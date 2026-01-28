@@ -1,0 +1,99 @@
+{
+    "pre_file_create": {
+      "allowed_paths": [
+        "pyproject.toml",
+        "docker-compose.yml",
+        "tribrid_config.json",
+        "Dockerfile",
+        "README.md",
+        "CLAUDE.md",
+        ".env",
+        ".env.example",
+        ".gitignore",
+        ".claude/**/*",
+        "server/**/*.py",
+        "web/**/*.ts",
+        "web/**/*.tsx", 
+        "web/**/*.css",
+        "web/**/*.json",
+        "web/index.html",
+        "web/vite.config.ts",
+        "web/tailwind.config.ts",
+        "web/postcss.config.js",
+        "web/tsconfig.json",
+        "web/package.json",
+        "infra/**/*",
+        "models/**/*",
+        "scripts/*.py",
+        "tests/**/*.py",
+        "spec/**/*"
+      ],
+      "blocked_patterns": [
+        "*.pyc",
+        "__pycache__/**",
+        ".venv/**",
+        "node_modules/**",
+        "*.egg-info/**",
+        ".git/**",
+        "dist/**",
+        "build/**"
+      ]
+    },
+    "pre_code_write": {
+      "banned_terms": [
+        {"term": "\\bcard\\b", "message": "Use 'chunk_summary' not 'card'"},
+        {"term": "\\bcards\\b", "message": "Use 'chunk_summaries' not 'cards'"},
+        {"term": "golden.*question", "message": "Use 'eval_dataset' not 'golden questions'"},
+        {"term": "\\bgolden\\b", "message": "Use 'dataset' or 'eval_dataset' not 'golden'"},
+        {"term": "\\branker\\b(?!e)", "message": "Use 'reranker' not 'ranker'"},
+        {"term": "from qdrant", "message": "Qdrant is banned - use pgvector"},
+        {"term": "import qdrant", "message": "Qdrant is banned - use pgvector"},
+        {"term": "from redis", "message": "Redis is banned"},
+        {"term": "import redis", "message": "Redis is banned"},
+        {"term": "from langchain", "message": "LangChain is banned"},
+        {"term": "import langchain", "message": "LangChain is banned"},
+        {"term": "from langgraph", "message": "LangGraph is banned"},
+        {"term": "import langgraph", "message": "LangGraph is banned"},
+        {"term": "pip install", "message": "Use 'uv add' not pip"},
+        {"term": "pip3 install", "message": "Use 'uv add' not pip"},
+        {"term": "python -m venv", "message": "Use 'uv' not venv"},
+        {"term": "virtualenv", "message": "Use 'uv' not virtualenv"},
+        {"term": "class.*Adapter", "message": "No adapters - fix the Pydantic model instead"},
+        {"term": "class.*Transformer", "message": "No transformers - fix the Pydantic model instead"},
+        {"term": "class.*Mapper", "message": "No mappers - fix the Pydantic model instead"}
+      ],
+      "max_stores": 6,
+      "max_hooks": 14,
+      "store_path": "web/src/stores/*.ts",
+      "hook_path": "web/src/hooks/*.ts"
+    },
+    "pre_command": {
+      "allowed": [
+        "uv *",
+        "npm *", 
+        "npx *",
+        "pnpm *",
+        "docker *",
+        "docker-compose *",
+        "cat *",
+        "ls *",
+        "mkdir *",
+        "touch *",
+        "rm -rf node_modules",
+        "rm -rf .venv",
+        "rm -rf dist",
+        "rm -rf build",
+        "git *",
+        "curl *",
+        "wget *"
+      ],
+      "blocked": [
+        "pip install*",
+        "pip3 install*", 
+        "python -m venv*",
+        "virtualenv*",
+        "conda*",
+        "pyenv*"
+      ]
+    }
+  }
