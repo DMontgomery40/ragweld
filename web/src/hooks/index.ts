@@ -8,6 +8,7 @@ export { useFusion } from './useFusion';
 export { useGlobalSearch } from './useGlobalSearch';
 export { useGraph } from './useGraph';
 export { useIndexing } from './useIndexing';
+export { useModels, useEmbeddingModels, useGenerationModels, useRerankerModels } from './useModels';
 export { useReranker } from './useReranker';
 export { useTheme } from './useTheme';
 export { useTooltips } from './useTooltips';

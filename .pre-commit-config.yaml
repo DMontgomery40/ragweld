@@ -1,0 +1,41 @@
+# Pre-commit hooks for tribrid-rag
+# Install: pip install pre-commit && pre-commit install
+# Run manually: pre-commit run --all-files
+
+repos:
+  - repo: local
+    hooks:
+      # Validate TypeScript types match Pydantic
+      - id: validate-types
+        name: Validate TypeScript types match Pydantic
+        entry: python scripts/validate_types.py
+        language: python
+        pass_filenames: false
+        files: ^server/models/.*\.py$
+        stages: [commit]
+
+      # Check for banned imports and terms
+      - id: check-banned
+        name: Check for banned imports and terms
+        entry: python scripts/check_banned.py
+        language: python
+        pass_filenames: false
+        files: \.(py|ts|tsx)$
+        stages: [commit]
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.1.6
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-json
+      - id: check-added-large-files
+        args: ['--maxkb=1000']

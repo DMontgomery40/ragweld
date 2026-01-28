@@ -1,53 +1,318 @@
 {
+  "retrieval": {
+    "rrf_k_div": 60,
+    "langgraph_final_k": 20,
+    "max_query_rewrites": 3,
+    "langgraph_max_query_rewrites": 3,
+    "fallback_confidence": 0.55,
+    "final_k": 10,
+    "eval_final_k": 5,
+    "conf_top1": 0.62,
+    "conf_avg5": 0.55,
+    "conf_any": 0.55,
+    "eval_multi": 0,
+    "query_expansion_enabled": 1,
+    "bm25_weight": 0.47423764458464773,
+    "bm25_k1": 1.4,
+    "bm25_b": 0.55,
+    "vector_weight": 0.5257623554153523,
+    "chunk_summary_search_enabled": 0,
+    "multi_query_m": 2,
+    "use_semantic_synonyms": 1,
+    "tribrid_synonyms_path": "",
+    "topk_dense": 75,
+    "topk_sparse": 75,
+    "hydration_mode": "lazy",
+    "hydration_max_chars": 2000
+  },
+  "scoring": {
+    "chunk_summary_bonus": 0.9,
+    "filename_boost_exact": 1.3,
+    "filename_boost_partial": 1.2,
+    "vendor_mode": "prefer_first_party",
+    "path_boosts": "/gui,/server,/indexer,/retrieval"
+  },
+  "layer_bonus": {
+    "gui": 0.15,
+    "retrieval": 0.14,
+    "indexer": 0.15,
+    "vendor_penalty": -0.1,
+    "freshness_bonus": 0.1,
+    "intent_matrix": {
+      "gui": {
+        "gui": 1.2,
+        "web": 1.2,
+        "server": 0.9,
+        "retrieval": 0.8,
+        "indexer": 0.8
+      },
+      "retrieval": {
+        "retrieval": 1.3,
+        "server": 1.15,
+        "common": 1.1,
+        "web": 0.7,
+        "gui": -0.6
+      },
+      "indexer": {
+        "indexer": 1.3,
+        "retrieval": 1.15,
+        "common": 1.1,
+        "web": 0.7,
+        "gui": 0.6
+      },
+      "eval": {
+        "eval": 1.3,
+        "retrieval": 1.15,
+        "server": 1.1,
+        "web": 0.8,
+        "gui": 0.7
+      },
+      "infra": {
+        "infra": 1.3,
+        "scripts": 1.15,
+        "server": 1.1,
+        "web": 0.9
+      },
+      "server": {
+        "server": 1.3,
+        "retrieval": 1.15,
+        "common": 1.1,
+        "web": 0.7,
+        "gui": 0.6
+      }
+    }
+  },
   "embedding": {
-    "provider": "openai",
-    "model": "text-embedding-3-small",
-    "dimensions": 1536,
-    "batch_size": 100
+    "embedding_type": "openai",
+    "embedding_model": "text-embedding-3-large",
+    "embedding_dim": 3072,
+    "voyage_model": "voyage-code-3",
+    "embedding_model_local": "all-MiniLM-L6-v2",
+    "embedding_batch_size": 64,
+    "embedding_max_tokens": 8000,
+    "embedding_cache_enabled": 1,
+    "embedding_timeout": 30,
+    "embedding_retry_max": 3
   },
-  "vector_search": {
-    "enabled": true,
-    "top_k": 50,
-    "similarity_threshold": 0.0
+  "chunking": {
+    "chunk_size": 1000,
+    "chunk_overlap": 200,
+    "ast_overlap_lines": 20,
+    "max_indexable_file_size": 2000000,
+    "max_chunk_tokens": 8000,
+    "min_chunk_chars": 50,
+    "greedy_fallback_target": 800,
+    "chunking_strategy": "ast",
+    "preserve_imports": 1
   },
-  "sparse_search": {
-    "enabled": true,
-    "top_k": 50,
-    "bm25_k1": 1.5,
-    "bm25_b": 0.75
+  "indexing": {
+    "postgres_url": "http://pgvector:6333",
+    "table_name": "code_chunks_tribrid",
+    "collection_suffix": "test",
+    "repo_path": "",
+    "indexing_batch_size": 100,
+    "indexing_workers": 4,
+    "bm25_tokenizer": "whitespace",
+    "bm25_stemmer_lang": "english",
+    "bm25_stopwords_lang": "en",
+    "index_excluded_exts": ".png,.jpg,.gif,.ico,.svg,.woff,.ttf",
+    "index_max_file_size_mb": 10,
+    "skip_dense": 0,
+    "out_dir_base": "./out",
+    "rag_out_base": "",
+    "repos_file": "./repos.json"
   },
-  "graph_search": {
-    "enabled": true,
+  "graph_storage": {
+    "neo4j_uri": "bolt://localhost:7687",
+    "neo4j_user": "neo4j",
+    "neo4j_password": "",
+    "neo4j_database": "neo4j",
     "max_hops": 2,
-    "top_k": 20,
-    "include_communities": true
+    "include_communities": true,
+    "community_algorithm": "louvain",
+    "entity_types": ["function", "class", "module", "variable", "import"],
+    "relationship_types": ["calls", "imports", "inherits", "contains", "references"],
+    "graph_search_top_k": 30
   },
   "fusion": {
     "method": "rrf",
     "vector_weight": 0.4,
     "sparse_weight": 0.3,
     "graph_weight": 0.3,
-    "rrf_k": 60
+    "rrf_k": 60,
+    "normalize_scores": true
   },
-  "reranker": {
-    "mode": "local",
-    "local_model": "cross-encoder/ms-marco-MiniLM-L-6-v2",
-    "trained_model_path": "models/cross-encoder-tribrid",
-    "api_provider": null,
-    "api_model": null,
-    "top_n": 20,
-    "batch_size": 16,
-    "max_length": 512
+  "reranking": {
+    "reranker_mode": "learning",
+    "reranker_cloud_provider": "cohere",
+    "reranker_cloud_model": "rerank-3.5",
+    "reranker_local_model": "cross-encoder/ms-marco-MiniLM-L-12-v2",
+    "tribrid_reranker_alpha": 0.7,
+    "tribrid_reranker_topn": 10,
+    "reranker_cloud_top_n": 50,
+    "tribrid_reranker_batch": 16,
+    "tribrid_reranker_maxlen": 512,
+    "tribrid_reranker_reload_on_change": 0,
+    "tribrid_reranker_reload_period_sec": 60,
+    "reranker_timeout": 10,
+    "rerank_input_snippet_chars": 700,
+    "transformers_trust_remote_code": 1
   },
-  "chunker": {
-    "strategy": "ast",
-    "chunk_size": 1500,
-    "chunk_overlap": 200,
-    "min_chunk_size": 100
+  "generation": {
+    "gen_model": "gpt-5",
+    "gen_temperature": 0.0,
+    "gen_max_tokens": 1000,
+    "gen_top_p": 1.0,
+    "gen_timeout": 60,
+    "gen_retry_max": 2,
+    "enrich_model": "gpt-5-mini",
+    "enrich_backend": "openai",
+    "enrich_disabled": 0,
+    "ollama_num_ctx": 8192,
+    "gen_model_cli": "gpt-5",
+    "gen_model_ollama": "gpt-4o-mini",
+    "gen_model_http": "",
+    "gen_model_mcp": "",
+    "enrich_model_ollama": "",
+    "ollama_url": "http://127.0.0.1:11434/api",
+    "openai_base_url": "",
+    "ollama_request_timeout": 300,
+    "ollama_stream_idle_timeout": 60
   },
-  "observability": {
-    "metrics_enabled": true,
-    "tracing_enabled": true,
-    "grafana_url": "http://localhost:3000"
+  "enrichment": {
+    "chunk_summaries_enrich_default": 1,
+    "chunk_summaries_max": 20,
+    "enrich_code_chunks": 1,
+    "enrich_min_chars": 50,
+    "enrich_max_chars": 1000,
+    "enrich_timeout": 30
+  },
+  "chunk_summaries": {
+    "exclude_dirs": [
+      "docs",
+      "agent_docs",
+      "website",
+      "tests",
+      "assets",
+      "internal_docs.md",
+      "out/",
+      "checkpoints/",
+      "models/",
+      "data/",
+      "telemetry/",
+      "node_mcp/",
+      "public/",
+      "examples/",
+      "bin/",
+      "reports/",
+      "screenshots/",
+      "web/dist",
+      "gui"
+    ],
+    "exclude_patterns": [],
+    "exclude_keywords": [
+      "playwright"
+    ],
+    "code_snippet_length": 2000,
+    "max_symbols": 5,
+    "max_routes": 5,
+    "purpose_max_length": 240,
+    "quick_tips": []
+  },
+  "keywords": {
+    "keywords_max_per_repo": 100,
+    "keywords_min_freq": 3,
+    "keywords_boost": 1.3,
+    "keywords_auto_generate": 1,
+    "keywords_refresh_hours": 24
+  },
+  "tracing": {
+    "tracing_enabled": 1,
+    "trace_sampling_rate": 1.0,
+    "prometheus_port": 9090,
+    "metrics_enabled": 1,
+    "alert_include_resolved": 1,
+    "alert_webhook_timeout": 5,
+    "log_level": "INFO",
+    "tracing_mode": "local",
+    "trace_auto_ls": 1,
+    "trace_retention": 50,
+    "tribrid_log_path": "data/logs/queries.jsonl",
+    "alert_notify_severities": "critical,warning",
+    "langchain_endpoint": "https://api.smith.langchain.com",
+    "langchain_project": "tribrid",
+    "langchain_tracing_v2": 1,
+    "langtrace_api_host": "",
+    "langtrace_project_id": ""
+  },
+  "training": {
+    "reranker_train_epochs": 2,
+    "reranker_train_batch": 16,
+    "reranker_train_lr": 0.00002,
+    "reranker_warmup_ratio": 0.1,
+    "triplets_min_count": 100,
+    "triplets_mine_mode": "replace",
+    "tribrid_reranker_model_path": "models/cross-encoder-tribrid",
+    "tribrid_reranker_mine_mode": "replace",
+    "tribrid_reranker_mine_reset": 0,
+    "tribrid_triplets_path": "data/training/triplets.jsonl"
+  },
+  "ui": {
+    "chat_streaming_enabled": 1,
+    "chat_history_max": 50,
+    "chat_stream_include_thinking": 1,
+    "chat_show_confidence": 1,
+    "chat_show_citations": 0,
+    "chat_show_trace": 0,
+    "chat_default_model": "gpt-5",
+    "chat_stream_timeout": 120,
+    "chat_thinking_budget_tokens": 10000,
+    "editor_port": 4440,
+    "grafana_dashboard_uid": "tribrid-overview",
+    "grafana_dashboard_slug": "tribrid-overview",
+    "grafana_base_url": "http://127.0.0.1:3000",
+    "grafana_auth_mode": "anonymous",
+    "grafana_embed_enabled": 1,
+    "grafana_kiosk": "tv",
+    "grafana_org_id": 1,
+    "grafana_refresh": "10s",
+    "editor_bind": "local",
+    "editor_embed_enabled": 1,
+    "editor_enabled": 1,
+    "editor_image": "codercom/code-server:latest",
+    "theme_mode": "dark",
+    "open_browser": 1,
+    "runtime_mode": "development"
+  },
+  "hydration": {
+    "hydration_mode": "lazy",
+    "hydration_max_chars": 2000
+  },
+  "evaluation": {
+    "golden_path": "data/evaluation_dataset.json",
+    "baseline_path": "data/evals/eval_baseline.json",
+    "eval_multi_m": 10
+  },
+  "system_prompts": {
+    "main_rag_chat": "You are a helpful expert software engineer with deep knowledge of rag (Retrieval-Augmented Generation) systems and code analysis, working in a RAG engine called TriBridRAG. \n\n## Your Role:\n- Answer questions about codebases with expert precision\n- Provide guidance on best practices\n- Always cite specific file paths and line ranges from the provided code context\n- Offer practical, helpful, production-ready solutions with error handling and edge cases\n\n## Response Style:\n- Be direct and technical, but friendly and accessible\n- Include relevant code examples when helpful\n- Explain the \"why\" behind recommendations\n- Always ground answers in the actual codebase when available\n\nYou answer strictly from the provided code context. Always cite file paths and line ranges you used.",
+    "query_expansion": "You are a code search query expander. Given a developer's question,\ngenerate alternative search queries that might find the same code using different terminology.\n\nRules:\n- Output one query variant per line\n- Keep variants concise (3-8 words each)\n- Use technical synonyms (auth/authentication, config/configuration, etc.)\n- Include both abstract and specific phrasings\n- Do NOT include explanations, just the queries",
+    "query_rewrite": "You rewrite developer questions into search-optimized queries without changing meaning. Optimize user query for code search - expand CamelCase, include API nouns",
+    "semantic_chunk_summaries": "Analyze this code chunk and create a comprehensive JSON summary for code search. Focus on WHAT the code does (business purpose) and HOW it works (technical details). Include all important symbols, patterns, and domain concepts.\n\nJSON format:\n{\n  \"symbols\": [\"function_name\", \"class_name\", \"variable_name\"],\n  \"purpose\": \"Clear business purpose - what problem this solves\",\n  \"technical_details\": \"Key technical implementation details\",\n  \"domain_concepts\": [\"business_term1\", \"business_term2\"],\n  \"routes\": [\"api/endpoint\", \"webhook/path\"],\n  \"dependencies\": [\"external_service\", \"library\"],\n  \"patterns\": [\"design_pattern\", \"architectural_concept\"]\n}\n\nFocus on:\n- Domain-specific terms\n- Technical patterns (streaming, detection, automation)\n- Business logic (what problem does this solve?)\n- Integration points (APIs, protocols, services)",
+    "code_enrichment": "Analyze this code and return a JSON object with: symbols (array of function/class/component names), purpose (one sentence description), keywords (array of technical terms). Be concise. Return ONLY valid JSON.",
+    "eval_analysis": "You are an expert RAG (Retrieval-Augmented Generation) system analyst.\\nYour job is to analyze evaluation comparisons and provide HONEST, SKEPTICAL insights.\\n\\nCRITICAL: Do NOT force explanations that don't make sense. If the data is contradictory or confusing:\\n- Say so clearly: \"This result is surprising and may indicate other factors at play\"\\n- Consider: index changes, data drift, golden question updates, or measurement noise\\n- Acknowledge when correlation != causation\\n- It's BETTER to say \"I'm not sure why this happened\" than to fabricate a plausible-sounding but wrong explanation\\n\\nBe rigorous:\\n1. Question whether the config changes ACTUALLY explain the performance delta\\n2. Flag when results seem counterintuitive (e.g., disabling a feature improving results)\\n3. Consider confounding variables: Was the index rebuilt? Did the test set change?\\n4. Provide actionable suggestions only when you have reasonable confidence\\n\\nFormat your response with clear sections using markdown headers.",
+    "lightweight_chunk_summaries": "Extract key information from this code: symbols (function/class names), purpose (one sentence), keywords (technical terms). Return JSON only."
+  },
+  "docker": {
+    "docker_host": "",
+    "docker_status_timeout": 5,
+    "docker_container_list_timeout": 10,
+    "docker_container_action_timeout": 30,
+    "docker_infra_up_timeout": 60,
+    "docker_infra_down_timeout": 30,
+    "docker_logs_tail": 100,
+    "docker_logs_timestamps": 1,
+    "dev_frontend_port": 5173,
+    "dev_backend_port": 8012,
+    "dev_stack_restart_timeout": 30
   }
 }
