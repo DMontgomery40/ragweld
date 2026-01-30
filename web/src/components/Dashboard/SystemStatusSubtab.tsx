@@ -246,7 +246,7 @@ export function SystemStatusSubtab() {
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                 <StatusItem label="Health" value={health} id="dash-health" color="var(--ok)" />
-                <StatusItem label="Repo" value={repo} id="dash-repo" color="var(--fg)" />
+                <StatusItem label="Corpus" value={repo} id="dash-repo" color="var(--fg)" />
                 <StatusItem label="Branch" value={branch} id="dash-branch" color="var(--link)" />
                 <StatusItem label="Summaries" value={chunkSummaries} id="dash-summaries" color="var(--link)" />
 

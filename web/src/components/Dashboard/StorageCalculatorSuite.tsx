@@ -320,7 +320,7 @@ export function StorageCalculatorSuite() {
               <div className="input-group">
                 <label>
                   <div className="label-with-tooltip">
-                    Repository Size
+                    Corpus Size
                     <span className="tooltip" title="Total size of your data/documents to index">?</span>
                   </div>
                 </label>
@@ -633,7 +633,7 @@ export function StorageCalculatorSuite() {
               <div className="input-group">
                 <label>
                   <div className="label-with-tooltip">
-                    Repository Size
+                    Corpus Size
                     <span className="tooltip" title="Same as left calculator - your total data">?</span>
                   </div>
                 </label>
@@ -743,8 +743,8 @@ export function StorageCalculatorSuite() {
               <div className="input-group">
                 <label>
                   <div className="label-with-tooltip">
-                    Cards/Summary %
-                    <span className="tooltip" title="Metadata/summaries, typically 10% of data">?</span>
+                    Chunk Summaries %
+                    <span className="tooltip" title="Pre-computed chunk summaries, typically 10% of data">?</span>
                   </div>
                 </label>
                 <input
@@ -767,7 +767,7 @@ export function StorageCalculatorSuite() {
                   <span className="result-value">{formatNumber(results2.chunks)}</span>
                 </div>
                 <div className="result-item">
-                  <span className="result-label">Repository</span>
+                  <span className="result-label">Corpus</span>
                   <span className="result-value">{formatBytes(results2.baseStorage)}</span>
                 </div>
               </div>
@@ -803,9 +803,9 @@ export function StorageCalculatorSuite() {
                     <div className="plan-details" style={{ lineHeight: 1.8 }}>
                       <strong>Includes:</strong><br />
                       • Product Quantized vectors<br />
-                      • Qdrant index<br />
-                      • BM25 search<br />
-                      • Cards/metadata<br />
+                      • pgvector HNSW index<br />
+                      • BM25 sparse search<br />
+                      • Chunk summaries<br />
                       • Reranker cache<br />
                       • Redis<br />
                       <strong>Excludes:</strong><br />
@@ -818,9 +818,9 @@ export function StorageCalculatorSuite() {
                     <div className="plan-details" style={{ lineHeight: 1.8 }}>
                       <strong>Includes:</strong><br />
                       • float16 vectors<br />
-                      • Qdrant index<br />
-                      • BM25 search<br />
-                      • Cards/metadata<br />
+                      • pgvector HNSW index<br />
+                      • BM25 sparse search<br />
+                      • Chunk summaries<br />
                       • Reranker cache<br />
                       • Redis<br />
                       • <span style={{ color: 'var(--warn)' }}>Data in RAM (per left hydration %)</span>
@@ -830,7 +830,7 @@ export function StorageCalculatorSuite() {
                 </div>
 
                 <p style={{ fontSize: '11px', color: 'var(--fg-muted)', margin: '16px 0 8px', padding: '12px', background: 'var(--card-bg)', borderRadius: '4px', lineHeight: 1.5 }}>
-                  💡 <strong>Why the big difference?</strong> Low Latency keeps data in RAM based on hydration % from left panel (currently adding {calc1.hydration}% of repo size). Minimal only stores compressed vectors and indexes, fetching actual data from disk when needed.
+                  💡 <strong>Why the big difference?</strong> Low Latency keeps data in RAM based on hydration % from left panel (currently adding {calc1.hydration}% of corpus size). Minimal only stores compressed vectors and indexes, fetching actual data from disk when needed.
                 </p>
 
                 <div className="total-row" style={{ marginTop: '20px' }}>

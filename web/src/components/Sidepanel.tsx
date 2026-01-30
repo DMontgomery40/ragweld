@@ -1,226 +1,103 @@
-import { useState, useEffect } from 'react';
-import { useConfigStore } from '@/stores';
-import { CostLogic } from '@/modules/cost_logic';
+import { useEffect } from 'react';
+import { useConfigStore, useCostCalculatorStore } from '@/stores';
+import { configApi } from '@/api/config';
 import { EmbeddingMismatchWarning } from './ui/EmbeddingMismatchWarning';
 
 export function Sidepanel() {
-  const { config, loadConfig } = useConfigStore();
-  
-  // Track if initial load from config is done
-  const [configLoaded, setConfigLoaded] = useState(false);
+  const { config } = useConfigStore();
+  const {
+    // State
+    inferenceProvider,
+    inferenceModel,
+    embeddingProvider,
+    embeddingModel,
+    rerankProvider,
+    rerankModel,
+    tokensIn,
+    tokensOut,
+    embeds,
+    reranks,
+    requestsPerDay,
+    dailyCost,
+    monthlyCost,
+    calculating,
+    providers,
+    chatModels,
+    embedModels,
+    rerankModels,
+    modelsLoading,
+    // Actions
+    setProvider,
+    setModel,
+    setTokensIn,
+    setTokensOut,
+    setEmbeds,
+    setReranks,
+    setRequestsPerDay,
+    calculateCost,
+    loadProviders,
+    syncFromConfig,
+  } = useCostCalculatorStore();
 
-  // Live Cost Calculator state - ALWAYS from Pydantic config
-  const [costProvider, setCostProvider] = useState('openai');
-  const [costModel, setCostModel] = useState('');
-  const [costEmbeddingProvider, setCostEmbeddingProvider] = useState('openai');
-  const [costEmbeddingModel, setCostEmbeddingModel] = useState('');
-  const [costRerankProvider, setCostRerankProvider] = useState('cohere');
-  const [costRerankModel, setCostRerankModel] = useState('');
-
-  // Load config values on mount - MUST come from Pydantic config
+  // Load providers on mount
   useEffect(() => {
-    if (config?.env && !configLoaded) {
-      // Sync inference model from GEN_MODEL (required by Pydantic)
-      if (config.env.GEN_MODEL) {
-        setCostModel(config.env.GEN_MODEL);
-      }
-      // Sync embedding model from EMBEDDING_MODEL (required by Pydantic)
-      if (config.env.EMBEDDING_MODEL) {
-        setCostEmbeddingModel(config.env.EMBEDDING_MODEL);
-      }
-      // Sync rerank model from RERANKER_CLOUD_MODEL
-      if (config.env.RERANKER_CLOUD_MODEL) {
-        setCostRerankModel(config.env.RERANKER_CLOUD_MODEL);
-      }
-      setConfigLoaded(true);
-    }
-  }, [config?.env, configLoaded]);
-  const [tokensIn, setTokensIn] = useState(5000);
-  const [tokensOut, setTokensOut] = useState(800);
-  const [embeds, setEmbeds] = useState(4);
-  const [reranks, setReranks] = useState(3);
-  const [costRequestsPerDay, setCostRequestsPerDay] = useState(100);
-  const [dailyCost, setDailyCost] = useState('--');
-  const [monthlyCost, setMonthlyCost] = useState('--');
-  
-  // Model lists from models.json
-  const [providers, setProviders] = useState<string[]>([]);
-  const [chatModels, setChatModels] = useState<string[]>([]);
-  const [embedModels, setEmbedModels] = useState<string[]>([]);
-  const [rerankModels, setRerankModels] = useState<string[]>([]);
+    loadProviders();
+  }, [loadProviders]);
 
-  // Quick Profile state
-  const [selectedProfile, setSelectedProfile] = useState('High Accuracy');
-
-  // Storage state
-  const [storageUsed, setStorageUsed] = useState(0);
-  const [storageTotal, setStorageTotal] = useState(100);
-  const [storagePercent, setStoragePercent] = useState(0);
-
-  // Load providers and models from models.json
-  useEffect(() => {
-    async function loadModels() {
-      try {
-        const providersList = await CostLogic.listProviders();
-        setProviders(providersList);
-        
-        if (providersList.length > 0 && !costProvider) {
-          setCostProvider(providersList[0]);
-        }
-      } catch (e) {
-        console.error('[Sidepanel] Failed to load providers:', e);
-      }
-    }
-    loadModels();
-  }, []);
-
-  // Load models when provider changes
-  useEffect(() => {
-    async function loadModelsForProvider() {
-      if (!costProvider) return;
-      try {
-        const chat = await CostLogic.listModels(costProvider, 'chat');
-        setChatModels(chat);
-        if (chat.length > 0 && !chat.includes(costModel)) {
-          setCostModel(chat[0]);
-        }
-      } catch (e) {
-        console.error('[Sidepanel] Failed to load chat models:', e);
-      }
-    }
-    loadModelsForProvider();
-  }, [costProvider]);
-
-  useEffect(() => {
-    async function loadEmbedModels() {
-      if (!costEmbeddingProvider) return;
-      try {
-        const embed = await CostLogic.listModels(costEmbeddingProvider, 'embed');
-        setEmbedModels(embed);
-        if (embed.length > 0 && !embed.includes(costEmbeddingModel)) {
-          setCostEmbeddingModel(embed[0]);
-        }
-      } catch (e) {
-        console.error('[Sidepanel] Failed to load embed models:', e);
-      }
-    }
-    loadEmbedModels();
-  }, [costEmbeddingProvider]);
-
-  useEffect(() => {
-    async function loadRerankModels() {
-      if (!costRerankProvider) return;
-      try {
-        const rerank = await CostLogic.listModels(costRerankProvider, 'rerank');
-        setRerankModels(rerank);
-        if (rerank.length > 0 && !rerank.includes(costRerankModel)) {
-          setCostRerankModel(rerank[0]);
-        }
-      } catch (e) {
-        console.error('[Sidepanel] Failed to load rerank models:', e);
-      }
-    }
-    loadRerankModels();
-  }, [costRerankProvider]);
-
-  // Load defaults from config store
+  // Sync from config when it loads
   useEffect(() => {
     if (config?.env) {
-      if (config.env.GEN_MODEL) setCostModel(config.env.GEN_MODEL);
-      if (config.env.EMBEDDING_MODEL) setCostEmbeddingModel(config.env.EMBEDDING_MODEL);
-      // Try to infer provider
-      const genModel = config.env.GEN_MODEL?.toLowerCase() || '';
-      if (genModel.includes('gpt')) setCostProvider('openai');
-      else if (genModel.includes('claude')) setCostProvider('anthropic');
-      else if (genModel.includes('gemini')) setCostProvider('google');
+      syncFromConfig(config);
     }
-  }, [config]);
+  }, [config?.env, syncFromConfig]);
 
-  useEffect(() => {
-    setStoragePercent(storageTotal > 0 ? Math.round((storageUsed / storageTotal) * 100) : 0);
-  }, [storageUsed, storageTotal]);
-
-  const handleCalculateCost = async () => {
+  const handleApplyChanges = async () => {
     try {
-      const response = await fetch('/api/cost/estimate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          gen_provider: costProvider,
-          gen_model: costModel,
-          tokens_in: tokensIn,
-          tokens_out: tokensOut,
-          embeds: embeds,
-          reranks: reranks,
-          requests_per_day: costRequestsPerDay,
-          embed_provider: costEmbeddingProvider,
-          embed_model: costEmbeddingModel,
-          rerank_provider: costRerankProvider,
-          rerank_model: costRerankModel,
-        }),
-      });
+      const envUpdates: Record<string, string> = {};
 
-      if (response.ok) {
-        const data = await response.json();
-        setDailyCost(`$${(data.daily || 0).toFixed(2)}`);
-        setMonthlyCost(`$${(data.monthly || 0).toFixed(2)}`);
-      } else {
-        const errorText = await response.text();
-        console.error('[Sidepanel] Cost estimate failed:', errorText);
-        setDailyCost('Error');
-        setMonthlyCost('Error');
+      // Generation model
+      if (inferenceModel) envUpdates.GEN_MODEL = inferenceModel;
+
+      // Embedding model and type
+      if (embeddingModel) envUpdates.EMBEDDING_MODEL = embeddingModel;
+      if (embeddingProvider) {
+        const p = embeddingProvider.toLowerCase();
+        if (['local', 'ollama', 'huggingface'].includes(p)) {
+          envUpdates.EMBEDDING_TYPE = 'local';
+        } else {
+          envUpdates.EMBEDDING_TYPE = p;
+        }
       }
+
+      // Reranker configuration
+      if (rerankProvider) {
+        const p = rerankProvider.toLowerCase();
+        if (p === 'cohere') {
+          envUpdates.RERANKER_MODE = 'cloud';
+          envUpdates.RERANKER_CLOUD_PROVIDER = 'cohere';
+          envUpdates.RERANKER_CLOUD_MODEL = rerankModel;
+        } else if (p === 'voyage') {
+          envUpdates.RERANKER_MODE = 'cloud';
+          envUpdates.RERANKER_CLOUD_PROVIDER = 'voyage';
+          envUpdates.RERANKER_CLOUD_MODEL = rerankModel;
+        } else if (['local', 'ollama', 'huggingface'].includes(p)) {
+          envUpdates.RERANKER_MODE = 'local';
+          envUpdates.RERANKER_LOCAL_MODEL = rerankModel;
+        }
+      }
+
+      // Use configApi instead of direct fetch
+      await configApi.saveConfig({ env: envUpdates });
+
+      // Dispatch config-updated event for other components
+      window.dispatchEvent(new CustomEvent('config-updated', { detail: envUpdates }));
+
+      alert('Changes applied successfully');
     } catch (e) {
-      console.error('[Sidepanel] Cost estimate error:', e);
-      setDailyCost('Error');
-      setMonthlyCost('Error');
+      console.error('[Sidepanel] Apply changes error:', e);
+      alert(e instanceof Error ? e.message : 'Error applying changes');
     }
   };
-
-  const handleApplyProfile = async () => {
-    try {
-      const response = await fetch('/api/profiles/apply', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ profile_name: selectedProfile }),
-      });
-
-      if (response.ok) {
-        alert('Profile applied successfully');
-      } else {
-        alert('Failed to apply profile');
-      }
-    } catch (e) {
-      console.error('[Sidepanel] Apply profile error:', e);
-      alert('Error applying profile');
-    }
-  };
-
-  const handleSaveProfile = async () => {
-    const profileName = prompt('Enter profile name:');
-    if (!profileName) return;
-
-    try {
-      const response = await fetch('/api/profiles/save', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: profileName,
-          config: {}, // Current config would be gathered from state
-        }),
-      });
-
-      if (response.ok) {
-        alert('Profile saved successfully');
-      } else {
-        alert('Failed to save profile');
-      }
-    } catch (e) {
-      console.error('[Sidepanel] Save profile error:', e);
-      alert('Error saving profile');
-    }
-  };
-
 
   const handleCleanUpStorage = async () => {
     if (!confirm('Clean up storage (remove old indexes, caches)?')) return;
@@ -236,64 +113,6 @@ export function Sidepanel() {
     } catch (e) {
       console.error('[Sidepanel] Cleanup error:', e);
       alert('Storage cleanup not available');
-    }
-  };
-
-  const handleApplyChanges = async () => {
-    try {
-      const envUpdates: Record<string, string> = {};
-
-      // Generation
-      if (costModel) envUpdates.GEN_MODEL = costModel;
-
-      // Embedding
-      if (costEmbeddingModel) envUpdates.EMBEDDING_MODEL = costEmbeddingModel;
-      if (costEmbeddingProvider) {
-        const p = costEmbeddingProvider.toLowerCase();
-        if (['local', 'ollama', 'huggingface'].includes(p)) {
-          envUpdates.EMBEDDING_TYPE = 'local';
-        } else {
-          envUpdates.EMBEDDING_TYPE = p;
-        }
-      }
-
-      // Reranker
-      if (costRerankProvider) {
-        const p = costRerankProvider.toLowerCase();
-        if (p === 'cohere') {
-          envUpdates.RERANKER_MODE = 'cloud';
-          envUpdates.RERANKER_CLOUD_PROVIDER = 'cohere';
-          envUpdates.RERANKER_CLOUD_MODEL = costRerankModel;
-        } else if (p === 'voyage') {
-          envUpdates.RERANKER_MODE = 'cloud';
-          envUpdates.RERANKER_CLOUD_PROVIDER = 'voyage';
-          envUpdates.RERANKER_CLOUD_MODEL = costRerankModel;
-        } else if (['local', 'ollama', 'huggingface'].includes(p)) {
-          envUpdates.RERANKER_MODE = 'local';
-          envUpdates.RERANKER_LOCAL_MODEL = costRerankModel;
-        }
-      }
-
-      // Send updates to backend
-      const response = await fetch('/api/config', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          env: envUpdates
-        }),
-      });
-
-      const payload = await response.json().catch(() => ({}));
-
-      if (response.ok && payload?.status !== 'error') {
-        alert('Changes applied successfully');
-      } else {
-        const detail = payload?.detail || payload?.error || 'Failed to apply changes';
-        alert(detail);
-      }
-    } catch (e) {
-      console.error('[Sidepanel] Apply changes error:', e);
-      alert('Error applying changes');
     }
   };
 
@@ -325,8 +144,8 @@ export function Sidepanel() {
           </span>
           <span
             style={{
-              background: 'var(--accent)',
-              color: 'var(--accent-contrast)',
+              background: calculating ? 'var(--warn)' : 'var(--accent)',
+              color: calculating ? 'var(--bg)' : 'var(--accent-contrast)',
               fontSize: '9px',
               fontWeight: 600,
               padding: '2px 6px',
@@ -334,33 +153,19 @@ export function Sidepanel() {
               marginLeft: 'auto',
             }}
           >
-            LIVE
+            {calculating ? 'CALC...' : 'LIVE'}
           </span>
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          {/* Inference Provider */}
           <div>
-            <label
-              style={{
-                display: 'block',
-                fontSize: '11px',
-                color: 'var(--fg-muted)',
-                marginBottom: '4px',
-              }}
-            >
-              INFERENCE PROVIDER
-            </label>
+            <label style={labelStyle}>INFERENCE PROVIDER</label>
             <select
-              value={costProvider}
-              onChange={(e) => setCostProvider(e.target.value)}
-              style={{
-                width: '100%',
-                background: 'var(--input-bg)',
-                border: '1px solid var(--line)',
-                color: 'var(--fg)',
-                padding: '6px 8px',
-                borderRadius: '4px',
-              }}
+              value={inferenceProvider}
+              onChange={(e) => setProvider('inference', e.target.value)}
+              style={selectStyle}
+              disabled={modelsLoading}
             >
               {providers.map((p) => (
                 <option key={p} value={p}>
@@ -370,28 +175,13 @@ export function Sidepanel() {
             </select>
           </div>
 
+          {/* Inference Model */}
           <div>
-            <label
-              style={{
-                display: 'block',
-                fontSize: '11px',
-                color: 'var(--fg-muted)',
-                marginBottom: '4px',
-              }}
-            >
-              INFERENCE MODEL
-            </label>
+            <label style={labelStyle}>INFERENCE MODEL</label>
             <select
-              value={costModel}
-              onChange={(e) => setCostModel(e.target.value)}
-              style={{
-                width: '100%',
-                background: 'var(--input-bg)',
-                border: '1px solid var(--line)',
-                color: 'var(--fg)',
-                padding: '6px 8px',
-                borderRadius: '4px',
-              }}
+              value={inferenceModel}
+              onChange={(e) => setModel('inference', e.target.value)}
+              style={selectStyle}
             >
               {chatModels.length > 0 ? (
                 chatModels.map((m) => (
@@ -400,34 +190,19 @@ export function Sidepanel() {
                   </option>
                 ))
               ) : (
-                <option value={costModel}>{costModel}</option>
+                <option value={inferenceModel}>{inferenceModel || 'Loading...'}</option>
               )}
             </select>
           </div>
 
+          {/* Embedding Provider & Model */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
             <div>
-              <label
-                style={{
-                  display: 'block',
-                  fontSize: '11px',
-                  color: 'var(--fg-muted)',
-                  marginBottom: '4px',
-                }}
-              >
-                EMBEDDINGS PROVIDER
-              </label>
+              <label style={labelStyle}>EMBEDDING PROVIDER</label>
               <select
-                value={costEmbeddingProvider}
-                onChange={(e) => setCostEmbeddingProvider(e.target.value)}
-                style={{
-                  width: '100%',
-                  background: 'var(--input-bg)',
-                  border: '1px solid var(--line)',
-                  color: 'var(--fg)',
-                  padding: '6px 8px',
-                  borderRadius: '4px',
-                }}
+                value={embeddingProvider}
+                onChange={(e) => setProvider('embedding', e.target.value)}
+                style={selectStyle}
               >
                 {providers.map((p) => (
                   <option key={p} value={p}>
@@ -437,27 +212,11 @@ export function Sidepanel() {
               </select>
             </div>
             <div>
-              <label
-                style={{
-                  display: 'block',
-                  fontSize: '11px',
-                  color: 'var(--fg-muted)',
-                  marginBottom: '4px',
-                }}
-              >
-                EMBEDDING MODEL
-              </label>
+              <label style={labelStyle}>EMBEDDING MODEL</label>
               <select
-                value={costEmbeddingModel}
-                onChange={(e) => setCostEmbeddingModel(e.target.value)}
-                style={{
-                  width: '100%',
-                  background: 'var(--input-bg)',
-                  border: '1px solid var(--line)',
-                  color: 'var(--fg)',
-                  padding: '6px 8px',
-                  borderRadius: '4px',
-                }}
+                value={embeddingModel}
+                onChange={(e) => setModel('embedding', e.target.value)}
+                style={selectStyle}
               >
                 {embedModels.length > 0 ? (
                   embedModels.map((m) => (
@@ -466,35 +225,20 @@ export function Sidepanel() {
                     </option>
                   ))
                 ) : (
-                  <option value={costEmbeddingModel}>{costEmbeddingModel}</option>
+                  <option value={embeddingModel}>{embeddingModel || 'Loading...'}</option>
                 )}
               </select>
             </div>
           </div>
 
+          {/* Reranker Provider & Model */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
             <div>
-              <label
-                style={{
-                  display: 'block',
-                  fontSize: '11px',
-                  color: 'var(--fg-muted)',
-                  marginBottom: '4px',
-                }}
-              >
-                RERANKER
-              </label>
+              <label style={labelStyle}>RERANKER</label>
               <select
-                value={costRerankProvider}
-                onChange={(e) => setCostRerankProvider(e.target.value)}
-                style={{
-                  width: '100%',
-                  background: 'var(--input-bg)',
-                  border: '1px solid var(--line)',
-                  color: 'var(--fg)',
-                  padding: '6px 8px',
-                  borderRadius: '4px',
-                }}
+                value={rerankProvider}
+                onChange={(e) => setProvider('rerank', e.target.value)}
+                style={selectStyle}
               >
                 {providers.map((p) => (
                   <option key={p} value={p}>
@@ -504,27 +248,11 @@ export function Sidepanel() {
               </select>
             </div>
             <div>
-              <label
-                style={{
-                  display: 'block',
-                  fontSize: '11px',
-                  color: 'var(--fg-muted)',
-                  marginBottom: '4px',
-                }}
-              >
-                RERANK MODEL
-              </label>
+              <label style={labelStyle}>RERANK MODEL</label>
               <select
-                value={costRerankModel}
-                onChange={(e) => setCostRerankModel(e.target.value)}
-                style={{
-                  width: '100%',
-                  background: 'var(--input-bg)',
-                  border: '1px solid var(--line)',
-                  color: 'var(--fg)',
-                  padding: '6px 8px',
-                  borderRadius: '4px',
-                }}
+                value={rerankModel}
+                onChange={(e) => setModel('rerank', e.target.value)}
+                style={selectStyle}
               >
                 {rerankModels.length > 0 ? (
                   rerankModels.map((m) => (
@@ -533,176 +261,87 @@ export function Sidepanel() {
                     </option>
                   ))
                 ) : (
-                  <option value={costRerankModel}>{costRerankModel}</option>
+                  <option value={rerankModel}>{rerankModel || 'Loading...'}</option>
                 )}
               </select>
             </div>
           </div>
 
+          {/* Token Inputs */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
             <div>
-              <label
-                style={{
-                  display: 'block',
-                  fontSize: '11px',
-                  color: 'var(--fg-muted)',
-                  marginBottom: '4px',
-                }}
-              >
-                TOKENS IN
-              </label>
+              <label style={labelStyle}>TOKENS IN</label>
               <input
                 type="number"
                 value={tokensIn}
                 onChange={(e) => setTokensIn(Number(e.target.value))}
-                style={{
-                  width: '100%',
-                  background: 'var(--input-bg)',
-                  border: '1px solid var(--line)',
-                  color: 'var(--fg)',
-                  padding: '6px 8px',
-                  borderRadius: '4px',
-                }}
+                style={inputStyle}
               />
             </div>
             <div>
-              <label
-                style={{
-                  display: 'block',
-                  fontSize: '11px',
-                  color: 'var(--fg-muted)',
-                  marginBottom: '4px',
-                }}
-              >
-                TOKENS OUT
-              </label>
+              <label style={labelStyle}>TOKENS OUT</label>
               <input
                 type="number"
                 value={tokensOut}
                 onChange={(e) => setTokensOut(Number(e.target.value))}
-                style={{
-                  width: '100%',
-                  background: 'var(--input-bg)',
-                  border: '1px solid var(--line)',
-                  color: 'var(--fg)',
-                  padding: '6px 8px',
-                  borderRadius: '4px',
-                }}
+                style={inputStyle}
               />
             </div>
           </div>
 
+          {/* Embeds & Reranks */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
             <div>
-              <label
-                style={{
-                  display: 'block',
-                  fontSize: '11px',
-                  color: 'var(--fg-muted)',
-                  marginBottom: '4px',
-                }}
-              >
-                EMBEDS
-              </label>
+              <label style={labelStyle}>EMBEDS</label>
               <input
                 type="number"
                 value={embeds}
                 onChange={(e) => setEmbeds(Number(e.target.value))}
-                style={{
-                  width: '100%',
-                  background: 'var(--input-bg)',
-                  border: '1px solid var(--line)',
-                  color: 'var(--fg)',
-                  padding: '6px 8px',
-                  borderRadius: '4px',
-                }}
+                style={inputStyle}
               />
             </div>
             <div>
-              <label
-                style={{
-                  display: 'block',
-                  fontSize: '11px',
-                  color: 'var(--fg-muted)',
-                  marginBottom: '4px',
-                }}
-              >
-                RERANKS
-              </label>
+              <label style={labelStyle}>RERANKS</label>
               <input
                 type="number"
                 value={reranks}
                 onChange={(e) => setReranks(Number(e.target.value))}
-                style={{
-                  width: '100%',
-                  background: 'var(--input-bg)',
-                  border: '1px solid var(--line)',
-                  color: 'var(--fg)',
-                  padding: '6px 8px',
-                  borderRadius: '4px',
-                }}
+                style={inputStyle}
               />
             </div>
           </div>
 
+          {/* Requests Per Day */}
           <div>
-            <label
-              style={{
-                display: 'block',
-                fontSize: '11px',
-                color: 'var(--fg-muted)',
-                marginBottom: '4px',
-              }}
-            >
-              REQUESTS / DAY
-            </label>
+            <label style={labelStyle}>REQUESTS / DAY</label>
             <input
               type="number"
-              value={costRequestsPerDay}
-              onChange={(e) => setCostRequestsPerDay(Number(e.target.value))}
-              style={{
-                width: '100%',
-                background: 'var(--input-bg)',
-                border: '1px solid var(--line)',
-                color: 'var(--fg)',
-                padding: '6px 8px',
-                borderRadius: '4px',
-              }}
+              value={requestsPerDay}
+              onChange={(e) => setRequestsPerDay(Number(e.target.value))}
+              style={inputStyle}
             />
           </div>
 
+          {/* Action Buttons */}
           <button
-            onClick={handleCalculateCost}
+            onClick={calculateCost}
+            disabled={calculating}
             style={{
               width: '100%',
-              background: 'var(--link)',
+              background: calculating ? 'var(--fg-muted)' : 'var(--link)',
               color: 'white',
               border: 'none',
               padding: '10px',
               borderRadius: '4px',
               fontWeight: 600,
-              cursor: 'pointer',
+              cursor: calculating ? 'not-allowed' : 'pointer',
               marginTop: '4px',
             }}
           >
-            CALCULATE COST
+            {calculating ? 'CALCULATING...' : 'CALCULATE COST'}
           </button>
 
-          <button
-            style={{
-              width: '100%',
-              background: 'var(--accent)',
-              color: 'var(--accent-contrast)',
-              border: 'none',
-              padding: '10px',
-              borderRadius: '4px',
-              fontWeight: 600,
-              cursor: 'pointer',
-            }}
-          >
-            ADD MODEL
-          </button>
-
+          {/* Cost Results */}
           <div
             style={{
               display: 'grid',
@@ -712,42 +351,18 @@ export function Sidepanel() {
             }}
           >
             <div>
-              <div
-                style={{
-                  fontSize: '11px',
-                  color: 'var(--fg-muted)',
-                  marginBottom: '4px',
-                }}
-              >
+              <div style={{ fontSize: '11px', color: 'var(--fg-muted)', marginBottom: '4px' }}>
                 DAILY
               </div>
-              <div
-                style={{
-                  fontSize: '16px',
-                  fontWeight: 600,
-                  color: 'var(--fg)',
-                }}
-              >
+              <div style={{ fontSize: '16px', fontWeight: 600, color: 'var(--fg)' }}>
                 {dailyCost}
               </div>
             </div>
             <div>
-              <div
-                style={{
-                  fontSize: '11px',
-                  color: 'var(--fg-muted)',
-                  marginBottom: '4px',
-                }}
-              >
+              <div style={{ fontSize: '11px', color: 'var(--fg-muted)', marginBottom: '4px' }}>
                 MONTHLY
               </div>
-              <div
-                style={{
-                  fontSize: '16px',
-                  fontWeight: 600,
-                  color: 'var(--fg)',
-                }}
-              >
+              <div style={{ fontSize: '16px', fontWeight: 600, color: 'var(--fg)' }}>
                 {monthlyCost}
               </div>
             </div>
@@ -755,9 +370,7 @@ export function Sidepanel() {
         </div>
       </div>
 
-      {/* Quick Profiles Widget - REMOVED (profiles are banned per CLAUDE.md) */}
-
-      {/* Storage Widget */}
+      {/* Secrets Ingest Widget */}
       <div
         style={{
           background: 'var(--card-bg)',
@@ -838,3 +451,29 @@ export function Sidepanel() {
     </div>
   );
 }
+
+// Shared styles
+const labelStyle: React.CSSProperties = {
+  display: 'block',
+  fontSize: '11px',
+  color: 'var(--fg-muted)',
+  marginBottom: '4px',
+};
+
+const selectStyle: React.CSSProperties = {
+  width: '100%',
+  background: 'var(--input-bg)',
+  border: '1px solid var(--line)',
+  color: 'var(--fg)',
+  padding: '6px 8px',
+  borderRadius: '4px',
+};
+
+const inputStyle: React.CSSProperties = {
+  width: '100%',
+  background: 'var(--input-bg)',
+  border: '1px solid var(--line)',
+  color: 'var(--fg)',
+  padding: '6px 8px',
+  borderRadius: '4px',
+};

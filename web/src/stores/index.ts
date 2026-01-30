@@ -10,6 +10,8 @@ export { useUIStore } from './useUIStore';
 export { useChunkSummariesStore, useCardsStore } from './useChunkSummariesStore';
 // Graph store (knowledge graph state)
 export { useGraphStore } from './useGraphStore';
+// Cost calculator store (for Sidepanel)
+export { useCostCalculatorStore } from './useCostCalculatorStore';
 export type { Repository } from './useRepoStore';
 export type { TooltipMap } from './useTooltipStore';
 export type { ChunkSummary, LastBuild } from '@/types/chunk_summaries';

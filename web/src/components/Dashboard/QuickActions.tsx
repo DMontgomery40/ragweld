@@ -343,7 +343,7 @@ export function QuickActions() {
         <QuickActionButton
           id="dash-change-repo"
           icon="📁"
-          label={activeRepo ? `Repo: ${activeRepo}` : 'Change Repo'}
+          label={activeRepo ? `Corpus: ${activeRepo}` : 'Change Corpus'}
           onClick={handleChangeRepo}
           dataAction="change-repo"
           disabled={switching}

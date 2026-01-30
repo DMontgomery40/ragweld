@@ -53,7 +53,11 @@ async function fetchModels(): Promise<ModelsData> {
   if (modelsCache) return modelsCache;
   if (modelsFetchPromise) return modelsFetchPromise;
 
-  modelsFetchPromise = fetch('/models.json')
+  // Use Vite's base URL to correctly resolve the models.json path
+  const baseUrl = import.meta.env.BASE_URL || '/';
+  const modelsUrl = `${baseUrl}models.json`.replace(/\/+/g, '/');
+
+  modelsFetchPromise = fetch(modelsUrl)
     .then(res => {
       if (!res.ok) throw new Error(`Failed to load models.json: ${res.status}`);
       return res.json();

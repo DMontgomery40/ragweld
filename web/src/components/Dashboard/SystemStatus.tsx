@@ -113,7 +113,7 @@ export function SystemStatus() {
       </h3>
       <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
         <StatusItem label="Health" value={status.health} color="var(--ok)" />
-        <StatusItem label="Repo" value={status.repo} color="var(--fg)" />
+        <StatusItem label="Corpus" value={status.repo} color="var(--fg)" />
         <StatusItem label="Summaries" value={status.chunkSummaries} color="var(--link)" />
         <StatusItem label="MCP" value={status.mcp} color="var(--link)" />
       </div>
