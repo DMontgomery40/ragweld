@@ -1,56 +1,47 @@
 import { create } from 'zustand';
-import type { ServiceStatus, ContainerStatus } from '../types/ui';
+import { healthApi } from '@/api/health';
+import type { HealthStatus } from '@web/types';
 
-interface HealthState {
-  healthy: boolean;
-  services: Record<string, ServiceStatus>;
-  docker: Record<string, ContainerStatus>;
-  lastCheck: Date | null;
-  checking: boolean;
-}
+interface HealthStore {
+  status: HealthStatus | null;
+  loading: boolean;
+  error: string | null;
+  lastChecked: Date | null;
 
-interface HealthActions {
+  // Actions
   checkHealth: () => Promise<void>;
-  checkDocker: () => Promise<void>;
-  restartContainer: (name: string) => Promise<void>;
+  reset: () => void;
 }
 
-type HealthStore = HealthState & HealthActions;
-
-export const useHealthStore = create<HealthStore>((set, get) => ({
-  healthy: false,
-  services: {},
-  docker: {},
-  lastCheck: null,
-  checking: false,
+export const useHealthStore = create<HealthStore>((set) => ({
+  status: null,
+  loading: false,
+  error: null,
+  lastChecked: null,
 
   checkHealth: async () => {
-    set({ checking: true });
+    set({ loading: true, error: null });
     try {
-      const res = await fetch('/api/health');
-      const data = await res.json();
-      const services = data.services || {};
-      const healthy = Object.values(services).every(
-        (s) => (s as ServiceStatus).healthy
-      );
-      set({ services, healthy, lastCheck: new Date(), checking: false });
-    } catch {
-      set({ healthy: false, checking: false });
+      const status = await healthApi.check();
+      set({
+        status,
+        loading: false,
+        error: null,
+        lastChecked: new Date()
+      });
+    } catch (error) {
+      set({
+        loading: false,
+        error: error instanceof Error ? error.message : 'Failed to check health',
+        status: null
+      });
     }
   },
 
-  checkDocker: async () => {
-    try {
-      const res = await fetch('/api/docker/status');
-      const docker = await res.json();
-      set({ docker });
-    } catch {
-      // Docker status optional
-    }
-  },
-
-  restartContainer: async (name) => {
-    await fetch(`/api/docker/${name}/restart`, { method: 'POST' });
-    await get().checkDocker();
-  },
+  reset: () => set({
+    status: null,
+    loading: false,
+    error: null,
+    lastChecked: null
+  }),
 }));

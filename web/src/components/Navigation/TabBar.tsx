@@ -1,36 +1,251 @@
-import { useUIStore } from '../../stores';
+// AGRO - TabBar Component  
+// EXACT copy of /gui tab-bar structure
 
-const TABS = [
-  { id: 'start', label: 'Start' },
-  { id: 'rag', label: 'RAG' },
-  { id: 'chat', label: 'Chat' },
-  { id: 'evaluation', label: 'Evaluation' },
-  { id: 'eval-analysis', label: 'Analysis' },
-  { id: 'grafana', label: 'Grafana' },
-  { id: 'graph', label: 'Graph' },
-  { id: 'infrastructure', label: 'Infrastructure' },
-  { id: 'admin', label: 'Admin' },
-];
+import { NavLink } from 'react-router-dom';
 
-export function TabBar() {
-  const activeTab = useUIStore((s) => s.activeTab);
-  const setActiveTab = useUIStore((s) => s.setActiveTab);
+interface TabBarProps {
+  mobileOpen?: boolean;
+  onNavigate?: () => void;
+}
+
+export function TabBar({ mobileOpen = false, onNavigate }: TabBarProps) {
+  const handleClick = () => {
+    // Close mobile menu after navigation
+    if (onNavigate) onNavigate();
+  };
 
   return (
-    <nav className="flex border-b border-gray-200 dark:border-gray-700">
-      {TABS.map((tab) => (
-        <button
-          key={tab.id}
-          className={`tribrid-tab px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
-            activeTab === tab.id
-              ? 'tribrid-tab-active border-blue-500 text-blue-600'
-              : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-          }`}
-          onClick={() => setActiveTab(tab.id)}
-        >
-          {tab.label}
-        </button>
-      ))}
-    </nav>
+    <div 
+      className={`tab-bar ${mobileOpen ? 'mobile-open' : ''}`} 
+      style={{ display: 'flex', gap: '8px', padding: '12px 24px', overflowX: 'auto' }}
+    >
+      <NavLink
+        to="/start"
+        className={({ isActive }) => isActive ? 'active' : ''}
+        onClick={handleClick}
+        style={{
+          background: 'var(--bg-elev2)',
+          color: 'var(--fg-muted)',
+          border: '1px solid var(--line)',
+          padding: '9px 16px',
+          borderRadius: '6px',
+          cursor: 'pointer',
+          fontSize: '13px',
+          fontWeight: 500,
+          whiteSpace: 'nowrap',
+          transition: 'all 0.15s',
+          minHeight: '44px',
+          textDecoration: 'none',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '6px',
+        }}
+      >
+        🚀 Get Started
+      </NavLink>
+      
+      <NavLink
+        to="/dashboard"
+        className={({ isActive }) => isActive ? 'active' : ''}
+        onClick={handleClick}
+        style={{
+          background: 'var(--bg-elev2)',
+          color: 'var(--fg-muted)',
+          border: '1px solid var(--line)',
+          padding: '9px 16px',
+          borderRadius: '6px',
+          cursor: 'pointer',
+          fontSize: '13px',
+          fontWeight: 500,
+          whiteSpace: 'nowrap',
+          transition: 'all 0.15s',
+          minHeight: '44px',
+          textDecoration: 'none',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '6px',
+        }}
+      >
+        📊 Dashboard
+      </NavLink>
+
+      <NavLink
+        to="/chat"
+        className={({ isActive }) => isActive ? 'active' : ''}
+        onClick={handleClick}
+        style={{
+          background: 'var(--bg-elev2)',
+          color: 'var(--fg-muted)',
+          border: '1px solid var(--line)',
+          padding: '9px 16px',
+          borderRadius: '6px',
+          cursor: 'pointer',
+          fontSize: '13px',
+          fontWeight: 500,
+          whiteSpace: 'nowrap',
+          transition: 'all 0.15s',
+          minHeight: '44px',
+          textDecoration: 'none',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '6px',
+        }}
+      >
+        💬 Chat
+      </NavLink>
+
+      <NavLink
+        to="/vscode"
+        className={({ isActive }) => `${isActive ? 'active' : ''} promoted-tab`}
+        onClick={handleClick}
+        style={{
+          background: 'var(--bg-elev2)',
+          color: 'var(--fg-muted)',
+          border: '1px solid var(--line)',
+          padding: '9px 16px',
+          borderRadius: '6px',
+          cursor: 'pointer',
+          fontSize: '13px',
+          fontWeight: 500,
+          whiteSpace: 'nowrap',
+          transition: 'all 0.15s',
+          minHeight: '44px',
+          textDecoration: 'none',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '6px',
+        }}
+      >
+        📝 VS Code
+      </NavLink>
+
+      <NavLink
+        to="/grafana"
+        className={({ isActive }) => `${isActive ? 'active' : ''} promoted-tab`}
+        onClick={handleClick}
+        style={{
+          background: 'var(--bg-elev2)',
+          color: 'var(--fg-muted)',
+          border: '1px solid var(--line)',
+          padding: '9px 16px',
+          borderRadius: '6px',
+          cursor: 'pointer',
+          fontSize: '13px',
+          fontWeight: 500,
+          whiteSpace: 'nowrap',
+          transition: 'all 0.15s',
+          minHeight: '44px',
+          textDecoration: 'none',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '6px',
+        }}
+      >
+        📈 Grafana
+      </NavLink>
+
+      <NavLink
+        to="/rag"
+        className={({ isActive }) => isActive ? 'active' : ''}
+        onClick={handleClick}
+        style={{
+          background: 'var(--bg-elev2)',
+          color: 'var(--fg-muted)',
+          border: '1px solid var(--line)',
+          padding: '9px 16px',
+          borderRadius: '6px',
+          cursor: 'pointer',
+          fontSize: '13px',
+          fontWeight: 500,
+          whiteSpace: 'nowrap',
+          transition: 'all 0.15s',
+          minHeight: '44px',
+          textDecoration: 'none',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '6px',
+        }}
+      >
+        🧠 RAG
+      </NavLink>
+
+      <NavLink
+        to="/eval"
+        className={({ isActive }) => `${isActive ? 'active' : ''} keystone-tab`}
+        onClick={handleClick}
+        style={{
+          background: 'var(--bg-elev2)',
+          color: 'var(--fg-muted)',
+          border: '1px solid var(--line)',
+          padding: '9px 16px',
+          borderRadius: '6px',
+          cursor: 'pointer',
+          fontSize: '13px',
+          fontWeight: 500,
+          whiteSpace: 'nowrap',
+          transition: 'all 0.15s',
+          minHeight: '44px',
+          textDecoration: 'none',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '6px',
+        }}
+        title="Deep-dive into evaluation runs with AI-powered analysis"
+      >
+        🔬 Eval Analysis
+      </NavLink>
+
+      {/* Profiles tab removed - banned feature per CLAUDE.md */}
+
+      <NavLink
+        to="/infrastructure"
+        className={({ isActive }) => isActive ? 'active' : ''}
+        onClick={handleClick}
+        style={{
+          background: 'var(--bg-elev2)',
+          color: 'var(--fg-muted)',
+          border: '1px solid var(--line)',
+          padding: '9px 16px',
+          borderRadius: '6px',
+          cursor: 'pointer',
+          fontSize: '13px',
+          fontWeight: 500,
+          whiteSpace: 'nowrap',
+          transition: 'all 0.15s',
+          minHeight: '44px',
+          textDecoration: 'none',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '6px',
+        }}
+      >
+        🔧 Infrastructure
+      </NavLink>
+
+      <NavLink
+        to="/admin"
+        className={({ isActive }) => isActive ? 'active' : ''}
+        onClick={handleClick}
+        style={{
+          background: 'var(--bg-elev2)',
+          color: 'var(--fg-muted)',
+          border: '1px solid var(--line)',
+          padding: '9px 16px',
+          borderRadius: '6px',
+          cursor: 'pointer',
+          fontSize: '13px',
+          fontWeight: 500,
+          whiteSpace: 'nowrap',
+          transition: 'all 0.15s',
+          minHeight: '44px',
+          textDecoration: 'none',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '6px',
+        }}
+      >
+        ⚙️ Admin
+      </NavLink>
+    </div>
   );
 }

@@ -20,5 +20,13 @@ export default defineConfig({
         baseURL: 'http://127.0.0.1:8001/tribrid-rag',
       },
     },
+    {
+      name: 'web',
+      testMatch: '**/web/**/*.spec.ts',
+      use: {
+        ...devices['Desktop Chrome'],
+        baseURL: 'http://localhost:5173',
+      },
+    },
   ],
 });

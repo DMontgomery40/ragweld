@@ -1,6 +1,6 @@
 from collections import defaultdict
 
-from server.models.config import FusionConfig
+from server.models.tribrid_config_model import FusionConfig
 from server.models.retrieval import ChunkMatch
 from server.retrieval.graph import GraphRetriever
 from server.retrieval.sparse import SparseRetriever

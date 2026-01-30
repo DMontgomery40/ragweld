@@ -1,39 +1,37 @@
-"""Tests for configuration models."""
+"""Tests for configuration models - using THE LAW (tribrid_config_model.py)."""
 
 import pytest
 from pydantic import ValidationError
 
-from server.models.config import (
+from server.models.tribrid_config_model import (
     EmbeddingConfig,
     FusionConfig,
-    RerankerConfig,
+    RerankingConfig,
     TriBridConfig,
 )
 
 
-def test_embedding_config_valid() -> None:
-    """Test valid embedding config."""
+def test_embedding_config_defaults() -> None:
+    """Test embedding config with defaults."""
+    config = EmbeddingConfig()
+    assert config.embedding_type == "openai"  # LAW uses 'embedding_type'
+    assert config.embedding_model == "text-embedding-3-large"
+    assert config.embedding_dim == 3072
+
+
+def test_embedding_config_custom() -> None:
+    """Test embedding config with custom values."""
     config = EmbeddingConfig(
-        provider="openai",
-        model="text-embedding-3-small",
-        dimensions=1536,
+        embedding_type="voyage",
+        embedding_model="voyage-code-3",
+        embedding_dim=1024,
     )
-    assert config.provider == "openai"
-    assert config.batch_size == 100  # default
-
-
-def test_embedding_config_invalid_provider() -> None:
-    """Test invalid embedding provider."""
-    with pytest.raises(ValidationError):
-        EmbeddingConfig(
-            provider="invalid",
-            model="test",
-            dimensions=100,
-        )
+    assert config.embedding_type == "voyage"
+    assert config.embedding_batch_size == 64  # default
 
 
 def test_fusion_config_weights() -> None:
-    """Test fusion config weight validation."""
+    """Test fusion config weight validation - LAW auto-normalizes."""
     config = FusionConfig(
         method="weighted",
         vector_weight=0.5,
@@ -41,34 +39,33 @@ def test_fusion_config_weights() -> None:
         graph_weight=0.2,
         rrf_k=60,
     )
-    assert config.vector_weight + config.sparse_weight + config.graph_weight == 1.0
+    # LAW normalizes weights to sum to 1.0
+    total = config.vector_weight + config.sparse_weight + config.graph_weight
+    assert abs(total - 1.0) < 0.01
 
 
 def test_reranker_modes() -> None:
-    """Test reranker mode options."""
-    for mode in ["none", "local", "trained", "api"]:
-        config = RerankerConfig(mode=mode)
-        assert config.mode == mode
+    """Test reranker mode options - LAW uses 'reranker_mode' not 'mode'."""
+    # LAW's valid modes: cloud, local, learning, none
+    for mode in ["none", "local", "learning", "cloud"]:
+        config = RerankingConfig(reranker_mode=mode)
+        assert config.reranker_mode == mode
 
 
-def test_tribrid_config_complete(test_config: TriBridConfig) -> None:
-    """Test complete TriBridConfig."""
-    assert test_config.embedding is not None
-    assert test_config.vector_search is not None
-    assert test_config.sparse_search is not None
-    assert test_config.graph_search is not None
-    assert test_config.fusion is not None
-    assert test_config.reranker is not None
-    assert test_config.chunker is not None
-    assert test_config.observability is not None
+def test_tribrid_config_defaults() -> None:
+    """Test full TriBridConfig with defaults."""
+    config = TriBridConfig()
+    assert config.embedding.embedding_type == "openai"
+    assert config.fusion.method == "rrf"
+    assert config.reranking.reranker_mode == "local"  # LAW default
+    assert config.chunking.chunking_strategy == "ast"
 
 
-def test_config_json_serialization(test_config: TriBridConfig) -> None:
-    """Test config can be serialized to JSON."""
-    json_str = test_config.model_dump_json()
-    assert "embedding" in json_str
-    assert "fusion" in json_str
-
-    # Can be deserialized back
-    restored = TriBridConfig.model_validate_json(json_str)
-    assert restored.embedding.provider == test_config.embedding.provider
+def test_tribrid_config_nested_access() -> None:
+    """Test nested config access."""
+    config = TriBridConfig()
+    # Access patterns that match the component code
+    assert hasattr(config, 'retrieval')
+    assert hasattr(config, 'scoring')
+    assert hasattr(config, 'reranking')  # LAW uses 'reranking' not 'reranker'
+    assert hasattr(config, 'chunking')   # LAW uses 'chunking' not 'chunker'

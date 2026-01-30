@@ -1,48 +1,202 @@
-import { useEffect } from 'react';
-import { useIndexing } from '../../hooks/useIndexing';
+/**
+ * IndexStatsPanel - Display index storage and stats
+ *
+ * Shows storage breakdown, chunk counts, and other index metrics.
+ * Uses useDashboard hook to get index stats.
+ */
+
+import { useEffect, useState, useCallback } from 'react';
+import { getIndexStats, type IndexStats } from '@/api/dashboard';
 
 interface IndexStatsPanelProps {
-  repoId: string;
+  /** Auto-refresh interval in ms (0 = disabled) */
+  refreshInterval?: number;
 }
 
-export function IndexStatsPanel({ repoId }: IndexStatsPanelProps) {
-  const { stats, refreshStats } = useIndexing();
+/**
+ * Format bytes to human-readable string
+ */
+function formatBytes(bytes: number): string {
+  if (bytes === 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
+}
+
+export function IndexStatsPanel({ refreshInterval = 0 }: IndexStatsPanelProps) {
+  const [stats, setStats] = useState<IndexStats | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const loadStats = useCallback(async () => {
+    try {
+      const data = await getIndexStats();
+      setStats(data);
+      setError(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to load stats');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
-    refreshStats(repoId);
-  }, [repoId, refreshStats]);
+    loadStats();
 
-  if (!stats) {
-    return <div className="text-gray-500">Loading stats...</div>;
+    if (refreshInterval > 0) {
+      const interval = setInterval(loadStats, refreshInterval);
+      return () => clearInterval(interval);
+    }
+  }, [loadStats, refreshInterval]);
+
+  if (loading) {
+    return (
+      <div className="index-stats-panel" style={panelStyles}>
+        <div style={{ color: 'var(--fg-muted)', fontSize: '13px' }}>
+          Loading stats...
+        </div>
+      </div>
+    );
   }
 
+  if (error) {
+    return (
+      <div className="index-stats-panel" style={panelStyles}>
+        <div style={{ color: 'var(--error)', fontSize: '13px' }}>{error}</div>
+      </div>
+    );
+  }
+
+  if (!stats) {
+    return null;
+  }
+
+  const statItems = [
+    {
+      label: 'Total Storage',
+      value: formatBytes(stats.total_storage || 0),
+      icon: '💾',
+    },
+    {
+      label: 'Qdrant Vectors',
+      value: formatBytes(stats.qdrant_size || 0),
+      icon: '🔷',
+    },
+    {
+      label: 'BM25 Index',
+      value: formatBytes(stats.bm25_index_size || 0),
+      icon: '📑',
+    },
+    {
+      label: 'Chunks JSON',
+      value: formatBytes(stats.chunks_json_size || 0),
+      icon: '📦',
+    },
+    {
+      label: 'Semantic Cards',
+      value: formatBytes(stats.cards_size || 0),
+      icon: '🃏',
+    },
+    {
+      label: 'Keywords',
+      value: String(stats.keyword_count || 0),
+      icon: '🔑',
+    },
+    {
+      label: 'Repos Indexed',
+      value: String(stats.profile_count || 0),
+      icon: '📁',
+    },
+  ];
+
   return (
-    <div className="tribrid-card p-4 bg-white dark:bg-gray-800 rounded-lg shadow">
-      <h4 className="font-medium mb-4">Index Statistics</h4>
-      <dl className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-        <div>
-          <dt className="text-gray-500">Files</dt>
-          <dd className="font-medium text-lg">{stats.total_files}</dd>
-        </div>
-        <div>
-          <dt className="text-gray-500">Chunks</dt>
-          <dd className="font-medium text-lg">{stats.total_chunks}</dd>
-        </div>
-        <div>
-          <dt className="text-gray-500">Tokens</dt>
-          <dd className="font-medium text-lg">{stats.total_tokens.toLocaleString()}</dd>
-        </div>
-        <div>
-          <dt className="text-gray-500">Dimensions</dt>
-          <dd className="font-medium text-lg">{stats.embedding_dimensions}</dd>
-        </div>
-      </dl>
-      <div className="mt-4 text-sm text-gray-500">
-        Model: {stats.embedding_model}
-        {stats.last_indexed && (
-          <> | Last indexed: {new Date(stats.last_indexed).toLocaleString()}</>
-        )}
+    <div className="index-stats-panel" style={panelStyles}>
+      <div style={headerStyles}>
+        <span style={{ fontSize: '16px' }}>📊</span>
+        <span>Index Stats</span>
+        <button
+          type="button"
+          onClick={loadStats}
+          style={refreshButtonStyles}
+          title="Refresh stats"
+        >
+          🔄
+        </button>
+      </div>
+
+      <div style={gridStyles}>
+        {statItems.map(item => (
+          <div key={item.label} style={statItemStyles}>
+            <div style={statIconStyles}>{item.icon}</div>
+            <div>
+              <div style={statValueStyles}>{item.value}</div>
+              <div style={statLabelStyles}>{item.label}</div>
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );
 }
+
+// Styles
+const panelStyles: React.CSSProperties = {
+  background: 'var(--card-bg)',
+  border: '1px solid var(--line)',
+  borderRadius: '12px',
+  padding: '16px',
+  marginTop: '24px',
+};
+
+const headerStyles: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: '8px',
+  fontSize: '14px',
+  fontWeight: 600,
+  color: 'var(--fg)',
+  marginBottom: '16px',
+};
+
+const refreshButtonStyles: React.CSSProperties = {
+  marginLeft: 'auto',
+  background: 'transparent',
+  border: 'none',
+  cursor: 'pointer',
+  fontSize: '14px',
+  padding: '4px',
+  borderRadius: '4px',
+  transition: 'all 0.2s ease',
+};
+
+const gridStyles: React.CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))',
+  gap: '12px',
+};
+
+const statItemStyles: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: '10px',
+  padding: '10px',
+  background: 'var(--bg)',
+  borderRadius: '8px',
+  border: '1px solid var(--line)',
+};
+
+const statIconStyles: React.CSSProperties = {
+  fontSize: '20px',
+};
+
+const statValueStyles: React.CSSProperties = {
+  fontSize: '14px',
+  fontWeight: 600,
+  color: 'var(--fg)',
+};
+
+const statLabelStyles: React.CSSProperties = {
+  fontSize: '11px',
+  color: 'var(--fg-muted)',
+};

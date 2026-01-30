@@ -1,5 +1,5 @@
 from server.db.postgres import PostgresClient
-from server.models.config import SparseSearchConfig
+from server.models.tribrid_config_model import SparseSearchConfig
 from server.models.retrieval import ChunkMatch
 
 

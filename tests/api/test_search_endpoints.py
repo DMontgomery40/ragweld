@@ -6,13 +6,13 @@ from httpx import AsyncClient
 
 @pytest.mark.asyncio
 async def test_search(client: AsyncClient) -> None:
-    """Test POST /search endpoint."""
+    """Test POST /api/search endpoint."""
     request = {
         "query": "How does authentication work?",
         "repo_id": "test-repo",
         "top_k": 10,
     }
-    response = await client.post("/search", json=request)
+    response = await client.post("/api/search", json=request)
     assert response.status_code in [200, 404]  # 404 if repo doesn't exist
 
     if response.status_code == 200:
@@ -25,7 +25,7 @@ async def test_search(client: AsyncClient) -> None:
 
 @pytest.mark.asyncio
 async def test_search_with_options(client: AsyncClient) -> None:
-    """Test POST /search with search type options."""
+    """Test POST /api/search with search type options."""
     request = {
         "query": "Find login function",
         "repo_id": "test-repo",
@@ -34,31 +34,31 @@ async def test_search_with_options(client: AsyncClient) -> None:
         "include_sparse": True,
         "include_graph": False,
     }
-    response = await client.post("/search", json=request)
+    response = await client.post("/api/search", json=request)
     assert response.status_code in [200, 404]
 
 
 @pytest.mark.asyncio
 async def test_search_empty_query(client: AsyncClient) -> None:
-    """Test POST /search with empty query."""
+    """Test POST /api/search with empty query."""
     request = {
         "query": "",
         "repo_id": "test-repo",
     }
-    response = await client.post("/search", json=request)
+    response = await client.post("/api/search", json=request)
     assert response.status_code in [400, 422]
 
 
 @pytest.mark.asyncio
 async def test_answer(client: AsyncClient) -> None:
-    """Test POST /answer endpoint."""
+    """Test POST /api/answer endpoint."""
     request = {
         "query": "Explain the main function",
         "repo_id": "test-repo",
         "top_k": 5,
         "stream": False,
     }
-    response = await client.post("/answer", json=request)
+    response = await client.post("/api/answer", json=request)
     assert response.status_code in [200, 404, 503]  # 503 if no LLM configured
 
     if response.status_code == 200:
@@ -70,24 +70,24 @@ async def test_answer(client: AsyncClient) -> None:
 
 @pytest.mark.asyncio
 async def test_answer_with_system_prompt(client: AsyncClient) -> None:
-    """Test POST /answer with custom system prompt."""
+    """Test POST /api/answer with custom system prompt."""
     request = {
         "query": "What does this code do?",
         "repo_id": "test-repo",
         "system_prompt": "You are a senior code reviewer.",
         "stream": False,
     }
-    response = await client.post("/answer", json=request)
+    response = await client.post("/api/answer", json=request)
     assert response.status_code in [200, 404, 503]
 
 
 @pytest.mark.asyncio
 async def test_answer_stream(client: AsyncClient) -> None:
-    """Test POST /answer/stream endpoint."""
+    """Test POST /api/answer/stream endpoint."""
     request = {
         "query": "Explain the authentication flow",
         "repo_id": "test-repo",
         "stream": True,
     }
-    response = await client.post("/answer/stream", json=request)
+    response = await client.post("/api/answer/stream", json=request)
     assert response.status_code in [200, 404, 503]

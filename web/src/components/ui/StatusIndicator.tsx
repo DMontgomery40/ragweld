@@ -1,20 +1,72 @@
-interface StatusIndicatorProps {
-  status: 'healthy' | 'warning' | 'error' | 'unknown';
+import React from 'react';
+
+export interface StatusIndicatorProps {
+  status: 'online' | 'offline' | 'loading' | 'success' | 'warning' | 'error' | 'idle';
   label?: string;
+  pulse?: boolean;
+  size?: 'sm' | 'md' | 'lg';
+  showLabel?: boolean;
+  className?: string;
+  ariaLabel?: string;
 }
 
-export function StatusIndicator({ status, label }: StatusIndicatorProps) {
-  const statusClasses = {
-    healthy: 'bg-green-500',
-    warning: 'bg-yellow-500',
-    error: 'bg-red-500',
-    unknown: 'bg-gray-400',
+/**
+ * StatusIndicator - Visual status indicator with optional label
+ *
+ * Features:
+ * - ARIA-compliant with live region updates
+ * - Multiple status types (online, offline, loading, success, warning, error, idle)
+ * - Optional pulse animation
+ * - Size variants (sm, md, lg)
+ * - Accessible labels
+ *
+ * Usage:
+ * ```tsx
+ * <StatusIndicator
+ *   status="online"
+ *   label="Docker Service"
+ *   pulse
+ * />
+ * ```
+ */
+export function StatusIndicator({
+  status,
+  label,
+  pulse = true,
+  size = 'md',
+  showLabel = true,
+  className = '',
+  ariaLabel
+}: StatusIndicatorProps) {
+  const statusLabels = {
+    online: 'Online',
+    offline: 'Offline',
+    loading: 'Loading',
+    success: 'Success',
+    warning: 'Warning',
+    error: 'Error',
+    idle: 'Idle'
   };
 
+  const displayLabel = label || statusLabels[status];
+  const effectiveAriaLabel = ariaLabel || `Status: ${displayLabel}`;
+
   return (
-    <div className="flex items-center gap-2">
-      <span className={`inline-block w-2 h-2 rounded-full ${statusClasses[status]}`} />
-      {label && <span className="text-sm">{label}</span>}
+    <div
+      className={`status-indicator status-indicator-${size} ${className}`}
+      role="status"
+      aria-label={effectiveAriaLabel}
+      aria-live="polite"
+    >
+      <div
+        className={`status-dot status-${status} ${pulse ? 'status-pulse' : ''}`}
+        aria-hidden="true"
+      />
+      {showLabel && label && (
+        <span className="status-label">{label}</span>
+      )}
     </div>
   );
 }
+
+export default StatusIndicator;

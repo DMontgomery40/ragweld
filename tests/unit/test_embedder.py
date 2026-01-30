@@ -4,18 +4,18 @@ import pytest
 from unittest.mock import AsyncMock, patch
 
 from server.indexing.embedder import Embedder
-from server.models.config import EmbeddingConfig
+from server.models.tribrid_config_model import EmbeddingConfig
 from server.models.index import Chunk
 
 
 @pytest.fixture
 def embedder() -> Embedder:
-    """Create embedder with test config."""
+    """Create embedder with test config using LAW's field names."""
     config = EmbeddingConfig(
-        provider="openai",
-        model="text-embedding-3-small",
-        dimensions=1536,
-        batch_size=10,
+        embedding_type="openai",  # LAW uses 'embedding_type' not 'provider'
+        embedding_model="text-embedding-3-small",  # LAW uses 'embedding_model' not 'model'
+        embedding_dim=1536,  # LAW uses 'embedding_dim' not 'dimensions'
+        embedding_batch_size=10,  # LAW uses 'embedding_batch_size' not 'batch_size'
     )
     return Embedder(config)
 

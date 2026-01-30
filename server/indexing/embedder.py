@@ -1,4 +1,4 @@
-from server.models.config import EmbeddingConfig
+from server.models.tribrid_config_model import EmbeddingConfig
 from server.models.index import Chunk
 
 

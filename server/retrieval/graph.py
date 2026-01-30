@@ -1,6 +1,6 @@
 from server.db.neo4j import Neo4jClient
 from server.indexing.embedder import Embedder
-from server.models.config import GraphSearchConfig
+from server.models.tribrid_config_model import GraphSearchConfig
 from server.models.retrieval import ChunkMatch
 
 

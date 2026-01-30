@@ -1,33 +1,86 @@
-interface ProgressBarProps {
-  progress: number;
+import React from 'react';
+
+export interface ProgressBarProps {
+  value: number;
+  max?: number;
   label?: string;
-  variant?: 'default' | 'success' | 'warning' | 'error';
+  showPercentage?: boolean;
+  variant?: 'default' | 'success' | 'warning' | 'error' | 'info';
+  size?: 'sm' | 'md' | 'lg';
+  animated?: boolean;
+  className?: string;
 }
 
-export function ProgressBar({ progress, label, variant = 'default' }: ProgressBarProps) {
-  const variantClasses = {
-    default: 'bg-blue-600',
-    success: 'bg-green-600',
-    warning: 'bg-yellow-500',
-    error: 'bg-red-600',
-  };
-
-  const clampedProgress = Math.min(100, Math.max(0, progress));
+/**
+ * ProgressBar - Accessible progress indicator with multiple variants
+ *
+ * Features:
+ * - ARIA-compliant progress semantics
+ * - Multiple visual variants (default, success, warning, error, info)
+ * - Optional label and percentage display
+ * - Smooth animations
+ * - Size variants (sm, md, lg)
+ *
+ * Usage:
+ * ```tsx
+ * <ProgressBar
+ *   value={65}
+ *   max={100}
+ *   label="Indexing documents..."
+ *   variant="success"
+ *   showPercentage
+ * />
+ * ```
+ */
+export function ProgressBar({
+  value,
+  max = 100,
+  label,
+  showPercentage = true,
+  variant = 'default',
+  size = 'md',
+  animated = true,
+  className = ''
+}: ProgressBarProps) {
+  const percentage = Math.min(Math.max((value / max) * 100, 0), 100);
+  const isIndeterminate = value < 0 || isNaN(value);
 
   return (
-    <div className="w-full">
+    <div
+      className={`progress-container progress-${size} ${className}`}
+      role="group"
+      aria-label={label || 'Progress indicator'}
+    >
       {label && (
-        <div className="flex justify-between mb-1 text-sm">
-          <span>{label}</span>
-          <span>{clampedProgress.toFixed(0)}%</span>
+        <div className="progress-header">
+          <span className="progress-label">{label}</span>
+          {showPercentage && !isIndeterminate && (
+            <span className="progress-percentage" aria-live="polite">
+              {Math.round(percentage)}%
+            </span>
+          )}
         </div>
       )}
-      <div className="w-full bg-gray-200 rounded-full h-2 dark:bg-gray-700">
+      <div
+        className="progress-bar"
+        role="progressbar"
+        aria-valuenow={isIndeterminate ? undefined : value}
+        aria-valuemin={0}
+        aria-valuemax={max}
+        aria-label={label || 'Progress'}
+      >
         <div
-          className={`h-2 rounded-full transition-all ${variantClasses[variant]}`}
-          style={{ width: `${clampedProgress}%` }}
+          className={`progress-fill progress-${variant} ${animated ? 'progress-animated' : ''} ${isIndeterminate ? 'progress-indeterminate' : ''}`}
+          style={{ width: isIndeterminate ? '100%' : `${percentage}%` }}
         />
       </div>
+      {!label && showPercentage && !isIndeterminate && (
+        <span className="progress-percentage progress-standalone" aria-live="polite">
+          {Math.round(percentage)}%
+        </span>
+      )}
     </div>
   );
 }
+
+export default ProgressBar;

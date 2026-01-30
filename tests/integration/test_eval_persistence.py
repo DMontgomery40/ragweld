@@ -3,7 +3,7 @@
 import pytest
 
 from server.models.eval import EvalMetrics, EvalResult, EvalRun
-from server.models.config import TriBridConfig
+from server.models.tribrid_config_model import TriBridConfig
 
 
 @pytest.mark.integration
@@ -41,7 +41,7 @@ async def test_eval_run_persistence(test_config: TriBridConfig) -> None:
         run_id="run-123",
         repo_id="repo-1",
         dataset_id="default",
-        config_snapshot=test_config,
+        config_snapshot=test_config.model_dump(),  # Convert to dict for storage
         metrics=metrics,
         results=results,
         started_at=datetime.utcnow(),

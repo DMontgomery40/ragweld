@@ -7,7 +7,14 @@ router = APIRouter(tags=["health"])
 
 @router.get("/health")
 async def health_check() -> dict[str, Any]:
-    raise NotImplementedError
+    return {
+        "status": "healthy",
+        "services": {
+            "api": {"status": "up"},
+            "postgres": {"status": "unknown"},  # Not connected yet
+            "neo4j": {"status": "unknown"},     # Not connected yet
+        }
+    }
 
 
 @router.get("/ready")

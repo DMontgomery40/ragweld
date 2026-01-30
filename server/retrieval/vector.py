@@ -1,6 +1,6 @@
 from server.db.postgres import PostgresClient
 from server.indexing.embedder import Embedder
-from server.models.config import VectorSearchConfig
+from server.models.tribrid_config_model import VectorSearchConfig
 from server.models.retrieval import ChunkMatch
 
 

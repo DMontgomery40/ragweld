@@ -7,8 +7,12 @@ Using Pydantic provides:
 - Clear error messages for invalid configs
 - Default values that match current hardcoded values
 - JSON schema generation for documentation
+
+This is THE LAW - all domain models and config types must be defined here.
+Other files should re-export from this module.
 """
-from typing import Any, Dict, List, Literal
+from datetime import datetime, timezone
+from typing import TYPE_CHECKING, Any, Dict, List, Literal
 
 try:
     from typing import Self
@@ -16,6 +20,245 @@ except ImportError:
     from typing_extensions import Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+
+# =============================================================================
+# DOMAIN MODELS - Core data types for the tribrid RAG system
+# =============================================================================
+# These models define the shapes of data flowing through the system.
+# Frontend TypeScript types are generated from these via generate_types.py.
+
+
+class Chunk(BaseModel):
+    """A code chunk from the indexed repository."""
+    chunk_id: str = Field(description="Unique identifier for this chunk")
+    content: str = Field(description="The actual code/text content")
+    file_path: str = Field(description="Path to the source file")
+    start_line: int = Field(description="Starting line number in source file")
+    end_line: int = Field(description="Ending line number in source file")
+    language: str | None = Field(default=None, description="Programming language")
+    token_count: int = Field(default=0, description="Token count for embedding budget")
+    embedding: list[float] | None = Field(default=None, description="Vector embedding")
+    summary: str | None = Field(default=None, description="AI-generated chunk summary")
+
+
+class IndexRequest(BaseModel):
+    """Request to index a repository."""
+    repo_id: str = Field(description="Repository identifier")
+    repo_path: str = Field(description="Path to repository on disk")
+    force_reindex: bool = Field(default=False, description="Force full reindex even if up-to-date")
+
+
+class IndexStatus(BaseModel):
+    """Current status of repository indexing."""
+    repo_id: str = Field(description="Repository identifier")
+    status: Literal["idle", "indexing", "complete", "error"] = Field(description="Current indexing state")
+    progress: float = Field(ge=0.0, le=1.0, description="Progress from 0.0 to 1.0")
+    current_file: str | None = Field(default=None, description="File currently being indexed")
+    error: str | None = Field(default=None, description="Error message if status is 'error'")
+    started_at: datetime | None = Field(default=None, description="When indexing started")
+    completed_at: datetime | None = Field(default=None, description="When indexing completed")
+
+
+class IndexStats(BaseModel):
+    """Statistics about an indexed repository."""
+    repo_id: str = Field(description="Repository identifier")
+    total_files: int = Field(description="Number of files indexed")
+    total_chunks: int = Field(description="Number of chunks created")
+    total_tokens: int = Field(description="Total token count across all chunks")
+    embedding_model: str = Field(description="Model used for embeddings")
+    embedding_dimensions: int = Field(description="Dimension of embedding vectors")
+    last_indexed: datetime | None = Field(default=None, description="When last indexed")
+    file_breakdown: dict[str, int] = Field(default_factory=dict, description="Count by file extension")
+
+
+class ChunkMatch(BaseModel):
+    """Unified result shape for vector/sparse/graph retrieval."""
+    chunk_id: str = Field(description="Unique identifier for matched chunk")
+    content: str = Field(description="The matched code/text content")
+    file_path: str = Field(description="Path to the source file")
+    start_line: int = Field(description="Starting line number")
+    end_line: int = Field(description="Ending line number")
+    language: str | None = Field(default=None, description="Programming language")
+    score: float = Field(description="Relevance score from retrieval")
+    source: Literal["vector", "sparse", "graph"] = Field(description="Which retrieval leg found this")
+    metadata: dict[str, Any] = Field(default_factory=dict, description="Additional match metadata")
+
+
+class SearchRequest(BaseModel):
+    """Request payload for tri-brid search."""
+    query: str = Field(description="The search query")
+    repo_id: str = Field(description="Repository to search")
+    top_k: int = Field(default=20, ge=1, le=100, description="Number of results to return")
+    include_vector: bool = Field(default=True, description="Include vector search results")
+    include_sparse: bool = Field(default=True, description="Include sparse/BM25 results")
+    include_graph: bool = Field(default=True, description="Include graph search results")
+
+
+class SearchResponse(BaseModel):
+    """Response from tri-brid search."""
+    query: str = Field(description="The original query")
+    matches: list[ChunkMatch] = Field(description="Ranked list of matching chunks")
+    fusion_method: str = Field(description="Fusion method used (rrf or weighted)")
+    reranker_mode: str = Field(description="Reranker mode used")
+    latency_ms: float = Field(description="Search latency in milliseconds")
+    debug: dict[str, Any] | None = Field(default=None, description="Debug information if requested")
+
+
+class AnswerRequest(BaseModel):
+    """Request payload for AI answer generation."""
+    query: str = Field(description="The question to answer")
+    repo_id: str = Field(description="Repository context")
+    top_k: int = Field(default=10, ge=1, le=50, description="Number of chunks to use as context")
+    stream: bool = Field(default=False, description="Stream the response")
+    system_prompt: str | None = Field(default=None, description="Override system prompt")
+
+
+class AnswerResponse(BaseModel):
+    """Response from AI answer generation."""
+    query: str = Field(description="The original question")
+    answer: str = Field(description="Generated answer")
+    sources: list[ChunkMatch] = Field(description="Chunks used to generate answer")
+    model: str = Field(description="Model used for generation")
+    tokens_used: int = Field(description="Total tokens consumed")
+    latency_ms: float = Field(description="Generation latency in milliseconds")
+
+
+class Message(BaseModel):
+    """Chat message in a conversation."""
+    role: Literal["user", "assistant", "system"] = Field(description="Message role")
+    content: str = Field(description="Message content")
+    timestamp: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        description="When message was created"
+    )
+
+
+class ChatRequest(BaseModel):
+    """Request payload for chat endpoint."""
+    message: str = Field(description="User's message")
+    repo_id: str = Field(description="Repository context")
+    conversation_id: str | None = Field(default=None, description="Continue existing conversation")
+    stream: bool = Field(default=False, description="Stream the response")
+
+
+class ChatResponse(BaseModel):
+    """Response from chat endpoint."""
+    conversation_id: str = Field(description="Conversation identifier")
+    message: Message = Field(description="Assistant's response message")
+    sources: list[ChunkMatch] = Field(description="Sources used for response")
+    tokens_used: int = Field(description="Tokens consumed")
+
+
+class Entity(BaseModel):
+    """Knowledge graph node representing a code entity."""
+    entity_id: str = Field(description="Unique identifier")
+    name: str = Field(description="Entity name (function name, class name, etc)")
+    entity_type: Literal["function", "class", "module", "variable", "concept"] = Field(
+        description="Type of entity"
+    )
+    file_path: str | None = Field(default=None, description="File where entity is defined")
+    description: str | None = Field(default=None, description="AI-generated description")
+    properties: dict[str, Any] = Field(default_factory=dict, description="Additional properties")
+
+
+class Relationship(BaseModel):
+    """Knowledge graph edge connecting two entities."""
+    source_id: str = Field(description="Source entity ID")
+    target_id: str = Field(description="Target entity ID")
+    relation_type: Literal["calls", "imports", "inherits", "contains", "references", "related_to"] = Field(
+        description="Type of relationship"
+    )
+    weight: float = Field(default=1.0, ge=0.0, le=1.0, description="Relationship strength")
+    properties: dict[str, Any] = Field(default_factory=dict, description="Additional properties")
+
+
+class Community(BaseModel):
+    """Knowledge graph community/cluster of related entities."""
+    community_id: str = Field(description="Unique identifier")
+    name: str = Field(description="Community name")
+    summary: str = Field(description="AI-generated summary of what this community represents")
+    member_ids: list[str] = Field(description="Entity IDs that belong to this community")
+    level: int = Field(ge=0, description="Hierarchy level (0 = top level)")
+
+
+class GraphStats(BaseModel):
+    """Statistics about a repository's knowledge graph."""
+    repo_id: str = Field(description="Repository identifier")
+    total_entities: int = Field(description="Number of entities in graph")
+    total_relationships: int = Field(description="Number of relationships")
+    total_communities: int = Field(description="Number of detected communities")
+    entity_breakdown: dict[str, int] = Field(default_factory=dict, description="Count by entity type")
+    relationship_breakdown: dict[str, int] = Field(default_factory=dict, description="Count by relation type")
+
+
+class EvalDatasetItem(BaseModel):
+    """Single evaluation dataset entry (formerly DatasetEntry)."""
+    entry_id: str = Field(description="Unique identifier for this entry")
+    question: str = Field(description="The test question")
+    expected_chunks: list[str] = Field(description="Chunk IDs that should be retrieved")
+    expected_answer: str | None = Field(default=None, description="Expected answer if testing generation")
+    tags: list[str] = Field(default_factory=list, description="Tags for filtering/grouping")
+    created_at: datetime = Field(description="When this entry was created")
+
+
+class EvalRequest(BaseModel):
+    """Request payload for evaluation run."""
+    repo_id: str = Field(description="Repository to evaluate")
+    dataset_id: str | None = Field(default=None, description="Dataset to use (None = default)")
+    sample_size: int | None = Field(default=None, ge=1, description="Number of entries to sample (None = all)")
+
+
+class EvalMetrics(BaseModel):
+    """Aggregated retrieval metrics from an evaluation run."""
+    mrr: float = Field(ge=0.0, le=1.0, description="Mean Reciprocal Rank")
+    recall_at_5: float = Field(ge=0.0, le=1.0, description="Recall at top 5")
+    recall_at_10: float = Field(ge=0.0, le=1.0, description="Recall at top 10")
+    recall_at_20: float = Field(ge=0.0, le=1.0, description="Recall at top 20")
+    precision_at_5: float = Field(ge=0.0, le=1.0, description="Precision at top 5")
+    ndcg_at_10: float = Field(ge=0.0, le=1.0, description="NDCG at top 10")
+    latency_p50_ms: float = Field(ge=0.0, description="50th percentile latency in ms")
+    latency_p95_ms: float = Field(ge=0.0, description="95th percentile latency in ms")
+
+
+class EvalResult(BaseModel):
+    """Per-entry evaluation result."""
+    entry_id: str = Field(description="Dataset entry ID")
+    question: str = Field(description="The test question")
+    retrieved_chunks: list[str] = Field(description="Chunk IDs that were actually retrieved")
+    expected_chunks: list[str] = Field(description="Chunk IDs that should have been retrieved")
+    reciprocal_rank: float = Field(ge=0.0, le=1.0, description="Reciprocal rank for this entry")
+    recall: float = Field(ge=0.0, le=1.0, description="Recall for this entry")
+    latency_ms: float = Field(ge=0.0, description="Latency for this query")
+
+
+class EvalRun(BaseModel):
+    """Complete evaluation run record."""
+    run_id: str = Field(description="Unique identifier for this run")
+    repo_id: str = Field(description="Repository evaluated")
+    dataset_id: str = Field(description="Dataset used")
+    config_snapshot: dict[str, Any] = Field(description="Config state during evaluation")
+    metrics: EvalMetrics = Field(description="Aggregated metrics")
+    results: list[EvalResult] = Field(description="Per-entry results")
+    started_at: datetime = Field(description="When evaluation started")
+    completed_at: datetime = Field(description="When evaluation completed")
+
+
+class EvalComparisonResult(BaseModel):
+    """Comparison between two evaluation runs."""
+    baseline_run_id: str = Field(description="Baseline run ID")
+    current_run_id: str = Field(description="Current run ID being compared")
+    baseline_metrics: EvalMetrics = Field(description="Baseline run metrics")
+    current_metrics: EvalMetrics = Field(description="Current run metrics")
+    delta_mrr: float = Field(description="Change in MRR (positive = improvement)")
+    delta_recall_at_10: float = Field(description="Change in recall@10")
+    improved_entries: list[str] = Field(default_factory=list, description="Entry IDs that improved")
+    degraded_entries: list[str] = Field(default_factory=list, description="Entry IDs that degraded")
+
+
+# =============================================================================
+# CONFIGURATION MODELS - Tunable parameters for the tribrid RAG system
+# =============================================================================
 
 
 class RetrievalConfig(BaseModel):
@@ -1536,9 +1779,9 @@ class HydrationConfig(BaseModel):
 class EvaluationConfig(BaseModel):
     """Evaluation dataset configuration."""
     
-    golden_path: str = Field(
+    eval_dataset_path: str = Field(
         default="data/evaluation_dataset.json",
-        description="Golden evaluation dataset path"
+        description="Evaluation dataset path"
     )
     
     baseline_path: str = Field(
@@ -1738,11 +1981,13 @@ class DockerConfig(BaseModel):
     )
 
 
-class TriBridConfigRoot(BaseModel):
+class TriBridConfig(BaseModel):
     """Root configuration model for tribrid_config.json.
 
     This is the top-level model that contains all configuration categories.
     The nested structure provides logical grouping and better organization.
+
+    Note: Previously named TriBridConfig. Renamed for consistency with imports.
     """
 
     retrieval: RetrievalConfig = Field(default_factory=RetrievalConfig)
@@ -1788,7 +2033,7 @@ class TriBridConfigRoot(BaseModel):
             Flat dictionary mapping env-style keys to values:
             {
                 'RRF_K_DIV': 60,
-                'CARD_BONUS': 0.08,
+                'CHUNK_SUMMARY_BONUS': 0.08,
                 ...
             }
         """
@@ -1811,7 +2056,7 @@ class TriBridConfigRoot(BaseModel):
             'BM25_K1': self.retrieval.bm25_k1,
             'BM25_B': self.retrieval.bm25_b,
             'VECTOR_WEIGHT': self.retrieval.vector_weight,
-            'CARD_SEARCH_ENABLED': self.retrieval.chunk_summary_search_enabled,
+            'CHUNK_SUMMARY_SEARCH_ENABLED': self.retrieval.chunk_summary_search_enabled,
             'MULTI_QUERY_M': self.retrieval.multi_query_m,
             'USE_SEMANTIC_SYNONYMS': self.retrieval.use_semantic_synonyms,
             'TRIBRID_SYNONYMS_PATH': self.retrieval.tribrid_synonyms_path,
@@ -1819,7 +2064,7 @@ class TriBridConfigRoot(BaseModel):
             'TOPK_SPARSE': self.retrieval.topk_sparse,
             # REMOVED: DISABLE_RERANK - use RERANKER_MODE='none' instead
             # Scoring params
-            'CARD_BONUS': self.scoring.chunk_summary_bonus,
+            'CHUNK_SUMMARY_BONUS': self.scoring.chunk_summary_bonus,
             'FILENAME_BOOST_EXACT': self.scoring.filename_boost_exact,
             'FILENAME_BOOST_PARTIAL': self.scoring.filename_boost_partial,
             'VENDOR_MODE': self.scoring.vendor_mode,
@@ -1922,21 +2167,21 @@ class TriBridConfigRoot(BaseModel):
             'OLLAMA_URL': self.generation.ollama_url,
             'OPENAI_BASE_URL': self.generation.openai_base_url,
             # Enrichment params (6)
-            'CARDS_ENRICH_DEFAULT': self.enrichment.chunk_summaries_enrich_default,
-            'CARDS_MAX': self.enrichment.chunk_summaries_max,
+            'CHUNK_SUMMARIES_ENRICH_DEFAULT': self.enrichment.chunk_summaries_enrich_default,
+            'CHUNK_SUMMARIES_MAX': self.enrichment.chunk_summaries_max,
             'ENRICH_CODE_CHUNKS': self.enrichment.enrich_code_chunks,
             'ENRICH_MIN_CHARS': self.enrichment.enrich_min_chars,
             'ENRICH_MAX_CHARS': self.enrichment.enrich_max_chars,
             'ENRICH_TIMEOUT': self.enrichment.enrich_timeout,
             # Chunk summaries filter params (8)
-            'CARDS_EXCLUDE_DIRS': ', '.join(self.chunk_summaries.exclude_dirs),
-            'CARDS_EXCLUDE_PATTERNS': ', '.join(self.chunk_summaries.exclude_patterns),
-            'CARDS_EXCLUDE_KEYWORDS': ', '.join(self.chunk_summaries.exclude_keywords),
-            'CARDS_CODE_SNIPPET_LENGTH': self.chunk_summaries.code_snippet_length,
-            'CARDS_MAX_SYMBOLS': self.chunk_summaries.max_symbols,
-            'CARDS_MAX_ROUTES': self.chunk_summaries.max_routes,
-            'CARDS_PURPOSE_MAX_LENGTH': self.chunk_summaries.purpose_max_length,
-            'CARDS_QUICK_TIPS': ', '.join(self.chunk_summaries.quick_tips),
+            'CHUNK_SUMMARIES_EXCLUDE_DIRS': ', '.join(self.chunk_summaries.exclude_dirs),
+            'CHUNK_SUMMARIES_EXCLUDE_PATTERNS': ', '.join(self.chunk_summaries.exclude_patterns),
+            'CHUNK_SUMMARIES_EXCLUDE_KEYWORDS': ', '.join(self.chunk_summaries.exclude_keywords),
+            'CHUNK_SUMMARIES_CODE_SNIPPET_LENGTH': self.chunk_summaries.code_snippet_length,
+            'CHUNK_SUMMARIES_MAX_SYMBOLS': self.chunk_summaries.max_symbols,
+            'CHUNK_SUMMARIES_MAX_ROUTES': self.chunk_summaries.max_routes,
+            'CHUNK_SUMMARIES_PURPOSE_MAX_LENGTH': self.chunk_summaries.purpose_max_length,
+            'CHUNK_SUMMARIES_QUICK_TIPS': ', '.join(self.chunk_summaries.quick_tips),
             # Keywords params (5)
             'KEYWORDS_MAX_PER_REPO': self.keywords.keywords_max_per_repo,
             'KEYWORDS_MIN_FREQ': self.keywords.keywords_min_freq,
@@ -2002,7 +2247,7 @@ class TriBridConfigRoot(BaseModel):
             'HYDRATION_MODE': self.hydration.hydration_mode,
             'HYDRATION_MAX_CHARS': self.hydration.hydration_max_chars,
             # Evaluation params (3)
-            'GOLDEN_PATH': self.evaluation.golden_path,
+            'EVAL_DATASET_PATH': self.evaluation.eval_dataset_path,
             'BASELINE_PATH': self.evaluation.baseline_path,
             'EVAL_MULTI_M': self.evaluation.eval_multi_m,
             # System prompts (7)
@@ -2028,7 +2273,7 @@ class TriBridConfigRoot(BaseModel):
         }
 
     @classmethod
-    def from_flat_dict(cls, data: Dict[str, Any]) -> 'TriBridConfigRoot':
+    def from_flat_dict(cls, data: Dict[str, Any]) -> 'TriBridConfig':
         """Create config from flat env-style dict.
 
         This allows the API to receive updates in the traditional flat format
@@ -2038,7 +2283,7 @@ class TriBridConfigRoot(BaseModel):
             data: Flat dictionary with env-style keys
 
         Returns:
-            TriBridConfigRoot instance with nested structure
+            TriBridConfig instance with nested structure
         """
         return cls(
             retrieval=RetrievalConfig(
@@ -2061,7 +2306,7 @@ class TriBridConfigRoot(BaseModel):
                 bm25_k1=data.get('BM25_K1', 1.2),
                 bm25_b=data.get('BM25_B', 0.4),
                 vector_weight=data.get('VECTOR_WEIGHT', 0.7),
-                chunk_summary_search_enabled=data.get('CARD_SEARCH_ENABLED', 1),
+                chunk_summary_search_enabled=data.get('CHUNK_SUMMARY_SEARCH_ENABLED', 1),
                 multi_query_m=data.get('MULTI_QUERY_M', 4),
                 use_semantic_synonyms=data.get('USE_SEMANTIC_SYNONYMS', 1),
                 tribrid_synonyms_path=data.get('TRIBRID_SYNONYMS_PATH', ''),
@@ -2072,7 +2317,7 @@ class TriBridConfigRoot(BaseModel):
                 # REMOVED: disable_rerank - use RERANKER_MODE='none' instead
             ),
             scoring=ScoringConfig(
-                chunk_summary_bonus=data.get('CARD_BONUS', 0.08),
+                chunk_summary_bonus=data.get('CHUNK_SUMMARY_BONUS', 0.08),
                 filename_boost_exact=data.get('FILENAME_BOOST_EXACT', 1.5),
                 filename_boost_partial=data.get('FILENAME_BOOST_PARTIAL', 1.2),
                 vendor_mode=data.get('VENDOR_MODE', 'prefer_first_party'),
@@ -2185,22 +2430,22 @@ class TriBridConfigRoot(BaseModel):
                 openai_base_url=data.get('OPENAI_BASE_URL', ''),
             ),
             enrichment=EnrichmentConfig(
-                chunk_summaries_enrich_default=data.get('CARDS_ENRICH_DEFAULT', 1),
-                chunk_summaries_max=data.get('CARDS_MAX', 100),
+                chunk_summaries_enrich_default=data.get('CHUNK_SUMMARIES_ENRICH_DEFAULT', 1),
+                chunk_summaries_max=data.get('CHUNK_SUMMARIES_MAX', 100),
                 enrich_code_chunks=data.get('ENRICH_CODE_CHUNKS', 1),
                 enrich_min_chars=data.get('ENRICH_MIN_CHARS', 50),
                 enrich_max_chars=data.get('ENRICH_MAX_CHARS', 1000),
                 enrich_timeout=data.get('ENRICH_TIMEOUT', 30),
             ),
             chunk_summaries=ChunkSummaryConfig(
-                exclude_dirs=data.get('CARDS_EXCLUDE_DIRS', ChunkSummaryConfig().exclude_dirs),
-                exclude_patterns=data.get('CARDS_EXCLUDE_PATTERNS', []),
-                exclude_keywords=data.get('CARDS_EXCLUDE_KEYWORDS', []),
-                code_snippet_length=data.get('CARDS_CODE_SNIPPET_LENGTH', 2000),
-                max_symbols=data.get('CARDS_MAX_SYMBOLS', 5),
-                max_routes=data.get('CARDS_MAX_ROUTES', 5),
-                purpose_max_length=data.get('CARDS_PURPOSE_MAX_LENGTH', 240),
-                quick_tips=data.get('CARDS_QUICK_TIPS', []),
+                exclude_dirs=data.get('CHUNK_SUMMARIES_EXCLUDE_DIRS', ChunkSummaryConfig().exclude_dirs),
+                exclude_patterns=data.get('CHUNK_SUMMARIES_EXCLUDE_PATTERNS', []),
+                exclude_keywords=data.get('CHUNK_SUMMARIES_EXCLUDE_KEYWORDS', []),
+                code_snippet_length=data.get('CHUNK_SUMMARIES_CODE_SNIPPET_LENGTH', 2000),
+                max_symbols=data.get('CHUNK_SUMMARIES_MAX_SYMBOLS', 5),
+                max_routes=data.get('CHUNK_SUMMARIES_MAX_ROUTES', 5),
+                purpose_max_length=data.get('CHUNK_SUMMARIES_PURPOSE_MAX_LENGTH', 240),
+                quick_tips=data.get('CHUNK_SUMMARIES_QUICK_TIPS', []),
             ),
             keywords=KeywordsConfig(
                 keywords_max_per_repo=data.get('KEYWORDS_MAX_PER_REPO', 50),
@@ -2272,7 +2517,7 @@ class TriBridConfigRoot(BaseModel):
                 hydration_max_chars=data.get('HYDRATION_MAX_CHARS', 2000),
             ),
             evaluation=EvaluationConfig(
-                golden_path=data.get('GOLDEN_PATH', 'data/evaluation_dataset.json'),
+                eval_dataset_path=data.get('EVAL_DATASET_PATH', 'data/evaluation_dataset.json'),
                 baseline_path=data.get('BASELINE_PATH', 'data/evals/eval_baseline.json'),
                 eval_multi_m=data.get('EVAL_MULTI_M', 10),
             ),
@@ -2302,7 +2547,7 @@ class TriBridConfigRoot(BaseModel):
 
 
 # Default config instance for easy access
-DEFAULT_CONFIG = TriBridConfigRoot()
+DEFAULT_CONFIG = TriBridConfig()
 
 # Set of keys that belong in tribrid_config.json (not .env)
 TRIBRID_CONFIG_KEYS = {
@@ -2324,7 +2569,7 @@ TRIBRID_CONFIG_KEYS = {
     'BM25_K1',
     'BM25_B',
     'VECTOR_WEIGHT',
-    'CARD_SEARCH_ENABLED',
+    'CHUNK_SUMMARY_SEARCH_ENABLED',
     'MULTI_QUERY_M',
     'USE_SEMANTIC_SYNONYMS',
     'TRIBRID_SYNONYMS_PATH',
@@ -2334,7 +2579,7 @@ TRIBRID_CONFIG_KEYS = {
     'HYDRATION_MAX_CHARS',
     # REMOVED: DISABLE_RERANK - use RERANKER_MODE='none' instead
     # Scoring params (5 - added 2 new)
-    'CARD_BONUS',
+    'CHUNK_SUMMARY_BONUS',
     'FILENAME_BOOST_EXACT',
     'FILENAME_BOOST_PARTIAL',
     'VENDOR_MODE',
@@ -2420,21 +2665,21 @@ TRIBRID_CONFIG_KEYS = {
     'GEN_MODEL_MCP',
     'GEN_MODEL_OLLAMA',
     # Enrichment params (6)
-    'CARDS_ENRICH_DEFAULT',
-    'CARDS_MAX',
+    'CHUNK_SUMMARIES_ENRICH_DEFAULT',
+    'CHUNK_SUMMARIES_MAX',
     'ENRICH_CODE_CHUNKS',
     'ENRICH_MIN_CHARS',
     'ENRICH_MAX_CHARS',
     'ENRICH_TIMEOUT',
     # Chunk summaries filter params (8)
-    'CARDS_EXCLUDE_DIRS',
-    'CARDS_EXCLUDE_PATTERNS',
-    'CARDS_EXCLUDE_KEYWORDS',
-    'CARDS_CODE_SNIPPET_LENGTH',
-    'CARDS_MAX_SYMBOLS',
-    'CARDS_MAX_ROUTES',
-    'CARDS_PURPOSE_MAX_LENGTH',
-    'CARDS_QUICK_TIPS',
+    'CHUNK_SUMMARIES_EXCLUDE_DIRS',
+    'CHUNK_SUMMARIES_EXCLUDE_PATTERNS',
+    'CHUNK_SUMMARIES_EXCLUDE_KEYWORDS',
+    'CHUNK_SUMMARIES_CODE_SNIPPET_LENGTH',
+    'CHUNK_SUMMARIES_MAX_SYMBOLS',
+    'CHUNK_SUMMARIES_MAX_ROUTES',
+    'CHUNK_SUMMARIES_PURPOSE_MAX_LENGTH',
+    'CHUNK_SUMMARIES_QUICK_TIPS',
     # Keywords params (5)
     'KEYWORDS_MAX_PER_REPO',
     'KEYWORDS_MIN_FREQ',
@@ -2500,7 +2745,7 @@ TRIBRID_CONFIG_KEYS = {
     'HYDRATION_MODE',
     'HYDRATION_MAX_CHARS',
     # Evaluation params (3)
-    'GOLDEN_PATH',
+    'EVAL_DATASET_PATH',
     'BASELINE_PATH',
     'EVAL_MULTI_M',
     # System prompts (7 active)
@@ -2539,7 +2784,7 @@ RAG_EVAL_CONFIG_KEYS: set[str] = {
     'RRF_K_DIV', 'LANGGRAPH_FINAL_K', 'FINAL_K', 'EVAL_FINAL_K',
     'TOPK_DENSE', 'TOPK_SPARSE', 'VECTOR_WEIGHT',
     'CONF_TOP1', 'CONF_AVG5', 'CONF_ANY', 'FALLBACK_CONFIDENCE',
-    'CARD_SEARCH_ENABLED', 'MULTI_QUERY_M', 'EVAL_MULTI',
+    'CHUNK_SUMMARY_SEARCH_ENABLED', 'MULTI_QUERY_M', 'EVAL_MULTI',
     # Query Expansion (prompts that modify query BEFORE search)
     'QUERY_EXPANSION_ENABLED', 'LANGGRAPH_MAX_QUERY_REWRITES', 'MAX_QUERY_REWRITES', 'USE_SEMANTIC_SYNONYMS',
     'PROMPT_QUERY_EXPANSION', 'PROMPT_QUERY_REWRITE', 'PROMPT_SEMANTIC_CARDS',
@@ -2552,7 +2797,7 @@ RAG_EVAL_CONFIG_KEYS: set[str] = {
     'MAX_CHUNK_TOKENS', 'MIN_CHUNK_CHARS', 'GREEDY_FALLBACK_TARGET',
     'CHUNKING_STRATEGY', 'PRESERVE_IMPORTS',
     # Scoring
-    'CARD_BONUS', 'FILENAME_BOOST_EXACT', 'FILENAME_BOOST_PARTIAL',
+    'CHUNK_SUMMARY_BONUS', 'FILENAME_BOOST_EXACT', 'FILENAME_BOOST_PARTIAL',
     'VENDOR_MODE', 'PATH_BOOSTS',
     # Layer Bonuses
     'LAYER_BONUS_GUI', 'LAYER_BONUS_RETRIEVAL', 'LAYER_BONUS_INDEXER',
@@ -2562,7 +2807,7 @@ RAG_EVAL_CONFIG_KEYS: set[str] = {
     # NOTE: Excluded (don't affect retrieval):
     # - PROMPT_MAIN_RAG_CHAT, PROMPT_CODE_ENRICHMENT, PROMPT_LIGHTWEIGHT_CARDS, PROMPT_EVAL_ANALYSIS (post-retrieval)
     # - HYDRATION_MODE, HYDRATION_MAX_CHARS (post-retrieval)
-    # - GOLDEN_PATH, BASELINE_PATH, EVAL_MULTI_M (eval metadata)
+    # - EVAL_DATASET_PATH, BASELINE_PATH, EVAL_MULTI_M (eval metadata)
 }
 
 
@@ -2601,7 +2846,7 @@ def get_eval_key_categories() -> dict[str, str]:
         'CONF_AVG5': 'Retrieval',
         'CONF_ANY': 'Retrieval',
         'FALLBACK_CONFIDENCE': 'Retrieval',
-        'CARD_SEARCH_ENABLED': 'Retrieval',
+        'CHUNK_SUMMARY_SEARCH_ENABLED': 'Retrieval',
         'MULTI_QUERY_M': 'Retrieval',
         'EVAL_MULTI': 'Retrieval',
         # Query Expansion
@@ -2635,7 +2880,7 @@ def get_eval_key_categories() -> dict[str, str]:
         'CHUNKING_STRATEGY': 'Chunking',
         'PRESERVE_IMPORTS': 'Chunking',
         # Scoring
-        'CARD_BONUS': 'Scoring',
+        'CHUNK_SUMMARY_BONUS': 'Scoring',
         'FILENAME_BOOST_EXACT': 'Scoring',
         'FILENAME_BOOST_PARTIAL': 'Scoring',
         'VENDOR_MODE': 'Scoring',

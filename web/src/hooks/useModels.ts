@@ -1,26 +1,22 @@
 /**
- * useModels - Hook for fetching model definitions from /api/models
+ * useModels - Load models from models.json filtered by component type
  *
- * THIS IS THE ONLY WAY to get model options in the UI.
- * NO HARDCODED MODEL LISTS ANYWHERE.
- *
- * Usage:
- *   const { models, loading, providers } = useModels('EMB');  // Embedding models only
- *   const { models, loading, providers } = useModels('GEN');  // Generation models only
- *   const { models, loading, providers } = useModels('RERANK');  // Reranker models only
- *   const { models, loading, providers } = useModels();  // All models
+ * Replaces legacy app.js:172-218 pattern of loading models.json into state.models
+ * and populating datalists. Now provides typed React hook for model selection.
  */
-import { useState, useEffect, useCallback, useMemo } from 'react';
 
-export type ComponentType = 'EMB' | 'GEN' | 'RERANK';
+import { useState, useEffect, useMemo } from 'react';
 
-export interface ModelDefinition {
+export interface Model {
   provider: string;
   family: string;
   model: string;
-  components: ComponentType[];
+  components: string[];
   dimensions?: number;
-  context: number;
+  context?: number;
+  unit?: string;
+  notes?: string;
+  // Pricing fields (optional)
   input_per_1k?: number;
   output_per_1k?: number;
   embed_per_1k?: number;
@@ -28,120 +24,112 @@ export interface ModelDefinition {
   per_request?: number;
 }
 
-export interface UseModelsResult {
-  models: ModelDefinition[];
+interface ModelsData {
+  currency: string;
+  last_updated: string;
+  sources: string[];
+  models: Model[];
+}
+
+type ComponentType = 'EMB' | 'GEN' | 'RERANK';
+
+interface UseModelsResult {
+  models: Model[];
   loading: boolean;
   error: string | null;
+  /** Get unique providers for this component type */
   providers: string[];
-  getModelsForProvider: (provider: string) => ModelDefinition[];
-  findModel: (provider: string, modelName: string) => ModelDefinition | undefined;
-  refresh: () => Promise<void>;
+  /** Get models for a specific provider */
+  getModelsForProvider: (provider: string) => Model[];
+  /** Find a specific model by provider and model name */
+  findModel: (provider: string, modelName: string) => Model | undefined;
 }
 
-// Global cache - shared across all hook instances
-let modelsCache: ModelDefinition[] | null = null;
-let cacheTimestamp: number = 0;
-const CACHE_TTL_MS = 60000; // 60 seconds
+// Cache models.json globally to avoid refetching
+let modelsCache: ModelsData | null = null;
+let modelsFetchPromise: Promise<ModelsData> | null = null;
 
-const LOCAL_PROVIDERS = new Set(['ollama', 'huggingface', 'local', 'sentence-transformers']);
+async function fetchModels(): Promise<ModelsData> {
+  if (modelsCache) return modelsCache;
+  if (modelsFetchPromise) return modelsFetchPromise;
 
-function isLocalProvider(provider: string): boolean {
-  return LOCAL_PROVIDERS.has(provider.toLowerCase());
-}
-
-export function useModels(componentType?: ComponentType): UseModelsResult {
-  const [models, setModels] = useState<ModelDefinition[]>(modelsCache || []);
-  const [loading, setLoading] = useState<boolean>(!modelsCache);
-  const [error, setError] = useState<string | null>(null);
-
-  const fetchModels = useCallback(async () => {
-    // Check cache validity
-    if (modelsCache && Date.now() - cacheTimestamp < CACHE_TTL_MS) {
-      setModels(modelsCache);
-      setLoading(false);
-      return;
-    }
-
-    setLoading(true);
-    setError(null);
-
-    try {
-      const response = await fetch('/api/models');
-      if (!response.ok) {
-        throw new Error(`Failed to fetch models: HTTP ${response.status}`);
-      }
-      const data: ModelDefinition[] = await response.json();
-
-      // Update global cache
+  modelsFetchPromise = fetch('/models.json')
+    .then(res => {
+      if (!res.ok) throw new Error(`Failed to load models.json: ${res.status}`);
+      return res.json();
+    })
+    .then((data: ModelsData) => {
       modelsCache = data;
-      cacheTimestamp = Date.now();
-
-      setModels(data);
-    } catch (e) {
-      const errorMessage = e instanceof Error ? e.message : 'Unknown error fetching models';
-      setError(errorMessage);
-      console.error('useModels fetch error:', errorMessage);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchModels();
-  }, [fetchModels]);
-
-  // Filter by component type if specified
-  const filteredModels = useMemo(() => {
-    if (!componentType) return models;
-    return models.filter(m => m.components?.includes(componentType));
-  }, [models, componentType]);
-
-  // Get unique providers (grouping local providers as "Local")
-  const providers = useMemo(() => {
-    const providerSet = new Set<string>();
-    let hasLocal = false;
-
-    filteredModels.forEach(m => {
-      if (isLocalProvider(m.provider)) {
-        hasLocal = true;
-      } else {
-        providerSet.add(m.provider);
-      }
+      return data;
+    })
+    .catch(err => {
+      modelsFetchPromise = null;
+      throw err;
     });
 
-    const cloudProviders = Array.from(providerSet).sort();
-    return hasLocal ? ['Local', ...cloudProviders] : cloudProviders;
-  }, [filteredModels]);
+  return modelsFetchPromise;
+}
 
-  const getModelsForProvider = useCallback((provider: string): ModelDefinition[] => {
-    if (provider === 'Local') {
-      return filteredModels.filter(m => isLocalProvider(m.provider));
-    }
-    return filteredModels.filter(m => m.provider.toLowerCase() === provider.toLowerCase());
-  }, [filteredModels]);
+export function useModels(component: ComponentType): UseModelsResult {
+  const [allModels, setAllModels] = useState<Model[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const findModel = useCallback((provider: string, modelName: string): ModelDefinition | undefined => {
-    return models.find(m =>
-      m.provider.toLowerCase() === provider.toLowerCase() &&
-      m.model.toLowerCase() === modelName.toLowerCase()
-    );
+  useEffect(() => {
+    let mounted = true;
+
+    fetchModels()
+      .then(data => {
+        if (!mounted) return;
+        setAllModels(data.models);
+        setLoading(false);
+      })
+      .catch(err => {
+        if (!mounted) return;
+        setError(err instanceof Error ? err.message : 'Failed to load models');
+        setLoading(false);
+      });
+
+    return () => { mounted = false; };
+  }, []);
+
+  // Filter models by component type
+  const models = useMemo(() => {
+    return allModels.filter(m => m.components.includes(component));
+  }, [allModels, component]);
+
+  // Get unique providers
+  const providers = useMemo(() => {
+    const unique = new Set(models.map(m => m.provider));
+    return Array.from(unique).sort();
+  }, [models]);
+
+  // Get models for a specific provider
+  const getModelsForProvider = useMemo(() => {
+    return (provider: string) => models.filter(m => m.provider === provider);
+  }, [models]);
+
+  // Find specific model
+  const findModel = useMemo(() => {
+    return (provider: string, modelName: string) =>
+      models.find(m => m.provider === provider && m.model === modelName);
   }, [models]);
 
   return {
-    models: filteredModels,
+    models,
     loading,
     error,
     providers,
     getModelsForProvider,
     findModel,
-    refresh: fetchModels,
   };
 }
 
-// Convenience hooks for specific component types
-export const useEmbeddingModels = () => useModels('EMB');
-export const useGenerationModels = () => useModels('GEN');
-export const useRerankerModels = () => useModels('RERANK');
-
-// Re-export for convenience
-export default useModels;
+/**
+ * Get recommended chunk size based on model's context window
+ * Returns 80% of context to leave headroom for safety
+ */
+export function getRecommendedChunkSize(model: Model | undefined): number | null {
+  if (!model?.context) return null;
+  return Math.floor(model.context * 0.8);
+}

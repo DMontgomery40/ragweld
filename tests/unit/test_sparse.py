@@ -1,16 +1,16 @@
-"""Tests for the sparse retriever module."""
+"""Tests for the sparse retriever module - using LAW's SparseSearchConfig."""
 
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
-from server.models.config import SparseSearchConfig
+from server.models.tribrid_config_model import SparseSearchConfig
 from server.models.retrieval import ChunkMatch
 from server.retrieval.sparse import SparseRetriever
 
 
 @pytest.fixture
 def sparse_config() -> SparseSearchConfig:
-    """Create sparse search config."""
+    """Create sparse search config with LAW's field names."""
     return SparseSearchConfig(
         enabled=True,
         top_k=10,
@@ -95,9 +95,10 @@ async def test_sparse_search_disabled(
 
 
 def test_sparse_config_defaults() -> None:
-    """Test sparse config default values."""
+    """Test sparse config default values from LAW."""
     config = SparseSearchConfig()
     assert config.enabled is True
     assert config.top_k == 50
-    assert config.bm25_k1 == 1.5
-    assert config.bm25_b == 0.75
+    # LAW's defaults
+    assert config.bm25_k1 == 1.2  # LAW default is 1.2
+    assert config.bm25_b == 0.4   # LAW default is 0.4

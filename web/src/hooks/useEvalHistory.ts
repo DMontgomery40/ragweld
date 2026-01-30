@@ -1,61 +1,85 @@
-import { useState, useCallback } from 'react';
-import type { EvalRun, EvalComparison } from '../types';
+import { useState, useEffect, useCallback } from 'react';
+
+const EVAL_HISTORY_KEY = 'agro_eval_history';
+
+export interface EvalHistoryEntry {
+  timestamp: string;
+  config: string;
+  reranker_mode: string;
+  reranker_cloud_provider?: string;
+  top1: number;
+  topk: number;
+  total: number;
+  secs: number;
+  final_k: number;
+  use_multi: boolean;
+}
 
 export function useEvalHistory() {
-  const [runs, setRuns] = useState<EvalRun[]>([]);
-  const [selectedRun, setSelectedRun] = useState<EvalRun | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [runs, setRuns] = useState<EvalHistoryEntry[]>([]);
+  const [selectedRunIndex, setSelectedRunIndex] = useState<number | null>(null);
 
-  const fetchRuns = useCallback(async (repoId?: string) => {
-    setLoading(true);
+  const loadHistory = useCallback(() => {
     try {
-      const url = repoId ? `/api/eval/runs?repo_id=${repoId}` : '/api/eval/runs';
-      const res = await fetch(url);
-      setRuns(await res.json());
-    } finally {
-      setLoading(false);
+      const raw = localStorage.getItem(EVAL_HISTORY_KEY);
+      const parsed = raw ? JSON.parse(raw) : [];
+      setRuns(Array.isArray(parsed) ? parsed : []);
+    } catch {
+      setRuns([]);
     }
   }, []);
 
-  const selectRun = useCallback(async (runId: string) => {
-    setLoading(true);
-    try {
-      const res = await fetch(`/api/eval/run/${runId}`);
-      setSelectedRun(await res.json());
-    } finally {
-      setLoading(false);
-    }
+  useEffect(() => {
+    loadHistory();
+  }, [loadHistory]);
+
+  const selectedRun = selectedRunIndex !== null ? runs[selectedRunIndex] : null;
+
+  const selectRun = useCallback((index: number) => {
+    setSelectedRunIndex(index);
   }, []);
 
-  const deleteRun = useCallback(async (runId: string) => {
-    await fetch(`/api/eval/run/${runId}`, { method: 'DELETE' });
-    setRuns((prev) => prev.filter((r) => r.run_id !== runId));
-    if (selectedRun?.run_id === runId) setSelectedRun(null);
-  }, [selectedRun]);
+  const clearHistory = useCallback(() => {
+    localStorage.removeItem(EVAL_HISTORY_KEY);
+    setRuns([]);
+    setSelectedRunIndex(null);
+  }, []);
 
-  const compareRuns = useCallback((runIds: string[]): EvalComparison => {
-    const selected = runs.filter((r) => runIds.includes(r.run_id));
-    const metricKeys = ['mrr', 'recall_at_5', 'recall_at_10', 'recall_at_20', 'precision_at_5', 'ndcg_at_10'];
-    const metrics: Record<string, number[]> = {};
-    const improvements: Record<string, number> = {};
+  const deleteRun = useCallback((index: number) => {
+    const updated = runs.filter((_, i) => i !== index);
+    localStorage.setItem(EVAL_HISTORY_KEY, JSON.stringify(updated));
+    setRuns(updated);
+    if (selectedRunIndex === index) setSelectedRunIndex(null);
+  }, [runs, selectedRunIndex]);
 
-    for (const key of metricKeys) {
-      metrics[key] = selected.map((r) => (r.metrics as Record<string, number>)[key]);
-      if (metrics[key].length >= 2) {
-        improvements[key] = metrics[key][metrics[key].length - 1] - metrics[key][0];
-      }
-    }
+  const getDeltaVsPrevious = useCallback((index: number) => {
+    if (index >= runs.length - 1) return null;
+    const current = runs[index];
+    const previous = runs[index + 1];
+    return {
+      top1: current.top1 - previous.top1,
+      topk: current.topk - previous.topk
+    };
+  }, [runs]);
 
-    return { runs: runIds, metrics, improvements };
+  const exportHistory = useCallback(() => {
+    const blob = new Blob([JSON.stringify(runs, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `eval-history-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
   }, [runs]);
 
   return {
     runs,
     selectedRun,
-    loading,
-    fetchRuns,
+    selectedRunIndex,
     selectRun,
+    clearHistory,
     deleteRun,
-    compareRuns,
+    getDeltaVsPrevious,
+    exportHistory
   };
 }

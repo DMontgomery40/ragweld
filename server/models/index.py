@@ -1,43 +1,13 @@
-from datetime import datetime
-from typing import Literal
+"""Index-related models - Re-exported from THE LAW.
 
-from pydantic import BaseModel
+All domain models are defined in tribrid_config_model.py (THE LAW).
+This file re-exports them for backwards compatibility.
+"""
+from server.models.tribrid_config_model import (
+    Chunk,
+    IndexRequest,
+    IndexStats,
+    IndexStatus,
+)
 
-
-class Chunk(BaseModel):
-    chunk_id: str
-    content: str
-    file_path: str
-    start_line: int
-    end_line: int
-    language: str | None
-    token_count: int
-    embedding: list[float] | None = None
-    summary: str | None = None
-
-
-class IndexRequest(BaseModel):
-    repo_id: str
-    repo_path: str
-    force_reindex: bool = False
-
-
-class IndexStatus(BaseModel):
-    repo_id: str
-    status: Literal["idle", "indexing", "complete", "error"]
-    progress: float  # 0.0 to 1.0
-    current_file: str | None
-    error: str | None
-    started_at: datetime | None
-    completed_at: datetime | None
-
-
-class IndexStats(BaseModel):
-    repo_id: str
-    total_files: int
-    total_chunks: int
-    total_tokens: int
-    embedding_model: str
-    embedding_dimensions: int
-    last_indexed: datetime | None
-    file_breakdown: dict[str, int]  # extension -> count
+__all__ = ["Chunk", "IndexRequest", "IndexStats", "IndexStatus"]

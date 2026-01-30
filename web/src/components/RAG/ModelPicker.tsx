@@ -1,92 +1,205 @@
-import { useConfig } from '../../hooks/useConfig';
-import { useEmbeddingModels } from '../../hooks/useModels';
+/**
+ * ModelPicker - Model dropdown from models.json
+ *
+ * Uses useModels hook to load models filtered by component type (EMB/GEN/RERANK).
+ * Shows models for a specific provider with optional custom input.
+ */
 
-export function ModelPicker() {
-  const { config, updateEmbedding } = useConfig();
-  const { models, loading, error, providers, getModelsForProvider } = useEmbeddingModels();
+import { useState, useMemo } from 'react';
+import { useModels, type Model } from '@/hooks';
+import { TooltipIcon } from '@/components/ui/TooltipIcon';
 
-  // Get current config values with safe defaults
-  const currentProvider = config?.embedding?.embedding_type || 'openai';
-  const currentModel = config?.embedding?.embedding_model || '';
+interface ModelPickerProps {
+  /** Component type filter */
+  componentType: 'EMB' | 'GEN' | 'RERANK';
+  /** Provider to filter models by */
+  provider: string;
+  /** Current selected model name */
+  value: string;
+  /** Called when selection changes */
+  onChange: (model: string) => void;
+  /** Tooltip key from tooltips.js */
+  tooltipKey?: string;
+  /** Label text */
+  label: string;
+  /** Allow custom model input */
+  allowCustom?: boolean;
+  /** Disabled state */
+  disabled?: boolean;
+}
 
-  const handleProviderChange = async (newProvider: string) => {
-    // Get first model from new provider as default
-    const providerModels = getModelsForProvider(newProvider);
-    const defaultModel = providerModels[0]?.model || '';
-    await updateEmbedding({
-      embedding_type: newProvider,
-      embedding_model: defaultModel
-    });
+export function ModelPicker({
+  componentType,
+  provider,
+  value,
+  onChange,
+  tooltipKey,
+  label,
+  allowCustom = false,
+  disabled = false,
+}: ModelPickerProps) {
+  const { models, loading, error, getModelsForProvider } = useModels(componentType);
+  const [customMode, setCustomMode] = useState(false);
+  const [customValue, setCustomValue] = useState('');
+
+  // Get models for the current provider
+  const providerModels = useMemo(() => {
+    return getModelsForProvider(provider);
+  }, [getModelsForProvider, provider]);
+
+  // Check if current value is in the list (for custom detection)
+  const isValueCustom = useMemo(() => {
+    if (!value || providerModels.length === 0) return false;
+    return !providerModels.some(m => m.model === value);
+  }, [value, providerModels]);
+
+  // Handle select change
+  const handleSelectChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const newValue = e.target.value;
+    if (newValue === '__custom__' && allowCustom) {
+      setCustomMode(true);
+      setCustomValue(value);
+    } else {
+      setCustomMode(false);
+      onChange(newValue);
+    }
   };
 
-  const handleModelChange = async (newModel: string) => {
-    await updateEmbedding({ embedding_model: newModel });
+  // Handle custom input
+  const handleCustomChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setCustomValue(e.target.value);
   };
 
-  // Get models for current provider
-  const currentProviderModels = getModelsForProvider(currentProvider);
+  const handleCustomBlur = () => {
+    if (customValue.trim()) {
+      onChange(customValue.trim());
+    }
+  };
+
+  const handleCustomKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      handleCustomBlur();
+    }
+  };
+
+  // Cancel custom mode
+  const cancelCustom = () => {
+    setCustomMode(false);
+    setCustomValue('');
+  };
 
   if (loading) {
     return (
-      <div className="tribrid-card p-4 bg-white dark:bg-gray-800 rounded-lg shadow" data-testid="model-picker">
-        <h4 className="font-medium mb-4">Embedding Model</h4>
-        <div className="animate-pulse">
-          <div className="h-10 bg-gray-200 dark:bg-gray-700 rounded mb-4"></div>
-          <div className="h-10 bg-gray-200 dark:bg-gray-700 rounded"></div>
-        </div>
+      <div className="setting-row">
+        <label>
+          {label}
+          {tooltipKey && <TooltipIcon name={tooltipKey} />}
+        </label>
+        <span style={{ color: 'var(--fg-muted)', fontSize: '13px' }}>Loading models...</span>
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="tribrid-card p-4 bg-white dark:bg-gray-800 rounded-lg shadow" data-testid="model-picker">
-        <h4 className="font-medium mb-4">Embedding Model</h4>
-        <div className="text-red-500 text-sm" data-testid="model-picker-error">
-          Error loading models: {error}
-        </div>
+      <div className="setting-row">
+        <label>
+          {label}
+          {tooltipKey && <TooltipIcon name={tooltipKey} />}
+        </label>
+        <span style={{ color: 'var(--error)', fontSize: '13px' }}>{error}</span>
       </div>
     );
   }
 
   return (
-    <div className="tribrid-card p-4 bg-white dark:bg-gray-800 rounded-lg shadow" data-testid="model-picker">
-      <h4 className="font-medium mb-4">Embedding Model</h4>
-      <div className="space-y-4">
-        <div>
-          <label className="block text-sm font-medium mb-1">Provider</label>
-          <select
-            className="w-full px-3 py-2 border rounded dark:bg-gray-700 dark:border-gray-600"
-            value={currentProvider}
-            onChange={(e) => handleProviderChange(e.target.value)}
-            data-testid="model-picker-provider"
+    <div className="setting-row">
+      <label>
+        {label}
+        {tooltipKey && <TooltipIcon name={tooltipKey} />}
+      </label>
+
+      {customMode ? (
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          <input
+            type="text"
+            value={customValue}
+            onChange={handleCustomChange}
+            onBlur={handleCustomBlur}
+            onKeyDown={handleCustomKeyDown}
+            placeholder="Enter model name"
+            disabled={disabled}
+            style={{ flex: 1 }}
+            autoFocus
+          />
+          <button
+            type="button"
+            onClick={cancelCustom}
+            style={{
+              padding: '4px 8px',
+              fontSize: '12px',
+              background: 'var(--card-bg)',
+              border: '1px solid var(--line)',
+              borderRadius: '4px',
+              cursor: 'pointer',
+            }}
           >
-            {providers.map((p) => (
-              <option key={p} value={p}>
-                {p.charAt(0).toUpperCase() + p.slice(1)}
-              </option>
-            ))}
-          </select>
+            Cancel
+          </button>
         </div>
-        <div>
-          <label className="block text-sm font-medium mb-1">Model</label>
-          <select
-            className="w-full px-3 py-2 border rounded dark:bg-gray-700 dark:border-gray-600"
-            value={currentModel}
-            onChange={(e) => handleModelChange(e.target.value)}
-            data-testid="model-picker-model"
-          >
-            {currentProviderModels.map((m) => (
+      ) : (
+        <select
+          value={isValueCustom ? '__custom__' : value}
+          onChange={handleSelectChange}
+          disabled={disabled}
+        >
+          {providerModels.length === 0 ? (
+            <option value="">No models for {provider}</option>
+          ) : (
+            providerModels.map(m => (
               <option key={m.model} value={m.model}>
-                {m.model} {m.dimensions ? `(${m.dimensions}d)` : ''}
+                {m.model}
+                {m.dimensions && ` (${m.dimensions}d)`}
               </option>
-            ))}
-          </select>
-        </div>
-        <div className="text-xs text-gray-500 dark:text-gray-400">
-          {models.length} embedding models available from {providers.length} providers
-        </div>
-      </div>
+            ))
+          )}
+          {allowCustom && (
+            <option value="__custom__">
+              {isValueCustom ? `Custom: ${value}` : 'Enter custom...'}
+            </option>
+          )}
+        </select>
+      )}
+
+      {/* Show model info if available */}
+      {!customMode && value && (
+        <ModelInfo model={providerModels.find(m => m.model === value)} />
+      )}
+    </div>
+  );
+}
+
+/**
+ * ModelInfo - Shows additional model details
+ */
+function ModelInfo({ model }: { model?: Model }) {
+  if (!model) return null;
+
+  return (
+    <div
+      style={{
+        fontSize: '11px',
+        color: 'var(--fg-muted)',
+        marginTop: '4px',
+        display: 'flex',
+        gap: '12px',
+      }}
+    >
+      {model.dimensions && <span>Dimensions: {model.dimensions}</span>}
+      {model.context && <span>Context: {model.context.toLocaleString()} tokens</span>}
+      {model.embed_per_1k !== undefined && (
+        <span>Cost: ${model.embed_per_1k.toFixed(5)}/1k tokens</span>
+      )}
     </div>
   );
 }

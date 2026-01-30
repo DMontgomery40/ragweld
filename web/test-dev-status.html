@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html>
+<head><title>Dev Status Test</title></head>
+<body>
+<h1>Dev Stack Status Test</h1>
+<pre id="output"></pre>
+<script>
+const output = document.getElementById('output');
+output.textContent = 'Testing API call...\n';
+
+fetch('http://127.0.0.1:8012/api/dev/status')
+  .then(res => res.json())
+  .then(data => {
+    output.textContent += 'API Response:\n' + JSON.stringify(data, null, 2);
+  })
+  .catch(err => {
+    output.textContent += 'Error: ' + err.message;
+  });
+</script>
+</body>
+</html>

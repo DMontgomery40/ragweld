@@ -1,50 +1,87 @@
-import React from 'react';
+import React from "react";
 
-interface ButtonProps {
-  variant?: 'primary' | 'secondary' | 'danger' | 'ghost';
-  size?: 'sm' | 'md' | 'lg';
-  loading?: boolean;
-  disabled?: boolean;
-  onClick?: () => void;
-  children: React.ReactNode;
+type ButtonVariant = "primary" | "secondary" | "ghost";
+type ButtonSize = "sm" | "md" | "lg";
+
+export type ButtonProps = React.ButtonHTMLAttributes<HTMLButtonElement> & {
+  variant?: ButtonVariant;
+  size?: ButtonSize;
+  leftIcon?: React.ReactNode;
+  rightIcon?: React.ReactNode;
+  fullWidth?: boolean;
+};
+
+function cx(...classes: Array<string | false | null | undefined>): string {
+  return classes.filter(Boolean).join(" ");
 }
 
-export function Button({
-  variant = 'primary',
-  size = 'md',
-  loading = false,
-  disabled = false,
-  onClick,
-  children,
-}: ButtonProps) {
-  const baseClasses = 'tribrid-button inline-flex items-center justify-center rounded font-medium transition-colors';
+const base =
+  // layout + typography
+  "inline-flex items-center justify-center font-medium select-none whitespace-nowrap" +
+  // sizing handled by size map
+  "" +
+  // border + radius
+  " rounded-xl border" +
+  // transitions
+  " transition-colors duration-200 ease-out" +
+  // focus-visible ring (accessibility)
+  " focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-accent focus-visible:ring-offset-bg" +
+  // disabled state
+  " disabled:opacity-50 disabled:pointer-events-none";
 
-  const variantClasses = {
-    primary: 'bg-blue-600 text-white hover:bg-blue-700 disabled:bg-blue-400',
-    secondary: 'bg-gray-200 text-gray-800 hover:bg-gray-300 disabled:bg-gray-100',
-    danger: 'bg-red-600 text-white hover:bg-red-700 disabled:bg-red-400',
-    ghost: 'bg-transparent hover:bg-gray-100 disabled:bg-transparent',
-  };
+const variants: Record<ButtonVariant, string> = {
+  primary:
+    // neon accent on near-black background
+    " bg-accent text-black border-transparent hover:brightness-110 active:brightness-95",
+  secondary:
+    // subtle outline with neon text
+    " bg-transparent text-accent border-accent/60 hover:bg-accent/10 active:bg-accent/20",
+  ghost:
+    // text-only, minimal chrome
+    " bg-transparent text-accent border-transparent hover:bg-accent/10 active:bg-accent/20",
+};
 
-  const sizeClasses = {
-    sm: 'px-2 py-1 text-sm',
-    md: 'px-4 py-2',
-    lg: 'px-6 py-3 text-lg',
-  };
+const sizes: Record<ButtonSize, string> = {
+  sm: " h-8 px-3 text-[13px] gap-2",
+  md: " h-10 px-4 text-[14px] gap-2.5",
+  lg: " h-12 px-5 text-[15px] gap-3",
+};
 
-  return (
-    <button
-      className={`${baseClasses} ${variantClasses[variant]} ${sizeClasses[size]}`}
-      onClick={onClick}
-      disabled={disabled || loading}
-    >
-      {loading && (
-        <svg className="animate-spin -ml-1 mr-2 h-4 w-4" fill="none" viewBox="0 0 24 24">
-          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-        </svg>
-      )}
-      {children}
-    </button>
-  );
-}
+export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
+  (
+    {
+      variant = "primary",
+      size = "md",
+      leftIcon,
+      rightIcon,
+      fullWidth,
+      className,
+      children,
+      ...rest
+    },
+    ref
+  ) => {
+    return (
+      <button
+        ref={ref}
+        className={cx(
+          base,
+          variants[variant],
+          sizes[size],
+          fullWidth && "w-full",
+          // high-contrast selection safety on neon themes
+          "selection:bg-white selection:text-black",
+          className
+        )}
+        {...rest}
+      >
+        {leftIcon ? <span aria-hidden="true" className="-ml-0.5">{leftIcon}</span> : null}
+        <span>{children}</span>
+        {rightIcon ? <span aria-hidden="true" className="-mr-0.5">{rightIcon}</span> : null}
+      </button>
+    );
+  }
+);
+
+Button.displayName = "Button";
+

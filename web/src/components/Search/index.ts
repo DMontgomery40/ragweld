@@ -1,1 +1,0 @@
-export { GlobalSearch } from './GlobalSearch';

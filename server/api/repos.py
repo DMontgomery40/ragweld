@@ -8,7 +8,8 @@ router = APIRouter(tags=["repos"])
 
 @router.get("/repos", response_model=list[Repository])
 async def list_repos() -> list[Repository]:
-    raise NotImplementedError
+    # Return empty list for now - repos will be managed via UI
+    return []
 
 
 @router.post("/repos", response_model=Repository)

@@ -1,20 +1,20 @@
-from server.models.config import RerankerConfig
+from server.models.tribrid_config_model import RerankingConfig
 from server.models.retrieval import ChunkMatch
 
 
 class Reranker:
-    def __init__(self, config: RerankerConfig):
+    def __init__(self, config: RerankingConfig):
         self.config = config
         self._model = None
 
     async def rerank(self, query: str, chunks: list[ChunkMatch]) -> list[ChunkMatch]:
-        if self.config.mode == "none":
-            return chunks[: self.config.top_n]
-        elif self.config.mode == "local":
+        if self.config.reranker_mode == "none":
+            return chunks[: self.config.tribrid_reranker_topn]
+        elif self.config.reranker_mode == "local":
             return await self._rerank_local(query, chunks)
-        elif self.config.mode == "trained":
+        elif self.config.reranker_mode == "learning":
             return await self._rerank_trained(query, chunks)
-        elif self.config.mode == "api":
+        elif self.config.reranker_mode == "cloud":
             return await self._rerank_api(query, chunks)
         return chunks
 

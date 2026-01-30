@@ -1,26 +1,12 @@
-from datetime import datetime
-from typing import Literal
+"""Chat-related models - Re-exported from THE LAW.
 
-from pydantic import BaseModel, Field
+All domain models are defined in tribrid_config_model.py (THE LAW).
+This file re-exports them for backwards compatibility.
+"""
+from server.models.tribrid_config_model import (
+    ChatRequest,
+    ChatResponse,
+    Message,
+)
 
-from server.models.retrieval import ChunkMatch
-
-
-class Message(BaseModel):
-    role: Literal["user", "assistant", "system"]
-    content: str
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
-
-
-class ChatRequest(BaseModel):
-    message: str
-    repo_id: str
-    conversation_id: str | None = None
-    stream: bool = False
-
-
-class ChatResponse(BaseModel):
-    conversation_id: str
-    message: Message
-    sources: list[ChunkMatch]
-    tokens_used: int
+__all__ = ["Message", "ChatRequest", "ChatResponse"]

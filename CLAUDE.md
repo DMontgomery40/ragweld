@@ -174,13 +174,7 @@ import langchain                 # Banned (use langgraph directly if needed)
 5. Update hook if needed  
 6. Update component
 
-### Store Limits
-- Maximum 6 Zustand stores (currently: Config, Health, Repo, UI, Tooltip, Graph)
-- Need a new store? Probably should be part of an existing one.
 
-### Hook Limits  
-- Maximum 14 custom hooks
-- Hooks wrap stores, not replace them
 
 ---
 

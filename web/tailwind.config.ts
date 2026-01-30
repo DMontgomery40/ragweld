@@ -1,34 +1,49 @@
-import type { Config } from 'tailwindcss';
+import type { Config } from 'tailwindcss'
 
 export default {
-  content: ['./index.html', './src/**/*.{js,ts,jsx,tsx}'],
-  darkMode: 'class',
+  content: ['./index.html', './src/**/*.{ts,tsx}'],
   theme: {
     extend: {
       colors: {
-        primary: {
-          50: '#eff6ff',
-          100: '#dbeafe',
-          200: '#bfdbfe',
-          300: '#93c5fd',
-          400: '#60a5fa',
-          500: '#3b82f6',
-          600: '#2563eb',
-          700: '#1d4ed8',
-          800: '#1e40af',
-          900: '#1e3a8a',
-        },
+        // Background colors
+        bg: 'var(--bg)',
+        bgElev1: 'var(--bg-elev1)',
+        bgElev2: 'var(--bg-elev2)',
+        panel: 'var(--panel)',
+        panelBg: 'var(--panel-bg)',
+        cardBg: 'var(--card-bg)',
+        chipBg: 'var(--chip-bg)',
+        inputBg: 'var(--input-bg)',
+        codeBg: 'var(--code-bg)',
+        
+        // Text colors
+        fg: 'var(--fg)',
+        muted: 'var(--fg-muted)',
+        codeFg: 'var(--code-fg)',
+        
+        // Border/line
+        line: 'var(--line)',
+        ring: 'var(--ring)',
+        
+        // Brand colors
+        accent: 'var(--accent)',           // NEON GREEN #00ff88
+        accentContrast: 'var(--accent-contrast)',
+        link: 'var(--link)',
+        onLink: 'var(--on-link)',
+        
+        // Status colors
+        ok: 'var(--ok)',
+        warn: 'var(--warn)',
+        err: 'var(--err)',
+        onWarn: 'var(--on-warn)',
+        onErr: 'var(--on-err)'
       },
-      animation: {
-        shimmer: 'shimmer 2s infinite',
-      },
-      keyframes: {
-        shimmer: {
-          '0%': { transform: 'translateX(-100%)' },
-          '100%': { transform: 'translateX(100%)' },
-        },
-      },
-    },
+      fontFamily: {
+        sans: ['var(--font-sans)'],
+        mono: ['var(--font-mono)']
+      }
+    }
   },
-  plugins: [],
-} satisfies Config;
+  plugins: []
+} satisfies Config
+

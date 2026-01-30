@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from server.models.config import TriBridConfig
+from server.models.tribrid_config_model import TriBridConfig
 
 DEFAULT_CONFIG_PATH = Path("tribrid_config.json")
 

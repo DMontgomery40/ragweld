@@ -1,5 +1,267 @@
 .live-terminal {
-  border: 1px solid #374151;
-  border-radius: 0.5rem;
+  margin-top: 16px;
+  border-radius: 8px;
+  background: #1a1a1a;
+  border: 1px solid var(--line);
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
   overflow: hidden;
+  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.live-terminal.collapsed {
+  max-height: 42px !important;
+}
+
+.live-terminal.expanded {
+  max-height: 500px;
+}
+
+.terminal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 16px;
+  background: #252525;
+  border-bottom: 1px solid var(--line);
+  user-select: none;
+}
+
+.terminal-header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.terminal-controls {
+  display: flex;
+  gap: 6px;
+}
+
+.control-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.control-dot:hover {
+  transform: scale(1.1);
+}
+
+.control-red {
+  background: #ff5f57;
+}
+
+.control-red:hover {
+  background: #ff3830;
+}
+
+.control-yellow {
+  background: #ffbd2e;
+}
+
+.control-yellow:hover {
+  background: #ffaa00;
+}
+
+.control-green {
+  background: #28c840;
+}
+
+.control-green:hover {
+  background: #20b038;
+}
+
+.terminal-title {
+  font-family: 'SF Mono', 'Monaco', monospace;
+  font-size: 13px;
+  color: #e0e0e0;
+  font-weight: 500;
+}
+
+.terminal-header-right {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.terminal-btn {
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--fg-muted);
+  padding: 4px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 11px;
+  font-family: 'SF Mono', monospace;
+  transition: all 0.2s ease;
+}
+
+.terminal-btn:hover {
+  background: var(--bg-elev1);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.terminal-btn.active {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.terminal-collapse-btn {
+  background: transparent;
+  border: none;
+  color: var(--fg-muted);
+  cursor: pointer;
+  font-size: 16px;
+  padding: 0 4px;
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.terminal-collapse-btn:hover {
+  color: var(--fg);
+}
+
+.terminal-progress {
+  padding: 8px 16px;
+  background: #1f1f1f;
+  border-bottom: 1px solid var(--line);
+  animation: slideDown 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.progress-info {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.progress-label {
+  font-family: 'SF Mono', monospace;
+  font-size: 11px;
+  color: var(--accent);
+}
+
+.progress-percent {
+  font-family: 'SF Mono', monospace;
+  font-size: 11px;
+  color: var(--fg-muted);
+}
+
+.progress-bar {
+  width: 100%;
+  height: 6px;
+  background: #0a0a0a;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent) 0%, var(--link) 100%);
+  border-radius: 3px;
+  transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  animation: shimmer 2s infinite linear;
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -200% center;
+  }
+  100% {
+    background-position: 200% center;
+  }
+}
+
+.terminal-body {
+  height: 350px;
+  overflow-y: auto;
+  padding: 12px 16px;
+  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #e0e0e0;
+  background: #1a1a1a;
+}
+
+.terminal-output {
+  margin: 0;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  color: #e0e0e0;
+}
+
+.terminal-output .log-line {
+  margin: 2px 0;
+  padding: 2px 4px;
+  border-radius: 2px;
+  transition: background 0.2s ease;
+}
+
+.terminal-output .log-line:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.terminal-output .log-error {
+  color: #ff5f57;
+  background: rgba(255, 95, 87, 0.1);
+}
+
+.terminal-output .log-warning {
+  color: #ffbd2e;
+  background: rgba(255, 189, 46, 0.1);
+}
+
+.terminal-output .log-success {
+  color: #28c840;
+  background: rgba(40, 200, 64, 0.1);
+}
+
+.terminal-output .log-info {
+  color: #5c9fd8;
+  background: rgba(92, 159, 216, 0.1);
+}
+
+/* Scrollbar styling */
+.terminal-body::-webkit-scrollbar {
+  width: 8px;
+  background: transparent;
+}
+
+.terminal-body::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 4px;
+}
+
+.terminal-body::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+}
+
+.terminal-body::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes pulse {
+  0% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+  100% {
+    opacity: 1;
+  }
 }

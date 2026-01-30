@@ -1,14 +1,25 @@
 from fastapi import APIRouter
 from typing import Any
 
-from server.models.config import TriBridConfig
+from server.models.tribrid_config_model import TriBridConfig
 
 router = APIRouter(tags=["config"])
+
+# In-memory config store
+_config: TriBridConfig | None = None
+
+
+def _get_default_config() -> TriBridConfig:
+    """Get default config - LAW provides all defaults via default_factory."""
+    return TriBridConfig()
 
 
 @router.get("/config", response_model=TriBridConfig)
 async def get_config() -> TriBridConfig:
-    raise NotImplementedError
+    global _config
+    if _config is None:
+        _config = _get_default_config()
+    return _config
 
 
 @router.put("/config", response_model=TriBridConfig)

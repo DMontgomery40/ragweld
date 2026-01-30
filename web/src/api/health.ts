@@ -1,8 +1,12 @@
-import { client } from './client';
-import type { ServiceStatus } from '../types/ui';
+import { apiClient, api } from './client';
+import type { HealthStatus } from '@web/types';
 
-export const check = () =>
-  client.get<{ services: Record<string, ServiceStatus> }>('/health');
-
-export const ready = () =>
-  client.get<{ ready: boolean }>('/ready');
+export const healthApi = {
+  /**
+   * Check system health status
+   */
+  async check(): Promise<HealthStatus> {
+    const { data } = await apiClient.get<HealthStatus>(api('/health'));
+    return data;
+  },
+};

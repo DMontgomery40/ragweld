@@ -1,43 +1,45 @@
-import { useState } from 'react';
-import { SystemStatusSubtab } from './SystemStatusSubtab';
-import { StorageSubtab } from './StorageSubtab';
-import { MonitoringSubtab } from './MonitoringSubtab';
-import { HelpSubtab } from './HelpSubtab';
-import { GlossarySubtab } from './GlossarySubtab';
+// AGRO - DashboardSubtabs Component
+// Subtab navigation for Dashboard tab
 
-const SUBTABS = [
-  { id: 'status', label: 'System Status' },
-  { id: 'storage', label: 'Storage' },
-  { id: 'monitoring', label: 'Monitoring' },
-  { id: 'help', label: 'Help' },
-  { id: 'glossary', label: 'Glossary' },
-];
+interface DashboardSubtabsProps {
+  activeSubtab: string;
+  onSubtabChange: (subtab: string) => void;
+}
 
-export function DashboardSubtabs() {
-  const [activeSubtab, setActiveSubtab] = useState('status');
+export function DashboardSubtabs({ activeSubtab, onSubtabChange }: DashboardSubtabsProps) {
+  const subtabs = [
+    { id: 'system', title: 'System Status' },
+    { id: 'monitoring', title: 'Monitoring' },
+    { id: 'storage', title: 'Storage' },
+    { id: 'help', title: 'Help' },
+    { id: 'glossary', title: 'Glossary' }
+  ];
+
+  // No defensive useEffect needed - parent initializes activeSubtab to 'system'
 
   return (
-    <div>
-      <div className="flex border-b border-gray-200 dark:border-gray-700 mb-4">
-        {SUBTABS.map((tab) => (
-          <button
-            key={tab.id}
-            className={`px-4 py-2 text-sm font-medium border-b-2 ${
-              activeSubtab === tab.id
-                ? 'border-blue-500 text-blue-600'
-                : 'border-transparent text-gray-500 hover:text-gray-700'
-            }`}
-            onClick={() => setActiveSubtab(tab.id)}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
-      {activeSubtab === 'status' && <SystemStatusSubtab />}
-      {activeSubtab === 'storage' && <StorageSubtab />}
-      {activeSubtab === 'monitoring' && <MonitoringSubtab />}
-      {activeSubtab === 'help' && <HelpSubtab />}
-      {activeSubtab === 'glossary' && <GlossarySubtab />}
+    <div
+      className="subtab-bar"
+      id="dashboard-subtabs"
+      data-state="visible"
+      style={{
+        display: 'flex',
+        opacity: 1,
+        transform: 'translateY(0)',
+        pointerEvents: 'auto',
+        visibility: 'visible'
+      }}
+    >
+      {subtabs.map(subtab => (
+        <button
+          key={subtab.id}
+          className={`subtab-btn ${activeSubtab === subtab.id ? 'active' : ''}`}
+          data-subtab={subtab.id}
+          onClick={() => onSubtabChange(subtab.id)}
+        >
+          {subtab.title}
+        </button>
+      ))}
     </div>
   );
 }

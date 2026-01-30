@@ -9,30 +9,19 @@ Exit codes:
     0 - Types are in sync
     1 - Types are out of sync (run generate_types.py to fix)
     2 - generated.ts doesn't exist
-    3 - pydantic2ts failed
+    3 - Generation failed
 """
-import shutil
 import subprocess
-import tempfile
 import sys
+import tempfile
 from pathlib import Path
 
-GENERATED_TS_PATH = Path("web/src/types/generated.ts")
+# Add project root to path
+PROJECT_ROOT = Path(__file__).parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
 
-# Find python with pydantic2ts installed
-def find_python_with_pydantic2ts():
-    """Find a Python interpreter that has pydantic2ts installed."""
-    candidates = ['python3.10', 'python3.11', 'python3.12', 'python3', sys.executable]
-    for py in candidates:
-        py_path = shutil.which(py)
-        if py_path:
-            result = subprocess.run(
-                [py_path, '-c', 'import pydantic2ts'],
-                capture_output=True
-            )
-            if result.returncode == 0:
-                return py_path
-    return None
+GENERATED_TS_PATH = PROJECT_ROOT / "web/src/types/generated.ts"
+GENERATE_SCRIPT = PROJECT_ROOT / "scripts/generate_types.py"
 
 
 def main() -> int:
@@ -42,36 +31,40 @@ def main() -> int:
         print("Run: uv run scripts/generate_types.py")
         return 2
 
-    # Find Python with pydantic2ts
-    python_exe = find_python_with_pydantic2ts()
-    if not python_exe:
-        print("ERROR: Could not find Python with pydantic2ts installed.")
-        print("Install with: pip install pydantic2ts")
-        return 3
-
-    # Generate to temp file
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.ts', delete=False) as f:
-        temp_path = Path(f.name)
-
     try:
-        # Use Python API instead of CLI since CLI has issues
-        result = subprocess.run(
-            [python_exe, '-c',
-             f"from pydantic2ts import generate_typescript_defs; generate_typescript_defs('server.models.tribrid_config_model', '{temp_path}')"],
-            capture_output=True,
-            text=True
-        )
+        # Read existing content
+        existing_content = GENERATED_TS_PATH.read_text()
 
-        if result.returncode != 0:
-            print(f"ERROR: pydantic2ts failed:")
-            print(result.stderr)
+        # Generate fresh content to a temp file
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.ts', delete=False) as tmp:
+            tmp_path = Path(tmp.name)
+
+        # Temporarily redirect the output
+        original_generated_ts = GENERATED_TS_PATH
+
+        # Import and run generation directly
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("generate_types", GENERATE_SCRIPT)
+        if spec is None or spec.loader is None:
+            print("ERROR: Could not load generate_types.py")
             return 3
 
-        # Compare files
-        existing_content = GENERATED_TS_PATH.read_text().strip()
-        generated_content = temp_path.read_text().strip()
+        generate_module = importlib.util.module_from_spec(spec)
 
-        if existing_content != generated_content:
+        # Monkey-patch the output path
+        old_stdout = sys.stdout
+        sys.stdout = open('/dev/null', 'w')
+
+        try:
+            spec.loader.exec_module(generate_module)
+            # Get the newly generated content
+            fresh_content = GENERATED_TS_PATH.read_text()
+        finally:
+            sys.stdout.close()
+            sys.stdout = old_stdout
+
+        # Compare content (strip to handle trailing newlines)
+        if existing_content.strip() != fresh_content.strip():
             print("ERROR: generated.ts is OUT OF SYNC with Pydantic models!")
             print("")
             print("The TypeScript types do not match the current Pydantic model definitions.")
@@ -85,8 +78,11 @@ def main() -> int:
         print("✓ Types are in sync - generated.ts matches Pydantic models")
         return 0
 
-    finally:
-        temp_path.unlink(missing_ok=True)
+    except Exception as e:
+        print(f"ERROR: Type validation failed: {e}")
+        import traceback
+        traceback.print_exc()
+        return 3
 
 
 if __name__ == '__main__':

@@ -1,61 +1,136 @@
-import { useState } from 'react';
-import { useTooltips } from '../../hooks/useTooltips';
+import React, { useState, useRef, useEffect } from 'react';
+import { useTooltips } from '@/hooks/useTooltips';
 
 interface TooltipIconProps {
-  tooltipId: string;
-  size?: 'sm' | 'md';
+  name: string;
 }
 
-export function TooltipIcon({ tooltipId, size = 'sm' }: TooltipIconProps) {
+/**
+ * TooltipIcon - Renders a help icon with tooltip bubble
+ * 
+ * Uses the global tooltip system from tooltips.js via useTooltips hook.
+ * Renders proper DOM structure for tooltip display with hover/click behavior.
+ */
+export function TooltipIcon({ name }: TooltipIconProps) {
+  const { tooltips } = useTooltips();
   const [visible, setVisible] = useState(false);
-  const { getTooltip } = useTooltips();
-  const tooltip = getTooltip(tooltipId);
+  const wrapRef = useRef<HTMLSpanElement>(null);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  if (!tooltip) return null;
+  // Get tooltip HTML content
+  const content = tooltips[name] || `<span class="tt-title">${name}</span><div>No tooltip available.</div>`;
 
-  const sizeClasses = {
-    sm: 'w-4 h-4',
-    md: 'w-5 h-5',
+  // Render tooltip content safely (no dangerouslySetInnerHTML)
+  const renderNodes = (nodes: NodeListOf<ChildNode>): React.ReactNode[] => {
+    const out: React.ReactNode[] = [];
+    nodes.forEach((n, idx) => {
+      if (n.nodeType === Node.TEXT_NODE) {
+        out.push(n.textContent);
+        return;
+      }
+      if (n.nodeType === Node.ELEMENT_NODE) {
+        const el = n as HTMLElement;
+        const children = renderNodes(el.childNodes as NodeListOf<ChildNode>);
+        const key = `${el.tagName}-${idx}`;
+        const tag = el.tagName.toLowerCase();
+        const commonProps = { key, className: el.className || undefined };
+        switch (tag) {
+          case 'a': {
+            const href = el.getAttribute('href') || '#';
+            return out.push(
+              <a {...commonProps} href={href} target="_blank" rel="noopener noreferrer">
+                {children}
+              </a>
+            );
+          }
+          case 'div':
+          case 'span':
+            return out.push(React.createElement(tag, commonProps, children));
+          case 'br':
+            return out.push(<br key={key} />);
+          default:
+            return;
+        }
+      }
+    });
+    return out;
+  };
+
+  const renderContent = (): React.ReactNode => {
+    if (typeof window === 'undefined' || typeof DOMParser === 'undefined') {
+      console.warn('[TooltipIcon] DOMParser not available, returning raw content');
+      return content;
+    }
+    try {
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(content, 'text/html');
+      const nodes = renderNodes(doc.body.childNodes as NodeListOf<ChildNode>);
+      // If renderNodes returns empty array, something went wrong
+      if (Array.isArray(nodes) && nodes.length === 0 && content.length > 0) {
+        console.warn('[TooltipIcon] renderNodes returned empty for non-empty content:', name);
+      }
+      return nodes;
+    } catch (e) {
+      console.error('[TooltipIcon] Error parsing tooltip HTML:', e, 'for key:', name);
+      return content;
+    }
+  };
+
+  // Handle click outside to close
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
+        setVisible(false);
+      }
+    }
+    if (visible) {
+      document.addEventListener('click', handleClickOutside);
+    }
+    return () => document.removeEventListener('click', handleClickOutside);
+  }, [visible]);
+
+  const show = () => {
+    if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    setVisible(true);
+  };
+
+  const hide = () => {
+    timeoutRef.current = setTimeout(() => setVisible(false), 150);
+  };
+
+  const toggle = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setVisible(v => !v);
   };
 
   return (
-    <div className="relative inline-block">
-      <button
-        className={`${sizeClasses[size]} text-gray-400 hover:text-gray-600 rounded-full`}
-        onMouseEnter={() => setVisible(true)}
-        onMouseLeave={() => setVisible(false)}
-        aria-label={`Info about ${tooltip.term}`}
+    <span 
+      ref={wrapRef}
+      className="tooltip-wrap" 
+      style={{ position: 'relative', display: 'inline-block' }}
+    >
+      <span
+        className="help-icon"
+        tabIndex={0}
+        aria-label={`Help: ${name}`}
+        onClick={toggle}
+        onMouseEnter={show}
+        onMouseLeave={hide}
+        onFocus={show}
+        onBlur={hide}
+        style={{ cursor: 'help' }}
       >
-        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-            d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-          />
-        </svg>
-      </button>
-      {visible && (
-        <div className="tribrid-tooltip absolute z-50 w-64 p-3 bg-gray-900 text-white text-sm rounded shadow-lg -top-2 left-6">
-          <div className="font-medium mb-1">{tooltip.term}</div>
-          <div className="text-gray-300">{tooltip.definition}</div>
-          {tooltip.links.length > 0 && (
-            <div className="mt-2 space-x-2">
-              {tooltip.links.map((link) => (
-                <a
-                  key={link.url}
-                  href={link.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-blue-400 hover:underline"
-                >
-                  {link.label}
-                </a>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-    </div>
+        ?
+      </span>
+      <div
+        className={`tooltip-bubble ${visible ? 'tooltip-visible' : ''}`}
+        onMouseEnter={show}
+        onMouseLeave={hide}
+        role="tooltip"
+        aria-label={`Tooltip for ${name}`}
+      >
+        {renderContent()}
+      </div>
+    </span>
   );
 }
