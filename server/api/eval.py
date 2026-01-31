@@ -177,7 +177,7 @@ async def run_evaluation(request: EvalRequest) -> EvalRun:
     for entry in entries:
         t0 = perf_counter()
         matches = await fusion.search(
-            repo_id=repo_id,
+            corpus_id=repo_id,
             query=entry.question,
             config=cfg.fusion,
             include_vector=True,
@@ -299,7 +299,7 @@ async def test_eval_entry(request: EvalTestRequest) -> EvalResult:
 
     t0 = perf_counter()
     matches = await fusion.search(
-        repo_id=repo_id,
+        corpus_id=repo_id,
         query=request.question,
         config=cfg.fusion,
         include_vector=True,
@@ -554,7 +554,7 @@ async def eval_run_stream(
 
                 t0 = perf_counter()
                 matches = await fusion.search(
-                    repo_id=repo_id,
+                    corpus_id=repo_id,
                     query=entry.question,
                     config=cfg.fusion,
                     include_vector=True,

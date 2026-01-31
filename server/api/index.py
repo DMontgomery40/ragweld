@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from collections import defaultdict
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
@@ -16,6 +17,7 @@ from server.indexing.chunker import Chunker
 from server.indexing.embedder import Embedder
 from server.indexing.graph_builder import GraphBuilder
 from server.indexing.loader import FileLoader
+from server.models.graph import Entity, Relationship
 from server.models.index import IndexRequest, IndexStats, IndexStatus
 from server.models.tribrid_config_model import CorpusScope, VocabPreviewResponse
 from server.services.config_store import get_config as load_scoped_config
@@ -27,6 +29,94 @@ _STATS: dict[str, IndexStats] = {}
 _TASKS: dict[str, asyncio.Task[None]] = {}
 _EVENT_QUEUES: dict[str, asyncio.Queue[dict[str, Any]]] = {}
 _LAST_STARTED_REPO: str | None = None
+
+_SEM_TOKEN_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]{2,63}")
+_SEM_STOPWORDS: set[str] = {
+    "the",
+    "and",
+    "for",
+    "with",
+    "from",
+    "this",
+    "that",
+    "return",
+    "true",
+    "false",
+    "none",
+    "null",
+    "import",
+    "export",
+    "class",
+    "function",
+    "const",
+    "let",
+    "var",
+    "async",
+    "await",
+}
+
+
+def _extract_semantic_concepts(text: str, *, min_len: int, max_terms: int) -> list[str]:
+    """Deterministic concept extraction (fallback for tests/offline)."""
+    if max_terms <= 0:
+        return []
+    toks = [t.lower() for t in _SEM_TOKEN_RE.findall(text or "")]
+    freq: dict[str, int] = defaultdict(int)
+    for t in toks:
+        if len(t) < min_len:
+            continue
+        if t in _SEM_STOPWORDS:
+            continue
+        freq[t] += 1
+    # Stable ordering: by frequency desc, then token asc.
+    items = sorted(freq.items(), key=lambda kv: (-kv[1], kv[0]))
+    return [k for k, _v in items[:max_terms]]
+
+
+async def _extract_semantic_kg_llm(
+    text: str,
+    *,
+    prompt: str,
+    model: str,
+    timeout_s: float,
+) -> tuple[list[str], list[dict[str, str]]]:
+    """LLM-assisted semantic KG extraction (best-effort).
+
+    Returns:
+    - concepts: list[str]
+    - relations: list[dict] with keys: source, target, relation_type
+    """
+    try:
+        from openai import AsyncOpenAI
+    except Exception:
+        return ([], [])
+
+    client = AsyncOpenAI()
+    resp = await client.responses.create(
+        model=model,
+        instructions=prompt,
+        input=text,
+        temperature=0,
+        text={"format": {"type": "json_object"}},
+        timeout=float(timeout_s),
+    )
+    raw = str(getattr(resp, "output_text", "") or "").strip()
+    if not raw:
+        return ([], [])
+    try:
+        data = json.loads(raw)
+    except Exception:
+        return ([], [])
+
+    concepts_raw = data.get("concepts") if isinstance(data, dict) else None
+    relations_raw = data.get("relations") if isinstance(data, dict) else None
+    concepts: list[str] = [str(x) for x in (concepts_raw or [])] if isinstance(concepts_raw, list) else []
+    relations: list[dict[str, str]] = []
+    if isinstance(relations_raw, list):
+        for r in relations_raw:
+            if isinstance(r, dict):
+                relations.append({str(k): str(v) for k, v in r.items()})
+    return (concepts, relations)
 
 
 async def _run_index(
@@ -63,15 +153,33 @@ async def _run_index(
     neo4j: Neo4jClient | None = None
     graph_builder: GraphBuilder | None = None
     try:
-        if cfg.graph_search.enabled:
+        if cfg.graph_indexing.enabled:
+            db_name = cfg.graph_storage.resolve_database(repo_id)
             neo4j = Neo4jClient(
                 cfg.graph_storage.neo4j_uri,
                 cfg.graph_storage.neo4j_user,
                 cfg.graph_storage.neo4j_password,
-                database=cfg.graph_storage.neo4j_database,
+                database=db_name,
             )
             await neo4j.connect()
             graph_builder = GraphBuilder(neo4j)
+
+            # Lexical chunk vector index (Neo4j native vector indexes)
+            if cfg.graph_indexing.build_lexical_graph and cfg.graph_indexing.store_chunk_embeddings and not skip_dense:
+                try:
+                    assert embedder is not None
+                    await neo4j.ensure_vector_index(
+                        index_name=cfg.graph_indexing.chunk_vector_index_name,
+                        label="Chunk",
+                        embedding_property=cfg.graph_indexing.chunk_embedding_property,
+                        dimensions=int(embedder.dim),
+                        similarity_function=cfg.graph_indexing.vector_similarity_function,
+                        wait_online=cfg.graph_indexing.wait_vector_index_online,
+                        timeout_s=float(cfg.graph_indexing.vector_index_online_timeout_s),
+                    )
+                except Exception:
+                    # Graph indexing should never block dense/sparse indexing.
+                    pass
     except Exception:
         # Graph layer is optional at runtime; vector + sparse indexing should still work.
         neo4j = None
@@ -106,6 +214,9 @@ async def _run_index(
                 {"type": "log", "message": f"⚡ skip_dense=1 → skipping embeddings (cleared {deleted} existing vectors)"}
             )
 
+    semantic_budget = int(cfg.graph_indexing.semantic_kg_max_chunks) if cfg.graph_indexing.semantic_kg_enabled else 0
+    semantic_processed = 0
+
     for idx, (rel_path, content) in enumerate(files, start=1):
         ext = "." + rel_path.split(".")[-1] if "." in rel_path else ""
         file_breakdown[ext] += 1
@@ -121,22 +232,198 @@ async def _run_index(
             await event_queue.put({"type": "progress", "percent": int((_STATUS[repo_id].progress) * 100), "message": rel_path})
 
         chunks = chunker.chunk_file(rel_path, content)
+        chunks_for_semantic = chunks
         total_chunks += len(chunks)
         total_tokens += sum(int(c.token_count or 0) for c in chunks)
 
         if skip_dense:
             await postgres.upsert_fts(repo_id, chunks, ts_config=cfg.indexing.postgres_ts_config)
+            if neo4j is not None and cfg.graph_indexing.build_lexical_graph:
+                try:
+                    await neo4j.upsert_document_and_chunks(
+                        repo_id,
+                        rel_path,
+                        chunks,
+                        store_embeddings=False,
+                        embedding_property=cfg.graph_indexing.chunk_embedding_property,
+                    )
+                except Exception:
+                    pass
         else:
             assert embedder is not None
             embedded = await embedder.embed_chunks(chunks)
+            chunks_for_semantic = embedded
             await postgres.upsert_embeddings(repo_id, embedded)
             await postgres.upsert_fts(repo_id, embedded, ts_config=cfg.indexing.postgres_ts_config)
+            if neo4j is not None and cfg.graph_indexing.build_lexical_graph:
+                try:
+                    await neo4j.upsert_document_and_chunks(
+                        repo_id,
+                        rel_path,
+                        embedded,
+                        store_embeddings=bool(cfg.graph_indexing.store_chunk_embeddings),
+                        embedding_property=cfg.graph_indexing.chunk_embedding_property,
+                    )
+                except Exception:
+                    pass
+
+        # Optional semantic KG extraction (concept entities + related_to edges linked to chunk_ids).
+        if (
+            neo4j is not None
+            and cfg.graph_indexing.build_lexical_graph
+            and cfg.graph_indexing.semantic_kg_enabled
+            and semantic_budget > 0
+            and semantic_processed < semantic_budget
+        ):
+            try:
+                mode = str(cfg.graph_indexing.semantic_kg_mode or "heuristic").strip().lower()
+                max_terms = int(cfg.graph_indexing.semantic_kg_max_concepts_per_chunk)
+                min_len = int(cfg.graph_indexing.semantic_kg_min_concept_len)
+                max_rels_per_chunk = int(cfg.graph_indexing.semantic_kg_max_relations_per_chunk)
+                llm_model = str(cfg.graph_indexing.semantic_kg_llm_model or "").strip() or str(cfg.generation.enrich_model)
+                llm_prompt = str(cfg.system_prompts.semantic_kg_extraction or "").strip()
+                llm_timeout_s = float(cfg.graph_indexing.semantic_kg_llm_timeout_s)
+                llm_max_chars = int(cfg.enrichment.enrich_max_chars)
+
+                def _norm_concept(name: str) -> str | None:
+                    v = (name or "").strip().lower()
+                    v = re.sub(r"[^a-z0-9_]+", "_", v).strip("_")
+                    if len(v) < min_len:
+                        return None
+                    if v in _SEM_STOPWORDS:
+                        return None
+                    if not _SEM_TOKEN_RE.fullmatch(v):
+                        return None
+                    return v
+
+                concept_entities: dict[str, Entity] = {}
+                rels: list[Relationship] = []
+                link_set: set[tuple[str, str]] = set()
+
+                for ch in chunks_for_semantic:
+                    if semantic_processed >= semantic_budget:
+                        break
+                    semantic_processed += 1
+
+                    concepts_raw: list[str]
+                    relations_raw: list[dict[str, str]]
+                    if mode == "llm" and llm_prompt:
+                        concepts_raw, relations_raw = await _extract_semantic_kg_llm(
+                            (ch.content or "")[: max(0, llm_max_chars)],
+                            prompt=llm_prompt,
+                            model=llm_model,
+                            timeout_s=llm_timeout_s,
+                        )
+                    else:
+                        concepts_raw = _extract_semantic_concepts(ch.content, min_len=min_len, max_terms=max_terms)
+                        relations_raw = []
+
+                    concepts: list[str] = []
+                    seen_concepts: set[str] = set()
+                    for name in concepts_raw:
+                        n = _norm_concept(name)
+                        if not n or n in seen_concepts:
+                            continue
+                        seen_concepts.add(n)
+                        concepts.append(n)
+                        if len(concepts) >= max_terms:
+                            break
+                    if not concepts:
+                        continue
+
+                    concept_ids: list[str] = []
+                    for name in concepts:
+                        ent_id = GraphBuilder._stable_id(repo_id, "", "concept", name)
+                        concept_ids.append(ent_id)
+                        if ent_id not in concept_entities:
+                            concept_entities[ent_id] = Entity(
+                                entity_id=ent_id,
+                                name=name,
+                                entity_type="concept",
+                                file_path=None,
+                                description=None,
+                                properties={"source": "semantic"},
+                            )
+                        link_set.add((ent_id, ch.chunk_id))
+
+                    if max_rels_per_chunk > 0:
+                        # LLM mode: use suggested relations if present, otherwise fall back.
+                        rels_added = 0
+                        if mode == "llm" and relations_raw:
+                            name_to_id = {n: GraphBuilder._stable_id(repo_id, "", "concept", n) for n in concepts}
+                            for r in relations_raw:
+                                if rels_added >= max_rels_per_chunk:
+                                    break
+                                src = _norm_concept(str(r.get("source") or ""))
+                                tgt = _norm_concept(str(r.get("target") or ""))
+                                rel_type = str(r.get("relation_type") or "related_to").strip().lower()
+                                if not src or not tgt or src == tgt:
+                                    continue
+                                if rel_type not in {"related_to", "references"}:
+                                    continue
+                                # Ensure entities exist even if relation mentions a concept not in concepts list.
+                                for nm in (src, tgt):
+                                    if nm not in name_to_id:
+                                        eid = GraphBuilder._stable_id(repo_id, "", "concept", nm)
+                                        name_to_id[nm] = eid
+                                        if eid not in concept_entities:
+                                            concept_entities[eid] = Entity(
+                                                entity_id=eid,
+                                                name=nm,
+                                                entity_type="concept",
+                                                file_path=None,
+                                                description=None,
+                                                properties={"source": "semantic", "mode": "llm"},
+                                            )
+                                        link_set.add((eid, ch.chunk_id))
+                                rels.append(
+                                    Relationship(
+                                        source_id=name_to_id[src],
+                                        target_id=name_to_id[tgt],
+                                        relation_type=rel_type,  # type: ignore[arg-type]
+                                        weight=0.7,
+                                        properties={"source": "semantic", "mode": "llm"},
+                                    )
+                                )
+                                rels_added += 1
+                        # Heuristic fallback: star graph around the top concept in this chunk.
+                        if rels_added == 0 and len(concept_ids) >= 2:
+                            root = concept_ids[0]
+                            for tgt in concept_ids[1:]:
+                                rels.append(
+                                    Relationship(
+                                        source_id=root,
+                                        target_id=tgt,
+                                        relation_type="related_to",
+                                        weight=0.5,
+                                        properties={"source": "semantic", "mode": "heuristic"},
+                                    )
+                                )
+                                rels_added += 1
+                                if rels_added >= max_rels_per_chunk:
+                                    break
+
+                if concept_entities:
+                    await neo4j.upsert_entities(repo_id, list(concept_entities.values()))
+                if rels:
+                    await neo4j.upsert_relationships(repo_id, rels)
+                if link_set:
+                    await neo4j.link_entities_to_chunks(
+                        repo_id,
+                        links=[{"entity_id": eid, "chunk_id": cid} for (eid, cid) in sorted(link_set)],
+                    )
+            except Exception:
+                # Semantic KG is optional; never block baseline indexing.
+                pass
 
     if graph_builder is not None:
         try:
             if event_queue is not None:
                 await event_queue.put({"type": "log", "message": "🧠 Building Neo4j graph (entities + relationships)..."} )
             await graph_builder.build_graph_for_files(repo_id, files)
+            # Link entities to chunk_ids so the graph leg can hydrate deterministically.
+            if neo4j is not None and cfg.graph_indexing.build_lexical_graph:
+                await neo4j.rebuild_entity_chunk_links(repo_id)
         except Exception:
             # Do not fail indexing if graph extraction is partial.
             pass
@@ -288,11 +575,12 @@ async def delete_index(corpus_id: str) -> dict[str, Any]:
     deleted_rows = await postgres.delete_chunks(repo_id)
 
     try:
+        db_name = cfg.graph_storage.resolve_database(repo_id)
         neo4j = Neo4jClient(
             cfg.graph_storage.neo4j_uri,
             cfg.graph_storage.neo4j_user,
             cfg.graph_storage.neo4j_password,
-            database=cfg.graph_storage.neo4j_database,
+            database=db_name,
         )
         await neo4j.connect()
         await neo4j.delete_graph(repo_id)

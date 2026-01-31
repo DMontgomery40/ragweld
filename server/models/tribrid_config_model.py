@@ -14,6 +14,7 @@ Other files should re-export from this module.
 from __future__ import annotations
 
 import uuid
+import re
 from datetime import UTC, datetime
 from typing import Any, Literal
 
@@ -1185,6 +1186,22 @@ class GraphStorageConfig(BaseModel):
         description="Neo4j database name"
     )
 
+    neo4j_database_mode: Literal["shared", "per_corpus"] = Field(
+        default="shared",
+        description="Database isolation mode: 'shared' uses a single Neo4j database (Community-compatible), "
+        "'per_corpus' uses a separate Neo4j database per corpus (Enterprise multi-database).",
+    )
+
+    neo4j_database_prefix: str = Field(
+        default="tribrid_",
+        description="Prefix for per-corpus Neo4j database names when neo4j_database_mode='per_corpus'.",
+    )
+
+    neo4j_auto_create_databases: bool = Field(
+        default=True,
+        description="Automatically create per-corpus Neo4j databases when missing (Enterprise).",
+    )
+
     max_hops: int = Field(
         default=2,
         ge=1,
@@ -1218,6 +1235,24 @@ class GraphStorageConfig(BaseModel):
         le=100,
         description="Number of results from graph traversal"
     )
+
+    def resolve_database(self, corpus_id: str | None) -> str:
+        """Resolve the Neo4j database name for a corpus.
+
+        - shared: use neo4j_database
+        - per_corpus: derive from corpus_id + prefix (sanitized)
+        """
+        if self.neo4j_database_mode == "shared" or not corpus_id:
+            return self.neo4j_database
+        base = f"{self.neo4j_database_prefix}{corpus_id}"
+        v = base.strip().lower()
+        v = re.sub(r"[^a-z0-9_]+", "_", v)
+        v = re.sub(r"_+", "_", v).strip("_")
+        if not v:
+            return self.neo4j_database
+        if v[0].isdigit():
+            v = f"db_{v}"
+        return v[:63]
 
 
 # =============================================================================
@@ -1349,9 +1384,41 @@ class SparseSearchConfig(BaseModel):
 class GraphSearchConfig(BaseModel):
     """Configuration for graph-based search using Neo4j."""
 
+    mode: Literal["chunk", "entity"] = Field(
+        default="chunk",
+        description="Graph retrieval mode. 'chunk' uses lexical chunk nodes + Neo4j vector index; "
+        "'entity' uses the legacy code-entity graph.",
+    )
+
     enabled: bool = Field(
         default=True,
         description="Enable graph search in tri-brid retrieval"
+    )
+
+    chunk_neighbor_window: int = Field(
+        default=1,
+        ge=0,
+        le=10,
+        description="When mode='chunk', include up to N adjacent chunks (NEXT_CHUNK) around each seed hit",
+    )
+
+    chunk_seed_overfetch_multiplier: int = Field(
+        default=10,
+        ge=1,
+        le=50,
+        description="When mode='chunk' and Neo4j uses a shared database, overfetch seed hits before filtering by corpus_id",
+    )
+
+    chunk_entity_expansion_enabled: bool = Field(
+        default=True,
+        description="When mode='chunk', expand from seed chunks via Entity graph (IN_CHUNK links) to find related chunks",
+    )
+
+    chunk_entity_expansion_weight: float = Field(
+        default=0.8,
+        ge=0.0,
+        le=1.0,
+        description="Blend weight for entity-expansion scores relative to seed chunk scores (mode='chunk')",
     )
 
     max_hops: int = Field(
@@ -1371,6 +1438,107 @@ class GraphSearchConfig(BaseModel):
         ge=5,
         le=100,
         description="Number of results to retrieve from graph search"
+    )
+
+
+# =============================================================================
+# GRAPH INDEXING CONFIG
+# =============================================================================
+
+class GraphIndexingConfig(BaseModel):
+    """Configuration for building/persisting graph data during indexing."""
+
+    enabled: bool = Field(
+        default=True,
+        description="Enable graph building during indexing (Neo4j)",
+    )
+
+    build_lexical_graph: bool = Field(
+        default=True,
+        description="Build lexical graph (Document/Chunk nodes + NEXT_CHUNK relationships)",
+    )
+
+    store_chunk_embeddings: bool = Field(
+        default=True,
+        description="Store chunk embeddings on Chunk nodes for Neo4j vector search (requires dense embeddings)",
+    )
+
+    semantic_kg_enabled: bool = Field(
+        default=False,
+        description="Build semantic knowledge graph (concept entities + relations) linked to chunks during indexing",
+    )
+
+    semantic_kg_mode: Literal["heuristic", "llm"] = Field(
+        default="heuristic",
+        description="Semantic KG extraction mode. 'heuristic' is deterministic and test-friendly; "
+        "'llm' uses an LLM to extract entities + relations.",
+    )
+
+    semantic_kg_max_concepts_per_chunk: int = Field(
+        default=8,
+        ge=0,
+        le=50,
+        description="Maximum semantic concepts to extract per chunk",
+    )
+
+    semantic_kg_min_concept_len: int = Field(
+        default=4,
+        ge=3,
+        le=20,
+        description="Minimum length for semantic concept tokens",
+    )
+
+    semantic_kg_max_relations_per_chunk: int = Field(
+        default=12,
+        ge=0,
+        le=200,
+        description="Maximum semantic relations to create per chunk (heuristic mode)",
+    )
+
+    semantic_kg_max_chunks: int = Field(
+        default=200,
+        ge=0,
+        le=100000,
+        description="Maximum chunks to process for semantic KG extraction per indexing run (0 = disabled)",
+    )
+
+    semantic_kg_llm_model: str = Field(
+        default="",
+        description="LLM model name for semantic KG extraction when semantic_kg_mode='llm' (empty = use generation.enrich_model)",
+    )
+
+    semantic_kg_llm_timeout_s: int = Field(
+        default=30,
+        ge=5,
+        le=120,
+        description="Timeout (seconds) for semantic KG LLM extraction per chunk",
+    )
+
+    chunk_vector_index_name: str = Field(
+        default="tribrid_chunk_embeddings",
+        description="Neo4j vector index name for Chunk embeddings (mode='chunk')",
+    )
+
+    chunk_embedding_property: str = Field(
+        default="embedding",
+        description="Chunk node property that stores the embedding vector",
+    )
+
+    vector_similarity_function: Literal["cosine", "euclidean"] = Field(
+        default="cosine",
+        description="Neo4j vector similarity function",
+    )
+
+    wait_vector_index_online: bool = Field(
+        default=True,
+        description="Wait for the Neo4j vector index to come ONLINE after (re)creating it",
+    )
+
+    vector_index_online_timeout_s: float = Field(
+        default=60.0,
+        ge=1.0,
+        le=600.0,
+        description="Timeout waiting for Neo4j vector index ONLINE (seconds)",
     )
 
 
@@ -2247,6 +2415,30 @@ Focus on:
         description="Extract metadata from code chunks during indexing"
     )
 
+    semantic_kg_extraction: str = Field(
+        default='''You are a semantic knowledge graph extractor.
+
+Given a single code/document chunk, extract a small set of reusable semantic concepts and relationships.
+
+Rules:
+- Return ONLY valid JSON (no markdown, no extra text)
+- Concepts must be short, lowercase, and reusable across the corpus (e.g. "authentication", "rate_limit", "vector_index")
+- Prefer domain concepts and architectural concepts over implementation noise
+- Do NOT include file paths or line numbers as concepts
+- Keep the list small and high-signal
+
+JSON format:
+{
+  "concepts": ["concept1", "concept2"],
+  "relations": [
+    {"source": "concept1", "target": "concept2", "relation_type": "related_to"}
+  ]
+}
+
+Allowed relation_type values: related_to, references''',
+        description="Prompt for LLM-assisted semantic KG extraction (concepts + relations)"
+    )
+
     eval_analysis: str = Field(
         default='''You are an expert RAG (Retrieval-Augmented Generation) system analyst.
 Your job is to analyze evaluation comparisons and provide HONEST, SKEPTICAL insights.
@@ -2368,6 +2560,7 @@ class TriBridConfig(BaseModel):
     chunking: ChunkingConfig = Field(default_factory=ChunkingConfig)
     indexing: IndexingConfig = Field(default_factory=IndexingConfig)
     graph_storage: GraphStorageConfig = Field(default_factory=GraphStorageConfig)
+    graph_indexing: GraphIndexingConfig = Field(default_factory=GraphIndexingConfig)
     fusion: FusionConfig = Field(default_factory=FusionConfig)
     vector_search: VectorSearchConfig = Field(default_factory=VectorSearchConfig)
     sparse_search: SparseSearchConfig = Field(default_factory=SparseSearchConfig)

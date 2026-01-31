@@ -82,7 +82,16 @@ export function IndexingSubtab() {
   const [bm25StopwordsLang, setBm25StopwordsLang] = useConfigField<string>('indexing.bm25_stopwords_lang', '');
 
   const [skipDense, setSkipDense] = useConfigField<number>('indexing.skip_dense', 0);
-  const [graphBuildEnabled, setGraphBuildEnabled] = useConfigField<boolean>('graph_search.enabled', true);
+  const [graphIndexingEnabled, setGraphIndexingEnabled] = useConfigField<boolean>('graph_indexing.enabled', true);
+  const [lexicalGraphEnabled, setLexicalGraphEnabled] = useConfigField<boolean>('graph_indexing.build_lexical_graph', true);
+  const [storeChunkEmbeddings, setStoreChunkEmbeddings] = useConfigField<boolean>('graph_indexing.store_chunk_embeddings', true);
+  const [semanticKgEnabled, setSemanticKgEnabled] = useConfigField<boolean>('graph_indexing.semantic_kg_enabled', false);
+  const [semanticKgMode, setSemanticKgMode] = useConfigField<'heuristic' | 'llm'>('graph_indexing.semantic_kg_mode', 'heuristic');
+  const [semanticKgMaxChunks, setSemanticKgMaxChunks] = useConfigField<number>('graph_indexing.semantic_kg_max_chunks', 200);
+  const [semanticKgMaxConcepts, setSemanticKgMaxConcepts] = useConfigField<number>(
+    'graph_indexing.semantic_kg_max_concepts_per_chunk',
+    8
+  );
 
   // Models (from /api/models, no hardcoded lists)
   const [embedModels, setEmbedModels] = useState<any[]>([]);
@@ -310,7 +319,7 @@ export function IndexingSubtab() {
     terminalRef.current?.appendLine(`🚀 Starting indexing for ${rid}`);
     terminalRef.current?.appendLine(`   Provider: ${String(embeddingType || '')}, Model: ${String(currentModel || '')}`);
     terminalRef.current?.appendLine(`   Chunk Size: ${chunkSize}, Strategy: ${chunkingStrategy}`);
-    terminalRef.current?.appendLine(`   Graph build: ${graphBuildEnabled ? 'enabled' : 'disabled'} • Skip dense: ${skipDense ? 'yes' : 'no'}`);
+    terminalRef.current?.appendLine(`   Graph indexing: ${graphIndexingEnabled ? 'enabled' : 'disabled'} • Skip dense: ${skipDense ? 'yes' : 'no'}`);
 
     try {
       const body: IndexRequest = {
@@ -348,7 +357,7 @@ export function IndexingSubtab() {
     effectivePath,
     embeddingType,
     forceReindex,
-    graphBuildEnabled,
+    graphIndexingEnabled,
     resetTerminal,
     skipDense,
     startStream,
@@ -1288,11 +1297,17 @@ export function IndexingSubtab() {
                   padding: '16px',
                   background: 'var(--bg-elev2)',
                   borderRadius: '8px',
-                  border: graphBuildEnabled ? '2px solid var(--accent)' : '1px solid var(--line)',
+                  border: graphIndexingEnabled ? '2px solid var(--accent)' : '1px solid var(--line)',
                 }}
               >
                 <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }}>
-                  <input type="checkbox" checked={graphBuildEnabled} onChange={(e) => setGraphBuildEnabled(e.target.checked)} style={{ width: '18px', height: '18px' }} />
+                  <input
+                    data-testid="graph-indexing-enabled"
+                    type="checkbox"
+                    checked={graphIndexingEnabled}
+                    onChange={(e) => setGraphIndexingEnabled(e.target.checked)}
+                    style={{ width: '18px', height: '18px' }}
+                  />
                   <div>
                     <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--fg)' }}>Build graph during indexing</div>
                     <div style={{ fontSize: '11px', color: 'var(--fg-muted)', marginTop: '2px' }}>
@@ -1300,6 +1315,142 @@ export function IndexingSubtab() {
                     </div>
                   </div>
                 </label>
+              </div>
+
+              <div
+                style={{
+                  padding: '16px',
+                  background: 'var(--bg-elev2)',
+                  borderRadius: '8px',
+                  border: graphIndexingEnabled && lexicalGraphEnabled ? '2px solid var(--accent)' : '1px solid var(--line)',
+                  opacity: graphIndexingEnabled ? 1 : 0.6,
+                }}
+              >
+                <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }}>
+                  <input
+                    data-testid="graph-lexical-enabled"
+                    type="checkbox"
+                    checked={lexicalGraphEnabled}
+                    onChange={(e) => setLexicalGraphEnabled(e.target.checked)}
+                    disabled={!graphIndexingEnabled}
+                    style={{ width: '18px', height: '18px' }}
+                  />
+                  <div>
+                    <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--fg)' }}>Build lexical chunk graph</div>
+                    <div style={{ fontSize: '11px', color: 'var(--fg-muted)', marginTop: '2px' }}>
+                      Creates Document/Chunk nodes + NEXT_CHUNK edges for chunk-based GraphRAG.
+                    </div>
+                  </div>
+                </label>
+              </div>
+
+              <div
+                style={{
+                  padding: '16px',
+                  background: 'var(--bg-elev2)',
+                  borderRadius: '8px',
+                  border: storeChunkEmbeddings ? '1px solid var(--line)' : '1px solid var(--line)',
+                  opacity: graphIndexingEnabled && lexicalGraphEnabled ? 1 : 0.6,
+                }}
+              >
+                <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }}>
+                  <input
+                    data-testid="graph-store-chunk-embeddings"
+                    type="checkbox"
+                    checked={storeChunkEmbeddings}
+                    onChange={(e) => setStoreChunkEmbeddings(e.target.checked)}
+                    disabled={!graphIndexingEnabled || !lexicalGraphEnabled}
+                    style={{ width: '18px', height: '18px' }}
+                  />
+                  <div>
+                    <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--fg)' }}>Store chunk embeddings in Neo4j</div>
+                    <div style={{ fontSize: '11px', color: 'var(--fg-muted)', marginTop: '2px' }}>
+                      Enables Neo4j native vector index over Chunk nodes (requires dense embeddings).
+                    </div>
+                  </div>
+                </label>
+                {skipDense === 1 && storeChunkEmbeddings && (
+                  <div
+                    style={{
+                      marginTop: '10px',
+                      padding: '8px 12px',
+                      background: 'rgba(var(--warn-rgb), 0.1)',
+                      borderRadius: '6px',
+                      color: 'var(--warn)',
+                      fontSize: '11px',
+                    }}
+                  >
+                    skip_dense=1 disables embeddings. Re-index with dense enabled to populate Neo4j vectors.
+                  </div>
+                )}
+              </div>
+
+              <div
+                style={{
+                  padding: '16px',
+                  background: 'var(--bg-elev2)',
+                  borderRadius: '8px',
+                  border: semanticKgEnabled ? '2px solid rgba(var(--accent-rgb), 0.6)' : '1px solid var(--line)',
+                  opacity: graphIndexingEnabled && lexicalGraphEnabled ? 1 : 0.6,
+                }}
+              >
+                <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }}>
+                  <input
+                    data-testid="semantic-kg-enabled"
+                    type="checkbox"
+                    checked={semanticKgEnabled}
+                    onChange={(e) => setSemanticKgEnabled(e.target.checked)}
+                    disabled={!graphIndexingEnabled || !lexicalGraphEnabled}
+                    style={{ width: '18px', height: '18px' }}
+                  />
+                  <div>
+                    <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--fg)' }}>Semantic KG (concepts + relations)</div>
+                    <div style={{ fontSize: '11px', color: 'var(--fg-muted)', marginTop: '2px' }}>
+                      Extracts concept entities + related_to edges and links them to chunk_ids for graph expansion.
+                    </div>
+                  </div>
+                </label>
+
+                {semanticKgEnabled && (
+                  <div style={{ marginTop: '12px', display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px' }}>
+                    <div className="input-group">
+                      <label style={{ fontSize: '11px', color: 'var(--fg-muted)', marginBottom: '6px' }}>Mode</label>
+                      <select
+                        data-testid="semantic-kg-mode"
+                        value={semanticKgMode}
+                        onChange={(e) => setSemanticKgMode(e.target.value as any)}
+                        style={{ width: '100%' }}
+                      >
+                        <option value="heuristic">Heuristic</option>
+                        <option value="llm">LLM</option>
+                      </select>
+                    </div>
+                    <div className="input-group">
+                      <label style={{ fontSize: '11px', color: 'var(--fg-muted)', marginBottom: '6px' }}>Max chunks</label>
+                      <input
+                        data-testid="semantic-kg-max-chunks"
+                        type="number"
+                        min={0}
+                        max={100000}
+                        value={semanticKgMaxChunks}
+                        onChange={(e) => setSemanticKgMaxChunks(parseInt(e.target.value || '0', 10))}
+                        style={{ width: '100%' }}
+                      />
+                    </div>
+                    <div className="input-group">
+                      <label style={{ fontSize: '11px', color: 'var(--fg-muted)', marginBottom: '6px' }}>Max concepts / chunk</label>
+                      <input
+                        data-testid="semantic-kg-max-concepts"
+                        type="number"
+                        min={0}
+                        max={50}
+                        value={semanticKgMaxConcepts}
+                        onChange={(e) => setSemanticKgMaxConcepts(parseInt(e.target.value || '0', 10))}
+                        style={{ width: '100%' }}
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div

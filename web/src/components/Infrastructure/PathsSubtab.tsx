@@ -33,6 +33,20 @@ export function PathsSubtab() {
   // Database endpoints from Pydantic GraphStorageConfig
   const [neo4jUri, setNeo4jUri] = useConfigField<string>('graph_storage.neo4j_uri', 'bolt://localhost:7687');
   const [neo4jUser, setNeo4jUser] = useConfigField<string>('graph_storage.neo4j_user', 'neo4j');
+  const [neo4jPassword, setNeo4jPassword] = useConfigField<string>('graph_storage.neo4j_password', '');
+  const [neo4jDatabase, setNeo4jDatabase] = useConfigField<string>('graph_storage.neo4j_database', 'neo4j');
+  const [neo4jDatabaseMode, setNeo4jDatabaseMode] = useConfigField<'shared' | 'per_corpus'>(
+    'graph_storage.neo4j_database_mode',
+    'shared'
+  );
+  const [neo4jDatabasePrefix, setNeo4jDatabasePrefix] = useConfigField<string>(
+    'graph_storage.neo4j_database_prefix',
+    'tribrid_'
+  );
+  const [neo4jAutoCreateDatabases, setNeo4jAutoCreateDatabases] = useConfigField<boolean>(
+    'graph_storage.neo4j_auto_create_databases',
+    true
+  );
   const [repoRoot, setRepoRoot] = useConfigField<string>('REPO_ROOT', '');
   const [filesRoot, setFilesRoot] = useConfigField<string>('FILES_ROOT', '');
   const [repoName, setRepoName] = useConfigField<string>('REPO', '');
@@ -105,6 +119,7 @@ export function PathsSubtab() {
             <TooltipIcon name="neo4j_uri" />
           </label>
           <input
+            data-testid="neo4j-uri"
             type="text"
             value={neo4jUri}
             onChange={(e) => setNeo4jUri(e.target.value)}
@@ -128,6 +143,7 @@ export function PathsSubtab() {
             <TooltipIcon name="neo4j_user" />
           </label>
           <input
+            data-testid="neo4j-user"
             type="text"
             value={neo4jUser}
             onChange={(e) => setNeo4jUser(e.target.value)}
@@ -145,6 +161,132 @@ export function PathsSubtab() {
             Neo4j authentication username
           </p>
         </div>
+      </div>
+
+      <div className="input-row">
+        <div className="input-group">
+          <label>
+            Neo4j Password
+            <TooltipIcon name="neo4j_password" />
+          </label>
+          <input
+            data-testid="neo4j-password"
+            type="password"
+            value={neo4jPassword}
+            onChange={(e) => setNeo4jPassword(e.target.value)}
+            placeholder="password"
+            style={{
+              width: '100%',
+              padding: '8px',
+              background: 'var(--input-bg)',
+              border: '1px solid var(--line)',
+              borderRadius: '4px',
+              color: 'var(--fg)'
+            }}
+          />
+          <p className="small" style={{ color: 'var(--fg-muted)', marginTop: '4px' }}>
+            Neo4j authentication password
+          </p>
+        </div>
+        <div className="input-group">
+          <label>
+            Neo4j Database (shared mode)
+            <TooltipIcon name="neo4j_database" />
+          </label>
+          <input
+            data-testid="neo4j-database"
+            type="text"
+            value={neo4jDatabase}
+            onChange={(e) => setNeo4jDatabase(e.target.value)}
+            placeholder="neo4j"
+            style={{
+              width: '100%',
+              padding: '8px',
+              background: 'var(--input-bg)',
+              border: '1px solid var(--line)',
+              borderRadius: '4px',
+              color: 'var(--fg)'
+            }}
+          />
+          <p className="small" style={{ color: 'var(--fg-muted)', marginTop: '4px' }}>
+            Used when database mode is set to shared.
+          </p>
+        </div>
+      </div>
+
+      <h3 style={{ marginTop: '32px' }}>Neo4j Database Isolation</h3>
+      <div className="input-row">
+        <div className="input-group">
+          <label>
+            Database Mode
+            <TooltipIcon name="neo4j_database_mode" />
+          </label>
+          <select
+            data-testid="neo4j-database-mode"
+            value={neo4jDatabaseMode}
+            onChange={(e) => setNeo4jDatabaseMode(e.target.value as any)}
+            style={{
+              width: '100%',
+              padding: '8px',
+              background: 'var(--input-bg)',
+              border: '1px solid var(--line)',
+              borderRadius: '4px',
+              color: 'var(--fg)'
+            }}
+          >
+            <option value="shared">Shared (Community-compatible)</option>
+            <option value="per_corpus">Per corpus (Enterprise multi-db)</option>
+          </select>
+          <p className="small" style={{ color: 'var(--fg-muted)', marginTop: '4px' }}>
+            Per-corpus databases require Neo4j Enterprise with multi-database support.
+          </p>
+        </div>
+        <div className="input-group">
+          <label>
+            Per-corpus DB prefix
+            <TooltipIcon name="neo4j_database_prefix" />
+          </label>
+          <input
+            data-testid="neo4j-database-prefix"
+            type="text"
+            value={neo4jDatabasePrefix}
+            onChange={(e) => setNeo4jDatabasePrefix(e.target.value)}
+            placeholder="tribrid_"
+            disabled={neo4jDatabaseMode !== 'per_corpus'}
+            style={{
+              width: '100%',
+              padding: '8px',
+              background: 'var(--input-bg)',
+              border: '1px solid var(--line)',
+              borderRadius: '4px',
+              color: 'var(--fg)',
+              opacity: neo4jDatabaseMode === 'per_corpus' ? 1 : 0.6,
+            }}
+          />
+          <p className="small" style={{ color: 'var(--fg-muted)', marginTop: '4px' }}>
+            Applied to database names when per-corpus mode is enabled.
+          </p>
+        </div>
+      </div>
+
+      <div className="input-row">
+        <div className="input-group">
+          <label style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <input
+              data-testid="neo4j-auto-create-databases"
+              type="checkbox"
+              checked={neo4jAutoCreateDatabases}
+              onChange={(e) => setNeo4jAutoCreateDatabases(e.target.checked)}
+              disabled={neo4jDatabaseMode !== 'per_corpus'}
+            />
+            Auto-create per-corpus databases
+            <TooltipIcon name="neo4j_auto_create_databases" />
+          </label>
+          <p className="small" style={{ color: 'var(--fg-muted)', marginTop: '4px' }}>
+            When enabled, creating a corpus will create its Neo4j database automatically (Enterprise).
+          </p>
+        </div>
+        <div className="input-group" />
       </div>
 
       {/* Repository Configuration */}

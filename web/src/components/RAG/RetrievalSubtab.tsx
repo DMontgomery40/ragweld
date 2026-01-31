@@ -65,9 +65,17 @@ export function RetrievalSubtab() {
   const [bm25B, setBm25B] = useConfigField<number>('sparse_search.bm25_b', 0.4);
 
   const [graphSearchEnabled, setGraphSearchEnabled] = useConfigField<boolean>('graph_search.enabled', true);
+  const [graphMode, setGraphMode] = useConfigField<'chunk' | 'entity'>('graph_search.mode', 'chunk');
   const [graphMaxHops, setGraphMaxHops] = useConfigField<number>('graph_search.max_hops', 2);
   const [graphIncludeCommunities, setGraphIncludeCommunities] = useConfigField<boolean>('graph_search.include_communities', true);
   const [graphSearchTopK, setGraphSearchTopK] = useConfigField<number>('graph_search.top_k', 30);
+  const [chunkNeighborWindow, setChunkNeighborWindow] = useConfigField<number>('graph_search.chunk_neighbor_window', 1);
+  const [chunkSeedOverfetchMultiplier, setChunkSeedOverfetchMultiplier] =
+    useConfigField<number>('graph_search.chunk_seed_overfetch_multiplier', 10);
+  const [chunkEntityExpansionEnabled, setChunkEntityExpansionEnabled] =
+    useConfigField<boolean>('graph_search.chunk_entity_expansion_enabled', true);
+  const [chunkEntityExpansionWeight, setChunkEntityExpansionWeight] =
+    useConfigField<number>('graph_search.chunk_entity_expansion_weight', 0.8);
 
   // Fusion config (tri-brid weights)
   const [fusionMethod, setFusionMethod] = useConfigField<'rrf' | 'weighted'>('fusion.method', 'rrf');
@@ -666,13 +674,102 @@ export function RetrievalSubtab() {
             <select
               value={graphIncludeCommunities ? '1' : '0'}
               onChange={(e) => setGraphIncludeCommunities(e.target.value === '1')}
-              disabled={!graphSearchEnabled}
+              disabled={!graphSearchEnabled || graphMode !== 'entity'}
             >
               <option value="1">Enabled</option>
               <option value="0">Disabled</option>
             </select>
           </div>
         </div>
+
+        <div className="input-row">
+          <div className="input-group">
+            <label>
+              Graph Mode
+              <span className="help-icon" data-tooltip="GRAPH_SEARCH_MODE">?</span>
+            </label>
+            <select
+              data-testid="graph-search-mode"
+              value={graphMode}
+              onChange={(e) => setGraphMode(e.target.value as any)}
+              disabled={!graphSearchEnabled}
+            >
+              <option value="chunk">Chunk (Neo4j vectors)</option>
+              <option value="entity">Entity (legacy)</option>
+            </select>
+          </div>
+
+          {graphMode === 'chunk' ? (
+            <>
+              <div className="input-group">
+                <label>
+                  Chunk Neighbor Window
+                  <span className="help-icon" data-tooltip="GRAPH_CHUNK_NEIGHBOR_WINDOW">?</span>
+                </label>
+                <input
+                  data-testid="graph-chunk-neighbor-window"
+                  type="number"
+                  min={0}
+                  max={10}
+                  value={chunkNeighborWindow}
+                  onChange={(e) => setChunkNeighborWindow(snapNumber(e.target.value, 1))}
+                  disabled={!graphSearchEnabled}
+                />
+              </div>
+              <div className="input-group">
+                <label>
+                  Seed Overfetch Multiplier
+                  <span className="help-icon" data-tooltip="GRAPH_CHUNK_SEED_OVERFETCH">?</span>
+                </label>
+                <input
+                  data-testid="graph-chunk-seed-overfetch"
+                  type="number"
+                  min={1}
+                  max={50}
+                  value={chunkSeedOverfetchMultiplier}
+                  onChange={(e) => setChunkSeedOverfetchMultiplier(snapNumber(e.target.value, 10))}
+                  disabled={!graphSearchEnabled}
+                />
+              </div>
+            </>
+          ) : (
+            <div className="input-group" />
+          )}
+        </div>
+
+        {graphMode === 'chunk' && (
+          <div className="input-row">
+            <div className="input-group">
+              <label>
+                <input
+                  data-testid="graph-chunk-entity-expansion-enabled"
+                  type="checkbox"
+                  checked={chunkEntityExpansionEnabled}
+                  onChange={(e) => setChunkEntityExpansionEnabled(e.target.checked)}
+                  disabled={!graphSearchEnabled}
+                />{' '}
+                Expand via entities (IN_CHUNK)
+              </label>
+            </div>
+            <div className="input-group">
+              <label>
+                Entity Expansion Weight
+                <span className="help-icon" data-tooltip="GRAPH_CHUNK_ENTITY_EXPANSION_WEIGHT">?</span>
+              </label>
+              <input
+                data-testid="graph-chunk-entity-expansion-weight"
+                type="number"
+                min={0}
+                max={1}
+                step={0.05}
+                value={chunkEntityExpansionWeight}
+                onChange={(e) => setChunkEntityExpansionWeight(snapNumber(e.target.value, 0.8))}
+                disabled={!graphSearchEnabled || !chunkEntityExpansionEnabled}
+              />
+            </div>
+            <div className="input-group" />
+          </div>
+        )}
 
         <div className="input-row">
           <div className="input-group">

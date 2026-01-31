@@ -98,3 +98,59 @@ async def test_graph_search_scoring_and_metadata() -> None:
     assert session.last_params.get("max_hops") == 2
     assert "tokens" in session.last_params
 
+
+@pytest.mark.asyncio
+async def test_chunk_vector_search_builds_query_and_returns_chunk_ids() -> None:
+    client = Neo4jClient(uri="bolt://fake", user="neo4j", password="test")
+
+    records = [
+        {"chunk_id": "c1", "score": 0.91},
+        {"chunk_id": "c2", "score": 0.88},
+    ]
+
+    # Inject a fake driver so we never connect to Neo4j.
+    client._driver = _FakeDriver(records)  # type: ignore[assignment]
+
+    out = await client.chunk_vector_search(
+        repo_id="test-corpus",
+        embedding=[0.0, 0.1, 0.2],
+        index_name="tribrid_chunk_embeddings",
+        top_k=2,
+        neighbor_window=1,
+        overfetch_multiplier=10,
+    )
+    assert out == [("c1", 0.91), ("c2", 0.88)]
+
+    session = client._driver.session_obj  # type: ignore[attr-defined]
+    assert session.last_query is not None
+    assert "db.index.vector.queryNodes" in session.last_query
+    assert "NEXT_CHUNK" in session.last_query
+    assert session.last_params is not None
+    assert session.last_params.get("repo_id") == "test-corpus"
+    assert session.last_params.get("index_name") == "tribrid_chunk_embeddings"
+    assert session.last_params.get("top_k") == 2
+    assert session.last_params.get("seed_k") == 20
+
+
+@pytest.mark.asyncio
+async def test_entity_chunk_search_uses_in_chunk_links() -> None:
+    client = Neo4jClient(uri="bolt://fake", user="neo4j", password="test")
+
+    records = [
+        {"chunk_id": "c1", "score": 0.5},
+        {"chunk_id": "c2", "score": 0.4},
+    ]
+    client._driver = _FakeDriver(records)  # type: ignore[assignment]
+
+    out = await client.entity_chunk_search(repo_id="test-corpus", query="Foo", max_hops=2, top_k=10)
+    assert out == [("c1", 0.5), ("c2", 0.4)]
+
+    session = client._driver.session_obj  # type: ignore[attr-defined]
+    assert session.last_query is not None
+    assert "IN_CHUNK" in session.last_query
+    assert session.last_params is not None
+    assert session.last_params.get("repo_id") == "test-corpus"
+    assert session.last_params.get("max_hops") == 2
+    assert session.last_params.get("limit") == 10
+    assert "tokens" in session.last_params
+

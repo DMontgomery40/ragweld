@@ -324,10 +324,56 @@ export interface GenerationConfig {
   ollama_stream_idle_timeout?: number; // default: 60
 }
 
+/** Configuration for building/persisting graph data during indexing. */
+export interface GraphIndexingConfig {
+  /** Enable graph building during indexing (Neo4j) */
+  enabled?: boolean; // default: True
+  /** Build lexical graph (Document/Chunk nodes + NEXT_CHUNK relationships) */
+  build_lexical_graph?: boolean; // default: True
+  /** Store chunk embeddings on Chunk nodes for Neo4j vector search (requires dense embeddings) */
+  store_chunk_embeddings?: boolean; // default: True
+  /** Build semantic knowledge graph (concept entities + relations) linked to chunks during indexing */
+  semantic_kg_enabled?: boolean; // default: False
+  /** Semantic KG extraction mode. 'heuristic' is deterministic and test-friendly; 'llm' uses an LLM to extract entities + relations. */
+  semantic_kg_mode?: "heuristic" | "llm"; // default: "heuristic"
+  /** Maximum semantic concepts to extract per chunk */
+  semantic_kg_max_concepts_per_chunk?: number; // default: 8
+  /** Minimum length for semantic concept tokens */
+  semantic_kg_min_concept_len?: number; // default: 4
+  /** Maximum semantic relations to create per chunk (heuristic mode) */
+  semantic_kg_max_relations_per_chunk?: number; // default: 12
+  /** Maximum chunks to process for semantic KG extraction per indexing run (0 = disabled) */
+  semantic_kg_max_chunks?: number; // default: 200
+  /** LLM model name for semantic KG extraction when semantic_kg_mode='llm' (empty = use generation.enrich_model) */
+  semantic_kg_llm_model?: string; // default: ""
+  /** Timeout (seconds) for semantic KG LLM extraction per chunk */
+  semantic_kg_llm_timeout_s?: number; // default: 30
+  /** Neo4j vector index name for Chunk embeddings (mode='chunk') */
+  chunk_vector_index_name?: string; // default: "tribrid_chunk_embeddings"
+  /** Chunk node property that stores the embedding vector */
+  chunk_embedding_property?: string; // default: "embedding"
+  /** Neo4j vector similarity function */
+  vector_similarity_function?: "cosine" | "euclidean"; // default: "cosine"
+  /** Wait for the Neo4j vector index to come ONLINE after (re)creating it */
+  wait_vector_index_online?: boolean; // default: True
+  /** Timeout waiting for Neo4j vector index ONLINE (seconds) */
+  vector_index_online_timeout_s?: number; // default: 60.0
+}
+
 /** Configuration for graph-based search using Neo4j. */
 export interface GraphSearchConfig {
+  /** Graph retrieval mode. 'chunk' uses lexical chunk nodes + Neo4j vector index; 'entity' uses the legacy code-entity graph. */
+  mode?: "chunk" | "entity"; // default: "chunk"
   /** Enable graph search in tri-brid retrieval */
   enabled?: boolean; // default: True
+  /** When mode='chunk', include up to N adjacent chunks (NEXT_CHUNK) around each seed hit */
+  chunk_neighbor_window?: number; // default: 1
+  /** When mode='chunk' and Neo4j uses a shared database, overfetch seed hits before filtering by corpus_id */
+  chunk_seed_overfetch_multiplier?: number; // default: 10
+  /** When mode='chunk', expand from seed chunks via Entity graph (IN_CHUNK links) to find related chunks */
+  chunk_entity_expansion_enabled?: boolean; // default: True
+  /** Blend weight for entity-expansion scores relative to seed chunk scores (mode='chunk') */
+  chunk_entity_expansion_weight?: number; // default: 0.8
   /** Maximum graph traversal hops */
   max_hops?: number; // default: 2
   /** Include community-based expansion in graph search */
@@ -362,6 +408,12 @@ export interface GraphStorageConfig {
   neo4j_password?: string; // default: ""
   /** Neo4j database name */
   neo4j_database?: string; // default: "neo4j"
+  /** Database isolation mode: 'shared' uses a single Neo4j database (Community-compatible), 'per_corpus' uses a separate Neo4j database per corpus (Enterprise multi-database). */
+  neo4j_database_mode?: "shared" | "per_corpus"; // default: "shared"
+  /** Prefix for per-corpus Neo4j database names when neo4j_database_mode='per_corpus'. */
+  neo4j_database_prefix?: string; // default: "tribrid_"
+  /** Automatically create per-corpus Neo4j databases when missing (Enterprise). */
+  neo4j_auto_create_databases?: boolean; // default: True
   /** Maximum traversal hops for graph search */
   max_hops?: number; // default: 2
   /** Include community detection in graph analysis */
@@ -600,6 +652,10 @@ export interface SystemPromptsConfig {
   semantic_chunk_summaries?: string; // default: "Analyze this code chunk and create a comprehens..."
   /** Extract metadata from code chunks during indexing */
   code_enrichment?: string; // default: "Analyze this code and return a JSON object with..."
+  /** Prompt for LLM-assisted semantic KG extraction (concepts + relations) */
+  semantic_kg_extraction?: string; // default: "You are a semantic knowledge graph extractor.
+
+..."
   /** Analyze eval regressions with skeptical approach - avoid false explanations */
   eval_analysis?: string; // default: "You are an expert RAG (Retrieval-Augmented Gene..."
   /** Lightweight chunk_summary generation prompt for faster indexing */
@@ -1167,6 +1223,7 @@ export interface TriBridConfig {
   chunking?: ChunkingConfig;
   indexing?: IndexingConfig;
   graph_storage?: GraphStorageConfig;
+  graph_indexing?: GraphIndexingConfig;
   fusion?: FusionConfig;
   vector_search?: VectorSearchConfig;
   sparse_search?: SparseSearchConfig;

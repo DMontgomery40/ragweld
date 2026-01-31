@@ -244,15 +244,17 @@ Key parameters (definition list):
 
 ## Where to go next
 
-Use these pages to deepen from “what is it?” to “how do I operate it?”:
+Use these pages to deepen from "what is it?" to "how do I operate it?":
 
-- [Configuration model (Pydantic is the law)](./configuration.md)
-- [Retrieval & fusion (vector + sparse + graph)](./retrieval.md)
-- [Graph RAG with Neo4j (entities, relationships, communities)](./graph-rag.md)
-- [Indexing pipeline (chunking, embeddings, chunk_summaries)](./indexing.md)
-- [Reranking (modes, performance, tuning)](./reranking.md)
-- [API reference (search, answer, index, config)](./api.md)
-- [Observability (metrics, dashboards, tracing)](./observability.md)
+- [Quick Start Guide](./getting-started/quickstart.md)
+- [Tri-Brid Search Architecture](./features/tribrid-search.md)
+- [Vector Search with pgvector](./features/pgvector.md)
+- [Graph Search with Neo4j](./features/neo4j-graph.md)
+- [Configuration Settings](./configuration/settings.md)
+- [Model Configuration](./configuration/models.md)
+- [API Endpoints](./api/endpoints.md)
+- [Monitoring & Observability](./operations/monitoring.md)
+- [Troubleshooting](./operations/troubleshooting.md)
 
 !!! danger "If it’s not in Pydantic, it doesn’t exist"
     Before adding a UI control, endpoint field, or new behavior: add it to `server/models/tribrid_config_model.py`, regenerate TypeScript types, then implement. This is how TriBridRAG stays coherent as it grows.

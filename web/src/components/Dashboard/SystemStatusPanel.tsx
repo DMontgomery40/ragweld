@@ -1,64 +1,58 @@
-// AGRO - System Status Panel Component
-// Status boxes: Health, Repo, Chunk Summaries, MCP
+// TriBridRAG - System Status Panel Component
+// Uses Zustand stores per CLAUDE.md requirements
 
 import { useEffect, useState } from 'react';
+import { useRepoStore } from '@/stores/useRepoStore';
+import { apiUrl } from '@/api/client';
 
 interface SystemStats {
   health: string;
-  repo: string;
-  branch: string;
-  chunkSummaries: string;
-  mcp: string;
+  corpus: string;
+  chunks: string;
 }
 
 export function SystemStatusPanel() {
+  const { repos, activeRepo } = useRepoStore();
   const [stats, setStats] = useState<SystemStats>({
     health: '—',
-    repo: '—',
-    branch: '—',
-    chunkSummaries: '—',
-    mcp: '—',
+    corpus: '—',
+    chunks: '—',
   });
 
   const loadStats = async () => {
     try {
-      // Health
-      const healthResp = await fetch('/api/health');
+      // Health from API
+      const healthResp = await fetch(apiUrl('/health'));
       const health = await healthResp.json();
 
-      // Index stats
-      const indexResp = await fetch('/api/index/stats');
-      const indexData = await indexResp.json();
+      // Index stats from API
+      let totalChunks = 0;
+      if (activeRepo) {
+        try {
+          const indexResp = await fetch(apiUrl(`/index/stats?corpus_id=${encodeURIComponent(activeRepo)}`));
+          if (indexResp.ok) {
+            const indexData = await indexResp.json();
+            totalChunks = indexData.total_chunks || 0;
+          }
+        } catch {
+          // Index stats not available
+        }
+      }
 
-      // Config
-      const configResp = await fetch('/api/config');
-      const config = await configResp.json();
-
-      // Get repo count
-      const repoCount = config.repos?.length || 1;
-      
-      // Get MCP status from config
-      const mcpHost = config.env?.MCP_HTTP_HOST || '0.0.0.0';
-      const mcpPort = config.env?.MCP_HTTP_PORT || '8013';
-      const mcpPath = config.env?.MCP_HTTP_PATH || '/mcp';
-      
       setStats({
-        health: health.status === 'healthy' ? 'healthy (graph ready)' : 'degraded',
-        repo: `${config.env?.REPO || 'agro'} (${repoCount} repos)`,
-        branch: config.git_branch || 'development',
-        chunkSummaries: `${indexData.total_chunks || 0} chunks`,
-        mcp: `${mcpHost}:${mcpPort}${mcpPath}`,
+        health: health.status === 'healthy' ? 'healthy' : 'degraded',
+        corpus: activeRepo ? `${activeRepo} (${repos.length} corpora)` : `(${repos.length} corpora)`,
+        chunks: `${totalChunks} chunks`,
       });
     } catch (e) {
-      console.error('[SystemStatus] Failed to load stats:', e);
+      console.error('[SystemStatusPanel] Failed to load stats:', e);
     }
   };
 
   useEffect(() => {
     loadStats();
-    const interval = setInterval(loadStats, 30000); // Refresh every 30s
-    
-    // Listen for refresh events
+    const interval = setInterval(loadStats, 30000);
+
     const handleRefresh = () => loadStats();
     window.addEventListener('dashboard-refresh', handleRefresh);
 
@@ -66,7 +60,7 @@ export function SystemStatusPanel() {
       clearInterval(interval);
       window.removeEventListener('dashboard-refresh', handleRefresh);
     };
-  }, []);
+  }, [activeRepo, repos.length]);
 
   return (
     <div>
@@ -94,116 +88,42 @@ export function SystemStatusPanel() {
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
         {/* Health */}
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            padding: '8px 12px',
-            background: 'var(--card-bg)',
-            borderRadius: '4px',
-            border: '1px solid var(--line)',
-          }}
-        >
-          <span style={{ fontSize: '11px', color: 'var(--fg-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-            Health
-          </span>
-          <span id="dash-health" className="mono" style={{ color: 'var(--ok)', fontWeight: 600 }}>
-            {stats.health}
-          </span>
-        </div>
-
-        {/* Repo */}
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            padding: '8px 12px',
-            background: 'var(--card-bg)',
-            borderRadius: '4px',
-            border: '1px solid var(--line)',
-          }}
-        >
-          <span style={{ fontSize: '11px', color: 'var(--fg-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-            Repo
-          </span>
-          <span id="dash-repo" className="mono" style={{ color: 'var(--fg)', fontWeight: 600 }}>
-            {stats.repo}
-          </span>
-        </div>
-
-        {/* Branch */}
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            padding: '8px 12px',
-            background: 'var(--card-bg)',
-            borderRadius: '4px',
-            border: '1px solid var(--line)',
-          }}
-        >
-          <span style={{ fontSize: '11px', color: 'var(--fg-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-            Branch
-          </span>
-          <span id="dash-branch" className="mono" style={{ color: 'var(--link)', fontWeight: 600 }}>
-            {stats.branch}
-          </span>
-        </div>
-
-        {/* Chunk Summaries (formerly "Cards") */}
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            padding: '8px 12px',
-            background: 'var(--card-bg)',
-            borderRadius: '4px',
-            border: '1px solid var(--line)',
-          }}
-        >
-          <span style={{ fontSize: '11px', color: 'var(--fg-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-            Chunks
-          </span>
-          <span id="dash-chunks" className="mono" style={{ color: 'var(--link)', fontWeight: 600 }}>
-            {stats.chunkSummaries}
-          </span>
-        </div>
-
-        {/* MCP */}
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            padding: '8px 12px',
-            background: 'var(--card-bg)',
-            borderRadius: '4px',
-            border: '1px solid var(--line)',
-          }}
-        >
-          <span style={{ fontSize: '11px', color: 'var(--fg-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-            MCP
-          </span>
-          <div
-            id="dash-mcp"
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '4px',
-              fontSize: '10px',
-              fontFamily: "'SF Mono', monospace",
-              color: 'var(--link)',
-            }}
-          >
-            {stats.mcp}
-          </div>
-        </div>
+        <StatusRow label="Health" value={stats.health} color="var(--ok)" id="dash-health" />
+        {/* Corpus */}
+        <StatusRow label="Corpus" value={stats.corpus} color="var(--fg)" id="dash-corpus" />
+        {/* Chunks */}
+        <StatusRow label="Chunks" value={stats.chunks} color="var(--link)" id="dash-chunks" />
       </div>
     </div>
   );
 }
 
+interface StatusRowProps {
+  label: string;
+  value: string;
+  color: string;
+  id?: string;
+}
+
+function StatusRow({ label, value, color, id }: StatusRowProps) {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        padding: '8px 12px',
+        background: 'var(--card-bg)',
+        borderRadius: '4px',
+        border: '1px solid var(--line)',
+      }}
+    >
+      <span style={{ fontSize: '11px', color: 'var(--fg-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+        {label}
+      </span>
+      <span id={id} className="mono" style={{ color, fontWeight: 600 }}>
+        {value}
+      </span>
+    </div>
+  );
+}

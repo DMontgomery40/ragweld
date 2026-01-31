@@ -183,14 +183,8 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
   const [includeVector, setIncludeVector] = useState(true);
   const [includeSparse, setIncludeSparse] = useState(true);
   const [includeGraph, setIncludeGraph] = useState(true);
-  const didInitLegTogglesRef = useRef(false);
-  useEffect(() => {
-    if (!config || didInitLegTogglesRef.current) return;
-    setIncludeVector(Boolean(config?.fusion?.include_vector ?? true));
-    setIncludeSparse(Boolean(config?.fusion?.include_sparse ?? true));
-    setIncludeGraph(Boolean(config?.fusion?.include_graph ?? true));
-    didInitLegTogglesRef.current = true;
-  }, [config]);
+  // Note: include_vector/sparse/graph are per-message settings on ChatRequest,
+  // not config settings. They default to true in the Pydantic model.
 
   // Quick settings (also editable in Chat Settings subtab)
   const [chatModel, setChatModel] = useConfigField<string>('ui.chat_default_model', 'gpt-4o-mini');

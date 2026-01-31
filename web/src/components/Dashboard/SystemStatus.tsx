@@ -1,90 +1,62 @@
 /**
  * System Status Widget
- * Displays real-time status for health, repo, chunk summaries, and MCP
+ * Uses Zustand stores per CLAUDE.md requirements
  */
 
 import { useState, useEffect, useCallback } from 'react';
-import { useAPI } from '@/hooks/useAPI';
+import { useRepoStore } from '@/stores/useRepoStore';
+import { apiUrl } from '@/api/client';
 
 interface StatusData {
   health: string;
-  repo: string;
+  corpus: string;
   chunkSummaries: string;
-  mcp: string;
 }
 
 export function SystemStatus() {
-  const { api } = useAPI();
+  const { repos, activeRepo } = useRepoStore();
   const [status, setStatus] = useState<StatusData>({
     health: '—',
-    repo: '—',
+    corpus: '—',
     chunkSummaries: '—',
-    mcp: '—',
   });
 
   const refreshStatus = useCallback(async () => {
     const newStatus: StatusData = { ...status };
 
-    // Fetch repo info
-    try {
-      const configRes = await fetch(api('/api/config'));
-      const config = await configRes.json();
-      const repo = (config.env && (config.env.REPO || config.default_repo)) || '(none)';
-      const reposCount = (config.repos || []).length;
-      newStatus.repo = `${repo} (${reposCount} repos)`;
-    } catch (e) {
-      console.error('[SystemStatus] Failed to fetch repo:', e);
-    }
+    // Corpus info from store
+    newStatus.corpus = activeRepo
+      ? `${activeRepo} (${repos.length} corpora)`
+      : `(${repos.length} corpora)`;
 
     // Fetch health
     try {
-      const healthRes = await fetch(api('/health'));
+      const healthRes = await fetch(apiUrl('/health'));
       const health = await healthRes.json();
-      newStatus.health = `${health.status}${health.graph_loaded ? ' (graph ready)' : ''}`;
+      newStatus.health = health.status === 'healthy' ? 'healthy' : 'degraded';
     } catch (e) {
       console.error('[SystemStatus] Failed to fetch health:', e);
     }
 
-    // Fetch chunk summaries (formerly "cards")
-    try {
-      const summariesRes = await fetch(api('/api/cards')); // API endpoint unchanged for now
-      const summaries = await summariesRes.json();
-      newStatus.chunkSummaries = `${summaries.count || 0} summaries`;
-    } catch (e) {
-      console.error('[SystemStatus] Failed to fetch chunk summaries:', e);
-    }
-
-    // Fetch MCP status
-    try {
-      const mcpRes = await fetch(api('/api/mcp/status'));
-      if (mcpRes.ok) {
-        const mcpData = await mcpRes.json();
-        const parts = [];
-        if (mcpData.python_http) {
-          const ph = mcpData.python_http;
-          parts.push(`py-http:${ph.host}:${ph.port}${ph.path} ${ph.running ? '' : '(stopped)'}`.trim());
+    // Fetch chunk summaries count
+    if (activeRepo) {
+      try {
+        const summariesRes = await fetch(apiUrl(`/chunk_summaries?corpus_id=${encodeURIComponent(activeRepo)}`));
+        if (summariesRes.ok) {
+          const summaries = await summariesRes.json();
+          newStatus.chunkSummaries = `${summaries.total || 0} summaries`;
         }
-        if (mcpData.node_http) {
-          const nh = mcpData.node_http;
-          parts.push(`node-http:${nh.host}:${nh.port}${nh.path || ''} ${nh.running ? '' : '(stopped)'}`.trim());
-        }
-        if (mcpData.python_stdio_available !== undefined) {
-          parts.push(`py-stdio:${mcpData.python_stdio_available ? 'available' : 'missing'}`);
-        }
-        newStatus.mcp = parts.join(' | ') || 'unknown';
-      } else {
-        newStatus.mcp = 'unknown';
+      } catch (e) {
+        console.error('[SystemStatus] Failed to fetch chunk summaries:', e);
       }
-    } catch (e) {
-      newStatus.mcp = 'unknown';
     }
 
     setStatus(newStatus);
-  }, [api]);
+  }, [activeRepo, repos.length]);
 
   useEffect(() => {
     refreshStatus();
-    const interval = setInterval(refreshStatus, 30000); // Refresh every 30 seconds
+    const interval = setInterval(refreshStatus, 30000);
     return () => clearInterval(interval);
   }, [refreshStatus]);
 
@@ -113,9 +85,8 @@ export function SystemStatus() {
       </h3>
       <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
         <StatusItem label="Health" value={status.health} color="var(--ok)" />
-        <StatusItem label="Corpus" value={status.repo} color="var(--fg)" />
+        <StatusItem label="Corpus" value={status.corpus} color="var(--fg)" />
         <StatusItem label="Summaries" value={status.chunkSummaries} color="var(--link)" />
-        <StatusItem label="MCP" value={status.mcp} color="var(--link)" />
       </div>
     </div>
   );

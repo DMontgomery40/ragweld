@@ -1,5 +1,5 @@
-// AGRO - Infrastructure Services Subtab
-// Real React component with full backend wiring
+// TriBridRAG - Infrastructure Services Subtab
+// Docker container management for Postgres, Neo4j, and observability services
 
 import { useState, useEffect } from 'react';
 import { dockerApi } from '@/api/docker';
@@ -20,21 +20,21 @@ interface ServiceStatus {
  * what: |
  *   React component that renders a subtab for displaying and managing Docker services and containers.
  *   Accepts no props; uses useAPI hook to access API client context.
- *   Returns a JSX element displaying Docker status, container lists (general and agro-specific), and service management controls.
- *   Manages local state for dockerStatus (DockerStatus | null), containers (DockerContainer[]), and agroContainers (DockerContainer[]).
+ *   Returns a JSX element displaying Docker status, container lists (general and tribrid-specific), and service management controls.
+ *   Manages local state for dockerStatus (DockerStatus | null), containers (DockerContainer[]), and tribridContainers (DockerContainer[]).
  *   Side effects: Fetches Docker status and container data on mount via api client; updates state based on API responses.
- *   Edge cases: Handles null dockerStatus gracefully; distinguishes between general containers and agro-specific containers; manages loading/error states during API calls.
+ *   Edge cases: Handles null dockerStatus gracefully; distinguishes between general containers and tribrid-specific containers; manages loading/error states during API calls.
  *
  * why: |
  *   Separates Docker service management into a dedicated subtab component to keep the parent tab component clean and focused.
  *   Uses local useState hooks for container and status data rather than global state because this data is subtab-scoped and doesn't need to be shared across the application.
- *   The distinction between containers and agroContainers suggests domain-specific filtering or categorization of Docker resources.
+ *   The distinction between containers and tribridContainers suggests domain-specific filtering or categorization of Docker resources.
  *
  * guardrails:
- *   - DO NOT move dockerStatus, containers, or agroContainers to a zustand store without user confirmation; these are subtab-local concerns and useState is appropriate
+ *   - DO NOT move dockerStatus, containers, or tribridContainers to a zustand store without user confirmation; these are subtab-local concerns and useState is appropriate
  *   - ALWAYS validate api client existence before calling api methods; useAPI hook should guarantee this but add defensive checks
  *   - NOTE: State initialization shows incomplete implementation; service status state variables are declared but not shown—confirm all state hooks are present before deployment
- *   - ASK USER: Clarify the distinction between containers and agroContainers; are these filtered by label, namespace, or another criterion? This affects data-fetching logic.
+ *   - ASK USER: Clarify the distinction between containers and tribridContainers; are these filtered by label, namespace, or another criterion? This affects data-fetching logic.
  * ---/agentspec
  */
 export function ServicesSubtab() {
@@ -43,23 +43,23 @@ export function ServicesSubtab() {
   // Core state
   const [dockerStatus, setDockerStatus] = useState<DockerStatus | null>(null);
   const [containers, setContainers] = useState<DockerContainer[]>([]);
-  const [agroContainers, setAgroContainers] = useState<DockerContainer[]>([]);
+  const [tribridContainers, setAgroContainers] = useState<DockerContainer[]>([]);
 
-  // Service status
-  const [qdrantStatus, setQdrantStatus] = useState<ServiceStatus>({
-    name: 'Qdrant',
+  // Service status - TriBridRAG uses Postgres (pgvector) and Neo4j
+  const [postgresStatus, setPostgresStatus] = useState<ServiceStatus>({
+    name: 'Postgres',
     status: 'checking',
     color: 'var(--accent)',
-    port: 6333,
-    description: 'Vector database'
+    port: 5432,
+    description: 'Vector + sparse storage (pgvector)'
   });
 
-  const [redisStatus, setRedisStatus] = useState<ServiceStatus>({
-    name: 'Redis',
+  const [neo4jStatus, setNeo4jStatus] = useState<ServiceStatus>({
+    name: 'Neo4j',
     status: 'checking',
-    color: 'var(--err)',
-    port: 6379,
-    description: 'Memory store'
+    color: 'var(--link)',
+    port: 7474,
+    description: 'Graph database'
   });
 
   const [prometheusStatus, setPrometheusStatus] = useState<ServiceStatus>({
@@ -211,19 +211,19 @@ export function ServicesSubtab() {
   /**
    * ---agentspec
    * what: |
-   *   Asynchronous function that fetches all Docker containers from the Docker API and updates two Zustand store states: the full container list and a filtered subset of AGRO-managed containers.
+   *   Asynchronous function that fetches all Docker containers from the Docker API and updates two Zustand store states: the full container list and a filtered subset of TriBrid-managed containers.
    *   Takes no parameters; relies on dockerApi.listContainers() to retrieve container data from the Docker daemon.
    *   Returns a Promise<DockerContainer[]> containing all containers; side effects include calling setContainers() and setAgroContainers() to update shared state.
    *   Handles the edge case where result.containers is undefined or null by defaulting to an empty array; does not throw on API failure—errors are silently caught but not logged or re-thrown.
    *
    * why: |
    *   Separates container fetching logic from UI components to centralize Docker API interaction and enable reusable state management via Zustand hooks.
-   *   The dual-state pattern (all containers + filtered AGRO subset) avoids repeated filtering in components and improves render performance.
-   *   Filtering by agro_managed flag allows the UI to display AGRO-specific operations separately from unmanaged containers.
+   *   The dual-state pattern (all containers + filtered TriBrid subset) avoids repeated filtering in components and improves render performance.
+   *   Filtering by tribrid_managed flag allows the UI to display TriBrid-specific operations separately from unmanaged containers.
    *
    * guardrails:
    *   - DO NOT add retry logic here; implement exponential backoff at the dockerApi.listContainers() layer to keep concerns separated
-   *   - ALWAYS validate that setContainers and setAgroContainers are Zustand store setters before calling; confirm store schema includes agro_managed boolean field
+   *   - ALWAYS validate that setContainers and setAgroContainers are Zustand store setters before calling; confirm store schema includes tribrid_managed boolean field
    *   - NOTE: The catch block silently swallows errors without logging; add error state to Zustand store and log failures for debugging production issues
    *   - NOTE: Type annotation uses 'any' for container objects; define and import a strict DockerContainer interface to catch schema mismatches at compile time
    *   - ASK USER: Confirm whether API errors should trigger a retry, update error state in the store, or both before modifying error handling
@@ -235,9 +235,9 @@ export function ServicesSubtab() {
       const allContainers = result.containers || [];
       setContainers(allContainers);
 
-      // Filter AGRO containers
-      const agro = allContainers.filter((c: any) => c.agro_managed === true);
-      setAgroContainers(agro);
+      // Filter TriBrid containers
+      const tribrid = allContainers.filter((c: any) => c.tribrid_managed === true);
+      setAgroContainers(tribrid);
 
       return allContainers;
     } catch (error) {
@@ -251,48 +251,48 @@ export function ServicesSubtab() {
   /**
    * ---agentspec
    * what: |
-   *   Asynchronously checks the operational status of services (specifically Qdrant) by inspecting a provided Docker containers list.
-   *   Takes a containersList parameter (array of DockerContainer objects) and searches for a container with 'qdrant' in its name (case-insensitive).
-   *   Updates the qdrantStatus state via setQdrantStatus hook, setting status to 'online' if the matching container's state is 'running', otherwise 'offline'.
+   *   Asynchronously checks the operational status of services (specifically Postgres) by inspecting a provided Docker containers list.
+   *   Takes a containersList parameter (array of DockerContainer objects) and searches for a container with 'postgres' in its name (case-insensitive).
+   *   Updates the postgresStatus state via setPostgresStatus hook, setting status to 'online' if the matching container's state is 'running', otherwise 'offline'.
    *   Returns a Promise that resolves when state update is queued (not when it completes).
-   *   Handles edge cases: missing container (defaults to 'offline'), case-insensitive name matching, preserves other qdrantStatus fields via spread operator.
+   *   Handles edge cases: missing container (defaults to 'offline'), case-insensitive name matching, preserves other postgresStatus fields via spread operator.
    *
    * why: |
    *   Accepts containersList as a parameter instead of reading from stale closure state, ensuring fresh Docker container data is used for status checks.
    *   Uses case-insensitive matching to handle naming variations in container names.
-   *   Preserves existing qdrantStatus properties (e.g., lastChecked, error) while only updating the status field, preventing loss of metadata.
+   *   Preserves existing postgresStatus properties (e.g., lastChecked, error) while only updating the status field, preventing loss of metadata.
    *
    * guardrails:
    *   - DO NOT read container state from a zustand store or component state closure; always use the passed containersList parameter to avoid stale data
    *   - ALWAYS use case-insensitive matching (toLowerCase()) for container name lookups because Docker container names may vary in casing
-   *   - NOTE: This function only checks if a container exists and is running; it does not validate that Qdrant is actually healthy or responding to requests
-   *   - ASK USER: Should this function also perform a health check (e.g., HTTP ping to Qdrant API) or is container state sufficient for your use case?
+   *   - NOTE: This function only checks if a container exists and is running; it does not validate that Postgres is actually healthy or responding to requests
+   *   - ASK USER: Should this function also perform a health check (e.g., HTTP ping to Postgres API) or is container state sufficient for your use case?
    * ---/agentspec
    */
   const fetchServiceStatus = async (containersList: DockerContainer[]) => {
-    // Check Qdrant - use passed containersList, not stale state
+    // Check Postgres - use passed containersList, not stale state
     const qdrantContainer = containersList.find(c =>
-      c.name.toLowerCase().includes('qdrant')
+      c.name.toLowerCase().includes('postgres')
     );
-    setQdrantStatus(prev => ({
+    setPostgresStatus(prev => ({
       ...prev,
       status: qdrantContainer?.state === 'running' ? 'online' : 'offline'
     }));
 
-    // Check Redis via ping endpoint
+    // Check Neo4j via ping endpoint
     try {
-      const res = await fetch(api('/api/docker/redis/ping'));
+      const res = await fetch(api('/api/docker/neo4j/ping'));
       if (res.ok) {
         const data = await res.json();
-        setRedisStatus(prev => ({
+        setNeo4jStatus(prev => ({
           ...prev,
           status: data.success ? 'online' : 'offline'
         }));
       } else {
-        setRedisStatus(prev => ({ ...prev, status: 'offline' }));
+        setNeo4jStatus(prev => ({ ...prev, status: 'offline' }));
       }
     } catch {
-      setRedisStatus(prev => ({ ...prev, status: 'offline' }));
+      setNeo4jStatus(prev => ({ ...prev, status: 'offline' }));
     }
 
     // Check Prometheus - use passed containersList
@@ -328,11 +328,11 @@ export function ServicesSubtab() {
   /**
    * ---agentspec
    * what: |
-   *   Handles opening and restarting Qdrant vector database container operations via UI interactions.
-   *   handleQdrantOpen() opens the Qdrant dashboard in a new browser tab at http://localhost:6333/dashboard using window.open().
-   *   handleQdrantRestart() searches the containers array for a container with 'qdrant' in its name (case-insensitive), then triggers a restart operation; sets actionMessage state if container not found.
+   *   Handles opening and restarting Postgres vector database container operations via UI interactions.
+   *   handlePostgresOpen() opens the Postgres dashboard in a new browser tab at http://localhost:6333/dashboard using window.open().
+   *   handlePostgresRestart() searches the containers array for a container with 'postgres' in its name (case-insensitive), then triggers a restart operation; sets actionMessage state if container not found.
    *   Both functions are event handlers (likely onClick callbacks) with no parameters.
-   *   Edge case: handleQdrantRestart() silently fails if containers array is empty or no matching container exists; dashboard URL is hardcoded and assumes Qdrant runs on localhost:6333.
+   *   Edge case: handlePostgresRestart() silently fails if containers array is empty or no matching container exists; dashboard URL is hardcoded and assumes Postgres runs on localhost:6333.
    *
    * why: |
    *   Separates UI concerns (opening dashboard, triggering restart) into discrete handler functions for clarity and reusability.
@@ -342,25 +342,26 @@ export function ServicesSubtab() {
    * guardrails:
    *   - DO NOT hardcode localhost:6333 in production; use environment variables or configuration to support different deployment environments
    *   - ALWAYS validate that containers array exists and is populated before calling find(); add null/undefined checks to prevent runtime errors
-   *   - NOTE: handleQdrantRestart() is incomplete; the restart logic after finding the container is not shown, confirm implementation before deployment
+   *   - NOTE: handlePostgresRestart() is incomplete; the restart logic after finding the container is not shown, confirm implementation before deployment
    *   - ASK USER: Should actionMessage be cleared after successful restart, or should error handling include retry logic and detailed error messages?
    * ---/agentspec
    */
-  const handleQdrantOpen = () => {
-    window.open('http://localhost:6333/dashboard', '_blank');
+  const handlePostgresOpen = () => {
+    // pgAdmin or similar tool would be at a different URL - this is a placeholder
+    window.open('http://localhost:5432', '_blank');
   };
 
   /**
    * ---agentspec
    * what: |
-   *   Handles the restart operation for a Qdrant container in a Docker environment.
+   *   Handles the restart operation for a Postgres container in a Docker environment.
    *   Takes no parameters; operates on component state (containers array and UI state setters).
-   *   Searches the containers array for a container with 'qdrant' in its name (case-insensitive).
-   *   Returns early with error message if no matching container found; otherwise sets loading state and displays "Restarting Qdrant..." message.
+   *   Searches the containers array for a container with 'postgres' in its name (case-insensitive).
+   *   Returns early with error message if no matching container found; otherwise sets loading state and displays "Restarting Postgres..." message.
    *   Side effects: mutates UI state (setLoading, setActionMessage) but does not execute the actual restart API call (incomplete implementation).
    *
    * why: |
-   *   Encapsulates the pre-restart validation and UI state management for the Qdrant restart workflow.
+   *   Encapsulates the pre-restart validation and UI state management for the Postgres restart workflow.
    *   Separates container lookup logic from the actual restart API call, allowing for staged implementation.
    *   Case-insensitive name matching provides robustness against naming variations in container metadata.
    *
@@ -372,21 +373,21 @@ export function ServicesSubtab() {
    *   - DO NOT call setLoading(true) without a corresponding setLoading(false) in error or success handlers; incomplete state management will leave UI in loading state
    * ---/agentspec
    */
-  const handleQdrantRestart = async () => {
-    const container = containers.find(c => c.name.toLowerCase().includes('qdrant'));
+  const handlePostgresRestart = async () => {
+    const container = containers.find(c => c.name.toLowerCase().includes('postgres'));
     if (!container) {
-      setActionMessage('Qdrant container not found');
+      setActionMessage('Postgres container not found');
       return;
     }
 
     setLoading(true);
-    setActionMessage('Restarting Qdrant...');
+    setActionMessage('Restarting Postgres...');
     try {
       await dockerApi.restartContainer(container.id);
-      setActionMessage('Qdrant restarted successfully');
+      setActionMessage('Postgres restarted successfully');
       setTimeout(() => fetchAllStatus(), 1000);
     } catch (error) {
-      setActionMessage(`Failed to restart Qdrant: ${error}`);
+      setActionMessage(`Failed to restart Postgres: ${error}`);
     } finally {
       setLoading(false);
       setTimeout(() => setActionMessage(null), 3000);
@@ -396,33 +397,33 @@ export function ServicesSubtab() {
   /**
    * ---agentspec
    * what: |
-   *   Async handler that pings a Redis instance via HTTP API endpoint and displays the result in UI state.
-   *   Takes no parameters; uses fetch to call GET /api/docker/redis/ping endpoint.
+   *   Async handler that pings a Neo4j instance via HTTP API endpoint and displays the result in UI state.
+   *   Takes no parameters; uses fetch to call GET /api/docker/neo4j/ping endpoint.
    *   Returns nothing; updates three pieces of React state: setLoading (boolean), setActionMessage (string with response or error).
-   *   On success, displays "Redis: {response}" message; on API error, displays "Redis ping failed: {error}"; on network failure, displays "Failed to ping Redis: {error}".
+   *   On success, displays "Neo4j: {response}" message; on API error, displays "Neo4j ping failed: {error}"; on network failure, displays "Failed to ping Neo4j: {error}".
    *   Edge case: Does not distinguish between JSON parse errors and network timeouts; both collapse into the catch block.
    *
    * why: |
-   *   Provides user feedback for Redis connectivity testing in a Docker environment via a simple fetch-based health check.
+   *   Provides user feedback for Neo4j connectivity testing in a Docker environment via a simple fetch-based health check.
    *   State updates (loading flag, message display) follow React hook patterns for async operations with user-facing status.
    *   Chosen over direct socket connection to keep logic in the frontend and leverage existing API layer abstraction.
    *
    * guardrails:
-   *   - DO NOT add retry logic here; implement at the API endpoint level (/api/docker/redis/ping) to keep concerns separated
+   *   - DO NOT add retry logic here; implement at the API endpoint level (/api/docker/neo4j/ping) to keep concerns separated
    *   - ALWAYS set setLoading(false) in a finally block to prevent UI lockup if the endpoint hangs or times out
    *   - NOTE: Error messages expose raw error objects as strings; consider sanitizing before display in production to avoid leaking internal details
    *   - ASK USER: Confirm whether setActionMessage should be cleared/reset before the next ping attempt, or if message history should persist
    * ---/agentspec
    */
-  const handleRedisPing = async () => {
+  const handleNeo4jPing = async () => {
     setLoading(true);
-    setActionMessage('Pinging Redis...');
+    setActionMessage('Pinging Neo4j...');
     try {
-      const res = await fetch(api('/api/docker/redis/ping'));
+      const res = await fetch(api('/api/docker/neo4j/ping'));
       const data = await res.json();
-      setActionMessage(data.success ? `Redis: ${data.response}` : `Redis ping failed: ${data.error}`);
+      setActionMessage(data.success ? `Neo4j: ${data.response}` : `Neo4j ping failed: ${data.error}`);
     } catch (error) {
-      setActionMessage(`Failed to ping Redis: ${error}`);
+      setActionMessage(`Failed to ping Neo4j: ${error}`);
     } finally {
       setLoading(false);
       setTimeout(() => setActionMessage(null), 3000);
@@ -433,41 +434,41 @@ export function ServicesSubtab() {
    * ```
    * ---agentspec
    * what: |
-   *   Handles the restart operation for a Redis container in a containerized environment.
+   *   Handles the restart operation for a Neo4j container in a containerized environment.
    *   Takes no parameters; reads from a `containers` state variable (array of container objects with `name` property).
-   *   Searches for a container whose name includes 'redis' (case-insensitive).
-   *   Returns early with error message if no Redis container is found; otherwise sets loading state to true and displays "Restarting Redis..." message.
+   *   Searches for a container whose name includes 'neo4j' (case-insensitive).
+   *   Returns early with error message if no Neo4j container is found; otherwise sets loading state to true and displays "Restarting Neo4j..." message.
    *   Side effects: mutates `setLoading` and `setActionMessage` state hooks; does not actually restart the container (incomplete implementation).
    *
    * why: |
-   *   Encapsulates the Redis restart workflow as a discrete event handler, separating UI state management from container orchestration logic.
-   *   Case-insensitive name matching provides flexibility for naming conventions (redis, Redis, REDIS, etc.).
+   *   Encapsulates the Neo4j restart workflow as a discrete event handler, separating UI state management from container orchestration logic.
+   *   Case-insensitive name matching provides flexibility for naming conventions (redis, Neo4j, REDIS, etc.).
    *   Early return pattern prevents unnecessary state updates if the container is not found.
    *   Incomplete implementation suggests this is a work-in-progress; the actual restart API call is missing.
    *
    * guardrails:
    *   - DO NOT assume the restart operation completes after setting loading state; the actual container restart logic (API call, exec command) is missing and must be implemented
    *   - ALWAYS validate that `containers` state is populated before calling this handler; if containers array is empty or undefined, the find() will return undefined and trigger the error message
-   *   - NOTE: Case-insensitive matching using `.toLowerCase().includes('redis')` may match unintended containers (e.g., 'my-redis-cache-backup'); consider more specific matching if multiple Redis-like containers exist
-   *   - ASK USER: Confirm the intended behavior after restart—should this handler await the restart completion, poll for container status, or trigger a callback? Also clarify error handling: should failure to find Redis throw an error or silently return?
+   *   - NOTE: Case-insensitive matching using `.toLowerCase().includes('neo4j')` may match unintended containers (e.g., 'my-redis-cache-backup'); consider more specific matching if multiple Neo4j-like containers exist
+   *   - ASK USER: Confirm the intended behavior after restart—should this handler await the restart completion, poll for container status, or trigger a callback? Also clarify error handling: should failure to find Neo4j throw an error or silently return?
    * ---/agentspec
    * ```
    */
-  const handleRedisRestart = async () => {
-    const container = containers.find(c => c.name.toLowerCase().includes('redis'));
+  const handleNeo4jRestart = async () => {
+    const container = containers.find(c => c.name.toLowerCase().includes('neo4j'));
     if (!container) {
-      setActionMessage('Redis container not found');
+      setActionMessage('Neo4j container not found');
       return;
     }
 
     setLoading(true);
-    setActionMessage('Restarting Redis...');
+    setActionMessage('Restarting Neo4j...');
     try {
       await dockerApi.restartContainer(container.id);
-      setActionMessage('Redis restarted successfully');
+      setActionMessage('Neo4j restarted successfully');
       setTimeout(() => fetchAllStatus(), 1000);
     } catch (error) {
-      setActionMessage(`Failed to restart Redis: ${error}`);
+      setActionMessage(`Failed to restart Neo4j: ${error}`);
     } finally {
       setLoading(false);
       setTimeout(() => setActionMessage(null), 3000);
@@ -1171,11 +1172,11 @@ export function ServicesSubtab() {
           marginBottom: '16px'
         }}>
           {renderServiceCard(
-            qdrantStatus,
+            postgresStatus,
             <>
               <button
                 id="btn-qdrant-open"
-                onClick={handleQdrantOpen}
+                onClick={handlePostgresOpen}
                 className="small-button"
                 style={{
                   flex: 1,
@@ -1188,7 +1189,7 @@ export function ServicesSubtab() {
               </button>
               <button
                 id="btn-qdrant-restart"
-                onClick={handleQdrantRestart}
+                onClick={handlePostgresRestart}
                 disabled={loading}
                 className="small-button"
                 style={{
@@ -1204,11 +1205,11 @@ export function ServicesSubtab() {
           )}
 
           {renderServiceCard(
-            redisStatus,
+            neo4jStatus,
             <>
               <button
                 id="btn-redis-ping"
-                onClick={handleRedisPing}
+                onClick={handleNeo4jPing}
                 disabled={loading}
                 className="small-button"
                 style={{
@@ -1222,7 +1223,7 @@ export function ServicesSubtab() {
               </button>
               <button
                 id="btn-redis-restart"
-                onClick={handleRedisRestart}
+                onClick={handleNeo4jRestart}
                 disabled={loading}
                 className="small-button"
                 style={{
@@ -1409,25 +1410,25 @@ export function ServicesSubtab() {
         </div>
       </div>
 
-      {/* AGRO Containers */}
+      {/* TriBrid Containers */}
       <div className="settings-section" style={{ borderLeft: '3px solid var(--accent)' }}>
         <h3>
-          <span style={{ color: 'var(--accent)' }}>●</span> AGRO Containers
+          <span style={{ color: 'var(--accent)' }}>●</span> TriBrid Containers
         </h3>
         <p className="small" style={{ color: 'var(--fg-muted)', marginBottom: '12px' }}>
           Core containers managed by docker-compose.services.yml.
         </p>
-        <div id="agro-containers-grid" style={{
+        <div id="tribrid-containers-grid" style={{
           display: 'grid',
           gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
           gap: '12px',
           marginBottom: '16px'
         }}>
-          {agroContainers.length > 0 ? (
-            agroContainers.map(renderContainer)
+          {tribridContainers.length > 0 ? (
+            tribridContainers.map(renderContainer)
           ) : (
             <div style={{ color: 'var(--fg-muted)', padding: '16px' }}>
-              No AGRO containers found
+              No TriBrid containers found
             </div>
           )}
         </div>
@@ -1451,7 +1452,7 @@ export function ServicesSubtab() {
           </button>
         </h3>
         <p className="small" style={{ color: 'var(--fg-muted)', marginBottom: '12px' }}>
-          Every Docker container detected on this host (including AGRO and user projects).
+          Every Docker container detected on this host (including TriBrid and user projects).
         </p>
         <div id="docker-containers-grid" style={{
           display: 'grid',

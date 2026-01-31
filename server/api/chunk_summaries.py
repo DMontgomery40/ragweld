@@ -198,7 +198,7 @@ async def delete_chunk_summary(
     cfg = await get_config(repo_id=repo_id)
     pg = PostgresClient(cfg.indexing.postgres_url)
     await pg.connect()
-    deleted = await pg.delete_chunk_summary(chunk_id, repo_id=repo_id)
+    deleted = await pg.delete_chunk_summary(chunk_id, corpus_id=repo_id)
     if deleted <= 0:
         raise HTTPException(status_code=404, detail=f"chunk_id={chunk_id} not found")
     return {"ok": True, "deleted": deleted}

@@ -31,13 +31,14 @@ async def _get_postgres() -> PostgresClient:
     return pg
 
 
-async def _get_neo4j() -> Neo4jClient:
+async def _get_neo4j(repo_id: str | None = None) -> Neo4jClient:
     cfg = load_config()
+    db_name = cfg.graph_storage.resolve_database(repo_id)
     neo4j = Neo4jClient(
         cfg.graph_storage.neo4j_uri,
         cfg.graph_storage.neo4j_user,
         cfg.graph_storage.neo4j_password,
-        database=cfg.graph_storage.neo4j_database,
+        database=db_name,
     )
     await neo4j.connect()
     return neo4j
@@ -74,7 +75,7 @@ async def list_corpora() -> list[Corpus]:
 
 @router.post("/repos", response_model=Corpus)
 async def add_repo(request: CorpusCreateRequest) -> Corpus:
-    repo_id = request.repo_id or _slugify(request.name)
+    corpus_id = request.repo_id or _slugify(request.name)
     pg = await _get_postgres()
 
     # Validate path exists on server
@@ -83,22 +84,42 @@ async def add_repo(request: CorpusCreateRequest) -> Corpus:
         raise HTTPException(status_code=422, detail=f"Path not found: {root}")
 
     await pg.upsert_corpus(
-        repo_id,
+        corpus_id,
         name=request.name,
         root_path=str(root),
         description=request.description,
-        meta={"slug": repo_id},
+        meta={"slug": corpus_id},
     )
 
     # Seed per-corpus config from current global template
     cfg = load_config()
-    await pg.upsert_corpus_config_json(repo_id, cfg.model_dump())
+    await pg.upsert_corpus_config_json(corpus_id, cfg.model_dump())
+
+    # Enterprise option: per-corpus Neo4j databases (multi-db).
+    # Only attempted when explicitly enabled in config.
+    if cfg.graph_storage.neo4j_database_mode == "per_corpus" and cfg.graph_storage.neo4j_auto_create_databases:
+        neo4j = Neo4jClient(
+            cfg.graph_storage.neo4j_uri,
+            cfg.graph_storage.neo4j_user,
+            cfg.graph_storage.neo4j_password,
+            database=cfg.graph_storage.neo4j_database,
+        )
+        await neo4j.connect()
+        db_name = cfg.graph_storage.resolve_database(corpus_id)
+        ok = await neo4j.ensure_database(db_name)
+        await neo4j.disconnect()
+        if not ok:
+            raise HTTPException(
+                status_code=503,
+                detail="Per-corpus Neo4j databases requested but not supported. "
+                "Use Neo4j Enterprise image + license (or switch neo4j_database_mode='shared').",
+            )
 
     return Corpus(
-        repo_id=repo_id,
+        repo_id=corpus_id,
         name=request.name,
         path=str(root),
-        slug=repo_id,
+        slug=corpus_id,
         description=request.description,
         created_at=datetime.now(UTC),
         last_indexed=None,
@@ -214,19 +235,14 @@ async def get_repo_stats(corpus_id: str) -> CorpusStats:
     lang_breakdown: dict[str, int] = {}
     root = Path(root_path).expanduser().resolve()
     if root.exists():
-        for p in root.rglob("*"):
-            if not p.is_file():
-                continue
-            rel = str(p.relative_to(root))
-            if not loader.should_include(rel):
-                continue
-            file_count += 1
-            try:
-                total_size += p.stat().st_size
-            except Exception:
-                pass
-            lang = loader.detect_language(rel) or "unknown"
-            lang_breakdown[lang] = lang_breakdown.get(lang, 0) + 1
+    for rel, p in loader.iter_repo_files(str(root)):
+        file_count += 1
+        try:
+            total_size += p.stat().st_size
+        except Exception:
+            pass
+        lang = loader.detect_language(rel) or "unknown"
+        lang_breakdown[lang] = lang_breakdown.get(lang, 0) + 1
 
     # Index stats from Postgres (404 if no chunks)
     index_stats: IndexStats | None = None
@@ -239,7 +255,7 @@ async def get_repo_stats(corpus_id: str) -> CorpusStats:
 
     graph_stats = None
     try:
-        neo4j = await _get_neo4j()
+        neo4j = await _get_neo4j(repo_id)
         graph_stats = await neo4j.get_graph_stats(repo_id)
         await neo4j.disconnect()
         if graph_stats.total_entities == 0:
@@ -268,7 +284,7 @@ async def delete_repo(corpus_id: str) -> dict[str, Any]:
     pg = await _get_postgres()
     await pg.delete_corpus(repo_id)
     try:
-        neo4j = await _get_neo4j()
+        neo4j = await _get_neo4j(repo_id)
         await neo4j.delete_graph(repo_id)
         await neo4j.disconnect()
     except Exception:

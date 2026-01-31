@@ -15,11 +15,12 @@ router = APIRouter(tags=["graph"])
 async def list_entities(corpus_id: str, entity_type: str | None = None, limit: int = 100) -> list[Entity]:
     repo_id = corpus_id
     cfg = await load_scoped_config(repo_id=repo_id)
+    db_name = cfg.graph_storage.resolve_database(repo_id)
     neo4j = Neo4jClient(
         cfg.graph_storage.neo4j_uri,
         cfg.graph_storage.neo4j_user,
         cfg.graph_storage.neo4j_password,
-        database=cfg.graph_storage.neo4j_database,
+        database=db_name,
     )
     try:
         await neo4j.connect()
@@ -35,11 +36,12 @@ async def list_entities(corpus_id: str, entity_type: str | None = None, limit: i
 async def get_entity(corpus_id: str, entity_id: str) -> Entity:
     repo_id = corpus_id
     cfg = await load_scoped_config(repo_id=repo_id)
+    db_name = cfg.graph_storage.resolve_database(repo_id)
     neo4j = Neo4jClient(
         cfg.graph_storage.neo4j_uri,
         cfg.graph_storage.neo4j_user,
         cfg.graph_storage.neo4j_password,
-        database=cfg.graph_storage.neo4j_database,
+        database=db_name,
     )
     try:
         await neo4j.connect()
@@ -55,11 +57,12 @@ async def get_entity(corpus_id: str, entity_id: str) -> Entity:
 async def get_entity_relationships(corpus_id: str, entity_id: str) -> list[Relationship]:
     repo_id = corpus_id
     cfg = await load_scoped_config(repo_id=repo_id)
+    db_name = cfg.graph_storage.resolve_database(repo_id)
     neo4j = Neo4jClient(
         cfg.graph_storage.neo4j_uri,
         cfg.graph_storage.neo4j_user,
         cfg.graph_storage.neo4j_password,
-        database=cfg.graph_storage.neo4j_database,
+        database=db_name,
     )
     try:
         await neo4j.connect()
@@ -72,11 +75,12 @@ async def get_entity_relationships(corpus_id: str, entity_id: str) -> list[Relat
 async def list_communities(corpus_id: str, level: int | None = None) -> list[Community]:
     repo_id = corpus_id
     cfg = await load_scoped_config(repo_id=repo_id)
+    db_name = cfg.graph_storage.resolve_database(repo_id)
     neo4j = Neo4jClient(
         cfg.graph_storage.neo4j_uri,
         cfg.graph_storage.neo4j_user,
         cfg.graph_storage.neo4j_password,
-        database=cfg.graph_storage.neo4j_database,
+        database=db_name,
     )
     try:
         await neo4j.connect()
@@ -92,11 +96,12 @@ async def list_communities(corpus_id: str, level: int | None = None) -> list[Com
 async def get_graph_stats(corpus_id: str) -> GraphStats:
     repo_id = corpus_id
     cfg = await load_scoped_config(repo_id=repo_id)
+    db_name = cfg.graph_storage.resolve_database(repo_id)
     neo4j = Neo4jClient(
         cfg.graph_storage.neo4j_uri,
         cfg.graph_storage.neo4j_user,
         cfg.graph_storage.neo4j_password,
-        database=cfg.graph_storage.neo4j_database,
+        database=db_name,
     )
     try:
         await neo4j.connect()
@@ -112,11 +117,12 @@ async def get_graph_stats(corpus_id: str) -> GraphStats:
 async def graph_query(corpus_id: str, cypher: str) -> list[dict[str, Any]]:
     repo_id = corpus_id
     cfg = await load_scoped_config(repo_id=repo_id)
+    db_name = cfg.graph_storage.resolve_database(repo_id)
     neo4j = Neo4jClient(
         cfg.graph_storage.neo4j_uri,
         cfg.graph_storage.neo4j_user,
         cfg.graph_storage.neo4j_password,
-        database=cfg.graph_storage.neo4j_database,
+        database=db_name,
     )
     try:
         await neo4j.connect()

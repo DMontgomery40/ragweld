@@ -127,6 +127,9 @@
     "neo4j_user": "neo4j",
     "neo4j_password": "",
     "neo4j_database": "neo4j",
+    "neo4j_database_mode": "shared",
+    "neo4j_database_prefix": "tribrid_",
+    "neo4j_auto_create_databases": true,
     "max_hops": 2,
     "include_communities": true,
     "community_algorithm": "louvain",
@@ -145,6 +148,24 @@
       "references"
     ],
     "graph_search_top_k": 30
+  },
+  "graph_indexing": {
+    "enabled": true,
+    "build_lexical_graph": true,
+    "store_chunk_embeddings": true,
+    "semantic_kg_enabled": false,
+    "semantic_kg_mode": "heuristic",
+    "semantic_kg_max_concepts_per_chunk": 8,
+    "semantic_kg_min_concept_len": 4,
+    "semantic_kg_max_relations_per_chunk": 12,
+    "semantic_kg_max_chunks": 200,
+    "semantic_kg_llm_model": "",
+    "semantic_kg_llm_timeout_s": 30,
+    "chunk_vector_index_name": "tribrid_chunk_embeddings",
+    "chunk_embedding_property": "embedding",
+    "vector_similarity_function": "cosine",
+    "wait_vector_index_online": true,
+    "vector_index_online_timeout_s": 60.0
   },
   "fusion": {
     "method": "rrf",
@@ -166,7 +187,12 @@
     "bm25_b": 0.4
   },
   "graph_search": {
+    "mode": "chunk",
     "enabled": true,
+    "chunk_neighbor_window": 1,
+    "chunk_seed_overfetch_multiplier": 10,
+    "chunk_entity_expansion_enabled": true,
+    "chunk_entity_expansion_weight": 0.8,
     "max_hops": 2,
     "include_communities": true,
     "top_k": 30
@@ -326,6 +352,7 @@
     "query_rewrite": "You rewrite developer questions into search-optimized queries without changing meaning.",
     "semantic_chunk_summaries": "Analyze this code chunk and create a comprehensive JSON summary for code search. Focus on WHAT the code does (business purpose) and HOW it works (technical details). Include all important symbols, patterns, and domain concepts.\n\nJSON format:\n{\n  \"symbols\": [\"function_name\", \"class_name\", \"variable_name\"],\n  \"purpose\": \"Clear business purpose - what problem this solves\",\n  \"technical_details\": \"Key technical implementation details\",\n  \"domain_concepts\": [\"business_term1\", \"business_term2\"],\n  \"routes\": [\"api/endpoint\", \"webhook/path\"],\n  \"dependencies\": [\"external_service\", \"library\"],\n  \"patterns\": [\"design_pattern\", \"architectural_concept\"]\n}\n\nFocus on:\n- Domain-specific terminology and concepts from this codebase\n- Technical patterns and architectural decisions\n- Business logic and problem being solved\n- Integration points, APIs, and external services\n- Key algorithms, data structures, and workflows",
     "code_enrichment": "Analyze this code and return a JSON object with: symbols (array of function/class/component names), purpose (one sentence description), keywords (array of technical terms). Be concise. Return ONLY valid JSON.",
+    "semantic_kg_extraction": "You are a semantic knowledge graph extractor.\n\nGiven a single code/document chunk, extract a small set of reusable semantic concepts and relationships.\n\nRules:\n- Return ONLY valid JSON (no markdown, no extra text)\n- Concepts must be short, lowercase, and reusable across the corpus (e.g. \"authentication\", \"rate_limit\", \"vector_index\")\n- Prefer domain concepts and architectural concepts over implementation noise\n- Do NOT include file paths or line numbers as concepts\n- Keep the list small and high-signal\n\nJSON format:\n{\n  \"concepts\": [\"concept1\", \"concept2\"],\n  \"relations\": [\n    {\"source\": \"concept1\", \"target\": \"concept2\", \"relation_type\": \"related_to\"}\n  ]\n}\n\nAllowed relation_type values: related_to, references",
     "eval_analysis": "You are an expert RAG (Retrieval-Augmented Generation) system analyst.\nYour job is to analyze evaluation comparisons and provide HONEST, SKEPTICAL insights.\n\nCRITICAL: Do NOT force explanations that don't make sense. If the data is contradictory or confusing:\n- Say so clearly: \"This result is surprising and may indicate other factors at play\"\n- Consider: index changes, data drift, eval dataset updates, or measurement noise\n- Acknowledge when correlation != causation\n- It's BETTER to say \"I'm not sure why this happened\" than to fabricate a plausible-sounding but wrong explanation\n\nBe rigorous:\n1. Question whether the config changes ACTUALLY explain the performance delta\n2. Flag when results seem counterintuitive (e.g., disabling a feature improving results)\n3. Consider confounding variables: Was the index rebuilt? Did the test set change?\n4. Provide actionable suggestions only when you have reasonable confidence\n\nFormat your response with clear sections using markdown headers.",
     "lightweight_chunk_summaries": "Extract key information from this code: symbols (function/class names), purpose (one sentence), keywords (technical terms). Return JSON only."
   },

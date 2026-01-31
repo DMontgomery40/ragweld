@@ -420,7 +420,7 @@ class PostgresClient:
         return (terms, total_terms)
 
     # Metadata
-    async def get_chunk(self, chunk_id: str) -> Chunk | None:
+    async def get_chunk(self, repo_id: str, chunk_id: str) -> Chunk | None:
         await self._require_pool()
         assert self._pool is not None
 
@@ -429,9 +429,11 @@ class PostgresClient:
                 """
                 SELECT repo_id, chunk_id, content, file_path, start_line, end_line, language, token_count
                 FROM chunks
-                WHERE chunk_id = $1
+                WHERE repo_id = $1
+                  AND chunk_id = $2
                 LIMIT 1;
                 """,
+                repo_id,
                 chunk_id,
             )
         if not row:
@@ -448,7 +450,7 @@ class PostgresClient:
             summary=None,
         )
 
-    async def get_chunks(self, chunk_ids: list[str]) -> list[Chunk]:
+    async def get_chunks(self, repo_id: str, chunk_ids: list[str]) -> list[Chunk]:
         if not chunk_ids:
             return []
         await self._require_pool()
@@ -457,10 +459,14 @@ class PostgresClient:
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(
                 """
-                SELECT chunk_id, content, file_path, start_line, end_line, language, token_count
-                FROM chunks
-                WHERE chunk_id = ANY($1::text[]);
+                SELECT c.chunk_id, c.content, c.file_path, c.start_line, c.end_line, c.language, c.token_count
+                FROM unnest($2::text[]) WITH ORDINALITY AS u(chunk_id, ord)
+                JOIN chunks c
+                  ON c.repo_id = $1
+                 AND c.chunk_id = u.chunk_id
+                ORDER BY u.ord ASC;
                 """,
+                repo_id,
                 chunk_ids,
             )
         return [
@@ -867,14 +873,14 @@ class PostgresClient:
                     int(last_build.enriched),
                 )
 
-    async def delete_chunk_summary(self, chunk_id: str, repo_id: str | None = None) -> int:
+    async def delete_chunk_summary(self, chunk_id: str, corpus_id: str | None = None) -> int:
         await self._require_pool()
         assert self._pool is not None
         async with self._pool.acquire() as conn:
-            if repo_id:
+            if corpus_id:
                 result = await conn.execute(
                     "DELETE FROM chunk_summaries WHERE repo_id = $1 AND chunk_id = $2;",
-                    repo_id,
+                    corpus_id,
                     chunk_id,
                 )
             else:
