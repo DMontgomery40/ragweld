@@ -235,14 +235,14 @@ async def get_repo_stats(corpus_id: str) -> CorpusStats:
     lang_breakdown: dict[str, int] = {}
     root = Path(root_path).expanduser().resolve()
     if root.exists():
-    for rel, p in loader.iter_repo_files(str(root)):
-        file_count += 1
-        try:
-            total_size += p.stat().st_size
-        except Exception:
-            pass
-        lang = loader.detect_language(rel) or "unknown"
-        lang_breakdown[lang] = lang_breakdown.get(lang, 0) + 1
+        for rel, p in loader.iter_repo_files(str(root)):
+            file_count += 1
+            try:
+                total_size += p.stat().st_size
+            except Exception:
+                pass
+            lang = loader.detect_language(rel) or "unknown"
+            lang_breakdown[lang] = lang_breakdown.get(lang, 0) + 1
 
     # Index stats from Postgres (404 if no chunks)
     index_stats: IndexStats | None = None

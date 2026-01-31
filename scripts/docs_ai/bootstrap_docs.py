@@ -32,7 +32,7 @@ SYSTEM_PROMPT = """You are writing documentation for TriBridRAG, a tri-brid RAG 
 - Sparse search (PostgreSQL Full-Text Search/BM25)
 - Graph search (Neo4j for entity relationships)
 
-WRITING STYLE: Technical, precise, thorough. First person where appropriate.
+WRITING STYLE: Technical, precise, thorough. Humorous where appropriate. 
 
 KEY ARCHITECTURE POINTS:
 1. THREE search legs fused together (hence "tri-brid")
@@ -139,6 +139,7 @@ You MUST use these components where appropriate:
   **MERMAID v11 RULES** (handDrawn style enabled sitewide):
   - Use \n for multi-line labels (NOT <br/> or HTML)
   - Add color classes with `:::className` for visual appeal
+  - Make them big and bold and colorful! And 3D!
   - Define classDef for custom colors (use hex colors)
   - Node shapes: [] rectangle, () rounded, {} diamond, (()) circle, [[ ]] subroutine
   - Edge types: --> solid, -.-> dotted, ==> thick
