@@ -1,7 +1,7 @@
 // AGRO - Embedding Configuration Panel
 // Shows current embedding model, dimensions, precision from backend
 
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 
 interface EmbeddingConfig {
   model: string;

@@ -5,13 +5,6 @@
 import { useState, useEffect } from 'react';
 import { useAPI } from '@/hooks';
 
-interface Integration {
-  name: string;
-  enabled: boolean;
-  config: Record<string, any>;
-  status: 'connected' | 'disconnected' | 'error' | 'unknown';
-}
-
 export function Integrations() {
   const { api } = useAPI();
 
@@ -30,7 +23,7 @@ export function Integrations() {
   // VS Code state
   const [vscodeEnabled, setVscodeEnabled] = useState(false);
   const [vscodePort, setVscodePort] = useState('8013');
-  const [vscodeStatus, setVscodeStatus] = useState<'connected' | 'disconnected'>('disconnected');
+  const [_vscodeStatus, setVscodeStatus] = useState<'connected' | 'disconnected'>('disconnected');
 
   // Webhooks state
   const [webhooks, setWebhooks] = useState<Array<{ url: string; events: string[] }>>([]);

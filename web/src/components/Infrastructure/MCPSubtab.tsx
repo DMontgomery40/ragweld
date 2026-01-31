@@ -39,7 +39,7 @@ interface MCPServer {
  */
 export function MCPSubtab() {
   const { api } = useAPI();
-  const { saveNow } = useConfig();
+  const { patchSection } = useConfig();
   const [mcpHttpHost, setMcpHttpHost] = useConfigField<string>('MCP_HTTP_HOST', '127.0.0.1');
   const [mcpHttpPort, setMcpHttpPort] = useConfigField<number>('MCP_HTTP_PORT', 8013);
   const [mcpHttpPath, setMcpHttpPath] = useConfigField<string>('MCP_HTTP_PATH', '/mcp');
@@ -164,19 +164,19 @@ export function MCPSubtab() {
     setIsSaving(true);
     setActionMessage('Saving MCP settings...');
     try {
-      await saveNow({
-        MCP_HTTP_HOST: mcpHttpHost,
-        MCP_HTTP_PORT: Number(mcpHttpPort) || 8013,
-        MCP_HTTP_PATH: mcpHttpPath,
+      // MCP settings not yet in Pydantic config - use generation section's mcp model field
+      await patchSection('generation', {
+        gen_model_mcp: `http://${mcpHttpHost}:${mcpHttpPort}${mcpHttpPath}`,
       });
 
       // API key must be configured in .env file directly - never saved via GUI
       setActionMessage('MCP settings saved! MCP_API_KEY must be configured in .env file. Restart the MCP server for changes to take effect.');
-    } catch (error: any) {
-      setActionMessage(`Error saving MCP settings: ${error.message}`);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      setActionMessage(`Error saving MCP settings: ${message}`);
     } finally {
       setIsSaving(false);
-      setTimeout(() => setActionMessage(null), 5000); // Longer timeout for this message
+      setTimeout(() => setActionMessage(null), 5000);
     }
   }
 

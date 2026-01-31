@@ -4,9 +4,8 @@ import hashlib
 import math
 import re
 
-from server.models.tribrid_config_model import EmbeddingConfig
 from server.models.index import Chunk
-
+from server.models.tribrid_config_model import EmbeddingConfig
 
 _TOKEN_RE = re.compile(r"[a-zA-Z_][a-zA-Z0-9_]{1,63}")
 
@@ -21,8 +20,9 @@ class Embedder:
 
     def __init__(self, config: EmbeddingConfig):
         self.config = config
-        # Avoid gigantic vectors in dev/test even if config.embedding_dim is large.
-        self.dim = max(32, min(int(getattr(config, "embedding_dim", 256) or 256), 256))
+        # Deterministic embeddings must match the configured dimensionality so that
+        # Postgres pgvector storage and stats are consistent across the system.
+        self.dim = max(32, int(getattr(config, "embedding_dim", 256) or 256))
 
     def _embed_sync(self, text: str) -> list[float]:
         tokens = _TOKEN_RE.findall((text or "").lower())
@@ -46,4 +46,4 @@ class Embedder:
         if not chunks:
             return []
         embeddings = await self.embed_batch([c.content for c in chunks])
-        return [c.model_copy(update={"embedding": emb}) for c, emb in zip(chunks, embeddings)]
+        return [c.model_copy(update={"embedding": emb}) for c, emb in zip(chunks, embeddings, strict=True)]

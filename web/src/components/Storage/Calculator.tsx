@@ -1,7 +1,7 @@
 // Storage Calculator - Main Container Component
 // Coordinates between Calculator 1 (Full Requirements) and Calculator 2 (Optimization)
 
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { useStorageCalculator, useOptimizationCalculator } from '@/hooks/useStorageCalculator';
 import { CalculatorForm } from './CalculatorForm';
 import { ResultsDisplay } from './ResultsDisplay';
@@ -92,7 +92,7 @@ export function Calculator() {
             </h2>
             <CalculatorForm
               inputs={calc1.inputs}
-              onUpdate={calc1.updateInput}
+              onUpdate={(key, value) => calc1.updateInput(key as keyof typeof calc1.inputs, value)}
               mode="full"
             />
           </div>
@@ -129,7 +129,7 @@ export function Calculator() {
             </h2>
             <CalculatorForm
               inputs={calc2.inputs}
-              onUpdate={calc2.updateInput}
+              onUpdate={(key, value) => calc2.updateInput(key as keyof typeof calc2.inputs, value)}
               mode="optimize"
             />
           </div>

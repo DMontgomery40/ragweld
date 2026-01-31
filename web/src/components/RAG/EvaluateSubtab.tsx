@@ -1,61 +1,24 @@
 // React implementation of EvaluateSubtab - NO legacy JS modules
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { useAPI } from '@/hooks';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { useAPI, useConfigField } from '@/hooks';
 import { EvalDrillDown } from '@/components/Evaluation/EvalDrillDown';
 import { LiveTerminal, LiveTerminalHandle } from '@/components/LiveTerminal/LiveTerminal';
 import { TerminalService } from '@/services/TerminalService';
-// Recommended golden questions for AGRO codebase
-const RECOMMENDED_GOLDEN = [
-  { q: 'Where is hybrid retrieval implemented?', repo: 'agro', expect_paths: ['retrieval/hybrid_search.py'] },
-  { q: 'Where is keyword generation handled server-side?', repo: 'agro', expect_paths: ['server/app.py','keywords/generate'] },
-  { q: 'Where is the metadata enrichment logic for code/keywords?', repo: 'agro', expect_paths: ['metadata_enricher.py'] },
-  { q: 'Where is the indexing pipeline (BM25 and dense) implemented?', repo: 'agro', expect_paths: ['indexer/index_repo.py'] },
-  { q: 'Where is comprehensive index status computed?', repo: 'agro', expect_paths: ['server/app.py','server/index_stats.py','index/status'] },
-  { q: 'Where are semantic cards built or listed?', repo: 'agro', expect_paths: ['server/app.py','api/cards','indexer/build_cards.py'] },
-  { q: 'Where are golden questions API routes defined?', repo: 'agro', expect_paths: ['server/app.py','api/golden'] },
-  { q: 'Where is the endpoint to test a single golden question?', repo: 'agro', expect_paths: ['server/app.py','api/golden/test'] },
-  { q: 'Where are GUI assets mounted and served?', repo: 'agro', expect_paths: ['server/app.py','/gui','gui/index.html'] },
-  { q: 'Where is repository configuration (repos.json) loaded?', repo: 'agro', expect_paths: ['config_loader.py'] },
-  { q: 'Where are MCP stdio tools implemented (rag_answer, rag_search)?', repo: 'agro', expect_paths: ['server/mcp/server.py'] },
-  { q: 'Where can I list or fetch latest LangGraph traces?', repo: 'agro', expect_paths: ['server/app.py','api/traces'] }
+import type { EvalDatasetItem, EvalResult, EvalRun, EvalRunMeta, EvalRunsResponse, EvalTestRequest } from '@/types/generated';
+
+// Recommended eval_dataset entries for the TriBridRAG codebase
+const RECOMMENDED_EVAL_DATASET: Array<Pick<EvalDatasetItem, 'question' | 'expected_paths'>> = [
+  { question: 'Where are chunk summaries API endpoints implemented?', expected_paths: ['server/api/chunk_summaries.py'] },
+  { question: 'Where is keyword generation implemented?', expected_paths: ['server/api/keywords.py'] },
+  { question: 'Where are eval_dataset CRUD endpoints implemented?', expected_paths: ['server/api/dataset.py'] },
+  { question: 'Where are eval run endpoints implemented?', expected_paths: ['server/api/eval.py'] },
+  { question: 'Where is config persistence implemented?', expected_paths: ['server/api/config.py', 'server/services/config_store.py'] },
 ];
-
-interface GoldenQuestion {
-  q: string;
-  repo: string;
-  expect_paths: string[];
-}
-
-interface TestResult {
-  top1_hit: boolean;
-  topk_hit: boolean;
-  all_results?: Array<{
-    file_path: string;
-    start_line: number;
-    rerank_score: number;
-  }>;
-}
-
-interface EvalResults {
-  top1_accuracy: number;
-  topk_accuracy: number;
-  mrr?: number;
-  duration_secs: number;
-  results?: Array<{
-    question: string;
-    repo: string;
-    expect_paths: string[];
-    top1_hit: boolean;
-    topk_hit: boolean;
-    top_paths: string[];
-    reciprocal_rank?: number;
-  }>;
-}
 
 /**
  * ---agentspec
  * what: |
- *   React component for evaluation subtab. Manages golden questions, runs test suite, tracks progress, displays results.
+ *   React component for evaluation subtab. Manages eval entries, runs test suite, tracks progress, displays results.
  *
  * why: |
  *   Centralizes eval UI state and API calls in single component for cohesion.
@@ -67,22 +30,25 @@ interface EvalResults {
  */
 export function EvaluateSubtab() {
   const { api } = useAPI();
-  const [goldenQuestions, setGoldenQuestions] = useState<GoldenQuestion[]>([]);
-  const [newQuestion, setNewQuestion] = useState({ q: '', repo: 'agro', paths: '' });
-  const [testResults, setTestResults] = useState<{ [key: number]: TestResult }>({});
+  const [corpusId, setCorpusId] = useState<string>(() => {
+    return (
+      localStorage.getItem('tribrid_active_corpus') ||
+      localStorage.getItem('tribrid_active_repo') ||
+      'tribrid'
+    );
+  });
+  const [evalDataset, setEvalDataset] = useState<EvalDatasetItem[]>([]);
+  const [newEntry, setNewEntry] = useState({ question: '', paths: '', tags: '' });
+  const [testResults, setTestResults] = useState<Record<string, EvalResult>>({});
   const [evalRunning, setEvalRunning] = useState(false);
   const [evalProgress, setEvalProgress] = useState({ current: 0, total: 0, status: '' });
-  const [evalResults, setEvalResults] = useState<EvalResults | null>(null);
+  const [evalResults, setEvalResults] = useState<EvalRun | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [evalSettings, setEvalSettings] = useState({
-    useMulti: true,
-    finalK: 5,
-    sampleSize: '',
-    goldenPath: 'data/golden.json',
-    baselinePath: 'data/evals/eval_baseline.json'
-  });
-  const [availableRuns, setAvailableRuns] = useState<Array<{run_id: string, top1_accuracy: number, topk_accuracy: number, mrr?: number}>>([]);
+  const [evalMulti, setEvalMulti] = useConfigField<number>('retrieval.eval_multi', 1);
+  const [evalFinalK, setEvalFinalK] = useConfigField<number>('retrieval.eval_final_k', 5);
+  const [sampleSize, setSampleSize] = useState<string>(() => localStorage.getItem('eval_sampleSize') || '');
+  const [availableRuns, setAvailableRuns] = useState<EvalRunMeta[]>([]);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [compareRunId, setCompareRunId] = useState<string | null>(null);
   const [latestRunId, setLatestRunId] = useState<string | null>(null);
@@ -191,45 +157,33 @@ export function EvaluateSubtab() {
     return res.json();
   }, [api]);
 
-  // Load config and golden questions on mount
+  // Keep active corpus scoped across config + API helpers
   useEffect(() => {
-    loadConfig();
-    loadGoldenQuestions();
-  }, []);
-
-  // Load eval settings from backend config
-  /**
-   * ---agentspec
-   * what: |
-   *   Fetches config from /api/config endpoint. Extracts env vars, sets goldenPath to GOLDEN_PATH or defaults to 'data/golden.json'.
-   *
-   * why: |
-   *   Centralizes config loading at app startup; avoids hardcoding paths.
-   *
-   * guardrails:
-   *   - DO NOT assume /api/config always returns env object; add fallback
-   *   - NOTE: No error handling; fetch failures will silently fail
-   * ---/agentspec
-   */
-  const loadConfig = async () => {
-    try {
-      const response = await fetch('/api/config');
-      const data = await response.json();
-      const env = data.env || {};
-
-      setEvalSettings(prev => ({
-        ...prev,
-        goldenPath: env.GOLDEN_PATH || 'data/golden.json',
-        baselinePath: env.BASELINE_PATH || 'data/evals/eval_baseline.json',
-        // Load user preferences from localStorage
-        useMulti: localStorage.getItem('eval_useMulti') === 'false' ? false : true,
-        finalK: parseInt(localStorage.getItem('eval_finalK') || '5', 10),
-        sampleSize: localStorage.getItem('eval_sampleSize') || ''
-      }));
-    } catch (error) {
-      console.error('Failed to load eval config:', error);
+    const next = corpusId.trim();
+    if (!next) return;
+    const prev =
+      localStorage.getItem('tribrid_active_corpus') || localStorage.getItem('tribrid_active_repo') || '';
+    if (prev !== next) {
+      localStorage.setItem('tribrid_active_corpus', next);
+      // Legacy key (kept for any older code paths)
+      localStorage.setItem('tribrid_active_repo', next);
     }
-  };
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.set('corpus', next);
+      url.searchParams.delete('repo');
+      window.history.replaceState({}, '', url.toString());
+    } catch {
+      // ignore
+    }
+    window.dispatchEvent(new CustomEvent('tribrid-corpus-changed', { detail: { corpus: next, repo: next } }));
+    // Legacy event name (kept for any older listeners)
+    window.dispatchEvent(new CustomEvent('agro-repo-changed', { detail: { repo: next } }));
+  }, [corpusId]);
+
+  useEffect(() => {
+    localStorage.setItem('eval_sampleSize', sampleSize);
+  }, [sampleSize]);
 
   // Load available eval runs on mount
   useEffect(() => {
@@ -248,7 +202,9 @@ export function EvaluateSubtab() {
      */
     const loadRuns = async () => {
       try {
-        const data = await fetchJson('eval/runs');
+        const rid = corpusId.trim();
+        if (!rid) return;
+        const data: EvalRunsResponse = await fetchJson(`eval/runs?corpus_id=${encodeURIComponent(rid)}`);
         if (data.ok && data.runs) {
           setAvailableRuns(data.runs);
           // Auto-select most recent run if available
@@ -265,34 +221,27 @@ export function EvaluateSubtab() {
       }
     };
     loadRuns();
-  }, [fetchJson, selectedRunId]);
+  }, [fetchJson, selectedRunId, corpusId]);
 
-  /**
-   * ---agentspec
-   * what: |
-   *   Fetches golden questions from 'golden' endpoint. Sets state: questions array, loading flag, error message.
-   *
-   * why: |
-   *   Centralizes async data load with error handling and loading state for UI feedback.
-   *
-   * guardrails:
-   *   - DO NOT retry on failure; let caller handle retry logic
-   *   - NOTE: Clears error only on success; preserves error state on fetch failure
-   * ---/agentspec
-   */
-  const loadGoldenQuestions = async () => {
+  const loadEvalDataset = useCallback(async () => {
+    const rid = corpusId.trim();
+    if (!rid) return;
     try {
       setLoading(true);
-      const response = await fetchJson('golden');
-      setGoldenQuestions(response.questions || []);
+      const entries: EvalDatasetItem[] = await fetchJson(`dataset?corpus_id=${encodeURIComponent(rid)}`);
+      setEvalDataset(entries);
       setError(null);
     } catch (err) {
-      setError(`Failed to load golden questions: ${err}`);
-      console.error('Failed to load golden questions:', err);
+      setError(`Failed to load eval dataset: ${err}`);
+      console.error('Failed to load eval dataset:', err);
     } finally {
       setLoading(false);
     }
-  };
+  }, [corpusId, fetchJson]);
+
+  useEffect(() => {
+    void loadEvalDataset();
+  }, [loadEvalDataset]);
 
   /**
    * ---agentspec
@@ -308,47 +257,46 @@ export function EvaluateSubtab() {
    *   - ASK USER: What happens on backend failure? (retry, toast, state rollback?)
    * ---/agentspec
    */
-  const addGoldenQuestion = async () => {
-    if (!newQuestion.q.trim()) {
+  const addEvalDatasetEntry = async () => {
+    const rid = corpusId.trim();
+    if (!rid) {
+      alert('Please enter a corpus ID');
+      return;
+    }
+    if (!newEntry.question.trim()) {
       alert('Please enter a question');
       return;
     }
 
-    /**
-     * ---agentspec
-     * what: |
-     *   Parses comma-separated paths from newQuestion.paths, trims whitespace, filters empty strings. POSTs to 'golden' endpoint with query, repo, and expect_paths array.
-     *
-     * why: |
-     *   Normalizes user input (paths) before API submission to ensure clean, validated array format.
-     *
-     * guardrails:
-     *   - DO NOT assume fetchJson succeeds; add error handling for network/API failures
-     *   - NOTE: Empty strings filtered; silent skip may hide malformed input
-     * ---/agentspec
-     */
-    const expect_paths = newQuestion.paths.split(',').map(p => p.trim()).filter(p => p);
+    const expected_paths = newEntry.paths
+      .split(/[\n,]+/)
+      .map((p) => p.trim())
+      .filter(Boolean);
+    const tags = newEntry.tags
+      .split(/[,]+/)
+      .map((t) => t.trim())
+      .filter(Boolean);
 
     try {
-      await fetchJson('golden', {
+      await fetchJson(`dataset?corpus_id=${encodeURIComponent(rid)}`, {
         method: 'POST',
         body: JSON.stringify({
-          q: newQuestion.q,
-          repo: newQuestion.repo,
-          expect_paths
-        })
+          question: newEntry.question,
+          expected_paths,
+          tags,
+        } satisfies Partial<EvalDatasetItem>),
       });
-      setNewQuestion({ q: '', repo: 'agro', paths: '' });
-      await loadGoldenQuestions();
+      setNewEntry({ question: '', paths: '', tags: '' });
+      await loadEvalDataset();
     } catch (err) {
-      alert(`Failed to add question: ${err}`);
+      alert(`Failed to add entry: ${err}`);
     }
   };
 
   /**
    * ---agentspec
    * what: |
-   *   Tests golden question at index against /golden/test endpoint. POSTs question, repo, expected paths; returns JSON result.
+   *   Tests eval entry at index against /golden/test endpoint. POSTs question, repo, expected paths; returns JSON result.
    *
    * why: |
    *   Validates agent responses against known-good outputs for regression detection.
@@ -358,20 +306,24 @@ export function EvaluateSubtab() {
    *   - NOTE: expect_paths must match actual file structure or test fails silently
    * ---/agentspec
    */
-  const testQuestion = async (index: number) => {
-    const q = goldenQuestions[index];
+  const testEntry = async (index: number) => {
+    const rid = corpusId.trim();
+    const entry = evalDataset[index];
+    if (!rid || !entry) return;
     try {
-      const result = await fetchJson('golden/test', {
+      const payload: EvalTestRequest = {
+        corpus_id: rid,
+        question: entry.question,
+        expected_paths: entry.expected_paths,
+        use_multi: Boolean(evalMulti),
+        final_k: evalFinalK,
+      };
+      const result: EvalResult = await fetchJson('eval/test', {
         method: 'POST',
-        body: JSON.stringify({
-          q: q.q,
-          repo: q.repo,
-          expect_paths: q.expect_paths,
-          final_k: 5,
-          use_multi: true
-        })
+        body: JSON.stringify(payload),
       });
-      setTestResults(prev => ({ ...prev, [index]: result }));
+      const key = entry.entry_id || String(index);
+      setTestResults((prev) => ({ ...prev, [key]: result }));
     } catch (err) {
       console.error('Test failed:', err);
       alert(`Test failed: ${err}`);
@@ -381,7 +333,7 @@ export function EvaluateSubtab() {
   /**
    * ---agentspec
    * what: |
-   *   Deletes a golden question by index via DELETE request. Confirms user intent, then reloads list.
+   *   Deletes a eval entry by index via DELETE request. Confirms user intent, then reloads list.
    *
    * why: |
    *   Confirmation prevents accidental deletions; reload ensures UI stays in sync with backend state.
@@ -391,12 +343,18 @@ export function EvaluateSubtab() {
    *   - NOTE: Silently fails if loadGoldenQuestions() throws; add error recovery
    * ---/agentspec
    */
-  const deleteQuestion = async (index: number) => {
-    if (!confirm('Delete this question?')) return;
+  const deleteEntry = async (index: number) => {
+    const rid = corpusId.trim();
+    const entry = evalDataset[index];
+    if (!rid || !entry?.entry_id) return;
+    if (!confirm('Delete this eval dataset entry?')) return;
 
     try {
-      await fetchJson(`golden/${index}`, { method: 'DELETE' });
-      await loadGoldenQuestions();
+      await fetchJson(
+        `dataset/${encodeURIComponent(entry.entry_id)}?corpus_id=${encodeURIComponent(rid)}`,
+        { method: 'DELETE' }
+      );
+      await loadEvalDataset();
     } catch (err) {
       alert(`Failed to delete: ${err}`);
     }
@@ -405,10 +363,10 @@ export function EvaluateSubtab() {
   /**
    * ---agentspec
    * what: |
-   *   Loads recommended questions from RECOMMENDED_GOLDEN array via POST to 'golden' endpoint. Tracks successful additions; silently skips failures per question.
+   *   Loads recommended questions from RECOMMENDED_ENTRIES array via POST to 'golden' endpoint. Tracks successful additions; silently skips failures per question.
    *
    * why: |
-   *   Batch seeding of golden questions with graceful per-item error handling to avoid total failure on single bad record.
+   *   Batch seeding of eval entries with graceful per-item error handling to avoid total failure on single bad record.
    *
    * guardrails:
    *   - DO NOT throw on individual POST failures; continue loop
@@ -418,20 +376,25 @@ export function EvaluateSubtab() {
    */
   const loadRecommendedQuestions = async () => {
     try {
+      const rid = corpusId.trim();
+      if (!rid) {
+        alert('Please enter a corpus ID');
+        return;
+      }
       let added = 0;
-      for (const q of RECOMMENDED_GOLDEN) {
+      for (const q of RECOMMENDED_EVAL_DATASET) {
         try {
-          await fetchJson('golden', {
+          await fetchJson(`dataset?corpus_id=${encodeURIComponent(rid)}`, {
             method: 'POST',
-            body: JSON.stringify(q)
+            body: JSON.stringify(q satisfies Partial<EvalDatasetItem>)
           });
           added++;
         } catch (err) {
-          console.warn(`Failed to add question: ${q.q}`, err);
+          console.warn(`Failed to add entry: ${q.question}`, err);
         }
       }
-      await loadGoldenQuestions();
-      alert(`Loaded ${added} recommended questions`);
+      await loadEvalDataset();
+      alert(`Loaded ${added} recommended eval dataset entries`);
     } catch (err) {
       alert(`Failed to load recommended questions: ${err}`);
     }
@@ -440,50 +403,58 @@ export function EvaluateSubtab() {
   /**
    * ---agentspec
    * what: |
-   *   Executes evaluation suite against all golden questions. Updates progress state (current, total, status) and sets running flag.
+   *   Executes evaluation suite against all eval entries. Updates progress state (current, total, status) and sets running flag.
    *
    * why: |
    *   Centralizes test orchestration; guards against empty dataset before batch execution.
    *
    * guardrails:
-   *   - DO NOT run if goldenQuestions.length === 0; alert user instead
+   *   - DO NOT run if evalEntries.length === 0; alert user instead
    *   - NOTE: setEvalRunning(true) must precede async work to prevent duplicate runs
    * ---/agentspec
    */
   const runAllTests = async () => {
-    if (goldenQuestions.length === 0) {
+    const rid = corpusId.trim();
+    if (!rid) {
+      alert('Please enter a corpus ID');
+      return;
+    }
+    if (evalDataset.length === 0) {
       alert('No questions to test');
       return;
     }
 
     setEvalRunning(true);
-    setEvalProgress({ current: 0, total: goldenQuestions.length, status: 'Starting...' });
+    setEvalProgress({ current: 0, total: evalDataset.length, status: 'Starting...' });
 
     try {
       let top1 = 0, topk = 0;
 
-      for (let i = 0; i < goldenQuestions.length; i++) {
-        const q = goldenQuestions[i];
-        setEvalProgress(prev => ({ ...prev, current: i + 1, status: `Testing: ${q.q}` }));
+      for (let i = 0; i < evalDataset.length; i++) {
+        const entry = evalDataset[i];
+        setEvalProgress(prev => ({ ...prev, current: i + 1, status: `Testing: ${entry.question}` }));
 
-        const result = await fetchJson('golden/test', {
+        const payload: EvalTestRequest = {
+          corpus_id: rid,
+          question: entry.question,
+          expected_paths: entry.expected_paths,
+          use_multi: Boolean(evalMulti),
+          final_k: evalFinalK,
+        };
+
+        const result: EvalResult = await fetchJson('eval/test', {
           method: 'POST',
-          body: JSON.stringify({
-            q: q.q,
-            repo: q.repo,
-            expect_paths: q.expect_paths || [],
-            final_k: 5,
-            use_multi: true
-          })
+          body: JSON.stringify(payload)
         });
 
         if (result.top1_hit) top1++;
         if (result.topk_hit) topk++;
 
-        setTestResults(prev => ({ ...prev, [i]: result }));
+        const key = entry.entry_id || String(i);
+        setTestResults(prev => ({ ...prev, [key]: result }));
       }
 
-      const msg = `Tests complete: Top-1: ${top1}/${goldenQuestions.length}, Top-K: ${topk}/${goldenQuestions.length}`;
+      const msg = `Tests complete: Top-1: ${top1}/${evalDataset.length}, Top-K: ${topk}/${evalDataset.length}`;
       alert(msg);
       setEvalProgress(prev => ({ ...prev, status: msg }));
     } catch (err) {
@@ -508,20 +479,28 @@ export function EvaluateSubtab() {
    */
   const runFullEvaluation = async () => {
     if (evalRunning) return;
+    const rid = corpusId.trim();
+    if (!rid) {
+      alert('Please enter a corpus ID');
+      return;
+    }
 
     setEvalRunning(true);
     setEvalProgress({ current: 0, total: 100, status: 'Starting evaluation...' });
     setTerminalVisible(true);
     resetTerminal('RAG Evaluation Logs');
 
-    const sampleLimit = evalSettings.sampleSize ? parseInt(evalSettings.sampleSize, 10) : undefined;
+    const sampleLimit = sampleSize ? parseInt(sampleSize, 10) : undefined;
     appendTerminalLine('🧪 Starting full RAG evaluation...');
-    appendTerminalLine(`Settings: use_multi=${evalSettings.useMulti ? 'true' : 'false'}, final_k=${evalSettings.finalK}, sample_limit=${sampleLimit || 'all'}`);
+    appendTerminalLine(
+      `Settings: corpus_id=${rid}, use_multi=${Boolean(evalMulti) ? 'true' : 'false'}, final_k=${evalFinalK}, sample_limit=${sampleLimit || 'all'}`
+    );
 
     try {
       TerminalService.streamEvalRun('eval_terminal', {
-        use_multi: evalSettings.useMulti,
-        final_k: evalSettings.finalK,
+        corpus_id: rid,
+        use_multi: Boolean(evalMulti),
+        final_k: evalFinalK,
         sample_limit: sampleLimit,
         onLine: (line) => {
           appendTerminalLine(line);
@@ -541,10 +520,19 @@ export function EvaluateSubtab() {
         },
         onComplete: async () => {
           try {
-            const results = await fetchJson('eval/results');
+            const results: EvalRun = await fetchJson(`eval/results?corpus_id=${encodeURIComponent(rid)}`);
             setEvalResults(results);
-            if (results.run_id) {
-              setLatestRunId(results.run_id);
+            if (results.run_id) setLatestRunId(results.run_id);
+            // Refresh run list + auto-select latest
+            try {
+              const runs: EvalRunsResponse = await fetchJson(`eval/runs?corpus_id=${encodeURIComponent(rid)}`);
+              if (runs.ok) {
+                const list = runs.runs || [];
+                setAvailableRuns(list);
+                if (list.length > 0) setSelectedRunId(list[0].run_id);
+              }
+            } catch {
+              // ignore
             }
           } catch (err) {
             appendTerminalLine(`\x1b[31mError fetching results: ${err}\x1b[0m`);
@@ -565,7 +553,7 @@ export function EvaluateSubtab() {
   /**
    * ---agentspec
    * what: |
-   *   Exports goldenQuestions array as JSON file. Creates blob, generates download link, triggers browser download, cleans up object URL.
+   *   Exports evalEntries array as JSON file. Creates blob, generates download link, triggers browser download, cleans up object URL.
    *
    * why: |
    *   Standard browser file export pattern using Blob API and temporary anchor element.
@@ -575,37 +563,47 @@ export function EvaluateSubtab() {
    *   - NOTE: Filename hardcoded; consider parameterizing for reuse
    * ---/agentspec
    */
-  const exportQuestions = () => {
-    const dataStr = JSON.stringify(goldenQuestions, null, 2);
+  const exportDataset = () => {
+    const dataStr = JSON.stringify(evalDataset, null, 2);
     const blob = new Blob([dataStr], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'golden_questions_export.json';
+    a.download = 'eval_dataset_export.json';
     a.click();
     URL.revokeObjectURL(url);
   };
 
   return (
     <div style={{ padding: '20px' }}>
-      {/* Golden Questions Manager */}
+      {/* Eval dataset manager */}
       <div className="settings-section" style={{ borderLeft: '3px solid var(--link)', marginBottom: '24px' }}>
         <h3>
-          <span className="accent-blue">●</span> Golden Questions Manager
+          <span className="accent-blue">●</span> Eval Dataset Manager
         </h3>
         <p className="small">
-          Manage test questions for evaluating retrieval quality. Add, edit, test individual questions, or run full evaluation suite.
+          Manage eval_dataset entries for evaluating retrieval quality. Add, test individual entries, or run a full evaluation.
         </p>
 
         {/* Add New Question Form */}
         <div style={{ background: 'var(--card-bg)', border: '1px solid var(--line)', borderRadius: '6px', padding: '16px', marginBottom: '16px' }}>
-          <h4 style={{ fontSize: '13px', color: 'var(--accent)', marginBottom: '12px' }}>Add New Question</h4>
+          <h4 style={{ fontSize: '13px', color: 'var(--accent)', marginBottom: '12px' }}>Add New Entry</h4>
+
+          <div className="input-group" style={{ marginBottom: '12px' }}>
+            <label>Corpus ID</label>
+            <input
+              type="text"
+              value={corpusId}
+              onChange={(e) => setCorpusId(e.target.value)}
+              placeholder="e.g., tribrid"
+            />
+          </div>
 
           <div className="input-group" style={{ marginBottom: '12px' }}>
             <label>Question Text</label>
             <textarea
-              value={newQuestion.q}
-              onChange={e => setNewQuestion(prev => ({ ...prev, q: e.target.value }))}
+              value={newEntry.question}
+              onChange={(e) => setNewEntry((prev) => ({ ...prev, question: e.target.value }))}
               placeholder="e.g., Where is OAuth token validated?"
               style={{ minHeight: '60px', width: '100%' }}
             />
@@ -613,94 +611,103 @@ export function EvaluateSubtab() {
 
           <div className="input-row" style={{ marginBottom: '12px' }}>
             <div className="input-group">
-              <label>Corpus</label>
-              <select
-                value={newQuestion.repo}
-                onChange={e => setNewQuestion(prev => ({ ...prev, repo: e.target.value }))}
-              >
-                <option value="agro">agro</option>
-              </select>
+              <label>Tags (comma-separated)</label>
+              <input
+                type="text"
+                value={newEntry.tags}
+                onChange={(e) => setNewEntry((prev) => ({ ...prev, tags: e.target.value }))}
+                placeholder="e.g., retrieval, reranker"
+              />
             </div>
             <div className="input-group">
               <label>Expected Paths (comma-separated)</label>
               <input
                 type="text"
-                value={newQuestion.paths}
-                onChange={e => setNewQuestion(prev => ({ ...prev, paths: e.target.value }))}
-                placeholder="auth, oauth, token"
+                value={newEntry.paths}
+                onChange={(e) => setNewEntry((prev) => ({ ...prev, paths: e.target.value }))}
+                placeholder="e.g., server/api/eval.py, server/api/dataset.py"
               />
             </div>
           </div>
 
           <button
             className="small-button"
-            onClick={addGoldenQuestion}
+            onClick={addEvalDatasetEntry}
             style={{ background: 'var(--accent)', color: 'var(--accent-contrast)', border: 'none', width: '100%' }}
           >
-            Add Question
+            Add Entry
           </button>
         </div>
 
         {/* Questions List */}
         <div style={{ background: 'var(--code-bg)', border: '1px solid var(--line)', borderRadius: '6px', padding: '16px', maxHeight: '400px', overflowY: 'auto', marginBottom: '16px' }}>
           {loading ? (
-            <div style={{ textAlign: 'center', color: 'var(--fg-muted)' }}>Loading questions...</div>
+            <div style={{ textAlign: 'center', color: 'var(--fg-muted)' }}>Loading eval dataset...</div>
           ) : error ? (
             <div style={{ color: 'var(--err)' }}>{error}</div>
-          ) : goldenQuestions.length === 0 ? (
+          ) : evalDataset.length === 0 ? (
             <div style={{ textAlign: 'center', padding: '24px', color: 'var(--fg-muted)' }}>
-              No golden questions yet. Add one above!
+              No eval dataset entries yet. Add one above!
             </div>
           ) : (
-            goldenQuestions.map((q, index) => (
-              <div key={index} style={{ background: 'var(--card-bg)', border: '1px solid var(--line)', borderRadius: '4px', padding: '12px', marginBottom: '10px' }}>
+            evalDataset.map((entry, index) => {
+              const key = entry.entry_id || String(index);
+              const test = testResults[key];
+              return (
+              <div key={key} style={{ background: 'var(--card-bg)', border: '1px solid var(--line)', borderRadius: '4px', padding: '12px', marginBottom: '10px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: '8px' }}>
                   <div style={{ flex: 1 }}>
                     <div style={{ fontWeight: 600, color: 'var(--fg)', marginBottom: '4px', wordBreak: 'break-word' }}>
-                      {q.q}
+                      {entry.question}
                     </div>
                     <div style={{ fontSize: '11px', color: 'var(--fg-muted)' }}>
                       <span style={{ background: 'var(--bg-elev2)', padding: '2px 6px', borderRadius: '3px', marginRight: '6px' }}>
-                        {q.repo}
+                        {corpusId.trim() || 'corpus'}
                       </span>
-                      {(q.expect_paths || []).map(p => (
+                      {(entry.expected_paths || []).map(p => (
                         <span key={p} style={{ color: 'var(--accent)' }}>{p} </span>
                       ))}
+                      {(entry.tags || []).length > 0 && (
+                        <span style={{ marginLeft: '8px', color: 'var(--fg-muted)' }}>
+                          tags: {(entry.tags || []).join(', ')}
+                        </span>
+                      )}
                     </div>
                   </div>
                   <div style={{ display: 'flex', gap: '6px', marginLeft: '12px' }}>
                     <button
-                      onClick={() => testQuestion(index)}
+                      onClick={() => void testEntry(index)}
                       style={{ background: 'var(--bg-elev2)', color: 'var(--link)', border: '1px solid var(--link)', padding: '4px 8px', borderRadius: '3px', fontSize: '11px', cursor: 'pointer' }}
                     >
                       Test
                     </button>
                     <button
-                      onClick={() => deleteQuestion(index)}
+                      onClick={() => void deleteEntry(index)}
                       style={{ background: 'var(--bg-elev2)', color: 'var(--err)', border: '1px solid var(--err)', padding: '4px 8px', borderRadius: '3px', fontSize: '11px', cursor: 'pointer' }}
                     >
                       ✗
                     </button>
                   </div>
                 </div>
-                {testResults[index] && (
+                {test && (
                   <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px solid var(--line)', fontSize: '12px' }}>
-                    <span style={{ color: testResults[index].top1_hit ? 'var(--accent)' : 'var(--err)', fontWeight: 600 }}>
-                      {testResults[index].top1_hit ? '✓' : '✗'} Top-1
+                    <span style={{ color: test.top1_hit ? 'var(--accent)' : 'var(--err)', fontWeight: 600 }}>
+                      {test.top1_hit ? '✓' : '✗'} Top-1
                     </span>
-                    <span style={{ marginLeft: '12px', color: testResults[index].topk_hit ? 'var(--accent)' : 'var(--warn)', fontWeight: 600 }}>
-                      {testResults[index].topk_hit ? '✓' : '✗'} Top-K
+                    <span style={{ marginLeft: '12px', color: test.topk_hit ? 'var(--accent)' : 'var(--warn)', fontWeight: 600 }}>
+                      {test.topk_hit ? '✓' : '✗'} Top-K
                     </span>
                   </div>
                 )}
               </div>
-            ))
+            );
+            })
           )}
         </div>
 
         {/* Action Buttons */}
         <div className="action-buttons" style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-          <button onClick={loadGoldenQuestions} style={{ flex: 1 }}>
+          <button onClick={() => void loadEvalDataset()} style={{ flex: 1 }}>
             Refresh List
           </button>
           <button
@@ -711,13 +718,13 @@ export function EvaluateSubtab() {
           </button>
           <button
             onClick={runAllTests}
-            disabled={evalRunning || goldenQuestions.length === 0}
+            disabled={evalRunning || evalDataset.length === 0}
             style={{ flex: 1, background: 'var(--bg-elev2)', color: 'var(--link)', border: '1px solid var(--link)' }}
           >
             Run All Tests
           </button>
           <button
-            onClick={exportQuestions}
+            onClick={exportDataset}
             style={{ flex: 1, background: 'var(--bg-elev2)', color: 'var(--accent)' }}
           >
             Export JSON
@@ -758,12 +765,8 @@ export function EvaluateSubtab() {
           <div className="input-group">
             <label>Use Multi-Query</label>
             <select
-              value={evalSettings.useMulti ? '1' : '0'}
-              onChange={e => {
-                const newValue = e.target.value === '1';
-                setEvalSettings(prev => ({ ...prev, useMulti: newValue }));
-                localStorage.setItem('eval_useMulti', String(newValue));
-              }}
+              value={String(Boolean(evalMulti) ? 1 : 0)}
+              onChange={(e) => setEvalMulti(e.target.value === '1' ? 1 : 0)}
             >
               <option value="1">Yes</option>
               <option value="0">No</option>
@@ -773,12 +776,8 @@ export function EvaluateSubtab() {
             <label>Final K Results</label>
             <input
               type="number"
-              value={evalSettings.finalK}
-              onChange={e => {
-                const newValue = parseInt(e.target.value) || 5;
-                setEvalSettings(prev => ({ ...prev, finalK: newValue }));
-                localStorage.setItem('eval_finalK', String(newValue));
-              }}
+              value={evalFinalK}
+              onChange={(e) => setEvalFinalK(parseInt(e.target.value, 10) || 5)}
               min="1"
               max="20"
             />
@@ -786,12 +785,8 @@ export function EvaluateSubtab() {
           <div className="input-group">
             <label>Sample Size</label>
             <select
-              value={evalSettings.sampleSize}
-              onChange={e => {
-                const newValue = e.target.value;
-                setEvalSettings(prev => ({ ...prev, sampleSize: newValue }));
-                localStorage.setItem('eval_sampleSize', newValue);
-              }}
+              value={sampleSize}
+              onChange={(e) => setSampleSize(e.target.value)}
             >
               <option value="">Full (All Questions)</option>
               <option value="10">Quick (10 Questions)</option>
@@ -801,21 +796,15 @@ export function EvaluateSubtab() {
           </div>
         </div>
 
-        {/* Run Button - navigates to Eval Analysis tab with autorun */}
+        {/* Run Button */}
         <button
           className="action-buttons"
-          onClick={() => {
-            // Navigate to Eval Analysis tab with autorun param
-            window.location.hash = '#/eval-analysis?autorun=true';
-          }}
+          onClick={() => void runFullEvaluation()}
           disabled={evalRunning}
           style={{ width: '100%', background: 'var(--link)', color: 'var(--accent-contrast)', fontSize: '15px', padding: '14px' }}
         >
           🚀 Run Full Evaluation
         </button>
-        <p style={{ fontSize: '11px', color: 'var(--fg-muted)', textAlign: 'center', marginTop: '8px' }}>
-          Opens Eval Analysis tab with live terminal
-        </p>
 
         <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '8px' }}>
           <button
@@ -865,19 +854,19 @@ export function EvaluateSubtab() {
               <div style={{ background: 'var(--card-bg)', border: '1px solid var(--line)', borderRadius: '6px', padding: '12px', textAlign: 'center' }}>
                 <div style={{ fontSize: '11px', color: 'var(--fg-muted)', marginBottom: '4px' }}>Top-1 Accuracy</div>
                 <div style={{ fontSize: '24px', color: 'var(--accent)', fontWeight: 700 }}>
-                  {(evalResults.top1_accuracy * 100).toFixed(1)}%
+                  {(((evalResults.top1_accuracy ?? 0) * 100)).toFixed(1)}%
                 </div>
               </div>
               <div style={{ background: 'var(--card-bg)', border: '1px solid var(--line)', borderRadius: '6px', padding: '12px', textAlign: 'center' }}>
                 <div style={{ fontSize: '11px', color: 'var(--fg-muted)', marginBottom: '4px' }}>Top-K Accuracy</div>
                 <div style={{ fontSize: '24px', color: 'var(--accent)', fontWeight: 700 }}>
-                  {(evalResults.topk_accuracy * 100).toFixed(1)}%
+                  {(((evalResults.topk_accuracy ?? 0) * 100)).toFixed(1)}%
                 </div>
               </div>
               <div style={{ background: 'var(--card-bg)', border: '1px solid var(--line)', borderRadius: '6px', padding: '12px', textAlign: 'center' }}>
                 <div style={{ fontSize: '11px', color: 'var(--fg-muted)', marginBottom: '4px' }}>MRR</div>
                 <div style={{ fontSize: '24px', color: 'var(--warn)', fontWeight: 700 }}>
-                  {(evalResults.mrr ?? 0).toFixed(4)}
+                  {(evalResults.metrics?.mrr ?? 0).toFixed(4)}
                 </div>
               </div>
               <div style={{ background: 'var(--card-bg)', border: '1px solid var(--line)', borderRadius: '6px', padding: '12px', textAlign: 'center' }}>

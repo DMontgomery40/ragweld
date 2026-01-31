@@ -45,7 +45,7 @@ export const EvaluationTab: React.FC = () => {
           color: 'var(--fg-muted)',
           margin: 0
         }}>
-          Test and measure RAG retrieval performance with golden questions
+          Test and measure RAG retrieval performance with eval dataset
         </p>
       </div>
 

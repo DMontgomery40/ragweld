@@ -5,34 +5,36 @@ import { ApiKeyStatus } from '@/components/ui/ApiKeyStatus';
 import { useConfig, useConfigField } from '@/hooks';
 
 export function GeneralSubtab() {
-  const { loading: configLoading, saveNow } = useConfig();
+  const { config, loading: configLoading, saveConfig } = useConfig();
 
   // Theme & Appearance
-  const [themeMode, setThemeMode] = useConfigField<string>('THEME_MODE', 'auto');
+  const [themeMode, setThemeMode] = useConfigField<string>('ui.theme_mode', 'dark');
 
-  // Server Settings
-  const [agroEdition, setAgroEdition] = useConfigField<string>('AGRO_EDITION', '');
-  const [threadId, setThreadId] = useConfigField<string>('THREAD_ID', '');
-  const [host, setHost] = useConfigField<string>('HOST', '127.0.0.1');
-  const [port, setPort] = useConfigField<number>('PORT', 8012);
-  const [openBrowser, setOpenBrowser] = useConfigField<number>('OPEN_BROWSER', 1);
-  const [agroPath, setAgroPath] = useConfigField<string>('AGRO_PATH', '');
-  const [netlifyDomains, setNetlifyDomains] = useConfigField<string>('NETLIFY_DOMAINS', '');
-  const [chatStreamingEnabled, setChatStreamingEnabled] = useConfigField<number>('CHAT_STREAMING_ENABLED', 1);
+  // Legacy server/runtime fields (not part of TriBridConfig; retained as local UI only during migration)
+  const [agroEdition, setAgroEdition] = useState('');
+  const [threadId, setThreadId] = useState('');
+  const [host, setHost] = useState('127.0.0.1');
+  const [port, setPort] = useState(8012);
+  const [agroPath, setAgroPath] = useState('');
+  const [netlifyDomains, setNetlifyDomains] = useState('');
+
+  // UI settings (TriBridConfig.ui)
+  const [openBrowser, setOpenBrowser] = useConfigField<number>('ui.open_browser', 1);
+  const [chatStreamingEnabled, setChatStreamingEnabled] = useConfigField<number>('ui.chat_streaming_enabled', 1);
 
   // Tracing & Observability
-  const [tracingEnabled, setTracingEnabled] = useConfigField<number>('TRACING_ENABLED', 1);
-  const [traceSamplingRate, setTraceSamplingRate] = useConfigField<number>('TRACE_SAMPLING_RATE', 1.0);
-  const [prometheusPort, setPrometheusPort] = useConfigField<number>('PROMETHEUS_PORT', 9090);
-  const [metricsEnabled, setMetricsEnabled] = useConfigField<number>('METRICS_ENABLED', 1);
-  const [logLevel, setLogLevel] = useConfigField<string>('LOG_LEVEL', 'INFO');
-  const [alertWebhookTimeout, setAlertWebhookTimeout] = useConfigField<number>('ALERT_WEBHOOK_TIMEOUT', 5);
+  const [tracingEnabled, setTracingEnabled] = useConfigField<number>('tracing.tracing_enabled', 1);
+  const [traceSamplingRate, setTraceSamplingRate] = useConfigField<number>('tracing.trace_sampling_rate', 1.0);
+  const [prometheusPort, setPrometheusPort] = useConfigField<number>('tracing.prometheus_port', 9090);
+  const [metricsEnabled, setMetricsEnabled] = useConfigField<number>('tracing.metrics_enabled', 1);
+  const [logLevel, setLogLevel] = useConfigField<string>('tracing.log_level', 'INFO');
+  const [alertWebhookTimeout, setAlertWebhookTimeout] = useConfigField<number>('tracing.alert_webhook_timeout', 5);
 
   // Editor Settings
-  const [editorEnabled, setEditorEnabled] = useConfigField<number>('EDITOR_ENABLED', 1);
-  const [editorEmbedEnabled, setEditorEmbedEnabled] = useConfigField<number>('EDITOR_EMBED_ENABLED', 1);
-  const [editorPort, setEditorPort] = useConfigField<number>('EDITOR_PORT', 4440);
-  const [editorBind, setEditorBind] = useConfigField<string>('EDITOR_BIND', 'local');
+  const [editorEnabled, setEditorEnabled] = useConfigField<number>('ui.editor_enabled', 1);
+  const [editorEmbedEnabled, setEditorEmbedEnabled] = useConfigField<number>('ui.editor_embed_enabled', 1);
+  const [editorPort, setEditorPort] = useConfigField<number>('ui.editor_port', 4440);
+  const [editorBind, setEditorBind] = useConfigField<string>('ui.editor_bind', 'local');
 
   // Webhooks
   const [webhookEnabled, setWebhookEnabled] = useState(true);
@@ -75,32 +77,11 @@ export function GeneralSubtab() {
   }
 
   async function saveGeneralSettings() {
+    if (!config) return;
     try {
       setSaving(true);
       setActionMessage('Saving general settings...');
-      const envUpdate = {
-        THEME_MODE: themeMode,
-        AGRO_EDITION: agroEdition,
-        THREAD_ID: threadId,
-        HOST: host,
-        PORT: port,
-        OPEN_BROWSER: openBrowser,
-        AGRO_PATH: agroPath,
-        NETLIFY_DOMAINS: netlifyDomains,
-        CHAT_STREAMING_ENABLED: chatStreamingEnabled,
-        TRACING_ENABLED: tracingEnabled,
-        TRACE_SAMPLING_RATE: traceSamplingRate,
-        PROMETHEUS_PORT: prometheusPort,
-        METRICS_ENABLED: metricsEnabled,
-        LOG_LEVEL: logLevel,
-        ALERT_WEBHOOK_TIMEOUT: alertWebhookTimeout,
-        EDITOR_ENABLED: editorEnabled,
-        EDITOR_EMBED_ENABLED: editorEmbedEnabled,
-        EDITOR_PORT: editorPort,
-        EDITOR_BIND: editorBind,
-      };
-
-      await saveNow(envUpdate);
+      await saveConfig(config);
       setActionMessage('General settings saved successfully!');
     } catch (err) {
       console.error('Failed to save settings:', err);

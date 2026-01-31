@@ -200,6 +200,10 @@ export const LiveTerminal = forwardRef<LiveTerminalHandle, LiveTerminalProps>(({
   }, [show]);
 
 
+  if (!isVisible) {
+    return null;
+  }
+
   return (
     <div
       ref={terminalRef}

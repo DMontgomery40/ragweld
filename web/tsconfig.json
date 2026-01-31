@@ -6,6 +6,8 @@
     "module": "ESNext",
     "skipLibCheck": true,
     "jsx": "react-jsx",
+    "allowJs": true,
+    "checkJs": false,
     "moduleResolution": "bundler",
     "allowImportingTsExtensions": true,
     "resolveJsonModule": true,
@@ -15,6 +17,7 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
+    "types": ["vite/client"],
 
     /* Path aliases */
     "baseUrl": ".",

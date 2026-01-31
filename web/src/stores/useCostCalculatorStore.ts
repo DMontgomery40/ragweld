@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import type { TriBridConfig } from '@/types/generated';
 
 // Model types for cost calculation
 type ModelType = 'inference' | 'embedding' | 'rerank';
@@ -108,7 +109,7 @@ interface CostCalculatorStore {
   calculateCost: () => Promise<void>;
   loadProviders: () => Promise<void>;
   loadModelsForProvider: (type: ModelType, provider: string) => Promise<void>;
-  syncFromConfig: (config: { env?: Record<string, string> }) => void;
+  syncFromConfig: (config: TriBridConfig) => void;
   reset: () => void;
 }
 
@@ -368,32 +369,35 @@ export const useCostCalculatorStore = create<CostCalculatorStore>((set, get) => 
     }
   },
 
-  syncFromConfig: (config: { env?: Record<string, string> }) => {
-    if (!config?.env) return;
+  syncFromConfig: (config: TriBridConfig) => {
+    if (!config) return;
 
     const updates: Partial<CostCalculatorStore> = {};
 
-    // Sync inference model from GEN_MODEL
-    if (config.env.GEN_MODEL) {
-      updates.inferenceModel = config.env.GEN_MODEL;
+    // Sync inference model from generation config
+    if (config.generation?.gen_model) {
+      updates.inferenceModel = config.generation.gen_model;
       // Try to infer provider from model name
-      const genModel = config.env.GEN_MODEL.toLowerCase();
+      const genModel = config.generation.gen_model.toLowerCase();
       if (genModel.includes('gpt')) updates.inferenceProvider = 'openai';
       else if (genModel.includes('claude')) updates.inferenceProvider = 'anthropic';
       else if (genModel.includes('gemini')) updates.inferenceProvider = 'google';
     }
 
-    // Sync embedding model from EMBEDDING_MODEL
-    if (config.env.EMBEDDING_MODEL) {
-      updates.embeddingModel = config.env.EMBEDDING_MODEL;
+    // Sync embedding model from embedding config
+    if (config.embedding?.embedding_model) {
+      updates.embeddingModel = config.embedding.embedding_model;
+    }
+    if (config.embedding?.embedding_type) {
+      updates.embeddingProvider = config.embedding.embedding_type;
     }
 
-    // Sync rerank model from RERANKER_CLOUD_MODEL
-    if (config.env.RERANKER_CLOUD_MODEL) {
-      updates.rerankModel = config.env.RERANKER_CLOUD_MODEL;
+    // Sync rerank model from reranking config
+    if (config.reranking?.reranker_cloud_model) {
+      updates.rerankModel = config.reranking.reranker_cloud_model;
     }
-    if (config.env.RERANKER_CLOUD_PROVIDER) {
-      updates.rerankProvider = config.env.RERANKER_CLOUD_PROVIDER;
+    if (config.reranking?.reranker_cloud_provider) {
+      updates.rerankProvider = config.reranking.reranker_cloud_provider;
     }
 
     set(updates);

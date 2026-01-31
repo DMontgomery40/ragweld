@@ -8,9 +8,8 @@ from typing import Any, Protocol
 from pydantic_ai import Agent, RunContext
 from pydantic_ai.models.openai import OpenAIResponsesModel, OpenAIResponsesModelSettings
 
-from server.models.chat import Message
-from server.models.tribrid_config_model import FusionConfig, TriBridConfig
 from server.models.retrieval import ChunkMatch
+from server.models.tribrid_config_model import FusionConfig, TriBridConfig
 from server.services.conversation_store import Conversation
 
 
@@ -18,7 +17,15 @@ class FusionProtocol(Protocol):
     """Protocol for fusion retrieval service."""
 
     async def search(
-        self, repo_id: str, query: str, config: FusionConfig
+        self,
+        repo_id: str,
+        query: str,
+        config: FusionConfig,
+        *,
+        include_vector: bool = True,
+        include_sparse: bool = True,
+        include_graph: bool = True,
+        top_k: int | None = None,
     ) -> list[ChunkMatch]:
         ...
 
@@ -30,6 +37,10 @@ class RAGDeps:
     fusion: FusionProtocol
     config: TriBridConfig
     repo_id: str
+    include_vector: bool = True
+    include_sparse: bool = True
+    include_graph: bool = True
+    top_k: int | None = None
 
 
 def _format_chunks_for_context(chunks: list[ChunkMatch]) -> str:
@@ -78,13 +89,18 @@ When answering questions:
 - Provide code examples when helpful"""
 
 
-# Create the agent with OpenAI Responses API (GPT-5)
-_model = OpenAIResponsesModel("gpt-5")
+# -----------------------------------------------------------------------------
+# NOTE: Chat model + prompt are config-driven (TriBridConfig is the law).
+# We keep a default agent instance for compatibility, but all real request
+# execution builds an agent per request using the scoped config passed in.
+# -----------------------------------------------------------------------------
+_DEFAULT_CONFIG = TriBridConfig()
+_default_model = OpenAIResponsesModel(_DEFAULT_CONFIG.ui.chat_default_model)
 
 rag_agent: Agent[RAGDeps, str] = Agent(
-    _model,
+    _default_model,
     deps_type=RAGDeps,
-    system_prompt=_build_system_prompt("{repo_id}"),  # Placeholder, overridden at runtime
+    system_prompt=_DEFAULT_CONFIG.system_prompts.main_rag_chat,
 )
 
 
@@ -103,6 +119,10 @@ async def retrieve_context(ctx: RunContext[RAGDeps], query: str) -> str:
         ctx.deps.repo_id,
         query,
         ctx.deps.config.fusion,
+        include_vector=ctx.deps.include_vector,
+        include_sparse=ctx.deps.include_sparse,
+        include_graph=ctx.deps.include_graph,
+        top_k=ctx.deps.top_k,
     )
     return _format_chunks_for_context(chunks)
 
@@ -124,12 +144,35 @@ def _extract_sources(result: Any) -> list[ChunkMatch]:
     return []
 
 
+def _resolve_chat_model(config: TriBridConfig) -> OpenAIResponsesModel:
+    model_name = str(getattr(config.ui, "chat_default_model", "") or "").strip()
+    if not model_name:
+        model_name = str(TriBridConfig().ui.chat_default_model)
+    return OpenAIResponsesModel(model_name)
+
+
+def _resolve_model_settings(config: TriBridConfig, prev_response_id: str) -> OpenAIResponsesModelSettings:
+    # OpenAIResponsesModelSettings is a TypedDict in pydantic-ai.
+    return {
+        "openai_previous_response_id": prev_response_id,
+        "temperature": float(config.generation.gen_temperature),
+        "top_p": float(config.generation.gen_top_p),
+        "max_tokens": int(config.generation.gen_max_tokens),
+        "timeout": float(config.ui.chat_stream_timeout),
+    }
+
+
 async def generate_response(
     message: str,
     repo_id: str,
     conversation: Conversation,
     config: TriBridConfig,
     fusion: FusionProtocol,
+    *,
+    include_vector: bool = True,
+    include_sparse: bool = True,
+    include_graph: bool = True,
+    top_k: int | None = None,
 ) -> tuple[str, list[ChunkMatch], str | None]:
     """Run the RAG agent and return response with sources.
 
@@ -143,20 +186,29 @@ async def generate_response(
     Returns:
         Tuple of (response_text, sources, provider_response_id).
     """
-    deps = RAGDeps(fusion=fusion, config=config, repo_id=repo_id)
+    deps = RAGDeps(
+        fusion=fusion,
+        config=config,
+        repo_id=repo_id,
+        include_vector=include_vector,
+        include_sparse=include_sparse,
+        include_graph=include_graph,
+        top_k=top_k,
+    )
+    collected_sources: list[ChunkMatch] = []
+    seen_chunk_ids: set[str] = set()
 
     # Build model settings with previous response ID for conversation continuity
     # Use 'auto' if no previous response ID (for first message in conversation)
     prev_response_id: str = conversation.last_provider_response_id or "auto"
-    model_settings = OpenAIResponsesModelSettings(
-        openai_previous_response_id=prev_response_id,
-    )
+    model_settings = _resolve_model_settings(config, prev_response_id)
 
     # Create a fresh agent with the correct repo_id in system prompt
+    model = _resolve_chat_model(config)
     agent: Agent[RAGDeps, str] = Agent(
-        _model,
+        model,
         deps_type=RAGDeps,
-        system_prompt=_build_system_prompt(repo_id),
+        system_prompt=config.system_prompts.main_rag_chat,
     )
 
     # Register the tool on the fresh agent
@@ -167,7 +219,16 @@ async def generate_response(
             ctx.deps.repo_id,
             query,
             ctx.deps.config.fusion,
+            include_vector=ctx.deps.include_vector,
+            include_sparse=ctx.deps.include_sparse,
+            include_graph=ctx.deps.include_graph,
+            top_k=ctx.deps.top_k,
         )
+        for ch in chunks:
+            if ch.chunk_id in seen_chunk_ids:
+                continue
+            seen_chunk_ids.add(ch.chunk_id)
+            collected_sources.append(ch)
         return _format_chunks_for_context(chunks)
 
     # Run the agent (no message_history - use openai_previous_response_id for context)
@@ -186,8 +247,7 @@ async def generate_response(
         if hasattr(last_msg, "provider_response_id"):
             provider_id = getattr(last_msg, "provider_response_id", None)
 
-    sources = _extract_sources(result)
-    return result.output, sources, provider_id
+    return result.output, collected_sources, provider_id
 
 
 async def stream_response(
@@ -196,6 +256,11 @@ async def stream_response(
     conversation: Conversation,
     config: TriBridConfig,
     fusion: FusionProtocol,
+    *,
+    include_vector: bool = True,
+    include_sparse: bool = True,
+    include_graph: bool = True,
+    top_k: int | None = None,
 ) -> AsyncIterator[str]:
     """Stream the RAG agent response as SSE events.
 
@@ -209,13 +274,25 @@ async def stream_response(
     Yields:
         SSE-formatted event strings.
     """
-    deps = RAGDeps(fusion=fusion, config=config, repo_id=repo_id)
+    deps = RAGDeps(
+        fusion=fusion,
+        config=config,
+        repo_id=repo_id,
+        include_vector=include_vector,
+        include_sparse=include_sparse,
+        include_graph=include_graph,
+        top_k=top_k,
+    )
+    collected_sources: list[ChunkMatch] = []
+    seen_chunk_ids: set[str] = set()
+    accumulated_text = ""
 
-    # Create a fresh agent with the correct repo_id in system prompt
+    # Create a fresh agent with the correct system prompt + model
+    model = _resolve_chat_model(config)
     agent: Agent[RAGDeps, str] = Agent(
-        _model,
+        model,
         deps_type=RAGDeps,
-        system_prompt=_build_system_prompt(repo_id),
+        system_prompt=config.system_prompts.main_rag_chat,
     )
 
     # Register the tool on the fresh agent
@@ -226,14 +303,21 @@ async def stream_response(
             ctx.deps.repo_id,
             query,
             ctx.deps.config.fusion,
+            include_vector=ctx.deps.include_vector,
+            include_sparse=ctx.deps.include_sparse,
+            include_graph=ctx.deps.include_graph,
+            top_k=ctx.deps.top_k,
         )
+        for ch in chunks:
+            if ch.chunk_id in seen_chunk_ids:
+                continue
+            seen_chunk_ids.add(ch.chunk_id)
+            collected_sources.append(ch)
         return _format_chunks_for_context(chunks)
 
     # Build model settings with previous response ID
     prev_response_id: str = conversation.last_provider_response_id or "auto"
-    model_settings = OpenAIResponsesModelSettings(
-        openai_previous_response_id=prev_response_id,
-    )
+    model_settings = _resolve_model_settings(config, prev_response_id)
 
     try:
         async with agent.run_stream(
@@ -242,14 +326,36 @@ async def stream_response(
             model_settings=model_settings,
         ) as response:
             async for text in response.stream_text():
+                accumulated_text += text
                 event_data = json.dumps({"type": "text", "content": text})
                 yield f"data: {event_data}\n\n"
 
-            # Final event with sources (empty for now since we can't extract from stream)
-            done_data = json.dumps({
-                "type": "done",
-                "sources": [],
-            })
+            # Best-effort provider response ID for conversation continuity
+            provider_id: str | None = None
+            all_messages = response.all_messages()
+            if all_messages:
+                last_msg = all_messages[-1]
+                if hasattr(last_msg, "provider_response_id"):
+                    provider_id = getattr(last_msg, "provider_response_id", None)
+            if provider_id:
+                conversation.last_provider_response_id = provider_id
+
+            # Persist assistant message in conversation history
+            from server.models.chat import Message  # local import to avoid module import cycles
+            from server.services.conversation_store import get_conversation_store
+
+            store = get_conversation_store()
+            store.add_message(conversation.id, Message(role="assistant", content=accumulated_text), provider_id)
+
+            # Final event with sources + conversation_id
+            sources_json = [s.model_dump(mode="serialization", by_alias=True) for s in collected_sources]
+            done_data = json.dumps(
+                {
+                    "type": "done",
+                    "conversation_id": conversation.id,
+                    "sources": sources_json,
+                }
+            )
             yield f"data: {done_data}\n\n"
 
     except Exception as e:

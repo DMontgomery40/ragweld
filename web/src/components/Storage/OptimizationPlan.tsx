@@ -1,7 +1,7 @@
 // Storage Optimization Plan Comparison
 // Displays aggressive vs conservative storage strategies
 
-import React from 'react';
+
 import type { Calculator2Results } from '@web/types/storage';
 import { formatBytes } from '@web/utils/formatters';
 

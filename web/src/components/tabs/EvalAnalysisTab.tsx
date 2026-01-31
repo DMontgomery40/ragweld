@@ -40,9 +40,9 @@ export const EvalAnalysisTab: React.FC = () => {
 
   // Derive eval settings from config store - these mirror retrieval settings
   const evalSettings = {
-    useMulti: config?.env?.EVAL_MULTI !== 0,  // 0 = disabled, 1 = enabled (LLM query expansion)
-    finalK: config?.env?.EVAL_FINAL_K || 5,
-    multiM: config?.env?.EVAL_MULTI_M || 10,
+    useMulti: (config?.retrieval?.eval_multi ?? 1) !== 0, // 0 = disabled, 1 = enabled
+    finalK: config?.retrieval?.eval_final_k ?? 5,
+    multiM: config?.retrieval?.multi_query_m ?? 10,
     sampleSize: ''  // Per-run override, not persisted
   };
 
@@ -95,12 +95,22 @@ export const EvalAnalysisTab: React.FC = () => {
     resetTerminal('RAG Evaluation Logs');
 
     const sampleLimit = evalSettings.sampleSize ? parseInt(evalSettings.sampleSize, 10) : undefined;
+    const params = new URLSearchParams(window.location.search);
+    const corpusId =
+      params.get('corpus') ||
+      params.get('repo') ||
+      localStorage.getItem('tribrid_active_corpus') ||
+      localStorage.getItem('tribrid_active_repo') ||
+      'tribrid';
     appendTerminalLine('🧪 Starting full RAG evaluation...');
-    appendTerminalLine(`Settings: use_multi=${evalSettings.useMulti ? 'true' : 'false'}, final_k=${evalSettings.finalK}, sample_limit=${sampleLimit || 'all'}`);
+    appendTerminalLine(
+      `Settings: corpus_id=${corpusId}, use_multi=${evalSettings.useMulti ? 'true' : 'false'}, final_k=${evalSettings.finalK}, sample_limit=${sampleLimit || 'all'}`
+    );
 
     console.log('[EvalAnalysisTab] Calling TerminalService.streamEvalRun with settings:', evalSettings);
     try {
       TerminalService.streamEvalRun('eval_analysis_terminal', {
+        corpus_id: corpusId,
         use_multi: evalSettings.useMulti,
         final_k: evalSettings.finalK,
         sample_limit: sampleLimit,
@@ -124,7 +134,7 @@ export const EvalAnalysisTab: React.FC = () => {
           console.log('[EvalAnalysisTab] onComplete fired - refreshing runs list');
           try {
             // Refresh runs list to get new eval
-            const response = await fetch('/api/eval/runs', { cache: 'no-store' });
+            const response = await fetch(`/api/eval/runs?corpus_id=${encodeURIComponent(corpusId)}`, { cache: 'no-store' });
             if (response.ok) {
               const data = await response.json();
               console.log('[EvalAnalysisTab] Got runs response:', data);

@@ -32,7 +32,7 @@ SYSTEM_PROMPT = """You are writing documentation for TriBridRAG, a tri-brid RAG 
 - Sparse search (PostgreSQL Full-Text Search/BM25)
 - Graph search (Neo4j for entity relationships)
 
-WRITING STYLE: Technical, precise, thorough. First person where appropriate.
+WRITING STYLE: Technical, precise, thorough. Humorous where appropriate. 
 
 KEY ARCHITECTURE POINTS:
 1. THREE search legs fused together (hence "tri-brid")
@@ -139,6 +139,7 @@ You MUST use these components where appropriate:
   **MERMAID v11 RULES** (handDrawn style enabled sitewide):
   - Use \n for multi-line labels (NOT <br/> or HTML)
   - Add color classes with `:::className` for visual appeal
+  - Make them big and bold and colorful! And 3D!
   - Define classDef for custom colors (use hex colors)
   - Node shapes: [] rectangle, () rounded, {} diamond, (()) circle, [[ ]] subroutine
   - Edge types: --> solid, -.-> dotted, ==> thick
@@ -161,6 +162,43 @@ OUTPUT FORMAT:
 - Start with a level-1 heading (# Title)
 - Do not include YAML frontmatter
 - Do not wrap output in code blocks
+"""
+
+# =============================================================================
+# VALID_PAGES - Documentation structure for accurate cross-linking
+# =============================================================================
+
+VALID_PAGES = """
+DOCUMENTATION STRUCTURE - Only link to these pages:
+
+HOME:
+- index.md (the landing page)
+
+GETTING STARTED:
+- getting-started/quickstart.md
+- getting-started/installation.md
+
+FEATURES:
+- features/tribrid-search.md (covers tri-brid architecture, fusion, retrieval)
+- features/pgvector.md (vector search)
+- features/neo4j-graph.md (graph search)
+
+CONFIGURATION:
+- configuration/models.md (model configuration, models.json)
+- configuration/settings.md (all config settings, reranking, scoring)
+
+API:
+- api/endpoints.md (all API endpoints)
+
+OPERATIONS:
+- operations/monitoring.md (observability, metrics, health)
+- operations/troubleshooting.md
+
+LINKING RULES:
+1. From index.md, link to: ./getting-started/quickstart.md, ./features/tribrid-search.md, etc.
+2. From getting-started/*.md, link to: ./quickstart.md (same dir) or ../features/tribrid-search.md (other dir)
+3. DO NOT invent pages like ./configuration.md, ./retrieval.md, ./api.md - they don't exist
+4. Link to the specific file that covers the topic (e.g., for "reranking" link to ./configuration/settings.md)
 """
 
 # =============================================================================
@@ -451,6 +489,8 @@ class DocBootstrapper:
 
         user_prompt = f"""Generate documentation for: {page_config['title']}
 
+{VALID_PAGES}
+
 SOURCE FILES:
 {source_content}
 
@@ -473,21 +513,15 @@ INSTRUCTIONS:
 
         print(f"Generating: {page_key} -> {page_config['output_path']}")
 
-        # Use Chat Completions API (not legacy completions)
-        # GPT-5+ models use max_completion_tokens instead of max_tokens
-        token_param = "max_completion_tokens" if self.model.startswith("gpt-5") or self.model.startswith("gpt-6") else "max_tokens"
-        
-        response = self.client.chat.completions.create(
+        # Use the Responses API (newer than Chat Completions)
+        response = self.client.responses.create(
             model=self.model,
-            **{token_param: self.max_tokens},
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": user_prompt}
-            ],
-            temperature=0.3,  # Lower temperature for more consistent technical writing
+            instructions=SYSTEM_PROMPT,
+            input=user_prompt,
+            max_output_tokens=self.max_tokens,
         )
 
-        content = response.choices[0].message.content
+        content = response.output_text
 
         # Write to output file
         output_path = self.project_root / page_config["output_path"]

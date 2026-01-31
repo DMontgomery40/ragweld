@@ -428,7 +428,7 @@ export function GrafanaDashboard() {
           alignItems: 'center'
         }}>
           <span>Press ESC or click Exit Fullscreen to return</span>
-          <span>Dashboard: {config.dashboardId}</span>
+          <span>Dashboard: {config.dashboardUid}</span>
         </div>
       )}
 

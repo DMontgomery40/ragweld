@@ -130,7 +130,12 @@ export function DockerContainerCard({ container }: DockerContainerCardProps) {
 
       {container.ports && (
         <div style={{ fontSize: '10px', color: 'var(--link)', marginBottom: '8px' }}>
-          {container.ports}
+          {typeof container.ports === 'string'
+            ? container.ports
+            : container.ports.map((p: { PrivatePort: number; PublicPort?: number; Type: string }) =>
+                `${p.PublicPort ? `${p.PublicPort}:` : ''}${p.PrivatePort}/${p.Type}`
+              ).join(', ')
+          }
         </div>
       )}
 

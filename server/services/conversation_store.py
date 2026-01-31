@@ -1,8 +1,8 @@
 """In-memory conversation history with provider response ID tracking for OpenAI Responses API."""
 
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
 import uuid
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
 
 from server.models.chat import Message
 
@@ -14,8 +14,8 @@ class Conversation:
     id: str
     messages: list[Message] = field(default_factory=list)
     last_provider_response_id: str | None = None
-    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-    updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
 class ConversationStore:
@@ -69,7 +69,7 @@ class ConversationStore:
         conv.messages.append(message)
         if provider_response_id:
             conv.last_provider_response_id = provider_response_id
-        conv.updated_at = datetime.now(timezone.utc)
+        conv.updated_at = datetime.now(UTC)
 
     def get_messages(self, conversation_id: str) -> list[Message]:
         """Get all messages in a conversation.

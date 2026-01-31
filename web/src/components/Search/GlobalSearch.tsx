@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import { useGlobalSearch } from '@/hooks/useGlobalSearch';
 
 export function GlobalSearch() {
@@ -6,7 +6,7 @@ export function GlobalSearch() {
     isOpen,
     query,
     results,
-    selectedIndex,
+    cursor: selectedIndex,
     search,
     navigateToResult
   } = useGlobalSearch();
@@ -129,7 +129,7 @@ export function GlobalSearch() {
                   marginBottom: '4px',
                   color: 'var(--fg)'
                 }}>
-                  {highlightText(result.label || result.name, query)}
+                  {highlightText(result.label || result.name || '', query)}
                 </div>
                 <div style={{
                   fontSize: '12px',

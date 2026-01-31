@@ -13,7 +13,7 @@ export function useAppInit() {
   const [isInitialized, setIsInitialized] = useState(false);
   const [initError, setInitError] = useState<string | null>(null);
   const { loadRepos } = useRepoStore();
-  const { loadConfig, loadKeywords } = useConfigStore();
+  const { loadConfig } = useConfigStore();
   const { checkHealth } = useHealthStore();
 
   useEffect(() => {
@@ -25,15 +25,11 @@ export function useAppInit() {
         await Promise.all([
           // Load config via Zustand store
           loadConfig()
-            .catch(err => console.warn('Failed to load config:', err)),
+            .catch((err: unknown) => console.warn('Failed to load config:', err)),
 
           // Load repos via Zustand store
           loadRepos()
-            .catch(err => console.warn('Failed to load repos:', err)),
-
-          // Load keywords via Zustand store
-          loadKeywords()
-            .catch(err => console.warn('Failed to load keywords:', err)),
+            .catch((err: unknown) => console.warn('Failed to load repos:', err)),
 
           // Load models.json for cost estimation (still needed for legacy modules during transition)
           fetch(apiUrl('/models'))
@@ -44,7 +40,7 @@ export function useAppInit() {
                 (window as any).CoreUtils.state.models = models;
               }
             })
-            .catch(err => console.warn('Failed to load models:', err)),
+            .catch((err: unknown) => console.warn('Failed to load models:', err)),
 
           // Load profiles (still needed for legacy modules during transition)
           fetch(apiUrl('/profiles'))
@@ -56,7 +52,7 @@ export function useAppInit() {
                 (window as any).CoreUtils.state.defaultProfile = data.default || null;
               }
             })
-            .catch(err => console.warn('Failed to load profiles:', err)),
+            .catch((err: unknown) => console.warn('Failed to load profiles:', err)),
 
           // Load commit metadata if available (legacy module)
           (window as any).GitCommitMeta?.loadCommitMeta?.()
@@ -104,7 +100,7 @@ export function useAppInit() {
       // Give a moment for initial render
       setTimeout(init, 50);
     }
-  }, [loadConfig, loadRepos, loadKeywords, checkHealth]);
+  }, [loadConfig, loadRepos, checkHealth]);
 
   return { isInitialized, initError };
 }

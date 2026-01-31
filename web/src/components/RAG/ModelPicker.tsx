@@ -38,7 +38,7 @@ export function ModelPicker({
   allowCustom = false,
   disabled = false,
 }: ModelPickerProps) {
-  const { models, loading, error, getModelsForProvider } = useModels(componentType);
+  const { models: _models, loading, error, getModelsForProvider } = useModels(componentType);
   const [customMode, setCustomMode] = useState(false);
   const [customValue, setCustomValue] = useState('');
 

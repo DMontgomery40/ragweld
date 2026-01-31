@@ -1,4 +1,3 @@
-import React from 'react';
 import type { EditorSettings as EditorSettingsType, EditorTheme } from '../../hooks/useEditor';
 
 interface EditorSettingsProps {
@@ -142,7 +141,7 @@ export function EditorSettings({ settings, onUpdate, onReset }: EditorSettingsPr
           />
           <ToggleSetting
             label="Show Whitespace"
-            checked={settings.renderWhitespace}
+            checked={typeof settings.renderWhitespace === 'boolean' ? settings.renderWhitespace : settings.renderWhitespace !== 'none'}
             onChange={(checked) => onUpdate({ renderWhitespace: checked })}
           />
           <ToggleSetting

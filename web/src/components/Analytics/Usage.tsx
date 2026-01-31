@@ -157,7 +157,7 @@ export function Usage() {
         </div>
       </div>
 
-      <style jsx>{`
+      <style>{`
         .usage-container {
           padding: 24px;
           display: flex;

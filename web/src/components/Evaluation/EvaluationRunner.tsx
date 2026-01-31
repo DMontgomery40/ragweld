@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useEvaluation } from '@/hooks/useEvaluation';
 import { useUIHelpers } from '@/hooks/useUIHelpers';
-import { EvalResult, EvalComparisonResult } from '@/services/EvaluationService';
+import type { EvalResult, EvalComparisonResult } from '@/types/generated';
 
 interface EvaluationRunnerProps {
   className?: string;
@@ -10,14 +10,15 @@ interface EvaluationRunnerProps {
 export const EvaluationRunner: React.FC<EvaluationRunnerProps> = ({ className = '' }) => {
   const {
     isRunning,
+    currentRun,
     results,
     progress,
     progressText,
     runEval,
-    saveBaseline,
-    compareWithBaseline,
     exportResults,
-    clearResults
+    clearState,
+    listRuns,
+    compareRuns,
   } = useEvaluation();
 
   const { showToast } = useUIHelpers();
@@ -28,32 +29,40 @@ export const EvaluationRunner: React.FC<EvaluationRunnerProps> = ({ className = 
   const [showComparison, setShowComparison] = useState(false);
 
   const handleRunEval = async () => {
-    await runEval({ use_multi: useMulti, final_k: finalK });
-  };
-
-  const handleSaveBaseline = async () => {
-    const success = await saveBaseline();
-    if (success) {
-      showToast('Baseline saved successfully', 'success');
-    }
+    // Note: use_multi and final_k are controlled by server config, not passed as options
+    await runEval();
   };
 
   const handleCompare = async () => {
-    const result = await compareWithBaseline();
+    // Get the two most recent runs and compare them
+    const runs = await listRuns();
+    if (runs.length < 2) {
+      showToast('Need at least 2 runs to compare', 'error');
+      return;
+    }
+    const result = await compareRuns(runs[1].run_id, runs[0].run_id);
     if (result) {
       setComparison(result);
       setShowComparison(true);
     }
   };
 
-  const handleExport = () => {
-    exportResults();
+  const handleExport = async () => {
+    const exported = await exportResults('json');
+    // Create a blob and download
+    const blob = new Blob([exported], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `eval-results-${currentRun?.run_id ?? 'export'}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
     showToast('Results exported', 'success');
   };
 
-  // Calculate pass/fail counts
-  const failures = results?.results.filter(r => !r.topk_hit) || [];
-  const passes = results?.results.filter(r => r.topk_hit) || [];
+  // Calculate pass/fail counts from results array
+  const failures = results.filter((r: EvalResult) => !r.topk_hit);
+  const passes = results.filter((r: EvalResult) => r.topk_hit);
 
   return (
     <div className={`evaluation-runner ${className}`}>
@@ -154,27 +163,11 @@ export const EvaluationRunner: React.FC<EvaluationRunnerProps> = ({ className = 
               opacity: isRunning ? 0.7 : 1
             }}
           >
-            {isRunning ? progressText : 'Run Full Evaluation'}
+            {isRunning ? progressText || 'Running...' : 'Run Full Evaluation'}
           </button>
 
-          {results && !isRunning && (
+          {currentRun && !isRunning && (
             <>
-              <button
-                onClick={handleSaveBaseline}
-                style={{
-                  background: 'var(--link)',
-                  color: 'white',
-                  border: 'none',
-                  padding: '10px 16px',
-                  borderRadius: '4px',
-                  fontSize: '13px',
-                  fontWeight: 600,
-                  cursor: 'pointer'
-                }}
-              >
-                Save as Baseline
-              </button>
-
               <button
                 onClick={handleCompare}
                 style={{
@@ -188,7 +181,7 @@ export const EvaluationRunner: React.FC<EvaluationRunnerProps> = ({ className = 
                   cursor: 'pointer'
                 }}
               >
-                Compare with Baseline
+                Compare with Previous
               </button>
 
               <button
@@ -206,6 +199,21 @@ export const EvaluationRunner: React.FC<EvaluationRunnerProps> = ({ className = 
               >
                 Export Results
               </button>
+
+              <button
+                onClick={clearState}
+                style={{
+                  background: 'transparent',
+                  color: 'var(--fg-muted)',
+                  border: '1px solid var(--line)',
+                  padding: '10px 16px',
+                  borderRadius: '4px',
+                  fontSize: '13px',
+                  cursor: 'pointer'
+                }}
+              >
+                Clear
+              </button>
             </>
           )}
         </div>
@@ -221,7 +229,7 @@ export const EvaluationRunner: React.FC<EvaluationRunnerProps> = ({ className = 
           marginBottom: '20px'
         }}>
           <div style={{ fontSize: '13px', color: 'var(--fg-muted)', marginBottom: '8px' }}>
-            {progressText}
+            {progressText || 'Running evaluation...'}
           </div>
           <div style={{
             width: '100%',
@@ -241,7 +249,7 @@ export const EvaluationRunner: React.FC<EvaluationRunnerProps> = ({ className = 
       )}
 
       {/* Results Display */}
-      {results && !isRunning && (
+      {currentRun && !isRunning && (
         <div className="eval-results" style={{
           background: 'var(--card-bg)',
           border: '1px solid var(--line)',
@@ -273,7 +281,7 @@ export const EvaluationRunner: React.FC<EvaluationRunnerProps> = ({ className = 
                 Top-1 Accuracy
               </div>
               <div style={{ fontSize: '24px', fontWeight: 700, color: 'var(--accent)' }}>
-                {(results.top1_accuracy * 100).toFixed(1)}%
+                {((currentRun.top1_accuracy ?? 0) * 100).toFixed(1)}%
               </div>
             </div>
 
@@ -288,7 +296,7 @@ export const EvaluationRunner: React.FC<EvaluationRunnerProps> = ({ className = 
                 Top-K Accuracy
               </div>
               <div style={{ fontSize: '24px', fontWeight: 700, color: 'var(--link)' }}>
-                {(results.topk_accuracy * 100).toFixed(1)}%
+                {((currentRun.topk_accuracy ?? 0) * 100).toFixed(1)}%
               </div>
             </div>
 
@@ -303,7 +311,7 @@ export const EvaluationRunner: React.FC<EvaluationRunnerProps> = ({ className = 
                 Duration
               </div>
               <div style={{ fontSize: '24px', fontWeight: 700, color: 'var(--fg)' }}>
-                {results.duration_secs}s
+                {currentRun.duration_secs?.toFixed(1)}s
               </div>
             </div>
           </div>
@@ -320,7 +328,7 @@ export const EvaluationRunner: React.FC<EvaluationRunnerProps> = ({ className = 
               <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--err)', marginBottom: '8px' }}>
                 FAILURES
               </div>
-              {failures.map((result, idx) => (
+              {failures.map((result: EvalResult, idx: number) => (
                 <ResultCard key={idx} result={result} isFailure={true} />
               ))}
             </div>
@@ -340,7 +348,7 @@ export const EvaluationRunner: React.FC<EvaluationRunnerProps> = ({ className = 
                 PASSES ({passes.length})
               </summary>
               <div style={{ marginTop: '8px' }}>
-                {passes.map((result, idx) => (
+                {passes.map((result: EvalResult, idx: number) => (
                   <ResultCard key={idx} result={result} isFailure={false} />
                 ))}
               </div>
@@ -366,7 +374,7 @@ export const EvaluationRunner: React.FC<EvaluationRunnerProps> = ({ className = 
               letterSpacing: '0.5px',
               margin: 0
             }}>
-              Baseline Comparison
+              Run Comparison
             </h4>
             <button
               onClick={() => setShowComparison(false)}
@@ -385,20 +393,20 @@ export const EvaluationRunner: React.FC<EvaluationRunnerProps> = ({ className = 
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '16px' }}>
             <ComparisonCard
-              title="Top-1 Accuracy"
-              baseline={comparison.baseline.top1_accuracy}
-              current={comparison.current.top1_accuracy}
-              delta={comparison.delta.top1}
+              title="MRR Change"
+              baseline={comparison.baseline_metrics.mrr}
+              current={comparison.current_metrics.mrr}
+              delta={comparison.delta_mrr}
             />
             <ComparisonCard
-              title="Top-K Accuracy"
-              baseline={comparison.baseline.topk_accuracy}
-              current={comparison.current.topk_accuracy}
-              delta={comparison.delta.topk}
+              title="Recall@10 Change"
+              baseline={comparison.baseline_metrics.recall_at_10}
+              current={comparison.current_metrics.recall_at_10}
+              delta={comparison.delta_recall_at_10}
             />
           </div>
 
-          {comparison.regressions && comparison.regressions.length > 0 && (
+          {comparison.degraded_entries && comparison.degraded_entries.length > 0 && (
             <div style={{
               background: 'color-mix(in oklch, var(--err) 8%, var(--bg))',
               border: '1px solid var(--err)',
@@ -407,25 +415,17 @@ export const EvaluationRunner: React.FC<EvaluationRunnerProps> = ({ className = 
               marginBottom: '12px'
             }}>
               <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--err)', marginBottom: '8px' }}>
-                ⚠ REGRESSIONS ({comparison.regressions.length})
+                ⚠ DEGRADED ENTRIES ({comparison.degraded_entries.length})
               </div>
-              {comparison.regressions.map((r, idx) => (
+              {comparison.degraded_entries.map((entryId: string, idx: number) => (
                 <div key={idx} style={{ fontSize: '11px', color: 'var(--err)', opacity: 0.85, marginBottom: '4px' }}>
-                  <span style={{
-                    background: 'var(--bg-elev2)',
-                    padding: '2px 6px',
-                    borderRadius: '2px',
-                    marginRight: '6px'
-                  }}>
-                    {r.repo}
-                  </span>
-                  {r.question}
+                  {entryId}
                 </div>
               ))}
             </div>
           )}
 
-          {comparison.improvements && comparison.improvements.length > 0 && (
+          {comparison.improved_entries && comparison.improved_entries.length > 0 && (
             <div style={{
               background: 'color-mix(in oklch, var(--ok) 8%, var(--bg))',
               border: '1px solid var(--ok)',
@@ -433,25 +433,17 @@ export const EvaluationRunner: React.FC<EvaluationRunnerProps> = ({ className = 
               padding: '12px'
             }}>
               <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--ok)', marginBottom: '8px' }}>
-                ✓ IMPROVEMENTS ({comparison.improvements.length})
+                ✓ IMPROVED ENTRIES ({comparison.improved_entries.length})
               </div>
-              {comparison.improvements.map((r, idx) => (
+              {comparison.improved_entries.map((entryId: string, idx: number) => (
                 <div key={idx} style={{ fontSize: '11px', color: 'var(--ok)', opacity: 0.85, marginBottom: '4px' }}>
-                  <span style={{
-                    background: 'var(--bg-elev2)',
-                    padding: '2px 6px',
-                    borderRadius: '2px',
-                    marginRight: '6px'
-                  }}>
-                    {r.repo}
-                  </span>
-                  {r.question}
+                  {entryId}
                 </div>
               ))}
             </div>
           )}
 
-          {!comparison.has_regressions && (
+          {(!comparison.degraded_entries || comparison.degraded_entries.length === 0) && (
             <div style={{
               background: 'color-mix(in oklch, var(--ok) 8%, var(--bg))',
               border: '1px solid var(--ok)',
@@ -461,7 +453,7 @@ export const EvaluationRunner: React.FC<EvaluationRunnerProps> = ({ className = 
               color: 'var(--ok)',
               fontWeight: 600
             }}>
-              ✓ No significant regressions detected
+              ✓ No degraded entries detected
             </div>
           )}
         </div>
@@ -493,12 +485,12 @@ const ResultCard: React.FC<{ result: EvalResult; isFailure: boolean }> = ({ resu
             padding: '2px 6px',
             borderRadius: '3px'
           }}>
-            {result.repo}
+            {result.entry_id}
           </span>
         </div>
       </div>
       <div style={{ fontSize: '11px', color: 'var(--fg-muted)', marginBottom: '4px' }}>
-        <strong>Expected:</strong> {result.expect_paths.join(', ')}
+        <strong>Expected:</strong> {result.expected_paths.join(', ')}
       </div>
       <div style={{ fontSize: '11px' }}>
         <span style={{ color: top1Color, fontWeight: 600 }}>
@@ -508,22 +500,24 @@ const ResultCard: React.FC<{ result: EvalResult; isFailure: boolean }> = ({ resu
           {result.topk_hit ? '✓' : '✗'} Top-K
         </span>
       </div>
-      <div style={{
-        marginTop: '6px',
-        fontSize: '10px',
-        fontFamily: "'SF Mono', monospace",
-        color: 'var(--fg-muted)'
-      }}>
-        {result.top_paths.slice(0, 3).map((path, i) => {
-          const match = result.expect_paths.some(exp => path.includes(exp));
-          const color = match ? 'var(--ok)' : 'var(--fg-muted)';
-          return (
-            <div key={i} style={{ color }}>
-              {i + 1}. {path}
-            </div>
-          );
-        })}
-      </div>
+      {result.top_paths && result.top_paths.length > 0 && (
+        <div style={{
+          marginTop: '6px',
+          fontSize: '10px',
+          fontFamily: "'SF Mono', monospace",
+          color: 'var(--fg-muted)'
+        }}>
+          {result.top_paths.slice(0, 3).map((path: string, i: number) => {
+            const match = result.expected_paths.some((exp: string) => path.includes(exp));
+            const color = match ? 'var(--ok)' : 'var(--fg-muted)';
+            return (
+              <div key={i} style={{ color }}>
+                {i + 1}. {path}
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 };

@@ -1,7 +1,23 @@
-from server.api import chat, config, cost, dataset, docker, eval, graph, health, index, reranker, repos, search
+from server.api import (
+    chat,
+    chunk_summaries,
+    config,
+    cost,
+    dataset,
+    docker,
+    eval,
+    graph,
+    health,
+    index,
+    keywords,
+    repos,
+    reranker,
+    search,
+)
 
 __all__ = [
     "chat",
+    "chunk_summaries",
     "config",
     "cost",
     "dataset",
@@ -10,6 +26,7 @@ __all__ = [
     "graph",
     "health",
     "index",
+    "keywords",
     "reranker",
     "repos",
     "search",

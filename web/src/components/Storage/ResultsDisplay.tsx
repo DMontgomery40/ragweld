@@ -1,7 +1,7 @@
 // Storage Calculator Results Display
 // Shows calculated storage requirements with formatted bytes
 
-import React from 'react';
+
 import type { StorageResults } from '@web/types/storage';
 import { formatBytes, formatNumber } from '@web/utils/formatters';
 

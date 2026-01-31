@@ -3,27 +3,41 @@
 // API keys are configured in .env ONLY - never written programmatically
 
 import { useState } from 'react';
-import { configApi } from '@/api/config';
 import { webhooksApi } from '@/api/webhooks';
 import { ApiKeyStatus } from '@/components/ui/ApiKeyStatus';
+import { useConfig, useConfigField } from '@/hooks';
 
 export function IntegrationsSubtab() {
+  const { config, saveConfig } = useConfig();
+
   // LangSmith settings (non-secret config only)
-  const [langsmithEndpoint, setLangsmithEndpoint] = useState('https://api.smith.langchain.com');
-  const [langsmithProject, setLangsmithProject] = useState('agro');
-  const [langchainTracingV2, setLangchainTracingV2] = useState(true);
+  const [langsmithEndpoint, setLangsmithEndpoint] = useConfigField<string>(
+    'tracing.langchain_endpoint',
+    'https://api.smith.langchain.com'
+  );
+  const [langsmithProject, setLangsmithProject] = useConfigField<string>(
+    'tracing.langchain_project',
+    'tribrid'
+  );
+  const [langchainTracingV2, setLangchainTracingV2] = useConfigField<number>(
+    'tracing.langchain_tracing_v2',
+    0
+  );
 
   // Grafana settings (non-secret config only)
-  const [grafanaUrl, setGrafanaUrl] = useState('http://127.0.0.1:3000');
+  const [grafanaUrl, setGrafanaUrl] = useConfigField<string>(
+    'ui.grafana_base_url',
+    'http://127.0.0.1:3000'
+  );
 
   // VS Code settings
   const [vscodeEnabled, setVscodeEnabled] = useState(false);
   const [vscodePort, setVscodePort] = useState('4440');
 
   // MCP & Channels
-  const [httpModel, setHttpModel] = useState('');
-  const [mcpModel, setMcpModel] = useState('');
-  const [cliModel, setCliModel] = useState('');
+  const [httpModel, setHttpModel] = useConfigField<string>('generation.gen_model_http', '');
+  const [mcpModel, setMcpModel] = useConfigField<string>('generation.gen_model_mcp', '');
+  const [cliModel, setCliModel] = useConfigField<string>('generation.gen_model_cli', '');
   const [mcpHttpHost, setMcpHttpHost] = useState('0.0.0.0');
   const [mcpHttpPort, setMcpHttpPort] = useState('8013');
   const [mcpHttpPath, setMcpHttpPath] = useState('/mcp');
@@ -40,48 +54,14 @@ export function IntegrationsSubtab() {
 
   async function saveIntegrationSettings() {
     setSaveStatus('');
-    const integrations: Record<string, any> = {};
-
-    // LangSmith (non-secret settings only - API keys must be in .env)
-    if (langsmithEndpoint) integrations.LANGSMITH_ENDPOINT = langsmithEndpoint;
-    // NEVER send API keys - they are in .env only
-    if (langsmithProject) integrations.LANGSMITH_PROJECT = langsmithProject;
-    integrations.LANGCHAIN_TRACING_V2 = langchainTracingV2 ? '1' : '0';
-
-    // Grafana (non-secret settings only - API keys must be in .env)
-    if (grafanaUrl) integrations.GRAFANA_BASE_URL = grafanaUrl;
-    // NEVER send API keys - they are in .env only
-
-    // VS Code
-    integrations.VSCODE_ENABLED = vscodeEnabled ? '1' : '0';
-    if (vscodePort) integrations.VSCODE_PORT = vscodePort;
-
-    // MCP & Channels
-    if (httpModel) integrations.HTTP_MODEL = httpModel;
-    if (mcpModel) integrations.MCP_MODEL = mcpModel;
-    if (cliModel) integrations.CLI_MODEL = cliModel;
-    if (mcpHttpHost) integrations.MCP_HTTP_HOST = mcpHttpHost;
-    if (mcpHttpPort) integrations.MCP_HTTP_PORT = mcpHttpPort;
-    if (mcpHttpPath) integrations.MCP_HTTP_PATH = mcpHttpPath;
-
-    // Webhooks (URLs are secrets - configured in .env only)
-    // NEVER send webhook URLs - they are secrets in .env only
-    integrations.NOTIFICATIONS_ENABLED = notificationsEnabled ? '1' : '0';
-    integrations.NOTIFY_CRITICAL = notifyCritical ? '1' : '0';
-    integrations.NOTIFY_WARNING = notifyWarning ? '1' : '0';
-    integrations.NOTIFY_INFO = notifyInfo ? '1' : '0';
-    integrations.INCLUDE_RESOLVED = includeResolved ? '1' : '0';
-
     try {
-      const result = await configApi.saveIntegrations(integrations);
-      if (result.status === 'success') {
-        setSaveStatus('Integration settings saved successfully!');
-        setTimeout(() => setSaveStatus(''), 3000);
-      } else {
-        setSaveStatus(`Failed to save: ${result.error || 'Unknown error'}`);
-      }
-    } catch (error: any) {
-      setSaveStatus(`Error saving integration settings: ${error.message}`);
+      if (!config) return;
+      await saveConfig(config);
+      setSaveStatus('Integration settings saved successfully!');
+      setTimeout(() => setSaveStatus(''), 3000);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      setSaveStatus(`Error saving integration settings: ${message}`);
     }
   }
 
@@ -351,8 +331,8 @@ export function IntegrationsSubtab() {
             <label style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <input
                 type="checkbox"
-                checked={langchainTracingV2}
-                onChange={(e) => setLangchainTracingV2(e.target.checked)}
+                checked={langchainTracingV2 === 1}
+                onChange={(e) => setLangchainTracingV2(e.target.checked ? 1 : 0)}
               />
               <span>Enable LangChain Tracing V2</span>
             </label>

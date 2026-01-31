@@ -4,7 +4,7 @@
 
 import type React from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useAPI, useConfig } from '@/hooks';
+import { useAPI, useConfig, useConfigField } from '@/hooks';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { RepoSelector } from '@/components/ui/RepoSelector';
 import { EmbeddingMismatchWarning } from '@/components/ui/EmbeddingMismatchWarning';
@@ -155,7 +155,7 @@ interface ChatInterfaceProps {
   onTracePreferenceChange?: (open: boolean) => void;
 }
 
-export function ChatInterface({ traceOpen, onTraceUpdate, onTracePreferenceChange }: ChatInterfaceProps) {
+export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) {
   const { api } = useAPI();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
@@ -164,17 +164,40 @@ export function ChatInterface({ traceOpen, onTraceUpdate, onTracePreferenceChang
   const [typing, setTyping] = useState(false);
   // Per-query repo override - empty string means use the global activeRepo
   const [queryRepoOverride, setQueryRepoOverride] = useState('');
+  const [conversationId, setConversationId] = useState<string | null>(null);
   
   // Use centralized repo store for repo list and default
-  const { repos, activeRepo, loadRepos, initialized } = useRepoStore();
+  const { activeRepo, loadRepos, initialized } = useRepoStore();
   
   // Check if index exists for "no index" warning
   const { status: embeddingStatus } = useEmbeddingStatus();
+
+  // Chat UI preferences (TriBridConfig-backed)
+  const { config } = useConfig();
+  const chatStreamingEnabled = Boolean(config?.ui?.chat_streaming_enabled ?? 1);
+  const chatShowConfidence = Boolean(config?.ui?.chat_show_confidence ?? 0);
+  const chatShowCitations = Boolean(config?.ui?.chat_show_citations ?? 1);
+  const chatShowTrace = Boolean(config?.ui?.chat_show_trace ?? 0);
+
+  // Per-message retrieval leg toggles (do NOT persist; user requested per-message control)
+  const [includeVector, setIncludeVector] = useState(true);
+  const [includeSparse, setIncludeSparse] = useState(true);
+  const [includeGraph, setIncludeGraph] = useState(true);
+  // Note: include_vector/sparse/graph are per-message settings on ChatRequest,
+  // not config settings. They default to true in the Pydantic model.
+
+  // Quick settings (also editable in Chat Settings subtab)
+  const [chatModel, setChatModel] = useConfigField<string>('ui.chat_default_model', 'gpt-4o-mini');
+  const [temperature, setTemperature] = useConfigField<number>('generation.gen_temperature', 0.0);
+  const [maxTokens, setMaxTokens] = useConfigField<number>('generation.gen_max_tokens', 2048);
+  const [topP, setTopP] = useConfigField<number>('generation.gen_top_p', 1.0);
+  const [topK, setTopK] = useConfigField<number>('retrieval.final_k', 10);
+
   const [tracePreference, setTracePreference] = useState<boolean>(() => {
     if (traceOpen !== undefined) return Boolean(traceOpen);
     return chatShowTrace;
   });
-  const [currentTrace, setCurrentTrace] = useState<TraceStep[]>([]);
+  // Trace is maintained via ref + parent callback (no local render use)
   const [showSettings, setShowSettings] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -263,18 +286,7 @@ export function ChatInterface({ traceOpen, onTraceUpdate, onTracePreferenceChang
     };
   }, [streaming, typing]);
 
-  // Chat settings state - Pydantic/Zustand-backed
-  const { get, set: setConfigValue } = useConfig();
-  const model = get('GEN_MODEL_CHAT', get('GEN_MODEL', ''));
-  const systemPrompt = get('PROMPT_MAIN_RAG_CHAT', '');
-  const temperature = get('GEN_TEMPERATURE', 0);
-  const maxTokens = get('GEN_MAX_TOKENS', 1000);
-  const topP = get('GEN_TOP_P', 1);
-  const topK = get('FINAL_K', 10);
-  const chatStreamingEnabled = Boolean(get('CHAT_STREAMING_ENABLED', 1));
-  const chatShowConfidence = Boolean(get('CHAT_SHOW_CONFIDENCE', 0));
-  const chatShowCitations = Boolean(get('CHAT_SHOW_CITATIONS', 1));
-  const chatShowTrace = Boolean(get('CHAT_SHOW_TRACE', 0));
+  // Chat settings state (TriBridConfig-backed)
   const [streamPref, setStreamPref] = useState<boolean>(() => chatStreamingEnabled);
   const [showConfidence, setShowConfidence] = useState<boolean>(() => chatShowConfidence);
   const [showCitations, setShowCitations] = useState<boolean>(() => chatShowCitations);
@@ -306,7 +318,6 @@ export function ChatInterface({ traceOpen, onTraceUpdate, onTracePreferenceChang
 
   // Define notifyTrace before useEffects that use it
   const notifyTrace = useCallback((steps: TraceStep[], open: boolean, source: 'config' | 'response' | 'clear' = 'response') => {
-    setCurrentTrace(steps);
     traceRef.current = steps;
     const effectiveOpen = source === 'response' ? (open && tracePreference) : open;
     onTraceUpdate?.(steps, effectiveOpen, source);
@@ -328,39 +339,6 @@ export function ChatInterface({ traceOpen, onTraceUpdate, onTracePreferenceChang
       } catch {}
     })();
   }, [api]);
-
-  // React to config updates from ChatSettings (cross-component sync)
-  useEffect(() => {
-    const handler = (event: Event) => {
-      const detail = (event as CustomEvent).detail || {};
-      if (detail && typeof detail === 'object') {
-        if (Object.prototype.hasOwnProperty.call(detail, 'streaming')) {
-          const val = Boolean(detail.streaming);
-          setStreamPref(val);
-          setConfigValue('CHAT_STREAMING_ENABLED', val ? 1 : 0);
-        }
-        if (Object.prototype.hasOwnProperty.call(detail, 'showConfidence')) {
-          const val = Boolean(detail.showConfidence);
-          setShowConfidence(val);
-          setConfigValue('CHAT_SHOW_CONFIDENCE', val ? 1 : 0);
-        }
-        if (Object.prototype.hasOwnProperty.call(detail, 'showCitations')) {
-          const val = Boolean(detail.showCitations);
-          setShowCitations(val);
-          setConfigValue('CHAT_SHOW_CITATIONS', val ? 1 : 0);
-        }
-        if (Object.prototype.hasOwnProperty.call(detail, 'showTrace')) {
-          const pref = Boolean(detail.showTrace);
-          setTracePreference(pref);
-          onTracePreferenceChange?.(pref);
-          notifyTrace(traceRef.current, pref, 'config');
-          setConfigValue('CHAT_SHOW_TRACE', pref ? 1 : 0);
-        }
-      }
-    };
-    window.addEventListener('agro-chat-config-updated', handler as EventListener);
-    return () => window.removeEventListener('agro-chat-config-updated', handler as EventListener);
-  }, [notifyTrace, onTracePreferenceChange]);
 
   // Load repositories via store (once on mount if not initialized)
   useEffect(() => {
@@ -411,6 +389,14 @@ export function ChatInterface({ traceOpen, onTraceUpdate, onTracePreferenceChang
     if (value === undefined || value === null || Number.isNaN(value)) return null;
     const pct = value <= 1 ? value * 100 : value;
     return `${pct.toFixed(1)}%`;
+  };
+
+  const citationToVscodeHref = (citation: string): string => {
+    const m = citation.match(/^(.*?):(\d+)(?:-(\d+))?$/);
+    if (!m) return `vscode://file/${citation}`;
+    const filePath = m[1];
+    const startLine = m[2];
+    return `vscode://file/${filePath}:${startLine}`;
   };
 
   const handleSend = async () => {
@@ -465,27 +451,23 @@ export function ChatInterface({ traceOpen, onTraceUpdate, onTracePreferenceChang
   const handleStreamingResponse = async (userMessage: Message) => {
     setStreaming(true);
 
-    const params = new URLSearchParams(window.location.search || '');
-    const fast = fastMode || params.get('fast') === '1' || params.get('smoke') === '1';
+    const corpusId = (queryRepoOverride || activeRepo || '').trim();
+    if (!corpusId) {
+      throw new Error('Select a corpus before chatting');
+    }
 
-    // Use unified /api/chat endpoint with stream: true
-    const response = await fetch(api('chat'), {
+    // Stream from /api/chat/stream (SSE)
+    const response = await fetch(api('chat/stream'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        question: userMessage.content,
-        repo: queryRepoOverride || activeRepo || null,
-        model,
-        temperature,
-        max_tokens: maxTokens,
-        multi_query: 1,
-        final_k: topK,
-        top_p: topP,
-        system_prompt: systemPrompt,
-        fast_mode: fast,
+        message: userMessage.content,
+        corpus_id: corpusId,
+        conversation_id: conversationId,
         stream: true,
-        include_reasoning: false,
-        history: messages.map(m => ({ role: m.role, content: m.content }))
+        include_vector: includeVector,
+        include_sparse: includeSparse,
+        include_graph: includeGraph,
       })
     });
 
@@ -497,13 +479,8 @@ export function ChatInterface({ traceOpen, onTraceUpdate, onTracePreferenceChang
     const decoder = new TextDecoder();
     let streamBuffer = '';
     let accumulatedContent = '';
-    let thinkingContent = '';
     let assistantMessageId = `assistant-${Date.now()}`;
     let citations: string[] = [];
-    let traceData: any = null;
-    let confidence: number | undefined;
-    let meta: any = undefined;
-    let eventId: string | undefined;
 
     if (!reader) {
       throw new Error('Response body is not readable');
@@ -520,64 +497,38 @@ export function ChatInterface({ traceOpen, onTraceUpdate, onTracePreferenceChang
         const chunkType = parsed.type;
 
         switch (chunkType) {
-          case 'thinking':
-            if (parsed.content) {
-              thinkingContent += parsed.content;
-            }
-            break;
-
-          case 'content':
-            if (parsed.content) {
+          case 'text':
+            if (typeof parsed.content === 'string') {
               accumulatedContent += parsed.content;
-            }
-            break;
-
-          case 'citations':
-            if (parsed.data?.citations) {
-              citations = parsed.data.citations;
-            }
-            if (typeof parsed.data?.confidence === 'number') {
-              confidence = parsed.data.confidence;
-            }
-            break;
-
-          case 'trace':
-            if (parsed.data) {
-              traceData = parsed.data;
-              const steps = parsed.data.steps || [];
-              notifyTrace(steps, tracePreference, 'response');
-            }
-            break;
-
-          case 'meta':
-            if (parsed.data) {
-              meta = parsed.data;
             }
             break;
 
           case 'done':
-            if (parsed.data?.event_id) {
-              eventId = parsed.data.event_id;
+            // Server may include conversation_id in the final event (best-effort).
+            if (typeof parsed.conversation_id === 'string') {
+              setConversationId(parsed.conversation_id);
             }
-            if (typeof parsed.data?.confidence === 'number') {
-              confidence = parsed.data.confidence;
+            if (Array.isArray(parsed.sources)) {
+              citations = parsed.sources
+                .map((s: any) => {
+                  const fp = s?.file_path;
+                  const sl = s?.start_line;
+                  const el = s?.end_line;
+                  if (!fp) return null;
+                  return `${fp}:${sl ?? 0}-${el ?? sl ?? 0}`;
+                })
+                .filter(Boolean) as string[];
             }
             break;
 
           case 'error':
-            console.error('[ChatInterface] Stream error:', parsed.data?.message);
-            accumulatedContent = `Error: ${parsed.data?.message || 'Unknown error'}`;
+            console.error('[ChatInterface] Stream error:', parsed.message);
+            accumulatedContent = `Error: ${parsed.message || 'Unknown error'}`;
             break;
 
           default:
-            if (parsed.content) {
+            if (typeof parsed.content === 'string') {
               accumulatedContent += parsed.content;
-            }
-            if (parsed.citations) {
-              citations = parsed.citations;
-            }
-            if (typeof parsed.confidence === 'number') {
-              confidence = parsed.confidence;
             }
         }
 
@@ -586,11 +537,7 @@ export function ChatInterface({ traceOpen, onTraceUpdate, onTracePreferenceChang
           role: 'assistant',
           content: accumulatedContent,
           timestamp: Date.now(),
-          citations,
-          traceData,
-          confidence,
-          meta,
-          eventId
+          citations
         };
 
         setMessages(prev => {
@@ -633,20 +580,26 @@ export function ChatInterface({ traceOpen, onTraceUpdate, onTracePreferenceChang
   const handleRegularResponse = async (userMessage: Message) => {
     const params = new URLSearchParams(window.location.search || '');
     const fast = fastMode || params.get('fast') === '1' || params.get('smoke') === '1';
+
+    const corpusId = (queryRepoOverride || activeRepo || '').trim();
+    if (!corpusId) {
+      throw new Error('Select a corpus before chatting');
+    }
+
+    // NOTE: `fast` is currently a UI-only toggle. The backend chat API does not accept fast_mode yet.
+    void fast;
+
     const response = await fetch(api('chat'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        question: userMessage.content,
-        repo: queryRepoOverride || activeRepo || null,
-        model,
-        temperature,
-        max_tokens: maxTokens,
-        multi_query: 1,
-        final_k: topK,
-        top_p: topP,
-        system_prompt: systemPrompt,
-        fast_mode: fast
+        message: userMessage.content,
+        corpus_id: corpusId,
+        conversation_id: conversationId,
+        stream: false,
+        include_vector: includeVector,
+        include_sparse: includeSparse,
+        include_graph: includeGraph,
       })
     });
 
@@ -656,91 +609,36 @@ export function ChatInterface({ traceOpen, onTraceUpdate, onTracePreferenceChang
 
     const data = await response.json();
 
-    // Extract provider metadata for a separate accessibility line
-    let meta: any = undefined;
-    try {
-      meta = data.meta && typeof data.meta === 'object' ? data.meta : {};
-      if (!Object.keys(meta).length) {
-        // Backward compat: some backends return flat fields
-        const prov = data.provider || undefined;
-        const backend = data.backend || prov || undefined;
-        const modelUsed = data.model || undefined;
-        const fail = data.failover || undefined;
-        const ollama = data.ollama || undefined;
-        meta = { backend, provider: prov, model: modelUsed, failover: fail, ollama };
-      }
-    } catch {}
+    // New Pydantic ChatResponse: { conversation_id, message, sources, tokens_used }
+    const nextConversationId: string | null =
+      data && typeof data.conversation_id === 'string' ? data.conversation_id : null;
+    if (nextConversationId) setConversationId(nextConversationId);
 
-    const confidenceValue = typeof data.confidence === 'number'
-      ? data.confidence
-      : (typeof (meta?.confidence) === 'number' ? meta.confidence : undefined);
-    let citations: string[] = Array.isArray(data.citations) ? data.citations : [];
-    if (!citations.length && Array.isArray(data.documents)) {
-      citations = data.documents
-        .map((d: any) => {
-          const fp = d?.file_path || d?.path;
-          const sl = d?.start_line ?? d?.start;
-          const el = d?.end_line ?? d?.end;
-          if (!fp) return null;
-          return `${fp}:${sl ?? 0}-${el ?? sl ?? 0}`;
-        })
-        .filter(Boolean) as string[];
-    }
+    const sources: any[] = Array.isArray(data?.sources) ? data.sources : [];
+    const citations: string[] = sources
+      .map((s: any) => {
+        const fp = s?.file_path;
+        const sl = s?.start_line;
+        const el = s?.end_line;
+        if (!fp) return null;
+        return `${fp}:${sl ?? 0}-${el ?? sl ?? 0}`;
+      })
+      .filter(Boolean) as string[];
 
+    const assistantText: string = String(data?.message?.content || '');
     const assistantMessage: Message = {
       id: `assistant-${Date.now()}`,
       role: 'assistant',
-      content: (data.answer || ''),
+      content: assistantText,
       timestamp: Date.now(),
-      meta,
       citations,
-      confidence: confidenceValue,
-      eventId: data.event_id // For feedback correlation
     };
 
-    const updatedMessages = [...messages, userMessage, assistantMessage];
-    setMessages(updatedMessages);
-    saveChatHistory(updatedMessages);
-
-    // Attach feedback controls and local trace when available
-    try {
-      // DISABLED: Legacy feedback buttons cause DOM conflicts with React
-      // const evtId = data.event_id;
-      // if (evtId && typeof (window as any).addFeedbackButtons === 'function') {
-      //   requestAnimationFrame(() => {
-      //     const target = document.getElementById(`feedback-${assistantMessage.id}`) || document.getElementById('chat-messages');
-      //     if (target) {
-      //       (window as any).addFeedbackButtons(target, evtId);
-      //     }
-      //   });
-      // }
-      if (data.trace && Array.isArray(data.trace.steps)) {
-        const steps = data.trace.steps;
-        notifyTrace(steps, tracePreference, 'response');
-      } else {
-        // Fallback: read latest persisted trace for richer detail
-        try {
-          const lt = await fetch(api('/traces/latest'));
-          if (lt.ok) {
-            const j = await lt.json();
-            if (j && j.trace && Array.isArray(j.trace.events)) {
-              const evs = j.trace.events.map((e: any) => ({ step: e.kind, duration: e.data?.duration_ms, details: e.data || {} }));
-              if (evs.length) {
-                notifyTrace(evs, tracePreference, 'response');
-              }
-            }
-          }
-        } catch {}
-      }
-      // DISABLED: Legacy trace loader causes DOM conflicts
-      // if (tracePreference) {
-      //   requestAnimationFrame(() => {
-      //     try {
-      //       (window as any).Trace?.loadLatestTrace?.('chat-trace-output');
-      //     } catch {}
-      //   });
-      // }
-    } catch {}
+    setMessages((prev) => {
+      const updated = [...prev, assistantMessage];
+      saveChatHistory(updated);
+      return updated;
+    });
   };
 
   const handleClear = () => {
@@ -1213,7 +1111,21 @@ export function ChatInterface({ traceOpen, onTraceUpdate, onTracePreferenceChang
                         <strong>Citations:</strong>
                         {message.citations.map((citation, idx) => (
                           <div key={idx} style={{ marginTop: '4px' }}>
-                            {citation}
+                            <a
+                              href={citationToVscodeHref(citation)}
+                              style={{
+                                color: 'var(--link)',
+                                textDecoration: 'none',
+                                borderBottom: '1px solid var(--link)',
+                                fontFamily: 'var(--font-mono)',
+                                fontSize: '11px',
+                                cursor: 'pointer',
+                              }}
+                              title="Open in editor"
+                              data-testid="chat-citation-link"
+                            >
+                              {citation}
+                            </a>
                           </div>
                         ))}
                       </div>
@@ -1581,6 +1493,46 @@ export function ChatInterface({ traceOpen, onTraceUpdate, onTracePreferenceChang
               Press Ctrl+Enter to send • Citations appear as clickable file links when enabled in settings
             </div>
 
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                flexWrap: 'wrap',
+                marginBottom: '0',
+              }}
+            >
+              <span style={{ fontSize: '11px', color: 'var(--fg-muted)', fontWeight: 700 }}>Retrieval legs:</span>
+              {[
+                { id: 'vector', label: 'Vector', enabled: includeVector, set: setIncludeVector },
+                { id: 'sparse', label: 'Sparse', enabled: includeSparse, set: setIncludeSparse },
+                { id: 'graph', label: 'Graph', enabled: includeGraph, set: setIncludeGraph },
+              ].map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => t.set(!t.enabled)}
+                  aria-pressed={t.enabled}
+                  data-testid={`chat-toggle-${t.id}`}
+                  style={{
+                    padding: '6px 10px',
+                    borderRadius: '999px',
+                    border: t.enabled ? '1px solid var(--accent)' : '1px solid var(--line)',
+                    background: t.enabled ? 'rgba(var(--accent-rgb), 0.12)' : 'var(--bg-elev2)',
+                    color: t.enabled ? 'var(--fg)' : 'var(--fg-muted)',
+                    fontSize: '11px',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease',
+                  }}
+                  title={`Include ${t.label} retrieval for this message`}
+                >
+                  {t.enabled ? '✓ ' : ''}
+                  {t.label}
+                </button>
+              ))}
+            </div>
+
           </div>
         </div>
 
@@ -1609,8 +1561,8 @@ export function ChatInterface({ traceOpen, onTraceUpdate, onTracePreferenceChang
               </label>
               {modelOptions.length > 0 ? (
                 <select
-                  value={model}
-                  onChange={(e) => setConfigValue('GEN_MODEL', e.target.value)}
+                  value={chatModel}
+                  onChange={(e) => setChatModel(e.target.value)}
                   style={{
                     width: '100%',
                     background: 'var(--input-bg)',
@@ -1626,8 +1578,8 @@ export function ChatInterface({ traceOpen, onTraceUpdate, onTracePreferenceChang
               ) : (
                 <input
                   type="text"
-                  value={model}
-                  onChange={(e) => setConfigValue('GEN_MODEL', e.target.value)}
+                  value={chatModel}
+                  onChange={(e) => setChatModel(e.target.value)}
                   style={{
                     width: '100%',
                     background: 'var(--input-bg)',
@@ -1657,7 +1609,7 @@ export function ChatInterface({ traceOpen, onTraceUpdate, onTracePreferenceChang
                 max="2"
                 step="0.1"
                 value={temperature}
-                onChange={(e) => setConfigValue('GEN_TEMPERATURE', parseFloat(e.target.value))}
+                onChange={(e) => setTemperature(parseFloat(e.target.value))}
                 style={{ width: '100%' }}
               />
             </div>
@@ -1675,7 +1627,7 @@ export function ChatInterface({ traceOpen, onTraceUpdate, onTracePreferenceChang
               <input
                 type="number"
                 value={maxTokens}
-                onChange={(e) => setConfigValue('GEN_MAX_TOKENS', parseInt(e.target.value))}
+                onChange={(e) => setMaxTokens(parseInt(e.target.value))}
                 min="1"
                 max="32000"
                 style={{
@@ -1706,7 +1658,7 @@ export function ChatInterface({ traceOpen, onTraceUpdate, onTracePreferenceChang
                 max="1"
                 step="0.01"
                 value={topP}
-                onChange={(e) => setConfigValue('GEN_TOP_P', parseFloat(e.target.value))}
+                onChange={(e) => setTopP(parseFloat(e.target.value))}
                 style={{ width: '100%' }}
               />
             </div>
@@ -1724,7 +1676,7 @@ export function ChatInterface({ traceOpen, onTraceUpdate, onTracePreferenceChang
               <input
                 type="number"
                 value={topK}
-                onChange={(e) => setConfigValue('FINAL_K', Math.max(1, parseInt(e.target.value) || 10))}
+                onChange={(e) => setTopK(Math.max(1, parseInt(e.target.value) || 10))}
                 min="1"
                 max="100"
                 style={{

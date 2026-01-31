@@ -1,25 +1,32 @@
-import React from 'react';
-import type { Card } from '@web/types/cards';
+/**
+ * ChunkSummaryDisplay - Displays chunk summaries in a grid layout
+ *
+ * Uses types from generated.ts (Pydantic-first):
+ * - ChunkSummary
+ */
 
-interface CardDisplayProps {
-  cards: Card[];
-  onCardClick?: (card: Card) => void;
+import React from 'react';
+import type { ChunkSummary } from '@/types/generated';
+
+interface ChunkSummaryDisplayProps {
+  chunkSummaries: ChunkSummary[];
+  onChunkClick?: (chunk: ChunkSummary) => void;
   isLoading?: boolean;
 }
 
-export function CardDisplay({ cards, onCardClick, isLoading }: CardDisplayProps) {
+export function ChunkSummaryDisplay({ chunkSummaries, onChunkClick, isLoading }: ChunkSummaryDisplayProps) {
   if (isLoading) {
     return (
       <div style={{ textAlign: 'center', padding: '24px', color: 'var(--fg-muted)' }}>
         <div style={{ animation: 'spin 1s linear infinite', width: '48px', height: '48px', margin: '0 auto' }}>
           ⏳
         </div>
-        <div style={{ marginTop: '12px' }}>Loading cards...</div>
+        <div style={{ marginTop: '12px' }}>Loading chunk summaries...</div>
       </div>
     );
   }
 
-  if (!cards || cards.length === 0) {
+  if (!chunkSummaries || chunkSummaries.length === 0) {
     return (
       <div style={{ textAlign: 'center', padding: '24px', color: 'var(--fg-muted)' }}>
         <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ opacity: 0.3, marginBottom: '12px' }}>
@@ -27,8 +34,8 @@ export function CardDisplay({ cards, onCardClick, isLoading }: CardDisplayProps)
           <line x1="3" y1="9" x2="21" y2="9"></line>
           <line x1="9" y1="4" x2="9" y2="20"></line>
         </svg>
-        <div>No cards available</div>
-        <div style={{ fontSize: '11px', marginTop: '8px' }}>Click "Build Cards" to generate code cards</div>
+        <div>No chunk summaries available</div>
+        <div style={{ fontSize: '11px', marginTop: '8px' }}>Click "Build Chunk Summaries" to generate summaries from indexed content</div>
       </div>
     );
   }
@@ -40,30 +47,30 @@ export function CardDisplay({ cards, onCardClick, isLoading }: CardDisplayProps)
       gap: '16px',
       padding: '16px'
     }}>
-      {cards.map((card, index) => (
-        <CardItem key={card.id || index} card={card} onClick={onCardClick} />
+      {chunkSummaries.map((chunk, index) => (
+        <ChunkSummaryItem key={chunk.chunk_id || `${chunk.file_path}:${chunk.start_line ?? ''}:${index}`} chunk={chunk} onClick={onChunkClick} />
       ))}
     </div>
   );
 }
 
-interface CardItemProps {
-  card: Card;
-  onClick?: (card: Card) => void;
+interface ChunkSummaryItemProps {
+  chunk: ChunkSummary;
+  onClick?: (chunk: ChunkSummary) => void;
 }
 
-function CardItem({ card, onClick }: CardItemProps) {
+function ChunkSummaryItem({ chunk, onClick }: ChunkSummaryItemProps) {
   const [isHovered, setIsHovered] = React.useState(false);
 
   const handleClick = () => {
     if (onClick) {
-      onClick(card);
+      onClick(chunk);
     }
   };
 
-  const title = (card.symbols && card.symbols[0]) ? card.symbols[0] : (card.file_path || '').split('/').pop() || 'Unknown';
-  const description = card.purpose || 'No description available';
-  const location = `${card.file_path}${card.start_line ? `:${card.start_line}` : ''}`;
+  const title = (chunk.symbols && chunk.symbols[0]) ? chunk.symbols[0] : (chunk.file_path || '').split('/').pop() || 'Unknown';
+  const description = chunk.purpose || 'No description available';
+  const location = `${chunk.file_path}${chunk.start_line ? `:${chunk.start_line}` : ''}`;
 
   return (
     <div

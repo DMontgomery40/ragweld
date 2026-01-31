@@ -1,5 +1,5 @@
-from server.models.tribrid_config_model import ChunkingConfig
 from server.models.index import Chunk
+from server.models.tribrid_config_model import ChunkingConfig
 
 
 class Chunker:

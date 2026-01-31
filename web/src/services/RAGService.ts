@@ -35,14 +35,14 @@ export interface SearchResult {
 export class RAGService {
   public rerank: RerankService;
   public indexing: IndexingService;
-  public profiles: IndexProfilesService;
+  public profiles: typeof IndexProfilesService;
   public keywords: KeywordsService;
   public mcp: MCPRagService;
 
   constructor(apiBase: string) {
     this.rerank = new RerankService(apiBase);
     this.indexing = new IndexingService(apiBase);
-    this.profiles = new IndexProfilesService(apiBase);
+    this.profiles = IndexProfilesService; // Static service, no instantiation
     this.keywords = new KeywordsService(apiBase);
     this.mcp = new MCPRagService(apiBase);
   }

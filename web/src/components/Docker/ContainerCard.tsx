@@ -93,12 +93,22 @@ function formatLogs(rawLogs: string): React.ReactNode {
  * Format port mappings for display
  */
 function formatPorts(container: DockerContainer): string {
-  if (!container.ports || container.ports.length === 0) {
+  if (!container.ports) {
+    return '';
+  }
+
+  // Handle string format (legacy)
+  if (typeof container.ports === 'string') {
+    return container.ports;
+  }
+
+  // Handle array format
+  if (container.ports.length === 0) {
     return '';
   }
 
   return container.ports
-    .map(p => {
+    .map((p: { PrivatePort: number; PublicPort?: number; Type: string }) => {
       if (p.PublicPort) {
         return `${p.PublicPort}:${p.PrivatePort}/${p.Type}`;
       }

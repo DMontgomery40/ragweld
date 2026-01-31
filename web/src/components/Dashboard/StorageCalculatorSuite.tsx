@@ -97,8 +97,6 @@ interface Calc2Results {
 }
 
 export function StorageCalculatorSuite() {
-  const [configLoaded, setConfigLoaded] = useState(false);
-
   // Calculator 1 state - defaults will be overwritten by Pydantic config
   const [calc1, setCalc1] = useState<Calc1Inputs>({
     repoSize: 5,
@@ -136,14 +134,12 @@ export function StorageCalculatorSuite() {
     async function loadConfig() {
       try {
         const config = await configApi.load();
-        const embDim = Number(config.env?.EMBEDDING_DIM ?? config.env?.EMBED_DIM ?? 3072);
+        const embDim = Number(config.embedding?.embedding_dim ?? 3072);
         
         setCalc1(prev => ({ ...prev, embDim }));
         setCalc2(prev => ({ ...prev, embDim }));
-        setConfigLoaded(true);
       } catch (err) {
         console.error('[StorageCalculatorSuite] Failed to load config:', err);
-        setConfigLoaded(true); // Continue with defaults
       }
     }
     loadConfig();

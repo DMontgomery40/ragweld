@@ -21,7 +21,7 @@ export function QuickActionButton({ id, icon, label, onClick, dataAction, disabl
       className="action-btn"
       data-action={dataAction}
       disabled={disabled}
-      onClick={(e) => {
+      onClick={(_e) => {
         if (disabled) return;
         setIsActive(true);
         onClick();

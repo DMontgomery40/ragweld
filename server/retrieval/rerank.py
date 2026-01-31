@@ -1,5 +1,5 @@
-from server.models.tribrid_config_model import RerankingConfig
 from server.models.retrieval import ChunkMatch
+from server.models.tribrid_config_model import RerankingConfig
 
 
 class Reranker:

@@ -12,6 +12,13 @@ TriBridRAG uses three complementary retrieval methods:
 
 Results are fused using Reciprocal Rank Fusion (RRF) or weighted combination, then optionally reranked using a cross-encoder model.
 
+## Corpus-first (not “repo-first”)
+
+TriBridRAG indexes **corpora**: any folder you want to search/GraphRAG over (a git repository, a docs folder, a monorepo subtree, etc.).
+
+- A **corpus** is the unit of isolation for **storage (Postgres)**, **graph (Neo4j)**, and **configuration**.
+- The API still uses the field name `repo_id` for backward compatibility; treat it as the **corpus identifier** (stable slug).
+
 ## Quick Start
 
 ### Prerequisites
@@ -52,7 +59,7 @@ cd web && npm install && cd ..
 
 6. Start the backend:
 ```bash
-uv run uvicorn server.main:app --reload
+uv run uvicorn server.main:app --reload --port 8012
 ```
 
 7. Start the frontend (in another terminal):
@@ -61,6 +68,25 @@ cd web && npm run dev
 ```
 
 8. Open http://localhost:5173 in your browser
+
+### Create a corpus + index it
+
+You can do this from the UI (Corpus switcher modal) or via the API:
+
+```bash
+# 1) Create a corpus (server must be able to see this path)
+curl -sS -X POST "http://localhost:8012/api/repos" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"TriBridRAG","path":"'"$PWD"'","description":"Local checkout"}'
+
+# 2) Start indexing (uses the stored corpus path)
+curl -sS -X POST "http://localhost:8012/api/index/start" \
+  -H "Content-Type: application/json" \
+  -d '{"repo_id":"tribridrag"}'
+
+# 3) Follow status
+curl -sS "http://localhost:8012/api/index/tribridrag/status"
+```
 
 ## Configuration
 
@@ -106,12 +132,16 @@ tribrid-rag/
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/search` | POST | Tri-brid search with fusion |
-| `/answer` | POST | RAG-powered answer generation |
-| `/index` | POST | Index a repository |
-| `/graph/{repo_id}/entities` | GET | List knowledge graph entities |
-| `/config` | GET/PUT | Configuration management |
-| `/eval/run` | POST | Run evaluation suite |
+| `/api/repos` | GET/POST | List/create corpora |
+| `/api/index` | POST | Start indexing (explicit `repo_path`) |
+| `/api/index/start` | POST | Start indexing for an existing corpus (path resolved from `/api/repos`) |
+| `/api/index/{repo_id}/status` | GET | Indexing status for a corpus |
+| `/api/index/{repo_id}/stats` | GET | Index stats for a corpus |
+| `/api/search` | POST | Tri-brid search with fusion |
+| `/api/answer` | POST | RAG-powered answer generation |
+| `/api/graph/{repo_id}/entities` | GET | List knowledge graph entities for a corpus |
+| `/api/config` | GET/PUT | Configuration management (supports `?repo_id=...` for per-corpus config) |
+| `/api/eval/run` | POST | Run evaluation suite |
 
 ## Development
 
@@ -139,7 +169,7 @@ uv run python scripts/generate_types.py
 
 - **Metrics**: Prometheus at http://localhost:9090
 - **Dashboards**: Grafana at http://localhost:3000 (admin/admin)
-- **API Docs**: FastAPI at http://localhost:8000/docs
+- **API Docs**: FastAPI at http://localhost:8012/docs
 
 ## License
 

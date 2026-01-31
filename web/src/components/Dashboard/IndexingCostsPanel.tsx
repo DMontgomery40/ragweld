@@ -1,7 +1,7 @@
 // AGRO - Indexing Costs Panel
 // Shows total tokens and embedding cost from backend
 
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 
 interface CostMetrics {
   totalTokens: string;

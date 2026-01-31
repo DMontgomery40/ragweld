@@ -9,7 +9,7 @@ import { useEffect } from 'react';
 import { useRepoStore, useRepos, useActiveRepo, useRepoLoading, useRepoInitialized } from '@/stores';
 import { TooltipIcon } from '@/components/ui/TooltipIcon';
 
-interface RepoSelectorProps {
+type RepoSelectorProps = {
   /** Tooltip key from tooltips.js */
   tooltipKey?: string;
   /** Label text */
@@ -20,11 +20,11 @@ interface RepoSelectorProps {
   disabled?: boolean;
   /** Callback when repo changes (in addition to store update) */
   onRepoChange?: (repo: string) => void;
-}
+};
 
 export function RepoSelector({
   tooltipKey = 'REPO',
-  label = 'Repository',
+  label = 'Corpus',
   showLoading = true,
   disabled = false,
   onRepoChange,
@@ -63,10 +63,10 @@ export function RepoSelector({
           style={{ minWidth: '180px' }}
         >
           {repos.length === 0 ? (
-            <option value="">No repositories</option>
+            <option value="">No corpora</option>
           ) : (
             repos.map(repo => (
-              <option key={repo.name} value={repo.name}>
+              <option key={repo.corpus_id} value={repo.corpus_id}>
                 {repo.name}
                 {repo.branch && ` (${repo.branch})`}
               </option>
@@ -143,7 +143,7 @@ export function RepoSelectorCompact({
       }}
     >
       {repos.map(repo => (
-        <option key={repo.name} value={repo.name}>
+        <option key={repo.corpus_id} value={repo.corpus_id}>
           {repo.name}
         </option>
       ))}

@@ -32,7 +32,7 @@ interface TestRun {
 
 export function Testing() {
   const { api } = useAPI();
-  const [suites, setSuites] = useState<TestSuite[]>([
+  const [suites, _setSuites] = useState<TestSuite[]>([
     { name: 'API Tests', id: 'api', tests: 25 },
     { name: 'UI Tests', id: 'ui', tests: 42 },
     { name: 'Integration Tests', id: 'integration', tests: 18 },

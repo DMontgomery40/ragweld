@@ -1,32 +1,27 @@
 /**
- * Chunk Summaries Store (formerly "Cards Store")
+ * Chunk Summaries Store
  *
- * Per CLAUDE.md: "cards" is a banned term - use "chunk_summaries" instead.
+ * Uses types from generated.ts (Pydantic-first):
+ * - ChunkSummary
+ * - ChunkSummariesLastBuild
  */
+
 import { create } from 'zustand';
-import type { ChunkSummary, LastBuild } from '@/types/chunk_summaries';
+import type { ChunkSummary, ChunkSummariesLastBuild } from '@/types/generated';
 
 interface ChunkSummariesStore {
   // State
   chunkSummaries: ChunkSummary[];
-  lastBuild: LastBuild | null;
+  lastBuild: ChunkSummariesLastBuild | null;
   isLoading: boolean;
   isBuilding: boolean;
-  buildInProgress: boolean;
-  buildStage: string;
-  buildProgress: number;
-  progressRepo: string;
   error: string | null;
 
   // Actions
   setChunkSummaries: (summaries: ChunkSummary[] | ((prev: ChunkSummary[]) => ChunkSummary[])) => void;
-  setLastBuild: (build: LastBuild | null) => void;
+  setLastBuild: (build: ChunkSummariesLastBuild | null) => void;
   setIsLoading: (loading: boolean) => void;
   setIsBuilding: (building: boolean) => void;
-  setBuildInProgress: (inProgress: boolean) => void;
-  setBuildStage: (stage: string) => void;
-  setBuildProgress: (progress: number) => void;
-  setProgressRepo: (repo: string) => void;
   setError: (error: string | null) => void;
   reset: () => void;
 }
@@ -37,10 +32,6 @@ export const useChunkSummariesStore = create<ChunkSummariesStore>()((set) => ({
   lastBuild: null,
   isLoading: false,
   isBuilding: false,
-  buildInProgress: false,
-  buildStage: '',
-  buildProgress: 0,
-  progressRepo: '',
   error: null,
 
   // Actions
@@ -52,10 +43,6 @@ export const useChunkSummariesStore = create<ChunkSummariesStore>()((set) => ({
   setLastBuild: (lastBuild) => set({ lastBuild }),
   setIsLoading: (isLoading) => set({ isLoading }),
   setIsBuilding: (isBuilding) => set({ isBuilding }),
-  setBuildInProgress: (buildInProgress) => set({ buildInProgress }),
-  setBuildStage: (buildStage) => set({ buildStage }),
-  setBuildProgress: (buildProgress) => set({ buildProgress }),
-  setProgressRepo: (progressRepo) => set({ progressRepo }),
   setError: (error) => set({ error }),
   reset: () =>
     set({
@@ -63,13 +50,9 @@ export const useChunkSummariesStore = create<ChunkSummariesStore>()((set) => ({
       lastBuild: null,
       isLoading: false,
       isBuilding: false,
-      buildInProgress: false,
-      buildStage: '',
-      buildProgress: 0,
-      progressRepo: '',
       error: null,
     }),
 }));
 
-// Legacy alias for backward compatibility
+// Legacy alias - DO NOT USE in new code
 export const useCardsStore = useChunkSummariesStore;

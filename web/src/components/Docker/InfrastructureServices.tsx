@@ -2,9 +2,9 @@ import { useState, useEffect } from 'react';
 import { useDockerStore } from '@/stores';
 
 export function InfrastructureServices() {
-  const { startInfrastructure, stopInfrastructure, pingRedis, loading } = useDockerStore();
-  const [qdrantStatus, setQdrantStatus] = useState<'running' | 'stopped' | 'unknown'>('unknown');
-  const [redisStatus, setRedisStatus] = useState<'running' | 'stopped' | 'unknown'>('unknown');
+  const { startInfrastructure, stopInfrastructure, pingService, loading } = useDockerStore();
+  const [postgresStatus, setPostgresStatus] = useState<'running' | 'stopped' | 'unknown'>('unknown');
+  const [neo4jStatus, setNeo4jStatus] = useState<'running' | 'stopped' | 'unknown'>('unknown');
   const [prometheusStatus, setPrometheusStatus] = useState<'running' | 'stopped' | 'unknown'>('unknown');
   const [grafanaStatus, setGrafanaStatus] = useState<'running' | 'stopped' | 'unknown'>('unknown');
 
@@ -15,20 +15,20 @@ export function InfrastructureServices() {
   }, []);
 
   const checkInfraStatus = async () => {
-    // Check Qdrant
+    // Check PostgreSQL (pgvector)
     try {
-      await fetch('http://127.0.0.1:6333/collections', { mode: 'no-cors' });
-      setQdrantStatus('running');
+      const result = await pingService('postgres');
+      setPostgresStatus(result ? 'running' : 'stopped');
     } catch {
-      setQdrantStatus('stopped');
+      setPostgresStatus('stopped');
     }
 
-    // Check Redis
+    // Check Neo4j
     try {
-      const result = await pingRedis();
-      setRedisStatus(result.success ? 'running' : 'stopped');
+      await fetch('http://127.0.0.1:7474/browser/', { mode: 'no-cors' });
+      setNeo4jStatus('running');
     } catch {
-      setRedisStatus('stopped');
+      setNeo4jStatus('stopped');
     }
 
     // Check Prometheus
@@ -65,9 +65,9 @@ export function InfrastructureServices() {
   };
 
   const statusIcon = (status: string) => {
-    if (status === 'running') return '✓';
-    if (status === 'stopped') return '✗';
-    return '○';
+    if (status === 'running') return '\u2713';
+    if (status === 'stopped') return '\u2717';
+    return '\u25CB';
   };
 
   return (
@@ -98,7 +98,7 @@ export function InfrastructureServices() {
       }}>
         <div style={{
           background: 'var(--card-bg)',
-          border: `1px solid ${statusColor(qdrantStatus)}`,
+          border: `1px solid ${statusColor(postgresStatus)}`,
           borderRadius: '6px',
           padding: '16px'
         }}>
@@ -108,31 +108,36 @@ export function InfrastructureServices() {
             textTransform: 'uppercase',
             marginBottom: '8px'
           }}>
-            Qdrant
+            PostgreSQL (pgvector)
           </div>
-          <div style={{ color: statusColor(qdrantStatus), fontSize: '16px', fontWeight: 600 }}>
-            {statusIcon(qdrantStatus)} {qdrantStatus === 'running' ? 'Running' : 'Not Running'}
+          <div style={{ color: statusColor(postgresStatus), fontSize: '16px', fontWeight: 600 }}>
+            {statusIcon(postgresStatus)} {postgresStatus === 'running' ? 'Running' : 'Not Running'}
           </div>
-          {qdrantStatus === 'running' && (
+          {postgresStatus === 'running' && (
             <button
-              onClick={() => window.open('http://127.0.0.1:6333/dashboard', '_blank')}
+              onClick={async () => {
+                const result = await pingService('postgres');
+                alert(result ? '\u2713 PostgreSQL responding!' : '\u2717 PostgreSQL not responding');
+              }}
               style={{
                 marginTop: '8px',
                 fontSize: '10px',
                 padding: '4px 8px',
                 background: 'var(--bg-elev1)',
                 border: '1px solid var(--link)',
-                color: 'var(--link)'
+                color: 'var(--link)',
+                cursor: 'pointer',
+                borderRadius: '4px',
               }}
             >
-              Open Dashboard
+              Ping PostgreSQL
             </button>
           )}
         </div>
 
         <div style={{
           background: 'var(--card-bg)',
-          border: `1px solid ${statusColor(redisStatus)}`,
+          border: `1px solid ${statusColor(neo4jStatus)}`,
           borderRadius: '6px',
           padding: '16px'
         }}>
@@ -142,27 +147,26 @@ export function InfrastructureServices() {
             textTransform: 'uppercase',
             marginBottom: '8px'
           }}>
-            Redis
+            Neo4j (Graph DB)
           </div>
-          <div style={{ color: statusColor(redisStatus), fontSize: '16px', fontWeight: 600 }}>
-            {statusIcon(redisStatus)} {redisStatus === 'running' ? 'Running' : 'Not Running'}
+          <div style={{ color: statusColor(neo4jStatus), fontSize: '16px', fontWeight: 600 }}>
+            {statusIcon(neo4jStatus)} {neo4jStatus === 'running' ? 'Running' : 'Not Running'}
           </div>
-          {redisStatus === 'running' && (
+          {neo4jStatus === 'running' && (
             <button
-              onClick={async () => {
-                const result = await pingRedis();
-                alert(result.success ? '✓ Redis PONG!' : '✗ Redis not responding');
-              }}
+              onClick={() => window.open('http://127.0.0.1:7474/browser/', '_blank')}
               style={{
                 marginTop: '8px',
                 fontSize: '10px',
                 padding: '4px 8px',
                 background: 'var(--bg-elev1)',
                 border: '1px solid var(--link)',
-                color: 'var(--link)'
+                color: 'var(--link)',
+                cursor: 'pointer',
+                borderRadius: '4px',
               }}
             >
-              Ping Redis
+              Open Browser
             </button>
           )}
         </div>
@@ -193,7 +197,9 @@ export function InfrastructureServices() {
                 padding: '4px 8px',
                 background: 'var(--bg-elev1)',
                 border: '1px solid var(--link)',
-                color: 'var(--link)'
+                color: 'var(--link)',
+                cursor: 'pointer',
+                borderRadius: '4px',
               }}
             >
               Open UI
@@ -227,7 +233,9 @@ export function InfrastructureServices() {
                 padding: '4px 8px',
                 background: 'var(--bg-elev1)',
                 border: '1px solid var(--link)',
-                color: 'var(--link)'
+                color: 'var(--link)',
+                cursor: 'pointer',
+                borderRadius: '4px',
               }}
             >
               Open UI
@@ -248,10 +256,12 @@ export function InfrastructureServices() {
             padding: '12px 20px',
             fontSize: '14px',
             fontWeight: 600,
-            opacity: loading ? 0.5 : 1
+            opacity: loading ? 0.5 : 1,
+            cursor: loading ? 'not-allowed' : 'pointer',
+            borderRadius: '4px',
           }}
         >
-          {loading ? '⏳ Starting...' : '▶ Start Infrastructure'}
+          {loading ? '\u23F3 Starting...' : '\u25B6 Start Infrastructure'}
         </button>
         <button
           onClick={handleStopInfra}
@@ -264,10 +274,12 @@ export function InfrastructureServices() {
             padding: '12px 20px',
             fontSize: '14px',
             fontWeight: 600,
-            opacity: loading ? 0.5 : 1
+            opacity: loading ? 0.5 : 1,
+            cursor: loading ? 'not-allowed' : 'pointer',
+            borderRadius: '4px',
           }}
         >
-          {loading ? '⏳ Stopping...' : '■ Stop Infrastructure'}
+          {loading ? '\u23F3 Stopping...' : '\u25A0 Stop Infrastructure'}
         </button>
       </div>
     </div>

@@ -82,63 +82,100 @@ function App() {
         // MIGRATED: theme.js → /hooks/useTheme.ts (UIStore-backed, exposes window.Theme)
 
         // 2. Test instrumentation (for debugging)
+        // @ts-ignore - legacy JS module (no exports)
         await import('./modules/test-instrumentation.js');
 
         // 4. Navigation and tabs - REMOVED, now using React Router
         // Legacy navigation modules replaced by TabBar/TabRouter components
 
         // 5. Search and tooltips (UI enhancements)
+        // @ts-ignore - legacy JS modules (no exports)
         await import('./modules/search.js');
+        // @ts-ignore - legacy JS module
         await import('./modules/tooltips.js');
 
         // 6. Configuration and health (backend integration)
+        // @ts-ignore - legacy JS modules (no exports)
         await import('./modules/config.js');
+        // @ts-ignore - legacy JS module
         await import('./modules/health.js');
 
         // 7. Feature modules (ensure feedback tools load before chat)
+        // @ts-ignore - legacy JS module
         await import('./modules/reranker.js');
         await Promise.all([
+          // @ts-ignore - legacy JS modules (no exports, attach to window)
           import('./modules/git-hooks.js'),
+          // @ts-ignore
           import('./modules/git-commit-meta.js'),
+          // @ts-ignore
           import('./modules/keywords.js'),
+          // @ts-ignore
           import('./modules/autotune.js'),
+          // @ts-ignore
           import('./modules/editor.js'),
+          // @ts-ignore
           import('./modules/editor-settings.js'),
+          // @ts-ignore
           import('./modules/secrets.js'),
+          // @ts-ignore
           import('./modules/model_flows.js'),
+          // @ts-ignore
           import('./modules/index_status.js'),
+          // @ts-ignore
           import('./modules/mcp_rag.js'),
+          // @ts-ignore
           import('./modules/mcp_server.js'),
           // REMOVED: Legacy JS indexing modules - IndexingSubtab now uses pure React/TypeScript
           // import('./modules/index_profiles.js'),
           // import('./modules/indexing.js'),
           // import('./modules/simple_index.js'),
+          // @ts-ignore
           import('./modules/docker.js'),
+          // @ts-ignore
           import('./modules/grafana.js'),
+          // @ts-ignore
           import('./modules/vscode.js'),
+          // @ts-ignore
           import('./modules/onboarding.js'),
+          // @ts-ignore
           import('./modules/index-display.js'),
+          // @ts-ignore
           import('./modules/cards_builder.js'),
+          // @ts-ignore
           import('./modules/cost_logic.js'),
+          // @ts-ignore
           import('./modules/storage-calculator-template.js'),
+          // @ts-ignore
           import('./modules/storage-calculator.js'),
+          // @ts-ignore
           import('./modules/profile_logic.js'),
+          // @ts-ignore
           import('./modules/profile_renderer.js'),
+          // @ts-ignore
           import('./modules/autoprofile_v2.js'),
           // REMOVED: Legacy JS modules - EvaluateSubtab now uses pure React/TypeScript
           // import('./modules/golden_questions.js'),
           // import('./modules/eval_runner.js'),
+          // @ts-ignore
           import('./modules/eval_history.js'),
           // MIGRATED: error-helpers.js → /utils/errorHelpers.ts (exposes window.ErrorHelpers)
+          // @ts-ignore
           import('./modules/layout_fix.js'),
+          // @ts-ignore
           import('./modules/live-terminal.js'),
+          // @ts-ignore
           import('./modules/trace.js'),
+          // @ts-ignore
           import('./modules/ux-feedback.js'),
+          // @ts-ignore
           import('./modules/langsmith.js'),
+          // @ts-ignore
           import('./modules/dino.js')
         ]);
 
         // 8. Main app coordinator (must load last)
+        // @ts-ignore - legacy JS module
         await import('./modules/app.js');
 
         console.log('[App] All legacy modules loaded successfully');
@@ -155,8 +192,7 @@ function App() {
   }, []);
 
   // Show loading screen while modules are loading
-  // TEMPORARY: Skip loading check to debug
-  if (false && (!modulesLoaded || !isInitialized)) {
+  if (!modulesLoaded || !isInitialized) {
     return (
       <div style={{
         display: 'flex',

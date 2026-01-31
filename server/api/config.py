@@ -1,59 +1,49 @@
 from __future__ import annotations
 
 import os
-
-from fastapi import APIRouter, HTTPException, Query
 from typing import Any
 
-from server.config import load_config, save_config
-from server.models.tribrid_config_model import TriBridConfig
+from fastapi import APIRouter, Depends, HTTPException, Query
+
+from server.models.tribrid_config_model import CorpusScope, TriBridConfig
+from server.services.config_store import get_config as load_scoped_config
+from server.services.config_store import reset_config as reset_scoped_config
+from server.services.config_store import save_config as save_scoped_config
 
 router = APIRouter(tags=["config"])
 
-# In-memory cache (source of truth is tribrid_config.json)
-_config_cache: TriBridConfig | None = None
-
-
-def _get_default_config() -> TriBridConfig:
-    """Get default config - LAW provides all defaults via default_factory."""
-    return TriBridConfig()
-
-
-def _load_or_init_config() -> TriBridConfig:
-    """Load config from disk; initialize defaults if missing/invalid."""
-    global _config_cache
-    if _config_cache is not None:
-        return _config_cache
-    try:
-        _config_cache = load_config()
-        return _config_cache
-    except FileNotFoundError:
-        _config_cache = _get_default_config()
-        save_config(_config_cache)
-        return _config_cache
-    except Exception as e:
-        # Surface validation errors clearly (Pydantic will raise)
-        raise HTTPException(status_code=500, detail=f"Failed to load tribrid_config.json: {e}")
-
-
 @router.get("/config", response_model=TriBridConfig)
-async def get_config() -> TriBridConfig:
-    return _load_or_init_config()
+async def get_config(scope: CorpusScope = Depends()) -> TriBridConfig:
+    repo_id = scope.resolved_repo_id
+    try:
+        return await load_scoped_config(repo_id=repo_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.put("/config", response_model=TriBridConfig)
-async def update_config(config: TriBridConfig) -> TriBridConfig:
-    global _config_cache
-    # Persist full config to disk
-    save_config(config)
-    _config_cache = config
-    return config
+async def update_config(
+    config: TriBridConfig,
+    scope: CorpusScope = Depends(),
+) -> TriBridConfig:
+    repo_id = scope.resolved_repo_id
+    try:
+        return await save_scoped_config(config, repo_id=repo_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.patch("/config/{section}", response_model=TriBridConfig)
-async def update_config_section(section: str, updates: dict[str, Any]) -> TriBridConfig:
-    global _config_cache
-    config = _load_or_init_config()
+async def update_config_section(
+    section: str,
+    updates: dict[str, Any],
+    scope: CorpusScope = Depends(),
+) -> TriBridConfig:
+    repo_id = scope.resolved_repo_id
+    try:
+        config = await load_scoped_config(repo_id=repo_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
     # Only allow patching known top-level sections
     if section not in TriBridConfig.model_fields:
@@ -73,20 +63,21 @@ async def update_config_section(section: str, updates: dict[str, Any]) -> TriBri
     try:
         new_config = TriBridConfig.model_validate(base)
     except Exception as e:
-        raise HTTPException(status_code=422, detail=str(e))
+        raise HTTPException(status_code=422, detail=str(e)) from e
 
-    save_config(new_config)
-    _config_cache = new_config
-    return new_config
+    try:
+        return await save_scoped_config(new_config, repo_id=repo_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.post("/config/reset", response_model=TriBridConfig)
-async def reset_config() -> TriBridConfig:
-    global _config_cache
-    cfg = _get_default_config()
-    save_config(cfg)
-    _config_cache = cfg
-    return cfg
+async def reset_config(scope: CorpusScope = Depends()) -> TriBridConfig:
+    repo_id = scope.resolved_repo_id
+    try:
+        return await reset_scoped_config(repo_id=repo_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.get("/secrets/check")

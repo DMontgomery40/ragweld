@@ -10,14 +10,14 @@
  */
 
 import { create } from 'zustand';
-import type { Repository, RepoIndexingConfig } from '@web/types';
+import type { Corpus, CorpusCreateRequest, CorpusUpdateRequest } from '@/types/generated';
 
-// Re-export types for backward compatibility
-export type { Repository, RepoIndexingConfig };
+// Re-export for backward compatibility with existing components
+export type Repository = Corpus;
 
 interface RepoStore {
   // State
-  repos: Repository[];
+  repos: Corpus[];
   activeRepo: string;
   loading: boolean;
   error: string | null;
@@ -29,8 +29,9 @@ interface RepoStore {
   loadRepos: () => Promise<void>;
   setActiveRepo: (repoName: string) => Promise<void>;
   refreshActiveRepo: () => Promise<void>;
-  getRepoByName: (name: string) => Repository | undefined;
-  updateRepoIndexing: (repoName: string, indexing: Partial<RepoIndexingConfig>) => Promise<void>;
+  getRepoByName: (name: string) => Corpus | undefined;
+  addRepo: (request: CorpusCreateRequest) => Promise<Corpus>;
+  updateCorpus: (corpusId: string, updates: CorpusUpdateRequest) => Promise<Corpus>;
 }
 
 // Determine API base URL
@@ -85,21 +86,21 @@ export const useRepoStore = create<RepoStore>((set, get) => ({
     try {
       const apiBase = getApiBase();
 
-      // Fetch repos list AND current config in parallel
-      const [reposRes, configRes] = await Promise.all([
-        fetch(`${apiBase}/repos`),
-        fetch(`${apiBase}/config`)
-      ]);
-
-      if (!reposRes.ok || !configRes.ok) {
-        throw new Error('Failed to load repos or config');
+      // Fetch corpus list
+      const reposRes = await fetch(`${apiBase}/corpora`);
+      if (!reposRes.ok) {
+        throw new Error('Failed to load corpora');
       }
 
-      const reposData = await reposRes.json();
-      const configData = await configRes.json();
+      const repos: Corpus[] = await reposRes.json();
 
-      const repos: Repository[] = reposData.repos || [];
-      const activeRepo = configData.env?.REPO || configData.default_repo || (repos[0]?.name || 'agro');
+      // Determine active corpus from URL, localStorage, or first corpus
+      const url = new URL(window.location.href);
+      const urlCorpus = url.searchParams.get('corpus') || url.searchParams.get('repo') || '';
+      const stored =
+        localStorage.getItem('tribrid_active_corpus') || localStorage.getItem('tribrid_active_repo') || '';
+      const activeRepo =
+        urlCorpus || stored || repos[0]?.corpus_id || repos[0]?.slug || repos[0]?.name || '';
 
       set({
         repos,
@@ -109,10 +110,17 @@ export const useRepoStore = create<RepoStore>((set, get) => ({
         initialized: true
       });
 
-      // Broadcast repo state for any listeners
-      window.dispatchEvent(new CustomEvent('agro-repo-loaded', {
-        detail: { repos, activeRepo }
-      }));
+      // Persist + broadcast
+      if (activeRepo) {
+        localStorage.setItem('tribrid_active_corpus', activeRepo);
+      }
+      window.dispatchEvent(
+        new CustomEvent('tribrid-corpus-loaded', {
+          detail: { repos, activeRepo }
+        })
+      );
+      // Legacy event name (kept for any older listeners)
+      window.dispatchEvent(new CustomEvent('agro-repo-loaded', { detail: { repos, activeRepo } }));
 
     } catch (error) {
       set({
@@ -127,8 +135,8 @@ export const useRepoStore = create<RepoStore>((set, get) => ({
     const { activeRepo, repos } = get();
     if (repoName === activeRepo) return;
     
-    // Verify repo exists
-    const targetRepo = repos.find(r => r.name === repoName || r.slug === repoName);
+    // Verify corpus exists
+    const targetRepo = repos.find(r => r.corpus_id === repoName || r.slug === repoName || r.name === repoName);
     if (!targetRepo && repos.length > 0) {
       set({ error: `Repository "${repoName}" not found` });
       return;
@@ -137,29 +145,23 @@ export const useRepoStore = create<RepoStore>((set, get) => ({
     set({ switching: true, error: null });
     
     try {
-      const apiBase = getApiBase();
-      
-      // Update backend config with new REPO
-      const response = await fetch(`${apiBase}/config`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ env: { REPO: repoName } })
-      });
-      
-      if (!response.ok) {
-        throw new Error('Failed to update active repository');
-      }
-      
-      // Trigger config reload to propagate changes to all backend modules
-      await fetch(`${apiBase}/env/reload`, { method: 'POST' });
-      
       const previousRepo = activeRepo;
       set({ activeRepo: repoName, switching: false });
+
+      // Persist active corpus locally and in URL
+      localStorage.setItem('tribrid_active_corpus', repoName);
+      const url = new URL(window.location.href);
+      url.searchParams.set('corpus', repoName);
+      window.history.replaceState({}, '', url.toString());
       
       // Broadcast repo change for all listeners
-      window.dispatchEvent(new CustomEvent('agro-repo-changed', { 
-        detail: { repo: repoName, previous: previousRepo } 
-      }));
+      window.dispatchEvent(
+        new CustomEvent('tribrid-corpus-changed', {
+          detail: { corpus: repoName, repo: repoName, previous: previousRepo },
+        })
+      );
+      // Legacy event name (kept for any older listeners)
+      window.dispatchEvent(new CustomEvent('agro-repo-changed', { detail: { repo: repoName, previous: previousRepo } }));
       
     } catch (error) {
       set({
@@ -170,66 +172,55 @@ export const useRepoStore = create<RepoStore>((set, get) => ({
   },
 
   refreshActiveRepo: async () => {
-    const apiBase = getApiBase();
     try {
-      const response = await fetch(`${apiBase}/config`);
-      if (response.ok) {
-        const data = await response.json();
-        const activeRepo = data.env?.REPO || data.default_repo || 'agro';
-        set({ activeRepo });
-      }
+      const url = new URL(window.location.href);
+      const urlCorpus = url.searchParams.get('corpus') || url.searchParams.get('repo') || '';
+      const stored =
+        localStorage.getItem('tribrid_active_corpus') || localStorage.getItem('tribrid_active_repo') || '';
+      const activeRepo = urlCorpus || stored;
+      if (activeRepo) set({ activeRepo });
     } catch {
       // Silent fail - will use cached value
     }
   },
 
   getRepoByName: (name: string) => {
-    return get().repos.find(r => r.name === name || r.slug === name);
+    return get().repos.find(r => r.corpus_id === name || r.slug === name || r.name === name);
   },
 
-  updateRepoIndexing: async (repoName: string, indexing: Partial<RepoIndexingConfig>) => {
-    const { repos } = get();
-    const targetRepo = repos.find(r => r.name === repoName || r.slug === repoName);
-    if (!targetRepo) {
-      set({ error: `Repository "${repoName}" not found` });
-      return;
+  addRepo: async (request: CorpusCreateRequest) => {
+    const apiBase = getApiBase();
+    const response = await fetch(`${apiBase}/corpora`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request)
+    });
+    if (!response.ok) {
+      const detail = await response.text().catch(() => '');
+      throw new Error(detail || `Failed to create corpus (${response.status})`);
     }
+    const created: Corpus = await response.json();
+    // Refresh list and set active
+    await get().loadRepos();
+    await get().setActiveRepo(created.corpus_id);
+    return created;
+  },
 
-    try {
-      const apiBase = getApiBase();
-      const response = await fetch(`${apiBase}/repos/${repoName}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ indexing })
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || 'Failed to update repo indexing config');
-      }
-
-      // Update local state
-      const updatedRepos = repos.map(r => {
-        if (r.name === repoName || r.slug === repoName) {
-          return {
-            ...r,
-            indexing: { ...r.indexing, ...indexing } as RepoIndexingConfig
-          };
-        }
-        return r;
-      });
-
-      set({ repos: updatedRepos, error: null });
-
-      // Broadcast for listeners
-      window.dispatchEvent(new CustomEvent('agro-repo-indexing-updated', {
-        detail: { repo: repoName, indexing }
-      }));
-
-    } catch (error) {
-      set({ error: error instanceof Error ? error.message : 'Failed to update indexing config' });
-      throw error;
+  updateCorpus: async (corpusId: string, updates: CorpusUpdateRequest) => {
+    const apiBase = getApiBase();
+    const response = await fetch(`${apiBase}/corpora/${encodeURIComponent(corpusId)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updates)
+    });
+    if (!response.ok) {
+      const detail = await response.text().catch(() => '');
+      throw new Error(detail || `Failed to update corpus (${response.status})`);
     }
+    const updated: Corpus = await response.json();
+    // Refresh list to reflect changes
+    await get().loadRepos();
+    return updated;
   }
 }));
 

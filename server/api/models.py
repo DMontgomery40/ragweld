@@ -5,11 +5,11 @@ in the UI. Every dropdown (embedding, generation, reranker) MUST use this endpoi
 
 NO HARDCODED MODEL LISTS ANYWHERE ELSE.
 """
+import json
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
-from pathlib import Path
-import json
 
 router = APIRouter(prefix="/api/models", tags=["models"])
 

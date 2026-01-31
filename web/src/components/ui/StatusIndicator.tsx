@@ -1,4 +1,4 @@
-import React from 'react';
+
 
 export interface StatusIndicatorProps {
   status: 'online' | 'offline' | 'loading' | 'success' | 'warning' | 'error' | 'idle';

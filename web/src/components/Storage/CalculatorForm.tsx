@@ -1,15 +1,12 @@
 // Storage Calculator Form - Input Controls
 // Provides accessible form inputs with proper labeling and validation
 
-import React from 'react';
+
 import type { CalculatorInputs, Calculator2Inputs } from '@web/types/storage';
 
 interface CalculatorFormProps {
   inputs: CalculatorInputs | Calculator2Inputs;
-  onUpdate: <K extends keyof (CalculatorInputs | Calculator2Inputs)>(
-    key: K,
-    value: any
-  ) => void;
+  onUpdate: (key: string, value: number) => void;
   mode: 'full' | 'optimize';
 }
 

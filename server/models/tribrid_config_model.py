@@ -11,16 +11,19 @@ Using Pydantic provides:
 This is THE LAW - all domain models and config types must be defined here.
 Other files should re-export from this module.
 """
-from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any, Dict, List, Literal
+from __future__ import annotations
+
+import uuid
+import re
+from datetime import UTC, datetime
+from typing import Any, Literal
 
 try:
     from typing import Self
 except ImportError:
-    from typing_extensions import Self
+    from typing import Self
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
-
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 # =============================================================================
 # DOMAIN MODELS - Core data types for the tribrid RAG system
@@ -44,14 +47,22 @@ class Chunk(BaseModel):
 
 class IndexRequest(BaseModel):
     """Request to index a repository."""
-    repo_id: str = Field(description="Repository identifier")
+    repo_id: str = Field(
+        description="Corpus identifier",
+        validation_alias=AliasChoices("repo_id", "corpus_id"),
+        serialization_alias="corpus_id",
+    )
     repo_path: str = Field(description="Path to repository on disk")
     force_reindex: bool = Field(default=False, description="Force full reindex even if up-to-date")
 
 
 class IndexStatus(BaseModel):
     """Current status of repository indexing."""
-    repo_id: str = Field(description="Repository identifier")
+    repo_id: str = Field(
+        description="Corpus identifier",
+        validation_alias=AliasChoices("repo_id", "corpus_id"),
+        serialization_alias="corpus_id",
+    )
     status: Literal["idle", "indexing", "complete", "error"] = Field(description="Current indexing state")
     progress: float = Field(ge=0.0, le=1.0, description="Progress from 0.0 to 1.0")
     current_file: str | None = Field(default=None, description="File currently being indexed")
@@ -62,7 +73,11 @@ class IndexStatus(BaseModel):
 
 class IndexStats(BaseModel):
     """Statistics about an indexed repository."""
-    repo_id: str = Field(description="Repository identifier")
+    repo_id: str = Field(
+        description="Corpus identifier",
+        validation_alias=AliasChoices("repo_id", "corpus_id"),
+        serialization_alias="corpus_id",
+    )
     total_files: int = Field(description="Number of files indexed")
     total_chunks: int = Field(description="Number of chunks created")
     total_tokens: int = Field(description="Total token count across all chunks")
@@ -70,6 +85,220 @@ class IndexStats(BaseModel):
     embedding_dimensions: int = Field(description="Dimension of embedding vectors")
     last_indexed: datetime | None = Field(default=None, description="When last indexed")
     file_breakdown: dict[str, int] = Field(default_factory=dict, description="Count by file extension")
+
+
+class Corpus(BaseModel):
+    """User-managed corpus (formerly "repo" in Agro).
+
+    A corpus is the unit of isolation for:
+    - indexing storage (Postgres)
+    - graph storage (Neo4j)
+    - configuration (per-corpus TriBridConfig)
+    """
+
+    repo_id: str = Field(
+        description="Corpus identifier (stable slug)",
+        validation_alias=AliasChoices("repo_id", "corpus_id"),
+        serialization_alias="corpus_id",
+    )
+    name: str = Field(description="Display name")
+    path: str = Field(description="Root path on disk")
+    slug: str | None = Field(default=None, description="Legacy alias for repo_id (UI compatibility)")
+    branch: str | None = Field(default=None, description="Optional branch name (if corpus is a git repo)")
+    default: bool | None = Field(default=None, description="Whether this corpus is the default selection")
+    exclude_paths: list[str] | None = Field(default=None, description="Paths to exclude during indexing")
+    keywords: list[str] | None = Field(default=None, description="Corpus-specific keyword boosts")
+    path_boosts: list[str] | None = Field(default=None, description="Path boost prefixes for scoring")
+    layer_bonuses: dict[str, dict[str, float]] | None = Field(
+        default=None,
+        description="Optional layer bonus overrides (intent->layer->multiplier)",
+    )
+    description: str | None = Field(default=None, description="Optional description")
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        description="When the corpus was created",
+    )
+    last_indexed: datetime | None = Field(default=None, description="When the corpus was last indexed")
+
+
+class CorpusStats(BaseModel):
+    """High-level corpus stats for UI dashboards."""
+
+    repo_id: str = Field(
+        description="Corpus identifier",
+        validation_alias=AliasChoices("repo_id", "corpus_id"),
+        serialization_alias="corpus_id",
+    )
+    file_count: int = Field(description="Number of files in corpus")
+    total_size_bytes: int = Field(description="Total size of corpus files (bytes)")
+    language_breakdown: dict[str, int] = Field(description="Language->file count breakdown")
+    index_stats: IndexStats | None = Field(default=None, description="Index stats (if indexed)")
+    graph_stats: GraphStats | None = Field(default=None, description="Graph stats (if built)")
+
+
+class CorpusCreateRequest(BaseModel):
+    """Request to create a new corpus."""
+
+    repo_id: str | None = Field(
+        default=None,
+        description="Optional corpus ID; generated from name if omitted",
+        validation_alias=AliasChoices("repo_id", "corpus_id"),
+        serialization_alias="corpus_id",
+    )
+    name: str = Field(description="Display name")
+    path: str = Field(description="Root path on disk")
+    description: str | None = Field(default=None, description="Optional description")
+
+
+class CorpusUpdateRequest(BaseModel):
+    """Request to update an existing corpus. All fields optional."""
+
+    name: str | None = Field(default=None, description="Display name")
+    path: str | None = Field(default=None, description="Root path on disk")
+    branch: str | None = Field(default=None, description="Git branch (if applicable)")
+    exclude_paths: list[str] | None = Field(default=None, description="Paths to exclude during indexing")
+    keywords: list[str] | None = Field(default=None, description="Corpus-specific keyword boosts")
+    path_boosts: list[str] | None = Field(default=None, description="Path patterns for scoring boosts")
+    layer_bonuses: dict[str, dict[str, float]] | None = Field(
+        default=None, description="Nested map for layer bonus scoring"
+    )
+
+
+class CorpusScope(BaseModel):
+    """Standard corpus scoping helper for query params and request bodies.
+
+    Accepts either `corpus_id` (preferred) or `repo_id` (legacy).
+    Also supports older `repo` query parameters used in parts of the UI.
+    """
+
+    corpus_id: str | None = Field(
+        default=None,
+        description="Corpus identifier (preferred)",
+    )
+
+    repo_id: str | None = Field(
+        default=None,
+        description="Corpus identifier (legacy repo_id)",
+    )
+
+    repo: str | None = Field(
+        default=None,
+        description="Corpus identifier (legacy repo alias)",
+    )
+
+    @property
+    def resolved_repo_id(self) -> str | None:
+        return self.corpus_id or self.repo_id or self.repo
+
+    @field_validator("corpus_id", "repo_id", "repo")
+    @classmethod
+    def _strip_repo_id(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        v = v.strip()
+        return v or None
+
+
+class VocabPreviewTerm(BaseModel):
+    """A single term in the Postgres FTS vocabulary preview."""
+
+    term: str = Field(description="Tokenized lexeme")
+    doc_count: int = Field(ge=0, description="Number of chunks containing this term")
+
+
+class VocabPreviewResponse(BaseModel):
+    """Response payload for the vocab preview endpoint."""
+
+    repo_id: str = Field(
+        description="Corpus identifier",
+        validation_alias=AliasChoices("repo_id", "corpus_id"),
+        serialization_alias="corpus_id",
+    )
+    top_n: int = Field(ge=10, le=500, description="Number of top terms requested")
+    tokenizer: str = Field(description="BM25 tokenizer setting (indexing.bm25_tokenizer)")
+    stemmer_lang: str | None = Field(default=None, description="Stemmer language (indexing.bm25_stemmer_lang)")
+    stopwords_lang: str | None = Field(default=None, description="Stopwords language code (indexing.bm25_stopwords_lang)")
+    ts_config: str = Field(description="Postgres text search configuration used for tsv + query parsing")
+    total_terms: int = Field(ge=0, description="Total unique terms in the corpus vocabulary")
+    terms: list[VocabPreviewTerm] = Field(default_factory=list, description="Top terms by document frequency")
+
+
+class ChunkSummary(BaseModel):
+    """A short summary of an indexed chunk (chunk_summary)."""
+
+    chunk_id: str = Field(description="Unique identifier of the source chunk")
+    file_path: str = Field(description="Path to the source file")
+    start_line: int | None = Field(default=None, description="Starting line number")
+    end_line: int | None = Field(default=None, description="Ending line number")
+    purpose: str | None = Field(default=None, description="High-level purpose summary")
+    symbols: list[str] = Field(default_factory=list, description="Symbols mentioned in this chunk")
+    technical_details: str | None = Field(default=None, description="Technical details summary")
+    domain_concepts: list[str] = Field(default_factory=list, description="Domain concepts mentioned in this chunk")
+
+
+class ChunkSummariesLastBuild(BaseModel):
+    """Metadata about the most recent chunk_summaries build."""
+
+    repo_id: str = Field(
+        description="Corpus identifier",
+        validation_alias=AliasChoices("repo_id", "corpus_id"),
+        serialization_alias="corpus_id",
+    )
+    timestamp: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        description="When the build completed",
+    )
+    total: int = Field(ge=0, description="Number of chunk_summaries generated")
+    enriched: int = Field(default=0, ge=0, description="Number of chunk_summaries enriched (if enabled)")
+
+
+class ChunkSummariesResponse(BaseModel):
+    """Response payload for chunk_summaries list/build endpoints."""
+
+    repo_id: str = Field(
+        description="Corpus identifier",
+        validation_alias=AliasChoices("repo_id", "corpus_id"),
+        serialization_alias="corpus_id",
+    )
+    chunk_summaries: list[ChunkSummary] = Field(description="Chunk summaries for this repo")
+    last_build: ChunkSummariesLastBuild | None = Field(
+        default=None, description="Metadata about the last build, if any"
+    )
+
+
+class ChunkSummariesBuildRequest(BaseModel):
+    """Request to build chunk_summaries for a repository."""
+
+    repo_id: str = Field(
+        description="Corpus identifier",
+        validation_alias=AliasChoices("repo_id", "repo", "corpus_id"),
+        serialization_alias="corpus_id",
+    )
+    # Optional overrides (otherwise use TriBridConfig fields)
+    max: int | None = Field(default=None, ge=1, le=10000, description="Override max summaries to build")
+    enrich: bool | None = Field(default=None, description="Override enrichment toggle for this build")
+
+
+class KeywordsGenerateRequest(BaseModel):
+    """Request to generate discriminative keywords for a repository."""
+
+    repo_id: str = Field(
+        description="Corpus identifier",
+        validation_alias=AliasChoices("repo_id", "repo", "corpus_id"),
+        serialization_alias="corpus_id",
+    )
+
+
+class KeywordsGenerateResponse(BaseModel):
+    """Response payload for keywords generation."""
+
+    repo_id: str = Field(
+        description="Corpus identifier",
+        validation_alias=AliasChoices("repo_id", "corpus_id"),
+        serialization_alias="corpus_id",
+    )
+    keywords: list[str] = Field(description="Generated keywords")
+    count: int = Field(ge=0, description="Number of keywords returned")
 
 
 class ChunkMatch(BaseModel):
@@ -88,7 +317,11 @@ class ChunkMatch(BaseModel):
 class SearchRequest(BaseModel):
     """Request payload for tri-brid search."""
     query: str = Field(description="The search query")
-    repo_id: str = Field(description="Repository to search")
+    repo_id: str = Field(
+        description="Corpus identifier to search",
+        validation_alias=AliasChoices("repo_id", "corpus_id"),
+        serialization_alias="corpus_id",
+    )
     top_k: int = Field(default=20, ge=1, le=100, description="Number of results to return")
     include_vector: bool = Field(default=True, description="Include vector search results")
     include_sparse: bool = Field(default=True, description="Include sparse/BM25 results")
@@ -108,7 +341,11 @@ class SearchResponse(BaseModel):
 class AnswerRequest(BaseModel):
     """Request payload for AI answer generation."""
     query: str = Field(description="The question to answer")
-    repo_id: str = Field(description="Repository context")
+    repo_id: str = Field(
+        description="Corpus identifier",
+        validation_alias=AliasChoices("repo_id", "corpus_id"),
+        serialization_alias="corpus_id",
+    )
     top_k: int = Field(default=10, ge=1, le=50, description="Number of chunks to use as context")
     stream: bool = Field(default=False, description="Stream the response")
     system_prompt: str | None = Field(default=None, description="Override system prompt")
@@ -129,7 +366,7 @@ class Message(BaseModel):
     role: Literal["user", "assistant", "system"] = Field(description="Message role")
     content: str = Field(description="Message content")
     timestamp: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc),
+        default_factory=lambda: datetime.now(UTC),
         description="When message was created"
     )
 
@@ -137,9 +374,22 @@ class Message(BaseModel):
 class ChatRequest(BaseModel):
     """Request payload for chat endpoint."""
     message: str = Field(description="User's message")
-    repo_id: str = Field(description="Repository context")
+    repo_id: str = Field(
+        description="Corpus identifier",
+        validation_alias=AliasChoices("repo_id", "corpus_id"),
+        serialization_alias="corpus_id",
+    )
     conversation_id: str | None = Field(default=None, description="Continue existing conversation")
     stream: bool = Field(default=False, description="Stream the response")
+    include_vector: bool = Field(default=True, description="Include vector retrieval results")
+    include_sparse: bool = Field(default=True, description="Include sparse/BM25 retrieval results")
+    include_graph: bool = Field(default=True, description="Include graph retrieval results")
+    top_k: int | None = Field(
+        default=None,
+        ge=1,
+        le=100,
+        description="Override retrieval.final_k for this message (leave null to use config default)",
+    )
 
 
 class ChatResponse(BaseModel):
@@ -184,7 +434,11 @@ class Community(BaseModel):
 
 class GraphStats(BaseModel):
     """Statistics about a repository's knowledge graph."""
-    repo_id: str = Field(description="Repository identifier")
+    repo_id: str = Field(
+        description="Corpus identifier",
+        validation_alias=AliasChoices("repo_id", "corpus_id"),
+        serialization_alias="corpus_id",
+    )
     total_entities: int = Field(description="Number of entities in graph")
     total_relationships: int = Field(description="Number of relationships")
     total_communities: int = Field(description="Number of detected communities")
@@ -194,19 +448,49 @@ class GraphStats(BaseModel):
 
 class EvalDatasetItem(BaseModel):
     """Single evaluation dataset entry (formerly DatasetEntry)."""
-    entry_id: str = Field(description="Unique identifier for this entry")
+    entry_id: str = Field(
+        default_factory=lambda: str(uuid.uuid4()),
+        description="Unique identifier for this entry",
+    )
     question: str = Field(description="The test question")
-    expected_chunks: list[str] = Field(description="Chunk IDs that should be retrieved")
+    expected_paths: list[str] = Field(
+        description="File paths that should be retrieved (relative or absolute)",
+        validation_alias=AliasChoices("expected_paths", "expected_chunks"),
+    )
     expected_answer: str | None = Field(default=None, description="Expected answer if testing generation")
     tags: list[str] = Field(default_factory=list, description="Tags for filtering/grouping")
-    created_at: datetime = Field(description="When this entry was created")
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        description="When this entry was created",
+    )
 
 
 class EvalRequest(BaseModel):
     """Request payload for evaluation run."""
-    repo_id: str = Field(description="Repository to evaluate")
+    repo_id: str = Field(
+        description="Corpus identifier to evaluate",
+        validation_alias=AliasChoices("repo_id", "corpus_id"),
+        serialization_alias="corpus_id",
+    )
     dataset_id: str | None = Field(default=None, description="Dataset to use (None = default)")
     sample_size: int | None = Field(default=None, ge=1, description="Number of entries to sample (None = all)")
+
+
+class EvalTestRequest(BaseModel):
+    """Request payload for testing a single eval_dataset entry."""
+
+    repo_id: str = Field(
+        description="Corpus identifier to evaluate",
+        validation_alias=AliasChoices("repo_id", "corpus_id"),
+        serialization_alias="corpus_id",
+    )
+    question: str = Field(description="The test question")
+    expected_paths: list[str] = Field(
+        description="Expected file paths to retrieve",
+        validation_alias=AliasChoices("expected_paths", "expected_chunks"),
+    )
+    use_multi: bool | None = Field(default=None, description="Optional override for multi-query")
+    final_k: int | None = Field(default=None, ge=1, le=50, description="Optional override for final-k")
 
 
 class EvalMetrics(BaseModel):
@@ -221,27 +505,92 @@ class EvalMetrics(BaseModel):
     latency_p95_ms: float = Field(ge=0.0, description="95th percentile latency in ms")
 
 
+class EvalDoc(BaseModel):
+    """Lightweight scored retrieval doc for eval drill-down."""
+
+    file_path: str = Field(description="Retrieved file path")
+    start_line: int | None = Field(default=None, description="Optional start line for the retrieved span")
+    score: float = Field(description="Retrieval score (post-fusion)")
+    source: str | None = Field(default=None, description="Retrieval source (vector/sparse/graph)")
+
+
 class EvalResult(BaseModel):
     """Per-entry evaluation result."""
     entry_id: str = Field(description="Dataset entry ID")
     question: str = Field(description="The test question")
-    retrieved_chunks: list[str] = Field(description="Chunk IDs that were actually retrieved")
-    expected_chunks: list[str] = Field(description="Chunk IDs that should have been retrieved")
+    retrieved_paths: list[str] = Field(
+        description="File paths that were actually retrieved (ranked)",
+        validation_alias=AliasChoices("retrieved_paths", "retrieved_chunks"),
+    )
+    expected_paths: list[str] = Field(
+        description="File paths that should have been retrieved",
+        validation_alias=AliasChoices("expected_paths", "expected_chunks"),
+    )
+    top_paths: list[str] = Field(
+        default_factory=list,
+        description="Top retrieved file paths (ranked, truncated for UI)",
+    )
+    top1_path: list[str] = Field(default_factory=list, description="Top-1 retrieved file path (0 or 1 items)")
+    top1_hit: bool = Field(default=False, description="Whether top-1 contained any expected path")
+    topk_hit: bool = Field(default=False, description="Whether top-k contained any expected path")
     reciprocal_rank: float = Field(ge=0.0, le=1.0, description="Reciprocal rank for this entry")
     recall: float = Field(ge=0.0, le=1.0, description="Recall for this entry")
     latency_ms: float = Field(ge=0.0, description="Latency for this query")
+    duration_secs: float = Field(default=0.0, ge=0.0, description="Duration for this query (seconds)")
+    docs: list[EvalDoc] = Field(default_factory=list, description="Top docs with scores for drill-down")
 
 
 class EvalRun(BaseModel):
     """Complete evaluation run record."""
     run_id: str = Field(description="Unique identifier for this run")
-    repo_id: str = Field(description="Repository evaluated")
+    repo_id: str = Field(
+        description="Corpus identifier evaluated",
+        validation_alias=AliasChoices("repo_id", "corpus_id"),
+        serialization_alias="corpus_id",
+    )
     dataset_id: str = Field(description="Dataset used")
-    config_snapshot: dict[str, Any] = Field(description="Config state during evaluation")
+    config_snapshot: dict[str, Any] = Field(description="Nested config state during evaluation")
+    config: dict[str, Any] = Field(default_factory=dict, description="Flat env-style config snapshot (for UI)")
+    total: int = Field(default=0, ge=0, description="Total questions evaluated")
+    top1_hits: int = Field(default=0, ge=0, description="Count of top-1 hits")
+    topk_hits: int = Field(default=0, ge=0, description="Count of top-k hits")
+    top1_accuracy: float = Field(default=0.0, ge=0.0, le=1.0, description="Top-1 accuracy")
+    topk_accuracy: float = Field(default=0.0, ge=0.0, le=1.0, description="Top-k accuracy")
+    duration_secs: float = Field(default=0.0, ge=0.0, description="Total run duration (seconds)")
+    use_multi: bool = Field(default=False, description="Whether multi-query was enabled for this run")
+    final_k: int = Field(default=0, ge=0, description="Final-k used for this run")
     metrics: EvalMetrics = Field(description="Aggregated metrics")
     results: list[EvalResult] = Field(description="Per-entry results")
     started_at: datetime = Field(description="When evaluation started")
     completed_at: datetime = Field(description="When evaluation completed")
+
+
+class EvalRunMeta(BaseModel):
+    """Summary metadata for listing eval runs."""
+
+    run_id: str = Field(description="Eval run ID")
+    top1_accuracy: float = Field(ge=0.0, le=1.0, description="Top-1 accuracy")
+    topk_accuracy: float = Field(ge=0.0, le=1.0, description="Top-k accuracy")
+    mrr: float | None = Field(default=None, ge=0.0, le=1.0, description="Mean reciprocal rank")
+    total: int = Field(ge=0, description="Total questions evaluated")
+    duration_secs: float = Field(ge=0.0, description="Total run duration (seconds)")
+    has_config: bool = Field(default=True, description="Whether config snapshot is present")
+
+
+class EvalRunsResponse(BaseModel):
+    """Response for listing eval runs."""
+
+    ok: bool = Field(default=True, description="Whether the request succeeded")
+    runs: list[EvalRunMeta] = Field(default_factory=list, description="Run summaries (newest first)")
+
+
+class EvalAnalyzeComparisonResponse(BaseModel):
+    """Response for /eval/analyze_comparison."""
+
+    ok: bool = Field(default=False, description="Whether analysis succeeded")
+    analysis: str | None = Field(default=None, description="Markdown analysis")
+    model_used: str | None = Field(default=None, description="Model identifier (if any)")
+    error: str | None = Field(default=None, description="Error message (if any)")
 
 
 class EvalComparisonResult(BaseModel):
@@ -553,7 +902,7 @@ class LayerBonusConfig(BaseModel):
         description="Bonus for recently modified files"
     )
 
-    intent_matrix: Dict[str, Dict[str, float]] = Field(
+    intent_matrix: dict[str, dict[str, float]] = Field(
         default_factory=lambda: {
             "gui": {"gui": 1.2, "web": 1.2, "server": 0.9, "retrieval": 0.8, "indexer": 0.8},
             "retrieval": {"retrieval": 1.3, "server": 1.15, "common": 1.1, "web": 0.7, "gui": 0.6},
@@ -639,6 +988,16 @@ class EmbeddingConfig(BaseModel):
         description="Max retries for embedding API"
     )
 
+    @property
+    def effective_model(self) -> str:
+        """Return the configured embedding model name actually in use for this provider."""
+        t = (self.embedding_type or "").strip().lower()
+        if t == "voyage":
+            return self.voyage_model
+        if t in {"local", "huggingface"}:
+            return self.embedding_model_local
+        return self.embedding_model
+
     @field_validator('embedding_dim')
     @classmethod
     def validate_dim_matches_model(cls, v: int) -> int:
@@ -717,8 +1076,8 @@ class IndexingConfig(BaseModel):
     """Indexing and vector storage configuration."""
 
     postgres_url: str = Field(
-        default="http://127.0.0.1:6333",
-        description="PostgreSQL pgvector URL"
+        default="postgresql://postgres:postgres@localhost:5432/tribrid_rag",
+        description="PostgreSQL connection string (DSN) for pgvector + FTS storage"
     )
     table_name: str = Field(
         default="code_chunks_{repo}",
@@ -786,6 +1145,19 @@ class IndexingConfig(BaseModel):
         description="Repository configuration file"
     )
 
+    @property
+    def postgres_ts_config(self) -> str:
+        """Resolve Postgres FTS config name from TriBridConfig (LAW).
+
+        - tokenizer=stemmer → use bm25_stemmer_lang (e.g., 'english')
+        - tokenizer=lowercase/whitespace → use the built-in 'simple' config (no stemming)
+        """
+        tok = (self.bm25_tokenizer or "").strip().lower()
+        if tok == "stemmer":
+            lang = (self.bm25_stemmer_lang or "").strip()
+            return lang or "english"
+        return "simple"
+
 
 # =============================================================================
 # GRAPH STORAGE CONFIG (Neo4j)
@@ -814,6 +1186,22 @@ class GraphStorageConfig(BaseModel):
         description="Neo4j database name"
     )
 
+    neo4j_database_mode: Literal["shared", "per_corpus"] = Field(
+        default="shared",
+        description="Database isolation mode: 'shared' uses a single Neo4j database (Community-compatible), "
+        "'per_corpus' uses a separate Neo4j database per corpus (Enterprise multi-database).",
+    )
+
+    neo4j_database_prefix: str = Field(
+        default="tribrid_",
+        description="Prefix for per-corpus Neo4j database names when neo4j_database_mode='per_corpus'.",
+    )
+
+    neo4j_auto_create_databases: bool = Field(
+        default=True,
+        description="Automatically create per-corpus Neo4j databases when missing (Enterprise).",
+    )
+
     max_hops: int = Field(
         default=2,
         ge=1,
@@ -831,12 +1219,12 @@ class GraphStorageConfig(BaseModel):
         description="Community detection algorithm"
     )
 
-    entity_types: List[str] = Field(
+    entity_types: list[str] = Field(
         default=["function", "class", "module", "variable", "import"],
         description="Entity types to extract and store in graph"
     )
 
-    relationship_types: List[str] = Field(
+    relationship_types: list[str] = Field(
         default=["calls", "imports", "inherits", "contains", "references"],
         description="Relationship types to extract"
     )
@@ -847,6 +1235,24 @@ class GraphStorageConfig(BaseModel):
         le=100,
         description="Number of results from graph traversal"
     )
+
+    def resolve_database(self, corpus_id: str | None) -> str:
+        """Resolve the Neo4j database name for a corpus.
+
+        - shared: use neo4j_database
+        - per_corpus: derive from corpus_id + prefix (sanitized)
+        """
+        if self.neo4j_database_mode == "shared" or not corpus_id:
+            return self.neo4j_database
+        base = f"{self.neo4j_database_prefix}{corpus_id}"
+        v = base.strip().lower()
+        v = re.sub(r"[^a-z0-9_]+", "_", v)
+        v = re.sub(r"_+", "_", v).strip("_")
+        if not v:
+            return self.neo4j_database
+        if v[0].isdigit():
+            v = f"db_{v}"
+        return v[:63]
 
 
 # =============================================================================
@@ -978,9 +1384,41 @@ class SparseSearchConfig(BaseModel):
 class GraphSearchConfig(BaseModel):
     """Configuration for graph-based search using Neo4j."""
 
+    mode: Literal["chunk", "entity"] = Field(
+        default="chunk",
+        description="Graph retrieval mode. 'chunk' uses lexical chunk nodes + Neo4j vector index; "
+        "'entity' uses the legacy code-entity graph.",
+    )
+
     enabled: bool = Field(
         default=True,
         description="Enable graph search in tri-brid retrieval"
+    )
+
+    chunk_neighbor_window: int = Field(
+        default=1,
+        ge=0,
+        le=10,
+        description="When mode='chunk', include up to N adjacent chunks (NEXT_CHUNK) around each seed hit",
+    )
+
+    chunk_seed_overfetch_multiplier: int = Field(
+        default=10,
+        ge=1,
+        le=50,
+        description="When mode='chunk' and Neo4j uses a shared database, overfetch seed hits before filtering by corpus_id",
+    )
+
+    chunk_entity_expansion_enabled: bool = Field(
+        default=True,
+        description="When mode='chunk', expand from seed chunks via Entity graph (IN_CHUNK links) to find related chunks",
+    )
+
+    chunk_entity_expansion_weight: float = Field(
+        default=0.8,
+        ge=0.0,
+        le=1.0,
+        description="Blend weight for entity-expansion scores relative to seed chunk scores (mode='chunk')",
     )
 
     max_hops: int = Field(
@@ -1000,6 +1438,107 @@ class GraphSearchConfig(BaseModel):
         ge=5,
         le=100,
         description="Number of results to retrieve from graph search"
+    )
+
+
+# =============================================================================
+# GRAPH INDEXING CONFIG
+# =============================================================================
+
+class GraphIndexingConfig(BaseModel):
+    """Configuration for building/persisting graph data during indexing."""
+
+    enabled: bool = Field(
+        default=True,
+        description="Enable graph building during indexing (Neo4j)",
+    )
+
+    build_lexical_graph: bool = Field(
+        default=True,
+        description="Build lexical graph (Document/Chunk nodes + NEXT_CHUNK relationships)",
+    )
+
+    store_chunk_embeddings: bool = Field(
+        default=True,
+        description="Store chunk embeddings on Chunk nodes for Neo4j vector search (requires dense embeddings)",
+    )
+
+    semantic_kg_enabled: bool = Field(
+        default=False,
+        description="Build semantic knowledge graph (concept entities + relations) linked to chunks during indexing",
+    )
+
+    semantic_kg_mode: Literal["heuristic", "llm"] = Field(
+        default="heuristic",
+        description="Semantic KG extraction mode. 'heuristic' is deterministic and test-friendly; "
+        "'llm' uses an LLM to extract entities + relations.",
+    )
+
+    semantic_kg_max_concepts_per_chunk: int = Field(
+        default=8,
+        ge=0,
+        le=50,
+        description="Maximum semantic concepts to extract per chunk",
+    )
+
+    semantic_kg_min_concept_len: int = Field(
+        default=4,
+        ge=3,
+        le=20,
+        description="Minimum length for semantic concept tokens",
+    )
+
+    semantic_kg_max_relations_per_chunk: int = Field(
+        default=12,
+        ge=0,
+        le=200,
+        description="Maximum semantic relations to create per chunk (heuristic mode)",
+    )
+
+    semantic_kg_max_chunks: int = Field(
+        default=200,
+        ge=0,
+        le=100000,
+        description="Maximum chunks to process for semantic KG extraction per indexing run (0 = disabled)",
+    )
+
+    semantic_kg_llm_model: str = Field(
+        default="",
+        description="LLM model name for semantic KG extraction when semantic_kg_mode='llm' (empty = use generation.enrich_model)",
+    )
+
+    semantic_kg_llm_timeout_s: int = Field(
+        default=30,
+        ge=5,
+        le=120,
+        description="Timeout (seconds) for semantic KG LLM extraction per chunk",
+    )
+
+    chunk_vector_index_name: str = Field(
+        default="tribrid_chunk_embeddings",
+        description="Neo4j vector index name for Chunk embeddings (mode='chunk')",
+    )
+
+    chunk_embedding_property: str = Field(
+        default="embedding",
+        description="Chunk node property that stores the embedding vector",
+    )
+
+    vector_similarity_function: Literal["cosine", "euclidean"] = Field(
+        default="cosine",
+        description="Neo4j vector similarity function",
+    )
+
+    wait_vector_index_online: bool = Field(
+        default=True,
+        description="Wait for the Neo4j vector index to come ONLINE after (re)creating it",
+    )
+
+    vector_index_online_timeout_s: float = Field(
+        default=60.0,
+        ge=1.0,
+        le=600.0,
+        description="Timeout waiting for Neo4j vector index ONLINE (seconds)",
     )
 
 
@@ -1292,7 +1831,7 @@ class EnrichmentConfig(BaseModel):
 class ChunkSummaryConfig(BaseModel):
     """Chunk summary builder filtering configuration."""
 
-    exclude_dirs: List[str] = Field(
+    exclude_dirs: list[str] = Field(
         default_factory=lambda: [
             "docs", "agent_docs", "website", "tests", "assets",
             "internal_docs.md", "out", "checkpoints", "models",
@@ -1302,12 +1841,12 @@ class ChunkSummaryConfig(BaseModel):
         description="Directories to skip when building chunk_summaries"
     )
 
-    exclude_patterns: List[str] = Field(
+    exclude_patterns: list[str] = Field(
         default_factory=list,
         description="File patterns/extensions to skip"
     )
 
-    exclude_keywords: List[str] = Field(
+    exclude_keywords: list[str] = Field(
         default_factory=list,
         description="Keywords that, when present in code, skip the chunk"
     )
@@ -1340,14 +1879,14 @@ class ChunkSummaryConfig(BaseModel):
         description="Max length for purpose field in chunk_summaries"
     )
 
-    quick_tips: List[str] = Field(
+    quick_tips: list[str] = Field(
         default_factory=list,
         description="Quick tips shown in chunk_summaries builder UI"
     )
 
     @field_validator('exclude_dirs', 'exclude_patterns', 'exclude_keywords', 'quick_tips', mode='before')
     @classmethod
-    def _parse_list(cls, v: Any) -> List[str]:
+    def _parse_list(cls, v: Any) -> list[str]:
         if v is None:
             return []
         if isinstance(v, str):
@@ -1750,13 +2289,13 @@ class UIConfig(BaseModel):
 
 class HydrationConfig(BaseModel):
     """Context hydration configuration."""
-    
+
     hydration_mode: str = Field(
         default="lazy",
         pattern="^(lazy|eager|none|off)$",
         description="Context hydration mode"
     )
-    
+
     hydration_max_chars: int = Field(
         default=2000,
         ge=500,
@@ -1778,17 +2317,17 @@ class HydrationConfig(BaseModel):
 
 class EvaluationConfig(BaseModel):
     """Evaluation dataset configuration."""
-    
+
     eval_dataset_path: str = Field(
         default="data/evaluation_dataset.json",
         description="Evaluation dataset path"
     )
-    
+
     baseline_path: str = Field(
         default="data/evals/eval_baseline.json",
         description="Baseline results path"
     )
-    
+
     eval_multi_m: int = Field(
         default=10,
         ge=1,
@@ -1874,6 +2413,30 @@ Focus on:
     code_enrichment: str = Field(
         default='''Analyze this code and return a JSON object with: symbols (array of function/class/component names), purpose (one sentence description), keywords (array of technical terms). Be concise. Return ONLY valid JSON.''',
         description="Extract metadata from code chunks during indexing"
+    )
+
+    semantic_kg_extraction: str = Field(
+        default='''You are a semantic knowledge graph extractor.
+
+Given a single code/document chunk, extract a small set of reusable semantic concepts and relationships.
+
+Rules:
+- Return ONLY valid JSON (no markdown, no extra text)
+- Concepts must be short, lowercase, and reusable across the corpus (e.g. "authentication", "rate_limit", "vector_index")
+- Prefer domain concepts and architectural concepts over implementation noise
+- Do NOT include file paths or line numbers as concepts
+- Keep the list small and high-signal
+
+JSON format:
+{
+  "concepts": ["concept1", "concept2"],
+  "relations": [
+    {"source": "concept1", "target": "concept2", "relation_type": "related_to"}
+  ]
+}
+
+Allowed relation_type values: related_to, references''',
+        description="Prompt for LLM-assisted semantic KG extraction (concepts + relations)"
     )
 
     eval_analysis: str = Field(
@@ -1997,6 +2560,7 @@ class TriBridConfig(BaseModel):
     chunking: ChunkingConfig = Field(default_factory=ChunkingConfig)
     indexing: IndexingConfig = Field(default_factory=IndexingConfig)
     graph_storage: GraphStorageConfig = Field(default_factory=GraphStorageConfig)
+    graph_indexing: GraphIndexingConfig = Field(default_factory=GraphIndexingConfig)
     fusion: FusionConfig = Field(default_factory=FusionConfig)
     vector_search: VectorSearchConfig = Field(default_factory=VectorSearchConfig)
     sparse_search: SparseSearchConfig = Field(default_factory=SparseSearchConfig)
@@ -2022,7 +2586,7 @@ class TriBridConfig(BaseModel):
         },
     )
 
-    def to_flat_dict(self) -> Dict[str, Any]:
+    def to_flat_dict(self) -> dict[str, Any]:
         """Convert nested config to flat dict with env-style keys.
 
         This provides backward compatibility with existing code that expects
@@ -2273,7 +2837,7 @@ class TriBridConfig(BaseModel):
         }
 
     @classmethod
-    def from_flat_dict(cls, data: Dict[str, Any]) -> 'TriBridConfig':
+    def from_flat_dict(cls, data: dict[str, Any]) -> TriBridConfig:
         """Create config from flat env-style dict.
 
         This allows the API to receive updates in the traditional flat format
@@ -2741,9 +3305,6 @@ TRIBRID_CONFIG_KEYS = {
     'THEME_MODE',
     'OPEN_BROWSER',
     'RUNTIME_MODE',
-    # Hydration params (2)
-    'HYDRATION_MODE',
-    'HYDRATION_MAX_CHARS',
     # Evaluation params (3)
     'EVAL_DATASET_PATH',
     'BASELINE_PATH',
@@ -2819,7 +3380,7 @@ def get_eval_key_categories() -> dict[str, str]:
     """
     # Define categories based on the existing comments in RAG_EVAL_CONFIG_KEYS
     # Each key maps to its display category name
-    _EVAL_KEY_CATEGORY_MAP: dict[str, str] = {
+    eval_key_category_map: dict[str, str] = {
         # BM25 Search
         'BM25_TOKENIZER': 'BM25 Search',
         'BM25_STEMMER_LANG': 'BM25 Search',
@@ -2897,4 +3458,4 @@ def get_eval_key_categories() -> dict[str, str]:
         'KEYWORDS_MAX_PER_REPO': 'Keywords',
         'KEYWORDS_MIN_FREQ': 'Keywords',
     }
-    return _EVAL_KEY_CATEGORY_MAP
+    return eval_key_category_map

@@ -7,21 +7,28 @@ interface ConfigStore {
   loading: boolean;
   error: string | null;
   saving: boolean;
+  /**
+   * Optional mapping of flat config keys -> UI categories.
+   * Used by Eval drill-down to group config snapshots.
+   */
+  evalKeyCategories: Record<string, string>;
 
   // Actions
   loadConfig: () => Promise<void>;
   saveConfig: (config: TriBridConfig) => Promise<void>;
   patchSection: (section: keyof TriBridConfig, updates: Record<string, unknown>) => Promise<void>;
   resetConfig: () => Promise<void>;
+  loadEvalKeyCategories: () => void;
 
   reset: () => void;
 }
 
-export const useConfigStore = create<ConfigStore>((set, get) => ({
+export const useConfigStore = create<ConfigStore>((set) => ({
   config: null,
   loading: false,
   error: null,
   saving: false,
+  evalKeyCategories: {},
 
   loadConfig: async () => {
     set({ loading: true, error: null });
@@ -75,11 +82,19 @@ export const useConfigStore = create<ConfigStore>((set, get) => ({
     }
   },
 
+  loadEvalKeyCategories: () => {
+    // Minimal implementation: keep empty mapping (everything groups as "Other").
+    // If/when we want richer grouping, we can populate this deterministically from
+    // `TriBridConfig.to_flat_dict()` key prefixes.
+    set({ evalKeyCategories: {} });
+  },
+
   reset: () =>
     set({
       config: null,
       loading: false,
       error: null,
       saving: false,
+      evalKeyCategories: {},
     }),
 }));

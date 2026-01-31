@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import { useEffect } from 'react';
 
 declare global {
   interface Window {
@@ -374,7 +374,7 @@ export default function StartTab() {
               </div>
             </div>
 
-            <button id="onboard-save-golden" className="ob-secondary-btn">Save these as Golden Questions</button>
+            <button id="onboard-save-golden" className="ob-secondary-btn">Save to Eval Dataset</button>
           </div>
         </div>
 

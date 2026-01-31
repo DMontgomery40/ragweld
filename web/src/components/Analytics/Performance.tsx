@@ -164,7 +164,7 @@ export function Performance() {
         </div>
       </div>
 
-      <style jsx>{`
+      <style>{`
         .performance-container {
           padding: 24px;
           display: flex;

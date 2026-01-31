@@ -46,26 +46,33 @@ export function Sidepanel() {
 
   // Sync from config when it loads
   useEffect(() => {
-    if (config?.env) {
+    if (config) {
       syncFromConfig(config);
     }
-  }, [config?.env, syncFromConfig]);
+  }, [config, syncFromConfig]);
 
   const handleApplyChanges = async () => {
     try {
-      const envUpdates: Record<string, string> = {};
+      // Build updates for different config sections
+      const embeddingUpdates: Record<string, string> = {};
+      const rerankerUpdates: Record<string, string> = {};
+      const generationUpdates: Record<string, string> = {};
 
       // Generation model
-      if (inferenceModel) envUpdates.GEN_MODEL = inferenceModel;
+      if (inferenceModel) {
+        generationUpdates.model = inferenceModel;
+      }
 
       // Embedding model and type
-      if (embeddingModel) envUpdates.EMBEDDING_MODEL = embeddingModel;
+      if (embeddingModel) {
+        embeddingUpdates.model = embeddingModel;
+      }
       if (embeddingProvider) {
         const p = embeddingProvider.toLowerCase();
         if (['local', 'ollama', 'huggingface'].includes(p)) {
-          envUpdates.EMBEDDING_TYPE = 'local';
+          embeddingUpdates.type = 'local';
         } else {
-          envUpdates.EMBEDDING_TYPE = p;
+          embeddingUpdates.type = p;
         }
       }
 
@@ -73,24 +80,34 @@ export function Sidepanel() {
       if (rerankProvider) {
         const p = rerankProvider.toLowerCase();
         if (p === 'cohere') {
-          envUpdates.RERANKER_MODE = 'cloud';
-          envUpdates.RERANKER_CLOUD_PROVIDER = 'cohere';
-          envUpdates.RERANKER_CLOUD_MODEL = rerankModel;
+          rerankerUpdates.mode = 'cloud';
+          rerankerUpdates.cloud_provider = 'cohere';
+          rerankerUpdates.cloud_model = rerankModel;
         } else if (p === 'voyage') {
-          envUpdates.RERANKER_MODE = 'cloud';
-          envUpdates.RERANKER_CLOUD_PROVIDER = 'voyage';
-          envUpdates.RERANKER_CLOUD_MODEL = rerankModel;
+          rerankerUpdates.mode = 'cloud';
+          rerankerUpdates.cloud_provider = 'voyage';
+          rerankerUpdates.cloud_model = rerankModel;
         } else if (['local', 'ollama', 'huggingface'].includes(p)) {
-          envUpdates.RERANKER_MODE = 'local';
-          envUpdates.RERANKER_LOCAL_MODEL = rerankModel;
+          rerankerUpdates.mode = 'local';
+          rerankerUpdates.local_model = rerankModel;
         }
       }
 
-      // Use configApi instead of direct fetch
-      await configApi.saveConfig({ env: envUpdates });
+      // Apply updates to appropriate sections via configApi
+      if (Object.keys(embeddingUpdates).length > 0) {
+        await configApi.patchSection('embedding', embeddingUpdates);
+      }
+      if (Object.keys(rerankerUpdates).length > 0) {
+        await configApi.patchSection('reranker', rerankerUpdates);
+      }
+      if (Object.keys(generationUpdates).length > 0) {
+        await configApi.patchSection('generation', generationUpdates);
+      }
 
       // Dispatch config-updated event for other components
-      window.dispatchEvent(new CustomEvent('config-updated', { detail: envUpdates }));
+      window.dispatchEvent(new CustomEvent('config-updated', {
+        detail: { embeddingUpdates, rerankerUpdates, generationUpdates }
+      }));
 
       alert('Changes applied successfully');
     } catch (e) {
@@ -99,22 +116,7 @@ export function Sidepanel() {
     }
   };
 
-  const handleCleanUpStorage = async () => {
-    if (!confirm('Clean up storage (remove old indexes, caches)?')) return;
-
-    try {
-      const response = await fetch('/api/storage/cleanup', { method: 'POST' });
-      if (response.ok) {
-        const data = await response.json();
-        alert(`Cleaned up ${data.bytes_freed || 0} bytes`);
-      } else {
-        alert('Cleanup failed');
-      }
-    } catch (e) {
-      console.error('[Sidepanel] Cleanup error:', e);
-      alert('Storage cleanup not available');
-    }
-  };
+  // TODO: Implement storage cleanup when /api/storage/cleanup endpoint exists
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: '16px' }}>

@@ -1,7 +1,7 @@
 // AGRO - Progress Bar with Shimmer Effect
 // Matches /gui micro-interactions.css progress bar polish
 
-import React from 'react';
+
 
 export interface ProgressBarWithShimmerProps {
   progress: number; // 0-100
@@ -54,7 +54,7 @@ export function ProgressBarWithShimmer({
         )}
       </div>
 
-      <style jsx>{`
+      <style>{`
         @keyframes shine {
           0% {
             left: -100%;

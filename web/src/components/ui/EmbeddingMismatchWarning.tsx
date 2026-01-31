@@ -74,7 +74,7 @@ const CompactWarning: React.FC<{ status: EmbeddingStatus }> = ({ status }) => (
       e.currentTarget.style.transform = 'translateY(0)';
       e.currentTarget.style.boxShadow = '0 2px 8px rgba(255, 107, 107, 0.3)';
     }}
-    title={`Config: ${status.configType} (${status.configDim}d) ≠ Index: ${status.indexType} (${status.indexDim}d). Click to fix.`}
+    title={`Config: ${status.configModel} (${status.configDim}d) ≠ Index: ${status.indexType} (${status.indexDim}d). Click to fix.`}
   >
     <span style={{ fontSize: '14px' }}>⚠️</span>
     <span>Embedding Mismatch!</span>
@@ -127,7 +127,7 @@ const InlineWarning: React.FC<{ status: EmbeddingStatus; showActions: boolean }>
         </div>
         <div style={{ fontSize: '12px', color: 'var(--fg-muted)', lineHeight: 1.5 }}>
           Config: <code style={{ background: 'var(--code-bg)', padding: '1px 4px', borderRadius: '3px' }}>
-            {status.configType}
+            {status.configModel}
           </code> ({status.configDim}d) ≠ 
           Index: <code style={{ background: 'var(--code-bg)', padding: '1px 4px', borderRadius: '3px' }}>
             {status.indexType}
@@ -148,7 +148,7 @@ const InlineWarning: React.FC<{ status: EmbeddingStatus; showActions: boolean }>
                 cursor: 'pointer',
               }}
             >
-              Re-index with {status.configType}
+              Re-index with {status.configModel}
             </button>
             <button
               onClick={() => navigateToConfig(status.indexType)}
@@ -415,10 +415,10 @@ const FullWarning: React.FC<{ status: EmbeddingStatus; showActions: boolean }> =
  * Only renders when there's an actual mismatch - returns null otherwise.
  * This ensures no false positives (per user requirement).
  */
-export function EmbeddingMismatchWarning({ 
+export function EmbeddingMismatchWarning({
   variant = 'full',
   showActions = true,
-  onNavigateToIndex,
+  onNavigateToIndex: _onNavigateToIndex,
 }: EmbeddingMismatchWarningProps) {
   const { status, loading, error } = useEmbeddingStatus();
 
@@ -506,7 +506,7 @@ export function EmbeddingMatchIndicator() {
   return (
     <span
       data-tooltip="EMBEDDING_MATCH"
-      title={`Embeddings match: ${status.configType} (${status.configDim}d)`}
+      title={`Embeddings match: ${status.configModel} (${status.configDim}d)`}
       style={{
         display: 'inline-flex',
         alignItems: 'center',

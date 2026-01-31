@@ -65,7 +65,7 @@ export function useGraph() {
     setError(null);
 
     try {
-      const response = await fetch(`${GRAPH_API_BASE}/stats?repo_id=${activeRepo.id}`);
+      const response = await fetch(`${GRAPH_API_BASE}/${encodeURIComponent(activeRepo)}/stats`);
       if (!response.ok) {
         throw new Error(`Failed to load graph stats: ${response.status}`);
       }
@@ -94,7 +94,7 @@ export function useGraph() {
     setError(null);
 
     try {
-      const response = await fetch(`${GRAPH_API_BASE}/communities?repo_id=${activeRepo.id}`);
+      const response = await fetch(`${GRAPH_API_BASE}/${encodeURIComponent(activeRepo)}/communities`);
       if (!response.ok) {
         throw new Error(`Failed to load communities: ${response.status}`);
       }
@@ -124,19 +124,17 @@ export function useGraph() {
       setError(null);
 
       try {
-        const params = new URLSearchParams({
-          repo_id: activeRepo.id,
-          query,
-          limit: String(limit),
-        });
-
-        const response = await fetch(`${GRAPH_API_BASE}/entities/search?${params}`);
+        const response = await fetch(
+          `${GRAPH_API_BASE}/${encodeURIComponent(activeRepo)}/entities?limit=${encodeURIComponent(String(limit))}`
+        );
         if (!response.ok) {
           throw new Error(`Failed to search entities: ${response.status}`);
         }
         const data: Entity[] = await response.json();
-        setEntities(data);
-        return data;
+        const q = query.trim().toLowerCase();
+        const filtered = q ? data.filter((e) => (e.name || '').toLowerCase().includes(q)) : data;
+        setEntities(filtered);
+        return filtered;
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Failed to search entities';
         setError(message);
@@ -152,7 +150,7 @@ export function useGraph() {
    * Get neighbors of an entity within N hops
    */
   const getNeighbors = useCallback(
-    async (entityId: string, hops: number = maxHops): Promise<{ entities: Entity[]; relationships: Relationship[] }> => {
+    async (_entityId: string, _hops: number = maxHops): Promise<{ entities: Entity[]; relationships: Relationship[] }> => {
       if (!activeRepo) {
         setError('No repository selected');
         return { entities: [], relationships: [] };
@@ -162,20 +160,8 @@ export function useGraph() {
       setError(null);
 
       try {
-        const params = new URLSearchParams({
-          repo_id: activeRepo.id,
-          entity_id: entityId,
-          max_hops: String(hops),
-        });
-
-        const response = await fetch(`${GRAPH_API_BASE}/neighbors?${params}`);
-        if (!response.ok) {
-          throw new Error(`Failed to get neighbors: ${response.status}`);
-        }
-        const data = await response.json();
-        setEntities(data.entities || []);
-        setRelationships(data.relationships || []);
-        return data;
+        setError('Neighbor lookup is not implemented for graph API yet');
+        return { entities: [], relationships: [] };
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Failed to get neighbors';
         setError(message);
@@ -191,7 +177,7 @@ export function useGraph() {
    * Get all entities in a community
    */
   const getCommunityMembers = useCallback(
-    async (communityId: string): Promise<Entity[]> => {
+    async (_communityId: string): Promise<Entity[]> => {
       if (!activeRepo) {
         setError('No repository selected');
         return [];
@@ -201,14 +187,8 @@ export function useGraph() {
       setError(null);
 
       try {
-        const response = await fetch(
-          `${GRAPH_API_BASE}/communities/${communityId}/members?repo_id=${activeRepo.id}`
-        );
-        if (!response.ok) {
-          throw new Error(`Failed to get community members: ${response.status}`);
-        }
-        const data: Entity[] = await response.json();
-        return data;
+        setError('Community member lookup is not implemented for graph API yet');
+        return [];
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Failed to get community members';
         setError(message);
@@ -290,7 +270,7 @@ export function useGraph() {
     if (activeRepo) {
       loadGraph();
     }
-  }, [activeRepo?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [activeRepo, loadGraph]);
 
   return {
     // State

@@ -1,7 +1,7 @@
 // AGRO - Monitoring Logs Panel
 // Shows recent alerts from Alertmanager webhook
 
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 
 export function MonitoringLogsPanel() {
   const [alertStatus, setAlertStatus] = useState('Loading...');

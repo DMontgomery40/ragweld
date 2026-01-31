@@ -69,7 +69,7 @@ export function HelpSubtab() {
               <strong>Test Your Setup:</strong> Go to the Chat tab to test queries against your indexed repository.
             </li>
             <li>
-              <strong>Evaluate Performance:</strong> Use the Evaluate subtab under RAG to run golden question tests and measure
+              <strong>Evaluate Performance:</strong> Use the Evaluate subtab under RAG to run eval dataset tests and measure
               retrieval quality.
             </li>
             <li>

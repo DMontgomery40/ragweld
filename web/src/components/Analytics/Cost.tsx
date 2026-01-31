@@ -206,7 +206,7 @@ export function Cost() {
         <div className="projection-note">Based on current usage patterns</div>
       </div>
 
-      <style jsx>{`
+      <style>{`
         .cost-container {
           padding: 24px;
           display: flex;

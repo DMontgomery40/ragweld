@@ -42,7 +42,7 @@ const DEFAULT_SETTINGS: EditorSettings = {
  */
 export function useVSCodeEmbed() {
   const { api } = useAPI();
-  const [settings, setSettings] = useState<EditorSettings>(DEFAULT_SETTINGS);
+  const [_settings, setSettings] = useState<EditorSettings>(DEFAULT_SETTINGS);
   const [iframeUrl, setIframeUrl] = useState<string>('');
   const [isHealthy, setIsHealthy] = useState(false);
   const [isEnabled, setIsEnabled] = useState(true);

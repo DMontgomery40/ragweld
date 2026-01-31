@@ -314,13 +314,13 @@ class TestEvalDatasetItem:
         item = EvalDatasetItem(
             entry_id="q_001",
             question="How does authentication work?",
-            expected_chunks=["chunk_auth_001", "chunk_auth_002"],
+            expected_paths=["chunk_auth_001", "chunk_auth_002"],
             expected_answer="Authentication uses JWT tokens...",
             tags=["auth", "security"],
             created_at=datetime.now(timezone.utc),
         )
         assert item.question == "How does authentication work?"
-        assert len(item.expected_chunks) == 2
+        assert len(item.expected_paths) == 2
         assert "auth" in item.tags
 
     def test_eval_dataset_item_minimal(self) -> None:
@@ -328,7 +328,7 @@ class TestEvalDatasetItem:
         item = EvalDatasetItem(
             entry_id="q_002",
             question="What is RAG?",
-            expected_chunks=["chunk_rag_001"],
+            expected_paths=["chunk_rag_001"],
             created_at=datetime.now(timezone.utc),
         )
         assert item.expected_answer is None
@@ -362,14 +362,14 @@ class TestEvalResult:
         result = EvalResult(
             entry_id="q_001",
             question="How does auth work?",
-            retrieved_chunks=["chunk_001", "chunk_002", "chunk_003"],
-            expected_chunks=["chunk_001", "chunk_004"],
+            retrieved_paths=["chunk_001", "chunk_002", "chunk_003"],
+            expected_paths=["chunk_001", "chunk_004"],
             reciprocal_rank=1.0,
             recall=0.5,
             latency_ms=42.0,
         )
         assert result.reciprocal_rank == 1.0
-        assert len(result.retrieved_chunks) == 3
+        assert len(result.retrieved_paths) == 3
 
 
 class TestEvalRun:
@@ -391,8 +391,8 @@ class TestEvalRun:
         result = EvalResult(
             entry_id="q_001",
             question="Test?",
-            retrieved_chunks=["c1"],
-            expected_chunks=["c1"],
+            retrieved_paths=["c1"],
+            expected_paths=["c1"],
             reciprocal_rank=1.0,
             recall=1.0,
             latency_ms=30.0,

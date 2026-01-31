@@ -35,6 +35,11 @@ interface DockerStore {
   clearCacheAndRestart: () => Promise<void>;
 
   reset: () => void;
+
+  // Infrastructure stubs (will be properly implemented)
+  startInfrastructure: () => Promise<void>;
+  stopInfrastructure: () => Promise<void>;
+  pingService: (service: string) => Promise<boolean>;
 }
 
 export const useDockerStore = create<DockerStore>((set, get) => ({
@@ -254,4 +259,54 @@ export const useDockerStore = create<DockerStore>((set, get) => ({
     restartingStack: false,
     clearingCache: false,
   }),
+
+  // Infrastructure operations - call real APIs
+  startInfrastructure: async () => {
+    set({ loading: true, error: null });
+    try {
+      // Infrastructure start/stop not yet implemented in backend
+      // When implemented, will call POST /api/docker/infrastructure/start
+      const response = await fetch('/api/docker/infrastructure/start', { method: 'POST' });
+      if (!response.ok) {
+        throw new Error('Infrastructure start not implemented');
+      }
+      await get().fetchStatus();
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : 'Failed to start infrastructure' });
+    } finally {
+      set({ loading: false });
+    }
+  },
+
+  stopInfrastructure: async () => {
+    set({ loading: true, error: null });
+    try {
+      // Infrastructure start/stop not yet implemented in backend
+      // When implemented, will call POST /api/docker/infrastructure/stop
+      const response = await fetch('/api/docker/infrastructure/stop', { method: 'POST' });
+      if (!response.ok) {
+        throw new Error('Infrastructure stop not implemented');
+      }
+      await get().fetchStatus();
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : 'Failed to stop infrastructure' });
+    } finally {
+      set({ loading: false });
+    }
+  },
+
+  pingService: async (service: string) => {
+    try {
+      // Call the real health endpoint
+      const response = await fetch('/api/health');
+      if (!response.ok) {
+        return false;
+      }
+      const health = await response.json();
+      const serviceStatus = health.services?.[service]?.status;
+      return serviceStatus === 'up' || serviceStatus === 'healthy';
+    } catch {
+      return false;
+    }
+  },
 }));

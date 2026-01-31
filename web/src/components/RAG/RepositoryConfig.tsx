@@ -1,11 +1,11 @@
-// AGRO - Repository Configuration Component
+// TriBridRAG - Repository Configuration Component
 // Refactored to use Zustand stores per CLAUDE.md requirements
-// Uses useRepoStore for repo list/selection, useConfigStore.updateRepo() for persistence
+// Uses useRepoStore for repo list/selection/updates
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRepoStore } from '@/stores/useRepoStore';
-import { useConfigStore } from '@/stores/useConfigStore';
 import { KeywordManager } from '@/components/KeywordManager';
+import type { CorpusUpdateRequest } from '@/types/generated';
 
 interface RepositoryConfigProps {
   // Only keep the callback that parent needs for syncing UI state
@@ -16,7 +16,8 @@ interface RepositoryConfigProps {
  * ---agentspec
  * what: |
  *   Repository config using Zustand stores. Gets repos/activeRepo from useRepoStore,
- *   persists changes via useConfigStore.updateRepo(). Local state ONLY for debounced text inputs.
+ *   persists changes via useRepoStore.updateCorpus() which calls PATCH /api/corpora/{id}.
+ *   Local state ONLY for debounced text inputs.
  *
  * why: |
  *   Single source of truth via Zustand; no duplicate state, fetch logic, or event listeners.
@@ -29,8 +30,20 @@ interface RepositoryConfigProps {
  */
 export function RepositoryConfig({ onExcludePathsChange }: RepositoryConfigProps) {
   // Get repos and active repo from Zustand store
-  const { repos, activeRepo, loading: reposLoading, getRepoByName, loadRepos, initialized } = useRepoStore();
-  const { updateRepo, saving } = useConfigStore();
+  const { activeRepo, loading: reposLoading, getRepoByName, loadRepos, initialized, updateCorpus } = useRepoStore();
+  const [saving, setSaving] = useState(false);
+
+  // Wrap updateCorpus to track saving state
+  const handleUpdateCorpus = useCallback(async (corpusId: string, updates: CorpusUpdateRequest) => {
+    setSaving(true);
+    try {
+      await updateCorpus(corpusId, updates);
+    } catch (err) {
+      console.error('[RepositoryConfig] Failed to update corpus:', err);
+    } finally {
+      setSaving(false);
+    }
+  }, [updateCorpus]);
   
   // Get current repo data from store (reactive to store changes)
   const repoData = getRepoByName(activeRepo);
@@ -91,11 +104,11 @@ export function RepositoryConfig({ onExcludePathsChange }: RepositoryConfigProps
       const currentKeywords = (repoData.keywords || []).sort().join(',');
       const newKeywords = keywordsArray.sort().join(',');
       if (currentKeywords !== newKeywords) {
-        updateRepo(activeRepo, { keywords: keywordsArray });
+        handleUpdateCorpus(activeRepo, { keywords: keywordsArray });
       }
     }, 1000);
     return () => clearTimeout(timeoutId);
-  }, [keywordsInput, repoData, activeRepo, updateRepo]);
+  }, [keywordsInput, repoData, activeRepo, handleUpdateCorpus]);
 
   /**
    * ---agentspec
@@ -117,11 +130,11 @@ export function RepositoryConfig({ onExcludePathsChange }: RepositoryConfigProps
       const currentBoosts = (repoData.path_boosts || []).sort().join(',');
       const newBoosts = pathBoostsArray.sort().join(',');
       if (currentBoosts !== newBoosts) {
-        updateRepo(activeRepo, { path_boosts: pathBoostsArray });
+        handleUpdateCorpus(activeRepo, { path_boosts: pathBoostsArray });
       }
     }, 1000);
     return () => clearTimeout(timeoutId);
-  }, [pathBoostsInput, repoData, activeRepo, updateRepo]);
+  }, [pathBoostsInput, repoData, activeRepo, handleUpdateCorpus]);
 
   /**
    * ---agentspec
@@ -146,7 +159,7 @@ export function RepositoryConfig({ onExcludePathsChange }: RepositoryConfigProps
           const currentBonuses = JSON.stringify(repoData.layer_bonuses || {});
           const newBonuses = JSON.stringify(parsed);
           if (currentBonuses !== newBonuses) {
-            updateRepo(activeRepo, { layer_bonuses: parsed });
+            handleUpdateCorpus(activeRepo, { layer_bonuses: parsed });
           }
         }
       } catch {
@@ -154,7 +167,7 @@ export function RepositoryConfig({ onExcludePathsChange }: RepositoryConfigProps
       }
     }, 1000);
     return () => clearTimeout(timeoutId);
-  }, [layerBonusesInput, repoData, activeRepo, updateRepo]);
+  }, [layerBonusesInput, repoData, activeRepo, handleUpdateCorpus]);
 
   // Exclude paths - derive from store, save via store
   const excludePaths = repoData?.exclude_paths || [];
@@ -175,9 +188,9 @@ export function RepositoryConfig({ onExcludePathsChange }: RepositoryConfigProps
     if (!excludePathInput.trim() || !activeRepo) return;
     const newPaths = [...excludePaths, excludePathInput.trim()];
     setExcludePathInput('');
-    updateRepo(activeRepo, { exclude_paths: newPaths });
+    handleUpdateCorpus(activeRepo, { exclude_paths: newPaths });
     onExcludePathsChange?.(newPaths);
-  }, [excludePathInput, excludePaths, activeRepo, updateRepo, onExcludePathsChange]);
+  }, [excludePathInput, excludePaths, activeRepo, handleUpdateCorpus, onExcludePathsChange]);
 
   /**
    * ---agentspec
@@ -193,9 +206,9 @@ export function RepositoryConfig({ onExcludePathsChange }: RepositoryConfigProps
    */
   const handleRemoveExcludePath = useCallback((path: string) => {
     const newPaths = excludePaths.filter(p => p !== path);
-    updateRepo(activeRepo, { exclude_paths: newPaths });
+    handleUpdateCorpus(activeRepo, { exclude_paths: newPaths });
     onExcludePathsChange?.(newPaths);
-  }, [excludePaths, activeRepo, updateRepo, onExcludePathsChange]);
+  }, [excludePaths, activeRepo, handleUpdateCorpus, onExcludePathsChange]);
 
   if (reposLoading) {
     return (
@@ -336,17 +349,9 @@ export function RepositoryConfig({ onExcludePathsChange }: RepositoryConfigProps
         />
       </div>
 
-      {/* Keyword Manager */}
+      {/* Keyword Manager - uses activeRepo from useRepoStore */}
       <div className="input-group full-width" style={{ marginTop: '12px' }}>
-        <KeywordManager
-          repo={{
-            name: repoData.name,
-            path: repoData.path || '',
-            keywords: repoData.keywords || [],
-            path_boosts: repoData.path_boosts || [],
-            layer_bonuses: repoData.layer_bonuses || {}
-          }}
-        />
+        <KeywordManager />
       </div>
 
       {saving && (

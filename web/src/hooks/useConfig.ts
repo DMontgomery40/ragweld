@@ -30,6 +30,20 @@ export function useConfig() {
     }
   }, [config, loading, loadConfig]);
 
+  // Reload config when active corpus changes
+  useEffect(() => {
+    const handler = () => {
+      loadConfig();
+    };
+    // New event name (preferred) + legacy event name for migration.
+    window.addEventListener('tribrid-corpus-changed', handler as EventListener);
+    window.addEventListener('agro-repo-changed', handler as EventListener);
+    return () => {
+      window.removeEventListener('tribrid-corpus-changed', handler as EventListener);
+      window.removeEventListener('agro-repo-changed', handler as EventListener);
+    };
+  }, [loadConfig]);
+
   const reload = useCallback(async () => {
     await loadConfig();
   }, [loadConfig]);

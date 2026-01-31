@@ -19,7 +19,7 @@ export const HistoryViewer: React.FC<HistoryViewerProps> = ({ className = '' }) 
   } = useEvalHistory();
 
   const { showToast } = useUIHelpers();
-  const [expandedIndex, setExpandedIndex] = useState<number | null>(null);
+  const [_expandedIndex, _setExpandedIndex] = useState<number | null>(null);
 
   const handleClearHistory = () => {
     if (confirm('Clear all evaluation history? This cannot be undone.')) {

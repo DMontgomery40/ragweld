@@ -136,32 +136,11 @@ export function useApplyButton() {
         throw new Error('Configuration not loaded');
       }
 
-      // Zustand/Pydantic config is THE ONLY source of truth
-      // DO NOT merge legacy DOM form data - that breaks Pydantic compliance
-      // All config values come from agro_config.json via Zustand store
-      // CRITICAL: Filter out masked secrets - they would destroy real keys in .env!
-      const rawEnv = currentConfig.env || {};
-      const configToSave: Record<string, any> = {};
-      for (const [k, v] of Object.entries(rawEnv)) {
-        // Skip masked secret values - they're placeholders, not real values
-        if (v === '••••••••••••••••' || String(v).startsWith('••••')) {
-          continue;
-        }
-        configToSave[k] = v;
-      }
-      const reposToSave = currentConfig.repos || [];
-
-      // Save via Pydantic/Zustand pipeline
-      await useConfigStore.getState().saveConfig({
-        env: configToSave,
-        repos: reposToSave
-      });
+      // Save via Pydantic/Zustand pipeline (TriBridConfig is the law)
+      await useConfigStore.getState().saveConfig(currentConfig);
 
       // Refresh snapshot after save
-      const savedConfig = useConfigStore.getState().config || {
-        env: configToSave,
-        repos: reposToSave
-      };
+      const savedConfig = useConfigStore.getState().config || currentConfig;
       baselineRef.current = JSON.stringify(savedConfig);
 
       setIsDirty(false);

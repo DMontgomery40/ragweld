@@ -7,16 +7,20 @@
  * Used by QuickActions and other components that need a full-screen repo selector.
  */
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useRepoStore } from '@/stores/useRepoStore';
 
-interface RepoSwitcherModalProps {
+type RepoSwitcherModalProps = {
   isOpen: boolean;
   onClose: () => void;
-}
+};
 
 export function RepoSwitcherModal({ isOpen, onClose }: RepoSwitcherModalProps) {
-  const { repos, activeRepo, switching, loading, loadRepos, setActiveRepo, error, initialized } = useRepoStore();
+  const { repos, activeRepo, switching, loading, loadRepos, setActiveRepo, addRepo, error, initialized } = useRepoStore();
+  const [newName, setNewName] = useState('');
+  const [newPath, setNewPath] = useState('');
+  const [newDescription, setNewDescription] = useState('');
+  const [createError, setCreateError] = useState<string | null>(null);
 
   // Load repos when modal opens (if not yet initialized)
   useEffect(() => {
@@ -50,6 +54,23 @@ export function RepoSwitcherModal({ isOpen, onClose }: RepoSwitcherModalProps) {
   };
   
   if (!isOpen) return null;
+
+  const handleCreate = async () => {
+    setCreateError(null);
+    try {
+      await addRepo({
+        name: newName.trim(),
+        path: newPath.trim(),
+        description: newDescription.trim() || null,
+      });
+      setNewName('');
+      setNewPath('');
+      setNewDescription('');
+      onClose();
+    } catch (e) {
+      setCreateError(e instanceof Error ? e.message : 'Failed to create corpus');
+    }
+  };
   
   return (
     <div 
@@ -95,7 +116,7 @@ export function RepoSwitcherModal({ isOpen, onClose }: RepoSwitcherModalProps) {
           }}
         >
           <span style={{ fontSize: '20px' }}>📁</span>
-          Select Repository
+          Select Corpus
         </h3>
         
         <p style={{ 
@@ -104,7 +125,7 @@ export function RepoSwitcherModal({ isOpen, onClose }: RepoSwitcherModalProps) {
           marginBottom: '16px',
           lineHeight: 1.5
         }}>
-          Switch the active repository. All queries, indexing, and evaluations will use the selected repo.
+          Switch the active corpus. All queries, indexing, and evaluations will use the selected corpus.
         </p>
         
         {error && (
@@ -127,7 +148,7 @@ export function RepoSwitcherModal({ isOpen, onClose }: RepoSwitcherModalProps) {
             textAlign: 'center', 
             color: 'var(--fg-muted)' 
           }}>
-            Loading repositories...
+            Loading corpora...
           </div>
         ) : repos.length === 0 ? (
           <div style={{ 
@@ -135,17 +156,17 @@ export function RepoSwitcherModal({ isOpen, onClose }: RepoSwitcherModalProps) {
             textAlign: 'center', 
             color: 'var(--fg-muted)' 
           }}>
-            No repositories configured. Add repos in Infrastructure &gt; Paths.
+            No corpora configured yet. Create one below.
           </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
             {repos.map(repo => {
-              const isActive = repo.name === activeRepo;
+              const isActive = repo.corpus_id === activeRepo || repo.slug === activeRepo || repo.name === activeRepo;
               
               return (
                 <button
-                  key={repo.name}
-                  onClick={() => handleSelect(repo.name)}
+                  key={repo.corpus_id}
+                  onClick={() => handleSelect(repo.corpus_id)}
                   disabled={switching}
                   style={{
                     background: isActive ? 'var(--accent)' : 'var(--bg-elev2)',
@@ -207,6 +228,86 @@ export function RepoSwitcherModal({ isOpen, onClose }: RepoSwitcherModalProps) {
             })}
           </div>
         )}
+
+        <div style={{ marginTop: '16px' }}>
+          <div style={{ fontSize: '12px', fontWeight: 600, marginBottom: '8px', color: 'var(--fg)' }}>
+            Create corpus
+          </div>
+          {createError && (
+            <div style={{
+              background: 'var(--error-bg, rgba(255,0,0,0.1))',
+              border: '1px solid var(--error, #ff4444)',
+              color: 'var(--error, #ff4444)',
+              padding: '8px 12px',
+              borderRadius: '4px',
+              fontSize: '12px',
+              marginBottom: '10px'
+            }}>
+              {createError}
+            </div>
+          )}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <input
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              placeholder="Corpus name (e.g. tribrid-rag)"
+              style={{
+                width: '100%',
+                padding: '10px 12px',
+                borderRadius: '6px',
+                border: '1px solid var(--line)',
+                background: 'var(--bg-elev2)',
+                color: 'var(--fg)',
+                fontSize: '13px',
+              }}
+            />
+            <input
+              value={newPath}
+              onChange={(e) => setNewPath(e.target.value)}
+              placeholder="/absolute/path/to/corpus"
+              style={{
+                width: '100%',
+                padding: '10px 12px',
+                borderRadius: '6px',
+                border: '1px solid var(--line)',
+                background: 'var(--bg-elev2)',
+                color: 'var(--fg)',
+                fontSize: '13px',
+              }}
+            />
+            <input
+              value={newDescription}
+              onChange={(e) => setNewDescription(e.target.value)}
+              placeholder="Description (optional)"
+              style={{
+                width: '100%',
+                padding: '10px 12px',
+                borderRadius: '6px',
+                border: '1px solid var(--line)',
+                background: 'var(--bg-elev2)',
+                color: 'var(--fg)',
+                fontSize: '13px',
+              }}
+            />
+            <button
+              onClick={handleCreate}
+              disabled={switching || loading || !newName.trim() || !newPath.trim()}
+              style={{
+                padding: '10px 16px',
+                background: 'var(--accent)',
+                border: '1px solid var(--accent)',
+                color: 'var(--accent-contrast)',
+                borderRadius: '6px',
+                cursor: switching || loading ? 'not-allowed' : 'pointer',
+                fontSize: '13px',
+                fontWeight: 600,
+                opacity: switching || loading ? 0.6 : 1,
+              }}
+            >
+              ➕ Create & Select
+            </button>
+          </div>
+        </div>
         
         <div style={{ 
           display: 'flex', 
@@ -258,6 +359,3 @@ export function RepoSwitcherModal({ isOpen, onClose }: RepoSwitcherModalProps) {
 }
 
 export default RepoSwitcherModal;
-
-
-

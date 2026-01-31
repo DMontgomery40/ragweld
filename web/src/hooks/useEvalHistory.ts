@@ -35,7 +35,7 @@ export function useEvalHistory() {
 
   const selectedRun = selectedRunIndex !== null ? runs[selectedRunIndex] : null;
 
-  const selectRun = useCallback((index: number) => {
+  const selectRun = useCallback((index: number | null) => {
     setSelectedRunIndex(index);
   }, []);
 
@@ -52,13 +52,19 @@ export function useEvalHistory() {
     if (selectedRunIndex === index) setSelectedRunIndex(null);
   }, [runs, selectedRunIndex]);
 
-  const getDeltaVsPrevious = useCallback((index: number) => {
+  const getDeltaVsPrevious = useCallback((index: number): { top1: number; topk: number; delta: number; improved: boolean } | null => {
     if (index >= runs.length - 1) return null;
     const current = runs[index];
     const previous = runs[index + 1];
+    const top1Delta = current.top1 - previous.top1;
+    const topkDelta = current.topk - previous.topk;
+    // Use average of both deltas as overall delta
+    const delta = (top1Delta + topkDelta) / 2;
     return {
-      top1: current.top1 - previous.top1,
-      topk: current.topk - previous.topk
+      top1: top1Delta,
+      topk: topkDelta,
+      delta,
+      improved: delta >= 0
     };
   }, [runs]);
 

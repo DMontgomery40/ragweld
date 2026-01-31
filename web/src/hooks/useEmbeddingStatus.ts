@@ -4,15 +4,13 @@
  * Detects embedding configuration mismatches between the current config
  * and what was used to create the index. This is CRITICAL because mismatched
  * embeddings will cause search to return completely irrelevant results.
- * 
- * The hook fetches from /api/index/stats which now includes:
- * - embedding_config: current configuration from env/config
- * - index_embedding_config: what the index was built with (from last_index.json)
- * - embedding_mismatch: boolean flag for quick checks
- * - embedding_mismatch_details: type/dimension comparison details
  */
 
 import { useState, useEffect, useCallback } from 'react';
+import { useAPI } from '@/hooks/useAPI';
+import { useConfig } from '@/hooks/useConfig';
+import { useRepoStore } from '@/stores/useRepoStore';
+import type { IndexStats } from '@/types/generated';
 
 export interface EmbeddingStatus {
   // Current configuration (from agro_config.json / env)
@@ -66,6 +64,10 @@ interface UseEmbeddingStatusResult {
  * ---/agentspec
  */
 export function useEmbeddingStatus(): UseEmbeddingStatusResult {
+  const { api } = useAPI();
+  const { config } = useConfig();
+  const { activeRepo } = useRepoStore();
+
   const [status, setStatus] = useState<EmbeddingStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -75,45 +77,71 @@ export function useEmbeddingStatus(): UseEmbeddingStatusResult {
       setLoading(true);
       setError(null);
 
-      const response = await fetch('/api/index/stats');
+      const corpusId = String(activeRepo || '').trim();
+      if (!corpusId || !config) {
+        setStatus(null);
+        return;
+      }
+
+      // Current config (TriBridConfig is the law)
+      const emb = config.embedding;
+      const provider = String(emb?.embedding_type || '').toLowerCase();
+      const configType = provider || 'openai';
+      const configDim = Number(emb?.embedding_dim || 0);
+      let configModel = String(emb?.embedding_model || '');
+      if (provider === 'voyage') configModel = String(emb?.voyage_model || '');
+      if (provider === 'local' || provider === 'huggingface') configModel = String(emb?.embedding_model_local || '');
+
+      // Index config (from Postgres corpus metadata via /api/index/{corpus_id}/stats)
+      const response = await fetch(api(`index/${encodeURIComponent(corpusId)}/stats`));
+      if (response.status === 404) {
+        setStatus({
+          configType,
+          configDim,
+          configModel,
+          indexType: null,
+          indexDim: null,
+          indexedAt: null,
+          indexPath: null,
+          hasIndex: false,
+          isMismatched: false,
+          typeMatch: true,
+          dimMatch: true,
+          totalChunks: 0,
+        });
+        return;
+      }
       if (!response.ok) {
         throw new Error(`Failed to fetch index stats: ${response.status}`);
       }
 
-      const data = await response.json();
+      const data: IndexStats = await response.json();
+      const totalChunks = Number(data.total_chunks || 0);
+      const indexModelRaw = String(data.embedding_model || '').trim();
+      const indexDimRaw = Number(data.embedding_dimensions || 0);
 
-      // Extract current config
-      const embeddingConfig = data.embedding_config || {};
-      const configType = (embeddingConfig.provider || 'openai').toLowerCase();
-      const configDim = embeddingConfig.dimensions || 3072;
-      const configModel = embeddingConfig.model || 'text-embedding-3-large';
+      // Treat empty/0 as “no dense embedding index” (e.g., skip_dense=1 runs).
+      const indexType = indexModelRaw ? indexModelRaw : null;
+      const indexDim = indexDimRaw > 0 ? indexDimRaw : null;
+      const hasIndex = Boolean(indexType && indexDim && totalChunks > 0);
 
-      // Extract index config (may be null if no index)
-      const indexConfig = data.index_embedding_config;
-      
-      // Use explicit has_index flag from backend, fallback to checking index_embedding_config
-      // This ensures we don't show "embeddings match" when there's no actual index
-      const hasIndex = data.has_index === true || (indexConfig !== null && data.total_chunks > 0);
+      const dimMatch = hasIndex ? configDim === indexDim : true;
+      const modelMatch = hasIndex ? configModel === indexType : true;
 
-      // Get mismatch details
-      const mismatchDetails = data.embedding_mismatch_details || {};
-
-      const embeddingStatus: EmbeddingStatus = {
+      setStatus({
         configType,
         configDim,
         configModel,
-        indexType: indexConfig?.provider || null,
-        indexDim: indexConfig?.dimensions || null,
-        indexedAt: indexConfig?.indexed_at || null,
-        indexPath: indexConfig?.index_path || null,
-        isMismatched: data.embedding_mismatch === true,
+        indexType,
+        indexDim,
+        indexedAt: data.last_indexed ? String(data.last_indexed) : null,
+        indexPath: null,
         hasIndex,
-        typeMatch: mismatchDetails.type_match !== false,
-        dimMatch: mismatchDetails.dim_match !== false,
-        totalChunks: data.total_chunks || 0,
-      };
-
-      setStatus(embeddingStatus);
+        isMismatched: hasIndex ? !(dimMatch && modelMatch) : false,
+        typeMatch: true, // provider is not persisted in index stats currently
+        dimMatch,
+        totalChunks,
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error checking embedding status');
       console.error('[useEmbeddingStatus] Error:', err);
@@ -151,11 +179,15 @@ export function useEmbeddingStatus(): UseEmbeddingStatusResult {
     window.addEventListener('config-updated', handleConfigChange);
     window.addEventListener('index-completed', handleConfigChange);
     window.addEventListener('dashboard-refresh', handleConfigChange);
+    window.addEventListener('tribrid-corpus-changed', handleConfigChange as EventListener);
+    window.addEventListener('agro-repo-changed', handleConfigChange as EventListener);
 
     return () => {
       window.removeEventListener('config-updated', handleConfigChange);
       window.removeEventListener('index-completed', handleConfigChange);
       window.removeEventListener('dashboard-refresh', handleConfigChange);
+      window.removeEventListener('tribrid-corpus-changed', handleConfigChange as EventListener);
+      window.removeEventListener('agro-repo-changed', handleConfigChange as EventListener);
     };
   }, [checkStatus]);
 

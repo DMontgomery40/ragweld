@@ -1,17 +1,22 @@
 /**
- * useChunkSummaries - Hook for managing chunk summaries (formerly "cards")
+ * useChunkSummaries - Hook for managing chunk summaries
  *
- * Per CLAUDE.md: "cards" is a banned term - use "chunk_summaries" instead.
- *
- * Uses centralized Zustand store for state management with Pydantic validation from backend.
+ * Uses types from generated.ts (Pydantic-first):
+ * - ChunkSummary
+ * - ChunkSummariesResponse
+ * - ChunkSummariesBuildRequest
+ * - ChunkSummariesLastBuild
  */
+
 import { useCallback, useEffect } from 'react';
 import { useAPI } from './useAPI';
 import { useChunkSummariesStore } from '@/stores/useChunkSummariesStore';
 import type {
   ChunkSummariesResponse,
-  ChunkSummaryBuildOptions,
-} from '@/types/chunk_summaries';
+  ChunkSummariesBuildRequest,
+} from '@/types/generated';
+
+const CHUNK_SUMMARIES_API = '/api/chunk_summaries';
 
 export function useChunkSummaries() {
   const { api } = useAPI();
@@ -20,34 +25,28 @@ export function useChunkSummaries() {
     lastBuild,
     isLoading,
     isBuilding,
-    buildInProgress,
-    buildStage,
-    buildProgress,
-    progressRepo,
     error,
     setChunkSummaries,
     setLastBuild,
     setIsLoading,
     setIsBuilding,
-    setBuildInProgress,
-    setBuildStage,
-    setBuildProgress,
-    setProgressRepo,
     setError,
   } = useChunkSummariesStore();
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (corpusId?: string) => {
     try {
       setIsLoading(true);
       setError(null);
-      // API endpoint still uses /api/cards for backward compatibility
-      const response = await fetch(api('/api/cards'));
+      const url = corpusId
+        ? api(`${CHUNK_SUMMARIES_API}?corpus_id=${encodeURIComponent(corpusId)}`)
+        : api(CHUNK_SUMMARIES_API);
+      const response = await fetch(url);
       if (!response.ok) {
         throw new Error(`Failed to load chunk summaries: ${response.status}`);
       }
       const data: ChunkSummariesResponse = await response.json();
       setChunkSummaries(Array.isArray(data.chunk_summaries) ? data.chunk_summaries : []);
-      setLastBuild(data.last_build || null);
+      setLastBuild(data.last_build ?? null);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error loading chunk summaries';
       setError(message);
@@ -58,38 +57,28 @@ export function useChunkSummaries() {
   }, [api, setChunkSummaries, setLastBuild, setIsLoading, setError]);
 
   const build = useCallback(
-    async (options: ChunkSummaryBuildOptions) => {
+    async (request: ChunkSummariesBuildRequest): Promise<ChunkSummariesResponse> => {
       try {
         setIsBuilding(true);
         setError(null);
 
-        const params = new URLSearchParams({
-          repo: options.repo,
-          enrich: options.enrich ? '1' : '0',
-          exclude_dirs: options.exclude_dirs || '',
-          exclude_patterns: options.exclude_patterns || '',
-          exclude_keywords: options.exclude_keywords || '',
-        });
-
-        // API endpoint still uses /api/cards for backward compatibility
-        const response = await fetch(api(`/api/cards/build/start?${params}`), {
+        const response = await fetch(api(`${CHUNK_SUMMARIES_API}/build`), {
           method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(request),
         });
-
-        if (response.status === 409) {
-          const data = await response.json();
-          throw new Error(data.detail || 'Job already running');
-        }
 
         if (!response.ok) {
-          throw new Error(`Failed to start chunk summaries build: ${response.status}`);
+          const errorData = await response.json().catch(() => ({}));
+          throw new Error(errorData.detail || `Failed to build chunk summaries: ${response.status}`);
         }
 
-        const data = await response.json();
-        return data.job_id;
+        const data: ChunkSummariesResponse = await response.json();
+        setChunkSummaries(data.chunk_summaries);
+        setLastBuild(data.last_build ?? null);
+        return data;
       } catch (err) {
-        const message =
-          err instanceof Error ? err.message : 'Unknown error building chunk summaries';
+        const message = err instanceof Error ? err.message : 'Unknown error building chunk summaries';
         setError(message);
         console.error('[useChunkSummaries] Build error:', err);
         throw err;
@@ -97,36 +86,10 @@ export function useChunkSummaries() {
         setIsBuilding(false);
       }
     },
-    [api, setIsBuilding, setError]
-  );
-
-  const deleteChunkSummary = useCallback(
-    async (summaryId: string) => {
-      try {
-        // API endpoint still uses /api/cards for backward compatibility
-        const response = await fetch(api(`/api/cards/${summaryId}`), {
-          method: 'DELETE',
-        });
-
-        if (!response.ok) {
-          throw new Error(`Failed to delete chunk summary: ${response.status}`);
-        }
-
-        // Remove from local state
-        setChunkSummaries((prev) => prev.filter((s) => s.file_path !== summaryId));
-      } catch (err) {
-        const message =
-          err instanceof Error ? err.message : 'Unknown error deleting chunk summary';
-        setError(message);
-        console.error('[useChunkSummaries] Delete error:', err);
-        throw err;
-      }
-    },
-    [api, setChunkSummaries, setError]
+    [api, setChunkSummaries, setLastBuild, setIsBuilding, setError]
   );
 
   const jumpToLine = useCallback((filePath: string, lineNumber: number | string) => {
-    // Dispatch custom event for navigation
     const event = new CustomEvent('chunkSummaryNavigation', {
       detail: { file: filePath, line: lineNumber },
     });
@@ -139,34 +102,24 @@ export function useChunkSummaries() {
   }, [load]);
 
   return {
-    // State - using new names
+    // State
     chunkSummaries,
     lastBuild,
     isLoading,
     isBuilding,
-    buildInProgress,
-    buildStage,
-    buildProgress,
-    progressRepo,
     error,
 
     // Actions
     load,
     build,
-    deleteChunkSummary,
     jumpToLine,
-    setBuildInProgress,
-    setBuildStage,
-    setBuildProgress,
-    setProgressRepo,
 
-    // Legacy aliases for backward compatibility
+    // Legacy aliases - DO NOT USE in new code
     cards: chunkSummaries,
-    deleteCard: deleteChunkSummary,
   };
 }
 
-// Legacy alias for backward compatibility
+// Legacy alias - DO NOT USE in new code
 export const useCards = useChunkSummaries;
 
 export default useChunkSummaries;

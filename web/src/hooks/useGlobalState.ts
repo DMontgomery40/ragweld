@@ -10,20 +10,20 @@ import { useRepoStore } from '@/stores/useRepoStore';
  * This hook exists only for backwards compatibility during migration
  */
 export function useGlobalState() {
-  const { config, keywordsCatalog } = useConfigStore();
-  const { repos, currentRepo } = useRepoStore();
+  const { config } = useConfigStore();
+  const { repos, activeRepo } = useRepoStore();
 
   // Derive state from Zustand stores
   const state = {
-    config: config?.env || null,
+    config: config || null,
     models: null, // models are loaded via useAppInit into legacy window.CoreUtils.state during transition
     profiles: [], // Profiles managed by legacy modules during transition
     defaultProfile: null,
     hwScan: null,
-    keywords: keywordsCatalog,
+    keywords: null,
     commitMeta: null,
     repos,
-    currentRepo
+    currentRepo: activeRepo
   };
 
   const updateState = useCallback((updates: Record<string, unknown>) => {

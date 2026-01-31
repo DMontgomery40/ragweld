@@ -1,33 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useConfigStore } from '@/stores/useConfigStore';
-
-interface QuestionResult {
-  question: string;
-  repo: string;
-  expect_paths: string[];
-  top_paths: string[];
-  top1_path: string[];
-  top1_hit: boolean;
-  topk_hit: boolean;
-  duration_secs: number;
-  reciprocal_rank?: number;
-  docs?: Array<{ file_path: string; score: number }>;
-}
-
-interface EvalRun {
-  run_id: string;
-  total: number;
-  top1_hits: number;
-  topk_hits: number;
-  top1_accuracy: number;
-  topk_accuracy: number;
-  mrr?: number;
-  duration_secs: number;
-  use_multi?: boolean;
-  final_k?: number;
-  config: Record<string, any>;
-  results: QuestionResult[];
-}
+import type { EvalResult, EvalRun } from '@/types/generated';
 
 interface EvalDrillDownProps {
   runId: string;
@@ -131,8 +104,8 @@ export const EvalDrillDown: React.FC<EvalDrillDownProps> = ({ runId, compareWith
     currentRun: EvalRun, 
     compRun: EvalRun, 
     configDiffs: any[], 
-    topkRegressions: QuestionResult[], 
-    topkImprovements: QuestionResult[],
+    topkRegressions: EvalResult[], 
+    topkImprovements: EvalResult[],
     top1RegressionsCount: number,
     top1ImprovementsCount: number
   ) => {
@@ -195,15 +168,15 @@ export const EvalDrillDown: React.FC<EvalDrillDownProps> = ({ runId, compareWith
         
         const response = await fetch(`/api/eval/results/${runId}`);
         if (!response.ok) throw new Error('Failed to fetch run data');
-        const data = await response.json();
+        const data: EvalRun = await response.json();
         console.log('[EvalDrillDown] Fetched data:', data);
-        console.log('[EvalDrillDown] Question 0 expect_paths:', data.results?.[0]?.expect_paths);
+        console.log('[EvalDrillDown] Question 0 expected_paths:', data.results?.[0]?.expected_paths);
         setEvalRun(data);
 
         if (compareWithRunId) {
           const compareResponse = await fetch(`/api/eval/results/${compareWithRunId}`);
           if (compareResponse.ok) {
-            const compareData = await compareResponse.json();
+            const compareData: EvalRun = await compareResponse.json();
             setCompareRun(compareData);
           }
         } else {
@@ -406,7 +379,7 @@ export const EvalDrillDown: React.FC<EvalDrillDownProps> = ({ runId, compareWith
             MRR
           </div>
           <div style={{ fontSize: '24px', fontWeight: 700, color: 'var(--warn)' }}>
-            {evalRun?.mrr !== undefined ? evalRun.mrr.toFixed(4) : 'N/A'}
+            {evalRun?.metrics?.mrr !== undefined ? evalRun.metrics.mrr.toFixed(4) : 'N/A'}
           </div>
           <div style={{ fontSize: '11px', color: 'var(--fg-muted)' }}>
             Mean Reciprocal Rank
@@ -652,11 +625,11 @@ export const EvalDrillDown: React.FC<EvalDrillDownProps> = ({ runId, compareWith
             {' • '}
             Performance change:
             <span style={{
-              color: evalRun.topk_accuracy > (compareRun?.topk_accuracy ?? 0) ? 'var(--accent-green)' : 'var(--err)',
+              color: (evalRun.topk_accuracy ?? 0) > (compareRun?.topk_accuracy ?? 0) ? 'var(--accent-green)' : 'var(--err)',
               fontWeight: 600,
               marginLeft: '8px'
             }}>
-              {((evalRun.topk_accuracy - (compareRun?.topk_accuracy ?? 0)) * 100).toFixed(1)}%
+              {(((evalRun.topk_accuracy ?? 0) - (compareRun?.topk_accuracy ?? 0)) * 100).toFixed(1)}%
             </span>
             {configDiffs.length === 0 && (
               <span style={{ marginLeft: '12px', color: 'var(--fg-muted)', fontStyle: 'italic' }}>
@@ -668,8 +641,7 @@ export const EvalDrillDown: React.FC<EvalDrillDownProps> = ({ runId, compareWith
           <div style={{ display: 'grid', gap: '12px', fontSize: '13px' }}>
             {configDiffs.map(({ key, current, previous }) => {
               // Determine if this param change correlates with improvement or regression
-              const perfImproved = evalRun.topk_accuracy > (compareRun?.topk_accuracy ?? 0);
-              const direction = JSON.stringify(current) > JSON.stringify(previous) ? 'increased' : 'decreased';
+              const perfImproved = (evalRun.topk_accuracy ?? 0) > (compareRun?.topk_accuracy ?? 0);
 
               // Check if both values are arrays
               const isArray = Array.isArray(current) && Array.isArray(previous);
@@ -1238,12 +1210,12 @@ export const EvalDrillDown: React.FC<EvalDrillDownProps> = ({ runId, compareWith
                               <div style={{ fontWeight: 600, color: 'var(--accent)', marginBottom: '8px' }}>
                                 ✓ Expected Paths:
                                 <span style={{ fontSize: '10px', color: 'var(--fg-muted)', marginLeft: '8px' }}>
-                                  (type: {typeof result.expect_paths}, array: {Array.isArray(result.expect_paths) ? 'yes' : 'no'}, count: {result.expect_paths?.length ?? 0})
+                                  (type: {typeof result.expected_paths}, array: {Array.isArray(result.expected_paths) ? 'yes' : 'no'}, count: {result.expected_paths?.length ?? 0})
                                 </span>
                               </div>
                               <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                                {result.expect_paths && Array.isArray(result.expect_paths) && result.expect_paths.length > 0 ? (
-                                  result.expect_paths.map((path, i) => (
+                                {result.expected_paths && Array.isArray(result.expected_paths) && result.expected_paths.length > 0 ? (
+                                  result.expected_paths.map((path, i) => (
                                     <div key={i} style={{
                                       fontFamily: 'monospace',
                                       padding: '6px 10px',
@@ -1268,7 +1240,7 @@ export const EvalDrillDown: React.FC<EvalDrillDownProps> = ({ runId, compareWith
                               <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                                 {result.top_paths && result.top_paths.length > 0 ? (
                                   result.top_paths.map((path, i) => {
-                                    const isExpected = result.expect_paths?.some(exp => path.includes(exp));
+                                    const isExpected = result.expected_paths?.some(exp => path.includes(exp));
                                     return (
                                       <div key={i} style={{
                                         fontFamily: 'monospace',

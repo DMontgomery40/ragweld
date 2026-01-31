@@ -10,7 +10,7 @@
 import { useEffect } from 'react';
 import { useRepoStore } from '@/stores/useRepoStore';
 
-interface RepoSelectorProps {
+type RepoSelectorProps = {
   id?: string;
   /** If true, selecting repo updates global active repo via store */
   global?: boolean;
@@ -30,7 +30,7 @@ interface RepoSelectorProps {
   'data-tooltip'?: string;
   /** Additional className */
   className?: string;
-}
+};
 
 export function RepoSelector({
   id = 'repo-selector',
@@ -102,7 +102,7 @@ export function RepoSelector({
         <option value="" disabled>No repos found</option>
       ) : (
         repos.map(repo => (
-          <option key={repo.name} value={repo.name}>
+          <option key={repo.corpus_id} value={repo.corpus_id}>
             {repo.name}
             {repo.branch ? ` (${repo.branch})` : ''}
           </option>
@@ -113,6 +113,5 @@ export function RepoSelector({
 }
 
 export default RepoSelector;
-
 
 

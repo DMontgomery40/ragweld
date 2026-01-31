@@ -1,5 +1,6 @@
-from server.models.eval import EvalResult
 from typing import Any
+
+from server.models.eval import EvalResult
 
 
 class LearningReranker:

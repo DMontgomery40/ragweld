@@ -1,4 +1,5 @@
 // Shared front-end types mirrored from backend Pydantic models and used by Zustand stores
+// NOTE: This file exists for legacy UI compatibility. Prefer importing API types from `types/generated`.
 // Core API Types
 export interface ApiResponse<T> {
   data?: T;
@@ -44,7 +45,7 @@ export interface DockerContainer {
 
 // Config Types
 export interface EnvConfig {
-  [key: string]: string | number | boolean;
+  [key: string]: string | number | boolean | undefined;
   REPO?: string;
   THEME_MODE?: 'auto' | 'dark' | 'light';
   API_BASE_URL?: string;
@@ -200,4 +201,30 @@ export interface QueryResult {
   }>;
   query: string;
   duration: number;
+}
+
+// ---------------------------------------------------------------------------
+// UI-only search types (not part of backend Pydantic contracts)
+// ---------------------------------------------------------------------------
+
+export interface SettingSearchItem {
+  label: string;
+  title: string;
+  name: string;
+  placeholder: string;
+  element: HTMLElement;
+  content: string;
+}
+
+export interface SearchResult {
+  file_path: string;
+  start_line: number;
+  end_line: number;
+  language: string;
+  rerank_score: number;
+  // Settings search fields (used by GlobalSearch modal)
+  label?: string;
+  title?: string;
+  name?: string;
+  element?: HTMLElement;
 }

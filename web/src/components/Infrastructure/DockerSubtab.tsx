@@ -1,14 +1,14 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useDockerStore, useConfigStore } from '@/stores';
-import { useTooltips } from '@/hooks/useTooltips';
-import { useErrorHandler } from '@/hooks/useErrorHandler';
 import { useNotification } from '@/hooks/useNotification';
 import { TooltipIcon } from '@/components/ui/TooltipIcon';
+import type { DockerConfig } from '@/types/generated';
 
 // Static display-only data for infrastructure services
+// Updated for TriBridRAG: postgres + neo4j, no qdrant/redis
 const INFRA_SERVICES = [
-  { name: 'qdrant', displayName: 'Qdrant', description: 'Vector database', port: 6333, color: 'var(--accent)' },
-  { name: 'redis', displayName: 'Redis', description: 'Memory store', port: 6379, color: '#ef4444' },
+  { name: 'postgres', displayName: 'PostgreSQL', description: 'Vector database (pgvector)', port: 5432, color: 'var(--accent)' },
+  { name: 'neo4j', displayName: 'Neo4j', description: 'Graph database', port: 7474, color: '#10b981' },
   { name: 'prometheus', displayName: 'Prometheus', description: 'Metrics', port: 9090, color: '#f59e0b' },
   { name: 'grafana', displayName: 'Grafana', description: 'Dashboard', port: 3000, color: '#f59e0b' },
 ] as const;
@@ -28,19 +28,13 @@ export function DockerSubtab() {
 
   // Config state from Zustand store - PYDANTIC COMPLIANT
   // Read values directly from store, no local state duplication
-  const { config, loadConfig, saveConfig, saving } = useConfigStore();
-
-  // Tooltip system
-  const { getTooltip } = useTooltips();
-
-  // Error handling - NO raw alert()
-  const { handleApiError } = useErrorHandler();
+  const { config, loadConfig, patchSection, saving } = useConfigStore();
 
   // Notifications for feedback
   const { success, error: notifyError, notifications, removeNotification } = useNotification();
 
   // Local UI state ONLY (not config values)
-  const [loading, setLoading] = useState(false);
+  const [_loading, setLoading] = useState(false);
   const [actionInProgress, setActionInProgress] = useState<string | null>(null);
   const [containerLogs, setContainerLogs] = useState<Record<string, string>>({});
   const [showLogsFor, setShowLogsFor] = useState<string | null>(null);
@@ -78,11 +72,25 @@ export function DockerSubtab() {
     return () => clearInterval(interval);
   }, [fetchStatus, fetchContainers, notifyError]);
 
+  // Map display keys to Pydantic field names
+  const keyMap: Record<string, keyof DockerConfig> = {
+    'DOCKER_STATUS_TIMEOUT': 'docker_status_timeout',
+    'DOCKER_CONTAINER_LIST_TIMEOUT': 'docker_container_list_timeout',
+    'DOCKER_CONTAINER_ACTION_TIMEOUT': 'docker_container_action_timeout',
+    'DOCKER_INFRA_UP_TIMEOUT': 'docker_infra_up_timeout',
+    'DOCKER_INFRA_DOWN_TIMEOUT': 'docker_infra_down_timeout',
+    'DOCKER_LOGS_TAIL': 'docker_logs_tail',
+    'DOCKER_LOGS_TIMESTAMPS': 'docker_logs_timestamps',
+  };
+
   // Get config value - pending change takes precedence over store value
   const getConfigValue = useCallback((key: string, defaultVal: number | boolean) => {
     if (key in pendingChanges) return pendingChanges[key];
-    const envVal = config?.env?.[key];
-    if (envVal !== undefined) return envVal;
+    const dockerKey = keyMap[key];
+    if (dockerKey && config?.docker) {
+      const val = config.docker[dockerKey];
+      if (val !== undefined) return val;
+    }
     return defaultVal;
   }, [config, pendingChanges]);
 
@@ -94,12 +102,20 @@ export function DockerSubtab() {
   // Check if there are unsaved changes
   const hasChanges = Object.keys(pendingChanges).length > 0;
 
-  // Save Docker settings to agro_config.json via Pydantic-validated endpoint
+  // Save Docker settings via Pydantic-validated endpoint
   const handleSaveSettings = async () => {
     if (!hasChanges) return;
 
     try {
-      await saveConfig({ env: pendingChanges });
+      // Convert pending changes to Pydantic field names
+      const dockerUpdates: Record<string, number | boolean> = {};
+      for (const [key, value] of Object.entries(pendingChanges)) {
+        const pydanticKey = keyMap[key];
+        if (pydanticKey) {
+          dockerUpdates[pydanticKey] = value;
+        }
+      }
+      await patchSection('docker', dockerUpdates);
       success('Docker settings saved');
       setPendingChanges({}); // Clear pending changes after successful save
     } catch (err) {

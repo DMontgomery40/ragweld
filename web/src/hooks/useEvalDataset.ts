@@ -33,7 +33,7 @@ interface DatasetState {
 // Input type for creating new entries (without generated fields)
 interface NewDatasetEntry {
   question: string;
-  expected_chunks: string[];
+  expected_paths: string[];
   expected_answer?: string;
   tags?: string[];
 }
@@ -60,8 +60,8 @@ export function useEvalDataset(datasetId?: string) {
 
     try {
       const url = datasetId
-        ? `${DATASET_API_BASE}/${datasetId}/entries?repo_id=${activeRepo.id}`
-        : `${DATASET_API_BASE}/entries?repo_id=${activeRepo.id}`;
+        ? `${DATASET_API_BASE}/${datasetId}/entries?corpus_id=${encodeURIComponent(activeRepo)}`
+        : `${DATASET_API_BASE}/entries?corpus_id=${encodeURIComponent(activeRepo)}`;
 
       const response = await fetch(url);
 
@@ -114,7 +114,7 @@ export function useEvalDataset(datasetId?: string) {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             ...entry,
-            repo_id: activeRepo.id,
+            corpus_id: activeRepo,
           }),
         });
 

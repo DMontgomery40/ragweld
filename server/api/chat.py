@@ -1,5 +1,4 @@
 """Chat API endpoints with PydanticAI-powered RAG."""
-
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
@@ -7,6 +6,8 @@ from starlette.responses import StreamingResponse
 
 from server.models.chat import ChatRequest, ChatResponse, Message
 from server.models.tribrid_config_model import TriBridConfig
+from server.retrieval.fusion import TriBridFusion
+from server.services.config_store import get_config as load_scoped_config
 from server.services.conversation_store import get_conversation_store
 from server.services.rag import FusionProtocol, generate_response, stream_response
 
@@ -30,9 +31,8 @@ def get_fusion() -> FusionProtocol:
     """Get the fusion retrieval service. Override with set_fusion() for testing."""
     if _fusion is not None:
         return _fusion
-    raise RuntimeError(
-        "Fusion service not initialized. Call set_fusion() or configure dependencies."
-    )
+    # Default: real tri-brid fusion over Postgres + Neo4j using per-corpus config.
+    return TriBridFusion(vector=None, sparse=None, graph=None)
 
 
 def set_config(config: TriBridConfig | None) -> None:
@@ -56,7 +56,7 @@ async def chat(request: ChatRequest) -> ChatResponse:
     """
     store = get_conversation_store()
     conv = store.get_or_create(request.conversation_id)
-    config = get_config()
+    config = _config if _config is not None else await load_scoped_config(repo_id=request.repo_id)
     fusion = get_fusion()
 
     try:
@@ -66,6 +66,10 @@ async def chat(request: ChatRequest) -> ChatResponse:
             conversation=conv,
             config=config,
             fusion=fusion,
+            include_vector=bool(request.include_vector),
+            include_sparse=bool(request.include_sparse),
+            include_graph=bool(request.include_graph),
+            top_k=request.top_k,
         )
 
         # Store the exchange
@@ -82,7 +86,7 @@ async def chat(request: ChatRequest) -> ChatResponse:
         )
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.post("/chat/stream")
@@ -96,7 +100,7 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
     """
     store = get_conversation_store()
     conv = store.get_or_create(request.conversation_id)
-    config = get_config()
+    config = _config if _config is not None else await load_scoped_config(repo_id=request.repo_id)
     fusion = get_fusion()
 
     # Store the user message before streaming
@@ -110,6 +114,10 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
             conversation=conv,
             config=config,
             fusion=fusion,
+            include_vector=bool(request.include_vector),
+            include_sparse=bool(request.include_sparse),
+            include_graph=bool(request.include_graph),
+            top_k=request.top_k,
         ),
         media_type="text/event-stream",
         headers={

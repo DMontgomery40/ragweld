@@ -37,11 +37,14 @@ export class KeywordsService {
     filter: string = '',
     excludeSet: Set<string> = new Set()
   ): string[] {
-    let base = category === 'all' ? (catalog.keywords || []) : (catalog[category] || []);
+    const base: string[] =
+      category === 'all'
+        ? (catalog.keywords || [])
+        : (Array.isArray(catalog[category]) ? (catalog[category] as string[]) : []);
     const f = filter.toLowerCase();
 
     return base
-      .filter(k => !excludeSet.has(k) && (!f || k.toLowerCase().includes(f)))
+      .filter((k: string) => !excludeSet.has(k) && (!f || k.toLowerCase().includes(f)))
       .slice(0, 500);
   }
 }

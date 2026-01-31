@@ -76,7 +76,8 @@ export function useTheme() {
       nodes.forEach(el => {
         let s = el.getAttribute('style') || '';
         mappings.forEach(([k, v]) => {
-          s = s.replaceAll(k, v);
+          // Avoid String.prototype.replaceAll for ES2020 compatibility.
+          s = s.split(k).join(v);
         });
         el.setAttribute('style', s);
       });

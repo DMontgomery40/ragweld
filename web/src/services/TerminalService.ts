@@ -27,6 +27,7 @@ class TerminalServiceClass {
   streamEvalRun(
     terminalId: string,
     params: {
+      corpus_id: string;
       use_multi?: boolean;
       final_k?: number;
       sample_limit?: number;
@@ -110,55 +111,25 @@ class TerminalServiceClass {
       onComplete?: () => void;
     }
   ): void {
-    this.disconnect(terminalId);
     const { onLine, onProgress, onError, onComplete, ...queryParams } = params;
+
+    // Backend SSE for index logs is:
+    //   GET /api/stream/operations/index?corpus_id=...
+    // (CorpusScope also accepts legacy repo/repo_id query params.)
     const qs = new URLSearchParams();
     Object.entries(queryParams).forEach(([key, value]) => {
       if (value !== undefined && value !== null) {
         const encoded = typeof value === 'boolean' ? (value ? 1 : 0) : value;
-        qs.append(key, String(encoded));
+        if (key === 'repo') {
+          qs.append('corpus_id', String(encoded));
+        } else {
+          qs.append(key, String(encoded));
+        }
       }
     });
-    const url = `${this.baseUrl}/api/stream/index/run${qs.toString() ? `?${qs.toString()}` : ''}`;
 
-    const sse = new EventSource(url);
-    const terminal: TerminalInstance = { id: terminalId, sse, onLine, onProgress, onError, onComplete };
-
-    sse.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        switch (data.type) {
-          case 'log':
-            onLine?.(data.message);
-            break;
-          case 'progress':
-            onProgress?.(data.percent, data.message || '');
-            break;
-          case 'error':
-            onError?.(data.message);
-            onLine?.(`\x1b[31mERROR: ${data.message}\x1b[0m`);
-            break;
-          case 'complete':
-            onComplete?.();
-            this.disconnect(terminalId);
-            break;
-          default:
-            if (data.message) {
-              onLine?.(data.message);
-            }
-        }
-      } catch (_) {
-        onLine?.(event.data);
-      }
-    };
-
-    sse.onerror = (error) => {
-      console.error(`[TerminalService] SSE error for ${terminalId}:`, error);
-      onError?.('Connection lost');
-      this.disconnect(terminalId);
-    };
-
-    this.terminals.set(terminalId, terminal);
+    const endpoint = `operations/index${qs.toString() ? `?${qs.toString()}` : ''}`;
+    this.connectToStream(terminalId, endpoint, { onLine, onProgress, onError, onComplete });
   }
 
   /**
@@ -356,8 +327,7 @@ class TerminalServiceClass {
     buildType: 'cards' | 'reranker' | 'index',
     repo?: string
   ): void {
-    const params = repo ? { repo } : {};
-    const endpoint = `builds/${buildType}`;
+    const endpoint = `builds/${buildType}${repo ? `?repo=${encodeURIComponent(repo)}` : ''}`;
 
     this.connectToStream(terminalId, endpoint, {
       onLine: (line) => {

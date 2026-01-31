@@ -1,7 +1,7 @@
 // AGRO - Storage Requirements Breakdown Panel
 // Shows detailed storage usage from backend data
 
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 
 interface StorageItem {
   label: string;

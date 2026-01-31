@@ -1,26 +1,15 @@
-export interface CardsBuildOptions {
-  repo: string;
-  enrich: boolean;
-  exclude_dirs?: string;
-  exclude_patterns?: string;
-  exclude_keywords?: string;
-}
+/**
+ * DEPRECATED: "cards" is a banned term per CLAUDE.md
+ *
+ * Use chunk_summaries.ts or import directly from generated.ts
+ */
 
-export interface CardsBuildStatus {
-  status: 'running' | 'done' | 'error' | 'cancelled';
-  stage: string;
-  total: number;
-  done: number;
-  pct: number;
-  tip?: string;
-  repo?: string;
-  eta_s?: number;
-  throughput?: string;
-  result?: {
-    cards_written?: number;
-    chunks_skipped?: number;
-    duration_s?: number;
-  };
-  error?: string;
-}
-
+// Re-export legacy aliases for backward compatibility only
+export type {
+  Card,
+  CardsResponse,
+  ChunkSummary,
+  ChunkSummariesResponse,
+  ChunkSummariesBuildRequest,
+  ChunkSummariesLastBuild,
+} from './chunk_summaries';

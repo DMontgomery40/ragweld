@@ -49,12 +49,20 @@ class MockFusion:
 
     def __init__(self, chunks: list[ChunkMatch]):
         self.chunks = chunks
-        self.search_calls: list[tuple[str, str, FusionConfig]] = []
+        self.search_calls: list[tuple[str, str, FusionConfig, bool, bool, bool, int | None]] = []
 
     async def search(
-        self, repo_id: str, query: str, config: FusionConfig
+        self,
+        repo_id: str,
+        query: str,
+        config: FusionConfig,
+        *,
+        include_vector: bool = True,
+        include_sparse: bool = True,
+        include_graph: bool = True,
+        top_k: int | None = None,
     ) -> list[ChunkMatch]:
-        self.search_calls.append((repo_id, query, config))
+        self.search_calls.append((repo_id, query, config, include_vector, include_sparse, include_graph, top_k))
         return self.chunks
 
 
@@ -364,3 +372,104 @@ class TestStreamEndpoint:
             assert len(messages) == 1
             assert messages[0].content == "Stream test message"
             assert messages[0].role == "user"
+
+
+class TestChatCitationsRealPipeline:
+    """Exercise the real rag pipeline without external API calls.
+
+    We patch the model resolver to use pydantic-ai's TestModel so the Agent
+    will call tools, allowing us to validate citation collection and SSE done payloads.
+    """
+
+    @pytest.mark.asyncio
+    async def test_chat_collects_sources_and_passes_leg_toggles(
+        self, chat_client: AsyncClient, mock_fusion: MockFusion, monkeypatch
+    ):
+        from pydantic_ai.models.test import TestModel
+
+        import server.services.rag as rag_service
+
+        monkeypatch.setattr(
+            rag_service,
+            "_resolve_chat_model",
+            lambda _cfg: TestModel(call_tools="all", custom_output_text="Assistant says hi"),
+            raising=True,
+        )
+
+        response = await chat_client.post(
+            "/api/chat",
+            json={
+                "message": "Where is config persistence implemented?",
+                "repo_id": "test-repo",
+                "include_vector": False,
+                "include_sparse": True,
+                "include_graph": False,
+            },
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["conversation_id"]
+        assert data["message"]["role"] == "assistant"
+        assert data["message"]["content"] == "Assistant says hi"
+        assert isinstance(data["sources"], list)
+        assert len(data["sources"]) >= 1
+        assert data["sources"][0]["file_path"] == "src/main.py"
+
+        # Ensure per-message leg toggles are propagated to fusion.search
+        assert mock_fusion.search_calls, "Expected fusion.search to be called"
+        (_repo_id, _query, _cfg, include_vector, include_sparse, include_graph, _top_k) = mock_fusion.search_calls[-1]
+        assert include_vector is False
+        assert include_sparse is True
+        assert include_graph is False
+
+    @pytest.mark.asyncio
+    async def test_stream_done_includes_conversation_id_and_sources(
+        self, chat_client: AsyncClient, monkeypatch
+    ):
+        from pydantic_ai.models.test import TestModel
+
+        import server.services.rag as rag_service
+
+        monkeypatch.setattr(
+            rag_service,
+            "_resolve_chat_model",
+            lambda _cfg: TestModel(call_tools="all", custom_output_text="Streamed response"),
+            raising=True,
+        )
+
+        payload = {"message": "Test", "repo_id": "test-repo", "conversation_id": "stream-conv-2"}
+
+        body = ""
+        async with chat_client.stream("POST", "/api/chat/stream", json=payload) as resp:
+            assert resp.status_code == 200
+            assert resp.headers["content-type"].startswith("text/event-stream")
+            async for chunk in resp.aiter_text():
+                body += chunk
+
+        # Parse SSE events and locate the done event
+        done: dict | None = None
+        for block in body.split("\n\n"):
+            block = block.strip()
+            if not block.startswith("data:"):
+                continue
+            data = block[len("data:") :].strip()
+            if not data:
+                continue
+            parsed = json.loads(data)
+            if parsed.get("type") == "done":
+                done = parsed
+                break
+
+        assert done is not None, f"Expected done event in SSE body, got: {body!r}"
+        assert done.get("conversation_id") == "stream-conv-2"
+        assert isinstance(done.get("sources"), list)
+        assert len(done["sources"]) >= 1
+        assert done["sources"][0]["file_path"] == "src/main.py"
+
+        # Streaming now stores assistant message on completion
+        store = get_conversation_store()
+        msgs = store.get_messages("stream-conv-2")
+        assert len(msgs) == 2
+        assert msgs[0].role == "user"
+        assert msgs[1].role == "assistant"

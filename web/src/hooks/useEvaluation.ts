@@ -19,12 +19,17 @@
 import { useState, useCallback } from 'react';
 import type {
   EvalRequest,
-  EvalMetrics,
-  EvalResult,
   EvalRun,
+  EvalRunMeta,
+  EvalRunsResponse,
   EvalComparisonResult,
+  EvalResult,
 } from '@/types/generated';
 import { useRepoStore } from '@/stores';
+import {
+  exportResultsToJson,
+  exportResultsToCsv,
+} from '@/services/EvaluationService';
 
 // API endpoint for evaluation
 const EVAL_API_BASE = '/api/eval';
@@ -33,16 +38,19 @@ interface EvaluationState {
   currentRun: EvalRun | null;
   isRunning: boolean;
   progress: number;
+  progressText: string;
   error: string | null;
   comparison: EvalComparisonResult | null;
 }
 
 export function useEvaluation() {
   const { activeRepo } = useRepoStore();
+
   const [state, setState] = useState<EvaluationState>({
     currentRun: null,
     isRunning: false,
     progress: 0,
+    progressText: '',
     error: null,
     comparison: null,
   });
@@ -66,7 +74,7 @@ export function useEvaluation() {
       }));
 
       const request: EvalRequest = {
-        repo_id: activeRepo.id,
+        corpus_id: activeRepo,
         dataset_id: options?.datasetId ?? null,
         sample_size: options?.sampleSize ?? null,
       };
@@ -114,12 +122,26 @@ export function useEvaluation() {
       setState((prev) => ({ ...prev, error: null, comparison: null }));
 
       try {
-        const response = await fetch(`${EVAL_API_BASE}/compare`, {
+        // Fetch both runs
+        const [baselineRes, currentRes] = await Promise.all([
+          fetch(`${EVAL_API_BASE}/runs/${baselineRunId}`),
+          fetch(`${EVAL_API_BASE}/runs/${currentRunId}`),
+        ]);
+
+        if (!baselineRes.ok || !currentRes.ok) {
+          throw new Error('Failed to fetch runs for comparison');
+        }
+
+        const baseline = await baselineRes.json();
+        const current = await currentRes.json();
+
+        // Call analyze_comparison endpoint
+        const response = await fetch(`${EVAL_API_BASE}/analyze_comparison`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            baseline_run_id: baselineRunId,
-            current_run_id: currentRunId,
+            baseline_run: baseline,
+            current_run: current,
           }),
         });
 
@@ -166,15 +188,16 @@ export function useEvaluation() {
   /**
    * List all evaluation runs for the active repository
    */
-  const listRuns = useCallback(async (): Promise<EvalRun[]> => {
+  const listRuns = useCallback(async (): Promise<EvalRunMeta[]> => {
     if (!activeRepo) return [];
 
     try {
-      const response = await fetch(`${EVAL_API_BASE}/runs?repo_id=${activeRepo.id}`);
+      const response = await fetch(`${EVAL_API_BASE}/runs?corpus_id=${encodeURIComponent(activeRepo)}`);
       if (!response.ok) {
         return [];
       }
-      return await response.json();
+      const data: EvalRunsResponse = await response.json();
+      return data.runs || [];
     } catch {
       return [];
     }
@@ -188,25 +211,55 @@ export function useEvaluation() {
       currentRun: null,
       isRunning: false,
       progress: 0,
+      progressText: '',
       error: null,
       comparison: null,
     });
   }, []);
+
+  /**
+   * Legacy alias for runEvaluation
+   */
+  const runEval = runEvaluation;
+
+  /**
+   * Export results to string format
+   */
+  const exportResults = useCallback(
+    async (format: 'json' | 'csv' = 'json'): Promise<string> => {
+      const results = state.currentRun?.results ?? [];
+      return format === 'csv' ? exportResultsToCsv(results) : exportResultsToJson(results);
+    },
+    [state.currentRun]
+  );
+
+  /**
+   * Clear results - alias for clearState
+   */
+  const clearResults = clearState;
+
+  // Derive results from currentRun
+  const results: EvalResult[] = state.currentRun?.results ?? [];
 
   return {
     // State
     currentRun: state.currentRun,
     isRunning: state.isRunning,
     progress: state.progress,
+    progressText: state.progressText,
     error: state.error,
     comparison: state.comparison,
+    results,
 
     // Actions
     runEvaluation,
+    runEval,
     compareRuns,
     fetchRun,
     listRuns,
     clearState,
+    clearResults,
+    exportResults,
   };
 }
 

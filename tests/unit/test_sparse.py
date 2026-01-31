@@ -1,9 +1,9 @@
 """Tests for the sparse retriever module - using LAW's SparseSearchConfig."""
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
-from server.models.tribrid_config_model import SparseSearchConfig
+from server.models.tribrid_config_model import SparseSearchConfig, TriBridConfig
 from server.models.retrieval import ChunkMatch
 from server.retrieval.sparse import SparseRetriever
 
@@ -17,6 +17,12 @@ def sparse_config() -> SparseSearchConfig:
         bm25_k1=1.5,
         bm25_b=0.75,
     )
+
+
+@pytest.fixture
+def mock_config() -> TriBridConfig:
+    """Create mock TriBridConfig for load_scoped_config."""
+    return TriBridConfig()
 
 
 @pytest.fixture
@@ -54,44 +60,50 @@ def mock_postgres() -> MagicMock:
 async def test_sparse_search_basic(
     mock_postgres: MagicMock,
     sparse_config: SparseSearchConfig,
+    mock_config: TriBridConfig,
 ) -> None:
     """Test basic sparse search."""
-    retriever = SparseRetriever(mock_postgres)
-    results = await retriever.search("repo-1", "python function", sparse_config)
+    with patch("server.retrieval.sparse.load_scoped_config", new_callable=AsyncMock, return_value=mock_config):
+        retriever = SparseRetriever(mock_postgres)
+        results = await retriever.search("repo-1", "python function", sparse_config)
 
-    assert len(results) == 2
-    assert all(r.source == "sparse" for r in results)
-    mock_postgres.sparse_search.assert_called_once()
+        assert len(results) == 2
+        assert all(r.source == "sparse" for r in results)
+        mock_postgres.sparse_search.assert_called_once()
 
 
 @pytest.mark.asyncio
 async def test_sparse_search_respects_top_k(
     mock_postgres: MagicMock,
     sparse_config: SparseSearchConfig,
+    mock_config: TriBridConfig,
 ) -> None:
     """Test that sparse search respects top_k."""
     sparse_config.top_k = 1
-    retriever = SparseRetriever(mock_postgres)
+    with patch("server.retrieval.sparse.load_scoped_config", new_callable=AsyncMock, return_value=mock_config):
+        retriever = SparseRetriever(mock_postgres)
 
-    # Even though mock returns 2, config says top_k=1
-    await retriever.search("repo-1", "test", sparse_config)
-    call_args = mock_postgres.sparse_search.call_args
-    # Verify top_k was passed
-    assert sparse_config.top_k == 1
+        # Even though mock returns 2, config says top_k=1
+        await retriever.search("repo-1", "test", sparse_config)
+        _call_args = mock_postgres.sparse_search.call_args
+        # Verify top_k was passed
+        assert sparse_config.top_k == 1
 
 
 @pytest.mark.asyncio
 async def test_sparse_search_disabled(
     mock_postgres: MagicMock,
     sparse_config: SparseSearchConfig,
+    mock_config: TriBridConfig,
 ) -> None:
     """Test that disabled sparse search returns empty."""
     sparse_config.enabled = False
-    retriever = SparseRetriever(mock_postgres)
-    results = await retriever.search("repo-1", "test", sparse_config)
+    with patch("server.retrieval.sparse.load_scoped_config", new_callable=AsyncMock, return_value=mock_config):
+        retriever = SparseRetriever(mock_postgres)
+        results = await retriever.search("repo-1", "test", sparse_config)
 
-    # Should not call postgres when disabled
-    assert len(results) == 0 or not sparse_config.enabled
+        # Should not call postgres when disabled
+        assert len(results) == 0 or not sparse_config.enabled
 
 
 def test_sparse_config_defaults() -> None:

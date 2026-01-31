@@ -89,7 +89,7 @@ async def mine_triplets() -> dict[str, Any]:
             lines = log_path.read_text(encoding="utf-8").splitlines()
         except Exception:
             lines = []
-        for i, line in enumerate([l for l in lines if l.strip()][:10]):
+        for i, line in enumerate([ln for ln in lines if ln.strip()][:10]):
             try:
                 query = json.loads(line).get("query")
             except Exception:

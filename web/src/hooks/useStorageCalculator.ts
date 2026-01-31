@@ -7,7 +7,6 @@ import type {
   Calculator2Inputs,
   StorageResults,
   Calculator2Results,
-  OptimizationPlan,
   PrecisionResults
 } from '@web/types/storage';
 import { formatBytes } from '@web/utils/formatters';

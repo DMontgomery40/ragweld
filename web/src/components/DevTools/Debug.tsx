@@ -26,7 +26,7 @@ export function Debug() {
   const { api } = useAPI();
   const [query, setQuery] = useState('');
   const [repository, setRepository] = useState('agro');
-  const [repositories, setRepositories] = useState(['agro', 'test-repo']);
+  const [repositories, _setRepositories] = useState(['agro', 'test-repo']);
   const [debugging, setDebugging] = useState(false);
   const [result, setResult] = useState<DebugResult | null>(null);
   const [error, setError] = useState<string | null>(null);

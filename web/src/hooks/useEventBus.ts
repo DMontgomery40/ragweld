@@ -32,6 +32,8 @@ export const LEGACY_EVENT_MAP: Record<string, EventName> = {
   'tab-switched': 'tab:switched',
   'agro-repo-loaded': 'repo:loaded',
   'agro-repo-changed': 'repo:changed',
+  'tribrid-corpus-loaded': 'repo:loaded',
+  'tribrid-corpus-changed': 'repo:changed',
   'repo-updated': 'repo:changed',
   'config-updated': 'config:updated',
 };

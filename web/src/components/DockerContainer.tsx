@@ -47,13 +47,16 @@ export function DockerContainer({ container, onStart, onStop, onRestart }: Docke
           </span>
         </div>
 
-        {container.ports && container.ports.length > 0 && (
+        {container.ports && (
           <div className="result-item">
             <span className="result-label">Ports</span>
             <span className="result-value" style={{ fontSize: '11px', color: 'var(--link)' }}>
-              {container.ports.map(p =>
-                p.PublicPort ? `${p.PublicPort}:${p.PrivatePort}` : p.PrivatePort
-              ).join(', ')}
+              {typeof container.ports === 'string'
+                ? container.ports
+                : container.ports.map((p: { PrivatePort: number; PublicPort?: number; Type: string }) =>
+                    p.PublicPort ? `${p.PublicPort}:${p.PrivatePort}` : String(p.PrivatePort)
+                  ).join(', ')
+              }
             </span>
           </div>
         )}

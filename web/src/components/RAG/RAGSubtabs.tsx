@@ -27,7 +27,7 @@ export function RAGSubtabs({ activeSubtab, onSubtabChange }: RAGSubtabsProps) {
     { id: 'data-quality', title: 'Data Quality' },
     { id: 'retrieval', title: 'Retrieval' },
     { id: 'reranker-config', title: 'Reranker' },
-    { id: 'learning-ranker', title: 'Learning Ranker' },
+    { id: 'learning-ranker', title: 'Learning Reranker' },
     { id: 'indexing', title: 'Indexing' },
     { id: 'evaluate', title: 'Evaluate' }
   ];

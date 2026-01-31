@@ -238,6 +238,21 @@ def main() -> None:
             IndexRequest,
             IndexStatus,
             IndexStats,
+            # Domain models - Corpora
+            Corpus,
+            CorpusCreateRequest,
+            CorpusUpdateRequest,
+            CorpusStats,
+            # Domain models - Index tooling
+            VocabPreviewTerm,
+            VocabPreviewResponse,
+            # Domain models - Chunk summaries + keywords
+            ChunkSummary,
+            ChunkSummariesLastBuild,
+            ChunkSummariesResponse,
+            ChunkSummariesBuildRequest,
+            KeywordsGenerateRequest,
+            KeywordsGenerateResponse,
             # Domain models - Retrieval
             ChunkMatch,
             SearchRequest,
@@ -256,9 +271,14 @@ def main() -> None:
             # Domain models - Eval
             EvalDatasetItem,
             EvalRequest,
+            EvalTestRequest,
             EvalMetrics,
+            EvalDoc,
             EvalResult,
             EvalRun,
+            EvalRunMeta,
+            EvalRunsResponse,
+            EvalAnalyzeComparisonResponse,
             EvalComparisonResult,
         )
     except ImportError as e:
@@ -274,6 +294,18 @@ def main() -> None:
         IndexRequest,
         IndexStatus,
         IndexStats,
+        Corpus,
+        CorpusCreateRequest,
+        CorpusUpdateRequest,
+        CorpusStats,
+        VocabPreviewTerm,
+        VocabPreviewResponse,
+        ChunkSummary,
+        ChunkSummariesLastBuild,
+        ChunkSummariesResponse,
+        ChunkSummariesBuildRequest,
+        KeywordsGenerateRequest,
+        KeywordsGenerateResponse,
         ChunkMatch,
         SearchRequest,
         SearchResponse,
@@ -288,9 +320,14 @@ def main() -> None:
         GraphStats,
         EvalDatasetItem,
         EvalRequest,
+        EvalTestRequest,
         EvalMetrics,
+        EvalDoc,
         EvalResult,
         EvalRun,
+        EvalRunMeta,
+        EvalRunsResponse,
+        EvalAnalyzeComparisonResponse,
         EvalComparisonResult,
     ]
 
@@ -301,7 +338,10 @@ def main() -> None:
     root_schemas: dict[str, dict[str, Any]] = {}
 
     for model in all_models:
-        schema = model.model_json_schema()
+        # Generate schemas in *serialization* mode so TS matches API responses.
+        # This matters for the repo_id -> corpus_id migration, where we keep the
+        # internal field name `repo_id` but serialize as `corpus_id`.
+        schema = model.model_json_schema(mode="serialization", by_alias=True)
         model_name = model.__name__
 
         # Add definitions from this model's schema

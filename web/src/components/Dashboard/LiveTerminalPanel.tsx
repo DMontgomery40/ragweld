@@ -1,7 +1,7 @@
 // AGRO - Live Terminal Panel Component
 // Dropdown terminal that slides down with bezier animation
 
-import React, { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import { LiveTerminal, LiveTerminalHandle } from '../LiveTerminal';
 
 interface LiveTerminalPanelProps {

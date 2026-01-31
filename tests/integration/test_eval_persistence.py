@@ -29,8 +29,8 @@ async def test_eval_run_persistence(test_config: TriBridConfig) -> None:
         EvalResult(
             entry_id="e1",
             question="How does function X work?",
-            retrieved_chunks=["c1", "c2", "c3"],
-            expected_chunks=["c1", "c3"],
+            retrieved_paths=["c1", "c2", "c3"],
+            expected_paths=["c1", "c3"],
             reciprocal_rank=1.0,
             recall=0.67,
             latency_ms=45.0,
@@ -64,8 +64,8 @@ def test_eval_metrics_aggregation() -> None:
         EvalResult(
             entry_id=f"e{i}",
             question=f"Question {i}",
-            retrieved_chunks=[f"c{i}"],
-            expected_chunks=[f"c{i}"],
+            retrieved_paths=[f"c{i}"],
+            expected_paths=[f"c{i}"],
             reciprocal_rank=1.0 if i % 2 == 0 else 0.5,
             recall=1.0 if i % 2 == 0 else 0.5,
             latency_ms=50.0 + i * 10,

@@ -482,7 +482,6 @@ export function Reranker() {
                           {availableRerankers.find(r => r.id === result.reranker)?.name || result.reranker}
                         </td>
                         {comparisonResult.correlation[rowIdx].map((correlation, colIdx) => {
-                          const intensity = Math.round(correlation * 255);
                           const bgColor = `rgba(var(--accent-rgb, 0, 120, 212), ${correlation})`;
                           return (
                             <td

@@ -1,7 +1,7 @@
 // AGRO - Dashboard Quick Actions Component
 // 6 action buttons for common operations
 
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { QuickActionButton } from './QuickActionButton';
 import { LiveTerminalPanel } from './LiveTerminalPanel';
 import { TerminalService } from '../../services/TerminalService';
@@ -40,7 +40,7 @@ export function QuickActions() {
   const [evalError, setEvalError] = useState<string | null>(null);
   
   // Use centralized repo store
-  const { activeRepo, switching, loadRepos, initialized } = useRepoStore();
+  const { activeRepo, switching, loadRepos, initialized, getRepoByName } = useRepoStore();
 
   // Load repos once on mount if not yet initialized
   useEffect(() => {
@@ -81,12 +81,18 @@ export function QuickActions() {
     try {
       // Get current repo from URL params or default to agro
       const params = new URLSearchParams(window.location.search);
-      const repo = params.get('repo') || activeRepo || 'agro';
+      const corpusId =
+        params.get('corpus') ||
+        params.get('repo') ||
+        activeRepo ||
+        localStorage.getItem('tribrid_active_corpus') ||
+        localStorage.getItem('tribrid_active_repo') ||
+        'tribrid';
 
       const response = await fetch('/api/keywords/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ repo })
+        body: JSON.stringify({ corpus_id: corpusId })
       });
       const data = await response.json();
       
@@ -135,7 +141,17 @@ export function QuickActions() {
     }
 
     try {
-      const response = await fetch('/api/index/start', { method: 'POST' });
+      const corpus = getRepoByName(activeRepo);
+      const repoPath = corpus?.path || '';
+      if (!activeRepo || !repoPath) {
+        throw new Error('Select a corpus with a valid path before indexing');
+      }
+
+      const response = await fetch('/api/index/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ repo_id: activeRepo, repo_path: repoPath })
+      });
 
       if (!response.ok) {
         const error = await response.text();
@@ -153,6 +169,7 @@ export function QuickActions() {
 
       // Connect to SSE stream for real logs
       TerminalService.streamOperation('dashboard_indexer', 'index', {
+        repo: activeRepo,
         onLine: (line) => {
           if (terminal) {
             terminal.appendLine(line);
@@ -251,13 +268,19 @@ export function QuickActions() {
     setProgress(0);
 
     const params = new URLSearchParams(window.location.search);
-    const repo = params.get('repo') || activeRepo || 'agro';
+    const corpusId =
+      params.get('corpus') ||
+      params.get('repo') ||
+      activeRepo ||
+      localStorage.getItem('tribrid_active_corpus') ||
+      localStorage.getItem('tribrid_active_repo') ||
+      'tribrid';
 
     const terminal = (window as any)._dashboardTerminal;
     if (terminal) {
       terminal.setTitle(`Evaluate (${option.label})`);
       terminal.clear();
-      terminal.appendLine(`🔬 Starting evaluation for repo: ${repo}`);
+      terminal.appendLine(`🔬 Starting evaluation for corpus: ${corpusId}`);
     }
 
     // Kick off eval run to ensure backend starts processing (non-stream acknowledgement)
@@ -265,7 +288,7 @@ export function QuickActions() {
       await fetch('/api/eval/run', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ backend: option.backend, repo })
+        body: JSON.stringify({ corpus_id: corpusId, dataset_id: null, sample_size: null })
       });
     } catch (error) {
       console.warn('Eval run kickoff failed (continuing with stream):', error);
@@ -274,6 +297,7 @@ export function QuickActions() {
     const preset = FALLBACK_EVAL_PARAMS[option.id] || {};
 
     TerminalService.streamEvalRun('dashboard_eval', {
+      corpus_id: corpusId,
       use_multi: preset.use_multi,
       final_k: preset.final_k,
       sample_limit: preset.sample_limit,
@@ -343,7 +367,7 @@ export function QuickActions() {
         <QuickActionButton
           id="dash-change-repo"
           icon="📁"
-          label={activeRepo ? `Corpus: ${activeRepo}` : 'Change Corpus'}
+          label={activeRepo ? `Corpus: ${getRepoByName(activeRepo)?.name || activeRepo}` : 'Change Corpus'}
           onClick={handleChangeRepo}
           dataAction="change-repo"
           disabled={switching}
@@ -508,4 +532,3 @@ export function QuickActions() {
     </div>
   );
 }
-

@@ -6,6 +6,14 @@
 
 ---
 
+## TERMINOLOGY (CORPUS VS REPO)
+
+TriBridRAG is **corpus-first**: a **corpus** is any folder you index/search/GraphRAG over (a git repo, a docs folder, a monorepo subtree, etc.). Corpus separation is fundamental: each corpus has its own storage + graph + config.
+
+**Important compatibility note:** the codebase and API still use the field name `repo_id` for the **corpus identifier**. Treat `repo_id` as `corpus_id`.
+
+---
+
 ## SOURCE OF TRUTH FILES (THE LAW)
 
 These files define what exists. If something isn't in these files, IT DOES NOT EXIST.
@@ -337,9 +345,9 @@ def test_search():
 
 # RIGHT - verify real results
 def test_search_returns_relevant_chunks():
-    response = client.post("/search", json={
+    response = client.post("/api/search", json={
         "query": "authentication flow",
-        "repo_id": "tribrid"
+        "repo_id": "my-corpus"
     })
     assert response.status_code == 200
     results = response.json()["matches"]

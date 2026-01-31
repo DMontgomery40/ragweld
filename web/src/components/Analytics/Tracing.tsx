@@ -173,7 +173,7 @@ export function Tracing() {
         </div>
       )}
 
-      <style jsx>{`
+      <style>{`
         .tracing-container {
           padding: 24px;
           display: flex;
