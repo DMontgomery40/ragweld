@@ -1,0 +1,246 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$ROOT_DIR"
+
+BACKEND_PORT="${BACKEND_PORT:-8012}"
+FRONTEND_PORT="${FRONTEND_PORT:-5173}"
+
+START_DOCKER=1
+START_BACKEND=1
+START_FRONTEND=1
+
+BACKEND_MODE="local" # local|docker
+WITH_OBSERVABILITY=0
+DRY_RUN=0
+
+BACKEND_PID=""
+
+usage() {
+  cat <<'EOF'
+Usage:
+  ./start.sh [options]
+
+Starts:
+  - Docker services (postgres + neo4j)
+  - Backend API on http://127.0.0.1:8012 (FastAPI)
+  - Frontend UI on http://localhost:5173/web (Vite)
+
+Options:
+  --docker-backend         Run backend via Docker Compose (maps host :8012 -> container :8000)
+  --with-observability     Also start prometheus + grafana (optional)
+  --no-docker              Skip Docker services
+  --no-backend             Skip backend
+  --no-frontend            Skip frontend
+  --check                  Print what would run, then exit
+  -h, --help               Show help
+
+Environment overrides:
+  BACKEND_PORT=8012        Backend host port (defaults to 8012)
+  FRONTEND_PORT=5173       Frontend dev server port (defaults to 5173)
+
+Notes:
+  - The frontend code + Vite proxy expect the backend on port 8012 during dev.
+  - If .env is missing, this script copies .env.example -> .env (you still need to add keys).
+EOF
+}
+
+die() {
+  echo "ERROR: $*" >&2
+  exit 1
+}
+
+log() {
+  echo "[start.sh] $*"
+}
+
+have_cmd() {
+  command -v "$1" >/dev/null 2>&1
+}
+
+DOCKER_COMPOSE=()
+resolve_docker_compose() {
+  if docker compose version >/dev/null 2>&1; then
+    DOCKER_COMPOSE=(docker compose)
+    return 0
+  fi
+  if have_cmd docker-compose; then
+    DOCKER_COMPOSE=(docker-compose)
+    return 0
+  fi
+  return 1
+}
+
+run() {
+  if [[ "$DRY_RUN" == "1" ]]; then
+    echo "+ $*"
+    return 0
+  fi
+  "$@"
+}
+
+wait_for_container_healthy() {
+  local cname="$1"
+  local timeout_s="${2:-120}"
+  local start_s
+  start_s="$(date +%s)"
+
+  log "Waiting for $cname to become healthy (timeout ${timeout_s}s)..."
+  while true; do
+    local status=""
+    status="$(docker inspect -f '{{.State.Health.Status}}' "$cname" 2>/dev/null || true)"
+    if [[ "$status" == "healthy" ]]; then
+      log "$cname is healthy."
+      return 0
+    fi
+    if [[ "$status" == "unhealthy" ]]; then
+      die "$cname is unhealthy. Check logs: docker logs $cname"
+    fi
+    if [[ -z "$status" ]]; then
+      die "Could not inspect $cname (is Docker running? did the container start?)"
+    fi
+
+    local now_s
+    now_s="$(date +%s)"
+    if (( now_s - start_s >= timeout_s )); then
+      die "Timed out waiting for $cname health (current status: $status)"
+    fi
+    sleep 2
+  done
+}
+
+wait_for_http_ok() {
+  local url="$1"
+  local timeout_s="${2:-60}"
+  local start_s
+  start_s="$(date +%s)"
+
+  log "Waiting for HTTP OK: $url (timeout ${timeout_s}s)..."
+  while true; do
+    if curl -fsS "$url" >/dev/null 2>&1; then
+      log "OK: $url"
+      return 0
+    fi
+    local now_s
+    now_s="$(date +%s)"
+    if (( now_s - start_s >= timeout_s )); then
+      die "Timed out waiting for: $url"
+    fi
+    sleep 1
+  done
+}
+
+cleanup() {
+  if [[ -n "${BACKEND_PID:-}" ]]; then
+    if kill -0 "$BACKEND_PID" >/dev/null 2>&1; then
+      log "Stopping backend (pid=$BACKEND_PID)..."
+      kill "$BACKEND_PID" >/dev/null 2>&1 || true
+    fi
+  fi
+}
+trap cleanup EXIT INT TERM
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --docker-backend)
+      BACKEND_MODE="docker"
+      ;;
+    --with-observability)
+      WITH_OBSERVABILITY=1
+      ;;
+    --no-docker)
+      START_DOCKER=0
+      ;;
+    --no-backend)
+      START_BACKEND=0
+      ;;
+    --no-frontend)
+      START_FRONTEND=0
+      ;;
+    --check)
+      DRY_RUN=1
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      usage
+      die "Unknown option: $1"
+      ;;
+  esac
+  shift
+done
+
+if [[ ! -f ".env" ]]; then
+  if [[ -f ".env.example" ]]; then
+    log ".env not found; copying .env.example -> .env"
+    run cp ".env.example" ".env"
+    log "Reminder: edit .env with your API keys if you want embeddings/LLM calls."
+  else
+    log ".env not found and .env.example missing; continuing."
+  fi
+fi
+
+if [[ "$START_DOCKER" == "1" ]]; then
+  resolve_docker_compose || die "Docker Compose not found. Install Docker Desktop."
+
+  services=(postgres neo4j)
+  if [[ "$WITH_OBSERVABILITY" == "1" ]]; then
+    services+=(prometheus grafana)
+  fi
+  if [[ "$BACKEND_MODE" == "docker" && "$START_BACKEND" == "1" ]]; then
+    services+=(api)
+  fi
+
+  log "Starting Docker services: ${services[*]}"
+  if [[ "$BACKEND_MODE" == "docker" && "$START_BACKEND" == "1" ]]; then
+    run env SERVER_PORT="$BACKEND_PORT" "${DOCKER_COMPOSE[@]}" up -d "${services[@]}"
+  else
+    run "${DOCKER_COMPOSE[@]}" up -d "${services[@]}"
+  fi
+
+  if [[ "$DRY_RUN" == "0" ]]; then
+    wait_for_container_healthy "tribrid-postgres" 120
+    wait_for_container_healthy "tribrid-neo4j" 180
+  fi
+fi
+
+if [[ "$START_BACKEND" == "1" && "$BACKEND_MODE" == "local" ]]; then
+  have_cmd uv || die "uv not found. Install uv, then re-run (see README prerequisites)."
+  log "Ensuring Python deps are installed (uv sync)..."
+  # Run once per machine; safe/no-op if already synced.
+  run uv sync
+
+  log "Starting backend (uvicorn) on port $BACKEND_PORT..."
+  if [[ "$DRY_RUN" == "1" ]]; then
+    run uv run uvicorn server.main:app --reload --port "$BACKEND_PORT"
+  else
+    uv run uvicorn server.main:app --reload --port "$BACKEND_PORT" &
+    BACKEND_PID="$!"
+    wait_for_http_ok "http://127.0.0.1:${BACKEND_PORT}/api/health" 60
+  fi
+elif [[ "$START_BACKEND" == "1" && "$BACKEND_MODE" == "docker" ]]; then
+  if [[ "$DRY_RUN" == "0" ]]; then
+    wait_for_http_ok "http://127.0.0.1:${BACKEND_PORT}/api/health" 90
+  fi
+fi
+
+if [[ "$START_FRONTEND" == "1" ]]; then
+  have_cmd npm || die "npm not found. Install Node.js 18+, then re-run."
+  if [[ ! -d "web" ]]; then
+    die "web/ directory not found."
+  fi
+
+  if [[ "$DRY_RUN" == "0" && ! -d "web/node_modules" ]]; then
+    log "web/node_modules missing; running npm install..."
+    run npm --prefix web install
+  fi
+
+  log "Starting frontend (Vite) on port $FRONTEND_PORT..."
+  log "UI: http://localhost:${FRONTEND_PORT}/web"
+  run npm --prefix web run dev -- --port "$FRONTEND_PORT"
+else
+  log "Done. (Nothing left to run in foreground.)"
+fi

@@ -28,20 +28,35 @@ class GraphBuilder:
     def __init__(self, neo4j: Neo4jClient | None):
         self.neo4j = neo4j
 
-    async def build_graph_for_files(self, repo_id: str, files: list[tuple[str, str]]) -> GraphStats:
+    async def build_graph_for_files(
+        self,
+        repo_id: str,
+        files: list[tuple[str, str]],
+        *,
+        batch_size: int = 100,
+    ) -> GraphStats:
         if self.neo4j is None:
             raise ValueError("neo4j client is required to build and persist a graph")
-        entities: list[Entity] = []
-        rels: list[Relationship] = []
+        bs = max(1, int(batch_size))
+        entities_batch: list[Entity] = []
+        rels_batch: list[Relationship] = []
 
         for file_path, content in files:
             file_entities, file_rels = self._parse_python_file(repo_id, file_path, content)
-            entities.extend(file_entities)
-            rels.extend(file_rels)
+            entities_batch.extend(file_entities)
+            rels_batch.extend(file_rels)
 
-        # Upsert graph in batches (Neo4j handles de-dupe via MERGE keys).
-        await self.neo4j.upsert_entities(repo_id, entities)
-        await self.neo4j.upsert_relationships(repo_id, rels)
+            if len(entities_batch) >= bs or len(rels_batch) >= bs:
+                await self.neo4j.upsert_entities(repo_id, entities_batch)
+                await self.neo4j.upsert_relationships(repo_id, rels_batch)
+                entities_batch.clear()
+                rels_batch.clear()
+
+        if entities_batch:
+            await self.neo4j.upsert_entities(repo_id, entities_batch)
+        if rels_batch:
+            await self.neo4j.upsert_relationships(repo_id, rels_batch)
+
         await self.neo4j.detect_communities(repo_id)
         return await self.neo4j.get_graph_stats(repo_id)
 

@@ -272,20 +272,22 @@ class Neo4jClient:
         seed_k = max(1, int(top_k) * max(1, int(overfetch_multiplier)))
         window = max(0, int(neighbor_window))
 
-        cypher = """
+        # Neo4j does not allow parameterized variable-length patterns (e.g., *0..$window),
+        # so we safely inline the integer window (validated + clamped above).
+        cypher = f"""
         CALL db.index.vector.queryNodes($index_name, $seed_k, $embedding) YIELD node, score
         WITH node, score
         WHERE node.repo_id = $repo_id
         WITH node, score
         ORDER BY score DESC
         LIMIT $top_k
-        CALL {
+        CALL {{
           WITH node, score
-          MATCH p = (node)-[:NEXT_CHUNK*0..$window]-(n:Chunk {repo_id: $repo_id})
+          MATCH p = (node)-[:NEXT_CHUNK*0..{window}]-(n:Chunk {{repo_id: $repo_id}})
           RETURN n.chunk_id AS chunk_id,
                  min(length(p)) AS dist,
                  max(score) AS seed_score
-        }
+        }}
         WITH chunk_id,
              min(dist) AS dist,
              max(seed_score) AS seed_score
@@ -302,7 +304,6 @@ class Neo4jClient:
                 index_name=str(index_name),
                 seed_k=int(seed_k),
                 embedding=embedding,
-                window=int(window),
                 top_k=int(top_k),
             )
             records = await res.data()
@@ -589,10 +590,12 @@ class Neo4jClient:
 
         max_hops = int(max(0, max_hops or 0))
         allowed_rels = ["calls", "imports", "inherits", "contains", "references", "related_to"]
-        cypher = """
-        MATCH (seed:Entity {repo_id: $repo_id})
+        # Neo4j does not allow parameterized variable-length patterns (*0..$max_hops),
+        # so we safely inline the integer hop limit (validated + clamped above).
+        cypher = f"""
+        MATCH (seed:Entity {{repo_id: $repo_id}})
         WHERE any(tok IN $tokens WHERE toLower(seed.name) CONTAINS tok)
-        MATCH p = (seed)-[rels*0..$max_hops]-(e:Entity {repo_id: $repo_id})
+        MATCH p = (seed)-[rels*0..{max_hops}]-(e:Entity {{repo_id: $repo_id}})
         WHERE ALL(r IN rels WHERE type(r) IN $allowed_rels)
         WITH
           e,
@@ -614,7 +617,6 @@ class Neo4jClient:
                 cypher,
                 repo_id=repo_id,
                 tokens=tokens,
-                max_hops=max_hops,
                 allowed_rels=allowed_rels,
                 limit=int(top_k),
             )
@@ -736,15 +738,17 @@ class Neo4jClient:
         if not payload:
             return []
 
-        cypher = """
+        # Neo4j does not allow parameterized variable-length patterns (*0..$max_hops),
+        # so we safely inline the integer hop limit (validated + clamped above).
+        cypher = f"""
         UNWIND $seeds AS s
-        MATCH (seed:Chunk {repo_id: $repo_id, chunk_id: s.chunk_id})
+        MATCH (seed:Chunk {{repo_id: $repo_id, chunk_id: s.chunk_id}})
         WITH seed, toFloat(s.score) AS seed_score
-        MATCH (seed)<-[:IN_CHUNK]-(seed_e:Entity {repo_id: $repo_id})
-        MATCH p = (seed_e)-[rels*0..$max_hops]-(e:Entity {repo_id: $repo_id})
+        MATCH (seed)<-[:IN_CHUNK]-(seed_e:Entity {{repo_id: $repo_id}})
+        MATCH p = (seed_e)-[rels*0..{hops}]-(e:Entity {{repo_id: $repo_id}})
         WHERE ALL(r IN rels WHERE type(r) IN $allowed_rels)
         WITH e, min(length(p)) AS hops, seed_score
-        MATCH (e)-[:IN_CHUNK]->(c:Chunk {repo_id: $repo_id})
+        MATCH (e)-[:IN_CHUNK]->(c:Chunk {{repo_id: $repo_id}})
         WITH c.chunk_id AS chunk_id,
              max(seed_score / (1.0 + toFloat(hops))) AS score
         RETURN chunk_id AS chunk_id, score AS score
@@ -757,7 +761,6 @@ class Neo4jClient:
                 cypher,
                 repo_id=repo_id,
                 seeds=payload,
-                max_hops=hops,
                 allowed_rels=["calls", "imports", "inherits", "contains", "references", "related_to"],
                 limit=int(top_k),
             )
@@ -786,10 +789,12 @@ class Neo4jClient:
 
         max_hops = int(max(0, max_hops or 0))
         allowed_rels = ["calls", "imports", "inherits", "contains", "references", "related_to"]
-        cypher = """
-        MATCH (seed:Entity {repo_id: $repo_id})
+        # Neo4j does not allow parameterized variable-length patterns (*0..$max_hops),
+        # so we safely inline the integer hop limit (validated + clamped above).
+        cypher = f"""
+        MATCH (seed:Entity {{repo_id: $repo_id}})
         WHERE any(tok IN $tokens WHERE toLower(seed.name) CONTAINS tok)
-        MATCH p = (seed)-[rels*0..$max_hops]-(e:Entity {repo_id: $repo_id})
+        MATCH p = (seed)-[rels*0..{max_hops}]-(e:Entity {{repo_id: $repo_id}})
         WHERE ALL(r IN rels WHERE type(r) IN $allowed_rels)
         WITH
           e,
@@ -800,7 +805,7 @@ class Neo4jClient:
           hops,
           direct_match,
           (CASE WHEN direct_match THEN 1.0 ELSE 0.7 END) / (1.0 + toFloat(hops)) AS entity_score
-        MATCH (e)-[:IN_CHUNK]->(c:Chunk {repo_id: $repo_id})
+        MATCH (e)-[:IN_CHUNK]->(c:Chunk {{repo_id: $repo_id}})
         RETURN c.chunk_id AS chunk_id,
                max(entity_score) AS score
         ORDER BY score DESC
@@ -812,7 +817,6 @@ class Neo4jClient:
                 cypher,
                 repo_id=repo_id,
                 tokens=tokens,
-                max_hops=max_hops,
                 allowed_rels=allowed_rels,
                 limit=int(top_k),
             )

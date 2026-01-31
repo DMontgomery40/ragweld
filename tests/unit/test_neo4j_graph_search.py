@@ -91,11 +91,13 @@ async def test_graph_search_scoring_and_metadata() -> None:
     # Deterministic hop decay: closer hits should score higher.
     assert top.score > tail.score
 
-    # Ensure Cypher params include tokens + max_hops for deterministic behavior.
+    # Ensure Cypher params include tokens and the hop limit is inlined.
     session = client._driver.session_obj  # type: ignore[attr-defined]
+    assert session.last_query is not None
     assert session.last_params is not None
     assert session.last_params.get("repo_id") == "test-corpus"
-    assert session.last_params.get("max_hops") == 2
+    assert "*0..2" in session.last_query
+    assert session.last_params.get("max_hops") is None
     assert "tokens" in session.last_params
 
 
@@ -150,7 +152,8 @@ async def test_entity_chunk_search_uses_in_chunk_links() -> None:
     assert "IN_CHUNK" in session.last_query
     assert session.last_params is not None
     assert session.last_params.get("repo_id") == "test-corpus"
-    assert session.last_params.get("max_hops") == 2
+    assert "*0..2" in session.last_query
+    assert session.last_params.get("max_hops") is None
     assert session.last_params.get("limit") == 10
     assert "tokens" in session.last_params
 

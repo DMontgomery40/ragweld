@@ -6,8 +6,9 @@ This file re-exports them for backwards compatibility.
 from server.models.tribrid_config_model import (
     Community,
     Entity,
+    GraphNeighborsResponse,
     GraphStats,
     Relationship,
 )
 
-__all__ = ["Entity", "Relationship", "Community", "GraphStats"]
+__all__ = ["Entity", "Relationship", "Community", "GraphStats", "GraphNeighborsResponse"]

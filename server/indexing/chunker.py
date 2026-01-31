@@ -1,3 +1,5 @@
+import bisect
+
 from server.models.index import Chunk
 from server.models.tribrid_config_model import ChunkingConfig
 
@@ -38,12 +40,14 @@ class Chunker:
         chunks: list[Chunk] = []
         start = 0
         n = len(content)
+        # Precompute newline positions once to avoid O(n^2) line counting on large files.
+        nl_positions = [i for i, ch in enumerate(content) if ch == "\n"]
         while start < n:
             end = min(n, start + size)
             chunk_text = content[start:end]
 
             # Rough line span
-            start_line = content[:start].count("\n") + 1
+            start_line = bisect.bisect_left(nl_positions, start) + 1
             end_line = start_line + chunk_text.count("\n")
 
             token_count = len(chunk_text.split())

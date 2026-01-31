@@ -33,6 +33,14 @@ services:
       NEO4J_ACCEPT_LICENSE_AGREEMENT: ${NEO4J_ACCEPT_LICENSE_AGREEMENT:-yes}
       NEO4J_PLUGINS: '["apoc"]'
       NEO4J_dbms_security_procedures_unrestricted: apoc.*
+      # Neo4j memory (important for large corpora). Defaults are conservative.
+      # Tune via env if needed:
+      #   NEO4J_HEAP_MAX=8G
+      #   NEO4J_HEAP_INIT=4G
+      #   NEO4J_PAGECACHE=4G
+      NEO4J_server_memory_heap_initial__size: ${NEO4J_HEAP_INIT:-2G}
+      NEO4J_server_memory_heap_max__size: ${NEO4J_HEAP_MAX:-4G}
+      NEO4J_server_memory_pagecache_size: ${NEO4J_PAGECACHE:-2G}
     ports:
       - "7474:7474"  # HTTP
       - "7687:7687"  # Bolt

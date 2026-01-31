@@ -32,8 +32,14 @@ _LANG_BY_EXT: dict[str, str] = {
 
 
 class FileLoader:
-    def __init__(self, ignore_patterns: list[str] | None = None):
+    def __init__(
+        self,
+        ignore_patterns: list[str] | None = None,
+        extra_gitignore_patterns: list[str] | None = None,
+    ):
         self.ignore_patterns = ignore_patterns or []
+        # Additional gitignore-style patterns applied at repo root (e.g., Corpus.exclude_paths).
+        self.extra_gitignore_patterns = extra_gitignore_patterns or []
 
     @staticmethod
     def _looks_like_git_dir(name: str) -> bool:
@@ -89,40 +95,70 @@ class FileLoader:
 
         return f"!{out}" if neg else out
 
-    def _build_gitignore_spec(self, root: Path) -> PathSpec:
-        """Build a PathSpec from all nested .gitignore files under root.
-
-        Note: This supports nested .gitignore semantics by prefixing patterns
-        with the directory they appear in.
-        """
-        patterns: list[str] = []
-
+    @staticmethod
+    def _base_gitignore_patterns() -> list[str]:
         # Always ignore Git internals + common heavyweight dirs, even when no .gitignore exists.
-        patterns.extend(
-            [
-                ".git/",
-                ".venv/",
-                ".venv*/",
-                "node_modules/",
-                "__pycache__/",
-                "*.pyc",
-                ".DS_Store",
-            ]
-        )
+        return [
+            ".git/",
+            ".venv/",
+            ".venv*/",
+            "node_modules/",
+            "__pycache__/",
+            "*.pyc",
+            ".DS_Store",
+            # Safety: never ingest secrets-by-default.
+            ".env",
+        ]
 
-        for gi in root.rglob(".gitignore"):
-            try:
-                rel_dir = str(gi.parent.relative_to(root)).replace("\\", "/")
-            except Exception:
+    def _gitignore_patterns_for_dir(self, root: Path, dirpath: Path) -> list[str]:
+        """Return normalized, root-relative patterns from dirpath/.gitignore (if present)."""
+        gi = dirpath / ".gitignore"
+        if not gi.exists():
+            return []
+        try:
+            rel_dir = str(dirpath.relative_to(root)).replace("\\", "/")
+        except Exception:
+            return []
+        rel_dir = "" if rel_dir == "." else rel_dir
+
+        out: list[str] = []
+        for raw in self._read_gitignore_lines(gi):
+            norm = self._normalize_gitignore_pattern(raw, rel_dir=rel_dir)
+            if norm:
+                out.append(norm)
+        return out
+
+    def _normalize_extra_gitignore_patterns(self) -> list[str]:
+        """Normalize user-provided gitignore patterns (root-scoped)."""
+        out: list[str] = []
+        seen: set[str] = set()
+
+        for raw in self.extra_gitignore_patterns or []:
+            s = str(raw or "").strip()
+            if not s:
                 continue
-            rel_dir = "" if rel_dir == "." else rel_dir
+            s = s.replace("\\", "/")
+            if s.startswith("./"):
+                s = s[2:]
+            norm = self._normalize_gitignore_pattern(s, rel_dir="")
+            if norm and norm not in seen:
+                out.append(norm)
+                seen.add(norm)
 
-            for raw in self._read_gitignore_lines(gi):
-                norm = self._normalize_gitignore_pattern(raw, rel_dir=rel_dir)
-                if norm:
-                    patterns.append(norm)
+            # If the user provided a non-glob path without a trailing slash,
+            # also add a directory form to ensure directory pruning works.
+            if s.startswith("!"):
+                continue
+            if any(ch in s for ch in ("*", "?", "[")):
+                continue
+            if s.endswith("/"):
+                continue
+            norm_dir = self._normalize_gitignore_pattern(s + "/", rel_dir="")
+            if norm_dir and norm_dir not in seen:
+                out.append(norm_dir)
+                seen.add(norm_dir)
 
-        return PathSpec.from_lines("gitwildmatch", patterns)
+        return out
 
     def iter_repo_files(self, repo_path: str) -> Iterator[tuple[str, Path]]:
         """Yield (relative_path, absolute_path) for included files."""
@@ -130,7 +166,12 @@ class FileLoader:
         if not root.exists():
             return
 
-        spec = self._build_gitignore_spec(root)
+        base_patterns = self._base_gitignore_patterns()
+        extra_patterns = self._normalize_extra_gitignore_patterns()
+        patterns_by_dir: dict[str, list[str]] = {
+            "": base_patterns + self._gitignore_patterns_for_dir(root, root) + extra_patterns
+        }
+        spec_by_dir: dict[str, PathSpec] = {"": PathSpec.from_lines("gitignore", patterns_by_dir[""])}
 
         for dirpath, dirnames, filenames in os.walk(root):
             p = Path(dirpath)
@@ -139,6 +180,17 @@ class FileLoader:
             except Exception:
                 continue
             rel_dir = "" if rel_dir == "." else rel_dir
+
+            if rel_dir not in spec_by_dir:
+                parent = str(Path(rel_dir).parent).replace("\\", "/")
+                parent = "" if parent == "." else parent
+                inherited = patterns_by_dir.get(parent, base_patterns)
+                merged = list(inherited)
+                merged.extend(self._gitignore_patterns_for_dir(root, p))
+                patterns_by_dir[rel_dir] = merged
+                spec_by_dir[rel_dir] = PathSpec.from_lines("gitignore", merged)
+
+            spec = spec_by_dir[rel_dir]
 
             # Prune ignored directories early for performance.
             kept_dirs: list[str] = []

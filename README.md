@@ -1,176 +1,474 @@
-# TriBridRAG
+<p align="center">
+  <img src="mkdocs/docs/assets/images/tribrid-logo.png" alt="TriBridRAG" width="200" />
+</p>
 
-A tri-brid RAG (Retrieval-Augmented Generation) engine combining vector search, sparse search (BM25), and knowledge graph traversal for superior code understanding.
+<h1 align="center">TriBridRAG</h1>
 
-## Architecture
+<p align="center">
+  <strong>Production-grade Retrieval-Augmented Generation combining Vector, Sparse, and Graph search</strong>
+</p>
 
-TriBridRAG uses three complementary retrieval methods:
+<p align="center">
+  <a href="https://github.com/DMontgomery40/tribrid-rag/actions"><img src="https://github.com/DMontgomery40/tribrid-rag/workflows/CI/badge.svg" alt="CI Status"></a>
+  <a href="https://dmontgomery40.github.io/tribrid-rag/"><img src="https://img.shields.io/badge/docs-mkdocs-blue" alt="Documentation"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="License"></a>
+  <a href="https://python.org"><img src="https://img.shields.io/badge/python-3.11+-blue" alt="Python"></a>
+</p>
 
-1. **Vector Search** (pgvector) - Semantic similarity using embeddings
-2. **Sparse Search** (PostgreSQL FTS) - Keyword matching with BM25-style ranking
-3. **Graph Search** (Neo4j) - Relationship traversal through code entities
+---
 
-Results are fused using Reciprocal Rank Fusion (RRF) or weighted combination, then optionally reranked using a cross-encoder model.
+## The Problem
 
-## Corpus-first (not “repo-first”)
+Single-method RAG systems fail in predictable ways:
 
-TriBridRAG indexes **corpora**: any folder you want to search/GraphRAG over (a git repository, a docs folder, a monorepo subtree, etc.).
+- **Vector search** misses exact identifiers, function names, and error codes
+- **Keyword/BM25 search** fails on conceptual queries and paraphrases
+- **Neither** understands code relationships—what calls what, what imports what
 
-- A **corpus** is the unit of isolation for **storage (Postgres)**, **graph (Neo4j)**, and **configuration**.
-- The API still uses the field name `repo_id` for backward compatibility; treat it as the **corpus identifier** (stable slug).
+## The Solution
+
+TriBridRAG runs **three retrieval methods in parallel**, fuses their results, and optionally reranks:
+
+```
+                                    ┌─────────────────────┐
+                                    │   Vector Search     │
+                                    │   (pgvector)        │
+                                    │   Semantic similarity│
+                              ┌────►│   "auth flow" →     │────┐
+                              │     │   "token exchange"  │    │
+                              │     └─────────────────────┘    │
+                              │                                │
+┌──────────────┐              │     ┌─────────────────────┐    │     ┌─────────────┐     ┌──────────────┐
+│              │              │     │   Sparse Search     │    │     │             │     │              │
+│    Query     │──────────────┼────►│   (PostgreSQL FTS)  │────┼────►│   Fusion    │────►│   Reranker   │────► Results
+│              │              │     │   BM25 ranking      │    │     │   (RRF /    │     │   (optional) │
+└──────────────┘              │     │   Exact matches     │    │     │   Weighted) │     │              │
+                              │     └─────────────────────┘    │     └─────────────┘     └──────────────┘
+                              │                                │
+                              │     ┌─────────────────────┐    │
+                              │     │   Graph Search      │    │
+                              └────►│   (Neo4j)           │────┘
+                                    │   Entity traversal  │
+                                    │   "what calls this?"│
+                                    └─────────────────────┘
+```
+
+Each search method compensates for the others' weaknesses. The result: **dramatically better recall** across query types.
+
+---
+
+## Features
+
+### Tri-Brid Retrieval
+- **Vector Search**: pgvector in PostgreSQL with HNSW indexing
+- **Sparse Search**: PostgreSQL Full-Text Search with BM25-style ranking
+- **Graph Search**: Neo4j knowledge graph with entity extraction and relationship traversal
+- **Fusion**: Reciprocal Rank Fusion (RRF) or configurable weighted scoring
+- **Reranking**: Local cross-encoder, cloud APIs (Cohere/Voyage/Jina), or custom trained models
+
+### Full-Stack Application
+- **Backend**: FastAPI with async support, comprehensive API
+- **Frontend**: React + TypeScript + Zustand, fully typed from Pydantic
+- **Configuration**: 500+ tunable parameters, all via UI or API
+- **Observability**: Prometheus metrics, Grafana dashboards, structured logging
+
+### Knowledge Graph
+- Automatic entity extraction (functions, classes, modules, variables)
+- Relationship mapping (calls, imports, inherits, contains, references)
+- Community detection (Louvain, Label Propagation)
+- Graph visualization in the UI
+
+### Evaluation & Cost Tracking
+- Built-in evaluation framework with golden question sets
+- Per-query cost tracking for embeddings and LLM calls
+- Model comparison tools
+- Retrieval quality metrics (MRR, Recall@K, NDCG)
+
+---
 
 ## Quick Start
 
 ### Prerequisites
 
-- Python 3.11+
-- Node.js 18+
 - Docker & Docker Compose
-- uv (Python package manager)
+- Python 3.11+ with [uv](https://github.com/astral-sh/uv)
+- Node.js 18+
+- API keys for your preferred embedding provider (OpenAI, Voyage, etc.)
 
-### Setup
+### 1. Clone and Configure
 
-1. Clone the repository:
 ```bash
-git clone https://github.com/your-org/tribrid-rag.git
+git clone https://github.com/DMontgomery40/tribrid-rag.git
 cd tribrid-rag
-```
-
-2. Copy environment file:
-```bash
 cp .env.example .env
-# Edit .env with your API keys
 ```
 
-3. Start infrastructure:
+Edit `.env` with your API keys:
 ```bash
-docker compose up -d postgres neo4j grafana
+OPENAI_API_KEY=sk-...
+# or
+VOYAGE_API_KEY=pa-...
 ```
 
-4. Install Python dependencies:
+### 2. Start Infrastructure
+
+```bash
+docker compose up -d postgres neo4j
+```
+
+This starts:
+- **PostgreSQL** with pgvector extension (port 5432)
+- **Neo4j** graph database (ports 7474, 7687)
+
+### 3. Start Backend
+
 ```bash
 uv sync
-```
-
-5. Install frontend dependencies:
-```bash
-cd web && npm install && cd ..
-```
-
-6. Start the backend:
-```bash
 uv run uvicorn server.main:app --reload --port 8012
 ```
 
-7. Start the frontend (in another terminal):
-```bash
-cd web && npm run dev
-```
+API available at http://localhost:8012
+OpenAPI docs at http://localhost:8012/docs
 
-8. Open http://localhost:5173 in your browser
-
-### Create a corpus + index it
-
-You can do this from the UI (Corpus switcher modal) or via the API:
+### 4. Start Frontend
 
 ```bash
-# 1) Create a corpus (server must be able to see this path)
-curl -sS -X POST "http://localhost:8012/api/repos" \
-  -H "Content-Type: application/json" \
-  -d '{"name":"TriBridRAG","path":"'"$PWD"'","description":"Local checkout"}'
-
-# 2) Start indexing (uses the stored corpus path)
-curl -sS -X POST "http://localhost:8012/api/index/start" \
-  -H "Content-Type: application/json" \
-  -d '{"repo_id":"tribridrag"}'
-
-# 3) Follow status
-curl -sS "http://localhost:8012/api/index/tribridrag/status"
+cd web
+npm install
+npm run dev
 ```
 
-## Configuration
+UI available at http://localhost:5173
 
-The main configuration file is `tribrid_config.json`. You can also configure via the web UI under the RAG tab.
+### 5. Index Your First Corpus
 
-### Embedding Providers
+Via UI: Use the corpus switcher in the top navigation.
 
-- **OpenAI**: `text-embedding-3-small`, `text-embedding-3-large`
-- **Voyage**: `voyage-code-2`, `voyage-large-2`
-- **Local**: Any sentence-transformers model
+Via API:
+```bash
+# Create a corpus
+curl -X POST "http://localhost:8012/api/repos" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "my-project",
+    "path": "/absolute/path/to/your/code"
+  }'
 
-### Reranker Modes
+# Start indexing
+curl -X POST "http://localhost:8012/api/index/start" \
+  -H "Content-Type: application/json" \
+  -d '{"repo_id": "my-project"}'
 
-- **none**: No reranking (fastest)
-- **local**: Pre-trained cross-encoder (ms-marco-MiniLM)
-- **trained**: Your fine-tuned model
-- **api**: Cohere, Voyage, or Jina reranking API
+# Check progress
+curl "http://localhost:8012/api/index/my-project/status"
+```
 
-## Project Structure
+### 6. Search
+
+```bash
+curl -X POST "http://localhost:8012/api/search" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "How does the authentication system work?",
+    "repo_id": "my-project",
+    "top_k": 10
+  }'
+```
+
+---
+
+## Architecture
+
+### The Golden Rule
+
+> **Pydantic is the law.**
+
+All configuration, all types, all API contracts are defined in `server/models/tribrid_config_model.py`. TypeScript types are **generated** from Pydantic—never hand-written. This ensures the backend and frontend can never drift apart.
+
+```
+tribrid_config_model.py  ──►  generate_types.py  ──►  web/src/types/generated.ts
+     (Pydantic)                    (script)              (TypeScript)
+         │                                                    │
+         ▼                                                    ▼
+    FastAPI uses                                      React components use
+    these types                                       these types
+```
+
+### Directory Structure
 
 ```
 tribrid-rag/
-├── server/          # Python FastAPI backend
-│   ├── api/         # REST endpoints
-│   ├── db/          # Database clients (Postgres, Neo4j)
-│   ├── indexing/    # Chunking, embedding, graph building
-│   ├── models/      # Pydantic schemas
-│   ├── retrieval/   # Search and fusion logic
-│   └── services/    # Business logic
-├── web/             # React TypeScript frontend
-│   ├── src/
-│   │   ├── api/        # API client
-│   │   ├── components/ # UI components
-│   │   ├── hooks/      # React hooks
-│   │   └── stores/     # Zustand state
-├── infra/           # Docker and observability configs
-├── scripts/         # Development scripts
-├── tests/           # Python tests
-└── spec/            # YAML specifications
+├── server/                     # Python FastAPI backend
+│   ├── api/                    # REST endpoints
+│   │   ├── search.py           # /api/search - tri-brid retrieval
+│   │   ├── index.py            # /api/index - corpus indexing
+│   │   ├── repos.py            # /api/repos - corpus management
+│   │   ├── config.py           # /api/config - configuration
+│   │   ├── graph.py            # /api/graph - knowledge graph queries
+│   │   ├── eval.py             # /api/eval - evaluation framework
+│   │   └── health.py           # /api/health - service health
+│   ├── db/
+│   │   ├── postgres.py         # pgvector + FTS operations
+│   │   └── neo4j.py            # Graph database operations
+│   ├── indexing/
+│   │   ├── chunker.py          # Code-aware chunking
+│   │   ├── embedder.py         # Embedding generation
+│   │   ├── graph_builder.py    # Entity/relationship extraction
+│   │   └── loader.py           # File loading with gitignore support
+│   ├── models/
+│   │   └── tribrid_config_model.py  # THE source of truth (~500 fields)
+│   ├── retrieval/
+│   │   ├── vector.py           # Dense retrieval
+│   │   ├── sparse.py           # BM25/FTS retrieval
+│   │   ├── graph.py            # Graph traversal
+│   │   ├── fusion.py           # RRF and weighted fusion
+│   │   └── rerank.py           # Cross-encoder reranking
+│   └── services/
+│       ├── rag.py              # RAG orchestration
+│       └── config_store.py     # Configuration persistence
+│
+├── web/                        # React TypeScript frontend
+│   └── src/
+│       ├── components/         # UI components
+│       │   ├── Dashboard/      # System status, metrics
+│       │   ├── RAG/            # Search, config panels
+│       │   ├── Chat/           # Conversational interface
+│       │   └── Infrastructure/ # Service management
+│       ├── stores/             # Zustand state management
+│       ├── hooks/              # React hooks
+│       ├── types/
+│       │   └── generated.ts    # Auto-generated from Pydantic
+│       └── api/                # API client
+│
+├── data/
+│   ├── models.json             # LLM/embedding model definitions
+│   └── glossary.json           # UI tooltip definitions (~250 terms)
+│
+├── infra/                      # Docker and deployment configs
+├── scripts/                    # Development and maintenance scripts
+├── tests/                      # Test suite
+└── mkdocs/                     # Documentation site
 ```
 
-## API Endpoints
+---
+
+## Configuration
+
+TriBridRAG is highly configurable. Every parameter is defined in Pydantic with validation, defaults, and descriptions.
+
+### Key Configuration Sections
+
+| Section | What it controls |
+|---------|------------------|
+| `retrieval` | Top-K per leg, BM25 parameters, query expansion |
+| `fusion` | Method (RRF/weighted), per-leg weights, normalization |
+| `graph_storage` | Max hops, entity types, relationship types, community detection |
+| `reranking` | Mode (none/local/cloud/trained), model selection, top-N |
+| `embedding` | Provider, model, dimensions, batch size |
+| `chunking` | Strategy, max tokens, overlap |
+| `indexing` | Postgres config, concurrent workers |
+
+### Configuration Methods
+
+1. **UI**: RAG tab in the web interface
+2. **API**: `GET/PUT /api/config`
+3. **File**: `tribrid_config.json`
+4. **Per-corpus**: `?repo_id=...` parameter for corpus-specific settings
+
+### Example: Adjust Fusion Weights
+
+```bash
+curl -X PUT "http://localhost:8012/api/config" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "fusion": {
+      "vector_weight": 0.5,
+      "sparse_weight": 0.3,
+      "graph_weight": 0.2
+    }
+  }'
+```
+
+---
+
+## API Reference
+
+### Search & Retrieval
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/repos` | GET/POST | List/create corpora |
-| `/api/index` | POST | Start indexing (explicit `repo_path`) |
-| `/api/index/start` | POST | Start indexing for an existing corpus (path resolved from `/api/repos`) |
-| `/api/index/{repo_id}/status` | GET | Indexing status for a corpus |
-| `/api/index/{repo_id}/stats` | GET | Index stats for a corpus |
-| `/api/search` | POST | Tri-brid search with fusion |
-| `/api/answer` | POST | RAG-powered answer generation |
-| `/api/graph/{repo_id}/entities` | GET | List knowledge graph entities for a corpus |
-| `/api/config` | GET/PUT | Configuration management (supports `?repo_id=...` for per-corpus config) |
+| `/api/search` | POST | Tri-brid search with fusion and optional reranking |
+| `/api/answer` | POST | RAG-powered answer generation with citations |
+| `/api/chat` | POST | Conversational RAG with history |
+
+### Corpus Management
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/repos` | GET | List all corpora |
+| `/api/repos` | POST | Create a new corpus |
+| `/api/repos/{id}` | GET | Get corpus details |
+| `/api/repos/{id}` | DELETE | Delete a corpus |
+
+### Indexing
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/index/start` | POST | Start indexing a corpus |
+| `/api/index/{id}/status` | GET | Get indexing progress |
+| `/api/index/{id}/stats` | GET | Get index statistics |
+
+### Knowledge Graph
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/graph/{id}/entities` | GET | List entities in the graph |
+| `/api/graph/{id}/relationships` | GET | List relationships |
+| `/api/graph/{id}/communities` | GET | List detected communities |
+
+### Configuration
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/config` | GET | Get current configuration |
+| `/api/config` | PUT | Update configuration |
+| `/api/models` | GET | List available models |
+
+### Evaluation
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
 | `/api/eval/run` | POST | Run evaluation suite |
+| `/api/eval/results` | GET | Get evaluation results |
+
+Full OpenAPI documentation: http://localhost:8012/docs
+
+---
 
 ## Development
 
-### Run Tests
+### Commands
+
 ```bash
+# Install dependencies
+uv sync
+
+# Run tests
 uv run pytest
-```
 
-### Type Checking
-```bash
+# Type checking
 uv run mypy server
-```
 
-### Linting
-```bash
+# Linting
 uv run ruff check server
+
+# Format code
+uv run ruff format server
+
+# Regenerate TypeScript types (after changing Pydantic models)
+uv run python scripts/generate_types.py
+
+# Validate type sync
+uv run python scripts/validate_types.py
 ```
 
-### Generate TypeScript Types
+### Adding a New Feature
+
+1. **Add to Pydantic first**: Define the field in `tribrid_config_model.py`
+2. **Regenerate types**: Run `scripts/generate_types.py`
+3. **Implement backend**: Use the new field in your Python code
+4. **Implement frontend**: Use the generated TypeScript type
+5. **Add tests**: Both Python and Playwright
+
+### Testing
+
 ```bash
-uv run python scripts/generate_types.py
+# Unit tests
+uv run pytest tests/unit
+
+# Integration tests (requires running services)
+uv run pytest tests/integration
+
+# Frontend tests
+cd web && npm test
+
+# E2E tests
+cd web && npx playwright test
 ```
+
+---
 
 ## Observability
 
-- **Metrics**: Prometheus at http://localhost:9090
-- **Dashboards**: Grafana at http://localhost:3000 (admin/admin)
-- **API Docs**: FastAPI at http://localhost:8012/docs
+### Endpoints
+
+| Service | URL | Credentials |
+|---------|-----|-------------|
+| API Docs | http://localhost:8012/docs | - |
+| Grafana | http://localhost:3000 | admin/admin |
+| Prometheus | http://localhost:9090 | - |
+| Neo4j Browser | http://localhost:7474 | neo4j/password |
+
+### Health Check
+
+```bash
+curl http://localhost:8012/api/health
+```
+
+Returns status of all services (Postgres, Neo4j, embedding provider).
+
+---
+
+## Embedding Providers
+
+| Provider | Models | Notes |
+|----------|--------|-------|
+| OpenAI | `text-embedding-3-small`, `text-embedding-3-large` | Best general-purpose |
+| Voyage | `voyage-code-2`, `voyage-large-2` | Optimized for code |
+| Local | Any sentence-transformers model | No API costs |
+
+Configure in `.env` or via the UI.
+
+---
+
+## Reranking Options
+
+| Mode | Model | Notes |
+|------|-------|-------|
+| `none` | - | Fastest, use fusion scores only |
+| `local` | `ms-marco-MiniLM-L-6-v2` | Good balance of speed/quality |
+| `cloud` | Cohere, Voyage, Jina | Best quality, API costs |
+| `trained` | Your fine-tuned model | Custom domain adaptation |
+
+---
+
+## Documentation
+
+Full documentation: https://dmontgomery40.github.io/tribrid-rag/
+
+Build locally:
+```bash
+mkdocs serve
+```
+
+---
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes (Pydantic first!)
+4. Run tests and type checking
+5. Submit a pull request
+
+---
 
 ## License
 
-MIT
+MIT License. See [LICENSE](LICENSE) for details.
+
+---
+
+<p align="center">
+  <strong>Three search engines. One answer.</strong>
+</p>

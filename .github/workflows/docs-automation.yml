@@ -1,0 +1,104 @@
+name: Documentation Automation
+on:
+  push:
+    branches: ["main", "develop"]
+  pull_request:
+    branches: ["main"]
+  workflow_dispatch:
+    inputs:
+      regenerate_all:
+        description: 'Regenerate all documentation'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+  pull-requests: write
+
+jobs:
+  generate-docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install mkdocs mkdocs-material pymdown-extensions
+          pip install requests pyyaml
+          pip install mkdocs-git-revision-date-localized-plugin mkdocs-minify-plugin
+
+      - name: Generate documentation with AI
+        if: ${{ github.event.inputs.regenerate_all == 'true' }}
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          python scripts/docs_ai/docs_autopilot_enhanced.py --regenerate-all
+
+      - name: Build documentation
+        run: mkdocs build
+
+      - name: Create PR with documentation updates
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.regenerate_all == 'true'
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          title: "docs: AI-generated documentation updates"
+          body: |
+            This PR contains AI-generated documentation updates based on the codebase.
+
+            **Please review carefully before merging.**
+
+            - [ ] Documentation is accurate
+            - [ ] No internal/sensitive information exposed
+            - [ ] Material for MkDocs features utilized
+            - [ ] Navigation structure is logical
+            - [ ] No banned terms (Qdrant, Redis, LangChain, cards)
+          commit-message: "docs: update documentation with AI assistance"
+          branch: docs/ai-updates-${{ github.run_id }}
+          base: main
+
+  deploy-docs:
+    needs: generate-docs
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install mkdocs mkdocs-material pymdown-extensions
+          pip install mkdocs-git-revision-date-localized-plugin mkdocs-minify-plugin
+
+      - name: Build documentation
+        run: mkdocs build
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: 'site'
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

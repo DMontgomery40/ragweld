@@ -56,6 +56,50 @@ _SEM_STOPWORDS: set[str] = {
 }
 
 
+def _emit_event(
+    queue: asyncio.Queue[dict[str, Any]] | None,
+    event: dict[str, Any],
+    *,
+    drop_oldest: bool = False,
+    guarantee: bool = False,
+) -> None:
+    """Best-effort event emission without blocking indexing.
+
+    Indexing can run for many thousands of files. If no SSE client is consuming
+    events, a bounded asyncio.Queue will fill and `await queue.put(...)` will
+    deadlock the indexing task. We always emit events non-blockingly and drop
+    old events when requested.
+    """
+    if queue is None:
+        return
+
+    if guarantee:
+        # Ensure this event is delivered by dropping older events until there is room.
+        while True:
+            try:
+                queue.put_nowait(event)
+                return
+            except asyncio.QueueFull:
+                try:
+                    queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    return
+
+    try:
+        queue.put_nowait(event)
+    except asyncio.QueueFull:
+        if not drop_oldest:
+            return
+        try:
+            queue.get_nowait()
+        except asyncio.QueueEmpty:
+            return
+        try:
+            queue.put_nowait(event)
+        except asyncio.QueueFull:
+            return
+
+
 def _extract_semantic_concepts(text: str, *, min_len: int, max_terms: int) -> list[str]:
     """Deterministic concept extraction (fallback for tests/offline)."""
     if max_terms <= 0:
@@ -142,13 +186,33 @@ async def _run_index(
             ext = "." + ext
         ignore_patterns.append(f"*{ext}")
 
-    loader = FileLoader(ignore_patterns=ignore_patterns)
     chunker = Chunker(cfg.chunking)
+    # Enforce a strict max file size before reading/chunking.
+    # LAW sources:
+    # - cfg.chunking.max_indexable_file_size (bytes)
+    # - cfg.indexing.index_max_file_size_mb (MB)
+    max_indexable_bytes = min(
+        int(cfg.chunking.max_indexable_file_size),
+        int(cfg.indexing.index_max_file_size_mb) * 1024 * 1024,
+    )
     skip_dense = bool(int(cfg.indexing.skip_dense or 0) == 1)
     embedder = None if skip_dense else Embedder(cfg.embedding)
     postgres = PostgresClient(cfg.indexing.postgres_url)
     await postgres.connect()
     await postgres.upsert_corpus(repo_id, name=repo_id, root_path=repo_path)
+
+    # Corpus-level exclude paths (stored in Postgres corpora.meta.exclude_paths)
+    extra_gitignore_patterns: list[str] = []
+    try:
+        corpus = await postgres.get_corpus(repo_id)
+        meta = (corpus.get("meta") or {}) if corpus else {}
+        raw = meta.get("exclude_paths") if isinstance(meta, dict) else None
+        if isinstance(raw, list):
+            extra_gitignore_patterns = [str(x).strip() for x in raw if str(x).strip()]
+    except Exception:
+        extra_gitignore_patterns = []
+
+    loader = FileLoader(ignore_patterns=ignore_patterns, extra_gitignore_patterns=extra_gitignore_patterns)
 
     neo4j: Neo4jClient | None = None
     graph_builder: GraphBuilder | None = None
@@ -193,16 +257,24 @@ async def _run_index(
     prev_status = _STATUS.get(repo_id)
     started_at = prev_status.started_at if prev_status and prev_status.started_at else datetime.now(UTC)
 
-    # Collect file list once so we can report progress deterministically.
-    files = list(loader.load_repo(repo_path))
-    total_files = len(files)
+    # Collect file paths once so we can report progress deterministically,
+    # without loading every file's contents into memory.
+    file_entries = list(loader.iter_repo_files(repo_path))
+    total_files = len(file_entries)
+
+    # GraphBuilder consumes (path, content) and currently only supports Python AST.
+    graph_files: list[tuple[str, str]] = []
 
     if force_reindex:
         await postgres.delete_chunks(repo_id)
         if neo4j is not None:
             await neo4j.delete_graph(repo_id)
         if event_queue is not None:
-            await event_queue.put({"type": "log", "message": "🧹 Cleared existing index (force_reindex=1)"})
+            _emit_event(
+                event_queue,
+                {"type": "log", "message": "🧹 Cleared existing index (force_reindex=1)"},
+                drop_oldest=True,
+            )
 
     # If skip_dense is enabled, ensure no stale embeddings remain from previous runs.
     # This makes graph-only / sparse-only workflows deterministic.
@@ -210,14 +282,16 @@ async def _run_index(
         deleted = await postgres.delete_embeddings(repo_id)
         await postgres.update_corpus_embedding_meta(repo_id, model="", dimensions=0)
         if event_queue is not None:
-            await event_queue.put(
-                {"type": "log", "message": f"⚡ skip_dense=1 → skipping embeddings (cleared {deleted} existing vectors)"}
+            _emit_event(
+                event_queue,
+                {"type": "log", "message": f"⚡ skip_dense=1 → skipping embeddings (cleared {deleted} existing vectors)"},
+                drop_oldest=True,
             )
 
     semantic_budget = int(cfg.graph_indexing.semantic_kg_max_chunks) if cfg.graph_indexing.semantic_kg_enabled else 0
     semantic_processed = 0
 
-    for idx, (rel_path, content) in enumerate(files, start=1):
+    for idx, (rel_path, abs_path) in enumerate(file_entries, start=1):
         ext = "." + rel_path.split(".")[-1] if "." in rel_path else ""
         file_breakdown[ext] += 1
 
@@ -229,7 +303,40 @@ async def _run_index(
             started_at=started_at,
         )
         if event_queue is not None:
-            await event_queue.put({"type": "progress", "percent": int((_STATUS[repo_id].progress) * 100), "message": rel_path})
+            _emit_event(
+                event_queue,
+                {"type": "progress", "percent": int((_STATUS[repo_id].progress) * 100), "message": rel_path},
+                drop_oldest=True,
+            )
+
+        try:
+            size_bytes = int(abs_path.stat().st_size)
+        except Exception:
+            size_bytes = None
+        if size_bytes is not None and size_bytes > max_indexable_bytes:
+            if event_queue is not None:
+                _emit_event(
+                    event_queue,
+                    {
+                        "type": "log",
+                        "message": (
+                            f"⏭️ Skipping large file ({size_bytes} bytes > {max_indexable_bytes} bytes): {rel_path}"
+                        ),
+                    },
+                    drop_oldest=True,
+                )
+            continue
+
+        try:
+            content = abs_path.read_text(encoding="utf-8", errors="ignore")
+        except Exception:
+            continue
+        # Postgres TEXT cannot store NUL bytes; treat as binary and skip.
+        if "\x00" in content:
+            continue
+
+        if graph_builder is not None and rel_path.lower().endswith(".py"):
+            graph_files.append((rel_path, content))
 
         chunks = chunker.chunk_file(rel_path, content)
         chunks_for_semantic = chunks
@@ -419,8 +526,16 @@ async def _run_index(
     if graph_builder is not None:
         try:
             if event_queue is not None:
-                await event_queue.put({"type": "log", "message": "🧠 Building Neo4j graph (entities + relationships)..."} )
-            await graph_builder.build_graph_for_files(repo_id, files)
+                _emit_event(
+                    event_queue,
+                    {"type": "log", "message": "🧠 Building Neo4j graph (entities + relationships)..."},
+                    drop_oldest=True,
+                )
+            await graph_builder.build_graph_for_files(
+                repo_id,
+                graph_files,
+                batch_size=int(cfg.indexing.indexing_batch_size),
+            )
             # Link entities to chunk_ids so the graph leg can hydrate deterministically.
             if neo4j is not None and cfg.graph_indexing.build_lexical_graph:
                 await neo4j.rebuild_entity_chunk_links(repo_id)
@@ -450,7 +565,7 @@ async def _background_index_job(request: IndexRequest, queue: asyncio.Queue[dict
     repo_id = request.repo_id
     started_at = datetime.now(UTC)
     try:
-        await queue.put({"type": "log", "message": f"🚀 Indexing started: {repo_id}"})
+        _emit_event(queue, {"type": "log", "message": f"🚀 Indexing started: {repo_id}"}, drop_oldest=True)
         await _run_index(
             repo_id,
             request.repo_path,
@@ -465,7 +580,7 @@ async def _background_index_job(request: IndexRequest, queue: asyncio.Queue[dict
             started_at=started_at,
             completed_at=datetime.now(UTC),
         )
-        await queue.put({"type": "complete", "message": "✓ Indexing complete"})
+        _emit_event(queue, {"type": "complete", "message": "✓ Indexing complete"}, guarantee=True)
     except Exception as e:
         prev = _STATUS.get(repo_id)
         _STATUS[repo_id] = IndexStatus(
@@ -477,7 +592,7 @@ async def _background_index_job(request: IndexRequest, queue: asyncio.Queue[dict
             started_at=started_at,
             completed_at=datetime.now(UTC),
         )
-        await queue.put({"type": "error", "message": str(e)})
+        _emit_event(queue, {"type": "error", "message": str(e)}, guarantee=True)
     finally:
         _TASKS.pop(repo_id, None)
 

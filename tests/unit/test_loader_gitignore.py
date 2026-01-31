@@ -49,3 +49,24 @@ def test_file_loader_respects_gitignore_and_defaults(tmp_path: Path) -> None:
     assert "sub/nested/test.log" not in got
     assert not any(p.startswith("sub/ignored_dir/") for p in got)
 
+
+def test_file_loader_applies_extra_gitignore_patterns(tmp_path: Path) -> None:
+    _write(tmp_path / "keep.txt", "ok")
+    _write(tmp_path / "public" / "admin-demo" / "assets" / "bundle.js", "x")
+    _write(tmp_path / "public" / "admin-demo" / "assets" / "bundle.min.js", "x")
+    _write(tmp_path / "public" / "other" / "keep.js", "y")
+    _write(tmp_path / "public" / "other" / "keep.min.js", "y")
+
+    loader = FileLoader(
+        ignore_patterns=[],
+        extra_gitignore_patterns=[
+            "public/admin-demo/",  # directory exclusion
+            "*.min.js",  # glob exclusion
+        ],
+    )
+    got = [rel for rel, _p in loader.iter_repo_files(str(tmp_path))]
+
+    assert "keep.txt" in got
+    assert "public/other/keep.js" in got
+    assert not any(p.startswith("public/admin-demo/") for p in got)
+    assert "public/other/keep.min.js" not in got

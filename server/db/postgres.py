@@ -14,6 +14,24 @@ from server.models.retrieval import ChunkMatch
 from server.models.tribrid_config_model import ChunkSummariesLastBuild, ChunkSummary, VocabPreviewTerm
 
 
+def _coerce_jsonb_dict(value: Any) -> dict[str, Any]:
+    """Coerce asyncpg JSON/JSONB values to a dict (robust across codecs)."""
+    if value is None:
+        return {}
+    if isinstance(value, dict):
+        return dict(value)
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except Exception:
+            return {}
+        return dict(parsed) if isinstance(parsed, dict) else {}
+    try:
+        return dict(value)
+    except Exception:
+        return {}
+
+
 class PostgresClient:
     """Postgres index store (pgvector + FTS).
 
@@ -41,8 +59,9 @@ class PostgresClient:
         self._pool = await asyncpg.create_pool(dsn=dsn, min_size=1, max_size=10)
 
         async with self._pool.acquire() as conn:
-            await register_vector(conn)
+            # Ensure extension exists before registering pgvector codecs.
             await self._ensure_schema(conn)
+            await register_vector(conn)
 
     async def disconnect(self) -> None:
         if self._pool is None:
@@ -562,7 +581,7 @@ class PostgresClient:
                 "name": str(r["name"]),
                 "path": str(r["root_path"]),
                 "description": str(r["description"]) if r["description"] is not None else None,
-                "meta": dict(r["meta"] or {}),
+                "meta": _coerce_jsonb_dict(r["meta"]),
                 "created_at": r["created_at"],
                 "last_indexed": r["last_indexed"],
             }
@@ -588,7 +607,7 @@ class PostgresClient:
             "name": str(row["name"]),
             "path": str(row["root_path"]),
             "description": str(row["description"]) if row["description"] is not None else None,
-            "meta": dict(row["meta"] or {}),
+            "meta": _coerce_jsonb_dict(row["meta"]),
             "created_at": row["created_at"],
             "last_indexed": row["last_indexed"],
         }
@@ -946,7 +965,11 @@ class PostgresClient:
                 RETURNING *;
             """
             row = await conn.fetchrow(query, *args)
-            return dict(row) if row else None
+            if not row:
+                return None
+            out = dict(row)
+            out["meta"] = _coerce_jsonb_dict(out.get("meta"))
+            return out
 
     async def delete_chunks(self, repo_id: str) -> int:
         """Hard-delete all chunks for a corpus (used for force_reindex)."""
@@ -973,7 +996,11 @@ class PostgresClient:
             VALUES ($1, $2, $3, $4, $5::jsonb)
             ON CONFLICT (repo_id) DO UPDATE SET
               name = EXCLUDED.name,
-              root_path = EXCLUDED.root_path,
+              root_path = CASE
+                WHEN EXCLUDED.root_path IS NULL OR EXCLUDED.root_path = '' OR EXCLUDED.root_path = '.'
+                  THEN corpora.root_path
+                ELSE EXCLUDED.root_path
+              END,
               description = EXCLUDED.description,
               meta = corpora.meta || EXCLUDED.meta;
             """,

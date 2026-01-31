@@ -446,6 +446,13 @@ class GraphStats(BaseModel):
     relationship_breakdown: dict[str, int] = Field(default_factory=dict, description="Count by relation type")
 
 
+class GraphNeighborsResponse(BaseModel):
+    """Neighbor subgraph centered on a single entity."""
+
+    entities: list[Entity] = Field(description="Entities in the neighborhood (includes the center entity)")
+    relationships: list[Relationship] = Field(description="Relationships between returned entities")
+
+
 class EvalDatasetItem(BaseModel):
     """Single evaluation dataset entry (formerly DatasetEntry)."""
     entry_id: str = Field(

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import math
 import re
@@ -37,10 +38,12 @@ class Embedder:
         return vec
 
     async def embed(self, text: str) -> list[float]:
-        return self._embed_sync(text)
+        # Deterministic CPU work: offload to a thread so long indexing runs
+        # don't block the FastAPI event loop (status endpoints, UI polling, etc.).
+        return await asyncio.to_thread(self._embed_sync, text)
 
     async def embed_batch(self, texts: list[str]) -> list[list[float]]:
-        return [self._embed_sync(t) for t in texts]
+        return await asyncio.to_thread(lambda: [self._embed_sync(t) for t in texts])
 
     async def embed_chunks(self, chunks: list[Chunk]) -> list[Chunk]:
         if not chunks:
