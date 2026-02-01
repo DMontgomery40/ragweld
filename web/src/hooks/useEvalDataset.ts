@@ -19,9 +19,10 @@
 import { useState, useCallback, useEffect } from 'react';
 import type { EvalDatasetItem } from '@/types/generated';
 import { useRepoStore } from '@/stores';
+import { apiUrl } from '@/api/client';
 
-// API endpoint for evaluation datasets
-const DATASET_API_BASE = '/api/eval/dataset';
+// API endpoint for evaluation datasets (file-backed per corpus)
+const DATASET_API_BASE = '/api/dataset';
 
 interface DatasetState {
   entries: EvalDatasetItem[];
@@ -38,7 +39,7 @@ interface NewDatasetEntry {
   tags?: string[];
 }
 
-export function useEvalDataset(datasetId?: string) {
+export function useEvalDataset() {
   const { activeRepo } = useRepoStore();
   const [state, setState] = useState<DatasetState>({
     entries: [],
@@ -59,9 +60,7 @@ export function useEvalDataset(datasetId?: string) {
     setState((prev) => ({ ...prev, loading: true, error: null }));
 
     try {
-      const url = datasetId
-        ? `${DATASET_API_BASE}/${datasetId}/entries?corpus_id=${encodeURIComponent(activeRepo)}`
-        : `${DATASET_API_BASE}/entries?corpus_id=${encodeURIComponent(activeRepo)}`;
+      const url = apiUrl(`${DATASET_API_BASE}?corpus_id=${encodeURIComponent(activeRepo)}`);
 
       const response = await fetch(url);
 
@@ -85,7 +84,7 @@ export function useEvalDataset(datasetId?: string) {
         error: message,
       }));
     }
-  }, [activeRepo, datasetId]);
+  }, [activeRepo]);
 
   // Load entries when repo changes
   useEffect(() => {
@@ -105,17 +104,12 @@ export function useEvalDataset(datasetId?: string) {
       setState((prev) => ({ ...prev, saving: true, error: null }));
 
       try {
-        const url = datasetId
-          ? `${DATASET_API_BASE}/${datasetId}/entries`
-          : `${DATASET_API_BASE}/entries`;
+        const url = apiUrl(`${DATASET_API_BASE}?corpus_id=${encodeURIComponent(activeRepo)}`);
 
         const response = await fetch(url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            ...entry,
-            corpus_id: activeRepo,
-          }),
+          body: JSON.stringify(entry),
         });
 
         if (!response.ok) {
@@ -142,7 +136,7 @@ export function useEvalDataset(datasetId?: string) {
         return null;
       }
     },
-    [activeRepo, datasetId]
+    [activeRepo]
   );
 
   /**
@@ -153,17 +147,32 @@ export function useEvalDataset(datasetId?: string) {
       entryId: string,
       updates: Partial<NewDatasetEntry>
     ): Promise<EvalDatasetItem | null> => {
+      if (!activeRepo) {
+        setState((prev) => ({ ...prev, error: 'No repository selected' }));
+        return null;
+      }
+
       setState((prev) => ({ ...prev, saving: true, error: null }));
 
       try {
-        const url = datasetId
-          ? `${DATASET_API_BASE}/${datasetId}/entries/${entryId}`
-          : `${DATASET_API_BASE}/entries/${entryId}`;
+        const existing = state.entries.find((e) => e.entry_id === entryId);
+        if (!existing) {
+          throw new Error(`Entry not found: ${entryId}`);
+        }
+
+        const payload: EvalDatasetItem = {
+          question: updates.question ?? existing.question,
+          expected_paths: updates.expected_paths ?? existing.expected_paths,
+          expected_answer: updates.expected_answer ?? existing.expected_answer ?? null,
+          tags: updates.tags ?? existing.tags ?? [],
+        };
+
+        const url = apiUrl(`${DATASET_API_BASE}/${encodeURIComponent(entryId)}?corpus_id=${encodeURIComponent(activeRepo)}`);
 
         const response = await fetch(url, {
-          method: 'PATCH',
+          method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(updates),
+          body: JSON.stringify(payload),
         });
 
         if (!response.ok) {
@@ -192,7 +201,7 @@ export function useEvalDataset(datasetId?: string) {
         return null;
       }
     },
-    [datasetId]
+    [activeRepo, state.entries]
   );
 
   /**
@@ -200,12 +209,15 @@ export function useEvalDataset(datasetId?: string) {
    */
   const deleteEntry = useCallback(
     async (entryId: string): Promise<boolean> => {
+      if (!activeRepo) {
+        setState((prev) => ({ ...prev, error: 'No repository selected' }));
+        return false;
+      }
+
       setState((prev) => ({ ...prev, saving: true, error: null }));
 
       try {
-        const url = datasetId
-          ? `${DATASET_API_BASE}/${datasetId}/entries/${entryId}`
-          : `${DATASET_API_BASE}/entries/${entryId}`;
+        const url = apiUrl(`${DATASET_API_BASE}/${encodeURIComponent(entryId)}?corpus_id=${encodeURIComponent(activeRepo)}`);
 
         const response = await fetch(url, {
           method: 'DELETE',
@@ -233,7 +245,7 @@ export function useEvalDataset(datasetId?: string) {
         return false;
       }
     },
-    [datasetId]
+    [activeRepo, state.entries]
   );
 
   /**

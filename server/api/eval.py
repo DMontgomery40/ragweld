@@ -384,103 +384,6 @@ async def list_eval_runs(
     return EvalRunsResponse(ok=True, runs=runs)
 
 
-@router.get("/eval/run/{run_id}", response_model=EvalRun)
-async def get_eval_run(run_id: str) -> EvalRun:
-    return _load_run(run_id)
-
-
-# Alias for UI code that expects /eval/runs/{id}
-@router.get("/eval/runs/{run_id}", response_model=EvalRun)
-async def get_eval_run_alias(run_id: str) -> EvalRun:
-    return _load_run(run_id)
-
-
-@router.delete("/eval/run/{run_id}")
-async def delete_eval_run(run_id: str) -> dict[str, Any]:
-    path = _run_path(run_id)
-    if not path.exists():
-        raise HTTPException(status_code=404, detail=f"run_id={run_id} not found")
-    path.unlink()
-    return {"ok": True, "deleted": 1}
-
-
-@router.delete("/eval/runs/{run_id}")
-async def delete_eval_run_alias(run_id: str) -> dict[str, Any]:
-    return await delete_eval_run(run_id)
-
-
-@router.get("/eval/status")
-async def eval_status() -> dict[str, Any]:
-    """Return in-process eval status (best-effort)."""
-    return dict(_EVAL_STATUS)
-
-
-@router.get("/eval/results", response_model=EvalRun)
-async def eval_results(scope: CorpusScope = Depends()) -> EvalRun:
-    """Return the most recent eval run results."""
-    repo_id = scope.resolved_repo_id
-    rid = _latest_run_id(repo_id=repo_id)
-    if rid is None:
-        raise HTTPException(status_code=404, detail="No eval runs found")
-    return _load_run(rid)
-
-
-@router.get("/eval/results/{run_id}", response_model=EvalRun)
-async def eval_results_by_run(run_id: str) -> EvalRun:
-    """Return eval results for a specific run."""
-    return _load_run(run_id)
-
-
-@router.post("/eval/analyze_comparison", response_model=EvalAnalyzeComparisonResponse)
-async def analyze_eval_comparison(payload: dict[str, Any]) -> EvalAnalyzeComparisonResponse:
-    """Deterministic comparison analysis (no external LLM dependency)."""
-    try:
-        current = payload.get("current_run") or {}
-        baseline = payload.get("compare_run") or payload.get("baseline_run") or {}
-        config_diffs = payload.get("config_diffs") or []
-        topk_regressions = payload.get("topk_regressions") or payload.get("regressions") or []
-        topk_improvements = payload.get("topk_improvements") or payload.get("improvements") or []
-
-        cur_top1 = float(current.get("top1_accuracy", 0.0) or 0.0)
-        cur_topk = float(current.get("topk_accuracy", 0.0) or 0.0)
-        cur_total = int(current.get("total", 0) or 0)
-        cur_id = str(current.get("run_id", "current"))
-
-        base_top1 = float(baseline.get("top1_accuracy", 0.0) or 0.0)
-        base_topk = float(baseline.get("topk_accuracy", 0.0) or 0.0)
-        base_total = int(baseline.get("total", 0) or 0)
-        base_id = str(baseline.get("run_id", "baseline"))
-
-        delta_top1 = (cur_top1 - base_top1) * 100.0
-        delta_topk = (cur_topk - base_topk) * 100.0
-
-        analysis = "\n".join(
-            [
-                "## Eval comparison",
-                f"- **Baseline**: `{base_id}` (n={base_total})",
-                f"- **Current**: `{cur_id}` (n={cur_total})",
-                "",
-                "## Metric deltas",
-                f"- **Top-1**: {delta_top1:+.1f}%",
-                f"- **Top-K**: {delta_topk:+.1f}%",
-                "",
-                "## Config changes (count)",
-                f"- {len(config_diffs)} changes detected",
-                "",
-                "## Question-level changes (Top-K)",
-                f"- Regressions: {len(topk_regressions)}",
-                f"- Improvements: {len(topk_improvements)}",
-                "",
-                "## Notes",
-                "- This analysis is deterministic (no LLM). Treat it as a quick triage summary.",
-            ]
-        )
-
-        return EvalAnalyzeComparisonResponse(ok=True, analysis=analysis, model_used="deterministic", error=None)
-    except Exception as e:
-        return EvalAnalyzeComparisonResponse(ok=False, analysis=None, model_used=None, error=str(e))
-
-
 @router.get("/eval/run/stream")
 async def eval_run_stream(
     request: Request,
@@ -489,7 +392,11 @@ async def eval_run_stream(
     final_k: int | None = Query(default=None, description="Override eval_final_k"),
     sample_limit: int | None = Query(default=None, description="Optional sample size limit"),
 ) -> StreamingResponse:
-    """Run evaluation and stream logs/progress via SSE."""
+    """Run evaluation and stream logs/progress via SSE.
+
+    IMPORTANT: This MUST be declared before `/eval/run/{run_id}` or it will be
+    shadowed by Starlette route matching (treating "stream" as a run_id).
+    """
 
     repo_id = scope.resolved_repo_id
     if not repo_id:
@@ -526,7 +433,7 @@ async def eval_run_stream(
             total = len(entries)
             _EVAL_STATUS["total"] = total
 
-            yield f"data: {json.dumps({'type': 'log', 'message': f'Starting eval: repo_id={repo_id}, use_multi={run_use_multi}, final_k={run_final_k}, sample_limit={sample_limit or "all"}'})}\n\n"
+            yield f"data: {json.dumps({'type': 'log', 'message': f'Starting eval: repo_id={repo_id}, use_multi={run_use_multi}, final_k={run_final_k}, sample_limit={sample_limit or \"all\"}'})}\n\n"
             yield f"data: {json.dumps({'type': 'log', 'message': f'Loaded {total} eval_dataset entries'})}\n\n"
 
             fusion = TriBridFusion(vector=None, sparse=None, graph=None)
@@ -684,3 +591,100 @@ async def eval_run_stream(
             "X-Accel-Buffering": "no",
         },
     )
+
+
+@router.get("/eval/run/{run_id}", response_model=EvalRun)
+async def get_eval_run(run_id: str) -> EvalRun:
+    return _load_run(run_id)
+
+
+# Alias for UI code that expects /eval/runs/{id}
+@router.get("/eval/runs/{run_id}", response_model=EvalRun)
+async def get_eval_run_alias(run_id: str) -> EvalRun:
+    return _load_run(run_id)
+
+
+@router.delete("/eval/run/{run_id}")
+async def delete_eval_run(run_id: str) -> dict[str, Any]:
+    path = _run_path(run_id)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail=f"run_id={run_id} not found")
+    path.unlink()
+    return {"ok": True, "deleted": 1}
+
+
+@router.delete("/eval/runs/{run_id}")
+async def delete_eval_run_alias(run_id: str) -> dict[str, Any]:
+    return await delete_eval_run(run_id)
+
+
+@router.get("/eval/status")
+async def eval_status() -> dict[str, Any]:
+    """Return in-process eval status (best-effort)."""
+    return dict(_EVAL_STATUS)
+
+
+@router.get("/eval/results", response_model=EvalRun)
+async def eval_results(scope: CorpusScope = Depends()) -> EvalRun:
+    """Return the most recent eval run results."""
+    repo_id = scope.resolved_repo_id
+    rid = _latest_run_id(repo_id=repo_id)
+    if rid is None:
+        raise HTTPException(status_code=404, detail="No eval runs found")
+    return _load_run(rid)
+
+
+@router.get("/eval/results/{run_id}", response_model=EvalRun)
+async def eval_results_by_run(run_id: str) -> EvalRun:
+    """Return eval results for a specific run."""
+    return _load_run(run_id)
+
+
+@router.post("/eval/analyze_comparison", response_model=EvalAnalyzeComparisonResponse)
+async def analyze_eval_comparison(payload: dict[str, Any]) -> EvalAnalyzeComparisonResponse:
+    """Deterministic comparison analysis (no external LLM dependency)."""
+    try:
+        current = payload.get("current_run") or {}
+        baseline = payload.get("compare_run") or payload.get("baseline_run") or {}
+        config_diffs = payload.get("config_diffs") or []
+        topk_regressions = payload.get("topk_regressions") or payload.get("regressions") or []
+        topk_improvements = payload.get("topk_improvements") or payload.get("improvements") or []
+
+        cur_top1 = float(current.get("top1_accuracy", 0.0) or 0.0)
+        cur_topk = float(current.get("topk_accuracy", 0.0) or 0.0)
+        cur_total = int(current.get("total", 0) or 0)
+        cur_id = str(current.get("run_id", "current"))
+
+        base_top1 = float(baseline.get("top1_accuracy", 0.0) or 0.0)
+        base_topk = float(baseline.get("topk_accuracy", 0.0) or 0.0)
+        base_total = int(baseline.get("total", 0) or 0)
+        base_id = str(baseline.get("run_id", "baseline"))
+
+        delta_top1 = (cur_top1 - base_top1) * 100.0
+        delta_topk = (cur_topk - base_topk) * 100.0
+
+        analysis = "\n".join(
+            [
+                "## Eval comparison",
+                f"- **Baseline**: `{base_id}` (n={base_total})",
+                f"- **Current**: `{cur_id}` (n={cur_total})",
+                "",
+                "## Metric deltas",
+                f"- **Top-1**: {delta_top1:+.1f}%",
+                f"- **Top-K**: {delta_topk:+.1f}%",
+                "",
+                "## Config changes (count)",
+                f"- {len(config_diffs)} changes detected",
+                "",
+                "## Question-level changes (Top-K)",
+                f"- Regressions: {len(topk_regressions)}",
+                f"- Improvements: {len(topk_improvements)}",
+                "",
+                "## Notes",
+                "- This analysis is deterministic (no LLM). Treat it as a quick triage summary.",
+            ]
+        )
+
+        return EvalAnalyzeComparisonResponse(ok=True, analysis=analysis, model_used="deterministic", error=None)
+    except Exception as e:
+        return EvalAnalyzeComparisonResponse(ok=False, analysis=None, model_used=None, error=str(e))

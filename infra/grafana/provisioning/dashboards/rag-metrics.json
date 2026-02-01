@@ -24,11 +24,11 @@
             "mode": "absolute",
             "steps": [
               {"color": "green", "value": null},
-              {"color": "yellow", "value": 500},
-              {"color": "red", "value": 1000}
+              {"color": "yellow", "value": 0.5},
+              {"color": "red", "value": 1.0}
             ]
           },
-          "unit": "ms"
+          "unit": "s"
         }
       },
       "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
@@ -47,7 +47,7 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, rate(tribrid_search_latency_bucket[5m]))",
+          "expr": "histogram_quantile(0.95, rate(tribrid_search_latency_seconds_bucket[5m]))",
           "legendFormat": "p95 Search Latency"
         }
       ],
@@ -89,7 +89,7 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(tribrid_search_total[5m]))",
+          "expr": "sum(rate(tribrid_search_requests_total[5m]))",
           "legendFormat": "Searches/sec"
         }
       ],
@@ -143,7 +143,7 @@
               {"color": "green", "value": null}
             ]
           },
-          "unit": "ms"
+          "unit": "s"
         }
       },
       "gridPos": {"h": 8, "w": 24, "x": 0, "y": 8},
@@ -162,19 +162,19 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.50, rate(tribrid_vector_search_latency_bucket[5m]))",
+          "expr": "histogram_quantile(0.50, rate(tribrid_vector_leg_latency_seconds_bucket[5m]))",
           "legendFormat": "Vector p50"
         },
         {
-          "expr": "histogram_quantile(0.50, rate(tribrid_sparse_search_latency_bucket[5m]))",
+          "expr": "histogram_quantile(0.50, rate(tribrid_sparse_leg_latency_seconds_bucket[5m]))",
           "legendFormat": "Sparse p50"
         },
         {
-          "expr": "histogram_quantile(0.50, rate(tribrid_graph_search_latency_bucket[5m]))",
+          "expr": "histogram_quantile(0.50, rate(tribrid_graph_leg_latency_seconds_bucket[5m]))",
           "legendFormat": "Graph p50"
         }
       ],
-      "title": "Search Latency by Type",
+      "title": "Search Latency by Leg (p50)",
       "type": "timeseries"
     },
     {
@@ -184,40 +184,66 @@
       },
       "fieldConfig": {
         "defaults": {
-          "color": {
-            "mode": "palette-classic"
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "spanNulls": false
           },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {"color": "green", "value": null}
-            ]
-          }
+          "unit": "s"
         }
       },
-      "gridPos": {"h": 8, "w": 8, "x": 0, "y": 16},
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 16 },
       "id": 4,
       "options": {
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": ["lastNotNull"],
-          "fields": "",
-          "values": false
+        "legend": {
+          "calcs": ["mean", "max"],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
         },
-        "textMode": "auto"
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
       },
       "targets": [
         {
-          "expr": "tribrid_indexed_chunks_total",
-          "legendFormat": "Total Chunks"
+          "expr": "histogram_quantile(0.50, sum(rate(tribrid_search_stage_latency_seconds_bucket{stage=\"embed_query\"}[5m])) by (le))",
+          "legendFormat": "embed_query p50"
+        },
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(tribrid_search_stage_latency_seconds_bucket{stage=\"postgres_vector_search\"}[5m])) by (le))",
+          "legendFormat": "postgres_vector_search p50"
+        },
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(tribrid_search_stage_latency_seconds_bucket{stage=\"postgres_sparse_search\"}[5m])) by (le))",
+          "legendFormat": "postgres_sparse_search p50"
+        },
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(tribrid_search_stage_latency_seconds_bucket{stage=\"neo4j_chunk_vector_search\"}[5m])) by (le))",
+          "legendFormat": "neo4j_chunk_vector_search p50"
+        },
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(tribrid_search_stage_latency_seconds_bucket{stage=\"neo4j_entity_chunk_search\"}[5m])) by (le))",
+          "legendFormat": "neo4j_entity_chunk_search p50"
+        },
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(tribrid_search_stage_latency_seconds_bucket{stage=\"postgres_get_chunks\"}[5m])) by (le))",
+          "legendFormat": "postgres_get_chunks p50"
+        },
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(tribrid_search_stage_latency_seconds_bucket{stage=\"fusion_rrf\"}[5m])) by (le))",
+          "legendFormat": "fusion_rrf p50"
+        },
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(tribrid_search_stage_latency_seconds_bucket{stage=\"fusion_weighted\"}[5m])) by (le))",
+          "legendFormat": "fusion_weighted p50"
         }
       ],
-      "title": "Indexed Chunks",
-      "type": "stat"
+      "title": "Search Stage Latency (p50)",
+      "type": "timeseries"
     },
     {
       "datasource": {
@@ -226,40 +252,30 @@
       },
       "fieldConfig": {
         "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {"color": "green", "value": null}
-            ]
-          }
+          "unit": "ops"
         }
       },
-      "gridPos": {"h": 8, "w": 8, "x": 8, "y": 16},
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 25 },
       "id": 5,
       "options": {
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": ["lastNotNull"],
-          "fields": "",
-          "values": false
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
         },
-        "textMode": "auto"
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
       },
       "targets": [
         {
-          "expr": "tribrid_graph_entities_total",
-          "legendFormat": "Graph Entities"
+          "expr": "sum(rate(tribrid_search_stage_errors_total[5m])) by (stage)",
+          "legendFormat": "{{stage}}"
         }
       ],
-      "title": "Graph Entities",
-      "type": "stat"
+      "title": "Search Stage Error Rate",
+      "type": "timeseries"
     },
     {
       "datasource": {
@@ -268,20 +284,115 @@
       },
       "fieldConfig": {
         "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {"color": "green", "value": null}
-            ]
-          }
+          "unit": "ops"
         }
       },
-      "gridPos": {"h": 8, "w": 8, "x": 16, "y": 16},
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 33 },
       "id": 6,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "rate(tribrid_index_files_processed_total[5m])",
+          "legendFormat": "files/s"
+        },
+        {
+          "expr": "rate(tribrid_index_chunks_created_total[5m])",
+          "legendFormat": "chunks/s"
+        },
+        {
+          "expr": "rate(tribrid_index_tokens_total[5m])",
+          "legendFormat": "tokens/s"
+        }
+      ],
+      "title": "Index Throughput",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "unit": "s"
+        }
+      },
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 42 },
+      "id": 7,
+      "options": {
+        "legend": {
+          "calcs": ["mean", "max"],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(tribrid_index_stage_latency_seconds_bucket{stage=\"file_read\"}[5m])) by (le))",
+          "legendFormat": "file_read p50"
+        },
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(tribrid_index_stage_latency_seconds_bucket{stage=\"chunk\"}[5m])) by (le))",
+          "legendFormat": "chunk p50"
+        },
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(tribrid_index_stage_latency_seconds_bucket{stage=\"embed_chunks\"}[5m])) by (le))",
+          "legendFormat": "embed_chunks p50"
+        },
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(tribrid_index_stage_latency_seconds_bucket{stage=\"postgres_upsert_embeddings\"}[5m])) by (le))",
+          "legendFormat": "postgres_upsert_embeddings p50"
+        },
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(tribrid_index_stage_latency_seconds_bucket{stage=\"postgres_upsert_fts\"}[5m])) by (le))",
+          "legendFormat": "postgres_upsert_fts p50"
+        },
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(tribrid_index_stage_latency_seconds_bucket{stage=\"neo4j_upsert_document_chunks\"}[5m])) by (le))",
+          "legendFormat": "neo4j_upsert_document_chunks p50"
+        },
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(tribrid_index_stage_latency_seconds_bucket{stage=\"graph_build\"}[5m])) by (le))",
+          "legendFormat": "graph_build p50"
+        }
+      ],
+      "title": "Index Stage Latency (p50)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        }
+      },
+      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 51 },
+      "id": 8,
       "options": {
         "colorMode": "value",
         "graphMode": "none",
@@ -296,11 +407,77 @@
       },
       "targets": [
         {
-          "expr": "tribrid_graph_relationships_total",
-          "legendFormat": "Graph Relationships"
+          "expr": "tribrid_chunks_indexed_current",
+          "legendFormat": "chunks"
         }
       ],
-      "title": "Graph Relationships",
+      "title": "Indexed Chunks (current)",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        }
+      },
+      "gridPos": { "h": 7, "w": 8, "x": 8, "y": 51 },
+      "id": 9,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "expr": "tribrid_graph_entities_current",
+          "legendFormat": "entities"
+        }
+      ],
+      "title": "Graph Entities (current)",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        }
+      },
+      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 51 },
+      "id": 10,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "expr": "tribrid_graph_relationships_current",
+          "legendFormat": "relationships"
+        }
+      ],
+      "title": "Graph Relationships (current)",
       "type": "stat"
     }
   ],

@@ -1,148 +1,165 @@
+# Configuration
+
 <div class="grid chunk_summaries" markdown>
 
--   :material-cog:{ .lg .middle } **Pydantic Config Model**
+-   :material-cog:{ .lg .middle } **Single Source of Truth**
 
     ---
 
-    All tunables live in server/models/tribrid_config_model.py
+    `server/models/tribrid_config_model.py` defines every tunable parameter with Pydantic `Field()` constraints.
 
--   :material-information:{ .lg .middle } **Models List**
-
-    ---
-
-    data/models.json is the source of truth for available LLMs and embeddings
-
--   :material-check-circle:{ .lg .middle } **Environment & Secrets**
+-   :material-file-code:{ .lg .middle } **Generated Types**
 
     ---
 
-    DB URIs, API keys, and container memory are set via .env
+    Run `uv run scripts/generate_types.py` to regenerate `web/src/types/generated.ts`. No hand-written types.
+
+-   :material-scale-balance:{ .lg .middle } **Constraints Enforced**
+
+    ---
+
+    Min/max ranges, enums, and defaults are enforced at load time with precise error messages.
 
 </div>
 
-!!! tip "Pro Tip"
-    Always add a new field to tribrid_config_model.py before adding UI controls. Run the generate script to propagate types.
+[Get started](index.md){ .md-button .md-button--primary }
+[Configuration](configuration.md){ .md-button }
+[API](api.md){ .md-button }
 
-!!! warning "Config Warning"
-    Field constraints in Pydantic (Field(..., ge=..., le=...)) are enforced at load time. Invalid config will fail to start.
+!!! tip "Pro Tip — Change Pydantic First"
+    Add fields to `tribrid_config_model.py`, regenerate TypeScript types, then wire through stores/hooks/components. Do not add UI controls first.
 
-!!! note "Important"
-    The field `repo_id` remains in APIs for backward compatibility. Treat it as `corpus_id` in documentation.
+!!! note "Terminology — Corpus"
+    A corpus is any folder you index. The identifier is serialized as `corpus_id`, but for compatibility `repo_id` is accepted on input.
 
-??? note "Collapsible: What belongs in tribrid_config_model.py"
+!!! warning "Validation"
+    Invalid config values are rejected at load time. Respect `ge`, `le`, and `Literal` constraints or your server will refuse to start.
 
-    - All thresholds, weights, and booleans that control runtime behavior
-    - Feature flags
-    - Model selection defaults
+## Configuration Surfaces
 
-
-## Configuration overview table
-
-| Section | Example fields | Purpose |
-|---------|----------------|---------|
-| indexing | indexing.chunk_size, indexing.bm25_tokenizer | Controls how chunking and BM25 are performed |
-| retrieval | retrieval.vector_k, retrieval.sparse_limit | Fine-tunes search budgets and limits |
-| fusion | fusion.vector_weight, fusion.sparse_weight, fusion.rrf_k_div | Weights and fusion algorithm parameters |
-| reranker | reranker.enabled, reranker.model, reranker.top_k | Controls training and runtime reranker behavior |
-| graph | graph.max_hops, graph.community_min_size | Controls graph traversal and community detection |
-
-
-### Example configuration snippets
+- `server/models/tribrid_config_model.py` — Pydantic models (authoritative)
+- `data/models.json` — Model catalog (pricing, context window)
+- `data/glossary.json` — Tooltip terms and categories
 
 ```mermaid
 flowchart LR
-    config_file[tribrid_config_model.py] --> gen_ts[generate_types.py]
-    gen_ts --> web_types[web/src/types/generated.ts]
-    web_types --> frontend[UI Stores & Hooks]
+    P[tribrid_config_model.py] -->|pydantic2ts| T[generated.ts]
+    T --> S[Zustand Stores]
+    S --> H[Hooks]
+    H --> C[Components]
+    P --> A[FastAPI Schemas]
+    A --> UI[API Responses]
 ```
 
+## Key Sections and Representative Fields
+
+| Section | Example Fields | Description |
+|--------|-----------------|-------------|
+| retrieval.vector | `top_k`, `distance_metric`, `min_score` | Dense search controls |
+| retrieval.sparse | `top_k`, `use_bm25`, `tsquery_mode` | Text search controls |
+| retrieval.graph | `max_hops`, `edge_types`, `community_boost` | Graph traversal |
+| fusion | `strategy`, `weights`, `rrf_k_div` | Fusion parameters |
+| reranker | `enabled`, `model`, `batch_size` | Cross-encoder settings |
+| indexing | `chunker.strategy`, `embedder.model` | Index pipeline knobs |
+
+### Fusion Configuration
+
+| Field | Type | Constraints | Description |
+|------|------|-------------|-------------|
+| `fusion.strategy` | Literal["weighted", "rrf"] | required | Fusion algorithm |
+| `fusion.weights.vector` | float | 0.0–2.0 | Weight for vector scores |
+| `fusion.weights.sparse` | float | 0.0–2.0 | Weight for sparse scores |
+| `fusion.weights.graph` | float | 0.0–2.0 | Weight for graph scores |
+| `fusion.rrf_k_div` | int | 1–200 | RRF divisor constant |
+
+### Graph Retrieval Configuration
+
+| Field | Type | Constraints | Description |
+|------|------|-------------|-------------|
+| `retrieval.graph.max_hops` | int | 0–5 | Traversal depth from seed entities |
+| `retrieval.graph.edge_types` | list[str] | optional | Restrict traversal to specific relationships |
+| `retrieval.graph.expand_neighbors` | bool | default False | Expand 1-hop neighbors for context |
+
+### Reranker Configuration
+
+| Field | Type | Constraints | Description |
+|------|------|-------------|-------------|
+| `reranker.enabled` | bool | default False | Enable reranking stage |
+| `reranker.model` | str | must exist in models.json | Reranker model id |
+| `reranker.batch_size` | int | 1–128 | Micro-batch size for scoring |
+
+## Reading and Updating Config via API
 
 === "Python"
     ```python
-    from server.models.tribrid_config_model import TriBridConfig
+    import httpx
 
-    cfg = TriBridConfig() # (1)
-    # (2) Example: read a constrained field
-    print(cfg.retrieval.vector_k)
+    base = "http://localhost:8000"
+
+    # Read full config (1)
+    cfg = httpx.get(f"{base}/config").json()
+
+    # Patch fusion weights (2)
+    patch = {"fusion": {"strategy": "weighted", "weights": {"vector": 1.0, "sparse": 0.8, "graph": 0.6}}}
+    r = httpx.patch(f"{base}/config/fusion", json=patch["fusion"]).json()
+
+    # Reset to defaults (3)
+    httpx.post(f"{base}/config/reset")
     ```
 
 === "curl"
     ```bash
-    # Get current server config
-    curl -X GET "http://localhost:8000/config"
-    ```
+    BASE=http://localhost:8000
 
-=== "TypeScript"
-    ```typescript
-    // DO NOT write types by hand - import generated
-    import { TriBridConfig } from '../types/generated'
+    curl -sS "$BASE/config" | jq . # (1)
 
-    const cfg = useConfigStore().config as TriBridConfig // (1)
-    ```
-
-
-1. Config loads from server/models/tribrid_config_model.py
-2. Field constraints prevent invalid values
-
-
-### Key config tables (selected fields)
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| retrieval.vector_k | int | 10 | Number of vector neighbors returned |
-| retrieval.sparse_limit | int | 50 | Max number of sparse results to fetch |
-| fusion.vector_weight | float | 1.0 | Weight applied to vector results in fusion |
-| fusion.sparse_weight | float | 1.0 | Weight applied to sparse results in fusion |
-| graph.max_hops | int | 2 | Max number of hops for graph expansion |
-| reranker.enabled | bool | False | Enable cross-encoder reranking |
-
-
-### Models source of truth
-
-| File | Purpose | Where used |
-|------|---------|------------|
-| data/models.json | All LLM/embedding/reranker model definitions | UI model pickers, cost calculator |
-| server/models/tribrid_config_model.py | Runtime defaults for model selection | Server config validation |
-
-
-### Code examples: update config via API
-
-=== "Python"
-    ```python
-    # (1) Patch a config section
-    import requests
-
-    resp = requests.patch('http://localhost:8000/config/retrieval', json={"vector_k": 20}) # (2)
-    print(resp.status_code)
-    ```
-
-=== "curl"
-    ```bash
-    curl -X PATCH "http://localhost:8000/config/retrieval" \
+    curl -sS -X PATCH "$BASE/config/fusion" \
       -H 'Content-Type: application/json' \
-      -d '{"vector_k":20}'
+      -d '{"strategy": "weighted", "weights": {"vector": 1.0, "sparse": 0.8, "graph": 0.6}}' | jq . # (2)
+
+    curl -sS -X POST "$BASE/config/reset" # (3)
     ```
 
 === "TypeScript"
     ```typescript
-    // (1) Use generated types to form request
-    import { RetrievalConfig } from '../types/generated'
+    import { TriBridConfig } from "./web/src/types/generated";
 
-    const payload: Partial<RetrievalConfig> = { vector_k: 20 }
-    await fetch('/api/config/retrieval', { method: 'PATCH', body: JSON.stringify(payload) })
+    async function loadConfig(): Promise<TriBridConfig> {
+      const r = await fetch("/config");
+      return await r.json(); // (1)
+    }
+
+    async function patchFusion() {
+      await fetch("/config/fusion", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ strategy: "weighted", weights: { vector: 1.0, sparse: 0.8, graph: 0.6 } }),
+      }); // (2)
+    }
     ```
 
+1. The API returns the Pydantic-driven shape of the full config
+2. Partial patch by section is supported; validation is enforced
+3. Reset restores defaults compiled into the Pydantic model
 
-1. Use typed payloads generated from Pydantic
-2. Server validates constraints and returns errors for out-of-range values
+!!! danger "Do Not Write Adapters"
+    If the frontend needs a different shape, change the Pydantic model and regenerate types. Adapters are forbidden technical debt.
 
+```mermaid
+flowchart TB
+    U[User] --> UI[Frontend]\n(generated.ts)
+    UI --> API[FastAPI /config]
+    API --> P[Pydantic Models]
+    P --> API
+    API --> UI
+```
 
-- [x] Add new config fields to tribrid_config_model.py
-- [x] Run ++uv run scripts/generate_types.py++
-- [x] Update UI stores/hooks to consume generated types
+- [x] Update Pydantic model first
+- [x] Run `uv run scripts/generate_types.py`
+- [x] Update stores and hooks
+- [x] Use generated types in components
 
-
-??? note "Collapsible: Advanced topics"
-
-    - You can generate JSON schema from the Pydantic model for external validation.
-    - Use Field(..., ge=..., le=...) to lock ranges and default values.
+??? note "Examples of Field Constraints"
+    - `Field(ge=0.0, le=1.0)` for progress fractions
+    - `Literal[...]` for state enums like `"idle" | "indexing" | "complete" | "error"`
+    - `AliasChoices("repo_id", "corpus_id")` to migrate naming safely

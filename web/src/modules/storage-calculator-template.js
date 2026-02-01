@@ -129,7 +129,7 @@ function getStorageCalculatorHTML() {
                                         <span class="tooltip" title="Session/chat memory storage">?</span>
                                     </div>
                                 </label>
-                                <input type="number" id="calc1-redis" value="400" step="50" min="0" aria-label="Redis cache size">
+                                <input type="number" id="calc1-redis" value="0" step="50" min="0" aria-label="Redis cache size">
                             </div>
                             <div class="input-group">
                                 <label>

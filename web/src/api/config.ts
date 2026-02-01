@@ -1,28 +1,5 @@
-import { apiClient, api } from './client';
+import { apiClient, api, withCorpusScope } from './client';
 import type { TriBridConfig } from '@/types/generated';
-
-function withCorpusScope(path: string): string {
-  try {
-    const u = new URL(window.location.href);
-    const corpus =
-      u.searchParams.get('corpus') ||
-      u.searchParams.get('repo') ||
-      localStorage.getItem('tribrid_active_corpus') ||
-      localStorage.getItem('tribrid_active_repo') ||
-      '';
-    if (!corpus) return path;
-    const sep = path.includes('?') ? '&' : '?';
-    return `${path}${sep}corpus_id=${encodeURIComponent(corpus)}`;
-  } catch {
-    const corpus =
-      localStorage.getItem('tribrid_active_corpus') ||
-      localStorage.getItem('tribrid_active_repo') ||
-      '';
-    if (!corpus) return path;
-    const sep = path.includes('?') ? '&' : '?';
-    return `${path}${sep}corpus_id=${encodeURIComponent(corpus)}`;
-  }
-}
 
 export const configApi = {
   /**

@@ -497,6 +497,26 @@ export function EvaluateSubtab() {
     );
 
     try {
+      // Fast-fail if backend is unreachable (otherwise EventSource just reports "Connection lost").
+      try {
+        const controller = new AbortController();
+        const timeoutMs = 3000;
+        const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+        try {
+          await fetchJson('health', { signal: controller.signal });
+        } finally {
+          window.clearTimeout(timer);
+        }
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        const pretty = msg.includes('aborted') ? 'Backend health check timed out' : msg;
+        setEvalRunning(false);
+        setEvalProgress((prev) => ({ ...prev, status: 'Backend unreachable' }));
+        appendTerminalLine(`\x1b[31mBackend unreachable: ${pretty}\x1b[0m`);
+        appendTerminalLine('Tip: run `./start.sh` and confirm http://127.0.0.1:8012/api/health is reachable.');
+        return;
+      }
+
       TerminalService.streamEvalRun('eval_terminal', {
         corpus_id: rid,
         use_multi: Boolean(evalMulti),

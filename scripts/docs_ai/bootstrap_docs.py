@@ -8,8 +8,8 @@ to generate MkDocs pages automatically.
 Usage:
     python scripts/docs_ai/bootstrap_docs.py --list
     python scripts/docs_ai/bootstrap_docs.py --dry-run --page index
-    python scripts/docs_ai/bootstrap_docs.py --page index --page features/tribrid-search
-    python scripts/docs_ai/bootstrap_docs.py --all --model gpt-5.2
+    python scripts/docs_ai/bootstrap_docs.py --page index --page retrieval/overview
+    python scripts/docs_ai/bootstrap_docs.py --all --model gpt-5 --verbosity high --reasoning-effort high
 """
 import argparse
 import os
@@ -32,7 +32,13 @@ SYSTEM_PROMPT = """You are writing documentation for TriBridRAG, a tri-brid RAG 
 - Sparse search (PostgreSQL Full-Text Search/BM25)
 - Graph search (Neo4j for entity relationships)
 
-WRITING STYLE: Technical, precise, thorough. Humorous where appropriate. 
+WRITING STYLE: Extremely detailed, high-signal, and deeply technical.
+- Default to long-form documentation. Avoid shallow summaries.
+- Assume the reader wants to operate and extend the system (not just understand it).
+- Prefer concrete, copy/paste-able examples over generic prose.
+
+MkDocs theme: Material for MkDocs (v9.7.x).
+Reference: https://squidfunk.github.io/mkdocs-material/reference/
 
 KEY ARCHITECTURE POINTS:
 1. THREE search legs fused together (hence "tri-brid")
@@ -50,118 +56,71 @@ BANNED TERMS (DO NOT USE):
 - "AGRO" or "agro" - this is TriBridRAG
 
 MKDOCS MATERIAL FORMATTING (MANDATORY):
-Reference: https://squidfunk.github.io/mkdocs-material/reference/
+- Start every page with a feature grid:
+  <div class="grid chunk_summaries" markdown>
+  ...
+  </div>
 
-You MUST use these components where appropriate:
-- **Admonitions**: !!! note, !!! tip, !!! warning, !!! danger, ??? collapsible "Title"
-- **Code blocks** with line numbers, highlighting, and annotations:
-  ```python linenums="1" hl_lines="3 4"
-  code here  # (1)!
-  ```
-  1. Annotations go in a numbered list after the code block
-  
-- **Content tabs** for multiple languages or approaches:
+- Every page MUST include a "Quick links" block with Material buttons (use at least 3):
+  !!! tip "Quick links"
+      [:material-sitemap: Architecture](architecture.md){ .md-button }
+      [:material-magnify: Retrieval](retrieval/overview.md){ .md-button }
+      [:material-cog: Configuration](configuration.md){ .md-button .md-button--primary }
+
+- Use admonitions heavily: !!! note, !!! tip, !!! warning, !!! danger, ??? collapsible "Title"
+
+- Use content tabs for all code and multi-approach content:
   === "Python"
       ```python
+      code
+      ```
+  === "curl"
+      ```bash
       code
       ```
   === "TypeScript"
       ```typescript
       code
       ```
-      
-- **Mermaid v11 diagrams with 3D handDrawn style** (CRITICAL - USE THESE NEW FEATURES):
-  
-  The site uses `look: "handDrawn"` for a cool 3D sketchy style - your diagrams will look awesome!
-  
-  **Flowchart with styling** (v11):
-  ```mermaid
-  flowchart LR
-      A[Start]:::highlight --> B{Decision}
-      B -->|Yes| C[Action 1]:::success
-      B -->|No| D[Action 2]:::warning
-      C --> E[End]
-      D --> E
-      
-      classDef highlight fill:#2dd4bf,stroke:#14b8a6,stroke-width:3px
-      classDef success fill:#22c55e,stroke:#16a34a,stroke-width:2px
-      classDef warning fill:#eab308,stroke:#ca8a04,stroke-width:2px
+
+- Use code annotations (MkDocs Material annotations) with markers inside comments:
+  ```python linenums="1" hl_lines="3 4"
+  do_thing()  # (1)!
   ```
-  
-  **Multi-line labels with colors**:
-  ```mermaid
-  flowchart LR
-      Query[User Query]:::input --> Vector["Vector Search\n(pgvector in PostgreSQL)"]:::search
-      Query --> Sparse["Sparse Search\n(PostgreSQL FTS/BM25)"]:::search
-      Query --> Graph["Graph Search\n(Neo4j traversal)"]:::search
-      
-      Vector --> Fusion["Fusion Layer\n(RRF or Weighted)"]:::process
-      Sparse --> Fusion
-      Graph --> Fusion
-      
-      Fusion --> Rerank["Reranker\n(local/cloud/trained)"]:::process
-      Rerank --> Results[Final Results]:::output
-      
-      classDef input fill:#3b82f6,stroke:#2563eb,stroke-width:3px
-      classDef search fill:#8b5cf6,stroke:#7c3aed,stroke-width:2px
-      classDef process fill:#ec4899,stroke:#db2777,stroke-width:2px
-      classDef output fill:#10b981,stroke:#059669,stroke-width:3px
-  ```
-  
-  **Sequence diagram with styling**:
-  ```mermaid
-  sequenceDiagram
-      participant User
-      participant API
-      participant Vector as Vector DB
-      participant Graph as Graph DB
-      
-      User->>+API: Search Query
-      API->>+Vector: Embed & Search
-      API->>+Graph: Entity Lookup
-      Vector-->>-API: Top-K Results
-      Graph-->>-API: Related Entities
-      API->>API: Fuse & Rerank
-      API-->>-User: Final Results
-  ```
-  
-  **State diagram** (great for workflows):
-  ```mermaid
-  stateDiagram-v2
-      [*] --> Indexing
-      Indexing --> Ready
-      Ready --> Searching
-      Searching --> Reranking
-      Reranking --> Ready
-      Ready --> [*]
-  ```
-  
-  **MERMAID v11 RULES** (handDrawn style enabled sitewide):
-  - Use \n for multi-line labels (NOT <br/> or HTML)
-  - Add color classes with `:::className` for visual appeal
-  - Make them big and bold and colorful! And 3D!
-  - Define classDef for custom colors (use hex colors)
-  - Node shapes: [] rectangle, () rounded, {} diamond, (()) circle, [[ ]] subroutine
-  - Edge types: --> solid, -.-> dotted, ==> thick
-  - Edge labels: -->|label| or -->|"multi\nline"|
-  - Proper indentation (4 spaces)
-  - NO HTML tags anywhere
-  - Use quotes for labels with special chars/newlines
-  - Include at least 2-3 diagrams per major page (mix flowcharts, sequences, states)
-  - Make diagrams colorful and visually interesting with classDef styling!
-  
-- **Data tables** with proper Markdown formatting
-- **Definition lists** for parameters:
-  `term`
-  :   Definition of the term
-  
-- **Links** between related pages using relative paths
+  1. Explanation for (1)
+
+- Use data tables for configuration and comparisons.
+- Use definition lists for parameters and glossary-like sections.
+- Use task lists for checklists.
+
+MERMAID v11 (CRITICAL: AVOID SYNTAX ERRORS):
+- NO HTML anywhere in Mermaid (no <br/>, no <b>, no <span>, no entities).
+- Prefer simple node IDs (A, B, C, D) and put all human text in labels.
+- ALWAYS quote labels that contain spaces, punctuation, or newlines:
+  - Good: A["Vector Search\\n(pgvector)"]
+  - Bad: A[Vector Search (pgvector)]
+- Use \\n for multi-line labels ONLY inside quoted labels.
+- If you use edge labels, quote them:
+  - Good: A -->|"embed + search"| B
+  - Bad: A -->|embed + search| B
+- Avoid these error-prone patterns: unescaped quotes, parentheses/brackets inside IDs, markdown inside labels.
+- Put classDef lines at the end of the diagram block.
+- Include 2-3 diagrams per page (mix flowchart LR, sequenceDiagram, stateDiagram-v2).
 
 OUTPUT FORMAT:
 - Output ONLY the markdown content for the page
 - Start with a level-1 heading (# Title)
 - Do not include YAML frontmatter
 - Do not wrap output in code blocks
+
+LINKING + REFERENCE RULES (CRITICAL: BUILD MUST PASS `mkdocs build --strict`):
+- Only create relative links to other documentation pages listed in VALID_PAGES.
+- NEVER create relative links to repository source files (e.g. `server/models/tribrid_config_model.py`) because MkDocs will treat them as broken.
+  - If you need to reference a source file path: format it as inline code: `server/models/tribrid_config_model.py`
+  - If you want a clickable link: use an ABSOLUTE GitHub URL:
+    `https://github.com/DMontgomery40/tribrid-rag/blob/main/server/models/tribrid_config_model.py`
+- When you link to an anchor (e.g. `configuration.md#fusion-config`), the target page MUST contain a heading whose generated anchor matches.
+- ALWAYS use lowercase in anchor fragments (e.g. `#frontend`, not `#Frontend`).
 """
 
 # =============================================================================
@@ -171,34 +130,50 @@ OUTPUT FORMAT:
 VALID_PAGES = """
 DOCUMENTATION STRUCTURE - Only link to these pages:
 
-HOME:
-- index.md (the landing page)
+PAGES:
+- index.md
+- architecture.md
+- retrieval/overview.md
+- configuration.md
+- api.md
+- indexing.md
+- deploy.md
+- glossary.md
 
-GETTING STARTED:
-- getting-started/quickstart.md
-- getting-started/installation.md
-
-FEATURES:
-- features/tribrid-search.md (covers tri-brid architecture, fusion, retrieval)
-- features/pgvector.md (vector search)
-- features/neo4j-graph.md (graph search)
-
-CONFIGURATION:
-- configuration/models.md (model configuration, models.json)
-- configuration/settings.md (all config settings, reranking, scoring)
-
-API:
-- api/endpoints.md (all API endpoints)
-
-OPERATIONS:
-- operations/monitoring.md (observability, metrics, health)
-- operations/troubleshooting.md
+REQUIRED STABLE ANCHORS (MUST EXIST EXACTLY AS HEADINGS):
+- index.md:
+  - ## Source of truth file
+  - ## Troubleshooting FAQ
+- architecture.md:
+  - ## Fusion methods
+  - ## pgvector integration
+  - ## Graph RAG using Neo4j
+- retrieval/overview.md:
+  - ## Fusion techniques
+- configuration.md:
+  - ## Fusion config
+  - ## Indexing config
+  - ## Embedding config
+  - ## Graph storage config
+  - ## Reranking
+- indexing.md:
+  - ## Chunking
+- deploy.md:
+  - ## Neo4j installation
+- glossary.md:
+  - ## Frontend
 
 LINKING RULES:
-1. From index.md, link to: ./getting-started/quickstart.md, ./features/tribrid-search.md, etc.
-2. From getting-started/*.md, link to: ./quickstart.md (same dir) or ../features/tribrid-search.md (other dir)
-3. DO NOT invent pages like ./configuration.md, ./retrieval.md, ./api.md - they don't exist
-4. Link to the specific file that covers the topic (e.g., for "reranking" link to ./configuration/settings.md)
+1. Use relative links and EXACT filenames from the list above.
+2. DO NOT invent new pages or link to non-existent paths.
+3. Prefer deep links into subsections using anchors when helpful.
+4. If you include an anchored link, you MUST also ensure the target heading exists (see REQUIRED STABLE ANCHORS).
+
+NESTED PAGE LINKING RULES (CRITICAL):
+- For `retrieval/overview.md`:
+  - Links to root-level pages MUST be prefixed with `../` (e.g. `../architecture.md`, `../configuration.md`, `../index.md`).
+  - NEVER link to `retrieval/overview.md` from inside `retrieval/overview.md` (it would resolve to `retrieval/retrieval/overview.md`).
+  - Prefer `#anchor` links for within-page references.
 """
 
 # =============================================================================
@@ -207,223 +182,229 @@ LINKING RULES:
 
 DOC_PAGES = {
     "index": {
-        "title": "TriBridRAG - Tri-Brid RAG Engine",
+        "title": "TriBridRAG Docs",
         "output_path": "mkdocs/docs/index.md",
         "source_files": [
             "README.md",
-            "CLAUDE.md",
+            "AGENTS.md",
+            "docker-compose.yml",
+            "start.sh",
             "server/models/tribrid_config_model.py",
         ],
-        "instruction": """Write the landing page for TriBridRAG documentation.
+        "instruction": """Write the main landing page.
 
-Include:
-1. Project overview - what is TriBridRAG and why tri-brid search?
-2. A Mermaid flowchart showing the tri-brid pipeline:
-   Query -> [Vector Search, Sparse Search, Graph Search] -> Fusion -> Reranker -> Results
-3. Key features list with brief descriptions
-4. Quick start commands (docker-compose up, API endpoints)
-5. Links to detailed documentation sections
-6. Architecture highlights from the Pydantic config model
-
-Make it welcoming but technically substantive.""",
+Hard requirements:
+1. Be LONG and substantive. This page should feel like a mini-book chapter, not a README.
+2. Start with a feature grid (<div class="grid chunk_summaries" markdown>).
+3. Include at least 3 Mermaid diagrams:
+   - A tri-brid pipeline flowchart (vector + sparse + graph -> fusion -> rerank -> results)
+   - A sequence diagram for a typical /search request
+   - A state diagram for indexing -> ready -> searching
+4. Include a table that maps “What you want to do” to the correct docs page (architecture/retrieval/config/api/indexing/deploy/glossary).
+5. Include a “Quick start” section with copy/paste commands and verification steps.
+6. Include explicit pointers to the Pydantic source-of-truth file and the generated TypeScript type chain.
+   - Refer to the source-of-truth file as inline code, or as an absolute GitHub link (NOT a relative link).
+7. Include a section with the exact heading: `## Source of truth file` (this must exist for anchored links).
+7. Include an “If this page is too long” collapsible (???) with a short reading path.
+8. End with a troubleshooting FAQ (at least 8 items) linking to the right pages/anchors.
+""",
     },
-    "getting-started/quickstart": {
-        "title": "Quick Start",
-        "output_path": "mkdocs/docs/getting-started/quickstart.md",
+    "architecture": {
+        "title": "Architecture",
+        "output_path": "mkdocs/docs/architecture.md",
         "source_files": [
-            "README.md",
-            "docker-compose.yml",
+            "AGENTS.md",
             "server/main.py",
-        ],
-        "instruction": """Write a quickstart guide for getting TriBridRAG running.
-
-Include:
-1. Prerequisites (Docker, Python 3.10+, Node.js)
-2. Clone and setup commands
-3. Docker compose up command
-4. Verify services are running (health checks)
-5. First API call example (search endpoint)
-6. Next steps links
-
-Keep it practical and copy-paste friendly.""",
-    },
-    "getting-started/installation": {
-        "title": "Installation",
-        "output_path": "mkdocs/docs/getting-started/installation.md",
-        "source_files": [
-            "README.md",
-            "pyproject.toml",
-            "docker-compose.yml",
-        ],
-        "instruction": """Write detailed installation instructions.
-
-Cover:
-1. Docker-based installation (recommended)
-2. Local development setup with uv
-3. Environment variables required
-4. Database setup (PostgreSQL with pgvector, Neo4j)
-5. Verifying the installation
-6. Common installation issues and solutions""",
-    },
-    "features/tribrid-search": {
-        "title": "Tri-Brid Search Architecture",
-        "output_path": "mkdocs/docs/features/tribrid-search.md",
-        "source_files": [
+            "server/services/rag.py",
+            "server/services/indexing.py",
             "server/retrieval/fusion.py",
+            "server/db/postgres.py",
+            "server/db/neo4j.py",
+        ],
+        "instruction": """Write an extremely detailed architecture page.
+
+Hard requirements:
+1. Explain the end-to-end dataflow for BOTH indexing and retrieval.
+2. Include multiple Mermaid diagrams (flowchart + sequence + state).
+3. Include a component table mapping responsibilities to concrete files/modules.
+4. Include a “Config is the contract” section that explains the Pydantic -> generated TS derivation chain with examples.
+5. Include an “Operational boundaries” section: what is per-corpus, what is global, what is cached, what is persisted.
+6. Include failure modes and observability signals (what to check when X fails).
+
+Required stable anchor headings (MUST be exact headings):
+- `## Fusion methods`
+- `## pgvector integration`
+- `## Graph RAG using Neo4j`
+
+CRITICAL:
+- If you link to `glossary.md#frontend`, the anchor must be lowercase (`#frontend`).
+""",
+    },
+    "retrieval/overview": {
+        "title": "Retrieval Overview",
+        "output_path": "mkdocs/docs/retrieval/overview.md",
+        "source_files": [
             "server/retrieval/vector.py",
             "server/retrieval/sparse.py",
             "server/retrieval/graph.py",
+            "server/retrieval/fusion.py",
+            "server/retrieval/rerank.py",
             "server/models/tribrid_config_model.py",
         ],
-        "instruction": """Explain the tri-brid search architecture in depth.
+        "instruction": """Write a deep retrieval overview.
 
-Include:
-1. Overview of the three search legs
-2. Mermaid diagram showing data flow
-3. How each search type works:
-   - Vector search with pgvector (HNSW, similarity metrics)
-   - Sparse search with BM25/FTS (term frequency, IDF)
-   - Graph search with Neo4j (entity traversal, communities)
-4. Fusion methods: RRF vs weighted scoring
-5. When to use which configuration
-6. Performance considerations""",
-    },
-    "features/pgvector": {
-        "title": "Vector Search (pgvector)",
-        "output_path": "mkdocs/docs/features/pgvector.md",
-        "source_files": [
-            "server/db/postgres.py",
-            "server/retrieval/vector.py",
-            "server/models/tribrid_config_model.py",
-        ],
-        "instruction": """Document the pgvector integration for vector search.
+Hard requirements:
+1. Explain each retriever leg (vector/sparse/graph) with:
+   - What signal it captures
+   - Common query types it wins on
+   - Cost and latency characteristics
+   - Key configuration knobs (as tables)
+2. Explain fusion strategies (RRF vs weighted) with worked examples and tables.
+3. Explain reranking: when it helps, when it hurts, how to configure it.
+4. Include at least 3 Mermaid diagrams (pipeline, detailed fusion, rerank sequence).
+5. Include “Debugging relevance” and “Debugging latency” sections with step-by-step checklists.
 
-Cover:
-1. Why pgvector over dedicated vector DBs
-2. Index types: HNSW vs IVFFlat
-3. Configuration options from IndexingConfig
-4. Embedding dimensions and models supported
-5. Query examples
-6. Performance tuning tips""",
-    },
-    "features/neo4j-graph": {
-        "title": "Graph Search (Neo4j)",
-        "output_path": "mkdocs/docs/features/neo4j-graph.md",
-        "source_files": [
-            "server/db/neo4j.py",
-            "server/retrieval/graph.py",
-            "server/indexing/graph_builder.py",
-            "server/models/tribrid_config_model.py",
-        ],
-        "instruction": """Document the Neo4j graph search integration.
+CRITICAL LINKING RULES FOR THIS PAGE:
+- This page lives at `retrieval/overview.md` (inside a subdirectory).
+- Links to root-level pages MUST be prefixed with `../`:
+  - `../architecture.md`, `../configuration.md`, `../api.md`, `../index.md`, `../indexing.md`, `../deploy.md`, `../glossary.md`
+- Prefer `#anchor` links for within-page references.
 
-Cover:
-1. Graph RAG approach - why graphs for code search
-2. Entity types extracted (functions, classes, modules, etc.)
-3. Relationship types (calls, imports, inherits, contains)
-4. Community detection algorithms (Louvain, label propagation)
-5. GraphStorageConfig options
-6. Cypher query patterns used
-7. Traversal depth configuration""",
+Required stable anchor headings (MUST be exact headings):
+- `## Fusion techniques`
+""",
     },
-    "configuration/models": {
-        "title": "Model Configuration",
-        "output_path": "mkdocs/docs/configuration/models.md",
+    "configuration": {
+        "title": "Configuration",
+        "output_path": "mkdocs/docs/configuration.md",
         "source_files": [
-            "server/models/tribrid_config_model.py",
-            "data/models.json",
-            "server/api/models.py",
-        ],
-        "instruction": """Document the model configuration system.
-
-Cover:
-1. models.json structure and purpose
-2. Model types: EMB (embedding), GEN (generation), RERANK
-3. Adding new models to models.json
-4. Provider support (OpenAI, Anthropic, Voyage, local)
-5. Cost tracking fields
-6. API endpoint /api/models
-7. How the frontend uses useModels hook""",
-    },
-    "configuration/settings": {
-        "title": "Configuration Settings",
-        "output_path": "mkdocs/docs/configuration/settings.md",
-        "source_files": [
-            "server/models/tribrid_config_model.py",
+            "AGENTS.md",
             "tribrid_config.json",
+            "server/models/tribrid_config_model.py",
+            "web/src/types/generated.ts",
+            "scripts/generate_types.py",
         ],
-        "instruction": """Document all configuration settings.
+        "instruction": """Write the configuration reference and mental model.
 
-Structure by config section:
-1. RetrievalConfig - search parameters
-2. ScoringConfig - result scoring/boosting
-3. EmbeddingConfig - embedding generation
-4. ChunkingConfig - code chunking
-5. IndexingConfig - vector storage
-6. GraphStorageConfig - Neo4j settings
-7. FusionConfig - tri-brid fusion weights
-8. RerankingConfig - reranker settings
+Hard requirements:
+1. Explain “Pydantic is the law” and what that means for users and contributors.
+2. Show how defaults/ranges are enforced, and how invalid configs fail (validation).
+3. Include BIG tables for the most important config sections (retrieval/fusion/reranking/indexing/graph/embedding/chunking).
+4. Include a section on type generation (pydantic2ts) and how the UI consumes generated types.
+5. Include common config recipes (as tabs) for different corpora:
+   - codebase search
+   - docs search
+   - mixed repo
+6. Include “Anti-patterns” section (what NOT to do) as warnings.
 
-For each, show the field, type, default, range, and description.""",
+Required stable anchor headings (MUST be exact headings):
+- `## Fusion config`
+- `## Indexing config`
+- `## Embedding config`
+- `## Graph storage config`
+- `## Reranking`
+""",
     },
-    "api/endpoints": {
-        "title": "API Endpoints",
-        "output_path": "mkdocs/docs/api/endpoints.md",
+    "api": {
+        "title": "API",
+        "output_path": "mkdocs/docs/api.md",
         "source_files": [
+            "server/main.py",
             "server/api/search.py",
             "server/api/index.py",
             "server/api/config.py",
             "server/api/models.py",
             "server/api/health.py",
-            "server/main.py",
+            "spec/backend/api_search.yaml",
+            "spec/backend/api_index.yaml",
+            "spec/backend/api_config.yaml",
+            "spec/backend/api_health.yaml",
         ],
-        "instruction": """Document all API endpoints.
+        "instruction": """Write a complete API reference page.
 
-For each endpoint include:
-1. HTTP method and path
-2. Description
-3. Request body schema (if applicable)
-4. Response schema
-5. Example curl command
-6. Example response
-
-Group by category: Search, Indexing, Configuration, Health""",
+Hard requirements:
+1. Enumerate endpoints grouped by domain (health, models, config, indexing, search).
+2. For each endpoint: purpose, request schema, response schema, examples in tabs (curl + Python + TypeScript).
+3. Include error handling guidance: common failure codes and what they mean.
+4. Include performance notes: pagination/top-k, timeouts, reranker costs.
+5. Include at least 2 Mermaid diagrams showing request lifecycles (search and indexing).
+""",
     },
-    "operations/monitoring": {
-        "title": "Monitoring & Observability",
-        "output_path": "mkdocs/docs/operations/monitoring.md",
+    "indexing": {
+        "title": "Indexing",
+        "output_path": "mkdocs/docs/indexing.md",
         "source_files": [
-            "server/observability/metrics.py",
-            "server/observability/tracing.py",
-            "server/api/health.py",
+            "server/indexing/loader.py",
+            "server/indexing/chunker.py",
+            "server/indexing/embedder.py",
+            "server/indexing/summarizer.py",
+            "server/indexing/graph_builder.py",
+            "server/models/tribrid_config_model.py",
         ],
-        "instruction": """Document monitoring and observability.
+        "instruction": """Write a deep indexing pipeline page.
 
-Cover:
-1. Health check endpoints
-2. Metrics exposed (if Prometheus)
-3. Tracing integration
-4. Logging configuration
-5. Alerting setup""",
+Hard requirements:
+1. Explain the pipeline stages: load -> chunk -> embed -> persist -> graph build -> summarize.
+2. Include Mermaid diagrams (pipeline + state + failure-mode flow).
+3. Include config tables for chunking/embedding/indexing/graph build.
+4. Include “How to reindex safely” section with checklists and warnings.
+5. Include troubleshooting section: common causes of missing chunks, bad embeddings, empty graphs.
+
+Required stable anchor headings (MUST be exact headings):
+- `## Chunking`
+
+CRITICAL:
+- The heading line MUST appear exactly as `## Chunking` (H2) somewhere in the page.
+- Do NOT replace it with `### Chunk` or `## Chunking Configuration` or any other variant.
+- All chunking-specific content, examples, and config tables must live under `## Chunking`.
+""",
     },
-    "operations/troubleshooting": {
-        "title": "Troubleshooting",
-        "output_path": "mkdocs/docs/operations/troubleshooting.md",
+    "deploy": {
+        "title": "Deployment",
+        "output_path": "mkdocs/docs/deploy.md",
         "source_files": [
-            "README.md",
-            "server/main.py",
+            "Dockerfile",
+            "docker-compose.yml",
+            "infra/docker-compose.dev.yml",
+            ".env.example",
+            "start.sh",
         ],
-        "instruction": """Write a troubleshooting guide.
+        "instruction": """Write an operational deployment guide.
 
-Common issues:
-1. Connection errors (Postgres, Neo4j)
-2. Embedding failures
-3. Search returning no results
-4. Performance issues
-5. Memory problems
-6. Docker issues
+Hard requirements:
+1. Cover local dev, docker compose, and environment configuration.
+2. Include explicit tables for required env vars (from .env.example).
+3. Include “Bring-up verification” checklists (health endpoints, DB connections, migrations if any).
+4. Include resource sizing guidance (CPU/RAM/disk) for small/medium/large corpora.
+5. Include at least 2 Mermaid diagrams (service topology + startup sequence).
 
-For each, show symptoms, diagnosis steps, and solutions.""",
+Required stable anchor headings (MUST be exact headings):
+- `## Neo4j installation`
+""",
+    },
+    "glossary": {
+        "title": "Glossary",
+        "output_path": "mkdocs/docs/glossary.md",
+        "source_files": [
+            "AGENTS.md",
+            "server/models/tribrid_config_model.py",
+            "web/src/modules/tooltips.js",
+        ],
+        "instruction": """Write a large, practical glossary.
+
+Hard requirements:
+1. Define core terms (corpus/repo_id, chunk, embedding, reranker, fusion, RRF, BM25/FTS, pgvector, Neo4j entities/relationships).
+2. For each term: definition, “why it matters”, and links to the best section elsewhere.
+3. Include a “Config field index” section that maps terms to important Pydantic fields.
+4. Use definition lists, tables, and admonitions for pitfalls and gotchas.
+
+CRITICAL LINKING RULE:
+- Do NOT create relative links to repo source files (like `server/models/tribrid_config_model.py`).
+- If you need a clickable reference, use an absolute GitHub URL (blob/main/...).
+
+Required stable anchor headings (MUST be exact headings):
+- `## Frontend`
+""",
     },
 }
 
@@ -435,21 +416,108 @@ For each, show symptoms, diagnosis steps, and solutions.""",
 class DocBootstrapper:
     """Generates documentation pages using OpenAI API."""
 
-    def __init__(self, model: str = "gpt-4o", max_tokens: int = 4096):
+    def __init__(
+        self,
+        model: str = "gpt-5",
+        max_tokens: int = 32000,
+        *,
+        verbosity: str = "high",
+        reasoning_effort: str = "high",
+        max_attempts: int = 2,
+    ):
         """Initialize with OpenAI client.
 
         Args:
-            model: OpenAI model to use (default: gpt-4o, can use gpt-5.2)
-            max_tokens: Maximum tokens for response (default: 4096)
+            model: OpenAI model to use (default: gpt-5)
+            max_tokens: Maximum tokens for response (default: 32000)
+            verbosity: GPT-5 text verbosity hint (low|medium|high)
+            reasoning_effort: GPT-5 reasoning effort (minimal|low|medium|high)
+            max_attempts: Max generation attempts per page (default: 2)
         """
-        api_key = os.environ.get("OPENAI_API_KEY")
-        if not api_key:
-            raise ValueError("OPENAI_API_KEY environment variable not set")
+        if not self._is_gpt5_model(model):
+            raise ValueError(f"Only GPT-5 models are supported here (got: {model})")
 
-        self.client = OpenAI(api_key=api_key)
+        api_key = os.environ.get("OPENAI_API_KEY")
+        self.client = OpenAI(api_key=api_key) if api_key else None
         self.model = model
         self.max_tokens = max_tokens
+        self.verbosity = verbosity
+        self.reasoning_effort = reasoning_effort
+        self.max_attempts = max_attempts
         self.project_root = Path(__file__).parent.parent.parent
+
+    @staticmethod
+    def _is_gpt5_model(model: str) -> bool:
+        m = (model or "").strip().lower()
+        return m.startswith("gpt-5")
+
+    def _validate_generated_markdown(self, page_key: str, content: str) -> list[str]:
+        """Return a list of validation issues for generated markdown."""
+        issues: list[str] = []
+
+        # Length heuristics: enforce non-trivial, long-form pages.
+        lines = [ln for ln in (content or "").splitlines() if ln.strip()]
+        if len(lines) < 180:
+            issues.append(f"too short: only {len(lines)} non-empty lines (min 180)")
+
+        # Material bells & whistles.
+        if "<div class=\"grid" not in (content or ""):
+            issues.append("missing feature grid (<div class=\"grid ...\">)")
+        if ".md-button" not in (content or ""):
+            issues.append("missing Material buttons (.md-button quick links)")
+        if (content or "").count("```mermaid") < 2:
+            issues.append("missing mermaid diagrams (need at least 2)")
+        if (content or "").count("!!!") < 3:
+            issues.append("missing admonitions (need at least 3)")
+        if (content or "").count("===") < 3:
+            issues.append("missing tabbed sections (need at least 3)")
+
+        # No relative links to repo source files (MkDocs strict breaks on these).
+        banned_rel_prefixes = ("server/", "web/", "scripts/", "infra/", "data/", "tests/")
+        for pref in banned_rel_prefixes:
+            if f"]({pref}" in (content or ""):
+                issues.append(f"contains relative link to repo path: ]({pref}...) (must be inline code or GitHub URL)")
+                break
+
+        # Nested page linking correctness (MkDocs strict resolves relative to current dir)
+        if page_key == "retrieval/overview":
+            wrong_root_links = [
+                "index.md",
+                "architecture.md",
+                "configuration.md",
+                "api.md",
+                "indexing.md",
+                "deploy.md",
+                "glossary.md",
+            ]
+            for tgt in wrong_root_links:
+                if f"]({tgt}" in (content or ""):
+                    issues.append(f"retrieval/overview.md must link to '../{tgt}', not '{tgt}'")
+                    break
+            if "](retrieval/overview.md" in (content or ""):
+                issues.append("retrieval/overview.md must not link to 'retrieval/overview.md' (self-link resolves incorrectly)")
+
+        # Stable anchors required by VALID_PAGES section.
+        required_heading_by_page: dict[str, list[str]] = {
+            "index": ["## Source of truth file", "## Troubleshooting FAQ"],
+            "architecture": ["## Fusion methods", "## pgvector integration", "## Graph RAG using Neo4j"],
+            "retrieval/overview": ["## Fusion techniques"],
+            "configuration": [
+                "## Fusion config",
+                "## Indexing config",
+                "## Embedding config",
+                "## Graph storage config",
+                "## Reranking",
+            ],
+            "indexing": ["## Chunking"],
+            "deploy": ["## Neo4j installation"],
+            "glossary": ["## Frontend"],
+        }
+        for heading in required_heading_by_page.get(page_key, []):
+            if heading not in (content or ""):
+                issues.append(f"missing required heading: {heading!r}")
+
+        return issues
 
     def _read_source_files(self, source_files: list[str]) -> str:
         """Read and concatenate source files."""
@@ -460,8 +528,9 @@ class DocBootstrapper:
                 try:
                     content = full_path.read_text()
                     # Truncate very large files
-                    if len(content) > 50000:
-                        content = content[:50000] + "\n\n... [truncated] ..."
+                    max_chars = 200000 if file_path.endswith("tribrid_config_model.py") else 75000
+                    if len(content) > max_chars:
+                        content = content[:max_chars] + "\n\n... [truncated] ..."
                     contents.append(f"=== FILE: {file_path} ===\n{content}\n")
                 except Exception as e:
                     contents.append(f"=== FILE: {file_path} ===\nError reading: {e}\n")
@@ -511,17 +580,54 @@ INSTRUCTIONS:
             print(user_prompt[:500] + "...")
             return None
 
+        if self.client is None:
+            raise ValueError("OPENAI_API_KEY environment variable not set")
+
         print(f"Generating: {page_key} -> {page_config['output_path']}")
 
-        # Use the Responses API (newer than Chat Completions)
-        response = self.client.responses.create(
-            model=self.model,
-            instructions=SYSTEM_PROMPT,
-            input=user_prompt,
-            max_output_tokens=self.max_tokens,
-        )
+        content: str | None = None
+        last_issues: list[str] = []
+        issues: list[str] = []
 
-        content = response.output_text
+        for attempt in range(1, self.max_attempts + 1):
+            attempt_prompt = user_prompt
+            if last_issues:
+                attempt_prompt = (
+                    attempt_prompt
+                    + "\n\n"
+                    + "REVISION REQUIRED:\n"
+                    + "The previous output failed validation. Rewrite the ENTIRE page and fix ALL issues:\n"
+                    + "\n".join([f"- {issue}" for issue in last_issues])
+                    + "\n\nRemember: output ONLY markdown for the full page."
+                )
+
+            kwargs: dict = {
+                "model": self.model,
+                "instructions": SYSTEM_PROMPT,
+                "input": attempt_prompt,
+                "max_output_tokens": self.max_tokens,
+                "text": {"verbosity": self.verbosity},
+            }
+            if self._is_gpt5_model(self.model):
+                kwargs["reasoning"] = {"effort": self.reasoning_effort}
+
+            # Use the Responses API (required)
+            response = self.client.responses.create(**kwargs)
+            content = response.output_text
+
+            issues = self._validate_generated_markdown(page_key, content or "")
+            if not issues:
+                last_issues = []
+                break
+            last_issues = issues
+
+        if not content:
+            raise RuntimeError(f"Empty content returned for page: {page_key}")
+        if issues:
+            raise RuntimeError(
+                f"Validation failed for page '{page_key}' after {self.max_attempts} attempts:\n"
+                + "\n".join([f"- {issue}" for issue in issues])
+            )
 
         # Write to output file
         output_path = self.project_root / page_config["output_path"]
@@ -545,6 +651,16 @@ INSTRUCTIONS:
             self.generate_page(page_key, dry_run=dry_run)
 
 
+# =============================================================================
+# NOTE ON BOOTSTRAP VS AUTOPILOT
+# =============================================================================
+#
+# This file is a deterministic "bootstrapper" that generates a fixed set of
+# pages. It is intentionally NOT the full Docs‑Autopilot workflow where the
+# model decides the doc structure. For the model‑driven workflow, use:
+# scripts/docs_ai/docs_autopilot_enhanced.py
+
+
 def list_pages() -> None:
     """Print all available documentation pages."""
     print("Available documentation pages:\n")
@@ -565,9 +681,9 @@ Examples:
   %(prog)s --list                          # List all available pages
   %(prog)s --dry-run --page index          # Preview without generating
   %(prog)s --page index                    # Generate index page
-  %(prog)s --page index --page features/tribrid-search  # Generate multiple
+  %(prog)s --page index --page retrieval/overview       # Generate multiple
   %(prog)s --all                           # Generate all pages
-  %(prog)s --all --model gpt-5.2           # Use specific model
+  %(prog)s --all --model gpt-5             # Use specific model
         """
     )
 
@@ -595,14 +711,32 @@ Examples:
     )
     parser.add_argument(
         "--model",
-        default="gpt-4o",
-        help="OpenAI model to use (default: gpt-4o, recommended: gpt-5.2)"
+        default="gpt-5",
+        help="OpenAI model to use (default: gpt-5). Use GPT-5 series only."
     )
     parser.add_argument(
         "--max-tokens",
         type=int,
-        default=4096,
-        help="Maximum tokens for response (default: 4096)"
+        default=32000,
+        help="Maximum tokens for response (default: 32000)"
+    )
+    parser.add_argument(
+        "--verbosity",
+        choices=["low", "medium", "high"],
+        default="high",
+        help="GPT-5 verbosity hint (default: high)"
+    )
+    parser.add_argument(
+        "--reasoning-effort",
+        choices=["minimal", "low", "medium", "high"],
+        default="high",
+        help="GPT-5 reasoning effort (default: high)"
+    )
+    parser.add_argument(
+        "--max-attempts",
+        type=int,
+        default=2,
+        help="Max generation attempts per page if validation fails (default: 2)"
     )
 
     args = parser.parse_args()
@@ -623,7 +757,10 @@ Examples:
     try:
         bootstrapper = DocBootstrapper(
             model=args.model,
-            max_tokens=args.max_tokens
+            max_tokens=args.max_tokens,
+            verbosity=args.verbosity,
+            reasoning_effort=args.reasoning_effort,
+            max_attempts=args.max_attempts,
         )
         bootstrapper.generate(pages, dry_run=args.dry_run)
     except ValueError as e:

@@ -3,6 +3,8 @@
  * Connects to backend endpoints for REAL logs, not fake placeholder shit
  */
 
+import { apiUrl } from '@/api/client';
+
 interface TerminalInstance {
   id: string;
   sse?: EventSource;
@@ -48,7 +50,7 @@ class TerminalServiceClass {
         qs.append(key, String(encoded));
       }
     });
-    const url = `${this.baseUrl}/api/eval/run/stream${qs.toString() ? `?${qs.toString()}` : ''}`;
+    const url = apiUrl(`/api/eval/run/stream${qs.toString() ? `?${qs.toString()}` : ''}`);
     console.log('[TerminalService] Creating EventSource for URL:', url);
 
     const sse = new EventSource(url);
@@ -148,7 +150,7 @@ class TerminalServiceClass {
     // Close existing connection if any
     this.disconnect(terminalId);
 
-    const url = `${this.baseUrl}/api/stream/${endpoint}`;
+    const url = apiUrl(`/api/stream/${endpoint}`);
     const sse = new EventSource(url);
 
     const terminal: TerminalInstance = {

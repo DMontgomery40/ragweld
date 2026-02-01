@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
+import time
 from collections import defaultdict
 from datetime import UTC, datetime
 from typing import Any, cast
@@ -12,6 +14,17 @@ from pgvector.asyncpg import register_vector
 from server.models.index import Chunk, IndexStats
 from server.models.retrieval import ChunkMatch
 from server.models.tribrid_config_model import ChunkSummariesLastBuild, ChunkSummary, VocabPreviewTerm
+
+# -----------------------------------------------------------------------------
+# Shared asyncpg pool caching (process-wide)
+#
+# This codebase creates PostgresClient instances in multiple places (API routes,
+# retrieval pipeline, config store). Creating a new asyncpg pool per instance is
+# expensive (connect handshake + schema init). We keep one pool per DSN and reuse
+# it across all PostgresClient instances.
+# -----------------------------------------------------------------------------
+_POOLS_BY_DSN: dict[str, asyncpg.Pool] = {}
+_POOL_LOCKS_BY_DSN: dict[str, asyncio.Lock] = {}
 
 
 def _coerce_jsonb_dict(value: Any) -> dict[str, Any]:
@@ -46,6 +59,7 @@ class PostgresClient:
     def __init__(self, connection_string: str):
         self.connection_string = connection_string
         self._pool: asyncpg.Pool | None = None
+        self._resolved_dsn: str | None = None
 
     # ---------------------------------------------------------------------
     # Connection + schema
@@ -56,18 +70,60 @@ class PostgresClient:
             return
 
         dsn = self._resolve_dsn(self.connection_string)
-        self._pool = await asyncpg.create_pool(dsn=dsn, min_size=1, max_size=10)
+        self._resolved_dsn = dsn
 
-        async with self._pool.acquire() as conn:
-            # Ensure extension exists before registering pgvector codecs.
-            await self._ensure_schema(conn)
-            await register_vector(conn)
+        # Fast path: pool already exists for this DSN (no locking needed).
+        existing = _POOLS_BY_DSN.get(dsn)
+        if existing is not None:
+            self._pool = existing
+            return
+
+        # Lazily create a lock per DSN (locks bind to the running loop).
+        lock = _POOL_LOCKS_BY_DSN.get(dsn)
+        if lock is None:
+            lock = asyncio.Lock()
+            _POOL_LOCKS_BY_DSN[dsn] = lock
+
+        async with lock:
+            pool = _POOLS_BY_DSN.get(dsn)
+            if pool is None:
+                pool = await asyncpg.create_pool(dsn=dsn, min_size=1, max_size=10)
+                try:
+                    async with pool.acquire() as conn:
+                        # Ensure extension exists before registering pgvector codecs.
+                        await self._ensure_schema(conn)
+                        await register_vector(conn)
+                except Exception:
+                    # Ensure we don't leave a half-initialized pool around.
+                    await pool.close()
+                    raise
+                _POOLS_BY_DSN[dsn] = pool
+
+            self._pool = pool
 
     async def disconnect(self) -> None:
+        # NOTE: Pools are shared per DSN. We intentionally do not close the
+        # process-wide pool on per-instance disconnect; many request paths call
+        # disconnect() and closing would destroy the performance benefit.
         if self._pool is None:
             return
-        await self._pool.close()
         self._pool = None
+        self._resolved_dsn = None
+
+    @classmethod
+    async def close_shared_pools(cls) -> None:
+        """Close all shared pools (best-effort).
+
+        Intended for tests/shutdown hooks. Production request paths should not
+        call this.
+        """
+        for dsn, pool in list(_POOLS_BY_DSN.items()):
+            try:
+                await pool.close()
+            except Exception:
+                pass
+        _POOLS_BY_DSN.clear()
+        _POOL_LOCKS_BY_DSN.clear()
 
     @staticmethod
     def _resolve_dsn(connection_string: str) -> str:
@@ -559,6 +615,144 @@ class PostgresClient:
             last_indexed=corpus["last_indexed"],
             file_breakdown=dict(breakdown),
         )
+
+    # ---------------------------------------------------------------------
+    # Dashboard storage metrics (bytes)
+    # ---------------------------------------------------------------------
+
+    _dashboard_storage_cache: dict[str, tuple[float, dict[str, int]]] = {}
+    _dashboard_storage_ttl_s: float = 30.0
+
+    async def get_dashboard_storage_breakdown(self, repo_id: str) -> dict[str, int]:
+        """Return a dashboard-oriented storage breakdown for a corpus (bytes).
+
+        The Dashboard polls frequently; keep this best-effort and cached.
+        """
+        repo_id = (repo_id or "").strip()
+        if not repo_id:
+            return {
+                "chunks_bytes": 0,
+                "embeddings_bytes": 0,
+                "pgvector_index_bytes": 0,
+                "bm25_index_bytes": 0,
+                "chunk_summaries_bytes": 0,
+            }
+
+        now = time.time()
+        cached = self._dashboard_storage_cache.get(repo_id)
+        if cached is not None:
+            ts, payload = cached
+            if now - ts <= float(self._dashboard_storage_ttl_s):
+                return dict(payload)
+
+        await self._require_pool()
+        assert self._pool is not None
+
+        async with self._pool.acquire() as conn:
+            # Chunks table: estimate corpus-scoped storage for core columns.
+            # We intentionally split out tsv (BM25) and embedding (dense) so the UI can
+            # present them as separate components.
+            chunks_row = await conn.fetchrow(
+                """
+                SELECT
+                  COUNT(*)::bigint AS chunk_rows,
+                  COALESCE(SUM(
+                    pg_column_size(chunk_id)
+                    + pg_column_size(file_path)
+                    + pg_column_size(start_line)
+                    + pg_column_size(end_line)
+                    + pg_column_size(language)
+                    + pg_column_size(token_count)
+                    + pg_column_size(content)
+                  ), 0)::bigint AS chunks_bytes,
+                  COUNT(*) FILTER (WHERE embedding IS NOT NULL)::bigint AS embedding_rows,
+                  COALESCE(SUM(pg_column_size(embedding)), 0)::bigint AS embeddings_bytes,
+                  COUNT(*) FILTER (WHERE tsv IS NOT NULL)::bigint AS tsv_rows,
+                  COALESCE(SUM(pg_column_size(tsv)), 0)::bigint AS tsv_bytes
+                FROM chunks
+                WHERE repo_id = $1;
+                """,
+                repo_id,
+            )
+
+            chunks_bytes = int(chunks_row["chunks_bytes"] or 0) if chunks_row else 0
+            embeddings_bytes = int(chunks_row["embeddings_bytes"] or 0) if chunks_row else 0
+            embedding_rows = int(chunks_row["embedding_rows"] or 0) if chunks_row else 0
+            tsv_rows = int(chunks_row["tsv_rows"] or 0) if chunks_row else 0
+            tsv_bytes = int(chunks_row["tsv_bytes"] or 0) if chunks_row else 0
+
+            # Chunk summaries table: corpus-scoped bytes.
+            summaries_row = await conn.fetchrow(
+                """
+                SELECT
+                  COALESCE(SUM(
+                    pg_column_size(chunk_id)
+                    + pg_column_size(file_path)
+                    + pg_column_size(start_line)
+                    + pg_column_size(end_line)
+                    + pg_column_size(purpose)
+                    + pg_column_size(symbols)
+                    + pg_column_size(technical_details)
+                    + pg_column_size(domain_concepts)
+                  ), 0)::bigint AS chunk_summaries_bytes
+                FROM chunk_summaries
+                WHERE repo_id = $1;
+                """,
+                repo_id,
+            )
+            chunk_summaries_bytes = int(summaries_row["chunk_summaries_bytes"] or 0) if summaries_row else 0
+
+            # Global counts for index allocation (shared indexes cannot be attributed directly per corpus).
+            totals_row = await conn.fetchrow(
+                """
+                SELECT
+                  COUNT(*) FILTER (WHERE embedding IS NOT NULL)::bigint AS embedding_rows_all,
+                  COUNT(*) FILTER (WHERE tsv IS NOT NULL)::bigint AS tsv_rows_all
+                FROM chunks;
+                """
+            )
+            embedding_rows_all = int(totals_row["embedding_rows_all"] or 0) if totals_row else 0
+            tsv_rows_all = int(totals_row["tsv_rows_all"] or 0) if totals_row else 0
+
+            # GIN BM25/FTS index size (shared). Allocate proportional to tsv rows.
+            gin_row = await conn.fetchrow(
+                """
+                SELECT COALESCE(pg_relation_size(c.oid), 0)::bigint AS bytes
+                FROM pg_class c
+                WHERE c.relname = 'idx_chunks_tsv'
+                LIMIT 1;
+                """
+            )
+            gin_total = int(gin_row["bytes"] or 0) if gin_row else 0
+            gin_alloc = 0
+            if gin_total > 0 and tsv_rows_all > 0 and tsv_rows > 0:
+                gin_alloc = int(round((gin_total * float(tsv_rows)) / float(tsv_rows_all)))
+
+            # Vector index size (if present). Allocate proportional to embedding rows.
+            vec_idx_row = await conn.fetchrow(
+                """
+                SELECT COALESCE(SUM(pg_relation_size(i.indexrelid)), 0)::bigint AS bytes
+                FROM pg_index i
+                JOIN pg_class t ON t.oid = i.indrelid
+                WHERE t.relname = 'chunks'
+                  AND pg_get_indexdef(i.indexrelid) ILIKE '%embedding%';
+                """
+            )
+            vec_idx_total = int(vec_idx_row["bytes"] or 0) if vec_idx_row else 0
+            vec_idx_alloc = 0
+            if vec_idx_total > 0 and embedding_rows_all > 0 and embedding_rows > 0:
+                vec_idx_alloc = int(round((vec_idx_total * float(embedding_rows)) / float(embedding_rows_all)))
+
+        bm25_index_bytes = int(tsv_bytes + gin_alloc)
+        out = {
+            "chunks_bytes": int(chunks_bytes),
+            "embeddings_bytes": int(embeddings_bytes),
+            "pgvector_index_bytes": int(vec_idx_alloc),
+            "bm25_index_bytes": int(bm25_index_bytes),
+            "chunk_summaries_bytes": int(chunk_summaries_bytes),
+        }
+        self._dashboard_storage_cache[repo_id] = (now, out)
+        return dict(out)
 
     # ---------------------------------------------------------------------
     # Corpus management (repo_id == corpus_id)

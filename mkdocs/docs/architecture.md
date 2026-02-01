@@ -1,138 +1,174 @@
+# Architecture
+
 <div class="grid chunk_summaries" markdown>
 
--   :material-magnify:{ .lg .middle } **Tri-Bridge Fusion**
+-   :material-source-branch:{ .lg .middle } **Tri-Path Retrieval**
 
     ---
 
-    Fusion engine merges signals from multiple retrievers
+    Vector, Sparse, and Graph retrievers run concurrently for maximum recall.
 
--   :material-database:{ .lg .middle } **Single Postgres Store**
-
-    ---
-
-    Embeddings (pgvector) + FTS for sparse search
-
--   :material-graph:{ .lg .middle } **Knowledge Graph**
+-   :material-shuffle-variant:{ .lg .middle } **Fusion Layer**
 
     ---
 
-    Neo4j holds entity nodes and relationships
+    Weighted fusion or RRF unifies heterogeneous scores into one ranking.
+
+-   :material-swap-vertical:{ .lg .middle } **Optional Reranker**
+
+    ---
+
+    Cross-encoder can refine the fused list by understanding local context.
+
+-   :material-cog:{ .lg .middle } **Pydantic-Orchestrated**
+
+    ---
+
+    All engine parameters are Pydantic fields with constraints and defaults.
+
+-   :material-rocket:{ .lg .middle } **FastAPI Surface**
+
+    ---
+
+    Clean endpoints for indexing, retrieval, graph queries, and system health.
+
+-   :material-chart-areaspline:{ .lg .middle } **Observability**
+
+    ---
+
+    Readiness + Prometheus metrics + PostgreSQL exporter.
 
 </div>
 
-!!! tip "Pro Tip"
-    Design UI controls only after adding fields to the Pydantic model. Generated TypeScript types drive the front-end stores.
+[Get started](index.md){ .md-button .md-button--primary }
+[Configuration](configuration.md){ .md-button }
+[API](api.md){ .md-button }
 
-!!! note "Implementation Note"
-    The derived TypeScript in web/src/types/generated.ts is auto-generated from server/models/tribrid_config_model.py.
+!!! tip "Pro Tip — Concurrency"
+    TriBridRAG parallelizes retrievers using asyncio. Keep DB connection pools sized adequately to avoid I/O starvation under concurrency.
 
-!!! danger "Critical"
-    The Pydantic schema is the source of truth. If it's missing a field, that feature does not exist.
+!!! note "Implementation Note — Failure Modes"
+    Each retriever is wrapped so failures degrade that path only. Fusion runs on the subset that succeeded, and `metadata.partial` flags can indicate a degraded answer.
 
-??? note "Collapsible: Architecture detail"
+!!! warning "Graph Availability"
+    If Neo4j is unavailable, retrieval still works with vector and sparse results. Ensure fallback behavior is tested for your deployment.
 
-    This section explains how repositories (corpora) map to storage and graph.
-
-
-## High-level architecture
+## System Diagram
 
 ```mermaid
 flowchart LR
-    User[User / UI] --> API[FastAPI Server]
-    API --> Postgres[(PostgreSQL + pgvector + FTS)]
-    API --> Neo4j[(Neo4j Graph DB)]
-    API --> Models[(LLM / Embedding Providers)]
-    Postgres --> Fusion[TriBridFusion]
-    Neo4j --> Fusion
-    Fusion --> Reranker[(Reranker Service)]
-    Reranker --> API
+    subgraph Client
+      U[User / UI / API Client]
+    end
+
+    U -->|HTTP| A[FastAPI]
+    A -->|async| V[VectorRetriever\nPostgres+pgvector]
+    A -->|async| S[SparseRetriever\nPostgres FTS/BM25]
+    A -->|async| G[GraphRetriever\nNeo4j]
+
+    V --> F[Fusion]
+    S --> F
+    G --> F
+
+    F -->|optional| R[Cross-Encoder Reranker]
+    F --> O[Results]
+    R --> O
+
+    subgraph Storage
+      P[(PostgreSQL)]
+      N[(Neo4j)]
+    end
+
+    V <--> P
+    S <--> P
+    G <--> N
 ```
 
+## Layer Responsibilities
 
-### Components and responsibilities
+| Layer | Module | Responsibilities | Key Config |
+|------|--------|------------------|------------|
+| Vector | `server/retrieval/vector.py` | Dense search via pgvector | `retrieval.vector.*` |
+| Sparse | `server/retrieval/sparse.py` | FTS/BM25 on chunks | `retrieval.sparse.*` |
+| Graph | `server/retrieval/graph.py` | Entity traversal, context expansion | `retrieval.graph.*` |
+| Fusion | `server/retrieval/fusion.py` | Merge scores (weighted or RRF) | `fusion.*` |
+| Reranker | `server/retrieval/rerank.py` | Cross-encoder ranking | `reranker.*` |
 
-| Component | Responsibility | Example Files |
-|-----------|----------------|---------------|
-| API Server | Exposes endpoints, orchestrates retrieval and indexing | server/api/*.py |
-| Postgres Index | Stores chunks, embeddings, FTS index | server/db/postgres.py |
-| Neo4j Graph | Stores entities, relationships, communities | server/db/neo4j.py |
-| Indexing | Chunking, embedding, summarization | server/indexing/* |
-| Retrieval | Vector, Sparse, Graph retrievers + Fusion | server/retrieval/* |
-
+## Hot Path Example
 
 === "Python"
     ```python
-    # (1) Example: wiring clients
-    from server.db.postgres import PostgresClient
-    from server.db.neo4j import Neo4jClient
+    from server.retrieval.fusion import TriBridFusion
 
-    pg = PostgresClient()
-    ng = Neo4jClient()
-
-    pg.connect() # (2)
-    ng.connect()
+    async def search(corpus_id: str, query: str, cfg):
+        fusion = TriBridFusion(cfg)                     # (1)
+        results = await fusion.search(corpus_id, query) # (2)
+        if cfg.reranker.enabled:
+            from server.retrieval.rerank import Reranker
+            rr = Reranker(cfg)
+            results = await rr.rerank(query, results)  # (3)
+        return results
     ```
 
 === "curl"
     ```bash
-    # (1) Ping health endpoint
-    curl http://localhost:8000/health
+    # High-level: Fusion + optional reranker is server-controlled by config.
+    curl -sS -X POST http://localhost:8000/search \
+      -H 'Content-Type: application/json' \
+      -d '{
+        "corpus_id": "tribrid",
+        "query": "database client architecture",
+        "top_k": 10,
+        "enable_reranker": true
+      }' | jq .
     ```
 
 === "TypeScript"
     ```typescript
-    // (1) Frontend reads types from generated.ts
-    import { TriBridConfig } from '../types/generated'
+    import { SearchRequest, SearchResponse } from "./web/src/types/generated";
 
-    // (2) useConfig() hook returns typed config
-    const cfg = useConfig()
+    export async function triSearch(req: SearchRequest): Promise<SearchResponse> {
+      const resp = await fetch("/search", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(req),
+      });
+      return await resp.json();
+    }
     ```
 
+1. `TriBridFusion` encapsulates running vector/sparse/graph in parallel
+2. Returns fused results, with per-source metadata for auditing
+3. Optional reranking pass
 
-1. Example annotations for code wiring
-2. Connect calls open DB connections
+!!! success "Separation of Concerns"
+    The fusion layer is agnostic of storage details. Retrievers expose a common interface returning scored matches with provenance.
 
+## Performance Considerations
 
-### Merits of tri-brid approach
-
-| Feature | Benefit | Notes |
-|---------|---------|-------|
-| Parallel retrieval | Better recall across query types | Vector=semantic, Sparse=identifiers, Graph=relationships |
-| Corpus isolation | Separate storage and graph per corpus | Use repo_id as corpus identifier |
-| Config-driven behavior | All thresholds, model choices are in Pydantic model | Ensures traceability |
-
-
-### Fusion flow (detailed)
+- Use HNSW or IVFFlat pgvector indexes depending on corpus size and update frequency.
+- Keep FTS indexes up to date after reindexing.
+- Neo4j memory (heap/pagecache) should be tuned for graph traversal fan-out.
+- Set Postgres and Neo4j connection pool sizes to match concurrency.
 
 ```mermaid
-sequenceDiagram
-    participant UI
-    participant API
-    participant Vector
-    participant Sparse
-    participant Graph
-    participant Fusion
-    participant Reranker
-    UI->>API: search(req)
-    API->>Vector: vector.search(req)
-    API->>Sparse: sparse.search(req)
-    API->>Graph: graph.search(req)
-    Vector-->>Fusion: vector_hits
-    Sparse-->>Fusion: sparse_hits
-    Graph-->>Fusion: graph_hits
-    Fusion->>Reranker: fused_candidates
-    Reranker-->>API: final_ranked
-    API-->>UI: results
+flowchart TB
+    subgraph Tuning Inputs
+      K[top_k]
+      W[weights]
+      RRF[rrf_k_div]
+      H[max_hops]
+    end
+
+    K --> FUSION
+    W --> FUSION
+    RRF --> FUSION
+    H --> GRAPH
+
+    GRAPH[GraphRetriever] --> FUSION[Fusion]
 ```
 
-
-- [x] Confirm DB connections
-- [x] Verify embeddings table exists
-- [ ] Tune fusion weights via config
-
-
-??? note "Collapsible: Design decisions"
-
-    - Corpus-first design isolates data per corpus for multi-tenant safety.
-    - No frontend type should be hand-written; generated types are the contract.
-
+??? note "Advanced: Caching Strategy"
+    - Retrieval cache key: `corpus_id + query + retriever config hash`.
+    - Expiration controlled by config; invalidate on reindex or config change.
+    - Cache entries store per-retriever scores and feature vectors for analysis.

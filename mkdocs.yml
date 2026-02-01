@@ -3,6 +3,7 @@ site_description: Tri-Brid Retrieval-Augmented Generation combining Vector, Spar
 site_url: https://dmontgomery40.github.io/tribrid-rag/
 repo_url: https://github.com/DMontgomery40/tribrid-rag
 repo_name: DMontgomery40/tribrid-rag
+edit_uri: edit/main/mkdocs/docs/
 copyright: Copyright &copy; 2025 TriBridRAG
 docs_dir: mkdocs/docs
 
@@ -27,23 +28,50 @@ theme:
     code: Roboto Mono
   features:
     - navigation.instant
+    - navigation.instant.progress
     - navigation.tracking
     - navigation.tabs
+    - navigation.tabs.sticky
     - navigation.sections
     - navigation.expand
+    - navigation.indexes
     - navigation.top
+    - navigation.footer
     - toc.follow
+    - toc.integrate
+    - header.autohide
     - content.code.copy
     - content.code.annotate
     - content.tabs.link
+    - content.tooltips
+    - content.action.edit
+    - content.action.view
     - search.suggest
     - search.highlight
+    - search.share
   icon:
     logo: material/vector-combine
     repo: fontawesome/brands/github
+    admonition:
+      note: material/note-text
+      info: material/information
+      tip: material/lightbulb
+      success: material/check-circle
+      warning: material/alert
+      danger: material/alert-circle
 
 plugins:
   - search
+  - mike
+  - git-revision-date-localized:
+      enable_creation_date: true
+      type: iso_datetime
+      strict: false
+  - minify:
+      minify_html: true
+      minify_js: true
+      minify_css: true
+  - glightbox
 
 markdown_extensions:
   - admonition
@@ -54,6 +82,8 @@ markdown_extensions:
       custom_checkbox: true
   - pymdownx.highlight:
       anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
   - pymdownx.inlinehilite
   - pymdownx.superfences:
       custom_fences:
@@ -74,16 +104,34 @@ extra:
   social:
     - icon: fontawesome/brands/github
       link: https://github.com/DMontgomery40/tribrid-rag
+  version:
+    provider: mike
+    default: latest
 
 extra_javascript:
-  - https://unpkg.com/mermaid@10/dist/mermaid.min.js
+  - https://unpkg.com/mermaid@11/dist/mermaid.min.js
+  - assets/js/mermaid-init.js
 
 nav:
   - Home: index.md
-  - Architecture: architecture.md
-  - Retrieval: retrieval/overview.md
+  - Architecture:
+      - Overview: architecture.md
+      - Health & metrics: architecture/health-metrics.md
+  - Retrieval:
+      - Overview: retrieval/overview.md
+  - Indexing: indexing.md
+  - Database: database.md
+  - Models: models.md
+  - Frontend: frontend.md
   - Configuration: configuration.md
   - API: api.md
-  - Indexing: indexing.md
-  - Deployment: deploy.md
+  - Operations: operations.md
+  - Deployment: deployment.md
+  - Security: security.md
+  - Troubleshooting: troubleshooting.md
+  - Guides:
+      - Corpus: guides/corpus.md
+      - Reranker: howto/reranker.md
+  - Dev:
+      - Pydantic: dev/pydantic.md
   - Glossary: glossary.md

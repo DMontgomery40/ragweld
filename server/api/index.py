@@ -6,6 +6,8 @@ import re
 from collections import defaultdict
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
+from functools import lru_cache
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -19,10 +21,35 @@ from server.indexing.graph_builder import GraphBuilder
 from server.indexing.loader import FileLoader
 from server.models.graph import Entity, Relationship
 from server.models.index import IndexRequest, IndexStats, IndexStatus
-from server.models.tribrid_config_model import CorpusScope, VocabPreviewResponse
+from server.models.tribrid_config_model import (
+    CorpusScope,
+    DashboardEmbeddingConfigSummary,
+    DashboardIndexCosts,
+    DashboardIndexStatsResponse,
+    DashboardIndexStatusMetadata,
+    DashboardIndexStatusResponse,
+    DashboardIndexStorageBreakdown,
+    VocabPreviewResponse,
+)
+from server.observability.metrics import (
+    CHUNKS_INDEXED_CURRENT,
+    GRAPH_ENTITIES_CURRENT,
+    GRAPH_RELATIONSHIPS_CURRENT,
+    INDEX_CHUNKS_CREATED_TOTAL,
+    INDEX_DURATION_SECONDS,
+    INDEX_ERRORS_TOTAL,
+    INDEX_FILES_PROCESSED_TOTAL,
+    INDEX_RUNS_TOTAL,
+    INDEX_STAGE_ERRORS_TOTAL,
+    INDEX_STAGE_LATENCY_SECONDS,
+    INDEX_TOKENS_TOTAL,
+)
 from server.services.config_store import get_config as load_scoped_config
 
 router = APIRouter(tags=["index"])
+
+# Ruff B008: avoid function calls in argument defaults (FastAPI Depends()).
+_CORPUS_SCOPE_DEP = Depends()
 
 _STATUS: dict[str, IndexStatus] = {}
 _STATS: dict[str, IndexStats] = {}
@@ -54,6 +81,135 @@ _SEM_STOPWORDS: set[str] = {
     "async",
     "await",
 }
+
+_MODELS_JSON_PATH = Path(__file__).parent.parent.parent / "data" / "models.json"
+
+
+@lru_cache(maxsize=1)
+def _load_models_json() -> list[dict[str, Any]]:
+    """Load models.json (THE LAW for model pricing/metadata)."""
+    try:
+        raw = json.loads(_MODELS_JSON_PATH.read_text())
+    except Exception:
+        return []
+    if isinstance(raw, dict) and isinstance(raw.get("models"), list):
+        return [m for m in raw["models"] if isinstance(m, dict)]
+    if isinstance(raw, list):
+        return [m for m in raw if isinstance(m, dict)]
+    return []
+
+
+def _estimate_embedding_cost_usd(*, provider: str, model: str, total_tokens: int) -> float | None:
+    """Estimate embedding cost from models.json (if pricing is available)."""
+    if total_tokens <= 0:
+        return 0.0
+    p = (provider or "").strip().lower()
+    mname = (model or "").strip()
+    if not p or not mname:
+        return None
+
+    for m in _load_models_json():
+        if str(m.get("provider", "")).strip().lower() != p:
+            continue
+        if str(m.get("model", "")).strip() != mname:
+            continue
+        comps = m.get("components") or []
+        if "EMB" not in comps:
+            continue
+        unit = str(m.get("unit") or "").strip()
+        embed_per_1k = m.get("embed_per_1k")
+        if unit != "1k_tokens" or embed_per_1k is None:
+            return None
+        try:
+            price = float(embed_per_1k)
+        except Exception:
+            return None
+        return (float(total_tokens) / 1000.0) * price
+    return None
+
+
+async def _resolve_dashboard_repo_id(scope: CorpusScope) -> str:
+    """Resolve a corpus_id for dashboard endpoints.
+
+    Priority:
+    1) explicit scope (corpus_id/repo_id/repo)
+    2) last started repo (legacy UX)
+    3) first corpus in Postgres (best-effort)
+    """
+    repo_id = (scope.resolved_repo_id or _LAST_STARTED_REPO or "").strip()
+    if repo_id:
+        return repo_id
+
+    # Best-effort fallback: first corpus in the registry.
+    cfg = await load_scoped_config(repo_id=None)
+    pg = PostgresClient(cfg.indexing.postgres_url)
+    await pg.connect()
+    try:
+        corpora = await pg.list_corpora()
+    finally:
+        await pg.disconnect()
+
+    if corpora:
+        rid = str(corpora[0].get("repo_id") or "").strip()
+        if rid:
+            return rid
+
+    raise HTTPException(
+        status_code=400,
+        detail="Missing corpus_id (or legacy repo/repo_id) query parameter and no corpora exist yet. Create a corpus first.",
+    )
+
+
+async def _compute_dashboard_storage_breakdown(*, repo_id: str) -> DashboardIndexStorageBreakdown:
+    """Compute a dashboard-friendly storage breakdown (bytes) for a corpus."""
+    cfg = await load_scoped_config(repo_id=repo_id)
+
+    # Postgres (pgvector + FTS + chunk_summaries)
+    pg = PostgresClient(cfg.indexing.postgres_url)
+    await pg.connect()
+    try:
+        breakdown = await pg.get_dashboard_storage_breakdown(repo_id)
+    finally:
+        await pg.disconnect()
+
+    # Neo4j (store size via JMX)
+    neo4j_store_bytes = 0
+    try:
+        db_name = cfg.graph_storage.resolve_database(repo_id)
+        neo4j = Neo4jClient(
+            cfg.graph_storage.neo4j_uri,
+            cfg.graph_storage.neo4j_user,
+            cfg.graph_storage.neo4j_password,
+            database=db_name,
+        )
+        await neo4j.connect()
+        try:
+            neo4j_store_bytes = int(await neo4j.get_store_size_bytes())
+        finally:
+            await neo4j.disconnect()
+    except Exception:
+        # Graph layer is optional; never fail dashboard rendering for missing graph.
+        neo4j_store_bytes = 0
+
+    chunks_bytes = int(breakdown.get("chunks_bytes") or 0)
+    embeddings_bytes = int(breakdown.get("embeddings_bytes") or 0)
+    pgvector_index_bytes = int(breakdown.get("pgvector_index_bytes") or 0)
+    bm25_index_bytes = int(breakdown.get("bm25_index_bytes") or 0)
+    chunk_summaries_bytes = int(breakdown.get("chunk_summaries_bytes") or 0)
+
+    postgres_total = chunks_bytes + embeddings_bytes + pgvector_index_bytes + bm25_index_bytes + chunk_summaries_bytes
+    total_storage = postgres_total + int(neo4j_store_bytes or 0)
+
+    return DashboardIndexStorageBreakdown(
+        chunks_bytes=chunks_bytes,
+        embeddings_bytes=embeddings_bytes,
+        pgvector_index_bytes=pgvector_index_bytes,
+        bm25_index_bytes=bm25_index_bytes,
+        chunk_summaries_bytes=chunk_summaries_bytes,
+        neo4j_store_bytes=int(neo4j_store_bytes or 0),
+        postgres_total_bytes=postgres_total,
+        total_storage_bytes=total_storage,
+    )
 
 
 def _emit_event(
@@ -259,7 +415,8 @@ async def _run_index(
 
     # Collect file paths once so we can report progress deterministically,
     # without loading every file's contents into memory.
-    file_entries = list(loader.iter_repo_files(repo_path))
+    with INDEX_STAGE_LATENCY_SECONDS.labels(stage="collect_file_paths").time():
+        file_entries = list(loader.iter_repo_files(repo_path))
     total_files = len(file_entries)
 
     # GraphBuilder consumes (path, content) and currently only supports Python AST.
@@ -328,8 +485,10 @@ async def _run_index(
             continue
 
         try:
-            content = abs_path.read_text(encoding="utf-8", errors="ignore")
+            with INDEX_STAGE_LATENCY_SECONDS.labels(stage="file_read").time():
+                content = abs_path.read_text(encoding="utf-8", errors="ignore")
         except Exception:
+            INDEX_STAGE_ERRORS_TOTAL.labels(stage="file_read").inc()
             continue
         # Postgres TEXT cannot store NUL bytes; treat as binary and skip.
         if "\x00" in content:
@@ -338,40 +497,69 @@ async def _run_index(
         if graph_builder is not None and rel_path.lower().endswith(".py"):
             graph_files.append((rel_path, content))
 
-        chunks = chunker.chunk_file(rel_path, content)
+        with INDEX_STAGE_LATENCY_SECONDS.labels(stage="chunk").time():
+            chunks = chunker.chunk_file(rel_path, content)
         chunks_for_semantic = chunks
         total_chunks += len(chunks)
-        total_tokens += sum(int(c.token_count or 0) for c in chunks)
+        chunk_tokens = sum(int(c.token_count or 0) for c in chunks)
+        total_tokens += chunk_tokens
+        INDEX_FILES_PROCESSED_TOTAL.inc()
+        INDEX_CHUNKS_CREATED_TOTAL.inc(len(chunks))
+        INDEX_TOKENS_TOTAL.inc(chunk_tokens)
 
         if skip_dense:
-            await postgres.upsert_fts(repo_id, chunks, ts_config=cfg.indexing.postgres_ts_config)
+            try:
+                with INDEX_STAGE_LATENCY_SECONDS.labels(stage="postgres_upsert_fts").time():
+                    await postgres.upsert_fts(repo_id, chunks, ts_config=cfg.indexing.postgres_ts_config)
+            except Exception:
+                INDEX_STAGE_ERRORS_TOTAL.labels(stage="postgres_upsert_fts").inc()
+                raise
             if neo4j is not None and cfg.graph_indexing.build_lexical_graph:
                 try:
-                    await neo4j.upsert_document_and_chunks(
-                        repo_id,
-                        rel_path,
-                        chunks,
-                        store_embeddings=False,
-                        embedding_property=cfg.graph_indexing.chunk_embedding_property,
-                    )
+                    with INDEX_STAGE_LATENCY_SECONDS.labels(stage="neo4j_upsert_document_chunks").time():
+                        await neo4j.upsert_document_and_chunks(
+                            repo_id,
+                            rel_path,
+                            chunks,
+                            store_embeddings=False,
+                            embedding_property=cfg.graph_indexing.chunk_embedding_property,
+                        )
                 except Exception:
+                    INDEX_STAGE_ERRORS_TOTAL.labels(stage="neo4j_upsert_document_chunks").inc()
                     pass
         else:
             assert embedder is not None
-            embedded = await embedder.embed_chunks(chunks)
+            try:
+                with INDEX_STAGE_LATENCY_SECONDS.labels(stage="embed_chunks").time():
+                    embedded = await embedder.embed_chunks(chunks)
+            except Exception:
+                INDEX_STAGE_ERRORS_TOTAL.labels(stage="embed_chunks").inc()
+                raise
             chunks_for_semantic = embedded
-            await postgres.upsert_embeddings(repo_id, embedded)
-            await postgres.upsert_fts(repo_id, embedded, ts_config=cfg.indexing.postgres_ts_config)
+            try:
+                with INDEX_STAGE_LATENCY_SECONDS.labels(stage="postgres_upsert_embeddings").time():
+                    await postgres.upsert_embeddings(repo_id, embedded)
+            except Exception:
+                INDEX_STAGE_ERRORS_TOTAL.labels(stage="postgres_upsert_embeddings").inc()
+                raise
+            try:
+                with INDEX_STAGE_LATENCY_SECONDS.labels(stage="postgres_upsert_fts").time():
+                    await postgres.upsert_fts(repo_id, embedded, ts_config=cfg.indexing.postgres_ts_config)
+            except Exception:
+                INDEX_STAGE_ERRORS_TOTAL.labels(stage="postgres_upsert_fts").inc()
+                raise
             if neo4j is not None and cfg.graph_indexing.build_lexical_graph:
                 try:
-                    await neo4j.upsert_document_and_chunks(
-                        repo_id,
-                        rel_path,
-                        embedded,
-                        store_embeddings=bool(cfg.graph_indexing.store_chunk_embeddings),
-                        embedding_property=cfg.graph_indexing.chunk_embedding_property,
-                    )
+                    with INDEX_STAGE_LATENCY_SECONDS.labels(stage="neo4j_upsert_document_chunks").time():
+                        await neo4j.upsert_document_and_chunks(
+                            repo_id,
+                            rel_path,
+                            embedded,
+                            store_embeddings=bool(cfg.graph_indexing.store_chunk_embeddings),
+                            embedding_property=cfg.graph_indexing.chunk_embedding_property,
+                        )
                 except Exception:
+                    INDEX_STAGE_ERRORS_TOTAL.labels(stage="neo4j_upsert_document_chunks").inc()
                     pass
 
         # Optional semantic KG extraction (concept entities + related_to edges linked to chunk_ids).
@@ -392,10 +580,10 @@ async def _run_index(
                 llm_timeout_s = float(cfg.graph_indexing.semantic_kg_llm_timeout_s)
                 llm_max_chars = int(cfg.enrichment.enrich_max_chars)
 
-                def _norm_concept(name: str) -> str | None:
+                def _norm_concept(name: str, *, _min_len: int = min_len) -> str | None:
                     v = (name or "").strip().lower()
                     v = re.sub(r"[^a-z0-9_]+", "_", v).strip("_")
-                    if len(v) < min_len:
+                    if len(v) < _min_len:
                         return None
                     if v in _SEM_STOPWORDS:
                         return None
@@ -511,15 +699,19 @@ async def _run_index(
                                     break
 
                 if concept_entities:
-                    await neo4j.upsert_entities(repo_id, list(concept_entities.values()))
+                    with INDEX_STAGE_LATENCY_SECONDS.labels(stage="neo4j_upsert_semantic_entities").time():
+                        await neo4j.upsert_entities(repo_id, list(concept_entities.values()))
                 if rels:
-                    await neo4j.upsert_relationships(repo_id, rels)
+                    with INDEX_STAGE_LATENCY_SECONDS.labels(stage="neo4j_upsert_semantic_relationships").time():
+                        await neo4j.upsert_relationships(repo_id, rels)
                 if link_set:
-                    await neo4j.link_entities_to_chunks(
-                        repo_id,
-                        links=[{"entity_id": eid, "chunk_id": cid} for (eid, cid) in sorted(link_set)],
-                    )
+                    with INDEX_STAGE_LATENCY_SECONDS.labels(stage="neo4j_link_entities_to_chunks").time():
+                        await neo4j.link_entities_to_chunks(
+                            repo_id,
+                            links=[{"entity_id": eid, "chunk_id": cid} for (eid, cid) in sorted(link_set)],
+                        )
             except Exception:
+                INDEX_STAGE_ERRORS_TOTAL.labels(stage="semantic_kg").inc()
                 # Semantic KG is optional; never block baseline indexing.
                 pass
 
@@ -531,15 +723,18 @@ async def _run_index(
                     {"type": "log", "message": "🧠 Building Neo4j graph (entities + relationships)..."},
                     drop_oldest=True,
                 )
-            await graph_builder.build_graph_for_files(
-                repo_id,
-                graph_files,
-                batch_size=int(cfg.indexing.indexing_batch_size),
-            )
+            with INDEX_STAGE_LATENCY_SECONDS.labels(stage="graph_build").time():
+                await graph_builder.build_graph_for_files(
+                    repo_id,
+                    graph_files,
+                    batch_size=int(cfg.indexing.indexing_batch_size),
+                )
             # Link entities to chunk_ids so the graph leg can hydrate deterministically.
             if neo4j is not None and cfg.graph_indexing.build_lexical_graph:
-                await neo4j.rebuild_entity_chunk_links(repo_id)
+                with INDEX_STAGE_LATENCY_SECONDS.labels(stage="neo4j_rebuild_entity_chunk_links").time():
+                    await neo4j.rebuild_entity_chunk_links(repo_id)
         except Exception:
+            INDEX_STAGE_ERRORS_TOTAL.labels(stage="graph_build").inc()
             # Do not fail indexing if graph extraction is partial.
             pass
 
@@ -565,13 +760,43 @@ async def _background_index_job(request: IndexRequest, queue: asyncio.Queue[dict
     repo_id = request.repo_id
     started_at = datetime.now(UTC)
     try:
+        INDEX_RUNS_TOTAL.inc()
         _emit_event(queue, {"type": "log", "message": f"🚀 Indexing started: {repo_id}"}, drop_oldest=True)
-        await _run_index(
-            repo_id,
-            request.repo_path,
-            request.force_reindex,
-            event_queue=queue,
-        )
+        with INDEX_DURATION_SECONDS.time():
+            stats = await _run_index(
+                repo_id,
+                request.repo_path,
+                request.force_reindex,
+                event_queue=queue,
+            )
+        # Update process-level “size” gauges (best-effort; no per-corpus labels).
+        try:
+            CHUNKS_INDEXED_CURRENT.set(int(getattr(stats, "total_chunks", 0) or 0))
+        except Exception:
+            pass
+        try:
+            cfg = await load_scoped_config(repo_id=repo_id)
+            if not cfg.graph_indexing.enabled:
+                GRAPH_ENTITIES_CURRENT.set(0)
+                GRAPH_RELATIONSHIPS_CURRENT.set(0)
+            else:
+                db_name = cfg.graph_storage.resolve_database(repo_id)
+                neo4j = Neo4jClient(
+                    cfg.graph_storage.neo4j_uri,
+                    cfg.graph_storage.neo4j_user,
+                    cfg.graph_storage.neo4j_password,
+                    database=db_name,
+                )
+                await neo4j.connect()
+                try:
+                    gstats = await neo4j.get_graph_stats(repo_id)
+                    GRAPH_ENTITIES_CURRENT.set(int(getattr(gstats, "total_entities", 0) or 0))
+                    GRAPH_RELATIONSHIPS_CURRENT.set(int(getattr(gstats, "total_relationships", 0) or 0))
+                finally:
+                    await neo4j.disconnect()
+        except Exception:
+            # Never fail indexing due to gauge update issues.
+            pass
         _STATUS[repo_id] = IndexStatus(
             repo_id=repo_id,
             status="complete",
@@ -582,6 +807,7 @@ async def _background_index_job(request: IndexRequest, queue: asyncio.Queue[dict
         )
         _emit_event(queue, {"type": "complete", "message": "✓ Indexing complete"}, guarantee=True)
     except Exception as e:
+        INDEX_ERRORS_TOTAL.inc()
         prev = _STATUS.get(repo_id)
         _STATUS[repo_id] = IndexStatus(
             repo_id=repo_id,
@@ -648,6 +874,127 @@ async def start_index_compat(payload: dict[str, Any] | None = None) -> IndexStat
     return await start_index(IndexRequest(repo_id=repo_id, repo_path=repo_path, force_reindex=force_reindex))
 
 
+@router.get("/index/status", response_model=DashboardIndexStatusResponse)
+async def get_dashboard_index_status(scope: CorpusScope = _CORPUS_SCOPE_DEP) -> DashboardIndexStatusResponse:
+    """Dashboard index summary (legacy-compatible endpoint).
+
+    This endpoint exists for the Dashboard System tab's full index summary panel.
+    It is distinct from the corpus-scoped `/api/index/{corpus_id}/status` endpoint.
+    """
+    repo_id = await _resolve_dashboard_repo_id(scope)
+
+    # In-memory indexing state (best-effort; only present for this process)
+    s = _STATUS.get(repo_id)
+    running = bool(repo_id in _TASKS) or (s is not None and s.status == "indexing")
+    progress = float(s.progress) if s is not None else None
+    current_file = s.current_file if s is not None else None
+
+    # Corpus metadata (name/branch/keywords)
+    cfg_global = await load_scoped_config(repo_id=None)
+    pg = PostgresClient(cfg_global.indexing.postgres_url)
+    await pg.connect()
+    try:
+        corpus = await pg.get_corpus(repo_id)
+    finally:
+        await pg.disconnect()
+
+    current_repo = str((corpus or {}).get("name") or repo_id)
+    meta = (corpus or {}).get("meta") or {}
+    current_branch = str(meta.get("branch") or "") or None
+    keywords = meta.get("keywords") if isinstance(meta, dict) else None
+    keywords_count = len(keywords) if isinstance(keywords, list) else 0
+
+    # Config + costs + storage breakdown (best-effort)
+    cfg = await load_scoped_config(repo_id=repo_id)
+    embedding_model = cfg.embedding.effective_model
+    embedding_provider = cfg.embedding.embedding_type
+    embedding_dim = int(cfg.embedding.embedding_dim)
+    total_tokens = 0
+    try:
+        pg2 = PostgresClient(cfg.indexing.postgres_url)
+        await pg2.connect()
+        try:
+            stats = await pg2.get_index_stats(repo_id)
+            total_tokens = int(stats.total_tokens or 0)
+        finally:
+            await pg2.disconnect()
+    except Exception:
+        total_tokens = 0
+
+    embedding_cost = _estimate_embedding_cost_usd(
+        provider=embedding_provider,
+        model=embedding_model,
+        total_tokens=total_tokens,
+    )
+
+    storage_breakdown = await _compute_dashboard_storage_breakdown(repo_id=repo_id)
+
+    metadata = DashboardIndexStatusMetadata(
+        repo_id=repo_id,
+        current_repo=current_repo,
+        current_branch=current_branch,
+        timestamp=datetime.now(UTC),
+        embedding_config=DashboardEmbeddingConfigSummary(
+            provider=embedding_provider,
+            model=embedding_model,
+            dimensions=embedding_dim,
+            precision="float32",
+        ),
+        costs=DashboardIndexCosts(total_tokens=total_tokens, embedding_cost=embedding_cost),
+        storage_breakdown=storage_breakdown,
+        keywords_count=keywords_count,
+        total_storage=int(storage_breakdown.total_storage_bytes),
+    )
+
+    lines: list[str] = []
+    if s is not None and s.status == "error":
+        lines = [f"Index error: {s.error or 'unknown error'}"]
+    elif running:
+        pct = int((progress or 0.0) * 100)
+        lines = [f"Indexing… {pct}%"]
+        if current_file:
+            lines.append(current_file)
+    elif s is not None and s.status == "complete":
+        lines = ["✓ Indexing complete"]
+    else:
+        lines = ["Ready to index…"]
+
+    return DashboardIndexStatusResponse(
+        lines=lines,
+        metadata=metadata,
+        running=running,
+        progress=progress,
+        current_file=current_file,
+    )
+
+
+@router.get("/index/stats", response_model=DashboardIndexStatsResponse)
+async def get_dashboard_index_stats(scope: CorpusScope = _CORPUS_SCOPE_DEP) -> DashboardIndexStatsResponse:
+    """Dashboard storage metrics (legacy-compatible endpoint)."""
+    repo_id = await _resolve_dashboard_repo_id(scope)
+
+    cfg_global = await load_scoped_config(repo_id=None)
+    pg = PostgresClient(cfg_global.indexing.postgres_url)
+    await pg.connect()
+    try:
+        corpus = await pg.get_corpus(repo_id)
+    finally:
+        await pg.disconnect()
+
+    meta = (corpus or {}).get("meta") or {}
+    keywords = meta.get("keywords") if isinstance(meta, dict) else None
+    keywords_count = len(keywords) if isinstance(keywords, list) else 0
+
+    storage_breakdown = await _compute_dashboard_storage_breakdown(repo_id=repo_id)
+
+    return DashboardIndexStatsResponse(
+        repo_id=repo_id,
+        storage_breakdown=storage_breakdown,
+        keywords_count=keywords_count,
+        total_storage=int(storage_breakdown.total_storage_bytes),
+    )
+
+
 @router.get("/index/{corpus_id}/status", response_model=IndexStatus)
 async def get_index_status(corpus_id: str) -> IndexStatus:
     repo_id = corpus_id
@@ -705,6 +1052,14 @@ async def delete_index(corpus_id: str) -> dict[str, Any]:
         pass
     _STATUS.pop(repo_id, None)
     _STATS.pop(repo_id, None)
+    # Best-effort gauges (process-level; no per-corpus labels).
+    # Reset to zero to avoid stale dashboards in single-corpus dev flows.
+    try:
+        CHUNKS_INDEXED_CURRENT.set(0)
+        GRAPH_ENTITIES_CURRENT.set(0)
+        GRAPH_RELATIONSHIPS_CURRENT.set(0)
+    except Exception:
+        pass
     return {
         "ok": True,
         "deleted_chunks": deleted_rows,
@@ -715,7 +1070,7 @@ async def delete_index(corpus_id: str) -> dict[str, Any]:
 
 @router.get("/index/vocab-preview", response_model=VocabPreviewResponse)
 async def get_vocab_preview(
-    scope: CorpusScope = Depends(),
+    scope: CorpusScope = _CORPUS_SCOPE_DEP,
     top_n: int = Query(default=100, ge=10, le=500, description="Number of top terms to return"),
 ) -> VocabPreviewResponse:
     """Return a vocabulary preview from Postgres FTS (chunks.tsv).
@@ -748,7 +1103,7 @@ async def get_vocab_preview(
 
 
 @router.get("/stream/operations/index")
-async def stream_index_operation(scope: CorpusScope = Depends()) -> StreamingResponse:
+async def stream_index_operation(scope: CorpusScope = _CORPUS_SCOPE_DEP) -> StreamingResponse:
     """SSE stream for indexing logs/progress (TerminalService.streamOperation compatibility)."""
     repo_id = (scope.resolved_repo_id or _LAST_STARTED_REPO or "").strip()
     if not repo_id:

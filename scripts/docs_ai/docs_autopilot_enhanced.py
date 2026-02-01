@@ -374,8 +374,12 @@ class EnhancedDocsAutopilot:
     def _create_system_prompt(self) -> str:
         """Create the system prompt for the LLM"""
         return """You are an expert technical documentation writer for TriBridRAG, a tri-brid
-Retrieval-Augmented Generation engine. You MUST create documentation that extensively uses
-Material for MkDocs features.
+Retrieval-Augmented Generation engine.
+
+Write **extremely detailed, high-signal, deeply technical** documentation. This is not marketing
+copy. Assume the reader is an engineer who will run, debug, extend, and operate this system.
+
+You MUST create documentation that extensively uses Material for MkDocs features.
 
 ## TRIBRIDRAG ARCHITECTURE
 
@@ -465,7 +469,7 @@ def search(query: str, repo_id: str): # (1)
 | Graph Search | Neo4j traversal | ✅ Active |
 
 ### 5. GRIDS (Use for feature showcases!)
-<div class="grid cards" markdown>
+<div class="grid chunk_summaries" markdown>
 
 -   :material-vector-combine:{ .lg .middle } **Tri-Brid Retrieval**
 
@@ -522,13 +526,22 @@ flowchart LR
   - [x] Completed task
   - [ ] Pending task
 
+### 10. QUICK LINKS (Material buttons)
+Include a short “Quick links” block near the top of every page:
+
+[Get started](index.md){ .md-button .md-button--primary }
+[Configuration](configuration.md){ .md-button }
+[API](api.md){ .md-button }
+
+Adjust relative paths correctly for the page location (e.g., a nested page should use `../index.md`).
+
 ## DOCUMENTATION REQUIREMENTS:
 1. EVERY page must have at least 3 admonitions
 2. EVERY code example must use tabs for multiple languages
 3. EVERY complex topic must have a Mermaid diagram
 4. EVERY configuration must use a data table
-5. EVERY feature list must use grid cards
-6. Focus on user-facing features, not internal implementation
+5. EVERY feature list must use a grid (`<div class="grid chunk_summaries" markdown>`)
+6. Include internal implementation details where operationally relevant (request/response shapes, config flow, pipeline stages, caching, metrics, failure modes)
 7. Write for dyslexic-friendly reading (visual breaks, clear sections)
 8. Exclude internal plans, phase numbers, development details
 9. NEVER mention Qdrant, Redis, LangChain, or other banned terms
@@ -706,11 +719,17 @@ visual enhancement!"""
             "Content-Type": "application/json",
         }
 
-        # Primary and fallback models (GPT-5 era)
-        primary_model = os.getenv("OPENAI_MODEL", "gpt-5-mini-2025-08-07")
-        fallback_model = "gpt-4o"
+        # Primary and fallback models (GPT-5 only)
+        primary_model = os.getenv("OPENAI_MODEL", "gpt-5")
+        fallback_model = os.getenv("OPENAI_FALLBACK_MODEL", "gpt-5-2025-08-07")
+        if not primary_model.startswith("gpt-5"):
+            raise ValueError(f"OPENAI_MODEL must be GPT-5 (got: {primary_model})")
+        if fallback_model and not fallback_model.startswith("gpt-5"):
+            raise ValueError(f"OPENAI_FALLBACK_MODEL must be GPT-5 (got: {fallback_model})")
 
         def build_payload(model: str) -> Dict[str, Any]:
+            if not model.startswith("gpt-5"):
+                raise ValueError(f"Model must be GPT-5 (got: {model})")
             base = {
                 "model": model,
                 "input": [
@@ -718,17 +737,10 @@ visual enhancement!"""
                     {"role": "user", "content": user_prompt},
                 ],
             }
-            # GPT-5 models don't need/support legacy sampling params
-            if not model.startswith("gpt-5"):
-                base.update(
-                    {
-                        "temperature": 0.7,
-                        "top_p": 0.95,
-                        "frequency_penalty": 0.3,
-                        "presence_penalty": 0.3,
-                        "max_output_tokens": 16000,
-                    }
-                )
+            # GPT-5 models use new controls
+            base["text"] = {"verbosity": os.getenv("OPENAI_VERBOSITY", "high")}
+            base["reasoning"] = {"effort": os.getenv("OPENAI_REASONING_EFFORT", "high")}
+            base["max_output_tokens"] = int(os.getenv("OPENAI_MAX_OUTPUT_TOKENS", "32000"))
             return base
 
         def post_with_retries(model: str, attempts: int = 4, base_delay: float = 5.0) -> Optional[str]:
@@ -736,7 +748,8 @@ visual enhancement!"""
             payload = build_payload(model)
             for i in range(attempts):
                 try:
-                    resp = requests.post(url, headers=headers, json=payload, timeout=180)
+                    timeout_s = int(os.getenv("OPENAI_HTTP_TIMEOUT_SECONDS", "900"))
+                    resp = requests.post(url, headers=headers, json=payload, timeout=timeout_s)
                     if resp.status_code == 429:
                         raise HTTPError("429 Too Many Requests", response=resp)
                     resp.raise_for_status()
@@ -784,9 +797,9 @@ visual enhancement!"""
                     time.sleep(wait)
             return None
 
-        # Try primary, then fallback
+        # Try primary, then fallback (GPT-5 only)
         resp_text = post_with_retries(primary_model)
-        if resp_text is None:
+        if resp_text is None and fallback_model:
             print(f"Attempting fallback with {fallback_model}...")
             resp_text = post_with_retries(fallback_model)
 
@@ -1339,8 +1352,8 @@ def main():
     # autopilot.write_mkdocs_config(config)
     print("\n⚙️ mkdocs.yml update skipped (managed manually)")
 
-    print("\n🔧 Creating GitHub workflow...")
-    autopilot.create_github_workflow()
+    # Workflows are managed in-repo; do not rewrite from this script.
+    print("\n🔧 GitHub workflow update skipped (managed manually)")
 
     print("\n" + "=" * 60)
     print("✅ Documentation automation setup complete!")

@@ -86,6 +86,49 @@ Each search method compensates for the others' weaknesses. The result: **dramati
 
 ---
 
+## Performance
+
+TriBridRAG measures real pipeline latency and throughput via **Prometheus + Grafana** (see dashboards `tribrid-overview` and `tribrid-rag-metrics`). For reproducible local benchmarking (index + search), use the built-in benchmark runner.
+
+### Reproducible benchmark (index + search)
+
+Prereqs:
+
+```bash
+docker compose up -d postgres neo4j
+# If using the docker-compose defaults:
+export NEO4J_PASSWORD=password
+```
+
+Run:
+
+```bash
+uv run scripts/benchmark_perf.py --corpus-id tribrid-rag --corpus-path . --force-reindex --iterations 5 --warmup 1
+```
+
+This prints **Markdown + JSON** summary you can paste into docs/PRs.
+
+### Latest benchmark (local dev run)
+
+Generated on `2026-02-01` with the command above (vector+sparse+graph enabled, `final_k=10`).
+
+| Operation | Performance | Notes |
+|---|---:|---|
+| Indexing | 419.0s | 497 files, 8,753 chunks, 702,647 tokens |
+| Search (tri-brid) | p50 459ms, p95 487ms | 25 calls (5 queries × 5 iters), ~1.62 QPS |
+
+Per-query (ms):
+
+| Query | p50 | p95 | mean |
+|---|---:|---:|---:|
+| authentication flow | 373.5 | 758.5 | 449.6 |
+| prometheus metrics endpoint /metrics | 462.5 | 484.9 | 466.5 |
+| neo4j graph retrieval mode | 461.6 | 487.1 | 467.5 |
+| where is /api/search implemented | 449.4 | 458.7 | 450.0 |
+| fusion rrf_k parameter | 471.0 | 483.0 | 465.9 |
+
+---
+
 ## Quick Start
 
 ### Prerequisites
@@ -528,7 +571,7 @@ cd web && npx playwright test
 | Service | URL | Credentials |
 |---------|-----|-------------|
 | API Docs | http://localhost:8012/docs | - |
-| Grafana | http://localhost:3000 | admin/admin |
+| Grafana | http://localhost:3001 | admin/admin |
 | Prometheus | http://localhost:9090 | - |
 | Neo4j Browser | http://localhost:7474 | neo4j/password |
 

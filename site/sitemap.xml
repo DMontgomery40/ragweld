@@ -2,38 +2,78 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
     <url>
          <loc>https://dmontgomery40.github.io/tribrid-rag/</loc>
-         <lastmod>2026-01-31</lastmod>
+         <lastmod>2026-02-01</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/tribrid-rag/api/</loc>
-         <lastmod>2026-01-31</lastmod>
+         <lastmod>2026-02-01</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/tribrid-rag/architecture/</loc>
-         <lastmod>2026-01-31</lastmod>
+         <lastmod>2026-02-01</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/tribrid-rag/configuration/</loc>
-         <lastmod>2026-01-31</lastmod>
+         <lastmod>2026-02-01</lastmod>
     </url>
     <url>
-         <loc>https://dmontgomery40.github.io/tribrid-rag/deploy/</loc>
-         <lastmod>2026-01-31</lastmod>
+         <loc>https://dmontgomery40.github.io/tribrid-rag/database/</loc>
+         <lastmod>2026-02-01</lastmod>
+    </url>
+    <url>
+         <loc>https://dmontgomery40.github.io/tribrid-rag/deployment/</loc>
+         <lastmod>2026-02-01</lastmod>
+    </url>
+    <url>
+         <loc>https://dmontgomery40.github.io/tribrid-rag/frontend/</loc>
+         <lastmod>2026-02-01</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/tribrid-rag/glossary/</loc>
-         <lastmod>2026-01-31</lastmod>
+         <lastmod>2026-02-01</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/tribrid-rag/indexing/</loc>
-         <lastmod>2026-01-31</lastmod>
+         <lastmod>2026-02-01</lastmod>
+    </url>
+    <url>
+         <loc>https://dmontgomery40.github.io/tribrid-rag/models/</loc>
+         <lastmod>2026-02-01</lastmod>
+    </url>
+    <url>
+         <loc>https://dmontgomery40.github.io/tribrid-rag/operations/</loc>
+         <lastmod>2026-02-01</lastmod>
+    </url>
+    <url>
+         <loc>https://dmontgomery40.github.io/tribrid-rag/security/</loc>
+         <lastmod>2026-02-01</lastmod>
+    </url>
+    <url>
+         <loc>https://dmontgomery40.github.io/tribrid-rag/troubleshooting/</loc>
+         <lastmod>2026-02-01</lastmod>
+    </url>
+    <url>
+         <loc>https://dmontgomery40.github.io/tribrid-rag/architecture/health-metrics/</loc>
+         <lastmod>2026-02-01</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/tribrid-rag/assets/images/</loc>
-         <lastmod>2026-01-31</lastmod>
+         <lastmod>2026-02-01</lastmod>
+    </url>
+    <url>
+         <loc>https://dmontgomery40.github.io/tribrid-rag/dev/pydantic/</loc>
+         <lastmod>2026-02-01</lastmod>
+    </url>
+    <url>
+         <loc>https://dmontgomery40.github.io/tribrid-rag/guides/corpus/</loc>
+         <lastmod>2026-02-01</lastmod>
+    </url>
+    <url>
+         <loc>https://dmontgomery40.github.io/tribrid-rag/howto/reranker/</loc>
+         <lastmod>2026-02-01</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/tribrid-rag/retrieval/overview/</loc>
-         <lastmod>2026-01-31</lastmod>
+         <lastmod>2026-02-01</lastmod>
     </url>
 </urlset>

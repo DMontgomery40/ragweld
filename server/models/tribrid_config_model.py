@@ -87,6 +87,142 @@ class IndexStats(BaseModel):
     file_breakdown: dict[str, int] = Field(default_factory=dict, description="Count by file extension")
 
 
+# =============================================================================
+# DASHBOARD MODELS - Index summary + storage breakdown
+# =============================================================================
+
+
+class DashboardIndexStorageBreakdown(BaseModel):
+    """Storage breakdown for the Dashboard index summary (bytes).
+
+    NOTE:
+    - Values are best-effort and may be allocated/estimated when a storage
+      component cannot be attributed to a single corpus directly (e.g., shared
+      Postgres indexes).
+    """
+
+    chunks_bytes: int = Field(
+        default=0,
+        ge=0,
+        description="Bytes used by chunk content + metadata in Postgres (corpus-scoped).",
+    )
+    embeddings_bytes: int = Field(
+        default=0,
+        ge=0,
+        description="Bytes used by stored embeddings in Postgres (corpus-scoped).",
+    )
+    pgvector_index_bytes: int = Field(
+        default=0,
+        ge=0,
+        description="Bytes used by pgvector index structures (0 if not created; may be allocated/estimated).",
+    )
+    bm25_index_bytes: int = Field(
+        default=0,
+        ge=0,
+        description="Allocated bytes for Postgres full-text (BM25/FTS) index (may be allocated/estimated).",
+    )
+    chunk_summaries_bytes: int = Field(
+        default=0,
+        ge=0,
+        description="Bytes used by chunk_summaries in Postgres (corpus-scoped).",
+    )
+    neo4j_store_bytes: int = Field(
+        default=0,
+        ge=0,
+        description="Total Neo4j store size for the resolved database (bytes).",
+    )
+
+    postgres_total_bytes: int = Field(
+        default=0,
+        ge=0,
+        description="Total Postgres bytes (sum of Postgres components, including allocations).",
+    )
+    total_storage_bytes: int = Field(
+        default=0,
+        ge=0,
+        description="Total storage bytes across Postgres + Neo4j.",
+    )
+
+
+class DashboardEmbeddingConfigSummary(BaseModel):
+    """Embedding configuration summary for dashboard display."""
+
+    provider: str | None = Field(default=None, description="Embedding provider (embedding.embedding_type).")
+    model: str | None = Field(default=None, description="Effective embedding model name.")
+    dimensions: int | None = Field(default=None, ge=1, description="Embedding vector dimensions.")
+    precision: str | None = Field(
+        default=None,
+        description="Storage precision label (e.g., float32).",
+    )
+
+
+class DashboardIndexCosts(BaseModel):
+    """Indexing cost summary for dashboard display."""
+
+    total_tokens: int = Field(default=0, ge=0, description="Total tokens processed during indexing.")
+    embedding_cost: float | None = Field(
+        default=None,
+        ge=0.0,
+        description="Estimated embedding cost (USD) when pricing data is available.",
+    )
+
+
+class DashboardIndexStatusMetadata(BaseModel):
+    """Metadata payload for the dashboard index status panel."""
+
+    repo_id: str = Field(
+        description="Corpus identifier",
+        validation_alias=AliasChoices("repo_id", "corpus_id"),
+        serialization_alias="corpus_id",
+    )
+    current_repo: str = Field(description="Display name for the active corpus.")
+    current_branch: str | None = Field(default=None, description="Current git branch for the corpus (if available).")
+    timestamp: datetime = Field(description="Timestamp for this status snapshot (UTC).")
+
+    embedding_config: DashboardEmbeddingConfigSummary | None = Field(
+        default=None, description="Embedding configuration summary."
+    )
+    costs: DashboardIndexCosts | None = Field(default=None, description="Indexing cost summary.")
+    storage_breakdown: DashboardIndexStorageBreakdown = Field(
+        default_factory=DashboardIndexStorageBreakdown,
+        description="Storage breakdown (bytes) for major components.",
+    )
+
+    keywords_count: int = Field(default=0, ge=0, description="Number of keywords for this corpus (if generated).")
+    total_storage: int = Field(default=0, ge=0, description="Total storage bytes (Postgres + Neo4j).")
+
+
+class DashboardIndexStatusResponse(BaseModel):
+    """Response payload for Dashboard index status panel."""
+
+    lines: list[str] = Field(default_factory=list, description="Human-readable status lines for fallback display.")
+    metadata: DashboardIndexStatusMetadata | None = Field(default=None, description="Structured status metadata.")
+    running: bool = Field(default=False, description="Whether indexing is currently running for this corpus.")
+    progress: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description="Indexing progress from 0.0 to 1.0 when running.",
+    )
+    current_file: str | None = Field(default=None, description="File currently being indexed (if running).")
+
+
+class DashboardIndexStatsResponse(BaseModel):
+    """Response payload for Dashboard storage panels."""
+
+    repo_id: str = Field(
+        description="Corpus identifier",
+        validation_alias=AliasChoices("repo_id", "corpus_id"),
+        serialization_alias="corpus_id",
+    )
+    storage_breakdown: DashboardIndexStorageBreakdown = Field(
+        default_factory=DashboardIndexStorageBreakdown,
+        description="Storage breakdown (bytes) for major components.",
+    )
+    keywords_count: int = Field(default=0, ge=0, description="Number of keywords for this corpus (if generated).")
+    total_storage: int = Field(default=0, ge=0, description="Total storage bytes (Postgres + Neo4j).")
+
+
 class Corpus(BaseModel):
     """User-managed corpus (formerly "repo" in Agro).
 

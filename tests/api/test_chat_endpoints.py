@@ -473,3 +473,102 @@ class TestChatCitationsRealPipeline:
         assert len(msgs) == 2
         assert msgs[0].role == "user"
         assert msgs[1].role == "assistant"
+
+
+class TestChatStreamingDeltaSemantics:
+    """Regression tests for SSE streaming semantics.
+
+    The backend MUST stream text deltas (not cumulative text) so the UI can append
+    chunks without duplicating content.
+    """
+
+    @pytest.mark.asyncio
+    async def test_stream_response_uses_delta_stream_text(self, test_config: TriBridConfig, monkeypatch):
+        import server.services.rag as rag_service
+        from server.services.conversation_store import get_conversation_store
+
+        # Arrange: stub Agent so we can assert stream_text(delta=True) is used.
+        parts = ["You send a fax ", "by POSTing a file ", "and destination number."]
+
+        class StubStreamedResponse:
+            def __init__(self, text_parts: list[str]):
+                self._parts = text_parts
+                self.delta_arg: bool | None = None
+
+            async def stream_text(self, *, delta: bool = False, debounce_by: float | None = 0.1):
+                # Record how stream_text was called (delta vs cumulative).
+                self.delta_arg = delta
+                if delta:
+                    for p in self._parts:
+                        yield p
+                else:
+                    acc = ""
+                    for p in self._parts:
+                        acc += p
+                        yield acc
+
+            def all_messages(self):
+                return []
+
+        stub_response = StubStreamedResponse(parts)
+
+        class StubAgent:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def tool(self, fn):
+                # Tool decorator: no-op for this test.
+                return fn
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+            # Agent.run_stream returns an async context manager that yields a streamed response.
+            def run_stream(self, *args, **kwargs):
+                from contextlib import asynccontextmanager
+
+                @asynccontextmanager
+                async def _cm():
+                    yield stub_response
+
+                return _cm()
+
+        monkeypatch.setattr(rag_service, "Agent", StubAgent, raising=True)
+
+        # Conversation store setup
+        store = get_conversation_store()
+        store._conversations.clear()
+        conv = store.get_or_create("delta-test-conv")
+
+        class DummyFusion:
+            async def search(self, *args, **kwargs):
+                return []
+
+        # Act: collect SSE blocks
+        sse_blocks: list[str] = []
+        async for block in rag_service.stream_response(
+            message="test",
+            repo_id="test-repo",
+            conversation=conv,
+            config=test_config,
+            fusion=DummyFusion(),
+        ):
+            sse_blocks.append(block)
+
+        # Assert: backend asked for delta=True and emitted deltas exactly.
+        assert stub_response.delta_arg is True
+
+        chunks: list[str] = []
+        for block in sse_blocks:
+            block = block.strip()
+            if not block.startswith("data:"):
+                continue
+            payload = json.loads(block[len("data:") :].strip())
+            if payload.get("type") == "text":
+                chunks.append(str(payload.get("content") or ""))
+
+        assert chunks == parts
+        assert "".join(chunks) == "".join(parts)

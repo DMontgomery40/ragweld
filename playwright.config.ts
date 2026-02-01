@@ -1,5 +1,8 @@
 import { defineConfig, devices } from '@playwright/test';
 
+const mkdocsBaseURL = process.env.PLAYWRIGHT_MKDOCS_BASE_URL ?? 'http://127.0.0.1:8001/tribrid-rag';
+const webBaseURL = process.env.PLAYWRIGHT_WEB_BASE_URL ?? 'http://localhost:5173';
+
 export default defineConfig({
   testDir: './.tests',
   fullyParallel: true,
@@ -17,7 +20,7 @@ export default defineConfig({
       testMatch: '**/mkdocs/**/*.spec.ts',
       use: {
         ...devices['Desktop Chrome'],
-        baseURL: 'http://127.0.0.1:8001/tribrid-rag',
+        baseURL: mkdocsBaseURL,
       },
     },
     {
@@ -25,7 +28,7 @@ export default defineConfig({
       testMatch: '**/web/**/*.spec.ts',
       use: {
         ...devices['Desktop Chrome'],
-        baseURL: 'http://localhost:5173',
+        baseURL: webBaseURL,
       },
     },
   ],

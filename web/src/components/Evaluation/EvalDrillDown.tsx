@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useConfigStore } from '@/stores/useConfigStore';
+import { apiUrl } from '@/api/client';
 import type { EvalResult, EvalRun } from '@/types/generated';
 
 interface EvalDrillDownProps {
@@ -114,7 +115,7 @@ export const EvalDrillDown: React.FC<EvalDrillDownProps> = ({ runId, compareWith
     setLlmAnalysis(null);
     
     try {
-      const response = await fetch('/api/eval/analyze_comparison', {
+      const response = await fetch(apiUrl('/api/eval/analyze_comparison'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -166,7 +167,7 @@ export const EvalDrillDown: React.FC<EvalDrillDownProps> = ({ runId, compareWith
         setLlmLoading(false);
         setModelUsed(null);
         
-        const response = await fetch(`/api/eval/results/${runId}`);
+        const response = await fetch(apiUrl(`/api/eval/results/${encodeURIComponent(runId)}`));
         if (!response.ok) throw new Error('Failed to fetch run data');
         const data: EvalRun = await response.json();
         console.log('[EvalDrillDown] Fetched data:', data);
@@ -174,7 +175,9 @@ export const EvalDrillDown: React.FC<EvalDrillDownProps> = ({ runId, compareWith
         setEvalRun(data);
 
         if (compareWithRunId) {
-          const compareResponse = await fetch(`/api/eval/results/${compareWithRunId}`);
+          const compareResponse = await fetch(
+            apiUrl(`/api/eval/results/${encodeURIComponent(compareWithRunId)}`)
+          );
           if (compareResponse.ok) {
             const compareData: EvalRun = await compareResponse.json();
             setCompareRun(compareData);

@@ -238,6 +238,46 @@ export function useGraph() {
   );
 
   /**
+   * Get a community subgraph (members + edges between members)
+   */
+  const getCommunitySubgraph = useCallback(
+    async (communityId: string, limit: number = 200): Promise<{ entities: Entity[]; relationships: Relationship[] }> => {
+      if (!activeRepo) {
+        setError('No repository selected');
+        return { entities: [], relationships: [] };
+      }
+
+      setIsLoading(true);
+      setError(null);
+
+      try {
+        const url = `${GRAPH_API_BASE}/${encodeURIComponent(activeRepo)}/community/${encodeURIComponent(communityId)}/subgraph` +
+          `?limit=${encodeURIComponent(String(limit))}`;
+
+        const response = await fetch(url);
+        if (!response.ok) {
+          if (response.status === 404) {
+            return { entities: [], relationships: [] };
+          }
+          throw new Error(`Failed to load community subgraph: ${response.status}`);
+        }
+
+        const data: GraphNeighborsResponse = await response.json();
+        const ents = Array.isArray(data.entities) ? data.entities : [];
+        const rels = Array.isArray(data.relationships) ? data.relationships : [];
+        return { entities: ents, relationships: rels };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Failed to get community subgraph';
+        setError(message);
+        return { entities: [], relationships: [] };
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [activeRepo, setIsLoading, setError]
+  );
+
+  /**
    * Select an entity and load its neighbors
    */
   const selectEntity = useCallback(
@@ -261,12 +301,27 @@ export function useGraph() {
       setSelectedEntity(null);
 
       if (community) {
+        const sub = await getCommunitySubgraph(community.community_id, 250);
+        if (sub.entities.length || sub.relationships.length) {
+          setEntities(sub.entities);
+          setRelationships(sub.relationships);
+          return;
+        }
+
+        // Back-compat / fallback when the subgraph endpoint isn't available.
         const members = await getCommunityMembers(community.community_id);
         setEntities(members);
         setRelationships([]);
       }
     },
-    [setSelectedCommunity, setSelectedEntity, getCommunityMembers, setEntities, setRelationships]
+    [
+      setSelectedCommunity,
+      setSelectedEntity,
+      getCommunitySubgraph,
+      getCommunityMembers,
+      setEntities,
+      setRelationships,
+    ]
   );
 
   /**
@@ -330,6 +385,7 @@ export function useGraph() {
     searchEntities,
     getNeighbors,
     getCommunityMembers,
+    getCommunitySubgraph,
     selectEntity,
     selectCommunity,
     reset,

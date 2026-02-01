@@ -325,9 +325,11 @@ async def stream_response(
             deps=deps,
             model_settings=model_settings,
         ) as response:
-            async for text in response.stream_text():
-                accumulated_text += text
-                event_data = json.dumps({"type": "text", "content": text})
+            # IMPORTANT: pydantic-ai's stream_text yields cumulative text by default.
+            # We want deltas for SSE so the UI can safely append without duplication.
+            async for delta in response.stream_text(delta=True):
+                accumulated_text += delta
+                event_data = json.dumps({"type": "text", "content": delta})
                 yield f"data: {event_data}\n\n"
 
             # Best-effort provider response ID for conversation continuity

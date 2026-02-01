@@ -236,29 +236,6 @@ export function CalculatorForm({ inputs, onUpdate, mode }: CalculatorFormProps) 
             </p>
           </div>
 
-          {/* Redis Size */}
-          <div>
-            <label htmlFor="redis" style={{ display: 'block', fontSize: '14px', fontWeight: '500', marginBottom: '6px' }}>
-              Redis Cache (MiB)
-            </label>
-            <input
-              id="redis"
-              type="number"
-              min="0"
-              step="10"
-              value={fullInputs.redisMiB}
-              onChange={(e) => onUpdate('redisMiB', parseFloat(e.target.value))}
-              style={{
-                width: '100%',
-                padding: '8px 12px',
-                border: '1px solid #d1d5db',
-                borderRadius: '4px',
-                fontSize: '14px'
-              }}
-              aria-label="Redis cache size in MiB"
-            />
-          </div>
-
           {/* Replication Factor */}
           <div>
             <label htmlFor="replication" style={{ display: 'block', fontSize: '14px', fontWeight: '500', marginBottom: '6px' }}>

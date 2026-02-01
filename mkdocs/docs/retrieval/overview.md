@@ -1,126 +1,150 @@
+# Retrieval Overview
+
 <div class="grid chunk_summaries" markdown>
 
--   :material-magnify:{ .lg .middle } **Vector Search (pgvector)**
+-   :material-magnify:{ .lg .middle } **Vector Search**
 
     ---
 
-    Semantic similarity using stored embeddings
+    pgvector similarity over chunk embeddings with configurable distance metrics and indexes.
 
--   :material-magnify:{ .lg .middle } **Sparse Search (FTS/BM25)**
-
-    ---
-
-    Exact matches and identifier lookup via Postgres FTS
-
--   :material-graph:{ .lg .middle } **Graph Search (Neo4j)**
+-   :material-format-quote-close:{ .lg .middle } **Sparse Search**
 
     ---
 
-    Entity traversal, community context, and hops-based expansion
+    PostgreSQL FTS/BM25 for exact tokens, identifiers, and literals.
+
+-   :material-graph:{ .lg .middle } **Graph Search**
+
+    ---
+
+    Neo4j traversal to expand entity neighborhoods and follow relationships across files.
+
+-   :material-shuffle-variant:{ .lg .middle } **Fusion**
+
+    ---
+
+    Weighted or RRF; per-retriever contributions logged for analysis.
+
+-   :material-swap-vertical:{ .lg .middle } **Optional Reranker**
+
+    ---
+
+    Cross-encoder rescoring of fused candidates for precision.
 
 </div>
 
-!!! tip "Pro Tip"
-    Use vector search for conceptual queries and sparse search for code identifiers or exact phrases.
+[Get started](../index.md){ .md-button .md-button--primary }
+[Configuration](../configuration.md){ .md-button }
+[API](../api.md){ .md-button }
 
-!!! note "Implementation Note"
-    TriBridFusion orchestrates parallel calls to VectorRetriever, SparseRetriever, and GraphRetriever.
+!!! tip "Pro Tip — Balance Recall and Precision"
+    Increase top_k per retriever to maximize recall. Use fusion weights and reranking to regain precision.
 
-!!! warning "Performance Warning"
-    Large corpora may need Postgres and Neo4j tuning. Adjust PG connection pools and Neo4j heap sizes in environment.
+!!! note "Isolation by Corpus"
+    Each corpus has isolated storage and graph. Queries always require `corpus_id`.
 
-??? note "Collapsible: Retrieval quick facts"
+!!! warning "Latency Budget"
+    Graph expansion can increase latency with large hop counts. Use `max_hops` conservatively and cache frequent queries.
 
-    - Fusion runs the three retrievers in parallel and merges results by configurable weights
-    - Reranking is optional and controlled by the reranker configuration
+## Control Surface
 
-
-## Retriever responsibilities
-
-| Retriever | Purpose | Primary file |
-|-----------|---------|--------------|
-| Vector | Semantic similarity via pgvector | server/retrieval/vector.py |
-| Sparse | BM25 & FTS for precise matching | server/retrieval/sparse.py |
-| Graph | Context expansion via Neo4j traversal | server/retrieval/graph.py |
-
+| Retriever | Key Fields | Defaults |
+|-----------|------------|----------|
+| Vector | `retrieval.vector.top_k`, `distance_metric`, `min_score` | Top_k 8–20 |
+| Sparse | `retrieval.sparse.top_k`, `use_bm25`, `tsquery_mode` | BM25 enabled |
+| Graph | `retrieval.graph.max_hops`, `edge_types`, `expand_neighbors` | 1–2 hops |
+| Fusion | `fusion.strategy`, `fusion.weights`, `fusion.rrf_k_div` | weighted + tuned weights |
+| Reranker | `reranker.enabled`, `reranker.model`, `batch_size` | disabled |
 
 ```mermaid
 flowchart LR
-    Query --> Vector[VectorRetriever]
-    Query --> Sparse[SparseRetriever]
-    Query --> Graph[GraphRetriever]
-    Vector --> Fusion
-    Sparse --> Fusion
-    Graph --> Fusion
-    Fusion --> Results
+    Q[Query] --> V[Vector]
+    Q --> S[Sparse]
+    Q --> G[Graph]
+
+    V --> F[Fusion]
+    S --> F
+    G --> F
+
+    F -->|optional| R[Reranker]
+    R --> OUT[Results]
+    F --> OUT
 ```
 
+## Programmatic Search
 
 === "Python"
     ```python
-    def fusion_search(query: str, repo_id: str): # (1)
-        # (2) Run retrievers in parallel
-        vector_task = vector.search(query, repo_id)
-        sparse_task = sparse.search(query, repo_id)
-        graph_task = graph.search(query, repo_id)
-        # (3) fusion merges results
-        fused = fusion.fuse([vector_task, sparse_task, graph_task])
-        return fused
+    import httpx
+
+    BASE = "http://localhost:8000"
+    body = {
+      "corpus_id": "tribrid",
+      "query": "How are pgvector indexes created?",
+      "top_k": 10,
+      "enable_reranker": True,
+      "filters": {"path_prefix": "server/db"}  # optional impl-specific filter
+    }
+    res = httpx.post(f"{BASE}/search", json=body).json() # (1)
+    for r in res["results"]:
+        # includes per-source scores e.g., r["sources"]["vector"], r["sources"]["sparse"]
+        print(r["file_path"], r["score"]) # (2)
     ```
 
 === "curl"
     ```bash
-    curl -X POST "http://localhost:8000/search" \
-      -H "Content-Type: application/json" \
-      -d '{"query":"init db connection","repo_id":"my_corpus"}'
+    curl -sS -X POST http://localhost:8000/search \
+      -H 'Content-Type: application/json' \
+      -d '{
+        "corpus_id": "tribrid",
+        "query": "pgvector index",
+        "top_k": 10,
+        "enable_reranker": true
+      }' | jq '.results[0]'
     ```
 
 === "TypeScript"
     ```typescript
-    import { SearchResponse } from '../types/generated' // (1)
+    import { SearchRequest, SearchResponse } from "../web/src/types/generated";
 
-    async function fetchSearch(query: string, repoId: string): Promise<SearchResponse> { // (2)
-      const res = await fetch('/api/search', { method: 'POST', body: JSON.stringify({ query, repo_id: repoId }) })
-      return res.json()
+    async function run(req: SearchRequest): Promise<SearchResponse> {
+      const r = await fetch("/search", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify(req) });
+      return await r.json();
     }
     ```
 
+1. Search executes all retrievers concurrently
+2. `score` is fused; provenance retained per source
 
-1. Function entry types and contract
-2. Parallel retrieval and fusion
-3. Optional rerank step occurs after fusion
+!!! success "Auditable Fusion"
+    Each match returns provenance: which retriever(s) contributed and their raw scores. This is essential for debugging.
 
+### Fusion Strategies
 
-### Graph expansion patterns
+| Strategy | Math | Notes |
+|----------|------|-------|
+| weighted | `w_v*sv + w_s*ss + w_g*sg` | Default; interpretable weights |
+| rrf | `1/(k + rank)` per source, summed | Robust across heterogeneous scores |
 
-| Strategy | Use case | Config field |
-|---------|----------|--------------|
-| Max hops | Short context expansion | graph.max_hops |
-| Community | Bring related entities | graph.community_min_size |
-| Attribute filter | Limit by node label | graph.allowed_labels |
+### Graph Expansion
 
-
-### Reranker
-
-!!! info "Information"
-    The reranker (cross-encoder) is an optional component. Training utilities and triplet mining exist under server/retrieval/learning.py and server/api/reranker.py.
-
+| Field | Effect |
+|-------|--------|
+| `max_hops` | Traversal depth; controls neighborhood growth |
+| `edge_types` | Restrict to safe/meaningful relations |
+| `expand_neighbors` | Add 1-hop context chunks to results |
 
 ```mermaid
-sequenceDiagram
-    participant Fusion
-    participant Reranker
-    Fusion->>Reranker: candidates
-    Reranker-->>Fusion: scored_ranked
-    Fusion-->>Client: final_results
+flowchart TB
+    Seed[Seed Entities] -->|max_hops| Walk[Traversal]
+    Walk --> Neigh[Neighbors]
+    Neigh --> Context[Context Expansion]
 ```
 
+- [x] Tune per-retriever `top_k`
+- [x] Choose `weighted` or `rrf`
+- [x] Enable reranking once recall is strong
 
-- [x] Verify embedding model selection in models.json
-- [ ] If using provider embeddings, ensure API keys are set
-
-
-??? note "Collapsible: Troubleshooting"
-
-    - If vector results are poor: re-embed with updated model or increase chunk context.
-    - If sparse fails to find identifiers: regenerate FTS tokenizer or stemmer settings in config.
+??? note "Caching"
+    The retrieval cache stores fused results keyed by `corpus_id`, `query`, and a hash of the retrieval config segment. Invalidate on config changes or reindex.

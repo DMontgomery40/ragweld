@@ -1,87 +1,78 @@
+# Glossary
+
 <div class="grid chunk_summaries" markdown>
 
--   :material-information:{ .lg .middle } **Glossary**
+-   :material-book-information-variant:{ .lg .middle } **Centralized Terms**
 
     ---
 
-    Key terms from data/glossary.json
+    `data/glossary.json` drives all tooltips in the UI.
 
--   :material-database:{ .lg .middle } **Infrastructure Terms**
-
-    ---
-
-    Postgres pgvector URL, Neo4j URI, Table names
-
--   :material-magnify:{ .lg .middle } **Retrieval Terms**
+-   :material-link-box:{ .lg .middle } **Cross-References**
 
     ---
 
-    vector_k, fusion weights, chunk_summaries
+    Each term lists related entries to encourage discovery.
+
+-   :material-pencil:{ .lg .middle } **Editable**
+
+    ---
+
+    Update the JSON file, not components, to change tooltip content.
 
 </div>
 
-!!! note "Information"
-    The complete glossary is sourced from data/glossary.json. UI tooltips derive from this file.
+[Get started](index.md){ .md-button .md-button--primary }
+[Configuration](configuration.md){ .md-button }
+[API](api.md){ .md-button }
 
-!!! tip "Pro Tip"
-    Use glossary terms in UI via the TooltipIcon component to keep definitions consistent.
+!!! tip "Source of Truth"
+    `data/glossary.json` is parsed by the UI. Keep `key` values stable for long-lived tooltips.
 
-!!! warning "Note"
-    Do not duplicate glossary definitions in UI code—use the source file for single source of truth.
+!!! note "Examples"
+    - PostgreSQL pgvector URL
+    - Neo4j Connection URI
+    - Active Repository (Corpus)
 
-??? note "Collapsible: Example terms"
+!!! warning "Typos"
+    Misspelled keys break existing tooltips silently. Validate JSON in CI.
 
-    Selected entries from data/glossary.json are shown below.
-
+## Representative Entries
 
 | Term | Key | Definition |
 |------|-----|------------|
-| PostgreSQL pgvector URL | POSTGRES_URL | Connection URL for PostgreSQL with pgvector extension. Format: postgresql://user:pass@host:port/db |
-| Neo4j Connection URI | NEO4J_URI | Connection URI for Neo4j. Format: bolt://host:7687 or neo4j://host:7687 |
-| Active Repository | REPO | Logical repository name for routing and indexing (repo_id / corpus_id) |
-| Table Name | TABLE_NAME | Optional override for pgvector table name, defaults to code_chunks_{REPO} |
-
+| PostgreSQL pgvector URL | POSTGRES_URL | Connection URL for pgvector-enabled Postgres |
+| Neo4j Connection URI | NEO4J_URI | Connection URI for Neo4j graph |
+| Active Repository | REPO | Logical corpus name for routing and indexing |
 
 ```mermaid
 flowchart LR
-    data_glossary[data/glossary.json] --> UI_Tooltip[TooltipIcon]
-    UI_Tooltip --> Frontend[Help text & Glossary tab]
+    glossary.json --> TooltipIcon
+    TooltipIcon --> UI
 ```
 
-
 === "Python"
-    ```python
-    # (1) Load glossary JSON
-    import json
-    with open('data/glossary.json') as f:
-        g = json.load(f)
-    print(g['terms'][0]['term'])
-    ```
+```python
+# Tooling note: the UI consumes the JSON directly; backend does not parse this by default.
+```
 
 === "curl"
-    ```bash
-    # (1) Serve glossary via endpoint
-    curl http://localhost:8000/glossary
-    ```
+```bash
+# Validate JSON structure in CI, e.g., with jq
+jq . data/glossary.json > /dev/null
+```
 
 === "TypeScript"
-    ```typescript
-    import glossary from '../data/glossary.json'
-    // (1) Render TooltipIcon with definition
-    <TooltipIcon term={glossary.terms[0]} />
-    ```
+```typescript
+// UI side: import terms via a loader and feed into TooltipIcon
+```
 
+!!! success "Consistency"
+    Use the glossary for all UI textual explanations to avoid drift between screens.
 
-1. The glossary is the authoritative source for tooltips and UI help
+- [x] Keep terms unique
+- [x] Provide related links for navigation
+- [x] Update definitions when behavior changes
 
-
-- [x] Use glossary terms in UI components
-- [x] Keep data/glossary.json updated when adding terms
-
-
-??? note "Collapsible: Adding a glossary term"
-
-    1. Add the term to data/glossary.json with key and definition
-    2. Commit and deploy
-    3. UI will surface term via TooltipIcon automatically
-
+??? note "Localization"
+    If localization is needed, consider expanding the schema with `translations` while keeping `key` stable.

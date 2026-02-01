@@ -6,7 +6,8 @@
  */
 
 import { useEffect, useState, useCallback } from 'react';
-import { getIndexStats, type IndexStats } from '@/api/dashboard';
+import { getIndexStats } from '@/api/dashboard';
+import type { DashboardIndexStatsResponse } from '@/types/generated';
 
 interface IndexStatsPanelProps {
   /** Auto-refresh interval in ms (0 = disabled) */
@@ -25,7 +26,7 @@ function formatBytes(bytes: number): string {
 }
 
 export function IndexStatsPanel({ refreshInterval = 0 }: IndexStatsPanelProps) {
-  const [stats, setStats] = useState<IndexStats | null>(null);
+  const [stats, setStats] = useState<DashboardIndexStatsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -79,34 +80,34 @@ export function IndexStatsPanel({ refreshInterval = 0 }: IndexStatsPanelProps) {
       icon: '💾',
     },
     {
-      label: 'Qdrant Vectors',
-      value: formatBytes(stats.qdrant_size || 0),
-      icon: '🔷',
+      label: 'Postgres Total',
+      value: formatBytes(stats.storage_breakdown.postgres_total_bytes || 0),
+      icon: '🗄️',
     },
     {
       label: 'BM25 Index',
-      value: formatBytes(stats.bm25_index_size || 0),
+      value: formatBytes(stats.storage_breakdown.bm25_index_bytes || 0),
       icon: '📑',
     },
     {
-      label: 'Chunks JSON',
-      value: formatBytes(stats.chunks_json_size || 0),
-      icon: '📦',
+      label: 'Chunks',
+      value: formatBytes(stats.storage_breakdown.chunks_bytes || 0),
+      icon: '📄',
     },
     {
-      label: 'Semantic Cards',
-      value: formatBytes(stats.cards_size || 0),
-      icon: '🃏',
+      label: 'pgvector vectors',
+      value: formatBytes(stats.storage_breakdown.embeddings_bytes || 0),
+      icon: '🔷',
     },
     {
       label: 'Keywords',
-      value: String(stats.keyword_count || 0),
+      value: String(stats.keywords_count || 0),
       icon: '🔑',
     },
     {
-      label: 'Repos Indexed',
-      value: String(stats.profile_count || 0),
-      icon: '📁',
+      label: 'Neo4j Store',
+      value: formatBytes(stats.storage_breakdown.neo4j_store_bytes || 0),
+      icon: '🧠',
     },
   ];
 

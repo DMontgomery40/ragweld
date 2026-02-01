@@ -33,9 +33,11 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install mkdocs mkdocs-material pymdown-extensions
-          pip install requests pyyaml
-          pip install mkdocs-git-revision-date-localized-plugin mkdocs-minify-plugin
+          python -m pip install --upgrade pip
+          pip install mkdocs==1.6.1 mkdocs-material==9.7.1 pymdown-extensions==10.7.1
+          pip install mike==2.1.0 mkdocs-git-revision-date-localized-plugin==1.2.6 mkdocs-minify-plugin==0.8.0
+          pip install mkdocs-glightbox
+          pip install requests pyyaml openai
 
       - name: Generate documentation with AI
         if: ${{ github.event.inputs.regenerate_all == 'true' }}
@@ -45,7 +47,7 @@ jobs:
           python scripts/docs_ai/docs_autopilot_enhanced.py --regenerate-all
 
       - name: Build documentation
-        run: mkdocs build
+        run: mkdocs build --strict
 
       - name: Create PR with documentation updates
         if: github.event_name == 'workflow_dispatch' && github.event.inputs.regenerate_all == 'true'
@@ -85,11 +87,13 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install mkdocs mkdocs-material pymdown-extensions
-          pip install mkdocs-git-revision-date-localized-plugin mkdocs-minify-plugin
+          python -m pip install --upgrade pip
+          pip install mkdocs==1.6.1 mkdocs-material==9.7.1 pymdown-extensions==10.7.1
+          pip install mike==2.1.0 mkdocs-git-revision-date-localized-plugin==1.2.6 mkdocs-minify-plugin==0.8.0
+          pip install mkdocs-glightbox
 
       - name: Build documentation
-        run: mkdocs build
+        run: mkdocs build --strict
 
       - name: Setup Pages
         uses: actions/configure-pages@v4

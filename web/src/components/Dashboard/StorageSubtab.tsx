@@ -15,7 +15,6 @@ export function StorageSubtab() {
   const [items, setItems] = useState<StorageItem[]>([]);
   const [totalStorage, setTotalStorage] = useState<string>('—');
   const [totalBytes, setTotalBytes] = useState<number>(0);
-  const [_profileCount, _setProfileCount] = useState<number>(0); // Profiles feature removed
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -33,59 +32,49 @@ export function StorageSubtab() {
 
     try {
       const data = await DashAPI.getIndexStats();
+      const storage = data.storage_breakdown;
 
       const storageItems: StorageItem[] = [
         {
-          label: 'CHUNKS JSON',
-          bytes: data.chunks_json_size || 0,
-          size: formatBytes(data.chunks_json_size || 0)
+          label: 'CHUNKS',
+          bytes: storage.chunks_bytes || 0,
+          size: formatBytes(storage.chunks_bytes || 0)
         },
         {
-          label: 'RAW EMBEDDINGS',
-          bytes: data.ram_embeddings_size || 0,
-          size: formatBytes(data.ram_embeddings_size || 0)
+          label: 'PGVECTOR VECTORS',
+          bytes: storage.embeddings_bytes || 0,
+          size: formatBytes(storage.embeddings_bytes || 0)
         },
         {
-          label: 'PGVECTOR INDEX',
-          bytes: data.qdrant_size || 0, // API still uses qdrant_size, mapped from pgvector
-          size: formatBytes(data.qdrant_size || 0)
+          label: 'PGVECTOR INDEX (optional)',
+          bytes: storage.pgvector_index_bytes || 0,
+          size: formatBytes(storage.pgvector_index_bytes || 0)
         },
         {
           label: 'BM25 INDEX',
-          bytes: data.bm25_index_size || 0,
-          size: formatBytes(data.bm25_index_size || 0)
+          bytes: storage.bm25_index_bytes || 0,
+          size: formatBytes(storage.bm25_index_bytes || 0)
         },
         {
-          label: 'NEO4J GRAPH',
-          bytes: (data as any).neo4j_total || 0, // Neo4j graph storage
-          size: formatBytes((data as any).neo4j_total || 0)
+          label: 'NEO4J STORE',
+          bytes: storage.neo4j_store_bytes || 0,
+          size: formatBytes(storage.neo4j_store_bytes || 0)
         },
         {
           label: 'CHUNK SUMMARIES',
-          bytes: data.cards_size || 0,
-          size: formatBytes(data.cards_size || 0)
-        },
-        {
-          label: 'RERANKER CACHE',
-          bytes: data.reranker_cache_size || 0,
-          size: formatBytes(data.reranker_cache_size || 0)
-        },
-        {
-          label: 'REDIS CACHE',
-          bytes: data.redis_cache_size || 0,
-          size: formatBytes(data.redis_cache_size || 0)
+          bytes: storage.chunk_summaries_bytes || 0,
+          size: formatBytes(storage.chunk_summaries_bytes || 0)
         },
         {
           label: 'KEYWORDS',
-          bytes: data.keyword_count || 0,
-          size: `${data.keyword_count || 0} keywords`
+          bytes: data.keywords_count || 0,
+          size: `${data.keywords_count || 0} keywords`
         }
       ];
 
       setItems(storageItems);
       setTotalBytes(data.total_storage || 0);
       setTotalStorage(formatBytes(data.total_storage || 0));
-      _setProfileCount(data.profile_count || 0); // Profiles feature removed
       setLoading(false);
     } catch (err) {
       console.error('[StorageSubtab] Failed to load storage:', err);
@@ -99,10 +88,15 @@ export function StorageSubtab() {
 
     // Listen for refresh events
     const handleRefresh = () => loadStorage();
+    const handleCorpusChanged = () => loadStorage();
     window.addEventListener('dashboard-refresh', handleRefresh);
+    window.addEventListener('tribrid-corpus-changed', handleCorpusChanged);
+    window.addEventListener('tribrid-corpus-loaded', handleCorpusChanged);
 
     return () => {
       window.removeEventListener('dashboard-refresh', handleRefresh);
+      window.removeEventListener('tribrid-corpus-changed', handleCorpusChanged);
+      window.removeEventListener('tribrid-corpus-loaded', handleCorpusChanged);
     };
   }, []);
 
@@ -335,9 +329,6 @@ export function StorageSubtab() {
             </li>
             <li>
               <strong>Reranker Cache:</strong> Stores cross-encoder scores to avoid re-computation
-            </li>
-            <li>
-              <strong>Redis Cache:</strong> Temporary cache for frequently accessed data (configure TTL in Admin)
             </li>
             <li>
               <strong>Keywords:</strong> BM25 keyword extraction for improved sparse retrieval

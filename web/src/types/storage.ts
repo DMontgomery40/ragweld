@@ -8,7 +8,6 @@ export interface CalculatorInputs {
   precision: 1 | 2 | 4;
   qdrantOverhead: number;
   hydrationPercent: number;
-  redisMiB: number;
   replicationFactor: number;
 }
 
@@ -20,7 +19,6 @@ export interface StorageResults {
   cardsSummary: number;
   hydration: number;
   reranker: number;
-  redis: number;
   singleInstance: number;
   replicated: number;
 }

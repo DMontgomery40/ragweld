@@ -39,7 +39,6 @@ export function ResultsDisplay({ results }: ResultsDisplayProps) {
         <ResultRow label="Cards/Metadata" value={results.cardsSummary} />
         <ResultRow label="Hydration Cache" value={results.hydration} />
         <ResultRow label="Reranker Cache" value={results.reranker} />
-        <ResultRow label="Redis" value={results.redis} />
       </div>
 
       {/* Totals */}

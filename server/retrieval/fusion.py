@@ -8,7 +8,16 @@ from server.db.postgres import PostgresClient
 from server.indexing.embedder import Embedder
 from server.models.retrieval import ChunkMatch
 from server.models.tribrid_config_model import FusionConfig
-from server.observability.metrics import GRAPH_LEG_LATENCY_SECONDS, SPARSE_LEG_LATENCY_SECONDS, VECTOR_LEG_LATENCY_SECONDS
+from server.observability.metrics import (
+    GRAPH_LEG_LATENCY_SECONDS,
+    SEARCH_GRAPH_HYDRATED_CHUNKS_COUNT,
+    SEARCH_LEG_RESULTS_COUNT,
+    SEARCH_RESULTS_FINAL_COUNT,
+    SEARCH_STAGE_ERRORS_TOTAL,
+    SEARCH_STAGE_LATENCY_SECONDS,
+    SPARSE_LEG_LATENCY_SECONDS,
+    VECTOR_LEG_LATENCY_SECONDS,
+)
 from server.services.config_store import get_config as load_scoped_config
 
 if TYPE_CHECKING:
@@ -44,6 +53,9 @@ class TriBridFusion:
 
         embedder = Embedder(cfg.embedding)
 
+        # Reuse query embeddings across legs when possible (vector + graph chunk-mode).
+        q_emb: list[float] | None = None
+
         vector_results: list[ChunkMatch] = []
         sparse_results: list[ChunkMatch] = []
         graph_results: list[ChunkMatch] = []
@@ -68,25 +80,39 @@ class TriBridFusion:
         # Run legs (request toggles + config.*.enabled)
         if include_vector and cfg.vector_search.enabled:
             with VECTOR_LEG_LATENCY_SECONDS.time():
-                q_emb = await embedder.embed(query)
-                vector_results = await postgres.vector_search(
-                    corpus_id, q_emb, int(top_k or cfg.vector_search.top_k)
-                )
+                try:
+                    if q_emb is None:
+                        with SEARCH_STAGE_LATENCY_SECONDS.labels(stage="embed_query").time():
+                            q_emb = await embedder.embed(query)
+                    with SEARCH_STAGE_LATENCY_SECONDS.labels(stage="postgres_vector_search").time():
+                        vector_results = await postgres.vector_search(
+                            corpus_id, q_emb, int(top_k or cfg.vector_search.top_k)
+                        )
+                except Exception:
+                    SEARCH_STAGE_ERRORS_TOTAL.labels(stage="vector_leg").inc()
+                    raise
                 if cfg.vector_search.similarity_threshold > 0:
                     vector_results = [
                         r for r in vector_results if r.score >= cfg.vector_search.similarity_threshold
                     ]
         debug["fusion_vector_results"] = len(vector_results)
+        SEARCH_LEG_RESULTS_COUNT.labels(leg="vector").observe(len(vector_results))
 
         if include_sparse and cfg.sparse_search.enabled:
             with SPARSE_LEG_LATENCY_SECONDS.time():
-                sparse_results = await postgres.sparse_search(
-                    corpus_id,
-                    query,
-                    int(top_k or cfg.sparse_search.top_k),
-                    ts_config=cfg.indexing.postgres_ts_config,
-                )
+                try:
+                    with SEARCH_STAGE_LATENCY_SECONDS.labels(stage="postgres_sparse_search").time():
+                        sparse_results = await postgres.sparse_search(
+                            corpus_id,
+                            query,
+                            int(top_k or cfg.sparse_search.top_k),
+                            ts_config=cfg.indexing.postgres_ts_config,
+                        )
+                except Exception:
+                    SEARCH_STAGE_ERRORS_TOTAL.labels(stage="sparse_leg").inc()
+                    raise
         debug["fusion_sparse_results"] = len(sparse_results)
+        SEARCH_LEG_RESULTS_COUNT.labels(leg="sparse").observe(len(sparse_results))
 
         # Graph retrieval: query Neo4j for relevant entities, then hydrate to chunks from Postgres.
         if include_graph and cfg.graph_search.enabled:
@@ -102,23 +128,27 @@ class TriBridFusion:
                         cfg.graph_storage.neo4j_password,
                         database=db_name,
                     )
-                    await neo4j.connect()
+                    with SEARCH_STAGE_LATENCY_SECONDS.labels(stage="neo4j_connect").time():
+                        await neo4j.connect()
                     if getattr(cfg.graph_search, "mode", "entity") == "chunk":
                         # Chunk-level graph retrieval: Neo4j vector index over Chunk nodes.
-                        q_emb = await embedder.embed(query)
+                        if q_emb is None:
+                            with SEARCH_STAGE_LATENCY_SECONDS.labels(stage="embed_query").time():
+                                q_emb = await embedder.embed(query)
                         overfetch = (
                             int(getattr(cfg.graph_search, "chunk_seed_overfetch_multiplier", 1) or 1)
                             if cfg.graph_storage.neo4j_database_mode == "shared"
                             else 1
                         )
-                        hits = await neo4j.chunk_vector_search(
-                            corpus_id,
-                            q_emb,
-                            index_name=cfg.graph_indexing.chunk_vector_index_name,
-                            top_k=graph_k,
-                            neighbor_window=int(getattr(cfg.graph_search, "chunk_neighbor_window", 0) or 0),
-                            overfetch_multiplier=overfetch,
-                        )
+                        with SEARCH_STAGE_LATENCY_SECONDS.labels(stage="neo4j_chunk_vector_search").time():
+                            hits = await neo4j.chunk_vector_search(
+                                corpus_id,
+                                q_emb,
+                                index_name=cfg.graph_indexing.chunk_vector_index_name,
+                                top_k=graph_k,
+                                neighbor_window=int(getattr(cfg.graph_search, "chunk_neighbor_window", 0) or 0),
+                                overfetch_multiplier=overfetch,
+                            )
                         debug["fusion_graph_entity_hits"] = len(hits)
 
                         score_by_id = {cid: float(score) for cid, score in hits}
@@ -127,12 +157,13 @@ class TriBridFusion:
                         if bool(
                             getattr(cfg.graph_search, "chunk_entity_expansion_enabled", False)
                         ) and int(cfg.graph_search.max_hops) > 0:
-                            exp_hits = await neo4j.expand_chunks_via_entities(
-                                corpus_id,
-                                hits,
-                                max_hops=int(cfg.graph_search.max_hops),
-                                top_k=graph_k,
-                            )
+                            with SEARCH_STAGE_LATENCY_SECONDS.labels(stage="neo4j_expand_chunks_via_entities").time():
+                                exp_hits = await neo4j.expand_chunks_via_entities(
+                                    corpus_id,
+                                    hits,
+                                    max_hops=int(cfg.graph_search.max_hops),
+                                    top_k=graph_k,
+                                )
                             debug["fusion_graph_entity_expansion_hits"] = len(exp_hits)
                             w = float(
                                 getattr(cfg.graph_search, "chunk_entity_expansion_weight", 1.0) or 0.0
@@ -145,7 +176,8 @@ class TriBridFusion:
                         chunk_ids = sorted(score_by_id, key=lambda cid: (-float(score_by_id[cid]), cid))[
                             :graph_k
                         ]
-                        hydrated = await postgres.get_chunks(corpus_id, chunk_ids)
+                        with SEARCH_STAGE_LATENCY_SECONDS.labels(stage="postgres_get_chunks").time():
+                            hydrated = await postgres.get_chunks(corpus_id, chunk_ids)
                         graph_results = [
                             ChunkMatch(
                                 chunk_id=ch.chunk_id,
@@ -167,14 +199,16 @@ class TriBridFusion:
                         debug["fusion_graph_hydrated_chunks"] = len(graph_results)
                     else:
                         # Entity-mode graph retrieval: return real chunk_ids via Entity-[:IN_CHUNK]->Chunk.
-                        hits = await neo4j.entity_chunk_search(
-                            corpus_id, query, cfg.graph_search.max_hops, graph_k
-                        )
+                        with SEARCH_STAGE_LATENCY_SECONDS.labels(stage="neo4j_entity_chunk_search").time():
+                            hits = await neo4j.entity_chunk_search(
+                                corpus_id, query, cfg.graph_search.max_hops, graph_k
+                            )
                         debug["fusion_graph_entity_hits"] = len(hits)
 
                         score_by_id = {cid: float(score) for cid, score in hits}
                         chunk_ids = [cid for cid, _score in hits]
-                        hydrated = await postgres.get_chunks(corpus_id, chunk_ids)
+                        with SEARCH_STAGE_LATENCY_SECONDS.labels(stage="postgres_get_chunks").time():
+                            hydrated = await postgres.get_chunks(corpus_id, chunk_ids)
                         graph_results = [
                             ChunkMatch(
                                 chunk_id=ch.chunk_id,
@@ -193,31 +227,41 @@ class TriBridFusion:
                         debug["fusion_graph_hydrated_chunks"] = len(graph_results)
             except Exception as e:
                 debug["fusion_graph_error"] = str(e)
+                SEARCH_STAGE_ERRORS_TOTAL.labels(stage="graph_leg").inc()
             finally:
                 if neo4j is not None:
                     try:
                         await neo4j.disconnect()
                     except Exception:
                         pass
+        SEARCH_LEG_RESULTS_COUNT.labels(leg="graph").observe(len(graph_results))
+        SEARCH_GRAPH_HYDRATED_CHUNKS_COUNT.observe(len(graph_results))
 
         # Fuse
         results: list[ChunkMatch]
         if config.method == "rrf":
-            results = self.rrf_fusion([vector_results, sparse_results, graph_results], k=int(config.rrf_k))
+            with SEARCH_STAGE_LATENCY_SECONDS.labels(stage="fusion_rrf").time():
+                results = self.rrf_fusion([vector_results, sparse_results, graph_results], k=int(config.rrf_k))
         else:
             v = list(vector_results)
             s = list(sparse_results)
             g = list(graph_results)
             if config.normalize_scores:
-                v = _normalize(v)
-                s = _normalize(s)
-                g = _normalize(g)
-            results = self.weighted_fusion([v, s, g], weights=[config.vector_weight, config.sparse_weight, config.graph_weight])
+                with SEARCH_STAGE_LATENCY_SECONDS.labels(stage="normalize_scores").time():
+                    v = _normalize(v)
+                    s = _normalize(s)
+                    g = _normalize(g)
+            with SEARCH_STAGE_LATENCY_SECONDS.labels(stage="fusion_weighted").time():
+                results = self.weighted_fusion(
+                    [v, s, g], weights=[config.vector_weight, config.sparse_weight, config.graph_weight]
+                )
 
         # Apply final_k cap (caller can override with top_k)
         final_k = int(top_k or cfg.retrieval.final_k)
         self.last_debug = debug
-        return results[:final_k]
+        final_results = results[:final_k]
+        SEARCH_RESULTS_FINAL_COUNT.observe(len(final_results))
+        return final_results
 
     def rrf_fusion(self, results: list[list[ChunkMatch]], k: int) -> list[ChunkMatch]:
         scores: dict[str, float] = defaultdict(float)

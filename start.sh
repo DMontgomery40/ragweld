@@ -59,6 +59,17 @@ have_cmd() {
   command -v "$1" >/dev/null 2>&1
 }
 
+port_listen_pids() {
+  local port="$1"
+  if have_cmd lsof; then
+    # One PID per line (may be multiple listeners in edge cases)
+    lsof -nP -iTCP:"${port}" -sTCP:LISTEN -t 2>/dev/null || true
+    return 0
+  fi
+  # Best-effort when lsof is unavailable: can't detect listeners.
+  return 0
+}
+
 DOCKER_COMPOSE=()
 resolve_docker_compose() {
   if docker compose version >/dev/null 2>&1; then
@@ -248,11 +259,25 @@ if [[ "$START_BACKEND" == "1" && "$BACKEND_MODE" == "local" ]]; then
   run uv sync
 
   log "Starting backend (uvicorn) on port $BACKEND_PORT..."
+  existing_pids="$(port_listen_pids "$BACKEND_PORT")"
+  if [[ -n "${existing_pids:-}" ]]; then
+    log "Backend port $BACKEND_PORT is already in use."
+    log "Listener PID(s):"
+    echo "$existing_pids" | sed 's/^/[start.sh]   - /'
+    die "Port $BACKEND_PORT is already in use. Stop the existing process, or run ./start.sh --no-backend if you want to reuse an already-running backend, or set BACKEND_PORT."
+  fi
+
   if [[ "$DRY_RUN" == "1" ]]; then
     run uv run uvicorn server.main:app --reload --port "$BACKEND_PORT"
   else
     uv run uvicorn server.main:app --reload --port "$BACKEND_PORT" &
     BACKEND_PID="$!"
+    # If uvicorn fails fast (e.g., bind error), fail loudly instead of
+    # accidentally proceeding with a stale process on the port.
+    sleep 0.2
+    if ! kill -0 "$BACKEND_PID" >/dev/null 2>&1; then
+      die "Backend failed to start (uvicorn exited immediately). Scroll up for the error."
+    fi
     wait_for_http_ok "http://127.0.0.1:${BACKEND_PORT}/api/health" 60
     wait_for_backend_ready 120
   fi

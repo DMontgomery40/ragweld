@@ -1,27 +1,6 @@
 import { useEffect, useState } from 'react';
 import * as DashAPI from '@/api/dashboard';
-
-type ExtendedMetadata = DashAPI.IndexStatusMetadata & {
-  embedding_config?: {
-    provider?: string;
-    model?: string;
-    dimensions?: number;
-    precision?: string;
-  };
-  costs?: {
-    total_tokens?: number;
-    embedding_cost?: number;
-  };
-  storage_breakdown?: {
-    chunks_json?: number;
-    embeddings_raw?: number;
-    qdrant_overhead?: number;
-    bm25_index?: number;
-    cards?: number;
-    reranker_cache?: number;
-    redis?: number;
-  };
-};
+import type { DashboardIndexStatusMetadata } from '@/types/generated';
 
 const formatBytes = (bytes?: number) => {
   if (!bytes || bytes <= 0) return '0 B';
@@ -32,7 +11,7 @@ const formatBytes = (bytes?: number) => {
 };
 
 export function IndexDisplayPanels() {
-  const [metadata, setMetadata] = useState<ExtendedMetadata | null>(null);
+  const [metadata, setMetadata] = useState<DashboardIndexStatusMetadata | null>(null);
   const [lines, setLines] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -42,7 +21,7 @@ export function IndexDisplayPanels() {
       setLoading(true);
       setError(null);
       const status = await DashAPI.getIndexStatus();
-      setMetadata((status.metadata || null) as ExtendedMetadata | null);
+      setMetadata((status.metadata || null) as DashboardIndexStatusMetadata | null);
       setLines(status.lines || []);
     } catch (err) {
       console.error('[IndexDisplay] Failed to load status:', err);
@@ -56,10 +35,15 @@ export function IndexDisplayPanels() {
     loadStatus();
     const interval = setInterval(loadStatus, 30000);
     const handleRefresh = () => loadStatus();
+    const handleCorpusChanged = () => loadStatus();
     window.addEventListener('dashboard-refresh', handleRefresh);
+    window.addEventListener('tribrid-corpus-changed', handleCorpusChanged);
+    window.addEventListener('tribrid-corpus-loaded', handleCorpusChanged);
     return () => {
       clearInterval(interval);
       window.removeEventListener('dashboard-refresh', handleRefresh);
+      window.removeEventListener('tribrid-corpus-changed', handleCorpusChanged);
+      window.removeEventListener('tribrid-corpus-loaded', handleCorpusChanged);
     };
   }, []);
 
@@ -97,17 +81,16 @@ export function IndexDisplayPanels() {
   const embedding = metadata.embedding_config || {};
   const costs = metadata.costs || {};
   const storage = metadata.storage_breakdown || {};
-  const qdrantWithOverhead = (storage.embeddings_raw || 0) + (storage.qdrant_overhead || 0);
 
   const storageCards = [
-    { label: 'Chunks JSON', value: formatBytes(storage.chunks_json), accent: 'var(--link)' },
-    { label: 'RAM Embeddings', value: formatBytes(storage.embeddings_raw), accent: 'var(--link)' },
-    { label: 'Qdrant (w/overhead)', value: formatBytes(qdrantWithOverhead), accent: 'var(--warn)' },
-    { label: 'BM25 Index', value: formatBytes(storage.bm25_index), accent: 'var(--accent)' },
-    { label: 'Cards/Summary', value: formatBytes(storage.cards), accent: 'var(--accent)' },
-    { label: 'Reranker Cache', value: formatBytes(storage.reranker_cache), accent: 'var(--warn)' },
-    { label: 'Redis Cache', value: formatBytes(storage.redis), accent: 'var(--link)' },
-    { label: 'Keywords', value: (metadata.keywords_count ?? 0).toLocaleString(), accent: 'var(--warn)' }
+    { label: 'Chunks', value: formatBytes(storage.chunks_bytes), accent: 'var(--link)' },
+    { label: 'pgvector vectors', value: formatBytes(storage.embeddings_bytes), accent: 'var(--link)' },
+    { label: 'pgvector index (optional)', value: formatBytes(storage.pgvector_index_bytes), accent: 'var(--warn)' },
+    { label: 'BM25 Index', value: formatBytes(storage.bm25_index_bytes), accent: 'var(--accent)' },
+    { label: 'Chunk Summaries', value: formatBytes(storage.chunk_summaries_bytes), accent: 'var(--accent)' },
+    { label: 'Neo4j Store', value: formatBytes(storage.neo4j_store_bytes), accent: 'var(--warn)' },
+    { label: 'Keywords', value: (metadata.keywords_count ?? 0).toLocaleString(), accent: 'var(--warn)' },
+    { label: 'Postgres Total', value: formatBytes(storage.postgres_total_bytes), accent: 'var(--link)' }
   ];
 
   return (
@@ -147,7 +130,10 @@ export function IndexDisplayPanels() {
                 marginTop: '4px'
               }}
             >
-              Branch: <span style={{ color: 'var(--link)', fontWeight: 600 }}>{metadata.current_branch}</span>
+              Branch:{' '}
+              <span style={{ color: 'var(--link)', fontWeight: 600 }}>
+                {metadata.current_branch || '—'}
+              </span>
             </div>
           </div>
         </div>
@@ -223,7 +209,10 @@ export function IndexDisplayPanels() {
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
             <CostStat label="Total Tokens" value={costs.total_tokens?.toLocaleString() || '0'} />
-            <CostStat label="Embedding Cost" value={`$${Number(costs.embedding_cost || 0).toFixed(4)}`} />
+            <CostStat
+              label="Embedding Cost"
+              value={costs.embedding_cost == null ? 'N/A' : `$${Number(costs.embedding_cost || 0).toFixed(4)}`}
+            />
           </div>
         </div>
       ) : null}
@@ -294,83 +283,6 @@ export function IndexDisplayPanels() {
           ))}
         </div>
       </div>
-
-      {metadata.repos && metadata.repos.length > 0 && (
-        <details style={{ marginBottom: '4px' }}>
-          <summary
-            style={{
-              cursor: 'pointer',
-              fontSize: '11px',
-              fontWeight: 700,
-              color: 'var(--fg-muted)',
-              textTransform: 'uppercase',
-              letterSpacing: '1px',
-              padding: '12px',
-              background: 'var(--card-bg)',
-              borderRadius: '6px',
-              border: '1px solid var(--line)',
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center'
-            }}
-          >
-            <span style={{ color: 'var(--link)' }}>▸ Index Profiles</span>
-            <span>{metadata.repos.length}</span>
-          </summary>
-          <div
-            style={{
-              marginTop: '12px',
-              padding: '12px',
-              background: 'var(--card-bg)',
-              borderRadius: '6px',
-              border: '1px solid var(--line)',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '8px'
-            }}
-          >
-            {metadata.repos.map(repo => {
-              const totalSize =
-                (repo.sizes?.chunks || 0) + (repo.sizes?.bm25 || 0) + (repo.sizes?.cards || 0);
-              const profileLabel = repo.profile || 'default';
-              return (
-                <div
-                  key={`${profileLabel}-${repo.name}`}
-                  style={{
-                    padding: '10px',
-                    background: 'var(--code-bg)',
-                    borderRadius: '4px',
-                    border: `1px solid ${
-                      repo.has_cards ? 'color-mix(in oklch, var(--ok) 30%, var(--line))' : 'var(--line)'
-                    }`
-                  }}
-                >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
-                    <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--fg)' }}>
-                      {repo.name}{' '}
-                      <span style={{ color: 'var(--fg-muted)', fontWeight: 400 }}>/ {profileLabel}</span>
-                    </div>
-                    <div
-                      style={{
-                        fontSize: '12px',
-                        fontWeight: 700,
-                        color: 'var(--accent)',
-                        fontFamily: "'SF Mono', monospace"
-                      }}
-                    >
-                      {formatBytes(totalSize)}
-                    </div>
-                  </div>
-                  <div style={{ fontSize: '10px', color: 'var(--fg-muted)' }}>
-                    {repo.chunk_count.toLocaleString()} chunks{' '}
-                    {repo.has_cards ? <span style={{ color: 'var(--ok)' }}>• ✓ Cards</span> : null}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </details>
-      )}
 
       <div
         style={{

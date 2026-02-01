@@ -4,8 +4,10 @@ import asyncio
 import json
 import os
 import re
+import time
 from collections import defaultdict
 from collections.abc import Iterable
+from pathlib import Path
 from typing import Any, Literal, cast
 
 from neo4j import AsyncDriver, AsyncGraphDatabase
@@ -658,6 +660,114 @@ class Neo4jClient:
 
         return [_entity_from_mapping(r) for r in records]
 
+    async def get_community_subgraph(
+        self,
+        repo_id: str,
+        community_id: str,
+        *,
+        limit: int = 200,
+    ) -> GraphNeighborsResponse | None:
+        """Return an induced subgraph for a community (members + edges between members).
+
+        This is used by the UI force-graph visualization so community selection can show edges,
+        not just a flat member list.
+        """
+        lim = int(max(0, limit or 0))
+        lim = min(lim, 2000)
+        if not community_id.strip() or lim <= 0:
+            return None
+
+        allowed_rels = ["calls", "imports", "inherits", "contains", "references", "related_to"]
+        driver = self._require_driver()
+
+        cypher = """
+        MATCH (c:Community {repo_id: $repo_id, community_id: $community_id})
+        MATCH (e:Entity {repo_id: $repo_id})-[:IN_COMMUNITY]->(c)
+        WITH e
+        ORDER BY e.name ASC
+        LIMIT $limit
+
+        WITH collect(e) AS nodes
+        UNWIND nodes AS a
+        OPTIONAL MATCH (a)-[r]-(b:Entity {repo_id: $repo_id})
+        WHERE b IN nodes AND type(r) IN $allowed_rels
+        WITH nodes, [x IN collect(DISTINCT r) WHERE x IS NOT NULL] AS rels
+
+        RETURN
+          [n IN nodes |
+            {
+              entity_id: n.entity_id,
+              name: n.name,
+              entity_type: n.entity_type,
+              file_path: n.file_path,
+              description: n.description,
+              properties_json: n.properties_json
+            }
+          ] AS entities,
+          [r IN rels |
+            {
+              source_id: startNode(r).entity_id,
+              target_id: endNode(r).entity_id,
+              relation_type: type(r),
+              weight: coalesce(r.weight, 1.0),
+              properties_json: r.properties_json
+            }
+          ] AS relationships;
+        """
+
+        async with driver.session(database=self.database) as session:
+            res = await session.run(
+                cypher,
+                repo_id=repo_id,
+                community_id=community_id,
+                allowed_rels=allowed_rels,
+                limit=lim,
+            )
+            records = await res.data()
+        if not records:
+            return None
+
+        rec = records[0] or {}
+        entities_raw = rec.get("entities") or []
+        relationships_raw = rec.get("relationships") or []
+
+        entities: list[Entity] = []
+        if isinstance(entities_raw, list):
+            for item in entities_raw:
+                if isinstance(item, dict):
+                    entities.append(_entity_from_mapping(item))
+
+        rels: list[Relationship] = []
+        allowed: set[str] = {"calls", "imports", "inherits", "contains", "references", "related_to"}
+        if isinstance(relationships_raw, list):
+            for r in relationships_raw:
+                if not isinstance(r, dict):
+                    continue
+                rel_type = str(r.get("relation_type") or "")
+                if rel_type not in allowed:
+                    continue
+                props = {}
+                if r.get("properties_json"):
+                    try:
+                        props = json.loads(str(r["properties_json"]))
+                    except Exception:
+                        props = {}
+                raw_weight = float(r.get("weight") or 1.0)
+                weight = max(0.0, min(1.0, raw_weight))
+                rels.append(
+                    Relationship(
+                        source_id=str(r.get("source_id") or ""),
+                        target_id=str(r.get("target_id") or ""),
+                        relation_type=cast(RelationshipType, rel_type),
+                        weight=weight,
+                        properties=props,
+                    )
+                )
+
+        if not entities:
+            return None
+        return GraphNeighborsResponse(entities=entities, relationships=rels)
+
     # Community operations
     async def detect_communities(self, repo_id: str) -> list[Community]:
         # Heuristic community detection (works without GDS): group by top-level directory.
@@ -992,6 +1102,101 @@ class Neo4jClient:
             res = await session.run(query, **p)
             records: list[dict[str, Any]] = await res.data()
         return records
+
+    _store_size_cache: dict[str, tuple[float, int]] = {}
+    _store_size_ttl_s: float = 30.0
+
+    @staticmethod
+    def _dir_size_bytes(root: Path) -> int:
+        """Return total size of all files under root (best-effort)."""
+        total = 0
+        stack: list[Path] = [root]
+        while stack:
+            p = stack.pop()
+            try:
+                for child in p.iterdir():
+                    try:
+                        if child.is_dir():
+                            stack.append(child)
+                        elif child.is_file():
+                            total += child.stat().st_size
+                    except Exception:
+                        continue
+            except Exception:
+                continue
+        return int(total)
+
+    @staticmethod
+    def _resolve_host_neo4j_data_dir() -> Path | None:
+        """Resolve the host path where docker-compose mounts Neo4j /data.
+
+        This is used as a fallback when Neo4j JMX store beans are unavailable.
+        """
+        # docker-compose uses TRIBRID_DB_DIR (default ../tribrid-rag-db) and mounts:
+        #   ${TRIBRID_DB_DIR}/neo4j/data  -> /data
+        repo_root = Path(__file__).resolve().parents[2]
+        raw = os.getenv("TRIBRID_DB_DIR") or "../tribrid-rag-db"
+        base = Path(raw).expanduser()
+        if not base.is_absolute():
+            base = (repo_root / base).resolve()
+        data_dir = (base / "neo4j" / "data").resolve()
+        if data_dir.exists():
+            return data_dir
+        return None
+
+    async def get_store_size_bytes(self) -> int:
+        """Return the total Neo4j store size (bytes) for this database.
+
+        Uses JMX exposure via Cypher (works in Neo4j 5+):
+        `CALL dbms.queryJmx(\"org.neo4j:instance=kernel#0,name=Store file sizes\")`.
+        """
+        db_key = str(self.database or "neo4j")
+        now = time.time()
+        cached = self._store_size_cache.get(db_key)
+        if cached is not None:
+            ts, size = cached
+            if now - ts <= float(self._store_size_ttl_s):
+                return int(size)
+
+        size = 0
+
+        # 1) Try Neo4j store-size MBean (may not be registered in some builds/configs)
+        try:
+            driver = self._require_driver()
+            async with driver.session(database=self.database) as session:
+                res = await session.run(
+                    """
+                    CALL dbms.queryJmx("org.neo4j:instance=kernel#0,name=Store file sizes")
+                    YIELD attributes
+                    RETURN attributes AS attrs
+                    LIMIT 1;
+                    """
+                )
+                rec = await res.single()
+
+            attrs = rec.get("attrs") if rec else None
+            if isinstance(attrs, dict):
+                raw = attrs.get("TotalStoreSize") or attrs.get("totalStoreSize")
+                if isinstance(raw, dict):
+                    raw = raw.get("value")
+                size = int(raw or 0)
+        except Exception:
+            size = 0
+
+        # 2) Fallback: host filesystem measurement (docker-compose local dev)
+        if size <= 0:
+            data_dir = self._resolve_host_neo4j_data_dir()
+            if data_dir is not None:
+                db_dir = data_dir / "databases" / db_key
+                tx_dir = data_dir / "transactions" / db_key
+                size = 0
+                if db_dir.exists():
+                    size += await asyncio.to_thread(self._dir_size_bytes, db_dir)
+                if tx_dir.exists():
+                    size += await asyncio.to_thread(self._dir_size_bytes, tx_dir)
+
+        self._store_size_cache[db_key] = (now, int(size))
+        return int(size)
 
     # Stats
     async def get_graph_stats(self, repo_id: str) -> GraphStats:

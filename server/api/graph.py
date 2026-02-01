@@ -115,6 +115,35 @@ async def get_community_members(corpus_id: str, community_id: str, limit: int = 
         await neo4j.disconnect()
 
 
+@router.get(
+    "/graph/{corpus_id}/community/{community_id}/subgraph",
+    response_model=GraphNeighborsResponse,
+)
+async def get_community_subgraph(
+    corpus_id: str,
+    community_id: str,
+    limit: int = 200,
+) -> GraphNeighborsResponse:
+    """Return a community subgraph (members + edges between members)."""
+    repo_id = corpus_id
+    cfg = await load_scoped_config(repo_id=repo_id)
+    db_name = cfg.graph_storage.resolve_database(repo_id)
+    neo4j = Neo4jClient(
+        cfg.graph_storage.neo4j_uri,
+        cfg.graph_storage.neo4j_user,
+        cfg.graph_storage.neo4j_password,
+        database=db_name,
+    )
+    try:
+        await neo4j.connect()
+        out = await neo4j.get_community_subgraph(repo_id, community_id, limit=limit)
+        if out is None:
+            raise HTTPException(status_code=404, detail="Community not found")
+        return out
+    finally:
+        await neo4j.disconnect()
+
+
 @router.get("/graph/{corpus_id}/communities", response_model=list[Community])
 async def list_communities(corpus_id: str, level: int | None = None) -> list[Community]:
     repo_id = corpus_id

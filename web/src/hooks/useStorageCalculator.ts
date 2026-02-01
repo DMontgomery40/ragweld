@@ -47,7 +47,6 @@ export function useStorageCalculator() {
     precision: 4, // float32
     qdrantOverhead: 1.5,
     hydrationPercent: 100,
-    redisMiB: 400,
     replicationFactor: 3,
   });
 
@@ -60,7 +59,6 @@ export function useStorageCalculator() {
     cardsSummary: 0,
     hydration: 0,
     reranker: 0,
-    redis: 0,
     singleInstance: 0,
     replicated: 0,
   });
@@ -80,7 +78,6 @@ export function useStorageCalculator() {
     const B = inputs.precision;
     const Q = inputs.qdrantOverhead;
     const hydrationPct = inputs.hydrationPercent / 100;
-    const redisBytes = inputs.redisMiB * 1048576;
     const replFactor = inputs.replicationFactor;
 
     // Calculate components
@@ -93,7 +90,7 @@ export function useStorageCalculator() {
     const RER = 0.5 * E;
 
     // Totals
-    const singleTotal = E + Q_bytes + BM25 + CARDS + HYDR + RER + redisBytes;
+    const singleTotal = E + Q_bytes + BM25 + CARDS + HYDR + RER;
     const criticalComponents = E + Q_bytes + HYDR + CARDS + RER;
     const replicatedTotal = singleTotal + (replFactor - 1) * criticalComponents;
 
@@ -105,7 +102,6 @@ export function useStorageCalculator() {
       cardsSummary: CARDS,
       hydration: HYDR,
       reranker: RER,
-      redis: redisBytes,
       singleInstance: singleTotal,
       replicated: replicatedTotal,
     });
@@ -220,9 +216,6 @@ export function useOptimizationCalculator(calculator1Inputs?: CalculatorInputs) 
     const hydrationPct = calculator1Inputs
       ? calculator1Inputs.hydrationPercent / 100
       : 1.0;
-    const redisBytesInput = calculator1Inputs
-      ? calculator1Inputs.redisMiB * 1048576
-      : 390 * 1048576;
     const replicationFactor = calculator1Inputs?.replicationFactor ?? 3;
 
     // Derived values
@@ -246,7 +239,7 @@ export function useOptimizationCalculator(calculator1Inputs?: CalculatorInputs) 
     const aggressiveEmbedding = E_pq8;
     const aggressiveQ = E_pq8 * qdrantMultiplier;
     const aggressiveRer = 0.5 * E_pq8;
-    const aggressiveTotal = aggressiveEmbedding + aggressiveQ + BM25 + CARDS + redisBytesInput + aggressiveRer;
+    const aggressiveTotal = aggressiveEmbedding + aggressiveQ + BM25 + CARDS + aggressiveRer;
     const aggressiveCritical = aggressiveEmbedding + aggressiveQ + CARDS + aggressiveRer;
     const aggressiveReplicated = aggressiveTotal + (replicationFactor - 1) * aggressiveCritical;
     const aggressiveFits = aggressiveTotal <= targetBytes;
@@ -256,7 +249,7 @@ export function useOptimizationCalculator(calculator1Inputs?: CalculatorInputs) 
     const conservativeQ = conservativeEmbedding * qdrantMultiplier;
     const conservativeRer = 0.5 * conservativeEmbedding;
     const conservativeHydration = hydrationPct * R;
-    const conservativeTotal = conservativeEmbedding + conservativeQ + conservativeHydration + BM25 + CARDS + conservativeRer + redisBytesInput;
+    const conservativeTotal = conservativeEmbedding + conservativeQ + conservativeHydration + BM25 + CARDS + conservativeRer;
     const conservativeCritical = conservativeEmbedding + conservativeQ + conservativeHydration + CARDS + conservativeRer;
     const conservativeReplicated = conservativeTotal + (replicationFactor - 1) * conservativeCritical;
     const conservativeFits = conservativeTotal <= targetBytes;
@@ -288,7 +281,6 @@ export function useOptimizationCalculator(calculator1Inputs?: CalculatorInputs) 
           'BM25 search',
           'Cards/metadata',
           'Reranker cache',
-          'Redis',
           'Excludes: Raw data (fetched on-demand)',
         ],
         total: aggressiveTotal,
@@ -303,7 +295,6 @@ export function useOptimizationCalculator(calculator1Inputs?: CalculatorInputs) 
           'BM25 search',
           'Cards/metadata',
           'Reranker cache',
-          'Redis',
           `Data in RAM (${Math.round(hydrationPct * 100)}% hydration)`,
         ],
         total: conservativeTotal,

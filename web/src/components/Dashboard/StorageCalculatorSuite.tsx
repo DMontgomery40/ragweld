@@ -37,7 +37,6 @@ interface Calc1Inputs {
   precision: number;
   pgvectorOverhead: number;
   hydration: number;
-  redis: number;
   replication: number;
   // Neo4j graph storage inputs
   neo4jNodeCount: number;
@@ -68,7 +67,6 @@ interface Calc1Results {
   chunkSummaries: number;
   hydration: number;
   reranker: number;
-  redisSize: number;
   // Neo4j graph storage
   neo4jNodes: number;
   neo4jRels: number;
@@ -107,7 +105,6 @@ export function StorageCalculatorSuite() {
     precision: 4, // float32
     pgvectorOverhead: 1.15, // pgvector HNSW index overhead (lower than Qdrant)
     hydration: 100,
-    redis: 400,
     replication: 3,
     // Neo4j defaults - estimated from typical entity extraction
     neo4jNodeCount: 10000,
@@ -160,7 +157,6 @@ export function StorageCalculatorSuite() {
     const B = calc1.precision;
     const PG = calc1.pgvectorOverhead;
     const hydrationPct = calc1.hydration / 100;
-    const redisBytes = calc1.redis * 1048576;
     const replFactor = calc1.replication;
 
     // Vector storage (pgvector)
@@ -180,7 +176,7 @@ export function StorageCalculatorSuite() {
     const NEO_indexes = Math.ceil((calc1.neo4jNodeCount + calc1.neo4jRelCount) * 0.1 * 64); // ~10% index overhead
     const NEO_total = NEO_nodes + NEO_rels + NEO_indexes;
 
-    const singleTotal = E + PG_bytes + BM25 + SUMMARIES + HYDR + RER + redisBytes + NEO_total;
+    const singleTotal = E + PG_bytes + BM25 + SUMMARIES + HYDR + RER + NEO_total;
     const criticalComponents = E + PG_bytes + HYDR + SUMMARIES + RER + NEO_total;
     const replicatedTotal = singleTotal + (replFactor - 1) * criticalComponents;
 
@@ -192,7 +188,6 @@ export function StorageCalculatorSuite() {
       chunkSummaries: SUMMARIES,
       hydration: HYDR,
       reranker: RER,
-      redisSize: redisBytes,
       neo4jNodes: NEO_nodes,
       neo4jRels: NEO_rels,
       neo4jIndexes: NEO_indexes,
@@ -217,7 +212,6 @@ export function StorageCalculatorSuite() {
     // Shared params from calc1
     const pgvectorMultiplier = calc1.pgvectorOverhead;
     const hydrationPct = calc1.hydration / 100;
-    const redisBytesInput = calc1.redis * 1048576;
     const replicationFactor = calc1.replication;
 
     const N = Math.ceil(R / C);
@@ -233,7 +227,7 @@ export function StorageCalculatorSuite() {
     const aggressiveEmbedding = E_pq8;
     const aggressivePG = E_pq8 * pgvectorMultiplier;
     const aggressiveRer = 0.5 * E_pq8;
-    const aggressiveTotal = aggressiveEmbedding + aggressivePG + BM25 + SUMMARIES + redisBytesInput + aggressiveRer;
+    const aggressiveTotal = aggressiveEmbedding + aggressivePG + BM25 + SUMMARIES + aggressiveRer;
     const aggressiveCritical = aggressiveEmbedding + aggressivePG + SUMMARIES + aggressiveRer;
     const aggressiveReplicated = aggressiveTotal + (replicationFactor - 1) * aggressiveCritical;
     const aggressiveFits = aggressiveTotal <= targetBytes;
@@ -243,7 +237,7 @@ export function StorageCalculatorSuite() {
     const conservativePG = conservativeEmbedding * pgvectorMultiplier;
     const conservativeRer = 0.5 * conservativeEmbedding;
     const conservativeHydration = hydrationPct * R;
-    const conservativeTotal = conservativeEmbedding + conservativePG + conservativeHydration + BM25 + SUMMARIES + conservativeRer + redisBytesInput;
+    const conservativeTotal = conservativeEmbedding + conservativePG + conservativeHydration + BM25 + SUMMARIES + conservativeRer;
     const conservativeCritical = conservativeEmbedding + conservativePG + conservativeHydration + SUMMARIES + conservativeRer;
     const conservativeReplicated = conservativeTotal + (replicationFactor - 1) * conservativeCritical;
     const conservativeFits = conservativeTotal <= targetBytes;
@@ -278,7 +272,7 @@ export function StorageCalculatorSuite() {
       statusMessage,
       statusType,
     });
-  }, [calc2, calc1.pgvectorOverhead, calc1.hydration, calc1.redis, calc1.replication]);
+  }, [calc2, calc1.pgvectorOverhead, calc1.hydration, calc1.replication]);
 
   // Recalculate when inputs change
   useEffect(() => {
@@ -436,21 +430,6 @@ export function StorageCalculatorSuite() {
               <div className="input-group">
                 <label>
                   <div className="label-with-tooltip">
-                    Redis Cache (MiB)
-                    <span className="tooltip" title="Session/chat memory storage">?</span>
-                  </div>
-                </label>
-                <input
-                  type="number"
-                  value={calc1.redis}
-                  onChange={(e) => setCalc1({ ...calc1, redis: parseFloat(e.target.value) || 0 })}
-                  step="50"
-                  min="0"
-                />
-              </div>
-              <div className="input-group">
-                <label>
-                  <div className="label-with-tooltip">
                     Replication Factor
                     <span className="tooltip" title="Number of copies for HA/scaling">?</span>
                   </div>
@@ -567,10 +546,6 @@ export function StorageCalculatorSuite() {
                 <div className="result-item">
                   <span className="result-label">Reranker</span>
                   <span className="result-value">{formatBytes(results1.reranker)}</span>
-                </div>
-                <div className="result-item">
-                  <span className="result-label">Redis</span>
-                  <span className="result-value">{formatBytes(results1.redisSize)}</span>
                 </div>
               </div>
 
@@ -803,7 +778,6 @@ export function StorageCalculatorSuite() {
                       • BM25 sparse search<br />
                       • Chunk summaries<br />
                       • Reranker cache<br />
-                      • Redis<br />
                       <strong>Excludes:</strong><br />
                       • Raw data (fetched on-demand)
                     </div>
@@ -818,7 +792,6 @@ export function StorageCalculatorSuite() {
                       • BM25 sparse search<br />
                       • Chunk summaries<br />
                       • Reranker cache<br />
-                      • Redis<br />
                       • <span style={{ color: 'var(--warn)' }}>Data in RAM (per left hydration %)</span>
                     </div>
                     <div className="plan-total">{formatBytes(results2.conservativeTotal)}</div>

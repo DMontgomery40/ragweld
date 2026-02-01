@@ -10,23 +10,45 @@
   const MERMAID_READY_POLL_MS = 50;
   const MERMAID_READY_TIMEOUT_MS = 8000;
 
+  function normalizeMaterialGridCards() {
+    // Material's card grid styling keys off the `.cards` class.
+    // We avoid using the word "cards" in doc content, so we add it at runtime.
+    const grids = Array.from(document.querySelectorAll(".md-typeset .grid.chunk_summaries, .md-typeset .grid.chunk_summary"));
+    for (const grid of grids) {
+      grid.classList.add("cards");
+    }
+  }
+
   function getMermaid() {
     // Mermaid attaches itself to window.
     return typeof window !== "undefined" ? window.mermaid : undefined;
   }
 
-  function initMermaidOnce(m) {
-    if (window[MERMAID_INIT_FLAG]) return;
+  function getMaterialColorScheme() {
+    const scheme = document?.body?.getAttribute("data-md-color-scheme");
+    return scheme || "default";
+  }
+
+  function getMermaidThemeForScheme(scheme) {
+    return scheme === "slate" ? "dark" : "default";
+  }
+
+  function initMermaid(m) {
+    const scheme = getMaterialColorScheme();
+    const theme = getMermaidThemeForScheme(scheme);
+    const prev = window[MERMAID_INIT_FLAG];
+    if (prev && prev.theme === theme) return;
 
     m.initialize({
       // We explicitly render on navigation events.
       startOnLoad: false,
-      theme: "dark",
+      securityLevel: "strict",
+      theme,
       look: "handDrawn", // Mermaid v11: 3D sketchy style
       layout: "elk", // Mermaid v11: improved auto-layout
       flowchart: {
         useMaxWidth: true,
-        htmlLabels: true,
+        htmlLabels: false,
         curve: "basis",
         padding: 20,
       },
@@ -39,14 +61,15 @@
       },
     });
 
-    window[MERMAID_INIT_FLAG] = true;
+    window[MERMAID_INIT_FLAG] = { theme };
   }
 
   async function renderMermaid() {
     const m = getMermaid();
     if (!m) return false;
 
-    initMermaidOnce(m);
+    normalizeMaterialGridCards();
+    initMermaid(m);
 
     const nodes = Array.from(document.querySelectorAll(".mermaid"));
     if (nodes.length === 0) return true;

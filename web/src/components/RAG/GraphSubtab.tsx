@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import ForceGraph2D from 'react-force-graph-2d';
 import { useGraph } from '@/hooks/useGraph';
 import { useRepoStore } from '@/stores/useRepoStore';
 import type { Community, Entity, Relationship } from '@/types/generated';
@@ -43,10 +44,21 @@ export function GraphSubtab() {
   } = useGraph();
 
   const [entityQuery, setEntityQuery] = useState('');
+  const [viewMode, setViewMode] = useState<'table' | 'viz'>('table');
+  const [accentColor, setAccentColor] = useState<string>('#00ff88');
+  const fgRef = useRef<any>(null);
+  const vizCanvasRef = useRef<HTMLDivElement | null>(null);
+  const [vizSize, setVizSize] = useState<{ w: number; h: number }>({ w: 0, h: 0 });
 
   useEffect(() => {
     if (!repos.length) void loadRepos();
   }, [repos.length, loadRepos]);
+
+  useEffect(() => {
+    // Pull the CSS theme accent into canvas-land (ForceGraph uses canvas fillStyles).
+    const v = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim();
+    if (v) setAccentColor(v);
+  }, []);
 
   const entityById = useMemo(() => {
     return new Map<string, Entity>((entities || []).map((e) => [e.entity_id, e]));
@@ -59,6 +71,51 @@ export function GraphSubtab() {
   const filteredRelationships = useMemo(() => {
     return getRelationshipsByType(visibleRelationTypes);
   }, [getRelationshipsByType, visibleRelationTypes]);
+
+  const vizEntityIdSet = useMemo(() => {
+    return new Set<string>(filteredEntities.map((e) => e.entity_id));
+  }, [filteredEntities]);
+
+  const vizRelationships = useMemo(() => {
+    // Ensure we don't create “phantom nodes” when filters hide endpoints.
+    return filteredRelationships.filter(
+      (r) => vizEntityIdSet.has(r.source_id) && vizEntityIdSet.has(r.target_id)
+    );
+  }, [filteredRelationships, vizEntityIdSet]);
+
+  const vizGraphData = useMemo(() => {
+    return { nodes: filteredEntities, links: vizRelationships };
+  }, [filteredEntities, vizRelationships]);
+
+  useEffect(() => {
+    if (viewMode !== 'viz') return;
+    const el = vizCanvasRef.current;
+    if (!el) return;
+
+    const update = () => {
+      const rect = el.getBoundingClientRect();
+      setVizSize({
+        w: Math.max(1, Math.floor(rect.width)),
+        h: Math.max(1, Math.floor(rect.height)),
+      });
+    };
+
+    update();
+    window.addEventListener('resize', update);
+    return () => window.removeEventListener('resize', update);
+  }, [viewMode]);
+
+  useEffect(() => {
+    if (viewMode !== 'viz') return;
+    const handle = window.setTimeout(() => {
+      try {
+        fgRef.current?.zoomToFit?.(400, 60);
+      } catch {
+        // no-op
+      }
+    }, 250);
+    return () => window.clearTimeout(handle);
+  }, [viewMode, vizGraphData.nodes.length, vizGraphData.links.length]);
 
   const entityTypes = useMemo(() => {
     return ['function', 'class', 'module', 'variable', 'concept'];
@@ -85,6 +142,24 @@ export function GraphSubtab() {
     await selectEntity(e);
   };
 
+  const nodeColor = (e: Entity): string => {
+    if (selectedEntity?.entity_id === e.entity_id) return accentColor;
+    switch (e.entity_type) {
+      case 'function':
+        return '#22c55e';
+      case 'class':
+        return '#60a5fa';
+      case 'module':
+        return '#fbbf24';
+      case 'variable':
+        return '#a78bfa';
+      case 'concept':
+        return '#94a3b8';
+      default:
+        return '#9fb1c7';
+    }
+  };
+
   return (
     <div className="subtab-panel" style={{ padding: '24px' }} data-testid="graph-subtab">
       <div style={{ marginBottom: '18px' }}>
@@ -93,6 +168,40 @@ export function GraphSubtab() {
         </h3>
         <div style={{ marginTop: '6px', fontSize: '13px', color: 'var(--fg-muted)' }}>
           Inspect entities, relationships, and communities stored in Neo4j for the active corpus.
+        </div>
+        <div style={{ marginTop: '12px', display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+          <button
+            onClick={() => setViewMode('viz')}
+            style={{
+              padding: '8px 10px',
+              background: viewMode === 'viz' ? 'rgba(var(--accent-rgb), 0.14)' : 'transparent',
+              color: viewMode === 'viz' ? 'var(--accent)' : 'var(--fg-muted)',
+              border: viewMode === 'viz' ? '1px solid var(--accent)' : '1px solid var(--line)',
+              borderRadius: '10px',
+              cursor: 'pointer',
+              fontWeight: 800,
+              fontSize: '12px',
+            }}
+            data-testid="graph-view-visualization"
+          >
+            Visualization
+          </button>
+          <button
+            onClick={() => setViewMode('table')}
+            style={{
+              padding: '8px 10px',
+              background: viewMode === 'table' ? 'rgba(var(--accent-rgb), 0.14)' : 'transparent',
+              color: viewMode === 'table' ? 'var(--accent)' : 'var(--fg-muted)',
+              border: viewMode === 'table' ? '1px solid var(--accent)' : '1px solid var(--line)',
+              borderRadius: '10px',
+              cursor: 'pointer',
+              fontWeight: 800,
+              fontSize: '12px',
+            }}
+            data-testid="graph-view-table"
+          >
+            Table
+          </button>
         </div>
       </div>
 
@@ -425,77 +534,143 @@ export function GraphSubtab() {
           </div>
         </div>
 
-        {/* Details */}
-        <div style={{ background: 'var(--card-bg)', border: '1px solid var(--line)', borderRadius: '12px', padding: '16px' }}>
-          <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--fg)', marginBottom: '10px' }}>Details</div>
+        {viewMode === 'table' ? (
+          /* Details */
+          <div style={{ background: 'var(--card-bg)', border: '1px solid var(--line)', borderRadius: '12px', padding: '16px' }}>
+            <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--fg)', marginBottom: '10px' }}>Details</div>
 
-          {selectedEntity ? (
-            <div data-testid="graph-entity-details">
-              <div style={{ fontSize: '14px', fontWeight: 800, color: 'var(--fg)' }}>{selectedEntity.name}</div>
-              <div style={{ marginTop: '6px', fontSize: '12px', color: 'var(--fg-muted)' }}>
-                <span style={{ fontFamily: 'var(--font-mono)' }}>{selectedEntity.entity_id}</span>
-              </div>
-              <div style={{ marginTop: '10px', fontSize: '12px', color: 'var(--fg)' }}>
-                <strong>Type:</strong> {selectedEntity.entity_type}
-              </div>
-              <div style={{ marginTop: '6px', fontSize: '12px', color: 'var(--fg)' }}>
-                <strong>File:</strong> {selectedEntity.file_path || '—'}
-              </div>
-              {selectedEntity.description && (
-                <div style={{ marginTop: '10px', fontSize: '12px', color: 'var(--fg-muted)', lineHeight: 1.5 }}>
-                  {selectedEntity.description}
+            {selectedEntity ? (
+              <div data-testid="graph-entity-details">
+                <div style={{ fontSize: '14px', fontWeight: 800, color: 'var(--fg)' }}>{selectedEntity.name}</div>
+                <div style={{ marginTop: '6px', fontSize: '12px', color: 'var(--fg-muted)' }}>
+                  <span style={{ fontFamily: 'var(--font-mono)' }}>{selectedEntity.entity_id}</span>
                 </div>
-              )}
-
-              <div style={{ marginTop: '14px', display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-                <div style={{ fontSize: '12px', fontWeight: 800, color: 'var(--fg)' }}>Relationships</div>
-                <div style={{ fontSize: '11px', color: 'var(--fg-muted)' }} data-testid="graph-relationship-count">
-                  {filteredRelationships.length} edges
+                <div style={{ marginTop: '10px', fontSize: '12px', color: 'var(--fg)' }}>
+                  <strong>Type:</strong> {selectedEntity.entity_type}
                 </div>
-              </div>
-
-              <div style={{ marginTop: '10px', maxHeight: '360px', overflowY: 'auto', display: 'grid', gap: '8px' }} data-testid="graph-relationships">
-                {filteredRelationships.map((r, idx) => (
-                  <div
-                    key={`${r.source_id}-${r.relation_type}-${r.target_id}-${idx}`}
-                    style={{
-                      padding: '10px 12px',
-                      background: 'var(--bg-elev2)',
-                      border: '1px solid var(--line)',
-                      borderRadius: '10px',
-                      fontSize: '12px',
-                      color: 'var(--fg)',
-                    }}
-                  >
-                    <div style={{ fontFamily: 'var(--font-mono)' }}>{formatRelLabel(r, entityById)}</div>
-                  </div>
-                ))}
-                {!filteredRelationships.length && (
-                  <div style={{ fontSize: '12px', color: 'var(--fg-muted)' }}>
-                    No relationships loaded. Select an entity to load its neighborhood.
+                <div style={{ marginTop: '6px', fontSize: '12px', color: 'var(--fg)' }}>
+                  <strong>File:</strong> {selectedEntity.file_path || '—'}
+                </div>
+                {selectedEntity.description && (
+                  <div style={{ marginTop: '10px', fontSize: '12px', color: 'var(--fg-muted)', lineHeight: 1.5 }}>
+                    {selectedEntity.description}
                   </div>
                 )}
+
+                <div style={{ marginTop: '14px', display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                  <div style={{ fontSize: '12px', fontWeight: 800, color: 'var(--fg)' }}>Relationships</div>
+                  <div style={{ fontSize: '11px', color: 'var(--fg-muted)' }} data-testid="graph-relationship-count">
+                    {filteredRelationships.length} edges
+                  </div>
+                </div>
+
+                <div style={{ marginTop: '10px', maxHeight: '360px', overflowY: 'auto', display: 'grid', gap: '8px' }} data-testid="graph-relationships">
+                  {filteredRelationships.map((r, idx) => (
+                    <div
+                      key={`${r.source_id}-${r.relation_type}-${r.target_id}-${idx}`}
+                      style={{
+                        padding: '10px 12px',
+                        background: 'var(--bg-elev2)',
+                        border: '1px solid var(--line)',
+                        borderRadius: '10px',
+                        fontSize: '12px',
+                        color: 'var(--fg)',
+                      }}
+                    >
+                      <div style={{ fontFamily: 'var(--font-mono)' }}>{formatRelLabel(r, entityById)}</div>
+                    </div>
+                  ))}
+                  {!filteredRelationships.length && (
+                    <div style={{ fontSize: '12px', color: 'var(--fg-muted)' }}>
+                      No relationships loaded. Select an entity to load its neighborhood.
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : selectedCommunity ? (
+              <div data-testid="graph-community-details">
+                <div style={{ fontSize: '14px', fontWeight: 800, color: 'var(--fg)' }}>{selectedCommunity.name}</div>
+                <div style={{ marginTop: '8px', fontSize: '12px', color: 'var(--fg-muted)', lineHeight: 1.5 }}>
+                  {selectedCommunity.summary || '—'}
+                </div>
+                <div style={{ marginTop: '10px', fontSize: '12px', color: 'var(--fg)' }}>
+                  <strong>Members:</strong> {selectedCommunity.member_ids?.length || 0}
+                </div>
+                <div style={{ marginTop: '10px', fontSize: '12px', color: 'var(--fg-muted)' }}>
+                  Click a member in the Entities list to load its neighbors.
+                </div>
+              </div>
+            ) : (
+              <div style={{ fontSize: '12px', color: 'var(--fg-muted)' }} data-testid="graph-details-empty">
+                Select a community or entity to view details.
+              </div>
+            )}
+          </div>
+        ) : (
+          /* Visualization */
+          <div
+            style={{
+              background: 'var(--card-bg)',
+              border: '1px solid var(--line)',
+              borderRadius: '12px',
+              padding: '16px',
+              overflow: 'hidden',
+            }}
+            data-testid="graph-viz-panel"
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '12px' }}>
+              <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--fg)' }}>Visualization</div>
+              <div style={{ fontSize: '11px', color: 'var(--fg-muted)' }}>
+                {filteredEntities.length} nodes • {vizRelationships.length} edges
               </div>
             </div>
-          ) : selectedCommunity ? (
-            <div data-testid="graph-community-details">
-              <div style={{ fontSize: '14px', fontWeight: 800, color: 'var(--fg)' }}>{selectedCommunity.name}</div>
-              <div style={{ marginTop: '8px', fontSize: '12px', color: 'var(--fg-muted)', lineHeight: 1.5 }}>
-                {selectedCommunity.summary || '—'}
-              </div>
-              <div style={{ marginTop: '10px', fontSize: '12px', color: 'var(--fg)' }}>
-                <strong>Members:</strong> {selectedCommunity.member_ids?.length || 0}
-              </div>
-              <div style={{ marginTop: '10px', fontSize: '12px', color: 'var(--fg-muted)' }}>
-                Click a member in the Entities list to load its neighbors.
-              </div>
+
+            <div
+              ref={vizCanvasRef}
+              style={{
+                marginTop: '12px',
+                height: '520px',
+                background: 'var(--bg)',
+                border: '1px solid var(--line)',
+                borderRadius: '10px',
+                overflow: 'hidden',
+              }}
+              data-testid="graph-viz-canvas"
+            >
+              {/* Inspired by Neumann’s force-graph UI (MIT). */}
+              {vizSize.w > 0 && vizSize.h > 0 && filteredEntities.length > 0 ? (
+                <ForceGraph2D
+                  ref={fgRef}
+                  width={vizSize.w}
+                  height={vizSize.h}
+                  graphData={vizGraphData as any}
+                  nodeId="entity_id"
+                  linkSource="source_id"
+                  linkTarget="target_id"
+                  nodeLabel={(n: any) => formatEntityLabel(n as Entity)}
+                  linkLabel={(l: any) => String((l as Relationship).relation_type || '')}
+                  nodeColor={(n: any) => nodeColor(n as Entity)}
+                  linkColor={() => 'rgba(255, 255, 255, 0.15)'}
+                  linkWidth={1}
+                  backgroundColor="rgba(0,0,0,0)"
+                  onNodeClick={(n: any) => {
+                    const e = n as Entity;
+                    const active = selectedEntity?.entity_id === e.entity_id;
+                    void handlePickEntity(active ? null : e);
+                  }}
+                />
+              ) : (
+                <div style={{ padding: '12px', fontSize: '12px', color: 'var(--fg-muted)' }}>
+                  Select an entity (or a community) to render a subgraph.
+                </div>
+              )}
             </div>
-          ) : (
-            <div style={{ fontSize: '12px', color: 'var(--fg-muted)' }} data-testid="graph-details-empty">
-              Select a community or entity to view details.
+
+            <div style={{ marginTop: '10px', fontSize: '11px', color: 'var(--fg-muted)' }}>
+              Tip: click a node to load its neighborhood.
             </div>
-          )}
-        </div>
+          </div>
+        )}
       </div>
     </div>
   );

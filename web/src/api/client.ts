@@ -69,6 +69,35 @@ export const apiUrl = (path: string): string => {
   return `${API_BASE}/${p}`;
 };
 
+/**
+ * Append the active corpus_id to an API path (query param scoping).
+ *
+ * NOTE: This should be used for endpoints that are corpus-scoped in the backend.
+ */
+export function withCorpusScope(path: string): string {
+  const p = String(path || '');
+  try {
+    const u = new URL(window.location.href);
+    const corpus =
+      u.searchParams.get('corpus') ||
+      u.searchParams.get('repo') ||
+      localStorage.getItem('tribrid_active_corpus') ||
+      localStorage.getItem('tribrid_active_repo') ||
+      '';
+    if (!corpus) return p;
+    const sep = p.includes('?') ? '&' : '?';
+    return `${p}${sep}corpus_id=${encodeURIComponent(corpus)}`;
+  } catch {
+    const corpus =
+      localStorage.getItem('tribrid_active_corpus') ||
+      localStorage.getItem('tribrid_active_repo') ||
+      '';
+    if (!corpus) return p;
+    const sep = p.includes('?') ? '&' : '?';
+    return `${p}${sep}corpus_id=${encodeURIComponent(corpus)}`;
+  }
+}
+
 // Expose window.CoreUtils for legacy JS modules during migration
 // This replaces /modules/core-utils.js
 if (typeof window !== 'undefined') {

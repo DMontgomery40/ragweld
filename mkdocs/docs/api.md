@@ -1,128 +1,166 @@
+# API Reference
+
 <div class="grid chunk_summaries" markdown>
 
--   :material-information:{ .lg .middle } **API Endpoints**
+-   :material-api:{ .lg .middle } **FastAPI Endpoints**
 
     ---
 
-    FastAPI endpoints in server/api/
+    Clean endpoints for config, indexing, retrieval, graph, models, keywords, reranker, and health.
 
--   :material-magnify:{ .lg .middle } **Search & Retrieval**
-
-    ---
-
-    /search, /graph, /chunk_summaries
-
--   :material-cog:{ .lg .middle } **Config & Models**
+-   :material-file-code:{ .lg .middle } **Schema by Pydantic**
 
     ---
 
-    /config, /models, /reranker
+    Request/response models are defined in Pydantic. The frontend imports generated TypeScript types.
+
+-   :material-shield-key:{ .lg .middle } **Secrets Check**
+
+    ---
+
+    Validate configured API keys and DB connections via `/secrets/check`.
 
 </div>
 
-!!! note "Implementation Note"
-    The API routes map directly to the server modules under server/api. Each endpoint uses Pydantic models for request/response validation.
+[Get started](index.md){ .md-button .md-button--primary }
+[Configuration](configuration.md){ .md-button }
+[API](api.md){ .md-button }
 
-!!! tip "Pro Tip"
-    Use the models endpoint (GET /models) as the authoritative list for UI dropdowns. Do not hardcode model lists elsewhere.
+!!! tip "Pro Tip — Inspect Schemas"
+    Each endpoint returns Pydantic-driven shapes. Prefer querying `/config` first to align UI interactions with actual server capabilities.
 
-!!! warning "Compatibility Warning"
-    API still uses `repo_id` naming. When scoping operations, prefer `corpus_id` but accept `repo_id` for compatibility.
+!!! note "HTTP Conventions"
+    - JSON requests/responses
+    - Errors via standard HTTP status codes with `detail`
+    - Streaming responses for long-running operations use `StreamingResponse`
 
-??? note "Collapsible: Endpoint index"
+!!! warning "Rate & Resource Limits"
+    Reranking and keyword generation incur model usage and cost. Control with config and model selection.
 
-    The API modules expose endpoints and helper functions. Key modules include:
+## Endpoint Inventory
 
-    - chunk_summaries.py
-    - config.py
-    - reranker.py
-    - models.py
-    - index.py
-    - graph.py
-
-
-## Selected endpoints and usage
-
-| Endpoint | Method | Purpose | Request model |
-|----------|--------|---------|---------------|
-| /search | POST | Run tri-brid search | SearchRequest (generated) |
-| /config | GET/PUT/PATCH | Read/update server config | TriBridConfig (generated) |
-| /models | GET | Serve data/models.json | n/a |
-| /chunk_summaries | GET/POST | Read/build chunk summaries | IndexScope / BuildRequest |
-| /graph/{corpus_id}/entities | GET | List graph entities | CorpusScope |
-
+| Area | Route | Method | Function |
+|------|-------|--------|----------|
+| Config | `/config` | GET | `get_config` |
+| Config | `/config/reset` | POST | `reset_config` |
+| Config | `/config/{section}` | PATCH | Sectional patch, e.g., `fusion` |
+| Secrets | `/secrets/check` | GET | `check_secrets` |
+| Index | `/index` | POST | Start indexing |
+| Index | `/index/status` | GET | `IndexStatus` for corpus |
+| Index | `/index/stats` | GET | `IndexStats` summary |
+| Search | `/search` | POST | Tri-brid retrieval + fusion (+reranker) |
+| Graph | `/graph/{corpus_id}/entities` | GET | List entities |
+| Graph | `/graph/{corpus_id}/entity/{entity_id}` | GET | Entity details |
+| Graph | `/graph/{corpus_id}/entity/{entity_id}/relationships` | GET | Relationships |
+| Graph | `/graph/{corpus_id}/entity/{entity_id}/neighbors` | GET | 1-hop neighbors |
+| Graph | `/graph/{corpus_id}/community/{community_id}/members` | GET | Members |
+| Graph | `/graph/{corpus_id}/community/{community_id}/subgraph` | GET | Subgraph |
+| Models | `/models/by-type/{component_type}` | GET | List models for component |
+| Models | `/models/providers` | GET | All providers |
+| Models | `/models/providers/{provider}` | GET | Models by provider |
+| Chunk Summaries | `/chunk_summaries` | GET | List summaries |
+| Chunk Summaries | `/chunk_summaries/build` | POST | Build summaries |
+| Keywords | `/keywords/generate` | POST | Generate keywords |
+| Reranker | `/reranker/status` | GET | Status |
+| Reranker | `/reranker/info` | GET | Info |
+| Reranker | `/reranker/mine` | POST | Mine triplets |
+| Reranker | `/reranker/train` | POST | Train |
+| Reranker | `/reranker/evaluate` | POST | Evaluate |
+| Reranker | `/reranker/logs/count` | GET | Logs count |
+| Reranker | `/reranker/triplets/count` | GET | Triplets count |
+| Reranker | `/reranker/costs` | GET | Cost report |
+| Health | `/health` | GET | Liveness |
+| Health | `/ready` | GET | Readiness |
+| Health | `/metrics` | GET | Prometheus |
+| Docker | `/docker/status` | GET | Runtime info |
+| Docker | `/docker/{container}/restart` | POST | Restart container |
+| Docker | `/docker/{container}/logs` | GET | Container logs |
 
 ```mermaid
-flowchart LR
-    Client --> API[FastAPI]
-    API --> Search[/search]
-    API --> Models[/models]
-    API --> Config[/config]
-    Search --> Fusion[TriBridFusion]
-    Fusion --> DB[(Postgres)]
-    Fusion --> Graph[(Neo4j)]
+flowchart TB
+    CLI[Client] --> API[FastAPI]
+    API --> PC[Postgres Client]
+    API --> NC[Neo4j Client]
+    API --> CFG[Pydantic Models]
+    API --> ML[Model Catalog]
+    PC --> DB[(PostgreSQL)]
+    NC --> GDB[(Neo4j)]
 ```
 
-
-### Example: search call
+## Example: Config Roundtrip
 
 === "Python"
     ```python
-    import requests
+    import httpx
 
-    resp = requests.post('http://localhost:8000/search', json={
-      'query': 'how to run migrations',
-      'repo_id': 'my_corpus'
-    }) # (1)
-    print(resp.json())
+    base = "http://localhost:8000"
+    cfg = httpx.get(f"{base}/config").json()          # (1)
+
+    # Enable reranker
+    httpx.patch(f"{base}/config/reranker", json={"enabled": True})  # (2)
+
+    # Check secrets (API keys, DBs) (3)
+    print(httpx.get(f"{base}/secrets/check").json())
     ```
 
 === "curl"
     ```bash
-    curl -X POST "http://localhost:8000/search" \
-      -H 'Content-Type: application/json' \
-      -d '{"query":"how to run migrations","repo_id":"my_corpus"}'
+    BASE=http://localhost:8000
+    curl -sS "$BASE/config" | jq . # (1)
+    curl -sS -X PATCH "$BASE/config/reranker" -H 'Content-Type: application/json' -d '{"enabled": true}' | jq . # (2)
+    curl -sS "$BASE/secrets/check" | jq . # (3)
     ```
 
 === "TypeScript"
     ```typescript
-    import { SearchRequest, SearchResponse } from '../types/generated' // (1)
+    import { TriBridConfig } from "./web/src/types/generated";
 
-    async function run(query: string, repoId: string): Promise<SearchResponse> {
-      const res = await fetch('/api/search', {
-        method: 'POST',
-        body: JSON.stringify({ query, repo_id: repoId }),
-      })
-      return res.json()
+    async function check(): Promise<void> {
+      const cfg: TriBridConfig = await (await fetch("/config")).json(); // (1)
+      await fetch("/config/reranker", { method: "PATCH", headers: {"Content-Type":"application/json"}, body: JSON.stringify({ enabled: true }) }); // (2)
+      const secrets = await (await fetch("/secrets/check")).json(); // (3)
+      console.log(secrets);
     }
     ```
 
+1. All shapes defined by Pydantic
+2. Patch one section with validation
+3. Validate secrets and DB connectivity
 
-1. Use generated types for request/response shapes
+!!! success "Model Catalog Endpoint"
+    The UI must populate model selectors from `/models/...`. No hard-coded lists.
 
+## Graph API Example
 
-### Reranker endpoints (selected)
+=== "Python"
+    ```python
+    import httpx
+    base = "http://localhost:8000"
 
-| Route | Method | Purpose |
-|-------|--------|---------|
-| /reranker/status | GET | Check if reranker is loaded |
-| /reranker/mine | POST | Mine triplets for training |
-| /reranker/train | POST | Train a reranker model |
-| /reranker/evaluate | POST | Evaluate reranker performance |
+    entities = httpx.get(f"{base}/graph/tribrid/entities").json()
+    node = httpx.get(f"{base}/graph/tribrid/entity/{entities[0]['id']}").json()
+    rels = httpx.get(f"{base}/graph/tribrid/entity/{entities[0]['id']}/relationships").json()
+    print(node, len(rels))
+    ```
 
+=== "curl"
+    ```bash
+    BASE=http://localhost:8000
+    curl -sS "$BASE/graph/tribrid/entities" | jq '.[0]'
+    ```
 
-### Chunk summaries endpoints
+=== "TypeScript"
+    ```typescript
+    async function firstEntity(corpus: string) {
+      const ents = await (await fetch(`/graph/${corpus}/entities`)).json();
+      const id = ents[0].id;
+      const rels = await (await fetch(`/graph/${corpus}/entity/${id}/relationships`)).json();
+      console.log(id, rels.length);
+    }
+    ```
 
-| Route | Method | Purpose |
-|-------|--------|---------|
-| /chunk_summaries | GET | List summaries for a corpus |
-| /chunk_summaries/build | POST | Trigger background build of chunk summaries |
+!!! danger "Do Not Transform Shapes"
+    If the frontend needs different `Entity` shapes, change the Pydantic models that define these endpoints and regenerate types.
 
-
-- [x] Use ++ctrl+c++ to copy curl snippets
-- [x] Use generated TypeScript types from Pydantic for API contracts
-
-
-??? note "Collapsible: Error handling"
-
-    FastAPI returns structured errors when validation fails. Check status codes and error messages that include the failing field path.
+??? note "Streaming Search"
+    Some endpoints may stream responses for long operations. Use backpressure-aware clients when consuming `text/event-stream` or chunked JSON.

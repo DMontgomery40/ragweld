@@ -1,108 +1,160 @@
+# Indexing Pipeline
+
 <div class="grid chunk_summaries" markdown>
 
--   :material-vector-combine:{ .lg .middle } **Chunking & Embedding**
+-   :material-file-find:{ .lg .middle } **Loader**
 
     ---
 
-    Chunker, Embedder, Summarizer components
+    Git-aware discovery honoring `.gitignore` with root-relative patterns.
 
--   :material-database:{ .lg .middle } **FileLoader & Patterns**
-
-    ---
-
-    FileLoader converts .gitignore patterns to gitwildmatch
-
--   :material-cog:{ .lg .middle } **Graph Builder**
+-   :material-content-cut:{ .lg .middle } **Chunker**
 
     ---
 
-    Extract entities and relationships to Neo4j
+    Fixed, AST-aware, or semantic chunk strategies with line attribution.
+
+-   :material-vector-polyline:{ .lg .middle } **Embedder**
+
+    ---
+
+    Deterministic local embedder or provider-backed embeddings configured in Pydantic.
+
+-   :material-text-short:{ .lg .middle } **Chunk Summaries**
+
+    ---
+
+    Optional LLM-generated `summary` per chunk to improve sparse search.
+
+-   :material-graph:{ .lg .middle } **Graph Builder**
+
+    ---
+
+    Entity/relationship extraction and Neo4j persistence.
 
 </div>
 
-!!! tip "Pro Tip"
-    Tune chunk_size and overlap in config to suit your LLM context window (see data/models.json for model contexts).
+[Get started](index.md){ .md-button .md-button--primary }
+[Configuration](configuration.md){ .md-button }
+[API](api.md){ .md-button }
 
-!!! note "Important"
-    The Embedder is deterministic by default; provider-backed embedders are supported by configuration and models.json.
+!!! tip "Pro Tip — Idempotent Indexing"
+    Use `force_reindex=false` for incremental updates. The indexer skips unchanged files using mtime/hash checks where available.
 
-!!! warning "Data Warning"
-    Reindexing can be IO and CPU intensive. Use force_reindex selectively and monitor IndexStatus endpoints.
+!!! note "Storage Layout"
+    Chunks, embeddings, and FTS are in PostgreSQL. Graph artifacts are in Neo4j. Sizes are summarized via dashboard endpoints.
 
-??? note "Collapsible: Indexing flow"
+!!! warning "Large Corpora"
+    Configure Neo4j heap and page cache in Docker env for multi-million edge graphs. Monitor Postgres disk growth for pgvector indexes.
 
-    Indexing typically follows: FileLoader -> Chunker -> Embedder -> Postgres storage -> GraphBuilder
-
+## Pipeline Flow
 
 ```mermaid
-flowchart TD
-    Files[Files on disk] --> Loader[FileLoader]
-    Loader --> Chunker[Chunker]
-    Chunker --> Embedder[Embedder]
-    Embedder --> Postgres[(Postgres Index)]
-    Chunker --> Summarizer[ChunkSummarizer]
-    Summarizer --> Postgres
-    Postgres --> GraphBuilder[GraphBuilder]
-    GraphBuilder --> Neo4j[(Neo4j Graph)]
+flowchart LR
+    L[FileLoader] --> C[Chunker]
+    C --> E[Embedder]
+    E --> P[(PostgreSQL)]
+    C --> S[ChunkSummarizer]
+    S --> P
+    C --> GB[GraphBuilder]
+    GB --> N[(Neo4j)]
 ```
 
+## Chunking Strategies
 
-| Step | Component | Output |
-|------|-----------|--------|
-| 1 | FileLoader | Normalized file list (excludes via patterns) |
-| 2 | Chunker | Chunks with token counts and metadata |
-| 3 | Embedder | Embedding vectors for chunks |
-| 4 | ChunkSummarizer | Short summaries (chunk_summaries) |
-| 5 | GraphBuilder | Entities & relationships stored in Neo4j |
+| Strategy | Module | Parameters | Use Case |
+|----------|--------|------------|----------|
+| `chunk_fixed` | `server/indexing/chunker.py` | `size`, `overlap` | Simple sliding windows |
+| `chunk_ast` | `server/indexing/chunker.py` | `language`, `node_types` | Code-aware boundaries |
+| `chunk_semantic` | `server/indexing/chunker.py` | `min_tokens`, `max_tokens` | Balanced semantic splits |
 
+### Index Request Models
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `corpus_id` | str | Corpus identifier (alias of `repo_id`) |
+| `repo_path` | str | Absolute path on disk |
+| `force_reindex` | bool | Force full rebuild |
+
+## Indexing via API
 
 === "Python"
     ```python
-    from server.indexing.chunker import Chunker
-    from server.indexing.embedder import Embedder
+    import httpx
 
-    chunker = Chunker()
-    embedder = Embedder()
+    base = "http://localhost:8000"
 
-    chunks = chunker.chunk_file('src/main.py') # (1)
-    embeddings = embedder.embed_chunks(chunks) # (2)
+    req = {
+        "corpus_id": "tribrid",
+        "repo_path": "/work/src/tribrid",
+        "force_reindex": False,
+    }
+
+    # Start
+    httpx.post(f"{base}/index", json=req)  # (1)
+
+    # Status
+    status = httpx.get(f"{base}/index/status", params={"corpus_id": "tribrid"}).json()  # (2)
+
+    # Storage stats
+    stats = httpx.get(f"{base}/index/stats", params={"corpus_id": "tribrid"}).json()  # (3)
+    print(stats)
     ```
 
 === "curl"
     ```bash
-    curl -X POST "http://localhost:8000/index" \
-      -H 'Content-Type: application/json' \
-      -d '{"repo_id":"my_corpus","repo_path":"/path/to/repo"}'
+    BASE=http://localhost:8000
+
+    curl -sS -X POST "$BASE/index" -H 'Content-Type: application/json' -d '{
+      "corpus_id":"tribrid",
+      "repo_path":"/work/src/tribrid",
+      "force_reindex":false
+    }'
+
+    curl -sS "$BASE/index/status?corpus_id=tribrid" | jq .
+    curl -sS "$BASE/index/stats?corpus_id=tribrid" | jq .
     ```
 
 === "TypeScript"
     ```typescript
-    import { IndexRequest } from '../types/generated'
+    import { IndexRequest, IndexStats } from "./web/src/types/generated";
 
-    const req: IndexRequest = { repo_id: 'my_corpus', repo_path: '/path' }
-    await fetch('/api/index', { method: 'POST', body: JSON.stringify(req) })
+    async function reindex(path: string) {
+      const req: IndexRequest = { corpus_id: "tribrid", repo_path: path, force_reindex: false };
+      await fetch("/index", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify(req) }); // (1)
+      const status = await (await fetch("/index/status?corpus_id=tribrid")).json(); // (2)
+      const stats: IndexStats = await (await fetch("/index/stats?corpus_id=tribrid")).json(); // (3)
+      console.log(status, stats.total_chunks);
+    }
     ```
 
+1. Start indexing
+2. Poll progress
+3. Inspect aggregated stats
 
-1. Chunker splits file into manageable pieces with start/end lines
-2. Embedder creates embeddings that are stored in Postgres
+## Chunk Summaries
 
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/chunk_summaries` | GET | List summaries for a corpus |
+| `/chunk_summaries/build` | POST | Generate summaries for all chunks |
 
-### Chunk summaries (UI term: chunk_summaries)
+!!! success "Sparse Boost"
+    Summaries can improve recall for identifier-heavy queries by adding descriptive context to FTS.
 
-| Field | Description |
-|-------|-------------|
-| chunk_id | Unique id for chunk |
-| summary | Short AI-generated text summary |
-| token_count | Token budget used for embedding |
+```mermaid
+flowchart TB
+    Chunks --> Summarizer
+    Summarizer --> Postgres[(FTS Index)]
+    Summarizer --> Costs[Model Costs]
+    Costs --> Models[data/models.json]
+```
 
+- [x] Choose chunking strategy in config
+- [x] Enable summaries for sparse boost if budget allows
+- [x] Validate storage growth in dashboard stats
 
-- [x] Validate file inclusion patterns
-- [x] Monitor IndexStatus endpoints for progress
-- [ ] Periodically rebuild vocabulary preview (VocabPreviewResponse)
-
-
-??? note "Collapsible: Best practices"
-
-    - Use consistent embedding models; changing models requires reindexing
-    - Keep chunk sizes aligned with model context limits (see data/models.json)
+??? note "Indexing Failure Modes"
+    - File decoding errors: logged and skipped
+    - Embedding timeouts: retried with backoff; chunk remains un-embedded if persistent
+    - Graph build failures: search still works with vector/sparse; flagged in logs
