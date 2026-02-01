@@ -153,7 +153,7 @@ export const TraceViewer: React.FC<TraceViewerProps> = ({ className = '' }) => {
 
     // Pre-rerank candidates
     if (retrieveEvent && Array.isArray(retrieveEvent.data?.candidates)) {
-      const candidates: Candidate[] = retrieveEvent.data.candidates.slice(0, 10);
+      const candidates: Candidate[] = retrieveEvent.data.candidates;
       parts.push(
         <div key="candidates" style={{ marginBottom: '16px' }}>
           <div style={{
@@ -162,7 +162,7 @@ export const TraceViewer: React.FC<TraceViewerProps> = ({ className = '' }) => {
             color: 'var(--fg)',
             marginBottom: '8px'
           }}>
-            Pre-rerank candidates (top 10):
+            Pre-rerank candidates ({candidates.length}):
           </div>
           <pre style={{
             background: 'var(--code-bg)',
@@ -190,7 +190,7 @@ export const TraceViewer: React.FC<TraceViewerProps> = ({ className = '' }) => {
 
     // Rerank results
     if (rerankEvent && Array.isArray(rerankEvent.data?.scores)) {
-      const scores: RerankScore[] = rerankEvent.data.scores.slice(0, 10);
+      const scores: RerankScore[] = rerankEvent.data.scores;
       parts.push(
         <div key="rerank" style={{ marginBottom: '16px' }}>
           <div style={{
@@ -199,7 +199,7 @@ export const TraceViewer: React.FC<TraceViewerProps> = ({ className = '' }) => {
             color: 'var(--fg)',
             marginBottom: '8px'
           }}>
-            Rerank top-10:
+            Rerank ({scores.length}):
           </div>
           <pre style={{
             background: 'var(--code-bg)',
@@ -247,8 +247,8 @@ export const TraceViewer: React.FC<TraceViewerProps> = ({ className = '' }) => {
     }
 
     // Events list
-    const recentEvents = events.slice(-10);
-    if (recentEvents.length > 0) {
+    const allEvents = events;
+    if (allEvents.length > 0) {
       parts.push(
         <div key="events" style={{ marginBottom: '16px' }}>
           <div style={{
@@ -265,7 +265,7 @@ export const TraceViewer: React.FC<TraceViewerProps> = ({ className = '' }) => {
             borderRadius: '4px',
             padding: '12px'
           }}>
-            {recentEvents.map((ev, idx) => {
+            {allEvents.map((ev, idx) => {
               const when = ev.ts
                 ? new Date(ev.ts).toLocaleTimeString()
                 : new Date().toLocaleTimeString();
@@ -278,7 +278,7 @@ export const TraceViewer: React.FC<TraceViewerProps> = ({ className = '' }) => {
                     fontSize: '11px',
                     fontFamily: "'SF Mono', monospace",
                     color: 'var(--fg-muted)',
-                    marginBottom: idx < recentEvents.length - 1 ? '4px' : 0
+                    marginBottom: idx < allEvents.length - 1 ? '4px' : 0
                   }}
                 >
                   {when}  {name}  {ev.msg || ''}

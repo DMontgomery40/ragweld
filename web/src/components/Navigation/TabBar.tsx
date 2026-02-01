@@ -141,31 +141,6 @@ export function TabBar({ mobileOpen = false, onNavigate }: TabBarProps) {
       </NavLink>
 
       <NavLink
-        to="/vscode"
-        className={({ isActive }) => `${isActive ? 'active' : ''} promoted-tab`}
-        onClick={handleDockAwareClick('/vscode')}
-        style={{
-          background: 'var(--bg-elev2)',
-          color: 'var(--fg-muted)',
-          border: '1px solid var(--line)',
-          padding: '9px 16px',
-          borderRadius: '6px',
-          cursor: 'pointer',
-          fontSize: '13px',
-          fontWeight: 500,
-          whiteSpace: 'nowrap',
-          transition: 'all 0.15s',
-          minHeight: '44px',
-          textDecoration: 'none',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '6px',
-        }}
-      >
-        📝 VS Code{pinned('/vscode')}
-      </NavLink>
-
-      <NavLink
         to="/grafana"
         className={({ isActive }) => `${isActive ? 'active' : ''} promoted-tab`}
         onClick={handleDockAwareClick('/grafana')}

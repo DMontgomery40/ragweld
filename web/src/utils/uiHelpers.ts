@@ -85,99 +85,152 @@ function bindResizableSidepanel(): void {
     if (handle.dataset.sidepanelResizeBound === '1') return true;
     handle.dataset.sidepanelResizeBound = '1';
 
-    // Restore saved width from Zustand store
-    const savedWidth = store.sidepanelWidth;
-    const maxAllowed = Math.min(UI_CONSTANTS.MAX_SIDEPANEL_WIDTH, window.innerWidth * 0.45);
-    if (savedWidth >= UI_CONSTANTS.MIN_SIDEPANEL_WIDTH && savedWidth <= maxAllowed) {
-      document.documentElement.style.setProperty('--sidepanel-width', savedWidth + 'px');
-      // Keep layout track width in sync even if an inline gridTemplateColumns override exists.
-      const layout = document.querySelector('.layout') as HTMLElement | null;
-      if (layout && window.innerWidth > 1024) {
-        layout.style.gridTemplateColumns = `1fr ${savedWidth}px`;
-      }
-    } else {
-      document.documentElement.style.setProperty('--sidepanel-width', UI_CONSTANTS.DEFAULT_SIDEPANEL_WIDTH + 'px');
-      store.setSidepanelWidth(UI_CONSTANTS.DEFAULT_SIDEPANEL_WIDTH);
-      const layout = document.querySelector('.layout') as HTMLElement | null;
-      if (layout && window.innerWidth > 1024) {
-        layout.style.gridTemplateColumns = `1fr ${UI_CONSTANTS.DEFAULT_SIDEPANEL_WIDTH}px`;
-      }
+    // Prevent page scrolling during touch resizing (iPad).
+    handle.style.touchAction = 'none';
+
+    // If a previous build left an inline override, clear it so CSS var drives layout.
+    const layout = document.querySelector('.layout') as HTMLElement | null;
+    if (layout?.style.gridTemplateColumns) {
+      layout.style.gridTemplateColumns = '';
     }
+
+    const clampWidth = (width: number): number => {
+      const viewportMax = Math.floor(window.innerWidth * 0.6);
+      const hardMax = Math.min(UI_CONSTANTS.MAX_SIDEPANEL_WIDTH, viewportMax);
+      const rounded = Math.round(width);
+      return Math.max(UI_CONSTANTS.MIN_SIDEPANEL_WIDTH, Math.min(hardMax, rounded));
+    };
+
+    const applyWidth = (width: number): number => {
+      const clamped = clampWidth(width);
+      document.documentElement.style.setProperty('--sidepanel-width', clamped + 'px');
+      store.setSidepanelWidth(clamped);
+      return clamped;
+    };
+
+    // Restore saved width from Zustand store (clamped to current viewport constraints)
+    const savedWidth = store.sidepanelWidth;
+    const initialWidth =
+      Number.isFinite(savedWidth) && savedWidth > 0
+        ? savedWidth
+        : UI_CONSTANTS.DEFAULT_SIDEPANEL_WIDTH;
+    applyWidth(initialWidth);
 
     // Export reset function for use in other modules/tests
     (window as any).resetSidepanelWidth = function() {
-      document.documentElement.style.setProperty('--sidepanel-width', UI_CONSTANTS.DEFAULT_SIDEPANEL_WIDTH + 'px');
-      useUIStore.getState().setSidepanelWidth(UI_CONSTANTS.DEFAULT_SIDEPANEL_WIDTH);
-      const layout = document.querySelector('.layout') as HTMLElement | null;
-      if (layout && window.innerWidth > 1024) {
-        layout.style.gridTemplateColumns = `1fr ${UI_CONSTANTS.DEFAULT_SIDEPANEL_WIDTH}px`;
-      }
+      applyWidth(UI_CONSTANTS.DEFAULT_SIDEPANEL_WIDTH);
       console.log('Sidepanel width reset to default');
     };
 
     let isDragging = false;
-    let startX = 0;
-    let startWidth = 0;
+    let activePointerId: number | null = null;
+    let overlay: HTMLDivElement | null = null;
+    let rafId = 0;
+    let lastClientX = 0;
 
-    function getCurrentWidth(): number {
-      const rootStyle = getComputedStyle(document.documentElement);
-      const widthStr = rootStyle.getPropertyValue('--sidepanel-width').trim();
-      return parseInt(widthStr, 10) || UI_CONSTANTS.DEFAULT_SIDEPANEL_WIDTH;
-    }
+    const mountOverlay = (): void => {
+      if (overlay) return;
+      overlay = document.createElement('div');
+      overlay.setAttribute('data-testid', 'resize-overlay');
+      overlay.style.position = 'fixed';
+      overlay.style.left = '0';
+      overlay.style.top = '0';
+      overlay.style.right = '0';
+      overlay.style.bottom = '0';
+      overlay.style.cursor = 'col-resize';
+      overlay.style.background = 'transparent';
+      overlay.style.zIndex = '2147483647'; // above iframes
+      overlay.style.touchAction = 'none';
+      document.body.appendChild(overlay);
+    };
 
-    function setWidth(width: number): void {
-      const viewportMax = Math.floor(window.innerWidth * 0.6);
-      const hardMax = Math.min(UI_CONSTANTS.MAX_SIDEPANEL_WIDTH, viewportMax);
-      const clampedWidth = Math.max(UI_CONSTANTS.MIN_SIDEPANEL_WIDTH, Math.min(hardMax, width));
-      document.documentElement.style.setProperty('--sidepanel-width', clampedWidth + 'px');
-      useUIStore.getState().setSidepanelWidth(clampedWidth);
-      // Ensure the grid track matches the CSS var even if inline overrides exist.
-      const layout = document.querySelector('.layout') as HTMLElement | null;
-      if (layout && window.innerWidth > 1024) {
-        layout.style.gridTemplateColumns = `1fr ${clampedWidth}px`;
+    const unmountOverlay = (): void => {
+      if (!overlay) return;
+      overlay.remove();
+      overlay = null;
+    };
+
+    const applyFromClientX = (clientX: number): void => {
+      const layoutEl = document.querySelector('.layout') as HTMLElement | null;
+      const rect = layoutEl?.getBoundingClientRect();
+      const right = rect?.right ?? window.innerWidth;
+      const nextWidth = right - clientX;
+      applyWidth(nextWidth);
+    };
+
+    const scheduleApply = (clientX: number): void => {
+      lastClientX = clientX;
+      if (rafId) return;
+      rafId = window.requestAnimationFrame(() => {
+        rafId = 0;
+        applyFromClientX(lastClientX);
+      });
+    };
+
+    const endDrag = (): void => {
+      if (!isDragging) return;
+      isDragging = false;
+      activePointerId = null;
+      if (rafId) {
+        window.cancelAnimationFrame(rafId);
+        rafId = 0;
       }
-    }
+      handle.classList.remove('dragging');
+      unmountOverlay();
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
 
-    handle.addEventListener('mousedown', (e: MouseEvent) => {
+    const onPointerDown = (e: PointerEvent): void => {
+      // Only left-button drags for mouse; allow touch/pen.
+      if (e.pointerType === 'mouse' && e.button !== 0) return;
+
       isDragging = true;
-      startX = e.clientX;
-      startWidth = getCurrentWidth();
+      activePointerId = e.pointerId;
       handle.classList.add('dragging');
       document.body.style.cursor = 'col-resize';
       document.body.style.userSelect = 'none';
+      mountOverlay();
+
+      try {
+        handle.setPointerCapture(e.pointerId);
+      } catch {}
+
+      scheduleApply(e.clientX);
       e.preventDefault();
-    });
+    };
 
-    document.addEventListener('mousemove', (e: MouseEvent) => {
+    const onPointerMove = (e: PointerEvent): void => {
       if (!isDragging) return;
-      const deltaX = startX - e.clientX;
-      const newWidth = startWidth + deltaX;
-      setWidth(newWidth);
-    });
+      if (activePointerId !== null && e.pointerId !== activePointerId) return;
+      scheduleApply(e.clientX);
+      e.preventDefault();
+    };
 
-    document.addEventListener('mouseup', () => {
-      if (!isDragging) return;
-      isDragging = false;
-      handle.classList.remove('dragging');
-      document.body.style.cursor = '';
-      document.body.style.userSelect = '';
-    });
+    const onPointerUpOrCancel = (e: PointerEvent): void => {
+      if (activePointerId !== null && e.pointerId !== activePointerId) return;
+      try {
+        handle.releasePointerCapture(e.pointerId);
+      } catch {}
+      endDrag();
+    };
+
+    const onLostPointerCapture = (): void => {
+      endDrag();
+    };
+
+    handle.addEventListener('pointerdown', onPointerDown, { passive: false });
+    handle.addEventListener('pointermove', onPointerMove, { passive: false });
+    handle.addEventListener('pointerup', onPointerUpOrCancel);
+    handle.addEventListener('pointercancel', onPointerUpOrCancel);
+    handle.addEventListener('lostpointercapture', onLostPointerCapture);
 
     return true;
   };
 
-  // In the React UI, legacy init can run before the `.resize-handle` exists (while the app shows a loading shell).
-  // Retry briefly so drag-to-resize reliably binds once the layout mounts.
-  if (tryBind()) return;
-
-  let attempts = 0;
-  const maxAttempts = 60; // ~3s at 50ms
-  const interval = window.setInterval(() => {
-    attempts += 1;
-    if (tryBind() || attempts >= maxAttempts) {
-      window.clearInterval(interval);
-    }
-  }, 50);
+  // Note: binding is triggered again from App.tsx once the layout is mounted.
+  // This avoids fragile polling loops while still handling the loading-shell race.
+  tryBind();
 }
 
 // ---------------- Number Formatting ----------------

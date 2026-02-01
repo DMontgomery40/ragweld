@@ -1,15 +1,18 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import signal
 import subprocess
 import time
+from collections import deque
 from pathlib import Path
 from typing import Any
 
 import httpx
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request
+from starlette.responses import StreamingResponse
 
 from server.config import load_config
 from server.models.tribrid_config_model import DevStackRestartResponse, DevStackStatusResponse, TriBridConfig
@@ -118,6 +121,38 @@ def _docker_env(cfg: TriBridConfig) -> dict[str, str]:
     if host:
         env["DOCKER_HOST"] = host
     return env
+
+
+def _loki_candidate_urls() -> list[str]:
+    """Return candidate Loki base URLs (best-effort, local-dev oriented)."""
+    env = (os.getenv("LOKI_BASE_URL") or "").strip()
+    candidates = []
+    if env:
+        candidates.append(env)
+    # Local dev (run on host)
+    candidates.append("http://127.0.0.1:3100")
+    # Docker-compose network (backend inside compose)
+    candidates.append("http://loki:3100")
+    # Docker Desktop host alias
+    candidates.append("http://host.docker.internal:3100")
+
+    out: list[str] = []
+    seen: set[str] = set()
+    for c in candidates:
+        c = (c or "").strip().rstrip("/")
+        if not c or c in seen:
+            continue
+        seen.add(c)
+        out.append(c)
+    return out
+
+
+async def _resolve_loki_base_url(timeout_s: float = 0.6) -> str | None:
+    """Return the first reachable Loki base URL (or None)."""
+    for base in _loki_candidate_urls():
+        if await _http_ok(f"{base}/ready", timeout_s=timeout_s):
+            return base
+    return None
 
 
 def _run_cmd(args: list[str], *, timeout_s: int, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
@@ -570,17 +605,48 @@ async def get_container_logs_legacy(container: str, lines: int = 100) -> list[st
 @router.get("/dev/status", response_model=DevStackStatusResponse)
 async def get_dev_stack_status() -> DevStackStatusResponse:
     frontend_port, backend_port = _resolve_dev_ports()
-    frontend_url = f"http://127.0.0.1:{frontend_port}/web"
-    backend_url = f"http://127.0.0.1:{backend_port}/api/health"
+    # NOTE: In dev, users may reach services via localhost, 127.0.0.1, or ::1.
+    # When the backend is containerized, reaching a host-side dev server may require host.docker.internal.
+    def _url_host(host: str) -> str:
+        return f"[{host}]" if ":" in host and not host.startswith("[") else host
+
+    hosts = ["127.0.0.1", "localhost", "::1"]
+    try:
+        if Path("/.dockerenv").exists():
+            hosts.append("host.docker.internal")
+    except Exception:
+        pass
+
+    async def _probe_first_ok(urls: list[str], *, label: str) -> tuple[bool, str | None, list[str]]:
+        for idx, url in enumerate(urls):
+            ok = await _http_ok(url, timeout_s=1.0)
+            if ok:
+                if idx == 0:
+                    return True, url, []
+                return True, url, [f"{label} reachable at {url} (preferred {urls[0]} failed)"]
+        return False, None, [f"{label} not reachable at {u}" for u in urls]
 
     details: list[str] = []
-    frontend_running = await _http_ok(frontend_url, timeout_s=1.0)
-    if not frontend_running:
-        details.append(f"Frontend not reachable at {frontend_url}")
 
-    backend_running = await _http_ok(backend_url, timeout_s=1.0)
-    if not backend_running:
-        details.append(f"Backend not reachable at {backend_url}")
+    frontend_probe_urls = [f"http://{_url_host(h)}:{frontend_port}/web" for h in hosts]
+    frontend_running, resolved_frontend_url, frontend_details = await _probe_first_ok(
+        frontend_probe_urls, label="Frontend"
+    )
+    details.extend(frontend_details)
+
+    backend_health_urls = [f"http://{_url_host(h)}:{backend_port}/api/health" for h in hosts]
+    backend_running, resolved_backend_health, backend_details = await _probe_first_ok(
+        backend_health_urls, label="Backend"
+    )
+    details.extend(backend_details)
+
+    # Surface URLs that match the chosen reachable host (best-effort).
+    frontend_url = resolved_frontend_url or frontend_probe_urls[0]
+    backend_url = (
+        (resolved_backend_health or backend_health_urls[0]).replace("/api/health", "/api")
+        if (resolved_backend_health or backend_health_urls)
+        else None
+    )
 
     return DevStackStatusResponse(
         frontend_running=frontend_running,
@@ -588,7 +654,7 @@ async def get_dev_stack_status() -> DevStackStatusResponse:
         frontend_port=frontend_port,
         backend_port=backend_port,
         frontend_url=frontend_url,
-        backend_url=f"http://127.0.0.1:{backend_port}/api",
+        backend_url=backend_url,
         details=details,
     )
 
@@ -689,3 +755,185 @@ async def restart_dev_stack(request: Request, background_tasks: BackgroundTasks)
             frontend_port=frontend_port,
             backend_port=backend_port,
         )
+
+
+# ==============================================================================
+# Loki proxy + streaming (dev tooling)
+# ==============================================================================
+
+
+@router.get("/loki/status")
+async def loki_status(request: Request) -> dict[str, Any]:
+    """Check whether Loki is reachable (local dev)."""
+    _ensure_dev_orchestrator_allowed(request)
+    base = await _resolve_loki_base_url()
+    if not base:
+        return {"reachable": False, "status": "unreachable"}
+
+    try:
+        async with httpx.AsyncClient(timeout=1.5) as client:
+            r = await client.get(f"{base}/ready")
+        reachable = r.status_code < 500
+        return {"reachable": bool(reachable), "url": base, "status": "ok" if reachable else f"status_{r.status_code}"}
+    except Exception as e:
+        return {"reachable": False, "url": base, "status": f"error: {e.__class__.__name__}"}
+
+
+@router.get("/loki/query_range")
+async def loki_query_range(
+    request: Request,
+    query: str = Query(..., description="LogQL query"),
+    start_ms: int | None = Query(default=None, ge=0, description="Start time (epoch ms)"),
+    end_ms: int | None = Query(default=None, ge=0, description="End time (epoch ms)"),
+    limit: int = Query(default=2000, ge=1, le=10000, description="Max log lines"),
+    direction: str = Query(default="forward", pattern="^(forward|backward)$"),
+) -> dict[str, Any]:
+    """Proxy Loki query_range (dev tooling)."""
+    _ensure_dev_orchestrator_allowed(request)
+    base = await _resolve_loki_base_url()
+    if not base:
+        raise HTTPException(status_code=503, detail="Loki not reachable")
+
+    now_ns = int(time.time() * 1_000_000_000)
+    start_ns = int(start_ms * 1_000_000) if start_ms is not None else now_ns - int(60 * 1_000_000_000)
+    end_ns = int(end_ms * 1_000_000) if end_ms is not None else now_ns
+
+    params = {"query": query, "start": str(start_ns), "end": str(end_ns), "limit": str(int(limit)), "direction": direction}
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            r = await client.get(f"{base}/loki/api/v1/query_range", params=params)
+        if r.status_code >= 400:
+            raise HTTPException(status_code=r.status_code, detail=r.text)
+        return r.json()
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Loki query failed: {e}") from e
+
+
+@router.get("/stream/loki/tail")
+async def loki_tail(
+    request: Request,
+    query: str = Query(..., description="LogQL query"),
+    start_ms: int | None = Query(default=None, ge=0, description="Start time (epoch ms)"),
+    end_ms: int | None = Query(default=None, ge=0, description="Optional end time (epoch ms)"),
+    limit: int = Query(default=2000, ge=1, le=10000, description="Max log lines per poll"),
+    poll_ms: int = Query(default=1000, ge=250, le=5000, description="Polling interval (ms)"),
+) -> StreamingResponse:
+    """SSE stream of Loki logs using incremental query_range polling.
+
+    Emits TerminalService-compatible SSE events:
+    - {"type":"log","message":"..."}
+    - {"type":"error","message":"..."}
+    - {"type":"complete"}
+    """
+    _ensure_dev_orchestrator_allowed(request)
+    base = await _resolve_loki_base_url()
+
+    async def _gen() -> Any:
+        if not base:
+            yield f"data: {json.dumps({'type': 'error', 'message': 'Loki not reachable'})}\n\n"
+            yield f"data: {json.dumps({'type': 'complete'})}\n\n"
+            return
+
+        now_ns = int(time.time() * 1_000_000_000)
+        cursor_ns = int(start_ms * 1_000_000) if start_ms is not None else now_ns - int(30 * 1_000_000_000)
+        end_ns_static = int(end_ms * 1_000_000) if end_ms is not None else None
+
+        # Deduplicate a small sliding window to avoid repeated lines between polls.
+        seen_order: deque[tuple[int, str, str]] = deque()
+        seen_set: set[tuple[int, str, str]] = set()
+        max_seen = 5000
+
+        idle_rounds = 0
+
+        while True:
+            if await request.is_disconnected():
+                break
+
+            end_ns = end_ns_static if end_ns_static is not None else int(time.time() * 1_000_000_000)
+            params = {
+                "query": query,
+                "start": str(cursor_ns),
+                "end": str(end_ns),
+                "limit": str(int(limit)),
+                "direction": "forward",
+            }
+
+            try:
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    r = await client.get(f"{base}/loki/api/v1/query_range", params=params)
+                if r.status_code >= 400:
+                    raise RuntimeError(f"{r.status_code}: {r.text}")
+                payload = r.json()
+            except Exception as e:
+                yield f"data: {json.dumps({'type': 'error', 'message': f'Loki tail error: {e}'})}\n\n"
+                yield f"data: {json.dumps({'type': 'complete'})}\n\n"
+                break
+
+            results = (payload.get("data") or {}).get("result") or []
+            entries: list[tuple[int, str, str]] = []
+
+            for stream in results:
+                labels = stream.get("stream") or {}
+                service = (
+                    labels.get("compose_service")
+                    or labels.get("container")
+                    or labels.get("job")
+                    or labels.get("app")
+                    or "log"
+                )
+                for pair in stream.get("values") or []:
+                    if not isinstance(pair, (list, tuple)) or len(pair) != 2:
+                        continue
+                    ts_raw, line = pair
+                    try:
+                        ts_ns = int(ts_raw)
+                    except Exception:
+                        continue
+                    entries.append((ts_ns, str(service), str(line)))
+
+            entries.sort(key=lambda x: x[0])
+
+            emitted = 0
+            max_ts = cursor_ns
+            for ts_ns, service, line in entries:
+                key = (ts_ns, service, line)
+                if key in seen_set:
+                    max_ts = max(max_ts, ts_ns)
+                    continue
+
+                seen_set.add(key)
+                seen_order.append(key)
+                if len(seen_order) > max_seen:
+                    old = seen_order.popleft()
+                    seen_set.discard(old)
+
+                max_ts = max(max_ts, ts_ns)
+                emitted += 1
+                yield f"data: {json.dumps({'type': 'log', 'message': f'[{service}] {line}'})}\n\n"
+
+            cursor_ns = max(cursor_ns, max_ts)
+
+            # If bounded by end_ms, close after a short idle window beyond end time.
+            if end_ns_static is not None:
+                if emitted == 0:
+                    idle_rounds += 1
+                else:
+                    idle_rounds = 0
+                if (int(time.time() * 1_000_000_000) >= end_ns_static) and idle_rounds >= 2:
+                    yield f"data: {json.dumps({'type': 'complete'})}\n\n"
+                    break
+
+            await asyncio.sleep(poll_ms / 1000)
+
+    return StreamingResponse(
+        _gen(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )

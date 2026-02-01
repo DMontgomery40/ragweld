@@ -14,6 +14,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
+import type { ChatDebugInfo } from '@/types/generated';
 
 // Useful tips shown during response generation
 // Each tip has content and optional category for styling
@@ -138,6 +139,10 @@ interface Message {
   timestamp: number;
   citations?: string[];
   confidence?: number;
+  runId?: string;
+  startedAtMs?: number;
+  endedAtMs?: number;
+  debug?: ChatDebugInfo | null;
   traceData?: any;
   meta?: any; // provider/backend/failover transparency
   eventId?: string; // For feedback correlation
@@ -424,7 +429,8 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
   const chatStreamingEnabled = Boolean(config?.ui?.chat_streaming_enabled ?? 1);
   const chatShowConfidence = Boolean(config?.ui?.chat_show_confidence ?? 0);
   const chatShowCitations = Boolean(config?.ui?.chat_show_citations ?? 1);
-  const chatShowTrace = Boolean(config?.ui?.chat_show_trace ?? 0);
+  const chatShowTrace = Boolean(config?.ui?.chat_show_trace ?? 1);
+  const chatShowDebugFooter = Boolean(config?.ui?.chat_show_debug_footer ?? 1);
   const chatHistoryMax = Math.max(10, Math.min(500, Number(config?.ui?.chat_history_max ?? 50)));
 
   // Per-message retrieval leg toggles (do NOT persist; user requested per-message control)
@@ -538,6 +544,7 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
   const [streamPref, setStreamPref] = useState<boolean>(() => chatStreamingEnabled);
   const [showConfidence, setShowConfidence] = useState<boolean>(() => chatShowConfidence);
   const [showCitations, setShowCitations] = useState<boolean>(() => chatShowCitations);
+  const [showDebugFooter, setShowDebugFooter] = useState<boolean>(() => chatShowDebugFooter);
   const traceRef = useRef<TraceStep[]>([]);
   const [modelOptions, setModelOptions] = useState<string[]>([]);
   const [fastMode, setFastMode] = useState<boolean>(() => {
@@ -557,6 +564,10 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
   useEffect(() => {
     setShowCitations(chatShowCitations);
   }, [chatShowCitations]);
+
+  useEffect(() => {
+    setShowDebugFooter(chatShowDebugFooter);
+  }, [chatShowDebugFooter]);
 
   useEffect(() => {
     if (traceOpen === undefined) {
@@ -741,6 +752,11 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
     const assistantMessageId = `assistant-${Date.now()}`;
     const assistantTimestamp = Date.now();
     let citations: string[] = [];
+    let runId: string | undefined;
+    let startedAtMs: number | undefined;
+    let endedAtMs: number | undefined;
+    let debug: ChatDebugInfo | null = null;
+    let confidence: number | undefined;
     let rafPending = false;
     let persistAfterNextRender = false;
 
@@ -764,6 +780,11 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
           content: accumulatedContent,
           timestamp: assistantTimestamp,
           citations,
+          runId,
+          startedAtMs,
+          endedAtMs,
+          debug,
+          confidence,
         };
 
         setMessages((prev) => {
@@ -829,6 +850,29 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
                 })
                 .filter(Boolean) as string[];
             }
+            if (typeof parsed.run_id === 'string') {
+              runId = parsed.run_id;
+            }
+            if (typeof parsed.started_at_ms === 'number') {
+              startedAtMs = parsed.started_at_ms;
+            }
+            if (typeof parsed.ended_at_ms === 'number') {
+              endedAtMs = parsed.ended_at_ms;
+            }
+            debug = parsed && typeof parsed.debug === 'object' ? (parsed.debug as ChatDebugInfo) : null;
+            confidence = typeof parsed?.debug?.confidence === 'number' ? parsed.debug.confidence : undefined;
+
+            try {
+              window.dispatchEvent(
+                new CustomEvent('tribrid:chat:run-complete', {
+                  detail: {
+                    run_id: runId,
+                    started_at_ms: startedAtMs,
+                    ended_at_ms: endedAtMs,
+                  },
+                })
+              );
+            } catch {}
             break;
 
           case 'error':
@@ -904,7 +948,7 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
 
     const data = await response.json();
 
-    // New Pydantic ChatResponse: { conversation_id, message, sources, tokens_used }
+    // New Pydantic ChatResponse: { run_id, started_at_ms, ended_at_ms, debug, conversation_id, message, sources, tokens_used }
     const nextConversationId: string | null =
       data && typeof data.conversation_id === 'string' ? data.conversation_id : null;
     if (nextConversationId) setConversationId(nextConversationId);
@@ -921,13 +965,35 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
       .filter(Boolean) as string[];
 
     const assistantText: string = String(data?.message?.content || '');
+    const runId: string | undefined = typeof data?.run_id === 'string' ? data.run_id : undefined;
+    const startedAtMs: number | undefined = typeof data?.started_at_ms === 'number' ? data.started_at_ms : undefined;
+    const endedAtMs: number | undefined = typeof data?.ended_at_ms === 'number' ? data.ended_at_ms : undefined;
+    const debug: ChatDebugInfo | null = data && typeof data?.debug === 'object' ? (data.debug as ChatDebugInfo) : null;
+    const confidence: number | undefined = typeof data?.debug?.confidence === 'number' ? data.debug.confidence : undefined;
     const assistantMessage: Message = {
       id: `assistant-${Date.now()}`,
       role: 'assistant',
       content: assistantText,
       timestamp: Date.now(),
       citations,
+      runId,
+      startedAtMs,
+      endedAtMs,
+      debug,
+      confidence,
     };
+
+    try {
+      window.dispatchEvent(
+        new CustomEvent('tribrid:chat:run-complete', {
+          detail: {
+            run_id: runId,
+            started_at_ms: startedAtMs,
+            ended_at_ms: endedAtMs,
+          },
+        })
+      );
+    } catch {}
 
     setMessages((prev) => {
       const updated = clampChatHistory([...prev, assistantMessage]);
@@ -967,6 +1033,26 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
     navigator.clipboard.writeText(content);
     // Could add a toast notification here
   };
+
+  const handleViewTraceAndLogs = useCallback((message: Message) => {
+    const run_id = (message.runId || '').trim();
+    // Dispatch an event so the parent ChatTab can load the right run context.
+    window.dispatchEvent(
+      new CustomEvent('tribrid:chat:open-trace', {
+        detail: {
+          run_id: run_id || undefined,
+          started_at_ms: message.startedAtMs,
+          ended_at_ms: message.endedAtMs,
+        },
+      })
+    );
+
+    const el = document.getElementById('chat-trace') as HTMLDetailsElement | null;
+    if (el) {
+      el.open = true;
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }, []);
 
   return (
     <div
@@ -1408,6 +1494,83 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
                         </div>
                       )}
                     </div>
+
+                    {/* Dev footer (per-answer debug metadata) */}
+                    {message.role === 'assistant' && showDebugFooter && (() => {
+                      const dbg = message.debug;
+                      if (!dbg && !message.runId) return null;
+
+                      const conf =
+                        typeof dbg?.confidence === 'number'
+                          ? dbg.confidence
+                          : typeof message.confidence === 'number'
+                            ? message.confidence
+                            : undefined;
+
+                      const legs: string[] = [];
+                      if (dbg?.include_vector && dbg.vector_enabled !== false) legs.push('vector');
+                      if (dbg?.include_sparse && dbg.sparse_enabled !== false) legs.push('sparse');
+                      if (dbg?.include_graph && dbg.graph_enabled !== false) legs.push('graph');
+                      const legsText = legs.length ? legs.join(' + ') : '—';
+
+                      let fusionText = '—';
+                      if (dbg?.fusion_method === 'rrf') {
+                        fusionText = `rrf(k=${dbg.rrf_k ?? '—'})`;
+                      } else if (dbg?.fusion_method === 'weighted') {
+                        const vw = typeof dbg.vector_weight === 'number' ? dbg.vector_weight.toFixed(2) : '—';
+                        const sw = typeof dbg.sparse_weight === 'number' ? dbg.sparse_weight.toFixed(2) : '—';
+                        const gw = typeof dbg.graph_weight === 'number' ? dbg.graph_weight.toFixed(2) : '—';
+                        fusionText = `weighted(v=${vw}, s=${sw}, g=${gw}${dbg.normalize_scores ? ', norm' : ''})`;
+                      }
+
+                      const kText = dbg?.final_k_used ?? '—';
+                      const countsText = dbg
+                        ? `v:${dbg.vector_results ?? '—'} s:${dbg.sparse_results ?? '—'} g:${dbg.graph_hydrated_chunks ?? '—'} final:${dbg.final_results ?? '—'}`
+                        : '—';
+                      const runShort = message.runId ? message.runId.slice(0, 8) : '—';
+
+                      return (
+                        <div
+                          data-testid="chat-debug-footer"
+                          style={{
+                            marginTop: '8px',
+                            paddingTop: '8px',
+                            borderTop: '1px solid var(--line)',
+                            fontSize: '11px',
+                            color: 'var(--fg-muted)',
+                            opacity: 0.9,
+                            display: 'flex',
+                            flexWrap: 'wrap',
+                            gap: '10px',
+                            alignItems: 'center',
+                          }}
+                        >
+                          <span>conf {typeof conf === 'number' ? formatConfidence(conf) : '—'}</span>
+                          <span>legs {legsText}</span>
+                          <span>fusion {fusionText}</span>
+                          <span>k {kText}</span>
+                          <span>{countsText}</span>
+                          <span>run {runShort}</span>
+                          <button
+                            type="button"
+                            data-testid="chat-debug-view-trace"
+                            onClick={() => handleViewTraceAndLogs(message)}
+                            style={{
+                              background: 'none',
+                              border: 'none',
+                              padding: 0,
+                              color: 'var(--link)',
+                              cursor: 'pointer',
+                              textDecoration: 'underline',
+                              fontSize: '11px',
+                            }}
+                            title="Jump to trace & logs for this run"
+                          >
+                            View trace &amp; logs
+                          </button>
+                        </div>
+                      );
+                    })()}
                   </div>
                 </div>
               ))

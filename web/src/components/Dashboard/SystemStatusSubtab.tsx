@@ -1,27 +1,43 @@
 // AGRO - System Status Subtab
 // Real-time system health, status, and quick overview
 
-import { useState, useEffect } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useNavigate } from 'react-router-dom';
 import * as DashAPI from '@/api/dashboard';
 import { QuickActions } from './QuickActions';
 import { IndexDisplayPanels } from './IndexDisplayPanels';
 import { useDockerStore } from '@/stores/useDockerStore';
 import { StatusIndicator } from '@/components/ui/StatusIndicator';
+import { useRepoStore } from '@/stores/useRepoStore';
+import { TooltipIcon } from '@/components/ui/TooltipIcon';
 
 export function SystemStatusSubtab() {
+  const navigate = useNavigate();
   const [health, setHealth] = useState<string>('—');
-  const [repo, setRepo] = useState<string>('—');
-  const [branch, setBranch] = useState<string>('—');
-  const [chunkSummaries, setChunkSummaries] = useState<string>('—');
   const [mcp, setMcp] = useState<string>('—');
   // const [autotune, setAutotune] = useState<string>('—'); // HIDDEN - Pro feature
-  const [docker, setDocker] = useState<string>('—');
-  const [gitHooks, setGitHooks] = useState<string>('—');
+  const [containers, setContainers] = useState<string>('—');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [topFolders, setTopFolders] = useState<
     Array<{ name: string; profile?: string; chunkCount: number; storageBytes: number }>
   >([]);
+
+  // Corpus-first state (Zustand store backed by Pydantic `Corpus`)
+  const repos = useRepoStore((s) => s.repos);
+  const activeRepo = useRepoStore((s) => s.activeRepo);
+  const reposInitialized = useRepoStore((s) => s.initialized);
+  const reposLoading = useRepoStore((s) => s.loading);
+  const loadRepos = useRepoStore((s) => s.loadRepos);
+
+  const corporaDisplay = useMemo(() => {
+    const count = Array.isArray(repos) ? repos.length : 0;
+    if (count <= 0) return 'No corpora';
+    const found = repos.find((r) => r.corpus_id === activeRepo || r.slug === activeRepo || r.name === activeRepo);
+    const activeName = String(found?.name || activeRepo || '').trim() || '(unknown)';
+    const countLabel = count === 1 ? '1 corpus' : `${count} corpora`;
+    return `${activeName} (${countLabel})`;
+  }, [repos, activeRepo]);
 
   // Dev Stack state from Zustand (Pydantic: DevStackStatusResponse)
   const {
@@ -54,21 +70,15 @@ export function SystemStatusSubtab() {
       // Fetch all status data in parallel
       const [
         healthData,
-        configData,
-        cardsData,
         mcpData,
         // autotuneData, // HIDDEN - Pro feature
         dockerData,
-        gitData,
         indexData
       ] = await Promise.allSettled([
         DashAPI.getHealth(),
-        DashAPI.getConfig(),
-        DashAPI.getCards(),
         DashAPI.getMCPStatus(),
         // DashAPI.getAutotuneStatus(), // HIDDEN - Pro feature
         DashAPI.getDockerStatus(),
-        DashAPI.getGitHookStatus(),
         DashAPI.getIndexStatus()
       ]);
 
@@ -78,23 +88,8 @@ export function SystemStatusSubtab() {
         setHealth(`${h.status}${h.graph_loaded ? ' (graph ready)' : ''}`);
       }
 
-      // Config (repo, branch)
-      if (configData.status === 'fulfilled') {
-        const c = configData.value;
-        const repoName = (c.env?.REPO || c.default_repo || '(none)');
-        const reposCount = (c.repos || []).length;
-        setRepo(`${repoName} (${reposCount} repos)`);
-        const branchName = c.env?.GIT_BRANCH || c.env?.BRANCH || c.git_branch;
-        if (branchName) {
-          setBranch(branchName);
-        }
-      }
-
       if (indexData.status === 'fulfilled' && indexData.value.metadata) {
         const metadata = indexData.value.metadata;
-        if (metadata.current_branch) {
-          setBranch(metadata.current_branch);
-        }
 
         if (metadata.repos && metadata.repos.length > 0) {
           const sortedByActivity = metadata.repos
@@ -121,12 +116,6 @@ export function SystemStatusSubtab() {
         } else {
           setTopFolders([]);
         }
-      }
-
-      // Chunk Summaries (formerly "cards")
-      if (cardsData.status === 'fulfilled') {
-        const summaryCount = cardsData.value.count || 0;
-        setChunkSummaries(`${summaryCount} summaries`);
       }
 
       // MCP
@@ -159,17 +148,13 @@ export function SystemStatusSubtab() {
       if (dockerData.status === 'fulfilled') {
         const d = dockerData.value;
         if (d.available && d.containers) {
-          const running = d.containers.filter(c => c.state === 'running').length;
-          setDocker(`${running}/${d.containers.length} running`);
+          const managed = d.containers.filter((c) => c.agro_managed);
+          const total = managed.length;
+          const running = managed.filter(c => c.state === 'running').length;
+          setContainers(`${running}/${total}`);
         } else {
-          setDocker('unavailable');
+          setContainers('unavailable');
         }
-      }
-
-      // Git Hooks
-      if (gitData.status === 'fulfilled') {
-        const g = gitData.value;
-        setGitHooks(g.installed ? `installed (${g.hooks?.length || 0})` : 'not installed');
       }
 
       setLoading(false);
@@ -183,6 +168,9 @@ export function SystemStatusSubtab() {
   useEffect(() => {
     refreshStatus();
     fetchDevStackStatus();
+    if (!reposInitialized && !reposLoading) {
+      loadRepos().catch(() => { /* store owns error state */ });
+    }
 
     // Poll status every 30 seconds
     const interval = setInterval(() => {
@@ -247,9 +235,16 @@ export function SystemStatusSubtab() {
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                 <StatusItem label="Health" value={health} id="dash-health" color="var(--ok)" />
-                <StatusItem label="Corpus" value={repo} id="dash-repo" color="var(--fg)" />
-                <StatusItem label="Branch" value={branch} id="dash-branch" color="var(--link)" />
-                <StatusItem label="Summaries" value={chunkSummaries} id="dash-summaries" color="var(--link)" />
+                <StatusItem
+                  label={
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      Corpora <TooltipIcon name="SYS_STATUS_CORPUS" />
+                    </span>
+                  }
+                  value={corporaDisplay}
+                  id="dash-corpora"
+                  color="var(--fg)"
+                />
 
                 <div
                   style={{
@@ -270,7 +265,28 @@ export function SystemStatusSubtab() {
                       letterSpacing: '0.5px'
                     }}
                   >
-                    MCP Servers
+                    <button
+                      type="button"
+                      onClick={() => navigate('/infrastructure?subtab=mcp')}
+                      style={{
+                        background: 'transparent',
+                        border: 'none',
+                        padding: 0,
+                        margin: 0,
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        fontSize: '11px',
+                        color: 'var(--fg-muted)',
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.5px',
+                        cursor: 'pointer',
+                        textAlign: 'left',
+                      }}
+                      aria-label="Open Infrastructure MCP Servers"
+                    >
+                      MCP Servers <TooltipIcon name="SYS_STATUS_MCP_SERVERS" />
+                    </button>
                   </span>
                   <div
                     id="dash-mcp"
@@ -283,16 +299,58 @@ export function SystemStatusSubtab() {
                       color: 'var(--link)'
                     }}
                   >
-                    <span>{mcp}</span>
+                    <button
+                      type="button"
+                      onClick={() => navigate('/infrastructure?subtab=mcp')}
+                      style={{
+                        background: 'transparent',
+                        border: 'none',
+                        padding: 0,
+                        margin: 0,
+                        color: 'var(--link)',
+                        cursor: 'pointer',
+                        textAlign: 'left',
+                        fontFamily: "'SF Mono', monospace",
+                        fontSize: '10px',
+                      }}
+                      aria-label="Open Infrastructure MCP Servers"
+                    >
+                      {mcp}
+                    </button>
                   </div>
                 </div>
 
-                {/* HIDDEN: Auto-Tune feature - Pro feature, implementing hardware-idle training detection
-                    Backend stub remains at /api/autotune/status for future implementation
-                    Re-enable when feature is complete */}
+                {/* HIDDEN: Auto-Tune feature - Pro feature. Re-enable when complete. */}
                 {/* <StatusItem label="Auto-Tune" value={autotune} id="dash-autotune" color="var(--warn)" /> */}
-                <StatusItem label="Docker" value={docker} id="dash-docker" color="var(--link)" />
-                <StatusItem label="Git Hooks" value={gitHooks} id="dash-git-hooks" color="var(--ok)" />
+                <StatusItem
+                  label={
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      Containers <TooltipIcon name="SYS_STATUS_CONTAINERS" />
+                    </span>
+                  }
+                  value={
+                    <button
+                      type="button"
+                      onClick={() => navigate('/infrastructure?subtab=docker')}
+                      style={{
+                        background: 'transparent',
+                        border: 'none',
+                        padding: 0,
+                        margin: 0,
+                        color: 'var(--link)',
+                        cursor: 'pointer',
+                        fontWeight: 600,
+                        fontSize: '12px',
+                        fontFamily: "'SF Mono', monospace",
+                      }}
+                      aria-label="Open Infrastructure Docker Containers"
+                    >
+                      {containers}
+                    </button>
+                  }
+                  id="dash-containers"
+                  color="var(--link)"
+                />
 
                 {/* Dev Stack Controls - Pydantic: DevStackStatusResponse */}
                 <div
@@ -502,10 +560,9 @@ export function SystemStatusSubtab() {
                       onClick={clearCacheAndRestart}
                       disabled={restartingFrontend || restartingBackend || restartingStack || clearingCache}
                       className="dev-stack-btn"
-                      title="Clear Python bytecode cache (__pycache__, .pyc) and restart backend"
                       style={{
                         flex: 1,
-                        minWidth: '90px',
+                        minWidth: '120px',
                         padding: '6px 8px',
                         background: 'var(--warn)',
                         color: 'var(--bg)',
@@ -521,7 +578,9 @@ export function SystemStatusSubtab() {
                       }}
                     >
                       {clearingCache && <span className="loading-spinner" style={{ width: '10px', height: '10px', borderTopColor: 'var(--bg)' }} />}
-                      🗑 Clear Cache
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                        🗑 Clear Bytecode <TooltipIcon name="DEV_STACK_CLEAR_PYTHON_BYTECODE" />
+                      </span>
                     </button>
                   </div>
                 </div>
@@ -630,12 +689,12 @@ export function SystemStatusSubtab() {
   );
 }
 
-interface StatusItemProps {
-  label: string;
-  value: string;
+type StatusItemProps = {
+  label: ReactNode;
+  value: ReactNode;
   id?: string;
   color: string;
-}
+};
 
 function StatusItem({ label, value, id, color }: StatusItemProps) {
   return (

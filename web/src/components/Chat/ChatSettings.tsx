@@ -38,7 +38,8 @@ export function ChatSettings() {
   const [streamingEnabled, setStreamingEnabled] = useConfigField<number>('ui.chat_streaming_enabled', 1);
   const [showConfidence, setShowConfidence] = useConfigField<number>('ui.chat_show_confidence', 0);
   const [showCitations, setShowCitations] = useConfigField<number>('ui.chat_show_citations', 1);
-  const [showTrace, setShowTrace] = useConfigField<number>('ui.chat_show_trace', 0);
+  const [showTrace, setShowTrace] = useConfigField<number>('ui.chat_show_trace', 1);
+  const [showDebugFooter, setShowDebugFooter] = useConfigField<number>('ui.chat_show_debug_footer', 1);
   const [chatHistoryMax, setChatHistoryMax] = useConfigField<number>('ui.chat_history_max', 50);
 
   // Load model options on mount
@@ -244,6 +245,25 @@ export function ChatSettings() {
               </span>
               <span className="toggle-label">Show routing trace</span>
             </label>
+          </div>
+        </div>
+
+        <div className="input-row">
+          <div className="input-group">
+            <label className="toggle">
+              <input
+                type="checkbox"
+                checked={showDebugFooter === 1}
+                onChange={(e) => setShowDebugFooter(e.target.checked ? 1 : 0)}
+              />
+              <span className="toggle-track" aria-hidden="true">
+                <span className="toggle-thumb"></span>
+              </span>
+              <span className="toggle-label">Show dev debug footer</span>
+            </label>
+            <p className="small">
+              Shows per-answer debug metadata (confidence, legs used, fusion params) under assistant messages.
+            </p>
           </div>
         </div>
 

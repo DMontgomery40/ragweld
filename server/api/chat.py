@@ -1,15 +1,21 @@
 """Chat API endpoints with PydanticAI-powered RAG."""
+import json
+import time
+import uuid
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
+from fastapi import Query
 from starlette.responses import StreamingResponse
 
 from server.models.chat import ChatRequest, ChatResponse, Message
+from server.models.tribrid_config_model import TracesLatestResponse
 from server.models.tribrid_config_model import TriBridConfig
 from server.retrieval.fusion import TriBridFusion
 from server.services.config_store import get_config as load_scoped_config
 from server.services.conversation_store import get_conversation_store
-from server.services.rag import FusionProtocol, generate_response, stream_response
+from server.services.rag import FusionProtocol, build_chat_debug_info, generate_response, stream_response
+from server.services.traces import get_trace_store
 
 router = APIRouter(tags=["chat"])
 
@@ -47,6 +53,18 @@ def set_fusion(fusion: FusionProtocol | None) -> None:
     _fusion = fusion
 
 
+@router.get("/traces/latest", response_model=TracesLatestResponse)
+async def get_latest_trace(
+    repo: str | None = Query(default=None, description="Optional corpus_id to filter by"),
+    corpus_id: str | None = Query(default=None, description="Alias for repo"),
+    run_id: str | None = Query(default=None, description="Optional run_id to fetch"),
+) -> TracesLatestResponse:
+    """Return the latest local trace (dev tooling)."""
+    repo_id = (repo or corpus_id or "").strip() or None
+    store = get_trace_store()
+    return await store.latest(repo=repo_id, run_id=(run_id or "").strip() or None)
+
+
 @router.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest) -> ChatResponse:
     """Process a chat message and return RAG-enhanced response.
@@ -58,6 +76,29 @@ async def chat(request: ChatRequest) -> ChatResponse:
     conv = store.get_or_create(request.conversation_id)
     config = _config if _config is not None else await load_scoped_config(repo_id=request.repo_id)
     fusion = get_fusion()
+    run_id = str(uuid.uuid4())
+    started_at_ms = int(time.time() * 1000)
+    trace_store = get_trace_store()
+    trace_enabled = await trace_store.start(
+        run_id=run_id,
+        repo_id=request.repo_id,
+        started_at_ms=started_at_ms,
+        config=config,
+    )
+    if trace_enabled:
+        await trace_store.add_event(
+            run_id,
+            kind="chat.request",
+            data={
+                "conversation_id": request.conversation_id,
+                "corpus_id": request.repo_id,
+                "include_vector": bool(request.include_vector),
+                "include_sparse": bool(request.include_sparse),
+                "include_graph": bool(request.include_graph),
+                "top_k_override": request.top_k,
+                "stream": False,
+            },
+        )
 
     try:
         response_text, sources, provider_id = await generate_response(
@@ -71,6 +112,44 @@ async def chat(request: ChatRequest) -> ChatResponse:
             include_graph=bool(request.include_graph),
             top_k=request.top_k,
         )
+        ended_at_ms = int(time.time() * 1000)
+        debug = build_chat_debug_info(
+            config=config,
+            fusion=fusion,
+            include_vector=bool(request.include_vector),
+            include_sparse=bool(request.include_sparse),
+            include_graph=bool(request.include_graph),
+            top_k=request.top_k,
+            sources=sources,
+        )
+        if trace_enabled:
+            await trace_store.add_event(
+                run_id,
+                kind="retrieval.fusion",
+                data={
+                    "fusion_debug": getattr(fusion, "last_debug", None) or {},
+                    "chat_debug": debug.model_dump(mode="serialization", by_alias=True),
+                    "sources": [
+                        {
+                            "file_path": s.file_path,
+                            "start_line": int(s.start_line),
+                            "end_line": int(s.end_line),
+                            "score": float(s.score),
+                            "source": str(s.source),
+                        }
+                        for s in sources
+                    ],
+                },
+            )
+            await trace_store.add_event(
+                run_id,
+                kind="chat.response",
+                data={
+                    "sources_count": len(sources),
+                    "tokens_used": 0,
+                },
+            )
+            await trace_store.end(run_id, ended_at_ms=ended_at_ms)
 
         # Store the exchange
         user_msg = Message(role="user", content=request.message)
@@ -79,6 +158,10 @@ async def chat(request: ChatRequest) -> ChatResponse:
         store.add_message(conv.id, assistant_msg, provider_id)
 
         return ChatResponse(
+            run_id=run_id,
+            started_at_ms=started_at_ms,
+            ended_at_ms=ended_at_ms,
+            debug=debug,
             conversation_id=conv.id,
             message=assistant_msg,
             sources=sources,
@@ -86,6 +169,9 @@ async def chat(request: ChatRequest) -> ChatResponse:
         )
 
     except Exception as e:
+        if trace_enabled:
+            await trace_store.add_event(run_id, kind="chat.error", msg=str(e), data={})
+            await trace_store.end(run_id)
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
@@ -102,23 +188,83 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
     conv = store.get_or_create(request.conversation_id)
     config = _config if _config is not None else await load_scoped_config(repo_id=request.repo_id)
     fusion = get_fusion()
+    run_id = str(uuid.uuid4())
+    started_at_ms = int(time.time() * 1000)
+    trace_store = get_trace_store()
+    trace_enabled = await trace_store.start(
+        run_id=run_id,
+        repo_id=request.repo_id,
+        started_at_ms=started_at_ms,
+        config=config,
+    )
+    if trace_enabled:
+        await trace_store.add_event(
+            run_id,
+            kind="chat.request",
+            data={
+                "conversation_id": request.conversation_id,
+                "corpus_id": request.repo_id,
+                "include_vector": bool(request.include_vector),
+                "include_sparse": bool(request.include_sparse),
+                "include_graph": bool(request.include_graph),
+                "top_k_override": request.top_k,
+                "stream": True,
+            },
+        )
 
     # Store the user message before streaming
     user_msg = Message(role="user", content=request.message)
     store.add_message(conv.id, user_msg, None)
 
+    async def wrapped_stream() -> Any:
+        ended_at_ms: int | None = None
+        try:
+            async for sse in stream_response(
+                message=request.message,
+                repo_id=request.repo_id,
+                conversation=conv,
+                config=config,
+                fusion=fusion,
+                include_vector=bool(request.include_vector),
+                include_sparse=bool(request.include_sparse),
+                include_graph=bool(request.include_graph),
+                top_k=request.top_k,
+                run_id=run_id,
+                started_at_ms=started_at_ms,
+            ):
+                if trace_enabled and '"type": "done"' in sse:
+                    ended_at_ms = int(time.time() * 1000)
+                    try:
+                        payload = json.loads(sse.replace("data: ", "").strip())
+                    except Exception:
+                        payload = {}
+                    sources = payload.get("sources") or []
+                    await trace_store.add_event(
+                        run_id,
+                        kind="retrieval.fusion",
+                        data={
+                            "fusion_debug": getattr(fusion, "last_debug", None) or {},
+                            "sources": sources,
+                        },
+                    )
+                    await trace_store.add_event(
+                        run_id,
+                        kind="chat.response",
+                        data={
+                            "sources_count": len(sources),
+                        },
+                    )
+                yield sse
+        except Exception as e:
+            if trace_enabled:
+                await trace_store.add_event(run_id, kind="chat.error", msg=str(e), data={})
+            raise
+        finally:
+            if trace_enabled:
+                await trace_store.end(run_id, ended_at_ms=ended_at_ms)
+
     return StreamingResponse(
-        stream_response(
-            message=request.message,
-            repo_id=request.repo_id,
-            conversation=conv,
-            config=config,
-            fusion=fusion,
-            include_vector=bool(request.include_vector),
-            include_sparse=bool(request.include_sparse),
-            include_graph=bool(request.include_graph),
-            top_k=request.top_k,
-        ),
+        wrapped_stream(),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

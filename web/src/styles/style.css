@@ -20,10 +20,6 @@ mark.hl { background: var(--accent); color: var(--accent-contrast); padding:0 2p
 #search-results .item:hover, #search-results .item.active { background: var(--bg-elev2); color: var(--fg); }
 .search-hit { outline:2px solid var(--accent); border-radius:6px; transition:outline 120ms ease; }
 
-.layout { display: grid; grid-template-columns: 1fr 360px; gap: 0; height: calc(100vh - 54px); }
-.content { padding: 0; border-right: 1px solid var(--line); display:flex; flex-direction:column; }
-.sidepanel { padding: 12px; overflow:auto; }
-
 .tab-bar { background: var(--panel); padding: 8px; border-bottom:1px solid var(--line); }
 .tab-bar button { background: var(--bg-elev2); color: var(--fg); border: 1px solid var(--line); padding: 8px 12px; border-radius: 8px; cursor: pointer; margin-right: 6px; }
 .tab-bar button.active { background: var(--accent); }
@@ -264,8 +260,4 @@ details summary { cursor:pointer; color: var(--muted); }
   50% { opacity: 0.3; box-shadow: 0 0 0 var(--accent); }
 }
 
-@media (max-width: 1100px) {
-  .layout { grid-template-columns: 1fr; }
-  .sidepanel { border-top:1px solid var(--line); height: 52vh; }
-  #calc-frame { height: 42vh; }
-}
+

@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import os
+import importlib.util
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from server.models.tribrid_config_model import CorpusScope, TriBridConfig
+from server.models.tribrid_config_model import CorpusScope, MCPStatusResponse, TriBridConfig
 from server.services.config_store import get_config as load_scoped_config
 from server.services.config_store import reset_config as reset_scoped_config
 from server.services.config_store import save_config as save_scoped_config
@@ -85,3 +86,33 @@ async def check_secrets(keys: str = Query(..., description="Comma-separated env 
     """Return which secret env vars are configured (never returns values)."""
     names = [k.strip() for k in (keys or "").split(",") if k.strip()]
     return {name: bool(os.getenv(name)) for name in names}
+
+
+@router.get("/mcp/status", response_model=MCPStatusResponse)
+async def mcp_status() -> MCPStatusResponse:
+    """Return status for MCP transports built into TriBridRAG.
+
+    Notes:
+    - The stdio transport is typically client-spawned (no always-on daemon).
+    - HTTP transports may be added later; this endpoint is forward-compatible.
+    """
+    details: list[str] = []
+    python_stdio_available = False
+
+    try:
+        python_stdio_available = importlib.util.find_spec("mcp") is not None
+    except Exception as e:
+        python_stdio_available = False
+        details.append(f"Error checking Python MCP package availability: {e}")
+
+    if python_stdio_available:
+        details.append("Python stdio MCP transport is available (client-spawned; no daemon).")
+    else:
+        details.append("Python stdio MCP transport not available (Python package 'mcp' not installed).")
+
+    return MCPStatusResponse(
+        python_http=None,
+        node_http=None,
+        python_stdio_available=python_stdio_available,
+        details=details,
+    )

@@ -160,15 +160,11 @@
                     'Cards',
                     'Keywords',
                     'Reranker',
-                    'Editor',
                     'Grafana',
-                    'Profile',
                     'Cost',
                     'MCP',
                     'Docker',
-                    'Health',
-                    'VSCode',
-                    'RAGNavigation'
+                    'Health'
                 ];
 
                 return modules.map(name => ({
@@ -185,7 +181,6 @@
                 const criticalIds = [
                     'tab-btn-dashboard',
                     'tab-btn-chat',
-                    'tab-btn-vscode',
                     'tab-btn-grafana',
                     'tab-btn-rag',
                     'health-status'
@@ -216,7 +211,6 @@
                     currentTab: window.Navigation.getCurrentTab(),
                     compatMode: window.Navigation.isCompatibilityMode(),
                     panels: {
-                        vscode: window.Navigation.isPanelVisible('vscode'),
                         grafana: window.Navigation.isPanelVisible('grafana')
                     }
                 };

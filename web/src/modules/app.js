@@ -1561,8 +1561,8 @@
         });
         window.dispatchEvent(event);
 
-        // You can add VSCode or other IDE integration here
-        // For now, show in a notification style
+        // Optional: integrate an external editor here.
+        // For now, show in a notification style.
         const notification = document.createElement('div');
         notification.style.cssText = `
             position: fixed; bottom: 20px; right: 20px;

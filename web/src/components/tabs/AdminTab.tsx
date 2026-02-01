@@ -6,7 +6,6 @@ import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { AdminSubtabs } from '@/components/Admin/AdminSubtabs';
 import { GeneralSubtab } from '@/components/Admin/GeneralSubtab';
-import { GitIntegrationSubtab } from '@/components/Admin/GitIntegrationSubtab';
 import { SecretsSubtab } from '@/components/Admin/SecretsSubtab';
 import { IntegrationsSubtab } from '@/components/Admin/IntegrationsSubtab';
 
@@ -18,7 +17,7 @@ export default function AdminTab() {
   // Read ?subtab=... (no writeback)
   useEffect(() => {
     if (!subtabParam) return;
-    const allowed = new Set(['general', 'git', 'secrets', 'integrations']);
+    const allowed = new Set(['general', 'secrets', 'integrations']);
     if (allowed.has(subtabParam)) setActiveSubtab(subtabParam);
   }, [subtabParam]);
 
@@ -30,10 +29,6 @@ export default function AdminTab() {
       {/* All subtabs rendered with visibility controlled by style */}
       <div id="tab-admin-general" style={{ display: activeSubtab === 'general' ? 'block' : 'none' }}>
         <GeneralSubtab />
-      </div>
-
-      <div id="tab-admin-git" style={{ display: activeSubtab === 'git' ? 'block' : 'none' }}>
-        <GitIntegrationSubtab />
       </div>
 
       <div id="tab-admin-secrets" style={{ display: activeSubtab === 'secrets' ? 'block' : 'none' }}>

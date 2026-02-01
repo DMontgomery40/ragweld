@@ -41,6 +41,18 @@ function App() {
   // Initialize theme - exposes window.Theme for legacy modules
   useTheme();
 
+  // Bind resizable sidepanel AFTER the layout (and handle) is mounted.
+  // Some legacy module init paths can run while the React loading shell is still on-screen.
+  useEffect(() => {
+    if (isEmbed) return;
+    if (!modulesLoaded || !isInitialized) return;
+    try {
+      (window as any).UiHelpers?.bindResizableSidepanel?.();
+    } catch (e) {
+      console.warn('[App] Failed to bind resizable sidepanel', e);
+    }
+  }, [isEmbed, isInitialized, modulesLoaded]);
+
   // Toggle mobile navigation
   const toggleMobileNav = () => {
     setMobileNavOpen(prev => !prev);

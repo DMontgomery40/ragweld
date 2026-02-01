@@ -197,6 +197,7 @@
             z-index: 10000; /* above iframes and sticky bars */
             transition: background 0.2s ease;
             pointer-events: auto;
+            touch-action: none; /* allow touch drag (iPad) without scrolling */
         }
 
         .resize-handle:hover, .resize-handle.dragging { background: var(--ring); }
@@ -842,6 +843,16 @@
             display: none;
         }
         .tooltip-bubble .tt-title { font-weight: 700; color: var(--fg); display:block; margin-bottom: 6px; }
+        .tooltip-bubble .tt-strong { font-weight: 700; color: var(--fg); }
+        .tooltip-bubble .mono {
+            font-family: var(--font-mono);
+            font-size: 12px;
+            color: var(--fg);
+            background: var(--bg-elev2);
+            border: 1px solid var(--line);
+            padding: 1px 4px;
+            border-radius: 4px;
+        }
         .tooltip-bubble .tt-links { margin-top: 8px; opacity: 0.9; }
         .tooltip-bubble .tt-links a { color: var(--link); text-decoration: none; margin-right: 10px; }
         .tooltip-bubble .tt-links a:hover { text-decoration: underline; }
@@ -967,7 +978,7 @@
            PRIMARY FOCUS - Most Used
            =================================== */
         /* ===================================
-           TABLET (<1024px) - Sidepanel to bottom
+           TABLET (<1024px) - Compact chrome
            =================================== */
         @media (max-width: 1024px) {
             :root {
@@ -1024,7 +1035,37 @@
                 flex-shrink: 0;
             }
 
-            /* CRITICAL: Sidepanel goes to BOTTOM on tablet */
+            /* Settings sections: maintain readability */
+            .settings-section {
+                padding: 16px;
+                margin-bottom: 16px;
+            }
+
+            .settings-section h3 {
+                font-size: 15px;
+                margin-bottom: 14px;
+            }
+
+            /* Input rows: keep 2-column on landscape tablet */
+            .input-row {
+                gap: 12px;
+            }
+
+            /* Action buttons grid: adapt to tablet */
+            .action-buttons {
+                flex-wrap: wrap;
+            }
+
+            /* Reduce spacing overall */
+            .tab-content {
+                padding: 16px;
+            }
+        }
+
+        /* ===================================
+           SMALL TABLET / PHONE (<900px) - Sidepanel stacks to bottom
+           =================================== */
+        @media (max-width: 900px) {
             .layout {
                 display: flex !important;
                 flex-direction: column !important;
@@ -1053,32 +1094,6 @@
 
             .resize-handle {
                 display: none;
-            }
-
-            /* Settings sections: maintain readability */
-            .settings-section {
-                padding: 16px;
-                margin-bottom: 16px;
-            }
-
-            .settings-section h3 {
-                font-size: 15px;
-                margin-bottom: 14px;
-            }
-
-            /* Input rows: keep 2-column on landscape tablet */
-            .input-row {
-                gap: 12px;
-            }
-
-            /* Action buttons grid: adapt to tablet */
-            .action-buttons {
-                flex-wrap: wrap;
-            }
-
-            /* Reduce spacing overall */
-            .tab-content {
-                padding: 16px;
             }
         }
 

@@ -6,7 +6,6 @@ import { Dashboard } from '../pages/Dashboard';
 import Docker from '../pages/Docker';
 // Tab components (all TypeScript)
 import ChatTab from '../components/tabs/ChatTab';
-import VSCodeTab from '../components/tabs/VSCodeTab';
 import GrafanaTab from '../components/tabs/GrafanaTab';
 import RAGTab from '../components/tabs/RAGTab';
 import EvalAnalysisTab from '../components/tabs/EvalAnalysisTab';
@@ -62,19 +61,11 @@ export const routes: RouteConfig[] = [
     subtabs: []
   },
   {
-    path: '/vscode',
-    element: VSCodeTab,
-    label: 'VS Code',
-    icon: '📝',
-    order: 4,
-    subtabs: []
-  },
-  {
     path: '/grafana',
     element: GrafanaTab,
     label: 'Grafana',
     icon: '📈',
-    order: 5,
+    order: 4,
     subtabs: []
   },
   {
@@ -98,7 +89,7 @@ export const routes: RouteConfig[] = [
     element: EvalAnalysisTab,
     label: 'Eval Analysis',
     icon: '🔬',
-    order: 7,
+    order: 6,
     subtabs: []
   },
   // Profiles route removed - banned feature per CLAUDE.md
@@ -107,7 +98,7 @@ export const routes: RouteConfig[] = [
     element: InfrastructureTab,
     label: 'Infrastructure',
     icon: '🔧',
-    order: 9,
+    order: 8,
     subtabs: [
       { id: 'services', title: 'Services' },
       { id: 'mcp', title: 'MCP Servers' },
@@ -120,10 +111,9 @@ export const routes: RouteConfig[] = [
     element: AdminTab,
     label: 'Admin',
     icon: '⚙️',
-    order: 10,
+    order: 9,
     subtabs: [
       { id: 'general', title: 'General' },
-      { id: 'git', title: 'Git Integration' },
       { id: 'secrets', title: 'Secrets' },
       { id: 'integrations', title: 'Integrations' }
     ]
@@ -133,7 +123,7 @@ export const routes: RouteConfig[] = [
     element: Docker,
     label: 'Docker',
     icon: '🐳',
-    order: 11,
+    order: 10,
     subtabs: []
   }
 ];
