@@ -7,7 +7,7 @@ export default function GrafanaTab(): React.ReactElement {
   const [activeSubtab, setActiveSubtab] = useState<string>('dashboard');
 
   return (
-    <div id="tab-grafana" className="tab-content" style={{ padding: 0 }}>
+    <div id="tab-grafana" className="tab-content" style={{ padding: 0, overflow: 'hidden' }}>
       <GrafanaSubtabs activeSubtab={activeSubtab} onSubtabChange={setActiveSubtab} />
 
       <div
@@ -21,13 +21,14 @@ export default function GrafanaTab(): React.ReactElement {
       <div
         id="tab-grafana-dashboard"
         className={`section-subtab fullscreen ${activeSubtab === 'dashboard' ? 'active' : ''}`}
+        style={{ flex: 1, minHeight: 0 }}
       >
         <div
           id="grafana-embed"
           style={{
-            height: 'calc(100vh - 200px)',
-            minHeight: '600px',
             display: 'flex',
+            flex: 1,
+            minHeight: 0,
             overflow: 'hidden',
             background: 'var(--card-bg)',
           }}

@@ -10,8 +10,8 @@ from typing import Any, Literal, cast
 
 from neo4j import AsyncDriver, AsyncGraphDatabase
 
+from server.models.graph import Community, Entity, GraphNeighborsResponse, GraphStats, Relationship
 from server.models.index import Chunk
-from server.models.graph import Community, Entity, GraphStats, Relationship
 from server.models.retrieval import ChunkMatch
 
 EntityType = Literal["function", "class", "module", "variable", "concept"]
@@ -381,13 +381,17 @@ class Neo4jClient:
             return None
         return _entity_from_record(rec)
 
-    async def list_entities(self, repo_id: str, entity_type: str | None, limit: int) -> list[Entity]:
+    async def list_entities(self, repo_id: str, entity_type: str | None, limit: int, query: str | None = None) -> list[Entity]:
         driver = self._require_driver()
         where = "WHERE n.repo_id = $repo_id"
         params: dict[str, Any] = {"repo_id": repo_id, "limit": int(limit)}
         if entity_type:
             where += " AND n.entity_type = $entity_type"
             params["entity_type"] = entity_type
+        q = (query or "").strip().lower()
+        if q:
+            where += " AND toLower(n.name) CONTAINS $q"
+            params["q"] = q
         query = f"""
         MATCH (n:Entity)
         {where}
@@ -398,6 +402,7 @@ class Neo4jClient:
                n.file_path AS file_path,
                n.description AS description,
                n.properties_json AS properties_json
+        ORDER BY name ASC
         LIMIT $limit;
         """
         async with driver.session(database=self.database) as session:
@@ -509,6 +514,149 @@ class Neo4jClient:
                 )
             )
         return out
+
+    async def get_entity_neighbors(
+        self,
+        repo_id: str,
+        entity_id: str,
+        *,
+        max_hops: int,
+        limit: int,
+    ) -> GraphNeighborsResponse | None:
+        """Return a neighbor subgraph centered on an Entity.
+
+        Notes:
+        - Uses a single Cypher query to avoid N+1 fetches
+        - Neo4j does not allow parameterized variable-length patterns (*1..$hops),
+          so hop limits are validated + inlined.
+        """
+        hops = int(max(1, max_hops or 1))
+        hops = min(hops, 5)
+        lim = int(max(0, limit or 0))
+        lim = min(lim, 2000)
+
+        allowed_rels = ["calls", "imports", "inherits", "contains", "references", "related_to"]
+        driver = self._require_driver()
+
+        cypher = f"""
+        MATCH (center:Entity {{repo_id: $repo_id, entity_id: $entity_id}})
+
+        OPTIONAL MATCH p = (center)-[rels*1..{hops}]-(n:Entity {{repo_id: $repo_id}})
+        WHERE ALL(r IN rels WHERE type(r) IN $allowed_rels)
+        WITH center, n, min(length(p)) AS min_hops
+        ORDER BY min_hops ASC, n.name ASC
+        LIMIT $limit
+
+        WITH center, [x IN collect(DISTINCT n) WHERE x IS NOT NULL] AS neighbors
+        WITH neighbors + [center] AS nodes
+
+        UNWIND nodes AS a
+        OPTIONAL MATCH (a)-[r]-(b)
+        WHERE b IN nodes AND type(r) IN $allowed_rels
+        WITH nodes, [x IN collect(DISTINCT r) WHERE x IS NOT NULL] AS rels
+
+        RETURN
+          [n IN nodes |
+            {{
+              entity_id: n.entity_id,
+              name: n.name,
+              entity_type: n.entity_type,
+              file_path: n.file_path,
+              description: n.description,
+              properties_json: n.properties_json
+            }}
+          ] AS entities,
+          [r IN rels |
+            {{
+              source_id: startNode(r).entity_id,
+              target_id: endNode(r).entity_id,
+              relation_type: type(r),
+              weight: coalesce(r.weight, 1.0),
+              properties_json: r.properties_json
+            }}
+          ] AS relationships;
+        """
+
+        async with driver.session(database=self.database) as session:
+            res = await session.run(
+                cypher,
+                repo_id=repo_id,
+                entity_id=entity_id,
+                allowed_rels=allowed_rels,
+                limit=lim,
+            )
+            records = await res.data()
+        if not records:
+            return None
+
+        rec = records[0] or {}
+        entities_raw = rec.get("entities") or []
+        relationships_raw = rec.get("relationships") or []
+
+        entities: list[Entity] = []
+        if isinstance(entities_raw, list):
+            for item in entities_raw:
+                if isinstance(item, dict):
+                    entities.append(_entity_from_mapping(item))
+
+        rels: list[Relationship] = []
+        allowed: set[str] = {"calls", "imports", "inherits", "contains", "references", "related_to"}
+        if isinstance(relationships_raw, list):
+            for r in relationships_raw:
+                if not isinstance(r, dict):
+                    continue
+                rel_type = str(r.get("relation_type") or "")
+                if rel_type not in allowed:
+                    continue
+                props = {}
+                if r.get("properties_json"):
+                    try:
+                        props = json.loads(str(r["properties_json"]))
+                    except Exception:
+                        props = {}
+                raw_weight = float(r.get("weight") or 1.0)
+                weight = max(0.0, min(1.0, raw_weight))
+                rels.append(
+                    Relationship(
+                        source_id=str(r.get("source_id") or ""),
+                        target_id=str(r.get("target_id") or ""),
+                        relation_type=cast(RelationshipType, rel_type),
+                        weight=weight,
+                        properties=props,
+                    )
+                )
+
+        return GraphNeighborsResponse(entities=entities, relationships=rels)
+
+    async def get_community_members(self, repo_id: str, community_id: str, *, limit: int = 500) -> list[Entity]:
+        lim = int(max(0, limit or 0))
+        lim = min(lim, 5000)
+        if not community_id.strip() or lim <= 0:
+            return []
+
+        driver = self._require_driver()
+        query = """
+        MATCH (c:Community {repo_id: $repo_id, community_id: $community_id})
+        MATCH (e:Entity {repo_id: $repo_id})-[:IN_COMMUNITY]->(c)
+        RETURN e.entity_id AS entity_id,
+               e.name AS name,
+               e.entity_type AS entity_type,
+               e.file_path AS file_path,
+               e.description AS description,
+               e.properties_json AS properties_json
+        ORDER BY name ASC
+        LIMIT $limit;
+        """
+        async with driver.session(database=self.database) as session:
+            res = await session.run(
+                query,
+                repo_id=repo_id,
+                community_id=community_id,
+                limit=lim,
+            )
+            records = await res.data()
+
+        return [_entity_from_mapping(r) for r in records]
 
     # Community operations
     async def detect_communities(self, repo_id: str) -> list[Community]:

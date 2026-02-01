@@ -20,7 +20,7 @@
 import { useCallback, useEffect } from 'react';
 import { useGraphStore } from '@/stores/useGraphStore';
 import { useRepoStore } from '@/stores';
-import type { Entity, Relationship, Community, GraphStats } from '@/types/generated';
+import type { Entity, Relationship, Community, GraphStats, GraphNeighborsResponse } from '@/types/generated';
 
 const GRAPH_API_BASE = '/api/graph';
 
@@ -124,17 +124,23 @@ export function useGraph() {
       setError(null);
 
       try {
-        const response = await fetch(
-          `${GRAPH_API_BASE}/${encodeURIComponent(activeRepo)}/entities?limit=${encodeURIComponent(String(limit))}`
-        );
+        const q = query.trim();
+        let url = `${GRAPH_API_BASE}/${encodeURIComponent(activeRepo)}/entities?limit=${encodeURIComponent(String(limit))}`;
+        if (q) url += `&q=${encodeURIComponent(q)}`;
+
+        const response = await fetch(url);
         if (!response.ok) {
+          if (response.status === 404) {
+            // No graph for this corpus yet (or empty corpus graph).
+            setEntities([]);
+            return [];
+          }
           throw new Error(`Failed to search entities: ${response.status}`);
         }
+
         const data: Entity[] = await response.json();
-        const q = query.trim().toLowerCase();
-        const filtered = q ? data.filter((e) => (e.name || '').toLowerCase().includes(q)) : data;
-        setEntities(filtered);
-        return filtered;
+        setEntities(data);
+        return data;
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Failed to search entities';
         setError(message);
@@ -150,7 +156,7 @@ export function useGraph() {
    * Get neighbors of an entity within N hops
    */
   const getNeighbors = useCallback(
-    async (_entityId: string, _hops: number = maxHops): Promise<{ entities: Entity[]; relationships: Relationship[] }> => {
+    async (entityId: string, hops: number = maxHops): Promise<{ entities: Entity[]; relationships: Relationship[] }> => {
       if (!activeRepo) {
         setError('No repository selected');
         return { entities: [], relationships: [] };
@@ -160,8 +166,28 @@ export function useGraph() {
       setError(null);
 
       try {
-        setError('Neighbor lookup is not implemented for graph API yet');
-        return { entities: [], relationships: [] };
+        const safeHops = Math.max(1, Math.min(5, Number.isFinite(hops) ? Math.floor(hops) : maxHops));
+        const url = `${GRAPH_API_BASE}/${encodeURIComponent(activeRepo)}/entity/${encodeURIComponent(entityId)}/neighbors` +
+          `?max_hops=${encodeURIComponent(String(safeHops))}&limit=${encodeURIComponent(String(200))}`;
+
+        const response = await fetch(url);
+        if (!response.ok) {
+          if (response.status === 404) {
+            // Treat as "no graph yet" / missing entity (avoid scary UI errors).
+            setEntities([]);
+            setRelationships([]);
+            return { entities: [], relationships: [] };
+          }
+          throw new Error(`Failed to get neighbors: ${response.status}`);
+        }
+
+        const data: GraphNeighborsResponse = await response.json();
+        const ents = Array.isArray(data.entities) ? data.entities : [];
+        const rels = Array.isArray(data.relationships) ? data.relationships : [];
+
+        setEntities(ents);
+        setRelationships(rels);
+        return { entities: ents, relationships: rels };
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Failed to get neighbors';
         setError(message);
@@ -177,7 +203,7 @@ export function useGraph() {
    * Get all entities in a community
    */
   const getCommunityMembers = useCallback(
-    async (_communityId: string): Promise<Entity[]> => {
+    async (communityId: string): Promise<Entity[]> => {
       if (!activeRepo) {
         setError('No repository selected');
         return [];
@@ -187,8 +213,19 @@ export function useGraph() {
       setError(null);
 
       try {
-        setError('Community member lookup is not implemented for graph API yet');
-        return [];
+        const url = `${GRAPH_API_BASE}/${encodeURIComponent(activeRepo)}/community/${encodeURIComponent(communityId)}/members` +
+          `?limit=${encodeURIComponent(String(500))}`;
+
+        const response = await fetch(url);
+        if (!response.ok) {
+          if (response.status === 404) {
+            return [];
+          }
+          throw new Error(`Failed to load community members: ${response.status}`);
+        }
+
+        const data: Entity[] = await response.json();
+        return Array.isArray(data) ? data : [];
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Failed to get community members';
         setError(message);

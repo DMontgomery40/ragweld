@@ -183,12 +183,46 @@ if [[ ! -f ".env" ]]; then
   fi
 fi
 
+# Load .env for local backend so Neo4j/Postgres credentials are available.
+# (Docker Compose reads .env automatically, but local uvicorn does not.)
+if [[ -f ".env" ]]; then
+  log "Loading environment from .env"
+  set -a
+  # shellcheck disable=SC1091
+  source ".env"
+  set +a
+fi
+
+wait_for_backend_ready() {
+  local url="http://127.0.0.1:${BACKEND_PORT}/api/ready"
+  local timeout_s="${1:-90}"
+  local start_s
+  start_s="$(date +%s)"
+
+  log "Waiting for backend readiness: $url (timeout ${timeout_s}s)..."
+  while true; do
+    local body=""
+    body="$(curl -fsS "$url" 2>/dev/null || true)"
+    if [[ -n "$body" ]] && echo "$body" | grep -Eq '"ready"[[:space:]]*:[[:space:]]*true'; then
+      log "Ready: $url"
+      return 0
+    fi
+    local now_s
+    now_s="$(date +%s)"
+    if (( now_s - start_s >= timeout_s )); then
+      echo "$body" >&2
+      die "Timed out waiting for backend readiness: $url"
+    fi
+    sleep 1
+  done
+}
+
 if [[ "$START_DOCKER" == "1" ]]; then
   resolve_docker_compose || die "Docker Compose not found. Install Docker Desktop."
 
   services=(postgres neo4j)
   if [[ "$WITH_OBSERVABILITY" == "1" ]]; then
-    services+=(prometheus grafana)
+    services+=(prometheus grafana loki promtail)
   fi
   if [[ "$BACKEND_MODE" == "docker" && "$START_BACKEND" == "1" ]]; then
     services+=(api)
@@ -220,10 +254,12 @@ if [[ "$START_BACKEND" == "1" && "$BACKEND_MODE" == "local" ]]; then
     uv run uvicorn server.main:app --reload --port "$BACKEND_PORT" &
     BACKEND_PID="$!"
     wait_for_http_ok "http://127.0.0.1:${BACKEND_PORT}/api/health" 60
+    wait_for_backend_ready 120
   fi
 elif [[ "$START_BACKEND" == "1" && "$BACKEND_MODE" == "docker" ]]; then
   if [[ "$DRY_RUN" == "0" ]]; then
     wait_for_http_ok "http://127.0.0.1:${BACKEND_PORT}/api/health" 90
+    wait_for_backend_ready 120
   fi
 fi
 

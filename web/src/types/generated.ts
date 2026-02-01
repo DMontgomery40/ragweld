@@ -176,6 +176,22 @@ export interface EnrichmentConfig {
   enrich_timeout?: number; // default: 30
 }
 
+/** Knowledge graph node representing a code entity. */
+export interface Entity {
+  /** Unique identifier */
+  entity_id: string;
+  /** Entity name (function name, class name, etc) */
+  name: string;
+  /** Type of entity */
+  entity_type: "function" | "class" | "module" | "variable" | "concept";
+  /** File where entity is defined */
+  file_path?: string | null; // default: None
+  /** AI-generated description */
+  description?: string | null; // default: None
+  /** Additional properties */
+  properties?: Record<string, unknown>;
+}
+
 /** Lightweight scored retrieval doc for eval drill-down. */
 export interface EvalDoc {
   /** Retrieved file path */
@@ -530,6 +546,20 @@ export interface Message {
   timestamp?: string;
 }
 
+/** Knowledge graph edge connecting two entities. */
+export interface Relationship {
+  /** Source entity ID */
+  source_id: string;
+  /** Target entity ID */
+  target_id: string;
+  /** Type of relationship */
+  relation_type: "calls" | "imports" | "inherits" | "contains" | "references" | "related_to";
+  /** Relationship strength */
+  weight?: number; // default: 1.0
+  /** Additional properties */
+  properties?: Record<string, unknown>;
+}
+
 /** Reranking configuration for result refinement. */
 export interface RerankingConfig {
   /** Reranker mode: 'cloud' (Cohere/Voyage API), 'local' (HuggingFace cross-encoder), 'learning' (TRIBRID cross-encoder-tribrid), 'none' (disabled) */
@@ -751,7 +781,7 @@ export interface UIConfig {
   /** Grafana dashboard slug */
   grafana_dashboard_slug?: string; // default: "tribrid-overview"
   /** Grafana base URL */
-  grafana_base_url?: string; // default: "http://127.0.0.1:3000"
+  grafana_base_url?: string; // default: "http://127.0.0.1:3001"
   /** Grafana authentication mode */
   grafana_auth_mode?: string; // default: "anonymous"
   /** Enable Grafana embedding */
@@ -990,22 +1020,6 @@ export interface CorpusUpdateRequest {
   layer_bonuses?: Record<string, Record<string, number>> | null;
 }
 
-/** Knowledge graph node representing a code entity. */
-export interface Entity {
-  /** Unique identifier */
-  entity_id: string;
-  /** Entity name (function name, class name, etc) */
-  name: string;
-  /** Type of entity */
-  entity_type: "function" | "class" | "module" | "variable" | "concept";
-  /** File where entity is defined */
-  file_path?: string | null;
-  /** AI-generated description */
-  description?: string | null;
-  /** Additional properties */
-  properties?: Record<string, unknown>;
-}
-
 /** Response for /eval/analyze_comparison. */
 export interface EvalAnalyzeComparisonResponse {
   /** Whether analysis succeeded */
@@ -1124,6 +1138,14 @@ export interface EvalTestRequest {
   final_k?: number | null;
 }
 
+/** Neighbor subgraph centered on a single entity. */
+export interface GraphNeighborsResponse {
+  /** Entities in the neighborhood (includes the center entity) */
+  entities: Entity[];
+  /** Relationships between returned entities */
+  relationships: Relationship[];
+}
+
 /** Request to index a repository. */
 export interface IndexRequest {
   /** Corpus identifier */
@@ -1166,20 +1188,6 @@ export interface KeywordsGenerateResponse {
   keywords: string[];
   /** Number of keywords returned */
   count: number;
-}
-
-/** Knowledge graph edge connecting two entities. */
-export interface Relationship {
-  /** Source entity ID */
-  source_id: string;
-  /** Target entity ID */
-  target_id: string;
-  /** Type of relationship */
-  relation_type: "calls" | "imports" | "inherits" | "contains" | "references" | "related_to";
-  /** Relationship strength */
-  weight?: number;
-  /** Additional properties */
-  properties?: Record<string, unknown>;
 }
 
 /** Request payload for tri-brid search. */

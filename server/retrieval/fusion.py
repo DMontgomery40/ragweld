@@ -8,6 +8,7 @@ from server.db.postgres import PostgresClient
 from server.indexing.embedder import Embedder
 from server.models.retrieval import ChunkMatch
 from server.models.tribrid_config_model import FusionConfig
+from server.observability.metrics import GRAPH_LEG_LATENCY_SECONDS, SPARSE_LEG_LATENCY_SECONDS, VECTOR_LEG_LATENCY_SECONDS
 from server.services.config_store import get_config as load_scoped_config
 
 if TYPE_CHECKING:
@@ -66,19 +67,25 @@ class TriBridFusion:
 
         # Run legs (request toggles + config.*.enabled)
         if include_vector and cfg.vector_search.enabled:
-            q_emb = await embedder.embed(query)
-            vector_results = await postgres.vector_search(corpus_id, q_emb, int(top_k or cfg.vector_search.top_k))
-            if cfg.vector_search.similarity_threshold > 0:
-                vector_results = [r for r in vector_results if r.score >= cfg.vector_search.similarity_threshold]
+            with VECTOR_LEG_LATENCY_SECONDS.time():
+                q_emb = await embedder.embed(query)
+                vector_results = await postgres.vector_search(
+                    corpus_id, q_emb, int(top_k or cfg.vector_search.top_k)
+                )
+                if cfg.vector_search.similarity_threshold > 0:
+                    vector_results = [
+                        r for r in vector_results if r.score >= cfg.vector_search.similarity_threshold
+                    ]
         debug["fusion_vector_results"] = len(vector_results)
 
         if include_sparse and cfg.sparse_search.enabled:
-            sparse_results = await postgres.sparse_search(
-                corpus_id,
-                query,
-                int(top_k or cfg.sparse_search.top_k),
-                ts_config=cfg.indexing.postgres_ts_config,
-            )
+            with SPARSE_LEG_LATENCY_SECONDS.time():
+                sparse_results = await postgres.sparse_search(
+                    corpus_id,
+                    query,
+                    int(top_k or cfg.sparse_search.top_k),
+                    ts_config=cfg.indexing.postgres_ts_config,
+                )
         debug["fusion_sparse_results"] = len(sparse_results)
 
         # Graph retrieval: query Neo4j for relevant entities, then hydrate to chunks from Postgres.
@@ -88,91 +95,102 @@ class TriBridFusion:
             db_name = cfg.graph_storage.resolve_database(corpus_id)
             neo4j: Neo4jClient | None = None
             try:
-                neo4j = Neo4jClient(
-                    cfg.graph_storage.neo4j_uri,
-                    cfg.graph_storage.neo4j_user,
-                    cfg.graph_storage.neo4j_password,
-                    database=db_name,
-                )
-                await neo4j.connect()
-                if getattr(cfg.graph_search, "mode", "entity") == "chunk":
-                    # Chunk-level graph retrieval: Neo4j vector index over Chunk nodes.
-                    q_emb = await embedder.embed(query)
-                    overfetch = (
-                        int(getattr(cfg.graph_search, "chunk_seed_overfetch_multiplier", 1) or 1)
-                        if cfg.graph_storage.neo4j_database_mode == "shared"
-                        else 1
+                with GRAPH_LEG_LATENCY_SECONDS.time():
+                    neo4j = Neo4jClient(
+                        cfg.graph_storage.neo4j_uri,
+                        cfg.graph_storage.neo4j_user,
+                        cfg.graph_storage.neo4j_password,
+                        database=db_name,
                     )
-                    hits = await neo4j.chunk_vector_search(
-                        corpus_id,
-                        q_emb,
-                        index_name=cfg.graph_indexing.chunk_vector_index_name,
-                        top_k=graph_k,
-                        neighbor_window=int(getattr(cfg.graph_search, "chunk_neighbor_window", 0) or 0),
-                        overfetch_multiplier=overfetch,
-                    )
-                    debug["fusion_graph_entity_hits"] = len(hits)
-
-                    score_by_id = {cid: float(score) for cid, score in hits}
-
-                    # Expand via entities (semantic KG / code entities linked to chunks).
-                    if bool(getattr(cfg.graph_search, "chunk_entity_expansion_enabled", False)) and int(cfg.graph_search.max_hops) > 0:
-                        exp_hits = await neo4j.expand_chunks_via_entities(
+                    await neo4j.connect()
+                    if getattr(cfg.graph_search, "mode", "entity") == "chunk":
+                        # Chunk-level graph retrieval: Neo4j vector index over Chunk nodes.
+                        q_emb = await embedder.embed(query)
+                        overfetch = (
+                            int(getattr(cfg.graph_search, "chunk_seed_overfetch_multiplier", 1) or 1)
+                            if cfg.graph_storage.neo4j_database_mode == "shared"
+                            else 1
+                        )
+                        hits = await neo4j.chunk_vector_search(
                             corpus_id,
-                            hits,
-                            max_hops=int(cfg.graph_search.max_hops),
+                            q_emb,
+                            index_name=cfg.graph_indexing.chunk_vector_index_name,
                             top_k=graph_k,
+                            neighbor_window=int(getattr(cfg.graph_search, "chunk_neighbor_window", 0) or 0),
+                            overfetch_multiplier=overfetch,
                         )
-                        debug["fusion_graph_entity_expansion_hits"] = len(exp_hits)
-                        w = float(getattr(cfg.graph_search, "chunk_entity_expansion_weight", 1.0) or 0.0)
-                        for cid, score in exp_hits:
-                            score_by_id[cid] = max(float(score_by_id.get(cid) or 0.0), float(score) * w)
+                        debug["fusion_graph_entity_hits"] = len(hits)
 
-                    chunk_ids = sorted(score_by_id, key=lambda cid: (-float(score_by_id[cid]), cid))[:graph_k]
-                    hydrated = await postgres.get_chunks(corpus_id, chunk_ids)
-                    graph_results = [
-                        ChunkMatch(
-                            chunk_id=ch.chunk_id,
-                            content=ch.content,
-                            file_path=ch.file_path,
-                            start_line=ch.start_line,
-                            end_line=ch.end_line,
-                            language=ch.language,
-                            score=float(score_by_id.get(ch.chunk_id) or 0.0),
-                            source="graph",
-                            metadata={
-                                "graph_mode": "chunk",
-                                "graph_index": cfg.graph_indexing.chunk_vector_index_name,
-                            },
-                        )
-                        for ch in hydrated
-                        if ch.chunk_id in score_by_id
-                    ]
-                    debug["fusion_graph_hydrated_chunks"] = len(graph_results)
-                else:
-                    # Entity-mode graph retrieval: return real chunk_ids via Entity-[:IN_CHUNK]->Chunk.
-                    hits = await neo4j.entity_chunk_search(corpus_id, query, cfg.graph_search.max_hops, graph_k)
-                    debug["fusion_graph_entity_hits"] = len(hits)
+                        score_by_id = {cid: float(score) for cid, score in hits}
 
-                    score_by_id = {cid: float(score) for cid, score in hits}
-                    chunk_ids = [cid for cid, _score in hits]
-                    hydrated = await postgres.get_chunks(corpus_id, chunk_ids)
-                    graph_results = [
-                        ChunkMatch(
-                            chunk_id=ch.chunk_id,
-                            content=ch.content,
-                            file_path=ch.file_path,
-                            start_line=ch.start_line,
-                            end_line=ch.end_line,
-                            language=ch.language,
-                            score=float(score_by_id.get(ch.chunk_id) or 0.0),
-                            source="graph",
-                            metadata={"graph_mode": "entity"},
+                        # Expand via entities (semantic KG / code entities linked to chunks).
+                        if bool(
+                            getattr(cfg.graph_search, "chunk_entity_expansion_enabled", False)
+                        ) and int(cfg.graph_search.max_hops) > 0:
+                            exp_hits = await neo4j.expand_chunks_via_entities(
+                                corpus_id,
+                                hits,
+                                max_hops=int(cfg.graph_search.max_hops),
+                                top_k=graph_k,
+                            )
+                            debug["fusion_graph_entity_expansion_hits"] = len(exp_hits)
+                            w = float(
+                                getattr(cfg.graph_search, "chunk_entity_expansion_weight", 1.0) or 0.0
+                            )
+                            for cid, score in exp_hits:
+                                score_by_id[cid] = max(
+                                    float(score_by_id.get(cid) or 0.0), float(score) * w
+                                )
+
+                        chunk_ids = sorted(score_by_id, key=lambda cid: (-float(score_by_id[cid]), cid))[
+                            :graph_k
+                        ]
+                        hydrated = await postgres.get_chunks(corpus_id, chunk_ids)
+                        graph_results = [
+                            ChunkMatch(
+                                chunk_id=ch.chunk_id,
+                                content=ch.content,
+                                file_path=ch.file_path,
+                                start_line=ch.start_line,
+                                end_line=ch.end_line,
+                                language=ch.language,
+                                score=float(score_by_id.get(ch.chunk_id) or 0.0),
+                                source="graph",
+                                metadata={
+                                    "graph_mode": "chunk",
+                                    "graph_index": cfg.graph_indexing.chunk_vector_index_name,
+                                },
+                            )
+                            for ch in hydrated
+                            if ch.chunk_id in score_by_id
+                        ]
+                        debug["fusion_graph_hydrated_chunks"] = len(graph_results)
+                    else:
+                        # Entity-mode graph retrieval: return real chunk_ids via Entity-[:IN_CHUNK]->Chunk.
+                        hits = await neo4j.entity_chunk_search(
+                            corpus_id, query, cfg.graph_search.max_hops, graph_k
                         )
-                        for ch in hydrated
-                        if ch.chunk_id in score_by_id
-                    ]
-                    debug["fusion_graph_hydrated_chunks"] = len(graph_results)
+                        debug["fusion_graph_entity_hits"] = len(hits)
+
+                        score_by_id = {cid: float(score) for cid, score in hits}
+                        chunk_ids = [cid for cid, _score in hits]
+                        hydrated = await postgres.get_chunks(corpus_id, chunk_ids)
+                        graph_results = [
+                            ChunkMatch(
+                                chunk_id=ch.chunk_id,
+                                content=ch.content,
+                                file_path=ch.file_path,
+                                start_line=ch.start_line,
+                                end_line=ch.end_line,
+                                language=ch.language,
+                                score=float(score_by_id.get(ch.chunk_id) or 0.0),
+                                source="graph",
+                                metadata={"graph_mode": "entity"},
+                            )
+                            for ch in hydrated
+                            if ch.chunk_id in score_by_id
+                        ]
+                        debug["fusion_graph_hydrated_chunks"] = len(graph_results)
             except Exception as e:
                 debug["fusion_graph_error"] = str(e)
             finally:

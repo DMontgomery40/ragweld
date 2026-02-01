@@ -86,6 +86,7 @@ export const routes: RouteConfig[] = [
     subtabs: [
       { id: 'data-quality', title: 'Data Quality' },
       { id: 'retrieval', title: 'Retrieval' },
+      { id: 'graph', title: 'Graph' },
       { id: 'reranker-config', title: 'Reranker' },
       { id: 'learning-ranker', title: 'Learning Ranker' },
       { id: 'indexing', title: 'Indexing' },

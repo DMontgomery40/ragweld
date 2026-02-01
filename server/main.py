@@ -1,4 +1,8 @@
-from fastapi import FastAPI
+from collections.abc import Awaitable, Callable
+
+from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
+from starlette.responses import Response
 
 from server.api.chat import router as chat_router
 from server.api.chunk_summaries import router as chunk_summaries_router
@@ -15,8 +19,45 @@ from server.api.models import router as models_router
 from server.api.repos import router as repos_router
 from server.api.reranker import router as reranker_router
 from server.api.search import router as search_router
+from server.observability.metrics import render_latest
 
 app = FastAPI(title="TriBridRAG", version="0.1.0")
+
+# Allow local dev UIs (Vite, etc.) to call the API without CORS issues.
+# In production, the UI is typically served from the same origin (/web), so this is harmless.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$",
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+@app.get("/metrics")
+async def metrics() -> Response:
+    body, content_type = render_latest()
+    return Response(content=body, media_type=content_type)
+
+
+@app.middleware("http")
+async def metrics_middleware(
+    request: Request, call_next: Callable[[Request], Awaitable[Response]]
+) -> Response:
+    # Keep middleware minimal: only measure /api/search to avoid high-cardinality labels.
+    if request.url.path == "/api/search":
+        from server.observability.metrics import SEARCH_ERRORS_TOTAL, SEARCH_LATENCY_SECONDS
+
+        with SEARCH_LATENCY_SECONDS.time():
+            try:
+                response = await call_next(request)
+                if response.status_code >= 500:
+                    SEARCH_ERRORS_TOTAL.inc()
+                return response
+            except Exception:
+                SEARCH_ERRORS_TOTAL.inc()
+                raise
+    return await call_next(request)
 
 app.include_router(health_router, prefix="/api")
 app.include_router(config_router, prefix="/api")

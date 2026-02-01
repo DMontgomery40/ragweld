@@ -323,7 +323,7 @@
     "editor_port": 4440,
     "grafana_dashboard_uid": "tribrid-overview",
     "grafana_dashboard_slug": "tribrid-overview",
-    "grafana_base_url": "http://127.0.0.1:3000",
+    "grafana_base_url": "http://127.0.0.1:3001",
     "grafana_auth_mode": "anonymous",
     "grafana_embed_enabled": 1,
     "grafana_kiosk": "tv",

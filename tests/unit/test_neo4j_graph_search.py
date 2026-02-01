@@ -157,3 +157,59 @@ async def test_entity_chunk_search_uses_in_chunk_links() -> None:
     assert session.last_params.get("limit") == 10
     assert "tokens" in session.last_params
 
+
+@pytest.mark.asyncio
+async def test_get_entity_neighbors_inlines_hops_and_parses_response() -> None:
+    client = Neo4jClient(uri="bolt://fake", user="neo4j", password="test")
+
+    records = [
+        {
+            "entities": [
+                {
+                    "entity_id": "e1",
+                    "name": "Foo",
+                    "entity_type": "function",
+                    "file_path": "src/foo.py",
+                    "description": None,
+                    "properties_json": json.dumps({"start_line": 1, "end_line": 2}),
+                },
+                {
+                    "entity_id": "e2",
+                    "name": "bar",
+                    "entity_type": "function",
+                    "file_path": "src/bar.py",
+                    "description": None,
+                    "properties_json": json.dumps({}),
+                },
+            ],
+            "relationships": [
+                {
+                    "source_id": "e1",
+                    "target_id": "e2",
+                    "relation_type": "calls",
+                    "weight": 1.0,
+                    "properties_json": json.dumps({"reason": "unit-test"}),
+                }
+            ],
+        }
+    ]
+
+    client._driver = _FakeDriver(records)  # type: ignore[assignment]
+
+    out = await client.get_entity_neighbors(repo_id="test-corpus", entity_id="e1", max_hops=2, limit=200)
+    assert out is not None
+    assert len(out.entities) == 2
+    assert {e.entity_id for e in out.entities} == {"e1", "e2"}
+    assert len(out.relationships) == 1
+    assert out.relationships[0].relation_type == "calls"
+    assert out.relationships[0].source_id == "e1"
+    assert out.relationships[0].target_id == "e2"
+
+    session = client._driver.session_obj  # type: ignore[attr-defined]
+    assert session.last_query is not None
+    assert "*1..2" in session.last_query
+    assert session.last_params is not None
+    assert session.last_params.get("repo_id") == "test-corpus"
+    assert session.last_params.get("entity_id") == "e1"
+    assert "max_hops" not in session.last_params
+

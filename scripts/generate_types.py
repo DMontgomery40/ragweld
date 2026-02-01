@@ -268,6 +268,7 @@ def main() -> None:
             Relationship,
             Community,
             GraphStats,
+            GraphNeighborsResponse,
             # Domain models - Eval
             EvalDatasetItem,
             EvalRequest,
@@ -318,6 +319,7 @@ def main() -> None:
         Relationship,
         Community,
         GraphStats,
+        GraphNeighborsResponse,
         EvalDatasetItem,
         EvalRequest,
         EvalTestRequest,

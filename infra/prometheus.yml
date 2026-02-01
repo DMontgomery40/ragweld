@@ -2,28 +2,48 @@ global:
   scrape_interval: 15s
   evaluation_interval: 15s
 
-alerting:
-  alertmanagers:
-    - static_configs:
-        - targets: []
-
-rule_files: []
-
 scrape_configs:
   - job_name: 'prometheus'
     static_configs:
       - targets: ['localhost:9090']
 
-  - job_name: 'tribrid-api'
+  # ----------------------------
+  # TriBrid API (FastAPI)
+  # ----------------------------
+  # Common local-dev flow: backend runs on the host on port 8012
+  - job_name: 'tribrid-api-host'
+    metrics_path: /metrics
+    scrape_interval: 10s
+    static_configs:
+      - targets: ['host.docker.internal:8012']
+        labels:
+          service: 'tribrid-api'
+          mode: 'host'
+
+  # Docker flow: backend runs as docker-compose service "api" on port 8000
+  - job_name: 'tribrid-api-docker'
     static_configs:
       - targets: ['api:8000']
     metrics_path: /metrics
     scrape_interval: 10s
+    relabel_configs:
+      - target_label: service
+        replacement: 'tribrid-api'
+      - target_label: mode
+        replacement: 'docker'
 
+  # ----------------------------
+  # Postgres (pgvector) via exporter
+  # ----------------------------
   - job_name: 'postgres'
     static_configs:
-      - targets: ['postgres:5432']
+      - targets: ['postgres-exporter:9187']
 
+  # ----------------------------
+  # Neo4j
+  # ----------------------------
+  # Neo4j's native Prometheus endpoint is Enterprise-only (disabled by default).
+  # If you're running Community, this target will stay down (expected).
   - job_name: 'neo4j'
     static_configs:
       - targets: ['neo4j:2004']

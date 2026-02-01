@@ -12,6 +12,7 @@ import { useAPI, useConfig, useConfigField } from '@/hooks';
 import { useRepoStore } from '@/stores/useRepoStore';
 import { LiveTerminal, type LiveTerminalHandle } from '@/components/LiveTerminal/LiveTerminal';
 import { TerminalService } from '@/services/TerminalService';
+import { RepositoryConfig } from '@/components/RAG/RepositoryConfig';
 import { EmbeddingMismatchWarning } from '@/components/ui/EmbeddingMismatchWarning';
 import { TooltipIcon } from '@/components/ui/TooltipIcon';
 import type { IndexRequest, IndexStats, IndexStatus, VocabPreviewResponse, VocabPreviewTerm } from '@/types/generated';
@@ -549,6 +550,16 @@ export function IndexingSubtab() {
           </div>
         </div>
       </div>
+
+      {/* Corpus settings (stored in Postgres corpora.meta). */}
+      <details style={{ marginBottom: '24px' }} data-testid="indexing-corpus-settings">
+        <summary style={{ cursor: 'pointer', fontSize: '13px', fontWeight: 700, color: 'var(--fg)' }}>
+          ⚙️ Corpus settings (exclude paths, keywords, boosts)
+        </summary>
+        <div style={{ marginTop: '12px' }}>
+          <RepositoryConfig />
+        </div>
+      </details>
 
       {/* Compatibility / mode callouts */}
       {skipDense === 1 && (

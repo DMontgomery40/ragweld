@@ -7,10 +7,10 @@ import { useRepoStore } from '@/stores/useRepoStore';
 import { KeywordManager } from '@/components/KeywordManager';
 import type { CorpusUpdateRequest } from '@/types/generated';
 
-interface RepositoryConfigProps {
+type RepositoryConfigProps = {
   // Only keep the callback that parent needs for syncing UI state
   onExcludePathsChange?: (paths: string[]) => void;
-}
+};
 
 /**
  * ---agentspec
@@ -47,6 +47,7 @@ export function RepositoryConfig({ onExcludePathsChange }: RepositoryConfigProps
   
   // Get current repo data from store (reactive to store changes)
   const repoData = getRepoByName(activeRepo);
+  const domId = (String(repoData?.corpus_id || activeRepo || '').trim() || 'corpus').replace(/[^A-Za-z0-9_-]/g, '_');
   
   // Local state ONLY for text inputs that need debouncing before save
   const [repoPathInput, setRepoPathInput] = useState('');
@@ -79,10 +80,10 @@ export function RepositoryConfig({ onExcludePathsChange }: RepositoryConfigProps
     
     // Allow saves after initial sync
     setTimeout(() => { isInitializing.current = false; }, 100);
-  }, [repoData?.name]); // Only re-sync when repo changes
+  }, [activeRepo]); // Only re-sync when corpus selection changes
 
   // NOTE: Path auto-save removed to prevent overwriting relative paths with absolute paths.
-  // Path changes now require explicit save. See: Pydantic migration for repos.json
+  // Path changes now require explicit save.
 
   /**
    * ---agentspec
@@ -226,6 +227,10 @@ export function RepositoryConfig({ onExcludePathsChange }: RepositoryConfigProps
     );
   }
 
+  const currentPath = String(repoData.path || '').trim();
+  const nextPath = repoPathInput.trim();
+  const pathDirty = Boolean(nextPath && nextPath !== currentPath);
+
   return (
     <div style={{ background: 'var(--card-bg)', border: '1px solid var(--line)', borderRadius: '6px', padding: '16px', marginBottom: '16px' }}>
       <h4 style={{ color: 'var(--accent)', fontSize: '14px', marginBottom: '12px' }}>Repo: {repoData.name}</h4>
@@ -233,18 +238,45 @@ export function RepositoryConfig({ onExcludePathsChange }: RepositoryConfigProps
       {/* Path */}
       <div className="input-group" style={{ marginBottom: '12px' }}>
         <label>Path</label>
-        <input
-          type="text"
-          value={repoPathInput}
-          onChange={(e) => setRepoPathInput(e.target.value)}
-        />
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <input
+            type="text"
+            value={repoPathInput}
+            onChange={(e) => setRepoPathInput(e.target.value)}
+            style={{ flex: 1 }}
+            data-testid="repo-config-path-input"
+          />
+          <button
+            type="button"
+            className="small-button"
+            onClick={() => {
+              if (!pathDirty) return;
+              void handleUpdateCorpus(activeRepo, { path: nextPath });
+            }}
+            disabled={!pathDirty || saving}
+            style={{
+              background: pathDirty ? 'var(--accent)' : 'var(--bg-elev2)',
+              color: pathDirty ? 'var(--accent-contrast)' : 'var(--fg-muted)',
+              padding: '6px 12px',
+              cursor: pathDirty && !saving ? 'pointer' : 'not-allowed',
+              opacity: saving ? 0.7 : 1,
+            }}
+            data-testid="repo-config-path-save"
+            title={pathDirty ? 'Save updated corpus path' : 'No changes'}
+          >
+            Save
+          </button>
+        </div>
+        <div style={{ fontSize: '11px', color: 'var(--fg-muted)', marginTop: '6px' }}>
+          Stored path: <span style={{ fontFamily: 'var(--font-mono)' }}>{currentPath || '—'}</span>
+        </div>
       </div>
 
       {/* Exclude Paths */}
       <div className="input-group" style={{ marginBottom: '12px' }}>
         <label>Exclude Paths (paths/patterns to skip during indexing)</label>
         <div
-          id={`exclude-paths-container-${repoData.name}`}
+          id={`exclude-paths-container-${domId}`}
           style={{
             display: 'flex',
             flexWrap: 'wrap',
@@ -256,6 +288,7 @@ export function RepositoryConfig({ onExcludePathsChange }: RepositoryConfigProps
             border: '1px solid var(--line)',
             borderRadius: '4px'
           }}
+          data-testid="repo-config-exclude-paths"
         >
           {excludePaths.map((path, idx) => (
             <span
@@ -293,7 +326,7 @@ export function RepositoryConfig({ onExcludePathsChange }: RepositoryConfigProps
         <div style={{ display: 'flex', gap: '6px' }}>
           <input
             type="text"
-            id={`exclude-path-input-${repoData.name}`}
+            id={`exclude-path-input-${domId}`}
             placeholder="e.g., /website, *.pyc, /node_modules"
             value={excludePathInput}
             onChange={(e) => setExcludePathInput(e.target.value)}
@@ -304,13 +337,15 @@ export function RepositoryConfig({ onExcludePathsChange }: RepositoryConfigProps
               }
             }}
             style={{ flex: 1 }}
+            data-testid="repo-config-exclude-input"
           />
           <button
             type="button"
             className="small-button"
-            id={`exclude-path-add-${repoData.name}`}
+            id={`exclude-path-add-${domId}`}
             onClick={handleAddExcludePath}
             style={{ background: 'var(--accent)', color: 'var(--accent-contrast)', padding: '6px 12px' }}
+            data-testid="repo-config-exclude-add"
           >
             Add
           </button>
@@ -366,7 +401,7 @@ export function RepositoryConfig({ onExcludePathsChange }: RepositoryConfigProps
             marginTop: '8px'
           }}
         >
-          Saving to repos.json...
+          Saving corpus settings…
         </div>
       )}
     </div>

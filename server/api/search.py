@@ -13,6 +13,7 @@ from server.retrieval.fusion import TriBridFusion
 from server.services.config_store import get_config as load_scoped_config
 from server.services.conversation_store import get_conversation_store
 from server.services.rag import generate_response, stream_response
+from server.observability.metrics import SEARCH_REQUESTS_TOTAL
 
 router = APIRouter(tags=["search"])
 
@@ -21,6 +22,8 @@ router = APIRouter(tags=["search"])
 async def search(request: SearchRequest) -> SearchResponse:
     if not request.query.strip():
         raise HTTPException(status_code=400, detail="Query must not be empty")
+
+    SEARCH_REQUESTS_TOTAL.inc()
 
     # Validate corpus exists (prevents auto-creating configs on search)
     global_cfg = load_config()

@@ -21,6 +21,17 @@ services:
       timeout: 5s
       retries: 5
 
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:latest
+    container_name: tribrid-postgres-exporter
+    environment:
+      # Prometheus exporter expects a Postgres DSN.
+      # Use the same defaults as the postgres service.
+      DATA_SOURCE_NAME: "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-tribrid_rag}?sslmode=disable"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   neo4j:
     # Use Community by default; override for Enterprise multi-database:
     #   NEO4J_IMAGE=neo4j:5.26.20-enterprise
@@ -51,7 +62,8 @@ services:
       - ${TRIBRID_DB_DIR:-../tribrid-rag-db}/neo4j/data:/data
       - ${TRIBRID_DB_DIR:-../tribrid-rag-db}/neo4j/logs:/logs
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:7474"]
+      # The Neo4j image does not ship with curl; prefer cypher-shell.
+      test: ["CMD-SHELL", "cypher-shell -u ${NEO4J_USER:-neo4j} -p ${NEO4J_PASSWORD:-password} 'RETURN 1 AS ok;' >/dev/null 2>&1"]
       interval: 10s
       timeout: 10s
       retries: 5
@@ -63,13 +75,23 @@ services:
       GF_SECURITY_ADMIN_USER: admin
       GF_SECURITY_ADMIN_PASSWORD: admin
       GF_USERS_ALLOW_SIGN_UP: "false"
+      # Allow embedding Grafana in an <iframe> (Grafana tab).
+      GF_SECURITY_ALLOW_EMBEDDING: "true"
+      # Anonymous auth for out-of-the-box, per-user-login-free embedding.
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      # Consistent dark mode in embeds.
+      GF_USERS_DEFAULT_THEME: dark
+      # Required for cross-origin iframe cookies in some browsers.
+      GF_SECURITY_COOKIE_SAMESITE: disabled
     ports:
-      - "${GRAFANA_PORT:-3000}:3000"
+      - "${GRAFANA_PORT:-3001}:3000"
     volumes:
       - grafana_data:/var/lib/grafana
       - ./infra/grafana/provisioning:/etc/grafana/provisioning
     depends_on:
       - prometheus
+      - loki
 
   prometheus:
     image: prom/prometheus:v2.45.0
@@ -83,6 +105,39 @@ services:
     volumes:
       - ./infra/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus_data:/prometheus
+    depends_on:
+      - postgres-exporter
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  loki:
+    image: grafana/loki:latest
+    container_name: tribrid-loki
+    restart: unless-stopped
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./infra/loki-config.yml:/etc/loki/local-config.yaml:ro
+      - loki_data:/loki
+    command: -config.file=/etc/loki/local-config.yaml
+
+  promtail:
+    image: grafana/promtail:latest
+    container_name: tribrid-promtail
+    restart: unless-stopped
+    volumes:
+      - ./infra/promtail-config.yml:/etc/promtail/config.yml:ro
+      # Docker container logs (works across platforms with Docker Desktop).
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # Optional: allow tailing host logs on Linux (best-effort; harmless if empty).
+      - /var/log:/var/log:ro
+      # Optional: app data logs if present.
+      - ./data:/app/data:ro
+    command: -config.file=/etc/promtail/config.yml
+    depends_on:
+      - loki
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
   api:
     build:
@@ -114,6 +169,7 @@ services:
 volumes:
   grafana_data:
   prometheus_data:
+  loki_data:
 
 networks:
   default:

@@ -2220,7 +2220,7 @@ class UIConfig(BaseModel):
     )
 
     grafana_base_url: str = Field(
-        default="http://127.0.0.1:3000",
+        default="http://127.0.0.1:3001",
         description="Grafana base URL"
     )
 
@@ -3069,7 +3069,7 @@ class TriBridConfig(BaseModel):
                 editor_port=data.get('EDITOR_PORT', 4440),
                 grafana_dashboard_uid=data.get('GRAFANA_DASHBOARD_UID', 'tribrid-overview'),
                 grafana_dashboard_slug=data.get('GRAFANA_DASHBOARD_SLUG', 'tribrid-overview'),
-                grafana_base_url=data.get('GRAFANA_BASE_URL', 'http://127.0.0.1:3000'),
+                grafana_base_url=data.get('GRAFANA_BASE_URL', 'http://127.0.0.1:3001'),
                 grafana_auth_mode=data.get('GRAFANA_AUTH_MODE', 'anonymous'),
                 grafana_embed_enabled=data.get('GRAFANA_EMBED_ENABLED', 1),
                 grafana_kiosk=data.get('GRAFANA_KIOSK', 'tv'),

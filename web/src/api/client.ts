@@ -11,10 +11,11 @@ function resolveAPIBase(): string {
     const override = q.get('api');
     if (override) return override.replace(/\/$/, '');
     
-    // If on the Vite dev server (ports 5170-5179), talk directly to backend on 8012
+    // If on the Vite dev server (ports 5170-5179), use same-origin `/api`
+    // so Vite's proxy can forward to the backend without CORS issues.
     const port = u.port || '';
     if (port && /^517[0-9]$/.test(port)) {
-      return 'http://127.0.0.1:8012/api';
+      return u.origin + '/api';
     }
     
     // If the protocol is http/https but not Vite dev port, use the same origin

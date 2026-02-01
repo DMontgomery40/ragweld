@@ -60,7 +60,8 @@ interface RepoStore {
 const getApiBase = (): string => {
   try {
     const u = new URL(window.location.href);
-    if (u.port === '5173') return 'http://127.0.0.1:8012/api';
+    // On Vite dev ports, keep requests same-origin so the dev proxy handles routing.
+    if (u.port && /^517[0-9]$/.test(u.port)) return u.origin + '/api';
     return u.origin + '/api';
   } catch {
     return '/api';

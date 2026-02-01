@@ -5,6 +5,7 @@ import { useCallback } from 'react';
 import { RAGSubtabs } from '@/components/RAG/RAGSubtabs';
 import { DataQualitySubtab } from '@/components/RAG/DataQualitySubtab';
 import { RetrievalSubtab } from '@/components/RAG/RetrievalSubtab';
+import { GraphSubtab } from '@/components/RAG/GraphSubtab';
 import { RerankerConfigSubtab } from '@/components/RAG/RerankerConfigSubtab';
 import { LearningRankerSubtab } from '@/components/RAG/LearningRankerSubtab';
 import { IndexingSubtab } from '@/components/RAG/IndexingSubtab';
@@ -34,6 +35,12 @@ export default function RAGTab() {
       <div id="tab-rag-retrieval" className={`rag-subtab-content ${activeSubtab === 'retrieval' ? 'active' : ''}`}>
         <ErrorBoundary context="RetrievalSubtab">
           <RetrievalSubtab />
+        </ErrorBoundary>
+      </div>
+
+      <div id="tab-rag-graph" className={`rag-subtab-content ${activeSubtab === 'graph' ? 'active' : ''}`}>
+        <ErrorBoundary context="GraphSubtab">
+          <GraphSubtab />
         </ErrorBoundary>
       </div>
 

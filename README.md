@@ -76,7 +76,7 @@ Each search method compensates for the others' weaknesses. The result: **dramati
 - Automatic entity extraction (functions, classes, modules, variables)
 - Relationship mapping (calls, imports, inherits, contains, references)
 - Community detection (Louvain, Label Propagation)
-- Graph visualization in the UI
+- Graph inspection via **RAG → Graph** (UI), Neo4j Browser, and `/api/graph/*` endpoints
 
 ### Evaluation & Cost Tracking
 - Built-in evaluation framework with golden question sets
@@ -116,6 +116,15 @@ VOYAGE_API_KEY=pa-...
 docker compose up -d postgres neo4j
 ```
 
+By default, Docker volumes are stored alongside the repo. To store DB data **outside** the repo (recommended for real corpora),
+set `TRIBRID_DB_DIR` (wired in `docker-compose.yml`):
+
+```bash
+# Example (macOS)
+export TRIBRID_DB_DIR="/Users/davidmontgomery/tribrid-rag-db"
+docker compose up -d postgres neo4j
+```
+
 This starts:
 - **PostgreSQL** with pgvector extension (port 5432)
 - **Neo4j** graph database (ports 7474, 7687)
@@ -137,6 +146,25 @@ cd web
 npm install
 npm run dev
 ```
+
+### One-command dev start (recommended)
+
+From the repo root:
+
+```bash
+./start.sh
+```
+
+With full observability stack (Prometheus + Grafana + Loki + Promtail):
+
+```bash
+./start.sh --with-observability
+```
+
+Observability URLs:
+- Grafana: http://localhost:3001 (admin/admin)
+- Prometheus: http://localhost:9090
+- Loki: http://localhost:3100
 
 UI available at http://localhost:5173
 
@@ -170,10 +198,102 @@ curl -X POST "http://localhost:8012/api/search" \
   -H "Content-Type: application/json" \
   -d '{
     "query": "How does the authentication system work?",
-    "repo_id": "my-project",
+    "corpus_id": "my-project",
     "top_k": 10
   }'
 ```
+
+---
+
+## Operator Runbook (Real Corpus GraphRAG)
+
+This section is optimized for running a **real on-disk corpus** end-to-end (Postgres + Neo4j), indexing it safely (gitignore-aware + size skips), and verifying graph retrieval is actually contributing results.
+
+### TL;DR (10–15 line runbook)
+
+```bash
+# (Optional) store DB volumes outside repo
+export TRIBRID_DB_DIR="/Users/davidmontgomery/tribrid-rag-db"
+
+# Neo4j memory tuning (recommended for large corpora on ~24GB VM)
+export NEO4J_HEAP_INIT=4G NEO4J_HEAP_MAX=12G NEO4J_PAGECACHE=8G
+docker compose up -d postgres neo4j
+
+# If you see Permission denied / AccessDeniedException in DB logs, fix perms then restart:
+chmod -R a+rwX "$TRIBRID_DB_DIR/postgres" "$TRIBRID_DB_DIR/neo4j/data" "$TRIBRID_DB_DIR/neo4j/logs"
+docker compose restart postgres neo4j
+
+# Start backend (avoid --reload for long indexing)
+NEO4J_PASSWORD=password uv run uvicorn server.main:app --host 127.0.0.1 --port 8012
+
+# Create corpus + exclude known heavy build outputs (example: faxbot)
+curl -sS -X POST http://127.0.0.1:8012/api/repos -H 'Content-Type: application/json' -d '{"corpus_id":"faxbot","name":"faxbot","path":"/Users/davidmontgomery/faxbot_folder"}'
+curl -sS -X PATCH http://127.0.0.1:8012/api/repos/faxbot -H 'Content-Type: application/json' -d '{"exclude_paths":["faxbot.net/public/admin-demo/",".worktrees/","out.noindex/","data/qdrant/","faxbot/site/","faxbot_gh_pages/"]}'
+
+# Index + poll
+curl -sS -X POST http://127.0.0.1:8012/api/index -H 'Content-Type: application/json' -d '{"corpus_id":"faxbot","repo_path":"/Users/davidmontgomery/faxbot_folder","force_reindex":true}'
+while true; do curl -sS http://127.0.0.1:8012/api/index/faxbot/status | python -m json.tool; sleep 2; done
+```
+
+### Verify GraphRAG is actually contributing results
+
+```bash
+curl -sS -X POST http://127.0.0.1:8012/api/search \
+  -H 'Content-Type: application/json' \
+  -d '{"corpus_id":"faxbot","query":"authentication flow","top_k":8,"include_vector":true,"include_sparse":true,"include_graph":true}' \
+  | python -m json.tool
+```
+
+Success criteria:
+- `debug.fusion_graph_attempted` is `true`
+- `debug.fusion_graph_error` is `null`
+- `debug.fusion_graph_hydrated_chunks > 0`
+- At least one match has `"source": "graph"`
+
+### How file inclusion works (gitignore + safety/perf)
+
+- **Gitignore semantics**: indexing uses a gitignore-aware loader that supports **nested `.gitignore` files**.
+- **Always-ignored** (even if corpus has no `.gitignore`): `.git/`, `.venv/`, `node_modules/`, `__pycache__/`, `*.pyc`, `.DS_Store`, `.env`.
+- **Size skip (LAW)**: files larger than `min(chunking.max_indexable_file_size, indexing.index_max_file_size_mb*1024*1024)` are skipped *before* reading/chunking.
+- **Corpus-level excludes**: set `exclude_paths` on the corpus (stored in Postgres `corpora.meta`) to skip large build outputs that are not gitignored. You can set this via **UI** (`RAG → Indexing → Corpus settings`) or **API** (`PATCH /api/corpora/{corpus_id}`).
+
+### Troubleshooting (real failures we hit)
+
+- **Neo4j health in `docker compose ps` may say “starting” forever**: the Neo4j container healthcheck uses `curl`, but the Neo4j image doesn’t ship curl. Use cypher-shell instead:
+
+```bash
+docker exec tribrid-neo4j cypher-shell -u neo4j -p password 'RETURN 1 AS ok;'
+```
+
+- **Neo4j “critical error needs restart”**:
+  - Most commonly caused by bind-mount permissions (Neo4j can’t write vector-index temp files).
+  - Fix permissions on `$TRIBRID_DB_DIR/neo4j/data` and `$TRIBRID_DB_DIR/neo4j/logs`, then `docker compose restart neo4j`.
+  - If Neo4j data is corrupted from a prior crash, you may need to wipe `$TRIBRID_DB_DIR/neo4j/data` (destructive).
+
+- **Postgres “Permission denied” writing relation files**:
+  - Fix permissions on `$TRIBRID_DB_DIR/postgres`, then `docker compose restart postgres`.
+
+### Graph inspection (UI + Neo4j Browser)
+
+- **UI (recommended)**: `RAG → Graph` shows graph stats, communities, entity search, and entity neighborhood subgraphs.
+  - Endpoints: `/api/graph/{corpus_id}/stats`, `/api/graph/{corpus_id}/entities`, `/api/graph/{corpus_id}/entity/{entity_id}/neighbors`, `/api/graph/{corpus_id}/communities`, `/api/graph/{corpus_id}/community/{community_id}/members`
+- **Neo4j Browser**: http://localhost:7474 (neo4j/password)
+- Useful Cypher examples:
+
+```cypher
+MATCH (c:Chunk {repo_id:"faxbot"}) RETURN count(c);
+MATCH (d:Document {repo_id:"faxbot"}) RETURN count(d);
+MATCH (e:Entity {repo_id:"faxbot"}) RETURN e.entity_type, count(*) ORDER BY count(*) DESC;
+MATCH (e:Entity {repo_id:"faxbot"})-[:IN_CHUNK]->(c:Chunk {repo_id:"faxbot"}) RETURN e.name, c.file_path, c.chunk_id LIMIT 25;
+SHOW INDEXES YIELD name, type, state WHERE type="VECTOR" RETURN name, state;
+```
+
+### UI notes (current state)
+
+- **Indexing UI**: `RAG → Indexing` is fully functional and streams progress via SSE (`/api/stream/operations/index?corpus_id=...`). Long indexing runs won’t hang if the UI isn’t connected.
+- **Corpus settings**: `RAG → Indexing → Corpus settings` lets you edit `exclude_paths` (and other corpus metadata) used by indexing.
+- **Retrieval UI**: `RAG → Retrieval` exposes graph retrieval toggles (e.g., `graph_search.enabled`, `graph_search.mode`, `graph_search.max_hops`, `graph_search.chunk_neighbor_window`).
+- **Graph UI**: `RAG → Graph` lets you browse communities, search entities, and load neighbor subgraphs (powered by `/api/graph/*`).
 
 ---
 
@@ -323,8 +443,11 @@ curl -X PUT "http://localhost:8012/api/config" \
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/api/graph/{id}/entities` | GET | List entities in the graph |
-| `/api/graph/{id}/relationships` | GET | List relationships |
 | `/api/graph/{id}/communities` | GET | List detected communities |
+| `/api/graph/{id}/stats` | GET | Graph stats (entity/rel/community counts) |
+| `/api/graph/{id}/entity/{entity_id}` | GET | Fetch a single entity |
+| `/api/graph/{id}/entity/{entity_id}/relationships` | GET | Relationships for a single entity |
+| `/api/graph/{id}/query` | POST | Read-only Cypher query (debug) |
 
 ### Configuration
 

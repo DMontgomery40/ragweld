@@ -7,6 +7,7 @@ from server.config import load_config
 from server.db.neo4j import Neo4jClient
 from server.db.postgres import PostgresClient
 from server.models.tribrid_config_model import CorpusScope, TriBridConfig
+from server.observability.metrics import render_latest
 from server.services.config_store import get_config as load_scoped_config
 
 router = APIRouter(tags=["health"])
@@ -89,4 +90,7 @@ async def readiness_check(scope: CorpusScope = Depends()) -> dict[str, Any]:
 
 @router.get("/metrics")
 async def prometheus_metrics() -> Response:
-    raise NotImplementedError
+    # Backward-compatible alias for Prometheus scrape.
+    # Prefer scraping /metrics (no /api prefix).
+    body, content_type = render_latest()
+    return Response(content=body, media_type=content_type)

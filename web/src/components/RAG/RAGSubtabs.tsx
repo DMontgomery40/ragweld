@@ -4,10 +4,10 @@
 
 import { useEffect } from 'react';
 
-interface RAGSubtabsProps {
+type RAGSubtabsProps = {
   activeSubtab: string;
   onSubtabChange: (subtab: string) => void;
-}
+};
 
 /**
  * ---agentspec
@@ -26,6 +26,7 @@ export function RAGSubtabs({ activeSubtab, onSubtabChange }: RAGSubtabsProps) {
   const subtabs = [
     { id: 'data-quality', title: 'Data Quality' },
     { id: 'retrieval', title: 'Retrieval' },
+    { id: 'graph', title: 'Graph' },
     { id: 'reranker-config', title: 'Reranker' },
     { id: 'learning-ranker', title: 'Learning Reranker' },
     { id: 'indexing', title: 'Indexing' },
