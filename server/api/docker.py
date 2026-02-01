@@ -24,9 +24,9 @@ _DEV_LOCK_PATH = Path("/tmp/tribrid-dev-stack.lock")
 _DEV_LOCK_FH: Any | None = None
 
 try:  # pragma: no cover - Windows compatibility
-    import fcntl  # type: ignore
+    import fcntl
 except Exception:  # pragma: no cover
-    fcntl = None  # type: ignore
+    fcntl = None  # type: ignore[assignment]
 
 
 def _project_root() -> Path:
@@ -171,8 +171,10 @@ def _run_cmd(args: list[str], *, timeout_s: int, env: dict[str, str] | None = No
         )
     except subprocess.TimeoutExpired as e:
         # Return a synthetic failure result rather than raising.
-        stdout = e.stdout or ""
-        stderr = e.stderr or f"Command timed out after {timeout_s}s"
+        stdout_raw = e.stdout
+        stderr_raw = e.stderr
+        stdout: str = stdout_raw.decode() if isinstance(stdout_raw, bytes) else (stdout_raw or "")
+        stderr: str = stderr_raw.decode() if isinstance(stderr_raw, bytes) else (stderr_raw or f"Command timed out after {timeout_s}s")
         return subprocess.CompletedProcess(args=args, returncode=124, stdout=stdout, stderr=stderr)
 
 
@@ -805,7 +807,8 @@ async def loki_query_range(
             r = await client.get(f"{base}/loki/api/v1/query_range", params=params)
         if r.status_code >= 400:
             raise HTTPException(status_code=r.status_code, detail=r.text)
-        return r.json()
+        result: dict[str, Any] = r.json()
+        return result
     except HTTPException:
         raise
     except Exception as e:

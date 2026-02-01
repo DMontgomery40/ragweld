@@ -4,7 +4,7 @@ import json
 import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 from pydantic_ai import Agent, RunContext
 from pydantic_ai.models.openai import OpenAIResponsesModel, OpenAIResponsesModelSettings
@@ -433,6 +433,22 @@ def build_chat_debug_info(
     elif top1 is not None and fusion_method == "weighted":
         confidence = max(0.0, min(1.0, float(top1)))
 
+    # Cast fusion_method to the expected Literal type
+    typed_fusion_method: Literal["rrf", "weighted"] | None = None
+    if fusion_method == "rrf":
+        typed_fusion_method = "rrf"
+    elif fusion_method == "weighted":
+        typed_fusion_method = "weighted"
+
+    # Safely extract int values from fusion_debug
+    def _safe_int(val: Any) -> int | None:
+        if val is None:
+            return None
+        try:
+            return int(val)
+        except (TypeError, ValueError):
+            return None
+
     return ChatDebugInfo(
         confidence=confidence,
         include_vector=bool(include_vector),
@@ -441,17 +457,17 @@ def build_chat_debug_info(
         vector_enabled=(bool(fusion_debug.get("fusion_vector_enabled")) if "fusion_vector_enabled" in fusion_debug else None),
         sparse_enabled=(bool(fusion_debug.get("fusion_sparse_enabled")) if "fusion_sparse_enabled" in fusion_debug else None),
         graph_enabled=(bool(fusion_debug.get("fusion_graph_enabled")) if "fusion_graph_enabled" in fusion_debug else None),
-        fusion_method=(fusion_method if fusion_method in {"rrf", "weighted"} else None),
-        rrf_k=(int(getattr(config.fusion, "rrf_k", 60)) if fusion_method == "rrf" else None),
-        vector_weight=(float(getattr(config.fusion, "vector_weight", 0.0)) if fusion_method == "weighted" else None),
-        sparse_weight=(float(getattr(config.fusion, "sparse_weight", 0.0)) if fusion_method == "weighted" else None),
-        graph_weight=(float(getattr(config.fusion, "graph_weight", 0.0)) if fusion_method == "weighted" else None),
-        normalize_scores=(bool(getattr(config.fusion, "normalize_scores", False)) if fusion_method == "weighted" else None),
+        fusion_method=typed_fusion_method,
+        rrf_k=(int(getattr(config.fusion, "rrf_k", 60)) if typed_fusion_method == "rrf" else None),
+        vector_weight=(float(getattr(config.fusion, "vector_weight", 0.0)) if typed_fusion_method == "weighted" else None),
+        sparse_weight=(float(getattr(config.fusion, "sparse_weight", 0.0)) if typed_fusion_method == "weighted" else None),
+        graph_weight=(float(getattr(config.fusion, "graph_weight", 0.0)) if typed_fusion_method == "weighted" else None),
+        normalize_scores=(bool(getattr(config.fusion, "normalize_scores", False)) if typed_fusion_method == "weighted" else None),
         final_k_used=int(top_k or config.retrieval.final_k),
-        vector_results=(int(fusion_debug.get("fusion_vector_results")) if "fusion_vector_results" in fusion_debug else None),
-        sparse_results=(int(fusion_debug.get("fusion_sparse_results")) if "fusion_sparse_results" in fusion_debug else None),
-        graph_entity_hits=(int(fusion_debug.get("fusion_graph_entity_hits")) if "fusion_graph_entity_hits" in fusion_debug else None),
-        graph_hydrated_chunks=(int(fusion_debug.get("fusion_graph_hydrated_chunks")) if "fusion_graph_hydrated_chunks" in fusion_debug else None),
+        vector_results=_safe_int(fusion_debug.get("fusion_vector_results")) if "fusion_vector_results" in fusion_debug else None,
+        sparse_results=_safe_int(fusion_debug.get("fusion_sparse_results")) if "fusion_sparse_results" in fusion_debug else None,
+        graph_entity_hits=_safe_int(fusion_debug.get("fusion_graph_entity_hits")) if "fusion_graph_entity_hits" in fusion_debug else None,
+        graph_hydrated_chunks=_safe_int(fusion_debug.get("fusion_graph_hydrated_chunks")) if "fusion_graph_hydrated_chunks" in fusion_debug else None,
         final_results=len(sources),
         top1_score=(float(top1) if top1 is not None else None),
         avg5_score=(float(avg5) if avg5 is not None else None),
