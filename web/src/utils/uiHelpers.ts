@@ -75,70 +75,162 @@ function bindCollapsibleSections(): void {
 // ---------------- Resizable Sidepanel ----------------
 // Binds mouse drag handler to resize-handle, syncs with Zustand store
 function bindResizableSidepanel(): void {
-  const handle = $('.resize-handle') as HTMLElement | null;
-  if (!handle) return;
-
   const store = useUIStore.getState();
 
-  // Restore saved width from Zustand store
-  const savedWidth = store.sidepanelWidth;
-  const maxAllowed = Math.min(UI_CONSTANTS.MAX_SIDEPANEL_WIDTH, window.innerWidth * 0.45);
-  if (savedWidth >= UI_CONSTANTS.MIN_SIDEPANEL_WIDTH && savedWidth <= maxAllowed) {
-    document.documentElement.style.setProperty('--sidepanel-width', savedWidth + 'px');
-  } else {
-    document.documentElement.style.setProperty('--sidepanel-width', UI_CONSTANTS.DEFAULT_SIDEPANEL_WIDTH + 'px');
-    store.setSidepanelWidth(UI_CONSTANTS.DEFAULT_SIDEPANEL_WIDTH);
-  }
+  const tryBind = (): boolean => {
+    const handle = $('.resize-handle') as HTMLElement | null;
+    if (!handle) return false;
 
-  // Export reset function for use in other modules
-  (window as any).resetSidepanelWidth = function() {
-    document.documentElement.style.setProperty('--sidepanel-width', UI_CONSTANTS.DEFAULT_SIDEPANEL_WIDTH + 'px');
-    useUIStore.getState().setSidepanelWidth(UI_CONSTANTS.DEFAULT_SIDEPANEL_WIDTH);
-    console.log('Sidepanel width reset to default');
+    // Prevent duplicate listeners if bind is called multiple times.
+    if (handle.dataset.sidepanelResizeBound === '1') return true;
+    handle.dataset.sidepanelResizeBound = '1';
+
+    // Prevent page scrolling during touch resizing (iPad).
+    handle.style.touchAction = 'none';
+
+    // If a previous build left an inline override, clear it so CSS var drives layout.
+    const layout = document.querySelector('.layout') as HTMLElement | null;
+    if (layout?.style.gridTemplateColumns) {
+      layout.style.gridTemplateColumns = '';
+    }
+
+    const clampWidth = (width: number): number => {
+      const viewportMax = Math.floor(window.innerWidth * 0.6);
+      const hardMax = Math.min(UI_CONSTANTS.MAX_SIDEPANEL_WIDTH, viewportMax);
+      const rounded = Math.round(width);
+      return Math.max(UI_CONSTANTS.MIN_SIDEPANEL_WIDTH, Math.min(hardMax, rounded));
+    };
+
+    const applyWidth = (width: number): number => {
+      const clamped = clampWidth(width);
+      document.documentElement.style.setProperty('--sidepanel-width', clamped + 'px');
+      store.setSidepanelWidth(clamped);
+      return clamped;
+    };
+
+    // Restore saved width from Zustand store (clamped to current viewport constraints)
+    const savedWidth = store.sidepanelWidth;
+    const initialWidth =
+      Number.isFinite(savedWidth) && savedWidth > 0
+        ? savedWidth
+        : UI_CONSTANTS.DEFAULT_SIDEPANEL_WIDTH;
+    applyWidth(initialWidth);
+
+    // Export reset function for use in other modules/tests
+    (window as any).resetSidepanelWidth = function() {
+      applyWidth(UI_CONSTANTS.DEFAULT_SIDEPANEL_WIDTH);
+      console.log('Sidepanel width reset to default');
+    };
+
+    let isDragging = false;
+    let activePointerId: number | null = null;
+    let overlay: HTMLDivElement | null = null;
+    let rafId = 0;
+    let lastClientX = 0;
+
+    const mountOverlay = (): void => {
+      if (overlay) return;
+      overlay = document.createElement('div');
+      overlay.setAttribute('data-testid', 'resize-overlay');
+      overlay.style.position = 'fixed';
+      overlay.style.left = '0';
+      overlay.style.top = '0';
+      overlay.style.right = '0';
+      overlay.style.bottom = '0';
+      overlay.style.cursor = 'col-resize';
+      overlay.style.background = 'transparent';
+      overlay.style.zIndex = '2147483647'; // above iframes
+      overlay.style.touchAction = 'none';
+      document.body.appendChild(overlay);
+    };
+
+    const unmountOverlay = (): void => {
+      if (!overlay) return;
+      overlay.remove();
+      overlay = null;
+    };
+
+    const applyFromClientX = (clientX: number): void => {
+      const layoutEl = document.querySelector('.layout') as HTMLElement | null;
+      const rect = layoutEl?.getBoundingClientRect();
+      const right = rect?.right ?? window.innerWidth;
+      const nextWidth = right - clientX;
+      applyWidth(nextWidth);
+    };
+
+    const scheduleApply = (clientX: number): void => {
+      lastClientX = clientX;
+      if (rafId) return;
+      rafId = window.requestAnimationFrame(() => {
+        rafId = 0;
+        applyFromClientX(lastClientX);
+      });
+    };
+
+    const endDrag = (): void => {
+      if (!isDragging) return;
+      isDragging = false;
+      activePointerId = null;
+      if (rafId) {
+        window.cancelAnimationFrame(rafId);
+        rafId = 0;
+      }
+      handle.classList.remove('dragging');
+      unmountOverlay();
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+
+    const onPointerDown = (e: PointerEvent): void => {
+      // Only left-button drags for mouse; allow touch/pen.
+      if (e.pointerType === 'mouse' && e.button !== 0) return;
+
+      isDragging = true;
+      activePointerId = e.pointerId;
+      handle.classList.add('dragging');
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+      mountOverlay();
+
+      try {
+        handle.setPointerCapture(e.pointerId);
+      } catch {}
+
+      scheduleApply(e.clientX);
+      e.preventDefault();
+    };
+
+    const onPointerMove = (e: PointerEvent): void => {
+      if (!isDragging) return;
+      if (activePointerId !== null && e.pointerId !== activePointerId) return;
+      scheduleApply(e.clientX);
+      e.preventDefault();
+    };
+
+    const onPointerUpOrCancel = (e: PointerEvent): void => {
+      if (activePointerId !== null && e.pointerId !== activePointerId) return;
+      try {
+        handle.releasePointerCapture(e.pointerId);
+      } catch {}
+      endDrag();
+    };
+
+    const onLostPointerCapture = (): void => {
+      endDrag();
+    };
+
+    handle.addEventListener('pointerdown', onPointerDown, { passive: false });
+    handle.addEventListener('pointermove', onPointerMove, { passive: false });
+    handle.addEventListener('pointerup', onPointerUpOrCancel);
+    handle.addEventListener('pointercancel', onPointerUpOrCancel);
+    handle.addEventListener('lostpointercapture', onLostPointerCapture);
+
+    return true;
   };
 
-  let isDragging = false;
-  let startX = 0;
-  let startWidth = 0;
-
-  function getCurrentWidth(): number {
-    const rootStyle = getComputedStyle(document.documentElement);
-    const widthStr = rootStyle.getPropertyValue('--sidepanel-width').trim();
-    return parseInt(widthStr, 10) || UI_CONSTANTS.DEFAULT_SIDEPANEL_WIDTH;
-  }
-
-  function setWidth(width: number): void {
-    const viewportMax = Math.floor(window.innerWidth * 0.6);
-    const hardMax = Math.min(UI_CONSTANTS.MAX_SIDEPANEL_WIDTH, viewportMax);
-    const clampedWidth = Math.max(UI_CONSTANTS.MIN_SIDEPANEL_WIDTH, Math.min(hardMax, width));
-    document.documentElement.style.setProperty('--sidepanel-width', clampedWidth + 'px');
-    useUIStore.getState().setSidepanelWidth(clampedWidth);
-  }
-
-  handle.addEventListener('mousedown', (e: MouseEvent) => {
-    isDragging = true;
-    startX = e.clientX;
-    startWidth = getCurrentWidth();
-    handle.classList.add('dragging');
-    document.body.style.cursor = 'col-resize';
-    document.body.style.userSelect = 'none';
-    e.preventDefault();
-  });
-
-  document.addEventListener('mousemove', (e: MouseEvent) => {
-    if (!isDragging) return;
-    const deltaX = startX - e.clientX;
-    const newWidth = startWidth + deltaX;
-    setWidth(newWidth);
-  });
-
-  document.addEventListener('mouseup', () => {
-    if (!isDragging) return;
-    isDragging = false;
-    handle.classList.remove('dragging');
-    document.body.style.cursor = '';
-    document.body.style.userSelect = '';
-  });
+  // Note: binding is triggered again from App.tsx once the layout is mounted.
+  // This avoids fragile polling loops while still handling the loading-shell race.
+  tryBind();
 }
 
 // ---------------- Number Formatting ----------------

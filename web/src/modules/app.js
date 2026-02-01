@@ -33,11 +33,6 @@
     const highlightMatches = window.Search?.highlightMatches || (() => {});
     const bindGlobalSearch = window.Search?.bindGlobalSearch || (() => {});
 
-    // ---------------- Git Hooks ----------------
-    // Delegated to GitHooks module (gui/js/git-hooks.js)
-    const refreshHooksStatus = window.GitHooks?.refreshHooksStatus || (async () => {});
-    const installHooks = window.GitHooks?.installHooks || (async () => {});
-
     // ---------------- Health ----------------
     // Delegated to Health module (gui/js/health.js)
     const checkHealth = window.Health?.checkHealth || (async () => {});
@@ -508,7 +503,7 @@
         }
         if (!scan) scan = await scanHardware();
         const budget = parseFloat($('#budget').value || '0');
-        const prof = (window.ProfileLogic && window.ProfileLogic.buildWizardProfile) ? window.ProfileLogic.buildWizardProfile(scan, budget) : {};
+        const prof = buildWizardProfile(scan, budget);
 
         // Try a pipeline cost preview
         const payload = (window.CostLogic && window.CostLogic.buildPayloadFromUI) ? window.CostLogic.buildPayloadFromUI() : {
@@ -533,14 +528,9 @@
             try { prof = JSON.parse(preview.dataset.profileData); } catch { /* no-op */ }
         }
         if (!prof || typeof prof !== 'object') prof = await generateProfileWizard();
-        // Remove cost estimate from applied profile
-        if (prof.__estimate__) delete prof.__estimate__;
-        try {
-            const r = await fetch(api('/api/profiles/apply'), { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ profile: prof }) });
-            const d = await r.json();
-            alert(`Profile applied: ${d.applied_keys?.join(', ') || 'ok'}`);
-            await loadConfig();
-        } catch (e) { alert('Failed to apply profile: ' + e.message); }
+        // Profiles persistence has been removed from the legacy UI.
+        // Keep this stub to avoid breaking any lingering DOM bindings.
+        alert('Profiles are no longer supported.');
     }
 
     // Tri-Candidate Generation (from docs)
@@ -715,53 +705,16 @@
             }
         }
 
-        // Render rich profile display using ProfileRenderer
-        if (window.ProfileRenderer && resultsContent) {
-            try {
-                const html = window.ProfileRenderer.renderProfileResults(winner.env, scan, budget);
-                resultsContent.innerHTML = html;
-                // Bind tooltips inside the rendered preview
-                if (window.ProfileRenderer.bindTooltips) window.ProfileRenderer.bindTooltips(resultsContent);
-
-                // Hide placeholder, show results
-                if (placeholder) placeholder.style.display = 'none';
-                resultsContent.style.display = 'block';
-            } catch (err) {
-                console.error('ProfileRenderer error:', err);
-                // Fallback to simple display
-                if (resultsContent) {
-                    resultsContent.innerHTML = '<pre style="color: var(--err);padding:20px;">Error rendering profile: ' + err.message + '</pre>';
-                    resultsContent.style.display = 'block';
-                    if (placeholder) placeholder.style.display = 'none';
-                }
-            }
-        } else {
-            console.error('ProfileRenderer not available:', { hasRenderer: !!window.ProfileRenderer, hasContent: !!resultsContent });
-            // Fallback to old method
-            if (resultsContent) {
-                resultsContent.innerHTML = '<pre style="padding:20px;color: var(--fg-muted);">' + JSON.stringify(winner.env, null, 2) + '</pre>';
-                resultsContent.style.display = 'block';
-                if (placeholder) placeholder.style.display = 'none';
-            }
+        // Render simple profile preview (legacy rich renderer removed)
+        if (resultsContent) {
+            resultsContent.innerHTML = '<pre style="padding:20px;color: var(--fg-muted);">' + JSON.stringify(winner.env, null, 2) + '</pre>';
+            resultsContent.style.display = 'block';
+            if (placeholder) placeholder.style.display = 'none';
         }
 
-        // Wire up action buttons (always, regardless of renderer)
-        const applyBtn = document.getElementById('apply-profile-btn');
-        if (applyBtn) {
-            applyBtn.addEventListener('click', async () => {
-                const r = await fetch(api('/api/profiles/apply'), {
-                    method: 'POST',
-                    headers: { 'Content-Type':'application/json' },
-                    body: JSON.stringify({ profile: winner.env })
-                });
-                if (!r.ok) {
-                    alert('Apply failed');
-                    return;
-                }
-                alert(`✓ Applied: ${winner.name} ($${winner.monthly.toFixed(2)}/mo)\n\nSettings are now active. Refresh the page to see updated values.`);
-                await loadConfig();
-            });
-        }
+        // Action buttons:
+        // - Export remains supported (client-side only)
+        // - Apply/Save removed (profiles persistence removed)
 
         const exportBtn = document.getElementById('export-profile-btn');
         if (exportBtn) {
@@ -773,25 +726,6 @@
                 a.download = `profile-${winner.name.toLowerCase().replace(/[^a-z0-9]/g, '-')}-${Date.now()}.json`;
                 a.click();
                 URL.revokeObjectURL(url);
-            });
-        }
-
-        const saveBtn = document.getElementById('save-profile-btn');
-        if (saveBtn) {
-            saveBtn.addEventListener('click', async () => {
-                const name = prompt('Profile name:', winner.name.toLowerCase().replace(/[^a-z0-9]/g, '-'));
-                if (!name) return;
-                const r = await fetch(api('/api/profiles/save'), {
-                    method: 'POST',
-                    headers: { 'Content-Type':'application/json' },
-                    body: JSON.stringify({ name, profile: winner.env })
-                });
-                if (r.ok) {
-                    alert(`✓ Saved as "${name}"`);
-                    await loadProfiles();
-                } else {
-                    alert('Save failed');
-                }
             });
         }
     }
@@ -914,218 +848,7 @@
     ;['wizard-gen-model','wizard-embed-provider','wizard-rerank-provider','wizard-rerank-model','budget'].forEach(id => {
         const el = document.getElementById(id); if (el) el.addEventListener('input', updateWizardSummary);
     });
-
-    async function applyProfile() {
-        const scanText = $('#scan-out').textContent;
-        if (!scanText || scanText === '') {
-            alert('Please scan hardware first');
-            return;
-        }
-
-        const scan = JSON.parse(scanText);
-        const budget = parseFloat($('#budget').value || '0');
-        const prof = proposeProfile(scan, budget);
-
-        try {
-            const r = await fetch(api('/api/profiles/apply'), {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ profile: prof })
-            });
-
-            const d = await r.json();
-            alert(`Profile applied: ${d.applied_keys.join(', ')}`);
-            await loadConfig();
-        } catch (e) {
-            alert('Failed to apply profile: ' + e.message);
-        }
-    }
-
-    async function loadProfiles() {
-        try {
-            const r = await fetch(api('/api/profiles'));
-            const d = await r.json();
-            state.profiles = d.profiles || [];
-            state.defaultProfile = d.default || null;
-
-            const ul = $('#profiles-ul');
-            const tooltip = $('#profile-tooltip');
-            if (!ul) {
-                // Element doesn't exist in React app, skip DOM manipulation
-                return;
-            }
-            ul.innerHTML = '';
-
-            state.profiles.forEach((name) => {
-                const li = document.createElement('li');
-                li.textContent = name;
-                li.style.cssText = 'padding: 6px 8px; color: var(--fg-muted); cursor: pointer; border-radius: 4px; transition: all 0.15s ease;';
-
-                li.addEventListener('mouseenter', async (e) => {
-                    li.style.background = 'var(--bg-elev2)';
-                    li.style.color = 'var(--accent)';
-                    await showProfileTooltip(name, e);
-                });
-
-                li.addEventListener('mouseleave', () => {
-                    li.style.background = 'transparent';
-                    li.style.color = 'var(--fg-muted)';
-                    hideProfileTooltip();
-                });
-
-                li.addEventListener('click', () => loadAndApplyProfile(name));
-                ul.appendChild(li);
-            });
-        } catch (e) {
-            console.error('Failed to load profiles:', e);
-        }
-    }
-
-    async function showProfileTooltip(name, event) {
-        const tooltip = $('#profile-tooltip');
-        if (!tooltip) return;
-
-        try {
-            // Fetch the profile data
-            const r = await fetch(api(`/api/profiles/${encodeURIComponent(name)}`));
-            if (!r.ok) return;
-
-            const d = await r.json();
-            const prof = d.profile || {};
-
-            // Build tooltip content
-            let html = `<div class="tooltip-header">${name}</div>`;
-
-            const entries = Object.entries(prof);
-            if (entries.length === 0) {
-                html += '<div style="color: var(--fg-muted); font-size: 11px; font-style: italic;">Empty profile</div>';
-            } else {
-                entries.forEach(([key, value]) => {
-                    const displayValue = String(value).length > 40
-                        ? String(value).substring(0, 37) + '...'
-                        : String(value);
-                    html += `
-                        <div class="tooltip-item">
-                            <div class="tooltip-key">${key}</div>
-                            <div class="tooltip-value">${displayValue}</div>
-                        </div>
-                    `;
-                });
-            }
-
-            tooltip.innerHTML = html;
-
-            // Position tooltip near the mouse
-            const rect = event.target.getBoundingClientRect();
-            tooltip.style.left = (rect.right + 10) + 'px';
-            tooltip.style.top = rect.top + 'px';
-            tooltip.style.display = 'block';
-
-        } catch (e) {
-            console.error('Failed to load profile for tooltip:', e);
-        }
-    }
-
-    /**
-     * ---agentspec
-     * what: |
-     *   Hides profile tooltip by setting display:none. Loads and applies user profile by name asynchronously.
-     *
-     * why: |
-     *   Separates UI hide logic from profile loading to avoid blocking tooltip removal.
-     *
-     * guardrails:
-     *   - DO NOT assume tooltip exists; check before accessing style property
-     *   - NOTE: loadAndApplyProfile incomplete; error handling missing
-     *   - ASK USER: What happens on profile load failure?
-     * ---/agentspec
-     */
-    function hideProfileTooltip() {
-        const tooltip = $('#profile-tooltip');
-        if (tooltip) {
-            tooltip.style.display = 'none';
-        }
-    }
-
-    async function loadAndApplyProfile(name) {
-        try {
-            // Load the profile data
-            const r = await fetch(api(`/api/profiles/${encodeURIComponent(name)}`));
-            if (!r.ok) {
-                alert(`Failed to load profile "${name}"`);
-                return;
-            }
-            const d = await r.json();
-            const prof = d.profile || {};
-
-            // Apply the profile
-            const applyRes = await fetch(api('/api/profiles/apply'), {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ profile: prof })
-            });
-
-            if (!applyRes.ok) {
-                alert(`Failed to apply profile "${name}"`);
-                return;
-            }
-
-            const applyData = await applyRes.json();
-            alert(`✓ Profile "${name}" applied successfully!\n\nApplied keys: ${applyData.applied_keys?.join(', ') || 'none'}`);
-
-            // Reload config to show updated values in UI
-            await loadConfig();
-        } catch (e) {
-            alert(`Error loading profile "${name}": ${e.message}`);
-        }
-    }
-
-    async function saveProfile() {
-        const name = $('#profile-name').value.trim();
-        if (!name) {
-            alert('Enter a profile name');
-            return;
-        }
-
-        // Prefer wizard preview if present; otherwise build from scan
-        let prof = null;
-        const preview = $('#profile-preview');
-        if (preview.dataset.profileData) {
-            try { prof = JSON.parse(preview.dataset.profileData); } catch {}
-        }
-        if (!prof) {
-            const scanOut = $('#scan-out');
-            if (!scanOut.dataset.scanData) { alert('Please scan hardware first'); return; }
-            const scan = JSON.parse(scanOut.dataset.scanData);
-            const budget = parseFloat($('#budget').value || '0');
-            prof = proposeProfile(scan, budget);
-        }
-        // Remove cost estimate before saving
-        if (prof.__estimate__) delete prof.__estimate__;
-
-        try {
-            const r = await fetch(api('/api/profiles/save'), {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name, profile: prof })
-            });
-
-            if (!r.ok) {
-                alert('Save failed');
-                return;
-            }
-
-            await loadProfiles();
-            alert(`Saved profile: ${name}`);
-        } catch (e) {
-            alert('Failed to save profile: ' + e.message);
-        }
-    }
-
-    // ---------------- Secrets Ingest (Drag & Drop) ----------------
-    // Delegated to Secrets module (gui/js/secrets.js)
-    const bindDropzone = window.Secrets?.bindDropzone || (() => {});
-    const ingestFile = window.Secrets?.ingestFile || (async () => {});
+    // Profiles persistence removed.
 
     // ---------------- Quick Action Helpers ----------------
     /**
@@ -1550,15 +1273,10 @@
         const saveBtn = $('#save-btn'); if (saveBtn) saveBtn.addEventListener('click', saveConfig);
         const btnEstimate = $('#btn-estimate'); if (btnEstimate) btnEstimate.addEventListener('click', estimateCost);
         const btnScanHw = $('#btn-scan-hw'); if (btnScanHw) btnScanHw.addEventListener('click', scanHardware);
-        const legacyApply = document.getElementById('btn-apply-profile');
-        if (legacyApply) legacyApply.addEventListener('click', applyProfile);
-        const btnSaveProfile = $('#btn-save-profile'); if (btnSaveProfile) btnSaveProfile.addEventListener('click', saveProfile);
         const genBtn = document.getElementById('btn-generate-profile');
         if (genBtn) genBtn.addEventListener('click', generateProfileWizard);
         const applyWizard = document.getElementById('btn-apply-wizard');
         if (applyWizard) applyWizard.addEventListener('click', applyProfileWizard);
-        const oneClick = document.getElementById('btn-wizard-oneclick');
-        if (oneClick) oneClick.addEventListener('click', onWizardOneClick);
         const loadCur = document.getElementById('btn-wizard-load-cur');
         if (loadCur) loadCur.addEventListener('click', loadWizardFromEnv);
 
@@ -1610,11 +1328,6 @@
         const addCost = document.getElementById('btn-add-cost-model');
         if (addCost) addCost.addEventListener('click', addCostModelFlow);
 
-        const btnAuto = document.getElementById('btn-autotune-refresh');
-        if (btnAuto) btnAuto.addEventListener('click', refreshAutotune);
-        const cbAuto = document.getElementById('autotune-enabled');
-        if (cbAuto) cbAuto.addEventListener('change', setAutotuneEnabled);
-
         const btnIndex = document.getElementById('btn-index-start');
         if (btnIndex) btnIndex.addEventListener('click', () => {
             if (window.IndexStatus && typeof window.IndexStatus.startIndexing === 'function') {
@@ -1659,14 +1372,6 @@
 
     // ---------------- LangSmith (Preview) ----------------
     const bindLangSmithViewer = window.LangSmith?.bind || (()=>{});
-    // ---------------- Commit Metadata ----------------
-    const loadCommitMeta = window.CommitMeta?.load || (async ()=>{});
-    const saveCommitMeta = window.CommitMeta?.save || (async ()=>{});
-
-    // ---------------- Autotune ----------------
-    // Delegated to Autotune module (gui/js/autotune.js)
-    const refreshAutotune = window.Autotune?.refreshAutotune || (async () => {});
-    const setAutotuneEnabled = window.Autotune?.setAutotuneEnabled || fallbackSetAutotuneEnabled;
 
     // ---------------- Help Tooltips (delegated) ----------------
     const addHelpTooltips = window.Tooltips?.attachTooltips || fallbackAddHelpTooltips;
@@ -1685,59 +1390,27 @@
         bindGlobalSearchLive();
         bindResizableSidepanel();
         bindCollapsibleSections();
-        bindDropzone();
         bindMcpRagSearch();
         bindLangSmithViewer();
-        const hookBtn = document.getElementById('btn-install-hooks'); if (hookBtn) hookBtn.addEventListener('click', installHooks);
-        const saveMetaBtn = document.getElementById('btn-save-commit-meta'); if (saveMetaBtn) saveMetaBtn.addEventListener('click', saveCommitMeta);
         const genKwBtn = document.getElementById('btn-generate-keywords'); if (genKwBtn) genKwBtn.addEventListener('click', createKeywords);
 
         await Promise.all([
             loadmodels(),
             loadConfig(),
-            loadProfiles(),
-            loadKeywords(),
-            loadCommitMeta()
+            loadKeywords()
         ]);
 
         await checkHealth();
-        await refreshAutotune();
         await refreshDashboard();
-        await refreshHooksStatus();
         addHelpTooltips();
         // Note: comma formatting removed for cost-* fields since they are type="number" inputs
         wireDayConverters();
     }
-
-    // -------- Embedded Editor (delegated) --------
-    const checkEditorHealth = window.Editor?.checkEditorHealth || (async ()=>{});
-    const openEditorWindow = window.Editor?.openEditorWindow || (async ()=>{});
-    const copyEditorUrl = window.Editor?.copyEditorUrl || (async ()=>{});
-    const restartEditor = window.Editor?.restartEditor || (async ()=>{});
-    window.initEditorHealthCheck = function(){
-        if (window.Editor?.initEditorHealthCheck) window.Editor.initEditorHealthCheck();
-    };
-    window.stopEditorHealthCheck = function(){
-        if (window.Editor?.stopEditorHealthCheck) window.Editor.stopEditorHealthCheck();
-    };
     // Ensure init runs even if DOMContentLoaded already fired (scripts at body end)
     if (document.readyState === 'loading') {
         window.addEventListener('DOMContentLoaded', init);
     } else {
         init();
-    }
-
-    // Decide v1 (client) vs v2 (server) auto-profile
-    async function onWizardOneClick(e){
-        try{
-            const v2 = document.getElementById('apv2-enabled');
-            if (v2 && v2.checked && window.AutoProfileV2 && typeof window.AutoProfileV2.run === 'function'){
-                e.preventDefault();
-                await window.AutoProfileV2.run();
-                return;
-            }
-        }catch{}
-        return triChooseAndApply();
     }
 
     // ---------------- Dashboard Summary ----------------
@@ -1756,11 +1429,6 @@
             const h = await (await fetch(api('/health'))).json();
             const dh = document.getElementById('dash-health'); if (dh) dh.textContent = `${h.status}${h.graph_loaded? ' (graph ready)':''}`;
         } catch {}
-
-        try {
-            const a = await (await fetch(api('/api/autotune/status'))).json();
-            const da = document.getElementById('dash-autotune'); if (da) da.textContent = a.enabled ? (a.current_mode || 'enabled') : 'disabled';
-        } catch { const da = document.getElementById('dash-autotune'); if (da) da.textContent = 'Pro required'; }
 
         try {
             const cards = await (await fetch(api('/api/cards'))).json();
@@ -1893,8 +1561,8 @@
         });
         window.dispatchEvent(event);
 
-        // You can add VSCode or other IDE integration here
-        // For now, show in a notification style
+        // Optional: integrate an external editor here.
+        // For now, show in a notification style.
         const notification = document.createElement('div');
         notification.style.cssText = `
             position: fixed; bottom: 20px; right: 20px;
@@ -2044,27 +1712,6 @@
             const tip = document.createElement('span'); tip.className='help'; tip.title = help; tip.textContent='?';
             label.appendChild(tip);
         });
-    }
-
-    async function fallbackSetAutotuneEnabled() {
-        try {
-            const enabled = document.getElementById('autotune-enabled').checked;
-            const r = await fetch(api('/api/autotune/status'), {
-                method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ enabled, current_mode: null })
-            });
-            if (!r.ok) {
-                if (r.status === 403 || r.status === 402) {
-                    alert('Autotune is a Pro feature. Enable it by setting Edition to "pro" (Misc section) or PRO_ENABLED=1.');
-                    $('#autotune-enabled').checked = false;
-                    return;
-                }
-                throw new Error('HTTP ' + r.status);
-            }
-            await refreshAutotune();
-        } catch (e) {
-            alert('Failed to set Auto‑Tune: ' + e.message);
-        }
     }
 
     // DUPLICATE REMOVED: Indexing + Cards (use window.IndexStatus)

@@ -14,6 +14,58 @@
  * - Domain model interfaces (ChunkMatch, SearchRequest, Entity, etc.)
  */
 
+/** Developer-facing debug metadata for a single chat answer. */
+export interface ChatDebugInfo {
+  /** Heuristic confidence score for this answer (0-1). */
+  confidence?: number | null; // default: None
+  /** Vector leg requested for this message */
+  include_vector?: boolean; // default: True
+  /** Sparse/BM25 leg requested for this message */
+  include_sparse?: boolean; // default: True
+  /** Graph leg requested for this message */
+  include_graph?: boolean; // default: True
+  /** Vector leg enabled in config */
+  vector_enabled?: boolean | null; // default: None
+  /** Sparse leg enabled in config */
+  sparse_enabled?: boolean | null; // default: None
+  /** Graph leg enabled in config */
+  graph_enabled?: boolean | null; // default: None
+  /** Fusion method used for retrieval results */
+  fusion_method?: "rrf" | "weighted" | null; // default: None
+  /** RRF k (if fusion_method is rrf) */
+  rrf_k?: number | null; // default: None
+  /** Vector weight (if fusion_method is weighted) */
+  vector_weight?: number | null; // default: None
+  /** Sparse weight (if fusion_method is weighted) */
+  sparse_weight?: number | null; // default: None
+  /** Graph weight (if fusion_method is weighted) */
+  graph_weight?: number | null; // default: None
+  /** Whether leg score normalization was enabled */
+  normalize_scores?: boolean | null; // default: None
+  /** Final K used for retrieval context */
+  final_k_used?: number | null; // default: None
+  /** Vector leg results returned */
+  vector_results?: number | null; // default: None
+  /** Sparse leg results returned */
+  sparse_results?: number | null; // default: None
+  /** Graph entity hits (pre-hydration) */
+  graph_entity_hits?: number | null; // default: None
+  /** Graph hydrated chunks returned */
+  graph_hydrated_chunks?: number | null; // default: None
+  /** Final fused results returned */
+  final_results?: number | null; // default: None
+  /** Top-1 fused score (raw) */
+  top1_score?: number | null; // default: None
+  /** Average fused score for top-5 (raw) */
+  avg5_score?: number | null; // default: None
+  /** Configured top-1 confidence threshold */
+  conf_top1_thresh?: number | null; // default: None
+  /** Configured avg-5 confidence threshold */
+  conf_avg5_thresh?: number | null; // default: None
+  /** Raw fusion debug payload (for developers). */
+  fusion_debug?: Record<string, unknown>;
+}
+
 /** Unified result shape for vector/sparse/graph retrieval. */
 export interface ChunkMatch {
   /** Unique identifier for matched chunk */
@@ -598,6 +650,42 @@ export interface LayerBonusConfig {
   intent_matrix?: Record<string, Record<string, number>>;
 }
 
+/** Inbound MCP (Model Context Protocol) server configuration.  This config controls TriBridRAG's embedded MCP Streamable HTTP endpoint. */
+export interface MCPConfig {
+  /** Enable the embedded MCP Streamable HTTP server. */
+  enabled?: boolean; // default: True
+  /** Mount path for the MCP Streamable HTTP endpoint (e.g. /mcp). */
+  mount_path?: string; // default: "/mcp"
+  /** Run MCP Streamable HTTP in stateless mode (recommended). */
+  stateless_http?: boolean; // default: True
+  /** Prefer JSON responses for MCP Streamable HTTP (recommended). */
+  json_response?: boolean; // default: True
+  /** Enable DNS rebinding protection for MCP HTTP (recommended). */
+  enable_dns_rebinding_protection?: boolean; // default: True
+  /** Allowed Host header values for MCP HTTP (supports wildcard ':*'). */
+  allowed_hosts?: string[];
+  /** Allowed Origin header values for MCP HTTP (supports wildcard ':*'). */
+  allowed_origins?: string[];
+  /** Require `Authorization: Bearer $MCP_API_KEY` for MCP HTTP access. */
+  require_api_key?: boolean; // default: False
+  /** Default top_k for MCP search/answer tools when not provided. */
+  default_top_k?: number; // default: 20
+  /** Default retrieval mode for MCP search/answer tools when not provided. */
+  default_mode?: "tribrid" | "dense_only" | "sparse_only" | "graph_only"; // default: "tribrid"
+}
+
+/** Status of an MCP HTTP transport (Python/Node) when enabled. */
+export interface MCPHTTPTransportStatus {
+  /** Host for the MCP HTTP transport. */
+  host: string;
+  /** Port for the MCP HTTP transport. */
+  port: number;
+  /** HTTP path prefix (if applicable). */
+  path?: string | null; // default: None
+  /** Whether the transport is reachable/responding. */
+  running: boolean;
+}
+
 /** Chat message in a conversation. */
 export interface Message {
   /** Message role */
@@ -754,6 +842,32 @@ export interface SystemPromptsConfig {
   lightweight_chunk_summaries?: string; // default: "Extract key information from this code: symbols..."
 }
 
+/** Trace payload for a single run. */
+export interface Trace {
+  /** Run identifier for correlation */
+  run_id: string;
+  /** Corpus identifier */
+  corpus_id: string;
+  /** Run start time (epoch milliseconds) */
+  started_at_ms: number;
+  /** Run end time (epoch milliseconds) */
+  ended_at_ms?: number | null; // default: None
+  /** Ordered trace events */
+  events?: TraceEvent[];
+}
+
+/** Single trace event (local tracing). */
+export interface TraceEvent {
+  /** Event kind identifier (e.g., retrieval.vector, fusion.rrf) */
+  kind: string;
+  /** Event timestamp (epoch milliseconds) */
+  ts: number;
+  /** Human-readable event message */
+  msg?: string | null; // default: None
+  /** Structured event payload */
+  data?: Record<string, unknown>;
+}
+
 /** Observability and tracing configuration. */
 export interface TracingConfig {
   /** Enable distributed tracing */
@@ -829,7 +943,9 @@ export interface UIConfig {
   /** Show citations list on chat answers */
   chat_show_citations?: number; // default: 1
   /** Show routing trace panel by default */
-  chat_show_trace?: number; // default: 0
+  chat_show_trace?: number; // default: 1
+  /** Show dev/debug footer under chat answers */
+  chat_show_debug_footer?: number; // default: 1
   /** Default model for chat if not specified in request */
   chat_default_model?: string; // default: "gpt-4o-mini"
   /** Streaming response timeout in seconds */
@@ -940,6 +1056,14 @@ export interface ChatRequest {
 
 /** Response from chat endpoint. */
 export interface ChatResponse {
+  /** Unique identifier for this chat run (trace/log correlation) */
+  run_id: string;
+  /** Chat run start time (epoch milliseconds) */
+  started_at_ms: number;
+  /** Chat run end time (epoch milliseconds) */
+  ended_at_ms?: number | null;
+  /** Developer debug metadata for this answer */
+  debug?: ChatDebugInfo | null;
   /** Conversation identifier */
   conversation_id: string;
   /** Assistant's response message */
@@ -1310,6 +1434,18 @@ export interface KeywordsGenerateResponse {
   count: number;
 }
 
+/** Status of MCP transports built into TriBridRAG. */
+export interface MCPStatusResponse {
+  /** Python MCP over HTTP transport status (if implemented/enabled). */
+  python_http?: MCPHTTPTransportStatus | null;
+  /** Node MCP over HTTP transport status (if implemented/enabled). */
+  node_http?: MCPHTTPTransportStatus | null;
+  /** Whether the Python stdio MCP transport is available (client-spawned). */
+  python_stdio_available?: boolean;
+  /** Human-readable diagnostic details (best-effort). */
+  details?: string[];
+}
+
 /** Request payload for tri-brid search. */
 export interface SearchRequest {
   /** The search query */
@@ -1342,6 +1478,16 @@ export interface SearchResponse {
   debug?: Record<string, unknown> | null;
 }
 
+/** Response payload for /api/traces/latest. */
+export interface TracesLatestResponse {
+  /** Corpus identifier for the returned trace (if any) */
+  repo?: string | null;
+  /** Run identifier for the returned trace (if any) */
+  run_id?: string | null;
+  /** Trace payload (null if none available) */
+  trace?: Trace | null;
+}
+
 /** TRIBRID RAG Engine tunable configuration parameters */
 export interface TriBridConfig {
   retrieval?: RetrievalConfig;
@@ -1367,6 +1513,7 @@ export interface TriBridConfig {
   hydration?: HydrationConfig;
   evaluation?: EvaluationConfig;
   system_prompts?: SystemPromptsConfig;
+  mcp?: MCPConfig;
   docker?: DockerConfig;
 }
 

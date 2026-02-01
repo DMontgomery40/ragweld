@@ -36,6 +36,86 @@
    */
   function buildTooltipMap(){
     return {
+      // -------------------------------------------------------------------
+      // Dashboard: System Status (live, clickable chips)
+      // -------------------------------------------------------------------
+
+      SYS_STATUS_CORPUS: L(
+        'Corpora (active selection)',
+        'A <span class="tt-strong">corpus</span> is TriBridRAG’s unit of isolation: each corpus has its own indexing storage (Postgres), graph storage (Neo4j), and per-corpus configuration.'
+          + '<br><br>'
+          + 'This System Status row shows the <span class="tt-strong">active corpus</span> and the <span class="tt-strong">total number of corpora</span> registered in this TriBridRAG instance.'
+          + '<br><br>'
+          + '<span class="tt-strong">Selection precedence</span> (highest → lowest):'
+          + '<br>1) URL query param <span class="mono">?corpus=</span> (or legacy <span class="mono">?repo=</span>)'
+          + '<br>2) Browser localStorage <span class="mono">tribrid_active_corpus</span>'
+          + '<br>3) First corpus in the registry'
+          + '<br><br>'
+          + 'Compatibility note: some API fields still use <span class="mono">repo_id</span> as the identifier, but it means <span class="tt-strong">corpus_id</span>.',
+        [
+          ['Corpus guide', '/docs/guides/corpus.md'],
+          ['Glossary', '/docs/glossary.md']
+        ],
+        [['Core concept', 'info']]
+      ),
+
+      SYS_STATUS_CONTAINERS: L(
+        'Containers (running/total)',
+        'Shows Docker container health for <span class="tt-strong">this TriBridRAG stack</span> as <span class="mono">running/total</span>.'
+          + '<br><br>'
+          + '<span class="tt-strong">running</span>: containers whose state is <span class="mono">running</span>'
+          + '<br>'
+          + '<span class="tt-strong">total</span>: all containers in the TriBridRAG docker-compose project (including stopped/exited)'
+          + '<br><br>'
+          + 'This intentionally excludes unrelated containers on your machine. Internally we identify TriBrid-managed containers via Docker Compose labels (<span class="mono">com.docker.compose.project</span>) and/or the <span class="mono">tribrid-*</span> container name prefix.'
+          + '<br><br>'
+          + '<span class="tt-strong">Tip:</span> click the chip to open <span class="tt-strong">Infrastructure → Docker</span> for full container management and logs.',
+        [
+          ['Docker Compose docs', 'https://docs.docker.com/compose/'],
+          ['Deployment guide', '/docs/deployment.md']
+        ],
+        [['Operational', 'info']]
+      ),
+
+      SYS_STATUS_MCP_SERVERS: L(
+        'MCP transports (stdio/HTTP)',
+        'MCP (Model Context Protocol) lets external clients (IDEs, agents, automation) call TriBridRAG tools in a standardized way.'
+          + '<br><br>'
+          + 'This System Status chip lists which <span class="tt-strong">inbound MCP transports</span> are available right now:'
+          + '<br>'
+          + '- <span class="mono">py-stdio</span>: Python stdio transport. This is typically <span class="tt-strong">client-spawned</span> (no always-on server). “available” means the required Python MCP runtime is installed and can be launched by an MCP client.'
+          + '<br>'
+          + '- <span class="mono">py-http</span> / <span class="mono">node-http</span>: future HTTP transports (will show host/port and running state when implemented).'
+          + '<br><br>'
+          + '<span class="tt-strong">Tip:</span> click the chip to open <span class="tt-strong">Infrastructure → MCP Servers</span> for detailed status and setup guidance.',
+        [
+          ['MCP specification', 'https://github.com/modelcontextprotocol/specification'],
+          ['MCP overview', 'https://modelcontextprotocol.io']
+        ],
+        [['Integration', 'info']]
+      ),
+
+      DEV_STACK_CLEAR_PYTHON_BYTECODE: L(
+        'Clear Python bytecode caches',
+        'Clears <span class="tt-strong">Python bytecode caches</span> inside this repo and then triggers a backend reload.'
+          + '<br><br>'
+          + '<span class="tt-strong">What it deletes</span> (repo-owned only):'
+          + '<br>- <span class="mono">__pycache__/</span> directories'
+          + '<br>- <span class="mono">*.pyc</span> files'
+          + '<br><br>'
+          + '<span class="tt-strong">Where</span>: <span class="mono">server/</span>, <span class="mono">tests/</span>, <span class="mono">scripts/</span>'
+          + '<br><br>'
+          + '<span class="tt-strong">What it does NOT delete</span>: your <span class="mono">.venv</span> / uv / pip caches, Docker images/volumes, Postgres/Neo4j data, or model files under <span class="mono">models/</span>.'
+          + '<br><br>'
+          + '<span class="tt-strong">Expected consequences</span>: backend reload (brief interruption) and a slightly slower first request after reload due to re-import/compile.'
+          + '<br><br>'
+          + 'Use this when you suspect stale bytecode after refactors or aggressive file watching — not as routine maintenance.',
+        [
+          ['Python bytecode docs', 'https://docs.python.org/3/library/importlib.html#bytecode-cache']
+        ],
+        [['Safe', 'ok']]
+      ),
+
       // Infrastructure & routing
       QDRANT_URL: L('Qdrant URL', 'HTTP URL for your Qdrant vector database. Used for dense vector queries during retrieval. If unavailable, retrieval still works via BM25 (sparse).', [
         ['Qdrant Docs: Collections', 'https://qdrant.tech/documentation/concepts/collections/'],
@@ -1885,11 +1965,10 @@
       ),
       GUI_DIR: L(
         'UI Public Directory',
-        'Directory for shared UI assets (models.json, profile checkpoints) used by /api/models and /api/profiles. Defaults to ./web/public. Point this to a writable volume if you keep pricing catalogs or profiles in sync at runtime; the React app reads from the same source.',
+        'Directory for shared UI assets (for example: models.json) used by /api/models and the frontend. Defaults to ./web/public. Point this to a writable volume if you keep catalogs in sync at runtime; the React app reads from the same source.',
         [
           ['Static Files (FastAPI)', 'https://fastapi.tiangolo.com/tutorial/static-files/'],
-          ['models catalog', '/web/models.json'],
-          ['Profiles API', '/api/profiles']
+          ['models catalog', '/web/models.json']
         ],
         [['Recommended', 'info']]
       ),

@@ -64,19 +64,19 @@
       // Candidates
       const pre = (t.events||[]).find(ev=>ev.kind==='retriever.retrieve');
       if (pre && Array.isArray(pre.data?.candidates)){
-        const rows = pre.data.candidates.slice(0,10).map(c=>[
+        const rows = pre.data.candidates.map(c=>[
           (c.path||'').split('/').slice(-2).join('/'), c.bm25_rank||'', c.dense_rank||''
         ]);
-        parts.push('Pre‑rerank candidates (top 10):');
+        parts.push(`Pre‑rerank candidates (${pre.data.candidates.length}):`);
         parts.push(_fmtTable(rows, ['path','bm25','dense']));
         parts.push('');
       }
       // Rerank results
       if (rer && Array.isArray(rer.data?.scores)){
-        const rows = rer.data.scores.slice(0,10).map(s=>[
+        const rows = rer.data.scores.map(s=>[
           (s.path||'').split('/').slice(-2).join('/'), s.score?.toFixed?.(3) || s.score || ''
         ]);
-        parts.push('Rerank top‑10:');
+        parts.push(`Rerank (${rer.data.scores.length}):`);
         parts.push(_fmtTable(rows, ['path','score']));
         parts.push('');
       }
@@ -84,9 +84,9 @@
       if (gate){ parts.push(`Gate: top1>=${gate.data?.top1_thresh} avg5>=${gate.data?.avg5_thresh}  →  ${gate.data?.outcome}`); parts.push(''); }
 
       // Events list
-      const evs = (t.events||[]).slice(-10);
+      const evs = (t.events||[]);
       if (evs.length){
-        parts.push('Events:');
+        parts.push(`Events (${evs.length}):`);
         evs.forEach(ev=>{
           const when = (new Date(ev.ts||Date.now())).toLocaleTimeString();
           const name = (ev.kind||'').padEnd(18);

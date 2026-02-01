@@ -13,6 +13,7 @@
   <a href="https://dmontgomery40.github.io/tribrid-rag/"><img src="https://img.shields.io/badge/docs-mkdocs-blue" alt="Documentation"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="License"></a>
   <a href="https://python.org"><img src="https://img.shields.io/badge/python-3.11+-blue" alt="Python"></a>
+  <a href="#mcp-integration"><img src="https://img.shields.io/badge/MCP-enabled-purple" alt="MCP Enabled"></a>
 </p>
 
 ---
@@ -70,7 +71,13 @@ Each search method compensates for the others' weaknesses. The result: **dramati
 - **Backend**: FastAPI with async support, comprehensive API
 - **Frontend**: React + TypeScript + Zustand, fully typed from Pydantic
 - **Configuration**: 500+ tunable parameters, all via UI or API
-- **Observability**: Prometheus metrics, Grafana dashboards, structured logging
+- **Observability**: Prometheus metrics, Grafana dashboards, Loki log aggregation, structured logging
+
+### MCP Integration (Model Context Protocol)
+- **Embedded MCP Server**: Streamable HTTP transport mounted at `/mcp`
+- **Three MCP Tools**: `search`, `answer`, `list_corpora`
+- **Claude Desktop / IDE Ready**: Connect any MCP-compatible client directly to TriBridRAG
+- **Stateless HTTP Mode**: No session management required (recommended for most use cases)
 
 ### Knowledge Graph
 - Automatic entity extraction (functions, classes, modules, variables)
@@ -78,10 +85,16 @@ Each search method compensates for the others' weaknesses. The result: **dramati
 - Community detection (Louvain, Label Propagation)
 - Graph inspection via **RAG → Graph** (UI), Neo4j Browser, and `/api/graph/*` endpoints
 
+### Local Tracing & Debugging
+- **Per-Request Traces**: Full trace capture for every chat/search request
+- **Debug Footer**: Inline debug metadata showing confidence, fusion method, retrieval leg counts
+- **Loki Integration**: Stream logs directly in the Chat UI via Loki proxy endpoints
+- **Ring Buffer Storage**: Configurable retention, no external dependencies for dev tracing
+
 ### Evaluation & Cost Tracking
 - Built-in evaluation framework with golden question sets
-- Per-query cost tracking for embeddings and LLM calls
-- Model comparison tools
+- **Detailed Cost Breakdowns**: Per-request costs for generation, embeddings, and reranking
+- Model comparison tools with accurate pricing from `data/models.json`
 - Retrieval quality metrics (MRR, Recall@K, NDCG)
 
 ---
@@ -248,6 +261,121 @@ curl -X POST "http://localhost:8012/api/search" \
 
 ---
 
+## MCP Integration
+
+TriBridRAG includes a built-in **Model Context Protocol (MCP)** server, allowing any MCP-compatible client (Claude Desktop, Cursor, VS Code extensions, custom agents) to use tri-brid retrieval directly.
+
+### MCP Tools Available
+
+| Tool | Description |
+|------|-------------|
+| `search` | Tri-brid search (vector + sparse + graph) returning ranked chunks |
+| `answer` | RAG-powered answer generation with citations |
+| `list_corpora` | List all available corpora for searching |
+
+### Connecting Claude Desktop
+
+Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "tribrid-rag": {
+      "url": "http://localhost:8012/mcp/"
+    }
+  }
+}
+```
+
+Restart Claude Desktop. You can now ask Claude to search your indexed codebases.
+
+### MCP Configuration
+
+MCP settings are in `tribrid_config.json` under the `mcp` section:
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `enabled` | `true` | Enable/disable the MCP server |
+| `mount_path` | `/mcp` | HTTP endpoint path |
+| `stateless_http` | `true` | Stateless mode (recommended) |
+| `json_response` | `true` | JSON responses (recommended) |
+| `require_api_key` | `false` | Require Bearer token auth |
+| `default_top_k` | `20` | Default result count |
+| `default_mode` | `tribrid` | Default retrieval mode |
+
+### MCP Retrieval Modes
+
+| Mode | Vector | Sparse | Graph | Use Case |
+|------|--------|--------|-------|----------|
+| `tribrid` | ✓ | ✓ | ✓ | Best recall (default) |
+| `dense_only` | ✓ | - | - | Semantic queries only |
+| `sparse_only` | - | ✓ | - | Exact keyword matching |
+| `graph_only` | - | - | ✓ | Relationship traversal |
+
+### Check MCP Status
+
+```bash
+curl http://localhost:8012/api/mcp/status
+```
+
+---
+
+## Local Tracing
+
+TriBridRAG captures detailed per-request traces for debugging and development. Traces are stored in an in-memory ring buffer (no external dependencies).
+
+### Trace Features
+
+- **Automatic Capture**: Every chat/search request generates a trace
+- **Event Timeline**: Request → Retrieval → Fusion → Response events with timestamps
+- **Debug Footer**: Inline metadata on every chat response showing:
+  - Confidence score (heuristic based on fusion method)
+  - Active retrieval legs (vector/sparse/graph)
+  - Fusion method and parameters (RRF k or weighted weights)
+  - Result counts per leg
+  - Run ID for correlation
+
+### API Endpoints
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET /api/traces/latest` | Get the most recent trace |
+| `GET /api/traces/latest?run_id=...` | Get a specific trace by run ID |
+| `GET /api/traces/latest?repo=...` | Get latest trace for a corpus |
+
+### Configuration
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `tracing.tracing_enabled` | `1` | Enable trace capture |
+| `tracing.tracing_mode` | `local` | Trace mode (`local`, `langsmith`, `off`) |
+| `tracing.trace_retention` | `50` | Max traces per corpus (ring buffer) |
+| `tracing.trace_sampling_rate` | `1.0` | Sampling rate (1.0 = capture all) |
+| `ui.chat_show_debug_footer` | `1` | Show debug footer under chat answers |
+
+---
+
+## Loki Log Integration
+
+When running with the observability stack, TriBridRAG proxies Loki queries for unified log viewing in the Chat UI.
+
+### Loki Proxy Endpoints
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET /api/loki/status` | Check Loki reachability |
+| `GET /api/loki/query_range` | Query logs (LogQL) |
+| `GET /api/stream/loki/tail` | SSE stream of live logs |
+
+### Chat UI Integration
+
+The Chat tab includes a **Trace & Logs** panel that:
+- Shows the trace timeline for the current/selected run
+- Streams live logs from Loki filtered by service
+- Correlates logs with trace events by timestamp
+
+---
+
 ## Operator Runbook (Real Corpus GraphRAG)
 
 This section is optimized for running a **real on-disk corpus** end-to-end (Postgres + Neo4j), indexing it safely (gitignore-aware + size skips), and verifying graph retrieval is actually contributing results.
@@ -302,18 +430,18 @@ Success criteria:
 
 ### Troubleshooting (real failures we hit)
 
-- **Neo4j health in `docker compose ps` may say “starting” forever**: the Neo4j container healthcheck uses `curl`, but the Neo4j image doesn’t ship curl. Use cypher-shell instead:
+- **Neo4j health in `docker compose ps` may say "starting" forever**: the Neo4j container healthcheck uses `curl`, but the Neo4j image doesn't ship curl. Use cypher-shell instead:
 
 ```bash
 docker exec tribrid-neo4j cypher-shell -u neo4j -p password 'RETURN 1 AS ok;'
 ```
 
-- **Neo4j “critical error needs restart”**:
-  - Most commonly caused by bind-mount permissions (Neo4j can’t write vector-index temp files).
+- **Neo4j "critical error needs restart"**:
+  - Most commonly caused by bind-mount permissions (Neo4j can't write vector-index temp files).
   - Fix permissions on `$TRIBRID_DB_DIR/neo4j/data` and `$TRIBRID_DB_DIR/neo4j/logs`, then `docker compose restart neo4j`.
   - If Neo4j data is corrupted from a prior crash, you may need to wipe `$TRIBRID_DB_DIR/neo4j/data` (destructive).
 
-- **Postgres “Permission denied” writing relation files**:
+- **Postgres "Permission denied" writing relation files**:
   - Fix permissions on `$TRIBRID_DB_DIR/postgres`, then `docker compose restart postgres`.
 
 ### Graph inspection (UI + Neo4j Browser)
@@ -333,10 +461,11 @@ SHOW INDEXES YIELD name, type, state WHERE type="VECTOR" RETURN name, state;
 
 ### UI notes (current state)
 
-- **Indexing UI**: `RAG → Indexing` is fully functional and streams progress via SSE (`/api/stream/operations/index?corpus_id=...`). Long indexing runs won’t hang if the UI isn’t connected.
+- **Indexing UI**: `RAG → Indexing` is fully functional and streams progress via SSE (`/api/stream/operations/index?corpus_id=...`). Long indexing runs won't hang if the UI isn't connected.
 - **Corpus settings**: `RAG → Indexing → Corpus settings` lets you edit `exclude_paths` (and other corpus metadata) used by indexing.
 - **Retrieval UI**: `RAG → Retrieval` exposes graph retrieval toggles (e.g., `graph_search.enabled`, `graph_search.mode`, `graph_search.max_hops`, `graph_search.chunk_neighbor_window`).
 - **Graph UI**: `RAG → Graph` lets you browse communities, search entities, and load neighbor subgraphs (powered by `/api/graph/*`).
+- **MCP UI**: `Infrastructure → MCP` shows transport status and connection info.
 
 ---
 
@@ -364,12 +493,18 @@ tribrid-rag/
 ├── server/                     # Python FastAPI backend
 │   ├── api/                    # REST endpoints
 │   │   ├── search.py           # /api/search - tri-brid retrieval
+│   │   ├── chat.py             # /api/chat - conversational RAG + tracing
 │   │   ├── index.py            # /api/index - corpus indexing
 │   │   ├── repos.py            # /api/repos - corpus management
-│   │   ├── config.py           # /api/config - configuration
+│   │   ├── config.py           # /api/config - configuration + MCP status
 │   │   ├── graph.py            # /api/graph - knowledge graph queries
+│   │   ├── docker.py           # /api/dev/* - dev stack + Loki proxy
+│   │   ├── cost.py             # /api/cost - detailed cost estimation
 │   │   ├── eval.py             # /api/eval - evaluation framework
 │   │   └── health.py           # /api/health - service health
+│   ├── mcp/                    # MCP server implementation
+│   │   ├── server.py           # FastMCP server singleton
+│   │   └── tools.py            # MCP tool implementations
 │   ├── db/
 │   │   ├── postgres.py         # pgvector + FTS operations
 │   │   └── neo4j.py            # Graph database operations
@@ -379,7 +514,7 @@ tribrid-rag/
 │   │   ├── graph_builder.py    # Entity/relationship extraction
 │   │   └── loader.py           # File loading with gitignore support
 │   ├── models/
-│   │   └── tribrid_config_model.py  # THE source of truth (~500 fields)
+│   │   └── tribrid_config_model.py  # THE source of truth (~500+ fields)
 │   ├── retrieval/
 │   │   ├── vector.py           # Dense retrieval
 │   │   ├── sparse.py           # BM25/FTS retrieval
@@ -387,7 +522,8 @@ tribrid-rag/
 │   │   ├── fusion.py           # RRF and weighted fusion
 │   │   └── rerank.py           # Cross-encoder reranking
 │   └── services/
-│       ├── rag.py              # RAG orchestration
+│       ├── rag.py              # RAG orchestration + ChatDebugInfo
+│       ├── traces.py           # Local trace store (ring buffer)
 │       └── config_store.py     # Configuration persistence
 │
 ├── web/                        # React TypeScript frontend
@@ -395,8 +531,8 @@ tribrid-rag/
 │       ├── components/         # UI components
 │       │   ├── Dashboard/      # System status, metrics
 │       │   ├── RAG/            # Search, config panels
-│       │   ├── Chat/           # Conversational interface
-│       │   └── Infrastructure/ # Service management
+│       │   ├── Chat/           # Conversational interface + debug footer
+│       │   └── Infrastructure/ # Service management, MCP status
 │       ├── stores/             # Zustand state management
 │       ├── hooks/              # React hooks
 │       ├── types/
@@ -404,7 +540,7 @@ tribrid-rag/
 │       └── api/                # API client
 │
 ├── data/
-│   ├── models.json             # LLM/embedding model definitions
+│   ├── models.json             # LLM/embedding model definitions + pricing
 │   └── glossary.json           # UI tooltip definitions (~250 terms)
 │
 ├── infra/                      # Docker and deployment configs
@@ -423,13 +559,16 @@ TriBridRAG is highly configurable. Every parameter is defined in Pydantic with v
 
 | Section | What it controls |
 |---------|------------------|
-| `retrieval` | Top-K per leg, BM25 parameters, query expansion |
+| `retrieval` | Top-K per leg, BM25 parameters, query expansion, confidence thresholds |
 | `fusion` | Method (RRF/weighted), per-leg weights, normalization |
 | `graph_storage` | Max hops, entity types, relationship types, community detection |
 | `reranking` | Mode (none/local/cloud/trained), model selection, top-N |
 | `embedding` | Provider, model, dimensions, batch size |
 | `chunking` | Strategy, max tokens, overlap |
 | `indexing` | Postgres config, concurrent workers |
+| `tracing` | Local trace capture, sampling rate, retention |
+| `mcp` | MCP server enable, mount path, defaults |
+| `ui` | Debug footer visibility, streaming, history limits |
 
 ### Configuration Methods
 
@@ -462,7 +601,8 @@ curl -X PUT "http://localhost:8012/api/config" \
 |----------|--------|-------------|
 | `/api/search` | POST | Tri-brid search with fusion and optional reranking |
 | `/api/answer` | POST | RAG-powered answer generation with citations |
-| `/api/chat` | POST | Conversational RAG with history |
+| `/api/chat` | POST | Conversational RAG with history and tracing |
+| `/api/chat/stream` | POST | Streaming chat with SSE |
 
 ### Corpus Management
 
@@ -471,6 +611,7 @@ curl -X PUT "http://localhost:8012/api/config" \
 | `/api/repos` | GET | List all corpora |
 | `/api/repos` | POST | Create a new corpus |
 | `/api/repos/{id}` | GET | Get corpus details |
+| `/api/repos/{id}` | PATCH | Update corpus settings |
 | `/api/repos/{id}` | DELETE | Delete a corpus |
 
 ### Indexing
@@ -489,8 +630,25 @@ curl -X PUT "http://localhost:8012/api/config" \
 | `/api/graph/{id}/communities` | GET | List detected communities |
 | `/api/graph/{id}/stats` | GET | Graph stats (entity/rel/community counts) |
 | `/api/graph/{id}/entity/{entity_id}` | GET | Fetch a single entity |
-| `/api/graph/{id}/entity/{entity_id}/relationships` | GET | Relationships for a single entity |
+| `/api/graph/{id}/entity/{entity_id}/neighbors` | GET | Entity neighborhood subgraph |
 | `/api/graph/{id}/query` | POST | Read-only Cypher query (debug) |
+
+### Tracing & Debugging
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/traces/latest` | GET | Get latest trace (optional `run_id` or `repo` filter) |
+| `/api/loki/status` | GET | Check Loki reachability |
+| `/api/loki/query_range` | GET | Query Loki logs (LogQL) |
+| `/api/stream/loki/tail` | GET | SSE stream of live logs |
+
+### MCP
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/mcp/status` | GET | MCP transport status |
+| `/api/mcp/rag_search` | GET | Debug endpoint for quick tri-brid search |
+| `/mcp/` | POST | MCP Streamable HTTP endpoint (for MCP clients) |
 
 ### Configuration
 
@@ -499,6 +657,14 @@ curl -X PUT "http://localhost:8012/api/config" \
 | `/api/config` | GET | Get current configuration |
 | `/api/config` | PUT | Update configuration |
 | `/api/models` | GET | List available models |
+
+### Cost Estimation
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/cost/estimate` | POST | Detailed cost breakdown (gen + embed + rerank) |
+| `/api/cost/history` | GET | Historical cost records |
+| `/api/cost/summary` | GET | Cost summary by period |
 
 ### Evaluation
 
@@ -552,6 +718,9 @@ uv run python scripts/validate_types.py
 # Unit tests
 uv run pytest tests/unit
 
+# API tests
+uv run pytest tests/api
+
 # Integration tests (requires running services)
 uv run pytest tests/integration
 
@@ -573,6 +742,7 @@ cd web && npx playwright test
 | API Docs | http://localhost:8012/docs | - |
 | Grafana | http://localhost:3001 | admin/admin |
 | Prometheus | http://localhost:9090 | - |
+| Loki | http://localhost:3100 | - |
 | Neo4j Browser | http://localhost:7474 | neo4j/password |
 
 ### Health Check
@@ -582,6 +752,14 @@ curl http://localhost:8012/api/health
 ```
 
 Returns status of all services (Postgres, Neo4j, embedding provider).
+
+### Metrics
+
+```bash
+curl http://localhost:8012/metrics
+```
+
+Prometheus-format metrics for retrieval latency, throughput, error rates.
 
 ---
 
@@ -605,6 +783,33 @@ Configure in `.env` or via the UI.
 | `local` | `ms-marco-MiniLM-L-6-v2` | Good balance of speed/quality |
 | `cloud` | Cohere, Voyage, Jina | Best quality, API costs |
 | `trained` | Your fine-tuned model | Custom domain adaptation |
+
+---
+
+## Cost Estimation
+
+The `/api/cost/estimate` endpoint provides detailed breakdowns:
+
+```bash
+curl -X POST "http://localhost:8012/api/cost/estimate" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "gen_provider": "openai",
+    "gen_model": "gpt-4o-mini",
+    "tokens_in": 2000,
+    "tokens_out": 500,
+    "embed_provider": "openai",
+    "embed_model": "text-embedding-3-small",
+    "embeds": 10,
+    "requests_per_day": 100
+  }'
+```
+
+Response includes:
+- **Per-request cost**: Generation + embedding + reranking
+- **Daily/monthly projections**: Based on requests_per_day
+- **Detailed breakdown**: Costs per component with model pricing info
+- **Validation errors**: Missing model definitions or pricing data
 
 ---
 

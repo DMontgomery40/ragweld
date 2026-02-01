@@ -15,6 +15,9 @@ dependencies = [
     "uvicorn[standard]>=0.27.0",
     "python-multipart>=0.0.9",
 
+    # MCP (Model Context Protocol) - official Python SDK
+    "mcp>=1.26.0",
+
     # Database
     "asyncpg>=0.29.0",
     "pgvector>=0.2.4",

@@ -11,7 +11,6 @@ interface AdminSubtabsProps {
 export function AdminSubtabs({ activeSubtab, onSubtabChange }: AdminSubtabsProps) {
   const subtabs = [
     { id: 'general', title: 'General' },
-    { id: 'git', title: 'Git Integration' },
     { id: 'secrets', title: 'Secrets' },
     { id: 'integrations', title: 'Integrations' }
   ];

@@ -65,7 +65,7 @@ export default function ProfilesTab() {
                     <div className="settings-section" style={{borderLeft: '3px solid var(--link)'}}>
                         <h3>💾 Configuration Profiles</h3>
                         <p className="small">Save and load configuration profiles</p>
-                        {/* Profile controls managed by profile_logic.js and autoprofile_v2.js */}
+                        {/* Legacy profile controls removed */}
                     </div>
                     {/* Save Alert Thresholds */}
                     <div className="settings-section">

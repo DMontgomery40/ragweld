@@ -55,8 +55,8 @@
     });
   }
 
-  // Initialization function called by secrets.js when admin view mounts
-  // Does NOT register view - secrets.js handles that
+  // Initialization function called when admin view mounts.
+  // This module does NOT register views; the React app owns routing.
   window.initLangSmith = function() {
     console.log('[langsmith.js] Initializing langsmith for admin view');
     bind();
@@ -64,6 +64,6 @@
 
   window.LangSmith = { bind };
 
-  console.log('[langsmith.js] Module loaded (coordination with secrets.js for admin view)');
+  console.log('[langsmith.js] Module loaded (admin view integration)');
 })();
 

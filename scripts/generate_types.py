@@ -248,6 +248,8 @@ def main() -> None:
             # Domain models - Dev stack orchestration (local dev only)
             DevStackStatusResponse,
             DevStackRestartResponse,
+            # Domain models - MCP status (System Status + Infrastructure)
+            MCPStatusResponse,
             # Domain models - Corpora
             Corpus,
             CorpusCreateRequest,
@@ -273,6 +275,10 @@ def main() -> None:
             Message,
             ChatRequest,
             ChatResponse,
+            ChatDebugInfo,
+            TraceEvent,
+            Trace,
+            TracesLatestResponse,
             # Domain models - Graph
             Entity,
             Relationship,
@@ -313,6 +319,7 @@ def main() -> None:
         DashboardIndexStatsResponse,
         DevStackStatusResponse,
         DevStackRestartResponse,
+        MCPStatusResponse,
         Corpus,
         CorpusCreateRequest,
         CorpusUpdateRequest,
@@ -333,6 +340,10 @@ def main() -> None:
         Message,
         ChatRequest,
         ChatResponse,
+        ChatDebugInfo,
+        TraceEvent,
+        Trace,
+        TracesLatestResponse,
         Entity,
         Relationship,
         Community,

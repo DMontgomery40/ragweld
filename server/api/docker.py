@@ -1,18 +1,21 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import signal
 import subprocess
 import time
+from collections import deque
 from pathlib import Path
 from typing import Any
 
 import httpx
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request
+from starlette.responses import StreamingResponse
 
 from server.config import load_config
-from server.models.tribrid_config_model import DevStackRestartResponse, DevStackStatusResponse
+from server.models.tribrid_config_model import DevStackRestartResponse, DevStackStatusResponse, TriBridConfig
 
 router = APIRouter(tags=["docker"])
 
@@ -21,9 +24,9 @@ _DEV_LOCK_PATH = Path("/tmp/tribrid-dev-stack.lock")
 _DEV_LOCK_FH: Any | None = None
 
 try:  # pragma: no cover - Windows compatibility
-    import fcntl  # type: ignore
+    import fcntl
 except Exception:  # pragma: no cover
-    fcntl = None  # type: ignore
+    fcntl = None  # type: ignore[assignment]
 
 
 def _project_root() -> Path:
@@ -111,19 +114,82 @@ async def _http_ok(url: str, timeout_s: float = 1.5) -> bool:
         return False
 
 
-def _run_cmd(args: list[str], *, timeout_s: int) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        args,
-        check=False,
-        capture_output=True,
-        text=True,
-        timeout=timeout_s,
-    )
+def _docker_env(cfg: TriBridConfig) -> dict[str, str]:
+    """Build env for docker CLI, honoring config overrides (best-effort)."""
+    env = os.environ.copy()
+    host = (getattr(cfg.docker, "docker_host", "") or "").strip()
+    if host:
+        env["DOCKER_HOST"] = host
+    return env
 
 
-def _docker_running(*, timeout_s: int) -> tuple[bool, str]:
+def _loki_candidate_urls() -> list[str]:
+    """Return candidate Loki base URLs (best-effort, local-dev oriented)."""
+    env = (os.getenv("LOKI_BASE_URL") or "").strip()
+    candidates = []
+    if env:
+        candidates.append(env)
+    # Local dev (run on host)
+    candidates.append("http://127.0.0.1:3100")
+    # Docker-compose network (backend inside compose)
+    candidates.append("http://loki:3100")
+    # Docker Desktop host alias
+    candidates.append("http://host.docker.internal:3100")
+
+    out: list[str] = []
+    seen: set[str] = set()
+    for c in candidates:
+        c = (c or "").strip().rstrip("/")
+        if not c or c in seen:
+            continue
+        seen.add(c)
+        out.append(c)
+    return out
+
+
+async def _resolve_loki_base_url(timeout_s: float = 0.6) -> str | None:
+    """Return the first reachable Loki base URL (or None)."""
+    for base in _loki_candidate_urls():
+        if await _http_ok(f"{base}/ready", timeout_s=timeout_s):
+            return base
+    return None
+
+
+def _run_cmd(args: list[str], *, timeout_s: int, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+    """Run a subprocess command (sync).
+
+    IMPORTANT: This must never raise TimeoutExpired inside request handlers.
+    """
     try:
-        info = _run_cmd(["docker", "info", "--format", "{{.ServerVersion}}"], timeout_s=timeout_s)
+        return subprocess.run(
+            args,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=timeout_s,
+            env=env,
+        )
+    except subprocess.TimeoutExpired as e:
+        # Return a synthetic failure result rather than raising.
+        stdout_raw = e.stdout
+        stderr_raw = e.stderr
+        stdout: str = stdout_raw.decode() if isinstance(stdout_raw, bytes) else (stdout_raw or "")
+        stderr: str = stderr_raw.decode() if isinstance(stderr_raw, bytes) else (stderr_raw or f"Command timed out after {timeout_s}s")
+        return subprocess.CompletedProcess(args=args, returncode=124, stdout=stdout, stderr=stderr)
+
+
+async def _run_cmd_async(
+    args: list[str], *, timeout_s: int, env: dict[str, str] | None = None
+) -> subprocess.CompletedProcess[str]:
+    """Run a subprocess command off the event loop."""
+    return await asyncio.to_thread(_run_cmd, args, timeout_s=timeout_s, env=env)
+
+
+async def _docker_running(*, timeout_s: int, env: dict[str, str] | None) -> tuple[bool, str]:
+    try:
+        info = await _run_cmd_async(
+            ["docker", "info", "--format", "{{.ServerVersion}}"], timeout_s=timeout_s, env=env
+        )
     except FileNotFoundError:
         return False, "docker"
 
@@ -134,9 +200,9 @@ def _docker_running(*, timeout_s: int) -> tuple[bool, str]:
     return True, f"docker{(' ' + ver) if ver else ''}".strip()
 
 
-def _docker_containers_count(*, timeout_s: int) -> int:
+async def _docker_containers_count(*, timeout_s: int, env: dict[str, str] | None) -> int:
     try:
-        res = _run_cmd(["docker", "ps", "-aq"], timeout_s=timeout_s)
+        res = await _run_cmd_async(["docker", "ps", "-aq"], timeout_s=timeout_s, env=env)
     except FileNotFoundError:
         return 0
     if res.returncode != 0:
@@ -156,10 +222,10 @@ def _parse_labels(raw: str) -> dict[str, str]:
     return out
 
 
-def _list_docker_containers(*, timeout_s: int) -> list[dict[str, Any]]:
+async def _list_docker_containers(*, timeout_s: int, env: dict[str, str] | None) -> list[dict[str, Any]]:
     """Return containers in the Dashboard/Docker UI shape."""
     try:
-        res = _run_cmd(
+        res = await _run_cmd_async(
             [
                 "docker",
                 "ps",
@@ -169,6 +235,7 @@ def _list_docker_containers(*, timeout_s: int) -> list[dict[str, Any]]:
                 "{{.ID}}\t{{.Image}}\t{{.Names}}\t{{.State}}\t{{.Status}}\t{{.Ports}}\t{{.Labels}}",
             ],
             timeout_s=timeout_s,
+            env=env,
         )
     except FileNotFoundError:
         return []
@@ -350,10 +417,12 @@ async def get_docker_status() -> dict[str, Any]:
         timeout = int(getattr(cfg.docker, "docker_status_timeout", 5))
         list_timeout = int(getattr(cfg.docker, "docker_container_list_timeout", 10))
     except Exception:
+        cfg = TriBridConfig()
         timeout, list_timeout = 5, 10
 
-    running, runtime = _docker_running(timeout_s=timeout)
-    containers_count = _docker_containers_count(timeout_s=list_timeout) if running else 0
+    env = _docker_env(cfg)
+    running, runtime = await _docker_running(timeout_s=timeout, env=env)
+    containers_count = await _docker_containers_count(timeout_s=list_timeout, env=env) if running else 0
     return {"running": running, "runtime": runtime, "containers_count": containers_count}
 
 
@@ -363,8 +432,10 @@ async def list_docker_containers() -> dict[str, Any]:
         cfg = load_config()
         timeout = int(getattr(cfg.docker, "docker_container_list_timeout", 10))
     except Exception:
+        cfg = TriBridConfig()
         timeout = 10
-    containers = _list_docker_containers(timeout_s=timeout)
+    env = _docker_env(cfg)
+    containers = await _list_docker_containers(timeout_s=timeout, env=env)
     return {"containers": containers}
 
 
@@ -380,9 +451,11 @@ async def start_container(container_id: str) -> dict[str, Any]:
         cfg = load_config()
         timeout = int(getattr(cfg.docker, "docker_container_action_timeout", 30))
     except Exception:
+        cfg = TriBridConfig()
         timeout = 30
     try:
-        res = _run_cmd(["docker", "start", container_id], timeout_s=timeout)
+        env = _docker_env(cfg)
+        res = await _run_cmd_async(["docker", "start", container_id], timeout_s=timeout, env=env)
     except FileNotFoundError as e:
         raise HTTPException(status_code=503, detail=str(e))
     if res.returncode != 0:
@@ -396,9 +469,11 @@ async def stop_container(container_id: str) -> dict[str, Any]:
         cfg = load_config()
         timeout = int(getattr(cfg.docker, "docker_container_action_timeout", 30))
     except Exception:
+        cfg = TriBridConfig()
         timeout = 30
     try:
-        res = _run_cmd(["docker", "stop", container_id], timeout_s=timeout)
+        env = _docker_env(cfg)
+        res = await _run_cmd_async(["docker", "stop", container_id], timeout_s=timeout, env=env)
     except FileNotFoundError as e:
         raise HTTPException(status_code=503, detail=str(e))
     if res.returncode != 0:
@@ -412,9 +487,11 @@ async def restart_container_by_id(container_id: str) -> dict[str, Any]:
         cfg = load_config()
         timeout = int(getattr(cfg.docker, "docker_container_action_timeout", 30))
     except Exception:
+        cfg = TriBridConfig()
         timeout = 30
     try:
-        res = _run_cmd(["docker", "restart", container_id], timeout_s=timeout)
+        env = _docker_env(cfg)
+        res = await _run_cmd_async(["docker", "restart", container_id], timeout_s=timeout, env=env)
     except FileNotFoundError as e:
         raise HTTPException(status_code=503, detail=str(e))
     if res.returncode != 0:
@@ -430,9 +507,11 @@ async def pause_container(container_id: str) -> dict[str, Any]:
         cfg = load_config()
         timeout = int(getattr(cfg.docker, "docker_container_action_timeout", 30))
     except Exception:
+        cfg = TriBridConfig()
         timeout = 30
     try:
-        res = _run_cmd(["docker", "pause", container_id], timeout_s=timeout)
+        env = _docker_env(cfg)
+        res = await _run_cmd_async(["docker", "pause", container_id], timeout_s=timeout, env=env)
     except FileNotFoundError as e:
         raise HTTPException(status_code=503, detail=str(e))
     if res.returncode != 0:
@@ -446,9 +525,11 @@ async def unpause_container(container_id: str) -> dict[str, Any]:
         cfg = load_config()
         timeout = int(getattr(cfg.docker, "docker_container_action_timeout", 30))
     except Exception:
+        cfg = TriBridConfig()
         timeout = 30
     try:
-        res = _run_cmd(["docker", "unpause", container_id], timeout_s=timeout)
+        env = _docker_env(cfg)
+        res = await _run_cmd_async(["docker", "unpause", container_id], timeout_s=timeout, env=env)
     except FileNotFoundError as e:
         raise HTTPException(status_code=503, detail=str(e))
     if res.returncode != 0:
@@ -462,9 +543,11 @@ async def remove_container(container_id: str) -> dict[str, Any]:
         cfg = load_config()
         timeout = int(getattr(cfg.docker, "docker_container_action_timeout", 30))
     except Exception:
+        cfg = TriBridConfig()
         timeout = 30
     try:
-        res = _run_cmd(["docker", "rm", "-f", container_id], timeout_s=timeout)
+        env = _docker_env(cfg)
+        res = await _run_cmd_async(["docker", "rm", "-f", container_id], timeout_s=timeout, env=env)
     except FileNotFoundError as e:
         raise HTTPException(status_code=503, detail=str(e))
     if res.returncode != 0:
@@ -473,19 +556,28 @@ async def remove_container(container_id: str) -> dict[str, Any]:
 
 
 @router.get("/docker/container/{container_id}/logs")
-async def get_container_logs(container_id: str, tail: int = Query(default=100, ge=1, le=5000)) -> dict[str, Any]:
+async def get_container_logs(
+    container_id: str,
+    tail: int | None = Query(default=None, ge=10, le=1000),
+) -> dict[str, Any]:
     try:
         cfg = load_config()
         timeout = int(getattr(cfg.docker, "docker_container_list_timeout", 10))
+        default_tail = int(getattr(cfg.docker, "docker_logs_tail", 100))
         timestamps = int(getattr(cfg.docker, "docker_logs_timestamps", 1))
     except Exception:
-        timeout, timestamps = 10, 1
-    args = ["docker", "logs", "--tail", str(tail)]
+        cfg = TriBridConfig()
+        timeout, default_tail, timestamps = 10, 100, 1
+
+    env = _docker_env(cfg)
+    effective_tail = int(tail or default_tail)
+
+    args = ["docker", "logs", "--tail", str(effective_tail)]
     if timestamps:
         args.append("--timestamps")
     args.append(container_id)
     try:
-        res = _run_cmd(args, timeout_s=timeout)
+        res = await _run_cmd_async(args, timeout_s=timeout, env=env)
     except FileNotFoundError as e:
         return {"success": False, "logs": "", "error": str(e)}
     if res.returncode != 0:
@@ -515,17 +607,48 @@ async def get_container_logs_legacy(container: str, lines: int = 100) -> list[st
 @router.get("/dev/status", response_model=DevStackStatusResponse)
 async def get_dev_stack_status() -> DevStackStatusResponse:
     frontend_port, backend_port = _resolve_dev_ports()
-    frontend_url = f"http://127.0.0.1:{frontend_port}/web"
-    backend_url = f"http://127.0.0.1:{backend_port}/api/health"
+    # NOTE: In dev, users may reach services via localhost, 127.0.0.1, or ::1.
+    # When the backend is containerized, reaching a host-side dev server may require host.docker.internal.
+    def _url_host(host: str) -> str:
+        return f"[{host}]" if ":" in host and not host.startswith("[") else host
+
+    hosts = ["127.0.0.1", "localhost", "::1"]
+    try:
+        if Path("/.dockerenv").exists():
+            hosts.append("host.docker.internal")
+    except Exception:
+        pass
+
+    async def _probe_first_ok(urls: list[str], *, label: str) -> tuple[bool, str | None, list[str]]:
+        for idx, url in enumerate(urls):
+            ok = await _http_ok(url, timeout_s=1.0)
+            if ok:
+                if idx == 0:
+                    return True, url, []
+                return True, url, [f"{label} reachable at {url} (preferred {urls[0]} failed)"]
+        return False, None, [f"{label} not reachable at {u}" for u in urls]
 
     details: list[str] = []
-    frontend_running = await _http_ok(frontend_url, timeout_s=1.0)
-    if not frontend_running:
-        details.append(f"Frontend not reachable at {frontend_url}")
 
-    backend_running = await _http_ok(backend_url, timeout_s=1.0)
-    if not backend_running:
-        details.append(f"Backend not reachable at {backend_url}")
+    frontend_probe_urls = [f"http://{_url_host(h)}:{frontend_port}/web" for h in hosts]
+    frontend_running, resolved_frontend_url, frontend_details = await _probe_first_ok(
+        frontend_probe_urls, label="Frontend"
+    )
+    details.extend(frontend_details)
+
+    backend_health_urls = [f"http://{_url_host(h)}:{backend_port}/api/health" for h in hosts]
+    backend_running, resolved_backend_health, backend_details = await _probe_first_ok(
+        backend_health_urls, label="Backend"
+    )
+    details.extend(backend_details)
+
+    # Surface URLs that match the chosen reachable host (best-effort).
+    frontend_url = resolved_frontend_url or frontend_probe_urls[0]
+    backend_url = (
+        (resolved_backend_health or backend_health_urls[0]).replace("/api/health", "/api")
+        if (resolved_backend_health or backend_health_urls)
+        else None
+    )
 
     return DevStackStatusResponse(
         frontend_running=frontend_running,
@@ -533,7 +656,7 @@ async def get_dev_stack_status() -> DevStackStatusResponse:
         frontend_port=frontend_port,
         backend_port=backend_port,
         frontend_url=frontend_url,
-        backend_url=f"http://127.0.0.1:{backend_port}/api",
+        backend_url=backend_url,
         details=details,
     )
 
@@ -634,3 +757,186 @@ async def restart_dev_stack(request: Request, background_tasks: BackgroundTasks)
             frontend_port=frontend_port,
             backend_port=backend_port,
         )
+
+
+# ==============================================================================
+# Loki proxy + streaming (dev tooling)
+# ==============================================================================
+
+
+@router.get("/loki/status")
+async def loki_status(request: Request) -> dict[str, Any]:
+    """Check whether Loki is reachable (local dev)."""
+    _ensure_dev_orchestrator_allowed(request)
+    base = await _resolve_loki_base_url()
+    if not base:
+        return {"reachable": False, "status": "unreachable"}
+
+    try:
+        async with httpx.AsyncClient(timeout=1.5) as client:
+            r = await client.get(f"{base}/ready")
+        reachable = r.status_code < 500
+        return {"reachable": bool(reachable), "url": base, "status": "ok" if reachable else f"status_{r.status_code}"}
+    except Exception as e:
+        return {"reachable": False, "url": base, "status": f"error: {e.__class__.__name__}"}
+
+
+@router.get("/loki/query_range")
+async def loki_query_range(
+    request: Request,
+    query: str = Query(..., description="LogQL query"),
+    start_ms: int | None = Query(default=None, ge=0, description="Start time (epoch ms)"),
+    end_ms: int | None = Query(default=None, ge=0, description="End time (epoch ms)"),
+    limit: int = Query(default=2000, ge=1, le=10000, description="Max log lines"),
+    direction: str = Query(default="forward", pattern="^(forward|backward)$"),
+) -> dict[str, Any]:
+    """Proxy Loki query_range (dev tooling)."""
+    _ensure_dev_orchestrator_allowed(request)
+    base = await _resolve_loki_base_url()
+    if not base:
+        raise HTTPException(status_code=503, detail="Loki not reachable")
+
+    now_ns = int(time.time() * 1_000_000_000)
+    start_ns = int(start_ms * 1_000_000) if start_ms is not None else now_ns - int(60 * 1_000_000_000)
+    end_ns = int(end_ms * 1_000_000) if end_ms is not None else now_ns
+
+    params = {"query": query, "start": str(start_ns), "end": str(end_ns), "limit": str(int(limit)), "direction": direction}
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            r = await client.get(f"{base}/loki/api/v1/query_range", params=params)
+        if r.status_code >= 400:
+            raise HTTPException(status_code=r.status_code, detail=r.text)
+        result: dict[str, Any] = r.json()
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Loki query failed: {e}") from e
+
+
+@router.get("/stream/loki/tail")
+async def loki_tail(
+    request: Request,
+    query: str = Query(..., description="LogQL query"),
+    start_ms: int | None = Query(default=None, ge=0, description="Start time (epoch ms)"),
+    end_ms: int | None = Query(default=None, ge=0, description="Optional end time (epoch ms)"),
+    limit: int = Query(default=2000, ge=1, le=10000, description="Max log lines per poll"),
+    poll_ms: int = Query(default=1000, ge=250, le=5000, description="Polling interval (ms)"),
+) -> StreamingResponse:
+    """SSE stream of Loki logs using incremental query_range polling.
+
+    Emits TerminalService-compatible SSE events:
+    - {"type":"log","message":"..."}
+    - {"type":"error","message":"..."}
+    - {"type":"complete"}
+    """
+    _ensure_dev_orchestrator_allowed(request)
+    base = await _resolve_loki_base_url()
+
+    async def _gen() -> Any:
+        if not base:
+            yield f"data: {json.dumps({'type': 'error', 'message': 'Loki not reachable'})}\n\n"
+            yield f"data: {json.dumps({'type': 'complete'})}\n\n"
+            return
+
+        now_ns = int(time.time() * 1_000_000_000)
+        cursor_ns = int(start_ms * 1_000_000) if start_ms is not None else now_ns - int(30 * 1_000_000_000)
+        end_ns_static = int(end_ms * 1_000_000) if end_ms is not None else None
+
+        # Deduplicate a small sliding window to avoid repeated lines between polls.
+        seen_order: deque[tuple[int, str, str]] = deque()
+        seen_set: set[tuple[int, str, str]] = set()
+        max_seen = 5000
+
+        idle_rounds = 0
+
+        while True:
+            if await request.is_disconnected():
+                break
+
+            end_ns = end_ns_static if end_ns_static is not None else int(time.time() * 1_000_000_000)
+            params = {
+                "query": query,
+                "start": str(cursor_ns),
+                "end": str(end_ns),
+                "limit": str(int(limit)),
+                "direction": "forward",
+            }
+
+            try:
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    r = await client.get(f"{base}/loki/api/v1/query_range", params=params)
+                if r.status_code >= 400:
+                    raise RuntimeError(f"{r.status_code}: {r.text}")
+                payload = r.json()
+            except Exception as e:
+                yield f"data: {json.dumps({'type': 'error', 'message': f'Loki tail error: {e}'})}\n\n"
+                yield f"data: {json.dumps({'type': 'complete'})}\n\n"
+                break
+
+            results = (payload.get("data") or {}).get("result") or []
+            entries: list[tuple[int, str, str]] = []
+
+            for stream in results:
+                labels = stream.get("stream") or {}
+                service = (
+                    labels.get("compose_service")
+                    or labels.get("container")
+                    or labels.get("job")
+                    or labels.get("app")
+                    or "log"
+                )
+                for pair in stream.get("values") or []:
+                    if not isinstance(pair, (list, tuple)) or len(pair) != 2:
+                        continue
+                    ts_raw, line = pair
+                    try:
+                        ts_ns = int(ts_raw)
+                    except Exception:
+                        continue
+                    entries.append((ts_ns, str(service), str(line)))
+
+            entries.sort(key=lambda x: x[0])
+
+            emitted = 0
+            max_ts = cursor_ns
+            for ts_ns, service, line in entries:
+                key = (ts_ns, service, line)
+                if key in seen_set:
+                    max_ts = max(max_ts, ts_ns)
+                    continue
+
+                seen_set.add(key)
+                seen_order.append(key)
+                if len(seen_order) > max_seen:
+                    old = seen_order.popleft()
+                    seen_set.discard(old)
+
+                max_ts = max(max_ts, ts_ns)
+                emitted += 1
+                yield f"data: {json.dumps({'type': 'log', 'message': f'[{service}] {line}'})}\n\n"
+
+            cursor_ns = max(cursor_ns, max_ts)
+
+            # If bounded by end_ms, close after a short idle window beyond end time.
+            if end_ns_static is not None:
+                if emitted == 0:
+                    idle_rounds += 1
+                else:
+                    idle_rounds = 0
+                if (int(time.time() * 1_000_000_000) >= end_ns_static) and idle_rounds >= 2:
+                    yield f"data: {json.dumps({'type': 'complete'})}\n\n"
+                    break
+
+            await asyncio.sleep(poll_ms / 1000)
+
+    return StreamingResponse(
+        _gen(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )

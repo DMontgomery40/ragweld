@@ -250,6 +250,10 @@ class TestChatEndpointWithMockedLLM:
 
             assert response.status_code == 200
             data = response.json()
+            assert isinstance(data.get("run_id"), str)
+            assert isinstance(data.get("started_at_ms"), int)
+            assert isinstance(data.get("ended_at_ms"), int)
+            assert isinstance(data.get("debug"), dict)
             assert "conversation_id" in data
             assert data["message"]["content"] == "Test response"
             assert data["message"]["role"] == "assistant"
@@ -462,6 +466,10 @@ class TestChatCitationsRealPipeline:
                 break
 
         assert done is not None, f"Expected done event in SSE body, got: {body!r}"
+        assert isinstance(done.get("run_id"), str)
+        assert isinstance(done.get("started_at_ms"), int)
+        assert isinstance(done.get("ended_at_ms"), int)
+        assert isinstance(done.get("debug"), dict)
         assert done.get("conversation_id") == "stream-conv-2"
         assert isinstance(done.get("sources"), list)
         assert len(done["sources"]) >= 1
@@ -473,6 +481,33 @@ class TestChatCitationsRealPipeline:
         assert len(msgs) == 2
         assert msgs[0].role == "user"
         assert msgs[1].role == "assistant"
+
+
+class TestTraceEndpoint:
+    """Tests for local trace endpoint."""
+
+    @pytest.mark.asyncio
+    async def test_traces_latest_by_run_id(self, chat_client: AsyncClient):
+        with patch("server.api.chat.generate_response") as mock_gen:
+            mock_gen.return_value = ("Trace response", [], "resp_trace")
+
+            resp = await chat_client.post(
+                "/api/chat",
+                json={"message": "Hello", "repo_id": "test-repo"},
+            )
+            assert resp.status_code == 200
+            run_id = resp.json().get("run_id")
+            assert isinstance(run_id, str)
+
+        tr = await chat_client.get(f"/api/traces/latest?run_id={run_id}")
+        assert tr.status_code == 200
+        data = tr.json()
+        assert data.get("run_id") == run_id
+        assert data.get("trace") is not None
+        assert isinstance(data["trace"].get("events"), list)
+        kinds = [ev.get("kind") for ev in data["trace"]["events"]]
+        assert "chat.request" in kinds
+        assert "chat.response" in kinds
 
 
 class TestChatStreamingDeltaSemantics:

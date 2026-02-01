@@ -316,7 +316,8 @@
     "chat_stream_include_thinking": 1,
     "chat_show_confidence": 0,
     "chat_show_citations": 1,
-    "chat_show_trace": 0,
+    "chat_show_trace": 1,
+    "chat_show_debug_footer": 1,
     "chat_default_model": "gpt-4o-mini",
     "chat_stream_timeout": 120,
     "chat_thinking_budget_tokens": 10000,
@@ -355,6 +356,24 @@
     "semantic_kg_extraction": "You are a semantic knowledge graph extractor.\n\nGiven a single code/document chunk, extract a small set of reusable semantic concepts and relationships.\n\nRules:\n- Return ONLY valid JSON (no markdown, no extra text)\n- Concepts must be short, lowercase, and reusable across the corpus (e.g. \"authentication\", \"rate_limit\", \"vector_index\")\n- Prefer domain concepts and architectural concepts over implementation noise\n- Do NOT include file paths or line numbers as concepts\n- Keep the list small and high-signal\n\nJSON format:\n{\n  \"concepts\": [\"concept1\", \"concept2\"],\n  \"relations\": [\n    {\"source\": \"concept1\", \"target\": \"concept2\", \"relation_type\": \"related_to\"}\n  ]\n}\n\nAllowed relation_type values: related_to, references",
     "eval_analysis": "You are an expert RAG (Retrieval-Augmented Generation) system analyst.\nYour job is to analyze evaluation comparisons and provide HONEST, SKEPTICAL insights.\n\nCRITICAL: Do NOT force explanations that don't make sense. If the data is contradictory or confusing:\n- Say so clearly: \"This result is surprising and may indicate other factors at play\"\n- Consider: index changes, data drift, eval dataset updates, or measurement noise\n- Acknowledge when correlation != causation\n- It's BETTER to say \"I'm not sure why this happened\" than to fabricate a plausible-sounding but wrong explanation\n\nBe rigorous:\n1. Question whether the config changes ACTUALLY explain the performance delta\n2. Flag when results seem counterintuitive (e.g., disabling a feature improving results)\n3. Consider confounding variables: Was the index rebuilt? Did the test set change?\n4. Provide actionable suggestions only when you have reasonable confidence\n\nFormat your response with clear sections using markdown headers.",
     "lightweight_chunk_summaries": "Extract key information from this code: symbols (function/class names), purpose (one sentence), keywords (technical terms). Return JSON only."
+  },
+  "mcp": {
+    "enabled": true,
+    "mount_path": "/mcp",
+    "stateless_http": true,
+    "json_response": true,
+    "enable_dns_rebinding_protection": true,
+    "allowed_hosts": [
+      "localhost:*",
+      "127.0.0.1:*"
+    ],
+    "allowed_origins": [
+      "http://localhost:*",
+      "http://127.0.0.1:*"
+    ],
+    "require_api_key": false,
+    "default_top_k": 20,
+    "default_mode": "tribrid"
   },
   "docker": {
     "docker_host": "",

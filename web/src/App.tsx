@@ -6,8 +6,8 @@ import { useHealthStore } from '@/stores';
 import { TabBar } from './components/Navigation/TabBar';
 import { TabRouter } from './components/Navigation/TabRouter';
 
-// Sidepanel component
-import { Sidepanel } from './components/Sidepanel';
+// Right panel (Dock / Settings)
+import { DockPanel } from './components/Dock/DockPanel';
 
 // UI Components
 import { EmbeddingMismatchWarning } from './components/ui/EmbeddingMismatchWarning';
@@ -31,6 +31,7 @@ function App() {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const { status, checkHealth } = useHealthStore();
   const navigate = useNavigate();
+  const isEmbed = new URLSearchParams(window.location.search).get('embed') === '1';
 
   // Initialize hooks
   const { isInitialized, initError } = useAppInit();
@@ -39,6 +40,18 @@ function App() {
 
   // Initialize theme - exposes window.Theme for legacy modules
   useTheme();
+
+  // Bind resizable sidepanel AFTER the layout (and handle) is mounted.
+  // Some legacy module init paths can run while the React loading shell is still on-screen.
+  useEffect(() => {
+    if (isEmbed) return;
+    if (!modulesLoaded || !isInitialized) return;
+    try {
+      (window as any).UiHelpers?.bindResizableSidepanel?.();
+    } catch (e) {
+      console.warn('[App] Failed to bind resizable sidepanel', e);
+    }
+  }, [isEmbed, isInitialized, modulesLoaded]);
 
   // Toggle mobile navigation
   const toggleMobileNav = () => {
@@ -104,20 +117,8 @@ function App() {
         // @ts-ignore - legacy JS module
         await import('./modules/reranker.js');
         await Promise.all([
-          // @ts-ignore - legacy JS modules (no exports, attach to window)
-          import('./modules/git-hooks.js'),
-          // @ts-ignore
-          import('./modules/git-commit-meta.js'),
           // @ts-ignore
           import('./modules/keywords.js'),
-          // @ts-ignore
-          import('./modules/autotune.js'),
-          // @ts-ignore
-          import('./modules/editor.js'),
-          // @ts-ignore
-          import('./modules/editor-settings.js'),
-          // @ts-ignore
-          import('./modules/secrets.js'),
           // @ts-ignore
           import('./modules/model_flows.js'),
           // @ts-ignore
@@ -135,8 +136,6 @@ function App() {
           // @ts-ignore
           import('./modules/grafana.js'),
           // @ts-ignore
-          import('./modules/vscode.js'),
-          // @ts-ignore
           import('./modules/onboarding.js'),
           // @ts-ignore
           import('./modules/index-display.js'),
@@ -148,12 +147,6 @@ function App() {
           import('./modules/storage-calculator-template.js'),
           // @ts-ignore
           import('./modules/storage-calculator.js'),
-          // @ts-ignore
-          import('./modules/profile_logic.js'),
-          // @ts-ignore
-          import('./modules/profile_renderer.js'),
-          // @ts-ignore
-          import('./modules/autoprofile_v2.js'),
           // REMOVED: Legacy JS modules - EvaluateSubtab now uses pure React/TypeScript
           // import('./modules/golden_questions.js'),
           // import('./modules/eval_runner.js'),
@@ -221,6 +214,30 @@ function App() {
           </div>
         )}
         <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+      </div>
+    );
+  }
+
+  if (isEmbed) {
+    return (
+      <div style={{ height: '100vh', background: 'var(--bg)', color: 'var(--fg)', display: 'flex', flexDirection: 'column' }}>
+        <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
+          <ErrorBoundary
+            context="embed-tab-router"
+            fallback={({ error, reset }) => (
+              <div className="p-6">
+                <SubtabErrorFallback
+                  title="Unable to load embedded tab"
+                  context={`Route path: ${window.location.pathname}`}
+                  error={error}
+                  onRetry={reset}
+                />
+              </div>
+            )}
+          >
+            <TabRouter />
+          </ErrorBoundary>
+        </div>
       </div>
     );
   }
@@ -365,27 +382,31 @@ function App() {
           </div>
         </div>
 
-        {/* Sidepanel */}
-        <div className="sidepanel" id="sidepanel">
-          <div className="sidepanel-header">
-            <h3 className="sidepanel-title" id="sidepanel-title">Settings</h3>
-          </div>
-          <div id="sidepanel-content" style={{flex: 1, overflowY: 'auto', padding: '20px'}}>
-            {/* React Sidepanel component with all widgets */}
-            <ErrorBoundary
-              context="sidepanel"
-              fallback={({ error, reset }) => (
-                <SubtabErrorFallback
-                  title="Sidepanel failed to render"
-                  context="An error inside the Settings sidepanel prevented it from mounting."
-                  error={error}
-                  onRetry={reset}
-                />
-              )}
-            >
-            <Sidepanel />
-            </ErrorBoundary>
-          </div>
+        {/* Right panel */}
+        <div
+          className="sidepanel"
+          id="sidepanel"
+          style={{
+            padding: 0,
+            overflow: 'hidden',
+            display: 'flex',
+            flexDirection: 'column',
+            background: 'var(--card-bg)',
+          }}
+        >
+          <ErrorBoundary
+            context="dock-panel"
+            fallback={({ error, reset }) => (
+              <SubtabErrorFallback
+                title="Right panel failed to render"
+                context="An error inside the Dock/Settings panel prevented it from mounting."
+                error={error}
+                onRetry={reset}
+              />
+            )}
+          >
+            <DockPanel />
+          </ErrorBoundary>
         </div>
       </div>
     </>

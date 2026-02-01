@@ -2,6 +2,7 @@
 // Main dashboard with System Status, Monitoring, Storage, Help, and Glossary subtabs
 
 import { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { DashboardSubtabs } from '../components/Dashboard/DashboardSubtabs';
 import { SystemStatusSubtab } from '../components/Dashboard/SystemStatusSubtab';
 import { MonitoringSubtab } from '../components/Dashboard/MonitoringSubtab';
@@ -12,6 +13,15 @@ import { GlossarySubtab } from '../components/Dashboard/GlossarySubtab';
 export function Dashboard() {
   // Simple useState for subtab - matches RAGTab.tsx pattern (no URL sync to avoid infinite loops)
   const [activeSubtab, setActiveSubtab] = useState('system');
+  const [searchParams] = useSearchParams();
+  const subtabParam = searchParams.get('subtab');
+
+  // Read ?subtab=... (no writeback)
+  useEffect(() => {
+    if (!subtabParam) return;
+    const allowed = new Set(['system', 'monitoring', 'storage', 'help', 'glossary']);
+    if (allowed.has(subtabParam)) setActiveSubtab(subtabParam);
+  }, [subtabParam]);
 
   // Flag for legacy modules so they can avoid mutating React-rendered dashboard DOM
   useEffect(() => {

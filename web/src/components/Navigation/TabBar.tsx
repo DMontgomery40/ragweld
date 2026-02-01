@@ -1,7 +1,11 @@
 // AGRO - TabBar Component  
 // EXACT copy of /gui tab-bar structure
 
-import { NavLink } from 'react-router-dom';
+import { NavLink, useLocation, useNavigate } from 'react-router-dom';
+import { useDockStore } from '@/stores';
+import { getRouteByPath } from '@/config/routes';
+import { DOCK_DEFAULT_MODE_BY_PATH } from '@/config/dockCatalog';
+import type { DockTarget } from '@/stores/useDockStore';
 
 interface TabBarProps {
   mobileOpen?: boolean;
@@ -9,9 +13,51 @@ interface TabBarProps {
 }
 
 export function TabBar({ mobileOpen = false, onNavigate }: TabBarProps) {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const docked = useDockStore((s) => s.docked);
+  const setDocked = useDockStore((s) => s.setDocked);
+  const setMode = useDockStore((s) => s.setMode);
+
   const handleClick = () => {
     // Close mobile menu after navigation
     if (onNavigate) onNavigate();
+  };
+
+  const pinned = (path: string) => (docked?.path === path ? ' 📌' : '');
+
+  const buildCurrentMainTarget = (): DockTarget | null => {
+    const route = getRouteByPath(location.pathname);
+    if (!route) return null;
+    const params = new URLSearchParams(location.search || '');
+    const subtabId = params.get('subtab') || '';
+    const subtabTitle =
+      subtabId && Array.isArray(route.subtabs)
+        ? route.subtabs.find((s) => s.id === subtabId)?.title
+        : undefined;
+    const renderMode = (DOCK_DEFAULT_MODE_BY_PATH[location.pathname] ?? 'iframe') as DockTarget['renderMode'];
+    return {
+      path: location.pathname,
+      search: location.search || '',
+      label: route.label,
+      icon: route.icon,
+      subtabTitle,
+      renderMode,
+    };
+  };
+
+  const handleDockAwareClick = (toPath: string) => (e: any) => {
+    // If the user clicks the tab that is currently docked, swap instead of duplicating.
+    if (docked && docked.path === toPath) {
+      e.preventDefault();
+      const current = buildCurrentMainTarget();
+      if (current) {
+        setDocked(current);
+        setMode('dock');
+      }
+      navigate(docked.path + docked.search);
+    }
+    handleClick();
   };
 
   return (
@@ -22,7 +68,7 @@ export function TabBar({ mobileOpen = false, onNavigate }: TabBarProps) {
       <NavLink
         to="/start"
         className={({ isActive }) => isActive ? 'active' : ''}
-        onClick={handleClick}
+        onClick={handleDockAwareClick('/start')}
         style={{
           background: 'var(--bg-elev2)',
           color: 'var(--fg-muted)',
@@ -41,13 +87,13 @@ export function TabBar({ mobileOpen = false, onNavigate }: TabBarProps) {
           gap: '6px',
         }}
       >
-        🚀 Get Started
+        🚀 Get Started{pinned('/start')}
       </NavLink>
       
       <NavLink
         to="/dashboard"
         className={({ isActive }) => isActive ? 'active' : ''}
-        onClick={handleClick}
+        onClick={handleDockAwareClick('/dashboard')}
         style={{
           background: 'var(--bg-elev2)',
           color: 'var(--fg-muted)',
@@ -66,13 +112,13 @@ export function TabBar({ mobileOpen = false, onNavigate }: TabBarProps) {
           gap: '6px',
         }}
       >
-        📊 Dashboard
+        📊 Dashboard{pinned('/dashboard')}
       </NavLink>
 
       <NavLink
         to="/chat"
         className={({ isActive }) => isActive ? 'active' : ''}
-        onClick={handleClick}
+        onClick={handleDockAwareClick('/chat')}
         style={{
           background: 'var(--bg-elev2)',
           color: 'var(--fg-muted)',
@@ -91,38 +137,13 @@ export function TabBar({ mobileOpen = false, onNavigate }: TabBarProps) {
           gap: '6px',
         }}
       >
-        💬 Chat
-      </NavLink>
-
-      <NavLink
-        to="/vscode"
-        className={({ isActive }) => `${isActive ? 'active' : ''} promoted-tab`}
-        onClick={handleClick}
-        style={{
-          background: 'var(--bg-elev2)',
-          color: 'var(--fg-muted)',
-          border: '1px solid var(--line)',
-          padding: '9px 16px',
-          borderRadius: '6px',
-          cursor: 'pointer',
-          fontSize: '13px',
-          fontWeight: 500,
-          whiteSpace: 'nowrap',
-          transition: 'all 0.15s',
-          minHeight: '44px',
-          textDecoration: 'none',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '6px',
-        }}
-      >
-        📝 VS Code
+        💬 Chat{pinned('/chat')}
       </NavLink>
 
       <NavLink
         to="/grafana"
         className={({ isActive }) => `${isActive ? 'active' : ''} promoted-tab`}
-        onClick={handleClick}
+        onClick={handleDockAwareClick('/grafana')}
         style={{
           background: 'var(--bg-elev2)',
           color: 'var(--fg-muted)',
@@ -141,13 +162,13 @@ export function TabBar({ mobileOpen = false, onNavigate }: TabBarProps) {
           gap: '6px',
         }}
       >
-        📈 Grafana
+        📈 Grafana{pinned('/grafana')}
       </NavLink>
 
       <NavLink
         to="/rag"
         className={({ isActive }) => isActive ? 'active' : ''}
-        onClick={handleClick}
+        onClick={handleDockAwareClick('/rag')}
         style={{
           background: 'var(--bg-elev2)',
           color: 'var(--fg-muted)',
@@ -166,13 +187,13 @@ export function TabBar({ mobileOpen = false, onNavigate }: TabBarProps) {
           gap: '6px',
         }}
       >
-        🧠 RAG
+        🧠 RAG{pinned('/rag')}
       </NavLink>
 
       <NavLink
         to="/eval"
         className={({ isActive }) => `${isActive ? 'active' : ''} keystone-tab`}
-        onClick={handleClick}
+        onClick={handleDockAwareClick('/eval')}
         style={{
           background: 'var(--bg-elev2)',
           color: 'var(--fg-muted)',
@@ -192,7 +213,7 @@ export function TabBar({ mobileOpen = false, onNavigate }: TabBarProps) {
         }}
         title="Deep-dive into evaluation runs with AI-powered analysis"
       >
-        🔬 Eval Analysis
+        🔬 Eval Analysis{pinned('/eval')}
       </NavLink>
 
       {/* Profiles tab removed - banned feature per CLAUDE.md */}
@@ -200,7 +221,7 @@ export function TabBar({ mobileOpen = false, onNavigate }: TabBarProps) {
       <NavLink
         to="/infrastructure"
         className={({ isActive }) => isActive ? 'active' : ''}
-        onClick={handleClick}
+        onClick={handleDockAwareClick('/infrastructure')}
         style={{
           background: 'var(--bg-elev2)',
           color: 'var(--fg-muted)',
@@ -219,13 +240,13 @@ export function TabBar({ mobileOpen = false, onNavigate }: TabBarProps) {
           gap: '6px',
         }}
       >
-        🔧 Infrastructure
+        🔧 Infrastructure{pinned('/infrastructure')}
       </NavLink>
 
       <NavLink
         to="/admin"
         className={({ isActive }) => isActive ? 'active' : ''}
-        onClick={handleClick}
+        onClick={handleDockAwareClick('/admin')}
         style={{
           background: 'var(--bg-elev2)',
           color: 'var(--fg-muted)',
@@ -244,7 +265,7 @@ export function TabBar({ mobileOpen = false, onNavigate }: TabBarProps) {
           gap: '6px',
         }}
       >
-        ⚙️ Admin
+        ⚙️ Admin{pinned('/admin')}
       </NavLink>
     </div>
   );

@@ -4,6 +4,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.responses import Response
 
+from server.config import load_config
 from server.api.chat import router as chat_router
 from server.api.chunk_summaries import router as chunk_summaries_router
 from server.api.config import router as config_router
@@ -19,6 +20,7 @@ from server.api.models import router as models_router
 from server.api.repos import router as repos_router
 from server.api.reranker import router as reranker_router
 from server.api.search import router as search_router
+from server.mcp.server import get_mcp_server
 from server.observability.metrics import render_latest
 
 app = FastAPI(title="TriBridRAG", version="0.1.0")
@@ -31,7 +33,36 @@ app.add_middleware(
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
+    # MCP streamable HTTP uses this header for session management.
+    expose_headers=["Mcp-Session-Id"],
 )
+
+_mcp_session_cm = None
+_global_cfg = load_config()
+if _global_cfg.mcp.enabled:
+    _mcp = get_mcp_server()
+    app.mount(_global_cfg.mcp.mount_path, _mcp.streamable_http_app())
+
+
+@app.on_event("startup")
+async def _mcp_startup() -> None:
+    global _mcp_session_cm
+    if not _global_cfg.mcp.enabled:
+        return
+    if _mcp_session_cm is not None:
+        return
+    _mcp_session_cm = _mcp.session_manager.run()
+    await _mcp_session_cm.__aenter__()
+
+
+@app.on_event("shutdown")
+async def _mcp_shutdown() -> None:
+    global _mcp_session_cm
+    cm = _mcp_session_cm
+    _mcp_session_cm = None
+    if cm is None:
+        return
+    await cm.__aexit__(None, None, None)
 
 
 @app.get("/metrics")

@@ -280,11 +280,15 @@ if [[ "$START_BACKEND" == "1" && "$BACKEND_MODE" == "local" ]]; then
     fi
     wait_for_http_ok "http://127.0.0.1:${BACKEND_PORT}/api/health" 60
     wait_for_backend_ready 120
+
+    log "MCP (Streamable HTTP): http://localhost:${BACKEND_PORT}/mcp/"
   fi
 elif [[ "$START_BACKEND" == "1" && "$BACKEND_MODE" == "docker" ]]; then
   if [[ "$DRY_RUN" == "0" ]]; then
     wait_for_http_ok "http://127.0.0.1:${BACKEND_PORT}/api/health" 90
     wait_for_backend_ready 120
+
+    log "MCP (Streamable HTTP): http://localhost:${BACKEND_PORT}/mcp/"
   fi
 fi
 

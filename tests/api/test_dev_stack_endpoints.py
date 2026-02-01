@@ -54,6 +54,36 @@ async def test_dev_status_includes_details_when_frontend_unreachable(
 
 
 @pytest.mark.asyncio
+async def test_dev_status_probes_multiple_hosts_and_returns_resolved_urls(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import server.api.docker as docker_api
+
+    monkeypatch.setattr(docker_api, "_resolve_dev_ports", lambda: (5173, 8012), raising=True)
+
+    async def _fake_ok(url: str, timeout_s: float = 1.5) -> bool:  # noqa: ARG001
+        # Simulate a common dev scenario: the frontend is reachable via localhost but not 127.0.0.1.
+        if url == "http://localhost:5173/web":
+            return True
+        # Backend health is reachable via 127.0.0.1 as normal.
+        if url == "http://127.0.0.1:8012/api/health":
+            return True
+        return False
+
+    monkeypatch.setattr(docker_api, "_http_ok", _fake_ok, raising=True)
+
+    r = await client.get("/api/dev/status")
+    assert r.status_code == 200
+    payload = r.json()
+
+    assert payload["frontend_running"] is True
+    assert payload["backend_running"] is True
+    assert payload["frontend_url"] == "http://localhost:5173/web"
+    assert payload["backend_url"] == "http://127.0.0.1:8012/api"
+    assert any("preferred http://127.0.0.1:5173/web failed" in d for d in payload["details"])
+
+
+@pytest.mark.asyncio
 async def test_dev_restart_frontend_rejects_non_local_clients(
     client: AsyncClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:

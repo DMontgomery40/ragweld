@@ -12,6 +12,8 @@ export { useChunkSummariesStore, useCardsStore } from './useChunkSummariesStore'
 export { useGraphStore } from './useGraphStore';
 // Cost calculator store (for Sidepanel)
 export { useCostCalculatorStore } from './useCostCalculatorStore';
+// Dock store (right panel: Dock vs Settings)
+export { useDockStore } from './useDockStore';
 export type { Repository } from './useRepoStore';
 export type { TooltipMap } from './useTooltipStore';
 export type { ChunkSummary, ChunkSummariesLastBuild } from '@/types/generated';

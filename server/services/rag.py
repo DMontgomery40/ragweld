@@ -1,15 +1,16 @@
 """RAG pipeline orchestration service using PydanticAI with OpenAI Responses API."""
 
 import json
+import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 from pydantic_ai import Agent, RunContext
 from pydantic_ai.models.openai import OpenAIResponsesModel, OpenAIResponsesModelSettings
 
 from server.models.retrieval import ChunkMatch
-from server.models.tribrid_config_model import FusionConfig, TriBridConfig
+from server.models.tribrid_config_model import ChatDebugInfo, FusionConfig, TriBridConfig
 from server.services.conversation_store import Conversation
 
 
@@ -261,6 +262,8 @@ async def stream_response(
     include_sparse: bool = True,
     include_graph: bool = True,
     top_k: int | None = None,
+    run_id: str | None = None,
+    started_at_ms: int | None = None,
 ) -> AsyncIterator[str]:
     """Stream the RAG agent response as SSE events.
 
@@ -351,15 +354,124 @@ async def stream_response(
 
             # Final event with sources + conversation_id
             sources_json = [s.model_dump(mode="serialization", by_alias=True) for s in collected_sources]
+
+            done_payload: dict[str, Any] = {
+                "type": "done",
+                "conversation_id": conversation.id,
+                "sources": sources_json,
+            }
+
+            if run_id:
+                ended_at_ms = int(time.time() * 1000)
+                debug = build_chat_debug_info(
+                    config=config,
+                    fusion=fusion,
+                    include_vector=include_vector,
+                    include_sparse=include_sparse,
+                    include_graph=include_graph,
+                    top_k=top_k,
+                    sources=collected_sources,
+                )
+                done_payload.update(
+                    {
+                        "run_id": run_id,
+                        "started_at_ms": int(started_at_ms or ended_at_ms),
+                        "ended_at_ms": int(ended_at_ms),
+                        "debug": debug.model_dump(mode="serialization", by_alias=True),
+                    }
+                )
+
             done_data = json.dumps(
-                {
-                    "type": "done",
-                    "conversation_id": conversation.id,
-                    "sources": sources_json,
-                }
+                done_payload
             )
             yield f"data: {done_data}\n\n"
 
     except Exception as e:
         error_data = json.dumps({"type": "error", "message": str(e)})
         yield f"data: {error_data}\n\n"
+
+
+def build_chat_debug_info(
+    *,
+    config: TriBridConfig,
+    fusion: Any,
+    include_vector: bool,
+    include_sparse: bool,
+    include_graph: bool,
+    top_k: int | None,
+    sources: list[ChunkMatch],
+) -> ChatDebugInfo:
+    """Build ChatDebugInfo from fusion debug + config."""
+    fusion_debug: dict[str, Any] = getattr(fusion, "last_debug", None) or {}
+
+    scores = [float(s.score) for s in sources if s.score is not None]
+    top1 = scores[0] if scores else None
+    top5 = scores[:5]
+    avg5 = (sum(top5) / len(top5)) if top5 else None
+
+    method = str(getattr(config.fusion, "method", "") or "").strip().lower()
+    fusion_method: str | None = method if method in {"rrf", "weighted"} else None
+
+    # Determine which legs actually contributed (requested + enabled + non-empty)
+    vector_ok = bool(include_vector) and bool(fusion_debug.get("fusion_vector_enabled")) and int(
+        fusion_debug.get("fusion_vector_results") or 0
+    ) > 0
+    sparse_ok = bool(include_sparse) and bool(fusion_debug.get("fusion_sparse_enabled")) and int(
+        fusion_debug.get("fusion_sparse_results") or 0
+    ) > 0
+    graph_ok = bool(include_graph) and bool(fusion_debug.get("fusion_graph_enabled")) and int(
+        fusion_debug.get("fusion_graph_hydrated_chunks") or 0
+    ) > 0
+    legs_used = int(vector_ok) + int(sparse_ok) + int(graph_ok)
+
+    confidence: float | None = None
+    if top1 is not None and fusion_method == "rrf":
+        k = int(getattr(config.fusion, "rrf_k", 60) or 60)
+        denom = float(legs_used) / float(k + 1) if legs_used > 0 else 0.0
+        if denom > 0.0:
+            confidence = max(0.0, min(1.0, float(top1) / denom))
+    elif top1 is not None and fusion_method == "weighted":
+        confidence = max(0.0, min(1.0, float(top1)))
+
+    # Cast fusion_method to the expected Literal type
+    typed_fusion_method: Literal["rrf", "weighted"] | None = None
+    if fusion_method == "rrf":
+        typed_fusion_method = "rrf"
+    elif fusion_method == "weighted":
+        typed_fusion_method = "weighted"
+
+    # Safely extract int values from fusion_debug
+    def _safe_int(val: Any) -> int | None:
+        if val is None:
+            return None
+        try:
+            return int(val)
+        except (TypeError, ValueError):
+            return None
+
+    return ChatDebugInfo(
+        confidence=confidence,
+        include_vector=bool(include_vector),
+        include_sparse=bool(include_sparse),
+        include_graph=bool(include_graph),
+        vector_enabled=(bool(fusion_debug.get("fusion_vector_enabled")) if "fusion_vector_enabled" in fusion_debug else None),
+        sparse_enabled=(bool(fusion_debug.get("fusion_sparse_enabled")) if "fusion_sparse_enabled" in fusion_debug else None),
+        graph_enabled=(bool(fusion_debug.get("fusion_graph_enabled")) if "fusion_graph_enabled" in fusion_debug else None),
+        fusion_method=typed_fusion_method,
+        rrf_k=(int(getattr(config.fusion, "rrf_k", 60)) if typed_fusion_method == "rrf" else None),
+        vector_weight=(float(getattr(config.fusion, "vector_weight", 0.0)) if typed_fusion_method == "weighted" else None),
+        sparse_weight=(float(getattr(config.fusion, "sparse_weight", 0.0)) if typed_fusion_method == "weighted" else None),
+        graph_weight=(float(getattr(config.fusion, "graph_weight", 0.0)) if typed_fusion_method == "weighted" else None),
+        normalize_scores=(bool(getattr(config.fusion, "normalize_scores", False)) if typed_fusion_method == "weighted" else None),
+        final_k_used=int(top_k or config.retrieval.final_k),
+        vector_results=_safe_int(fusion_debug.get("fusion_vector_results")) if "fusion_vector_results" in fusion_debug else None,
+        sparse_results=_safe_int(fusion_debug.get("fusion_sparse_results")) if "fusion_sparse_results" in fusion_debug else None,
+        graph_entity_hits=_safe_int(fusion_debug.get("fusion_graph_entity_hits")) if "fusion_graph_entity_hits" in fusion_debug else None,
+        graph_hydrated_chunks=_safe_int(fusion_debug.get("fusion_graph_hydrated_chunks")) if "fusion_graph_hydrated_chunks" in fusion_debug else None,
+        final_results=len(sources),
+        top1_score=(float(top1) if top1 is not None else None),
+        avg5_score=(float(avg5) if avg5 is not None else None),
+        conf_top1_thresh=float(config.retrieval.conf_top1),
+        conf_avg5_thresh=float(config.retrieval.conf_avg5),
+        fusion_debug=fusion_debug,
+    )

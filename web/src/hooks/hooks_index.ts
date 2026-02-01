@@ -24,7 +24,6 @@ export { useGlobalSearch } from './useGlobalSearch';
 // Navigation hooks (React Router integration)
 export { useNavigation } from './useNavigation';
 export { useTabs } from './useTabs';
-export { useVSCodeEmbed } from './useVSCodeEmbed';
 
 // Config management (Zustand-backed)
 export { useConfig, useConfigField } from './useConfig';

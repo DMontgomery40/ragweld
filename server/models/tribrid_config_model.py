@@ -249,6 +249,108 @@ class DevStackRestartResponse(BaseModel):
     backend_port: int | None = Field(default=None, ge=1024, le=65535, description="Backend port (if applicable).")
 
 
+class MCPHTTPTransportStatus(BaseModel):
+    """Status of an MCP HTTP transport (Python/Node) when enabled."""
+
+    host: str = Field(description="Host for the MCP HTTP transport.")
+    port: int = Field(ge=1, le=65535, description="Port for the MCP HTTP transport.")
+    path: str | None = Field(default=None, description="HTTP path prefix (if applicable).")
+    running: bool = Field(description="Whether the transport is reachable/responding.")
+
+
+class MCPStatusResponse(BaseModel):
+    """Status of MCP transports built into TriBridRAG."""
+
+    # Future-facing: expose HTTP transports when implemented.
+    python_http: MCPHTTPTransportStatus | None = Field(
+        default=None,
+        description="Python MCP over HTTP transport status (if implemented/enabled).",
+    )
+    node_http: MCPHTTPTransportStatus | None = Field(
+        default=None,
+        description="Node MCP over HTTP transport status (if implemented/enabled).",
+    )
+
+    # Current: stdio is typically client-spawned (no daemon).
+    python_stdio_available: bool = Field(
+        default=False,
+        description="Whether the Python stdio MCP transport is available (client-spawned).",
+    )
+    details: list[str] = Field(
+        default_factory=list,
+        description="Human-readable diagnostic details (best-effort).",
+    )
+
+
+class MCPConfig(BaseModel):
+    """Inbound MCP (Model Context Protocol) server configuration.
+
+    This config controls TriBridRAG's embedded MCP Streamable HTTP endpoint.
+    """
+
+    enabled: bool = Field(
+        default=True,
+        description="Enable the embedded MCP Streamable HTTP server.",
+    )
+    mount_path: str = Field(
+        default="/mcp",
+        description="Mount path for the MCP Streamable HTTP endpoint (e.g. /mcp).",
+    )
+    stateless_http: bool = Field(
+        default=True,
+        description="Run MCP Streamable HTTP in stateless mode (recommended).",
+    )
+    json_response: bool = Field(
+        default=True,
+        description="Prefer JSON responses for MCP Streamable HTTP (recommended).",
+    )
+    enable_dns_rebinding_protection: bool = Field(
+        default=True,
+        description="Enable DNS rebinding protection for MCP HTTP (recommended).",
+    )
+    allowed_hosts: list[str] = Field(
+        default_factory=lambda: ["localhost:*", "127.0.0.1:*"],
+        description="Allowed Host header values for MCP HTTP (supports wildcard ':*').",
+    )
+    allowed_origins: list[str] = Field(
+        default_factory=lambda: ["http://localhost:*", "http://127.0.0.1:*"],
+        description="Allowed Origin header values for MCP HTTP (supports wildcard ':*').",
+    )
+    require_api_key: bool = Field(
+        default=False,
+        description="Require `Authorization: Bearer $MCP_API_KEY` for MCP HTTP access.",
+    )
+    default_top_k: int = Field(
+        default=20,
+        ge=1,
+        le=200,
+        description="Default top_k for MCP search/answer tools when not provided.",
+    )
+    default_mode: Literal["tribrid", "dense_only", "sparse_only", "graph_only"] = Field(
+        default="tribrid",
+        description="Default retrieval mode for MCP search/answer tools when not provided.",
+    )
+
+    @field_validator("allowed_hosts", "allowed_origins", mode="before")
+    @classmethod
+    def _parse_list(cls, v: Any) -> list[str]:
+        if v is None:
+            return []
+        if isinstance(v, str):
+            return [item.strip() for item in v.replace("\n", ",").split(",") if item.strip()]
+        if isinstance(v, (list, tuple, set)):
+            cleaned: list[str] = []
+            for item in v:
+                if item is None:
+                    continue
+                text = str(item).strip()
+                if text:
+                    cleaned.append(text)
+            return cleaned
+        text = str(v).strip()
+        return [text] if text else []
+
+
 class Corpus(BaseModel):
     """User-managed corpus (formerly "repo" in Agro).
 
@@ -554,8 +656,101 @@ class ChatRequest(BaseModel):
     )
 
 
+class ChatDebugInfo(BaseModel):
+    """Developer-facing debug metadata for a single chat answer."""
+
+    confidence: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description="Heuristic confidence score for this answer (0-1).",
+    )
+
+    # Per-message leg toggles (what user requested)
+    include_vector: bool = Field(default=True, description="Vector leg requested for this message")
+    include_sparse: bool = Field(default=True, description="Sparse/BM25 leg requested for this message")
+    include_graph: bool = Field(default=True, description="Graph leg requested for this message")
+
+    # Config enablement (what actually ran is include_* AND *_enabled)
+    vector_enabled: bool | None = Field(default=None, description="Vector leg enabled in config")
+    sparse_enabled: bool | None = Field(default=None, description="Sparse leg enabled in config")
+    graph_enabled: bool | None = Field(default=None, description="Graph leg enabled in config")
+
+    # Fusion parameters
+    fusion_method: Literal["rrf", "weighted"] | None = Field(
+        default=None, description="Fusion method used for retrieval results"
+    )
+    rrf_k: int | None = Field(default=None, ge=1, le=200, description="RRF k (if fusion_method is rrf)")
+    vector_weight: float | None = Field(
+        default=None, ge=0.0, le=1.0, description="Vector weight (if fusion_method is weighted)"
+    )
+    sparse_weight: float | None = Field(
+        default=None, ge=0.0, le=1.0, description="Sparse weight (if fusion_method is weighted)"
+    )
+    graph_weight: float | None = Field(
+        default=None, ge=0.0, le=1.0, description="Graph weight (if fusion_method is weighted)"
+    )
+    normalize_scores: bool | None = Field(default=None, description="Whether leg score normalization was enabled")
+
+    # Counts + summary statistics
+    final_k_used: int | None = Field(default=None, ge=1, le=500, description="Final K used for retrieval context")
+    vector_results: int | None = Field(default=None, ge=0, description="Vector leg results returned")
+    sparse_results: int | None = Field(default=None, ge=0, description="Sparse leg results returned")
+    graph_entity_hits: int | None = Field(default=None, ge=0, description="Graph entity hits (pre-hydration)")
+    graph_hydrated_chunks: int | None = Field(default=None, ge=0, description="Graph hydrated chunks returned")
+    final_results: int | None = Field(default=None, ge=0, description="Final fused results returned")
+    top1_score: float | None = Field(default=None, description="Top-1 fused score (raw)")
+    avg5_score: float | None = Field(default=None, description="Average fused score for top-5 (raw)")
+    conf_top1_thresh: float | None = Field(
+        default=None, ge=0.0, le=1.0, description="Configured top-1 confidence threshold"
+    )
+    conf_avg5_thresh: float | None = Field(
+        default=None, ge=0.0, le=1.0, description="Configured avg-5 confidence threshold"
+    )
+
+    fusion_debug: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Raw fusion debug payload (for developers).",
+    )
+
+
+class TraceEvent(BaseModel):
+    """Single trace event (local tracing)."""
+
+    kind: str = Field(description="Event kind identifier (e.g., retrieval.vector, fusion.rrf)")
+    ts: int = Field(ge=0, description="Event timestamp (epoch milliseconds)")
+    msg: str | None = Field(default=None, description="Human-readable event message")
+    data: dict[str, Any] = Field(default_factory=dict, description="Structured event payload")
+
+
+class Trace(BaseModel):
+    """Trace payload for a single run."""
+
+    run_id: str = Field(description="Run identifier for correlation")
+    repo_id: str = Field(
+        description="Corpus identifier",
+        validation_alias=AliasChoices("repo_id", "corpus_id"),
+        serialization_alias="corpus_id",
+    )
+    started_at_ms: int = Field(ge=0, description="Run start time (epoch milliseconds)")
+    ended_at_ms: int | None = Field(default=None, ge=0, description="Run end time (epoch milliseconds)")
+    events: list[TraceEvent] = Field(default_factory=list, description="Ordered trace events")
+
+
+class TracesLatestResponse(BaseModel):
+    """Response payload for /api/traces/latest."""
+
+    repo: str | None = Field(default=None, description="Corpus identifier for the returned trace (if any)")
+    run_id: str | None = Field(default=None, description="Run identifier for the returned trace (if any)")
+    trace: Trace | None = Field(default=None, description="Trace payload (null if none available)")
+
+
 class ChatResponse(BaseModel):
     """Response from chat endpoint."""
+    run_id: str = Field(description="Unique identifier for this chat run (trace/log correlation)")
+    started_at_ms: int = Field(ge=0, description="Chat run start time (epoch milliseconds)")
+    ended_at_ms: int | None = Field(default=None, ge=0, description="Chat run end time (epoch milliseconds)")
+    debug: ChatDebugInfo | None = Field(default=None, description="Developer debug metadata for this answer")
     conversation_id: str = Field(description="Conversation identifier")
     message: Message = Field(description="Assistant's response message")
     sources: list[ChunkMatch] = Field(description="Sources used for response")
@@ -2339,10 +2534,17 @@ class UIConfig(BaseModel):
     )
 
     chat_show_trace: int = Field(
-        default=0,
+        default=1,
         ge=0,
         le=1,
         description="Show routing trace panel by default"
+    )
+
+    chat_show_debug_footer: int = Field(
+        default=1,
+        ge=0,
+        le=1,
+        description="Show dev/debug footer under chat answers"
     )
 
     chat_default_model: str = Field(
@@ -2745,6 +2947,7 @@ class TriBridConfig(BaseModel):
     hydration: HydrationConfig = Field(default_factory=HydrationConfig)
     evaluation: EvaluationConfig = Field(default_factory=EvaluationConfig)
     system_prompts: SystemPromptsConfig = Field(default_factory=SystemPromptsConfig)
+    mcp: MCPConfig = Field(default_factory=MCPConfig)
     docker: DockerConfig = Field(default_factory=DockerConfig)
 
     model_config = ConfigDict(
@@ -2957,6 +3160,7 @@ class TriBridConfig(BaseModel):
             'CHAT_SHOW_CONFIDENCE': self.ui.chat_show_confidence,
             'CHAT_SHOW_CITATIONS': self.ui.chat_show_citations,
             'CHAT_SHOW_TRACE': self.ui.chat_show_trace,
+            'CHAT_SHOW_DEBUG_FOOTER': self.ui.chat_show_debug_footer,
             'CHAT_DEFAULT_MODEL': self.ui.chat_default_model,
             'CHAT_STREAM_TIMEOUT': self.ui.chat_stream_timeout,
             'CHAT_THINKING_BUDGET_TOKENS': self.ui.chat_thinking_budget_tokens,
@@ -2991,6 +3195,17 @@ class TriBridConfig(BaseModel):
             'PROMPT_CODE_ENRICHMENT': self.system_prompts.code_enrichment,
             'PROMPT_EVAL_ANALYSIS': self.system_prompts.eval_analysis,
             'PROMPT_LIGHTWEIGHT_CARDS': self.system_prompts.lightweight_chunk_summaries,
+            # MCP (inbound) params (7)
+            'MCP_HTTP_ENABLED': self.mcp.enabled,
+            'MCP_HTTP_PATH': self.mcp.mount_path,
+            'MCP_HTTP_STATELESS': self.mcp.stateless_http,
+            'MCP_HTTP_JSON_RESPONSE': self.mcp.json_response,
+            'MCP_HTTP_DNS_REBIND_PROTECTION': self.mcp.enable_dns_rebinding_protection,
+            'MCP_HTTP_ALLOWED_HOSTS': ",".join(self.mcp.allowed_hosts),
+            'MCP_HTTP_ALLOWED_ORIGINS': ",".join(self.mcp.allowed_origins),
+            'MCP_REQUIRE_API_KEY': self.mcp.require_api_key,
+            'MCP_DEFAULT_TOP_K': self.mcp.default_top_k,
+            'MCP_DEFAULT_MODE': self.mcp.default_mode,
             # Docker params (11)
             'DOCKER_HOST': self.docker.docker_host,
             'DOCKER_STATUS_TIMEOUT': self.docker.docker_status_timeout,
@@ -3224,7 +3439,8 @@ class TriBridConfig(BaseModel):
                 chat_stream_include_thinking=data.get('CHAT_STREAM_INCLUDE_THINKING', 1),
                 chat_show_confidence=data.get('CHAT_SHOW_CONFIDENCE', 0),
                 chat_show_citations=data.get('CHAT_SHOW_CITATIONS', 1),
-                chat_show_trace=data.get('CHAT_SHOW_TRACE', 0),
+                chat_show_trace=data.get('CHAT_SHOW_TRACE', 1),
+                chat_show_debug_footer=data.get('CHAT_SHOW_DEBUG_FOOTER', 1),
                 chat_default_model=data.get('CHAT_DEFAULT_MODEL', 'gpt-4o-mini'),
                 chat_stream_timeout=data.get('CHAT_STREAM_TIMEOUT', 120),
                 chat_thinking_budget_tokens=data.get('CHAT_THINKING_BUDGET_TOKENS', 10000),
@@ -3262,6 +3478,20 @@ class TriBridConfig(BaseModel):
                 code_enrichment=data.get('PROMPT_CODE_ENRICHMENT', SystemPromptsConfig().code_enrichment),
                 eval_analysis=data.get('PROMPT_EVAL_ANALYSIS', SystemPromptsConfig().eval_analysis),
                 lightweight_chunk_summaries=data.get('PROMPT_LIGHTWEIGHT_CARDS', SystemPromptsConfig().lightweight_chunk_summaries),
+            ),
+            mcp=MCPConfig(
+                enabled=data.get('MCP_HTTP_ENABLED', MCPConfig().enabled),
+                mount_path=data.get('MCP_HTTP_PATH', MCPConfig().mount_path),
+                stateless_http=data.get('MCP_HTTP_STATELESS', MCPConfig().stateless_http),
+                json_response=data.get('MCP_HTTP_JSON_RESPONSE', MCPConfig().json_response),
+                enable_dns_rebinding_protection=data.get(
+                    'MCP_HTTP_DNS_REBIND_PROTECTION', MCPConfig().enable_dns_rebinding_protection
+                ),
+                allowed_hosts=data.get('MCP_HTTP_ALLOWED_HOSTS', MCPConfig().allowed_hosts),
+                allowed_origins=data.get('MCP_HTTP_ALLOWED_ORIGINS', MCPConfig().allowed_origins),
+                require_api_key=data.get('MCP_REQUIRE_API_KEY', MCPConfig().require_api_key),
+                default_top_k=data.get('MCP_DEFAULT_TOP_K', MCPConfig().default_top_k),
+                default_mode=data.get('MCP_DEFAULT_MODE', MCPConfig().default_mode),
             ),
             docker=DockerConfig(
                 docker_host=data.get('DOCKER_HOST', ''),
@@ -3455,6 +3685,7 @@ TRIBRID_CONFIG_KEYS = {
     'CHAT_SHOW_CONFIDENCE',
     'CHAT_SHOW_CITATIONS',
     'CHAT_SHOW_TRACE',
+    'CHAT_SHOW_DEBUG_FOOTER',
     'CHAT_DEFAULT_MODEL',
     'CHAT_STREAM_TIMEOUT',
     'CHAT_THINKING_BUDGET_TOKENS',
@@ -3486,6 +3717,17 @@ TRIBRID_CONFIG_KEYS = {
     'PROMPT_LIGHTWEIGHT_CARDS',
     'PROMPT_CODE_ENRICHMENT',
     'PROMPT_EVAL_ANALYSIS',
+    # MCP (inbound) params (7)
+    'MCP_HTTP_ENABLED',
+    'MCP_HTTP_PATH',
+    'MCP_HTTP_STATELESS',
+    'MCP_HTTP_JSON_RESPONSE',
+    'MCP_HTTP_DNS_REBIND_PROTECTION',
+    'MCP_HTTP_ALLOWED_HOSTS',
+    'MCP_HTTP_ALLOWED_ORIGINS',
+    'MCP_REQUIRE_API_KEY',
+    'MCP_DEFAULT_TOP_K',
+    'MCP_DEFAULT_MODE',
     # Docker params (11)
     'DOCKER_HOST',
     'DOCKER_STATUS_TIMEOUT',

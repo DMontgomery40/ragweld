@@ -513,6 +513,8 @@ class TestChatModels:
             source="vector",
         )
         resp = ChatResponse(
+            run_id="run_001",
+            started_at_ms=0,
             conversation_id="conv_001",
             message=msg,
             sources=[source],

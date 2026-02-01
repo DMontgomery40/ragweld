@@ -1396,22 +1396,22 @@ function formatTracePayload(payload: TracePayload, vectorBackend: string): strin
 
   const retrieval = findEvent('retriever.retrieve');
   if (retrieval && Array.isArray(retrieval.data?.candidates)) {
-    const rows = retrieval.data.candidates.slice(0, 10).map((candidate: any) => [
+    const rows = retrieval.data.candidates.map((candidate: any) => [
       (candidate.path || '').split('/').slice(-2).join('/'),
       candidate.bm25_rank ?? '',
       candidate.dense_rank ?? '',
     ]);
-    parts.push('Pre-rerank candidates (top 10):');
+    parts.push(`Pre-rerank candidates (${retrieval.data.candidates.length}):`);
     parts.push(formatTraceTable(rows, ['path', 'bm25', 'dense']));
     parts.push('');
   }
 
   if (rerank && Array.isArray(rerank.data?.scores)) {
-    const rows = rerank.data.scores.slice(0, 10).map((score: any) => [
+    const rows = rerank.data.scores.map((score: any) => [
       (score.path || '').split('/').slice(-2).join('/'),
       score.score?.toFixed?.(3) ?? score.score ?? '',
     ]);
-    parts.push('Rerank top-10:');
+    parts.push(`Rerank (${rerank.data.scores.length}):`);
     parts.push(formatTraceTable(rows, ['path', 'score']));
     parts.push('');
   }
@@ -1421,10 +1421,10 @@ function formatTracePayload(payload: TracePayload, vectorBackend: string): strin
     parts.push('');
   }
 
-  const recentEvents = events.slice(-10);
-  if (recentEvents.length) {
-    parts.push('Events:');
-    recentEvents.forEach((event) => {
+  const allEvents = events;
+  if (allEvents.length) {
+    parts.push(`Events (${allEvents.length}):`);
+    allEvents.forEach((event) => {
       const when = new Date(event.ts ?? Date.now()).toLocaleTimeString();
       const name = (event.kind ?? '').padEnd(18);
       parts.push(`  ${when}  ${name}  ${event.msg ?? ''}`);

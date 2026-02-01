@@ -2,7 +2,7 @@
 // Centralized API calls for all Dashboard operations
 
 import { apiUrl, withCorpusScope } from './client';
-import type { DashboardIndexStatsResponse, DashboardIndexStatusResponse } from '@/types/generated';
+import type { DashboardIndexStatsResponse, DashboardIndexStatusResponse, MCPStatusResponse } from '@/types/generated';
 
 // ============================================================================
 // System Status APIs
@@ -33,27 +33,6 @@ export interface CardsData {
   cards?: any[];
 }
 
-export interface MCPStatus {
-  python_http?: {
-    host: string;
-    port: number;
-    path: string;
-    running: boolean;
-  };
-  node_http?: {
-    host: string;
-    port: number;
-    path?: string;
-    running: boolean;
-  };
-  python_stdio_available?: boolean;
-}
-
-export interface AutotuneStatus {
-  enabled: boolean;
-  current_mode?: string;
-}
-
 export async function getHealth(): Promise<HealthStatus> {
   const response = await fetch(apiUrl('/health'));
   if (!response.ok) throw new Error('Failed to fetch health');
@@ -72,15 +51,9 @@ export async function getCards(): Promise<CardsData> {
   return response.json();
 }
 
-export async function getMCPStatus(): Promise<MCPStatus> {
+export async function getMCPStatus(): Promise<MCPStatusResponse> {
   const response = await fetch(apiUrl('/mcp/status'));
   if (!response.ok) throw new Error('Failed to fetch MCP status');
-  return response.json();
-}
-
-export async function getAutotuneStatus(): Promise<AutotuneStatus> {
-  const response = await fetch(apiUrl('/autotune/status'));
-  if (!response.ok) throw new Error('Failed to fetch autotune status');
   return response.json();
 }
 
@@ -331,21 +304,6 @@ export async function getDockerContainers(): Promise<DockerContainer[]> {
     console.error('[getDockerContainers] Error:', err);
     return [];
   }
-}
-
-// ============================================================================
-// Git & Repository APIs
-// ============================================================================
-
-export interface GitHookStatus {
-  installed: boolean;
-  hooks?: string[];
-}
-
-export async function getGitHookStatus(): Promise<GitHookStatus> {
-  const response = await fetch(apiUrl('/git/hooks/status'));
-  if (!response.ok) return { installed: false };
-  return response.json();
 }
 
 export interface RepoInfo {

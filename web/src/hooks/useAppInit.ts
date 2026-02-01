@@ -6,7 +6,7 @@ import { apiUrl } from '@/api/client';
 
 /**
  * Hook for app initialization
- * Handles loading config, profiles, and repos via Zustand stores
+ * Handles loading config and repos via Zustand stores
  * NO LONGER depends on window.CoreUtils - uses typed API client
  */
 export function useAppInit() {
@@ -41,22 +41,6 @@ export function useAppInit() {
               }
             })
             .catch((err: unknown) => console.warn('Failed to load models:', err)),
-
-          // Load profiles (still needed for legacy modules during transition)
-          fetch(apiUrl('/profiles'))
-            .then(r => r.json())
-            .then(data => {
-              // Store in window for legacy modules that still need it
-              if ((window as any).CoreUtils?.state) {
-                (window as any).CoreUtils.state.profiles = data.profiles || [];
-                (window as any).CoreUtils.state.defaultProfile = data.default || null;
-              }
-            })
-            .catch((err: unknown) => console.warn('Failed to load profiles:', err)),
-
-          // Load commit metadata if available (legacy module)
-          (window as any).GitCommitMeta?.loadCommitMeta?.()
-            .catch((err: Error) => console.warn('Failed to load commit meta:', err))
         ]);
 
         // Trigger initial health check via Zustand store
@@ -64,21 +48,8 @@ export function useAppInit() {
           console.warn('Initial health check failed:', err)
         );
 
-        // Legacy module initializations (temporary, will be removed as modules migrate)
-        if ((window as any).Autotune?.refreshAutotune) {
-          await (window as any).Autotune.refreshAutotune().catch((err: Error) =>
-            console.warn('Failed to refresh autotune:', err)
-          );
-        }
-
         if ((window as any).UiHelpers?.wireDayConverters) {
           (window as any).UiHelpers.wireDayConverters();
-        }
-
-        if ((window as any).GitHooks?.refreshHooksStatus) {
-          await (window as any).GitHooks.refreshHooksStatus().catch((err: Error) =>
-            console.warn('Failed to refresh git hooks:', err)
-          );
         }
 
         console.log('[useAppInit] Initialization complete');
