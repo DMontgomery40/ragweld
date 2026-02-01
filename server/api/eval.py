@@ -433,7 +433,7 @@ async def eval_run_stream(
             total = len(entries)
             _EVAL_STATUS["total"] = total
 
-            yield f"data: {json.dumps({'type': 'log', 'message': f'Starting eval: repo_id={repo_id}, use_multi={run_use_multi}, final_k={run_final_k}, sample_limit={sample_limit or \"all\"}'})}\n\n"
+            yield f"data: {json.dumps({'type': 'log', 'message': f'Starting eval: repo_id={repo_id}, use_multi={run_use_multi}, final_k={run_final_k}, sample_limit={sample_limit or "all"}'})}\n\n"
             yield f"data: {json.dumps({'type': 'log', 'message': f'Loaded {total} eval_dataset entries'})}\n\n"
 
             fusion = TriBridFusion(vector=None, sparse=None, graph=None)

@@ -39,7 +39,7 @@
 
 ```mermaid
 flowchart TB
-    P[Pydantic\ntribrid_config_model.py] --> G[pydantic2ts\n(generate_types.py)]
+    P["Pydantic\ntribrid_config_model.py"] --> G["pydantic2ts\n(generate_types.py)"]
     G --> T[generated.ts]
     T --> Z[Zustand Stores]
     Z --> H[Hooks]

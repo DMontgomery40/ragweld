@@ -147,7 +147,7 @@ flowchart LR
 
 ```mermaid
 flowchart TB
-    U[User] --> UI[Frontend]\n(generated.ts)
+    U[User] --> UI["Frontend\n(generated.ts)"]
     UI --> API[FastAPI /config]
     API --> P[Pydantic Models]
     P --> API

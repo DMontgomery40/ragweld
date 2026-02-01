@@ -62,9 +62,9 @@ flowchart LR
     end
 
     U -->|HTTP| A[FastAPI]
-    A -->|async| V[VectorRetriever\nPostgres+pgvector]
-    A -->|async| S[SparseRetriever\nPostgres FTS/BM25]
-    A -->|async| G[GraphRetriever\nNeo4j]
+    A -->|async| V["VectorRetriever\nPostgres+pgvector"]
+    A -->|async| S["SparseRetriever\nPostgres FTS/BM25"]
+    A -->|async| G["GraphRetriever\nNeo4j"]
 
     V --> F[Fusion]
     S --> F
@@ -153,7 +153,7 @@ flowchart LR
 
 ```mermaid
 flowchart TB
-    subgraph Tuning Inputs
+    subgraph "Tuning Inputs"
       K[top_k]
       W[weights]
       RRF[rrf_k_div]

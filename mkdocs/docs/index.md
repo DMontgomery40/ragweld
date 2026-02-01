@@ -69,9 +69,9 @@ TriBridRAG executes three independent retrieval methods in parallel and fuses th
 
 ```mermaid
 flowchart LR
-    Q[Query] --> V[Vector Search\npgvector]
-    Q --> S[Sparse Search\nPostgreSQL FTS/BM25]
-    Q --> G[Graph Search\nNeo4j]
+    Q[Query] --> V["Vector Search\npgvector"]
+    Q --> S["Sparse Search\nPostgreSQL FTS/BM25"]
+    Q --> G["Graph Search\nNeo4j"]
     V --> F[Fusion Layer]
     S --> F
     G --> F
@@ -197,7 +197,7 @@ Use ++ctrl+c++ to stop local uvicorn or Docker Tail sessions.
 
 ```mermaid
 flowchart TB
-    CFG[Pydantic Config\nTriBridConfig] --> GEN[generate_types.py\nTypescript types]
+    CFG["Pydantic Config\nTriBridConfig"] --> GEN["generate_types.py\nTypescript types"]
     GEN --> STO[Zustand Stores]
     STO --> HOOKS[React Hooks]
     HOOKS --> UI[Components]

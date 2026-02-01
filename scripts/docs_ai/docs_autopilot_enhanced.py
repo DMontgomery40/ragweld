@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Enhanced Docs Autopilot for TriBridRAG
-Generates comprehensive documentation using OpenAI GPT-4 with full context awareness
+Generates comprehensive documentation using OpenAI GPT-5 (Responses API) with full context awareness
 
 TriBridRAG is a tri-brid RAG engine combining:
 - Vector search (pgvector in PostgreSQL)
@@ -21,6 +21,91 @@ from datetime import datetime
 from typing import List, Dict, Optional, Tuple, Any
 import requests
 from dataclasses import dataclass, field
+
+
+_MERMAID_FENCE_RE = re.compile(r"```mermaid\s*\n(?P<code>[\s\S]*?)\n```", re.MULTILINE)
+
+
+def _normalize_mermaid_v11_code(code: str) -> str:
+    """
+    Normalize Mermaid flowchart syntax to reduce Mermaid v11 parse errors.
+
+    This is intentionally conservative and only fixes common, mechanical issues:
+    - `\\n` line breaks must be inside quoted labels: `A[foo\\nbar]` -> `A[\"foo\\nbar\"]`
+    - `A[foo]\\nbar` -> `A[\"foo\\nbar\"]`
+    - Endpoint tokens like `/metrics` must NOT be node IDs: `--> /metrics` -> `--> METRICS[\"/metrics\"]`
+    - `subgraph` titles with spaces should be quoted: `subgraph Foo Bar` -> `subgraph \"Foo Bar\"`
+    """
+
+    fixed = code
+
+    # 1) Quote subgraph titles that contain spaces and are not already quoted / bracketed.
+    lines: list[str] = []
+    for line in fixed.splitlines():
+        m = re.match(r"^(\s*)subgraph\s+([^\[\"\n]+)$", line)
+        if m:
+            indent, title = m.group(1), m.group(2).strip()
+            if " " in title and not title.startswith('"') and "[" not in title:
+                line = f'{indent}subgraph "{title}"'
+        lines.append(line)
+    fixed = "\n".join(lines)
+
+    # 2) Replace bare endpoint tokens used as node IDs.
+    endpoint_nodes = {
+        "/metrics": "METRICS",
+        "/ready": "READY",
+        "/health": "HEALTH",
+    }
+    for endpoint, node_id in endpoint_nodes.items():
+        # ... --> /metrics
+        fixed = re.sub(
+            rf"(-->)\s*{re.escape(endpoint)}\s*$",
+            rf'\1 {node_id}["{endpoint}"]',
+            fixed,
+            flags=re.MULTILINE,
+        )
+        # /metrics --> ...
+        fixed = re.sub(
+            rf"^(\s*){re.escape(endpoint)}(\s*-->)",
+            rf'\1{node_id}["{endpoint}"]\2',
+            fixed,
+            flags=re.MULTILINE,
+        )
+
+    # 3) Quote labels that contain a literal "\\n" inside brackets.
+    #    A[foo\nbar] -> A["foo\nbar"]
+    fixed = re.sub(
+        r'(\b[A-Za-z][A-Za-z0-9_]*)\[(?!")(\s*[^\]]*\\n[^\]]*)\]',
+        r'\1["\2"]',
+        fixed,
+    )
+
+    # 4) Merge the invalid pattern: A[foo]\\nbar -> A["foo\\nbar"]
+    fixed = re.sub(
+        r'(\b[A-Za-z][A-Za-z0-9_]*)\[([^\]]+)\]\\n([^\n]+)$',
+        r'\1["\2\\n\3"]',
+        fixed,
+        flags=re.MULTILINE,
+    )
+
+    return fixed
+
+
+def normalize_mermaid_v11_markdown(markdown: str) -> Tuple[str, int]:
+    """Normalize Mermaid blocks in markdown. Returns (updated_markdown, blocks_changed)."""
+
+    blocks_changed = 0
+
+    def _replace(match: re.Match[str]) -> str:
+        nonlocal blocks_changed
+        code = match.group("code")
+        normalized = _normalize_mermaid_v11_code(code)
+        if normalized != code:
+            blocks_changed += 1
+        return f"```mermaid\n{normalized}\n```"
+
+    updated = _MERMAID_FENCE_RE.sub(_replace, markdown or "")
+    return updated, blocks_changed
 
 
 @dataclass
@@ -503,6 +588,22 @@ flowchart LR
     Fusion --> Rerank[Reranker]
     Rerank --> Results[Final Results]
 ```
+
+### MERMAID v11 (CRITICAL: AVOID SYNTAX ERRORS)
+- ONLY generate `flowchart` diagrams (`flowchart LR` / `flowchart TB`). Avoid other diagram types.
+- NO HTML anywhere in Mermaid (no `<br>`, no tags, no raw HTML labels).
+- Node IDs MUST be simple: start with a letter, then letters/numbers/underscore only (`^[A-Za-z][A-Za-z0-9_]*$`).
+- NEVER use URL-ish or path-ish tokens as node IDs (e.g., do NOT write `--> /metrics`). Use an ID + quoted label:
+  - `METRICS["/metrics"]`, `READY["/ready"]`, `HEALTH["/health"]`
+- If you want multi-line labels, you MUST quote the label and put `\\n` *inside* the quotes:
+  - GOOD: `UI["Frontend\\n(generated.ts)"]`
+  - BAD: `UI[Frontend]\\n(generated.ts)`
+- If you use `subgraph` and the title contains spaces, quote it:
+  - GOOD: `subgraph "Tuning Inputs"`
+  - GOOD: `subgraph tuning_inputs["Tuning Inputs"]`
+  - BAD: `subgraph Tuning Inputs`
+- Prefer quoting any label containing punctuation like `/`, `(`, `)`, `:`, `+`, `-`.
+- Keep diagrams small and shallow. Prefer 6–14 nodes per diagram; use multiple diagrams instead of one huge diagram.
 
 ### 7. CONTENT ORGANIZATION
 - Use hierarchical headers (##, ###, ####)
@@ -1126,9 +1227,37 @@ visual enhancement!"""
             # Filter content one more time before writing
             filtered_content = self._filter_sensitive_content(content)
             filtered_content = self._filter_banned_terms(filtered_content)
+            filtered_content, blocks_changed = normalize_mermaid_v11_markdown(filtered_content)
 
             full_path.write_text(filtered_content, encoding="utf-8")
+            if blocks_changed:
+                print(f"    ↳ Mermaid normalized: {blocks_changed} block(s)")
             print(f"  ✅ Wrote: {file_path}")
+
+    def normalize_existing_mermaid(self) -> Tuple[int, int]:
+        """Normalize Mermaid blocks across existing mkdocs/docs markdown files."""
+
+        if not self.docs_dir.exists():
+            return 0, 0
+
+        files_changed = 0
+        blocks_changed_total = 0
+
+        for md_file in sorted(self.docs_dir.rglob("*.md")):
+            try:
+                original = md_file.read_text(encoding="utf-8")
+            except Exception:
+                continue
+
+            updated, blocks_changed = normalize_mermaid_v11_markdown(original)
+            if blocks_changed and updated != original:
+                md_file.write_text(updated, encoding="utf-8")
+                files_changed += 1
+                blocks_changed_total += blocks_changed
+                rel = md_file.relative_to(self.docs_dir)
+                print(f"  ✅ Mermaid normalized: {rel} ({blocks_changed} block(s))")
+
+        return files_changed, blocks_changed_total
 
     def write_mkdocs_config(self, config: dict) -> None:
         """Write mkdocs.yml configuration"""
@@ -1316,6 +1445,11 @@ def main():
     parser.add_argument("--dry-run", action="store_true", help="Don't write files, just show what would be done")
     parser.add_argument("--regenerate-all", action="store_true", help="Regenerate all documentation from entire codebase")
     parser.add_argument("--full-scan", action="store_true", help="Scan entire repository, not just changes")
+    parser.add_argument(
+        "--normalize-mermaid",
+        action="store_true",
+        help="Normalize Mermaid v11 blocks in existing docs (no LLM call)",
+    )
     args = parser.parse_args()
 
     print("=" * 60)
@@ -1323,6 +1457,12 @@ def main():
     print("=" * 60)
 
     autopilot = EnhancedDocsAutopilot()
+
+    if args.normalize_mermaid:
+        print("\n🧹 Normalizing Mermaid blocks across mkdocs/docs ...")
+        files_changed, blocks_changed = autopilot.normalize_existing_mermaid()
+        print(f"✅ Mermaid normalization complete: {files_changed} file(s), {blocks_changed} block(s) updated")
+        return
 
     # Force full repository scan if regenerate-all or full-scan
     if args.regenerate_all or args.full_scan:

@@ -223,6 +223,32 @@ class DashboardIndexStatsResponse(BaseModel):
     total_storage: int = Field(default=0, ge=0, description="Total storage bytes (Postgres + Neo4j).")
 
 
+class DevStackStatusResponse(BaseModel):
+    """Status of the local dev stack (frontend + backend)."""
+
+    frontend_running: bool = Field(description="Whether the dev frontend (Vite) is reachable.")
+    backend_running: bool = Field(description="Whether the dev backend (FastAPI/Uvicorn) is reachable.")
+    frontend_port: int = Field(ge=1024, le=65535, description="Port for dev frontend (Vite).")
+    backend_port: int = Field(ge=1024, le=65535, description="Port for dev backend (Uvicorn).")
+
+    frontend_url: str | None = Field(default=None, description="Resolved frontend URL (if known).")
+    backend_url: str | None = Field(default=None, description="Resolved backend URL (if known).")
+    details: list[str] = Field(
+        default_factory=list,
+        description="Human-readable diagnostic details (best-effort).",
+    )
+
+
+class DevStackRestartResponse(BaseModel):
+    """Response payload for a dev stack restart operation."""
+
+    success: bool = Field(description="Whether the operation was accepted and executed successfully.")
+    message: str | None = Field(default=None, description="Human-readable success message.")
+    error: str | None = Field(default=None, description="Error message (if success=false).")
+    frontend_port: int | None = Field(default=None, ge=1024, le=65535, description="Frontend port (if applicable).")
+    backend_port: int | None = Field(default=None, ge=1024, le=65535, description="Backend port (if applicable).")
+
+
 class Corpus(BaseModel):
     """User-managed corpus (formerly "repo" in Agro).
 

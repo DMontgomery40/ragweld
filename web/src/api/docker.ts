@@ -1,5 +1,6 @@
 import { apiClient, api } from './client';
 import type { DockerStatus, DockerContainer } from '@web/types';
+import type { DevStackRestartResponse, DevStackStatusResponse } from '@/types/generated';
 
 export const dockerApi = {
   /**
@@ -129,18 +130,5 @@ export const dockerApi = {
 };
 
 // Dev Stack Types
-export interface DevStackStatus {
-  frontend_running: boolean;
-  backend_running: boolean;
-  frontend_port: number;
-  backend_port: number;
-}
-
-export interface DevStackRestartResult {
-  success: boolean;
-  message?: string;
-  error?: string;
-  port?: number;
-  frontend_port?: number;
-  backend_port?: number;
-}
+export type DevStackStatus = DevStackStatusResponse;
+export type DevStackRestartResult = DevStackRestartResponse;

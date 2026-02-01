@@ -37,8 +37,8 @@
 
 ```mermaid
 flowchart TB
-    App --> /metrics
-    /metrics --> Prom[Prometheus]
+    App --> METRICS["/metrics"]
+    METRICS["/metrics"] --> Prom[Prometheus]
     Postgres --> PExp[postgres-exporter]
     PExp --> Prom
 ```

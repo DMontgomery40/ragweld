@@ -6,6 +6,7 @@ import * as DashAPI from '@/api/dashboard';
 import { QuickActions } from './QuickActions';
 import { IndexDisplayPanels } from './IndexDisplayPanels';
 import { useDockerStore } from '@/stores/useDockerStore';
+import { StatusIndicator } from '@/components/ui/StatusIndicator';
 
 export function SystemStatusSubtab() {
   const [health, setHealth] = useState<string>('—');
@@ -341,16 +342,39 @@ export function SystemStatusSubtab() {
                       }}
                     >
                       <span style={{ color: 'var(--fg-muted)' }}>Frontend</span>
-                      <span
-                        className={devStackStatus?.frontend_running ? 'status-running' : 'status-stopped'}
-                        style={{
-                          color: devStackStatus?.frontend_running ? 'var(--ok)' : 'var(--err)',
-                          fontWeight: 600,
-                          fontFamily: "'SF Mono', monospace"
-                        }}
-                      >
-                        {devStackLoading ? '...' : devStackStatus?.frontend_running ? `running :${devStackStatus.frontend_port}` : 'stopped'}
-                      </span>
+                    <span
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        fontWeight: 600,
+                        fontFamily: "'SF Mono', monospace",
+                        color: devStackLoading
+                          ? 'var(--fg-muted)'
+                          : devStackStatus
+                            ? (devStackStatus.frontend_running ? 'var(--ok)' : 'var(--err)')
+                            : 'var(--fg-muted)',
+                      }}
+                    >
+                      <StatusIndicator
+                        status={
+                          devStackLoading
+                            ? 'loading'
+                            : devStackStatus
+                              ? (devStackStatus.frontend_running ? 'online' : 'offline')
+                              : 'idle'
+                        }
+                        showLabel={false}
+                        size="sm"
+                        pulse
+                        ariaLabel="Dev frontend status"
+                      />
+                      {devStackLoading
+                        ? 'checking'
+                        : devStackStatus
+                          ? (devStackStatus.frontend_running ? `running :${devStackStatus.frontend_port}` : 'stopped')
+                          : 'unknown'}
+                    </span>
                     </div>
                     <div
                       style={{
@@ -361,16 +385,39 @@ export function SystemStatusSubtab() {
                       }}
                     >
                       <span style={{ color: 'var(--fg-muted)' }}>Backend</span>
-                      <span
-                        className={devStackStatus?.backend_running ? 'status-running' : 'status-stopped'}
-                        style={{
-                          color: devStackStatus?.backend_running ? 'var(--ok)' : 'var(--err)',
-                          fontWeight: 600,
-                          fontFamily: "'SF Mono', monospace"
-                        }}
-                      >
-                        {devStackLoading ? '...' : devStackStatus?.backend_running ? `running :${devStackStatus.backend_port}` : 'stopped'}
-                      </span>
+                    <span
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        fontWeight: 600,
+                        fontFamily: "'SF Mono', monospace",
+                        color: devStackLoading
+                          ? 'var(--fg-muted)'
+                          : devStackStatus
+                            ? (devStackStatus.backend_running ? 'var(--ok)' : 'var(--err)')
+                            : 'var(--fg-muted)',
+                      }}
+                    >
+                      <StatusIndicator
+                        status={
+                          devStackLoading
+                            ? 'loading'
+                            : devStackStatus
+                              ? (devStackStatus.backend_running ? 'online' : 'offline')
+                              : 'idle'
+                        }
+                        showLabel={false}
+                        size="sm"
+                        pulse
+                        ariaLabel="Dev backend status"
+                      />
+                      {devStackLoading
+                        ? 'checking'
+                        : devStackStatus
+                          ? (devStackStatus.backend_running ? `running :${devStackStatus.backend_port}` : 'stopped')
+                          : 'unknown'}
+                    </span>
                     </div>
                   </div>
 

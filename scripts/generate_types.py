@@ -225,12 +225,12 @@ def main() -> None:
     output_path = project_root / "web" / "src" / "types" / "generated.ts"
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    print(f"\nSource: server.models.tribrid_config_model")
+    print("\nSource: server.models.tribrid_config_model")
     print(f"Output: {output_path}\n")
 
     try:
         # Import all models from THE LAW
-        from server.models.tribrid_config_model import (
+        from server.models.tribrid_config_model import (  # noqa: I001
             # Root config
             TriBridConfig,
             # Domain models - Index
@@ -245,6 +245,9 @@ def main() -> None:
             DashboardIndexStatusMetadata,
             DashboardIndexStatusResponse,
             DashboardIndexStatsResponse,
+            # Domain models - Dev stack orchestration (local dev only)
+            DevStackStatusResponse,
+            DevStackRestartResponse,
             # Domain models - Corpora
             Corpus,
             CorpusCreateRequest,
@@ -308,6 +311,8 @@ def main() -> None:
         DashboardIndexStatusMetadata,
         DashboardIndexStatusResponse,
         DashboardIndexStatsResponse,
+        DevStackStatusResponse,
+        DevStackRestartResponse,
         Corpus,
         CorpusCreateRequest,
         CorpusUpdateRequest,

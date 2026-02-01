@@ -1108,6 +1108,38 @@ export interface DashboardIndexStatusResponse {
   current_file?: string | null;
 }
 
+/** Response payload for a dev stack restart operation. */
+export interface DevStackRestartResponse {
+  /** Whether the operation was accepted and executed successfully. */
+  success: boolean;
+  /** Human-readable success message. */
+  message?: string | null;
+  /** Error message (if success=false). */
+  error?: string | null;
+  /** Frontend port (if applicable). */
+  frontend_port?: number | null;
+  /** Backend port (if applicable). */
+  backend_port?: number | null;
+}
+
+/** Status of the local dev stack (frontend + backend). */
+export interface DevStackStatusResponse {
+  /** Whether the dev frontend (Vite) is reachable. */
+  frontend_running: boolean;
+  /** Whether the dev backend (FastAPI/Uvicorn) is reachable. */
+  backend_running: boolean;
+  /** Port for dev frontend (Vite). */
+  frontend_port: number;
+  /** Port for dev backend (Uvicorn). */
+  backend_port: number;
+  /** Resolved frontend URL (if known). */
+  frontend_url?: string | null;
+  /** Resolved backend URL (if known). */
+  backend_url?: string | null;
+  /** Human-readable diagnostic details (best-effort). */
+  details?: string[];
+}
+
 /** Response for /eval/analyze_comparison. */
 export interface EvalAnalyzeComparisonResponse {
   /** Whether analysis succeeded */

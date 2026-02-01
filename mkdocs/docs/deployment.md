@@ -99,7 +99,7 @@ flowchart TB
     Pydantic --> Types[generated.ts]
     Types --> UI
     Compose --> API
-    API --> /ready
+    API --> READY["/ready"]
 ```
 
 ??? note "Container Logs"
