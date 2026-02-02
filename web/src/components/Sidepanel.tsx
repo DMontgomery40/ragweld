@@ -423,12 +423,3 @@ const selectStyle: React.CSSProperties = {
   padding: '6px 8px',
   borderRadius: '4px',
 };
-
-const inputStyle: React.CSSProperties = {
-  width: '100%',
-  background: 'var(--input-bg)',
-  border: '1px solid var(--line)',
-  color: 'var(--fg)',
-  padding: '6px 8px',
-  borderRadius: '4px',
-};

@@ -29,50 +29,43 @@
 !!! tip "Source of Truth"
     `data/glossary.json` is parsed by the UI. Keep `key` values stable for long-lived tooltips.
 
-!!! note "Examples"
-    - PostgreSQL pgvector URL
-    - Neo4j Connection URI
-    - Active Repository (Corpus)
+!!! note "Representative Entries"
+    - PostgreSQL pgvector URL (`POSTGRES_URL`)
+    - Neo4j Connection URI (`NEO4J_URI`)
+    - Final Top-K (`FINAL_K`)
 
 !!! warning "Typos"
     Misspelled keys break existing tooltips silently. Validate JSON in CI.
 
-## Representative Entries
+## Example Entries
 
 | Term | Key | Definition |
 |------|-----|------------|
 | PostgreSQL pgvector URL | POSTGRES_URL | Connection URL for pgvector-enabled Postgres |
 | Neo4j Connection URI | NEO4J_URI | Connection URI for Neo4j graph |
-| Active Repository | REPO | Logical corpus name for routing and indexing |
+| Final Top‑K | FINAL_K | Final result size after fusion/reranking |
 
 ```mermaid
 flowchart LR
-    glossary.json --> TooltipIcon
-    TooltipIcon --> UI
+    glossary["glossary.json"] --> Tooltip["TooltipIcon"]
+    Tooltip --> UI["UI"]
 ```
 
 === "Python"
 ```python
-# Tooling note: the UI consumes the JSON directly; backend does not parse this by default.
+# Backend is not reading glossary by default; UI reads the JSON.
 ```
 
 === "curl"
 ```bash
-# Validate JSON structure in CI, e.g., with jq
-jq . data/glossary.json > /dev/null
+# Validate glossary.json structure
+eq 0 $(jq . data/glossary.json >/dev/null 2>&1; echo $?) && echo OK || echo FAIL
 ```
 
 === "TypeScript"
 ```typescript
-// UI side: import terms via a loader and feed into TooltipIcon
+// UI side: load glossary.json and feed into TooltipIcon
 ```
 
 !!! success "Consistency"
     Use the glossary for all UI textual explanations to avoid drift between screens.
-
-- [x] Keep terms unique
-- [x] Provide related links for navigation
-- [x] Update definitions when behavior changes
-
-??? note "Localization"
-    If localization is needed, consider expanding the schema with `translations` while keeping `key` stable.

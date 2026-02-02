@@ -1,38 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { useAPI } from '@/hooks/useAPI';
 import { useErrorHandler } from '@/hooks/useErrorHandler';
+import type { TracesLatestResponse } from '@/types/generated';
 
-interface TraceViewerProps {
+type TraceViewerProps = {
   className?: string;
-}
-
-interface TraceEvent {
-  kind: string;
-  ts?: string;
-  msg?: string;
-  data?: any;
-}
-
-interface TraceData {
-  trace: {
-    events?: TraceEvent[];
-  } | null;
-  repo?: string;
-}
-
-interface Candidate {
-  path?: string;
-  bm25_rank?: number;
-  dense_rank?: number;
-}
-
-interface RerankScore {
-  path?: string;
-  score?: number;
-}
+};
 
 export const TraceViewer: React.FC<TraceViewerProps> = ({ className = '' }) => {
-  const [traceData, setTraceData] = useState<TraceData | null>(null);
+  const [traceData, setTraceData] = useState<TracesLatestResponse | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedRepo, setSelectedRepo] = useState('agro');
@@ -46,7 +22,7 @@ export const TraceViewer: React.FC<TraceViewerProps> = ({ className = '' }) => {
 
     try {
       const repoParam = selectedRepo ? `?repo=${encodeURIComponent(selectedRepo)}` : '';
-      const response = await fetch(api(`/api/traces/latest${repoParam}`));
+      const response = await fetch(api(`/traces/latest${repoParam}`));
       const data = await response.json();
       setTraceData(data);
     } catch (err) {
@@ -115,7 +91,7 @@ export const TraceViewer: React.FC<TraceViewerProps> = ({ className = '' }) => {
           padding: '40px',
           color: 'var(--fg-muted)'
         }}>
-          No traces yet. Enable LangChain Tracing V2 in Misc and run a query via /answer.
+          No traces yet. Set Tracing Mode to Local/LangSmith (not Off) and run a query.
         </div>
       );
     }
@@ -135,7 +111,7 @@ export const TraceViewer: React.FC<TraceViewerProps> = ({ className = '' }) => {
       `Policy: ${decideEvent?.data?.policy || '—'}`,
       `Intent: ${decideEvent?.data?.intent || '—'}`,
       `Final K: ${rerankEvent?.data?.output_topK || '—'}`,
-      `Vector: qdrant`
+      `Vector: pgvector`
     ];
 
     parts.push(
@@ -153,7 +129,7 @@ export const TraceViewer: React.FC<TraceViewerProps> = ({ className = '' }) => {
 
     // Pre-rerank candidates
     if (retrieveEvent && Array.isArray(retrieveEvent.data?.candidates)) {
-      const candidates: Candidate[] = retrieveEvent.data.candidates;
+      const candidates = (retrieveEvent.data as any).candidates as any[];
       parts.push(
         <div key="candidates" style={{ marginBottom: '16px' }}>
           <div style={{
@@ -190,7 +166,7 @@ export const TraceViewer: React.FC<TraceViewerProps> = ({ className = '' }) => {
 
     // Rerank results
     if (rerankEvent && Array.isArray(rerankEvent.data?.scores)) {
-      const scores: RerankScore[] = rerankEvent.data.scores;
+      const scores = (rerankEvent.data as any).scores as any[];
       parts.push(
         <div key="rerank" style={{ marginBottom: '16px' }}>
           <div style={{
@@ -226,6 +202,7 @@ export const TraceViewer: React.FC<TraceViewerProps> = ({ className = '' }) => {
 
     // Gating info
     if (gateEvent) {
+      const gateData = (gateEvent.data ?? {}) as any;
       parts.push(
         <div key="gate" style={{
           fontSize: '12px',
@@ -237,10 +214,10 @@ export const TraceViewer: React.FC<TraceViewerProps> = ({ className = '' }) => {
           borderLeft: '3px solid var(--accent)'
         }}>
           <strong>Gate:</strong>{' '}
-          top1&gt;={gateEvent.data?.top1_thresh} avg5&gt;={gateEvent.data?.avg5_thresh}
+          top1&gt;={String(gateData.top1_thresh ?? '—')} avg5&gt;={String(gateData.avg5_thresh ?? '—')}
           {' → '}
           <span style={{ color: 'var(--accent)', fontWeight: 600 }}>
-            {gateEvent.data?.outcome}
+            {String(gateData.outcome ?? '—')}
           </span>
         </div>
       );

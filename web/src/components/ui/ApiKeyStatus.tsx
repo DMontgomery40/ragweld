@@ -88,6 +88,33 @@ export function ApiKeyStatus({ keyName, label }: ApiKeyStatusProps) {
     );
   }
 
+  if (isConfigured === null) {
+    return (
+      <div style={{
+        padding: '12px 16px',
+        background: 'var(--bg-elev1)',
+        borderRadius: '8px',
+        border: '1px solid var(--line)',
+        fontSize: '12px',
+      }}>
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          color: 'var(--fg-muted)'
+        }}>
+          <span style={{ fontSize: '14px' }}>?</span>
+          <span style={{ fontWeight: 600 }}>
+            {displayName}: Unable to check
+          </span>
+        </div>
+        <div style={{ color: 'var(--fg-muted)', marginTop: '4px' }}>
+          The backend may be unreachable, misconfigured, or blocked by CORS. Verify the API is running, then reload.
+        </div>
+      </div>
+    );
+  }
+
   // Not configured or unknown
   return (
     <div style={{

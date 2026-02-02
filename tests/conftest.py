@@ -57,13 +57,3 @@ class Calculator:
     def subtract(self, a: int, b: int) -> int:
         return a - b
 '''
-
-
-# Hook to skip tests that raise NotImplementedError
-@pytest.hookimpl(hookwrapper=True)
-def pytest_runtest_call(item):
-    """Skip tests that raise NotImplementedError (stub implementations)."""
-    outcome = yield
-    exc_info = outcome.excinfo
-    if exc_info is not None and exc_info[0] is NotImplementedError:
-        pytest.skip("Not yet implemented (stub)")

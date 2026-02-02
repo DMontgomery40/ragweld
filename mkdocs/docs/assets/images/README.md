@@ -1,64 +1,76 @@
 # Screenshots Guide
 
-## How to Add Screenshots to Docs
+<div class="grid chunk_summaries" markdown>
 
-1. **Take screenshots** of the TriBridRAG UI at http://localhost:5175/
-2. **Save them** to this directory with descriptive names:
-   - `rag-config-interface.png` - RAG tab with fusion weights
-   - `search-results.png` - Search interface with results
-   - `graph-visualization.png` - Neo4j graph view
-   - `model-selector.png` - Model picker interface
-   - `cost-calculator.png` - Cost tracking dashboard
+-   :material-image:{ .lg .middle } **High-Quality Images**
 
-3. **Add to docs** using this format:
+    ---
+
+    Dark theme, 1920x1080, real data.
+
+-   :material-camera:{ .lg .middle } **What to Capture**
+
+    ---
+
+    RAG config, search results, graph visualization, model picker, glossary.
+
+-   :material-folder-image:{ .lg .middle } **Organization**
+
+    ---
+
+    Save descriptive filenames in `docs/assets/images/`.
+
+</div>
+
+[Get started](../../index.md){ .md-button .md-button--primary }
+[Configuration](../../configuration.md){ .md-button }
+[API](../../api.md){ .md-button }
+
+!!! tip "Suggested Shots"
+    - RAG configuration with fusion weights and reranker
+    - Search results with citations
+    - Graph visualization (entities, relationships)
+    - Model selector and pricing info
+    - Glossary tooltips in action
+
+!!! note "Filenames"
+    - `rag-config-interface.png`
+    - `search-results.png`
+    - `graph-visualization.png`
+    - `model-selector.png`
+
+!!! warning "Privacy"
+    Ensure screenshots do not contain secrets or PII.
+
+## Add Images to Docs
 
 ```markdown
 ![RAG Configuration Interface](./assets/images/rag-config-interface.png)
-*Configure fusion weights, reranking, and search parameters through the intuitive UI*
 ```
 
-Or with lightbox zoom:
-
-```markdown
-<figure markdown>
-  ![RAG Configuration](./assets/images/rag-config-interface.png){ loading=lazy }
-  <figcaption>Configure tri-brid fusion weights and reranking options</figcaption>
-</figure>
+=== "Python"
+```python
+# Tip: keep images under docs/assets/images and reference with relative paths
+print("Embed with ![alt](./assets/images/filename.png)")
 ```
 
-## Recommended Screenshots
+=== "curl"
+```bash
+# No runtime step; images are static assets.
+```
 
-### 1. RAG Configuration Tab
-- Show the sliders for fusion weights (vector/sparse/graph)
-- Reranker dropdown
-- Top-K settings
-- Confidence thresholds
+=== "TypeScript"
+```typescript
+// Not applicable; images are referenced in markdown.
+```
 
-### 2. Search Interface
-- Query input
-- Results panel with chunks
-- Relevance scores
-- Citation links
+```mermaid
+flowchart TB
+    Shot["Screenshot"] --> File["docs/assets/images/*.png"]
+    File --> Markdown["Markdown Pages"]
+    Markdown --> Site["MkDocs Site"]
+```
 
-### 3. Graph Visualization
-- Neo4j entities and relationships
-- Community detection
-- Entity details panel
-
-### 4. Model Management
-- Model picker dropdown (embedding/generation/reranker)
-- Provider selection
-- Cost calculator
-- Context window info
-
-### 5. Glossary/Tooltips
-- Show the tooltip system with definitions
-- Searchable glossary tab
-
-## Screenshot Tips
-
-- Use dark mode (matches docs theme)
-- Capture at ~1920x1080 or similar
-- Show real data/results (not empty states)
-- Highlight key features with cursor or annotations
-- Keep UI clean (close unnecessary panels)
+- [x] Use dark mode
+- [x] Real data
+- [x] Descriptive filenames

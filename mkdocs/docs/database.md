@@ -26,82 +26,55 @@
 [Configuration](configuration.md){ .md-button }
 [API](api.md){ .md-button }
 
-!!! tip "Pro Tip — Co-locate Storage"
+!!! tip "Co-locate Storage"
     Use the provided Docker Compose to run Postgres and Neo4j locally with sane defaults and persistent volumes outside the repository.
 
 !!! note "pgvector Index Choice"
-    Choose HNSW for high-recall and read-heavy workloads; IVFFlat for faster build times and stable performance on mid-size corpora.
+    Choose HNSW for high-recall, read-heavy workloads; IVFFlat for faster build times and stable performance on mid-size corpora.
 
 !!! warning "Neo4j Memory"
     Set `NEO4J_HEAP_INIT`, `NEO4J_HEAP_MAX`, and `NEO4J_PAGECACHE` environment variables for large graphs to avoid GC thrash.
 
-## Docker Compose Services
+## Services
 
 | Service | Image | Ports | Data Volume |
 |---------|-------|-------|-------------|
 | Postgres | `pgvector/pgvector:pg16` | `${POSTGRES_PORT:-5432}:5432` | `${TRIBRID_DB_DIR}/postgres:/var/lib/postgresql/data` |
 | Postgres Exporter | `prometheuscommunity/postgres-exporter:latest` | internal | n/a |
-| Neo4j | `${NEO4J_IMAGE:-neo4j:5.26.20-community}` | `7687`, `7474` | internal volume |
+| Neo4j | `neo4j:5.x` | `7687`, `7474` | `${TRIBRID_DB_DIR}/neo4j/*` |
 
 ```mermaid
 flowchart LR
     Client --> API
-    API --> PG[(PostgreSQL + pgvector)]
-    API --> NEO[(Neo4j)]
-    PG --> EXP[Postgres Exporter]
-    EXP --> PROM[Prometheus]
+    API --> PG[("PostgreSQL + pgvector")]
+    API --> NEO[("Neo4j")]
+    PG --> EXP["Postgres Exporter"]
+    EXP --> PROM["Prometheus"]
 ```
-
-## Environment Variables
-
-| Key | Description |
-|-----|-------------|
-| `POSTGRES_HOST` | Hostname for PostgreSQL |
-| `POSTGRES_PORT` | Port number |
-| `POSTGRES_DB` | Database name |
-| `POSTGRES_USER` | Username |
-| `POSTGRES_PASSWORD` | Password |
-| `NEO4J_URI` | `bolt://host:7687` or `neo4j://host:7687` |
-| `NEO4J_USER` | Neo4j username |
-| `NEO4J_PASSWORD` | Neo4j password |
-| `TRIBRID_DB_DIR` | Host directory for DB bind-mounts |
-| `NEO4J_HEAP_INIT`, `NEO4J_HEAP_MAX`, `NEO4J_PAGECACHE` | Neo4j memory tuning |
 
 ## Connectivity Checks
 
 === "Python"
-    ```python
-    import httpx
-
-    base = "http://localhost:8000"
-    print(httpx.get(f"{base}/health").json())  # (1)
-    print(httpx.get(f"{base}/ready").json())   # (2)
-    ```
+```python
+import httpx
+print(httpx.get("http://localhost:8000/health").json())   # liveness
+print(httpx.get("http://localhost:8000/ready").json())    # readiness
+```
 
 === "curl"
-    ```bash
-    curl -sS http://localhost:8000/health | jq .
-    curl -sS http://localhost:8000/ready | jq .
-    ```
+```bash
+curl -sS http://localhost:8000/health | jq .
+curl -sS http://localhost:8000/ready | jq .
+```
 
 === "TypeScript"
-    ```typescript
-    async function readiness() {
-      const health = await (await fetch("/health")).json(); // (1)
-      const ready = await (await fetch("/ready")).json();   // (2)
-      console.log(health, ready);
-    }
-    ```
-
-1. Liveness: server process up
-2. Readiness: DBs connected and ready to accept requests
+```typescript
+async function readiness() {
+  const health = await (await fetch("/health")).json();
+  const ready = await (await fetch("/ready")).json();
+  console.log(health, ready);
+}
+```
 
 !!! success "Index Footprint"
     Use `DashboardIndexStatsResponse` to view `pgvector_index_bytes`, `bm25_index_bytes`, and `neo4j_store_bytes` per corpus.
-
-- [x] Use separate credentials per environment
-- [x] Restrict network access to DB services
-- [x] Enable backups for Postgres and Neo4j stores
-
-??? note "Postgres Client"
-    `PostgresClient` manages connection pooling and ensures FTS + pgvector indexes exist per corpus table. It exposes `connect`, `disconnect`, and `close_shared_pools` for lifecycle control.

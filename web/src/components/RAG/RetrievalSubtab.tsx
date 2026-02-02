@@ -107,12 +107,15 @@ export function RetrievalSubtab() {
   const [layerBonusRetrieval, setLayerBonusRetrieval] = useConfigField<number>('layer_bonus.retrieval', 0.15);
   const [vendorPenalty, setVendorPenalty] = useConfigField<number>('layer_bonus.vendor_penalty', -0.1);
   const [freshnessBonus, setFreshnessBonus] = useConfigField<number>('layer_bonus.freshness_bonus', 0.05);
-  const [tracingMode, setTracingMode] = useConfigField<string>('tracing.tracing_mode', 'off');
-  const [traceAutoLs, setTraceAutoLs] = useConfigField<number>('tracing.trace_auto_ls', 0);
+  const [tracingMode, setTracingMode] = useConfigField<string>('tracing.tracing_mode', 'langsmith');
+  const [traceAutoLs, setTraceAutoLs] = useConfigField<number>('tracing.trace_auto_ls', 1);
   const [traceRetention, setTraceRetention] = useConfigField<number>('tracing.trace_retention', 50);
   const [langchainTracingV2, setLangchainTracingV2] = useConfigField<number>('tracing.langchain_tracing_v2', 0);
-  const [langchainEndpoint, setLangchainEndpoint] = useConfigField<string>('tracing.langchain_endpoint', '');
-  const [langchainProject, setLangchainProject] = useConfigField<string>('tracing.langchain_project', '');
+  const [langchainEndpoint, setLangchainEndpoint] = useConfigField<string>(
+    'tracing.langchain_endpoint',
+    'https://api.smith.langchain.com',
+  );
+  const [langchainProject, setLangchainProject] = useConfigField<string>('tracing.langchain_project', 'tribrid');
   const [langtraceApiHost, setLangtraceApiHost] = useConfigField<string>('tracing.langtrace_api_host', '');
   const [langtraceProjectId, setLangtraceProjectId] = useConfigField<string>('tracing.langtrace_project_id', '');
 
@@ -200,25 +203,6 @@ export function RetrievalSubtab() {
       setTraceLoading(false);
     }
   }, []);
-
-  const handleOpenLangSmith = useCallback(async () => {
-    try {
-      const project = langchainProject || 'tribrid';
-      const qs = new URLSearchParams({ project, share: 'true' }).toString();
-      const response = await fetch(`/api/langsmith/latest?${qs}`);
-      if (!response.ok) {
-        throw new Error('LangSmith lookup failed');
-      }
-      const payload = await response.json();
-      if (payload?.url) {
-        window.open(payload.url, '_blank', 'noopener,noreferrer');
-      } else {
-        alert('No recent LangSmith run found. Ask a question first.');
-      }
-    } catch (error) {
-      alert(error instanceof Error ? error.message : 'Unable to open LangSmith');
-    }
-  }, [langchainProject]);
 
   if (hydrating) {
     return <div style={{ padding: '24px' }}>Loading configuration...</div>;
@@ -1189,8 +1173,8 @@ export function RetrievalSubtab() {
       </CollapsibleSection>
 
       <CollapsibleSection
-        title="Routing Trace & LangSmith"
-        description="Inspect LangGraph traces and jump directly into LangSmith for debugging."
+        title="Routing Trace (Local)"
+        description="Preview the latest in-memory request trace. External exporters (LangSmith/LangTrace) are not wired yet; settings below are reserved for future integrations."
         storageKey="retrieval-tracing"
         defaultExpanded={false}
       >
@@ -1200,10 +1184,10 @@ export function RetrievalSubtab() {
               {traceLoading ? 'Loading trace…' : 'Load Latest Trace'}
             </button>
           </div>
-          <div className="input-group">
-            <button className="small-button" onClick={handleOpenLangSmith}>
-              Open in LangSmith
-            </button>
+          <div className="input-group" style={{ display: 'flex', alignItems: 'center' }}>
+            <span className="small" style={{ color: 'var(--fg-muted)' }}>
+              LangSmith deep-linking is not implemented yet.
+            </span>
           </div>
         </div>
 
@@ -1260,7 +1244,7 @@ export function RetrievalSubtab() {
             </label>
             <input
               type="number"
-              min={1}
+              min={10}
               max={500}
               value={traceRetention}
               onChange={(e) => setTraceRetention(snapNumber(e.target.value, 50))}
@@ -1374,7 +1358,7 @@ function snapNumber(value: string, fallback: number) {
 
 function formatTracePayload(payload: TracePayload, vectorBackend: string): string {
   if (!payload?.trace) {
-    return 'No traces yet. Enable LangChain tracing and run a query.';
+    return 'No traces yet. Set Tracing Mode to Local/LangSmith (not Off) and run a query.';
   }
   const events = Array.isArray(payload.trace.events) ? payload.trace.events : [];
   const parts: string[] = [];

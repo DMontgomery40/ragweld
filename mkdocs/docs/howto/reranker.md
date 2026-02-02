@@ -18,7 +18,7 @@
 
     ---
 
-    Benchmark before/after reranking on an eval dataset.
+    Benchmark before/after reranking on an evaluation dataset.
 
 </div>
 
@@ -33,89 +33,77 @@
     Training and evaluation costs depend on selected `RERANK` and `EMB/GEN` models from `data/models.json`.
 
 !!! warning "Config-Governed"
-    Enable via `reranker.enabled`. All training hyperparameters must be present in Pydantic before use.
+    Enable via `reranking.reranker_mode`. All training hyperparameters must be present in Pydantic before use.
 
 ## API Surface
 
 | Route | Method | Description |
 |-------|--------|-------------|
-| `/reranker/status` | GET | Load status (model, enabled) |
+| `/reranker/status` | GET | Load status (mode/model) |
 | `/reranker/info` | GET | Implementation details |
 | `/reranker/mine` | POST | Mine triplets |
 | `/reranker/train` | POST | Train reranker |
 | `/reranker/evaluate` | POST | Evaluate against dataset |
-| `/reranker/logs/count` | GET | Available logs |
-| `/reranker/triplets/count` | GET | Triplets available |
-| `/reranker/costs` | GET | Estimated costs |
+| `/reranker/train/run/{run_id}` | GET | Inspect a training run |
+| `/reranker/train/run/{run_id}/metrics` | GET | Metrics stream |
 
 ```mermaid
 flowchart TB
-    Logs[Retrieval Logs] --> Mine[Mine Triplets]
-    Mine --> Train[Train Reranker]
-    Train --> Model[Reranker Model]
-    Model --> Eval[Evaluate]
-    Eval --> Report[Metrics]
+    Logs["Retrieval Logs"] --> Mine["Mine Triplets"]
+    Mine --> Train["Train Reranker"]
+    Train --> Model["Reranker Model"]
+    Model --> Eval["Evaluate"]
+    Eval --> Report["Metrics"]
 ```
 
-## Example Workflow
+## Example Workflow (Annotated)
 
 === "Python"
-    ```python
-    import httpx
+```python
+import httpx
+base = "http://localhost:8000"
 
-    base = "http://localhost:8000"
+# Mine triplets (1)
+httpx.post(f"{base}/reranker/mine", json={"corpus_id": "tribrid", "max_pairs": 500}).raise_for_status()
 
-    # Mine triplets (1)
-    mine_req = {"corpus_id": "tribrid", "max_pairs": 500}
-    httpx.post(f"{base}/reranker/mine", json=mine_req)
+# Train (2)
+httpx.post(f"{base}/reranker/train", json={"corpus_id": "tribrid", "epochs": 2, "batch_size": 16}).raise_for_status()
 
-    # Train (2)
-    train_req = {"corpus_id": "tribrid", "epochs": 2, "batch_size": 16}
-    httpx.post(f"{base}/reranker/train", json=train_req)
-
-    # Evaluate (3)
-    eval_req = {"corpus_id": "tribrid"}
-    print(httpx.post(f"{base}/reranker/evaluate", json=eval_req).json())
-    ```
+# Evaluate (3)
+print(httpx.post(f"{base}/reranker/evaluate", json={"corpus_id": "tribrid"}).json())
+```
 
 === "curl"
-    ```bash
-    BASE=http://localhost:8000
-    curl -sS -X POST "$BASE/reranker/mine" -H 'Content-Type: application/json' -d '{"corpus_id":"tribrid","max_pairs":500}'
-    curl -sS -X POST "$BASE/reranker/train" -H 'Content-Type: application/json' -d '{"corpus_id":"tribrid","epochs":2,"batch_size":16}'
-    curl -sS -X POST "$BASE/reranker/evaluate" -H 'Content-Type: application/json' -d '{"corpus_id":"tribrid"}' | jq .
-    ```
+```bash
+BASE=http://localhost:8000
+curl -sS -X POST "$BASE/reranker/mine" -H 'Content-Type: application/json' -d '{"corpus_id":"tribrid","max_pairs":500}'
+curl -sS -X POST "$BASE/reranker/train" -H 'Content-Type: application/json' -d '{"corpus_id":"tribrid","epochs":2,"batch_size":16}'
+curl -sS -X POST "$BASE/reranker/evaluate" -H 'Content-Type: application/json' -d '{"corpus_id":"tribrid"}' | jq .
+```
 
 === "TypeScript"
-    ```typescript
-    async function trainReranker(corpus_id: string) {
-      await fetch('/reranker/mine', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ corpus_id, max_pairs: 500 }) }); // (1)
-      await fetch('/reranker/train', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ corpus_id, epochs: 2, batch_size: 16 }) }); // (2)
-      const report = await (await fetch('/reranker/evaluate', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ corpus_id }) })).json(); // (3)
-      console.log(report);
-    }
-    ```
+```typescript
+async function trainReranker(corpus_id: string) {
+  await fetch('/reranker/mine', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ corpus_id, max_pairs: 500 }) }); // (1)
+  await fetch('/reranker/train', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ corpus_id, epochs: 2, batch_size: 16 }) }); // (2)
+  const report = await (await fetch('/reranker/evaluate', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ corpus_id }) })).json(); // (3)
+  console.log(report);
+}
+```
 
-1. Mine triplets
-2. Train model
-3. Evaluate results
+1. Mine triplets from logs/heuristics
+2. Train a local cross-encoder
+3. Evaluate results on your `eval_dataset`
 
-### Reranker Config Fields
+### Reranker Config Fields (Selected)
 
 | Field | Description |
 |-------|-------------|
-| `reranker.enabled` | Toggle reranker usage in search |
-| `reranker.model` | Model id from `models.json` |
-| `reranker.batch_size` | Micro-batch for reranking |
+| `reranking.reranker_mode` | `none | local | learning | cloud` |
+| `reranking.reranker_cloud_provider` | Provider id when cloud mode |
+| `reranking.reranker_local_model` | HuggingFace/local model id |
+| `reranking.tribrid_reranker_topn` | Candidates to rerank |
+| `reranking.rerank_input_snippet_chars` | Max chars per candidate snippet |
 
 !!! success "Evaluation Discipline"
-    Use a fixed `eval_dataset` to avoid overfitting. Track MAP@K and NDCG@K pre/post reranking.
-
-- [x] Mine → Train → Evaluate
-- [x] Compare metrics vs baseline
-- [x] Monitor cost estimates via `/reranker/costs`
-
-??? note "Triplet Mining"
-    - Hard negatives from near-miss candidates
-    - Positives from clicked/accepted chunks in logs
-    - Balance classes to prevent bias
+    Use a fixed `eval_dataset` to avoid overfitting. Track MRR, Recall@K, and NDCG pre/post reranking.

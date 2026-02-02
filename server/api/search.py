@@ -4,6 +4,7 @@ import os
 import time
 
 from fastapi import APIRouter, HTTPException
+from pydantic_ai.exceptions import ModelHTTPError
 from starlette.responses import StreamingResponse
 
 from server.config import load_config
@@ -78,13 +79,18 @@ async def answer(request: AnswerRequest) -> AnswerResponse:
     store = get_conversation_store()
     conv = store.get_or_create(None)
 
-    text, sources, _provider_id = await generate_response(
-        message=request.query,
-        repo_id=request.repo_id,
-        conversation=conv,
-        config=cfg,
-        fusion=fusion,
-    )
+    try:
+        text, sources, _provider_id = await generate_response(
+            message=request.query,
+            repo_id=request.repo_id,
+            conversation=conv,
+            config=cfg,
+            fusion=fusion,
+        )
+    except ModelHTTPError as e:
+        # Surface auth/config errors as "no LLM configured" for dev UX and tests.
+        # (httpx ASGITransport raises app exceptions by default unless converted to HTTPException.)
+        raise HTTPException(status_code=503, detail=f"LLM request failed: {e}") from e
 
     return AnswerResponse(
         query=request.query,

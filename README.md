@@ -192,6 +192,10 @@ uv sync
 uv run uvicorn server.main:app --reload --port 8012
 ```
 
+Notes:
+- The backend will **auto-load** repo-root `.env` on startup (dev convenience).
+- If you change `.env` while the backend is running, you must **restart** the backend for changes to take effect.
+
 API available at http://localhost:8012
 OpenAPI docs at http://localhost:8012/docs
 

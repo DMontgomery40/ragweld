@@ -9,7 +9,47 @@
          <lastmod>2026-02-01</lastmod>
     </url>
     <url>
+         <loc>https://dmontgomery40.github.io/tribrid-rag/api_extra/</loc>
+         <lastmod>2026-02-01</lastmod>
+    </url>
+    <url>
+         <loc>https://dmontgomery40.github.io/tribrid-rag/api_graph/</loc>
+         <lastmod>2026-02-01</lastmod>
+    </url>
+    <url>
+         <loc>https://dmontgomery40.github.io/tribrid-rag/api_health/</loc>
+         <lastmod>2026-02-01</lastmod>
+    </url>
+    <url>
+         <loc>https://dmontgomery40.github.io/tribrid-rag/api_indexing/</loc>
+         <lastmod>2026-02-01</lastmod>
+    </url>
+    <url>
+         <loc>https://dmontgomery40.github.io/tribrid-rag/api_models/</loc>
+         <lastmod>2026-02-01</lastmod>
+    </url>
+    <url>
+         <loc>https://dmontgomery40.github.io/tribrid-rag/api_models_chat/</loc>
+         <lastmod>2026-02-01</lastmod>
+    </url>
+    <url>
+         <loc>https://dmontgomery40.github.io/tribrid-rag/api_models_eval/</loc>
+         <lastmod>2026-02-01</lastmod>
+    </url>
+    <url>
+         <loc>https://dmontgomery40.github.io/tribrid-rag/api_models_extra/</loc>
+         <lastmod>2026-02-01</lastmod>
+    </url>
+    <url>
+         <loc>https://dmontgomery40.github.io/tribrid-rag/api_models_reranker/</loc>
+         <lastmod>2026-02-01</lastmod>
+    </url>
+    <url>
          <loc>https://dmontgomery40.github.io/tribrid-rag/architecture/</loc>
+         <lastmod>2026-02-01</lastmod>
+    </url>
+    <url>
+         <loc>https://dmontgomery40.github.io/tribrid-rag/architecture_extra/</loc>
          <lastmod>2026-02-01</lastmod>
     </url>
     <url>
@@ -45,6 +85,10 @@
          <lastmod>2026-02-01</lastmod>
     </url>
     <url>
+         <loc>https://dmontgomery40.github.io/tribrid-rag/retrieval_extra/</loc>
+         <lastmod>2026-02-01</lastmod>
+    </url>
+    <url>
          <loc>https://dmontgomery40.github.io/tribrid-rag/security/</loc>
          <lastmod>2026-02-01</lastmod>
     </url>
@@ -73,7 +117,23 @@
          <lastmod>2026-02-01</lastmod>
     </url>
     <url>
+         <loc>https://dmontgomery40.github.io/tribrid-rag/integrations/mcp/</loc>
+         <lastmod>2026-02-01</lastmod>
+    </url>
+    <url>
+         <loc>https://dmontgomery40.github.io/tribrid-rag/retrieval/fusion/</loc>
+         <lastmod>2026-02-01</lastmod>
+    </url>
+    <url>
+         <loc>https://dmontgomery40.github.io/tribrid-rag/retrieval/graph/</loc>
+         <lastmod>2026-02-01</lastmod>
+    </url>
+    <url>
          <loc>https://dmontgomery40.github.io/tribrid-rag/retrieval/overview/</loc>
+         <lastmod>2026-02-01</lastmod>
+    </url>
+    <url>
+         <loc>https://dmontgomery40.github.io/tribrid-rag/retrieval/vector-sparse/</loc>
          <lastmod>2026-02-01</lastmod>
     </url>
 </urlset>

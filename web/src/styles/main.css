@@ -188,9 +188,10 @@
         }
 
         .resize-handle {
-            position: absolute;
-            left: calc(100% - var(--sidepanel-width) - 3px);
-            top: 0;
+            /* Fixed so the grab area stays within the viewport (prevents offscreen hit testing). */
+            position: fixed;
+            left: calc(100vw - var(--sidepanel-width) - 3px);
+            top: 56px; /* matches .topbar height */
             bottom: 0;
             width: 10px; /* wider grab area for reliability */
             cursor: col-resize;

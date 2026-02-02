@@ -81,22 +81,22 @@ export function IndexStatsPanel({ refreshInterval = 0 }: IndexStatsPanelProps) {
     },
     {
       label: 'Postgres Total',
-      value: formatBytes(stats.storage_breakdown.postgres_total_bytes || 0),
+      value: formatBytes(stats.storage_breakdown?.postgres_total_bytes || 0),
       icon: '🗄️',
     },
     {
       label: 'BM25 Index',
-      value: formatBytes(stats.storage_breakdown.bm25_index_bytes || 0),
+      value: formatBytes(stats.storage_breakdown?.bm25_index_bytes || 0),
       icon: '📑',
     },
     {
       label: 'Chunks',
-      value: formatBytes(stats.storage_breakdown.chunks_bytes || 0),
+      value: formatBytes(stats.storage_breakdown?.chunks_bytes || 0),
       icon: '📄',
     },
     {
       label: 'pgvector vectors',
-      value: formatBytes(stats.storage_breakdown.embeddings_bytes || 0),
+      value: formatBytes(stats.storage_breakdown?.embeddings_bytes || 0),
       icon: '🔷',
     },
     {
@@ -106,7 +106,7 @@ export function IndexStatsPanel({ refreshInterval = 0 }: IndexStatsPanelProps) {
     },
     {
       label: 'Neo4j Store',
-      value: formatBytes(stats.storage_breakdown.neo4j_store_bytes || 0),
+      value: formatBytes(stats.storage_breakdown?.neo4j_store_bytes || 0),
       icon: '🧠',
     },
   ];

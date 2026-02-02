@@ -17,6 +17,48 @@ import sys
 from pathlib import Path
 from typing import List, Tuple
 
+# =============================================================================
+# Zero-mocked tests policy (TriBrid direction)
+# =============================================================================
+#
+# We are moving to "zero-mocked tests": no Playwright request stubbing and no
+# Python monkeypatch/unittest.mock. This checker is the enforcement mechanism.
+#
+# During migration, we allowlist known legacy tests that still contain mocks.
+# Shrink this list toward empty as tests are converted to real integration/E2E.
+ZERO_MOCK_ALLOWLIST = {
+    # Playwright tests (temporary, migrating away from route stubs)
+    ".tests/web/chat_streaming.spec.ts",
+    ".tests/web/chat_dev_trace_logs.spec.ts",
+    ".tests/web/dashboard-storage.spec.ts",
+    ".tests/web/dev-stack.spec.ts",
+    ".tests/web/eval_runner.spec.ts",
+    ".tests/web/evaluation-runner.spec.ts",
+    ".tests/web/grafana-tab.spec.ts",
+    ".tests/web/graph-visualization.spec.ts",
+    ".tests/web/graph.spec.ts",
+    ".tests/web/graphrag-ui.spec.ts",
+    ".tests/web/rag-tab.spec.ts",
+    ".tests/web/reranker-training.spec.ts",
+    ".tests/web/stores-hooks.spec.ts",
+    # Pytest files (temporary, migrating away from monkeypatch/mocks)
+    "tests/api/test_chat_endpoints.py",
+    "tests/api/test_config_endpoints.py",
+    "tests/api/test_cost_endpoints.py",
+    "tests/api/test_dev_stack_endpoints.py",
+    "tests/api/test_docker_endpoints.py",
+    "tests/api/test_index_dashboard_endpoints.py",
+    "tests/api/test_metrics_endpoint.py",
+    "tests/api/test_rag_tab_endpoints.py",
+    "tests/api/test_reranker_train_endpoints.py",
+    "tests/api/test_search_endpoints.py",
+    "tests/unit/test_embedder.py",
+    "tests/unit/test_fusion.py",
+    "tests/unit/test_postgres_pooling.py",
+    "tests/unit/test_reranker.py",
+    "tests/unit/test_sparse.py",
+}
+
 # Banned import patterns (regex)
 BANNED_IMPORTS: List[Tuple[str, str]] = [
     (r'from\s+qdrant_client\s+import', 'Use pgvector instead of Qdrant'),
@@ -118,6 +160,82 @@ def check_typescript_files() -> List[str]:
     return errors
 
 
+def _normalize_relpath(p: Path) -> str:
+    try:
+        rel = p.relative_to(Path.cwd())
+    except Exception:
+        rel = p
+    # Normalize path separators for stable output across platforms.
+    return str(rel).replace("\\", "/")
+
+
+def check_zero_mock_tests() -> List[str]:
+    """Fail on mocked tests (Playwright route stubs, pytest mocks).
+
+    Note: while migrating, files in ZERO_MOCK_ALLOWLIST are permitted to contain
+    these patterns. The allowlist should shrink toward empty.
+    """
+    errors: list[str] = []
+
+    # Playwright route stubbing / request interception patterns
+    playwright_patterns: list[tuple[str, str]] = [
+        (r"\bpage\.route\(", "Zero-mocked tests: remove Playwright request stubbing (page.route)."),
+        (r"\bcontext\.route\(", "Zero-mocked tests: remove Playwright request stubbing (context.route)."),
+        (r"\broute\.fulfill\(", "Zero-mocked tests: remove mocked responses (route.fulfill)."),
+        (r"\broute\.(abort|continue|fallback)\(", "Zero-mocked tests: remove request interception (route.abort/continue/fallback)."),
+    ]
+
+    tests_root = Path(".tests")
+    if tests_root.exists():
+        for f in tests_root.rglob("*"):
+            if should_skip(f) or not f.is_file():
+                continue
+            if f.suffix not in {".ts", ".tsx", ".js"}:
+                continue
+            rel = _normalize_relpath(f)
+            try:
+                content = f.read_text()
+            except Exception:
+                continue
+            lines = content.split("\n")
+            for i, line in enumerate(lines, 1):
+                for pattern, message in playwright_patterns:
+                    if re.search(pattern, line):
+                        if rel in ZERO_MOCK_ALLOWLIST:
+                            continue
+                        errors.append(f"{rel}:{i}: {message}")
+
+    # Pytest mocking patterns
+    pytest_patterns: list[tuple[str, str]] = [
+        (r"\bmonkeypatch\b", "Zero-mocked tests: remove pytest monkeypatch usage."),
+        (r"\bfrom\s+unittest\.mock\s+import\b", "Zero-mocked tests: remove unittest.mock usage."),
+        (r"\bimport\s+unittest\.mock\b", "Zero-mocked tests: remove unittest.mock usage."),
+        (r"\bMagicMock\b", "Zero-mocked tests: remove unittest.mock MagicMock usage."),
+        (r"\bAsyncMock\b", "Zero-mocked tests: remove unittest.mock AsyncMock usage."),
+        (r"\bpatch\(", "Zero-mocked tests: remove unittest.mock patch() usage."),
+    ]
+
+    pytests_root = Path("tests")
+    if pytests_root.exists():
+        for py_file in pytests_root.rglob("*.py"):
+            if should_skip(py_file):
+                continue
+            rel = _normalize_relpath(py_file)
+            try:
+                content = py_file.read_text()
+            except Exception:
+                continue
+            lines = content.split("\n")
+            for i, line in enumerate(lines, 1):
+                for pattern, message in pytest_patterns:
+                    if re.search(pattern, line):
+                        if rel in ZERO_MOCK_ALLOWLIST:
+                            continue
+                        errors.append(f"{rel}:{i}: {message}")
+
+    return errors
+
+
 def main() -> int:
     print("Checking for banned patterns...")
     print("")
@@ -125,6 +243,7 @@ def main() -> int:
     errors = []
     errors.extend(check_python_files())
     errors.extend(check_typescript_files())
+    errors.extend(check_zero_mock_tests())
 
     if errors:
         print("BANNED PATTERNS FOUND:")

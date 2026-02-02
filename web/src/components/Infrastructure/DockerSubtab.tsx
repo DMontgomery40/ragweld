@@ -125,7 +125,7 @@ export function DockerSubtab() {
 
   // Handle service actions with proper error handling
   const handleServiceAction = async (serviceName: string, action: 'start' | 'stop' | 'restart') => {
-    const container = containers.find(c => c.name.includes(serviceName));
+    const container = getContainerForService(serviceName);
     if (!container) {
       notifyError(`Container for ${serviceName} not found`);
       return;
@@ -156,7 +156,7 @@ export function DockerSubtab() {
 
     let started = 0;
     for (const service of INFRA_SERVICES) {
-      const container = containers.find(c => c.name.includes(service.name));
+      const container = getContainerForService(service.name);
       if (container && container.state !== 'running') {
         try {
           await startContainer(container.id);
@@ -180,7 +180,7 @@ export function DockerSubtab() {
 
     let stopped = 0;
     for (const service of INFRA_SERVICES) {
-      const container = containers.find(c => c.name.includes(service.name));
+      const container = getContainerForService(service.name);
       if (container && container.state === 'running') {
         try {
           await stopContainer(container.id);
@@ -213,7 +213,22 @@ export function DockerSubtab() {
   };
 
   const getContainerForService = (serviceName: string) => {
-    return containers.find(c => c.name.includes(serviceName));
+    const svc = serviceName.toLowerCase();
+
+    // Prefer docker-compose metadata when available (avoids false matches like postgres-exporter).
+    const byCompose = containers.find(c => (c.compose_service || '').toLowerCase() === svc);
+    if (byCompose) return byCompose;
+
+    // Fallback to our canonical docker-compose container names.
+    const byName = containers.find(c => c.name.toLowerCase() === `tribrid-${svc}`);
+    if (byName) return byName;
+
+    // Last resort: substring match (avoid exporter for postgres).
+    if (svc === 'postgres') {
+      return containers.find(c => c.name.toLowerCase().includes('postgres') && !c.name.toLowerCase().includes('exporter'));
+    }
+
+    return containers.find(c => c.name.toLowerCase().includes(svc));
   };
 
   const getContainerStatus = (serviceName: string): 'running' | 'stopped' | 'unknown' => {

@@ -65,10 +65,6 @@ export function IntegrationsSubtab() {
     }
   }
 
-  async function testLangSmith() {
-    alert(`Testing connection to LangSmith at ${langsmithEndpoint}...`);
-  }
-
   async function testGrafana() {
     try {
       const response = await fetch(grafanaUrl + '/api/health');
@@ -303,7 +299,7 @@ export function IntegrationsSubtab() {
               type="text"
               value={langsmithProject}
               onChange={(e) => setLangsmithProject(e.target.value)}
-              placeholder="agro"
+              placeholder="tribrid"
               style={{
                 width: '100%',
                 padding: '8px',
@@ -334,24 +330,14 @@ export function IntegrationsSubtab() {
                 checked={langchainTracingV2 === 1}
                 onChange={(e) => setLangchainTracingV2(e.target.checked ? 1 : 0)}
               />
-              <span>Enable LangChain Tracing V2</span>
+              <span>Enable LangSmith tracing v2 (reserved)</span>
             </label>
           </div>
         </div>
 
-        <button
-          className="small-button"
-          onClick={testLangSmith}
-          style={{
-            width: '100%',
-            background: 'var(--link)',
-            color: 'var(--accent-contrast)',
-            fontWeight: '600',
-            marginTop: '12px'
-          }}
-        >
-          Test Connection
-        </button>
+        <div className="small" style={{ color: 'var(--fg-muted)', marginTop: '12px' }}>
+          LangSmith export / deep-linking is not implemented yet. TriBridRAG currently provides local, in-memory traces.
+        </div>
       </div>
 
       {/* Grafana Integration */}

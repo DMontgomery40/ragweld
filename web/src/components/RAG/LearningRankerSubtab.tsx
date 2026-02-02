@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useConfigField, useNotification } from '@/hooks';
 import { useReranker } from '@/hooks/useReranker';
 import { TooltipIcon } from '@/components/ui/TooltipIcon';
+import { TrainingStudio } from '@/components/RerankerTraining/TrainingStudio';
 
 export function LearningRankerSubtab() {
   const { success, error: notifyError, info } = useNotification();
@@ -154,6 +155,8 @@ export function LearningRankerSubtab() {
           {modeWarning}
         </div>
       )}
+
+      <TrainingStudio />
 
       <div
         style={{

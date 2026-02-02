@@ -47,7 +47,7 @@
       const d = await r.json();
       const el = document.getElementById(targetId);
       if (!el) return;
-      if (!d || !d.trace){ el.textContent = 'No traces yet. Enable LangChain Tracing V2 in Misc and run a query via /answer.'; return; }
+      if (!d || !d.trace){ el.textContent = 'No traces yet. Set Tracing Mode to Local/LangSmith (not Off) and run a query.'; return; }
       const t = d.trace;
       const decide = (t.events||[]).find(ev=>ev.kind==='router.decide');
       const rer = (t.events||[]).find(ev=>ev.kind==='reranker.rank');
@@ -56,7 +56,7 @@
       header.push(`Policy: ${(decide?.data?.policy)||'—'}`);
       header.push(`Intent: ${(decide?.data?.intent)||'—'}`);
       header.push(`Final K: ${(rer?.data?.output_topK)||'—'}`);
-      header.push(`Vector: ${((d && d.repo) ? (document.querySelector('[name="VECTOR_BACKEND"]').value||'qdrant'):'qdrant')}`);
+      header.push(`Vector: ${((d && d.repo) ? (document.querySelector('[name="VECTOR_BACKEND"]').value||'pgvector'):'pgvector')}`);
 
       const parts = [];
       parts.push(header.join('  •  '));
