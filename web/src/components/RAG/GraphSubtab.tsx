@@ -1,8 +1,12 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import ForceGraph2D from 'react-force-graph-2d';
 import { useGraph } from '@/hooks/useGraph';
 import { useRepoStore } from '@/stores/useRepoStore';
 import type { Community, Entity, Relationship } from '@/types/generated';
+
+/** Node with computed degree for importance labeling */
+type NodeWithDegree = Entity & { __degree?: number };
 
 function formatEntityLabel(e: Entity): string {
   const name = String(e.name || '').trim();
@@ -45,9 +49,14 @@ export function GraphSubtab() {
   const [entityQuery, setEntityQuery] = useState('');
   const [viewMode, setViewMode] = useState<'table' | 'viz'>('table');
   const [accentColor, setAccentColor] = useState<string>('#00ff88');
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [fullscreenAnimating, setFullscreenAnimating] = useState(false);
   const fgRef = useRef<any>(null);
+  const fullscreenFgRef = useRef<any>(null);
   const vizCanvasRef = useRef<HTMLDivElement | null>(null);
+  const fullscreenCanvasRef = useRef<HTMLDivElement | null>(null);
   const [vizSize, setVizSize] = useState<{ w: number; h: number }>({ w: 0, h: 0 });
+  const [fullscreenSize, setFullscreenSize] = useState<{ w: number; h: number }>({ w: 0, h: 0 });
 
   useEffect(() => {
     if (!repos.length) void loadRepos();
@@ -86,6 +95,41 @@ export function GraphSubtab() {
     return { nodes: filteredEntities, links: vizRelationships };
   }, [filteredEntities, vizRelationships]);
 
+  // Compute node degrees for importance-based labeling
+  const nodeDegreeMap = useMemo(() => {
+    const degreeMap = new Map<string, number>();
+    for (const entity of filteredEntities) {
+      degreeMap.set(entity.entity_id, 0);
+    }
+    for (const rel of vizRelationships) {
+      degreeMap.set(rel.source_id, (degreeMap.get(rel.source_id) || 0) + 1);
+      degreeMap.set(rel.target_id, (degreeMap.get(rel.target_id) || 0) + 1);
+    }
+    return degreeMap;
+  }, [filteredEntities, vizRelationships]);
+
+  // Determine which nodes are "important" (top 15% by connectivity, min 3 connections)
+  const importantNodeIds = useMemo(() => {
+    if (nodeDegreeMap.size === 0) return new Set<string>();
+
+    const degrees = Array.from(nodeDegreeMap.entries())
+      .filter(([, deg]) => deg >= 3) // Must have at least 3 connections
+      .sort((a, b) => b[1] - a[1]);
+
+    // Take top 15% of nodes, but cap at 12 labels to avoid clutter
+    const topCount = Math.min(12, Math.max(1, Math.ceil(degrees.length * 0.15)));
+    return new Set(degrees.slice(0, topCount).map(([id]) => id));
+  }, [nodeDegreeMap]);
+
+  // Fullscreen graph data with degree annotations for custom rendering
+  const fullscreenGraphData = useMemo(() => {
+    const nodesWithDegree: NodeWithDegree[] = filteredEntities.map((e) => ({
+      ...e,
+      __degree: nodeDegreeMap.get(e.entity_id) || 0,
+    }));
+    return { nodes: nodesWithDegree, links: vizRelationships };
+  }, [filteredEntities, vizRelationships, nodeDegreeMap]);
+
   useEffect(() => {
     if (viewMode !== 'viz') return;
     const el = vizCanvasRef.current;
@@ -115,6 +159,139 @@ export function GraphSubtab() {
     }, 250);
     return () => window.clearTimeout(handle);
   }, [viewMode, vizGraphData.nodes.length, vizGraphData.links.length]);
+
+  // Fullscreen canvas resize observer
+  useEffect(() => {
+    if (!isFullscreen) return;
+    const el = fullscreenCanvasRef.current;
+    if (!el) return;
+
+    const update = () => {
+      const rect = el.getBoundingClientRect();
+      setFullscreenSize({
+        w: Math.max(1, Math.floor(rect.width)),
+        h: Math.max(1, Math.floor(rect.height)),
+      });
+    };
+
+    // Small delay to let CSS transition complete
+    const initialTimeout = window.setTimeout(update, 50);
+    window.addEventListener('resize', update);
+
+    return () => {
+      window.clearTimeout(initialTimeout);
+      window.removeEventListener('resize', update);
+    };
+  }, [isFullscreen]);
+
+  // Fullscreen graph auto-fit
+  useEffect(() => {
+    if (!isFullscreen) return;
+    const handle = window.setTimeout(() => {
+      try {
+        fullscreenFgRef.current?.zoomToFit?.(400, 80);
+      } catch {
+        // no-op
+      }
+    }, 300);
+    return () => window.clearTimeout(handle);
+  }, [isFullscreen, fullscreenGraphData.nodes.length, fullscreenGraphData.links.length]);
+
+  // Escape key to close fullscreen
+  useEffect(() => {
+    if (!isFullscreen) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        handleCloseFullscreen();
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [isFullscreen, handleCloseFullscreen]);
+
+  // Fullscreen open/close handlers with animation
+  const handleOpenFullscreen = useCallback(() => {
+    setFullscreenAnimating(true);
+    setIsFullscreen(true);
+    // Let the fade-in animation play
+    window.setTimeout(() => setFullscreenAnimating(false), 200);
+  }, []);
+
+  const handleCloseFullscreen = useCallback(() => {
+    setFullscreenAnimating(true);
+    // Let fade-out animation start
+    window.setTimeout(() => {
+      setIsFullscreen(false);
+      setFullscreenAnimating(false);
+    }, 150);
+  }, []);
+
+  // Custom node rendering for fullscreen mode - shows labels for important nodes
+  const fullscreenNodeCanvasObject = useCallback(
+    (node: any, ctx: CanvasRenderingContext2D, globalScale: number) => {
+      const entity = node as NodeWithDegree;
+      const x = node.x ?? 0;
+      const y = node.y ?? 0;
+
+      // Node size based on degree (more connections = larger node)
+      const baseSize = 4;
+      const degree = entity.__degree || 0;
+      const sizeMultiplier = Math.min(2.5, 1 + degree * 0.15);
+      const nodeSize = baseSize * sizeMultiplier;
+
+      // Draw node circle
+      ctx.beginPath();
+      ctx.arc(x, y, nodeSize, 0, 2 * Math.PI);
+      ctx.fillStyle =
+        selectedEntity?.entity_id === entity.entity_id
+          ? accentColor
+          : nodeColor(entity);
+      ctx.fill();
+
+      // Draw subtle glow for important nodes
+      if (importantNodeIds.has(entity.entity_id)) {
+        ctx.beginPath();
+        ctx.arc(x, y, nodeSize + 2, 0, 2 * Math.PI);
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+      }
+
+      // Draw label for important nodes (only when zoomed in enough)
+      if (importantNodeIds.has(entity.entity_id) && globalScale >= 0.4) {
+        const label = entity.name || entity.entity_id;
+        const fontSize = Math.max(10, 12 / globalScale);
+        ctx.font = `600 ${fontSize}px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif`;
+
+        // Background pill for readability
+        const textWidth = ctx.measureText(label).width;
+        const padding = 4 / globalScale;
+        const pillHeight = fontSize + padding * 2;
+        const pillWidth = textWidth + padding * 3;
+        const pillY = y - nodeSize - pillHeight - 4 / globalScale;
+
+        ctx.fillStyle = 'rgba(20, 20, 30, 0.85)';
+        ctx.beginPath();
+        const radius = pillHeight / 2;
+        ctx.roundRect(x - pillWidth / 2, pillY, pillWidth, pillHeight, radius);
+        ctx.fill();
+
+        // Border
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+        ctx.lineWidth = 1 / globalScale;
+        ctx.stroke();
+
+        // Text
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
+        ctx.fillText(label, x, pillY + pillHeight / 2);
+      }
+    },
+    [selectedEntity, accentColor, importantNodeIds, nodeColor]
+  );
 
   const entityTypes = useMemo(() => {
     return ['function', 'class', 'module', 'variable', 'concept'];
@@ -617,10 +794,51 @@ export function GraphSubtab() {
             }}
             data-testid="graph-viz-panel"
           >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '12px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px' }}>
               <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--fg)' }}>Visualization</div>
-              <div style={{ fontSize: '11px', color: 'var(--fg-muted)' }}>
-                {filteredEntities.length} nodes • {vizRelationships.length} edges
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <div style={{ fontSize: '11px', color: 'var(--fg-muted)' }}>
+                  {filteredEntities.length} nodes • {vizRelationships.length} edges
+                </div>
+                <button
+                  onClick={handleOpenFullscreen}
+                  disabled={filteredEntities.length === 0}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    padding: '6px 10px',
+                    background: 'rgba(var(--accent-rgb), 0.1)',
+                    border: '1px solid var(--accent)',
+                    borderRadius: '8px',
+                    color: 'var(--accent)',
+                    fontSize: '11px',
+                    fontWeight: 700,
+                    cursor: filteredEntities.length === 0 ? 'not-allowed' : 'pointer',
+                    opacity: filteredEntities.length === 0 ? 0.5 : 1,
+                    transition: 'all 0.15s ease',
+                  }}
+                  onMouseEnter={(e) => {
+                    if (filteredEntities.length > 0) {
+                      e.currentTarget.style.background = 'rgba(var(--accent-rgb), 0.2)';
+                      e.currentTarget.style.transform = 'scale(1.02)';
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = 'rgba(var(--accent-rgb), 0.1)';
+                    e.currentTarget.style.transform = 'scale(1)';
+                  }}
+                  data-testid="graph-expand-btn"
+                  title="Expand graph to fullscreen view"
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="15 3 21 3 21 9" />
+                    <polyline points="9 21 3 21 3 15" />
+                    <line x1="21" y1="3" x2="14" y2="10" />
+                    <line x1="3" y1="21" x2="10" y2="14" />
+                  </svg>
+                  Expand
+                </button>
               </div>
             </div>
 
@@ -671,6 +889,231 @@ export function GraphSubtab() {
           </div>
         )}
       </div>
+
+      {/* Fullscreen Graph Modal */}
+      {isFullscreen &&
+        createPortal(
+          <div
+            style={{
+              position: 'fixed',
+              inset: 0,
+              zIndex: 9999,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              background: fullscreenAnimating
+                ? 'rgba(0, 0, 0, 0)'
+                : 'rgba(0, 0, 0, 0.75)',
+              backdropFilter: fullscreenAnimating ? 'blur(0px)' : 'blur(8px)',
+              transition: 'background 0.2s ease, backdrop-filter 0.2s ease',
+            }}
+            onClick={handleCloseFullscreen}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Fullscreen graph visualization"
+            data-testid="graph-fullscreen-overlay"
+          >
+            {/* Modal container - 85% of viewport */}
+            <div
+              style={{
+                width: '85vw',
+                height: '85vh',
+                maxWidth: '1800px',
+                maxHeight: '1100px',
+                background: 'var(--bg-elev1)',
+                borderRadius: '20px',
+                border: '1px solid var(--line)',
+                boxShadow: '0 25px 80px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.05)',
+                display: 'flex',
+                flexDirection: 'column',
+                overflow: 'hidden',
+                transform: fullscreenAnimating ? 'scale(0.95)' : 'scale(1)',
+                opacity: fullscreenAnimating ? 0 : 1,
+                transition: 'transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s ease',
+              }}
+              onClick={(e) => e.stopPropagation()}
+              data-testid="graph-fullscreen-modal"
+            >
+              {/* Header */}
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  padding: '16px 24px',
+                  borderBottom: '1px solid var(--line)',
+                  background: 'var(--bg-elev2)',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  <span style={{ fontSize: '20px' }}>🕸️</span>
+                  <div>
+                    <div style={{ fontSize: '16px', fontWeight: 700, color: 'var(--fg)' }}>
+                      Knowledge Graph
+                    </div>
+                    <div style={{ fontSize: '12px', color: 'var(--fg-muted)', marginTop: '2px' }}>
+                      {filteredEntities.length} nodes • {vizRelationships.length} edges
+                      {importantNodeIds.size > 0 && ` • ${importantNodeIds.size} hub${importantNodeIds.size === 1 ? '' : 's'} labeled`}
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                  {/* Legend */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px', fontSize: '11px' }}>
+                    {[
+                      { type: 'function', color: '#22c55e' },
+                      { type: 'class', color: '#60a5fa' },
+                      { type: 'module', color: '#fbbf24' },
+                      { type: 'variable', color: '#a78bfa' },
+                      { type: 'concept', color: '#94a3b8' },
+                    ].map(({ type, color }) => (
+                      <div key={type} style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        <div
+                          style={{
+                            width: '10px',
+                            height: '10px',
+                            borderRadius: '50%',
+                            background: color,
+                          }}
+                        />
+                        <span style={{ color: 'var(--fg-muted)' }}>{type}</span>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Close button */}
+                  <button
+                    onClick={handleCloseFullscreen}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      width: '36px',
+                      height: '36px',
+                      background: 'rgba(255, 255, 255, 0.05)',
+                      border: '1px solid var(--line)',
+                      borderRadius: '10px',
+                      color: 'var(--fg-muted)',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease',
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.background = 'rgba(255, 255, 255, 0.1)';
+                      e.currentTarget.style.color = 'var(--fg)';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.background = 'rgba(255, 255, 255, 0.05)';
+                      e.currentTarget.style.color = 'var(--fg-muted)';
+                    }}
+                    data-testid="graph-fullscreen-close"
+                    title="Close (Esc)"
+                  >
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <line x1="18" y1="6" x2="6" y2="18" />
+                      <line x1="6" y1="6" x2="18" y2="18" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+
+              {/* Graph canvas */}
+              <div
+                ref={fullscreenCanvasRef}
+                style={{
+                  flex: 1,
+                  background: 'radial-gradient(ellipse at center, var(--bg-elev1) 0%, var(--bg) 100%)',
+                  position: 'relative',
+                }}
+                data-testid="graph-fullscreen-canvas"
+              >
+                {fullscreenSize.w > 0 && fullscreenSize.h > 0 && (
+                  <ForceGraph2D
+                    ref={fullscreenFgRef}
+                    width={fullscreenSize.w}
+                    height={fullscreenSize.h}
+                    graphData={fullscreenGraphData as any}
+                    nodeId="entity_id"
+                    linkSource="source_id"
+                    linkTarget="target_id"
+                    nodeLabel={(n: any) => formatEntityLabel(n as Entity)}
+                    linkLabel={(l: any) => String((l as Relationship).relation_type || '')}
+                    nodeCanvasObject={fullscreenNodeCanvasObject}
+                    linkColor={() => 'rgba(255, 255, 255, 0.12)'}
+                    linkWidth={1.5}
+                    backgroundColor="rgba(0,0,0,0)"
+                    enableNodeDrag={true}
+                    enableZoomInteraction={true}
+                    enablePanInteraction={true}
+                    cooldownTime={2000}
+                    d3AlphaDecay={0.02}
+                    d3VelocityDecay={0.3}
+                    onNodeClick={(n: any) => {
+                      const e = n as Entity;
+                      const active = selectedEntity?.entity_id === e.entity_id;
+                      void handlePickEntity(active ? null : e);
+                    }}
+                  />
+                )}
+
+                {/* Selected entity indicator */}
+                {selectedEntity && (
+                  <div
+                    style={{
+                      position: 'absolute',
+                      bottom: '20px',
+                      left: '20px',
+                      background: 'rgba(20, 20, 30, 0.9)',
+                      border: '1px solid var(--accent)',
+                      borderRadius: '12px',
+                      padding: '12px 16px',
+                      maxWidth: '300px',
+                      backdropFilter: 'blur(8px)',
+                    }}
+                  >
+                    <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--accent)' }}>
+                      {selectedEntity.name}
+                    </div>
+                    <div style={{ fontSize: '11px', color: 'var(--fg-muted)', marginTop: '4px' }}>
+                      {selectedEntity.entity_type} • {nodeDegreeMap.get(selectedEntity.entity_id) || 0} connections
+                    </div>
+                    {selectedEntity.file_path && (
+                      <div
+                        style={{
+                          fontSize: '10px',
+                          color: 'var(--fg-muted)',
+                          marginTop: '4px',
+                          fontFamily: 'var(--font-mono)',
+                          opacity: 0.8,
+                        }}
+                      >
+                        {selectedEntity.file_path}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Instructions tooltip */}
+                <div
+                  style={{
+                    position: 'absolute',
+                    bottom: '20px',
+                    right: '20px',
+                    fontSize: '11px',
+                    color: 'var(--fg-muted)',
+                    background: 'rgba(20, 20, 30, 0.7)',
+                    padding: '8px 12px',
+                    borderRadius: '8px',
+                    backdropFilter: 'blur(4px)',
+                  }}
+                >
+                  Scroll to zoom • Drag to pan • Click node for details • Esc to close
+                </div>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
     </div>
   );
 }
