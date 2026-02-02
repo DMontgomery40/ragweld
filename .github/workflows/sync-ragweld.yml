@@ -1,14 +1,12 @@
-# Trigger ragweld.com rebuild when web/ changes
+# Sync tribrid-rag/web to ragweld.com/vendor/demo when web/ changes
 # This ensures the live demo stays in sync with the source code
 #
 # Setup required:
-# 1. In Netlify: Site settings > Build & deploy > Build hooks > Add build hook
-#    Name: "sync-from-tribrid-rag"
-# 2. In GitHub: Settings > Secrets > Add secret
-#    Name: RAGWELD_NETLIFY_HOOK
-#    Value: The build hook URL from step 1
+# 1. Create a GitHub Personal Access Token (PAT) with repo scope
+# 2. Add it as a secret: RAGWELD_DEPLOY_TOKEN
+#    Settings > Secrets > Actions > New repository secret
 
-name: Sync ragweld.com
+name: Sync ragweld.com Demo
 
 on:
   push:
@@ -16,17 +14,92 @@ on:
     paths:
       - 'web/**'
       - '.github/workflows/sync-ragweld.yml'
+  workflow_dispatch:  # Allow manual trigger
 
 jobs:
-  trigger-rebuild:
+  sync-demo:
     runs-on: ubuntu-latest
     steps:
-      - name: Trigger Netlify build
+      - name: Checkout tribrid-rag
+        uses: actions/checkout@v4
+        with:
+          path: tribrid-rag
+
+      - name: Checkout ragweld.com
+        uses: actions/checkout@v4
+        with:
+          repository: DMontgomery40/ragweld.com
+          token: ${{ secrets.RAGWELD_DEPLOY_TOKEN }}
+          path: ragweld.com
+
+      - name: Sync web/ to vendor/demo/
         run: |
-          if [ -z "${{ secrets.RAGWELD_NETLIFY_HOOK }}" ]; then
-            echo "Warning: RAGWELD_NETLIFY_HOOK secret not set"
-            echo "Skipping Netlify trigger"
-            exit 0
+          # Backup MSW mocks (ragweld-specific)
+          if [ -d "ragweld.com/vendor/demo/src/mocks" ]; then
+            cp -R ragweld.com/vendor/demo/src/mocks /tmp/ragweld-mocks-backup
           fi
-          curl -X POST -d '{}' "${{ secrets.RAGWELD_NETLIFY_HOOK }}"
-          echo "Triggered ragweld.com rebuild"
+
+          # Remove old demo source (keep node_modules if exists)
+          cd ragweld.com/vendor/demo
+          find . -maxdepth 1 ! -name 'node_modules' ! -name '.' -exec rm -rf {} +
+          cd ../../..
+
+          # Copy fresh web/ source
+          cp -R tribrid-rag/web/* ragweld.com/vendor/demo/
+
+          # Remove build artifacts and node_modules from copy
+          rm -rf ragweld.com/vendor/demo/node_modules
+          rm -rf ragweld.com/vendor/demo/dist
+          rm -rf ragweld.com/vendor/demo/.tests
+
+          # Restore MSW mocks
+          if [ -d "/tmp/ragweld-mocks-backup" ]; then
+            rm -rf ragweld.com/vendor/demo/src/mocks
+            cp -R /tmp/ragweld-mocks-backup ragweld.com/vendor/demo/src/mocks
+          fi
+
+          # Patch vite.config.ts: base /web/ -> /demo/
+          sed -i "s|base: '/web/'|base: '/demo/'|g" ragweld.com/vendor/demo/vite.config.ts
+
+          # Patch main.tsx: basename /web -> /demo
+          sed -i 's|basename="/web"|basename="/demo"|g' ragweld.com/vendor/demo/src/main.tsx
+
+          # Ensure MSW init code is in main.tsx (add if missing)
+          if ! grep -q "enableMocking" ragweld.com/vendor/demo/src/main.tsx; then
+            echo "Warning: MSW init code missing from main.tsx - manual fix required"
+          fi
+
+      - name: Check for changes
+        id: changes
+        run: |
+          cd ragweld.com
+          git add -A
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+          else
+            echo "Changes detected"
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Commit and push
+        if: steps.changes.outputs.has_changes == 'true'
+        run: |
+          cd ragweld.com
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git commit -m "chore: sync demo from tribrid-rag/web
+
+          Auto-synced from tribrid-rag commit: ${{ github.sha }}
+
+          Co-Authored-By: github-actions[bot] <github-actions[bot]@users.noreply.github.com>"
+          git push
+
+      - name: Summary
+        run: |
+          if [ "${{ steps.changes.outputs.has_changes }}" == "true" ]; then
+            echo "✅ Demo synced and pushed to ragweld.com"
+            echo "Netlify will auto-deploy from the push"
+          else
+            echo "ℹ️ No changes detected - demo already in sync"
+          fi

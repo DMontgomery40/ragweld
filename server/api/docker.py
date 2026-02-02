@@ -18,6 +18,7 @@ from server.config import load_config
 from server.models.tribrid_config_model import (
     DevStackRestartResponse,
     DevStackStatusResponse,
+    DockerContainer,
     DockerContainersResponse,
     DockerStatus,
     LokiStatus,
@@ -442,7 +443,8 @@ async def list_docker_containers() -> DockerContainersResponse:
         cfg = TriBridConfig()
         timeout = 10
     env = _docker_env(cfg)
-    containers = await _list_docker_containers(timeout_s=timeout, env=env)
+    container_dicts = await _list_docker_containers(timeout_s=timeout, env=env)
+    containers = [DockerContainer.model_validate(c) for c in container_dicts]
     return DockerContainersResponse(containers=containers)
 
 
