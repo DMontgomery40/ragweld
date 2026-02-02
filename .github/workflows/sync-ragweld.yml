@@ -1,0 +1,32 @@
+# Trigger ragweld.com rebuild when web/ changes
+# This ensures the live demo stays in sync with the source code
+#
+# Setup required:
+# 1. In Netlify: Site settings > Build & deploy > Build hooks > Add build hook
+#    Name: "sync-from-tribrid-rag"
+# 2. In GitHub: Settings > Secrets > Add secret
+#    Name: RAGWELD_NETLIFY_HOOK
+#    Value: The build hook URL from step 1
+
+name: Sync ragweld.com
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'web/**'
+      - '.github/workflows/sync-ragweld.yml'
+
+jobs:
+  trigger-rebuild:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Netlify build
+        run: |
+          if [ -z "${{ secrets.RAGWELD_NETLIFY_HOOK }}" ]; then
+            echo "Warning: RAGWELD_NETLIFY_HOOK secret not set"
+            echo "Skipping Netlify trigger"
+            exit 0
+          fi
+          curl -X POST -d '{}' "${{ secrets.RAGWELD_NETLIFY_HOOK }}"
+          echo "Triggered ragweld.com rebuild"
