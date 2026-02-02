@@ -1,4 +1,37 @@
+from __future__ import annotations
+
 from collections.abc import Awaitable, Callable
+from pathlib import Path
+
+# Load repo-root .env early so env-backed secrets (API keys) are available even
+# when the backend is started directly (e.g. `uv run uvicorn ...`) instead of
+# through `./start.sh` or Docker Compose.
+#
+# IMPORTANT:
+# - Never override already-set environment variables.
+# - No error if .env is missing (CI/prod).
+def _load_dotenv_file(dotenv_path: Path) -> bool:
+    """Best-effort dotenv loader for local/dev.
+
+    Returns True if a file existed and was loaded, otherwise False.
+    Never overrides already-set environment variables.
+    """
+    try:
+        from dotenv import load_dotenv
+    except Exception:
+        return False
+
+    try:
+        if not dotenv_path.exists():
+            return False
+        load_dotenv(dotenv_path=dotenv_path, override=False)
+        return True
+    except Exception:
+        return False
+
+
+# Best-effort convenience only; never block API startup.
+_load_dotenv_file(Path(__file__).resolve().parents[1] / ".env")
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware

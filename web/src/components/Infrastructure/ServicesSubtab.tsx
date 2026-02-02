@@ -236,7 +236,8 @@ export function ServicesSubtab() {
       setContainers(allContainers);
 
       // Filter TriBrid containers
-      const tribrid = allContainers.filter((c: any) => c.tribrid_managed === true);
+      // Backend currently exposes this as `agro_managed` (legacy naming).
+      const tribrid = allContainers.filter((c: any) => c.agro_managed === true);
       setAgroContainers(tribrid);
 
       return allContainers;
@@ -269,48 +270,63 @@ export function ServicesSubtab() {
    *   - ASK USER: Should this function also perform a health check (e.g., HTTP ping to Postgres API) or is container state sufficient for your use case?
    * ---/agentspec
    */
-  const fetchServiceStatus = async (containersList: DockerContainer[]) => {
-    // Check Postgres - use passed containersList, not stale state
-    const qdrantContainer = containersList.find(c =>
-      c.name.toLowerCase().includes('postgres')
-    );
-    setPostgresStatus(prev => ({
-      ...prev,
-      status: qdrantContainer?.state === 'running' ? 'online' : 'offline'
-    }));
+  const findServiceContainer = (
+    list: DockerContainer[],
+    service: 'postgres' | 'neo4j' | 'prometheus' | 'grafana',
+  ): DockerContainer | undefined => {
+    const svc = service.toLowerCase();
 
-    // Check Neo4j via ping endpoint
-    try {
-      const res = await fetch(api('/api/docker/neo4j/ping'));
-      if (res.ok) {
-        const data = await res.json();
-        setNeo4jStatus(prev => ({
-          ...prev,
-          status: data.success ? 'online' : 'offline'
-        }));
-      } else {
-        setNeo4jStatus(prev => ({ ...prev, status: 'offline' }));
-      }
-    } catch {
-      setNeo4jStatus(prev => ({ ...prev, status: 'offline' }));
+    // Prefer docker-compose metadata when available (avoids false matches like postgres-exporter).
+    const byCompose = list.find(c => (c.compose_service || '').toLowerCase() === svc);
+    if (byCompose) return byCompose;
+
+    // Fallback to our canonical container names in docker-compose.yml.
+    const byName = list.find(c => c.name.toLowerCase() === `tribrid-${svc}`);
+    if (byName) return byName;
+
+    // Last resort: substring match (avoid exporter for postgres).
+    if (svc === 'postgres') {
+      return list.find(c => c.name.toLowerCase().includes('postgres') && !c.name.toLowerCase().includes('exporter'));
     }
 
+    return list.find(c => c.name.toLowerCase().includes(svc));
+  };
+
+  const isServiceOnline = (container?: DockerContainer): boolean => {
+    if (!container) return false;
+    if (container.state !== 'running') return false;
+    const status = (container.status || '').toLowerCase();
+    if (status.includes('unhealthy')) return false;
+    return true;
+  };
+
+  const fetchServiceStatus = async (containersList: DockerContainer[]) => {
+    // Check Postgres - use passed containersList, not stale state
+    const postgresContainer = findServiceContainer(containersList, 'postgres');
+    setPostgresStatus(prev => ({
+      ...prev,
+      status: isServiceOnline(postgresContainer) ? 'online' : 'offline'
+    }));
+
+    // Check Neo4j - derive from docker container state (avoid missing /docker/neo4j/ping endpoint)
+    const neo4jContainer = findServiceContainer(containersList, 'neo4j');
+    setNeo4jStatus(prev => ({
+      ...prev,
+      status: isServiceOnline(neo4jContainer) ? 'online' : 'offline'
+    }));
+
     // Check Prometheus - use passed containersList
-    const prometheusContainer = containersList.find(c =>
-      c.name.toLowerCase().includes('prometheus')
-    );
+    const prometheusContainer = findServiceContainer(containersList, 'prometheus');
     setPrometheusStatus(prev => ({
       ...prev,
-      status: prometheusContainer?.state === 'running' ? 'online' : 'offline'
+      status: isServiceOnline(prometheusContainer) ? 'online' : 'offline'
     }));
 
     // Check Grafana - use passed containersList
-    const grafanaContainer = containersList.find(c =>
-      c.name.toLowerCase().includes('grafana')
-    );
+    const grafanaContainer = findServiceContainer(containersList, 'grafana');
     setGrafanaStatus(prev => ({
       ...prev,
-      status: grafanaContainer?.state === 'running' ? 'online' : 'offline'
+      status: isServiceOnline(grafanaContainer) ? 'online' : 'offline'
     }));
 
     // Check Loki
@@ -374,7 +390,7 @@ export function ServicesSubtab() {
    * ---/agentspec
    */
   const handlePostgresRestart = async () => {
-    const container = containers.find(c => c.name.toLowerCase().includes('postgres'));
+    const container = findServiceContainer(containers, 'postgres');
     if (!container) {
       setActionMessage('Postgres container not found');
       return;
@@ -419,9 +435,16 @@ export function ServicesSubtab() {
     setLoading(true);
     setActionMessage('Pinging Neo4j...');
     try {
-      const res = await fetch(api('/api/docker/neo4j/ping'));
+      // Use readiness probe which performs a real Neo4j connection check.
+      const res = await fetch(api('/ready'));
       const data = await res.json();
-      setActionMessage(data.success ? `Neo4j: ${data.response}` : `Neo4j ping failed: ${data.error}`);
+      const dep = data?.dependencies?.neo4j;
+      if (res.ok && dep?.ok) {
+        const db = dep?.database ? ` (db: ${dep.database})` : '';
+        setActionMessage(`Neo4j: OK${db}`);
+      } else {
+        setActionMessage(`Neo4j ping failed: ${dep?.error || data?.detail || 'Unknown error'}`);
+      }
     } catch (error) {
       setActionMessage(`Failed to ping Neo4j: ${error}`);
     } finally {
@@ -455,7 +478,7 @@ export function ServicesSubtab() {
    * ```
    */
   const handleNeo4jRestart = async () => {
-    const container = containers.find(c => c.name.toLowerCase().includes('neo4j'));
+    const container = findServiceContainer(containers, 'neo4j');
     if (!container) {
       setActionMessage('Neo4j container not found');
       return;

@@ -18,7 +18,7 @@
 
     ---
 
-    Chunk storage, embeddings, pgvector indexing, and FTS live in one database. No separate vector DB to manage.
+    Chunk storage, embeddings, pgvector indexing, and FTS live in one database.
 
 -   :material-graph:{ .lg .middle } **Knowledge Graph**
 
@@ -44,18 +44,16 @@
 [Configuration](configuration.md){ .md-button }
 [API](api.md){ .md-button }
 
-!!! tip "Pro Tip — Read This First"
-    TriBridRAG is strictly Pydantic-first. If a field or feature is not in `tribrid_config_model.py`, it does not exist. Add it there, regenerate TypeScript types, then build the rest.
+!!! tip "Read This First"
+    TriBridRAG is strictly Pydantic-first. If a field or feature is not in `server/models/tribrid_config_model.py`, it does not exist. Add it there, regenerate TypeScript types, then build the rest.
 
-!!! note "Implementation Note — repo_id vs corpus_id"
-    The API still uses `repo_id` for historical reasons. Treat it as the corpus identifier. Many Pydantic models accept both via `validation_alias`, and serialize as `corpus_id`.
+!!! note "Terminology — corpus vs repo_id"
+    The API still accepts `repo_id` for legacy reasons. Treat it as the corpus identifier. Pydantic models use `AliasChoices("repo_id", "corpus_id")` and serialize as `corpus_id`.
 
-!!! warning "Security Warning — Secrets and DB Access"
-    Ensure `.env` is not committed. Limit database exposure to trusted networks. Use strong passwords for PostgreSQL and Neo4j. Rotate API keys regularly.
+!!! warning "Security"
+    Keep `.env` out of version control. Restrict database access. Use strong passwords for PostgreSQL and Neo4j. Rotate API keys regularly.
 
 ## What TriBridRAG Does
-
-TriBridRAG executes three independent retrieval methods in parallel and fuses them into a single result list that can optionally be reranked with a cross-encoder. All behavior is controlled by the Pydantic configuration model.
 
 | Feature | Description | Status |
 |---------|-------------|--------|
@@ -69,14 +67,14 @@ TriBridRAG executes three independent retrieval methods in parallel and fuses th
 
 ```mermaid
 flowchart LR
-    Q[Query] --> V["Vector Search\npgvector"]
+    Q["Query"] --> V["Vector Search\npgvector"]
     Q --> S["Sparse Search\nPostgreSQL FTS/BM25"]
     Q --> G["Graph Search\nNeo4j"]
-    V --> F[Fusion Layer]
+    V --> F["Fusion Layer"]
     S --> F
     G --> F
-    F --> R[Optional Reranker]
-    R --> O[Results]
+    F --> R["Optional Reranker"]
+    R --> O["Results"]
     F --> O
 ```
 
@@ -84,136 +82,148 @@ flowchart LR
 
 - [x] Configure environment (.env)
 - [x] Launch services with Docker Compose
+- [x] Regenerate TypeScript types from Pydantic
 - [x] Index a corpus
 - [x] Search via API
-- [ ] Tune fusion weights
+- [ ] Tune fusion weights and confidence thresholds
 - [ ] Enable reranking if needed
 
 Use ++ctrl+c++ to stop local uvicorn or Docker Tail sessions.
 
 === "Python"
-    ```python
-    import httpx
+```python
+import httpx, subprocess
 
-    BASE = "http://localhost:8000"
+BASE = "http://localhost:8000"
 
-    # 1) Trigger indexing of a corpus (1)
-    req = {
-        "corpus_id": "tribrid",  # repo_id alias is also accepted (2)
-        "repo_path": "/path/to/your/codebase",
-        "force_reindex": False,
-    }
-    r = httpx.post(f"{BASE}/index", json=req)
-    r.raise_for_status()
+# 1) Generate TS types from Pydantic (required for UI) (1)
+subprocess.check_call(["uv", "run", "scripts/generate_types.py"])  # (1)
 
-    # 2) Poll status
-    status = httpx.get(f"{BASE}/index/status", params={"corpus_id": "tribrid"}).json()
-    print(status)
+# 2) Trigger indexing of a corpus (2)
+req = {
+    "corpus_id": "tribrid",  # repo_id alias is also accepted (3)
+    "repo_path": "/path/to/your/codebase",
+    "force_reindex": False,
+}
+httpx.post(f"{BASE}/index", json=req).raise_for_status()
 
-    # 3) Search (parallel vector/sparse/graph with fusion -> optional rerank) (3)
-    payload = {
-        "corpus_id": "tribrid",
-        "query": "How does the chunker split Python files?",
-        "top_k": 8,
-        "enable_reranker": False,
-    }
-    res = httpx.post(f"{BASE}/search", json=payload).json()
-    for m in res["results"]:
-        print(m["file_path"], m["score"])  # fused score
-    ```
+# 3) Poll status (4)
+status = httpx.get(f"{BASE}/index/status", params={"corpus_id": "tribrid"}).json()
+print(status)
+
+# 4) Search (parallel vector/sparse/graph -> fusion -> optional rerank) (5)
+payload = {
+    "corpus_id": "tribrid",
+    "query": "How does the chunker split Python files?",
+    "top_k": 8,
+}
+res = httpx.post(f"{BASE}/search", json=payload).json()
+for m in res.get("matches", []):
+    print(m["file_path"], m["score"])  # fused score
+```
 
 === "curl"
-    ```bash
-    BASE=http://localhost:8000
+```bash
+BASE=http://localhost:8000
 
-    # (1) Start indexing
-    curl -sS -X POST "$BASE/index" \
-      -H 'Content-Type: application/json' \
-      -d '{
-        "corpus_id": "tribrid",
-        "repo_path": "/path/to/your/codebase",
-        "force_reindex": false
-      }'
+# (1) Types are generated locally via Python; no curl equivalent
 
-    # (2) Status
-    curl -sS "$BASE/index/status?corpus_id=tribrid" | jq .
+# (2) Start indexing
+curl -sS -X POST "$BASE/index" \ 
+  -H 'Content-Type: application/json' \ 
+  -d '{
+    "corpus_id": "tribrid",
+    "repo_path": "/path/to/your/codebase",
+    "force_reindex": false
+  }'
 
-    # (3) Search
-    curl -sS -X POST "$BASE/search" \
-      -H 'Content-Type: application/json' \
-      -d '{
-        "corpus_id": "tribrid",
-        "query": "How does the chunker split Python files?",
-        "top_k": 8,
-        "enable_reranker": false
-      }' | jq '.results[] | {file_path, score}'
-    ```
+# (4) Status
+curl -sS "$BASE/index/status?corpus_id=tribrid" | jq .
+
+# (5) Search
+curl -sS -X POST "$BASE/search" \ 
+  -H 'Content-Type: application/json' \ 
+  -d '{
+    "corpus_id": "tribrid",
+    "query": "How does the chunker split Python files?",
+    "top_k": 8
+  }' | jq '.matches[] | {file_path, score}'
+```
 
 === "TypeScript"
-    ```typescript
-    // (1) Use generated types — do not hand-write interfaces
-    import { IndexRequest } from "./web/src/types/generated"; // (2)
+```typescript
+// (1) Ensure ./web/src/types/generated.ts exists (generated by Python)
+import type { IndexRequest, SearchRequest, SearchResponse } from "./web/src/types/generated";
 
-    async function search() {
-      const base = "http://localhost:8000";
+async function indexAndSearch() {
+  const base = "http://localhost:8000";
 
-      const indexReq: IndexRequest = {
-        corpus_id: "tribrid", // repo_id alias is accepted server-side
-        repo_path: "/path/to/your/codebase",
-        force_reindex: false,
-      };
+  const indexReq: IndexRequest = {
+    corpus_id: "tribrid", // repo_id alias is also accepted server-side (3)
+    repo_path: "/path/to/your/codebase",
+    force_reindex: false,
+  };
+  await fetch(`${base}/index`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(indexReq),
+  }); // (2)
 
-      await fetch(`${base}/index`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(indexReq),
-      });
+  const searchReq: SearchRequest = {
+    corpus_id: "tribrid",
+    query: "chunker split Python",
+    top_k: 8,
+  } as any; // depending on generated type
 
-      const res = await fetch(`${base}/search`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ corpus_id: "tribrid", query: "chunker", top_k: 8 }),
-      });
-      const data = await res.json();
-      console.log(data.results.map((m: any) => [m.file_path, m.score])); // (3)
-    }
-    ```
+  const r = await fetch(`${base}/search`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(searchReq),
+  });
+  const data: SearchResponse = await r.json(); // (5)
+  console.log(data.matches.map(m => [m.file_path, m.score]));
+}
+```
 
-1. Index start: pushes files through loader → chunker → embedder → graph builder
-2. repo_id/corpus_id aliasing is enforced in Pydantic with `AliasChoices`
-3. Search runs vector/sparse/graph in parallel → fusion → optional reranker
+1. Generate UI types from Pydantic models — this is the contract for the frontend
+2. Start indexing your corpus folder
+3. Inputs accept `repo_id` but serialize as `corpus_id`
+4. Poll index status to show progress in UI
+5. Search runs vector/sparse/graph in parallel, fuses, then optionally reranks
 
-!!! success "Success — One Config To Rule Them All"
-    Every behavior above is configured by the Pydantic model. Toggle fusion weights, graph hop limits, top_k, and reranker directly in config.
+!!! success "One Config To Rule Them All"
+    Every behavior above is configured by `TriBridConfig`. Adjust fusion weights, hop limits, Top-K, and reranking in the config and the system adapts immediately.
 
-## Configuration and Operational Knobs
-
-| Area | Key Examples | Description |
-|------|--------------|-------------|
-| Retrieval | `retrieval.vector.top_k`, `retrieval.sparse.top_k`, `retrieval.graph.max_hops` | Controls depth and breadth per retriever |
-| Fusion | `fusion.strategy`, `fusion.weights`, `fusion.rrf_k_div` | Controls score fusion behavior |
-| Reranker | `reranker.enabled`, `reranker.model` | Optional cross-encoder reranking |
-| Indexing | `indexing.chunker.strategy`, `indexing.embedder.model` | Chunking and embeddings |
+## Architecture Overview
 
 ```mermaid
 flowchart TB
-    CFG["Pydantic Config\nTriBridConfig"] --> GEN["generate_types.py\nTypescript types"]
-    GEN --> STO[Zustand Stores]
-    STO --> HOOKS[React Hooks]
-    HOOKS --> UI[Components]
-    CFG --> API[FastAPI Schemas]
+    subgraph Client
+      U["User / UI / API Client"]
+    end
+
+    U --> A["FastAPI"]
+    A --> V["VectorRetriever\nPostgres+pgvector"]
+    A --> S["SparseRetriever\nPostgres FTS/BM25"]
+    A --> G["GraphRetriever\nNeo4j"]
+    V --> F["Fusion"]
+    S --> F
+    G --> F
+    F --> R["Reranker (optional)"]
+    R --> O["Final Results"]
+    F --> O
+
+    subgraph Storage
+      P[("PostgreSQL")]
+      N[("Neo4j")]
+    end
+
+    V <--> P
+    S <--> P
+    G <--> N
 ```
 
-!!! danger "Critical — Do Not Hand-Write API Types"
-    All frontend types are generated from Pydantic. Run `uv run scripts/generate_types.py` after any config model changes.
-
-[Configuration](configuration.md){ .md-button .md-button--primary }
-[API](api.md){ .md-button }
-[Retrieval](retrieval/overview.md){ .md-button }
-
-[^1]: Costs are derived from `data/models.json` and displayed in the UI.
-
 ??? note "Advanced Topics"
-    - Fusion math: supports weighted linear combination and Reciprocal Rank Fusion with configurable `rrf_k_div`.
-    - Retrieval cache: cache keys include `corpus_id`, `query`, and relevant config hashes for correctness.
-    - Failure isolation: vector, sparse, and graph paths are resilient; a failure in one path degrades gracefully without crashing the whole search.
+    - Fusion math: supports weighted linear combination and Reciprocal Rank Fusion with configurable `rrf_k`.
+    - Retrieval cache: cache keys include `corpus_id`, `query`, and a hash of the retrieval config segment for correctness.
+    - Failure isolation: vector, sparse, and graph legs are resilient; a failure in one path degrades gracefully without crashing the whole search.

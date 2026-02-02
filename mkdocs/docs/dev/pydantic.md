@@ -27,66 +27,77 @@
 [API](../api.md){ .md-button }
 
 !!! tip "Workflow"
-    1) Add/modify fields in Pydantic. 2) Generate TS types. 3) Use types in stores/hooks/components. 4) Update backend logic to honor new fields.
+    - Add/modify fields in Pydantic with `Field()` constraints and descriptions.
+    - Generate TS types.
+    - Use types in stores/hooks/components.
+    - Implement backend behavior that uses those fields.
 
 !!! note "Constraints"
-    Use `Field(ge=..., le=..., description=...)` everywhere. Descriptions become tooltips and docs.
+    Use `Field(ge=..., le=..., description=...)` everywhere. Descriptions power docs and UI tooltips.
 
 !!! warning "No Adapters"
-    Never write client-side adapters to change response shapes. Fix the Pydantic model instead.
+    Never write client-side adapters to change response shapes. Fix the Pydantic model instead and regenerate.
 
 ## Derivation Chain
 
 ```mermaid
 flowchart TB
     P["Pydantic\ntribrid_config_model.py"] --> G["pydantic2ts\n(generate_types.py)"]
-    G --> T[generated.ts]
-    T --> Z[Zustand Stores]
-    Z --> H[Hooks]
-    H --> C[Components]
-    P --> A[FastAPI Schemas]
+    G --> T["generated.ts"]
+    T --> Z["Zustand Stores"]
+    Z --> H["Hooks"]
+    H --> C["Components"]
+    P --> A["FastAPI Schemas"]
 ```
 
-## Commands
+## Commands (Annotated)
 
 === "Python"
-    ```python
-    import subprocess
-    subprocess.check_call(["uv", "run", "scripts/generate_types.py"])  # (1)
-    ```
+```python
+import subprocess
+
+# Generate TS types from Pydantic (1)
+subprocess.check_call(["uv", "run", "scripts/generate_types.py"])  # (1)
+
+# Validate sync (2)
+subprocess.check_call(["uv", "run", "scripts/validate_types.py"])  # (2)
+```
 
 === "curl"
-    ```bash
-    # Not applicable — run locally with uv
-    echo "Run: uv run scripts/generate_types.py" # (1)
-    ```
+```bash
+# Run locally with Python; no direct curl equivalent
+```
 
 === "TypeScript"
-    ```typescript
-    // After generation, import from generated.ts (2)
-    import { TriBridConfig } from '../web/src/types/generated';
-    ```
+```typescript
+// After generation, import from generated.ts (3)
+import type { TriBridConfig } from '../web/src/types/generated'; // (3)
+```
 
 1. Generate TypeScript types from Pydantic models
-2. Consume generated types exclusively
+2. Validate that generated types match current models
+3. Consume generated types exclusively
 
-### Source-of-Truth Files
+## Ralph Loop (Verification-Based Development)
 
-| File | Purpose |
-|------|---------|
-| `server/models/tribrid_config_model.py` | All config and domain models |
-| `data/models.json` | Model catalog, pricing, context windows |
-| `data/glossary.json` | Tooltip terms and categories |
+- [x] Start from repo root
+- [x] For each iteration: pick first unchecked TODO, implement end-to-end
+- [x] Verification sequence:
+  - `uv run scripts/check_banned.py`
+  - `uv run scripts/validate_types.py`
+  - `uv run pytest -q`
+- [ ] Only mark TODO complete when verification passes
 
-!!! success "UI Traceability"
-    Every prop in React components must trace back to a Pydantic field through generated types.
+```mermaid
+flowchart TB
+    Iteration["Ralph Loop Iteration"] --> TODO["Read TODO.md"]
+    TODO --> Implement["Implement Feature"]
+    Implement --> Verify["Run Verification"]
+    Verify -->|pass| Next["Next Iteration"]
+    Verify -->|fail| Fix["Fix Exact Failure"]
+```
 
-- [x] Add field in Pydantic first
-- [x] Generate types
-- [x] Update store/hook
-- [x] Use in component
-
-??? note "Common Pitfalls"
-    - Missing `validation_alias` when migrating `repo_id` → `corpus_id`
-    - Forgetting to include `description` leads to poor auto-docs
-    - Unbounded fields without `ge/le` allow invalid config into production
+??? note "Testing Discipline"
+    - GUI changes: Playwright tests with real interactions
+    - API changes: pytest with real request/response assertions
+    - Retrieval logic: verify relevance in results

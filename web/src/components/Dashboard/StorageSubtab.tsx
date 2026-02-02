@@ -37,33 +37,33 @@ export function StorageSubtab() {
       const storageItems: StorageItem[] = [
         {
           label: 'CHUNKS',
-          bytes: storage.chunks_bytes || 0,
-          size: formatBytes(storage.chunks_bytes || 0)
+          bytes: storage?.chunks_bytes || 0,
+          size: formatBytes(storage?.chunks_bytes || 0)
         },
         {
           label: 'PGVECTOR VECTORS',
-          bytes: storage.embeddings_bytes || 0,
-          size: formatBytes(storage.embeddings_bytes || 0)
+          bytes: storage?.embeddings_bytes || 0,
+          size: formatBytes(storage?.embeddings_bytes || 0)
         },
         {
           label: 'PGVECTOR INDEX (optional)',
-          bytes: storage.pgvector_index_bytes || 0,
-          size: formatBytes(storage.pgvector_index_bytes || 0)
+          bytes: storage?.pgvector_index_bytes || 0,
+          size: formatBytes(storage?.pgvector_index_bytes || 0)
         },
         {
           label: 'BM25 INDEX',
-          bytes: storage.bm25_index_bytes || 0,
-          size: formatBytes(storage.bm25_index_bytes || 0)
+          bytes: storage?.bm25_index_bytes || 0,
+          size: formatBytes(storage?.bm25_index_bytes || 0)
         },
         {
           label: 'NEO4J STORE',
-          bytes: storage.neo4j_store_bytes || 0,
-          size: formatBytes(storage.neo4j_store_bytes || 0)
+          bytes: storage?.neo4j_store_bytes || 0,
+          size: formatBytes(storage?.neo4j_store_bytes || 0)
         },
         {
           label: 'CHUNK SUMMARIES',
-          bytes: storage.chunk_summaries_bytes || 0,
-          size: formatBytes(storage.chunk_summaries_bytes || 0)
+          bytes: storage?.chunk_summaries_bytes || 0,
+          size: formatBytes(storage?.chunk_summaries_bytes || 0)
         },
         {
           label: 'KEYWORDS',

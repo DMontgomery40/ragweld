@@ -161,11 +161,17 @@ def definition_to_interface(name: str, definition: dict[str, Any], definitions: 
         if "default" in prop_def:
             default_val = prop_def["default"]
             if isinstance(default_val, str):
+                safe_default = (
+                    default_val.replace("\r", "\\r")
+                    .replace("\n", "\\n")
+                    .replace("\t", "\\t")
+                    .replace('"', '\\"')
+                )
                 # Truncate long string defaults
-                if len(default_val) > 50:
-                    default_comment = f' // default: "{default_val[:47]}..."'
+                if len(safe_default) > 50:
+                    default_comment = f' // default: "{safe_default[:47]}..."'
                 else:
-                    default_comment = f' // default: "{default_val}"'
+                    default_comment = f' // default: "{safe_default}"'
             elif isinstance(default_val, (dict, list)):
                 json_str = json.dumps(default_val)
                 if len(json_str) > 50:
@@ -297,6 +303,17 @@ def main() -> None:
             EvalRunsResponse,
             EvalAnalyzeComparisonResponse,
             EvalComparisonResult,
+            # Domain models - Reranker training eval
+            CorpusEvalProfile,
+            RerankerTrainStartRequest,
+            RerankerTrainRun,
+            RerankerTrainRunMeta,
+            RerankerTrainRunsResponse,
+            RerankerTrainMetricEvent,
+            RerankerTrainStartResponse,
+            RerankerTrainMetricsResponse,
+            RerankerTrainDiffRequest,
+            RerankerTrainDiffResponse,
         )
     except ImportError as e:
         print(f"ERROR: Could not import models: {e}")
@@ -360,6 +377,16 @@ def main() -> None:
         EvalRunsResponse,
         EvalAnalyzeComparisonResponse,
         EvalComparisonResult,
+        CorpusEvalProfile,
+        RerankerTrainStartRequest,
+        RerankerTrainRun,
+        RerankerTrainRunMeta,
+        RerankerTrainRunsResponse,
+        RerankerTrainMetricEvent,
+        RerankerTrainStartResponse,
+        RerankerTrainMetricsResponse,
+        RerankerTrainDiffRequest,
+        RerankerTrainDiffResponse,
     ]
 
     print(f"Processing {len(all_models)} models...")

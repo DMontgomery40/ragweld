@@ -44,131 +44,119 @@
 [Configuration](configuration.md){ .md-button }
 [API](api.md){ .md-button }
 
-!!! tip "Pro Tip — Concurrency"
-    TriBridRAG parallelizes retrievers using asyncio. Keep DB connection pools sized adequately to avoid I/O starvation under concurrency.
+!!! tip "Concurrency"
+    TriBridRAG parallelizes retrievers with async I/O. Size DB connection pools to match concurrency and avoid I/O starvation.
 
-!!! note "Implementation Note — Failure Modes"
-    Each retriever is wrapped so failures degrade that path only. Fusion runs on the subset that succeeded, and `metadata.partial` flags can indicate a degraded answer.
+!!! note "Failure Isolation"
+    Each retriever is wrapped so failures degrade that leg only. Fusion runs on the subset that succeeded; fused results keep provenance in `ChunkMatch.source`.
 
 !!! warning "Graph Availability"
-    If Neo4j is unavailable, retrieval still works with vector and sparse results. Ensure fallback behavior is tested for your deployment.
+    If Neo4j is temporarily unavailable, retrieval continues with vector + sparse. Test fallback behavior in your deployment.
 
 ## System Diagram
 
 ```mermaid
 flowchart LR
-    subgraph Client
-      U[User / UI / API Client]
+    subgraph API
+      FAPI["FastAPI"]
     end
 
-    U -->|HTTP| A[FastAPI]
-    A -->|async| V["VectorRetriever\nPostgres+pgvector"]
-    A -->|async| S["SparseRetriever\nPostgres FTS/BM25"]
-    A -->|async| G["GraphRetriever\nNeo4j"]
+    FAPI --> V["VectorRetriever"]
+    FAPI --> S["SparseRetriever"]
+    FAPI --> G["GraphRetriever"]
 
-    V --> F[Fusion]
-    S --> F
-    G --> F
+    V --> FU["Fusion"]
+    S --> FU
+    G --> FU
 
-    F -->|optional| R[Cross-Encoder Reranker]
-    F --> O[Results]
-    R --> O
+    FU --> RR["Reranker (optional)"]
+    RR --> RES["Results"]
+    FU --> RES
 
-    subgraph Storage
-      P[(PostgreSQL)]
-      N[(Neo4j)]
-    end
-
-    V <--> P
-    S <--> P
-    G <--> N
+    V <--> PG["("PostgreSQL\n(pgvector+FTS)")"]
+    S <--> PG
+    G <--> NEO["("Neo4j\nGraph")"]
 ```
 
 ## Layer Responsibilities
 
-| Layer | Module | Responsibilities | Key Config |
-|------|--------|------------------|------------|
-| Vector | `server/retrieval/vector.py` | Dense search via pgvector | `retrieval.vector.*` |
-| Sparse | `server/retrieval/sparse.py` | FTS/BM25 on chunks | `retrieval.sparse.*` |
-| Graph | `server/retrieval/graph.py` | Entity traversal, context expansion | `retrieval.graph.*` |
-| Fusion | `server/retrieval/fusion.py` | Merge scores (weighted or RRF) | `fusion.*` |
-| Reranker | `server/retrieval/rerank.py` | Cross-encoder ranking | `reranker.*` |
+| Layer | Module | Responsibilities | Representative Config |
+|------|--------|------------------|-----------------------|
+| Vector | `server/retrieval/vector.py` | Dense search via pgvector | `vector_search.enabled`, `vector_search.top_k`, `embedding.*` |
+| Sparse | `server/retrieval/sparse.py` | FTS/BM25 over chunks | `sparse_search.enabled`, `sparse_search.top_k`, `indexing.bm25_*` |
+| Graph | `server/retrieval/graph.py` | Entity traversal, context expansion | `graph_search.enabled`, `graph_search.max_hops`, `graph_storage.*` |
+| Fusion | `server/retrieval/fusion.py` | Merge lists and scores | `fusion.method`, `fusion.rrf_k`, `fusion.*_weight` |
+| Reranker | `server/retrieval/rerank.py` | Cross-encoder scoring | `reranking.reranker_mode`, `reranking.*` |
 
-## Hot Path Example
+## Hot Path (Annotated)
 
 === "Python"
-    ```python
-    from server.retrieval.fusion import TriBridFusion
+```python
+from server.retrieval.fusion import TriBridFusion
+from server.retrieval.rerank import Reranker
 
-    async def search(corpus_id: str, query: str, cfg):
-        fusion = TriBridFusion(cfg)                     # (1)
-        results = await fusion.search(corpus_id, query) # (2)
-        if cfg.reranker.enabled:
-            from server.retrieval.rerank import Reranker
-            rr = Reranker(cfg)
-            results = await rr.rerank(query, results)  # (3)
-        return results
-    ```
+async def search(query: str, corpus_id: str, cfg):  # (1)
+    fusion = TriBridFusion(cfg)
+    fused = await fusion.search(corpus_id, query)   # (2)
+    if cfg.reranking.reranker_mode != "none":
+        rr = Reranker(cfg)
+        fused = await rr.rerank(query, fused)       # (3)
+    return fused                                   # (4)
+```
 
 === "curl"
-    ```bash
-    # High-level: Fusion + optional reranker is server-controlled by config.
-    curl -sS -X POST http://localhost:8000/search \
-      -H 'Content-Type: application/json' \
-      -d '{
-        "corpus_id": "tribrid",
-        "query": "database client architecture",
-        "top_k": 10,
-        "enable_reranker": true
-      }' | jq .
-    ```
+```bash
+BASE=http://localhost:8000
+# (2) Fusion (vector+sparse+graph)
+curl -sS -X POST "$BASE/search" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "corpus_id": "tribrid",
+    "query": "connection pool size",
+    "top_k": 10
+  }' | jq '.matches[0]'
+```
 
 === "TypeScript"
-    ```typescript
-    import { SearchRequest, SearchResponse } from "./web/src/types/generated";
+```typescript
+import type { SearchRequest, SearchResponse } from "../web/src/types/generated";
 
-    export async function triSearch(req: SearchRequest): Promise<SearchResponse> {
-      const resp = await fetch("/search", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(req),
-      });
-      return await resp.json();
-    }
-    ```
+export async function triSearch(req: SearchRequest): Promise<SearchResponse> {
+  const resp = await fetch("/search", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(req),
+  });
+  return await resp.json(); // (4)
+}
+```
 
-1. `TriBridFusion` encapsulates running vector/sparse/graph in parallel
-2. Returns fused results, with per-source metadata for auditing
-3. Optional reranking pass
+1. Query and corpus identifier; use `corpus_id` (alias of legacy `repo_id`)
+2. Fusion runs vector/sparse/graph concurrently and merges results
+3. Optional reranking with cross-encoder based on config
+4. Returns unified `SearchResponse` with provenance and latency
 
-!!! success "Separation of Concerns"
-    The fusion layer is agnostic of storage details. Retrievers expose a common interface returning scored matches with provenance.
+## Fusion Choices
 
-## Performance Considerations
-
-- Use HNSW or IVFFlat pgvector indexes depending on corpus size and update frequency.
-- Keep FTS indexes up to date after reindexing.
-- Neo4j memory (heap/pagecache) should be tuned for graph traversal fan-out.
-- Set Postgres and Neo4j connection pool sizes to match concurrency.
+| Method | Formula | Strengths | Notes |
+|--------|---------|-----------|-------|
+| weighted | `w_v*sv + w_s*ss + w_g*sg` | Interpretable weight tuning | Normalize scores if distributions differ |
+| rrf | `sum 1/(k+rank_i)` | Robust across heterogeneous scales | Tune `rrf_k` in `fusion.rrf_k` |
 
 ```mermaid
 flowchart TB
-    subgraph "Tuning Inputs"
-      K[top_k]
-      W[weights]
-      RRF[rrf_k_div]
-      H[max_hops]
-    end
-
-    K --> FUSION
-    W --> FUSION
-    RRF --> FUSION
-    H --> GRAPH
-
-    GRAPH[GraphRetriever] --> FUSION[Fusion]
+    Q["Query"] --> V["Vector Top-K"]
+    Q --> S["Sparse Top-K"]
+    Q --> G["Graph Top-K"]
+    V --> FU["Fusion"]
+    S --> FU
+    G --> FU
+    FU --> OUT["Top-N Results"]
 ```
 
-??? note "Advanced: Caching Strategy"
-    - Retrieval cache key: `corpus_id + query + retriever config hash`.
-    - Expiration controlled by config; invalidate on reindex or config change.
-    - Cache entries store per-retriever scores and feature vectors for analysis.
+??? note "Implementation Notes"
+    - All configurable fields (weights, top_k, thresholds) live in `TriBridConfig`. Frontend sliders and toggles must map 1:1 to these fields via `generated.ts`.
+    - DB clients: `server/db/postgres.py` (pgvector + FTS) and `server/db/neo4j.py` (graph). Keep pools separate to avoid head-of-line blocking.
+
+!!! danger "Do Not Hand-Write Types"
+    All API types must be imported from `web/src/types/generated.ts`. Regenerate with `uv run scripts/generate_types.py` whenever Pydantic models change.

@@ -89,33 +89,9 @@ export function SystemStatusSubtab() {
       }
 
       if (indexData.status === 'fulfilled' && indexData.value.metadata) {
-        const metadata = indexData.value.metadata;
-
-        if (metadata.repos && metadata.repos.length > 0) {
-          const sortedByActivity = metadata.repos
-            .map(repo => {
-              const chunkCount = repo.chunk_count || 0;
-              const storageBytes =
-                (repo.sizes?.chunks || 0) + (repo.sizes?.bm25 || 0) + (repo.sizes?.cards || 0);
-              return {
-                name: repo.name,
-                profile: repo.profile,
-                chunkCount,
-                storageBytes
-              };
-            })
-            .sort((a, b) => {
-              if (b.chunkCount === a.chunkCount) {
-                return b.storageBytes - a.storageBytes;
-              }
-              return b.chunkCount - a.chunkCount;
-            })
-            .slice(0, 5);
-
-          setTopFolders(sortedByActivity);
-        } else {
-          setTopFolders([]);
-        }
+        // DashboardIndexStatusMetadata does not expose a per-corpus repo breakdown.
+        // Keep this empty until the backend provides a deterministic schema.
+        setTopFolders([]);
       }
 
       // MCP

@@ -142,10 +142,19 @@ function bindResizableSidepanel(): void {
       overlay.style.zIndex = '2147483647'; // above iframes
       overlay.style.touchAction = 'none';
       document.body.appendChild(overlay);
+
+      // Fallback: if pointer capture fails, the overlay will receive pointer events.
+      // Attach listeners here so resizing still works on pages where capture is unreliable.
+      overlay.addEventListener('pointermove', onPointerMove, { passive: false });
+      overlay.addEventListener('pointerup', onPointerUpOrCancel);
+      overlay.addEventListener('pointercancel', onPointerUpOrCancel);
     };
 
     const unmountOverlay = (): void => {
       if (!overlay) return;
+      overlay.removeEventListener('pointermove', onPointerMove);
+      overlay.removeEventListener('pointerup', onPointerUpOrCancel);
+      overlay.removeEventListener('pointercancel', onPointerUpOrCancel);
       overlay.remove();
       overlay = null;
     };
@@ -174,6 +183,9 @@ function bindResizableSidepanel(): void {
       if (rafId) {
         window.cancelAnimationFrame(rafId);
         rafId = 0;
+        // If the drag ended before the next animation frame, flush the last position
+        // so the final width is applied deterministically (important for tests + UX).
+        applyFromClientX(lastClientX);
       }
       handle.classList.remove('dragging');
       unmountOverlay();
@@ -190,11 +202,10 @@ function bindResizableSidepanel(): void {
       handle.classList.add('dragging');
       document.body.style.cursor = 'col-resize';
       document.body.style.userSelect = 'none';
-      mountOverlay();
-
       try {
         handle.setPointerCapture(e.pointerId);
       } catch {}
+      mountOverlay();
 
       scheduleApply(e.clientX);
       e.preventDefault();

@@ -26,7 +26,7 @@
 [Configuration](configuration.md){ .md-button }
 [API](api.md){ .md-button }
 
-!!! tip "Pro Tip — Persistent Volumes"
+!!! tip "Persistent Volumes"
     Keep DB data outside the repo. Default bind-mount path is `../tribrid-rag-db/`. Override with `TRIBRID_DB_DIR` to point elsewhere.
 
 !!! note "Environment Template"
@@ -43,64 +43,60 @@
 | PostgreSQL | 5432 | Chunk + vector + FTS storage |
 | Neo4j Bolt | 7687 | Graph driver |
 | Neo4j Browser | 7474 | Admin UI |
+| Prometheus | 9090 | Metrics |
+| Grafana | 3001 | Dashboards |
 
 ```mermaid
 flowchart LR
-    Dev[Developer] --> Compose[Docker Compose]
-    Compose --> API
-    Compose --> Postgres
-    Compose --> Neo4j
-    Postgres --> Exporter
+    Dev["Developer"] --> Compose["Docker Compose"]
+    Compose --> API["API"]
+    Compose --> Postgres["Postgres"]
+    Compose --> Neo4j["Neo4j"]
+    Postgres --> Exporter["Postgres Exporter"]
 ```
 
-## Bring-Up
+## Bring-Up Tasks
 
 - [x] Create `.env` with DB creds and API keys
 - [x] `docker compose up -d`
 - [x] `uv run scripts/generate_types.py`
 - [x] Start API service
 
-Use ++ctrl+c++ to stop foreground sessions.
-
 === "Python"
-    ```python
-    import subprocess, os
+```python
+import subprocess, os
 
-    # Generate types from Pydantic (1)
-    subprocess.check_call(["uv", "run", "scripts/generate_types.py"])  # (1)
+# Generate types from Pydantic (1)
+subprocess.check_call(["uv", "run", "scripts/generate_types.py"])  # (1)
 
-    # Start FastAPI via uvicorn (2)
-    os.system("uvicorn server.main:app --reload --port 8000")  # (2)
-    ```
+# Start FastAPI via uvicorn (2)
+os.system("uvicorn server.main:app --reload --port 8000")  # (2)
+```
 
 === "curl"
-    ```bash
-    # After containers are up:
-    curl -sS http://localhost:8000/ready | jq .  # (3)
-    ```
+```bash
+# After containers are up:
+curl -sS http://localhost:8000/ready | jq .  # readiness check (3)
+```
 
 === "TypeScript"
-    ```typescript
-    // Frontend dev typically proxies to :8000
-    // Ensure generated.ts is present
-    console.log("Ensure types generated and API ready at /ready");
-    ```
+```typescript
+// Frontend dev typically proxies to :8000
+console.log("Ensure generated.ts exists and API ready at /ready");
+```
 
 1. Generate TS types from Pydantic
-2. Run API server
-3. Validate readiness
-
-!!! success "Monitoring"
-    Prometheus can scrape `/metrics` directly and `postgres-exporter` for DB metrics.
+2. Run API server (dev mode)
+3. Validate readiness gates DB connectivity
 
 ```mermaid
 flowchart TB
-    Env[.env] --> Compose
-    Pydantic --> Types[generated.ts]
-    Types --> UI
-    Compose --> API
+    Env[".env"] --> Compose
+    Pydantic --> Types["generated.ts"]
+    Types --> UI["Frontend"]
+    Compose --> API["API"]
     API --> READY["/ready"]
 ```
 
 ??? note "Container Logs"
-    Use `/docker/{container}/logs` to fetch current logs lines via API for basic troubleshooting when UI access is limited.
+    Use `/docker/{container}/logs` to fetch current log lines via API for basic troubleshooting when UI access is limited.

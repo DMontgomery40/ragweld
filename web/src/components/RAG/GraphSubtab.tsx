@@ -22,7 +22,6 @@ export function GraphSubtab() {
   const { repos, activeRepo, loadRepos, setActiveRepo } = useRepoStore();
   const {
     entities,
-    relationships,
     communities,
     stats,
     selectedEntity,

@@ -13,8 +13,8 @@ Other files should re-export from this module.
 """
 from __future__ import annotations
 
-import uuid
 import re
+import uuid
 from datetime import UTC, datetime
 from typing import Any, Literal
 
@@ -967,6 +967,169 @@ class EvalComparisonResult(BaseModel):
     delta_recall_at_10: float = Field(description="Change in recall@10")
     improved_entries: list[str] = Field(default_factory=list, description="Entry IDs that improved")
     degraded_entries: list[str] = Field(default_factory=list, description="Entry IDs that degraded")
+
+
+# =============================================================================
+# DOMAIN MODELS - Training evaluation (reranker training runs)
+# =============================================================================
+
+MetricKey = Literal["mrr", "ndcg", "map"]
+LabelKind = Literal["pairwise", "binary", "graded", "unknown"]
+
+
+class CorpusEvalProfile(BaseModel):
+    repo_id: str = Field(
+        description="Corpus identifier",
+        validation_alias=AliasChoices("repo_id", "corpus_id"),
+        serialization_alias="corpus_id",
+    )
+    label_kind: LabelKind = Field(default="unknown", description="Label structure for relevance data")
+    avg_relevant_per_query: float = Field(default=0.0, ge=0.0)
+    p95_relevant_per_query: float = Field(default=0.0, ge=0.0)
+    recommended_metric: MetricKey = Field(description="Auto-selected headline metric for this corpus")
+    recommended_k: int = Field(default=10, ge=1, le=200, description="Recommended k for @k metrics")
+    rationale: str = Field(default="", description="Short UI-safe explanation for metric choice")
+
+
+RerankerTrainRunStatus = Literal["queued", "running", "completed", "failed", "cancelled"]
+
+
+class RerankerTrainStartRequest(BaseModel):
+    repo_id: str = Field(
+        description="Corpus identifier to train against",
+        validation_alias=AliasChoices("repo_id", "corpus_id"),
+        serialization_alias="corpus_id",
+    )
+    # Optional overrides (Advanced UI)
+    primary_metric: MetricKey | None = Field(default=None, description="Override metric (else use profile)")
+    primary_k: int | None = Field(default=None, ge=1, le=200, description="Override k (else use profile)")
+    # Training overrides (optional, defaults come from config)
+    epochs: int | None = Field(default=None, ge=1, le=50)
+    batch_size: int | None = Field(default=None, ge=1, le=256)
+    lr: float | None = Field(default=None, gt=0.0)
+    warmup_ratio: float | None = Field(default=None, ge=0.0, le=1.0)
+    max_length: int | None = Field(default=None, ge=32, le=2048)
+
+
+class RerankerTrainRunSummary(BaseModel):
+    # Computed at end; keep lightweight so run listing is cheap.
+    primary_metric_best: float | None = Field(default=None, ge=0.0)
+    primary_metric_final: float | None = Field(default=None, ge=0.0)
+    best_step: int | None = Field(default=None, ge=0)
+    time_to_best_secs: float | None = Field(default=None, ge=0.0)
+    stability_stddev: float | None = Field(
+        default=None,
+        ge=0.0,
+        description="Late-training stddev of primary metric",
+    )
+
+
+class RerankerTrainRun(BaseModel):
+    run_id: str = Field(description="Unique identifier for this training run")
+    repo_id: str = Field(
+        description="Corpus identifier",
+        validation_alias=AliasChoices("repo_id", "corpus_id"),
+        serialization_alias="corpus_id",
+    )
+    status: RerankerTrainRunStatus = Field(default="queued")
+    started_at: datetime = Field(description="UTC start time")
+    completed_at: datetime | None = Field(default=None, description="UTC completion time")
+
+    # Snapshots for reproducibility
+    config_snapshot: dict[str, Any] = Field(description="Nested TriBridConfig snapshot (mode='json')")
+    config: dict[str, Any] = Field(default_factory=dict, description="Flat env-style config snapshot")
+
+    # Stable “North Star”
+    primary_metric: MetricKey = Field(description="Run-locked headline metric")
+    primary_k: int = Field(ge=1, le=200, description="Run-locked k for @k metrics")
+    metrics_available: list[str] = Field(default_factory=list, description="e.g. ['mrr@10','ndcg@10','map']")
+
+    # Store the *profile snapshot used at start* so rationale never changes later
+    metric_profile: CorpusEvalProfile = Field(description="Profile snapshot used to choose primary_metric/primary_k")
+
+    # Hyperparameters captured (resolved defaults + overrides)
+    epochs: int = Field(ge=1, le=50)
+    batch_size: int = Field(ge=1, le=256)
+    lr: float = Field(gt=0.0)
+    warmup_ratio: float = Field(ge=0.0, le=1.0)
+    max_length: int = Field(ge=32, le=2048)
+
+    summary: RerankerTrainRunSummary = Field(default_factory=RerankerTrainRunSummary)
+
+
+class RerankerTrainRunMeta(BaseModel):
+    run_id: str
+    repo_id: str = Field(
+        validation_alias=AliasChoices("repo_id", "corpus_id"),
+        serialization_alias="corpus_id",
+    )
+    status: RerankerTrainRunStatus
+    started_at: datetime
+    completed_at: datetime | None = None
+    primary_metric: MetricKey
+    primary_k: int
+    primary_metric_best: float | None = None
+    primary_metric_final: float | None = None
+
+
+class RerankerTrainRunsResponse(BaseModel):
+    ok: bool = Field(default=True)
+    runs: list[RerankerTrainRunMeta] = Field(default_factory=list)
+
+
+# --- Metrics event stream schema (stored in metrics.jsonl and used by SSE/UI) ---
+
+RerankerTrainEventType = Literal["log", "progress", "metrics", "state", "error", "complete"]
+
+
+class RerankerTrainMetricEvent(BaseModel):
+    type: RerankerTrainEventType
+    ts: datetime = Field(description="UTC timestamp")
+    run_id: str
+    step: int | None = Field(default=None, ge=0)
+    epoch: float | None = Field(default=None, ge=0.0)
+
+    message: str | None = None  # for log/error
+    percent: float | None = Field(default=None, ge=0.0, le=100.0)  # for progress
+    metrics: dict[str, float] | None = None  # for metrics: {'mrr@10':0.33,'ndcg@10':0.41,'map':0.22}
+    status: RerankerTrainRunStatus | None = None  # for state/complete
+
+
+class RerankerTrainStartResponse(BaseModel):
+    ok: bool = Field(default=True)
+    run_id: str
+    run: RerankerTrainRun
+
+
+class RerankerTrainMetricsResponse(BaseModel):
+    ok: bool = Field(default=True)
+    events: list[RerankerTrainMetricEvent] = Field(default_factory=list)
+
+
+class RerankerTrainDiffRequest(BaseModel):
+    baseline_run_id: str
+    current_run_id: str
+
+
+class RerankerTrainDiffResponse(BaseModel):
+    ok: bool = Field(default=True)
+    compatible: bool = Field(default=True, description="False if primary metric/k differ")
+    reason: str | None = None
+
+    primary_metric: MetricKey | None = None
+    primary_k: int | None = None
+
+    baseline_primary_best: float | None = None
+    current_primary_best: float | None = None
+    delta_primary_best: float | None = None
+
+    baseline_time_to_best_secs: float | None = None
+    current_time_to_best_secs: float | None = None
+    delta_time_to_best_secs: float | None = None
+
+    baseline_stability_stddev: float | None = None
+    current_stability_stddev: float | None = None
+    delta_stability_stddev: float | None = None
 
 
 # =============================================================================

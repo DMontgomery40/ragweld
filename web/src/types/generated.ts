@@ -162,6 +162,21 @@ export interface ChunkingConfig {
   preserve_imports?: number; // default: 1
 }
 
+export interface CorpusEvalProfile {
+  /** Corpus identifier */
+  corpus_id: string;
+  /** Label structure for relevance data */
+  label_kind?: "pairwise" | "binary" | "graded" | "unknown"; // default: "unknown"
+  avg_relevant_per_query?: number; // default: 0.0
+  p95_relevant_per_query?: number; // default: 0.0
+  /** Auto-selected headline metric for this corpus */
+  recommended_metric: "mrr" | "ndcg" | "map";
+  /** Recommended k for @k metrics */
+  recommended_k?: number; // default: 10
+  /** Short UI-safe explanation for metric choice */
+  rationale?: string; // default: ""
+}
+
 /** Embedding configuration summary for dashboard display. */
 export interface DashboardEmbeddingConfigSummary {
   /** Embedding provider (embedding.embedding_type). */
@@ -710,6 +725,70 @@ export interface Relationship {
   properties?: Record<string, unknown>;
 }
 
+export interface RerankerTrainMetricEvent {
+  type: "log" | "progress" | "metrics" | "state" | "error" | "complete";
+  /** UTC timestamp */
+  ts: string;
+  run_id: string;
+  step?: number | null; // default: None
+  epoch?: number | null; // default: None
+  message?: string | null; // default: None
+  percent?: number | null; // default: None
+  metrics?: Record<string, number> | null; // default: None
+  status?: "queued" | "running" | "completed" | "failed" | "cancelled" | null; // default: None
+}
+
+export interface RerankerTrainRun {
+  /** Unique identifier for this training run */
+  run_id: string;
+  /** Corpus identifier */
+  corpus_id: string;
+  status?: "queued" | "running" | "completed" | "failed" | "cancelled"; // default: "queued"
+  /** UTC start time */
+  started_at: string;
+  /** UTC completion time */
+  completed_at?: string | null; // default: None
+  /** Nested TriBridConfig snapshot (mode='json') */
+  config_snapshot: Record<string, unknown>;
+  /** Flat env-style config snapshot */
+  config?: Record<string, unknown>;
+  /** Run-locked headline metric */
+  primary_metric: "mrr" | "ndcg" | "map";
+  /** Run-locked k for @k metrics */
+  primary_k: number;
+  /** e.g. ['mrr@10','ndcg@10','map'] */
+  metrics_available?: string[];
+  /** Profile snapshot used to choose primary_metric/primary_k */
+  metric_profile: CorpusEvalProfile;
+  epochs: number;
+  batch_size: number;
+  lr: number;
+  warmup_ratio: number;
+  max_length: number;
+  summary?: RerankerTrainRunSummary;
+}
+
+export interface RerankerTrainRunMeta {
+  run_id: string;
+  corpus_id: string;
+  status: "queued" | "running" | "completed" | "failed" | "cancelled";
+  started_at: string;
+  completed_at?: string | null; // default: None
+  primary_metric: "mrr" | "ndcg" | "map";
+  primary_k: number;
+  primary_metric_best?: number | null; // default: None
+  primary_metric_final?: number | null; // default: None
+}
+
+export interface RerankerTrainRunSummary {
+  primary_metric_best?: number | null; // default: None
+  primary_metric_final?: number | null; // default: None
+  best_step?: number | null; // default: None
+  time_to_best_secs?: number | null; // default: None
+  /** Late-training stddev of primary metric */
+  stability_stddev?: number | null; // default: None
+}
+
 /** Reranking configuration for result refinement. */
 export interface RerankingConfig {
   /** Reranker mode: 'cloud' (Cohere/Voyage API), 'local' (HuggingFace cross-encoder), 'learning' (TRIBRID cross-encoder-tribrid), 'none' (disabled) */
@@ -833,9 +912,7 @@ export interface SystemPromptsConfig {
   /** Extract metadata from code chunks during indexing */
   code_enrichment?: string; // default: "Analyze this code and return a JSON object with..."
   /** Prompt for LLM-assisted semantic KG extraction (concepts + relations) */
-  semantic_kg_extraction?: string; // default: "You are a semantic knowledge graph extractor.
-
-..."
+  semantic_kg_extraction?: string; // default: "You are a semantic knowledge graph extractor.\n..."
   /** Analyze eval regressions with skeptical approach - avoid false explanations */
   eval_analysis?: string; // default: "You are an expert RAG (Retrieval-Augmented Gene..."
   /** Lightweight chunk_summary generation prompt for faster indexing */
@@ -1444,6 +1521,59 @@ export interface MCPStatusResponse {
   python_stdio_available?: boolean;
   /** Human-readable diagnostic details (best-effort). */
   details?: string[];
+}
+
+export interface RerankerTrainDiffRequest {
+  baseline_run_id: string;
+  current_run_id: string;
+}
+
+export interface RerankerTrainDiffResponse {
+  ok?: boolean;
+  /** False if primary metric/k differ */
+  compatible?: boolean;
+  reason?: string | null;
+  primary_metric?: "mrr" | "ndcg" | "map" | null;
+  primary_k?: number | null;
+  baseline_primary_best?: number | null;
+  current_primary_best?: number | null;
+  delta_primary_best?: number | null;
+  baseline_time_to_best_secs?: number | null;
+  current_time_to_best_secs?: number | null;
+  delta_time_to_best_secs?: number | null;
+  baseline_stability_stddev?: number | null;
+  current_stability_stddev?: number | null;
+  delta_stability_stddev?: number | null;
+}
+
+export interface RerankerTrainMetricsResponse {
+  ok?: boolean;
+  events?: RerankerTrainMetricEvent[];
+}
+
+export interface RerankerTrainRunsResponse {
+  ok?: boolean;
+  runs?: RerankerTrainRunMeta[];
+}
+
+export interface RerankerTrainStartRequest {
+  /** Corpus identifier to train against */
+  corpus_id: string;
+  /** Override metric (else use profile) */
+  primary_metric?: "mrr" | "ndcg" | "map" | null;
+  /** Override k (else use profile) */
+  primary_k?: number | null;
+  epochs?: number | null;
+  batch_size?: number | null;
+  lr?: number | null;
+  warmup_ratio?: number | null;
+  max_length?: number | null;
+}
+
+export interface RerankerTrainStartResponse {
+  ok?: boolean;
+  run_id: string;
+  run: RerankerTrainRun;
 }
 
 /** Request payload for tri-brid search. */

@@ -312,6 +312,21 @@ IMPORTANT:
 
 This is not optional. This is not "if you have time." Every change must be verified before you say "done."
 
+### Zero-mocked tests (new direction)
+We are moving to **zero-mocked tests**. The goal is to stop missing real regressions caused by “fake green” tests.
+
+**Rules (effective immediately for new/edited tests):**
+- **No Playwright API mocking**: do not use `page.route(...)` + `route.fulfill(...)` (or similar request interception) to fake backend responses.
+- **No Python mocking**: do not use `monkeypatch`, `unittest.mock`, `MagicMock`, `patch()`, or similar test doubles.
+- **No “skip stubs” behavior**: tests must fail loudly if code raises `NotImplementedError` or is otherwise incomplete.
+
+**How to run real E2E locally:**
+- Start the full stack (DBs + Loki): `./start.sh --with-observability`
+- Ensure your LLM credentials are configured in `.env` (chat uses real model calls by design).
+
+**Migration rule while converting existing coverage:**
+- If you touch a feature area and there’s an existing test that uses mock data for it, **convert that test to a real test first**, then run it.
+
 ### GUI Changes → Playwright Tests
 Not just "screen isn't black." Real interaction tests:
 ```typescript

@@ -33,7 +33,7 @@
     Pydantic models specify `validation_alias=AliasChoices("repo_id", "corpus_id")` and `serialization_alias="corpus_id"` to ensure forward compatibility.
 
 !!! warning "Cross-Corpus Leakage"
-    Never mix `corpus_id` across requests. Isolation is enforced, but path filters and boosts are corpus-scoped.
+    Never mix `corpus_id` across requests. Isolation is enforced in storage and graph layers.
 
 ## Models Using corpus_id
 
@@ -41,50 +41,37 @@
 |-------|--------|
 | `IndexRequest` | `corpus_id`, `repo_path`, `force_reindex` |
 | `IndexStatus` | `corpus_id`, `status`, `progress`, `current_file` |
-| `IndexStats` | `corpus_id`, `total_files`, `total_chunks`, `embedding_model` |
-| `DashboardIndexStatusResponse` | `metadata.repo_id` (serialized `corpus_id`) |
+| `SearchRequest` | `corpus_id`, `query`, `top_k` |
 
 ```mermaid
 flowchart LR
-    UI --> API
-    API --> Pyd[AliasChoices(repo_id, corpus_id)]
-    Pyd --> Store[Serialized as corpus_id]
+    UI["UI"] --> API["API"]
+    API --> Pyd["AliasChoices(repo_id, corpus_id)"]
+    Pyd --> Store["Serialized as corpus_id"]
 ```
 
 ## Example Requests
 
 === "Python"
-    ```python
-    import httpx
-
-    req = {"corpus_id": "tribrid", "repo_path": "/code/tribrid", "force_reindex": False}
-    httpx.post("http://localhost:8000/index", json=req)   # (1)
-    httpx.get("http://localhost:8000/index/status", params={"corpus_id": "tribrid"})  # (2)
-    ```
+```python
+import httpx
+req = {"corpus_id": "tribrid", "repo_path": "/code/tribrid", "force_reindex": False}
+httpx.post("http://localhost:8000/index", json=req)
+httpx.get("http://localhost:8000/index/status", params={"corpus_id": "tribrid"})
+```
 
 === "curl"
-    ```bash
-    curl -sS -X POST http://localhost:8000/index -H 'Content-Type: application/json' -d '{
-      "corpus_id": "tribrid", "repo_path": "/code/tribrid", "force_reindex": false
-    }'
-    ```
+```bash
+curl -sS -X POST http://localhost:8000/index -H 'Content-Type: application/json' -d '{
+  "corpus_id": "tribrid", "repo_path": "/code/tribrid", "force_reindex": false
+}'
+```
 
 === "TypeScript"
-    ```typescript
-    import { IndexRequest } from '../web/src/types/generated';
-    const req: IndexRequest = { corpus_id: 'tribrid', repo_path: '/code/tribrid', force_reindex: false };
-    ```
-
-1. Create/refresh a specific corpus
-2. Poll that same corpus id for status
+```typescript
+import type { IndexRequest } from "../../web/src/types/generated";
+const req: IndexRequest = { corpus_id: 'tribrid', repo_path: '/code/tribrid', force_reindex: false };
+```
 
 !!! success "Multi-Corpus UIs"
     Add a repo switcher bound to `corpus_id`. All panels (RAG, Graph, Index) should update in lockstep.
-
-- [x] Normalize ids to lowercase slugs
-- [x] Persist per-corpus config
-- [x] Scope metrics by `corpus_id`
-
-??? note "Storage Isolation"
-    - Postgres tables can be suffixed by corpus id
-    - Neo4j Enterprise can allocate separate databases per corpus; Community can emulate via labeling and namespacing

@@ -772,7 +772,7 @@
       ),
       LANGCHAIN_TRACING_V2: L(
         'LangChain Tracing',
-        'Enable comprehensive tracing with LangSmith (v2 tracing protocol). When true, all LangChain operations (LLM calls, retrieval, agent actions) are logged to LangSmith for debugging, monitoring, and optimization. Set LANGCHAIN_API_KEY and LANGCHAIN_PROJECT in your environment. Traces include inputs, outputs, latency, and token usage. Essential for production debugging and cost tracking.',
+        'Reserved for future LangSmith integration (v2 tracing protocol). TriBridRAG currently captures local, in-memory request traces for UI preview and does not export traces to LangSmith yet.',
         [
           ['LangSmith Setup', 'https://docs.smith.langchain.com/'],
           ['Tracing Guide', 'https://docs.smith.langchain.com/tracing'],
@@ -1180,37 +1180,35 @@
       ),
       TRACING_ENABLED: L(
         'Tracing Enabled',
-        'Enable distributed tracing for debugging complex RAG pipelines. Traces track request flow through retrieval, reranking, and generation. Useful for debugging latency or finding bottlenecks.',
+        'Enable TriBridRAG request tracing. This records an in-memory per-request event trace (used by the UI “Routing Trace” preview) for debugging routing/retrieval decisions and latency. This does not export traces to external providers.',
         [
-          ['Distributed Tracing', 'https://opentelemetry.io/docs/concepts/observability-primer/#distributed-traces'],
-          ['LangSmith Tracing', 'https://docs.smith.langchain.com/tracing']
+          ['Distributed Tracing (concepts)', 'https://opentelemetry.io/docs/concepts/observability-primer/#distributed-traces']
         ]
       ),
       TRACING_MODE: L(
         'Tracing Mode',
-        'Tracing backend to use. Options: "langsmith" (LangSmith/LangChain), "langtrace" (Langtrace), "none" (disabled). Each backend has different dashboards and features for visualizing RAG pipeline execution.',
+        'Controls tracing behavior. Options: "off" (disable tracing), "local" (local-only), "langsmith" (local traces + reserved for future LangSmith export). Alias: "none" is normalized to "off".',
         [
-          ['LangSmith', 'https://docs.smith.langchain.com/'],
-          ['Langtrace', 'https://docs.langtrace.ai/']
+          ['LangSmith', 'https://docs.smith.langchain.com/']
         ]
       ),
       TRACE_AUTO_LS: L(
-        'Auto LangSmith',
-        'Automatically enable LangSmith tracing when LANGSMITH_API_KEY is set (1=yes, 0=no). Convenient for dev environments - no need to manually toggle LANGCHAIN_TRACING_V2.',
+        'Auto-open LangSmith',
+        'UI convenience flag intended to auto-open LangSmith after a request (1=yes, 0=no). TriBridRAG does not currently implement LangSmith deep-linking; this setting is reserved for future integration.',
         [
           ['LangSmith Setup', 'https://docs.smith.langchain.com/']
         ]
       ),
       TRACE_RETENTION: L(
-        'Trace Retention Days',
-        'Number of days to retain trace data before automatic cleanup. Lower values save storage, higher values preserve history for debugging. Typical: 7-30 days.',
+        'Trace Retention',
+        'Number of traces to retain in the in-memory ring buffer (10-500). Higher values preserve more history for debugging; lower values use less memory.',
         [
           ['Data Retention', 'https://en.wikipedia.org/wiki/Data_retention']
         ]
       ),
       LANGSMITH_API_KEY: L(
         'LangSmith API Key',
-        'API key for LangSmith tracing service. Get from LangSmith dashboard under Settings > API Keys. Required when TRACING_MODE=langsmith or LANGCHAIN_TRACING_V2=true.',
+        'API key for LangSmith (external provider). TriBridRAG does not currently export traces to LangSmith; the UI only checks whether this key is set in your environment.',
         [
           ['LangSmith API Keys', 'https://docs.smith.langchain.com/'],
           ['Get API Key', 'https://smith.langchain.com/settings']
@@ -1218,42 +1216,42 @@
       ),
       LANGCHAIN_API_KEY: L(
         'LangChain API Key',
-        'Legacy alias for LANGSMITH_API_KEY. Both keys work for LangSmith authentication. Prefer LANGSMITH_API_KEY for clarity.',
+        'Alternate env var name used by LangSmith. Treat as an alias for LANGSMITH_API_KEY (external provider). TriBridRAG does not currently export traces to LangSmith.',
         [
           ['LangSmith Setup', 'https://docs.smith.langchain.com/']
         ]
       ),
       LANGCHAIN_PROJECT: L(
         'LangChain Project',
-        'Project name for organizing traces in LangSmith dashboard. Use different project names for dev/staging/prod to separate trace data. Example: "agro-dev", "agro-prod".',
+        'Project name for organizing traces in LangSmith (external provider). Stored in config field tracing.langchain_project. Reserved for future integration.',
         [
           ['LangSmith Projects', 'https://docs.smith.langchain.com/tracing/faq#how-do-i-use-projects']
         ]
       ),
       LANGCHAIN_ENDPOINT: L(
         'LangChain Endpoint',
-        'LangSmith API endpoint URL. Default: https://api.smith.langchain.com. Only change for self-hosted LangSmith or custom proxy setups.',
+        'LangSmith API endpoint URL (external provider). Stored in config field tracing.langchain_endpoint. Reserved for future integration.',
         [
           ['LangSmith API', 'https://docs.smith.langchain.com/']
         ]
       ),
       LANGTRACE_API_KEY: L(
-        'Langtrace API Key',
-        'API key for Langtrace observability platform. Get from Langtrace dashboard. Required when TRACING_MODE=langtrace.',
+        'LangTrace API Key',
+        'API key for LangTrace (external provider). TriBridRAG does not currently export traces to LangTrace; the UI only checks whether this key is set in your environment.',
         [
           ['Langtrace Setup', 'https://docs.langtrace.ai/']
         ]
       ),
       LANGTRACE_API_HOST: L(
-        'Langtrace API Host',
-        'Langtrace API endpoint URL. Default: https://langtrace.ai/api. Only change for self-hosted Langtrace instances.',
+        'LangTrace API Host',
+        'LangTrace API endpoint host (optional). Stored in config field tracing.langtrace_api_host (and surfaced as LANGTRACE_API_HOST in env exports). Reserved for future external trace export.',
         [
           ['Langtrace Docs', 'https://docs.langtrace.ai/']
         ]
       ),
       LANGTRACE_PROJECT_ID: L(
-        'Langtrace Project ID',
-        'Project identifier for organizing traces in Langtrace. Find in Langtrace dashboard under project settings.',
+        'LangTrace Project ID',
+        'Project identifier for LangTrace (optional). Stored in config field tracing.langtrace_project_id (and surfaced as LANGTRACE_PROJECT_ID in env exports). Reserved for future external trace export.',
         [
           ['Langtrace Projects', 'https://docs.langtrace.ai/']
         ]

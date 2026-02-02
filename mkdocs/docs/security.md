@@ -38,46 +38,39 @@
 ## Secrets Check
 
 === "Python"
-    ```python
-    import httpx
-    print(httpx.get("http://localhost:8000/secrets/check").json())  # (1)
-    ```
+```python
+import httpx
+print(httpx.get("http://localhost:8000/secrets/check").json())
+```
 
 === "curl"
-    ```bash
-    curl -sS http://localhost:8000/secrets/check | jq .
-    ```
+```bash
+curl -sS http://localhost:8000/secrets/check | jq .
+```
 
 === "TypeScript"
-    ```typescript
-    async function secrets() {
-      console.log(await (await fetch('/secrets/check')).json());
-    }
-    ```
+```typescript
+async function secrets() {
+  console.log(await (await fetch('/secrets/check')).json());
+}
+```
 
-1. Returns flags for provider keys, Postgres, and Neo4j connectivity
-
-## Environment Fields
+## Environment Keys (Selected)
 
 | Key | Purpose |
 |-----|---------|
-| `OPENAI_API_KEY`, `VOYAGE_API_KEY`, `COHERE_API_KEY`, `JINA_API_KEY` | Provider access |
+| `OPENAI_API_KEY`, `VOYAGE_API_KEY`, `COHERE_API_KEY`, `JINA_API_KEY` | Provider access for embedding/gen/rerank |
 | `POSTGRES_*` | DB connection for pgvector + FTS |
 | `NEO4J_*` | Neo4j connection |
+| `SERVER_PORT` | API service port |
+| `CONFIG_FILE` | Path to `tribrid_config.json` |
 
 ```mermaid
 flowchart LR
-    Env[Environment] --> API
-    API --> Check[/secrets/check]
-    Check --> Report[Status]
+    Env["Environment"] --> API
+    API --> Check["/secrets/check"]
+    Check --> Report["Status"]
 ```
 
-- [x] Rotate keys regularly
-- [x] Use strong DB passwords
-- [x] Restrict inbound network access
-
-!!! success "Auditing"
-    Log access to admin endpoints (`/config`, `/docker/*`, `/reranker/*`). Monitor for unusual patterns.
-
-??? note "RBAC"
-    Consider fronting the API with an authenticating proxy that provides role-based access for administrative routes.
+!!! success "Audit"
+    Log access to admin endpoints (`/config`, `/docker/*`, `/reranker/*`). Monitor for unusual patterns in logs and metrics.

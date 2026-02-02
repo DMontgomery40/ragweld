@@ -153,6 +153,16 @@ class EnhancedDocsAutopilot:
     def __init__(self, repo_root: Path = None):
         self.repo_root = Path(repo_root or os.getcwd())
         self.docs_dir = self.repo_root / "mkdocs" / "docs"
+
+        # Load local environment variables from `.env` (if present).
+        # This helps local runs without requiring `export OPENAI_API_KEY=...`.
+        try:
+            from dotenv import load_dotenv
+
+            load_dotenv(dotenv_path=self.repo_root / ".env", override=False)
+        except Exception:
+            pass
+
         self.openai_api_key = os.getenv("OPENAI_API_KEY")
         self.github_token = os.getenv("GITHUB_TOKEN")
 
@@ -204,20 +214,19 @@ class EnhancedDocsAutopilot:
         """Gather comprehensive context from the entire TriBridRAG codebase"""
 
         print("  📖 Reading CLAUDE.md...")
-        claude_md = self._read_file(self.repo_root / "CLAUDE.md", max_chars=15000)
+        claude_md = self._read_file(self.repo_root / "CLAUDE.md")
         claude_md = self._filter_sensitive_content(claude_md)
 
         print("  📐 Reading tribrid_config_model.py (source of truth)...")
         tribrid_config = self._read_file(
             self.repo_root / "server" / "models" / "tribrid_config_model.py",
-            max_chars=50000
         )
 
         print("  🤖 Reading models.json...")
-        models_json = self._read_file(self.repo_root / "data" / "models.json", max_chars=20000)
+        models_json = self._read_file(self.repo_root / "data" / "models.json")
 
         print("  📚 Reading glossary.json...")
-        glossary_json = self._read_file(self.repo_root / "data" / "glossary.json", max_chars=15000)
+        glossary_json = self._read_file(self.repo_root / "data" / "glossary.json")
 
         print("  🔌 Analyzing API endpoints...")
         api_endpoints = self._analyze_directory(self.repo_root / "server" / "api", "*.py")
@@ -244,14 +253,14 @@ class EnhancedDocsAutopilot:
         hooks = self._analyze_directory(self.repo_root / "web" / "src" / "hooks", "*.ts")
 
         print("  🐳 Reading docker-compose.yml...")
-        docker_compose = self._read_file(self.repo_root / "docker-compose.yml", max_chars=5000)
+        docker_compose = self._read_file(self.repo_root / "docker-compose.yml")
 
         print("  🔐 Reading .env.example...")
-        env_example = self._read_file(self.repo_root / ".env.example", max_chars=3000)
+        env_example = self._read_file(self.repo_root / ".env.example")
         env_example = self._sanitize_env_example(env_example)
 
         print("  📄 Reading README.md...")
-        readme = self._read_file(self.repo_root / "README.md", max_chars=10000)
+        readme = self._read_file(self.repo_root / "README.md")
 
         print("  📚 Analyzing existing documentation...")
         existing_docs = self._analyze_existing_docs()
@@ -280,11 +289,11 @@ class EnhancedDocsAutopilot:
             all_files=all_files,
         )
 
-    def _read_file(self, path: Path, max_chars: int = 10000) -> str:
-        """Read file safely with size limit"""
+    def _read_file(self, path: Path, max_chars: Optional[int] = None) -> str:
+        """Read file safely (optionally truncated)."""
         try:
             content = path.read_text(encoding="utf-8")
-            if len(content) > max_chars:
+            if max_chars is not None and max_chars > 0 and len(content) > max_chars:
                 content = content[:max_chars] + "\n... [truncated]"
             return content
         except Exception:
@@ -340,7 +349,7 @@ class EnhancedDocsAutopilot:
             if file_path.name.startswith('_') and file_path.name != '__init__.py':
                 continue
 
-            content = self._read_file(file_path, max_chars=5000)
+            content = self._read_file(file_path)
 
             # Extract docstrings and key info
             summary = self._extract_module_summary(content)
@@ -361,7 +370,7 @@ class EnhancedDocsAutopilot:
         # Get class definitions with their docstrings
         class_matches = re.findall(r'class\s+(\w+).*?:\s*\n\s*"""(.*?)"""', content, re.DOTALL)
         for class_name, docstring in class_matches[:5]:
-            lines.append(f"class {class_name}: {docstring[:100].strip()}")
+            lines.append(f"class {class_name}: {docstring.strip()}")
 
         # Get function definitions
         func_matches = re.findall(r'def\s+(\w+)\([^)]*\).*?:', content)
@@ -375,7 +384,7 @@ class EnhancedDocsAutopilot:
             routes = [f"{method.upper()} {path}" for method, path in route_matches]
             lines.append(f"Routes: {', '.join(routes)}")
 
-        return '\n'.join(lines) if lines else content[:1000]
+        return '\n'.join(lines) if lines else content
 
     def _list_components(self, components_dir: Path) -> List[str]:
         """List all React components"""
@@ -433,7 +442,7 @@ class EnhancedDocsAutopilot:
 
         for doc_file in self.docs_dir.rglob("*.md"):
             rel_path = doc_file.relative_to(self.docs_dir)
-            content = self._read_file(doc_file, max_chars=500)
+            content = self._read_file(doc_file)
             docs[str(rel_path)] = content
 
         return docs
@@ -441,8 +450,10 @@ class EnhancedDocsAutopilot:
     def generate_documentation_with_llm(self, context: DocumentationContext) -> Dict[str, str]:
         """Generate documentation using OpenAI GPT-4"""
 
-        if not self.openai_api_key:
+        api_key = (self.openai_api_key or "").strip().strip('"').strip("'")
+        if not api_key:
             raise ValueError("OPENAI_API_KEY environment variable not set")
+        self.openai_api_key = api_key
 
         # Prepare the comprehensive prompt
         system_prompt = self._create_system_prompt()
@@ -461,8 +472,14 @@ class EnhancedDocsAutopilot:
         return """You are an expert technical documentation writer for TriBridRAG, a tri-brid
 Retrieval-Augmented Generation engine.
 
-Write **extremely detailed, high-signal, deeply technical** documentation. This is not marketing
-copy. Assume the reader is an engineer who will run, debug, extend, and operate this system.
+Write **extremely detailed, high-signal, deeply technical** documentation. Do not be "stiff", these should feel human written This is not marketing
+copy.
+
+**Write for all audiences:**
+
+1. **The reader who is an engineer** who will run, debug, extend, and operate this system.
+2. **The reader who is not very technical**, and wants to learn about RAG.
+3. **The reader who is not interested in the technical details**, and just wants to know how to search for information in their own data. 
 
 You MUST create documentation that extensively uses Material for MkDocs features.
 
@@ -474,8 +491,7 @@ TriBridRAG runs three retrieval methods in parallel, fuses their results, and op
 2. **Sparse Search** (PostgreSQL FTS/BM25) - Exact matches, identifiers
 3. **Graph Search** (Neo4j) - Entity traversal, relationships
 
-### THE GOLDEN RULE
-> **Pydantic is the law.**
+
 
 All configuration and types are defined in `server/models/tribrid_config_model.py`.
 TypeScript types are GENERATED from Pydantic—never hand-written.
@@ -502,22 +518,22 @@ ALWAYS use admonitions for important information. Examples:
     Critical security information goes here.
 
 !!! tip "Pro Tip"
-    Helpful tips and best practices.
+    Helpful tips and best practices. Feel free to add multiple tips, bullet pointed out of a list. Do not be afraid to be verbose; not every line of documentation should be a technical bullet point, readers should assume these docs were written by a human, who has some narrative prose, especially when addressing features or concepts that are complex, interesting, unique to this repo, etc. 
 
 !!! info "Information"
-    General information blocks.
+    General information blocks. Feel free to add multiple information blocks, bullet pointed out of a list. Do not be afraid to be verbose; not every line of documentation should be a technical bullet point, readers should assume these docs were written by a human, who has some narrative prose, especially when addressing features or concepts that are complex, interesting, unique to this repo, etc. 
 
 !!! success "Success"
-    Success messages and confirmations.
+    Success messages and confirmations. Feel free to add multiple success messages, bullet pointed out of a list. Do not be afraid to be verbose; not every line of documentation should be a technical bullet point, readers should assume these docs were written by a human, who has some narrative prose, especially when addressing features or concepts that are complex, interesting, unique to this repo, etc. 
 
 !!! danger "Critical"
     Critical warnings about data loss or security.
 
 !!! example "Example"
-    Code examples and use cases.
+    Code examples and use cases. If it it not inhently obvious, explain it in a way that is easy to understand and follow.
 
 ??? note "Collapsible Section"
-    Use ??? for collapsible content that users can expand.
+    Use ??? for collapsible content that users can expand. Primarily use this for pieces of documentation that are important to include, but may not be relevant to most users, and therefore are collapsible as to not take up real estate or distract from more relevant documentation.
 
 ### 2. CODE BLOCKS WITH TABS (Use for ALL code examples!)
 === "Python"
@@ -666,7 +682,7 @@ visual enhancement!"""
             "Generate comprehensive documentation for TriBridRAG based on the following context:",
             "",
             "## Project Instructions (from CLAUDE.md)",
-            context.claude_md[:5000],
+            context.claude_md,
             "",
         ]
 
@@ -691,63 +707,63 @@ visual enhancement!"""
             "",
             "## Configuration Model (tribrid_config_model.py - SOURCE OF TRUTH)",
             "This file defines ALL configurable parameters (~500+ fields):",
-            context.tribrid_config[:10000],
+            context.tribrid_config,
             "",
         ])
 
         # Add API endpoints
         prompt_parts.extend([
             "## API Endpoints (server/api/)",
-            *[f"### {name}\n{desc[:500]}" for name, desc in list(context.api_endpoints.items())[:10]],
+            *[f"### {name}\n{desc}" for name, desc in list(context.api_endpoints.items())[:10]],
             "",
         ])
 
         # Add retrieval modules
         prompt_parts.extend([
             "## Retrieval Pipeline (server/retrieval/)",
-            *[f"### {name}\n{desc[:500]}" for name, desc in list(context.retrieval_modules.items())[:10]],
+            *[f"### {name}\n{desc}" for name, desc in list(context.retrieval_modules.items())[:10]],
             "",
         ])
 
         # Add database modules
         prompt_parts.extend([
             "## Database Modules (server/db/)",
-            *[f"### {name}\n{desc[:500]}" for name, desc in list(context.db_modules.items())[:5]],
+            *[f"### {name}\n{desc}" for name, desc in list(context.db_modules.items())[:5]],
             "",
         ])
 
         # Add indexing modules
         prompt_parts.extend([
             "## Indexing Pipeline (server/indexing/)",
-            *[f"### {name}\n{desc[:500]}" for name, desc in list(context.indexing_modules.items())[:5]],
+            *[f"### {name}\n{desc}" for name, desc in list(context.indexing_modules.items())[:5]],
             "",
         ])
 
         # Add models.json
         prompt_parts.extend([
             "## LLM/Embedding Models (data/models.json)",
-            context.models_json[:3000],
+            context.models_json,
             "",
         ])
 
         # Add glossary
         prompt_parts.extend([
             "## Glossary Terms (data/glossary.json)",
-            context.glossary_json[:2000],
+            context.glossary_json,
             "",
         ])
 
         # Add docker compose
         prompt_parts.extend([
             "## Docker Compose Configuration",
-            context.docker_compose[:2000],
+            context.docker_compose,
             "",
         ])
 
         # Add environment example
         prompt_parts.extend([
             "## Environment Configuration",
-            context.env_example[:1000],
+            context.env_example,
             "",
         ])
 
@@ -761,7 +777,7 @@ visual enhancement!"""
         # Add existing docs
         prompt_parts.extend([
             "## Existing Documentation Structure",
-            *[f"- {path}: {content[:100]}..." for path, content in list(context.existing_docs.items())[:20]],
+            *[f"- {path}: {content}" for path, content in list(context.existing_docs.items())[:20]],
             "",
         ])
 
@@ -888,8 +904,30 @@ visual enhancement!"""
                         print(f"Rate limited (429). Retrying in {wait:.1f}s... [{i+1}/{attempts}]")
                         time.sleep(wait)
                         continue
-                    # Non-429 HTTP error; do not retry
-                    print(f"HTTP error from OpenAI: {he}")
+                    # Non-429 HTTP error; do not retry.
+                    #
+                    # For auth failures, fail fast with a useful message (this will never succeed on retry).
+                    detail = ""
+                    if he.response is not None:
+                        try:
+                            body = he.response.json()
+                            if isinstance(body, dict) and isinstance(body.get("error"), dict):
+                                detail = str(body["error"].get("message") or "")
+                            else:
+                                detail = (he.response.text or "")[:500]
+                        except Exception:
+                            detail = (he.response.text or "")[:500]
+
+                    if status in (401, 403):
+                        raise RuntimeError(
+                            f"OpenAI API auth failed ({status}). "
+                            f"{detail or 'Check OPENAI_API_KEY (and that it is a real, unrevoked key).'}"
+                        )
+
+                    if detail:
+                        print(f"HTTP error from OpenAI ({status}): {detail}")
+                    else:
+                        print(f"HTTP error from OpenAI: {he}")
                     return None
                 except Exception as e:
                     # Network or parse error; retry with backoff
@@ -906,7 +944,7 @@ visual enhancement!"""
 
         # If still failing in CI, soft-fail with empty updates
         if resp_text is None:
-            if os.getenv("GITHUB_ACTIONS") == "true" or os.getenv("CI"):
+            if os.getenv("GITHUB_ACTIONS") == "true":
                 print("OpenAI API unavailable or rate-limited; skipping documentation generation in CI.")
                 return "{}"  # Return empty JSON to indicate no updates
             # Outside CI, raise to signal interactive failure
