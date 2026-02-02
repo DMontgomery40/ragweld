@@ -1,4 +1,4 @@
-// AGRO - Embedding Configuration Panel
+// TriBridRAG - Embedding Configuration Panel
 // Shows current embedding model, dimensions, precision from backend
 
 import { useEffect, useState } from 'react';

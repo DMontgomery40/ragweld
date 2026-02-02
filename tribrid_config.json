@@ -154,7 +154,13 @@
     "build_lexical_graph": true,
     "store_chunk_embeddings": true,
     "semantic_kg_enabled": false,
+    "ast_contains_weight": 1.0,
+    "ast_inherits_weight": 1.0,
+    "ast_imports_weight": 1.0,
+    "ast_calls_weight": 1.0,
     "semantic_kg_mode": "heuristic",
+    "semantic_kg_relation_weight_llm": 0.7,
+    "semantic_kg_relation_weight_heuristic": 0.5,
     "semantic_kg_max_concepts_per_chunk": 8,
     "semantic_kg_min_concept_len": 4,
     "semantic_kg_max_relations_per_chunk": 12,
@@ -345,6 +351,11 @@
   "evaluation": {
     "eval_dataset_path": "data/evaluation_dataset.json",
     "baseline_path": "data/evals/eval_baseline.json",
+    "recall_at_5_k": 5,
+    "recall_at_10_k": 10,
+    "recall_at_20_k": 20,
+    "precision_at_5_k": 5,
+    "ndcg_at_10_k": 10,
     "eval_multi_m": 10
   },
   "system_prompts": {

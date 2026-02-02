@@ -1,4 +1,4 @@
-// AGRO - AdminSubtabs Component
+// TriBridRAG - AdminSubtabs Component
 // Subtab navigation for Admin mega-tab
 
 import { useEffect } from 'react';

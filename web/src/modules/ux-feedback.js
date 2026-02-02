@@ -1,5 +1,5 @@
 /**
- * AGRO UX Feedback Module
+ * TriBridRAG UX Feedback Module
  * Version: 1.0.0
  * Agent: Senior UI/UX Polish Specialist
  *

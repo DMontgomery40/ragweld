@@ -20,8 +20,16 @@ import type { TriBridConfig } from '@/types/generated';
  * ---/agentspec
  */
 export function useConfig() {
-  const { config, loading, error, saving, loadConfig, saveConfig, patchSection, resetConfig } =
-    useConfigStore();
+  const config = useConfigStore((s) => s.config);
+  const loading = useConfigStore((s) => s.loading);
+  const error = useConfigStore((s) => s.error);
+  const saving = useConfigStore((s) => s.saving);
+  const loadConfig = useConfigStore((s) => s.loadConfig);
+  const saveConfig = useConfigStore((s) => s.saveConfig);
+  const patchSection = useConfigStore((s) => s.patchSection);
+  const patchSectionDebounced = useConfigStore((s) => s.patchSectionDebounced);
+  const cancelPendingPatches = useConfigStore((s) => s.cancelPendingPatches);
+  const resetConfig = useConfigStore((s) => s.resetConfig);
 
   // Load config on mount (once)
   useEffect(() => {
@@ -33,16 +41,16 @@ export function useConfig() {
   // Reload config when active corpus changes
   useEffect(() => {
     const handler = () => {
+      // Prevent any pending debounced patches from firing against a new corpus scope.
+      cancelPendingPatches();
       loadConfig();
     };
-    // New event name (preferred) + legacy event name for migration.
+    // New event name (preferred).
     window.addEventListener('tribrid-corpus-changed', handler as EventListener);
-    window.addEventListener('agro-repo-changed', handler as EventListener);
     return () => {
       window.removeEventListener('tribrid-corpus-changed', handler as EventListener);
-      window.removeEventListener('agro-repo-changed', handler as EventListener);
     };
-  }, [loadConfig]);
+  }, [cancelPendingPatches, loadConfig]);
 
   const reload = useCallback(async () => {
     await loadConfig();
@@ -64,6 +72,7 @@ export function useConfig() {
     loadConfig,
     saveConfig,
     patchSection,
+    patchSectionDebounced,
     resetConfig,
     reload,
     clearError,
@@ -80,7 +89,7 @@ export function useConfigField<T>(
   path: string,
   defaultValue: T
 ): [T, (value: T) => void, { loading: boolean; error: string | null }] {
-  const { config, loading, error, patchSection } = useConfig();
+  const { config, loading, error, patchSectionDebounced, patchSection } = useConfig();
 
   const value = useMemo(() => {
     if (!config) return defaultValue;
@@ -99,6 +108,7 @@ export function useConfigField<T>(
       if (!section) return;
       if (rest.length === 0) {
         // Replace entire section
+        // This is rare; keep it immediate.
         void patchSection(section as keyof TriBridConfig, newValue as any);
         return;
       }
@@ -107,9 +117,10 @@ export function useConfigField<T>(
       for (let i = rest.length - 1; i >= 0; i -= 1) {
         patch = { [rest[i]]: patch };
       }
-      void patchSection(section as keyof TriBridConfig, patch);
+      // Debounced persistence for high-frequency inputs.
+      patchSectionDebounced(section as keyof TriBridConfig, patch);
     },
-    [patchSection, path]
+    [patchSection, patchSectionDebounced, path]
   );
 
   return [value, setValue, { loading, error }];

@@ -6,23 +6,25 @@ from starlette.responses import Response
 from server.config import load_config
 from server.db.neo4j import Neo4jClient
 from server.db.postgres import PostgresClient
-from server.models.tribrid_config_model import CorpusScope, TriBridConfig
+from server.models.tribrid_config_model import CorpusScope, HealthServiceStatus, HealthStatus, TriBridConfig
 from server.observability.metrics import render_latest
 from server.services.config_store import get_config as load_scoped_config
 
 router = APIRouter(tags=["health"])
 
 
-@router.get("/health")
-async def health_check() -> dict[str, Any]:
-    return {
-        "status": "healthy",
-        "services": {
-            "api": {"status": "up"},
-            "postgres": {"status": "unknown"},  # Not connected yet
-            "neo4j": {"status": "unknown"},     # Not connected yet
-        }
-    }
+@router.get("/health", response_model=HealthStatus)
+async def health_check() -> HealthStatus:
+    # Keep this endpoint fast and dependency-free: do not connect to Postgres/Neo4j here.
+    return HealthStatus(
+        ok=True,
+        status="healthy",
+        services={
+            "api": HealthServiceStatus(status="up"),
+            "postgres": HealthServiceStatus(status="unknown"),
+            "neo4j": HealthServiceStatus(status="unknown"),
+        },
+    )
 
 
 @router.get("/ready")

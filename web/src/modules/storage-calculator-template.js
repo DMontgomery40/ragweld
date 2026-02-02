@@ -4,7 +4,7 @@
 /**
  * ---agentspec
  * what: |
- *   Renders HTML storage calculator UI for AGRO RAG system. Displays configuration inputs and memory planning tools.
+ *   Renders HTML storage calculator UI for TriBridRAG. Displays configuration inputs and memory planning tools.
  *
  * why: |
  *   Centralizes storage estimation UI in single reusable function.
@@ -18,7 +18,7 @@ function getStorageCalculatorHTML() {
     return `
         <div class="storage-calc-wrapper">
             <div class="storage-calc-header">
-                <h1><span class="brand">AGRO</span> Storage Calculator Suite</h1>
+                <h1><span class="brand">TriBrid</span> Storage Calculator Suite</h1>
                 <p class="subtitle">Another Good RAG Option • Enterprise Memory Planning</p>
                 <div class="info-box">
                     <p>
@@ -378,7 +378,7 @@ function getStorageCalculatorHTML() {
             </div>
 
             <div class="storage-calc-footer">
-                <p>AGRO (Another Good RAG Option) • Enterprise Storage Calculator v1.2</p>
+                <p>TriBridRAG • Enterprise Storage Calculator v1.2</p>
                 <p>Precision calculations for vector search infrastructure</p>
             </div>
         </div>

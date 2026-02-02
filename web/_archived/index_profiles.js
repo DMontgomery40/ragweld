@@ -1,4 +1,4 @@
-// AGRO GUI - Index Profiles Module
+// TriBridRAG GUI - Index Profiles Module
 // Handles index profile selection and application
 
 (function () {
@@ -18,7 +18,7 @@
             description: 'BM25-only indexing with no API calls. Perfect for quick searches across branches without embedding costs.',
             settings: {
                 OUT_DIR_BASE: './out.noindex-shared',
-                COLLECTION_NAME: 'code_chunks_agro_shared',
+                COLLECTION_NAME: 'code_chunks_tribrid_shared',
                 SKIP_DENSE: '1',
                 EMBEDDING_TYPE: 'local'
             },
@@ -40,7 +40,7 @@
             description: 'Small subset for testing. Local embeddings, limited chunks. Fast iteration during development.',
             settings: {
                 OUT_DIR_BASE: './out.noindex-dev',
-                COLLECTION_NAME: 'code_chunks_agro_dev',
+                COLLECTION_NAME: 'code_chunks_tribrid_dev',
                 SKIP_DENSE: '0',
                 EMBEDDING_TYPE: 'local',
                 CARDS_MAX: '50'

@@ -161,7 +161,7 @@ export const SystemPromptsSubtab: React.FC<SystemPromptsSubtabProps> = ({ classN
           color: 'var(--fg-muted)',
           lineHeight: 1.5
         }}>
-          Edit LLM system prompts that affect RAG pipeline behavior. Changes are saved to agro_config.json and take effect immediately.
+          Edit LLM system prompts that affect RAG pipeline behavior. Changes are saved to tribrid_config.json (or per-corpus config) and take effect immediately.
         </p>
       </div>
 

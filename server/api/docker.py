@@ -15,7 +15,14 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request
 from starlette.responses import StreamingResponse
 
 from server.config import load_config
-from server.models.tribrid_config_model import DevStackRestartResponse, DevStackStatusResponse, TriBridConfig
+from server.models.tribrid_config_model import (
+    DevStackRestartResponse,
+    DevStackStatusResponse,
+    DockerContainersResponse,
+    DockerStatus,
+    LokiStatus,
+    TriBridConfig,
+)
 
 router = APIRouter(tags=["docker"])
 
@@ -253,7 +260,7 @@ async def _list_docker_containers(*, timeout_s: int, env: dict[str, str] | None)
         labels = _parse_labels(labels_raw)
         compose_project = labels.get("com.docker.compose.project")
         compose_service = labels.get("com.docker.compose.service")
-        agro_managed = bool(compose_project == "tribrid" or name.startswith("tribrid-"))
+        tribrid_managed = bool(compose_project == "tribrid" or name.startswith("tribrid-"))
         containers.append(
             {
                 "id": cid,
@@ -265,7 +272,7 @@ async def _list_docker_containers(*, timeout_s: int, env: dict[str, str] | None)
                 "ports": ports,
                 "compose_project": compose_project,
                 "compose_service": compose_service,
-                "agro_managed": agro_managed,
+                "tribrid_managed": tribrid_managed,
             }
         )
     return containers
@@ -410,8 +417,8 @@ def _clear_python_bytecode_cache() -> None:
 # ============================================================================
 
 
-@router.get("/docker/status")
-async def get_docker_status() -> dict[str, Any]:
+@router.get("/docker/status", response_model=DockerStatus)
+async def get_docker_status() -> DockerStatus:
     try:
         cfg = load_config()
         timeout = int(getattr(cfg.docker, "docker_status_timeout", 5))
@@ -423,11 +430,11 @@ async def get_docker_status() -> dict[str, Any]:
     env = _docker_env(cfg)
     running, runtime = await _docker_running(timeout_s=timeout, env=env)
     containers_count = await _docker_containers_count(timeout_s=list_timeout, env=env) if running else 0
-    return {"running": running, "runtime": runtime, "containers_count": containers_count}
+    return DockerStatus(running=bool(running), runtime=str(runtime or ""), containers_count=int(containers_count))
 
 
-@router.get("/docker/containers")
-async def list_docker_containers() -> dict[str, Any]:
+@router.get("/docker/containers", response_model=DockerContainersResponse)
+async def list_docker_containers() -> DockerContainersResponse:
     try:
         cfg = load_config()
         timeout = int(getattr(cfg.docker, "docker_container_list_timeout", 10))
@@ -436,11 +443,11 @@ async def list_docker_containers() -> dict[str, Any]:
         timeout = 10
     env = _docker_env(cfg)
     containers = await _list_docker_containers(timeout_s=timeout, env=env)
-    return {"containers": containers}
+    return DockerContainersResponse(containers=containers)
 
 
-@router.get("/docker/containers/all")
-async def list_docker_containers_all() -> dict[str, Any]:
+@router.get("/docker/containers/all", response_model=DockerContainersResponse)
+async def list_docker_containers_all() -> DockerContainersResponse:
     # Backward-compatible alias used by the Docker tab (axios client).
     return await list_docker_containers()
 
@@ -764,21 +771,25 @@ async def restart_dev_stack(request: Request, background_tasks: BackgroundTasks)
 # ==============================================================================
 
 
-@router.get("/loki/status")
-async def loki_status(request: Request) -> dict[str, Any]:
+@router.get("/loki/status", response_model=LokiStatus)
+async def loki_status(request: Request) -> LokiStatus:
     """Check whether Loki is reachable (local dev)."""
     _ensure_dev_orchestrator_allowed(request)
     base = await _resolve_loki_base_url()
     if not base:
-        return {"reachable": False, "status": "unreachable"}
+        return LokiStatus(reachable=False, url=None, status="unreachable")
 
     try:
         async with httpx.AsyncClient(timeout=1.5) as client:
             r = await client.get(f"{base}/ready")
         reachable = r.status_code < 500
-        return {"reachable": bool(reachable), "url": base, "status": "ok" if reachable else f"status_{r.status_code}"}
+        return LokiStatus(
+            reachable=bool(reachable),
+            url=str(base),
+            status=("ok" if reachable else f"status_{r.status_code}"),
+        )
     except Exception as e:
-        return {"reachable": False, "url": base, "status": f"error: {e.__class__.__name__}"}
+        return LokiStatus(reachable=False, url=str(base), status=f"error: {e.__class__.__name__}")
 
 
 @router.get("/loki/query_range")

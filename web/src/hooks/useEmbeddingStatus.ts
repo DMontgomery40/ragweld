@@ -13,7 +13,7 @@ import { useRepoStore } from '@/stores/useRepoStore';
 import type { IndexStats } from '@/types/generated';
 
 export interface EmbeddingStatus {
-  // Current configuration (from agro_config.json / env)
+  // Current configuration (from tribrid_config.json / env)
   configType: string;
   configDim: number;
   configModel: string;
@@ -180,14 +180,14 @@ export function useEmbeddingStatus(): UseEmbeddingStatusResult {
     window.addEventListener('index-completed', handleConfigChange);
     window.addEventListener('dashboard-refresh', handleConfigChange);
     window.addEventListener('tribrid-corpus-changed', handleConfigChange as EventListener);
-    window.addEventListener('agro-repo-changed', handleConfigChange as EventListener);
+    window.addEventListener('tribrid-corpus-changed', handleConfigChange as EventListener);
 
     return () => {
       window.removeEventListener('config-updated', handleConfigChange);
       window.removeEventListener('index-completed', handleConfigChange);
       window.removeEventListener('dashboard-refresh', handleConfigChange);
       window.removeEventListener('tribrid-corpus-changed', handleConfigChange as EventListener);
-      window.removeEventListener('agro-repo-changed', handleConfigChange as EventListener);
+      window.removeEventListener('tribrid-corpus-changed', handleConfigChange as EventListener);
     };
   }, [checkStatus]);
 

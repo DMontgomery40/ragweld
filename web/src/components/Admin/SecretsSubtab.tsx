@@ -1,4 +1,4 @@
-// AGRO - Secrets Subtab Component
+// TriBridRAG - Secrets Subtab Component
 // API keys are configured in .env only - never stored in frontend state
 
 import { ApiKeyStatus } from '@/components/ui/ApiKeyStatus';

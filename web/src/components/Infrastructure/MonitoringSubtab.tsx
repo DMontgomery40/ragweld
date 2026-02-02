@@ -1,4 +1,4 @@
-// AGRO - Monitoring Subtab Component
+// TriBridRAG - Monitoring Subtab Component
 // Grafana metrics display and alert configuration
 
 import { useState, useEffect } from 'react';

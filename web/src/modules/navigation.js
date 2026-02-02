@@ -1,6 +1,6 @@
-// AGRO GUI - Navigation System
+// TriBridRAG GUI - Navigation System
 // New navigation with tab registry and compatibility layer for safe migration
-// Author: AGRO Redesign (Phase 1)
+// Author: TriBrid Redesign (Phase 1)
 
 (function() {
     'use strict';
@@ -668,7 +668,7 @@
     /**
      * ---agentspec
      * what: |
-     *   Initializes navigation system. Reads feature flags from localStorage (AGRO_NEW_IA), sets navState.featureFlags.NEW_NAVIGATION and compatibilityMode booleans.
+     *   Initializes navigation system. Reads feature flags from localStorage (TRIBRID_NEW_IA), sets navState.featureFlags.NEW_NAVIGATION and compatibilityMode booleans.
      *
      * why: |
      *   Centralizes startup logic for feature-gated navigation behavior.
@@ -683,7 +683,7 @@
         console.log('[Navigation] Initializing navigation system');
 
         // Check feature flags
-        const newNavEnabled = localStorage.getItem('AGRO_NEW_IA') === '1';
+        const newNavEnabled = localStorage.getItem('TRIBRID_NEW_IA') === '1';
         navState.featureFlags.NEW_NAVIGATION = newNavEnabled;
         navState.compatibilityMode = !newNavEnabled;
 
@@ -745,7 +745,7 @@
         // Configuration
         setCompatibilityMode: (enabled) => {
             navState.compatibilityMode = enabled;
-            localStorage.setItem('AGRO_NEW_IA', enabled ? '0' : '1');
+            localStorage.setItem('TRIBRID_NEW_IA', enabled ? '0' : '1');
         },
         isCompatibilityMode: () => navState.compatibilityMode,
         

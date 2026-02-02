@@ -11,7 +11,7 @@ export const TraceViewer: React.FC<TraceViewerProps> = ({ className = '' }) => {
   const [traceData, setTraceData] = useState<TracesLatestResponse | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [selectedRepo, setSelectedRepo] = useState('agro');
+  const [selectedRepo, setSelectedRepo] = useState('');
 
   const { api } = useAPI();
   const { handleApiError } = useErrorHandler();
@@ -309,7 +309,7 @@ export const TraceViewer: React.FC<TraceViewerProps> = ({ className = '' }) => {
                 fontSize: '12px'
               }}
             >
-              <option value="agro">agro</option>
+              <option value="">All corpora</option>
             </select>
 
             <button

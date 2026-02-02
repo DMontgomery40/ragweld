@@ -1,6 +1,12 @@
 import { apiClient, api } from './client';
-import type { DockerStatus, DockerContainer } from '@web/types';
-import type { DevStackRestartResponse, DevStackStatusResponse } from '@/types/generated';
+import type {
+  DevStackRestartResponse,
+  DevStackStatusResponse,
+  DockerContainer,
+  DockerContainersResponse,
+  DockerStatus,
+  LokiStatus,
+} from '@/types/generated';
 
 export const dockerApi = {
   /**
@@ -14,10 +20,8 @@ export const dockerApi = {
   /**
    * List all Docker containers
    */
-  async listContainers(): Promise<{ containers: DockerContainer[] }> {
-    const { data } = await apiClient.get<{ containers: DockerContainer[] }>(
-      api('/docker/containers/all')
-    );
+  async listContainers(): Promise<DockerContainersResponse> {
+    const { data } = await apiClient.get<DockerContainersResponse>(api('/docker/containers/all'));
     return data;
   },
 
@@ -76,10 +80,8 @@ export const dockerApi = {
   /**
    * Get Loki status
    */
-  async getLokiStatus(): Promise<{ reachable: boolean; url?: string; status: string }> {
-    const { data } = await apiClient.get<{ reachable: boolean; url?: string; status: string }>(
-      api('/loki/status')
-    );
+  async getLokiStatus(): Promise<LokiStatus> {
+    const { data } = await apiClient.get<LokiStatus>(api('/loki/status'));
     return data;
   },
 

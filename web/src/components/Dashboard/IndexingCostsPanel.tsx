@@ -1,4 +1,4 @@
-// AGRO - Indexing Costs Panel
+// TriBridRAG - Indexing Costs Panel
 // Shows total tokens and embedding cost from backend
 
 import { useEffect, useState } from 'react';

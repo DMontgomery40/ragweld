@@ -1,4 +1,4 @@
-// AGRO GUI - Test Instrumentation
+// TriBridRAG GUI - Test Instrumentation
 // Adds data-testid attributes and test helpers for Playwright
 // Author: Agent 4 - Testing & Validation
 

@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { healthApi } from '@/api/health';
-import type { HealthStatus } from '@web/types';
+import type { HealthStatus } from '@/types/generated';
 
 interface HealthStore {
   status: HealthStatus | null;

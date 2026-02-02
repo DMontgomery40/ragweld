@@ -1,4 +1,4 @@
-// AGRO - Chat Components Export
+// TriBridRAG - Chat Components Export
 // Exports all Chat tab components
 
 export { ChatInterface } from './ChatInterface';

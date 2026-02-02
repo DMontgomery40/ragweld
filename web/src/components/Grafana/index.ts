@@ -1,4 +1,4 @@
-// AGRO - Grafana Components Export
+// TriBridRAG - Grafana Components Export
 // Exports all Grafana tab components
 
 export { GrafanaDashboard } from './GrafanaDashboard';

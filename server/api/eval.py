@@ -157,8 +157,14 @@ async def run_evaluation(request: EvalRequest) -> EvalRun:
     fusion = TriBridFusion(vector=None, sparse=None, graph=None)
 
     final_k = int(cfg.retrieval.eval_final_k)
-    eval_k = max(20, final_k)
     use_multi = bool(int(cfg.retrieval.eval_multi))
+    k_recall5 = int(cfg.evaluation.recall_at_5_k)
+    k_recall10 = int(cfg.evaluation.recall_at_10_k)
+    k_recall20 = int(cfg.evaluation.recall_at_20_k)
+    k_prec5 = int(cfg.evaluation.precision_at_5_k)
+    k_ndcg10 = int(cfg.evaluation.ndcg_at_10_k)
+    # Ensure we retrieve enough results to compute all configured metrics.
+    eval_k = max(int(final_k), k_recall5, k_recall10, k_recall20, k_prec5, k_ndcg10)
 
     rr_vals: list[float] = []
     recall5_vals: list[float] = []
@@ -214,11 +220,11 @@ async def run_evaluation(request: EvalRequest) -> EvalRun:
         topk_hit = any(any(_path_matches(exp, rp) for exp in expected_paths) for rp in top_paths)
 
         recall = _recall_at_k(expected_paths, retrieved_paths, k=len(retrieved_paths) if retrieved_paths else eval_k)
-        recall5 = _recall_at_k(expected_paths, retrieved_paths, k=5)
-        recall10 = _recall_at_k(expected_paths, retrieved_paths, k=10)
-        recall20 = _recall_at_k(expected_paths, retrieved_paths, k=20)
-        prec5 = _precision_at_k(expected_paths, retrieved_paths, k=5)
-        ndcg10 = _ndcg_at_k(expected_paths, retrieved_paths, k=10)
+        recall5 = _recall_at_k(expected_paths, retrieved_paths, k=k_recall5)
+        recall10 = _recall_at_k(expected_paths, retrieved_paths, k=k_recall10)
+        recall20 = _recall_at_k(expected_paths, retrieved_paths, k=k_recall20)
+        prec5 = _precision_at_k(expected_paths, retrieved_paths, k=k_prec5)
+        ndcg10 = _ndcg_at_k(expected_paths, retrieved_paths, k=k_ndcg10)
 
         rr_vals.append(rr)
         recall5_vals.append(recall5)
@@ -295,7 +301,12 @@ async def test_eval_entry(request: EvalTestRequest) -> EvalResult:
 
     final_k = int(request.final_k) if request.final_k is not None else int(cfg.retrieval.eval_final_k)
     final_k = max(1, final_k)
-    eval_k = max(20, final_k)
+    k_recall5 = int(cfg.evaluation.recall_at_5_k)
+    k_recall10 = int(cfg.evaluation.recall_at_10_k)
+    k_recall20 = int(cfg.evaluation.recall_at_20_k)
+    k_prec5 = int(cfg.evaluation.precision_at_5_k)
+    k_ndcg10 = int(cfg.evaluation.ndcg_at_10_k)
+    eval_k = max(int(final_k), k_recall5, k_recall10, k_recall20, k_prec5, k_ndcg10)
 
     t0 = perf_counter()
     matches = await fusion.search(
@@ -450,7 +461,12 @@ async def eval_run_stream(
             from datetime import UTC, datetime
             started_at = datetime.now(UTC)
 
-            eval_k = max(20, run_final_k)
+            k_recall5 = int(cfg.evaluation.recall_at_5_k)
+            k_recall10 = int(cfg.evaluation.recall_at_10_k)
+            k_recall20 = int(cfg.evaluation.recall_at_20_k)
+            k_prec5 = int(cfg.evaluation.precision_at_5_k)
+            k_ndcg10 = int(cfg.evaluation.ndcg_at_10_k)
+            eval_k = max(int(run_final_k), k_recall5, k_recall10, k_recall20, k_prec5, k_ndcg10)
 
             for idx, entry in enumerate(entries, start=1):
                 if await request.is_disconnected():
@@ -496,11 +512,11 @@ async def eval_run_stream(
                 topk_hit = any(any(_path_matches(exp, rp) for exp in expected_paths) for rp in top_paths)
 
                 recall = _recall_at_k(expected_paths, retrieved_paths, k=len(retrieved_paths) if retrieved_paths else eval_k)
-                recall5 = _recall_at_k(expected_paths, retrieved_paths, k=5)
-                recall10 = _recall_at_k(expected_paths, retrieved_paths, k=10)
-                recall20 = _recall_at_k(expected_paths, retrieved_paths, k=20)
-                prec5 = _precision_at_k(expected_paths, retrieved_paths, k=5)
-                ndcg10 = _ndcg_at_k(expected_paths, retrieved_paths, k=10)
+                recall5 = _recall_at_k(expected_paths, retrieved_paths, k=k_recall5)
+                recall10 = _recall_at_k(expected_paths, retrieved_paths, k=k_recall10)
+                recall20 = _recall_at_k(expected_paths, retrieved_paths, k=k_recall20)
+                prec5 = _precision_at_k(expected_paths, retrieved_paths, k=k_prec5)
+                ndcg10 = _ndcg_at_k(expected_paths, retrieved_paths, k=k_ndcg10)
 
                 rr_vals.append(rr)
                 recall5_vals.append(recall5)

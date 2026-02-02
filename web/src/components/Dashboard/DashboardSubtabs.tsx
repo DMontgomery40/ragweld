@@ -1,4 +1,4 @@
-// AGRO - DashboardSubtabs Component
+// TriBridRAG - DashboardSubtabs Component
 // Subtab navigation for Dashboard tab
 
 interface DashboardSubtabsProps {

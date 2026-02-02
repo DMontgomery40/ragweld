@@ -1,4 +1,4 @@
-// AGRO - Glossary Subtab
+// TriBridRAG - Glossary Subtab
 // Searchable glossary of all RAG configuration parameters
 // Uses useTooltips hook (Zustand) which loads from tooltips.js - SINGLE SOURCE OF TRUTH
 

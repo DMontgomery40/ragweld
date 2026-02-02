@@ -1,4 +1,4 @@
-// AGRO - Code Editor Component
+// TriBridRAG - Code Editor Component
 // Embedded Monaco editor with file tree
 // Reference: /assets/dev tools - editor - embedded vscode editor - way cool.png
 
@@ -78,7 +78,7 @@ export function Editor() {
 
     try {
       editorRef.current = window.monaco.editor.create(containerRef.current, {
-        value: fileContent || '// Welcome to AGRO Code Editor\n// Open a file from the tree to start editing',
+        value: fileContent || '// Welcome to Tri-Brid RAG Code Editor\n// Open a file from the tree to start editing',
         language: language,
         theme: 'vs-dark',
         automaticLayout: true,

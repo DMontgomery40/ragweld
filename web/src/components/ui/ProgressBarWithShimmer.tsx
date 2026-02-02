@@ -1,4 +1,4 @@
-// AGRO - Progress Bar with Shimmer Effect
+// TriBridRAG - Progress Bar with Shimmer Effect
 // Matches /gui micro-interactions.css progress bar polish
 
 

@@ -13,7 +13,7 @@ export function useAppInit() {
   const [isInitialized, setIsInitialized] = useState(false);
   const [initError, setInitError] = useState<string | null>(null);
   const { loadRepos } = useRepoStore();
-  const { loadConfig } = useConfigStore();
+  const loadConfig = useConfigStore((s) => s.loadConfig);
   const { checkHealth } = useHealthStore();
 
   useEffect(() => {
@@ -21,15 +21,13 @@ export function useAppInit() {
       try {
         console.log('[useAppInit] Starting app initialization (no CoreUtils dependency)...');
 
-        // Load initial data in parallel using Zustand stores and typed API
-        await Promise.all([
-          // Load config via Zustand store
-          loadConfig()
-            .catch((err: unknown) => console.warn('Failed to load config:', err)),
+        // Load repos first so corpus scope is canonicalized before config loads.
+        // (Prevents config load from using stale/invalid localStorage corpus_id.)
+        await loadRepos().catch((err: unknown) => console.warn('Failed to load repos:', err));
 
-          // Load repos via Zustand store
-          loadRepos()
-            .catch((err: unknown) => console.warn('Failed to load repos:', err)),
+        // Load config + models in parallel after corpora are available
+        await Promise.all([
+          loadConfig().catch((err: unknown) => console.warn('Failed to load config:', err)),
 
           // Load models.json for cost estimation (still needed for legacy modules during transition)
           fetch(apiUrl('/models'))

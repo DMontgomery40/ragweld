@@ -13,7 +13,7 @@ export default function ChatTab() {
                             <div style={{display: 'flex', gap: '8px', alignItems: 'center'}}>
                                 <select id="chat-repo-select" style={{background: 'var(--card-bg)', border: '1px solid var(--line)', color: 'var(--fg)', padding: '6px 12px', borderRadius: '4px', fontSize: '12px'}}>
                                     <option value="">Auto-detect repo</option>
-                                    <option value="agro">agro</option>
+                                    <option value="tribrid">tribrid</option>
                                     <option value=""></option>
                                 </select>
 
@@ -194,7 +194,7 @@ export default function ChatTab() {
                             Custom System Prompt
                             <span className="help-icon" data-tooltip="CHAT_SYSTEM_PROMPT">?</span>
                         </label>
-                        <textarea id="chat-system-prompt" placeholder="Leave empty for expert system prompt ( plugin dev + AGRO RAG expert)" style={{minHeight: '80px'}}></textarea>
+                        <textarea id="chat-system-prompt" placeholder="Leave empty for expert system prompt (plugin dev + TriBridRAG expert)" style={{minHeight: '80px'}}></textarea>
                     </div>
 
                     {/* History Settings Section */}

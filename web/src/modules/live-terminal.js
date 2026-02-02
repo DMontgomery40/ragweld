@@ -1,5 +1,5 @@
 /**
- * AGRO Live Terminal Component
+ * TriBridRAG Live Terminal Component
  * Provides real-time streaming output for long-running operations
  *
  * Features:

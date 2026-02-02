@@ -1,4 +1,4 @@
-// AGRO GUI - Docker Management Module
+// TriBridRAG GUI - Docker Management Module
 // Handles Docker status, containers, and infrastructure services
 
 (function () {

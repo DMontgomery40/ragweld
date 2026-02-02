@@ -1,4 +1,4 @@
-// AGRO - InfrastructureSubtabs Component
+// TriBridRAG - InfrastructureSubtabs Component
 // Subtab navigation for Infrastructure mega-tab
 
 import { useEffect } from 'react';

@@ -1,5 +1,5 @@
 {
-  "name": "agro-web",
+  "name": "tribrid-rag-web",
   "private": true,
   "version": "0.0.1",
   "type": "module",
@@ -28,9 +28,10 @@
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.2",
     "autoprefixer": "^10.4.20",
+    "baseline-browser-mapping": "^2.9.19",
     "postcss": "^8.4.47",
     "tailwindcss": "^3.4.13",
     "typescript": "^5.6.3",
-    "vite": "^5.4.8"
+    "vite": "^7.3.1"
   }
 }

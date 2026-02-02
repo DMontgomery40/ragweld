@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from server.db.neo4j import Neo4jClient
 from server.models.graph import Entity, GraphStats, Relationship
 from server.models.index import Chunk
+from server.models.tribrid_config_model import GraphIndexingConfig
 
 
 @dataclass(frozen=True)
@@ -25,8 +26,10 @@ class GraphBuilder:
     - Leaves deeper semantic extraction (LLM descriptions, cross-file resolution) for later
     """
 
-    def __init__(self, neo4j: Neo4jClient | None):
+    def __init__(self, neo4j: Neo4jClient | None, cfg: GraphIndexingConfig | None = None):
         self.neo4j = neo4j
+        # Use LAW defaults when not provided (unit tests may pass cfg=None).
+        self.cfg = cfg or GraphIndexingConfig()
 
     async def build_graph_for_files(
         self,
@@ -105,7 +108,7 @@ class GraphBuilder:
                         source_id=module_id,
                         target_id=class_id,
                         relation_type="contains",
-                        weight=1.0,
+                        weight=float(builder.cfg.ast_contains_weight),
                         properties={},
                     )
                 )
@@ -132,7 +135,7 @@ class GraphBuilder:
                             source_id=class_id,
                             target_id=base_id,
                             relation_type="inherits",
-                            weight=1.0,
+                            weight=float(builder.cfg.ast_inherits_weight),
                             properties={},
                         )
                     )
@@ -162,7 +165,7 @@ class GraphBuilder:
                         source_id=parent,
                         target_id=fn_id,
                         relation_type="contains",
-                        weight=1.0,
+                        weight=float(builder.cfg.ast_contains_weight),
                         properties={},
                     )
                 )
@@ -198,7 +201,7 @@ class GraphBuilder:
                             source_id=module_id,
                             target_id=mod_id,
                             relation_type="imports",
-                            weight=1.0,
+                            weight=float(builder.cfg.ast_imports_weight),
                             properties={},
                         )
                     )
@@ -224,7 +227,7 @@ class GraphBuilder:
                         source_id=module_id,
                         target_id=mod_id,
                         relation_type="imports",
-                        weight=1.0,
+                        weight=float(builder.cfg.ast_imports_weight),
                         properties={},
                     )
                 )
@@ -252,7 +255,7 @@ class GraphBuilder:
                         source_id=self.current_function_id,
                         target_id=callee_id,
                         relation_type="calls",
-                        weight=1.0,
+                        weight=float(builder.cfg.ast_calls_weight),
                         properties={},
                     )
                 )

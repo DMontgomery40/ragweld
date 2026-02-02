@@ -28,7 +28,10 @@ export function DockerSubtab() {
 
   // Config state from Zustand store - PYDANTIC COMPLIANT
   // Read values directly from store, no local state duplication
-  const { config, loadConfig, patchSection, saving } = useConfigStore();
+  const config = useConfigStore((s) => s.config);
+  const loadConfig = useConfigStore((s) => s.loadConfig);
+  const patchSection = useConfigStore((s) => s.patchSection);
+  const saving = useConfigStore((s) => s.saving);
 
   // Notifications for feedback
   const { success, error: notifyError, notifications, removeNotification } = useNotification();

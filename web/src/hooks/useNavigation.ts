@@ -1,4 +1,4 @@
-// AGRO - useNavigation Hook
+// TriBridRAG - useNavigation Hook
 // Replaces legacy navigation.js DOM manipulation with React Router
 
 import { useCallback, useEffect } from 'react';

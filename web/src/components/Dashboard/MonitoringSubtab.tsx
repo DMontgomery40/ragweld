@@ -1,4 +1,4 @@
-// AGRO - Monitoring Subtab
+// TriBridRAG - Monitoring Subtab
 // Logs, alerts, traces, and performance monitoring
 
 import { useState, useEffect } from 'react';
@@ -345,12 +345,12 @@ export function MonitoringSubtab() {
                   width: '12px',
                   height: '12px',
                   borderRadius: '50%',
-                  background: lokiStatus.available ? 'var(--ok)' : 'var(--err)',
-                  boxShadow: lokiStatus.available ? '0 0 8px var(--ok)' : '0 0 8px var(--err)'
+                  background: lokiStatus.reachable ? 'var(--ok)' : 'var(--err)',
+                  boxShadow: lokiStatus.reachable ? '0 0 8px var(--ok)' : '0 0 8px var(--err)'
                 }}
               />
               <span style={{ fontSize: '14px', fontWeight: '600' }}>
-                Status: {lokiStatus.available ? 'Connected' : 'Disconnected'}
+                Status: {lokiStatus.reachable ? 'Connected' : 'Disconnected'}
               </span>
             </div>
             {lokiStatus.url && (
@@ -358,9 +358,9 @@ export function MonitoringSubtab() {
                 Endpoint: <code style={{ color: 'var(--link)' }}>{lokiStatus.url}</code>
               </div>
             )}
-            {lokiStatus.error && (
+            {!lokiStatus.reachable && (
               <div style={{ fontSize: '12px', color: 'var(--err)', marginTop: '8px' }}>
-                Error: {lokiStatus.error}
+                Detail: {lokiStatus.status}
               </div>
             )}
           </div>

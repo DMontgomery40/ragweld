@@ -3,7 +3,7 @@ import { apiClient, api } from './client';
 /**
  * Webhook configuration interface for saving
  */
-export interface WebhookSaveRequest {
+export type WebhookSaveRequest = {
   slack_url?: string;
   discord_url?: string;
   enabled?: boolean;
@@ -14,7 +14,7 @@ export interface WebhookSaveRequest {
   };
   include_resolved?: boolean;
   timeout_seconds?: number;
-}
+};
 
 export interface WebhookConfig {
   slack_webhook_url: string;
@@ -25,10 +25,10 @@ export interface WebhookConfig {
   alert_webhook_timeout_seconds: number;
 }
 
-export interface WebhookSaveResponse {
+export type WebhookSaveResponse = {
   status: 'success' | 'error';
   message: string;
-}
+};
 
 const severityToString = (severity?: WebhookSaveRequest['severity']) => {
   if (!severity) return 'critical,warning';

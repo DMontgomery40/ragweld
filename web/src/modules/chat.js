@@ -40,7 +40,7 @@ let chatSettings = loadChatSettings();
  */
 function loadChatSettings() {
     try {
-        const saved = localStorage.getItem('agro_chat_settings');
+        const saved = localStorage.getItem('tribrid_chat_settings');
         if (saved) {
             return { ...DEFAULT_CHAT_SETTINGS, ...JSON.parse(saved) };
         }
@@ -85,7 +85,7 @@ function saveChatSettings() {
             showHistoryOnLoad: document.getElementById('chat-show-history-on-load').value === '1'
         };
 
-        localStorage.setItem('agro_chat_settings', JSON.stringify(settings));
+        localStorage.setItem('tribrid_chat_settings', JSON.stringify(settings));
         chatSettings = settings;
 
         // Persist to backend as the source of truth (non-blocking)
@@ -144,7 +144,7 @@ function resetChatSettings() {
     if (!confirm('Reset all chat settings to defaults?')) return;
 
     chatSettings = { ...DEFAULT_CHAT_SETTINGS };
-    localStorage.removeItem('agro_chat_settings');
+    localStorage.removeItem('tribrid_chat_settings');
     applyChatSettings();
     showToast('Chat settings reset to defaults', 'success');
 }
@@ -471,7 +471,7 @@ function formatAssistantMessage(content) {
         }
     );
 
-    // Extract repo header (e.g., [repo: agro])
+    // Extract repo header (e.g., [corpus: tribrid-demo])
     formatted = formatted.replace(
         /\[repo:\s*([^\]]+)\]/g,
         '<span style="background: var(--bg-elev2); color: var(--fg-muted); padding: 2px 8px; border-radius: 3px; font-size: 11px; font-family: \'SF Mono\', monospace;">repo: $1</span>'
@@ -566,7 +566,7 @@ function saveMessageToHistory(role, content, messageId) {
     if (!chatSettings.historyEnabled) return;
 
     try {
-        let history = JSON.parse(localStorage.getItem('agro_chat_history') || '[]');
+        let history = JSON.parse(localStorage.getItem('tribrid_chat_history') || '[]');
 
         // Add new message with metadata
         history.push({
@@ -582,7 +582,7 @@ function saveMessageToHistory(role, content, messageId) {
             history = history.slice(-chatSettings.historyLimit);
         }
 
-        localStorage.setItem('agro_chat_history', JSON.stringify(history));
+        localStorage.setItem('tribrid_chat_history', JSON.stringify(history));
         updateStorageDisplay();
     } catch (e) {
         console.warn('Failed to save message to history:', e);
@@ -610,7 +610,7 @@ function loadChatHistory() {
     if (!chatSettings.historyEnabled || !chatSettings.showHistoryOnLoad) return;
 
     try {
-        const raw = localStorage.getItem('agro_chat_history') || '[]';
+        const raw = localStorage.getItem('tribrid_chat_history') || '[]';
         let history = [];
         try { history = JSON.parse(raw); } catch { history = []; }
 
@@ -738,7 +738,7 @@ function renderHistoryDropdown(history) {
 /**
  * ---agentspec
  * what: |
- *   Clears localStorage chat history after user confirmation. Removes 'agro_chat_history' key, updates UI, shows success toast.
+ *   Clears localStorage chat history after user confirmation. Removes 'tribrid_chat_history' key, updates UI, shows success toast.
  *
  * why: |
  *   Confirmation prevents accidental data loss; try-catch handles storage API failures gracefully.
@@ -752,7 +752,7 @@ function clearChatHistory() {
     if (!confirm('Clear all saved chat history? This cannot be undone.')) return;
 
     try {
-        localStorage.removeItem('agro_chat_history');
+        localStorage.removeItem('tribrid_chat_history');
         updateStorageDisplay();
         showToast('Chat history cleared', 'success');
     } catch (e) {
@@ -765,7 +765,7 @@ function clearChatHistory() {
 /**
  * ---agentspec
  * what: |
- *   Exports localStorage chat history to JSON file. Retrieves 'agro_chat_history', creates blob, triggers browser download with timestamped filename.
+ *   Exports localStorage chat history to JSON file. Retrieves 'tribrid_chat_history', creates blob, triggers browser download with timestamped filename.
  *
  * why: |
  *   Client-side export avoids server round-trip; localStorage access + blob URL pattern is standard for browser file downloads.
@@ -778,7 +778,7 @@ function clearChatHistory() {
  */
 function exportChatHistory() {
     try {
-        const history = localStorage.getItem('agro_chat_history') || '[]';
+        const history = localStorage.getItem('tribrid_chat_history') || '[]';
         const blob = new Blob([history], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -799,7 +799,7 @@ function exportChatHistory() {
 /**
  * ---agentspec
  * what: |
- *   Reads agro_chat_history from localStorage, calculates Blob size in KB, parses JSON, updates #chat-storage-display DOM element.
+ *   Reads tribrid_chat_history from localStorage, calculates Blob size in KB, parses JSON, updates #chat-storage-display DOM element.
  *
  * why: |
  *   Centralizes storage monitoring for chat history quota tracking.
@@ -812,7 +812,7 @@ function exportChatHistory() {
  */
 function updateStorageDisplay() {
     try {
-        const historyStr = localStorage.getItem('agro_chat_history') || '[]';
+        const historyStr = localStorage.getItem('tribrid_chat_history') || '[]';
         const sizeInBytes = new Blob([historyStr]).size;
         const sizeInKB = (sizeInBytes / 1024).toFixed(2);
         const history = JSON.parse(historyStr);
@@ -984,7 +984,7 @@ if (typeof window !== 'undefined') {
 
     // React migration hooks: initialize when React signals readiness or when Chat tab mounts
     window.addEventListener('react-ready', tryInitOnVisible);
-    window.addEventListener('agro:chat:mount', tryInitOnVisible);
+    window.addEventListener('tribrid:chat:mount', tryInitOnVisible);
 
     window.addEventListener('DOMContentLoaded', () => {
         // Register view with Navigation system

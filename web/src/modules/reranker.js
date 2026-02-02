@@ -224,7 +224,7 @@ async function trainReranker(options = {}) {
                 ],
                 links: [
                     ['📖 Training Guide', '/docs/RERANKER.md#training'],
-                    ['Cross-Encoder Model Info', '/models/cross-encoder-agro.baseline/README.md'],
+                    ['Cross-Encoder Model Info', '/models/cross-encoder-tribrid.baseline/README.md'],
                     ['Sentence-Transformers Docs', 'https://www.sbert.net/docs/cross_encoder/training/usage.html'],
                     ['PyTorch Installation', 'https://pytorch.org/get-started/locally/']
                 ]
@@ -540,7 +540,7 @@ async function updateRerankerStats() {
     const statusDiv = document.getElementById('reranker-enabled-status');
     if (statusDiv) {
         const config = await fetch('/api/config').then(r => r.json()).catch(() => ({env:{}}));
-        const enabled = config.env?.AGRO_RERANKER_ENABLED === '1';
+        const enabled = config.env?.TRIBRID_RERANKER_ENABLED === '1';
         statusDiv.textContent = enabled ? '✓ Enabled' : '✗ Disabled';
         statusDiv.style.color = enabled ? 'var(--accent)' : 'var(--err)';
     }
@@ -676,13 +676,13 @@ async function viewLogs() {
             message: error.message,
             causes: [
                 'Backend server is not running or not accessible',
-                'Query logging is disabled (AGRO_RERANKER_ENABLED not set)',
+                'Query logging is disabled (TRIBRID_RERANKER_ENABLED not set)',
                 'Log file is corrupted or inaccessible',
                 'Insufficient permissions to read log files'
             ],
             fixes: [
                 'Check that backend server is running (Infrastructure > Services)',
-                'Verify AGRO_RERANKER_ENABLED=1 in environment',
+                'Verify TRIBRID_RERANKER_ENABLED=1 in environment',
                 'Check file permissions on data/queries/ directory',
                 'Look for errors in server logs'
             ],
@@ -835,7 +835,7 @@ async function saveBaseline() {
         const response = await fetch('/api/reranker/baseline/save', { method: 'POST' });
         const data = await response.json();
         if (data.ok) {
-            alert('✓ Baseline saved!\n\nYour current model has been backed up to models/cross-encoder-agro.baseline/\n\nUse this baseline to compare future training runs and prevent regressions.');
+            alert('✓ Baseline saved!\n\nYour current model has been backed up to models/cross-encoder-tribrid.baseline/\n\nUse this baseline to compare future training runs and prevent regressions.');
         } else {
             const msg = window.ErrorHelpers ? window.ErrorHelpers.createAlertError('Failed to save baseline', {
                 message: data.error || 'Unknown error',
@@ -847,13 +847,13 @@ async function saveBaseline() {
                 ],
                 fixes: [
                     'Train a model first before saving a baseline',
-                    'Check file permissions on models/cross-encoder-agro.baseline/',
+                    'Check file permissions on models/cross-encoder-tribrid.baseline/',
                     'Ensure sufficient disk space is available',
                     'Manually back up model files if necessary'
                 ],
                 links: [
                     ['Baseline Management', '/docs/RERANKER.md#baselines'],
-                    ['Model Files Location', '/models/cross-encoder-agro.baseline/']
+                    ['Model Files Location', '/models/cross-encoder-tribrid.baseline/']
                 ]
             }) : `Failed: ${data.error || 'Unknown'}`;
             alert(msg);
@@ -888,7 +888,7 @@ async function compareBaseline() {
                 message += 'Learn more:\n• MRR Explanation: https://en.wikipedia.org/wiki/Mean_reciprocal_rank\n• Rollback Guide: /docs/RERANKER.md#rollback';
             } else if (delta.mrr > 0.02 || delta.hit1 > 0.05) {
                 message += '✓ IMPROVEMENT detected!\nSafe to enable in production.\n\n';
-                message += 'Next steps:\n• Save this as new baseline\n• Update AGRO_RERANKER_ENABLED=1 to enable';
+                message += 'Next steps:\n• Save this as new baseline\n• Update TRIBRID_RERANKER_ENABLED=1 to enable';
             } else {
                 message += '→ Marginal change. Consider more training data.\n\n';
                 message += 'Tips:\n• Collect more user feedback\n• Add more golden questions\n• Increase training epochs';
@@ -910,7 +910,7 @@ async function compareBaseline() {
                 ],
                 links: [
                     ['Baseline Workflow', '/docs/RERANKER.md#baseline-workflow'],
-                    ['Model Directory', '/models/cross-encoder-agro.baseline/']
+                    ['Model Directory', '/models/cross-encoder-tribrid.baseline/']
                 ]
             }) : 'No baseline found or comparison failed';
             alert(msg);
@@ -927,7 +927,7 @@ async function compareBaseline() {
 }
 
 async function rollbackModel() {
-    if (!confirm('Rollback to previous model?\n\nThis will restore models/cross-encoder-agro.baseline/ to the active model.\n\nIMPORTANT: You must restart the server after rollback for changes to take effect.\n\nContinue?')) return;
+    if (!confirm('Rollback to previous model?\n\nThis will restore models/cross-encoder-tribrid.baseline/ to the active model.\n\nIMPORTANT: You must restart the server after rollback for changes to take effect.\n\nContinue?')) return;
     try {
         const response = await fetch('/api/reranker/rollback', { method: 'POST' });
         const data = await response.json();
@@ -943,7 +943,7 @@ async function rollbackModel() {
                     'Baseline model is corrupted or incomplete'
                 ],
                 fixes: [
-                    'Ensure a baseline exists (check models/cross-encoder-agro.baseline/)',
+                    'Ensure a baseline exists (check models/cross-encoder-tribrid.baseline/)',
                     'Stop all training/evaluation processes',
                     'Check file permissions on models/ directory',
                     'Manually restore model files if necessary'
@@ -1003,13 +1003,13 @@ async function runSmokeTest() {
                 title: 'Smoke test failed',
                 message: data.error || 'Unknown error',
                 causes: [
-                    'Reranker is disabled (AGRO_RERANKER_ENABLED not set)',
+                    'Reranker is disabled (TRIBRID_RERANKER_ENABLED not set)',
                     'Model files are missing or corrupted',
                     'Insufficient resources to run reranker',
                     'Backend API endpoint not accessible'
                 ],
                 fixes: [
-                    'Enable reranker with AGRO_RERANKER_ENABLED=1',
+                    'Enable reranker with TRIBRID_RERANKER_ENABLED=1',
                     'Train or download a reranker model',
                     'Check server logs for detailed error messages',
                     'Verify backend server is running (Infrastructure tab)'
@@ -1201,7 +1201,7 @@ if (typeof window !== 'undefined') {
         registerRerankerView();
     });
     // React bridge: initialize when RAG learning-ranker subtab becomes visible
-    window.addEventListener('agro:reranker:mount', () => {
+    window.addEventListener('tribrid:reranker:mount', () => {
         try { initRerankerUI(); } catch (e) { console.warn('[reranker] init failed on mount event:', e); }
     });
     // Expose manual init for React components/tests

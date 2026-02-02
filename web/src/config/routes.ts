@@ -1,4 +1,4 @@
-// AGRO - React Router Configuration
+// TriBridRAG - React Router Configuration
 // Converted from legacy navigation.js TAB_REGISTRY and NEW_TABS
 
 import { ReactNode, ComponentType } from 'react';

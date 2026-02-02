@@ -1,5 +1,5 @@
 import { apiClient, api } from './client';
-import type { HealthStatus } from '@web/types';
+import type { HealthStatus } from '@/types/generated';
 
 export const healthApi = {
   /**

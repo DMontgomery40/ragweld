@@ -1,4 +1,4 @@
-// AGRO - Chat Subtabs Component
+// TriBridRAG - Chat Subtabs Component
 // Subtab navigation for Chat tab (UI and Settings)
 
 import { useEffect } from 'react';

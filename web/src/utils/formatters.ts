@@ -1,4 +1,4 @@
-// AGRO - Common formatters for display values
+// TriBridRAG - Common formatters for display values
 
 /**
  * Format bytes to human-readable string

@@ -1,4 +1,4 @@
-// AGRO - Chat Interface Component
+// TriBridRAG - Chat Interface Component
 // Main chat UI with message list, input, streaming, and trace panel
 // Reference: /assets/chat tab.png, /assets/chat_built_in.png
 
@@ -18,13 +18,13 @@ import type { ChatDebugInfo } from '@/types/generated';
 
 // Useful tips shown during response generation
 // Each tip has content and optional category for styling
-const AGRO_TIPS = [
+const TRIBRID_TIPS = [
   // RAG & Search Tips
   { tip: "Use specific file paths like 'server/app.py' to narrow your search to specific areas of the codebase.", category: "search" },
   { tip: "Try asking 'Where is X implemented?' rather than 'What is X?' for more precise code locations.", category: "search" },
   { tip: "Multi-query expansion rewrites your question multiple ways to find more relevant results.", category: "rag" },
   { tip: "The reranker scores results by semantic similarity - higher confidence means better matches.", category: "rag" },
-  { tip: "BM25 finds keyword matches while dense search finds semantic meaning - AGRO uses both.", category: "rag" },
+  { tip: "BM25 finds keyword matches while dense search finds semantic meaning - Tri-Brid RAG uses both.", category: "rag" },
   { tip: "Click any citation to open the file directly in VS Code at the exact line number.", category: "ux" },
   { tip: "Fast mode skips reranking for quicker results when you need speed over precision.", category: "rag" },
   { tip: "The confidence score reflects how well the retrieved documents match your query.", category: "rag" },
@@ -32,17 +32,17 @@ const AGRO_TIPS = [
   // Learning Reranker
   { tip: "Every thumbs up/down you give trains the Learning Reranker to better understand your codebase.", category: "feedback" },
   { tip: "The cross-encoder reranker learns from your feedback to improve result ordering over time.", category: "feedback" },
-  { tip: "Consistent feedback helps AGRO learn your codebase's unique terminology and patterns.", category: "feedback" },
+  { tip: "Consistent feedback helps Tri-Brid RAG learn your codebase's unique terminology and patterns.", category: "feedback" },
   { tip: "The reranker model checkpoints are saved automatically - your feedback is never lost.", category: "feedback" },
   
   // Prompts & Models
-  { tip: "Custom system prompts let you tailor AGRO's response style to your team's preferences.", category: "config" },
+  { tip: "Custom system prompts let you tailor Tri-Brid RAG's response style to your team's preferences.", category: "config" },
   { tip: "Lower temperature (0.0-0.3) gives more focused answers; higher (0.7+) allows more creativity.", category: "config" },
   { tip: "You can use local models via Ollama for air-gapped environments or cost savings.", category: "config" },
   { tip: "The model automatically fails over to cloud APIs if local inference isn't available.", category: "config" },
   
   // Indexing
-  { tip: "Re-index after major refactors to keep AGRO's understanding of your code current.", category: "indexing" },
+  { tip: "Re-index after major refactors to keep Tri-Brid RAG's understanding of your code current.", category: "indexing" },
   { tip: "The AST chunker preserves function boundaries - results always show complete code blocks.", category: "indexing" },
   { tip: "Semantic cards summarize files and classes for better high-level understanding.", category: "indexing" },
   { tip: "Index stats show when your codebase was last indexed - check Dashboard for details.", category: "indexing" },
@@ -50,13 +50,13 @@ const AGRO_TIPS = [
   // Evaluation & Quality
   { tip: "Run evals regularly to track retrieval quality as your codebase evolves.", category: "eval" },
   { tip: "Golden questions are your benchmark - add questions that matter to your team.", category: "eval" },
-  { tip: "MRR (Mean Reciprocal Rank) measures how quickly AGRO finds the right answer.", category: "eval" },
+  { tip: "MRR (Mean Reciprocal Rank) measures how quickly Tri-Brid RAG finds the right answer.", category: "eval" },
   { tip: "Compare eval runs to see if config changes improved or regressed retrieval quality.", category: "eval" },
   
   // Tracing & Debugging
-  { tip: "Enable the Routing Trace to see exactly how AGRO found and ranked your results.", category: "debug" },
+  { tip: "Enable the Routing Trace to see exactly how Tri-Brid RAG found and ranked your results.", category: "debug" },
   { tip: "Trace steps show timing for each stage: retrieval, reranking, and generation.", category: "debug" },
-  { tip: "The provider failover trace shows when AGRO switched between local and cloud models.", category: "debug" },
+  { tip: "The provider failover trace shows when Tri-Brid RAG switched between local and cloud models.", category: "debug" },
   { tip: "Use LangSmith integration for detailed traces of the full RAG pipeline.", category: "debug" },
   
   // Keyboard & UX
@@ -72,14 +72,14 @@ const AGRO_TIPS = [
   { tip: "Docker containers can be configured for different deployment scenarios.", category: "infra" },
   
   // Best Practices
-  { tip: "Ask follow-up questions - AGRO maintains context from your conversation history.", category: "best" },
+  { tip: "Ask follow-up questions - Tri-Brid RAG maintains context from your conversation history.", category: "best" },
   { tip: "Be specific about what you're looking for: 'error handling in auth' beats 'auth code'.", category: "best" },
   { tip: "If results seem off, try rephrasing - different words can surface different code.", category: "best" },
-  { tip: "Check citations to verify the answer - AGRO shows exactly where information came from.", category: "best" },
+  { tip: "Check citations to verify the answer - Tri-Brid RAG shows exactly where information came from.", category: "best" },
   { tip: "Use the repo selector to focus on specific repositories in multi-repo setups.", category: "best" },
   
   // Advanced
-  { tip: "Profiles let you save and switch between different AGRO configurations instantly.", category: "advanced" },
+  { tip: "Profiles let you save and switch between different Tri-Brid RAG configurations instantly.", category: "advanced" },
   { tip: "The MCP server enables IDE integrations - ask your editor about your code.", category: "advanced" },
   { tip: "Webhooks can trigger re-indexing automatically when you push code changes.", category: "advanced" },
   { tip: "The CLI supports all chat features for terminal-first workflows.", category: "advanced" },
@@ -460,9 +460,9 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
   const streamingSupportedRef = useRef<boolean | null>(null);
   
   // Tip rotation state for streaming indicator
-  const [currentTip, setCurrentTip] = useState<typeof AGRO_TIPS[0] | null>(null);
+  const [currentTip, setCurrentTip] = useState<typeof TRIBRID_TIPS[0] | null>(null);
   const [tipFade, setTipFade] = useState(true);
-  const shuffledTipsRef = useRef<typeof AGRO_TIPS>([]);
+  const shuffledTipsRef = useRef<typeof TRIBRID_TIPS>([]);
   const tipIndexRef = useRef(0);
   
   // Feedback state: track which messages have received feedback
@@ -499,7 +499,7 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
     
     // Shuffle tips on first activation
     if (shuffledTipsRef.current.length === 0) {
-      shuffledTipsRef.current = shuffleArray(AGRO_TIPS);
+      shuffledTipsRef.current = shuffleArray(TRIBRID_TIPS);
       tipIndexRef.current = 0;
     }
     
@@ -512,7 +512,7 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
         tipIndexRef.current = (tipIndexRef.current + 1) % shuffledTipsRef.current.length;
         // Re-shuffle when we've shown all tips
         if (tipIndexRef.current === 0) {
-          shuffledTipsRef.current = shuffleArray(AGRO_TIPS);
+          shuffledTipsRef.current = shuffleArray(TRIBRID_TIPS);
         }
         setTipFade(true);
       }, 150);
@@ -621,7 +621,7 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
 
   const loadChatHistory = () => {
     try {
-      const saved = localStorage.getItem('agro-chat-history');
+      const saved = localStorage.getItem('tribrid-chat-history');
       if (saved) {
         const parsed = JSON.parse(saved);
         const trimmed = clampChatHistory(Array.isArray(parsed) ? (parsed as Message[]) : []);
@@ -639,7 +639,7 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
   const saveChatHistory = (msgs: Message[]) => {
     try {
       const trimmed = clampChatHistory(msgs);
-      localStorage.setItem('agro-chat-history', JSON.stringify(trimmed));
+      localStorage.setItem('tribrid-chat-history', JSON.stringify(trimmed));
     } catch (error) {
       console.error('[ChatInterface] Failed to save chat history:', error);
     }
@@ -1006,7 +1006,7 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
     if (confirm('Clear all messages?')) {
       setMessages([]);
       notifyTrace([], false, 'clear');
-      localStorage.removeItem('agro-chat-history');
+      localStorage.removeItem('tribrid-chat-history');
     }
   };
 

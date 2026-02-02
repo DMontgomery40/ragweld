@@ -5,18 +5,18 @@ let goldenQuestions = [];
 
 // Recommended questions (baseline for this repo)
 const RECOMMENDED_GOLDEN = [
-  { q: 'Where is hybrid retrieval implemented?', repo: 'agro', expect_paths: ['retrieval/hybrid_search.py'] },
-  { q: 'Where is keyword generation handled server-side?', repo: 'agro', expect_paths: ['server/app.py','keywords/generate'] },
-  { q: 'Where is the metadata enrichment logic for code/keywords?', repo: 'agro', expect_paths: ['metadata_enricher.py'] },
-  { q: 'Where is the indexing pipeline (BM25 and dense) implemented?', repo: 'agro', expect_paths: ['indexer/index_repo.py'] },
-  { q: 'Where is comprehensive index status computed?', repo: 'agro', expect_paths: ['server/app.py','server/index_stats.py','index/status'] },
-  { q: 'Where are semantic cards built or listed?', repo: 'agro', expect_paths: ['server/app.py','api/cards','indexer/build_cards.py'] },
-  { q: 'Where are golden questions API routes defined?', repo: 'agro', expect_paths: ['server/app.py','api/golden'] },
-  { q: 'Where is the endpoint to test a single golden question?', repo: 'agro', expect_paths: ['server/app.py','api/golden/test'] },
-  { q: 'Where are GUI assets mounted and served?', repo: 'agro', expect_paths: ['server/app.py','/gui','gui/index.html'] },
-  { q: 'Where is repository configuration (repos.json) loaded?', repo: 'agro', expect_paths: ['config_loader.py'] },
-  { q: 'Where are MCP stdio tools implemented (rag_answer, rag_search)?', repo: 'agro', expect_paths: ['server/mcp/server.py'] },
-  { q: 'Where can I list or fetch latest LangGraph traces?', repo: 'agro', expect_paths: ['server/app.py','api/traces'] }
+  { q: 'Where is hybrid retrieval implemented?', repo: 'tribrid', expect_paths: ['retrieval/hybrid_search.py'] },
+  { q: 'Where is keyword generation handled server-side?', repo: 'tribrid', expect_paths: ['server/app.py','keywords/generate'] },
+  { q: 'Where is the metadata enrichment logic for code/keywords?', repo: 'tribrid', expect_paths: ['metadata_enricher.py'] },
+  { q: 'Where is the indexing pipeline (BM25 and dense) implemented?', repo: 'tribrid', expect_paths: ['indexer/index_repo.py'] },
+  { q: 'Where is comprehensive index status computed?', repo: 'tribrid', expect_paths: ['server/app.py','server/index_stats.py','index/status'] },
+  { q: 'Where are semantic cards built or listed?', repo: 'tribrid', expect_paths: ['server/app.py','api/cards','indexer/build_cards.py'] },
+  { q: 'Where are golden questions API routes defined?', repo: 'tribrid', expect_paths: ['server/app.py','api/golden'] },
+  { q: 'Where is the endpoint to test a single golden question?', repo: 'tribrid', expect_paths: ['server/app.py','api/golden/test'] },
+  { q: 'Where are GUI assets mounted and served?', repo: 'tribrid', expect_paths: ['server/app.py','/gui','gui/index.html'] },
+  { q: 'Where is repository configuration (repos.json) loaded?', repo: 'tribrid', expect_paths: ['config_loader.py'] },
+  { q: 'Where are MCP stdio tools implemented (rag_answer, rag_search)?', repo: 'tribrid', expect_paths: ['server/mcp/server.py'] },
+  { q: 'Where can I list or fetch latest LangGraph traces?', repo: 'tribrid', expect_paths: ['server/app.py','api/traces'] }
 ];
 
 // Load all golden questions
@@ -228,7 +228,7 @@ function editQuestion(index) {
                 <div>
                     <label style="font-size: 11px; color: var(--fg-muted); display: block; margin-bottom: 4px;">Repo</label>
                     <select id="edit-repo-${index}" style="width: 100%; background: var(--card-bg); border: 1px solid var(--line); color: var(--fg); padding: 6px; border-radius: 3px;">
-                        <option value="agro" ${q.repo === 'agro' ? 'selected' : ''}>agro</option>
+                        <option value="tribrid" ${q.repo === 'tribrid' ? 'selected' : ''}>tribrid</option>
                     </select>
                 </div>
                 <div>

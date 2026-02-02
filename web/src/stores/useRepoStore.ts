@@ -1,5 +1,5 @@
 /**
- * AGRO - Centralized Repository State Management
+ * TriBridRAG - Centralized Corpus State Management
  *
  * Provides a single source of truth for:
  * - Available repositories list
@@ -32,6 +32,7 @@ interface RepoStore {
   getRepoByName: (name: string) => Corpus | undefined;
   addRepo: (request: CorpusCreateRequest) => Promise<Corpus>;
   updateCorpus: (corpusId: string, updates: CorpusUpdateRequest) => Promise<Corpus>;
+  deleteCorpus: (corpusId: string) => Promise<void>;
 }
 
 // Determine API base URL
@@ -95,13 +96,25 @@ export const useRepoStore = create<RepoStore>((set, get) => ({
 
       const repos: Corpus[] = await reposRes.json();
 
-      // Determine active corpus from URL, localStorage, or first corpus
+      // Determine active corpus from URL, localStorage, or first corpus (and validate it exists)
       const url = new URL(window.location.href);
-      const urlCorpus = url.searchParams.get('corpus') || url.searchParams.get('repo') || '';
-      const stored =
+      const urlCorpusRaw = url.searchParams.get('corpus') || url.searchParams.get('repo') || '';
+      const storedRaw =
         localStorage.getItem('tribrid_active_corpus') || localStorage.getItem('tribrid_active_repo') || '';
+
+      const resolveToCorpusId = (candidate: string): string => {
+        const v = String(candidate || '').trim();
+        if (!v) return '';
+        const found = repos.find((r) => r.corpus_id === v || r.slug === v || r.name === v);
+        return String(found?.corpus_id || '').trim();
+      };
+
+      const resolvedFromUrl = resolveToCorpusId(urlCorpusRaw);
+      const resolvedFromStored = resolveToCorpusId(storedRaw);
       const activeRepo =
-        urlCorpus || stored || repos[0]?.corpus_id || repos[0]?.slug || repos[0]?.name || '';
+        resolvedFromUrl ||
+        resolvedFromStored ||
+        String(repos[0]?.corpus_id || repos[0]?.slug || repos[0]?.name || '').trim();
 
       set({
         repos,
@@ -114,14 +127,21 @@ export const useRepoStore = create<RepoStore>((set, get) => ({
       // Persist + broadcast
       if (activeRepo) {
         localStorage.setItem('tribrid_active_corpus', activeRepo);
+        // Keep URL in sync (canonicalize to ?corpus=<id>)
+        try {
+          const nextUrl = new URL(window.location.href);
+          nextUrl.searchParams.set('corpus', activeRepo);
+          nextUrl.searchParams.delete('repo');
+          window.history.replaceState({}, '', nextUrl.toString());
+        } catch {
+          // ignore
+        }
       }
       window.dispatchEvent(
         new CustomEvent('tribrid-corpus-loaded', {
           detail: { repos, activeRepo }
         })
       );
-      // Legacy event name (kept for any older listeners)
-      window.dispatchEvent(new CustomEvent('agro-repo-loaded', { detail: { repos, activeRepo } }));
 
     } catch (error) {
       set({
@@ -161,8 +181,6 @@ export const useRepoStore = create<RepoStore>((set, get) => ({
           detail: { corpus: repoName, repo: repoName, previous: previousRepo },
         })
       );
-      // Legacy event name (kept for any older listeners)
-      window.dispatchEvent(new CustomEvent('agro-repo-changed', { detail: { repo: repoName, previous: previousRepo } }));
       
     } catch (error) {
       set({
@@ -222,7 +240,39 @@ export const useRepoStore = create<RepoStore>((set, get) => ({
     // Refresh list to reflect changes
     await get().loadRepos();
     return updated;
-  }
+  },
+
+  deleteCorpus: async (corpusId: string) => {
+    const apiBase = getApiBase();
+    const { activeRepo } = get();
+    const response = await fetch(`${apiBase}/corpora/${encodeURIComponent(corpusId)}`, {
+      method: 'DELETE',
+    });
+    if (!response.ok) {
+      const detail = await response.text().catch(() => '');
+      throw new Error(detail || `Failed to delete corpus (${response.status})`);
+    }
+
+    // Refresh list after deletion
+    await get().loadRepos();
+
+    // If we deleted the active corpus, explicitly switch to a remaining corpus (emits events).
+    if (activeRepo === corpusId) {
+      const next = get().repos[0]?.corpus_id || '';
+      if (next) {
+        await get().setActiveRepo(next);
+      } else {
+        // No corpora left
+        set({ activeRepo: '' });
+        try {
+          localStorage.removeItem('tribrid_active_corpus');
+          localStorage.removeItem('tribrid_active_repo');
+        } catch {
+          // ignore
+        }
+      }
+    }
+  },
 }));
 
 // Export selector hooks for convenience

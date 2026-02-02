@@ -63,7 +63,7 @@ export const useDockStore = create<DockStore>()(
         });
       },
     }),
-    { name: 'agro-dock-storage' }
+    { name: 'tribrid-dock-storage' }
   )
 );
 

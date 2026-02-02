@@ -1,4 +1,4 @@
-// AGRO GUI - Indexing Module
+// TriBridRAG GUI - Indexing Module
 // Handles index operations and repo dropdown population
 
 (function () {

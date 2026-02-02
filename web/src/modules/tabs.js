@@ -1,4 +1,4 @@
-// AGRO GUI - Tabs Module
+// TriBridRAG GUI - Tabs Module
 // Handles main tab navigation, subtab switching, and lazy loading
 
 (function () {

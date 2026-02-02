@@ -1,4 +1,4 @@
-// AGRO - Debug Component
+// TriBridRAG - Debug Component
 // Query debugger with detailed trace output
 // Reference: /assets/dev tools - debug subtag 1.png, /assets/dev tools - degub subtag 2.png
 
@@ -25,8 +25,8 @@ interface DebugResult {
 export function Debug() {
   const { api } = useAPI();
   const [query, setQuery] = useState('');
-  const [repository, setRepository] = useState('agro');
-  const [repositories, _setRepositories] = useState(['agro', 'test-repo']);
+  const [repository, setRepository] = useState('auto');
+  const [repositories, _setRepositories] = useState(['auto']);
   const [debugging, setDebugging] = useState(false);
   const [result, setResult] = useState<DebugResult | null>(null);
   const [error, setError] = useState<string | null>(null);

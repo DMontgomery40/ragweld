@@ -249,6 +249,86 @@ class DevStackRestartResponse(BaseModel):
     backend_port: int | None = Field(default=None, ge=1024, le=65535, description="Backend port (if applicable).")
 
 
+# =============================================================================
+# HEALTH + INFRASTRUCTURE API MODELS
+# =============================================================================
+
+
+class HealthServiceStatus(BaseModel):
+    """Per-service status entry for /api/health."""
+
+    status: str = Field(description="Service health status label (e.g., up/unknown/down).")
+    error: str | None = Field(default=None, description="Optional error message if unhealthy/unreachable.")
+
+
+class HealthStatus(BaseModel):
+    """System health status payload for /api/health."""
+
+    ok: bool = Field(default=True, description="Overall health boolean.")
+    status: Literal["healthy", "unhealthy", "unknown"] = Field(default="healthy", description="Overall status label.")
+    ts: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        description="Timestamp for this health snapshot (UTC).",
+    )
+    services: dict[str, HealthServiceStatus] = Field(
+        default_factory=dict,
+        description="Map of service name -> status entry.",
+    )
+
+
+class DockerContainer(BaseModel):
+    """Normalized Docker container entry used by the Docker tab + dashboard."""
+
+    id: str = Field(description="Full container ID.")
+    short_id: str = Field(description="Short container ID (first 12 chars).")
+    name: str = Field(description="Container name.")
+    image: str = Field(description="Container image reference.")
+    state: str = Field(description="Container state (lowercase, best-effort).")
+    status: str = Field(description="Human-readable docker status string.")
+    ports: str | None = Field(default=None, description="Port mapping summary string (may be empty).")
+    compose_project: str | None = Field(default=None, description="Docker Compose project label (if present).")
+    compose_service: str | None = Field(default=None, description="Docker Compose service label (if present).")
+    tribrid_managed: bool = Field(default=False, description="Whether this container belongs to the TriBrid dev stack.")
+
+
+class DockerContainersResponse(BaseModel):
+    """Response payload for /api/docker/containers (and /api/docker/containers/all)."""
+
+    containers: list[DockerContainer] = Field(default_factory=list, description="List of Docker containers.")
+
+
+class DockerStatus(BaseModel):
+    """Response payload for /api/docker/status."""
+
+    running: bool = Field(default=False, description="Whether Docker is available and responding.")
+    runtime: str = Field(default="", description="Runtime label/version string (best-effort).")
+    containers_count: int = Field(default=0, ge=0, description="Total number of containers (docker ps -aq).")
+
+
+class LokiStatus(BaseModel):
+    """Response payload for /api/loki/status."""
+
+    reachable: bool = Field(default=False, description="Whether Loki is reachable.")
+    url: str | None = Field(default=None, description="Resolved Loki base URL if reachable (best-effort).")
+    status: str = Field(default="unreachable", description="Human-readable status label (best-effort).")
+
+
+class MCPRagSearchResult(BaseModel):
+    """Compact result shape for legacy /api/mcp/rag_search (debug UI)."""
+
+    file_path: str = Field(description="Matched file path.")
+    start_line: int = Field(description="Start line for the matched span.")
+    end_line: int = Field(description="End line for the matched span.")
+    rerank_score: float = Field(description="Legacy field: score for the match (post-fusion).")
+
+
+class MCPRagSearchResponse(BaseModel):
+    """Response payload for legacy /api/mcp/rag_search (debug UI)."""
+
+    results: list[MCPRagSearchResult] = Field(default_factory=list, description="Compact match list.")
+    error: str | None = Field(default=None, description="Error message when the search fails.")
+
+
 class MCPHTTPTransportStatus(BaseModel):
     """Status of an MCP HTTP transport (Python/Node) when enabled."""
 
@@ -352,7 +432,7 @@ class MCPConfig(BaseModel):
 
 
 class Corpus(BaseModel):
-    """User-managed corpus (formerly "repo" in Agro).
+    """User-managed corpus (formerly "repo" in earlier versions).
 
     A corpus is the unit of isolation for:
     - indexing storage (Postgres)
@@ -1995,10 +2075,52 @@ class GraphIndexingConfig(BaseModel):
         description="Build semantic knowledge graph (concept entities + relations) linked to chunks during indexing",
     )
 
+    ast_contains_weight: float = Field(
+        default=1.0,
+        ge=0.0,
+        le=10.0,
+        description="Edge weight for AST containment relationships (module->class/function, class->method).",
+    )
+
+    ast_inherits_weight: float = Field(
+        default=1.0,
+        ge=0.0,
+        le=10.0,
+        description="Edge weight for AST inheritance relationships (class->base).",
+    )
+
+    ast_imports_weight: float = Field(
+        default=1.0,
+        ge=0.0,
+        le=10.0,
+        description="Edge weight for AST import relationships (module->imported_module).",
+    )
+
+    ast_calls_weight: float = Field(
+        default=1.0,
+        ge=0.0,
+        le=10.0,
+        description="Edge weight for AST call relationships (function->callee).",
+    )
+
     semantic_kg_mode: Literal["heuristic", "llm"] = Field(
         default="heuristic",
         description="Semantic KG extraction mode. 'heuristic' is deterministic and test-friendly; "
         "'llm' uses an LLM to extract entities + relations.",
+    )
+
+    semantic_kg_relation_weight_llm: float = Field(
+        default=0.7,
+        ge=0.0,
+        le=10.0,
+        description="Edge weight for semantic concept relations in LLM mode.",
+    )
+
+    semantic_kg_relation_weight_heuristic: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=10.0,
+        description="Edge weight for semantic concept relations in heuristic fallback mode.",
     )
 
     semantic_kg_max_concepts_per_chunk: int = Field(
@@ -2860,6 +2982,41 @@ class EvaluationConfig(BaseModel):
     baseline_path: str = Field(
         default="data/evals/eval_baseline.json",
         description="Baseline results path"
+    )
+
+    recall_at_5_k: int = Field(
+        default=5,
+        ge=1,
+        le=200,
+        description="K used for recall_at_5 metric (default 5).",
+    )
+
+    recall_at_10_k: int = Field(
+        default=10,
+        ge=1,
+        le=200,
+        description="K used for recall_at_10 metric (default 10).",
+    )
+
+    recall_at_20_k: int = Field(
+        default=20,
+        ge=1,
+        le=200,
+        description="K used for recall_at_20 metric (default 20).",
+    )
+
+    precision_at_5_k: int = Field(
+        default=5,
+        ge=1,
+        le=200,
+        description="K used for precision_at_5 metric (default 5).",
+    )
+
+    ndcg_at_10_k: int = Field(
+        default=10,
+        ge=1,
+        le=200,
+        description="K used for ndcg_at_10 metric (default 10).",
     )
 
     eval_multi_m: int = Field(

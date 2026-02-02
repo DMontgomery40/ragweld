@@ -1,4 +1,4 @@
-// AGRO - Quick Action Button Component
+// TriBridRAG - Quick Action Button Component
 // Reusable action button with icon and label
 
 import React from 'react';

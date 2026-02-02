@@ -24,7 +24,7 @@ except ImportError:
     sys.exit(1)
 
 # =============================================================================
-# SYSTEM PROMPT - TriBridRAG-specific (NO AGRO REFERENCES)
+# SYSTEM PROMPT - TriBridRAG-specific (NO legacy-name references)
 # =============================================================================
 
 SYSTEM_PROMPT = """You are writing documentation for TriBridRAG, a tri-brid RAG engine combining:
@@ -53,7 +53,7 @@ BANNED TERMS (DO NOT USE):
 - "Redis" - removed from project
 - "LangChain" - use LangGraph directly if needed
 - "cards" - use "chunk_summaries"
-- "AGRO" or "agro" - this is TriBridRAG
+- This project is TriBridRAG (do not use legacy project naming)
 
 MKDOCS MATERIAL FORMATTING (MANDATORY):
 - Start every page with a feature grid:

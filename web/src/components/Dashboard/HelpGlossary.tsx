@@ -1,4 +1,4 @@
-// AGRO - Help & Glossary Component
+// TriBridRAG - Help & Glossary Component
 // Displays all RAG configuration parameters with search and filtering
 // Dynamically reads from tooltips module - updates automatically when tooltips change
 

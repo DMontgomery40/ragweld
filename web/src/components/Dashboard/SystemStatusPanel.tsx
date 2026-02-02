@@ -7,7 +7,8 @@ import { apiUrl } from '@/api/client';
 
 interface SystemStats {
   health: string;
-  corpus: string;
+  activeCorpus: string;
+  totalCorpora: string;
   chunks: string;
 }
 
@@ -15,7 +16,8 @@ export function SystemStatusPanel() {
   const { repos, activeRepo } = useRepoStore();
   const [stats, setStats] = useState<SystemStats>({
     health: '—',
-    corpus: '—',
+    activeCorpus: '—',
+    totalCorpora: '—',
     chunks: '—',
   });
 
@@ -41,7 +43,8 @@ export function SystemStatusPanel() {
 
       setStats({
         health: health.status === 'healthy' ? 'healthy' : 'degraded',
-        corpus: activeRepo ? `${activeRepo} (${repos.length} corpora)` : `(${repos.length} corpora)`,
+        activeCorpus: String(activeRepo || '').trim() || '(none)',
+        totalCorpora: `${repos.length} ${repos.length === 1 ? 'corpus' : 'corpora'}`,
         chunks: `${totalChunks} chunks`,
       });
     } catch (e) {
@@ -89,8 +92,10 @@ export function SystemStatusPanel() {
       <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
         {/* Health */}
         <StatusRow label="Health" value={stats.health} color="var(--ok)" id="dash-health" />
-        {/* Corpus */}
-        <StatusRow label="Corpus" value={stats.corpus} color="var(--fg)" id="dash-corpus" />
+        {/* Active corpus */}
+        <StatusRow label="Active corpus" value={stats.activeCorpus} color="var(--fg)" id="dash-active-corpus" />
+        {/* Total corpora */}
+        <StatusRow label="Total corpora" value={stats.totalCorpora} color="var(--fg)" id="dash-total-corpora" />
         {/* Chunks */}
         <StatusRow label="Chunks" value={stats.chunks} color="var(--link)" id="dash-chunks" />
       </div>

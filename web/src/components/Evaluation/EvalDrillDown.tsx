@@ -93,7 +93,8 @@ export const EvalDrillDown: React.FC<EvalDrillDownProps> = ({ runId, compareWith
   const [modelUsed, setModelUsed] = useState<string | null>(null);
 
   // Zustand - config key categories for grouping (from Pydantic backend)
-  const { evalKeyCategories, loadEvalKeyCategories } = useConfigStore();
+  const evalKeyCategories = useConfigStore((s) => s.evalKeyCategories);
+  const loadEvalKeyCategories = useConfigStore((s) => s.loadEvalKeyCategories);
 
   // Load eval key categories on mount
   useEffect(() => {

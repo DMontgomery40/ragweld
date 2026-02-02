@@ -8,11 +8,19 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from server.config import load_config as load_global_config
 from server.db.postgres import PostgresClient
-from server.models.tribrid_config_model import CorpusScope, MCPHTTPTransportStatus, MCPStatusResponse, TriBridConfig
+from server.models.tribrid_config_model import (
+    CorpusScope,
+    MCPHTTPTransportStatus,
+    MCPRagSearchResponse,
+    MCPRagSearchResult,
+    MCPStatusResponse,
+    TriBridConfig,
+)
 from server.retrieval.fusion import TriBridFusion
 from server.services.config_store import get_config as load_scoped_config
 from server.services.config_store import reset_config as reset_scoped_config
 from server.services.config_store import save_config as save_scoped_config
+from server.services.config_store import CorpusNotFoundError
 
 router = APIRouter(tags=["config"])
 
@@ -21,6 +29,8 @@ async def get_config(scope: CorpusScope = Depends()) -> TriBridConfig:
     repo_id = scope.resolved_repo_id
     try:
         return await load_scoped_config(repo_id=repo_id)
+    except CorpusNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
 
@@ -33,6 +43,8 @@ async def update_config(
     repo_id = scope.resolved_repo_id
     try:
         return await save_scoped_config(config, repo_id=repo_id)
+    except CorpusNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
 
@@ -46,6 +58,8 @@ async def update_config_section(
     repo_id = scope.resolved_repo_id
     try:
         config = await load_scoped_config(repo_id=repo_id)
+    except CorpusNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
 
@@ -71,6 +85,8 @@ async def update_config_section(
 
     try:
         return await save_scoped_config(new_config, repo_id=repo_id)
+    except CorpusNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
 
@@ -80,6 +96,8 @@ async def reset_config(scope: CorpusScope = Depends()) -> TriBridConfig:
     repo_id = scope.resolved_repo_id
     try:
         return await reset_scoped_config(repo_id=repo_id)
+    except CorpusNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
 
@@ -151,13 +169,13 @@ async def mcp_status(request: Request) -> MCPStatusResponse:
     )
 
 
-@router.get("/mcp/rag_search")
+@router.get("/mcp/rag_search", response_model=MCPRagSearchResponse)
 async def mcp_rag_search(
     q: str = Query(..., description="Search query"),
-    top_k: int = Query(10, ge=1, le=100, description="Number of results to return"),
+    top_k: int | None = Query(default=None, ge=1, le=100, description="Number of results to return"),
     force_local: bool = Query(False, description="Legacy flag (ignored)"),
     scope: CorpusScope = Depends(),
-) -> dict[str, Any]:
+) -> MCPRagSearchResponse:
     """Legacy debug endpoint: run tri-brid search and return compact results.
 
     Notes:
@@ -167,9 +185,12 @@ async def mcp_rag_search(
     _ = force_local  # ignored (legacy param)
     repo_id = scope.resolved_repo_id
     if not repo_id:
-        return {"results": [], "error": "Missing corpus_id/repo_id (pass ?repo=... or ?corpus_id=...)"}
+        return MCPRagSearchResponse(
+            results=[],
+            error="Missing corpus_id/repo_id (pass ?repo=... or ?corpus_id=...)",
+        )
     if not q.strip():
-        return {"results": [], "error": "Query must not be empty"}
+        return MCPRagSearchResponse(results=[], error="Query must not be empty")
 
     try:
         # Validate corpus exists (avoid implicitly creating new corpora/configs).
@@ -178,10 +199,11 @@ async def mcp_rag_search(
         await pg.connect()
         corpus = await pg.get_corpus(repo_id)
         if corpus is None:
-            return {"results": [], "error": f"Corpus not found: {repo_id}"}
+            return MCPRagSearchResponse(results=[], error=f"Corpus not found: {repo_id}")
 
         cfg = await load_scoped_config(repo_id=repo_id)
         fusion = TriBridFusion(vector=None, sparse=None, graph=None)
+        effective_top_k = int(top_k or cfg.mcp.default_top_k)
         matches = await fusion.search(
             repo_id,
             q,
@@ -189,19 +211,18 @@ async def mcp_rag_search(
             include_vector=True,
             include_sparse=True,
             include_graph=True,
-            top_k=int(top_k),
+            top_k=effective_top_k,
         )
 
-        return {
-            "results": [
-                {
-                    "file_path": m.file_path,
-                    "start_line": int(m.start_line),
-                    "end_line": int(m.end_line),
-                    "rerank_score": float(m.score),
-                }
-                for m in matches
-            ]
-        }
+        results = [
+            MCPRagSearchResult(
+                file_path=m.file_path,
+                start_line=int(m.start_line),
+                end_line=int(m.end_line),
+                rerank_score=float(m.score),
+            )
+            for m in matches
+        ]
+        return MCPRagSearchResponse(results=results, error=None)
     except Exception as e:
-        return {"results": [], "error": str(e)}
+        return MCPRagSearchResponse(results=[], error=str(e))

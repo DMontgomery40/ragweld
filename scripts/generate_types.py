@@ -254,6 +254,15 @@ def main() -> None:
             # Domain models - Dev stack orchestration (local dev only)
             DevStackStatusResponse,
             DevStackRestartResponse,
+            # Domain models - Health + infra status
+            HealthServiceStatus,
+            HealthStatus,
+            DockerStatus,
+            DockerContainer,
+            DockerContainersResponse,
+            LokiStatus,
+            MCPRagSearchResult,
+            MCPRagSearchResponse,
             # Domain models - MCP status (System Status + Infrastructure)
             MCPStatusResponse,
             # Domain models - Corpora
@@ -336,6 +345,14 @@ def main() -> None:
         DashboardIndexStatsResponse,
         DevStackStatusResponse,
         DevStackRestartResponse,
+        HealthServiceStatus,
+        HealthStatus,
+        DockerStatus,
+        DockerContainer,
+        DockerContainersResponse,
+        LokiStatus,
+        MCPRagSearchResult,
+        MCPRagSearchResponse,
         MCPStatusResponse,
         Corpus,
         CorpusCreateRequest,

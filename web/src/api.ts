@@ -50,7 +50,7 @@ export const healthApi = {
 export const configApi = {
     get: () => get('/api/config'),
     update: (data: any) => post('/api/config', data),
-    // Renamed from reloadEnv - reloads agro_config.json, NOT .env
+    // Renamed from reloadEnv - reloads tribrid_config.json (and per-corpus config), NOT .env
     reloadConfig: () => post('/api/env/reload'),
     reloadEnv: () => post('/api/env/reload'), // DEPRECATED: use reloadConfig
     load: () => get('/api/config'),

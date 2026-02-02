@@ -73,12 +73,12 @@ export function useApplyButton() {
     document.addEventListener('change', handleFormChange);
 
     // Listen for custom dirty events from modules
-    window.addEventListener('agro-form-dirty', handleFormChange);
+    window.addEventListener('tribrid-form-dirty', handleFormChange);
 
     return () => {
       document.removeEventListener('input', handleFormChange);
       document.removeEventListener('change', handleFormChange);
-      window.removeEventListener('agro-form-dirty', handleFormChange);
+      window.removeEventListener('tribrid-form-dirty', handleFormChange);
     };
   }, []);
 
@@ -152,7 +152,7 @@ export function useApplyButton() {
       }
 
       // Emit success event for any listeners
-      window.dispatchEvent(new CustomEvent('agro-config-saved', { detail: savedConfig }));
+      window.dispatchEvent(new CustomEvent('tribrid-config-saved', { detail: savedConfig }));
 
       return savedConfig;
     } catch (err) {

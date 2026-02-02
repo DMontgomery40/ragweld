@@ -1,4 +1,4 @@
-// AGRO - DevTools Components Export
+// TriBridRAG - DevTools Components Export
 // Exports all DevTools subtab components
 
 export { Editor } from './Editor';

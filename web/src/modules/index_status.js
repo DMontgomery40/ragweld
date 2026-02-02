@@ -14,7 +14,7 @@
    *   Centralizes dashboard element detection and human-readable storage formatting.
    *
    * guardrails:
-   *   - DO NOT rely on window.__AGRO_REACT_DASHBOARD__ as primary source; prioritize data-react-dashboard attribute
+   *   - DO NOT rely on window.__TRIBRID_REACT_DASHBOARD__ as primary source; prioritize data-react-dashboard attribute
    *   - NOTE: formatBytes silently returns '0 B' for null/undefined/0; add explicit validation if strict type-checking required
    *   - ASK USER: Should formatBytes throw on negative bytes or non-numeric input?
    * ---/agentspec
@@ -31,12 +31,12 @@
    * guardrails:
    *   - DO NOT call getReactDashboardRoot() repeatedly; cache result
    *   - NOTE: formatBytes returns '0 B' for null/undefined/0; handles edge cases
-   *   - NOTE: isReactDashboardElement requires window.__AGRO_REACT_DASHBOARD__ or root to exist
+   *   - NOTE: isReactDashboardElement requires window.__TRIBRID_REACT_DASHBOARD__ or root to exist
    * ---/agentspec
    */
   const isReactDashboardElement = (node) => {
     const root = getReactDashboardRoot();
-    return Boolean((window.__AGRO_REACT_DASHBOARD__ || root) && node && root && root.contains(node));
+    return Boolean((window.__TRIBRID_REACT_DASHBOARD__ || root) && node && root && root.contains(node));
   };
 
   /**

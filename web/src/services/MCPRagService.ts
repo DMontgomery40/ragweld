@@ -5,17 +5,10 @@
  * Handles RAG search via MCP protocol
  */
 
-export interface MCPRagResult {
-  file_path: string;
-  start_line: number;
-  end_line: number;
-  rerank_score?: number;
-}
+import type { MCPRagSearchResponse, MCPRagSearchResult } from '@/types/generated';
 
-export interface MCPRagResponse {
-  results?: MCPRagResult[];
-  error?: string;
-}
+export type MCPRagResult = MCPRagSearchResult;
+export type MCPRagResponse = MCPRagSearchResponse;
 
 export class MCPRagService {
   private apiBase: string;

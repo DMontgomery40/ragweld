@@ -1,4 +1,4 @@
-// AGRO - Docker Page
+// TriBridRAG - Docker Page
 // Simple wrapper for Docker status and container management
 
 import { DockerStatusCard } from '@/components/DockerStatusCard';

@@ -1,4 +1,4 @@
-import type { DockerStatus } from '@web/types';
+import type { DockerStatus } from '@/types/generated';
 
 interface DockerStatusCardProps {
   status: DockerStatus | null;

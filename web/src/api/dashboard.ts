@@ -2,36 +2,25 @@
 // Centralized API calls for all Dashboard operations
 
 import { apiUrl, withCorpusScope } from './client';
-import type { DashboardIndexStatsResponse, DashboardIndexStatusResponse, MCPStatusResponse } from '@/types/generated';
+import type {
+  DashboardIndexStatsResponse,
+  DashboardIndexStatusResponse,
+  DockerContainer,
+  DockerContainersResponse,
+  DockerStatus,
+  HealthStatus,
+  LokiStatus,
+  MCPStatusResponse,
+  TriBridConfig,
+  TracesLatestResponse,
+} from '@/types/generated';
+
+// Re-export selected generated types for convenience in consumers that import `* as DashAPI`.
+export type { DockerContainer, DockerStatus, HealthStatus, LokiStatus, TracesLatestResponse, TriBridConfig };
 
 // ============================================================================
 // System Status APIs
 // ============================================================================
-
-export interface HealthStatus {
-  status: string;
-  ok: boolean;
-  graph_loaded?: boolean;
-  ts?: string;
-}
-
-export interface ConfigData {
-  env?: Record<string, any>;
-  default_repo?: string;
-  repos?: Array<{
-    name: string;
-    profile?: string;
-    [key: string]: any;
-  }>;
-  MCP_SERVER_URL?: string;
-  AUTOTUNE_ENABLED?: string;
-  [key: string]: any;
-}
-
-export interface CardsData {
-  count: number;
-  cards?: any[];
-}
 
 export async function getHealth(): Promise<HealthStatus> {
   const response = await fetch(apiUrl('/health'));
@@ -39,15 +28,9 @@ export async function getHealth(): Promise<HealthStatus> {
   return response.json();
 }
 
-export async function getConfig(): Promise<ConfigData> {
+export async function getConfig(): Promise<TriBridConfig> {
   const response = await fetch(apiUrl('/config'));
   if (!response.ok) throw new Error('Failed to fetch config');
-  return response.json();
-}
-
-export async function getCards(): Promise<CardsData> {
-  const response = await fetch(apiUrl('/cards'));
-  if (!response.ok) throw new Error('Failed to fetch cards');
   return response.json();
 }
 
@@ -71,10 +54,10 @@ export interface Alert {
   annotations?: Record<string, any>;
 }
 
-export interface AlertStatus {
+export type AlertStatus = {
   recent_alerts?: Alert[];
   total_count?: number;
-}
+};
 
 export async function getAlertStatus(): Promise<AlertStatus> {
   const response = await fetch(apiUrl('/webhooks/alertmanager/status'));
@@ -96,21 +79,15 @@ export async function getTraces(limit: number = 50): Promise<Trace[]> {
   return response.json();
 }
 
-export async function getLatestTrace(): Promise<Trace | null> {
+export async function getLatestTrace(): Promise<TracesLatestResponse | null> {
   const response = await fetch(apiUrl('/traces/latest'));
   if (!response.ok) return null;
   return response.json();
 }
 
-export interface LokiStatus {
-  url?: string;
-  available: boolean;
-  error?: string;
-}
-
 export async function getLokiStatus(): Promise<LokiStatus> {
   const response = await fetch(apiUrl('/loki/status'));
-  if (!response.ok) return { available: false, error: 'Failed to connect' };
+  if (!response.ok) return { reachable: false, status: 'unreachable' };
   return response.json();
 }
 
@@ -188,11 +165,11 @@ export async function runEval(backend: string, repo?: string): Promise<Response>
   });
 }
 
-export interface EvalStatus {
+export type EvalStatus = {
   running: boolean;
   progress?: number;
   current_step?: string;
-}
+};
 
 export async function getEvalStatus(): Promise<EvalStatus> {
   const response = await fetch(apiUrl('/eval/status'));
@@ -204,56 +181,16 @@ export async function getEvalStatus(): Promise<EvalStatus> {
 // Docker & Infrastructure APIs
 // ============================================================================
 
-/**
- * Container info from /api/docker/containers
- */
-export interface DockerContainer {
-  id: string;
-  short_id: string;
-  name: string;
-  image: string;
-  state: string;
-  status: string;
-  ports: string;
-  compose_project: string | null;
-  compose_service: string | null;
-  agro_managed: boolean;
-}
-
-/**
- * Normalized Docker status for UI consumption.
- * Combines data from /api/docker/status and /api/docker/containers.
- */
-export interface DockerStatus {
-  available: boolean;
-  runtime?: string;
-  containers?: DockerContainer[];
-}
-
-/**
- * Raw response from /api/docker/status
- */
-interface DockerStatusRaw {
-  running: boolean;
-  runtime: string;
-  containers_count: number;
-  error?: string;
-}
-
-/**
- * Raw response from /api/docker/containers
- */
-interface DockerContainersRaw {
+export type DockerOverview = {
+  status: DockerStatus;
   containers: DockerContainer[];
-  error?: string;
-}
+};
 
 /**
- * Get Docker status with container list.
- * Calls both /api/docker/status and /api/docker/containers to provide
- * complete Docker state information for the UI.
+ * Get Docker daemon status + container list.
+ * Calls both /api/docker/status and /api/docker/containers.
  */
-export async function getDockerStatus(): Promise<DockerStatus> {
+export async function getDockerStatus(): Promise<DockerOverview> {
   try {
     // Fetch status and containers in parallel
     const [statusRes, containersRes] = await Promise.all([
@@ -261,32 +198,19 @@ export async function getDockerStatus(): Promise<DockerStatus> {
       fetch(apiUrl('/docker/containers'))
     ]);
 
-    if (!statusRes.ok) {
-      return { available: false };
-    }
-
-    const statusData: DockerStatusRaw = await statusRes.json();
-
-    // If Docker isn't running, return early
-    if (!statusData.running) {
-      return { available: false, runtime: statusData.runtime };
-    }
+    const status: DockerStatus = statusRes.ok
+      ? await statusRes.json()
+      : { running: false, runtime: '', containers_count: 0 };
 
     // Get container list if available
-    let containers: DockerContainer[] = [];
-    if (containersRes.ok) {
-      const containersData: DockerContainersRaw = await containersRes.json();
-      containers = containersData.containers || [];
-    }
+    const containers: DockerContainer[] = containersRes.ok
+      ? ((await containersRes.json()) as DockerContainersResponse).containers ?? []
+      : [];
 
-    return {
-      available: true,
-      runtime: statusData.runtime,
-      containers
-    };
+    return { status, containers };
   } catch (err) {
     console.error('[getDockerStatus] Error:', err);
-    return { available: false };
+    return { status: { running: false, runtime: '', containers_count: 0 }, containers: [] };
   }
 }
 
@@ -298,7 +222,7 @@ export async function getDockerContainers(): Promise<DockerContainer[]> {
   try {
     const response = await fetch(apiUrl('/docker/containers'));
     if (!response.ok) return [];
-    const data: DockerContainersRaw = await response.json();
+    const data: DockerContainersResponse = await response.json();
     return data.containers || [];
   } catch (err) {
     console.error('[getDockerContainers] Error:', err);
@@ -337,10 +261,10 @@ export interface TopQueryData {
   ips: Array<[string, number]>;
 }
 
-export interface TopQueriesResponse {
+export type TopQueriesResponse = {
   total_queries: number;
   top: TopQueryData[];
-}
+};
 
 /**
  * Get top folder access metrics by extracting folder paths from query analytics.

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 
-const EVAL_HISTORY_KEY = 'agro_eval_history';
+const EVAL_HISTORY_KEY = 'tribrid_eval_history';
 
 export interface EvalHistoryEntry {
   timestamp: string;

@@ -1,4 +1,4 @@
-// AGRO - Testing Component
+// TriBridRAG - Testing Component
 // Test suite runner with results display
 // Reference: /assets/dev tools - testing .png
 

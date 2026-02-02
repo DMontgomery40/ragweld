@@ -5,7 +5,7 @@ import { useState, useEffect } from 'react';
 import { dockerApi } from '@/api/docker';
 import { configApi } from '@/api/config';
 import { useAPI } from '@/hooks';
-import type { DockerStatus, DockerContainer } from '@web/types';
+import type { DockerContainer, DockerStatus } from '@/types/generated';
 
 interface ServiceStatus {
   name: string;
@@ -43,7 +43,7 @@ export function ServicesSubtab() {
   // Core state
   const [dockerStatus, setDockerStatus] = useState<DockerStatus | null>(null);
   const [containers, setContainers] = useState<DockerContainer[]>([]);
-  const [tribridContainers, setAgroContainers] = useState<DockerContainer[]>([]);
+  const [tribridContainers, setTribridContainers] = useState<DockerContainer[]>([]);
 
   // Service status - TriBridRAG uses Postgres (pgvector) and Neo4j
   const [postgresStatus, setPostgresStatus] = useState<ServiceStatus>({
@@ -213,7 +213,7 @@ export function ServicesSubtab() {
    * what: |
    *   Asynchronous function that fetches all Docker containers from the Docker API and updates two Zustand store states: the full container list and a filtered subset of TriBrid-managed containers.
    *   Takes no parameters; relies on dockerApi.listContainers() to retrieve container data from the Docker daemon.
-   *   Returns a Promise<DockerContainer[]> containing all containers; side effects include calling setContainers() and setAgroContainers() to update shared state.
+   *   Returns a Promise<DockerContainer[]> containing all containers; side effects include calling setContainers() and setTribridContainers() to update shared state.
    *   Handles the edge case where result.containers is undefined or null by defaulting to an empty array; does not throw on API failure—errors are silently caught but not logged or re-thrown.
    *
    * why: |
@@ -223,7 +223,7 @@ export function ServicesSubtab() {
    *
    * guardrails:
    *   - DO NOT add retry logic here; implement exponential backoff at the dockerApi.listContainers() layer to keep concerns separated
-   *   - ALWAYS validate that setContainers and setAgroContainers are Zustand store setters before calling; confirm store schema includes tribrid_managed boolean field
+   *   - ALWAYS validate that setContainers and setTribridContainers are Zustand store setters before calling; confirm store schema includes tribrid_managed boolean field
    *   - NOTE: The catch block silently swallows errors without logging; add error state to Zustand store and log failures for debugging production issues
    *   - NOTE: Type annotation uses 'any' for container objects; define and import a strict DockerContainer interface to catch schema mismatches at compile time
    *   - ASK USER: Confirm whether API errors should trigger a retry, update error state in the store, or both before modifying error handling
@@ -236,15 +236,14 @@ export function ServicesSubtab() {
       setContainers(allContainers);
 
       // Filter TriBrid containers
-      // Backend currently exposes this as `agro_managed` (legacy naming).
-      const tribrid = allContainers.filter((c: any) => c.agro_managed === true);
-      setAgroContainers(tribrid);
+      const tribrid = allContainers.filter((c: any) => c.tribrid_managed === true);
+      setTribridContainers(tribrid);
 
       return allContainers;
     } catch (error) {
       console.error('[ServicesSubtab] Failed to fetch containers:', error);
       setContainers([]);
-      setAgroContainers([]);
+      setTribridContainers([]);
       return [];
     }
   };

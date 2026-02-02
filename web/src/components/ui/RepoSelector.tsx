@@ -1,5 +1,5 @@
 /**
- * AGRO - Reusable Repository Selector Component
+ * TriBridRAG - Reusable Repository Selector Component
  * 
  * A dropdown component for selecting repositories that integrates with useRepoStore.
  * Can be used in two modes:

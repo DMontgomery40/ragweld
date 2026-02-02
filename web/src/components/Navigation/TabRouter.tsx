@@ -1,4 +1,4 @@
-// AGRO - TabRouter Component
+// TriBridRAG - TabRouter Component
 // Routes configuration for all tabs
 
 import { Routes, Route, Navigate } from 'react-router-dom';

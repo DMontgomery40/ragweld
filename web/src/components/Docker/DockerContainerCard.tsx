@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { DockerContainer as DockerContainerType } from '@web/types';
+import type { DockerContainer as DockerContainerType } from '@/types/generated';
 import { useDockerStore } from '@/stores';
 
 interface DockerContainerCardProps {
@@ -130,12 +130,7 @@ export function DockerContainerCard({ container }: DockerContainerCardProps) {
 
       {container.ports && (
         <div style={{ fontSize: '10px', color: 'var(--link)', marginBottom: '8px' }}>
-          {typeof container.ports === 'string'
-            ? container.ports
-            : container.ports.map((p: { PrivatePort: number; PublicPort?: number; Type: string }) =>
-                `${p.PublicPort ? `${p.PublicPort}:` : ''}${p.PrivatePort}/${p.Type}`
-              ).join(', ')
-          }
+          {container.ports}
         </div>
       )}
 

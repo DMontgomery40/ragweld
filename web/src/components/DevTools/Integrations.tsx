@@ -1,4 +1,4 @@
-// AGRO - Integrations Component
+// TriBridRAG - Integrations Component
 // Configure external integrations: LangSmith, Grafana, VS Code, Webhooks
 // Reference: /assets/dev tools - integrations subtab.png
 

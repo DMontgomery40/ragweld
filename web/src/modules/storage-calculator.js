@@ -1,4 +1,4 @@
-// AGRO Storage Calculator v1.2 - JavaScript Logic
+// TriBridRAG Storage Calculator v1.2 - JavaScript Logic
 // This file contains all the calculation logic for the storage calculator
 
 // Improved formatBytes function with consistent formatting

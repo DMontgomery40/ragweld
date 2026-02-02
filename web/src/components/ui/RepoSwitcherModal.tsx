@@ -1,5 +1,5 @@
 /**
- * AGRO - Repository Switcher Modal
+ * TriBridRAG - Repository Switcher Modal
  * 
  * A modal dialog for switching the active repository from the dashboard.
  * Shows all available repos with visual indication of the active one.
@@ -16,11 +16,12 @@ type RepoSwitcherModalProps = {
 };
 
 export function RepoSwitcherModal({ isOpen, onClose }: RepoSwitcherModalProps) {
-  const { repos, activeRepo, switching, loading, loadRepos, setActiveRepo, addRepo, error, initialized } = useRepoStore();
+  const { repos, activeRepo, switching, loading, loadRepos, setActiveRepo, addRepo, deleteCorpus, error, initialized } = useRepoStore();
   const [newName, setNewName] = useState('');
   const [newPath, setNewPath] = useState('');
   const [newDescription, setNewDescription] = useState('');
   const [createError, setCreateError] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   // Load repos when modal opens (if not yet initialized)
   useEffect(() => {
@@ -69,6 +70,20 @@ export function RepoSwitcherModal({ isOpen, onClose }: RepoSwitcherModalProps) {
       onClose();
     } catch (e) {
       setCreateError(e instanceof Error ? e.message : 'Failed to create corpus');
+    }
+  };
+
+  const handleDelete = async (repoId: string, repoName: string) => {
+    setDeleteError(null);
+    if (!repoId.trim()) return;
+    const ok = confirm(
+      `Delete corpus "${repoName}" (${repoId})?\n\nThis will remove the corpus from the registry. Index data and graph data may also be removed depending on backend configuration.`
+    );
+    if (!ok) return;
+    try {
+      await deleteCorpus(repoId);
+    } catch (e) {
+      setDeleteError(e instanceof Error ? e.message : 'Failed to delete corpus');
     }
   };
   
@@ -141,6 +156,20 @@ export function RepoSwitcherModal({ isOpen, onClose }: RepoSwitcherModalProps) {
             {error}
           </div>
         )}
+
+        {deleteError && (
+          <div style={{
+            background: 'var(--error-bg, rgba(255,0,0,0.1))',
+            border: '1px solid var(--error, #ff4444)',
+            color: 'var(--error, #ff4444)',
+            padding: '8px 12px',
+            borderRadius: '4px',
+            fontSize: '12px',
+            marginBottom: '12px'
+          }}>
+            {deleteError}
+          </div>
+        )}
         
         {loading && repos.length === 0 ? (
           <div style={{ 
@@ -164,66 +193,97 @@ export function RepoSwitcherModal({ isOpen, onClose }: RepoSwitcherModalProps) {
               const isActive = repo.corpus_id === activeRepo || repo.slug === activeRepo || repo.name === activeRepo;
               
               return (
-                <button
+                <div
                   key={repo.corpus_id}
-                  onClick={() => handleSelect(repo.corpus_id)}
-                  disabled={switching}
-                  style={{
-                    background: isActive ? 'var(--accent)' : 'var(--bg-elev2)',
-                    color: isActive ? 'var(--accent-contrast)' : 'var(--fg)',
-                    border: `1px solid ${isActive ? 'var(--accent)' : 'var(--line)'}`,
-                    padding: '14px 16px',
-                    borderRadius: '8px',
-                    cursor: switching ? 'not-allowed' : 'pointer',
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    textAlign: 'left',
-                    fontSize: '14px',
-                    opacity: switching ? 0.6 : 1,
-                    transition: 'all 0.15s ease'
-                  }}
+                  style={{ display: 'flex', gap: '8px', alignItems: 'stretch' }}
                 >
-                  <div>
-                    <div style={{ 
-                      fontWeight: 600, 
-                      fontFamily: "'SF Mono', 'Monaco', 'Consolas', monospace",
-                      marginBottom: repo.path || repo.branch ? '4px' : 0
-                    }}>
-                      {repo.name}
+                  <button
+                    onClick={() => handleSelect(repo.corpus_id)}
+                    disabled={switching}
+                    data-testid={`corpus-select-${repo.corpus_id}`}
+                    style={{
+                      flex: 1,
+                      background: isActive ? 'var(--accent)' : 'var(--bg-elev2)',
+                      color: isActive ? 'var(--accent-contrast)' : 'var(--fg)',
+                      border: `1px solid ${isActive ? 'var(--accent)' : 'var(--line)'}`,
+                      padding: '14px 16px',
+                      borderRadius: '8px',
+                      cursor: switching ? 'not-allowed' : 'pointer',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      textAlign: 'left',
+                      fontSize: '14px',
+                      opacity: switching ? 0.6 : 1,
+                      transition: 'all 0.15s ease'
+                    }}
+                  >
+                    <div>
+                      <div style={{ 
+                        fontWeight: 600, 
+                        fontFamily: "'SF Mono', 'Monaco', 'Consolas', monospace",
+                        marginBottom: repo.path || repo.branch ? '4px' : 0
+                      }}>
+                        {repo.name}
+                      </div>
+                      {repo.path && (
+                        <div style={{ 
+                          fontSize: '11px', 
+                          color: isActive ? 'var(--accent-contrast)' : 'var(--fg-muted)',
+                          opacity: 0.8,
+                          fontFamily: "'SF Mono', 'Monaco', 'Consolas', monospace"
+                        }}>
+                          {repo.path}
+                        </div>
+                      )}
+                      {repo.branch && (
+                        <div style={{ 
+                          fontSize: '10px', 
+                          color: isActive ? 'var(--accent-contrast)' : 'var(--link)',
+                          marginTop: '2px'
+                        }}>
+                          Branch: {repo.branch}
+                        </div>
+                      )}
                     </div>
-                    {repo.path && (
-                      <div style={{ 
-                        fontSize: '11px', 
-                        color: isActive ? 'var(--accent-contrast)' : 'var(--fg-muted)',
-                        opacity: 0.8,
-                        fontFamily: "'SF Mono', 'Monaco', 'Consolas', monospace"
+                    {isActive && (
+                      <span style={{ 
+                        fontSize: '12px', 
+                        fontWeight: 600,
+                        background: 'rgba(255,255,255,0.2)',
+                        padding: '4px 8px',
+                        borderRadius: '4px'
                       }}>
-                        {repo.path}
-                      </div>
+                        ✓ ACTIVE
+                      </span>
                     )}
-                    {repo.branch && (
-                      <div style={{ 
-                        fontSize: '10px', 
-                        color: isActive ? 'var(--accent-contrast)' : 'var(--link)',
-                        marginTop: '2px'
-                      }}>
-                        Branch: {repo.branch}
-                      </div>
-                    )}
-                  </div>
-                  {isActive && (
-                    <span style={{ 
-                      fontSize: '12px', 
-                      fontWeight: 600,
-                      background: 'rgba(255,255,255,0.2)',
-                      padding: '4px 8px',
-                      borderRadius: '4px'
-                    }}>
-                      ✓ ACTIVE
-                    </span>
-                  )}
-                </button>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => void handleDelete(repo.corpus_id, repo.name)}
+                    disabled={switching}
+                    data-testid={`corpus-delete-${repo.corpus_id}`}
+                    aria-label={`Delete corpus ${repo.name}`}
+                    title="Delete corpus"
+                    style={{
+                      width: '44px',
+                      minWidth: '44px',
+                      background: 'transparent',
+                      color: 'var(--err)',
+                      border: '1px solid var(--err)',
+                      borderRadius: '8px',
+                      cursor: switching ? 'not-allowed' : 'pointer',
+                      opacity: switching ? 0.6 : 1,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: '14px'
+                    }}
+                  >
+                    🗑
+                  </button>
+                </div>
               );
             })}
           </div>

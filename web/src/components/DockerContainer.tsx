@@ -1,4 +1,4 @@
-import type { DockerContainer as DockerContainerType } from '@web/types';
+import type { DockerContainer as DockerContainerType } from '@/types/generated';
 
 interface DockerContainerProps {
   container: DockerContainerType;
@@ -51,12 +51,7 @@ export function DockerContainer({ container, onStart, onStop, onRestart }: Docke
           <div className="result-item">
             <span className="result-label">Ports</span>
             <span className="result-value" style={{ fontSize: '11px', color: 'var(--link)' }}>
-              {typeof container.ports === 'string'
-                ? container.ports
-                : container.ports.map((p: { PrivatePort: number; PublicPort?: number; Type: string }) =>
-                    p.PublicPort ? `${p.PublicPort}:${p.PrivatePort}` : String(p.PrivatePort)
-                  ).join(', ')
-              }
+              {container.ports}
             </span>
           </div>
         )}

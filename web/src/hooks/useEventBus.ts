@@ -27,11 +27,7 @@ export type EventName = keyof EventPayloads;
 // Legacy event name mapping for gradual migration
 export const LEGACY_EVENT_MAP: Record<string, EventName> = {
   'react-ready': 'react:ready',
-  'agro:chat:mount': 'chat:mount',
-  'agro:reranker:mount': 'reranker:mount',
   'tab-switched': 'tab:switched',
-  'agro-repo-loaded': 'repo:loaded',
-  'agro-repo-changed': 'repo:changed',
   'tribrid-corpus-loaded': 'repo:loaded',
   'tribrid-corpus-changed': 'repo:changed',
   'repo-updated': 'repo:changed',

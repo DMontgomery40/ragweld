@@ -1,4 +1,4 @@
-// AGRO - Grafana Subtabs Component
+// TriBridRAG - Grafana Subtabs Component
 // Subtab navigation for Grafana tab (Dashboard and Config)
 
 import { useEffect } from 'react';

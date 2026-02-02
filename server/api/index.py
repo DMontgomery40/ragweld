@@ -134,13 +134,13 @@ async def _resolve_dashboard_repo_id(scope: CorpusScope) -> str:
     Priority:
     1) explicit scope (corpus_id/repo_id/repo)
     2) last started repo (legacy UX)
-    3) first corpus in Postgres (best-effort)
+    3) only-corpus in Postgres (best-effort for single-corpus setups)
     """
     repo_id = (scope.resolved_repo_id or _LAST_STARTED_REPO or "").strip()
     if repo_id:
         return repo_id
 
-    # Best-effort fallback: first corpus in the registry.
+    # Best-effort fallback: only allow implicit selection when there is exactly one corpus.
     cfg = await load_scoped_config(repo_id=None)
     pg = PostgresClient(cfg.indexing.postgres_url)
     await pg.connect()
@@ -150,6 +150,13 @@ async def _resolve_dashboard_repo_id(scope: CorpusScope) -> str:
         await pg.disconnect()
 
     if corpora:
+        # If multiple corpora exist, never guess — callers must pass corpus_id explicitly.
+        if len(corpora) > 1:
+            raise HTTPException(
+                status_code=400,
+                detail="Missing corpus_id (or legacy repo/repo_id) query parameter. "
+                "Multiple corpora exist; select a corpus explicitly.",
+            )
         rid = str(corpora[0].get("repo_id") or "").strip()
         if rid:
             return rid
@@ -382,7 +389,7 @@ async def _run_index(
                 database=db_name,
             )
             await neo4j.connect()
-            graph_builder = GraphBuilder(neo4j)
+            graph_builder = GraphBuilder(neo4j, cfg.graph_indexing)
 
             # Lexical chunk vector index (Neo4j native vector indexes)
             if cfg.graph_indexing.build_lexical_graph and cfg.graph_indexing.store_chunk_embeddings and not skip_dense:
@@ -676,7 +683,7 @@ async def _run_index(
                                         source_id=name_to_id[src],
                                         target_id=name_to_id[tgt],
                                         relation_type=rel_type,  # type: ignore[arg-type]
-                                        weight=0.7,
+                                        weight=float(cfg.graph_indexing.semantic_kg_relation_weight_llm),
                                         properties={"source": "semantic", "mode": "llm"},
                                     )
                                 )
@@ -690,7 +697,7 @@ async def _run_index(
                                         source_id=root,
                                         target_id=tgt,
                                         relation_type="related_to",
-                                        weight=0.5,
+                                            weight=float(cfg.graph_indexing.semantic_kg_relation_weight_heuristic),
                                         properties={"source": "semantic", "mode": "heuristic"},
                                     )
                                 )

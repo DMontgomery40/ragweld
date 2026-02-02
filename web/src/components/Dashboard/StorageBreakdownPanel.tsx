@@ -1,4 +1,4 @@
-// AGRO - Storage Requirements Breakdown Panel
+// TriBridRAG - Storage Requirements Breakdown Panel
 // Shows detailed storage usage from backend data
 
 import { useEffect, useState } from 'react';

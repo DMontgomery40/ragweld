@@ -1,4 +1,4 @@
-// AGRO - Dashboard Quick Actions Component
+// TriBridRAG - Dashboard Quick Actions Component
 // 6 action buttons for common operations
 
 import { useState, useEffect } from 'react';
@@ -14,7 +14,7 @@ const FALLBACK_EVAL_OPTIONS: DashAPI.RerankerOption[] = [
     id: 'baseline-eval',
     backend: 'default',
     label: 'Baseline Eval (current config)',
-    description: 'Run evaluation using the active agro_config settings.'
+    description: 'Run evaluation using the active TriBridConfig settings.'
   },
   {
     id: 'multi-query-eval',
@@ -79,15 +79,10 @@ export function QuickActions() {
     }
 
     try {
-      // Get current repo from URL params or default to agro
-      const params = new URLSearchParams(window.location.search);
-      const corpusId =
-        params.get('corpus') ||
-        params.get('repo') ||
-        activeRepo ||
-        localStorage.getItem('tribrid_active_corpus') ||
-        localStorage.getItem('tribrid_active_repo') ||
-        'tribrid';
+      const corpusId = String(activeRepo || '').trim();
+      if (!corpusId) {
+        throw new Error('Select a corpus first');
+      }
 
       const response = await fetch('/api/keywords/generate', {
         method: 'POST',
@@ -267,14 +262,11 @@ export function QuickActions() {
     setStatusMessage(`Running eval with ${option.label}`);
     setProgress(0);
 
-    const params = new URLSearchParams(window.location.search);
-    const corpusId =
-      params.get('corpus') ||
-      params.get('repo') ||
-      activeRepo ||
-      localStorage.getItem('tribrid_active_corpus') ||
-      localStorage.getItem('tribrid_active_repo') ||
-      'tribrid';
+    const corpusId = String(activeRepo || '').trim();
+    if (!corpusId) {
+      setStatusMessage('✗ Select a corpus first');
+      return;
+    }
 
     const terminal = (window as any)._dashboardTerminal;
     if (terminal) {

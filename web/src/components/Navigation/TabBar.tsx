@@ -1,4 +1,4 @@
-// AGRO - TabBar Component  
+// TriBridRAG - TabBar Component
 // EXACT copy of /gui tab-bar structure
 
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';

@@ -85,7 +85,7 @@ export const useUIStore = create<UIStore>()(
       },
     }),
     {
-      name: 'agro-ui-storage',
+      name: 'tribrid-ui-storage',
     }
   )
 );

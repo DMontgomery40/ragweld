@@ -1,4 +1,4 @@
-// AGRO GUI app.js (main coordinator - modularized)
+// TriBridRAG GUI app.js (main coordinator - modularized)
 ;(function () {
     'use strict';
 
@@ -105,7 +105,7 @@
             try{
                 const env = (state.config?.env)||{};
                 if ((env.TRACING_MODE||'').toLowerCase()==='langsmith' && ['1','true','on'].includes(String(env.TRACE_AUTO_LS||'0').toLowerCase())){
-                    const prj = (env.LANGCHAIN_PROJECT||'agro');
+                    const prj = (env.LANGCHAIN_PROJECT||'tribrid');
                     const lsQs = new URLSearchParams({ project: prj, share: 'true' });
                     const lsRes = await fetch(api(`/api/langsmith/latest?${lsQs.toString()}`));
                     const lsData = await lsRes.json();
@@ -860,7 +860,7 @@
      *   Centralizes dashboard detection and button state logic to avoid scattered conditionals.
      *
      * guardrails:
-     *   - DO NOT assume window.__AGRO_REACT_DASHBOARD__ persists across navigation; re-check on state changes
+     *   - DO NOT assume window.__TRIBRID_REACT_DASHBOARD__ persists across navigation; re-check on state changes
      *   - NOTE: getReactDashboardRoot() queries DOM each call; cache if called frequently
      *   - DO NOT apply button state without validating btn exists; setButtonState guards but caller must verify
      * ---/agentspec
@@ -875,11 +875,11 @@
      *   Centralizes dashboard detection and button state logic to avoid scattered conditional rendering.
      *
      * guardrails:
-     *   - DO NOT rely on window.__AGRO_REACT_DASHBOARD__ alone; verify DOM root exists
+     *   - DO NOT rely on window.__TRIBRID_REACT_DASHBOARD__ alone; verify DOM root exists
      *   - NOTE: Button state removal clears all states before applying new one; idempotent
      * ---/agentspec
      */
-    const isReactDashboardActive = () => Boolean(window.__AGRO_REACT_DASHBOARD__) || Boolean(getReactDashboardRoot());
+    const isReactDashboardActive = () => Boolean(window.__TRIBRID_REACT_DASHBOARD__) || Boolean(getReactDashboardRoot());
     /**
      * ---agentspec
      * what: |
@@ -1056,7 +1056,7 @@
             const response = await fetch(api('/api/config'));
             const data = await response.json();
             const repos = data.repos || [];
-            const currentRepo = (data.env && data.env.REPO) || data.default_repo || 'agro';
+            const currentRepo = (data.env && data.env.REPO) || data.default_repo || '';
 
             if (repos.length === 0) {
                 showStatus('No repositories configured', 'error');
@@ -1108,18 +1108,9 @@
                             showStatus(`Switching to ${repo.slug}...`, 'loading');
 
                             try {
-                                const updateResponse = await fetch(api('/api/config'), {
-                                    method: 'POST',
-                                    headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify({ env: { REPO: repo.slug } })
-                                });
-
-                                if (updateResponse.ok) {
-                                    showStatus(`✓ Switched to ${repo.slug}`, 'success');
-                                    setTimeout(() => refreshDashboard(), 500);
-                                } else {
-                                    showStatus(`✗ Failed to switch to ${repo.slug}`, 'error');
-                                }
+                                // Legacy repo switching via POST /api/config is removed.
+                                // Corpora are managed via /api/corpora + the React Repo store.
+                                showStatus(`✗ Legacy repo switching is disabled. Use the React corpus selector.`, 'error');
                             } catch (err) {
                                 showStatus(`✗ Error switching repo: ${err.message}`, 'error');
                             }
@@ -1142,7 +1133,7 @@
             const response = await fetch(api('/api/config'));
             const data = await response.json();
             const env = (data && data.env) || (state.config && state.config.env) || {};
-            const repo = env.REPO || data.default_repo || 'agro';
+            const repo = env.REPO || data.default_repo || '';
             const modeSel = document.getElementById('kw-gen-mode');
             const mode = modeSel ? (modeSel.value || 'llm') : 'llm';
             const maxFilesEl = document.querySelector('[name="KEYWORDS_MAX_FILES"]');
@@ -1270,7 +1261,11 @@
      */
     function bindActions() {
         const btnHealth = $('#btn-health'); if (btnHealth) btnHealth.addEventListener('click', checkHealth);
-        const saveBtn = $('#save-btn'); if (saveBtn) saveBtn.addEventListener('click', saveConfig);
+        // React owns the Apply button. Never bind legacy save handler inside the React root.
+        const saveBtn = $('#save-btn');
+        if (saveBtn && !saveBtn.closest('#root')) {
+            saveBtn.addEventListener('click', saveConfig);
+        }
         const btnEstimate = $('#btn-estimate'); if (btnEstimate) btnEstimate.addEventListener('click', estimateCost);
         const btnScanHw = $('#btn-scan-hw'); if (btnScanHw) btnScanHw.addEventListener('click', scanHardware);
         const genBtn = document.getElementById('btn-generate-profile');
@@ -1286,7 +1281,7 @@
         const rtLS = document.getElementById('btn-trace-open-ls');
         if (rtLS) rtLS.addEventListener('click', async ()=>{
             try{
-                const prj = (state.config?.env?.LANGCHAIN_PROJECT||'agro');
+                const prj = (state.config?.env?.LANGCHAIN_PROJECT||'tribrid');
                 const qs = new URLSearchParams({ project: prj, share: 'true' });
                 const r = await fetch(api(`/api/langsmith/latest?${qs.toString()}`));
                 const d = await r.json();
@@ -1696,7 +1691,7 @@
             MCP_HTTP_PATH: 'Path prefix for MCP HTTP server.',
 
             // Misc
-            AGRO_EDITION: 'Edition gate (oss, pro, enterprise). Pro/Enterprise unlock Autotune/Compat.',
+            TRIBRID_EDITION: 'Edition gate (oss, pro, enterprise). Pro/Enterprise unlock Autotune/Compat.',
             THREAD_ID: 'LangGraph thread id (http or cli-chat).',
             PORT: 'Uvicorn port for serve entrypoints.',
             PROJECT_PATH: 'Optional reference path used by some helpers.',

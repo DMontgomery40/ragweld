@@ -1,5 +1,5 @@
 // Imported from react/rag-tab-and-modules (db2229d)
-// AGRO - RAGSubtabs Component
+// TriBridRAG - RAGSubtabs Component
 // Subtab navigation for RAG mega-tab
 
 import { useEffect } from 'react';

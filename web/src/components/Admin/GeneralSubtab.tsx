@@ -11,11 +11,11 @@ export function GeneralSubtab() {
   const [themeMode, setThemeMode] = useConfigField<string>('ui.theme_mode', 'dark');
 
   // Legacy server/runtime fields (not part of TriBridConfig; retained as local UI only during migration)
-  const [agroEdition, setAgroEdition] = useState('');
+  const [edition, setEdition] = useState('');
   const [threadId, setThreadId] = useState('');
   const [host, setHost] = useState('127.0.0.1');
   const [port, setPort] = useState(8012);
-  const [agroPath, setAgroPath] = useState('');
+  const [projectRootPath, setProjectRootPath] = useState('');
   const [netlifyDomains, setNetlifyDomains] = useState('');
 
   // UI settings (TriBridConfig.ui)
@@ -46,7 +46,7 @@ export function GeneralSubtab() {
 
   // MCP RAG Search
   const [mcpRagQuestion, setMcpRagQuestion] = useState('');
-  const [mcpRagRepo, setMcpRagRepo] = useState('agro');
+  const [mcpRagRepo, setMcpRagRepo] = useState('auto');
   const [mcpRagTopK, setMcpRagTopK] = useState(10);
   const [mcpRagForceLocal, setMcpRagForceLocal] = useState(false);
   const [mcpRagResults, setMcpRagResults] = useState('');
@@ -176,10 +176,10 @@ export function GeneralSubtab() {
         <div className="input-row">
           <div className="input-group">
             <label>
-              Agro Edition
-              <TooltipIcon name="AGRO_EDITION" />
+              Edition
+              <TooltipIcon name="TRIBRID_EDITION" />
             </label>
-            <input type="text" value={agroEdition} onChange={(e) => setAgroEdition(e.target.value)} placeholder="oss | pro | enterprise" />
+            <input type="text" value={edition} onChange={(e) => setEdition(e.target.value)} placeholder="oss | pro | enterprise" />
           </div>
           <div className="input-group">
             <label>Thread ID</label>
@@ -205,8 +205,8 @@ export function GeneralSubtab() {
             </select>
           </div>
           <div className="input-group">
-            <label>agro Path</label>
-            <input type="text" value={agroPath} onChange={(e) => setAgroPath(e.target.value)} />
+            <label>Project Root Path</label>
+            <input type="text" value={projectRootPath} onChange={(e) => setProjectRootPath(e.target.value)} />
           </div>
         </div>
         <div className="input-row">
@@ -454,7 +454,7 @@ export function GeneralSubtab() {
         <div className="input-row">
           <div className="input-group">
             <label>Repository</label>
-            <input type="text" value={mcpRagRepo} onChange={(e) => setMcpRagRepo(e.target.value)} placeholder="agro" />
+            <input type="text" value={mcpRagRepo} onChange={(e) => setMcpRagRepo(e.target.value)} placeholder="auto" />
           </div>
           <div className="input-group">
             <label>Top K</label>

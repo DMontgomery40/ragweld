@@ -1,4 +1,4 @@
-// AGRO - useTabs Hook
+// TriBridRAG - useTabs Hook
 // Manages tab and subtab state for components
 
 import { useState, useCallback } from 'react';

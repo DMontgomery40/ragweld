@@ -16,6 +16,10 @@ from server.db.postgres import PostgresClient
 from server.models.tribrid_config_model import TriBridConfig
 
 
+class CorpusNotFoundError(RuntimeError):
+    """Raised when a corpus-scoped config is requested for a missing corpus."""
+
+
 class ConfigStore:
     """Load/save TriBridConfig for global and per-corpus scopes."""
 
@@ -37,10 +41,10 @@ class ConfigStore:
         base = load_global_config()
         await self._postgres.connect()
 
-        # Ensure corpus row exists (name defaults to repo_id)
+        # Ensure corpus row exists (do NOT auto-create on read)
         corpus = await self._postgres.get_corpus(repo_id)
         if corpus is None:
-            await self._postgres.upsert_corpus(repo_id, name=repo_id, root_path=base.indexing.repo_path or ".")
+            raise CorpusNotFoundError(f"Corpus not found: {repo_id}")
 
         raw = await self._postgres.get_corpus_config_json(repo_id)
         if raw is None:
@@ -61,6 +65,9 @@ class ConfigStore:
             return config
 
         await self._postgres.connect()
+        corpus = await self._postgres.get_corpus(repo_id)
+        if corpus is None:
+            raise CorpusNotFoundError(f"Corpus not found: {repo_id}")
         await self._postgres.upsert_corpus_config_json(repo_id, config.model_dump())
         self._cache[repo_id] = config
         return config

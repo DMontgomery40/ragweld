@@ -1,4 +1,4 @@
-// AGRO GUI - MCP Server Management Module
+// TriBridRAG GUI - MCP Server Management Module
 // Handles MCP HTTP server management and stdio testing
 
 (function () {

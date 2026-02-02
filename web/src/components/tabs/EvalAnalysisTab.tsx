@@ -1,4 +1,4 @@
-// AGRO - Eval Analysis Tab
+// TriBridRAG - Eval Analysis Tab
 // Top-level tab for evaluation drill-down and AI analysis
 // This is the keystone feature - comparing eval runs with LLM insights
 
@@ -9,16 +9,10 @@ import { SystemPromptsSubtab } from '@/components/Evaluation/SystemPromptsSubtab
 import { LiveTerminal, LiveTerminalHandle } from '@/components/LiveTerminal/LiveTerminal';
 import { TerminalService } from '@/services/TerminalService';
 import { useConfigStore } from '@/stores/useConfigStore';
+import { useActiveRepo, useRepoStore, useRepoInitialized, useRepoLoading } from '@/stores';
+import type { EvalRunMeta } from '@/types/generated';
 
 type EvalSubtab = 'analysis' | 'prompts';
-
-interface EvalRunMeta {
-  run_id: string;
-  timestamp: string;
-  top1_accuracy: number;
-  topk_accuracy: number;
-  total: number;
-}
 
 export const EvalAnalysisTab: React.FC = () => {
   const [searchParams] = useSearchParams();
@@ -36,7 +30,19 @@ export const EvalAnalysisTab: React.FC = () => {
   const terminalRef = useRef<LiveTerminalHandle>(null);
 
   // Eval settings from Pydantic config (Zustandic - syncs with backend)
-  const { config, loadConfig } = useConfigStore();
+  const config = useConfigStore((s) => s.config);
+  const loadConfig = useConfigStore((s) => s.loadConfig);
+  const activeRepo = useActiveRepo();
+  const reposInitialized = useRepoInitialized();
+  const reposLoading = useRepoLoading();
+  const { loadRepos } = useRepoStore();
+
+  // Reset run selection when corpus changes
+  useEffect(() => {
+    setRuns([]);
+    setSelectedRunId(null);
+    setCompareRunId(null);
+  }, [activeRepo]);
 
   // Derive eval settings from config store - these mirror retrieval settings
   const evalSettings = {
@@ -50,6 +56,13 @@ export const EvalAnalysisTab: React.FC = () => {
   useEffect(() => {
     if (!config) loadConfig();
   }, [config, loadConfig]);
+
+  // Ensure corpora are loaded so activeRepo is valid
+  useEffect(() => {
+    if (!reposInitialized && !reposLoading) {
+      loadRepos();
+    }
+  }, [loadRepos, reposInitialized, reposLoading]);
 
   // Handle URL params for cross-tab navigation (e.g., ?subtab=prompts)
   useEffect(() => {
@@ -95,13 +108,13 @@ export const EvalAnalysisTab: React.FC = () => {
     resetTerminal('RAG Evaluation Logs');
 
     const sampleLimit = evalSettings.sampleSize ? parseInt(evalSettings.sampleSize, 10) : undefined;
-    const params = new URLSearchParams(window.location.search);
-    const corpusId =
-      params.get('corpus') ||
-      params.get('repo') ||
-      localStorage.getItem('tribrid_active_corpus') ||
-      localStorage.getItem('tribrid_active_repo') ||
-      'tribrid';
+    const corpusId = String(activeRepo || '').trim();
+    if (!corpusId) {
+      setEvalRunning(false);
+      setEvalProgress({ current: 0, total: 100, status: 'Select a corpus first' });
+      appendTerminalLine('\x1b[31mMissing corpus selection. Choose a corpus and try again.\x1b[0m');
+      return;
+    }
     appendTerminalLine('🧪 Starting full RAG evaluation...');
     appendTerminalLine(
       `Settings: corpus_id=${corpusId}, use_multi=${evalSettings.useMulti ? 'true' : 'false'}, final_k=${evalSettings.finalK}, sample_limit=${sampleLimit || 'all'}`
@@ -169,7 +182,7 @@ export const EvalAnalysisTab: React.FC = () => {
       setEvalProgress((prev) => ({ ...prev, status: 'Failed to start' }));
       appendTerminalLine(`\x1b[31mFailed to start evaluation: ${err}\x1b[0m`);
     }
-  }, [evalRunning, evalSettings, resetTerminal, appendTerminalLine, updateTerminalProgress]);
+  }, [activeRepo, evalRunning, evalSettings, resetTerminal, appendTerminalLine, updateTerminalProgress]);
 
   // Check URL params for auto-run trigger (from RAG > Evaluate subtab)
   useEffect(() => {
@@ -190,7 +203,13 @@ export const EvalAnalysisTab: React.FC = () => {
     const fetchRuns = async () => {
       try {
         setLoading(true);
-        const response = await fetch('/api/eval/runs');
+        const corpusId = String(activeRepo || '').trim();
+        if (!corpusId) {
+          setRuns([]);
+          setError(null);
+          return;
+        }
+        const response = await fetch(`/api/eval/runs?corpus_id=${encodeURIComponent(corpusId)}`, { cache: 'no-store' });
         if (!response.ok) throw new Error('Failed to fetch eval runs');
         const data = await response.json();
 
@@ -217,7 +236,7 @@ export const EvalAnalysisTab: React.FC = () => {
     };
 
     fetchRuns();
-  }, []);
+  }, [activeRepo]);
 
   // Format run label for dropdown
   const formatRunLabel = (run: EvalRunMeta) => {

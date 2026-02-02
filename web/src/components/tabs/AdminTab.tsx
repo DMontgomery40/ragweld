@@ -1,4 +1,4 @@
-// AGRO - Admin Tab Component (React)
+// TriBridRAG - Admin Tab Component (React)
 // Main Admin configuration tab with subtab navigation
 // Structure matches /gui/index.html exactly with all subtabs rendered and visibility controlled by className
 

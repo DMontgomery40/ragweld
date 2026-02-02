@@ -55,7 +55,7 @@ export const HistoryViewer: React.FC<HistoryViewerProps> = ({ className = '' }) 
       };
     } else if (entry.reranker_mode === 'learning') {
       return {
-        display: 'BM25 + AGRO Learning CE',
+        display: 'BM25 + Learning CE',
         color: 'var(--success)',
         bg: 'rgba(var(--success-rgb), 0.1)'
       };

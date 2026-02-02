@@ -1,4 +1,4 @@
-// AGRO - Paths & Stores Subtab Component
+// TriBridRAG - Paths & Stores Subtab Component
 // Directory paths and storage configuration
 
 import { useState } from 'react';
@@ -344,7 +344,7 @@ export function PathsSubtab() {
             type="text"
             value={repoName}
             onChange={(e) => setRepoName(e.target.value)}
-            placeholder="agro"
+            placeholder="corpus_id"
             style={{
               width: '100%',
               padding: '8px',

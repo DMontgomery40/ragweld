@@ -170,7 +170,7 @@
     const input = $(`#onboard-q${qIndex}`); const answerDiv = $(`#onboard-ans-${qIndex}`); const traceLink = $(`#onboard-trace-${qIndex}`); const btn = $(`.ob-ask-btn[data-q="${qIndex}"]`);
     if (!input || !answerDiv) return; const question = input.value.trim(); if (!question) return; if (btn) btn.disabled = true; answerDiv.textContent = 'Thinking...'; answerDiv.classList.add('visible');
     try{
-      const repo = (state.config && state.config.REPO) ? state.config.REPO : 'agro';
+      const repo = (state.config && state.config.REPO) ? state.config.REPO : 'auto';
       const res = await fetch(api('/api/chat'), { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ question, repo }) });
       if (!res.ok) throw new Error('Failed to get answer'); const data = await res.json(); answerDiv.textContent = data.answer || 'No answer received'; onboardingState.questions[qIndex - 1].answer = data.answer; if (traceLink) traceLink.style.display = 'inline-block';
     }catch(err){ console.error('Question error:', err); answerDiv.textContent = 'Error: ' + err.message; }
@@ -224,7 +224,7 @@
     const input=$('#onboard-help-input'), results=$('#onboard-help-results'), btn=$('#onboard-help-send'); if(!input||!results) return; const question=input.value.trim(); if(!question) return; if(btn){btn.disabled=true;btn.textContent='Asking...';btn.style.opacity='0.6';}
     results.innerHTML = '<div style="display:flex;align-items:center;gap:8px;color:var(--fg-muted);"><div style="width:16px;height:16px;border:2px solid var(--accent);border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite;"></div> Thinking...</div>';
     results.classList.add('visible');
-    try{ const repo = (state.config && state.config.REPO) ? state.config.REPO : 'agro'; const res = await fetch(api('/api/chat'), { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ question, repo }) }); if(!res.ok) throw new Error('Failed to get answer'); const data=await res.json(); const answer=(data.answer||'No answer received').replace(/\n/g,'<br>'); results.innerHTML=answer; }
+    try{ const repo = (state.config && state.config.REPO) ? state.config.REPO : 'auto'; const res = await fetch(api('/api/chat'), { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ question, repo }) }); if(!res.ok) throw new Error('Failed to get answer'); const data=await res.json(); const answer=(data.answer||'No answer received').replace(/\n/g,'<br>'); results.innerHTML=answer; }
     catch(err){ console.error('Help question error:', err); results.innerHTML = '<span style="color:var(--err);">Error: '+err.message+'</span>'; }
     finally{ if(btn){btn.disabled=false;btn.textContent='Ask';btn.style.opacity='1';} }
   }

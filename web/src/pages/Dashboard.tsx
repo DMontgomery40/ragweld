@@ -1,4 +1,4 @@
-// AGRO - Dashboard Page
+// TriBridRAG - Dashboard Page
 // Main dashboard with System Status, Monitoring, Storage, Help, and Glossary subtabs
 
 import { useState, useEffect } from 'react';
@@ -25,10 +25,10 @@ export function Dashboard() {
 
   // Flag for legacy modules so they can avoid mutating React-rendered dashboard DOM
   useEffect(() => {
-    (window as any).__AGRO_REACT_DASHBOARD__ = true;
+    (window as any).__TRIBRID_REACT_DASHBOARD__ = true;
     window.dispatchEvent(new CustomEvent('react-dashboard-ready'));
     return () => {
-      delete (window as any).__AGRO_REACT_DASHBOARD__;
+      delete (window as any).__TRIBRID_REACT_DASHBOARD__;
       window.dispatchEvent(new CustomEvent('react-dashboard-unmount'));
     };
   }, []);

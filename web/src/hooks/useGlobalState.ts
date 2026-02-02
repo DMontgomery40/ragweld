@@ -10,8 +10,9 @@ import { useRepoStore } from '@/stores/useRepoStore';
  * This hook exists only for backwards compatibility during migration
  */
 export function useGlobalState() {
-  const { config } = useConfigStore();
-  const { repos, activeRepo } = useRepoStore();
+  const config = useConfigStore((s) => s.config);
+  const repos = useRepoStore((s) => s.repos);
+  const activeRepo = useRepoStore((s) => s.activeRepo);
 
   // Derive state from Zustand stores
   const state = {
@@ -31,7 +32,7 @@ export function useGlobalState() {
     const w = window as any;
     if (w.CoreUtils?.state) {
       Object.assign(w.CoreUtils.state, updates);
-      window.dispatchEvent(new CustomEvent('agro-state-update', { detail: updates }));
+      window.dispatchEvent(new CustomEvent('tribrid-state-update', { detail: updates }));
     }
 
     // Note: Most updates should go through individual Zustand stores

@@ -1,5 +1,5 @@
 /**
- * AGRO React Hooks
+ * TriBridRAG React Hooks
  *
  * These hooks bridge the React components with the legacy module system
  * while maintaining full functionality and ADA compliance.

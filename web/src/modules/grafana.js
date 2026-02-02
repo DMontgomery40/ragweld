@@ -1,4 +1,4 @@
-// AGRO GUI - Grafana Embed Module
+// TriBridRAG GUI - Grafana Embed Module
 // Builds iframe URL from GUI-controlled env and provides show/hide controls
 (function() {
   'use strict';
@@ -63,8 +63,8 @@
    */
   function buildUrl() {
     const base = String(vFromDom('GRAFANA_BASE_URL', 'http://127.0.0.1:3000')).replace(/\/$/, '');
-    const uid = String(vFromDom('GRAFANA_DASHBOARD_UID', 'agro-overview'));
-    const slug = String(vFromDom('GRAFANA_DASHBOARD_SLUG', 'agro-overview'));
+    const uid = String(vFromDom('GRAFANA_DASHBOARD_UID', 'tribrid-overview'));
+    const slug = String(vFromDom('GRAFANA_DASHBOARD_SLUG', 'tribrid-overview'));
     const orgId = String(vFromDom('GRAFANA_ORG_ID', '1'));
     const refresh = String(vFromDom('GRAFANA_REFRESH', '10s'));
     const kiosk = String(vFromDom('GRAFANA_KIOSK', 'tv'));
@@ -242,7 +242,7 @@
   /**
    * ---agentspec
    * what: |
-   *   Reads Grafana config from DOM data attributes. Returns object with baseUrl, dashboardUid, embedEnabled. Defaults: http://127.0.0.1:3000, 'agro-overview', 'true'.
+   *   Reads Grafana config from DOM data attributes. Returns object with baseUrl, dashboardUid, embedEnabled. Defaults: http://127.0.0.1:3000, 'tribrid-overview', 'true'.
    *
    * why: |
    *   Centralizes config retrieval; enables environment-specific overrides via DOM without code changes.
@@ -256,7 +256,7 @@
   function getConfig() {
     return {
       baseUrl: vFromDom('GRAFANA_BASE_URL', 'http://127.0.0.1:3000'),
-      dashboardUid: vFromDom('GRAFANA_DASHBOARD_UID', 'agro-overview'),
+      dashboardUid: vFromDom('GRAFANA_DASHBOARD_UID', 'tribrid-overview'),
       embedEnabled: vFromDom('GRAFANA_EMBED_ENABLED', 'true')
     };
   }

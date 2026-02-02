@@ -1,7 +1,7 @@
 // Evaluation Run History Management
 // Tracks and displays BM25-only vs cross-encoder performance across runs
 
-const EVAL_HISTORY_KEY = 'agro_eval_history';
+const EVAL_HISTORY_KEY = 'tribrid_eval_history';
 const MAX_HISTORY_ENTRIES = 20;
 
 // Initialize eval history on page load

@@ -18,7 +18,7 @@ export interface FeedbackSignal {
   note?: string;
 }
 
-export interface RerankerStatus {
+export type RerankerStatus = {
   running: boolean;
   progress: number;
   task: 'mining' | 'training' | 'evaluating' | '';
@@ -29,7 +29,7 @@ export interface RerankerStatus {
     error?: string;
   };
   live_output?: string[];
-}
+};
 
 export interface TrainingOptions {
   epochs?: number;

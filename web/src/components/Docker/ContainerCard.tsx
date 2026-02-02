@@ -4,7 +4,7 @@
  */
 
 import React from 'react';
-import type { DockerContainer } from '@web/types';
+import type { DockerContainer } from '@/types/generated';
 
 interface ContainerCardProps {
   container: DockerContainer;
@@ -93,28 +93,7 @@ function formatLogs(rawLogs: string): React.ReactNode {
  * Format port mappings for display
  */
 function formatPorts(container: DockerContainer): string {
-  if (!container.ports) {
-    return '';
-  }
-
-  // Handle string format (legacy)
-  if (typeof container.ports === 'string') {
-    return container.ports;
-  }
-
-  // Handle array format
-  if (container.ports.length === 0) {
-    return '';
-  }
-
-  return container.ports
-    .map((p: { PrivatePort: number; PublicPort?: number; Type: string }) => {
-      if (p.PublicPort) {
-        return `${p.PublicPort}:${p.PrivatePort}/${p.Type}`;
-      }
-      return `${p.PrivatePort}/${p.Type}`;
-    })
-    .join(', ');
+  return container.ports ? String(container.ports) : '';
 }
 
 export function ContainerCard({

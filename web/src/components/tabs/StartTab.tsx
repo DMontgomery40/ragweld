@@ -197,8 +197,8 @@ export default function StartTab() {
         {/* Step 1: Welcome */}
         <div id="onboard-welcome" className="ob-step active">
           <div className="ob-main">
-            <h2 className="ob-title">Welcome to AGRO</h2>
-            <p className="ob-subtitle">Point AGRO at a folder or repo; in ~3 minutes it will answer questions about it.</p>
+            <h2 className="ob-title">Welcome to Tri-Brid RAG</h2>
+            <p className="ob-subtitle">Point Tri-Brid RAG at a folder or repo; in ~3 minutes it will answer questions about it.</p>
 
             <div className="ob-info-box">
               <p>We scan text, markdown, code, and docs. Nothing leaves your computer unless you turn on cloud.</p>

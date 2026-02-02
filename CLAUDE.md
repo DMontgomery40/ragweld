@@ -156,7 +156,7 @@ import langchain                 # Banned (use langgraph directly if needed)
 | golden questions | eval_dataset |
 | ranker | reranker |
 | profile, profiles | (removed - no profiles) |
-| onboarding | (removed - no onboarding) |
+
 
 ### Architecture Smells
 - `class *Adapter` → Fix the Pydantic model instead
@@ -284,25 +284,6 @@ IMPORTANT:
 
 ---
 
-## WHAT TO COPY FROM agro-rag-engine
-
-### YES - Copy These
-- CSS files from `web/src/styles/` (visual styling)
-- Component LAYOUTS (but rewrite to use new hooks/stores)
-- Tooltip CONTENT (but put in glossary.json, not JS module)
-
-### NO - Don't Copy These
-- Any adapter/transformer code
-- Legacy JS modules from `web/src/modules/`
-- The architecture (it's slop)
-- Anything with Qdrant, Redis, LangGraph
-
-### TRANSLATE - Convert These
-| agro-rag-engine | tribrid-rag |
-|-----------------|-------------|
-| `agro_config_model.py` | `tribrid_config_model.py` (strip banned, add Neo4j) |
-| `modules/tooltips.js` | `data/glossary.json` |
-| `models.json` | `data/models.json` (same format) |
 
 ---
 

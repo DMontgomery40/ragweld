@@ -1,4 +1,4 @@
-import type { HealthStatus } from '@web/types';
+import type { HealthStatus } from '@/types/generated';
 
 interface HealthStatusCardProps {
   status: HealthStatus | null;

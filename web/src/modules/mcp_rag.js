@@ -31,7 +31,7 @@
       if (!qEl || !out) return;
       const q = (qEl.value || '').trim();
       if (!q) { out.textContent = 'Please enter a question.'; return; }
-      const repo = (repoEl && repoEl.value) ? repoEl.value.trim() : ((state.config && state.config.env && state.config.env.REPO) ? state.config.env.REPO : 'agro');
+      const repo = (repoEl && repoEl.value) ? repoEl.value.trim() : ((state.config && state.config.env && state.config.env.REPO) ? state.config.env.REPO : 'auto');
       const top_k = parseInt((topkEl && topkEl.value) ? String(topkEl.value) : '10', 10) || 10;
       const force_local = (localEl && String(localEl.value) === 'true') ? 'true' : 'false';
       try {

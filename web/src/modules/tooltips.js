@@ -126,7 +126,7 @@
         ['LangGraph Checkpoints', 'https://langchain-ai.github.io/langgraph/concepts/persistence/'],
         ['Redis Connection URLs', 'https://redis.io/docs/latest/develop/connect/clients/']
       ]),
-      REPO: L('Active Repository', 'Logical repository name for routing and indexing. MCP and CLI use this to scope retrieval. Must match a repository name defined in repos.json for multi-repo setups. Example: "agro", "myapp", "cli-tool". Used for multi-repo RAG systems where each repo has separate indices, keywords, and path boosts.', [
+      REPO: L('Active Repository', 'Logical repository name for routing and indexing. MCP and CLI use this to scope retrieval. Must match a repository name defined in repos.json for multi-repo setups. Example: "tribrid-demo", "myapp", "cli-tool". Used for multi-repo RAG systems where each repo has separate indices, keywords, and path boosts.', [
         ['Namespace Concept', 'https://en.wikipedia.org/wiki/Namespace'],
         ['MCP Protocol Spec', 'https://github.com/modelcontextprotocol/specification'],
         ['LangSmith Context', 'https://www.langchain.com/langsmith']
@@ -315,7 +315,7 @@
       // Unified Reranker Configuration (4 modes)
       RERANKER_MODE: L(
         'Reranker Mode',
-        'Controls which reranking approach is used. Four options:\n\n• none: Disabled—BM25 + vector fusion only, no cross-encoder scoring.\n• local: Any local reranker model you provide (BGE, Jina, etc.).\n• learning: AGRO self-training cross-encoder that improves with your usage patterns.\n• cloud: External API reranking (Cohere, Voyage, Jina).\n\nRecommended: Start with "learning" to leverage AGRO\'s adaptive improvements, or "cloud" for lowest latency if you have API budget.',
+        'Controls which reranking approach is used. Four options:\n\n• none: Disabled—BM25 + vector fusion only, no cross-encoder scoring.\n• local: Any local reranker model you provide (BGE, Jina, etc.).\n• learning: TriBridRAG self-training cross-encoder that improves with your usage patterns.\n• cloud: External API reranking (Cohere, Voyage, Jina).\n\nRecommended: Start with "learning" to leverage TriBridRAG\'s adaptive improvements, or "cloud" for lowest latency if you have API budget.',
         [
           ['Cross-Encoder Overview', 'https://www.sbert.net/examples/applications/cross-encoder/README.html'],
           ['Learning Reranker Docs', '/docs/LEARNING_RERANKER.md']
@@ -345,18 +345,18 @@
 
       RERANKER_MODEL: L(
         'Local Reranker (HF)',
-        'HuggingFace model name or path for local reranking when RERANK_BACKEND=local or hf. Common options: "cross-encoder/ms-marco-MiniLM-L-6-v2" (fast, good quality), "BAAI/bge-reranker-base" (higher quality, slower), or path to your fine-tuned model like "models/cross-encoder-agro". Local reranking is free but slower than Cohere. Ensure model is downloaded before use.',
+        'HuggingFace model name or path for local reranking when RERANK_BACKEND=local or hf. Common options: "cross-encoder/ms-marco-MiniLM-L-6-v2" (fast, good quality), "BAAI/bge-reranker-base" (higher quality, slower), or path to your fine-tuned model like "models/cross-encoder-tribrid". Local reranking is free but slower than Cohere. Ensure model is downloaded before use.',
         [
           ['Cross-Encoder Models', 'https://www.sbert.net/docs/cross_encoder/pretrained_models.html'],
           ['HuggingFace Model Hub', 'https://huggingface.co/models?pipeline_tag=text-classification&sort=downloads'],
-          ['Local Reranker README', '/models/cross-encoder-agro/README.md'],
+          ['Local Reranker README', '/models/cross-encoder-tribrid/README.md'],
           ['Learning Reranker', '/docs/LEARNING_RERANKER.md']
         ],
         [['Free (no API costs)', 'info'], ['Requires download', 'warn']]
       ),
 
       // Reranker Inference (live search blending)
-      AGRO_RERANKER_ALPHA: L(
+      TRIBRID_RERANKER_ALPHA: L(
         'Reranker Blend Alpha',
         'Weight of the cross-encoder reranker score during final fusion. Higher alpha prioritizes semantic pairwise scoring; lower alpha relies more on initial hybrid retrieval (BM25 + dense). Typical range 0.6–0.8. Increasing alpha can improve ordering for nuanced queries but may surface false positives if your model is undertrained.',
         [
@@ -366,7 +366,7 @@
         ],
         [['Affects ranking', 'info']]
       ),
-      AGRO_RERANKER_MAXLEN: L(
+      TRIBRID_RERANKER_MAXLEN: L(
         'Reranker Max Sequence Length (Inference)',
         'Maximum token length for each (query, text) pair during live reranking. Larger values increase memory/cost and may not improve quality beyond ~256–384 tokens for code. Use higher values for long comments/docs; lower for tight compute budgets.',
         [
@@ -375,7 +375,7 @@
         ],
         [['Performance sensitive', 'warn']]
       ),
-      AGRO_RERANKER_BATCH: L(
+      TRIBRID_RERANKER_BATCH: L(
         'Reranker Batch Size (Inference)',
         'Batch size used when scoring candidates during rerank. Higher values reduce latency but increase memory. If you see OOM or throttling, lower this value.',
         [
@@ -384,7 +384,7 @@
         ],
         [['Tune for memory', 'info']]
       ),
-      AGRO_RERANKER_TOPN: L(
+      TRIBRID_RERANKER_TOPN: L(
         'Reranker Top-N',
         'Maximum number of candidates to pass through the cross-encoder reranker stage during retrieval. After hybrid fusion (BM25 + dense), the top-N candidates are reranked using pairwise semantic scoring before final selection. Higher values (50-100) improve recall by considering more candidates but increase reranking latency and compute cost quadratically. Lower values (20-30) are faster but may miss relevant results that scored poorly in initial retrieval but would rank highly after reranking.\n\nSweet spot: 40-60 for most use cases. Use 60-80 for complex queries where initial ranking may be noisy (e.g., ambiguous natural language queries like "where do we handle payments?"). Use 20-40 for tight latency budgets or when initial hybrid retrieval is already high-quality. Reranking cost scales with top-N × query length, so monitor inference time when tuning this parameter.\n\nSymptom of too low: Relevant results appear when you increase top-K but not with default settings. Symptom of too high: Reranking takes >500ms and retrieval latency dominates response time. Most production systems use 40-50 as a balanced default.\n\n• Typical range: 20-80 candidates\n• Balanced default: 40-50 for most workloads\n• High recall: 60-80 for exploratory queries\n• Low latency: 20-30 for speed-critical apps\n• Reranking cost: O(top-N × tokens) per query',
         [
@@ -548,7 +548,7 @@
       ),
       KEYWORDS_BOOST: L(
         'Keywords Boost',
-        'Score boost applied to chunks containing high-frequency repository-specific keywords. Keywords are mined during indexing from your codebase - class names, function names, domain terms that appear frequently in your project but rarely in general code. When a query contains these keywords, matching chunks receive this bonus. Helps surface domain-specific code and project-specific patterns.\n\nSweet spot: 0.08-0.12 for balanced keyword boosting. Use 0.12-0.15 for strong domain term preference when your project has unique terminology (e.g., "Agro", "AgroRAG", "hybrid_search"). Use 0.05-0.08 for subtle boosting when overlap with common terms is high. Keywords must appear >= KEYWORDS_MIN_FREQ times in the codebase to be considered domain-specific.\n\nKeywords are stored during indexing in keywords.json (per-repo). Query terms are matched against this keyword set, and chunks containing these terms get the bonus during reranking. This is separate from BM25 (which scores all terms) - keyword boost targets YOUR project\'s vocabulary. Example: "AuthService" is a keyword in your codebase but not in general code, so queries about "AuthService" get extra boost.\n\n• Range: 0.05-0.15 (typical)\n• Subtle: 0.05-0.08\n• Balanced: 0.08-0.12 (recommended)\n• Strong domain preference: 0.12-0.15\n• Requires: keywords.json generated during indexing\n• Controlled by: KEYWORDS_MIN_FREQ (frequency threshold)',
+        'Score boost applied to chunks containing high-frequency repository-specific keywords. Keywords are mined during indexing from your codebase - class names, function names, domain terms that appear frequently in your project but rarely in general code. When a query contains these keywords, matching chunks receive this bonus. Helps surface domain-specific code and project-specific patterns.\n\nSweet spot: 0.08-0.12 for balanced keyword boosting. Use 0.12-0.15 for strong domain term preference when your project has unique terminology (e.g., "TriBrid", "TriBridRAG", "hybrid_search"). Use 0.05-0.08 for subtle boosting when overlap with common terms is high. Keywords must appear >= KEYWORDS_MIN_FREQ times in the codebase to be considered domain-specific.\n\nKeywords are stored during indexing in keywords.json (per-repo). Query terms are matched against this keyword set, and chunks containing these terms get the bonus during reranking. This is separate from BM25 (which scores all terms) - keyword boost targets YOUR project\'s vocabulary. Example: "AuthService" is a keyword in your codebase but not in general code, so queries about "AuthService" get extra boost.\n\n• Range: 0.05-0.15 (typical)\n• Subtle: 0.05-0.08\n• Balanced: 0.08-0.12 (recommended)\n• Strong domain preference: 0.12-0.15\n• Requires: keywords.json generated during indexing\n• Controlled by: KEYWORDS_MIN_FREQ (frequency threshold)',
         [
           ['Keyword Extraction', 'https://en.wikipedia.org/wiki/Keyword_extraction'],
           ['Domain-Specific Terms', 'https://en.wikipedia.org/wiki/Terminology'],
@@ -631,7 +631,7 @@
       ),
       PER_REPO_INDEXING: L(
         'Per-Repository Indexing Configuration',
-        'Override global indexing settings per repo. Enables optimization for different codebases. Scenarios: docs repos (larger chunks 1500-2000, stemmer), dense code (smaller chunks 500-800, whitespace), mixed (AST + hybrid), legacy (greedy if AST fails). Checked = inherit agro_config.json. Unchecked = repos.json overrides take precedence. Unchanged fields still inherit global. Changes apply on reindex.',
+        'Override global indexing settings per repo. Enables optimization for different codebases. Scenarios: docs repos (larger chunks 1500-2000, stemmer), dense code (smaller chunks 500-800, whitespace), mixed (AST + hybrid), legacy (greedy if AST fails). Checked = inherit tribrid_config.json. Unchecked = repos.json overrides take precedence. Unchanged fields still inherit global. Changes apply on reindex.',
         [
           ['Monorepo Configuration Patterns', 'https://monorepo.tools/'],
           ['Multi-Repo Search Strategies', 'https://www.aviator.co/blog/monorepo-a-hands-on-guide-for-managing-repositories-and-microservices/'],
@@ -939,7 +939,7 @@
         ],
         [['Requires restart', 'warn']]
       ),
-      AGRO_EDITION: L(
+      TRIBRID_EDITION: L(
         'Edition',
         'Product edition identifier for feature gating in multi-tier deployments. Values: "oss" (open source, all community features), "pro" (professional tier with advanced features), "enterprise" (full feature set with support). This flag enables/disables certain UI elements and API endpoints based on licensing. Most users should leave this as "oss".',
         [
@@ -1041,37 +1041,7 @@
         [['Quick testing', 'info'], ['Sample recommended for CI', 'info']]
       ),
 
-      // Repo‑specific env overrides (legacy)
-      agro_PATH: L(
-        'agro PATH (legacy)',
-        'DEPRECATED: Legacy environment variable for setting the agro repository path. This is repo-specific and only works for a repo named "agro". Modern approach: use REPO_PATH for single repos or configure repos.json for multi-repo setups with proper routing. Kept for backwards compatibility - will be removed in future versions.',
-        [
-          ['repos.json Format', '/repos.json'],
-          ['Migration Guide', '/docs/MIGRATION.md#legacy-env-vars'],
-          ['REPO_PATH Setting', '/docs/CONFIGURATION.md#repo-path']
-        ],
-        [['Deprecated', 'warn'], ['Use repos.json instead', 'warn']]
-      ),
-      agro_PATH_BOOSTS: L(
-        'agro Path Boosts (CSV)',
-        'DEPRECATED: Legacy comma-separated path boosts for the "agro" repository only (e.g., "app/,lib/,config/"). Repo-specific environment variables like this don\'t scale for multi-repo setups. Modern approach: configure path boosts in repos.json per-repo settings. Kept for backwards compatibility.',
-        [
-          ['repos.json Path Boosts', '/repos.json'],
-          ['Migration Guide', '/docs/MIGRATION.md#path-boosts'],
-          ['Modern Path Boosting', '/docs/RETRIEVAL.md#path-boosting']
-        ],
-        [['Deprecated', 'warn'], ['Use repos.json instead', 'warn']]
-      ),
-      LANGCHAIN_agro: L(
-        'LangChain (agro)',
-        'DEPRECATED: Legacy/internal environment variable for LangChain tracing metadata specific to the "agro" repo. Repo-specific tracing keys don\'t work well with modern LangSmith. Modern approach: use LANGCHAIN_TRACING_V2=true + LANGCHAIN_PROJECT in your environment for proper tracing across all repos.',
-        [
-          ['LangSmith Tracing', 'https://docs.smith.langchain.com/'],
-          ['LANGCHAIN_TRACING_V2', 'https://docs.smith.langchain.com/tracing/faq#how-do-i-turn-on-tracing'],
-          ['Migration Guide', '/docs/MIGRATION.md#langchain-tracing']
-        ],
-        [['Deprecated', 'warn'], ['Use LANGCHAIN_TRACING_V2', 'warn']]
-      ),
+      // Repo‑specific env overrides (legacy) removed (use repos.json / config UI instead)
 
       // Generation & API
       GEN_MAX_TOKENS: L(
@@ -1408,7 +1378,7 @@
         ],
         [['Costs API calls', 'warn'], ['High quality', 'info']]
       ),
-      AGRO_RERANKER_RELOAD_ON_CHANGE: L(
+      TRIBRID_RERANKER_RELOAD_ON_CHANGE: L(
         'Reranker Auto-Reload',
         'Automatically reload the local reranker model when RERANKER_MODEL path changes during runtime (1=yes, 0=no). When enabled, the system detects model path changes and hot-reloads the new model without server restart. Useful during development when switching between reranker models or testing fine-tuned versions. In production, disable to avoid unexpected reloads and ensure stability. Model reloading adds 2-5 seconds of latency on first query after change.\n\nRecommended: 1 for development/testing, 0 for production deployments.',
         [
@@ -1649,7 +1619,7 @@
           ['Synonym Guide', '/docs/RETRIEVAL.md#synonyms']
         ]
       ),
-      AGRO_SYNONYMS_PATH: L(
+      TRIBRID_SYNONYMS_PATH: L(
         'Synonyms File Path',
         'Custom path to the semantic synonyms JSON file. Defaults to data/semantic_synonyms.json if empty. Use this to point to a repository-specific or custom synonym dictionary. The file should contain a JSON object mapping terms to arrays of synonyms (e.g., {"auth": ["authentication", "oauth", "jwt"]}).\n\n\u2022 Default: data/semantic_synonyms.json\n\u2022 Example: /path/to/custom_synonyms.json\n\u2022 Format: {"term": ["synonym1", "synonym2", ...]}\n\u2022 Works with: USE_SEMANTIC_SYNONYMS toggle',
         [
@@ -1764,7 +1734,7 @@
       ),
       CHAT_SYSTEM_PROMPT: L(
         'Custom System Prompt',
-        'Override the default expert system prompt for Chat. Use to adjust tone, safety constraints, or provide domain instructions. Leave empty to use the built\u2011in AGRO RAG expert prompt.',
+        'Override the default expert system prompt for Chat. Use to adjust tone, safety constraints, or provide domain instructions. Leave empty to use the built\u2011in TriBridRAG expert prompt.',
         [
           ['Prompt Engineering (Guide)', 'https://platform.openai.com/docs/guides/prompt-engineering']
         ]
@@ -1865,7 +1835,7 @@
       // Backend Selection
       VECTOR_BACKEND: L(
         'Vector Backend',
-        'Selects the vector search backend used for dense retrieval. Qdrant is the default/primary backend in AGRO and stores your embedding vectors for fast similarity search. Use this to switch between implementations when benchmarking or troubleshooting.',
+        'Selects the vector search backend used for dense retrieval. Postgres (pgvector) is the default backend in TriBridRAG and stores your embedding vectors for fast similarity search. Use this to switch between implementations when benchmarking or troubleshooting.',
         [
           ['Qdrant Docs', 'https://qdrant.tech/documentation/'],
           ['LangChain Vector Stores', 'https://python.langchain.com/docs/integrations/vectorstores/']
@@ -1874,7 +1844,7 @@
       ),
       RERANKER_BACKEND: L(
         'Reranker Backend',
-        'Choose the reranking provider to reorder retrieved results by semantic relevance (cross-encoder). Options typically include Cohere Rerank, the built\u2011in AGRO Learning Reranker, or none. Reranking improves answer quality but adds latency.',
+        'Choose the reranking provider to reorder retrieved results by semantic relevance (cross-encoder). Options typically include Cohere Rerank, the built\u2011in TriBridRAG Learning Reranker, or none. Reranking improves answer quality but adds latency.',
         [
           ['Cohere Rerank', 'https://docs.cohere.com/docs/rerank'],
           ['Sentence\u2011Transformers (Cross\u2011Encoders)', 'https://www.sbert.net/examples/training/cross-encoder/README.html']
@@ -1898,22 +1868,22 @@
         ]
       ),
 
-      // AGRO Learning Reranker (RERANKER_MODE is defined earlier at ~line 236)
-      AGRO_RERANKER_MODEL_PATH: L(
+      // TriBridRAG Learning Reranker (RERANKER_MODE is defined earlier at ~line 236)
+      TRIBRID_RERANKER_MODEL_PATH: L(
         'Reranker Model Path',
         'Filesystem path to the trained reranker model checkpoint directory (relative paths recommended). The service loads weights from this path on startup or when reloaded.',
         [
           ['Model Checkpoints', 'https://huggingface.co/docs/transformers/main_classes/model#transformers.PreTrainedModel.from_pretrained']
         ]
       ),
-      AGRO_LOG_PATH: L(
+      TRIBRID_LOG_PATH: L(
         'Reranker Log Path',
         'Directory where the reranker writes logs and training progress. Useful for monitoring and resuming experiments. Ensure the path is writable by the server process.',
         [
           ['Python logging', 'https://docs.python.org/3/library/logging.html']
         ]
       ),
-      AGRO_TRIPLETS_PATH: L(
+      TRIBRID_TRIPLETS_PATH: L(
         'Triplets Dataset Path',
         'Path to mined triplets used for training the Learning Reranker. Triplets contain (query, positive, negative) examples. Keep under version control or in a reproducible data store.',
         [
@@ -1921,7 +1891,7 @@
           ['SBERT Training Data', 'https://www.sbert.net/examples/training/cross-encoder/README.html']
         ]
       ),
-      AGRO_RERANKER_MINE_MODE: L(
+      TRIBRID_RERANKER_MINE_MODE: L(
         'Triplet Mining Mode',
         'Strategy for mining training triplets: random, semi\u2011hard, or hard negatives. Harder negatives improve discriminative power but may be noisier and slower to mine.',
         [
@@ -1929,7 +1899,7 @@
         ],
         [['Advanced','info']]
       ),
-      AGRO_RERANKER_MINE_RESET: L(
+      TRIBRID_RERANKER_MINE_RESET: L(
         'Reset Triplets Before Mining',
         'If enabled, deletes existing mined triplets before starting a new mining run. Use with caution to avoid losing curated datasets.',
         [
@@ -1943,7 +1913,7 @@
       // Path Overrides
       REPO_ROOT: L(
         'Repository Root Override',
-        'Override the auto-detected project root directory. AGRO normally detects the repository root automatically by walking up from the current working directory to find .git or pyproject.toml. Use this setting when running in Docker, when AGRO is installed outside the repository, or when you need to force a specific root path. Leave empty to use auto-detection. Example: /workspace/myproject',
+        'Override the auto-detected project root directory. TriBridRAG normally detects the repository root automatically by walking up from the current working directory to find .git or pyproject.toml. Use this setting when running in Docker, when TriBridRAG is installed outside the repository, or when you need to force a specific root path. Leave empty to use auto-detection. Example: /workspace/myproject',
         [
           ['Path Resolution', 'https://en.wikipedia.org/wiki/Path_(computing)#Absolute_and_relative_paths'],
           ['Docker Volume Mounts', 'https://docs.docker.com/storage/volumes/'],
@@ -1953,7 +1923,7 @@
       ),
       FILES_ROOT: L(
         'Files Root Override',
-        'Override the root directory for the /files HTTP mount point. This setting controls where the FastAPI static file server looks for files when serving requests to /files/*. By default, AGRO uses the repository root. Set this when you need to serve files from a different location, such as a mounted volume in Docker, a shared NFS mount, or a custom data directory. Example: /mnt/shared/agro-files',
+        'Override the root directory for the /files HTTP mount point. This setting controls where the FastAPI static file server looks for files when serving requests to /files/*. By default, TriBridRAG uses the repository root. Set this when you need to serve files from a different location, such as a mounted volume in Docker, a shared NFS mount, or a custom data directory. Example: /mnt/shared/tribrid-files',
         [
           ['Static Files (FastAPI)', 'https://fastapi.tiangolo.com/tutorial/static-files/'],
           ['File Serving', '/docs/FILE_SERVING.md'],
@@ -2016,7 +1986,7 @@
       ),
       SYSTEM_PROMPTS_SUBTAB: L(
         'System Prompts',
-        'Edit LLM system prompts that control RAG pipeline behavior. These prompts are used for query expansion, chat responses, semantic card generation, code enrichment, and eval analysis. Changes are saved to agro_config.json and take effect immediately.',
+        'Edit LLM system prompts that control RAG pipeline behavior. These prompts are used for query expansion, chat responses, semantic card generation, code enrichment, and eval analysis. Changes are saved to tribrid_config.json (or per-corpus config) and take effect immediately.',
         [
           ['Prompt Engineering', 'https://www.anthropic.com/news/prompt-engineering']
         ],
@@ -2155,7 +2125,7 @@
       // Reranker Extended
       RERANKER_ACTIVE: L(
         'Active Reranker',
-        'Route reranking to local vs cloud.\n\u2022 local/learning \u2014 on-host (includes AGRO learning reranker)\n\u2022 cloud \u2014 uses provider/model from models.json\n\u2022 none/off \u2014 disables rerank. If cloud is selected but provider/model are empty, rerank is effectively disabled.',
+        'Route reranking to local vs cloud.\n\u2022 local/learning \u2014 on-host (includes TriBridRAG learning reranker)\n\u2022 cloud \u2014 uses provider/model from models.json\n\u2022 none/off \u2014 disables rerank. If cloud is selected but provider/model are empty, rerank is effectively disabled.',
         [],
         [['Required', 'info']]
       ),

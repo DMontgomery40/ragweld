@@ -1,4 +1,4 @@
-// AGRO - Reranker Comparison Component
+// TriBridRAG - Reranker Comparison Component
 // Compare different reranker models side-by-side
 // Allows testing reranker performance with custom queries and documents
 

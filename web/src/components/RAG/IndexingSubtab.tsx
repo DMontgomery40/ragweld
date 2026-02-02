@@ -1,8 +1,8 @@
 /**
- * IndexingSubtab (TriBrid) — Restored AGRO-quality layout.
+ * IndexingSubtab (TriBrid) — Restored production-quality layout.
  *
  * Goal:
- * - Keep the *layout* and UX patterns from AGRO’s IndexingSubtab (cards, panels, advanced details, slide-down terminal)
+ * - Keep the *layout* and UX patterns from the legacy IndexingSubtab (cards, panels, advanced details, slide-down terminal)
  * - Wire everything to TriBridConfig (Pydantic is the law) and corpus-first state (useRepoStore)
  * - No hardcoded model lists (load from /api/models)
  */

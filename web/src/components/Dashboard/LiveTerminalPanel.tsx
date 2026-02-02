@@ -1,4 +1,4 @@
-// AGRO - Live Terminal Panel Component
+// TriBridRAG - Live Terminal Panel Component
 // Dropdown terminal that slides down with bezier animation
 
 import { useEffect, useRef } from 'react';

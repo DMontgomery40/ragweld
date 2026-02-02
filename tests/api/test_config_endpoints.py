@@ -55,3 +55,22 @@ async def test_invalid_config_section(client: AsyncClient) -> None:
     """Test updating invalid config section."""
     response = await client.patch("/api/config/invalid_section", json={})
     assert response.status_code in [400, 404, 422]
+
+
+@pytest.mark.asyncio
+async def test_get_config_unknown_corpus_does_not_autocreate(client: AsyncClient) -> None:
+    """GET /api/config for an unknown corpus must 404 and must not create a corpus row."""
+    before = await client.get("/api/corpora")
+    assert before.status_code == 200
+    before_ids = {c.get("repo_id") for c in before.json() if isinstance(c, dict)}
+
+    missing_id = "does_not_exist_corpus__should_404"
+    resp = await client.get("/api/config", params={"corpus_id": missing_id})
+    assert resp.status_code == 404
+
+    after = await client.get("/api/corpora")
+    assert after.status_code == 200
+    after_ids = {c.get("repo_id") for c in after.json() if isinstance(c, dict)}
+
+    assert missing_id not in after_ids
+    assert after_ids == before_ids

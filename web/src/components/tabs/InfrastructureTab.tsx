@@ -1,4 +1,4 @@
-// AGRO - Infrastructure Tab Component (React)
+// TriBridRAG - Infrastructure Tab Component (React)
 // Main Infrastructure configuration tab with subtab navigation
 // Structure matches /gui/index.html exactly with all subtabs rendered and visibility controlled by className
 

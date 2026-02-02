@@ -1,4 +1,4 @@
-// AGRO - Integrations Subtab Component
+// TriBridRAG - Integrations Subtab Component
 // External service integrations and webhooks
 // API keys are configured in .env ONLY - never written programmatically
 

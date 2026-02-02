@@ -129,7 +129,7 @@ export function useUIHelpers() {
     const MIN_WIDTH = 280;
     const MAX_WIDTH = 900;
     const DEFAULT_WIDTH = 360;
-    const STORAGE_KEY = 'agro-sidepanel-width';
+    const STORAGE_KEY = 'tribrid-sidepanel-width';
 
     // Restore saved width with viewport constraints
     const savedWidth = localStorage.getItem(STORAGE_KEY);

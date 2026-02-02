@@ -9,7 +9,8 @@ import { apiUrl } from '@/api/client';
 
 interface StatusData {
   health: string;
-  corpus: string;
+  activeCorpus: string;
+  totalCorpora: string;
   chunkSummaries: string;
 }
 
@@ -17,7 +18,8 @@ export function SystemStatus() {
   const { repos, activeRepo } = useRepoStore();
   const [status, setStatus] = useState<StatusData>({
     health: '—',
-    corpus: '—',
+    activeCorpus: '—',
+    totalCorpora: '—',
     chunkSummaries: '—',
   });
 
@@ -25,9 +27,8 @@ export function SystemStatus() {
     const newStatus: StatusData = { ...status };
 
     // Corpus info from store
-    newStatus.corpus = activeRepo
-      ? `${activeRepo} (${repos.length} corpora)`
-      : `(${repos.length} corpora)`;
+    newStatus.activeCorpus = String(activeRepo || '').trim() || '(none)';
+    newStatus.totalCorpora = `${repos.length} ${repos.length === 1 ? 'corpus' : 'corpora'}`;
 
     // Fetch health
     try {
@@ -85,7 +86,8 @@ export function SystemStatus() {
       </h3>
       <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
         <StatusItem label="Health" value={status.health} color="var(--ok)" />
-        <StatusItem label="Corpus" value={status.corpus} color="var(--fg)" />
+        <StatusItem label="Active corpus" value={status.activeCorpus} color="var(--fg)" />
+        <StatusItem label="Total corpora" value={status.totalCorpora} color="var(--fg)" />
         <StatusItem label="Summaries" value={status.chunkSummaries} color="var(--link)" />
       </div>
     </div>

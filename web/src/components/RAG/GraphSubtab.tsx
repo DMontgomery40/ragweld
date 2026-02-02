@@ -197,20 +197,6 @@ export function GraphSubtab() {
     return () => window.clearTimeout(handle);
   }, [isFullscreen, fullscreenGraphData.nodes.length, fullscreenGraphData.links.length]);
 
-  // Escape key to close fullscreen
-  useEffect(() => {
-    if (!isFullscreen) return;
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        handleCloseFullscreen();
-      }
-    };
-
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [isFullscreen, handleCloseFullscreen]);
-
   // Fullscreen open/close handlers with animation
   const handleOpenFullscreen = useCallback(() => {
     setFullscreenAnimating(true);
@@ -227,6 +213,38 @@ export function GraphSubtab() {
       setFullscreenAnimating(false);
     }, 150);
   }, []);
+
+  // Escape key to close fullscreen
+  useEffect(() => {
+    if (!isFullscreen) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        handleCloseFullscreen();
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [isFullscreen, handleCloseFullscreen]);
+
+  const nodeColor = (e: Entity): string => {
+    if (selectedEntity?.entity_id === e.entity_id) return accentColor;
+    switch (e.entity_type) {
+      case 'function':
+        return '#22c55e';
+      case 'class':
+        return '#60a5fa';
+      case 'module':
+        return '#fbbf24';
+      case 'variable':
+        return '#a78bfa';
+      case 'concept':
+        return '#94a3b8';
+      default:
+        return '#9fb1c7';
+    }
+  };
 
   // Custom node rendering for fullscreen mode - shows labels for important nodes
   const fullscreenNodeCanvasObject = useCallback(
@@ -316,24 +334,6 @@ export function GraphSubtab() {
 
   const handlePickEntity = async (e: Entity | null) => {
     await selectEntity(e);
-  };
-
-  const nodeColor = (e: Entity): string => {
-    if (selectedEntity?.entity_id === e.entity_id) return accentColor;
-    switch (e.entity_type) {
-      case 'function':
-        return '#22c55e';
-      case 'class':
-        return '#60a5fa';
-      case 'module':
-        return '#fbbf24';
-      case 'variable':
-        return '#a78bfa';
-      case 'concept':
-        return '#94a3b8';
-      default:
-        return '#9fb1c7';
-    }
   };
 
   return (

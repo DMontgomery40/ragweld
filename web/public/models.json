@@ -948,12 +948,12 @@
     },
     {
       "provider": "local",
-      "family": "cross-encoder-agro",
-      "model": "cross-encoder-agro",
+      "family": "cross-encoder-tribrid",
+      "model": "cross-encoder-tribrid",
       "components": ["RERANK"],
       "unit": "request",
       "per_request": 0.0,
-      "notes": "AGRO learning reranker (cross-encoder, local)"
+      "notes": "TriBrid learning reranker (cross-encoder, local)"
     },
     {
       "provider": "local",

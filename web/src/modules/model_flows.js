@@ -5,8 +5,13 @@
 
   async function updateEnv(envUpdates){
     try{
-      await fetch(api('/api/config'), { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ env: envUpdates, repos: [] }) });
-    }catch(e){ alert('Failed to update config: ' + e.message); }
+      // Legacy env-update flow is deprecated in TriBridRAG.
+      // The React/Zustand pipeline owns configuration now; secrets live in `.env` only.
+      const msg = 'Legacy env update flow is disabled. Use the React settings UI or edit `.env`.';
+      console.warn('[model_flows] updateEnv disabled', envUpdates);
+      try { if (typeof window.showStatus === 'function') window.showStatus(msg, 'warning'); } catch {}
+      alert(msg);
+    }catch(e){ alert('Failed: ' + e.message); }
   }
 
   async function upsertPrice(entry){
@@ -24,7 +29,7 @@
    *   Interactive UI for selecting generation model before workflow execution.
    *
    * guardrails:
-   *   - DO NOT validate model against agro_config.json here; defer to addGenModelFlow caller
+   *   - DO NOT validate model against tribrid_config.json here; defer to addGenModelFlow caller
    *   - NOTE: Returns null on user cancel; caller must handle
    *   - ASK USER: Should this pre-populate from current GEN_MODEL config?
    * ---/agentspec
@@ -37,7 +42,7 @@
   async function addGenModelFlow(){
     const provider = promptStr('Provider (openai, anthropic, google, local)', 'openai');
     if (!provider) return;
-    const model = promptStr('Model ID (from agro_config.json GEN_MODEL)', '');
+    const model = promptStr('Model ID (from tribrid_config.json GEN_MODEL)', '');
     if (!model) return;
     const baseUrl = promptStr('Base URL (optional; for proxies or local, e.g., http://127.0.0.1:11434)', '');
     let apiKey = '';
@@ -100,12 +105,14 @@
     // learning and none modes don't need additional config
 
     // Update via config API (NOT env)
-    await fetch('/api/config', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(config)
-    });
-    if (window.Config?.loadConfig) await window.Config.loadConfig();
+    // Legacy config write path removed (POST /api/config no longer exists).
+    {
+      const msg = 'Legacy reranker model flow is disabled. Use the React Reranker settings UI.';
+      console.warn('[model_flows] addRerankModelFlow disabled', config);
+      try { if (typeof window.showStatus === 'function') window.showStatus(msg, 'warning'); } catch {}
+      alert(msg);
+      return;
+    }
 
     const entry = { provider: mode === 'cloud' ? config.reranker_cloud_provider : mode, model: config.reranker_cloud_model || config.reranker_local_model || mode, family:'rerank' };
     entry.unit = mode === 'cloud' ? '1k_tokens' : 'request';

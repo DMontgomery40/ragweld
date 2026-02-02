@@ -1,4 +1,4 @@
-// AGRO GUI - Config Module
+// TriBridRAG GUI - Config Module
 // Handles configuration form loading, population, and saving
 
 (function () {
@@ -536,29 +536,13 @@
         if (!body) return;
 
         try {
-            const r = await fetch(api('/api/config'), {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(body)
-            });
-
-            if (!r.ok) {
-                let detail = 'Save failed';
-                try {
-                    const err = await r.json();
-                    detail = err?.detail || err?.error || detail;
-                } catch (e) {}
-                alert(detail);
-                return;
-            }
-
-            const result = await r.json();
-            if (result.status === 'success') {
-                alert('Configuration updated successfully!');
-                await loadConfig(); // Reload to confirm
-            } else if (result.status === 'error') {
-                alert(result.error || 'Save failed');
-            }
+            // Legacy config save used POST /api/config with an env-style payload.
+            // TriBridRAG config is Pydantic-first; React/Zustand owns config persistence now.
+            const msg = 'Legacy config save is disabled. Use the React settings UI (Apply All Changes).';
+            console.warn('[config.js] saveConfig disabled', body);
+            try { if (typeof window.showStatus === 'function') window.showStatus(msg, 'warning'); } catch {}
+            alert(msg);
+            return;
         } catch (e) {
             const msg = window.ErrorHelpers ? window.ErrorHelpers.createAlertError('Failed to save configuration', {
                 message: e.message,
@@ -621,11 +605,17 @@
         });
     } else {
         console.warn('[config.js] Navigation API not available, falling back to legacy mode');
-        // Legacy mode: initialize immediately
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', loadConfig);
+        // In the React app, config is loaded via Zustand stores. Avoid legacy auto-load/DOM mutation.
+        const isReactApp = !!document.getElementById('root');
+        if (!isReactApp) {
+            // Legacy mode: initialize immediately
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', loadConfig);
+            } else {
+                loadConfig();
+            }
         } else {
-            loadConfig();
+            console.log('[config.js] React app detected; skipping legacy auto-load');
         }
     }
 

@@ -1,4 +1,4 @@
-// AGRO - Monitoring Logs Panel
+// TriBridRAG - Monitoring Logs Panel
 // Shows recent alerts from Alertmanager webhook
 
 import { useEffect, useState } from 'react';

@@ -8,6 +8,8 @@ import type {
   KeywordsGenerateRequest,
   KeywordsGenerateResponse,
 } from '@/types/generated';
+import { useActiveRepo } from '@/stores';
+import { RepoSelectorCompact } from '@/components/RAG/RepoSelector';
 
 function parseList(text: string): string[] {
   return text
@@ -17,25 +19,7 @@ function parseList(text: string): string[] {
 }
 
 export function DataQualitySubtab() {
-  // Corpus selection (UI wording); API uses corpus_id.
-  const [corpusId, setCorpusId] = useState<string>(() => {
-    try {
-      const u = new URL(window.location.href);
-      return (
-        u.searchParams.get('corpus') ||
-        u.searchParams.get('repo') ||
-        localStorage.getItem('tribrid_active_corpus') ||
-        localStorage.getItem('tribrid_active_repo') ||
-        'tribrid'
-      );
-    } catch {
-      return (
-        localStorage.getItem('tribrid_active_corpus') ||
-        localStorage.getItem('tribrid_active_repo') ||
-        'tribrid'
-      );
-    }
-  });
+  const activeRepo = useActiveRepo();
 
   // Config fields (THE LAW)
   const [excludeDirs, setExcludeDirs] = useConfigField<string[]>(
@@ -104,26 +88,6 @@ export function DataQualitySubtab() {
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
 
-  // Persist corpus selection + broadcast (keeps config store and other tabs in sync)
-  useEffect(() => {
-    const next = corpusId.trim();
-    if (!next) return;
-    localStorage.setItem('tribrid_active_corpus', next);
-    // Legacy key (kept for any older code paths)
-    localStorage.setItem('tribrid_active_repo', next);
-    try {
-      const url = new URL(window.location.href);
-      url.searchParams.set('corpus', next);
-      url.searchParams.delete('repo');
-      window.history.replaceState({}, '', url.toString());
-    } catch {
-      // ignore
-    }
-    window.dispatchEvent(new CustomEvent('tribrid-corpus-changed', { detail: { corpus: next, repo: next } }));
-    // Legacy event name (kept for any older listeners)
-    window.dispatchEvent(new CustomEvent('agro-repo-changed', { detail: { repo: next } }));
-  }, [corpusId]);
-
   const filteredSummaries = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return chunkSummaries;
@@ -142,11 +106,12 @@ export function DataQualitySubtab() {
   }, [chunkSummaries, search]);
 
   const loadSummaries = useCallback(async () => {
-    if (!corpusId.trim()) return;
+    const rid = String(activeRepo || '').trim();
+    if (!rid) return;
     setLoadingSummaries(true);
     setError(null);
     try {
-      const res = await fetch(`/api/chunk_summaries?corpus_id=${encodeURIComponent(corpusId.trim())}`);
+      const res = await fetch(`/api/chunk_summaries?corpus_id=${encodeURIComponent(rid)}`);
       if (!res.ok) {
         const detail = await res.text().catch(() => '');
         throw new Error(detail || `Failed to load chunk summaries (${res.status})`);
@@ -159,15 +124,16 @@ export function DataQualitySubtab() {
     } finally {
       setLoadingSummaries(false);
     }
-  }, [corpusId]);
+  }, [activeRepo]);
 
   const buildSummaries = useCallback(async () => {
-    if (!corpusId.trim()) return;
+    const rid = String(activeRepo || '').trim();
+    if (!rid) return;
     setBuildingSummaries(true);
     setError(null);
     try {
       const body: ChunkSummariesBuildRequest = {
-        corpus_id: corpusId.trim(),
+        corpus_id: rid,
       };
       const res = await fetch('/api/chunk_summaries/build', {
         method: 'POST',
@@ -186,16 +152,17 @@ export function DataQualitySubtab() {
     } finally {
       setBuildingSummaries(false);
     }
-  }, [corpusId]);
+  }, [activeRepo]);
 
   const deleteSummary = useCallback(
     async (chunkId: string) => {
-      if (!corpusId.trim()) return;
+      const rid = String(activeRepo || '').trim();
+      if (!rid) return;
       setError(null);
       try {
         const res = await fetch(
           `/api/chunk_summaries/${encodeURIComponent(chunkId)}?corpus_id=${encodeURIComponent(
-            corpusId.trim()
+            rid
           )}`,
           { method: 'DELETE' }
         );
@@ -208,15 +175,16 @@ export function DataQualitySubtab() {
         setError(e instanceof Error ? e.message : 'Delete failed');
       }
     },
-    [corpusId]
+    [activeRepo]
   );
 
   const generateKeywords = useCallback(async () => {
-    if (!corpusId.trim()) return;
+    const rid = String(activeRepo || '').trim();
+    if (!rid) return;
     setGeneratingKeywords(true);
     setError(null);
     try {
-      const body: KeywordsGenerateRequest = { corpus_id: corpusId.trim() };
+      const body: KeywordsGenerateRequest = { corpus_id: rid };
       const res = await fetch('/api/keywords/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -233,7 +201,7 @@ export function DataQualitySubtab() {
     } finally {
       setGeneratingKeywords(false);
     }
-  }, [corpusId]);
+  }, [activeRepo]);
 
   const applyFilters = useCallback(() => {
     setExcludeDirs(parseList(excludeDirsDraft));
@@ -280,8 +248,8 @@ export function DataQualitySubtab() {
         <div style={{ fontWeight: 600, marginBottom: 10 }}>Corpus</div>
         <div className="input-row">
           <div className="input-group">
-            <label>Corpus ID</label>
-            <input value={corpusId} onChange={(e) => setCorpusId(e.target.value)} placeholder="tribrid" />
+            <label>Corpus</label>
+            <RepoSelectorCompact />
             <div style={{ fontSize: 12, color: 'var(--fg-muted)', marginTop: 6 }}>
               Use the same ID you used for Indexing.
             </div>
@@ -289,10 +257,10 @@ export function DataQualitySubtab() {
           <div className="input-group" />
         </div>
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-          <button className="small-button" onClick={() => void loadSummaries()} disabled={!corpusId.trim() || loadingSummaries}>
+          <button className="small-button" onClick={() => void loadSummaries()} disabled={!String(activeRepo || '').trim() || loadingSummaries}>
             {loadingSummaries ? 'Loading…' : 'Refresh chunk summaries'}
           </button>
-          <button className="small-button" onClick={() => void generateKeywords()} disabled={!corpusId.trim() || generatingKeywords}>
+          <button className="small-button" onClick={() => void generateKeywords()} disabled={!String(activeRepo || '').trim() || generatingKeywords}>
             {generatingKeywords ? 'Generating…' : 'Generate keywords'}
           </button>
         </div>
@@ -369,7 +337,11 @@ export function DataQualitySubtab() {
           <button className="small-button" onClick={applyFilters}>
             Save filters
           </button>
-          <button className="small-button" onClick={() => void buildSummaries()} disabled={!corpusId.trim() || buildingSummaries}>
+          <button
+            className="small-button"
+            onClick={() => void buildSummaries()}
+            disabled={!String(activeRepo || '').trim() || buildingSummaries}
+          >
             {buildingSummaries ? 'Building…' : 'Build chunk summaries'}
           </button>
         </div>

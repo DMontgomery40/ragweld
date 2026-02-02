@@ -33,7 +33,7 @@
         opt.textContent = repo.name;
         sel.appendChild(opt);
       });
-      sel.value = (config.env && config.env.REPO) || config.default_repo || 'agro';
+      sel.value = (config.env && config.env.REPO) || config.default_repo || 'auto';
     } catch(e){
       const msg = window.ErrorHelpers ? window.ErrorHelpers.createAlertError('Failed to load repositories', {
         message: e.message,
@@ -247,7 +247,7 @@
 
   async function startCardsBuild(){
     try{
-      const repo = $('cards-repo-select')?.value || 'agro';
+      const repo = $('cards-repo-select')?.value || 'auto';
       const enrich = $('cards-enrich-gui')?.checked ? 1 : 0;
       const excludeDirs = $('cards-exclude-dirs')?.value || '';
       const excludePatterns = $('cards-exclude-patterns')?.value || '';
@@ -292,7 +292,7 @@
           const finalData = JSON.parse(ev.data||'{}');
           showCompletionStatus(finalData);
           if (window.showStatus) window.showStatus('✓ Cards built successfully', 'success');
-          window.dispatchEvent(new Event('agro:cards:refresh'));
+          window.dispatchEvent(new Event('tribrid:cards:refresh'));
         });
         es.addEventListener('error', (_ev) => { console.log('[cards_builder] SSE error, falling back to polling'); });
         es.addEventListener('cancelled', (_ev) => {
@@ -309,7 +309,7 @@
             if ((s.status||'')==='done'){
               stopCardsStreams();
               showCompletionStatus(s);
-              window.dispatchEvent(new Event('agro:cards:refresh'));
+              window.dispatchEvent(new Event('tribrid:cards:refresh'));
               if (window.showStatus) window.showStatus('✓ Cards built successfully', 'success');
             }
             if ((s.status||'')==='error'){

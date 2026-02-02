@@ -38,6 +38,7 @@ ZERO_MOCK_ALLOWLIST = {
     ".tests/web/graph-visualization.spec.ts",
     ".tests/web/graph.spec.ts",
     ".tests/web/graphrag-ui.spec.ts",
+    ".tests/web/infrastructure-services-status.spec.ts",
     ".tests/web/rag-tab.spec.ts",
     ".tests/web/reranker-training.spec.ts",
     ".tests/web/stores-hooks.spec.ts",
@@ -147,6 +148,41 @@ def check_typescript_files() -> List[str]:
         except Exception as e:
             print(f"Warning: Could not read {ts_file}: {e}")
             continue
+
+        rel_path = _normalize_relpath(ts_file)
+        rel_norm = rel_path.replace("\\", "/")
+
+        # ---------------------------------------------------------------------
+        # Pydantic-first enforcement: do not import API payload types from @web/types
+        # ---------------------------------------------------------------------
+        if "/web/src/api/" in f"/{rel_norm}" or "/web/src/stores/" in f"/{rel_norm}":
+            # Allow UI-only modules (explicit allowlist).
+            allow_prefixes = (
+                "@web/types/storage",
+            )
+            for i, line in enumerate(content.split("\n"), 1):
+                if "@web/types" not in line:
+                    continue
+                m = re.search(r"from\s+['\"](@web/types(?:/[^'\"]+)?)['\"]", line)
+                if not m:
+                    continue
+                spec = m.group(1)
+                if any(spec == p or spec.startswith(p + "/") for p in allow_prefixes):
+                    continue
+                errors.append(
+                    f"{rel_path}:{i}: API types must be imported from types/generated.ts, not {spec}"
+                )
+
+        # ---------------------------------------------------------------------
+        # Prevent reintroducing hand-written API payload interfaces in api/services
+        # ---------------------------------------------------------------------
+        if "/web/src/api/" in f"/{rel_norm}" or "/web/src/services/" in f"/{rel_norm}":
+            for i, line in enumerate(content.split("\n"), 1):
+                if re.search(r"export\s+interface\s+\w+(Request|Response|Status)\b", line):
+                    errors.append(
+                        f"{rel_path}:{i}: Hand-written API interface found. "
+                        "Define it in Pydantic and import from types/generated.ts."
+                    )
 
         # Check for hand-written Config interfaces (should import from generated.ts)
         # Only flag in component files, not in hooks/stores/types directories

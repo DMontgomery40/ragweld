@@ -1,4 +1,4 @@
-// AGRO - System Status Subtab
+// TriBridRAG - System Status Subtab
 // Real-time system health, status, and quick overview
 
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
@@ -30,13 +30,16 @@ export function SystemStatusSubtab() {
   const reposLoading = useRepoStore((s) => s.loading);
   const loadRepos = useRepoStore((s) => s.loadRepos);
 
-  const corporaDisplay = useMemo(() => {
+  const corporaInfo = useMemo(() => {
     const count = Array.isArray(repos) ? repos.length : 0;
-    if (count <= 0) return 'No corpora';
     const found = repos.find((r) => r.corpus_id === activeRepo || r.slug === activeRepo || r.name === activeRepo);
-    const activeName = String(found?.name || activeRepo || '').trim() || '(unknown)';
-    const countLabel = count === 1 ? '1 corpus' : `${count} corpora`;
-    return `${activeName} (${countLabel})`;
+    const activeName = String(found?.name || activeRepo || '').trim() || '(none)';
+    const activeDisplay =
+      found && found.name && String(found.name).trim() && String(found.name).trim() !== String(activeRepo || '').trim()
+        ? `${found.name} (${activeRepo})`
+        : activeName;
+    const totalLabel = count === 1 ? '1 corpus' : `${count} corpora`;
+    return { count, totalLabel, activeDisplay };
   }, [repos, activeRepo]);
 
   // Dev Stack state from Zustand (Pydantic: DevStackStatusResponse)
@@ -85,7 +88,7 @@ export function SystemStatusSubtab() {
       // Health
       if (healthData.status === 'fulfilled') {
         const h = healthData.value;
-        setHealth(`${h.status}${h.graph_loaded ? ' (graph ready)' : ''}`);
+        setHealth(`${h.status}`);
       }
 
       if (indexData.status === 'fulfilled' && indexData.value.metadata) {
@@ -123,10 +126,10 @@ export function SystemStatusSubtab() {
       // Docker
       if (dockerData.status === 'fulfilled') {
         const d = dockerData.value;
-        if (d.available && d.containers) {
-          const managed = d.containers.filter((c) => c.agro_managed);
+        if (d.status.running) {
+          const managed = d.containers.filter((c) => c.tribrid_managed);
           const total = managed.length;
-          const running = managed.filter(c => c.state === 'running').length;
+          const running = managed.filter((c) => c.state === 'running').length;
           setContainers(`${running}/${total}`);
         } else {
           setContainers('unavailable');
@@ -214,11 +217,21 @@ export function SystemStatusSubtab() {
                 <StatusItem
                   label={
                     <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      Corpora <TooltipIcon name="SYS_STATUS_CORPUS" />
+                      Active corpus <TooltipIcon name="SYS_STATUS_CORPUS" />
                     </span>
                   }
-                  value={corporaDisplay}
-                  id="dash-corpora"
+                  value={corporaInfo.activeDisplay}
+                  id="dash-active-corpus"
+                  color="var(--fg)"
+                />
+                <StatusItem
+                  label={
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      Total corpora <TooltipIcon name="SYS_STATUS_CORPUS" />
+                    </span>
+                  }
+                  value={corporaInfo.totalLabel}
+                  id="dash-total-corpora"
                   color="var(--fg)"
                 />
 

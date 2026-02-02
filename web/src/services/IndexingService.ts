@@ -19,7 +19,7 @@ export interface IndexStats {
   current_repo?: string;
 }
 
-export interface IndexStatus {
+export type IndexStatus = {
   running: boolean;
   current_repo?: string;
   progress?: number;
@@ -61,7 +61,7 @@ export interface IndexStatus {
       embedding_cost: number;
     };
   };
-}
+};
 
 export interface IndexOptions {
   repo: string;

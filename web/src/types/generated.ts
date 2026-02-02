@@ -265,6 +265,30 @@ export interface DockerConfig {
   dev_stack_restart_timeout?: number; // default: 30
 }
 
+/** Normalized Docker container entry used by the Docker tab + dashboard. */
+export interface DockerContainer {
+  /** Full container ID. */
+  id: string;
+  /** Short container ID (first 12 chars). */
+  short_id: string;
+  /** Container name. */
+  name: string;
+  /** Container image reference. */
+  image: string;
+  /** Container state (lowercase, best-effort). */
+  state: string;
+  /** Human-readable docker status string. */
+  status: string;
+  /** Port mapping summary string (may be empty). */
+  ports?: string | null; // default: None
+  /** Docker Compose project label (if present). */
+  compose_project?: string | null; // default: None
+  /** Docker Compose service label (if present). */
+  compose_service?: string | null; // default: None
+  /** Whether this container belongs to the TriBrid dev stack. */
+  tribrid_managed?: boolean; // default: False
+}
+
 /** Embedding generation and caching configuration. */
 export interface EmbeddingConfig {
   /** Embedding provider (dynamic - validated against models.json at runtime) */
@@ -407,6 +431,16 @@ export interface EvaluationConfig {
   eval_dataset_path?: string; // default: "data/evaluation_dataset.json"
   /** Baseline results path */
   baseline_path?: string; // default: "data/evals/eval_baseline.json"
+  /** K used for recall_at_5 metric (default 5). */
+  recall_at_5_k?: number; // default: 5
+  /** K used for recall_at_10 metric (default 10). */
+  recall_at_10_k?: number; // default: 10
+  /** K used for recall_at_20 metric (default 20). */
+  recall_at_20_k?: number; // default: 20
+  /** K used for precision_at_5 metric (default 5). */
+  precision_at_5_k?: number; // default: 5
+  /** K used for ndcg_at_10 metric (default 10). */
+  ndcg_at_10_k?: number; // default: 10
   /** Multi-query variants for evaluation */
   eval_multi_m?: number; // default: 10
 }
@@ -479,8 +513,20 @@ export interface GraphIndexingConfig {
   store_chunk_embeddings?: boolean; // default: True
   /** Build semantic knowledge graph (concept entities + relations) linked to chunks during indexing */
   semantic_kg_enabled?: boolean; // default: False
+  /** Edge weight for AST containment relationships (module->class/function, class->method). */
+  ast_contains_weight?: number; // default: 1.0
+  /** Edge weight for AST inheritance relationships (class->base). */
+  ast_inherits_weight?: number; // default: 1.0
+  /** Edge weight for AST import relationships (module->imported_module). */
+  ast_imports_weight?: number; // default: 1.0
+  /** Edge weight for AST call relationships (function->callee). */
+  ast_calls_weight?: number; // default: 1.0
   /** Semantic KG extraction mode. 'heuristic' is deterministic and test-friendly; 'llm' uses an LLM to extract entities + relations. */
   semantic_kg_mode?: "heuristic" | "llm"; // default: "heuristic"
+  /** Edge weight for semantic concept relations in LLM mode. */
+  semantic_kg_relation_weight_llm?: number; // default: 0.7
+  /** Edge weight for semantic concept relations in heuristic fallback mode. */
+  semantic_kg_relation_weight_heuristic?: number; // default: 0.5
   /** Maximum semantic concepts to extract per chunk */
   semantic_kg_max_concepts_per_chunk?: number; // default: 8
   /** Minimum length for semantic concept tokens */
@@ -571,6 +617,14 @@ export interface GraphStorageConfig {
   relationship_types?: string[]; // default: ["calls", "imports", "inherits", "contains", "r...
   /** Number of results from graph traversal */
   graph_search_top_k?: number; // default: 30
+}
+
+/** Per-service status entry for /api/health. */
+export interface HealthServiceStatus {
+  /** Service health status label (e.g., up/unknown/down). */
+  status: string;
+  /** Optional error message if unhealthy/unreachable. */
+  error?: string | null; // default: None
 }
 
 /** Context hydration configuration. */
@@ -699,6 +753,18 @@ export interface MCPHTTPTransportStatus {
   path?: string | null; // default: None
   /** Whether the transport is reachable/responding. */
   running: boolean;
+}
+
+/** Compact result shape for legacy /api/mcp/rag_search (debug UI). */
+export interface MCPRagSearchResult {
+  /** Matched file path. */
+  file_path: string;
+  /** Start line for the matched span. */
+  start_line: number;
+  /** End line for the matched span. */
+  end_line: number;
+  /** Legacy field: score for the match (post-fusion). */
+  rerank_score: number;
 }
 
 /** Chat message in a conversation. */
@@ -1341,6 +1407,22 @@ export interface DevStackStatusResponse {
   details?: string[];
 }
 
+/** Response payload for /api/docker/containers (and /api/docker/containers/all). */
+export interface DockerContainersResponse {
+  /** List of Docker containers. */
+  containers?: DockerContainer[];
+}
+
+/** Response payload for /api/docker/status. */
+export interface DockerStatus {
+  /** Whether Docker is available and responding. */
+  running?: boolean;
+  /** Runtime label/version string (best-effort). */
+  runtime?: string;
+  /** Total number of containers (docker ps -aq). */
+  containers_count?: number;
+}
+
 /** Response for /eval/analyze_comparison. */
 export interface EvalAnalyzeComparisonResponse {
   /** Whether analysis succeeded */
@@ -1467,6 +1549,18 @@ export interface GraphNeighborsResponse {
   relationships: Relationship[];
 }
 
+/** System health status payload for /api/health. */
+export interface HealthStatus {
+  /** Overall health boolean. */
+  ok?: boolean;
+  /** Overall status label. */
+  status?: "healthy" | "unhealthy" | "unknown";
+  /** Timestamp for this health snapshot (UTC). */
+  ts?: string;
+  /** Map of service name -> status entry. */
+  services?: Record<string, HealthServiceStatus>;
+}
+
 /** Request to index a repository. */
 export interface IndexRequest {
   /** Corpus identifier */
@@ -1509,6 +1603,24 @@ export interface KeywordsGenerateResponse {
   keywords: string[];
   /** Number of keywords returned */
   count: number;
+}
+
+/** Response payload for /api/loki/status. */
+export interface LokiStatus {
+  /** Whether Loki is reachable. */
+  reachable?: boolean;
+  /** Resolved Loki base URL if reachable (best-effort). */
+  url?: string | null;
+  /** Human-readable status label (best-effort). */
+  status?: string;
+}
+
+/** Response payload for legacy /api/mcp/rag_search (debug UI). */
+export interface MCPRagSearchResponse {
+  /** Compact match list. */
+  results?: MCPRagSearchResult[];
+  /** Error message when the search fails. */
+  error?: string | null;
 }
 
 /** Status of MCP transports built into TriBridRAG. */

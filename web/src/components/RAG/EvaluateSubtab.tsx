@@ -5,6 +5,8 @@ import { EvalDrillDown } from '@/components/Evaluation/EvalDrillDown';
 import { LiveTerminal, LiveTerminalHandle } from '@/components/LiveTerminal/LiveTerminal';
 import { TerminalService } from '@/services/TerminalService';
 import type { EvalDatasetItem, EvalResult, EvalRun, EvalRunMeta, EvalRunsResponse, EvalTestRequest } from '@/types/generated';
+import { useActiveRepo } from '@/stores';
+import { RepoSelectorCompact } from '@/components/RAG/RepoSelector';
 
 // Recommended eval_dataset entries for the TriBridRAG codebase
 const RECOMMENDED_EVAL_DATASET: Array<Pick<EvalDatasetItem, 'question' | 'expected_paths'>> = [
@@ -30,13 +32,7 @@ const RECOMMENDED_EVAL_DATASET: Array<Pick<EvalDatasetItem, 'question' | 'expect
  */
 export function EvaluateSubtab() {
   const { api } = useAPI();
-  const [corpusId, setCorpusId] = useState<string>(() => {
-    return (
-      localStorage.getItem('tribrid_active_corpus') ||
-      localStorage.getItem('tribrid_active_repo') ||
-      'tribrid'
-    );
-  });
+  const activeRepo = useActiveRepo();
   const [evalDataset, setEvalDataset] = useState<EvalDatasetItem[]>([]);
   const [newEntry, setNewEntry] = useState({ question: '', paths: '', tags: '' });
   const [testResults, setTestResults] = useState<Record<string, EvalResult>>({});
@@ -157,29 +153,16 @@ export function EvaluateSubtab() {
     return res.json();
   }, [api]);
 
-  // Keep active corpus scoped across config + API helpers
+  // Reset run-scoped UI state when corpus changes
   useEffect(() => {
-    const next = corpusId.trim();
-    if (!next) return;
-    const prev =
-      localStorage.getItem('tribrid_active_corpus') || localStorage.getItem('tribrid_active_repo') || '';
-    if (prev !== next) {
-      localStorage.setItem('tribrid_active_corpus', next);
-      // Legacy key (kept for any older code paths)
-      localStorage.setItem('tribrid_active_repo', next);
-    }
-    try {
-      const url = new URL(window.location.href);
-      url.searchParams.set('corpus', next);
-      url.searchParams.delete('repo');
-      window.history.replaceState({}, '', url.toString());
-    } catch {
-      // ignore
-    }
-    window.dispatchEvent(new CustomEvent('tribrid-corpus-changed', { detail: { corpus: next, repo: next } }));
-    // Legacy event name (kept for any older listeners)
-    window.dispatchEvent(new CustomEvent('agro-repo-changed', { detail: { repo: next } }));
-  }, [corpusId]);
+    setSelectedRunId(null);
+    setCompareRunId(null);
+    setLatestRunId(null);
+    setEvalResults(null);
+    setShowDrillDown(false);
+    setTestResults({});
+    // (evalDataset will reload via effect below)
+  }, [activeRepo]);
 
   useEffect(() => {
     localStorage.setItem('eval_sampleSize', sampleSize);
@@ -202,7 +185,7 @@ export function EvaluateSubtab() {
      */
     const loadRuns = async () => {
       try {
-        const rid = corpusId.trim();
+        const rid = String(activeRepo || '').trim();
         if (!rid) return;
         const data: EvalRunsResponse = await fetchJson(`eval/runs?corpus_id=${encodeURIComponent(rid)}`);
         if (data.ok && data.runs) {
@@ -221,10 +204,10 @@ export function EvaluateSubtab() {
       }
     };
     loadRuns();
-  }, [fetchJson, selectedRunId, corpusId]);
+  }, [fetchJson, selectedRunId, activeRepo]);
 
   const loadEvalDataset = useCallback(async () => {
-    const rid = corpusId.trim();
+    const rid = String(activeRepo || '').trim();
     if (!rid) return;
     try {
       setLoading(true);
@@ -237,7 +220,7 @@ export function EvaluateSubtab() {
     } finally {
       setLoading(false);
     }
-  }, [corpusId, fetchJson]);
+  }, [activeRepo, fetchJson]);
 
   useEffect(() => {
     void loadEvalDataset();
@@ -258,9 +241,9 @@ export function EvaluateSubtab() {
    * ---/agentspec
    */
   const addEvalDatasetEntry = async () => {
-    const rid = corpusId.trim();
+    const rid = String(activeRepo || '').trim();
     if (!rid) {
-      alert('Please enter a corpus ID');
+      alert('Please select a corpus');
       return;
     }
     if (!newEntry.question.trim()) {
@@ -307,7 +290,7 @@ export function EvaluateSubtab() {
    * ---/agentspec
    */
   const testEntry = async (index: number) => {
-    const rid = corpusId.trim();
+    const rid = String(activeRepo || '').trim();
     const entry = evalDataset[index];
     if (!rid || !entry) return;
     try {
@@ -344,7 +327,7 @@ export function EvaluateSubtab() {
    * ---/agentspec
    */
   const deleteEntry = async (index: number) => {
-    const rid = corpusId.trim();
+    const rid = String(activeRepo || '').trim();
     const entry = evalDataset[index];
     if (!rid || !entry?.entry_id) return;
     if (!confirm('Delete this eval dataset entry?')) return;
@@ -376,9 +359,9 @@ export function EvaluateSubtab() {
    */
   const loadRecommendedQuestions = async () => {
     try {
-      const rid = corpusId.trim();
+      const rid = String(activeRepo || '').trim();
       if (!rid) {
-        alert('Please enter a corpus ID');
+        alert('Please select a corpus');
         return;
       }
       let added = 0;
@@ -414,9 +397,9 @@ export function EvaluateSubtab() {
    * ---/agentspec
    */
   const runAllTests = async () => {
-    const rid = corpusId.trim();
+    const rid = String(activeRepo || '').trim();
     if (!rid) {
-      alert('Please enter a corpus ID');
+      alert('Please select a corpus');
       return;
     }
     if (evalDataset.length === 0) {
@@ -479,9 +462,9 @@ export function EvaluateSubtab() {
    */
   const runFullEvaluation = async () => {
     if (evalRunning) return;
-    const rid = corpusId.trim();
+    const rid = String(activeRepo || '').trim();
     if (!rid) {
-      alert('Please enter a corpus ID');
+      alert('Please select a corpus');
       return;
     }
 
@@ -610,13 +593,8 @@ export function EvaluateSubtab() {
           <h4 style={{ fontSize: '13px', color: 'var(--accent)', marginBottom: '12px' }}>Add New Entry</h4>
 
           <div className="input-group" style={{ marginBottom: '12px' }}>
-            <label>Corpus ID</label>
-            <input
-              type="text"
-              value={corpusId}
-              onChange={(e) => setCorpusId(e.target.value)}
-              placeholder="e.g., tribrid"
-            />
+            <label>Corpus</label>
+            <RepoSelectorCompact />
           </div>
 
           <div className="input-group" style={{ marginBottom: '12px' }}>
@@ -682,7 +660,7 @@ export function EvaluateSubtab() {
                     </div>
                     <div style={{ fontSize: '11px', color: 'var(--fg-muted)' }}>
                       <span style={{ background: 'var(--bg-elev2)', padding: '2px 6px', borderRadius: '3px', marginRight: '6px' }}>
-                        {corpusId.trim() || 'corpus'}
+                        {String(activeRepo || '').trim() || 'corpus'}
                       </span>
                       {(entry.expected_paths || []).map(p => (
                         <span key={p} style={{ color: 'var(--accent)' }}>{p} </span>
