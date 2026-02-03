@@ -419,7 +419,7 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
   const [conversationId, setConversationId] = useState<string | null>(null);
   
   // Use centralized repo store for repo list and default
-  const { repos, loadRepos, initialized } = useRepoStore();
+  const { repos, loadRepos, initialized, activeRepo } = useRepoStore();
   
   // Check if index exists for "no index" warning
   const { status: embeddingStatus } = useEmbeddingStatus();
@@ -480,6 +480,11 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
     const openrouterDefault = config.chat?.openrouter?.default_model;
     const localDefault = config.chat?.local_models?.default_chat_model;
     const hasLocalOptions = chatModels.some((m) => m.source === 'local');
+    const openrouterDefaultTrimmed = typeof openrouterDefault === 'string' ? openrouterDefault.trim() : '';
+    const hasOpenrouterDefaultOption =
+      openrouterEnabled &&
+      !!openrouterDefaultTrimmed &&
+      chatModels.some((m) => m.source === 'openrouter' && String(m.id) === openrouterDefaultTrimmed);
 
     const uiDefault = typeof config.ui?.chat_default_model === 'string' ? config.ui.chat_default_model.trim() : '';
     const cloudDefaultOption = uiDefault
@@ -490,7 +495,7 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
       : undefined;
 
     const preferred =
-      (openrouterEnabled && typeof openrouterDefault === 'string' && openrouterDefault.trim()) ||
+      (hasOpenrouterDefaultOption ? `openrouter:${openrouterDefaultTrimmed}` : '') ||
       (hasLocalOptions && typeof localDefault === 'string' && localDefault.trim()
         ? `local:${localDefault.trim()}`
         : '') ||
@@ -616,7 +621,8 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
         { id: 'gpt-4o-mini', provider: 'OpenAI', source: 'cloud_direct' },
       ];
       try {
-        const r = await fetch(api('chat/models'));
+        const qs = activeRepo ? `?corpus_id=${encodeURIComponent(activeRepo)}` : '';
+        const r = await fetch(api(`chat/models${qs}`));
         if (!r.ok) {
           setChatModels(fallbackModels);
           return;
@@ -629,7 +635,14 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
         setChatModels(fallbackModels);
       }
     })();
-  }, [api]);
+  }, [
+    api,
+    activeRepo,
+    Boolean(config?.chat?.openrouter?.enabled),
+    Array.isArray(config?.chat?.local_models?.providers)
+      ? config!.chat!.local_models!.providers!.map((p) => `${p.enabled !== false}:${p.base_url}`).join('|')
+      : '',
+  ]);
 
   // Chat settings state (TriBridConfig-backed)
   const [streamPref, setStreamPref] = useState<boolean>(() => chatStreamingEnabled);
@@ -1956,50 +1969,6 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
                 color: 'var(--fg-muted)',
                 marginBottom: '4px'
               }}>
-                Model
-              </label>
-              {modelOptions.length > 0 ? (
-                <select
-                  value={chatModel}
-                  onChange={(e) => setChatModel(e.target.value)}
-                  style={{
-                    width: '100%',
-                    background: 'var(--input-bg)',
-                    border: '1px solid var(--line)',
-                    color: 'var(--fg)',
-                    padding: '6px 8px',
-                    borderRadius: '4px',
-                    fontSize: '12px'
-                  }}
-                >
-                  {modelOptions.map(m => (<option key={m} value={m}>{m}</option>))}
-                </select>
-              ) : (
-                <input
-                  type="text"
-                  value={chatModel}
-                  onChange={(e) => setChatModel(e.target.value)}
-                  style={{
-                    width: '100%',
-                    background: 'var(--input-bg)',
-                    border: '1px solid var(--line)',
-                    color: 'var(--fg)',
-                    padding: '6px 8px',
-                    borderRadius: '4px',
-                    fontSize: '12px'
-                  }}
-                />
-              )}
-            </div>
-
-            <div style={{ marginBottom: '16px' }}>
-              <label style={{
-                display: 'block',
-                fontSize: '11px',
-                fontWeight: '600',
-                color: 'var(--fg-muted)',
-                marginBottom: '4px'
-              }}>
                 Temperature: {temperature}
               </label>
               <input
@@ -2027,8 +1996,8 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
                 type="number"
                 value={maxTokens}
                 onChange={(e) => setMaxTokens(parseInt(e.target.value))}
-                min="1"
-                max="32000"
+                min="100"
+                max="16384"
                 style={{
                   width: '100%',
                   background: 'var(--input-bg)',
@@ -2038,27 +2007,6 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
                   borderRadius: '4px',
                   fontSize: '12px'
                 }}
-              />
-            </div>
-
-            <div style={{ marginBottom: '16px' }}>
-              <label style={{
-                display: 'block',
-                fontSize: '11px',
-                fontWeight: '600',
-                color: 'var(--fg-muted)',
-                marginBottom: '4px'
-              }}>
-                Top-p: {topP}
-              </label>
-              <input
-                type="range"
-                min="0"
-                max="1"
-                step="0.01"
-                value={topP}
-                onChange={(e) => setTopP(parseFloat(e.target.value))}
-                style={{ width: '100%' }}
               />
             </div>
 

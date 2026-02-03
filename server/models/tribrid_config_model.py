@@ -2530,7 +2530,7 @@ class RerankingConfig(BaseModel):
     """Reranking configuration for result refinement."""
 
     reranker_mode: str = Field(
-        default="local",
+        default="none",
         pattern="^(cloud|local|learning|none)$",
         description="Reranker mode: 'cloud' (Cohere/Voyage API), 'local' (HuggingFace cross-encoder), 'learning' (TRIBRID cross-encoder-tribrid), 'none' (disabled)"
     )
@@ -4299,7 +4299,7 @@ class TriBridConfig(BaseModel):
             ),
             reranking=RerankingConfig(
                 # Unified RERANKER_MODE with backwards compat fallback to old keys
-                reranker_mode=data.get('RERANKER_MODE') or data.get('RERANKER_ACTIVE') or data.get('RERANKER_BACKEND') or 'local',
+                reranker_mode=data.get('RERANKER_MODE') or data.get('RERANKER_ACTIVE') or data.get('RERANKER_BACKEND') or 'none',
                 reranker_cloud_provider=data.get('RERANKER_CLOUD_PROVIDER') or data.get('RERANKER_PROVIDER') or 'cohere',
                 reranker_cloud_model=data.get('RERANKER_CLOUD_MODEL') or data.get('COHERE_RERANK_MODEL') or 'rerank-v3.5',
                 reranker_local_model=data.get('RERANKER_LOCAL_MODEL') or data.get('RERANKER_MODEL') or 'cross-encoder/ms-marco-MiniLM-L-12-v2',

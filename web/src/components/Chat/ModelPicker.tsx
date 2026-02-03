@@ -15,7 +15,9 @@ const SOURCE_LABELS = {
 const SOURCE_ORDER = ['cloud_direct', 'openrouter', 'local'] as const;
 
 function toOptionValue(model: ChatModelInfo): string {
-  return model.source === 'local' ? `local:${model.id}` : model.id;
+  if (model.source === 'local') return `local:${model.id}`;
+  if (model.source === 'openrouter') return `openrouter:${model.id}`;
+  return model.id;
 }
 
 function toOptionLabel(model: ChatModelInfo): string {

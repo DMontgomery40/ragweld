@@ -1134,7 +1134,7 @@ export interface RerankerTrainRunSummary {
 /** Reranking configuration for result refinement. */
 export interface RerankingConfig {
   /** Reranker mode: 'cloud' (Cohere/Voyage API), 'local' (HuggingFace cross-encoder), 'learning' (TRIBRID cross-encoder-tribrid), 'none' (disabled) */
-  reranker_mode?: string; // default: "local"
+  reranker_mode?: string; // default: "none"
   /** Cloud reranker provider when mode=cloud (cohere, voyage, jina) */
   reranker_cloud_provider?: string; // default: "cohere"
   /** Cloud reranker model name when mode=cloud (Cohere: rerank-v3.5) */

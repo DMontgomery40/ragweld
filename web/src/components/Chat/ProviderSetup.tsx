@@ -128,7 +128,7 @@ export function ProviderSetup() {
                         );
                         setLocalModels({ ...(localModels || {}), providers: nextProviders });
                       }}
-                      placeholder="http://127.0.0.1:11434/v1"
+                      placeholder="http://127.0.0.1:11434"
                     />
                   </div>
                 </div>

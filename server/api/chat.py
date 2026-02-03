@@ -416,9 +416,20 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
 
 
 @router.get("/chat/models", response_model=ChatModelsResponse)
-async def list_chat_models() -> ChatModelsResponse:
+async def list_chat_models(
+    repo: str | None = Query(default=None, description="Optional corpus_id to scope provider config"),
+    corpus_id: str | None = Query(default=None, description="Alias for repo"),
+    repo_id: str | None = Query(default=None, description="Alias for corpus_id"),
+) -> ChatModelsResponse:
     """Return available chat models (cloud direct + OpenRouter + local)."""
-    cfg = get_config()
+    scope_id = (repo or corpus_id or repo_id or "").strip() or None
+    if _config is not None:
+        cfg = _config
+    else:
+        try:
+            cfg = await load_scoped_config(repo_id=scope_id) if scope_id else TriBridConfig()
+        except CorpusNotFoundError:
+            cfg = TriBridConfig()
 
     models: list[ChatModelInfo] = []
 
@@ -494,9 +505,20 @@ async def list_chat_models() -> ChatModelsResponse:
 
 
 @router.get("/chat/health", response_model=ProvidersHealthResponse)
-async def chat_health() -> ProvidersHealthResponse:
+async def chat_health(
+    repo: str | None = Query(default=None, description="Optional corpus_id to scope provider config"),
+    corpus_id: str | None = Query(default=None, description="Alias for repo"),
+    repo_id: str | None = Query(default=None, description="Alias for corpus_id"),
+) -> ProvidersHealthResponse:
     """Return health status for chat providers."""
-    cfg = get_config()
+    scope_id = (repo or corpus_id or repo_id or "").strip() or None
+    if _config is not None:
+        cfg = _config
+    else:
+        try:
+            cfg = await load_scoped_config(repo_id=scope_id) if scope_id else TriBridConfig()
+        except CorpusNotFoundError:
+            cfg = TriBridConfig()
     out: list[ProviderHealth] = []
 
     # OpenRouter
@@ -544,15 +566,19 @@ async def chat_health() -> ProvidersHealthResponse:
     for p in cfg.chat.local_models.providers:
         if not p.enabled:
             continue
+        base_url = str(p.base_url or "").rstrip("/")
+        # Be forgiving: some UIs/examples include a trailing /v1. Normalize to the provider root.
+        if base_url.endswith("/v1"):
+            base_url = base_url[: -len("/v1")]
         try:
             async with httpx.AsyncClient(timeout=1.5) as client:
-                r = await client.get(f"{p.base_url.rstrip('/')}/v1/models")
+                r = await client.get(f"{base_url}/v1/models")
                 ok = r.status_code < 400
             out.append(
                 ProviderHealth(
                     provider=p.name,
                     kind="local",
-                    base_url=p.base_url,
+                    base_url=base_url or p.base_url,
                     reachable=bool(ok),
                     detail=None if ok else f"HTTP {r.status_code}",
                 )
@@ -562,7 +588,7 @@ async def chat_health() -> ProvidersHealthResponse:
                 ProviderHealth(
                     provider=p.name,
                     kind="local",
-                    base_url=p.base_url,
+                    base_url=base_url or p.base_url,
                     reachable=False,
                     detail=str(e),
                 )

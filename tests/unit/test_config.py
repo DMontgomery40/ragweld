@@ -59,7 +59,7 @@ def test_tribrid_config_defaults() -> None:
     config = TriBridConfig()
     assert config.embedding.embedding_type == "openai"
     assert config.fusion.method == "rrf"
-    assert config.reranking.reranker_mode == "local"  # LAW default
+    assert config.reranking.reranker_mode == "none"  # LAW default
     assert config.chunking.chunking_strategy == "ast"
 
 
