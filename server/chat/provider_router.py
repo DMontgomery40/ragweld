@@ -14,6 +14,10 @@ from server.models.chat_config import ChatConfig
 
 _OPENAI_DEFAULT_BASE_URL = "https://api.openai.com/v1"
 
+def _normalize_local_base_url(url: str) -> str:
+    u = (url or "").strip().rstrip("/")
+    return u[: -len("/v1")] if u.endswith("/v1") else u
+
 
 @dataclass(frozen=True, slots=True)
 class ProviderRoute:
@@ -72,7 +76,7 @@ def select_provider_route(*, chat_config: ChatConfig, model_override: str = "") 
         return ProviderRoute(
             kind="local",
             provider_name=chosen.name,
-            base_url=chosen.base_url,
+            base_url=_normalize_local_base_url(chosen.base_url),
             model=model,
             api_key=None,
         )
@@ -144,7 +148,7 @@ def select_provider_route(*, chat_config: ChatConfig, model_override: str = "") 
         return ProviderRoute(
             kind="local",
             provider_name=chosen.name,
-            base_url=chosen.base_url,
+            base_url=_normalize_local_base_url(chosen.base_url),
             model=model,
             api_key=None,
         )

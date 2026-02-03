@@ -12,6 +12,19 @@ def _norm_base_url(url: str) -> str:
     return (url or "").strip().rstrip("/")
 
 
+def _norm_local_base_url(url: str) -> str:
+    """Normalize a local provider base URL to the provider root.
+
+    Many OpenAI-compatible servers are documented with a trailing `/v1`.
+    Our config expects the provider root (we append `/v1/...` internally), so
+    strip a trailing `/v1` to avoid double-prefix paths like `/v1/v1/models`.
+    """
+    u = _norm_base_url(url)
+    if u.endswith("/v1"):
+        u = u[: -len("/v1")]
+    return u
+
+
 async def discover_local_models(providers: list[LocalProviderEntry]) -> list[dict[str, Any]]:
     """Best-effort discovery of models from enabled local providers.
 
@@ -30,7 +43,7 @@ async def discover_local_models(providers: list[LocalProviderEntry]) -> list[dic
             if not getattr(provider, "enabled", True):
                 continue
 
-            base_url = _norm_base_url(getattr(provider, "base_url", ""))
+            base_url = _norm_local_base_url(getattr(provider, "base_url", ""))
             if not base_url:
                 continue
 

@@ -204,7 +204,7 @@
     "top_k": 30
   },
   "reranking": {
-    "reranker_mode": "local",
+    "reranker_mode": "none",
     "reranker_cloud_provider": "cohere",
     "reranker_cloud_model": "rerank-v3.5",
     "reranker_local_model": "cross-encoder/ms-marco-MiniLM-L-12-v2",

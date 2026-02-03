@@ -7,7 +7,7 @@ from server.db.neo4j import Neo4jClient
 from server.db.postgres import PostgresClient
 from server.indexing.embedder import Embedder
 from server.models.retrieval import ChunkMatch
-from server.models.tribrid_config_model import FusionConfig
+from server.models.tribrid_config_model import FusionConfig, RerankingConfig
 from server.observability.metrics import (
     GRAPH_LEG_LATENCY_SECONDS,
     SEARCH_GRAPH_HYDRATED_CHUNKS_COUNT,
@@ -18,6 +18,7 @@ from server.observability.metrics import (
     SPARSE_LEG_LATENCY_SECONDS,
     VECTOR_LEG_LATENCY_SECONDS,
 )
+from server.retrieval.rerank import Reranker
 from server.services.config_store import get_config as load_scoped_config
 
 if TYPE_CHECKING:
@@ -72,7 +73,9 @@ class TriBridFusion:
             SEARCH_RESULTS_FINAL_COUNT.observe(0)
             return []
 
-        async def _search_single_corpus(cid: str) -> tuple[list[ChunkMatch], list[ChunkMatch], list[ChunkMatch], dict[str, Any], int]:
+        async def _search_single_corpus(
+            cid: str,
+        ) -> tuple[list[ChunkMatch], list[ChunkMatch], list[ChunkMatch], dict[str, Any], int, RerankingConfig, str]:
             cfg = await load_scoped_config(repo_id=cid)
 
             # Use real storage backends per corpus config.
@@ -268,7 +271,15 @@ class TriBridFusion:
             for r in sparse_results:
                 r.metadata = {**(r.metadata or {}), "corpus_id": cid}
 
-            return vector_results, sparse_results, graph_results, debug, int(cfg.retrieval.final_k)
+            return (
+                vector_results,
+                sparse_results,
+                graph_results,
+                debug,
+                int(cfg.retrieval.final_k),
+                cfg.reranking,
+                str(cfg.training.tribrid_reranker_model_path or ""),
+            )
 
         # Run per-corpus retrieval and collect lists for fusion.
         per_corpus_debug: dict[str, Any] = {}
@@ -276,6 +287,9 @@ class TriBridFusion:
         sparse_lists: list[list[ChunkMatch]] = []
         graph_lists: list[list[ChunkMatch]] = []
         final_k_candidates: list[int] = []
+        reranking_cfg: RerankingConfig | None = None
+        trained_model_path: str | None = None
+        rerank_config_corpus_id: str | None = None
 
         total_vector = 0
         total_sparse = 0
@@ -289,12 +303,16 @@ class TriBridFusion:
         graph_errors: list[dict[str, str]] = []
 
         for cid in corpus_ids:
-            v, s, g, dbg, final_k_default = await _search_single_corpus(cid)
+            v, s, g, dbg, final_k_default, rerank_cfg, train_path = await _search_single_corpus(cid)
             per_corpus_debug[cid] = dbg
             vector_lists.append(v)
             sparse_lists.append(s)
             graph_lists.append(g)
             final_k_candidates.append(int(final_k_default))
+            if reranking_cfg is None:
+                reranking_cfg = rerank_cfg
+                trained_model_path = str(train_path or "").strip() or None
+                rerank_config_corpus_id = cid
 
             total_vector += len(v)
             total_sparse += len(s)
@@ -376,6 +394,39 @@ class TriBridFusion:
                     [v_all, s_all, g_all],
                     weights=[config.vector_weight, config.sparse_weight, config.graph_weight],
                 )
+
+        # Optional reranking stage (best-effort; never fails the search).
+        rerank_ok = True
+        rerank_error: str | None = None
+        rerank_mode = ""
+        if reranking_cfg is not None:
+            try:
+                rerank_mode = str(getattr(reranking_cfg, "reranker_mode", "") or "").strip().lower()
+            except Exception:
+                rerank_mode = ""
+
+        if results and reranking_cfg is not None and rerank_mode and rerank_mode != "none":
+            try:
+                with SEARCH_STAGE_LATENCY_SECONDS.labels(stage="rerank").time():
+                    reranker = Reranker(reranking_cfg, trained_model_path=trained_model_path)
+                    rr = await reranker.try_rerank(query, results)
+                    results = rr.chunks
+                    rerank_ok = bool(rr.ok)
+                    rerank_error = rr.error
+            except Exception as e:
+                rerank_ok = False
+                rerank_error = str(e)
+                SEARCH_STAGE_ERRORS_TOTAL.labels(stage="rerank").inc()
+
+        debug.update(
+            {
+                "rerank_enabled": bool(rerank_mode and rerank_mode != "none"),
+                "rerank_mode": rerank_mode or "none",
+                "rerank_ok": bool(rerank_ok),
+                "rerank_error": rerank_error,
+                "rerank_config_corpus_id": rerank_config_corpus_id,
+            }
+        )
 
         # Apply final_k cap (caller can override with top_k)
         final_k_default = max(final_k_candidates) if final_k_candidates else 0
