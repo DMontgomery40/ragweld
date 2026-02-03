@@ -512,10 +512,8 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
   const [lastRecallPlan, setLastRecallPlan] = useState<RecallPlan | null>(null);
 
   // Quick settings (also editable in Chat Settings subtab)
-  const [chatModel, setChatModel] = useConfigField<string>('ui.chat_default_model', 'gpt-4o-mini');
-  const [temperature, setTemperature] = useConfigField<number>('generation.gen_temperature', 0.0);
-  const [maxTokens, setMaxTokens] = useConfigField<number>('generation.gen_max_tokens', 2048);
-  const [topP, setTopP] = useConfigField<number>('generation.gen_top_p', 1.0);
+  const [temperature, setTemperature] = useConfigField<number>('chat.temperature', 0.3);
+  const [maxTokens, setMaxTokens] = useConfigField<number>('chat.max_tokens', 4096);
   const [topK, setTopK] = useConfigField<number>('retrieval.final_k', 10);
 
   const [tracePreference, setTracePreference] = useState<boolean>(() => {
@@ -639,7 +637,6 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
   const [showCitations, setShowCitations] = useState<boolean>(() => chatShowCitations);
   const [showDebugFooter, setShowDebugFooter] = useState<boolean>(() => chatShowDebugFooter);
   const traceRef = useRef<TraceStep[]>([]);
-  const [modelOptions, setModelOptions] = useState<string[]>([]);
   const [fastMode, setFastMode] = useState<boolean>(() => {
     const params = new URLSearchParams(window.location.search || '');
     return params.get('fast') === '1' || params.get('smoke') === '1';
@@ -674,23 +671,6 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
     const effectiveOpen = source === 'response' ? (open && tracePreference) : open;
     onTraceUpdate?.(steps, effectiveOpen, source);
   }, [onTraceUpdate, tracePreference]);
-
-  // Load model options (backend discovery)
-  useEffect(() => {
-    (async () => {
-      try {
-        const p = await fetch(api('/api/models'));
-        if (p.ok) {
-          const d = await p.json();
-          const list = (d.models || [])
-            .filter((m: any) => (m && (String(m.unit || '').toLowerCase() === '1k_tokens')))
-            .map((m: any) => String(m.model || '').trim())
-            .filter(Boolean);
-          setModelOptions(Array.from(new Set(list)));
-        }
-      } catch {}
-    })();
-  }, [api]);
 
   // Load repositories via store (once on mount if not initialized)
   useEffect(() => {

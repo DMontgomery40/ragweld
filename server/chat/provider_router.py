@@ -34,7 +34,7 @@ def select_provider_route(*, chat_config: ChatConfig, model_override: str = "") 
     """Select the provider route for a chat request.
 
     Selection order:
-    1) OpenRouter when `OPENROUTER_API_KEY` is set.
+    1) OpenRouter when enabled AND `OPENROUTER_API_KEY` is set.
     2) Local provider with lowest priority (tie-break by name) when any enabled.
     3) Fallback to cloud-direct (currently: OpenAI via OPENAI_API_KEY).
 
@@ -60,9 +60,7 @@ def select_provider_route(*, chat_config: ChatConfig, model_override: str = "") 
             override_model = rest.strip()
 
     enabled_local = [p for p in chat_config.local_models.providers if p.enabled]
-    # Note: OpenRouter API key is env-backed; treat key presence as "ready" even if
-    # config.chat.openrouter.enabled is false so chat can work out-of-the-box in dev.
-    openrouter_ready = bool(openrouter_api_key)
+    openrouter_ready = bool(chat_config.openrouter.enabled and openrouter_api_key)
     openai_ready = bool(openai_api_key)
 
     # Force local when requested.

@@ -427,8 +427,8 @@ async def list_chat_models() -> ChatModelsResponse:
     cloud_direct_ready: set[str] = set()
     openai_api_key = (os.getenv("OPENAI_API_KEY") or "").strip()
     openrouter_api_key = (os.getenv("OPENROUTER_API_KEY") or "").strip()
-    # OpenAI models are usable either via direct OpenAI OR via OpenRouter proxy.
-    if openai_api_key or openrouter_api_key:
+    # OpenAI models are usable either via direct OpenAI OR via OpenRouter proxy (when enabled).
+    if openai_api_key or (bool(cfg.chat.openrouter.enabled) and openrouter_api_key):
         cloud_direct_ready.add("openai")
     openai_base_url = (os.getenv("OPENAI_BASE_URL") or "").strip() or "https://api.openai.com/v1"
 
