@@ -29,8 +29,8 @@ import { useAPI } from './useAPI';
  * ---/agentspec
  */
 export function useMCPRag() {
-  const { apiBase } = useAPI();
-  const service = useMemo(() => new MCPRagService(apiBase), [apiBase]);
+  const { api } = useAPI();
+  const service = useMemo(() => new MCPRagService(api), [api]);
 
   const [isSearching, setIsSearching] = useState(false);
   const [results, setResults] = useState<MCPRagResult[]>([]);

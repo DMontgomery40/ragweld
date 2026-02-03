@@ -3,6 +3,8 @@
 import pytest
 from httpx import AsyncClient
 
+from server.models.tribrid_config_model import TriBridConfig
+
 
 @pytest.mark.asyncio
 async def test_get_config(client: AsyncClient) -> None:
@@ -21,7 +23,7 @@ async def test_get_config(client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
-async def test_update_config(client: AsyncClient, test_config) -> None:
+async def test_update_config(client: AsyncClient, test_config: TriBridConfig) -> None:
     """Test PUT /api/config endpoint."""
     response = await client.put("/api/config", json=test_config.model_dump())
     assert response.status_code == 200
@@ -62,7 +64,7 @@ async def test_get_config_unknown_corpus_does_not_autocreate(client: AsyncClient
     """GET /api/config for an unknown corpus must 404 and must not create a corpus row."""
     before = await client.get("/api/corpora")
     assert before.status_code == 200
-    before_ids = {c.get("repo_id") for c in before.json() if isinstance(c, dict)}
+    before_ids = {c.get("corpus_id") for c in before.json() if isinstance(c, dict)}
 
     missing_id = "does_not_exist_corpus__should_404"
     resp = await client.get("/api/config", params={"corpus_id": missing_id})
@@ -70,7 +72,7 @@ async def test_get_config_unknown_corpus_does_not_autocreate(client: AsyncClient
 
     after = await client.get("/api/corpora")
     assert after.status_code == 200
-    after_ids = {c.get("repo_id") for c in after.json() if isinstance(c, dict)}
+    after_ids = {c.get("corpus_id") for c in after.json() if isinstance(c, dict)}
 
     assert missing_id not in after_ids
     assert after_ids == before_ids

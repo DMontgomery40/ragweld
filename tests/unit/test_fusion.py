@@ -80,6 +80,82 @@ def test_weighted_fusion_normalization() -> None:
 
 
 @pytest.mark.asyncio
+async def test_search_empty_corpus_ids_returns_empty() -> None:
+    """Multi-corpus search should return empty list for empty corpus_ids."""
+    from server.models.tribrid_config_model import FusionConfig
+
+    fusion = TriBridFusion(vector=None, sparse=None, graph=None)
+    out = await fusion.search(
+        corpus_ids=[],
+        query="foo",
+        config=FusionConfig(),
+        include_vector=True,
+        include_sparse=True,
+        include_graph=False,
+        top_k=5,
+    )
+    assert out == []
+
+
+@pytest.mark.asyncio
+async def test_search_multiple_corpora_dedupes_by_corpus_and_chunk_id(monkeypatch) -> None:
+    """Same chunk_id in different corpora must not collide in fusion."""
+    import server.retrieval.fusion as fusion_mod
+    from server.models.tribrid_config_model import FusionConfig, TriBridConfig
+
+    class _FakePostgres:
+        def __init__(self, *_args, **_kwargs) -> None:
+            pass
+
+        async def connect(self) -> None:
+            return None
+
+        async def vector_search(self, repo_id: str, _embedding: list[float], top_k: int):
+            _ = top_k
+            return [
+                ChunkMatch(
+                    chunk_id="c1",
+                    content=f"content-{repo_id}",
+                    file_path=f"{repo_id}.txt",
+                    start_line=1,
+                    end_line=1,
+                    language=None,
+                    score=0.9,
+                    source="vector",
+                    metadata={},
+                )
+            ]
+
+    async def _fake_load_scoped_config(*, repo_id: str | None = None) -> TriBridConfig:
+        _ = repo_id
+        cfg = TriBridConfig()
+        cfg.vector_search.enabled = 1
+        cfg.sparse_search.enabled = 0
+        cfg.graph_search.enabled = 0
+        cfg.vector_search.top_k = 5
+        cfg.retrieval.final_k = 10
+        return cfg
+
+    monkeypatch.setattr(fusion_mod, "PostgresClient", _FakePostgres, raising=True)
+    monkeypatch.setattr(fusion_mod, "load_scoped_config", _fake_load_scoped_config, raising=True)
+
+    fusion = TriBridFusion(vector=None, sparse=None, graph=None)
+    out = await fusion.search(
+        corpus_ids=["a", "b"],
+        query="foo",
+        config=FusionConfig(method="rrf", rrf_k=60),
+        include_vector=True,
+        include_sparse=False,
+        include_graph=False,
+        top_k=5,
+    )
+
+    assert len(out) == 2
+    assert {c.content for c in out} == {"content-a", "content-b"}
+    assert {str((c.metadata or {}).get("corpus_id")) for c in out} == {"a", "b"}
+
+
+@pytest.mark.asyncio
 async def test_search_graph_leg_records_error_in_debug(monkeypatch) -> None:
     """Graph leg failures should be visible in fusion.last_debug (no silent swallow)."""
     import server.retrieval.fusion as fusion_mod
@@ -120,7 +196,7 @@ async def test_search_graph_leg_records_error_in_debug(monkeypatch) -> None:
 
     fusion = TriBridFusion(vector=None, sparse=None, graph=None)
     out = await fusion.search(
-        corpus_id="test-corpus",
+        corpus_ids=["test-corpus"],
         query="foo",
         config=FusionConfig(),
         include_vector=False,
@@ -227,7 +303,7 @@ async def test_search_graph_chunk_mode_hydrates_by_chunk_id(monkeypatch) -> None
 
     fusion = TriBridFusion(vector=None, sparse=None, graph=None)
     out = await fusion.search(
-        corpus_id="test-corpus",
+        corpus_ids=["test-corpus"],
         query="foo",
         config=FusionConfig(),
         include_vector=False,
@@ -333,7 +409,7 @@ async def test_search_graph_chunk_mode_entity_expansion_adds_chunks(monkeypatch)
 
     fusion = TriBridFusion(vector=None, sparse=None, graph=None)
     out = await fusion.search(
-        corpus_id="test-corpus",
+        corpus_ids=["test-corpus"],
         query="foo",
         config=FusionConfig(),
         include_vector=False,
@@ -410,7 +486,7 @@ async def test_search_graph_entity_mode_hydrates_by_chunk_id(monkeypatch) -> Non
 
     fusion = TriBridFusion(vector=None, sparse=None, graph=None)
     out = await fusion.search(
-        corpus_id="test-corpus",
+        corpus_ids=["test-corpus"],
         query="foo",
         config=FusionConfig(),
         include_vector=False,

@@ -14,6 +14,7 @@ class Conversation:
     id: str
     messages: list[Message] = field(default_factory=list)
     last_provider_response_id: str | None = None
+    last_recall_had_results: bool = True
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 

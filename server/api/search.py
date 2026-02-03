@@ -39,7 +39,7 @@ async def search(request: SearchRequest) -> SearchResponse:
 
     t0 = time.perf_counter()
     matches = await fusion.search(
-        request.repo_id,
+        [request.repo_id],
         request.query,
         cfg.fusion,
         include_vector=bool(request.include_vector),

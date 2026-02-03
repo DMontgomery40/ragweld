@@ -144,8 +144,8 @@ async def test_search_accepts_corpus_id_without_postgres(client: AsyncClient, mo
 
     expected_corpus_id = "test-corpus"
 
-    async def _fake_fusion_search(self, repo_id: str, query: str, *_args, **_kwargs):
-        assert repo_id == expected_corpus_id
+    async def _fake_fusion_search(self, corpus_ids: list[str], query: str, *_args, **_kwargs):
+        assert corpus_ids == [expected_corpus_id]
         assert query == "hello"
         return [
             ChunkMatch(
@@ -210,8 +210,8 @@ async def test_search_accepts_repo_id_without_postgres(client: AsyncClient, monk
 
     expected_repo_id = "legacy-repo"
 
-    async def _fake_fusion_search(self, repo_id: str, query: str, *_args, **_kwargs):
-        assert repo_id == expected_repo_id
+    async def _fake_fusion_search(self, corpus_ids: list[str], query: str, *_args, **_kwargs):
+        assert corpus_ids == [expected_repo_id]
         assert query == "legacy"
         return [
             ChunkMatch(

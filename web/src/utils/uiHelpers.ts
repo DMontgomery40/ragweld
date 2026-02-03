@@ -45,31 +45,6 @@ function bindCollapsibleSections(): void {
     });
   });
 
-  // Theme selectors (topbar + misc) -> live apply + sync
-  const selTop = $('#theme-mode') as HTMLSelectElement | null;
-  const selMisc = $('#misc-theme-mode') as HTMLSelectElement | null;
-
-  // Restore theme from store
-  const currentTheme = store.themeMode;
-  if (selTop) selTop.value = currentTheme;
-  if (selMisc) selMisc.value = currentTheme;
-
-  function onThemeChange(src: HTMLSelectElement): void {
-    const v = src.value as 'auto' | 'dark' | 'light';
-    if (selTop && selTop !== src) selTop.value = v;
-    if (selMisc && selMisc !== src) selMisc.value = v;
-
-    // Update Zustand store
-    useUIStore.getState().setThemeMode(v);
-
-    // Call legacy theme apply if available
-    if (typeof (window as any).Theme?.applyTheme === 'function') {
-      (window as any).Theme.applyTheme(v);
-    }
-  }
-
-  if (selTop) selTop.addEventListener('change', () => onThemeChange(selTop));
-  if (selMisc) selMisc.addEventListener('change', () => onThemeChange(selMisc));
 }
 
 // ---------------- Resizable Sidepanel ----------------
@@ -115,12 +90,6 @@ function bindResizableSidepanel(): void {
         ? savedWidth
         : UI_CONSTANTS.DEFAULT_SIDEPANEL_WIDTH;
     applyWidth(initialWidth);
-
-    // Export reset function for use in other modules/tests
-    (window as any).resetSidepanelWidth = function() {
-      applyWidth(UI_CONSTANTS.DEFAULT_SIDEPANEL_WIDTH);
-      console.log('Sidepanel width reset to default');
-    };
 
     let isDragging = false;
     let activePointerId: number | null = null;
@@ -297,9 +266,3 @@ export const UiHelpers = {
   attachCommaFormatting,
   wireDayConverters
 };
-
-// Expose on window for legacy JS modules (app.js, etc.)
-if (typeof window !== 'undefined') {
-  (window as any).UiHelpers = UiHelpers;
-  console.log('[UiHelpers] Loaded from TypeScript (Zustand-backed)');
-}

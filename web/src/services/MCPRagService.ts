@@ -11,10 +11,10 @@ export type MCPRagResult = MCPRagSearchResult;
 export type MCPRagResponse = MCPRagSearchResponse;
 
 export class MCPRagService {
-  private apiBase: string;
+  private api: (path: string) => string;
 
-  constructor(apiBase: string) {
-    this.apiBase = apiBase;
+  constructor(api: (path: string) => string) {
+    this.api = api;
   }
 
   /**
@@ -38,7 +38,7 @@ export class MCPRagService {
       params.set('repo', options.repo);
     }
 
-    const response = await fetch(`${this.apiBase}/api/mcp/rag_search?${params.toString()}`);
+    const response = await fetch(this.api(`/mcp/rag_search?${params.toString()}`));
 
     if (!response.ok) {
       throw new Error('MCP RAG search failed');

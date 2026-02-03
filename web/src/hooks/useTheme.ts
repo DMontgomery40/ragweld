@@ -90,11 +90,6 @@ export function useTheme() {
       localStorage.setItem('THEME_MODE', newMode);
       setTheme(newMode);
       applyThemeToDocument(newMode);
-
-      // Expose to window for backwards compatibility during migration
-      if ((window as any).Theme) {
-        (window as any).Theme.currentMode = newMode;
-      }
     } catch (e) {
       console.warn('[useTheme] Failed to save theme:', e);
     }
@@ -107,31 +102,6 @@ export function useTheme() {
     applyTheme(next);
   }, [theme, applyTheme]);
 
-  // Initialize theme from config/localStorage - called by legacy config.js
-  const initThemeFromEnv = useCallback((env?: { THEME_MODE?: ThemeMode }) => {
-    try {
-      const saved = localStorage.getItem('THEME_MODE') as ThemeMode | null;
-      const configMode = env?.THEME_MODE;
-      const mode = saved || configMode || 'auto';
-
-      setTheme(mode);
-      applyThemeToDocument(mode);
-
-      // Sync with UIStore
-      useUIStore.getState().setThemeMode(mode);
-
-      // Update selectors if present
-      const selTop = document.querySelector('#theme-mode') as HTMLSelectElement | null;
-      const selMisc = document.querySelector('#misc-theme-mode') as HTMLSelectElement | null;
-      if (selTop) selTop.value = mode;
-      if (selMisc) selMisc.value = mode;
-
-      console.log('[useTheme] Initialized from config with mode:', mode);
-    } catch (e) {
-      console.warn('[useTheme] Failed to initialize from config:', e);
-    }
-  }, [applyThemeToDocument]);
-
   // Initialize theme on mount
   useEffect(() => {
     try {
@@ -143,20 +113,11 @@ export function useTheme() {
       setTheme(mode);
       applyThemeToDocument(mode);
 
-      // Expose to window for backwards compatibility with legacy modules
-      (window as any).Theme = {
-        resolveTheme,
-        applyTheme,
-        toggleTheme,
-        initThemeFromEnv,
-        currentMode: mode
-      };
-
       console.log('[useTheme] Initialized with mode:', mode);
     } catch (e) {
       console.warn('[useTheme] Failed to initialize:', e);
     }
-  }, [applyThemeToDocument, resolveTheme, applyTheme, toggleTheme, initThemeFromEnv]);
+  }, [applyThemeToDocument]);
 
   // React to system preference changes when in auto mode
   useEffect(() => {

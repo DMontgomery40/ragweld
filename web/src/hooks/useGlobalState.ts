@@ -17,8 +17,8 @@ export function useGlobalState() {
   // Derive state from Zustand stores
   const state = {
     config: config || null,
-    models: null, // models are loaded via useAppInit into legacy window.CoreUtils.state during transition
-    profiles: [], // Profiles managed by legacy modules during transition
+    models: null,
+    profiles: [],
     defaultProfile: null,
     hwScan: null,
     keywords: null,
@@ -28,16 +28,12 @@ export function useGlobalState() {
   };
 
   const updateState = useCallback((updates: Record<string, unknown>) => {
-    // During transition, also update legacy window.CoreUtils.state if it exists
-    const w = window as any;
-    if (w.CoreUtils?.state) {
-      Object.assign(w.CoreUtils.state, updates);
-      window.dispatchEvent(new CustomEvent('tribrid-state-update', { detail: updates }));
-    }
-
     // Note: Most updates should go through individual Zustand stores
     // This is a fallback for legacy code paths
     console.warn('[useGlobalState] updateState called - use individual Zustand stores instead');
+    try {
+      window.dispatchEvent(new CustomEvent('tribrid-state-update', { detail: updates }));
+    } catch {}
   }, []);
 
   const getState = useCallback((key: string) => {

@@ -1,9 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useTooltips } from '@/hooks/useTooltips';
 
-interface TooltipIconProps {
+type TooltipIconProps = {
   name: string;
-}
+};
 
 /**
  * TooltipIcon - Renders a help icon with tooltip bubble
@@ -12,13 +12,13 @@ interface TooltipIconProps {
  * Renders proper DOM structure for tooltip display with hover/click behavior.
  */
 export function TooltipIcon({ name }: TooltipIconProps) {
-  const { tooltips } = useTooltips();
+  const { getTooltip } = useTooltips();
   const [visible, setVisible] = useState(false);
   const wrapRef = useRef<HTMLSpanElement>(null);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Get tooltip HTML content
-  const content = tooltips[name] || `<span class="tt-title">${name}</span><div>No tooltip available.</div>`;
+  const content = getTooltip(name) || `<span class="tt-title">${name}</span><div>No tooltip available.</div>`;
 
   // Render tooltip content safely (no dangerouslySetInnerHTML)
   const renderNodes = (nodes: NodeListOf<ChildNode>): React.ReactNode[] => {

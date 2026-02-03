@@ -1,11 +1,11 @@
 // TriBridRAG - MCP Subtab
 // Status + guidance for inbound MCP transports (stdio now; HTTP later).
 
-import { useEffect, useMemo, useState } from 'react';
-import { apiUrl } from '@/api/client';
+import { useMemo, useState } from 'react';
 import { TooltipIcon } from '@/components/ui/TooltipIcon';
 import { StatusIndicator } from '@/components/ui/StatusIndicator';
-import type { MCPHTTPTransportStatus, MCPStatusResponse } from '@/types/generated';
+import type { MCPHTTPTransportStatus } from '@/types/generated';
+import { useMCPServer } from '@/hooks/useMCPServer';
 
 type TransportRow = {
   key: string;
@@ -24,29 +24,13 @@ function buildHttpSummary(t: MCPHTTPTransportStatus): { summary: string; href: s
 }
 
 export function MCPSubtab() {
-  const [status, setStatus] = useState<MCPStatusResponse | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
-
-  const refresh = async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await fetch(apiUrl('/mcp/status'));
-      if (!res.ok) {
-        const text = await res.text().catch(() => '');
-        throw new Error(text || `Failed to fetch MCP status (HTTP ${res.status})`);
-      }
-      const data: MCPStatusResponse = await res.json();
-      setStatus(data);
-      setLastUpdated(new Date());
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-      setStatus(null);
-    } finally {
-      setLoading(false);
-    }
+  const { status, httpStatus, stdioTestResult, loading, error, refresh, startHttp, stopHttp, restartHttp, testStdio } = useMCPServer();
+ 
+  // Keep a human timestamp in this component for UX
+  const refreshAndStamp = async () => {
+    await refresh();
+    setLastUpdated(new Date());
   };
 
   const rows: TransportRow[] = useMemo(() => {
@@ -100,13 +84,6 @@ export function MCPSubtab() {
 
     return out;
   }, [status, loading]);
-
-  useEffect(() => {
-    refresh();
-    const interval = setInterval(() => refresh(), 30000);
-    return () => clearInterval(interval);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   return (
     <div style={{ padding: '24px' }}>
@@ -187,7 +164,7 @@ export function MCPSubtab() {
         <button
           type="button"
           className="small-button"
-          onClick={refresh}
+          onClick={() => void refreshAndStamp()}
           disabled={loading}
           style={{
             background: 'var(--accent)',
@@ -231,6 +208,77 @@ export function MCPSubtab() {
           {status.details.map((d, idx) => `${idx + 1}. ${d}`).join('\n')}
         </div>
       )}
+
+      <div style={{ marginTop: '22px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+        <div
+          style={{
+            background: 'var(--bg-elev1)',
+            border: '1px solid var(--line)',
+            borderRadius: '8px',
+            padding: '14px',
+          }}
+        >
+          <div style={{ fontSize: '13px', fontWeight: 800, color: 'var(--fg)', marginBottom: '8px' }}>
+            MCP HTTP server controls
+          </div>
+          <div style={{ fontSize: '12px', color: 'var(--fg-muted)', marginBottom: '10px' }}>
+            Start/stop the embedded Streamable HTTP transport (if compiled in).
+          </div>
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+            <button className="small-button" onClick={() => void startHttp()} disabled={loading} style={{ background: 'var(--accent)', color: 'var(--accent-contrast)', fontWeight: 700 }}>
+              Start
+            </button>
+            <button className="small-button" onClick={() => void stopHttp()} disabled={loading} style={{ background: 'transparent', border: '1px solid var(--err)', color: 'var(--err)', fontWeight: 700 }}>
+              Stop
+            </button>
+            <button className="small-button" onClick={() => void restartHttp()} disabled={loading} style={{ background: 'var(--bg-elev2)', border: '1px solid var(--line)', color: 'var(--fg)', fontWeight: 700 }}>
+              Restart
+            </button>
+            <button className="small-button" onClick={() => void refreshAndStamp()} disabled={loading} style={{ background: 'transparent', border: '1px solid var(--line)', color: 'var(--fg-muted)', fontWeight: 700 }}>
+              Check
+            </button>
+          </div>
+          <div style={{ marginTop: '10px', fontSize: '12px', color: 'var(--fg-muted)', fontFamily: 'var(--font-mono)', whiteSpace: 'pre-wrap' }}>
+            {httpStatus
+              ? `${httpStatus.running ? '✓ running' : '✗ stopped'} • ${String(httpStatus.host || '0.0.0.0')}:${String(httpStatus.port || '—')}${String(httpStatus.path || '')}`
+              : 'HTTP status unavailable'}
+          </div>
+        </div>
+
+        <div
+          style={{
+            background: 'var(--bg-elev1)',
+            border: '1px solid var(--line)',
+            borderRadius: '8px',
+            padding: '14px',
+          }}
+        >
+          <div style={{ fontSize: '13px', fontWeight: 800, color: 'var(--fg)', marginBottom: '8px' }}>
+            stdio MCP test
+          </div>
+          <div style={{ fontSize: '12px', color: 'var(--fg-muted)', marginBottom: '10px' }}>
+            Verifies the stdio runtime can spawn and list tools.
+          </div>
+          <button className="small-button" onClick={() => void testStdio()} disabled={loading} style={{ background: 'var(--link)', color: 'var(--accent-contrast)', fontWeight: 700 }}>
+            {loading ? 'Testing…' : 'Run test'}
+          </button>
+          <pre
+            style={{
+              marginTop: '10px',
+              background: 'var(--code-bg)',
+              border: '1px solid var(--line)',
+              borderRadius: '8px',
+              padding: '12px',
+              fontSize: '11px',
+              color: 'var(--fg)',
+              whiteSpace: 'pre-wrap',
+              minHeight: '74px',
+            }}
+          >
+            {stdioTestResult ? JSON.stringify(stdioTestResult, null, 2) : '—'}
+          </pre>
+        </div>
+      </div>
     </div>
   );
 }

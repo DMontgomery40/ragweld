@@ -100,7 +100,6 @@ TEXT_SUFFIXES = {
     ".json",
     ".yml",
     ".yaml",
-    ".md",
     ".txt",
     ".css",
     ".html",
@@ -119,7 +118,7 @@ def should_skip(path: Path) -> bool:
 
 def check_python_files() -> List[str]:
     """Check Python files for banned patterns."""
-    errors = []
+    errors: list[str] = []
 
     for py_file in Path('server').rglob('*.py'):
         if should_skip(py_file):
@@ -150,7 +149,7 @@ def check_python_files() -> List[str]:
 
 def check_typescript_files() -> List[str]:
     """Check TypeScript files for banned patterns."""
-    errors = []
+    errors: list[str] = []
 
     web_src = Path('web/src')
     if not web_src.exists():

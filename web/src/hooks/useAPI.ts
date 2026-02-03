@@ -87,7 +87,6 @@ export function useAPI() {
   useEffect(() => {
     const next = resolveAPIBase();
     if (next !== apiBase) setApiBase(next);
-    try { (window as any).API_BASE = next; } catch {}
     console.log('[useAPI] API base configured:', next);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

@@ -49,11 +49,13 @@ class MockFusion:
 
     def __init__(self, chunks: list[ChunkMatch]):
         self.chunks = chunks
-        self.search_calls: list[tuple[str, str, FusionConfig, bool, bool, bool, int | None]] = []
+        self.search_calls: list[
+            tuple[list[str], str, FusionConfig, bool, bool, bool, int | None]
+        ] = []
 
     async def search(
         self,
-        repo_id: str,
+        corpus_ids: list[str],
         query: str,
         config: FusionConfig,
         *,
@@ -62,7 +64,9 @@ class MockFusion:
         include_graph: bool = True,
         top_k: int | None = None,
     ) -> list[ChunkMatch]:
-        self.search_calls.append((repo_id, query, config, include_vector, include_sparse, include_graph, top_k))
+        self.search_calls.append(
+            (list(corpus_ids), query, config, include_vector, include_sparse, include_graph, top_k)
+        )
         return self.chunks
 
 
@@ -240,12 +244,14 @@ class TestChatEndpointWithMockedLLM:
     @pytest.mark.asyncio
     async def test_chat_creates_conversation(self, chat_client: AsyncClient):
         """Test that chat creates a new conversation when none provided."""
-        with patch("server.api.chat.generate_response") as mock_gen:
-            mock_gen.return_value = ("Test response", [], "resp_123")
+        with patch(
+            "server.chat.handler.generate_chat_text",
+            new=AsyncMock(return_value=("Test response", "resp_123")),
+        ):
 
             response = await chat_client.post(
                 "/api/chat",
-                json={"message": "Hello", "repo_id": "test-repo"},
+                json={"message": "Hello", "sources": {"corpus_ids": []}},
             )
 
             assert response.status_code == 200
@@ -264,14 +270,16 @@ class TestChatEndpointWithMockedLLM:
         store = get_conversation_store()
         store.get_or_create("existing-conv")
 
-        with patch("server.api.chat.generate_response") as mock_gen:
-            mock_gen.return_value = ("Response 1", [], "resp_1")
+        with patch(
+            "server.chat.handler.generate_chat_text",
+            new=AsyncMock(return_value=("Response 1", "resp_1")),
+        ):
 
             response = await chat_client.post(
                 "/api/chat",
                 json={
                     "message": "Hello",
-                    "repo_id": "test-repo",
+                    "sources": {"corpus_ids": []},
                     "conversation_id": "existing-conv",
                 },
             )
@@ -282,12 +290,14 @@ class TestChatEndpointWithMockedLLM:
     @pytest.mark.asyncio
     async def test_chat_stores_messages(self, chat_client: AsyncClient):
         """Test that chat stores user and assistant messages."""
-        with patch("server.api.chat.generate_response") as mock_gen:
-            mock_gen.return_value = ("Assistant says hi", [], "resp_456")
+        with patch(
+            "server.chat.handler.generate_chat_text",
+            new=AsyncMock(return_value=("Assistant says hi", "resp_456")),
+        ):
 
             response = await chat_client.post(
                 "/api/chat",
-                json={"message": "User says hello", "repo_id": "test-repo"},
+                json={"message": "User says hello", "sources": {"corpus_ids": []}},
             )
 
             conv_id = response.json()["conversation_id"]
@@ -303,12 +313,14 @@ class TestChatEndpointWithMockedLLM:
     @pytest.mark.asyncio
     async def test_chat_returns_sources(self, chat_client: AsyncClient, mock_chunks: list[ChunkMatch]):
         """Test that chat returns sources from retrieval."""
-        with patch("server.api.chat.generate_response") as mock_gen:
-            mock_gen.return_value = ("Response with sources", mock_chunks, "resp_789")
+        with patch(
+            "server.chat.handler.generate_chat_text",
+            new=AsyncMock(return_value=("Response with sources", "resp_789")),
+        ):
 
             response = await chat_client.post(
                 "/api/chat",
-                json={"message": "How does X work?", "repo_id": "test-repo"},
+                json={"message": "How does X work?", "sources": {"corpus_ids": ["test-repo"]}},
             )
 
             assert response.status_code == 200
@@ -319,12 +331,14 @@ class TestChatEndpointWithMockedLLM:
     @pytest.mark.asyncio
     async def test_chat_handles_error(self, chat_client: AsyncClient):
         """Test that chat handles errors gracefully."""
-        with patch("server.api.chat.generate_response") as mock_gen:
-            mock_gen.side_effect = Exception("LLM unavailable")
+        with patch(
+            "server.chat.handler.generate_chat_text",
+            new=AsyncMock(side_effect=Exception("LLM unavailable")),
+        ):
 
             response = await chat_client.post(
                 "/api/chat",
-                json={"message": "Hello", "repo_id": "test-repo"},
+                json={"message": "Hello", "sources": {"corpus_ids": []}},
             )
 
             assert response.status_code == 500
@@ -338,15 +352,15 @@ class TestStreamEndpoint:
     async def test_stream_returns_sse(self, chat_client: AsyncClient):
         """Test that stream endpoint returns SSE format."""
 
-        async def mock_stream(*args, **kwargs):
-            yield 'data: {"type": "text", "content": "Hello"}\n\n'
-            yield 'data: {"type": "text", "content": " world"}\n\n'
-            yield 'data: {"type": "done", "sources": []}\n\n'
+        async def mock_stream_chat_text(*args, **kwargs):
+            _ = (args, kwargs)
+            yield "Hello"
+            yield " world"
 
-        with patch("server.api.chat.stream_response", mock_stream):
+        with patch("server.chat.handler.stream_chat_text", new=mock_stream_chat_text):
             response = await chat_client.post(
                 "/api/chat/stream",
-                json={"message": "Test", "repo_id": "test-repo"},
+                json={"message": "Test", "sources": {"corpus_ids": []}},
             )
 
             assert response.status_code == 200
@@ -356,15 +370,17 @@ class TestStreamEndpoint:
     async def test_stream_stores_user_message(self, chat_client: AsyncClient):
         """Test that streaming stores user message before streaming."""
 
-        async def mock_stream(*args, **kwargs):
-            yield 'data: {"type": "done", "sources": []}\n\n'
+        async def mock_stream_chat_text(*args, **kwargs):
+            _ = (args, kwargs)
+            if False:  # pragma: no cover
+                yield ""
 
-        with patch("server.api.chat.stream_response", mock_stream):
+        with patch("server.chat.handler.stream_chat_text", new=mock_stream_chat_text):
             response = await chat_client.post(
                 "/api/chat/stream",
                 json={
                     "message": "Stream test message",
-                    "repo_id": "test-repo",
+                    "sources": {"corpus_ids": []},
                     "conversation_id": "stream-conv",
                 },
             )
@@ -373,7 +389,7 @@ class TestStreamEndpoint:
 
             store = get_conversation_store()
             messages = store.get_messages("stream-conv")
-            assert len(messages) == 1
+            assert len(messages) == 2
             assert messages[0].content == "Stream test message"
             assert messages[0].role == "user"
 
@@ -389,27 +405,22 @@ class TestChatCitationsRealPipeline:
     async def test_chat_collects_sources_and_passes_leg_toggles(
         self, chat_client: AsyncClient, mock_fusion: MockFusion, monkeypatch
     ):
-        from pydantic_ai.models.test import TestModel
+        _ = monkeypatch
 
-        import server.services.rag as rag_service
-
-        monkeypatch.setattr(
-            rag_service,
-            "_resolve_chat_model",
-            lambda _cfg: TestModel(call_tools="all", custom_output_text="Assistant says hi"),
-            raising=True,
-        )
-
-        response = await chat_client.post(
-            "/api/chat",
-            json={
-                "message": "Where is config persistence implemented?",
-                "repo_id": "test-repo",
-                "include_vector": False,
-                "include_sparse": True,
-                "include_graph": False,
-            },
-        )
+        with patch(
+            "server.chat.handler.generate_chat_text",
+            new=AsyncMock(return_value=("Assistant says hi", "resp_test")),
+        ):
+            response = await chat_client.post(
+                "/api/chat",
+                json={
+                    "message": "Where is config persistence implemented?",
+                    "sources": {"corpus_ids": ["test-repo"]},
+                    "include_vector": False,
+                    "include_sparse": True,
+                    "include_graph": False,
+                },
+            )
 
         assert response.status_code == 200
         data = response.json()
@@ -422,7 +433,7 @@ class TestChatCitationsRealPipeline:
 
         # Ensure per-message leg toggles are propagated to fusion.search
         assert mock_fusion.search_calls, "Expected fusion.search to be called"
-        (_repo_id, _query, _cfg, include_vector, include_sparse, include_graph, _top_k) = mock_fusion.search_calls[-1]
+        (_corpus_ids, _query, _cfg, include_vector, include_sparse, include_graph, _top_k) = mock_fusion.search_calls[-1]
         assert include_vector is False
         assert include_sparse is True
         assert include_graph is False
@@ -431,25 +442,21 @@ class TestChatCitationsRealPipeline:
     async def test_stream_done_includes_conversation_id_and_sources(
         self, chat_client: AsyncClient, monkeypatch
     ):
-        from pydantic_ai.models.test import TestModel
+        _ = monkeypatch
 
-        import server.services.rag as rag_service
-
-        monkeypatch.setattr(
-            rag_service,
-            "_resolve_chat_model",
-            lambda _cfg: TestModel(call_tools="all", custom_output_text="Streamed response"),
-            raising=True,
-        )
-
-        payload = {"message": "Test", "repo_id": "test-repo", "conversation_id": "stream-conv-2"}
+        payload = {"message": "Test", "sources": {"corpus_ids": ["test-repo"]}, "conversation_id": "stream-conv-2"}
 
         body = ""
-        async with chat_client.stream("POST", "/api/chat/stream", json=payload) as resp:
-            assert resp.status_code == 200
-            assert resp.headers["content-type"].startswith("text/event-stream")
-            async for chunk in resp.aiter_text():
-                body += chunk
+        async def mock_stream_chat_text(*args, **kwargs):
+            _ = (args, kwargs)
+            yield "Streamed response"
+
+        with patch("server.chat.handler.stream_chat_text", new=mock_stream_chat_text):
+            async with chat_client.stream("POST", "/api/chat/stream", json=payload) as resp:
+                assert resp.status_code == 200
+                assert resp.headers["content-type"].startswith("text/event-stream")
+                async for chunk in resp.aiter_text():
+                    body += chunk
 
         # Parse SSE events and locate the done event
         done: dict | None = None
@@ -488,12 +495,14 @@ class TestTraceEndpoint:
 
     @pytest.mark.asyncio
     async def test_traces_latest_by_run_id(self, chat_client: AsyncClient):
-        with patch("server.api.chat.generate_response") as mock_gen:
-            mock_gen.return_value = ("Trace response", [], "resp_trace")
+        with patch(
+            "server.chat.handler.generate_chat_text",
+            new=AsyncMock(return_value=("Trace response", "resp_trace")),
+        ):
 
             resp = await chat_client.post(
                 "/api/chat",
-                json={"message": "Hello", "repo_id": "test-repo"},
+                json={"message": "Hello", "sources": {"corpus_ids": []}},
             )
             assert resp.status_code == 200
             run_id = resp.json().get("run_id")

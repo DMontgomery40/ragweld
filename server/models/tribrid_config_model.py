@@ -16,6 +16,7 @@ from __future__ import annotations
 import re
 import uuid
 from datetime import UTC, datetime
+from enum import Enum
 from typing import Any, Literal
 
 try:
@@ -43,6 +44,7 @@ class Chunk(BaseModel):
     token_count: int = Field(default=0, description="Token count for embedding budget")
     embedding: list[float] | None = Field(default=None, description="Vector embedding")
     summary: str | None = Field(default=None, description="AI-generated chunk summary")
+    metadata: dict[str, Any] = Field(default_factory=dict, description="Arbitrary chunk metadata")
 
 
 class IndexRequest(BaseModel):
@@ -715,19 +717,287 @@ class Message(BaseModel):
     )
 
 
+class ActiveSources(BaseModel):
+    """What the user has checked in the data sources dropdown.
+
+    This is what the frontend sends. The backend passes corpus_ids straight into fusion.
+    """
+
+    corpus_ids: list[str] = Field(
+        default_factory=list,
+        description="Checked corpus IDs (include recall_default when Recall is checked). Empty = no retrieval.",
+    )
+
+
+class RecallIntensity(str, Enum):
+    """How aggressively to query Recall (chat memory) for a single message.
+
+    NOTE:
+    - This is an optimization hint decided per-message (or overridden by the user).
+    - It only applies to the Recall corpus. Non-Recall RAG corpora are always queried when checked.
+    """
+
+    skip = "skip"
+    light = "light"
+    standard = "standard"
+    deep = "deep"
+
+
+class RecallSignals(BaseModel):
+    """Signals extracted from the user's message + conversation context.
+
+    Used by the Recall gate to decide Recall intensity. Exposed in debug metadata.
+    All fields are cheap to compute (no LLM calls, no embeddings).
+    """
+
+    token_count: int = Field(description="Approximate token count of message")
+    is_question: bool = Field(description="Contains ? or interrogative pattern")
+    is_greeting: bool = Field(description="Matches greeting/farewell patterns")
+    is_acknowledgment: bool = Field(description="'ok', 'thanks', 'got it', etc.")
+    is_follow_up: bool = Field(
+        description="Continuation of prior topic — short message after retrieval-backed reply"
+    )
+    is_recall_trigger: bool = Field(
+        description=(
+            "Explicit past reference: 'we discussed', 'you mentioned', 'last time', "
+            "'remember when', 'as I said before'"
+        )
+    )
+    has_definite_article: bool = Field(
+        description="'the function', 'the bug', 'the config' — assumes shared context"
+    )
+    is_standalone_question: bool = Field(
+        description=(
+            "Question that makes sense without conversation history "
+            "(code/concept questions vs 'what did we decide?')"
+        )
+    )
+    conversation_turn: int = Field(description="0-indexed user turn number in current conversation")
+    last_recall_had_results: bool = Field(
+        default=True,
+        description="Did the previous message's Recall query return >0 chunks?",
+    )
+    rag_corpora_active: bool = Field(description="Are any non-Recall corpora checked?")
+
+
+class RecallFusionOverrides(BaseModel):
+    """Per-message overrides applied when querying Recall.
+
+    The gate generates these. They do not permanently change config.
+    They are applied only for this single Recall query.
+    """
+
+    include_vector: bool | None = Field(
+        default=None,
+        description="Override vector leg. None=use request/default.",
+    )
+    include_sparse: bool | None = Field(
+        default=None,
+        description="Override sparse leg. None=use request/default.",
+    )
+    top_k: int | None = Field(
+        default=None,
+        ge=1,
+        le=50,
+        description=(
+            "Override final_k for the Recall query. Lower than RAG since "
+            "chat chunks are smaller."
+        ),
+    )
+    enable_rerank: bool | None = Field(
+        default=None,
+        description="Override reranker for Recall. None=use config default.",
+    )
+    recency_weight: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description="How much to weight recent messages over relevance (0=relevance, 1=recency).",
+    )
+
+
+class RecallPlan(BaseModel):
+    """The gate's decision for whether/how to query Recall for a single message."""
+
+    intensity: RecallIntensity = Field(description="How aggressively to query Recall.")
+    fusion_overrides: RecallFusionOverrides = Field(
+        default_factory=RecallFusionOverrides,
+        description="Per-message parameter patches for Recall query.",
+    )
+    signals: RecallSignals = Field(description="Signals that drove this decision.")
+    reason: str = Field(
+        description=(
+            "Human-readable explanation for the decision. "
+            "E.g., 'Greeting — skipping Recall' or 'Past reference — querying Recall'"
+        )
+    )
+    user_override: bool = Field(
+        default=False,
+        description="True if the user manually overrode intensity for this message.",
+    )
+
+
+class RecallGateConfig(BaseModel):
+    """Configuration for the Recall gate. Lives at ChatConfig.recall_gate.
+
+    Controls the heuristic that decides per-message Recall behavior.
+    NOTE: This only affects Recall (chat memory). RAG corpora are always queried when checked.
+    """
+
+    enabled: bool = Field(
+        default=True,
+        description="Enable smart gating. False=always query Recall when checked.",
+    )
+
+    default_intensity: RecallIntensity = Field(
+        default=RecallIntensity.standard,
+        description="Fallback when classifier is uncertain.",
+    )
+
+    # Skip thresholds
+    skip_greetings: bool = Field(
+        default=True,
+        description="Skip Recall for greetings, farewells, acknowledgments.",
+    )
+    skip_standalone_questions: bool = Field(
+        default=True,
+        description=(
+            "Skip Recall for questions that don't reference past context. "
+            "'How does auth work?' doesn't need chat history."
+        ),
+    )
+    skip_when_rag_active: bool = Field(
+        default=False,
+        description=(
+            "Skip Recall when RAG corpora are checked. Assumes user wants code context, not chat history. "
+            "Default False — let both contribute."
+        ),
+    )
+    skip_max_tokens: int = Field(
+        default=4,
+        ge=1,
+        le=20,
+        description="Messages with ≤ this many tokens are skip candidates (only if they match a skip pattern).",
+    )
+
+    # Light triggers
+    light_for_short_questions: bool = Field(
+        default=True,
+        description="Use sparse-only for short questions (< 10 tokens) without explicit recall triggers.",
+    )
+    light_top_k: int = Field(
+        default=3,
+        ge=1,
+        le=10,
+        description="top_k when intensity=light.",
+    )
+
+    # Standard defaults
+    standard_top_k: int = Field(
+        default=5,
+        ge=1,
+        le=20,
+        description="top_k for standard Recall queries.",
+    )
+    standard_recency_weight: float = Field(
+        default=0.3,
+        ge=0.0,
+        le=1.0,
+        description="Default recency weight for Recall (recent messages often more relevant).",
+    )
+
+    # Deep triggers
+    deep_on_explicit_reference: bool = Field(
+        default=True,
+        description="Trigger deep when message explicitly references past conversation.",
+    )
+    deep_top_k: int = Field(
+        default=10,
+        ge=3,
+        le=30,
+        description="top_k when intensity=deep.",
+    )
+    deep_recency_weight: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        description="recency_weight for deep (higher when user explicitly asks about the past).",
+    )
+
+    # Transparency
+    show_gate_decision: bool = Field(
+        default=True,
+        description="Show gate decision (intensity, reason) in status bar.",
+    )
+    show_signals: bool = Field(
+        default=False,
+        description="Show raw RecallSignals in debug footer (dev mode).",
+    )
+
+
+class ImageAttachment(BaseModel):
+    """Single image attached to a chat message.
+
+    Exactly ONE of `url` or `base64` must be provided.
+    """
+
+    url: str | None = Field(default=None, description="Remote URL")
+    base64: str | None = Field(
+        default=None,
+        description="Base64 data URI (no data: prefix required)",
+    )
+    mime_type: str = Field(default="image/png", description="MIME type (e.g., image/png)")
+
+    @model_validator(mode="after")
+    def _check_source(self) -> Self:
+        if not self.url and not self.base64:
+            raise ValueError("Must provide either url or base64")
+        if self.url and self.base64:
+            raise ValueError("Provide only one of url or base64")
+        return self
+
+
 class ChatRequest(BaseModel):
-    """Request payload for chat endpoint."""
+    """Chat request — composable data sources, not modes."""
+
     message: str = Field(description="User's message")
+
     repo_id: str = Field(
+        default="",
         description="Corpus identifier",
         validation_alias=AliasChoices("repo_id", "corpus_id"),
         serialization_alias="corpus_id",
     )
+
+    sources: ActiveSources = Field(
+        default_factory=ActiveSources,
+        description=(
+            "Checked sources. Empty corpus_ids = no retrieval. If recall_default is not present, "
+            "Recall is OFF for both retrieval and indexing."
+        ),
+    )
+
+    recall_intensity: RecallIntensity | None = Field(
+        default=None,
+        description=(
+            "User override for Recall (chat memory) query intensity. None=auto (gate decides). "
+            "Does not affect RAG corpus queries."
+        ),
+    )
+
     conversation_id: str | None = Field(default=None, description="Continue existing conversation")
     stream: bool = Field(default=False, description="Stream the response")
+    images: list[ImageAttachment] = Field(
+        default_factory=list,
+        description="Optional images for vision (max 5)",
+    )
+    model_override: str = Field(default="", description="Override chat model for this request (empty=default)")
     include_vector: bool = Field(default=True, description="Include vector retrieval results")
     include_sparse: bool = Field(default=True, description="Include sparse/BM25 retrieval results")
-    include_graph: bool = Field(default=True, description="Include graph retrieval results")
+    include_graph: bool = Field(
+        default=False,
+        description="Advanced. Graph leg runs per-corpus; Recall only if ChatConfig.recall.graph_enabled.",
+    )
     top_k: int | None = Field(
         default=None,
         ge=1,
@@ -744,6 +1014,13 @@ class ChatDebugInfo(BaseModel):
         ge=0.0,
         le=1.0,
         description="Heuristic confidence score for this answer (0-1).",
+    )
+
+    recall_plan: RecallPlan | None = Field(
+        default=None,
+        description=(
+            "Recall gate decision for this message (Recall only; RAG corpora are always queried when checked)."
+        ),
     )
 
     # Per-message leg toggles (what user requested)
@@ -835,6 +1112,64 @@ class ChatResponse(BaseModel):
     message: Message = Field(description="Assistant's response message")
     sources: list[ChunkMatch] = Field(description="Sources used for response")
     tokens_used: int = Field(description="Tokens consumed")
+
+
+class ChatModelInfo(BaseModel):
+    """Single chat model option resolved from providers."""
+
+    id: str = Field(description="Model identifier")
+    provider: str = Field(description="Provider display name (e.g., OpenRouter, Ollama)")
+    source: Literal["cloud_direct", "openrouter", "local"] = Field(
+        description="Model source group for UI grouping."
+    )
+    provider_type: str | None = Field(default=None, description="Provider type (ollama, llamacpp, openrouter, etc)")
+    base_url: str | None = Field(default=None, description="Provider base URL (local/openrouter)")
+    supports_vision: bool = Field(default=False, description="Whether this model is expected to support vision inputs")
+
+
+class ChatModelsResponse(BaseModel):
+    """Response payload for GET /api/chat/models."""
+
+    models: list[ChatModelInfo] = Field(default_factory=list)
+
+
+class ProviderHealth(BaseModel):
+    """Health status for a configured provider endpoint."""
+
+    provider: str = Field(description="Provider display name")
+    kind: Literal["openrouter", "local"] = Field(description="Provider kind")
+    base_url: str = Field(description="Provider base URL")
+    reachable: bool = Field(description="Whether the provider endpoint is reachable")
+    detail: str | None = Field(default=None, description="Optional detail/error message")
+
+
+class ProvidersHealthResponse(BaseModel):
+    """Response payload for GET /api/chat/health."""
+
+    providers: list[ProviderHealth] = Field(default_factory=list)
+
+
+class RecallIndexRequest(BaseModel):
+    """Request payload for POST /api/recall/index."""
+
+    conversation_id: str = Field(description="Conversation identifier to index into Recall")
+
+
+class RecallIndexResponse(BaseModel):
+    """Response payload for POST /api/recall/index."""
+
+    ok: bool = Field(description="Whether indexing was triggered")
+    conversation_id: str = Field(description="Conversation identifier")
+    chunks_indexed: int = Field(default=0, ge=0, description="Number of chunks indexed into Recall")
+
+
+class RecallStatusResponse(BaseModel):
+    """Response payload for GET /api/recall/status."""
+
+    enabled: bool = Field(description="Whether Recall is enabled")
+    corpus_id: str = Field(description="Recall corpus id (default recall_default)")
+    exists: bool = Field(description="Whether the Recall corpus exists in Postgres")
+    chunk_count: int = Field(default=0, ge=0, description="Approximate number of chunks stored for Recall")
 
 
 class Entity(BaseModel):
@@ -3235,6 +3570,308 @@ class DockerConfig(BaseModel):
     )
 
 
+class ChatRerankerConfig(BaseModel):
+    """Chat-specific reranker.
+
+    Separate from RAG reranker because:
+    - Shorter passages (conversation turns, not code blocks)
+    - Recency bias (recent messages matter more)
+    - Lower latency tolerance (chat feels slow >500ms)
+    """
+
+    mode: str = Field(
+        default="local",
+        pattern="^(cloud|local|none)$",
+        description="Chat reranker mode.",
+    )
+    local_model: str = Field(
+        default="cross-encoder/ms-marco-MiniLM-L-6-v2",
+        description="Local cross-encoder. L-6 not L-12 — faster for chat.",
+    )
+    cloud_provider: str = Field(default="cohere")
+    cloud_model: str = Field(default="rerank-v3.5")
+    top_n: int = Field(default=20, ge=5, le=100)
+    recency_weight: float = Field(
+        default=0.3,
+        ge=0.0,
+        le=1.0,
+        description="Blend weight for recency. 0=pure relevance, 1=pure recency.",
+    )
+    max_age_hours: int = Field(
+        default=0,
+        ge=0,
+        description="Only retrieve messages from last N hours. 0=no limit.",
+    )
+
+
+class RecallConfig(BaseModel):
+    """Persistent chat memory. ON by default.
+
+    Indexes every conversation into a lightweight pgvector corpus.
+    Self-hosted, local, zero privacy risk, negligible storage.
+    """
+
+    enabled: bool = Field(default=True, description="Enable Recall. ON by default.")
+    vector_backend: str = Field(
+        default="pgvector",
+        pattern="^(pgvector|neo4j)$",
+        description="pgvector recommended (already running).",
+    )
+    auto_index: bool = Field(default=True)
+    index_delay_seconds: int = Field(default=5, ge=1, le=60)
+    chunking_strategy: str = Field(
+        default="sentence",
+        pattern="^(sentence|paragraph|turn|fixed)$",
+        description="'turn'=one chunk per message, 'sentence'=split by sentence.",
+    )
+    chunk_max_tokens: int = Field(
+        default=256,
+        ge=64,
+        le=1024,
+        description="Chat chunks should be smaller than code chunks.",
+    )
+    embedding_model: str = Field(
+        default="",
+        description="Override embedding model. Empty=use global config.",
+    )
+    max_history_tokens: int = Field(default=4096, ge=512, le=32768)
+    default_corpus_id: str = Field(
+        default="recall_default",
+        description="Auto-created at first launch. Users never touch this.",
+    )
+    graph_enabled: bool = Field(
+        default=False,
+        description="Enable Recall graph indexing + retrieval (experimental).",
+    )
+
+
+class ChatMultimodalConfig(BaseModel):
+    """Image upload + vision model configuration."""
+
+    vision_enabled: bool = Field(default=True)
+    max_image_size_mb: int = Field(default=20, ge=1, le=50)
+    max_images_per_message: int = Field(default=5, ge=1, le=10)
+    supported_formats: list[str] = Field(default=["png", "jpg", "jpeg", "gif", "webp"])
+    image_detail: str = Field(
+        default="auto",
+        pattern="^(auto|low|high)$",
+        description="OpenAI vision detail level.",
+    )
+    vision_model_override: str = Field(
+        default="",
+        description="Force model for vision. Empty=use chat model if it supports vision.",
+    )
+
+
+class ImageGenConfig(BaseModel):
+    """Two tiers:
+    - LOCAL: Direct CLI/subprocess (free, self-hosted)
+    - CLOUD: Paid APIs (ComfyUI API, Replicate, DALL-E)
+
+    ComfyUI is typically self-hosted. We do NOT use ComfyUI as the local P0 path; local P0 is
+    direct CLI/subprocess. `comfyui_api` is a remote endpoint (self-hosted or paid).
+    """
+
+    enabled: bool = Field(default=False)
+    provider: str = Field(default="local", pattern="^(local|openai|comfyui_api|replicate)$")
+    # Local (free)
+    local_command: str = Field(
+        default="python -m qwen_image.generate",
+        description="CLI command. Receives --prompt, --output, --steps, --width, --height.",
+    )
+    local_model_path: str = Field(default="")
+    use_lightning_lora: bool = Field(default=True)
+    # Cloud (paid)
+    comfyui_api_endpoint: str = Field(default="")
+    replicate_model: str = Field(default="")
+    # Shared
+    default_steps: int = Field(default=8, ge=1, le=50)
+    default_resolution: str = Field(default="1024x1024")
+
+
+class OpenRouterConfig(BaseModel):
+    """Unified gateway to 400+ cloud models. OpenAI-compatible.
+
+    MANDATORY P0 provider.
+    """
+
+    enabled: bool = Field(default=False)
+    api_key: str = Field(default="")
+    base_url: str = Field(default="https://openrouter.ai/api/v1")
+    default_model: str = Field(default="anthropic/claude-sonnet-4-20250514")
+    site_name: str = Field(default="TriBridRAG")
+    fallback_models: list[str] = Field(default=["openai/gpt-4o", "google/gemini-2.0-flash"])
+
+
+class LocalProviderEntry(BaseModel):
+    """A single local inference provider endpoint."""
+
+    name: str = Field(description="Display name")
+    provider_type: str = Field(pattern="^(ollama|llamacpp|lmstudio|vllm|custom)$")
+    base_url: str = Field(description="Provider API endpoint")
+    enabled: bool = Field(default=True)
+    priority: int = Field(
+        default=0,
+        ge=0,
+        description="Lower = higher priority when multiple have same model.",
+    )
+
+
+class LocalModelConfig(BaseModel):
+    """Supports MULTIPLE simultaneous local providers.
+
+    P0: Ollama + llama.cpp. All use OpenAI-compatible API.
+    """
+
+    providers: list[LocalProviderEntry] = Field(
+        default=[
+            LocalProviderEntry(
+                name="Ollama",
+                provider_type="ollama",
+                base_url="http://127.0.0.1:11434",
+                priority=0,
+            ),
+            LocalProviderEntry(
+                name="llama.cpp",
+                provider_type="llamacpp",
+                base_url="http://127.0.0.1:8080",
+                priority=1,
+            ),
+        ]
+    )
+    auto_detect: bool = Field(default=True)
+    health_check_interval: int = Field(default=30, ge=10, le=300)
+    fallback_to_cloud: bool = Field(default=True)
+    gpu_memory_limit_gb: float = Field(default=0, ge=0)
+    default_chat_model: str = Field(default="qwen3:8b")
+    default_vision_model: str = Field(default="qwen3-vl:8b")
+    default_embedding_model: str = Field(default="nomic-embed-text")
+
+
+class BenchmarkConfig(BaseModel):
+    """Split-screen model comparison + pipeline profiling."""
+
+    enabled: bool = Field(default=True)
+    max_concurrent_models: int = Field(default=4, ge=2, le=8)
+    save_results: bool = Field(default=True)
+    results_path: str = Field(default="data/benchmarks/")
+    include_cost_tracking: bool = Field(default=True)
+    include_timing_breakdown: bool = Field(default=True)
+
+
+class ChatConfig(BaseModel):
+    """Top-level chat configuration. Lives at TriBridConfig.chat.
+
+    KEY CONCEPT: There are no modes. The user checks/unchecks data sources.
+    Recall is always available and ON by default. Corpora are available when indexed.
+    Everything composes freely.
+    """
+
+    default_corpus_ids: list[str] = Field(
+        default=["recall_default"],
+        description="Default checked corpus IDs for new conversations (Recall ON by default).",
+    )
+
+    # Legacy prompt composition (kept for backwards compatibility; prefer the 4 state prompts below).
+    system_prompt_base: str = Field(default="You are a helpful assistant.")
+    system_prompt_recall_suffix: str = Field(
+        default=" You have access to conversation history. Reference past discussions when relevant."
+    )
+    system_prompt_rag_suffix: str = Field(
+        default=" Answer questions using the provided code context. Cite file paths and line ranges."
+    )
+
+    # Four-state prompts (selected based on whether RAG/Recall context is present).
+    system_prompt_direct: str = Field(
+        default="""You are a code assistant powered by TriBridRAG.
+
+The user is chatting directly without any retrieval context. No code repositories or conversation history are being queried for this message.
+
+Answer based on your general knowledge. If the user asks about their specific codebase and no context is provided, let them know they can enable RAG corpora in the Data Sources panel to query their indexed repositories.
+
+Be direct, technical, and helpful.""",
+        description="State 1: No context. Nothing checked or retrieval returned empty.",
+    )
+    system_prompt_rag: str = Field(
+        default="""You are a code assistant powered by TriBridRAG, a hybrid retrieval system that combines vector search, keyword search, and knowledge graphs to find relevant code.
+
+The user has selected one or more code repositories to query. You will receive relevant code snippets in <rag_context>...</rag_context> tags.
+
+Each snippet includes:
+- File path and line numbers (e.g., `server/auth/middleware.py:45-78`)
+- Language identifier
+- The actual code
+
+How to use this context:
+- Base your answers on the actual code shown, not assumptions
+- Always cite file paths and line numbers when referencing code
+- If the retrieved code doesn't fully answer the question, say what's missing
+- Don't invent code that isn't in the context
+- Connect related pieces when they appear across multiple snippets
+
+Be direct, technical, and precise. You're helping a developer understand their codebase.""",
+        description="State 2: RAG only. Code corpora returned results; Recall did not.",
+    )
+    system_prompt_recall: str = Field(
+        default="""You are a code assistant powered by TriBridRAG. You have access to your conversation history with this user via the Recall system.
+
+Relevant snippets from past conversations appear in <recall_context>...</recall_context> tags.
+
+Each snippet includes:
+- Who said it (user or assistant)
+- Timestamp
+- The message content
+
+How to use this context:
+- Reference past discussions naturally
+- Don't explicitly say \"according to my recall\" — incorporate it as shared context
+- Past conversations may contain decisions, preferences, or context that inform the current question
+- Prioritize recent conversations over older ones when relevant
+
+Be direct and helpful. You're continuing an ongoing collaboration with this developer.""",
+        description="State 3: Recall only. Recall returned results; no RAG corpora active.",
+    )
+    system_prompt_rag_and_recall: str = Field(
+        default="""You are a code assistant powered by TriBridRAG, a hybrid retrieval system. You have access to both:
+1) The user's indexed code repositories
+2) Your conversation history with this user (Recall)
+
+Code context appears in <rag_context>...</rag_context> tags.
+Conversation history appears in <recall_context>...</recall_context> tags.
+
+How to use both:
+- Cite file paths and line numbers when referencing code
+- Reference past discussions naturally
+- Connect them when relevant (e.g., a past decision and the code that implements it)
+- If past context contradicts current code, acknowledge the change
+- Don't say \"according to recall\" — just incorporate shared knowledge naturally
+
+Be direct, technical, and precise. You're helping a developer with ongoing context.""",
+        description="State 4: Both. RAG and Recall both returned results.",
+    )
+
+    reranker: ChatRerankerConfig = Field(default_factory=ChatRerankerConfig)
+    recall: RecallConfig = Field(default_factory=RecallConfig)
+    recall_gate: RecallGateConfig = Field(default_factory=RecallGateConfig)
+    multimodal: ChatMultimodalConfig = Field(default_factory=ChatMultimodalConfig)
+    image_gen: ImageGenConfig = Field(default_factory=ImageGenConfig)
+    local_models: LocalModelConfig = Field(default_factory=LocalModelConfig)
+    openrouter: OpenRouterConfig = Field(default_factory=OpenRouterConfig)
+    benchmark: BenchmarkConfig = Field(default_factory=BenchmarkConfig)
+
+    temperature: float = Field(default=0.3, ge=0.0, le=2.0)
+    temperature_no_retrieval: float = Field(
+        default=0.7,
+        ge=0.0,
+        le=2.0,
+        description="Temperature when nothing is checked (direct chat = more creative)",
+    )
+    max_tokens: int = Field(default=4096, ge=100, le=16384)
+
+    show_source_dropdown: bool = Field(default=True)
+    send_shortcut: str = Field(default="ctrl+enter")
+
+
 class TriBridConfig(BaseModel):
     """Root configuration model for tribrid_config.json.
 
@@ -3264,6 +3901,7 @@ class TriBridConfig(BaseModel):
     tracing: TracingConfig = Field(default_factory=TracingConfig)
     training: TrainingConfig = Field(default_factory=TrainingConfig)
     ui: UIConfig = Field(default_factory=UIConfig)
+    chat: ChatConfig = Field(default_factory=ChatConfig)
     hydration: HydrationConfig = Field(default_factory=HydrationConfig)
     evaluation: EvaluationConfig = Field(default_factory=EvaluationConfig)
     system_prompts: SystemPromptsConfig = Field(default_factory=SystemPromptsConfig)

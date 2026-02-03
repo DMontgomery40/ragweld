@@ -2,8 +2,9 @@
 // Displays all RAG configuration parameters with search and filtering
 // Dynamically reads from tooltips module - updates automatically when tooltips change
 
-import { useState, useEffect, useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import './HelpGlossary.css';
+import { useTooltips } from '@/hooks/useTooltips';
 
 // Category definitions for organizing tooltips
 const CATEGORIES = {
@@ -46,11 +47,11 @@ interface TooltipData {
   badges: Array<{ text: string; class: string }>;
 }
 
-interface GlossaryItem extends TooltipData {
+type GlossaryItem = TooltipData & {
   paramName: string;
   category: string;
   searchText: string;
-}
+};
 
 // Parse tooltip HTML to extract structured data
 function parseTooltipHTML(html: string): TooltipData {
@@ -104,24 +105,14 @@ function categorizeTooltip(paramName: string): string {
 export function HelpGlossary() {
   const [searchQuery, setSearchQuery] = useState('');
   const [currentFilter, setCurrentFilter] = useState('all');
-  const [allItems, setAllItems] = useState<GlossaryItem[]>([]);
+  const { tooltips } = useTooltips();
 
-  // Load glossary items from tooltips
-  useEffect(() => {
-    // Access window.Tooltips from legacy module
-    const tooltips = (window as any).Tooltips;
-    if (!tooltips || !tooltips.buildTooltipMap) {
-      console.warn('[HelpGlossary] window.Tooltips not available yet');
-      return;
-    }
-
-    const tooltipMap = tooltips.buildTooltipMap();
+  const allItems = useMemo((): GlossaryItem[] => {
     const items: GlossaryItem[] = [];
 
-    for (const [paramName, html] of Object.entries(tooltipMap)) {
-      const parsed = parseTooltipHTML(html as string);
+    for (const [paramName, html] of Object.entries(tooltips)) {
+      const parsed = parseTooltipHTML(html);
       const category = categorizeTooltip(paramName);
-
       items.push({
         paramName,
         category,
@@ -138,8 +129,8 @@ export function HelpGlossary() {
       return a.title.localeCompare(b.title);
     });
 
-    setAllItems(items);
-  }, []);
+    return items;
+  }, [tooltips]);
 
   // Filter items
   const filteredItems = useMemo(() => {

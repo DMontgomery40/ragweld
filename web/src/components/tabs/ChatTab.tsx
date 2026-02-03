@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChatSubtabs } from '@/components/Chat/ChatSubtabs';
 import { ChatInterface } from '@/components/Chat/ChatInterface';
-import { ChatSettings } from '@/components/Chat/ChatSettings';
+import { ChatSettings2 } from '@/components/Chat/ChatSettings2';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { useAPI, useConfig } from '@/hooks';
 import { LiveTerminal, type LiveTerminalHandle } from '@/components/LiveTerminal/LiveTerminal';
@@ -307,7 +307,7 @@ export default function ChatTab() {
         >
           <div className="settings-section" style={{ borderLeft: '3px solid var(--warn)', marginTop: '16px' }}>
             <ErrorBoundary>
-              <ChatSettings />
+              <ChatSettings2 />
             </ErrorBoundary>
           </div>
         </div>

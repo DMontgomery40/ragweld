@@ -1,6 +1,6 @@
 // GUI Tooltips: human-readable help + accurate links
-// Exposes window.Tooltips.{buildTooltipMap, attachTooltips}
-(function(){
+// Legacy tooltip definitions (migrated away from window globals)
+const LegacyTooltips = (function(){
   /**
    * ---agentspec
    * what: |
@@ -699,6 +699,427 @@
           ['Chunk Size Tuning', '/docs/INDEXING.md#chunk-size']
         ],
         [['Performance', 'info']]
+      ),
+
+      // Vector Search
+      VECTOR_SEARCH_ENABLED: L(
+        'Vector Search Enabled',
+        'Enable or disable vector (dense semantic) search using pgvector. When enabled, queries use embedding similarity to find semantically related chunks. When disabled, only sparse (BM25) and graph search are used. Recommended: enabled for most use cases. Disable only if you want pure keyword-based retrieval or are troubleshooting vector search performance.\n\nSweet spot: enabled for production systems. Vector search excels at finding conceptually related content even when exact keywords don\'t match. Disable temporarily if pgvector is unavailable or causing latency issues.\n\n• Enabled: Full tri-brid retrieval (vector + sparse + graph)\n• Disabled: Dual-mode retrieval (sparse + graph only)\n• Effect: Controls whether semantic similarity search contributes to results\n• Symptom if disabled: Semantic matches may be missed, especially for abstract queries',
+        [
+          ['pgvector Documentation', 'https://github.com/pgvector/pgvector'],
+          ['Vector Search Optimization', 'https://neon.tech/docs/ai/ai-vector-search-optimization'],
+          ['Semantic Search', 'https://en.wikipedia.org/wiki/Semantic_search'],
+          ['Tri-brid Retrieval', '/docs/retrieval/overview.md']
+        ],
+        [['Core Setting', 'info']]
+      ),
+      VECTOR_SEARCH_TOP_K: L(
+        'Vector Search Top-K',
+        'Number of candidate results to retrieve from pgvector vector search before fusion. Higher values (75-150) improve recall for semantic matches but increase query latency and memory usage. Lower values (30-50) are faster but may miss relevant results. Must be >= FINAL_K. Recommended: 50 for balanced performance, 75-100 for high recall scenarios.\n\nSweet spot: 50-75 for production systems. Use 75-100 when semantic matching is critical (e.g., finding conceptually similar code patterns). Use 30-50 for cost-sensitive scenarios or when initial retrieval quality is already high.\n\n• Range: 10-200 (typical: 30-100)\n• Balanced: 50-75 (recommended)\n• High recall: 75-100 (semantic-heavy queries)\n• Cost-sensitive: 30-50 (faster, lower cost)\n• Effect: Higher = more semantic candidates, better recall, higher latency\n• Symptom too low: Relevant semantic matches missed\n• Symptom too high: Slower queries, memory pressure, diminishing returns',
+        [
+          ['pgvector Optimization', 'https://neon.tech/blog/optimizing-vector-search-performance-with-pgvector'],
+          ['Top-K Retrieval', 'https://en.wikipedia.org/wiki/Nearest_neighbor_search#k-nearest_neighbors'],
+          ['Vector Search Performance', 'https://aws.amazon.com/blogs/database/supercharging-vector-search-performance-and-relevance-with-pgvector-0-8-0-on-amazon-aurora-postgresql/'],
+          ['Retrieval Tuning', '/docs/retrieval/vector-sparse.md']
+        ],
+        [['Affects latency', 'info'], ['Semantic matches', 'info']]
+      ),
+      VECTOR_SIMILARITY_THRESHOLD: L(
+        'Vector Similarity Threshold',
+        'Minimum cosine similarity score (0.0-1.0) required to include a vector search result. Results below this threshold are filtered out before fusion. 0.0 = no threshold (all results included). Higher values (0.5-0.7) ensure only highly similar results pass, improving precision but reducing recall. Lower values (0.0-0.3) allow more diverse results.\n\nSweet spot: 0.0 for most use cases (let fusion handle filtering). Use 0.5-0.6 when you want to aggressively filter low-quality semantic matches. Use 0.7+ only for precision-critical scenarios where false positives are costly.\n\n• Range: 0.0-1.0 (typical: 0.0-0.6)\n• No filtering: 0.0 (recommended, let fusion decide)\n• Moderate filtering: 0.4-0.5 (reduce noise)\n• Aggressive filtering: 0.6-0.7 (precision-critical)\n• Effect: Higher = fewer results, higher precision, lower recall\n• Symptom too high: Relevant semantic matches filtered out\n• Symptom too low: Noise included, fusion must handle filtering',
+        [
+          ['Cosine Similarity Threshold', 'https://www.emergentmind.com/topics/cosine-similarity-threshold'],
+          ['Vector Similarity Search', 'https://en.wikipedia.org/wiki/Cosine_similarity'],
+          ['Score Filtering', 'https://ui.adsabs.harvard.edu/abs/2018arXiv181207695L/abstract'],
+          ['Retrieval Filtering', '/docs/retrieval/vector-sparse.md#similarity-thresholds']
+        ],
+        [['Precision tuning', 'info']]
+      ),
+
+      // Sparse Search
+      SPARSE_SEARCH_ENABLED: L(
+        'Sparse Search Enabled',
+        'Enable or disable sparse (BM25 keyword) search. When enabled, queries use lexical matching to find chunks containing exact keywords, variable names, function names, and error codes. When disabled, only vector and graph search are used. Recommended: enabled for most use cases. Disable only if you want pure semantic retrieval or are troubleshooting BM25 performance.\n\nSweet spot: enabled for production systems. Sparse search excels at exact keyword matching and finding specific code symbols. Disable temporarily if BM25 indexing is unavailable or causing latency issues.\n\n• Enabled: Full tri-brid retrieval (vector + sparse + graph)\n• Disabled: Dual-mode retrieval (vector + graph only)\n• Effect: Controls whether lexical keyword search contributes to results\n• Symptom if disabled: Exact keyword matches may be missed, especially for code symbols',
+        [
+          ['BM25 Algorithm', 'https://en.wikipedia.org/wiki/Okapi_BM25'],
+          ['Hybrid Retrieval', 'https://www.elastic.co/search-labs/blog/improving-information-retrieval-elastic-stack-hybrid'],
+          ['Sparse vs Dense Retrieval', 'https://www.pinecone.io/learn/hybrid-search-intro/'],
+          ['Tri-brid Retrieval', '/docs/retrieval/overview.md']
+        ],
+        [['Core Setting', 'info']]
+      ),
+      SPARSE_SEARCH_TOP_K: L(
+        'Sparse Search Top-K',
+        'Number of candidate results to retrieve from BM25 sparse search before fusion. Higher values (75-150) improve recall for exact keyword matches (variable names, function names, error codes) but increase query latency. Lower values (30-50) are faster but may miss exact matches. Must be >= FINAL_K. Recommended: 50 for balanced performance, 75-100 for keyword-heavy queries.\n\nSweet spot: 50-75 for production systems. Use 75-100 when exact keyword matching is critical (e.g., finding specific function names or error codes). Use 30-50 for cost-sensitive scenarios or when initial retrieval quality is already high.\n\n• Range: 10-200 (typical: 30-100)\n• Balanced: 50-75 (recommended)\n• High recall: 75-100 (keyword-heavy queries)\n• Cost-sensitive: 30-50 (faster, lower cost)\n• Effect: Higher = more keyword candidates, better recall, higher latency\n• Symptom too low: Exact keyword matches missed\n• Symptom too high: Slower queries, diminishing returns',
+        [
+          ['BM25 Best Practices', 'https://www.elastic.co/blog/practical-bm25-part-3-considerations-for-picking-b-and-k1-in-elasticsearch'],
+          ['Top-K Retrieval', 'https://en.wikipedia.org/wiki/Tf%E2%80%93idf#Top-K_retrieval'],
+          ['BM25 Weighting Scheme', 'https://xapian.org/docs/bm25.html'],
+          ['Retrieval Tuning', '/docs/retrieval/vector-sparse.md']
+        ],
+        [['Affects latency', 'info'], ['Keyword matches', 'info']]
+      ),
+
+      // Graph Search
+      GRAPH_SEARCH_ENABLED: L(
+        'Graph Search Enabled',
+        'Enable or disable graph-based search using Neo4j. When enabled, queries traverse the knowledge graph to find related chunks through entity relationships, code structure (AST), and community detection. When disabled, only vector and sparse search are used. Recommended: enabled for codebases with rich structure and relationships.\n\nSweet spot: enabled for production systems with graph indexing. Graph search excels at finding related code through structural relationships (imports, calls, inheritance). Disable if Neo4j is unavailable, graph indexing is incomplete, or you want pure vector/sparse retrieval.\n\n• Enabled: Full tri-brid retrieval (vector + sparse + graph)\n• Disabled: Dual-mode retrieval (vector + sparse only)\n• Effect: Controls whether graph traversal contributes to results\n• Symptom if disabled: Structural relationships and entity connections may be missed',
+        [
+          ['Neo4j GraphRAG', 'https://neo4j.com/blog/what-is-graphrag/'],
+          ['GraphRAG User Guide', 'https://neo4j.com/docs/neo4j-graphrag-python/current/user_guide_rag.html'],
+          ['Graph Traversal', 'https://neo4j.com/blog/developer/graph-traversal-graphrag-python-package'],
+          ['Tri-brid Retrieval', '/docs/retrieval/graph.md']
+        ],
+        [['Core Setting', 'info']]
+      ),
+      GRAPH_SEARCH_MODE: L(
+        'Graph Search Mode',
+        'Graph retrieval strategy: "chunk" uses lexical chunk nodes with Neo4j vector index for semantic chunk search, "entity" uses the legacy code-entity graph. Chunk mode (recommended) combines vector similarity with graph traversal for better relevance. Entity mode uses structural relationships between code entities (functions, classes, modules).\n\nSweet spot: "chunk" for most use cases. Chunk mode provides better integration with vector search and more relevant results. Use "entity" only for legacy compatibility or when entity-based traversal is specifically needed.\n\n• Chunk mode: Modern approach, integrates with vector search, better relevance\n• Entity mode: Legacy approach, entity-based traversal, structural relationships\n• Effect: Determines how graph traversal finds related chunks\n• Symptom wrong mode: Suboptimal results, missing relevant connections',
+        [
+          ['Neo4j GraphRAG', 'https://neo4j.com/docs/neo4j-graphrag-python/current/user_guide_rag.html'],
+          ['Graph Retrieval Modes', 'https://neo4j.com/blog/developer/graphrag-field-guide-rag-patterns'],
+          ['Graph Traversal', 'https://neo4j.com/blog/developer/graph-traversal-graphrag-python-package'],
+          ['Graph Search', '/docs/retrieval/graph.md']
+        ],
+        [['Configuration', 'info']]
+      ),
+      GRAPH_MAX_HOPS: L(
+        'Graph Max Hops',
+        'Maximum number of graph traversal hops from seed nodes. Each hop expands the search to connected nodes (chunks, entities, relationships). Higher values (3-5) find more distant relationships but increase query latency and may introduce noise. Lower values (1-2) are faster and more focused. Recommended: 2 for balanced performance.\n\nSweet spot: 2 for production systems. Use 1 for fast, focused traversal (immediate neighbors only). Use 3-4 when you need to find distant relationships or explore deep code structures. Use 5 only for exploratory queries where completeness matters more than speed.\n\n• Range: 1-5 (typical: 1-3)\n• Focused: 1 (immediate neighbors only)\n• Balanced: 2 (recommended)\n• Deep exploration: 3-4 (distant relationships)\n• Effect: Higher = more relationships explored, better recall, higher latency\n• Symptom too low: Relevant connections missed\n• Symptom too high: Slower queries, noise introduced',
+        [
+          ['Neo4j Graph Traversal', 'https://neo4j.com/docs/neo4j-graphrag-python/current/user_guide_rag.html'],
+          ['Graph Traversal Depth', 'https://neo4j.com/blog/developer/graph-traversal-graphrag-python-package'],
+          ['Graph Algorithms', 'https://en.wikipedia.org/wiki/Graph_traversal'],
+          ['Graph Search', '/docs/retrieval/graph.md']
+        ],
+        [['Performance', 'info']]
+      ),
+      GRAPH_INCLUDE_COMMUNITIES: L(
+        'Include Communities',
+        'Enable community-based expansion in graph search. When enabled, the system uses community detection algorithms (e.g., Louvain) to identify clusters of related nodes and expands search to include entire communities. This improves recall for related concepts but may introduce noise. Recommended: enabled for entity mode, optional for chunk mode.\n\nSweet spot: enabled for entity mode, disabled for chunk mode. Community expansion works best with entity-based graphs where structural clusters are meaningful. For chunk mode, neighbor expansion is usually sufficient.\n\n• Enabled: Community-based expansion, better recall, may introduce noise\n• Disabled: Direct neighbor expansion only, more focused results\n• Effect: Controls whether community detection influences traversal\n• Symptom if disabled: Related concepts in same community may be missed',
+        [
+          ['Louvain Algorithm', 'https://neo4j.com/docs/graph-data-science/current/algorithms/louvain'],
+          ['Community Detection', 'https://neo4j.com/docs/graph-data-science/current/algorithms/community/'],
+          ['Community Detection Algorithms', 'https://en.wikipedia.org/wiki/Community_structure'],
+          ['Graph Search', '/docs/retrieval/graph.md']
+        ],
+        [['Advanced', 'info']]
+      ),
+      GRAPH_SEARCH_TOP_K: L(
+        'Graph Search Top-K',
+        'Number of candidate results to retrieve from Neo4j graph search before fusion. Higher values (40-100) improve recall for graph-based relationships but increase query latency. Lower values (15-30) are faster but may miss relevant connections. Must be >= FINAL_K. Recommended: 30 for balanced performance.\n\nSweet spot: 30 for production systems. Use 40-50 when graph relationships are critical (e.g., finding code that calls or imports specific functions). Use 15-20 for cost-sensitive scenarios or when graph indexing is sparse.\n\n• Range: 5-100 (typical: 20-50)\n• Balanced: 30 (recommended)\n• High recall: 40-50 (relationship-heavy queries)\n• Cost-sensitive: 15-20 (faster, lower cost)\n• Effect: Higher = more graph candidates, better recall, higher latency\n• Symptom too low: Relevant graph connections missed\n• Symptom too high: Slower queries, diminishing returns',
+        [
+          ['Neo4j GraphRAG', 'https://neo4j.com/docs/neo4j-graphrag-python/current/user_guide_rag.html'],
+          ['Graph Traversal', 'https://neo4j.com/blog/developer/graph-traversal-graphrag-python-package'],
+          ['Top-K Retrieval', 'https://en.wikipedia.org/wiki/Nearest_neighbor_search#k-nearest_neighbors'],
+          ['Graph Search', '/docs/retrieval/graph.md']
+        ],
+        [['Affects latency', 'info'], ['Graph relationships', 'info']]
+      ),
+      GRAPH_CHUNK_NEIGHBOR_WINDOW: L(
+        'Chunk Neighbor Window',
+        'When graph mode is "chunk", include up to N adjacent chunks (NEXT_CHUNK relationships) around each seed hit. Higher values (2-5) include more context but may introduce noise. Lower values (0-1) are more focused. Recommended: 1 for balanced context.\n\nSweet spot: 1 for production systems. Use 0 for minimal context (seed chunks only). Use 2-3 when you need more surrounding context (e.g., finding complete function implementations). Use 4-5 only for exploratory queries where completeness matters.\n\n• Range: 0-10 (typical: 0-3)\n• Minimal: 0 (seed chunks only)\n• Balanced: 1 (recommended)\n• Extended context: 2-3 (more surrounding chunks)\n• Effect: Higher = more adjacent chunks included, better context, may introduce noise\n• Symptom too low: Insufficient context around seed hits\n• Symptom too high: Too much noise from distant chunks',
+        [
+          ['Neo4j Graph Traversal', 'https://neo4j.com/docs/neo4j-graphrag-python/current/user_guide_rag.html'],
+          ['Graph Chunk Relationships', 'https://neo4j.com/blog/developer/graph-traversal-graphrag-python-package'],
+          ['Context Window', 'https://en.wikipedia.org/wiki/Context_window'],
+          ['Graph Search', '/docs/retrieval/graph.md']
+        ],
+        [['Chunk Mode', 'info']]
+      ),
+      GRAPH_CHUNK_SEED_OVERFETCH: L(
+        'Chunk Seed Overfetch Multiplier',
+        'When graph mode is "chunk" and Neo4j uses a shared database, overfetch seed hits before filtering by corpus_id. This compensates for shared database queries where corpus filtering happens after retrieval. Higher values (10-20) ensure sufficient results after filtering but increase query cost. Lower values (5-10) are more efficient but may return fewer results.\n\nSweet spot: 10 for shared database mode. Use 5-8 for per-corpus databases (no filtering needed). Use 15-20 when corpus filtering is very selective (small corpus in large database).\n\n• Range: 1-50 (typical: 5-20)\n• Per-corpus DB: 5-8 (minimal overfetch)\n• Shared DB: 10 (recommended)\n• Selective filtering: 15-20 (high overfetch)\n• Effect: Higher = more seed candidates, better recall after filtering, higher cost\n• Symptom too low: Insufficient results after corpus filtering\n• Symptom too high: Unnecessary query overhead',
+        [
+          ['Neo4j Multi-Database', 'https://assets.neo4j.com/Official-Materials/Multi+DB+Considerations.pdf'],
+          ['Database Isolation', 'https://neo4j.com/docs/operations-manual/current/scalability/concepts/'],
+          ['Query Optimization', 'https://neo4j.com/docs/cypher-manual/current/query-tuning/'],
+          ['Graph Storage', '/docs/database.md']
+        ],
+        [['Performance', 'info'], ['Shared DB', 'warn']]
+      ),
+      GRAPH_CHUNK_ENTITY_EXPANSION_ENABLED: L(
+        'Chunk Entity Expansion Enabled',
+        'When graph mode is "chunk", expand from seed chunks via entity graph (IN_CHUNK links) to find related chunks. This combines chunk-based retrieval with entity relationships for better recall. When enabled, chunks connected to the same entities are included. Recommended: enabled for codebases with rich entity relationships.\n\nSweet spot: enabled for production systems. Entity expansion improves recall by finding chunks that share entities (functions, classes, modules) even if they\'re not directly connected. Disable if entity relationships are sparse or causing noise.\n\n• Enabled: Entity-based expansion, better recall, may introduce noise\n• Disabled: Chunk-only expansion, more focused results\n• Effect: Controls whether entity relationships influence chunk retrieval\n• Symptom if disabled: Related chunks sharing entities may be missed',
+        [
+          ['Neo4j Graph Traversal', 'https://neo4j.com/docs/neo4j-graphrag-python/current/user_guide_rag.html'],
+          ['Entity Relationships', 'https://neo4j.com/blog/developer/graph-traversal-graphrag-python-package'],
+          ['Graph Expansion', 'https://en.wikipedia.org/wiki/Graph_traversal'],
+          ['Graph Search', '/docs/retrieval/graph.md']
+        ],
+        [['Chunk Mode', 'info']]
+      ),
+      GRAPH_CHUNK_ENTITY_EXPANSION_WEIGHT: L(
+        'Chunk Entity Expansion Weight',
+        'Blend weight for entity-expansion scores relative to seed chunk scores when entity expansion is enabled. Higher values (0.7-1.0) favor entity-expanded chunks, lower values (0.3-0.6) favor seed chunks. Recommended: 0.8 for balanced blending.\n\nSweet spot: 0.8 for production systems. Use 0.6-0.7 when seed chunks are more reliable. Use 0.9-1.0 when entity relationships are highly trustworthy. Use 0.3-0.5 when entity expansion is experimental or noisy.\n\n• Range: 0.0-1.0 (typical: 0.5-0.9)\n• Seed-focused: 0.5-0.6 (favor seed chunks)\n• Balanced: 0.7-0.8 (recommended)\n• Entity-focused: 0.9-1.0 (favor entity expansion)\n• Effect: Higher = more weight to entity-expanded chunks\n• Symptom too low: Entity expansion underutilized\n• Symptom too high: Seed chunks undervalued',
+        [
+          ['Score Blending', 'https://neo4j.com/docs/neo4j-graphrag-python/current/user_guide_rag.html'],
+          ['Graph Traversal', 'https://neo4j.com/blog/developer/graph-traversal-graphrag-python-package'],
+          ['Weighted Fusion', 'https://en.wikipedia.org/wiki/Data_fusion'],
+          ['Graph Search', '/docs/retrieval/graph.md']
+        ],
+        [['Advanced', 'info']]
+      ),
+
+      // Fusion
+      FUSION_METHOD: L(
+        'Fusion Method',
+        'Method for combining results from vector, sparse, and graph search: "rrf" (Reciprocal Rank Fusion) or "weighted" (score-based weighted sum). RRF combines ranking positions without score normalization, making it robust to different score scales. Weighted fusion requires normalized scores and allows fine-grained control over modality weights.\n\nSweet spot: "rrf" for most use cases. RRF is simpler, more robust, and doesn\'t require score normalization. Use "weighted" when you need precise control over modality weights or when score distributions are well-calibrated.\n\n• RRF: Position-based fusion, robust to score scales, simpler\n• Weighted: Score-based fusion, requires normalization, more control\n• Effect: Determines how tri-brid results are combined\n• Symptom wrong method: Suboptimal result ranking',
+        [
+          ['Reciprocal Rank Fusion', 'https://cormack.uwaterloo.ca/cormacksigir09-rrf.pdf'],
+          ['RRF Paper', 'https://research.google/pubs/reciprocal-rank-fusion-outperforms-condorcet-and-individual-rank-learning-methods/'],
+          ['Data Fusion', 'https://en.wikipedia.org/wiki/Data_fusion'],
+          ['Fusion Strategies', '/docs/retrieval/fusion.md']
+        ],
+        [['Core Setting', 'info']]
+      ),
+      FUSION_VECTOR_WEIGHT: L(
+        'Vector Weight',
+        'Weight assigned to vector (pgvector) search results in weighted fusion mode. Higher values (0.5-0.7) favor semantic matches, lower values (0.2-0.4) reduce semantic influence. Weights must sum to ~1.0 with sparse and graph weights. Recommended: 0.4 for balanced tri-brid retrieval.\n\nSweet spot: 0.4 for balanced systems. Use 0.5-0.6 when semantic matching is critical (e.g., finding conceptually similar code). Use 0.2-0.3 when keyword matching is more important than semantics.\n\n• Range: 0.0-1.0 (must sum with sparse + graph ≈ 1.0)\n• Keyword-focused: 0.2-0.3 (lower semantic weight)\n• Balanced: 0.4 (recommended)\n• Semantic-focused: 0.5-0.6 (higher semantic weight)\n• Effect: Higher = more weight to vector search results\n• Symptom too high: Semantic matches dominate, keyword matches buried\n• Symptom too low: Semantic matches undervalued',
+        [
+          ['Hybrid Search', 'https://www.pinecone.io/learn/hybrid-search-intro/'],
+          ['Weighted Fusion', 'https://en.wikipedia.org/wiki/Data_fusion'],
+          ['Fusion Strategies', 'https://arxiv.org/abs/2402.14734'],
+          ['Fusion Configuration', '/docs/retrieval/fusion.md']
+        ],
+        [['Weighted Mode', 'info']]
+      ),
+      FUSION_SPARSE_WEIGHT: L(
+        'Sparse Weight',
+        'Weight assigned to sparse (BM25) search results in weighted fusion mode. Higher values (0.4-0.6) favor keyword matches, lower values (0.2-0.3) reduce keyword influence. Weights must sum to ~1.0 with vector and graph weights. Recommended: 0.3 for balanced tri-brid retrieval.\n\nSweet spot: 0.3 for balanced systems. Use 0.4-0.5 when exact keyword matching is critical (e.g., finding specific function names or error codes). Use 0.2 when semantic and graph search are more important.\n\n• Range: 0.0-1.0 (must sum with vector + graph ≈ 1.0)\n• Semantic-focused: 0.2 (lower keyword weight)\n• Balanced: 0.3 (recommended)\n• Keyword-focused: 0.4-0.5 (higher keyword weight)\n• Effect: Higher = more weight to sparse search results\n• Symptom too high: Keyword matches dominate, semantic matches buried\n• Symptom too low: Keyword matches undervalued',
+        [
+          ['BM25 Algorithm', 'https://en.wikipedia.org/wiki/Okapi_BM25'],
+          ['Hybrid Search', 'https://www.elastic.co/search-labs/blog/improving-information-retrieval-elastic-stack-hybrid'],
+          ['Weighted Fusion', 'https://en.wikipedia.org/wiki/Data_fusion'],
+          ['Fusion Configuration', '/docs/retrieval/fusion.md']
+        ],
+        [['Weighted Mode', 'info']]
+      ),
+      FUSION_GRAPH_WEIGHT: L(
+        'Graph Weight',
+        'Weight assigned to graph (Neo4j) search results in weighted fusion mode. Higher values (0.4-0.6) favor structural relationships, lower values (0.2-0.3) reduce graph influence. Weights must sum to ~1.0 with vector and sparse weights. Recommended: 0.3 for balanced tri-brid retrieval.\n\nSweet spot: 0.3 for balanced systems. Use 0.4-0.5 when graph relationships are critical (e.g., finding code that calls or imports specific functions). Use 0.2 when vector and sparse search are more important.\n\n• Range: 0.0-1.0 (must sum with vector + sparse ≈ 1.0)\n• Vector/sparse-focused: 0.2 (lower graph weight)\n• Balanced: 0.3 (recommended)\n• Graph-focused: 0.4-0.5 (higher graph weight)\n• Effect: Higher = more weight to graph search results\n• Symptom too high: Graph matches dominate, other modalities buried\n• Symptom too low: Graph relationships undervalued',
+        [
+          ['Neo4j GraphRAG', 'https://neo4j.com/docs/neo4j-graphrag-python/current/user_guide_rag.html'],
+          ['Graph Traversal', 'https://neo4j.com/blog/developer/graph-traversal-graphrag-python-package'],
+          ['Weighted Fusion', 'https://en.wikipedia.org/wiki/Data_fusion'],
+          ['Fusion Configuration', '/docs/retrieval/fusion.md']
+        ],
+        [['Weighted Mode', 'info']]
+      ),
+      FUSION_RRF_K: L(
+        'RRF k Parameter',
+        'Smoothing constant for Reciprocal Rank Fusion. Higher values (80-120) give more weight to top-ranked results, lower values (40-60) distribute weight more evenly across ranks. The original RRF paper used k=60, which is near-optimal for most cases. Recommended: 60 for standard RRF behavior.\n\nSweet spot: 60 for production systems (matches original RRF paper). Use 40-50 when you want more uniform weight distribution (less emphasis on top ranks). Use 80-100 when top-ranked results are highly reliable and should dominate.\n\n• Range: 1-200 (typical: 40-100)\n• Uniform weights: 40-50 (less top-rank emphasis)\n• Standard RRF: 60 (recommended, original paper)\n• Top-rank focused: 80-100 (more emphasis on top results)\n• Effect: Higher = more weight to top-ranked results\n• Symptom too low: Top results undervalued\n• Symptom too high: Lower-ranked results ignored',
+        [
+          ['RRF Original Paper', 'https://cormack.uwaterloo.ca/cormacksigir09-rrf.pdf'],
+          ['RRF Research', 'https://research.google/pubs/reciprocal-rank-fusion-outperforms-condorcet-and-individual-rank-learning-methods/'],
+          ['Reciprocal Rank Fusion', 'https://en.wikipedia.org/wiki/Reciprocal_rank_fusion'],
+          ['Fusion Configuration', '/docs/retrieval/fusion.md']
+        ],
+        [['RRF Mode', 'info']]
+      ),
+      FUSION_NORMALIZE_SCORES: L(
+        'Normalize Scores',
+        'Normalize scores from vector, sparse, and graph search to [0,1] range before fusion. This ensures scores from different modalities are comparable when using weighted fusion. When disabled, raw scores are used directly (may cause one modality to dominate). Recommended: enabled for weighted fusion, not needed for RRF.\n\nSweet spot: enabled for weighted fusion mode. Normalization prevents one modality from dominating due to different score scales. For RRF mode, normalization is unnecessary since RRF uses ranking positions, not scores.\n\n• Enabled: Scores normalized to [0,1], comparable across modalities\n• Disabled: Raw scores used, may cause modality imbalance\n• Effect: Controls score normalization before weighted fusion\n• Symptom if disabled: One modality may dominate due to score scale differences',
+        [
+          ['Score Normalization', 'https://link.springer.com/chapter/10.1007/11880592_57'],
+          ['Normalization Methods', 'https://codecademy.com/article/min-max-zscore-normalization'],
+          ['Data Fusion', 'https://en.wikipedia.org/wiki/Data_fusion'],
+          ['Fusion Configuration', '/docs/retrieval/fusion.md']
+        ],
+        [['Weighted Mode', 'info']]
+      ),
+
+      // Neo4j Storage
+      neo4j_uri: L(
+        'Neo4j Connection URI',
+        'Neo4j database connection URI using Bolt protocol. Format: <SCHEME>://<HOST>[:<PORT>]. Schemes: "bolt" (no encryption), "bolt+s" (TLS with CA cert), "bolt+ssc" (TLS with self-signed cert), "neo4j" (routing-aware), "neo4j+s" (routing + TLS). Default: bolt://localhost:7687. Use "neo4j" schemes for cluster routing, "bolt" schemes for direct connections.\n\nSweet spot: bolt://localhost:7687 for local development, neo4j+s://your-cluster:7687 for production clusters. Use "bolt+s" or "neo4j+s" for encrypted connections. Use "bolt+ssc" or "neo4j+ssc" for self-signed certificates.\n\n• Local dev: bolt://localhost:7687\n• Production cluster: neo4j+s://cluster-host:7687\n• Direct connection: bolt://host:7687\n• Encrypted: bolt+s://host:7687 (CA cert) or bolt+ssc://host:7687 (self-signed)\n• Effect: Determines how the system connects to Neo4j\n• Symptom wrong URI: Connection failures, authentication errors',
+        [
+          ['Neo4j URI Schemes', 'https://neo4j.com/docs/upgrade-migration-guide/current/version-4/migration/drivers/new-uri-schemes/'],
+          ['Bolt Protocol', 'https://neo4j.com/docs/bolt/current/'],
+          ['Connection Configuration', 'https://neo4j.com/docs/java-manual/current/connect-advanced/'],
+          ['Database Configuration', '/docs/database.md']
+        ],
+        [['Core Setting', 'info']]
+      ),
+      neo4j_user: L(
+        'Neo4j Username',
+        'Neo4j database authentication username. Default: "neo4j". Used for basic authentication along with the password. For Kerberos or bearer token authentication, different configuration is required. The username must match a Neo4j user account with appropriate permissions.\n\nSweet spot: "neo4j" for default installations, custom username for production deployments. Use a dedicated service account with minimal required permissions rather than the admin account. Store credentials securely (environment variables, not in config files).\n\n• Default: neo4j (initial admin user)\n• Production: Custom service account with minimal permissions\n• Security: Use environment variables, not config files\n• Effect: Determines authentication identity\n• Symptom wrong user: Authentication failures',
+        [
+          ['Neo4j Authentication', 'https://neo4j.com/docs/java-manual/current/connect-advanced/'],
+          ['Connection Configuration', 'https://neo4j.com/docs/browser-manual/current/operations/dbms-connection/'],
+          ['Security Best Practices', 'https://neo4j.com/product/neo4j-graph-database/security'],
+          ['Database Configuration', '/docs/database.md']
+        ],
+        [['Security', 'warn']]
+      ),
+      neo4j_password: L(
+        'Neo4j Password',
+        'Neo4j database authentication password. Required for basic authentication along with the username. Default: empty (must be set). For security, use environment variables rather than storing passwords in config files. The password must match the Neo4j user account.\n\nSweet spot: Store in environment variable (e.g., NEO4J_PASSWORD), not in config files. Use strong passwords for production deployments. Rotate passwords regularly. For initial setup, Neo4j requires password change on first login.\n\n• Security: Use environment variables, never store in config files\n• Production: Strong passwords, regular rotation\n• Initial setup: Neo4j requires password change on first login\n• Effect: Determines authentication credentials\n• Symptom wrong password: Authentication failures',
+        [
+          ['Neo4j Authentication', 'https://neo4j.com/docs/java-manual/current/connect-advanced/'],
+          ['Security Best Practices', 'https://neo4j.com/product/neo4j-graph-database/security'],
+          ['Connection Configuration', 'https://neo4j.com/docs/browser-manual/current/operations/dbms-connection/'],
+          ['Database Configuration', '/docs/database.md']
+        ],
+        [['Security', 'err']]
+      ),
+      neo4j_database: L(
+        'Neo4j Database Name',
+        'Neo4j database name used when database_mode is "shared". All corpora share this single database with corpus_id filtering. Default: "neo4j". For "per_corpus" mode, this is ignored and databases are named using the prefix + corpus_id pattern. Must be a valid Neo4j database name.\n\nSweet spot: "neo4j" for default installations, custom name for shared multi-corpus setups. Use descriptive names that indicate purpose (e.g., "tribrid_shared"). For per_corpus mode, this setting is ignored.\n\n• Default: neo4j (standard database name)\n• Shared mode: Single database name for all corpora\n• Per-corpus mode: Ignored (uses prefix + corpus_id)\n• Effect: Determines database name in shared mode\n• Symptom wrong name: Database not found errors',
+        [
+          ['Neo4j Multi-Database', 'https://assets.neo4j.com/Official-Materials/Multi+DB+Considerations.pdf'],
+          ['Database Isolation', 'https://neo4j.com/docs/operations-manual/current/scalability/concepts/'],
+          ['Database Management', 'https://neo4j.com/docs/cypher-manual/current/administration/databases/'],
+          ['Database Configuration', '/docs/database.md']
+        ],
+        [['Shared Mode', 'info']]
+      ),
+      neo4j_database_mode: L(
+        'Neo4j Database Mode',
+        'Database isolation strategy: "shared" uses a single Neo4j database for all corpora (Community-compatible, requires corpus_id filtering), "per_corpus" uses separate databases per corpus (Enterprise multi-database, better isolation). Shared mode works with Neo4j Community Edition, per_corpus requires Enterprise Edition.\n\nSweet spot: "shared" for Community Edition or small deployments, "per_corpus" for Enterprise Edition with strict isolation needs. Per_corpus mode provides better performance (no filtering) and isolation but requires Enterprise licensing.\n\n• Shared: Single database, corpus_id filtering, Community-compatible\n• Per-corpus: Separate databases, no filtering needed, Enterprise required\n• Effect: Determines database isolation strategy\n• Symptom wrong mode: Performance issues (shared) or licensing errors (per_corpus without Enterprise)',
+        [
+          ['Neo4j Multi-Database', 'https://assets.neo4j.com/Official-Materials/Multi+DB+Considerations.pdf'],
+          ['Database Isolation', 'https://neo4j.com/docs/operations-manual/current/scalability/concepts/'],
+          ['Enterprise Features', 'https://neo4j.com/docs/operations-manual/current/scalability/concepts/'],
+          ['Database Configuration', '/docs/database.md']
+        ],
+        [['Enterprise', 'warn']]
+      ),
+      neo4j_database_prefix: L(
+        'Neo4j Database Prefix',
+        'Prefix applied to per-corpus database names when database_mode is "per_corpus". Database names are constructed as: {prefix}{corpus_id} (sanitized). Default: "tribrid_". The prefix helps identify TriBridRAG-managed databases and prevents conflicts with other applications. Must be a valid database name prefix.\n\nSweet spot: "tribrid_" for standard deployments, custom prefix for multi-tenant or organizational needs. Use descriptive prefixes that indicate purpose or organization. Database names are sanitized (lowercase, alphanumeric + underscore only).\n\n• Default: tribrid_\n• Per-corpus mode: Applied to corpus_id to form database name\n• Shared mode: Ignored\n• Effect: Determines database naming pattern in per_corpus mode\n• Symptom wrong prefix: Database naming conflicts or confusion',
+        [
+          ['Neo4j Multi-Database', 'https://assets.neo4j.com/Official-Materials/Multi+DB+Considerations.pdf'],
+          ['Database Isolation', 'https://neo4j.com/docs/operations-manual/current/scalability/concepts/'],
+          ['Database Naming', 'https://neo4j.com/docs/cypher-manual/current/administration/databases/'],
+          ['Database Configuration', '/docs/database.md']
+        ],
+        [['Per-corpus Mode', 'info']]
+      ),
+      neo4j_auto_create_databases: L(
+        'Neo4j Auto-Create Databases',
+        'Automatically create per-corpus Neo4j databases when missing (Enterprise multi-database only). When enabled, creating a corpus will create its Neo4j database automatically if it doesn\'t exist. When disabled, databases must be created manually before indexing. Requires Neo4j Enterprise Edition and database_mode="per_corpus".\n\nSweet spot: enabled for Enterprise deployments. Auto-creation simplifies corpus management and ensures databases exist when needed. Disable if you need manual control over database creation or want to pre-create databases with custom settings.\n\n• Enabled: Automatic database creation on corpus creation\n• Disabled: Manual database creation required\n• Requirements: Enterprise Edition, per_corpus mode\n• Effect: Controls automatic database provisioning\n• Symptom if disabled: Database not found errors when indexing new corpus',
+        [
+          ['Neo4j Multi-Database', 'https://assets.neo4j.com/Official-Materials/Multi+DB+Considerations.pdf'],
+          ['Database Isolation', 'https://neo4j.com/docs/operations-manual/current/scalability/concepts/'],
+          ['Enterprise Features', 'https://neo4j.com/docs/operations-manual/current/scalability/concepts/'],
+          ['Database Configuration', '/docs/database.md']
+        ],
+        [['Enterprise', 'warn']]
+      ),
+
+      // Data Quality - Chunk Summaries
+      CHUNK_SUMMARIES_MAX: L(
+        'Max Chunk Summaries',
+        'Maximum number of chunk summaries to generate per corpus. Chunk summaries provide structured metadata (purpose, symbols, keywords) for each code chunk, improving retrieval quality. Higher values (200-500) provide more comprehensive coverage but increase indexing time and storage. Lower values (50-100) are faster but may miss important chunks.\n\nSweet spot: 100 for balanced coverage. Use 50-75 for large codebases where indexing speed matters. Use 200-300 when comprehensive coverage is critical. Use 500+ only for small, critical codebases.\n\n• Range: 10-1000 (typical: 50-300)\n• Fast indexing: 50-75 (lower coverage)\n• Balanced: 100 (recommended)\n• Comprehensive: 200-300 (higher coverage)\n• Effect: Higher = more summaries, better coverage, longer indexing\n• Symptom too low: Important chunks missing summaries\n• Symptom too high: Slow indexing, storage overhead',
+        [
+          ['Chunk Summarization', 'https://vectify.ai/blog/LargeDocumentSummarization'],
+          ['Code Analysis', 'https://llamaindex.ai/blog/evaluating-the-ideal-chunk-size-for-a-rag-system-using-llamaindex-6207e5d3fec5'],
+          ['Document Summarization', 'https://cookbook.openai.com/examples/summarizing_long_documents'],
+          ['Data Quality', '/docs/guides/corpus.md']
+        ],
+        [['Indexing', 'info']]
+      ),
+      CHUNK_SUMMARIES_EXCLUDE_DIRS: L(
+        'Exclude Directories',
+        'List of directory paths to skip when building chunk summaries. Directories matching these paths (exact or prefix) are excluded from summarization. Useful for excluding test files, documentation, generated code, or third-party dependencies. Default includes: docs, tests, node_modules, venv, dist, etc.\n\nSweet spot: Default list for most projects. Add project-specific directories (e.g., "legacy", "deprecated") to improve summary quality. Remove defaults only if you want to include tests or docs in summaries.\n\n• Format: Comma-separated or newline-separated directory paths\n• Default: docs, tests, node_modules, venv, dist, etc.\n• Effect: Filters out directories from summarization\n• Symptom if too permissive: Low-quality summaries from test files or dependencies',
+        [
+          ['Code Filtering', 'https://en.wikipedia.org/wiki/Code_filtering'],
+          ['File Exclusion Patterns', 'https://en.wikipedia.org/wiki/Glob_(programming)'],
+          ['Data Quality', '/docs/guides/corpus.md'],
+          ['Indexing Configuration', '/docs/indexing.md']
+        ],
+        [['Filtering', 'info']]
+      ),
+      CHUNK_SUMMARIES_EXCLUDE_PATTERNS: L(
+        'Exclude Patterns',
+        'List of glob patterns (e.g., "*.min.js", "*.lock", "**/*.test.ts") to skip when building chunk summaries. Files matching these patterns are excluded from summarization. Useful for excluding generated files, lock files, minified code, or test files. More flexible than directory exclusion.\n\nSweet spot: Add patterns for generated or minified files (e.g., "*.min.js", "*.bundle.js"). Include test file patterns if you don\'t want tests summarized (e.g., "**/*.test.ts", "**/*.spec.js"). Leave empty if you want all files summarized.\n\n• Format: Comma-separated or newline-separated glob patterns\n• Examples: *.min.js, *.lock, **/*.test.ts, dist/**\n• Effect: Filters out files matching patterns from summarization\n• Symptom if too permissive: Low-quality summaries from generated or test files',
+        [
+          ['Glob Patterns', 'https://en.wikipedia.org/wiki/Glob_(programming)'],
+          ['File Filtering', 'https://en.wikipedia.org/wiki/File_system'],
+          ['Data Quality', '/docs/guides/corpus.md'],
+          ['Indexing Configuration', '/docs/indexing.md']
+        ],
+        [['Filtering', 'info']]
+      ),
+      CHUNK_SUMMARIES_EXCLUDE_KEYWORDS: L(
+        'Exclude Keywords',
+        'List of keywords that, when present in code, cause the chunk to be skipped during summarization. Useful for excluding deprecated code, TODO comments, legacy implementations, or experimental features. Case-insensitive matching.\n\nSweet spot: Add project-specific keywords (e.g., "deprecated", "legacy", "TODO", "FIXME") to improve summary quality. Leave empty if you want all code summarized regardless of keywords.\n\n• Format: Comma-separated or newline-separated keywords\n• Examples: deprecated, legacy, TODO, FIXME, experimental\n• Effect: Filters out chunks containing keywords from summarization\n• Symptom if too permissive: Low-quality summaries from deprecated or incomplete code',
+        [
+          ['Code Filtering', 'https://en.wikipedia.org/wiki/Code_filtering'],
+          ['Keyword Extraction', 'https://en.wikipedia.org/wiki/Keyword_extraction'],
+          ['Data Quality', '/docs/guides/corpus.md'],
+          ['Indexing Configuration', '/docs/indexing.md']
+        ],
+        [['Filtering', 'info']]
+      ),
+      CHUNK_SUMMARIES_ENRICH_DEFAULT: L(
+        'Chunk Summaries Enrich Default',
+        'Enable chunk summary enrichment by default when building summaries. When enabled, summaries include enriched metadata (detailed purpose, technical details, domain concepts) using LLM analysis. When disabled, summaries use lightweight extraction only. Enrichment improves quality but increases indexing time and cost.\n\nSweet spot: enabled for production systems. Enriched summaries provide better retrieval quality and more detailed metadata. Disable only if indexing speed or cost is a concern, or if lightweight summaries are sufficient.\n\n• Enabled: Full enrichment with LLM analysis (recommended)\n• Disabled: Lightweight extraction only (faster, lower cost)\n• Effect: Controls whether summaries are enriched with detailed metadata\n• Symptom if disabled: Less detailed summaries, potentially lower retrieval quality',
+        [
+          ['Code Enrichment', 'https://cookbook.openai.com/examples/summarizing_long_documents'],
+          ['Chunk Summarization', 'https://vectify.ai/blog/LargeDocumentSummarization'],
+          ['Data Quality', '/docs/guides/corpus.md'],
+          ['Indexing Configuration', '/docs/indexing.md']
+        ],
+        [['Enrichment', 'info']]
+      ),
+
+      // Data Quality - Keywords
+      KEYWORDS_MAX_PER_REPO: L(
+        'Keywords Max Per Corpus',
+        'Maximum number of discriminative keywords to extract per corpus. Keywords are computed using TF-IDF to identify terms that distinguish this corpus from others. Higher values (100-300) provide more keyword coverage but may include less discriminative terms. Lower values (20-50) focus on the most distinctive keywords.\n\nSweet spot: 50 for balanced keyword extraction. Use 20-30 for focused keyword sets (most discriminative only). Use 100-200 when comprehensive keyword coverage is needed. Use 300+ only for very large or diverse corpora.\n\n• Range: 10-500 (typical: 20-200)\n• Focused: 20-30 (most discriminative)\n• Balanced: 50 (recommended)\n• Comprehensive: 100-200 (broader coverage)\n• Effect: Higher = more keywords, broader coverage, less discriminative\n• Symptom too low: Important keywords missed\n• Symptom too high: Less discriminative keywords included',
+        [
+          ['TF-IDF Keyword Extraction', 'https://github.com/tonifuc3m/document_selection_tfidf'],
+          ['Keyword Extraction', 'https://github.com/airKlizz/CustomizedTFIDF'],
+          ['TF-IDF Algorithm', 'https://en.wikipedia.org/wiki/Tf%E2%80%93idf'],
+          ['Data Quality', '/docs/guides/corpus.md']
+        ],
+        [['Keyword Extraction', 'info']]
+      ),
+      KEYWORDS_MIN_FREQ: L(
+        'Keywords Min Frequency',
+        'Minimum term frequency required for a keyword to be included. Terms must appear at least this many times in the corpus to be considered. Higher values (5-10) ensure keywords are common enough to be meaningful, lower values (1-3) allow rare but distinctive terms. Recommended: 3 for balanced filtering.\n\nSweet spot: 3 for most corpora. Use 1-2 when you want to include rare but distinctive terms (e.g., unique function names). Use 5-7 when you want only common, well-established keywords. Use 10+ only for very large corpora.\n\n• Range: 1-10 (typical: 2-5)\n• Rare terms: 1-2 (include distinctive rare terms)\n• Balanced: 3 (recommended)\n• Common terms: 5-7 (only well-established keywords)\n• Effect: Higher = fewer keywords, more common terms only\n• Symptom too low: Rare, potentially noisy keywords included\n• Symptom too high: Important distinctive keywords filtered out',
+        [
+          ['TF-IDF Keyword Extraction', 'https://github.com/tonifuc3m/document_selection_tfidf'],
+          ['Term Frequency', 'https://en.wikipedia.org/wiki/Tf%E2%80%93idf'],
+          ['Keyword Extraction', 'https://github.com/MOoTawaty/TF-IDF-keywords-extraction'],
+          ['Data Quality', '/docs/guides/corpus.md']
+        ],
+        [['Keyword Extraction', 'info']]
+      ),
+      KEYWORDS_BOOST: L(
+        'Keywords Boost',
+        'Score boost multiplier applied to search results that match corpus keywords. Higher values (1.5-2.0) strongly favor keyword matches, lower values (1.1-1.3) provide mild preference. The boost is multiplied with the base retrieval score. Recommended: 1.3 for balanced keyword preference.\n\nSweet spot: 1.3 for balanced systems. Use 1.1-1.2 for mild keyword preference (keyword matches slightly favored). Use 1.5-2.0 when keywords are highly reliable indicators of relevance. Use 2.5+ only when keywords are definitive relevance signals.\n\n• Range: 1.0-3.0 (typical: 1.1-2.0)\n• Mild boost: 1.1-1.2 (slight preference)\n• Balanced: 1.3 (recommended)\n• Strong boost: 1.5-2.0 (strong preference)\n• Effect: Higher = more weight to keyword matches\n• Symptom too low: Keyword matches undervalued\n• Symptom too high: Keyword matches dominate, other signals ignored',
+        [
+          ['Score Boosting', 'https://en.wikipedia.org/wiki/Relevance_(information_retrieval)'],
+          ['TF-IDF Scoring', 'https://en.wikipedia.org/wiki/Tf%E2%80%93idf'],
+          ['Keyword Extraction', 'https://github.com/airKlizz/CustomizedTFIDF'],
+          ['Data Quality', '/docs/guides/corpus.md']
+        ],
+        [['Scoring', 'info']]
+      ),
+      KEYWORDS_AUTO_GENERATE: L(
+        'Keywords Auto-Generate',
+        'Automatically generate discriminative keywords during indexing. When enabled, keywords are computed and stored automatically when a corpus is indexed. When disabled, keywords must be generated manually via the API. Recommended: enabled for automatic keyword management.\n\nSweet spot: enabled for production systems. Auto-generation ensures keywords are always up-to-date with the latest corpus content. Disable only if you want manual control over keyword generation timing or want to use pre-computed keywords.\n\n• Enabled: Automatic keyword generation during indexing (recommended)\n• Disabled: Manual keyword generation required\n• Effect: Controls automatic keyword computation\n• Symptom if disabled: Keywords may be stale or missing',
+        [
+          ['TF-IDF Keyword Extraction', 'https://github.com/tonifuc3m/document_selection_tfidf'],
+          ['Keyword Extraction', 'https://github.com/airKlizz/CustomizedTFIDF'],
+          ['Automatic Indexing', 'https://en.wikipedia.org/wiki/Index_(search_engine)'],
+          ['Data Quality', '/docs/guides/corpus.md']
+        ],
+        [['Auto-Generation', 'info']]
+      ),
+      KEYWORDS_REFRESH_HOURS: L(
+        'Keywords Refresh Hours',
+        'Hours between automatic keyword refresh. When auto-generate is enabled, keywords are recomputed after this interval to reflect corpus changes. Lower values (12-24) keep keywords more current but increase computation cost. Higher values (48-168) reduce cost but keywords may become stale.\n\nSweet spot: 24 hours for most corpora. Use 12 hours for rapidly changing codebases where keyword freshness is critical. Use 48-72 hours for stable codebases where frequent refresh isn\'t needed. Use 168+ (weekly) only for very stable corpora.\n\n• Range: 1-168 (typical: 12-72)\n• Rapid changes: 12 (more frequent refresh)\n• Balanced: 24 (recommended)\n• Stable codebase: 48-72 (less frequent refresh)\n• Effect: Higher = less frequent refresh, lower cost, potentially stale keywords\n• Symptom too low: Unnecessary refresh overhead\n• Symptom too high: Stale keywords, reduced retrieval quality',
+        [
+          ['TF-IDF Keyword Extraction', 'https://github.com/tonifuc3m/document_selection_tfidf'],
+          ['Keyword Refresh', 'https://en.wikipedia.org/wiki/Index_(search_engine)'],
+          ['Data Quality', '/docs/guides/corpus.md'],
+          ['Indexing Configuration', '/docs/indexing.md']
+        ],
+        [['Refresh Interval', 'info']]
       ),
 
       // Confidence
@@ -1739,6 +2160,136 @@
           ['Prompt Engineering (Guide)', 'https://platform.openai.com/docs/guides/prompt-engineering']
         ]
       ),
+
+      // Chat 2.0 (Pydantic keys used by React TooltipIcon)
+      'chat.system_prompt_base': L(
+        'System prompt (base)',
+        'Legacy base prompt used for backward compatibility. If the selected 4-state system prompt is empty, TriBridRAG falls back to base + Recall/RAG suffix composition.',
+        [
+          ['Prompt engineering', 'https://platform.openai.com/docs/guides/prompt-engineering']
+        ],
+        [['Legacy', 'warn']]
+      ),
+      'chat.system_prompt_direct': L(
+        'System prompt: Direct',
+        'Sent when no retrieval context is provided (no RAG and no Recall results). This prompt must fully orient the model for direct chat.',
+        [],
+        [['Chat 2.0', 'info']]
+      ),
+      'chat.system_prompt_rag': L(
+        'System prompt: RAG only',
+        'Sent when RAG corpora returned results. Explains how to use <rag_context> and how to cite file paths and line numbers.',
+        [],
+        [['Chat 2.0', 'info']]
+      ),
+      'chat.system_prompt_recall': L(
+        'System prompt: Recall only',
+        'Sent when Recall returned results but no RAG context is present. Explains how to use <recall_context> chat history snippets.',
+        [],
+        [['Chat 2.0', 'info']]
+      ),
+      'chat.system_prompt_rag_and_recall': L(
+        'System prompt: RAG + Recall',
+        'Sent when both RAG and Recall context are present. Explains how to use both <rag_context> and <recall_context> together.',
+        [],
+        [['Chat 2.0', 'info']]
+      ),
+      'chat.recall_gate.enabled': L(
+        'Recall gate enabled',
+        'Enable smart per-message gating for Recall (chat memory). When disabled, Recall is always queried when checked.',
+        [],
+        [['Recall', 'info']]
+      ),
+      'chat.recall_gate.default_intensity': L(
+        'Default Recall intensity',
+        'Fallback intensity when the classifier is uncertain (skip/light/standard/deep). Only affects Recall; RAG corpora are always queried when checked.',
+        [],
+        [['Recall', 'info']]
+      ),
+      'chat.recall_gate.skip_greetings': L(
+        'Skip greetings/acknowledgments',
+        "Skip Recall for short conversational messages like 'hi', 'thanks', 'ok'. Avoids wasted embeddings + noisy context.",
+        [],
+        [['Latency', 'info'], ['Cost', 'info']]
+      ),
+      'chat.recall_gate.skip_standalone_questions': L(
+        'Skip standalone questions',
+        "Skip Recall for technical questions that don't depend on past conversation (e.g., 'How does auth work?').",
+        [],
+        [['Precision', 'info']]
+      ),
+      'chat.recall_gate.skip_when_rag_active': L(
+        'Skip Recall when RAG active',
+        'Optional: skip Recall if any non-Recall RAG corpora are checked. Default is off so both can contribute.',
+        [],
+        [['Advanced', 'info']]
+      ),
+      'chat.recall_gate.skip_max_tokens': L(
+        'Max skip tokens',
+        'Messages with \u2264 this many tokens are strong candidates for skipping Recall when they match a skip pattern.',
+        [],
+        [['Advanced', 'info']]
+      ),
+      'chat.recall_gate.light_for_short_questions': L(
+        'Light for short questions',
+        'For short questions that are not explicit Recall triggers, use light Recall (sparse-only, low top_k).',
+        [],
+        [['Latency', 'info']]
+      ),
+      'chat.recall_gate.light_top_k': L(
+        'Light top_k',
+        'Top-k results to include for light Recall queries.',
+        [],
+        [['Recall', 'info']]
+      ),
+      'chat.recall_gate.standard_top_k': L(
+        'Standard top_k',
+        'Top-k results to include for standard Recall queries.',
+        [],
+        [['Recall', 'info']]
+      ),
+      'chat.recall_gate.standard_recency_weight': L(
+        'Standard recency weight',
+        'Blend weight for recency vs relevance when scoring Recall results (0=relevance, 1=recency).',
+        [],
+        [['Recall', 'info']]
+      ),
+      'chat.recall_gate.deep_on_explicit_reference': L(
+        'Deep on explicit reference',
+        'When the user explicitly references past conversation (\"we discussed\", \"you mentioned\"), use deep Recall.',
+        [],
+        [['Recall', 'info']]
+      ),
+      'chat.recall_gate.deep_top_k': L(
+        'Deep top_k',
+        'Top-k results to include for deep Recall queries.',
+        [],
+        [['Recall', 'info']]
+      ),
+      'chat.recall_gate.deep_recency_weight': L(
+        'Deep recency weight',
+        'Recency weight for deep Recall. Higher values bias toward more recent messages when the user asks about the past.',
+        [],
+        [['Recall', 'info']]
+      ),
+      'chat.recall_gate.show_gate_decision': L(
+        'Show gate decision',
+        'Show Recall gate intensity (skip/light/standard/deep) in the chat status bar.',
+        [],
+        [['Debug', 'info']]
+      ),
+      'chat.recall_gate.show_signals': L(
+        'Show raw signals',
+        'Show extracted RecallSignals + overrides in the debug footer (developer mode).',
+        [],
+        [['Debug', 'info']]
+      ),
+      chat_recall_intensity: L(
+        'Recall intensity override (per message)',
+        'Per-message override for Recall (chat memory) intensity. \"auto\" lets the gate decide; other values force behavior for the next message.',
+        [],
+        [['Chat 2.0', 'info']]
+      ),
       CHAT_HISTORY: L(
         'Chat History Storage',
         'Controls how chat history is saved and loaded. History persists in browser localStorage only \u2014 no server storage for privacy.',
@@ -2526,5 +3077,10 @@
     });
   }
 
-  window.Tooltips = { buildTooltipMap, attachTooltips, attachManualTooltips };
+  // NOTE: React components render tooltips; keep DOM attach helpers for reference only.
+  // We intentionally do NOT attach anything to window.*.
+  return { buildTooltipMap };
 })();
+
+export const buildTooltipMap = LegacyTooltips.buildTooltipMap;
+export const tooltipMap = LegacyTooltips.buildTooltipMap();

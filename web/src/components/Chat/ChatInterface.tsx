@@ -6,15 +6,17 @@ import type React from 'react';
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { useAPI, useConfig, useConfigField } from '@/hooks';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
-import { RepoSelector } from '@/components/ui/RepoSelector';
 import { EmbeddingMismatchWarning } from '@/components/ui/EmbeddingMismatchWarning';
 import { useEmbeddingStatus } from '@/hooks/useEmbeddingStatus';
 import { useRepoStore } from '@/stores/useRepoStore';
+import { SourceDropdown } from '@/components/Chat/SourceDropdown';
+import { ModelPicker } from '@/components/Chat/ModelPicker';
+import { StatusBar } from '@/components/Chat/StatusBar';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
-import type { ChatDebugInfo } from '@/types/generated';
+import type { ActiveSources, ChatDebugInfo, ChatModelInfo, ChatModelsResponse, ChunkMatch, RecallIntensity, RecallPlan } from '@/types/generated';
 
 // Useful tips shown during response generation
 // Each tip has content and optional category for styling
@@ -414,12 +416,10 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
   const [sending, setSending] = useState(false);
   const [streaming, setStreaming] = useState(false);
   const [typing, setTyping] = useState(false);
-  // Per-query repo override - empty string means use the global activeRepo
-  const [queryRepoOverride, setQueryRepoOverride] = useState('');
   const [conversationId, setConversationId] = useState<string | null>(null);
   
   // Use centralized repo store for repo list and default
-  const { activeRepo, loadRepos, initialized } = useRepoStore();
+  const { repos, loadRepos, initialized } = useRepoStore();
   
   // Check if index exists for "no index" warning
   const { status: embeddingStatus } = useEmbeddingStatus();
@@ -431,14 +431,64 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
   const chatShowCitations = Boolean(config?.ui?.chat_show_citations ?? 1);
   const chatShowTrace = Boolean(config?.ui?.chat_show_trace ?? 1);
   const chatShowDebugFooter = Boolean(config?.ui?.chat_show_debug_footer ?? 1);
+  const recallGateShowDecision = Boolean(config?.chat?.recall_gate?.show_gate_decision ?? true);
+  const recallGateShowSignals = Boolean(config?.chat?.recall_gate?.show_signals ?? false);
   const chatHistoryMax = Math.max(10, Math.min(500, Number(config?.ui?.chat_history_max ?? 50)));
 
   // Per-message retrieval leg toggles (do NOT persist; user requested per-message control)
   const [includeVector, setIncludeVector] = useState(true);
   const [includeSparse, setIncludeSparse] = useState(true);
-  const [includeGraph, setIncludeGraph] = useState(true);
+  const [includeGraph, setIncludeGraph] = useState(false);
   // Note: include_vector/sparse/graph are per-message settings on ChatRequest,
   // not config settings. They default to true in the Pydantic model.
+  const [recallIntensity, setRecallIntensity] = useState<RecallIntensity | null>(null);
+
+  // Chat 2.0: composable sources + model picker
+  const sourcesInitRef = useRef(false);
+  const [activeSources, setActiveSources] = useState<ActiveSources>({ corpus_ids: ['recall_default'] });
+  const handleSourcesChange = useCallback(
+    (next: ActiveSources) => {
+      setActiveSources(next);
+      const ids = next.corpus_ids ?? [];
+      if (!ids.includes('recall_default')) {
+        setRecallIntensity(null);
+      }
+    },
+    [setActiveSources]
+  );
+  useEffect(() => {
+    if (sourcesInitRef.current) return;
+    if (!config) return;
+    sourcesInitRef.current = true;
+    const defaults = config.chat?.default_corpus_ids ?? ['recall_default'];
+    setActiveSources({ corpus_ids: defaults });
+  }, [config]);
+
+  const [chatModels, setChatModels] = useState<ChatModelInfo[]>([]);
+  const [modelOverride, setModelOverride] = useState<string>('');
+  const modelInitRef = useRef(false);
+  useEffect(() => {
+    if (!config) return;
+    if (modelInitRef.current) return;
+    if (!chatModels.length) return;
+    // Prefer configured OpenRouter default; otherwise prefer local default (prefixed).
+    const openrouterDefault = config.chat?.openrouter?.default_model;
+    const localDefault = config.chat?.local_models?.default_chat_model;
+    const preferred =
+      (typeof openrouterDefault === 'string' && openrouterDefault.trim()) ||
+      (typeof localDefault === 'string' && localDefault.trim() ? `local:${localDefault.trim()}` : '');
+    if (preferred) {
+      setModelOverride(preferred);
+    } else {
+      const first = chatModels[0];
+      setModelOverride(first.source === 'local' ? `local:${first.id}` : first.id);
+    }
+    modelInitRef.current = true;
+  }, [chatModels, config]);
+
+  const [lastMatches, setLastMatches] = useState<ChunkMatch[]>([]);
+  const [lastLatencyMs, setLastLatencyMs] = useState<number | null>(null);
+  const [lastRecallPlan, setLastRecallPlan] = useState<RecallPlan | null>(null);
 
   // Quick settings (also editable in Chat Settings subtab)
   const [chatModel, setChatModel] = useConfigField<string>('ui.chat_default_model', 'gpt-4o-mini');
@@ -539,6 +589,28 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
       clearTimeout(timeoutId);
     };
   }, [streaming, typing]);
+
+  // Load chat model options (Chat 2.0)
+  useEffect(() => {
+    (async () => {
+      const fallbackModels: ChatModelInfo[] = [
+        { id: 'gpt-4o-mini', provider: 'OpenAI', source: 'cloud_direct' },
+      ];
+      try {
+        const r = await fetch(api('chat/models'));
+        if (!r.ok) {
+          setChatModels(fallbackModels);
+          return;
+        }
+        const d = (await r.json()) as ChatModelsResponse;
+        const models = Array.isArray(d?.models) ? (d.models as ChatModelInfo[]) : [];
+        setChatModels(models.length > 0 ? models : fallbackModels);
+      } catch {
+        // Best-effort; provide a sensible default so the UI can still run offline.
+        setChatModels(fallbackModels);
+      }
+    })();
+  }, [api]);
 
   // Chat settings state (TriBridConfig-backed)
   const [streamPref, setStreamPref] = useState<boolean>(() => chatStreamingEnabled);
@@ -672,6 +744,10 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
 
   const handleSend = async (text: string) => {
     if (!text.trim() || sending) return;
+    const recallIntensityOverride = recallIntensity;
+    if (recallIntensityOverride !== null) {
+      setRecallIntensity(null);
+    }
 
     const userMessage: Message = {
       id: `user-${Date.now()}`,
@@ -691,14 +767,14 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
       const streamingEnabled = streamPref && streamingSupportedRef.current !== false;
       if (streamingEnabled) {
         try {
-          await handleStreamingResponse(userMessage);
+          await handleStreamingResponse(userMessage, recallIntensityOverride);
           streamingSupportedRef.current = true;
         } catch (err) {
           streamingSupportedRef.current = false;
-          await handleRegularResponse(userMessage);
+          await handleRegularResponse(userMessage, recallIntensityOverride);
         }
       } else {
-        await handleRegularResponse(userMessage);
+        await handleRegularResponse(userMessage, recallIntensityOverride);
       }
     } catch (error) {
       console.error('[ChatInterface] Failed to send message:', error);
@@ -718,13 +794,11 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
     }
   };
 
-  const handleStreamingResponse = async (userMessage: Message) => {
+  const handleStreamingResponse = async (
+    userMessage: Message,
+    recallIntensityOverride: RecallIntensity | null
+  ) => {
     setStreaming(true);
-
-    const corpusId = (queryRepoOverride || activeRepo || '').trim();
-    if (!corpusId) {
-      throw new Error('Select a corpus before chatting');
-    }
 
     // Stream from /api/chat/stream (SSE)
     const response = await fetch(api('chat/stream'), {
@@ -732,12 +806,15 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         message: userMessage.content,
-        corpus_id: corpusId,
+        sources: activeSources,
         conversation_id: conversationId,
         stream: true,
+        images: [],
+        model_override: modelOverride,
         include_vector: includeVector,
         include_sparse: includeSparse,
         include_graph: includeGraph,
+        recall_intensity: recallIntensityOverride,
       })
     });
 
@@ -840,6 +917,7 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
               setConversationId(parsed.conversation_id);
             }
             if (Array.isArray(parsed.sources)) {
+              setLastMatches(parsed.sources as ChunkMatch[]);
               citations = parsed.sources
                 .map((s: any) => {
                   const fp = s?.file_path;
@@ -857,10 +935,15 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
               startedAtMs = parsed.started_at_ms;
             }
             if (typeof parsed.ended_at_ms === 'number') {
-              endedAtMs = parsed.ended_at_ms;
+              const ended = parsed.ended_at_ms;
+              endedAtMs = ended;
+              if (typeof startedAtMs === 'number') {
+                setLastLatencyMs(Math.max(0, ended - startedAtMs));
+              }
             }
             debug = parsed && typeof parsed.debug === 'object' ? (parsed.debug as ChatDebugInfo) : null;
             confidence = typeof parsed?.debug?.confidence === 'number' ? parsed.debug.confidence : undefined;
+            setLastRecallPlan((debug as any)?.recall_plan ?? null);
 
             try {
               window.dispatchEvent(
@@ -916,14 +999,12 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
     scheduleAssistantRender(true);
   };
 
-  const handleRegularResponse = async (userMessage: Message) => {
+  const handleRegularResponse = async (
+    userMessage: Message,
+    recallIntensityOverride: RecallIntensity | null
+  ) => {
     const params = new URLSearchParams(window.location.search || '');
     const fast = fastMode || params.get('fast') === '1' || params.get('smoke') === '1';
-
-    const corpusId = (queryRepoOverride || activeRepo || '').trim();
-    if (!corpusId) {
-      throw new Error('Select a corpus before chatting');
-    }
 
     // NOTE: `fast` is currently a UI-only toggle. The backend chat API does not accept fast_mode yet.
     void fast;
@@ -933,12 +1014,15 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         message: userMessage.content,
-        corpus_id: corpusId,
+        sources: activeSources,
         conversation_id: conversationId,
         stream: false,
+        images: [],
+        model_override: modelOverride,
         include_vector: includeVector,
         include_sparse: includeSparse,
         include_graph: includeGraph,
+        recall_intensity: recallIntensityOverride,
       })
     });
 
@@ -953,7 +1037,8 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
       data && typeof data.conversation_id === 'string' ? data.conversation_id : null;
     if (nextConversationId) setConversationId(nextConversationId);
 
-    const sources: any[] = Array.isArray(data?.sources) ? data.sources : [];
+    const sources: ChunkMatch[] = Array.isArray(data?.sources) ? (data.sources as ChunkMatch[]) : [];
+    setLastMatches(sources);
     const citations: string[] = sources
       .map((s: any) => {
         const fp = s?.file_path;
@@ -968,7 +1053,11 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
     const runId: string | undefined = typeof data?.run_id === 'string' ? data.run_id : undefined;
     const startedAtMs: number | undefined = typeof data?.started_at_ms === 'number' ? data.started_at_ms : undefined;
     const endedAtMs: number | undefined = typeof data?.ended_at_ms === 'number' ? data.ended_at_ms : undefined;
+    if (typeof startedAtMs === 'number' && typeof endedAtMs === 'number') {
+      setLastLatencyMs(Math.max(0, endedAtMs - startedAtMs));
+    }
     const debug: ChatDebugInfo | null = data && typeof data?.debug === 'object' ? (data.debug as ChatDebugInfo) : null;
+    setLastRecallPlan((debug as any)?.recall_plan ?? null);
     const confidence: number | undefined = typeof data?.debug?.confidence === 'number' ? data.debug.confidence : undefined;
     const assistantMessage: Message = {
       id: `assistant-${Date.now()}`,
@@ -1094,13 +1183,22 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
             <input id="chat-fast-mode" type="checkbox" checked={fastMode} onChange={(e) => setFastMode(e.target.checked)} style={{ width: '14px', height: '14px', cursor: 'pointer' }} />
             Fast
           </label>
-          <RepoSelector
-            id="chat-repo-select"
-            value={queryRepoOverride}
-            onChange={setQueryRepoOverride}
-            showAutoDetect={true}
-            compact={true}
+          <SourceDropdown
+            value={activeSources}
+            onChange={handleSourcesChange}
+            corpora={repos}
+            includeVector={includeVector}
+            includeSparse={includeSparse}
+            includeGraph={includeGraph}
+            onIncludeVectorChange={setIncludeVector}
+            onIncludeSparseChange={setIncludeSparse}
+            onIncludeGraphChange={setIncludeGraph}
+            recallIntensity={recallIntensity}
+            onRecallIntensityChange={setRecallIntensity}
           />
+          <div style={{ width: '360px', minWidth: '280px' }}>
+            <ModelPicker value={modelOverride} onChange={setModelOverride} models={chatModels} />
+          </div>
 
           <button
             onClick={handleExport}
@@ -1528,6 +1626,10 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
                         ? `v:${dbg.vector_results ?? '—'} s:${dbg.sparse_results ?? '—'} g:${dbg.graph_hydrated_chunks ?? '—'} final:${dbg.final_results ?? '—'}`
                         : '—';
                       const runShort = message.runId ? message.runId.slice(0, 8) : '—';
+                      const recallPlan = (dbg as any)?.recall_plan;
+                      const recallIntensity =
+                        typeof recallPlan?.intensity === 'string' ? (recallPlan.intensity as string) : null;
+                      const recallReason = typeof recallPlan?.reason === 'string' ? (recallPlan.reason as string) : null;
 
                       return (
                         <div
@@ -1550,7 +1652,32 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
                           <span>fusion {fusionText}</span>
                           <span>k {kText}</span>
                           <span>{countsText}</span>
+                          {recallIntensity ? <span>recall {recallIntensity}</span> : null}
+                          {recallReason ? (
+                            <span title={recallReason} style={{ maxWidth: 420, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                              gate {recallReason}
+                            </span>
+                          ) : null}
                           <span>run {runShort}</span>
+                          {recallGateShowSignals && recallPlan ? (
+                            <details>
+                              <summary style={{ cursor: 'pointer', color: 'var(--link)' }}>signals</summary>
+                              <pre
+                                style={{
+                                  marginTop: 6,
+                                  background: 'var(--bg-elev2)',
+                                  border: '1px solid var(--line)',
+                                  padding: 10,
+                                  borderRadius: 8,
+                                  maxWidth: 680,
+                                  overflow: 'auto',
+                                  whiteSpace: 'pre-wrap',
+                                }}
+                              >
+                                {JSON.stringify(recallPlan, null, 2)}
+                              </pre>
+                            </details>
+                          ) : null}
                           <button
                             type="button"
                             data-testid="chat-debug-view-trace"
@@ -1964,6 +2091,14 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
           </div>
         )}
       </div>
+
+      <StatusBar
+        sources={activeSources}
+        matches={lastMatches}
+        latencyMs={lastLatencyMs}
+        recallPlan={lastRecallPlan}
+        showRecallGateDecision={recallGateShowDecision}
+      />
 
       <style>{`
         @keyframes pulse {

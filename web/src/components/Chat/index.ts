@@ -2,4 +2,4 @@
 // Exports all Chat tab components
 
 export { ChatInterface } from './ChatInterface';
-export { ChatSettings } from './ChatSettings';
+export { ChatSettings2 } from './ChatSettings2';

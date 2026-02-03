@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { SearchResult, SettingSearchItem } from '../types';
 import { useAPI } from './useAPI';
 
@@ -34,6 +35,8 @@ import { useAPI } from './useAPI';
  */
 export function useGlobalSearch() {
   const { api } = useAPI();
+  const navigate = useNavigate();
+  const location = useLocation();
   const [isOpen, setIsOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<SearchResult[]>([]);
@@ -87,39 +90,16 @@ export function useGlobalSearch() {
     // Build index after initial render
     const timer = setTimeout(buildSettingsIndex, 500);
 
-    // Rebuild on navigation/tab changes
-    /**
-     * ---agentspec
-     * what: |
-     *   Sets up event-driven navigation handling with deferred index building.
-     *   Registers a 'tab-changed' event listener that triggers buildSettingsIndex after a 100ms delay via setTimeout.
-     *   Returns a cleanup function that clears any pending timeout and removes the event listener.
-     *   The 100ms delay allows the DOM to settle after tab transitions before rebuilding the index.
-     *   Edge case: If component unmounts before the timeout fires, the cleanup function prevents buildSettingsIndex from executing on a potentially unmounted component.
-     *
-     * why: |
-     *   The setTimeout delay decouples index building from the tab-change event, preventing race conditions where the DOM hasn't fully rendered.
-     *   Cleanup function ensures no memory leaks or orphaned timers when the component is destroyed.
-     *   This pattern is common in React/Vue effects to handle async side effects safely.
-     *
-     * guardrails:
-     *   - DO NOT remove the cleanup function; it prevents memory leaks and stale closures
-     *   - ALWAYS ensure buildSettingsIndex is idempotent, since it may be called multiple times during rapid tab switches
-     *   - NOTE: The 100ms delay is arbitrary; if settings index fails to populate, this timeout may be too short for slow DOM renders
-     *   - ASK USER: Confirm whether 100ms is sufficient for your DOM rendering speed, or if this should be configurable/dynamic
-     * ---/agentspec
-     */
-    const handleNavigation = () => {
-      setTimeout(buildSettingsIndex, 100);
-    };
-
-    window.addEventListener('tab-changed', handleNavigation);
-
     return () => {
       clearTimeout(timer);
-      window.removeEventListener('tab-changed', handleNavigation);
     };
   }, [buildSettingsIndex]);
+
+  // Rebuild index on route changes (React Router)
+  useEffect(() => {
+    const t = window.setTimeout(buildSettingsIndex, 150);
+    return () => window.clearTimeout(t);
+  }, [buildSettingsIndex, location.pathname, location.search]);
 
   // Keyboard shortcut: Ctrl+K or Cmd+K
   useEffect(() => {
@@ -259,22 +239,55 @@ export function useGlobalSearch() {
     if (result.element) {
       // GUI setting - navigate and highlight
       const tabContent = result.element.closest('.tab-content');
-      if (tabContent) {
-        const tabId = (tabContent as HTMLElement).id.replace('tab-', '');
+      const tabId = tabContent ? (tabContent as HTMLElement).id.replace('tab-', '') : '';
 
-        // Call global switchTab if available
-        if (typeof (window as any).switchTab === 'function') {
-          (window as any).switchTab(tabId);
-        }
+      // Capture stable lookup info before navigation (DOM nodes may be replaced)
+      const el = result.element as HTMLElement;
+      const elementId = el.id || '';
+      const elementName = (el as HTMLInputElement).name || '';
+
+      // If the setting is within a known subtab, preserve it via query string.
+      let nextPath = tabId ? `/${tabId}` : location.pathname;
+      if (tabId === 'rag') {
+        const subtabEl = el.closest('.rag-subtab-content') as HTMLElement | null;
+        const subtabId =
+          subtabEl && typeof subtabEl.id === 'string' && subtabEl.id.startsWith('tab-rag-')
+            ? subtabEl.id.replace('tab-rag-', '')
+            : '';
+        if (subtabId) nextPath = `/rag?subtab=${encodeURIComponent(subtabId)}`;
       }
 
-      // Highlight and scroll to element
-      result.element.classList.add('search-hit');
-      result.element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      if (nextPath !== location.pathname + location.search) {
+        navigate(nextPath);
+      }
 
-      setTimeout(() => {
-        result.element!.classList.remove('search-hit');
-      }, 1200);
+      // Highlight and scroll once the DOM is settled on the target route
+      window.setTimeout(() => {
+        let target: HTMLElement | null = null;
+        if (elementId) {
+          try {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const esc = (CSS as any)?.escape ? (CSS as any).escape(elementId) : elementId;
+            target = document.getElementById(elementId) || (document.querySelector(`#${esc}`) as HTMLElement | null);
+          } catch {
+            target = document.getElementById(elementId);
+          }
+        }
+        if (!target && elementName) {
+          try {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const esc = (CSS as any)?.escape ? (CSS as any).escape(elementName) : elementName;
+            target = document.querySelector(`[name="${esc}"]`) as HTMLElement | null;
+          } catch {
+            target = document.querySelector(`[name="${elementName}"]`) as HTMLElement | null;
+          }
+        }
+
+        if (!target) return;
+        target.classList.add('search-hit');
+        target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        window.setTimeout(() => target?.classList.remove('search-hit'), 1200);
+      }, 200);
     } else {
       // Code file - could open in editor or show preview
       console.log('[useGlobalSearch] Navigate to file:', result.file_path);
@@ -284,7 +297,7 @@ export function useGlobalSearch() {
     setIsOpen(false);
     setQuery('');
     setResults([]);
-  }, []);
+  }, [location.pathname, location.search, navigate]);
 
   // Keyboard navigation in results
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
