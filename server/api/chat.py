@@ -455,7 +455,7 @@ async def list_chat_models(
     cloud_direct_ready: set[str] = set()
     openai_api_key = (os.getenv("OPENAI_API_KEY") or "").strip()
     openrouter_api_key = (os.getenv("OPENROUTER_API_KEY") or "").strip()
-    openai_base_url = (os.getenv("OPENAI_BASE_URL") or "").strip() or "https://api.openai.com/v1"
+    openai_base_url = (str(cfg.generation.openai_base_url or "").strip() or "https://api.openai.com/v1")
 
     # Validate cloud provider credentials best-effort so the UI doesn't advertise unusable providers.
     openai_valid = False

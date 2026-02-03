@@ -197,7 +197,11 @@ async def chat_once(
         has_recall_context=bool(recall_chunks),
         config=config.chat,
     )
-    route = select_provider_route(chat_config=config.chat, model_override=request.model_override)
+    route = select_provider_route(
+        chat_config=config.chat,
+        model_override=request.model_override,
+        openai_base_url_override=config.generation.openai_base_url,
+    )
     provider_info = ChatProviderInfo(
         kind=cast(Any, route.kind),
         provider_name=str(route.provider_name),
@@ -323,7 +327,11 @@ async def chat_stream(
         has_recall_context=bool(recall_chunks),
         config=config.chat,
     )
-    route = select_provider_route(chat_config=config.chat, model_override=request.model_override)
+    route = select_provider_route(
+        chat_config=config.chat,
+        model_override=request.model_override,
+        openai_base_url_override=config.generation.openai_base_url,
+    )
     provider_info = ChatProviderInfo(
         kind=cast(Any, route.kind),
         provider_name=str(route.provider_name),

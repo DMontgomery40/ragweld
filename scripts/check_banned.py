@@ -76,6 +76,69 @@ BANNED_TERMS: List[Tuple[str, str]] = [
     (r'golden.?question', 'Use "eval_dataset" instead of "golden questions"'),
 ]
 
+# =============================================================================
+# Env usage policy ("THE LAW")
+# =============================================================================
+#
+# Environment variables are allowed for:
+# - Secrets (API keys)
+# - Infrastructure/runtime wiring (ports, DSNs, container flags)
+#
+# They are NOT allowed for model selection or other tunable behavior that should
+# be governed by Pydantic config (server/models/tribrid_config_model.py).
+ENV_EXAMPLE_BANNED_KEYS = {
+    # Legacy/no-op keys that have caused repeated confusion.
+    "EMBEDDING_PROVIDER",
+    "EMBEDDING_MODEL",
+    "EMBEDDING_DIMENSIONS",
+    "LLM_PROVIDER",
+    "LLM_MODEL",
+    "LLM_TEMPERATURE",
+}
+
+# Strict allowlist for literal os.getenv("...") keys in server/.
+#
+# If you add a new env dependency, it must be either:
+# - a secret/infra key, added here with justification, OR
+# - moved under Pydantic config (preferred).
+SERVER_ENV_GETENV_ALLOWLIST = {
+    # Provider secrets
+    "OPENAI_API_KEY",
+    "OPENROUTER_API_KEY",
+    "COHERE_API_KEY",
+    # Postgres infra
+    "POSTGRES_DSN",
+    "POSTGRES_HOST",
+    "POSTGRES_PORT",
+    "POSTGRES_DB",
+    "POSTGRES_USER",
+    "POSTGRES_PASSWORD",
+    # Neo4j infra
+    "NEO4J_URI",
+    "NEO4J_USER",
+    "NEO4J_PASSWORD",
+    "TRIBRID_DB_DIR",
+    # Dev stack / container wiring
+    "TRIBRID_DEV_ORCHESTRATOR",
+    "FRONTEND_PORT",
+    "BACKEND_PORT",
+    "LOKI_BASE_URL",
+}
+
+# Keys that must never be read from env in server code (config must be Pydantic-driven).
+SERVER_ENV_GETENV_BANNED = {
+    "LLM_MODEL",
+    "LLM_PROVIDER",
+    "LLM_TEMPERATURE",
+    "EMBEDDING_PROVIDER",
+    "EMBEDDING_MODEL",
+    "EMBEDDING_DIMENSIONS",
+    # Use TriBridConfig.generation.openai_base_url instead.
+    "OPENAI_BASE_URL",
+    # Use TriBridConfig.embedding.embedding_dim instead.
+    "TRIBRID_EMBEDDING_DIM",
+}
+
 # Files/directories to skip
 SKIP_PATTERNS = [
     '__pycache__',
@@ -350,6 +413,64 @@ def check_legacy_project_name() -> List[str]:
     return errors
 
 
+def check_env_example_legacy_keys() -> List[str]:
+    """Fail if .env.example contains legacy/no-op config keys.
+
+    .env.example is tracked and serves as onboarding documentation. It must not
+    advertise non-LAW configuration.
+    """
+    errors: list[str] = []
+    p = Path(".env.example")
+    if not p.exists():
+        return errors
+    try:
+        content = p.read_text(errors="ignore")
+    except Exception:
+        return errors
+
+    for key in sorted(ENV_EXAMPLE_BANNED_KEYS):
+        if re.search(rf"^\s*{re.escape(key)}\s*=", content, re.MULTILINE):
+            errors.append(
+                f".env.example:1: Legacy key '{key}' found. "
+                "Model/provider selection must be configured via Pydantic config, not .env."
+            )
+    return errors
+
+
+def check_server_env_getenv_allowlist() -> List[str]:
+    """Fail if server/ reads a non-allowlisted env key via os.getenv("...")."""
+    errors: list[str] = []
+    rx = re.compile(r"os\.getenv\(\s*['\"]([^'\"]+)['\"]")
+
+    for py_file in Path("server").rglob("*.py"):
+        if should_skip(py_file):
+            continue
+        try:
+            content = py_file.read_text(errors="ignore")
+        except Exception:
+            continue
+        for i, line in enumerate(content.split("\n"), 1):
+            m = rx.search(line)
+            if not m:
+                continue
+            key = str(m.group(1) or "").strip()
+            if not key:
+                continue
+            if key in SERVER_ENV_GETENV_BANNED:
+                errors.append(
+                    f"{_normalize_relpath(py_file)}:{i}: Env key '{key}' is banned in server code. "
+                    "Move this under Pydantic config (THE LAW)."
+                )
+                continue
+            if key not in SERVER_ENV_GETENV_ALLOWLIST:
+                errors.append(
+                    f"{_normalize_relpath(py_file)}:{i}: Env key '{key}' is not allowlisted. "
+                    "If this is a secret/infra key, add it to SERVER_ENV_GETENV_ALLOWLIST with justification; "
+                    "otherwise move it under Pydantic config."
+                )
+    return errors
+
+
 def main() -> int:
     print("Checking for banned patterns...")
     print("")
@@ -360,6 +481,8 @@ def main() -> int:
     errors.extend(check_zero_mock_tests())
     errors.extend(check_no_legacy_web_modules())
     errors.extend(check_legacy_project_name())
+    errors.extend(check_env_example_legacy_keys())
+    errors.extend(check_server_env_getenv_allowlist())
 
     if errors:
         print("BANNED PATTERNS FOUND:")

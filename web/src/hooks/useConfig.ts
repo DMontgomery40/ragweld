@@ -2,23 +2,7 @@ import { useCallback, useEffect, useMemo } from 'react';
 import { useConfigStore } from '@/stores';
 import type { TriBridConfig } from '@/types/generated';
 
-/**
- * ---agentspec
- * what: |
- *   React hook that provides centralized access to application configuration state and management functions.
- *   Takes no parameters; returns an object containing: config (TriBridConfig), loading, error, saving, and functions to load/save/patch/reset config.
- *   Manages async operations for loading and saving configuration, maintaining loading/saving state flags and error state throughout the lifecycle.
- *   Handles edge cases: returns stale config if load fails, prevents concurrent saves, clears errors on successful operations.
- *
- * why: |
- *   Centralizes configuration state management in a custom hook to avoid prop drilling and provide consistent access across components.
- *   Separates concerns: hook manages async state (loading, saving, error) while components handle UI rendering, making testing and reuse easier.
- *   Exposes both read operations (loadConfig) and write operations (saveConfig, patchSection, resetConfig) through a single interface.
- *
- * guardrails:
- *   - DO NOT mutate config objects directly; always use patchSection/saveConfig
- * ---/agentspec
- */
+
 export function useConfig() {
   const config = useConfigStore((s) => s.config);
   const loading = useConfigStore((s) => s.loading);
@@ -33,15 +17,17 @@ export function useConfig() {
 
   // Load config on mount (once)
   useEffect(() => {
-    if (!config && !loading) {
+    // Avoid retry-loops: if a load failed, surface the error and wait for user action/corpus-change.
+    if (!config && !loading && !error) {
       loadConfig();
     }
-  }, [config, loading, loadConfig]);
+  }, [config, error, loading, loadConfig]);
 
   // Reload config when active corpus changes
   useEffect(() => {
     const handler = () => {
-      // Prevent any pending debounced patches from firing against a new corpus scope.
+      // When corpus changes, cancel patches (they're for the old corpus) and load new config.
+      // Note: loadConfig() will flush patches, but we cancel here because patches are corpus-scoped.
       cancelPendingPatches();
       loadConfig();
     };

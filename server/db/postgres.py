@@ -201,8 +201,17 @@ class PostgresClient:
                 """
             )
         except Exception:
-            # Fallback: fixed dimension (matches LAW default, can be overridden via TRIBRID_EMBEDDING_DIM)
-            dim = int(os.getenv("TRIBRID_EMBEDDING_DIM", "3072"))
+            # Fallback: fixed dimension (matches THE LAW embedding.embedding_dim).
+            # NOTE: This fallback is only needed on older pgvector versions that require
+            # an explicit vector dimension in the schema.
+            try:
+                from server.config import load_config as _load_global_config
+
+                dim = int(_load_global_config().embedding.embedding_dim)
+            except Exception:
+                from server.models.tribrid_config_model import TriBridConfig
+
+                dim = int(TriBridConfig().embedding.embedding_dim)
             await conn.execute(
                 f"""
                 CREATE TABLE IF NOT EXISTS chunks (

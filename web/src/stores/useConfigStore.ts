@@ -72,6 +72,20 @@ export const useConfigStore = create<ConfigStore>((set) => {
     }
   };
 
+  const flushAllPendingPatches = async () => {
+    // Clear all pending timers first
+    for (const key of Object.keys(timersBySection)) {
+      clearTimeout(timersBySection[key]);
+      delete timersBySection[key];
+    }
+    
+    // Flush all pending sections
+    const sections = Object.keys(pendingBySection);
+    if (sections.length === 0) return;
+    
+    await Promise.all(sections.map((section) => flushSection(section)));
+  };
+
   const patchSectionDebounced = (section: keyof TriBridConfig, updates: Record<string, unknown>) => {
     const sectionKey = String(section);
 
@@ -100,11 +114,32 @@ export const useConfigStore = create<ConfigStore>((set) => {
   evalKeyCategories: {},
 
   loadConfig: async () => {
-    cancelPendingPatches();
+    // Critical: do NOT cancel optimistic patches here. Flush them before loading so
+    // debounced saves are not lost and GET does not overwrite local updates.
+    
+    // Capture optimistic updates BEFORE flushing (flush will clear pendingBySection)
+    const optimisticUpdates = { ...pendingBySection };
+    for (const key in optimisticUpdates) {
+      optimisticUpdates[key] = { ...optimisticUpdates[key] };
+    }
+    
+    await flushAllPendingPatches();
+    
     set({ loading: true, error: null });
     try {
       const config = await configApi.load();
-      set({ config, loading: false, error: null });
+      
+      // Merge server config with optimistic updates that were pending before flush
+      // This preserves user changes even if server hasn't processed the flush yet
+      const mergedConfig = { ...config } as any;
+      for (const [sectionKey, updates] of Object.entries(optimisticUpdates)) {
+        if (updates && Object.keys(updates).length > 0) {
+          const curSection = mergedConfig[sectionKey] || {};
+          mergedConfig[sectionKey] = { ...curSection, ...updates };
+        }
+      }
+      
+      set({ config: mergedConfig as TriBridConfig, loading: false, error: null });
     } catch (error) {
       set({
         loading: false,

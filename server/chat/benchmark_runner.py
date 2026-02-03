@@ -32,7 +32,11 @@ async def _run_one(
 ) -> dict[str, Any]:
     async with sem:
         try:
-            route = select_provider_route(chat_config=config.chat, model_override=model)
+            route = select_provider_route(
+                chat_config=config.chat,
+                model_override=model,
+                openai_base_url_override=config.generation.openai_base_url,
+            )
         except Exception as e:
             return {
                 "model": model,
@@ -98,4 +102,3 @@ async def run_benchmark(*, prompt: str, models: list[str], config: TriBridConfig
         out_file.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
     return payload
-

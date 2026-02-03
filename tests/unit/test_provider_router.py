@@ -133,6 +133,37 @@ def test_select_provider_route_uses_cloud_direct_openai_for_openai_prefix_when_k
         _restore_openrouter_api_key(old_openrouter)
 
 
+def test_select_provider_route_does_not_hijack_openai_prefix_with_openrouter_when_openai_ready() -> None:
+    """Regression test: OpenRouter being enabled must not hijack OpenAI models by default."""
+    old_openrouter = _set_openrouter_api_key("test-openrouter-key")
+    old_openai = _set_openai_api_key("test-openai-key")
+    try:
+        cfg = ChatConfig(openrouter=OpenRouterConfig(enabled=True, default_model="openrouter-default"))
+        route = select_provider_route(chat_config=cfg, model_override="openai/gpt-4o-mini")
+        assert route.kind == "cloud_direct"
+        assert route.provider_name == "OpenAI"
+        assert route.model == "gpt-4o-mini"
+        assert route.api_key == "test-openai-key"
+    finally:
+        _restore_openai_api_key(old_openai)
+        _restore_openrouter_api_key(old_openrouter)
+
+
+def test_select_provider_route_routes_unqualified_gpt_models_cloud_direct_when_openai_ready() -> None:
+    old_openrouter = _set_openrouter_api_key("test-openrouter-key")
+    old_openai = _set_openai_api_key("test-openai-key")
+    try:
+        cfg = ChatConfig(openrouter=OpenRouterConfig(enabled=True, default_model="openrouter-default"))
+        route = select_provider_route(chat_config=cfg, model_override="gpt-5.1")
+        assert route.kind == "cloud_direct"
+        assert route.provider_name == "OpenAI"
+        assert route.model == "gpt-5.1"
+        assert route.api_key == "test-openai-key"
+    finally:
+        _restore_openai_api_key(old_openai)
+        _restore_openrouter_api_key(old_openrouter)
+
+
 def test_select_provider_route_local_prefix_forces_local_even_when_openrouter_ready() -> None:
     old = _set_openrouter_api_key("test-openrouter-key")
     try:
@@ -170,4 +201,3 @@ def test_select_provider_route_raises_when_no_provider_configured() -> None:
     finally:
         _restore_openai_api_key(old_openai)
         _restore_openrouter_api_key(old_openrouter)
-
