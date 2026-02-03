@@ -148,7 +148,7 @@ export function useEmbeddingStatus(): UseEmbeddingStatusResult {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [activeRepo, api, config]);
 
   // Initial check on mount
   useEffect(() => {
@@ -180,13 +180,11 @@ export function useEmbeddingStatus(): UseEmbeddingStatusResult {
     window.addEventListener('index-completed', handleConfigChange);
     window.addEventListener('dashboard-refresh', handleConfigChange);
     window.addEventListener('tribrid-corpus-changed', handleConfigChange as EventListener);
-    window.addEventListener('tribrid-corpus-changed', handleConfigChange as EventListener);
 
     return () => {
       window.removeEventListener('config-updated', handleConfigChange);
       window.removeEventListener('index-completed', handleConfigChange);
       window.removeEventListener('dashboard-refresh', handleConfigChange);
-      window.removeEventListener('tribrid-corpus-changed', handleConfigChange as EventListener);
       window.removeEventListener('tribrid-corpus-changed', handleConfigChange as EventListener);
     };
   }, [checkStatus]);

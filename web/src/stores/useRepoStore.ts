@@ -33,6 +33,8 @@ interface RepoStore {
   addRepo: (request: CorpusCreateRequest) => Promise<Corpus>;
   updateCorpus: (corpusId: string, updates: CorpusUpdateRequest) => Promise<Corpus>;
   deleteCorpus: (corpusId: string) => Promise<void>;
+  /** Deletes all corpora with last_indexed == null (excludes recall_default). */
+  deleteUnindexedCorpora: () => Promise<string[]>;
 }
 
 // Determine API base URL
@@ -272,6 +274,64 @@ export const useRepoStore = create<RepoStore>((set, get) => ({
         }
       }
     }
+  },
+
+  deleteUnindexedCorpora: async () => {
+    const apiBase = getApiBase();
+    const { repos, activeRepo } = get();
+    const beforeActive = String(activeRepo || '').trim();
+
+    const toDelete = (repos || []).filter((c) => {
+      const id = String(c.corpus_id || '').trim();
+      if (!id) return false;
+      if (id === 'recall_default') return false;
+      return !c.last_indexed;
+    });
+
+    if (toDelete.length === 0) {
+      return [];
+    }
+
+    const deleted: string[] = [];
+    const failed: Array<{ id: string; status: number; detail: string }> = [];
+
+    for (const c of toDelete) {
+      const id = String(c.corpus_id || '').trim();
+      if (!id) continue;
+      try {
+        const response = await fetch(`${apiBase}/corpora/${encodeURIComponent(id)}`, {
+          method: 'DELETE',
+        });
+        if (!response.ok) {
+          const detail = await response.text().catch(() => '');
+          failed.push({ id, status: response.status, detail });
+          continue;
+        }
+        deleted.push(id);
+      } catch (e) {
+        failed.push({ id, status: 0, detail: e instanceof Error ? e.message : String(e) });
+      }
+    }
+
+    await get().loadRepos();
+    const afterActive = String(get().activeRepo || '').trim();
+    if (beforeActive && afterActive && beforeActive !== afterActive) {
+      window.dispatchEvent(
+        new CustomEvent('tribrid-corpus-changed', {
+          detail: { corpus: afterActive, repo: afterActive, previous: beforeActive },
+        })
+      );
+    }
+
+    if (failed.length > 0) {
+      const first = failed[0];
+      throw new Error(
+        `Deleted ${deleted.length}/${toDelete.length} corpora. ` +
+          `Failed ${failed.length} (first: ${first.id}${first.status ? ` ${first.status}` : ''})`
+      );
+    }
+
+    return deleted;
   },
 }));
 

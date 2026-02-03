@@ -7,7 +7,6 @@ import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { useAPI, useConfig, useConfigField } from '@/hooks';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { EmbeddingMismatchWarning } from '@/components/ui/EmbeddingMismatchWarning';
-import { useEmbeddingStatus } from '@/hooks/useEmbeddingStatus';
 import { useRepoStore } from '@/stores/useRepoStore';
 import { SourceDropdown } from '@/components/Chat/SourceDropdown';
 import { ModelPicker } from '@/components/Chat/ModelPicker';
@@ -419,11 +418,8 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
   const [conversationId, setConversationId] = useState<string | null>(null);
   
   // Use centralized repo store for repo list and default
-  const { repos, loadRepos, initialized, activeRepo } = useRepoStore();
+  const { repos, loadRepos, initialized, activeRepo, deleteUnindexedCorpora } = useRepoStore();
   
-  // Check if index exists for "no index" warning
-  const { status: embeddingStatus } = useEmbeddingStatus();
-
   // Chat UI preferences (TriBridConfig-backed)
   const { config } = useConfig();
   const chatStreamingEnabled = Boolean(config?.ui?.chat_streaming_enabled ?? 1);
@@ -456,6 +452,26 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
     },
     [setActiveSources]
   );
+  const handleCleanupUnindexed = useCallback(async () => {
+    try {
+      const deleted = await deleteUnindexedCorpora();
+      if (!deleted.length) return;
+      const ids = (activeSources?.corpus_ids ?? []).filter((id) => !deleted.includes(String(id)));
+      handleSourcesChange({ ...activeSources, corpus_ids: ids });
+    } catch (e) {
+      console.error('[ChatInterface] Failed to delete unindexed corpora:', e);
+    }
+  }, [activeSources, deleteUnindexedCorpora, handleSourcesChange]);
+
+  // Prune selected sources when corpora are deleted/changed.
+  useEffect(() => {
+    const allowed = new Set<string>(repos.map((r) => String(r.corpus_id)));
+    allowed.add('recall_default');
+    const current = (activeSources?.corpus_ids ?? []).map(String);
+    const next = current.filter((id) => allowed.has(id));
+    if (next.length === current.length) return;
+    handleSourcesChange({ ...activeSources, corpus_ids: next });
+  }, [activeSources, handleSourcesChange, repos]);
   useEffect(() => {
     if (sourcesInitRef.current) return;
     if (!config) return;
@@ -466,10 +482,8 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
 
   const [chatModels, setChatModels] = useState<ChatModelInfo[]>([]);
   const [modelOverride, setModelOverride] = useState<string>('');
-  const modelInitRef = useRef(false);
   useEffect(() => {
     if (!config) return;
-    if (modelInitRef.current) return;
     if (!chatModels.length) return;
     // Pick a sensible default model_override based on what's actually available.
     //
@@ -479,12 +493,29 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
     const openrouterEnabled = Boolean(config.chat?.openrouter?.enabled);
     const openrouterDefault = config.chat?.openrouter?.default_model;
     const localDefault = config.chat?.local_models?.default_chat_model;
-    const hasLocalOptions = chatModels.some((m) => m.source === 'local');
     const openrouterDefaultTrimmed = typeof openrouterDefault === 'string' ? openrouterDefault.trim() : '';
-    const hasOpenrouterDefaultOption =
-      openrouterEnabled &&
-      !!openrouterDefaultTrimmed &&
-      chatModels.some((m) => m.source === 'openrouter' && String(m.id) === openrouterDefaultTrimmed);
+
+    const toOverrideValue = (m: ChatModelInfo): string => {
+      if (m.source === 'local') return `local:${m.id}`;
+      if (m.source === 'openrouter') return `openrouter:${m.id}`;
+      return String(m.id || '');
+    };
+
+    // If current selection is valid, don't override it.
+    const optionValues = chatModels.map(toOverrideValue);
+    if (modelOverride && optionValues.includes(modelOverride)) {
+      return;
+    }
+
+    const localModels = chatModels.filter((m) => m.source === 'local');
+    const localDefaultTrimmed = typeof localDefault === 'string' ? localDefault.trim() : '';
+    const localDefaultOption =
+      localDefaultTrimmed ? localModels.find((m) => String(m.id) === localDefaultTrimmed) : undefined;
+
+    const openrouterDefaultOption =
+      openrouterEnabled && openrouterDefaultTrimmed
+        ? chatModels.find((m) => m.source === 'openrouter' && String(m.id) === openrouterDefaultTrimmed)
+        : undefined;
 
     const uiDefault = typeof config.ui?.chat_default_model === 'string' ? config.ui.chat_default_model.trim() : '';
     const cloudDefaultOption = uiDefault
@@ -495,9 +526,9 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
       : undefined;
 
     const preferred =
-      (hasOpenrouterDefaultOption ? `openrouter:${openrouterDefaultTrimmed}` : '') ||
-      (hasLocalOptions && typeof localDefault === 'string' && localDefault.trim()
-        ? `local:${localDefault.trim()}`
+      (openrouterDefaultOption ? `openrouter:${openrouterDefaultTrimmed}` : '') ||
+      (localModels.length
+        ? (localDefaultOption ? `local:${localDefaultTrimmed}` : `local:${localModels[0].id}`)
         : '') ||
       (cloudDefaultOption ? String(cloudDefaultOption.id) : '');
 
@@ -505,12 +536,11 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
       ? String(preferred)
       : (() => {
           const first = chatModels[0];
-          return first.source === 'local' ? `local:${first.id}` : first.id;
+          return toOverrideValue(first);
         })();
 
     setModelOverride(nextOverride);
-    modelInitRef.current = true;
-  }, [chatModels, config]);
+  }, [chatModels, config, modelOverride]);
 
   const [lastMatches, setLastMatches] = useState<ChunkMatch[]>([]);
   const [lastLatencyMs, setLastLatencyMs] = useState<number | null>(null);
@@ -1209,6 +1239,7 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
             onIncludeGraphChange={setIncludeGraph}
             recallIntensity={recallIntensity}
             onRecallIntensityChange={setRecallIntensity}
+            onCleanupUnindexed={handleCleanupUnindexed}
           />
           <div style={{ width: '360px', minWidth: '280px' }}>
             <ModelPicker value={modelOverride} onChange={setModelOverride} models={chatModels} />
@@ -1292,7 +1323,15 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
       <EmbeddingMismatchWarning variant="inline" showActions={true} />
       
       {/* No Index Warning - Show when user hasn't indexed yet */}
-      {embeddingStatus && !embeddingStatus.hasIndex && embeddingStatus.totalChunks === 0 && (
+      {(() => {
+        const selected = (activeSources?.corpus_ids ?? []).filter((id) => id && id !== 'recall_default');
+        const selectedCorpora = selected
+          .map((id) => repos.find((r) => r.corpus_id === id))
+          .filter(Boolean) as Array<(typeof repos)[number]>;
+        const unindexed = selectedCorpora.filter((c) => !c.last_indexed);
+        if (unindexed.length === 0) return null;
+        const names = unindexed.map((c) => c.name || c.corpus_id).join(', ');
+        return (
         <div
           role="alert"
           style={{
@@ -1312,12 +1351,13 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
                 fontSize: '13px',
                 marginBottom: '4px',
               }}>
-                No Index Found
+                Not indexed yet
               </div>
               <div style={{ fontSize: '12px', color: 'var(--fg-muted)', lineHeight: 1.5 }}>
-                You need to index your codebase before chat can search it. 
+                Selected corpora are not indexed ({names}). Chat can’t retrieve anything until you index them.
+                {' '}
                 Go to <a 
-                  href="/#/rag?subtab=indexing" 
+                  href="/web/rag?subtab=indexing"
                   style={{ color: 'var(--link)', textDecoration: 'underline' }}
                 >
                   RAG → Indexing
@@ -1326,7 +1366,8 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
             </div>
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {/* Main content area with messages and optional sidebars */}
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>

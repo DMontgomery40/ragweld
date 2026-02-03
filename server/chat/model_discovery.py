@@ -142,6 +142,13 @@ async def discover_openrouter_models(cfg: OpenRouterConfig) -> list[dict[str, An
 
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
+            # Validate the API key first. `/models` is public and can return 200 even
+            # with an invalid key, which makes the UI look like OpenRouter is usable
+            # when it isn't.
+            key_resp = await client.get(f"{base_url}/key", headers=headers)
+            if key_resp.status_code != 200:
+                return []
+
             resp = await client.get(url, headers=headers)
             resp.raise_for_status()
             payload: Any = resp.json()

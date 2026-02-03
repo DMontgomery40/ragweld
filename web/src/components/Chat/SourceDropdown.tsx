@@ -1,4 +1,5 @@
 import type { ActiveSources, Corpus, RecallIntensity } from '@/types/generated';
+import { useEffect, useState } from 'react';
 
 type SourceDropdownProps = {
   value: ActiveSources;
@@ -12,6 +13,7 @@ type SourceDropdownProps = {
   onIncludeGraphChange: (v: boolean) => void;
   recallIntensity: RecallIntensity | null;
   onRecallIntensityChange: (v: RecallIntensity | null) => void;
+  onCleanupUnindexed?: () => void | Promise<void>;
 };
 
 const RECALL_CORPUS_ID = 'recall_default' as const;
@@ -35,6 +37,8 @@ function toggleInOrderedSet(items: string[], id: string): string[] {
 
 export function SourceDropdown(props: SourceDropdownProps) {
   const corpusIds = props.value.corpus_ids ?? [];
+  const [confirmCleanup, setConfirmCleanup] = useState(false);
+  const [cleanupRunning, setCleanupRunning] = useState(false);
 
   const isChecked = (id: string) => corpusIds.includes(id);
 
@@ -44,9 +48,32 @@ export function SourceDropdown(props: SourceDropdownProps) {
   };
 
   const availableCorpora = props.corpora.filter((c) => c.corpus_id !== RECALL_CORPUS_ID);
+  const unindexedCount = availableCorpora.filter((c) => !c.last_indexed).length;
 
   const selectedCount = corpusIds.length;
   const summaryLabel = selectedCount === 0 ? 'None' : `${selectedCount} selected`;
+
+  useEffect(() => {
+    if (!confirmCleanup) return;
+    const t = window.setTimeout(() => setConfirmCleanup(false), 4000);
+    return () => window.clearTimeout(t);
+  }, [confirmCleanup]);
+
+  const handleCleanupClick = async () => {
+    if (!props.onCleanupUnindexed) return;
+    if (cleanupRunning) return;
+    if (!confirmCleanup) {
+      setConfirmCleanup(true);
+      return;
+    }
+    setConfirmCleanup(false);
+    setCleanupRunning(true);
+    try {
+      await props.onCleanupUnindexed();
+    } finally {
+      setCleanupRunning(false);
+    }
+  };
 
   return (
     <details
@@ -125,8 +152,35 @@ export function SourceDropdown(props: SourceDropdownProps) {
           </label>
         </div>
 
-        <div style={{ fontSize: '12px', color: 'var(--fg-muted)', marginBottom: '8px' }}>
-          Corpora
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', marginBottom: '8px' }}>
+          <div style={{ fontSize: '12px', color: 'var(--fg-muted)' }}>Corpora</div>
+
+          {props.onCleanupUnindexed && unindexedCount > 0 && (
+            <button
+              type="button"
+              data-testid="cleanup-unindexed-corpora"
+              onClick={() => void handleCleanupClick()}
+              disabled={cleanupRunning}
+              style={{
+                padding: '6px 10px',
+                borderRadius: '8px',
+                border: '1px solid var(--err)',
+                background: confirmCleanup ? 'var(--err)' : 'transparent',
+                color: confirmCleanup ? 'white' : 'var(--err)',
+                fontSize: '11px',
+                fontWeight: 800,
+                cursor: cleanupRunning ? 'not-allowed' : 'pointer',
+                opacity: cleanupRunning ? 0.65 : 1,
+              }}
+              title={
+                confirmCleanup
+                  ? 'Click again to confirm deleting all NOT INDEXED corpora'
+                  : `Delete all NOT INDEXED corpora (${unindexedCount})`
+              }
+            >
+              {confirmCleanup ? 'CONFIRM DELETE' : `DELETE NOT INDEXED (${unindexedCount})`}
+            </button>
+          )}
         </div>
 
         <div style={{ display: 'grid', gap: '10px' }}>
@@ -177,7 +231,22 @@ export function SourceDropdown(props: SourceDropdownProps) {
                 checked={isChecked(corpus.corpus_id)}
                 onChange={() => handleCorpusToggle(corpus.corpus_id)}
               />
-              <span>{corpus.name}</span>
+              <span style={{ flex: 1 }}>{corpus.name}</span>
+              <span
+                style={{
+                  fontSize: '11px',
+                  color: corpus.last_indexed ? 'var(--ok)' : 'var(--warn)',
+                  fontWeight: 700,
+                  opacity: 0.9,
+                }}
+                title={
+                  corpus.last_indexed
+                    ? `Indexed: ${corpus.last_indexed}`
+                    : 'Not indexed yet. Go to RAG → Indexing to build an index.'
+                }
+              >
+                {corpus.last_indexed ? 'indexed' : 'not indexed'}
+              </span>
             </label>
           ))}
         </div>

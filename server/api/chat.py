@@ -438,10 +438,34 @@ async def list_chat_models(
     cloud_direct_ready: set[str] = set()
     openai_api_key = (os.getenv("OPENAI_API_KEY") or "").strip()
     openrouter_api_key = (os.getenv("OPENROUTER_API_KEY") or "").strip()
-    # OpenAI models are usable either via direct OpenAI OR via OpenRouter proxy (when enabled).
-    if openai_api_key or (bool(cfg.chat.openrouter.enabled) and openrouter_api_key):
-        cloud_direct_ready.add("openai")
     openai_base_url = (os.getenv("OPENAI_BASE_URL") or "").strip() or "https://api.openai.com/v1"
+
+    # Validate cloud provider credentials best-effort so the UI doesn't advertise unusable providers.
+    openai_valid = False
+    if openai_api_key:
+        try:
+            async with httpx.AsyncClient(timeout=2.0) as client:
+                r = await client.get(
+                    f"{openai_base_url.rstrip('/')}/models",
+                    headers={"Authorization": f"Bearer {openai_api_key}"},
+                )
+                openai_valid = r.status_code == 200
+        except Exception:
+            openai_valid = False
+
+    openrouter_valid = False
+    if bool(cfg.chat.openrouter.enabled) and openrouter_api_key:
+        try:
+            async with httpx.AsyncClient(timeout=2.0) as client:
+                base = cfg.chat.openrouter.base_url.rstrip("/")
+                r = await client.get(f"{base}/key", headers={"Authorization": f"Bearer {openrouter_api_key}"})
+                openrouter_valid = r.status_code == 200
+        except Exception:
+            openrouter_valid = False
+
+    # OpenAI models are usable either via direct OpenAI OR via OpenRouter proxy (when enabled + valid).
+    if openai_valid or openrouter_valid:
+        cloud_direct_ready.add("openai")
 
     # Cloud-direct models from models.json (GEN component).
     try:
@@ -537,18 +561,30 @@ async def chat_health(
         else:
             try:
                 async with httpx.AsyncClient(timeout=2.0) as client:
-                    r = await client.get(
-                        f"{cfg.chat.openrouter.base_url.rstrip('/')}/models",
-                        headers={"Authorization": f"Bearer {api_key}"},
-                    )
-                    ok = r.status_code < 400
+                    base = cfg.chat.openrouter.base_url.rstrip("/")
+                    r = await client.get(f"{base}/key", headers={"Authorization": f"Bearer {api_key}"})
+                    ok = r.status_code == 200
+                    detail = None
+                    if not ok:
+                        # Best-effort parse error message without leaking anything sensitive.
+                        msg = None
+                        try:
+                            payload = r.json()
+                            msg = (
+                                (payload.get("error") or {}).get("message")
+                                if isinstance(payload, dict)
+                                else None
+                            )
+                        except Exception:
+                            msg = None
+                        detail = msg or f"HTTP {r.status_code}"
                 out.append(
                     ProviderHealth(
                         provider="OpenRouter",
                         kind="openrouter",
                         base_url=cfg.chat.openrouter.base_url,
                         reachable=bool(ok),
-                        detail=None if ok else f"HTTP {r.status_code}",
+                        detail=detail,
                     )
                 )
             except Exception as e:

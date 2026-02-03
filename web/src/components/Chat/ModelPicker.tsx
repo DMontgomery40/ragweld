@@ -12,7 +12,8 @@ const SOURCE_LABELS = {
   local: 'Local',
 } as const;
 
-const SOURCE_ORDER = ['cloud_direct', 'openrouter', 'local'] as const;
+// Put Local first so it's easy to find even when OpenRouter lists hundreds of models.
+const SOURCE_ORDER = ['local', 'openrouter', 'cloud_direct'] as const;
 
 function toOptionValue(model: ChatModelInfo): string {
   if (model.source === 'local') return `local:${model.id}`;

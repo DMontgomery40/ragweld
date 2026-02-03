@@ -1,9 +1,14 @@
-import { useConfig, useConfigField } from '@/hooks';
+import { useEffect, useMemo, useState } from 'react';
+import { useAPI, useConfig, useConfigField } from '@/hooks';
 import { ApiKeyStatus } from '@/components/ui/ApiKeyStatus';
+import { useRepoStore } from '@/stores/useRepoStore';
 import type { LocalModelConfig, OpenRouterConfig } from '@/types/generated';
+import type { ProvidersHealthResponse, ProviderHealth } from '@/types/generated';
 
 export function ProviderSetup() {
+  const { api } = useAPI();
   const { config, loading, error } = useConfig();
+  const { activeRepo } = useRepoStore();
 
   // NOTE: We bind to the nested objects (not leaf fields) to avoid clobbering sibling fields
   // due to shallow merges in config section patching.
@@ -20,6 +25,38 @@ export function ProviderSetup() {
   }
 
   const providers = Array.isArray(localModels.providers) ? localModels.providers : [];
+
+  const [health, setHealth] = useState<ProvidersHealthResponse | null>(null);
+  const [healthLoading, setHealthLoading] = useState(false);
+  const [healthError, setHealthError] = useState<string | null>(null);
+
+  const healthByProvider = useMemo(() => {
+    const items = (health?.providers || []) as ProviderHealth[];
+    const byName = new Map<string, ProviderHealth>();
+    for (const p of items) {
+      const key = `${p.kind}:${p.provider}`;
+      byName.set(key, p);
+    }
+    return byName;
+  }, [health]);
+
+  useEffect(() => {
+    if (!config) return;
+    const scope = String(activeRepo || '').trim();
+    const qs = scope ? `?corpus_id=${encodeURIComponent(scope)}` : '';
+
+    setHealthLoading(true);
+    setHealthError(null);
+
+    fetch(api(`chat/health${qs}`))
+      .then((r) => {
+        if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
+        return r.json();
+      })
+      .then((d) => setHealth(d as ProvidersHealthResponse))
+      .catch((e) => setHealthError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setHealthLoading(false));
+  }, [activeRepo, api, config, openrouter?.enabled, providers]);
 
   return (
     <div className="subtab-panel" style={{ padding: '24px' }}>
@@ -66,6 +103,25 @@ export function ProviderSetup() {
             <ApiKeyStatus keyName="OPENROUTER_API_KEY" label="OpenRouter API Key" />
           </div>
         </div>
+
+        <div style={{ marginTop: 10, fontSize: 12, color: 'var(--fg-muted)' }}>
+          {healthLoading ? (
+            <span>Checking provider status…</span>
+          ) : healthError ? (
+            <span style={{ color: 'var(--err)' }}>Health check failed: {healthError}</span>
+          ) : (
+            (() => {
+              const h = healthByProvider.get('openrouter:OpenRouter');
+              if (!h) return <span>Provider status: unknown</span>;
+              if (h.reachable) return <span style={{ color: 'var(--ok)' }}>Provider status: reachable</span>;
+              return (
+                <span style={{ color: 'var(--warn)' }}>
+                  Provider status: unreachable{h.detail ? ` — ${h.detail}` : ''}
+                </span>
+              );
+            })()
+          )}
+        </div>
       </div>
 
       <div
@@ -96,6 +152,15 @@ export function ProviderSetup() {
                   <div style={{ minWidth: 180 }}>
                     <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--fg)' }}>{p.name}</div>
                     <div style={{ fontSize: 11, color: 'var(--fg-muted)', marginTop: 2 }}>{p.provider_type}</div>
+                  </div>
+
+                  <div style={{ fontSize: 11, color: 'var(--fg-muted)' }}>
+                    {(() => {
+                      const h = healthByProvider.get(`local:${p.name}`);
+                      if (!h) return 'status: unknown';
+                      if (h.reachable) return <span style={{ color: 'var(--ok)' }}>status: reachable</span>;
+                      return <span style={{ color: 'var(--warn)' }}>status: unreachable</span>;
+                    })()}
                   </div>
 
                   <label className="toggle" style={{ marginLeft: 'auto' }}>
