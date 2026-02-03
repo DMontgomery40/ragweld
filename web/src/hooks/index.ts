@@ -7,7 +7,6 @@
 
 // App lifecycle
 export { useAppInit } from './useAppInit';
-export { useModuleLoader } from './useModuleLoader';
 export { useEventBus } from './useEventBus';
 export { useGlobalState } from './useGlobalState';
 export { useApplyButton } from './useApplyButton';
@@ -36,12 +35,14 @@ export { useEmbeddingStatus } from '@/hooks/useEmbeddingStatus';
 // Feature hooks
 export { useDashboard } from './useDashboard';
 export { useIndexing } from './useIndexing';
-export type { IndexStatus } from './useIndexing';
 export { useModels, getRecommendedChunkSize } from './useModels';
 export type { Model } from './useModels';
 export { useReranker } from './useReranker';
 export { useKeywords } from './useKeywords';
 export { useMCPRag } from './useMCPRag';
+export { useMCPServer } from './useMCPServer';
+export { useCost } from './useCost';
+export { useModelFlows } from './useModelFlows';
 // Chunk Summaries (formerly "cards" - renamed per CLAUDE.md)
 export { useChunkSummaries, useCards } from './useChunkSummaries';
 // useOnboarding removed - banned feature per CLAUDE.md

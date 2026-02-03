@@ -1,6 +1,7 @@
 import { create } from 'zustand';
+import { tooltipMap, type TooltipMap as RegistryTooltipMap } from '../tooltips/registry';
 
-export type TooltipMap = Record<string, string>;
+export type TooltipMap = RegistryTooltipMap;
 
 interface TooltipStore {
   tooltips: TooltipMap;
@@ -62,59 +63,22 @@ function buildTooltipHTML(
  * Zustand store for tooltips - SINGLE SOURCE OF TRUTH
  *
  * All tooltip definitions live in web/src/modules/tooltips.js
- * This store loads from window.Tooltips.buildTooltipMap() which that module exposes
+ * This store loads from the centralized tooltip registry (Wave 1A)
  */
 export const useTooltipStore = create<TooltipStore>((set, get) => ({
-  tooltips: {},
-  loading: true,
-  initialized: false,
+  tooltips: tooltipMap,
+  loading: false,
+  initialized: true,
 
   initialize: () => {
+    // Wave 1A: store is pre-loaded from `web/src/tooltips/registry.ts`.
+    // Keep initialize() for backward compatibility with existing hook call sites.
     if (get().initialized) return;
-
-    try {
-      // Load from legacy tooltips.js module (single source of truth)
-      const windowTooltips = (window as any).Tooltips;
-
-      if (windowTooltips && typeof windowTooltips.buildTooltipMap === 'function') {
-        const map = windowTooltips.buildTooltipMap();
-        set({
-          tooltips: map,
-          loading: false,
-          initialized: true
-        });
-        console.log('[useTooltipStore] Loaded', Object.keys(map).length, 'tooltips from window.Tooltips');
-      } else {
-        // Fallback: wait for tooltips.js to load, then retry
-        console.warn('[useTooltipStore] window.Tooltips not available, waiting...');
-
-        const checkInterval = setInterval(() => {
-          const wt = (window as any).Tooltips;
-          if (wt && typeof wt.buildTooltipMap === 'function') {
-            clearInterval(checkInterval);
-            const map = wt.buildTooltipMap();
-            set({
-              tooltips: map,
-              loading: false,
-              initialized: true
-            });
-            console.log('[useTooltipStore] Loaded', Object.keys(map).length, 'tooltips (delayed)');
-          }
-        }, 100);
-
-        // Timeout after 5 seconds
-        setTimeout(() => {
-          clearInterval(checkInterval);
-          if (!get().initialized) {
-            console.error('[useTooltipStore] Failed to load tooltips - window.Tooltips never became available');
-            set({ loading: false, initialized: true });
-          }
-        }, 5000);
-      }
-    } catch (error) {
-      console.error('[useTooltipStore] Error loading tooltips:', error);
-      set({ loading: false, initialized: true });
-    }
+    set({
+      tooltips: tooltipMap,
+      loading: false,
+      initialized: true
+    });
   },
 
   getTooltip: (settingKey: string): string => {

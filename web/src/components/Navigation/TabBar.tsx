@@ -1,6 +1,7 @@
 // TriBridRAG - TabBar Component
 // EXACT copy of /gui tab-bar structure
 
+import { useEffect } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useDockStore } from '@/stores';
 import { getRouteByPath } from '@/config/routes';
@@ -18,6 +19,18 @@ export function TabBar({ mobileOpen = false, onNavigate }: TabBarProps) {
   const docked = useDockStore((s) => s.docked);
   const setDocked = useDockStore((s) => s.setDocked);
   const setMode = useDockStore((s) => s.setMode);
+
+  // Persist current tab for legacy compatibility + tests
+  useEffect(() => {
+    try {
+      const rawPath = location.pathname.replace(/^\//, '');
+      const withoutBase = rawPath.startsWith('web/') ? rawPath.slice('web/'.length) : rawPath;
+      const currentTab = withoutBase.split('/')[0] || 'dashboard';
+      localStorage.setItem('nav_current_tab', currentTab);
+    } catch {
+      // ignore localStorage errors
+    }
+  }, [location.pathname]);
 
   const handleClick = () => {
     // Close mobile menu after navigation
@@ -61,7 +74,8 @@ export function TabBar({ mobileOpen = false, onNavigate }: TabBarProps) {
   };
 
   return (
-    <div 
+    <div
+      data-testid="tab-bar"
       className={`tab-bar ${mobileOpen ? 'mobile-open' : ''}`} 
       style={{ display: 'flex', gap: '8px', padding: '12px 24px', overflowX: 'auto' }}
     >
@@ -163,6 +177,31 @@ export function TabBar({ mobileOpen = false, onNavigate }: TabBarProps) {
         }}
       >
         📈 Grafana{pinned('/grafana')}
+      </NavLink>
+
+      <NavLink
+        to="/benchmark"
+        className={({ isActive }) => isActive ? 'active' : ''}
+        onClick={handleDockAwareClick('/benchmark')}
+        style={{
+          background: 'var(--bg-elev2)',
+          color: 'var(--fg-muted)',
+          border: '1px solid var(--line)',
+          padding: '9px 16px',
+          borderRadius: '6px',
+          cursor: 'pointer',
+          fontSize: '13px',
+          fontWeight: 500,
+          whiteSpace: 'nowrap',
+          transition: 'all 0.15s',
+          minHeight: '44px',
+          textDecoration: 'none',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '6px',
+        }}
+      >
+        🏁 Benchmark{pinned('/benchmark')}
       </NavLink>
 
       <NavLink

@@ -61,13 +61,8 @@ jobs:
           # Patch vite.config.ts: base /web/ -> /demo/
           sed -i "s|base: '/web/'|base: '/demo/'|g" ragweld.com/vendor/demo/vite.config.ts
 
-          # Patch main.tsx: basename /web -> /demo
-          sed -i 's|basename="/web"|basename="/demo"|g' ragweld.com/vendor/demo/src/main.tsx
-
-          # Ensure MSW init code is in main.tsx (add if missing)
-          if ! grep -q "enableMocking" ragweld.com/vendor/demo/src/main.tsx; then
-            echo "Warning: MSW init code missing from main.tsx - manual fix required"
-          fi
+          # Patch demo entrypoint to keep ragweld-specific MSW bootstrap + /demo basename
+          node ragweld.com/scripts/patch-demo-entry.cjs
 
       - name: Check for changes
         id: changes

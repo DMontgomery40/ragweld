@@ -323,7 +323,7 @@ export function EvaluateSubtab() {
    *
    * guardrails:
    *   - DO NOT skip confirmation; user must explicitly approve
-   *   - NOTE: Silently fails if loadGoldenQuestions() throws; add error recovery
+   *   - NOTE: Always reload the dataset after delete to keep UI consistent
    * ---/agentspec
    */
   const deleteEntry = async (index: number) => {

@@ -3,6 +3,8 @@ import { apiClient, api } from '@/api/client';
 import { TooltipIcon } from '@/components/ui/TooltipIcon';
 import { ApiKeyStatus } from '@/components/ui/ApiKeyStatus';
 import { useConfig, useConfigField } from '@/hooks';
+import { ModelCatalogPanel } from '@/components/Admin/ModelCatalogPanel';
+import { useMCPRag } from '@/hooks/useMCPRag';
 
 export function GeneralSubtab() {
   const { config, loading: configLoading, saveConfig } = useConfig();
@@ -50,6 +52,7 @@ export function GeneralSubtab() {
   const [mcpRagTopK, setMcpRagTopK] = useState(10);
   const [mcpRagForceLocal, setMcpRagForceLocal] = useState(false);
   const [mcpRagResults, setMcpRagResults] = useState('');
+  const { isSearching: mcpRagSearching, search: mcpRagSearch, formatResults: formatMcpRagResults, error: mcpRagError } = useMCPRag();
 
   // Loading states
   const [saving, setSaving] = useState(false);
@@ -120,14 +123,17 @@ export function GeneralSubtab() {
   async function runMcpRagSearch() {
     try {
       setMcpRagResults('Running...');
-      const params = new URLSearchParams({
-        q: mcpRagQuestion,
+      const res = await mcpRagSearch(mcpRagQuestion, {
         repo: mcpRagRepo,
-        top_k: String(mcpRagTopK),
-        force_local: String(mcpRagForceLocal),
+        top_k: mcpRagTopK,
+        force_local: mcpRagForceLocal,
       });
-      const { data } = await apiClient.get(api(`/mcp/rag_search?${params}`));
-      setMcpRagResults(JSON.stringify(data, null, 2));
+      if (res.results && Array.isArray(res.results) && res.results.length) {
+        const lines = formatMcpRagResults(res.results);
+        setMcpRagResults(lines.join('\n'));
+      } else {
+        setMcpRagResults(JSON.stringify(res, null, 2));
+      }
     } catch (err) {
       setMcpRagResults('Error: ' + (err as Error).message);
     }
@@ -470,15 +476,21 @@ export function GeneralSubtab() {
         </div>
         <div className="input-row">
           <div className="input-group">
-            <button className="small-button" onClick={runMcpRagSearch}>
-              Run
+            <button className="small-button" onClick={runMcpRagSearch} disabled={mcpRagSearching}>
+              {mcpRagSearching ? 'Running…' : 'Run'}
             </button>
           </div>
         </div>
+        {mcpRagError ? (
+          <div style={{ fontSize: '12px', color: 'var(--err)', marginBottom: '8px' }}>{mcpRagError}</div>
+        ) : null}
         <pre className="result-display" style={{ minHeight: '120px', whiteSpace: 'pre-wrap', background: 'var(--code-bg)' }}>
           {mcpRagResults}
         </pre>
       </div>
+
+      {/* Model catalog upsert (pricing) */}
+      <ModelCatalogPanel />
 
       {/* Save All Button */}
       <div className="input-row" style={{ marginTop: '24px' }}>

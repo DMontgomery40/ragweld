@@ -205,7 +205,7 @@ async def mcp_rag_search(
         fusion = TriBridFusion(vector=None, sparse=None, graph=None)
         effective_top_k = int(top_k or cfg.mcp.default_top_k)
         matches = await fusion.search(
-            repo_id,
+            [repo_id],
             q,
             cfg.fusion,
             include_vector=True,

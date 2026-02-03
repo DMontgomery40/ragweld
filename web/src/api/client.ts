@@ -97,29 +97,3 @@ export function withCorpusScope(path: string): string {
     return `${p}${sep}corpus_id=${encodeURIComponent(corpus)}`;
   }
 }
-
-// Expose window.CoreUtils for legacy JS modules during migration
-// This replaces /modules/core-utils.js
-if (typeof window !== 'undefined') {
-  // Legacy state object - kept for modules that still access it
-  // New code should use Zustand stores (useConfigStore, useRepoStore)
-  const legacyState = {
-    models: null as any,
-    config: null as any,
-    profiles: [] as any[],
-    defaultProfile: null as any,
-  };
-
-  (window as any).CoreUtils = {
-    API_BASE,
-    api: apiUrl, // Legacy modules expect api() to return full URL
-    $: (sel: string) => document.querySelector(sel),
-    $$: (sel: string) => Array.from(document.querySelectorAll(sel)),
-    state: legacyState
-  };
-
-  // Also expose API_BASE directly on window for diagnostics
-  (window as any).API_BASE = API_BASE;
-
-  console.log('[CoreUtils] Loaded from TypeScript client - API:', API_BASE);
-}

@@ -88,7 +88,7 @@ async def _fake_get_config(*_args: Any, **_kwargs: Any) -> TriBridConfig:
 
 async def _fake_fusion_search(
     self: TriBridFusion,
-    corpus_id: str,
+    corpus_ids: list[str],
     query: str,
     config: Any,
     *,
@@ -97,6 +97,7 @@ async def _fake_fusion_search(
     include_graph: bool = True,
     top_k: int | None = None,
 ) -> list[ChunkMatch]:
+    _ = (self, corpus_ids, config, include_vector, include_sparse, include_graph)
     # Deterministic: return config.py first for "config" queries, otherwise chunk_summaries.py first.
     if "config" in query.lower():
         paths = ["server/api/config.py", "server/api/eval.py", "server/api/dataset.py"]

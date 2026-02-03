@@ -15,16 +15,9 @@ import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { SubtabErrorFallback } from '@/components/ui/SubtabErrorFallback';
 
 // Hooks
-import { useAppInit, useModuleLoader, useApplyButton, useTheme } from '@/hooks';
-
-// Import errorHelpers to expose window.ErrorHelpers BEFORE legacy modules load
-import '@/utils/errorHelpers';
-// Import api/client to expose window.CoreUtils BEFORE legacy modules load
-// This replaces /modules/core-utils.js
-import '@/api/client';
-// Import uiHelpers to expose window.UiHelpers BEFORE legacy modules load
-// This replaces /modules/ui-helpers.js (Zustand-backed)
-import '@/utils/uiHelpers';
+import { useAppInit, useApplyButton, useTheme } from '@/hooks';
+import { GlobalSearch } from '@/components/Search/GlobalSearch';
+import { UiHelpers } from '@/utils/uiHelpers';
 
 function App() {
   const [healthDisplay, setHealthDisplay] = useState('—');
@@ -35,23 +28,46 @@ function App() {
 
   // Initialize hooks
   const { isInitialized, initError } = useAppInit();
-  const { modulesLoaded, loadError, loadProgress } = useModuleLoader();
   const { handleApply: handleSaveAllChanges, isDirty, isSaving, saveError } = useApplyButton();
 
-  // Initialize theme - exposes window.Theme for legacy modules
-  useTheme();
+  // Initialize theme
+  const { theme, applyTheme } = useTheme();
 
   // Bind resizable sidepanel AFTER the layout (and handle) is mounted.
-  // Some legacy module init paths can run while the React loading shell is still on-screen.
+  // Note: `useAppInit()` can flip isInitialized before the main layout renders, so we
+  // retry briefly until the `.resize-handle` exists.
   useEffect(() => {
     if (isEmbed) return;
-    if (!modulesLoaded || !isInitialized) return;
-    try {
-      (window as any).UiHelpers?.bindResizableSidepanel?.();
-    } catch (e) {
-      console.warn('[App] Failed to bind resizable sidepanel', e);
-    }
-  }, [isEmbed, isInitialized, modulesLoaded]);
+    if (!isInitialized) return;
+
+    let cancelled = false;
+    let attempts = 0;
+    const maxAttempts = 60; // ~3s @ 50ms
+
+    const tick = () => {
+      if (cancelled) return;
+
+      const handle = document.querySelector('.resize-handle') as HTMLElement | null;
+      if (handle?.dataset?.sidepanelResizeBound === '1') return;
+
+      try {
+        UiHelpers.bindResizableSidepanel();
+      } catch (e) {
+        // best effort: keep retrying until layout exists
+        console.warn('[App] Failed to bind resizable sidepanel', e);
+      }
+
+      attempts += 1;
+      if (attempts < maxAttempts) {
+        setTimeout(tick, 50);
+      }
+    };
+
+    tick();
+    return () => {
+      cancelled = true;
+    };
+  }, [isEmbed, isInitialized]);
 
   // Toggle mobile navigation
   const toggleMobileNav = () => {
@@ -80,112 +96,8 @@ function App() {
     }
   }, [status]);
 
-  // Load legacy modules for backward compatibility with existing tabs
-  // This ensures window.* globals are available for tabs that haven't been refactored yet
-  useEffect(() => {
-    const loadModules = async () => {
-      console.log('[App] DOM ready, loading legacy modules...');
-
-      try {
-        // Load in dependency order
-        // 1. Core utilities (must load first)
-        // MIGRATED: fetch-shim.js removed - was no-op (Phase 2.5)
-        // MIGRATED: core-utils.js → /api/client.ts (exposes window.CoreUtils)
-        // MIGRATED: ui-helpers.js → /utils/uiHelpers.ts (Zustand-backed, exposes window.UiHelpers)
-        // MIGRATED: theme.js → /hooks/useTheme.ts (UIStore-backed, exposes window.Theme)
-
-        // 2. Test instrumentation (for debugging)
-        // @ts-ignore - legacy JS module (no exports)
-        await import('./modules/test-instrumentation.js');
-
-        // 4. Navigation and tabs - REMOVED, now using React Router
-        // Legacy navigation modules replaced by TabBar/TabRouter components
-
-        // 5. Search and tooltips (UI enhancements)
-        // @ts-ignore - legacy JS modules (no exports)
-        await import('./modules/search.js');
-        // @ts-ignore - legacy JS module
-        await import('./modules/tooltips.js');
-
-        // 6. Configuration and health (backend integration)
-        // @ts-ignore - legacy JS modules (no exports)
-        await import('./modules/config.js');
-        // @ts-ignore - legacy JS module
-        await import('./modules/health.js');
-
-        // 7. Feature modules (ensure feedback tools load before chat)
-        // @ts-ignore - legacy JS module
-        await import('./modules/reranker.js');
-        await Promise.all([
-          // @ts-ignore
-          import('./modules/keywords.js'),
-          // @ts-ignore
-          import('./modules/model_flows.js'),
-          // @ts-ignore
-          import('./modules/index_status.js'),
-          // @ts-ignore
-          import('./modules/mcp_rag.js'),
-          // @ts-ignore
-          import('./modules/mcp_server.js'),
-          // REMOVED: Legacy JS indexing modules - IndexingSubtab now uses pure React/TypeScript
-          // import('./modules/index_profiles.js'),
-          // import('./modules/indexing.js'),
-          // import('./modules/simple_index.js'),
-          // @ts-ignore
-          import('./modules/docker.js'),
-          // @ts-ignore
-          import('./modules/grafana.js'),
-          // @ts-ignore
-          import('./modules/onboarding.js'),
-          // @ts-ignore
-          import('./modules/index-display.js'),
-          // @ts-ignore
-          import('./modules/cards_builder.js'),
-          // @ts-ignore
-          import('./modules/cost_logic.js'),
-          // @ts-ignore
-          import('./modules/storage-calculator-template.js'),
-          // @ts-ignore
-          import('./modules/storage-calculator.js'),
-          // REMOVED: Legacy JS modules - EvaluateSubtab now uses pure React/TypeScript
-          // import('./modules/golden_questions.js'),
-          // import('./modules/eval_runner.js'),
-          // @ts-ignore
-          import('./modules/eval_history.js'),
-          // MIGRATED: error-helpers.js → /utils/errorHelpers.ts (exposes window.ErrorHelpers)
-          // @ts-ignore
-          import('./modules/layout_fix.js'),
-          // @ts-ignore
-          import('./modules/live-terminal.js'),
-          // @ts-ignore
-          import('./modules/trace.js'),
-          // @ts-ignore
-          import('./modules/ux-feedback.js'),
-          // @ts-ignore
-          import('./modules/langsmith.js'),
-          // @ts-ignore
-          import('./modules/dino.js')
-        ]);
-
-        // 8. Main app coordinator (must load last)
-        // @ts-ignore - legacy JS module
-        await import('./modules/app.js');
-
-        console.log('[App] All legacy modules loaded successfully');
-
-        // Dispatch a custom event so modules know React is ready
-        window.dispatchEvent(new Event('react-ready'));
-      } catch (err) {
-        console.error('[App] Error loading modules:', err);
-      }
-    };
-
-    // Give React a tick to render before loading modules
-    setTimeout(loadModules, 100);
-  }, []);
-
-  // Show loading screen while modules are loading
-  if (!modulesLoaded || !isInitialized) {
+  // Show loading screen while app initializes
+  if (!isInitialized) {
     return (
       <div style={{
         display: 'flex',
@@ -206,11 +118,11 @@ function App() {
           marginBottom: '16px'
         }}></div>
         <div style={{ fontSize: '14px', color: 'var(--fg-muted)' }}>
-          {loadProgress || 'Loading application...'}
+          Loading application...
         </div>
-        {(loadError || initError) && (
+        {initError && (
           <div style={{ color: 'var(--err)', fontSize: '12px', marginTop: '12px', maxWidth: '400px', textAlign: 'center' }}>
-            {loadError || initError}
+            {initError}
           </div>
         )}
         <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
@@ -286,12 +198,13 @@ function App() {
             </svg>
             <span>Learn</span>
           </button>
-          <input id="global-search" type="search" placeholder="Search settings (Ctrl+K)" />
-          <div id="search-results"></div>
+          <GlobalSearch />
           <select
             id="theme-mode"
             name="THEME_MODE"
             title="Theme Mode"
+            value={theme}
+            onChange={(e) => applyTheme(e.target.value as any)}
             style={{
               background: 'var(--input-bg)',
               color: 'var(--fg)',

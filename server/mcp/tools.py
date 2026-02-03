@@ -62,7 +62,7 @@ def register_mcp_tools(mcp: FastMCP, cfg: MCPConfig) -> None:
 
         fusion = TriBridFusion(vector=None, sparse=None, graph=None)
         return await fusion.search(
-            corpus_id,
+            [corpus_id],
             query,
             scoped_cfg.fusion,
             include_vector=include_vector,

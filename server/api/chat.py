@@ -1,20 +1,39 @@
-"""Chat API endpoints with PydanticAI-powered RAG."""
+"""Chat API endpoints (Chat 2.0)."""
+import asyncio
 import json
+import os
 import time
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
-from fastapi import Query
+import httpx
+from fastapi import APIRouter, HTTPException, Query
 from starlette.responses import StreamingResponse
 
+from server.chat.handler import chat_once
+from server.chat.handler import chat_stream as chat_stream_handler
+from server.chat.model_discovery import discover_models
+from server.chat.recall_indexer import index_recall_conversation
+from server.chat.source_router import resolve_sources
+from server.db.postgres import PostgresClient
+from server.indexing.embedder import Embedder
 from server.models.chat import ChatRequest, ChatResponse, Message
-from server.models.tribrid_config_model import TracesLatestResponse
-from server.models.tribrid_config_model import TriBridConfig
+from server.models.tribrid_config_model import (
+    ChatModelInfo,
+    ChatModelsResponse,
+    ProviderHealth,
+    ProvidersHealthResponse,
+    RecallIndexRequest,
+    RecallIndexResponse,
+    RecallStatusResponse,
+    TracesLatestResponse,
+    TriBridConfig,
+)
 from server.retrieval.fusion import TriBridFusion
+from server.services.config_store import CorpusNotFoundError
 from server.services.config_store import get_config as load_scoped_config
 from server.services.conversation_store import get_conversation_store
-from server.services.rag import FusionProtocol, build_chat_debug_info, generate_response, stream_response
+from server.services.rag import FusionProtocol, build_chat_debug_info
 from server.services.traces import get_trace_store
 
 router = APIRouter(tags=["chat"])
@@ -53,6 +72,18 @@ def set_fusion(fusion: FusionProtocol | None) -> None:
     _fusion = fusion
 
 
+def _primary_corpus_id_from_request(request: ChatRequest) -> str | None:
+    """Resolve a best-effort config scope for chat settings."""
+    corpus_ids = resolve_sources(request.sources)
+    if not corpus_ids:
+        return None
+    # Prefer a non-recall corpus as the primary scope.
+    for cid in corpus_ids:
+        if cid and cid != "recall_default":
+            return cid
+    return corpus_ids[0]
+
+
 @router.get("/traces/latest", response_model=TracesLatestResponse)
 async def get_latest_trace(
     repo: str | None = Query(default=None, description="Optional corpus_id to filter by"),
@@ -67,21 +98,28 @@ async def get_latest_trace(
 
 @router.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest) -> ChatResponse:
-    """Process a chat message and return RAG-enhanced response.
-
-    Uses PydanticAI with OpenAI Responses API (GPT-5) to generate
-    contextual answers based on codebase search.
-    """
+    """Process a chat message and return a response (Chat 2.0)."""
     store = get_conversation_store()
     conv = store.get_or_create(request.conversation_id)
-    config = _config if _config is not None else await load_scoped_config(repo_id=request.repo_id)
+
+    # Choose config scope from selected sources (best-effort).
+    primary = _primary_corpus_id_from_request(request)
+    if _config is not None:
+        config = _config
+    else:
+        try:
+            config = await load_scoped_config(repo_id=primary) if primary else TriBridConfig()
+        except CorpusNotFoundError:
+            config = TriBridConfig()
+
     fusion = get_fusion()
     run_id = str(uuid.uuid4())
     started_at_ms = int(time.time() * 1000)
     trace_store = get_trace_store()
+    trace_repo_id = primary or (resolve_sources(request.sources)[0] if resolve_sources(request.sources) else "")
     trace_enabled = await trace_store.start(
         run_id=run_id,
-        repo_id=request.repo_id,
+        repo_id=trace_repo_id,
         started_at_ms=started_at_ms,
         config=config,
     )
@@ -91,7 +129,7 @@ async def chat(request: ChatRequest) -> ChatResponse:
             kind="chat.request",
             data={
                 "conversation_id": request.conversation_id,
-                "corpus_id": request.repo_id,
+                "corpus_ids": resolve_sources(request.sources),
                 "include_vector": bool(request.include_vector),
                 "include_sparse": bool(request.include_sparse),
                 "include_graph": bool(request.include_graph),
@@ -101,16 +139,11 @@ async def chat(request: ChatRequest) -> ChatResponse:
         )
 
     try:
-        response_text, sources, provider_id = await generate_response(
-            message=request.message,
-            repo_id=request.repo_id,
-            conversation=conv,
+        response_text, sources, provider_id, recall_plan = await chat_once(
+            request=request,
             config=config,
             fusion=fusion,
-            include_vector=bool(request.include_vector),
-            include_sparse=bool(request.include_sparse),
-            include_graph=bool(request.include_graph),
-            top_k=request.top_k,
+            conversation=conv,
         )
         ended_at_ms = int(time.time() * 1000)
         debug = build_chat_debug_info(
@@ -121,6 +154,7 @@ async def chat(request: ChatRequest) -> ChatResponse:
             include_graph=bool(request.include_graph),
             top_k=request.top_k,
             sources=sources,
+            recall_plan=recall_plan,
         )
         if trace_enabled:
             await trace_store.add_event(
@@ -157,6 +191,31 @@ async def chat(request: ChatRequest) -> ChatResponse:
         store.add_message(conv.id, user_msg, None)
         store.add_message(conv.id, assistant_msg, provider_id)
 
+        # Best-effort Recall indexing (only when recall_default is selected).
+        corpus_ids = resolve_sources(request.sources)
+        if (
+            config.chat.recall.enabled
+            and config.chat.recall.auto_index
+            and (config.chat.recall.default_corpus_id in set(corpus_ids))
+        ):
+            async def _do_index() -> None:
+                delay = int(config.chat.recall.index_delay_seconds or 0)
+                if delay > 0:
+                    await asyncio.sleep(delay)
+                pg = PostgresClient(config.indexing.postgres_url)
+                await pg.connect()
+                embedder = Embedder(config.embedding)
+                await index_recall_conversation(
+                    pg,
+                    conversation_id=conv.id,
+                    messages=store.get_messages(conv.id),
+                    config=config.chat.recall,
+                    embedder=embedder,
+                    ts_config="english",
+                )
+
+            asyncio.create_task(_do_index())
+
         return ChatResponse(
             run_id=run_id,
             started_at_ms=started_at_ms,
@@ -186,14 +245,24 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
     """
     store = get_conversation_store()
     conv = store.get_or_create(request.conversation_id)
-    config = _config if _config is not None else await load_scoped_config(repo_id=request.repo_id)
+
+    primary = _primary_corpus_id_from_request(request)
+    if _config is not None:
+        config = _config
+    else:
+        try:
+            config = await load_scoped_config(repo_id=primary) if primary else TriBridConfig()
+        except CorpusNotFoundError:
+            config = TriBridConfig()
+
     fusion = get_fusion()
     run_id = str(uuid.uuid4())
     started_at_ms = int(time.time() * 1000)
     trace_store = get_trace_store()
+    trace_repo_id = primary or (resolve_sources(request.sources)[0] if resolve_sources(request.sources) else "")
     trace_enabled = await trace_store.start(
         run_id=run_id,
-        repo_id=request.repo_id,
+        repo_id=trace_repo_id,
         started_at_ms=started_at_ms,
         config=config,
     )
@@ -203,7 +272,7 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
             kind="chat.request",
             data={
                 "conversation_id": request.conversation_id,
-                "corpus_id": request.repo_id,
+                "corpus_ids": resolve_sources(request.sources),
                 "include_vector": bool(request.include_vector),
                 "include_sparse": bool(request.include_sparse),
                 "include_graph": bool(request.include_graph),
@@ -218,42 +287,114 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
 
     async def wrapped_stream() -> Any:
         ended_at_ms: int | None = None
+        accumulated = ""
         try:
-            async for sse in stream_response(
-                message=request.message,
-                repo_id=request.repo_id,
-                conversation=conv,
+            async for sse in chat_stream_handler(
+                request=request,
                 config=config,
                 fusion=fusion,
-                include_vector=bool(request.include_vector),
-                include_sparse=bool(request.include_sparse),
-                include_graph=bool(request.include_graph),
-                top_k=request.top_k,
+                conversation=conv,
                 run_id=run_id,
                 started_at_ms=started_at_ms,
             ):
-                if trace_enabled and '"type": "done"' in sse:
+                if not sse.startswith("data: "):
+                    yield sse
+                    continue
+                try:
+                    payload = json.loads(sse.replace("data: ", "").strip())
+                except Exception:
+                    yield sse
+                    continue
+
+                typ = payload.get("type")
+                if typ == "text":
+                    delta = payload.get("content")
+                    if isinstance(delta, str):
+                        accumulated += delta
+                    yield sse
+                    continue
+
+                if typ == "done":
                     ended_at_ms = int(time.time() * 1000)
-                    try:
-                        payload = json.loads(sse.replace("data: ", "").strip())
-                    except Exception:
-                        payload = {}
-                    sources = payload.get("sources") or []
-                    await trace_store.add_event(
-                        run_id,
-                        kind="retrieval.fusion",
-                        data={
-                            "fusion_debug": getattr(fusion, "last_debug", None) or {},
-                            "sources": sources,
-                        },
+
+                    # Persist assistant message now that we have full content.
+                    assistant_msg = Message(role="assistant", content=accumulated)
+                    store.add_message(conv.id, assistant_msg, None)
+
+                    # Best-effort Recall indexing (only when recall_default is selected).
+                    corpus_ids = resolve_sources(request.sources)
+                    if (
+                        config.chat.recall.enabled
+                        and config.chat.recall.auto_index
+                        and (config.chat.recall.default_corpus_id in set(corpus_ids))
+                    ):
+                        async def _do_index() -> None:
+                            delay = int(config.chat.recall.index_delay_seconds or 0)
+                            if delay > 0:
+                                await asyncio.sleep(delay)
+                            pg = PostgresClient(config.indexing.postgres_url)
+                            await pg.connect()
+                            embedder = Embedder(config.embedding)
+                            await index_recall_conversation(
+                                pg,
+                                conversation_id=conv.id,
+                                messages=store.get_messages(conv.id),
+                                config=config.chat.recall,
+                                embedder=embedder,
+                                ts_config="english",
+                            )
+
+                        asyncio.create_task(_do_index())
+
+                    # Attach debug info for frontend compatibility.
+                    from server.models.chat_config import RecallPlan as RecallPlanModel
+                    from server.models.retrieval import ChunkMatch as ChunkMatchModel
+
+                    src_objs: list[ChunkMatchModel] = []
+                    for s in payload.get("sources") or []:
+                        try:
+                            src_objs.append(ChunkMatchModel.model_validate(s))
+                        except Exception:
+                            continue
+
+                    raw_recall_plan = payload.get("recall_plan")
+                    recall_plan_obj = None
+                    if isinstance(raw_recall_plan, dict):
+                        try:
+                            recall_plan_obj = RecallPlanModel.model_validate(raw_recall_plan)
+                        except Exception:
+                            recall_plan_obj = None
+
+                    debug = build_chat_debug_info(
+                        config=config,
+                        fusion=fusion,
+                        include_vector=bool(request.include_vector),
+                        include_sparse=bool(request.include_sparse),
+                        include_graph=bool(request.include_graph),
+                        top_k=request.top_k,
+                        sources=src_objs,
+                        recall_plan=recall_plan_obj,
                     )
-                    await trace_store.add_event(
-                        run_id,
-                        kind="chat.response",
-                        data={
-                            "sources_count": len(sources),
-                        },
-                    )
+                    payload["debug"] = debug.model_dump(mode="serialization", by_alias=True)
+
+                    if trace_enabled:
+                        await trace_store.add_event(
+                            run_id,
+                            kind="retrieval.fusion",
+                            data={
+                                "fusion_debug": getattr(fusion, "last_debug", None) or {},
+                                "sources": payload.get("sources") or [],
+                            },
+                        )
+                        await trace_store.add_event(
+                            run_id,
+                            kind="chat.response",
+                            data={"sources_count": len(payload.get("sources") or [])},
+                        )
+
+                    yield f"data: {json.dumps(payload)}\n\n"
+                    continue
+
                 yield sse
         except Exception as e:
             if trace_enabled:
@@ -271,6 +412,200 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
             "Connection": "keep-alive",
             "X-Accel-Buffering": "no",
         },
+    )
+
+
+@router.get("/chat/models", response_model=ChatModelsResponse)
+async def list_chat_models() -> ChatModelsResponse:
+    """Return available chat models (cloud direct + OpenRouter + local)."""
+    cfg = get_config()
+
+    models: list[ChatModelInfo] = []
+
+    # Cloud-direct models from models.json (GEN component).
+    try:
+        from server.api.models import _load_catalog  # local import to avoid cycles at import time
+
+        catalog = _load_catalog()
+        raw = catalog.get("models") if isinstance(catalog, dict) else None
+        if isinstance(raw, list):
+            for m in raw:
+                if not isinstance(m, dict):
+                    continue
+                comps = m.get("components") or []
+                if not isinstance(comps, list) or "GEN" not in comps:
+                    continue
+                provider = str(m.get("provider") or "").strip() or "Cloud"
+                model_id = str(m.get("model") or "").strip()
+                if not model_id:
+                    continue
+                model_full = model_id if "/" in model_id else f"{provider}/{model_id}" if provider and provider != "Cloud" else model_id
+                models.append(
+                    ChatModelInfo(
+                        id=model_full,
+                        provider=provider,
+                        source="cloud_direct",
+                        provider_type=str(provider).lower(),
+                        base_url=None,
+                        supports_vision=False,
+                    )
+                )
+    except Exception:
+        # Best-effort; allow discovery even if catalog missing.
+        pass
+
+    # Provider discovery (best-effort).
+    discovered = await discover_models(cfg.chat.local_models, cfg.chat.openrouter)
+    for d in discovered:
+        try:
+            models.append(
+                ChatModelInfo(
+                    id=str(d.get("id") or ""),
+                    provider=str(d.get("provider") or ""),
+                    source=str(d.get("source") or "local"),  # type: ignore[arg-type]
+                    provider_type=(str(d.get("provider_type")) if d.get("provider_type") else None),
+                    base_url=(str(d.get("base_url")) if d.get("base_url") else None),
+                    supports_vision=False,
+                )
+            )
+        except Exception:
+            continue
+
+    # De-dupe by (source, provider, id)
+    uniq: dict[tuple[str, str, str], ChatModelInfo] = {}
+    for m in models:
+        key = (str(m.source), str(m.provider), str(m.id))
+        uniq[key] = m
+
+    return ChatModelsResponse(models=list(uniq.values()))
+
+
+@router.get("/chat/health", response_model=ProvidersHealthResponse)
+async def chat_health() -> ProvidersHealthResponse:
+    """Return health status for chat providers."""
+    cfg = get_config()
+    out: list[ProviderHealth] = []
+
+    # OpenRouter
+    if cfg.chat.openrouter.enabled:
+        api_key = (os.getenv("OPENROUTER_API_KEY") or "").strip()
+        if not api_key:
+            out.append(
+                ProviderHealth(
+                    provider="OpenRouter",
+                    kind="openrouter",
+                    base_url=cfg.chat.openrouter.base_url,
+                    reachable=False,
+                    detail="Missing OPENROUTER_API_KEY",
+                )
+            )
+        else:
+            try:
+                async with httpx.AsyncClient(timeout=2.0) as client:
+                    r = await client.get(
+                        f"{cfg.chat.openrouter.base_url.rstrip('/')}/models",
+                        headers={"Authorization": f"Bearer {api_key}"},
+                    )
+                    ok = r.status_code < 400
+                out.append(
+                    ProviderHealth(
+                        provider="OpenRouter",
+                        kind="openrouter",
+                        base_url=cfg.chat.openrouter.base_url,
+                        reachable=bool(ok),
+                        detail=None if ok else f"HTTP {r.status_code}",
+                    )
+                )
+            except Exception as e:
+                out.append(
+                    ProviderHealth(
+                        provider="OpenRouter",
+                        kind="openrouter",
+                        base_url=cfg.chat.openrouter.base_url,
+                        reachable=False,
+                        detail=str(e),
+                    )
+                )
+
+    # Local providers
+    for p in cfg.chat.local_models.providers:
+        if not p.enabled:
+            continue
+        try:
+            async with httpx.AsyncClient(timeout=1.5) as client:
+                r = await client.get(f"{p.base_url.rstrip('/')}/v1/models")
+                ok = r.status_code < 400
+            out.append(
+                ProviderHealth(
+                    provider=p.name,
+                    kind="local",
+                    base_url=p.base_url,
+                    reachable=bool(ok),
+                    detail=None if ok else f"HTTP {r.status_code}",
+                )
+            )
+        except Exception as e:
+            out.append(
+                ProviderHealth(
+                    provider=p.name,
+                    kind="local",
+                    base_url=p.base_url,
+                    reachable=False,
+                    detail=str(e),
+                )
+            )
+
+    return ProvidersHealthResponse(providers=out)
+
+
+@router.post("/recall/index", response_model=RecallIndexResponse)
+async def recall_index(request: RecallIndexRequest) -> RecallIndexResponse:
+    """Manually index a conversation into Recall."""
+    cfg = get_config()
+    if not cfg.chat.recall.enabled:
+        raise HTTPException(status_code=400, detail="Recall is disabled")
+
+    store = get_conversation_store()
+    msgs = store.get_messages(request.conversation_id)
+    if not msgs:
+        return RecallIndexResponse(ok=True, conversation_id=request.conversation_id, chunks_indexed=0)
+
+    pg = PostgresClient(cfg.indexing.postgres_url)
+    await pg.connect()
+    embedder = Embedder(cfg.embedding)
+    n = await index_recall_conversation(
+        pg,
+        conversation_id=request.conversation_id,
+        messages=msgs,
+        config=cfg.chat.recall,
+        embedder=embedder,
+        ts_config="english",
+    )
+    return RecallIndexResponse(ok=True, conversation_id=request.conversation_id, chunks_indexed=int(n))
+
+
+@router.get("/recall/status", response_model=RecallStatusResponse)
+async def recall_status() -> RecallStatusResponse:
+    """Return Recall corpus bootstrap/index status."""
+    cfg = get_config()
+    corpus_id = str(cfg.chat.recall.default_corpus_id or "recall_default")
+
+    pg = PostgresClient(cfg.indexing.postgres_url)
+    await pg.connect()
+    exists = await pg.get_corpus(corpus_id) is not None
+    chunk_count = 0
+    if exists:
+        try:
+            stats = await pg.get_index_stats(corpus_id)
+            chunk_count = int(stats.total_chunks or 0)
+        except Exception:
+            chunk_count = 0
+
+    return RecallStatusResponse(
+        enabled=bool(cfg.chat.recall.enabled),
+        corpus_id=corpus_id,
+        exists=bool(exists),
+        chunk_count=int(chunk_count),
     )
 
 

@@ -531,6 +531,7 @@ export function IndexingSubtab() {
               <TooltipIcon name="REPO_PATH" />
             </label>
             <input
+              data-testid="corpus-path-override"
               value={pathOverride}
               onChange={(e) => setPathOverride(e.target.value)}
               placeholder={resolvedPath || '/absolute/path/to/corpus'}

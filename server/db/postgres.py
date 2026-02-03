@@ -193,6 +193,7 @@ class PostgresClient:
                   language TEXT,
                   content TEXT NOT NULL,
                   token_count INT NOT NULL DEFAULT 0,
+                  metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
                   embedding vector,
                   tsv tsvector,
                   PRIMARY KEY (repo_id, chunk_id)
@@ -213,6 +214,7 @@ class PostgresClient:
                   language TEXT,
                   content TEXT NOT NULL,
                   token_count INT NOT NULL DEFAULT 0,
+                  metadata JSONB NOT NULL DEFAULT '{{}}'::jsonb,
                   embedding vector({dim}),
                   tsv tsvector,
                   PRIMARY KEY (repo_id, chunk_id)
@@ -220,10 +222,29 @@ class PostgresClient:
                 """
             )
 
+        # Schema upgrade: chat requires arbitrary chunk metadata (JSONB).
+        # Must run every boot; idempotent for existing installs.
+        await conn.execute(
+            "ALTER TABLE chunks ADD COLUMN IF NOT EXISTS metadata JSONB NOT NULL DEFAULT '{}'::jsonb;"
+        )
+
         await conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_chunks_repo_file ON chunks (repo_id, file_path);"
         )
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_chunks_tsv ON chunks USING GIN (tsv);")
+        # Optional recall-only HNSW index for low-latency Recall vector search.
+        # Best-effort: do not block startup if the pgvector build lacks HNSW support.
+        try:
+            await conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_chunks_recall_embedding_hnsw
+                  ON chunks USING hnsw (embedding vector_cosine_ops)
+                  WITH (m = 16, ef_construction = 64)
+                  WHERE repo_id = 'recall_default' AND embedding IS NOT NULL;
+                """
+            )
+        except Exception:
+            pass
         # Optional vector index (HNSW preferred on newer pgvector; keep minimal here).
         # Index creation can be expensive; create lazily in a later iteration.
 
@@ -272,9 +293,9 @@ class PostgresClient:
 
             stmt = """
             INSERT INTO chunks (
-              repo_id, chunk_id, file_path, start_line, end_line, language, content, token_count, embedding
+              repo_id, chunk_id, file_path, start_line, end_line, language, content, token_count, metadata, embedding
             )
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10)
             ON CONFLICT (repo_id, chunk_id) DO UPDATE SET
               file_path = EXCLUDED.file_path,
               start_line = EXCLUDED.start_line,
@@ -282,6 +303,7 @@ class PostgresClient:
               language = EXCLUDED.language,
               content = EXCLUDED.content,
               token_count = EXCLUDED.token_count,
+              metadata = EXCLUDED.metadata,
               embedding = EXCLUDED.embedding;
             """
 
@@ -297,6 +319,7 @@ class PostgresClient:
                         ch.language,
                         ch.content,
                         int(ch.token_count or 0),
+                        json.dumps(ch.metadata or {}),
                         ch.embedding,
                     )
                     for ch in chunks
@@ -319,7 +342,7 @@ class PostgresClient:
             await register_vector(conn)
             rows = await conn.fetch(
                 """
-                SELECT chunk_id, content, file_path, start_line, end_line, language,
+                SELECT chunk_id, content, file_path, start_line, end_line, language, metadata,
                        (1 - (embedding <=> $1))::float8 AS score
                 FROM chunks
                 WHERE repo_id = $2 AND embedding IS NOT NULL
@@ -341,7 +364,7 @@ class PostgresClient:
                 language=str(r["language"]) if r["language"] is not None else None,
                 score=float(r["score"] or 0.0),
                 source="vector",
-                metadata={},
+                metadata=_coerce_jsonb_dict(r.get("metadata")),
             )
             for r in rows
         ]
@@ -369,9 +392,9 @@ class PostgresClient:
             # Update tsv for each chunk (ensure row exists first)
             stmt = """
             INSERT INTO chunks (
-              repo_id, chunk_id, file_path, start_line, end_line, language, content, token_count, tsv
+              repo_id, chunk_id, file_path, start_line, end_line, language, content, token_count, metadata, tsv
             )
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,to_tsvector($9::regconfig, $7))
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,to_tsvector($10::regconfig, $7))
             ON CONFLICT (repo_id, chunk_id) DO UPDATE SET
               file_path = EXCLUDED.file_path,
               start_line = EXCLUDED.start_line,
@@ -379,7 +402,8 @@ class PostgresClient:
               language = EXCLUDED.language,
               content = EXCLUDED.content,
               token_count = EXCLUDED.token_count,
-              tsv = to_tsvector($9::regconfig, EXCLUDED.content);
+              metadata = EXCLUDED.metadata,
+              tsv = to_tsvector($10::regconfig, EXCLUDED.content);
             """
             await conn.executemany(
                 stmt,
@@ -393,6 +417,7 @@ class PostgresClient:
                         ch.language,
                         ch.content,
                         int(ch.token_count or 0),
+                        json.dumps(ch.metadata or {}),
                         ts_config,
                     )
                     for ch in chunks
@@ -414,7 +439,7 @@ class PostgresClient:
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(
                 """
-                SELECT chunk_id, content, file_path, start_line, end_line, language,
+                SELECT chunk_id, content, file_path, start_line, end_line, language, metadata,
                        ts_rank_cd(tsv, plainto_tsquery($4::regconfig, $1))::float8 AS score
                 FROM chunks
                 WHERE repo_id = $2 AND tsv @@ plainto_tsquery($4::regconfig, $1)
@@ -437,7 +462,7 @@ class PostgresClient:
                 language=str(r["language"]) if r["language"] is not None else None,
                 score=float(r["score"] or 0.0),
                 source="sparse",
-                metadata={},
+                metadata=_coerce_jsonb_dict(r.get("metadata")),
             )
             for r in rows
         ]
@@ -502,7 +527,7 @@ class PostgresClient:
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
-                SELECT repo_id, chunk_id, content, file_path, start_line, end_line, language, token_count
+                SELECT repo_id, chunk_id, content, file_path, start_line, end_line, language, token_count, metadata
                 FROM chunks
                 WHERE repo_id = $1
                   AND chunk_id = $2
@@ -523,6 +548,7 @@ class PostgresClient:
             token_count=int(row["token_count"] or 0),
             embedding=None,
             summary=None,
+            metadata=_coerce_jsonb_dict(row.get("metadata")),
         )
 
     async def get_chunks(self, repo_id: str, chunk_ids: list[str]) -> list[Chunk]:
@@ -534,7 +560,7 @@ class PostgresClient:
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(
                 """
-                SELECT c.chunk_id, c.content, c.file_path, c.start_line, c.end_line, c.language, c.token_count
+                SELECT c.chunk_id, c.content, c.file_path, c.start_line, c.end_line, c.language, c.token_count, c.metadata
                 FROM unnest($2::text[]) WITH ORDINALITY AS u(chunk_id, ord)
                 JOIN chunks c
                   ON c.repo_id = $1
@@ -555,6 +581,7 @@ class PostgresClient:
                 token_count=int(r["token_count"] or 0),
                 embedding=None,
                 summary=None,
+                metadata=_coerce_jsonb_dict(r.get("metadata")),
             )
             for r in rows
         ]
@@ -664,6 +691,7 @@ class PostgresClient:
                     + pg_column_size(language)
                     + pg_column_size(token_count)
                     + pg_column_size(content)
+                    + pg_column_size(metadata)
                   ), 0)::bigint AS chunks_bytes,
                   COUNT(*) FILTER (WHERE embedding IS NOT NULL)::bigint AS embedding_rows,
                   COALESCE(SUM(pg_column_size(embedding)), 0)::bigint AS embeddings_bytes,
@@ -886,7 +914,7 @@ class PostgresClient:
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(
                 """
-                SELECT chunk_id, content, file_path, start_line, end_line, language, token_count
+                SELECT chunk_id, content, file_path, start_line, end_line, language, token_count, metadata
                 FROM chunks
                 WHERE repo_id = $1
                   AND file_path = $2
@@ -911,6 +939,7 @@ class PostgresClient:
                 token_count=int(r["token_count"] or 0),
                 embedding=None,
                 summary=None,
+                metadata=_coerce_jsonb_dict(r.get("metadata")),
             )
             for r in rows
         ]
@@ -923,7 +952,7 @@ class PostgresClient:
             if limit is None:
                 rows = await conn.fetch(
                     """
-                    SELECT chunk_id, content, file_path, start_line, end_line, language, token_count
+                    SELECT chunk_id, content, file_path, start_line, end_line, language, token_count, metadata
                     FROM chunks
                     WHERE repo_id = $1
                     ORDER BY file_path ASC, start_line ASC, chunk_id ASC;
@@ -933,7 +962,7 @@ class PostgresClient:
             else:
                 rows = await conn.fetch(
                     """
-                    SELECT chunk_id, content, file_path, start_line, end_line, language, token_count
+                    SELECT chunk_id, content, file_path, start_line, end_line, language, token_count, metadata
                     FROM chunks
                     WHERE repo_id = $1
                     ORDER BY file_path ASC, start_line ASC, chunk_id ASC
@@ -954,6 +983,7 @@ class PostgresClient:
                 token_count=int(r["token_count"] or 0),
                 embedding=None,
                 summary=None,
+                metadata=_coerce_jsonb_dict(r.get("metadata")),
             )
             for r in rows
         ]

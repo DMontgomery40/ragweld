@@ -1,43 +1,12 @@
-import React, { useState, useEffect } from 'react';
-import { useAPI } from '@/hooks/useAPI';
-import { useErrorHandler } from '@/hooks/useErrorHandler';
-import type { TracesLatestResponse } from '@/types/generated';
+import React from 'react';
+import { useTrace } from '@/hooks/useTrace';
 
 type TraceViewerProps = {
   className?: string;
 };
 
 export const TraceViewer: React.FC<TraceViewerProps> = ({ className = '' }) => {
-  const [traceData, setTraceData] = useState<TracesLatestResponse | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [selectedRepo, setSelectedRepo] = useState('');
-
-  const { api } = useAPI();
-  const { handleApiError } = useErrorHandler();
-
-  const loadLatestTrace = async () => {
-    setIsLoading(true);
-    setError(null);
-
-    try {
-      const repoParam = selectedRepo ? `?repo=${encodeURIComponent(selectedRepo)}` : '';
-      const response = await fetch(api(`/traces/latest${repoParam}`));
-      const data = await response.json();
-      setTraceData(data);
-    } catch (err) {
-      console.error('Failed to load trace:', err);
-      const errorMsg = handleApiError(err, 'Load trace');
-      setError(errorMsg);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  // Auto-load on mount
-  useEffect(() => {
-    loadLatestTrace();
-  }, [selectedRepo]);
+  const { traceData, isLoading, error, selectedRepo, setSelectedRepo, loadLatestTrace } = useTrace();
 
   const formatTable = (rows: string[][], headers: string[]) => {
     const cols = headers.length;
@@ -271,7 +240,7 @@ export const TraceViewer: React.FC<TraceViewerProps> = ({ className = '' }) => {
   };
 
   return (
-    <div className={`trace-viewer ${className}`}>
+    <div className={`trace-viewer ${className}`} data-testid="trace-viewer">
       <div style={{
         background: 'var(--card-bg)',
         border: '1px solid var(--line)',
@@ -315,6 +284,7 @@ export const TraceViewer: React.FC<TraceViewerProps> = ({ className = '' }) => {
             <button
               onClick={loadLatestTrace}
               disabled={isLoading}
+              data-testid="trace-refresh"
               style={{
                 background: isLoading ? 'var(--bg-elev2)' : 'var(--accent)',
                 color: isLoading ? 'var(--fg-muted)' : 'var(--accent-contrast)',

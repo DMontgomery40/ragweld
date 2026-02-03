@@ -14,10 +14,59 @@
  * - Domain model interfaces (ChunkMatch, SearchRequest, Entity, etc.)
  */
 
+/** What the user has checked in the data sources dropdown.  This is what the frontend sends. The backend passes corpus_ids straight into fusion. */
+export interface ActiveSources {
+  /** Checked corpus IDs (include recall_default when Recall is checked). Empty = no retrieval. */
+  corpus_ids?: string[];
+}
+
+/** Split-screen model comparison + pipeline profiling. */
+export interface BenchmarkConfig {
+  enabled?: boolean; // default: True
+  max_concurrent_models?: number; // default: 4
+  save_results?: boolean; // default: True
+  results_path?: string; // default: "data/benchmarks/"
+  include_cost_tracking?: boolean; // default: True
+  include_timing_breakdown?: boolean; // default: True
+}
+
+/** Top-level chat configuration. Lives at TriBridConfig.chat.  KEY CONCEPT: There are no modes. The user checks/unchecks data sources. Recall is always available and ON by default. Corpora are available when indexed. Everything composes freely. */
+export interface ChatConfig {
+  /** Default checked corpus IDs for new conversations (Recall ON by default). */
+  default_corpus_ids?: string[]; // default: ["recall_default"]
+  system_prompt_base?: string; // default: "You are a helpful assistant."
+  system_prompt_recall_suffix?: string; // default: " You have access to conversation history. Refer..."
+  system_prompt_rag_suffix?: string; // default: " Answer questions using the provided code conte..."
+  /** State 1: No context. Nothing checked or retrieval returned empty. */
+  system_prompt_direct?: string; // default: "You are a code assistant powered by TriBridRAG...."
+  /** State 2: RAG only. Code corpora returned results; Recall did not. */
+  system_prompt_rag?: string; // default: "You are a code assistant powered by TriBridRAG,..."
+  /** State 3: Recall only. Recall returned results; no RAG corpora active. */
+  system_prompt_recall?: string; // default: "You are a code assistant powered by TriBridRAG...."
+  /** State 4: Both. RAG and Recall both returned results. */
+  system_prompt_rag_and_recall?: string; // default: "You are a code assistant powered by TriBridRAG,..."
+  reranker?: ChatRerankerConfig;
+  recall?: RecallConfig;
+  recall_gate?: RecallGateConfig;
+  multimodal?: ChatMultimodalConfig;
+  image_gen?: ImageGenConfig;
+  local_models?: LocalModelConfig;
+  openrouter?: OpenRouterConfig;
+  benchmark?: BenchmarkConfig;
+  temperature?: number; // default: 0.3
+  /** Temperature when nothing is checked (direct chat = more creative) */
+  temperature_no_retrieval?: number; // default: 0.7
+  max_tokens?: number; // default: 4096
+  show_source_dropdown?: boolean; // default: True
+  send_shortcut?: string; // default: "ctrl+enter"
+}
+
 /** Developer-facing debug metadata for a single chat answer. */
 export interface ChatDebugInfo {
   /** Heuristic confidence score for this answer (0-1). */
   confidence?: number | null; // default: None
+  /** Recall gate decision for this message (Recall only; RAG corpora are always queried when checked). */
+  recall_plan?: RecallPlan | null; // default: None
   /** Vector leg requested for this message */
   include_vector?: boolean; // default: True
   /** Sparse/BM25 leg requested for this message */
@@ -64,6 +113,49 @@ export interface ChatDebugInfo {
   conf_avg5_thresh?: number | null; // default: None
   /** Raw fusion debug payload (for developers). */
   fusion_debug?: Record<string, unknown>;
+}
+
+/** Single chat model option resolved from providers. */
+export interface ChatModelInfo {
+  /** Model identifier */
+  id: string;
+  /** Provider display name (e.g., OpenRouter, Ollama) */
+  provider: string;
+  /** Model source group for UI grouping. */
+  source: "cloud_direct" | "openrouter" | "local";
+  /** Provider type (ollama, llamacpp, openrouter, etc) */
+  provider_type?: string | null; // default: None
+  /** Provider base URL (local/openrouter) */
+  base_url?: string | null; // default: None
+  /** Whether this model is expected to support vision inputs */
+  supports_vision?: boolean; // default: False
+}
+
+/** Image upload + vision model configuration. */
+export interface ChatMultimodalConfig {
+  vision_enabled?: boolean; // default: True
+  max_image_size_mb?: number; // default: 20
+  max_images_per_message?: number; // default: 5
+  supported_formats?: string[]; // default: ["png", "jpg", "jpeg", "gif", "webp"]
+  /** OpenAI vision detail level. */
+  image_detail?: string; // default: "auto"
+  /** Force model for vision. Empty=use chat model if it supports vision. */
+  vision_model_override?: string; // default: ""
+}
+
+/** Chat-specific reranker.  Separate from RAG reranker because: - Shorter passages (conversation turns, not code blocks) - Recency bias (recent messages matter more) - Lower latency tolerance (chat feels slow >500ms) */
+export interface ChatRerankerConfig {
+  /** Chat reranker mode. */
+  mode?: string; // default: "local"
+  /** Local cross-encoder. L-6 not L-12 — faster for chat. */
+  local_model?: string; // default: "cross-encoder/ms-marco-MiniLM-L-6-v2"
+  cloud_provider?: string; // default: "cohere"
+  cloud_model?: string; // default: "rerank-v3.5"
+  top_n?: number; // default: 20
+  /** Blend weight for recency. 0=pure relevance, 1=pure recency. */
+  recency_weight?: number; // default: 0.3
+  /** Only retrieve messages from last N hours. 0=no limit. */
+  max_age_hours?: number; // default: 0
 }
 
 /** Unified result shape for vector/sparse/graph retrieval. */
@@ -635,6 +727,30 @@ export interface HydrationConfig {
   hydration_max_chars?: number; // default: 2000
 }
 
+/** Single image attached to a chat message.  Exactly ONE of `url` or `base64` must be provided. */
+export interface ImageAttachment {
+  /** Remote URL */
+  url?: string | null; // default: None
+  /** Base64 data URI (no data: prefix required) */
+  base64?: string | null; // default: None
+  /** MIME type (e.g., image/png) */
+  mime_type?: string; // default: "image/png"
+}
+
+/** Two tiers: - LOCAL: Direct CLI/subprocess (free, self-hosted) - CLOUD: Paid APIs (ComfyUI API, Replicate, DALL-E)  ComfyUI is typically self-hosted. We do NOT use ComfyUI as the local P0 path; local P0 is direct CLI/subprocess. `comfyui_api` is a remote endpoint (self-hosted or paid). */
+export interface ImageGenConfig {
+  enabled?: boolean; // default: False
+  provider?: string; // default: "local"
+  /** CLI command. Receives --prompt, --output, --steps, --width, --height. */
+  local_command?: string; // default: "python -m qwen_image.generate"
+  local_model_path?: string; // default: ""
+  use_lightning_lora?: boolean; // default: True
+  comfyui_api_endpoint?: string; // default: ""
+  replicate_model?: string; // default: ""
+  default_steps?: number; // default: 8
+  default_resolution?: string; // default: "1024x1024"
+}
+
 /** Statistics about an indexed repository. */
 export interface IndexStats {
   /** Corpus identifier */
@@ -719,6 +835,30 @@ export interface LayerBonusConfig {
   intent_matrix?: Record<string, Record<string, number>>;
 }
 
+/** Supports MULTIPLE simultaneous local providers.  P0: Ollama + llama.cpp. All use OpenAI-compatible API. */
+export interface LocalModelConfig {
+  providers?: LocalProviderEntry[]; // default: [{"name": "Ollama", "provider_type": "ollama", ...
+  auto_detect?: boolean; // default: True
+  health_check_interval?: number; // default: 30
+  fallback_to_cloud?: boolean; // default: True
+  gpu_memory_limit_gb?: number; // default: 0
+  default_chat_model?: string; // default: "qwen3:8b"
+  default_vision_model?: string; // default: "qwen3-vl:8b"
+  default_embedding_model?: string; // default: "nomic-embed-text"
+}
+
+/** A single local inference provider endpoint. */
+export interface LocalProviderEntry {
+  /** Display name */
+  name: string;
+  provider_type: string;
+  /** Provider API endpoint */
+  base_url: string;
+  enabled?: boolean; // default: True
+  /** Lower = higher priority when multiple have same model. */
+  priority?: number; // default: 0
+}
+
 /** Inbound MCP (Model Context Protocol) server configuration.  This config controls TriBridRAG's embedded MCP Streamable HTTP endpoint. */
 export interface MCPConfig {
   /** Enable the embedded MCP Streamable HTTP server. */
@@ -775,6 +915,142 @@ export interface Message {
   content: string;
   /** When message was created */
   timestamp?: string;
+}
+
+/** Unified gateway to 400+ cloud models. OpenAI-compatible.  MANDATORY P0 provider. */
+export interface OpenRouterConfig {
+  enabled?: boolean; // default: False
+  api_key?: string; // default: ""
+  base_url?: string; // default: "https://openrouter.ai/api/v1"
+  default_model?: string; // default: "anthropic/claude-sonnet-4-20250514"
+  site_name?: string; // default: "TriBridRAG"
+  fallback_models?: string[]; // default: ["openai/gpt-4o", "google/gemini-2.0-flash"]
+}
+
+/** Health status for a configured provider endpoint. */
+export interface ProviderHealth {
+  /** Provider display name */
+  provider: string;
+  /** Provider kind */
+  kind: "openrouter" | "local";
+  /** Provider base URL */
+  base_url: string;
+  /** Whether the provider endpoint is reachable */
+  reachable: boolean;
+  /** Optional detail/error message */
+  detail?: string | null; // default: None
+}
+
+/** Persistent chat memory. ON by default.  Indexes every conversation into a lightweight pgvector corpus. Self-hosted, local, zero privacy risk, negligible storage. */
+export interface RecallConfig {
+  /** Enable Recall. ON by default. */
+  enabled?: boolean; // default: True
+  /** pgvector recommended (already running). */
+  vector_backend?: string; // default: "pgvector"
+  auto_index?: boolean; // default: True
+  index_delay_seconds?: number; // default: 5
+  /** 'turn'=one chunk per message, 'sentence'=split by sentence. */
+  chunking_strategy?: string; // default: "sentence"
+  /** Chat chunks should be smaller than code chunks. */
+  chunk_max_tokens?: number; // default: 256
+  /** Override embedding model. Empty=use global config. */
+  embedding_model?: string; // default: ""
+  max_history_tokens?: number; // default: 4096
+  /** Auto-created at first launch. Users never touch this. */
+  default_corpus_id?: string; // default: "recall_default"
+  /** Enable Recall graph indexing + retrieval (experimental). */
+  graph_enabled?: boolean; // default: False
+}
+
+/** Per-message overrides applied when querying Recall.  The gate generates these. They do not permanently change config. They are applied only for this single Recall query. */
+export interface RecallFusionOverrides {
+  /** Override vector leg. None=use request/default. */
+  include_vector?: boolean | null; // default: None
+  /** Override sparse leg. None=use request/default. */
+  include_sparse?: boolean | null; // default: None
+  /** Override final_k for the Recall query. Lower than RAG since chat chunks are smaller. */
+  top_k?: number | null; // default: None
+  /** Override reranker for Recall. None=use config default. */
+  enable_rerank?: boolean | null; // default: None
+  /** How much to weight recent messages over relevance (0=relevance, 1=recency). */
+  recency_weight?: number | null; // default: None
+}
+
+/** Configuration for the Recall gate. Lives at ChatConfig.recall_gate.  Controls the heuristic that decides per-message Recall behavior. NOTE: This only affects Recall (chat memory). RAG corpora are always queried when checked. */
+export interface RecallGateConfig {
+  /** Enable smart gating. False=always query Recall when checked. */
+  enabled?: boolean; // default: True
+  /** Fallback when classifier is uncertain. */
+  default_intensity?: RecallIntensity; // default: "standard"
+  /** Skip Recall for greetings, farewells, acknowledgments. */
+  skip_greetings?: boolean; // default: True
+  /** Skip Recall for questions that don't reference past context. 'How does auth work?' doesn't need chat history. */
+  skip_standalone_questions?: boolean; // default: True
+  /** Skip Recall when RAG corpora are checked. Assumes user wants code context, not chat history. Default False — let both contribute. */
+  skip_when_rag_active?: boolean; // default: False
+  /** Messages with ≤ this many tokens are skip candidates (only if they match a skip pattern). */
+  skip_max_tokens?: number; // default: 4
+  /** Use sparse-only for short questions (< 10 tokens) without explicit recall triggers. */
+  light_for_short_questions?: boolean; // default: True
+  /** top_k when intensity=light. */
+  light_top_k?: number; // default: 3
+  /** top_k for standard Recall queries. */
+  standard_top_k?: number; // default: 5
+  /** Default recency weight for Recall (recent messages often more relevant). */
+  standard_recency_weight?: number; // default: 0.3
+  /** Trigger deep when message explicitly references past conversation. */
+  deep_on_explicit_reference?: boolean; // default: True
+  /** top_k when intensity=deep. */
+  deep_top_k?: number; // default: 10
+  /** recency_weight for deep (higher when user explicitly asks about the past). */
+  deep_recency_weight?: number; // default: 0.5
+  /** Show gate decision (intensity, reason) in status bar. */
+  show_gate_decision?: boolean; // default: True
+  /** Show raw RecallSignals in debug footer (dev mode). */
+  show_signals?: boolean; // default: False
+}
+
+/** How aggressively to query Recall (chat memory) for a single message.  NOTE: - This is an optimization hint decided per-message (or overridden by the user). - It only applies to the Recall corpus. Non-Recall RAG corpora are always queried when checked. */
+export type RecallIntensity = "skip" | "light" | "standard" | "deep";
+
+/** The gate's decision for whether/how to query Recall for a single message. */
+export interface RecallPlan {
+  /** How aggressively to query Recall. */
+  intensity: RecallIntensity;
+  /** Per-message parameter patches for Recall query. */
+  fusion_overrides?: RecallFusionOverrides;
+  /** Signals that drove this decision. */
+  signals: RecallSignals;
+  /** Human-readable explanation for the decision. E.g., 'Greeting — skipping Recall' or 'Past reference — querying Recall' */
+  reason: string;
+  /** True if the user manually overrode intensity for this message. */
+  user_override?: boolean; // default: False
+}
+
+/** Signals extracted from the user's message + conversation context.  Used by the Recall gate to decide Recall intensity. Exposed in debug metadata. All fields are cheap to compute (no LLM calls, no embeddings). */
+export interface RecallSignals {
+  /** Approximate token count of message */
+  token_count: number;
+  /** Contains ? or interrogative pattern */
+  is_question: boolean;
+  /** Matches greeting/farewell patterns */
+  is_greeting: boolean;
+  /** 'ok', 'thanks', 'got it', etc. */
+  is_acknowledgment: boolean;
+  /** Continuation of prior topic — short message after retrieval-backed reply */
+  is_follow_up: boolean;
+  /** Explicit past reference: 'we discussed', 'you mentioned', 'last time', 'remember when', 'as I said before' */
+  is_recall_trigger: boolean;
+  /** 'the function', 'the bug', 'the config' — assumes shared context */
+  has_definite_article: boolean;
+  /** Question that makes sense without conversation history (code/concept questions vs 'what did we decide?') */
+  is_standalone_question: boolean;
+  /** 0-indexed user turn number in current conversation */
+  conversation_turn: number;
+  /** Did the previous message's Recall query return >0 chunks? */
+  last_recall_had_results?: boolean; // default: True
+  /** Are any non-Recall corpora checked? */
+  rag_corpora_active: boolean;
 }
 
 /** Knowledge graph edge connecting two entities. */
@@ -1177,21 +1453,34 @@ export interface AnswerResponse {
   latency_ms: number;
 }
 
-/** Request payload for chat endpoint. */
+/** Response payload for GET /api/chat/models. */
+export interface ChatModelsResponse {
+  models?: ChatModelInfo[];
+}
+
+/** Chat request — composable data sources, not modes. */
 export interface ChatRequest {
   /** User's message */
   message: string;
   /** Corpus identifier */
-  corpus_id: string;
+  corpus_id?: string;
+  /** Checked sources. Empty corpus_ids = no retrieval. If recall_default is not present, Recall is OFF for both retrieval and indexing. */
+  sources?: ActiveSources;
+  /** User override for Recall (chat memory) query intensity. None=auto (gate decides). Does not affect RAG corpus queries. */
+  recall_intensity?: RecallIntensity | null;
   /** Continue existing conversation */
   conversation_id?: string | null;
   /** Stream the response */
   stream?: boolean;
+  /** Optional images for vision (max 5) */
+  images?: ImageAttachment[];
+  /** Override chat model for this request (empty=default) */
+  model_override?: string;
   /** Include vector retrieval results */
   include_vector?: boolean;
   /** Include sparse/BM25 retrieval results */
   include_sparse?: boolean;
-  /** Include graph retrieval results */
+  /** Advanced. Graph leg runs per-corpus; Recall only if ChatConfig.recall.graph_enabled. */
   include_graph?: boolean;
   /** Override retrieval.final_k for this message (leave null to use config default) */
   top_k?: number | null;
@@ -1237,6 +1526,8 @@ export interface Chunk {
   embedding?: number[] | null;
   /** AI-generated chunk summary */
   summary?: string | null;
+  /** Arbitrary chunk metadata */
+  metadata?: Record<string, unknown>;
 }
 
 /** Request to build chunk_summaries for a repository. */
@@ -1635,6 +1926,39 @@ export interface MCPStatusResponse {
   details?: string[];
 }
 
+/** Response payload for GET /api/chat/health. */
+export interface ProvidersHealthResponse {
+  providers?: ProviderHealth[];
+}
+
+/** Request payload for POST /api/recall/index. */
+export interface RecallIndexRequest {
+  /** Conversation identifier to index into Recall */
+  conversation_id: string;
+}
+
+/** Response payload for POST /api/recall/index. */
+export interface RecallIndexResponse {
+  /** Whether indexing was triggered */
+  ok: boolean;
+  /** Conversation identifier */
+  conversation_id: string;
+  /** Number of chunks indexed into Recall */
+  chunks_indexed?: number;
+}
+
+/** Response payload for GET /api/recall/status. */
+export interface RecallStatusResponse {
+  /** Whether Recall is enabled */
+  enabled: boolean;
+  /** Recall corpus id (default recall_default) */
+  corpus_id: string;
+  /** Whether the Recall corpus exists in Postgres */
+  exists: boolean;
+  /** Approximate number of chunks stored for Recall */
+  chunk_count?: number;
+}
+
 export interface RerankerTrainDiffRequest {
   baseline_run_id: string;
   current_run_id: string;
@@ -1752,6 +2076,7 @@ export interface TriBridConfig {
   tracing?: TracingConfig;
   training?: TrainingConfig;
   ui?: UIConfig;
+  chat?: ChatConfig;
   hydration?: HydrationConfig;
   evaluation?: EvaluationConfig;
   system_prompts?: SystemPromptsConfig;

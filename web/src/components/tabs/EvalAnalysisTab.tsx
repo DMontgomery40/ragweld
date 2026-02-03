@@ -6,13 +6,14 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { EvalDrillDown } from '@/components/Evaluation/EvalDrillDown';
 import { SystemPromptsSubtab } from '@/components/Evaluation/SystemPromptsSubtab';
+import { TraceViewer } from '@/components/Evaluation/TraceViewer';
 import { LiveTerminal, LiveTerminalHandle } from '@/components/LiveTerminal/LiveTerminal';
 import { TerminalService } from '@/services/TerminalService';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useActiveRepo, useRepoStore, useRepoInitialized, useRepoLoading } from '@/stores';
 import type { EvalRunMeta } from '@/types/generated';
 
-type EvalSubtab = 'analysis' | 'prompts';
+type EvalSubtab = 'analysis' | 'prompts' | 'trace';
 
 export const EvalAnalysisTab: React.FC = () => {
   const [searchParams] = useSearchParams();
@@ -69,6 +70,8 @@ export const EvalAnalysisTab: React.FC = () => {
     const subtabParam = searchParams.get('subtab');
     if (subtabParam === 'prompts') {
       setActiveSubtab('prompts');
+    } else if (subtabParam === 'trace') {
+      setActiveSubtab('trace');
     }
   }, [searchParams]);
 
@@ -393,6 +396,27 @@ export const EvalAnalysisTab: React.FC = () => {
           <span style={{ fontSize: '14px' }}>&#x1F4DD;</span>
           System Prompts
         </button>
+        <button
+          onClick={() => setActiveSubtab('trace')}
+          data-tooltip="TRACE_VIEWER_SUBTAB"
+          style={{
+            padding: '12px 20px',
+            background: activeSubtab === 'trace' ? 'var(--bg)' : 'transparent',
+            color: activeSubtab === 'trace' ? 'var(--accent)' : 'var(--fg-muted)',
+            border: 'none',
+            borderBottom: activeSubtab === 'trace' ? '2px solid var(--accent)' : '2px solid transparent',
+            fontSize: '13px',
+            fontWeight: 600,
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            transition: 'all 0.2s ease'
+          }}
+        >
+          <span style={{ fontSize: '14px' }}>&#x1F50E;</span>
+          Trace Viewer
+        </button>
       </div>
 
       {/* Header with Run Selectors - only show for analysis subtab when runs exist */}
@@ -702,9 +726,13 @@ export const EvalAnalysisTab: React.FC = () => {
               Select an evaluation run to view details
             </div>
           )
-        ) : (
+        ) : activeSubtab === 'prompts' ? (
           // System Prompts subtab - always accessible
           <SystemPromptsSubtab />
+        ) : (
+          <div style={{ padding: '24px' }}>
+            <TraceViewer />
+          </div>
         )}
       </div>
     </div>

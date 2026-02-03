@@ -144,13 +144,6 @@ export function useUIHelpers() {
       }
     }
 
-    // Export reset function
-    (window as any).resetSidepanelWidth = function() {
-      document.documentElement.style.setProperty('--sidepanel-width', DEFAULT_WIDTH + 'px');
-      localStorage.setItem(STORAGE_KEY, DEFAULT_WIDTH.toString());
-      console.log('Sidepanel width reset to default');
-    };
-
     let isDragging = false;
     let startX = 0;
     let startWidth = 0;
@@ -353,55 +346,6 @@ export function useUIHelpers() {
     recalc();
   }, [getNum, setNum]);
 
-  // Sync theme selectors across different locations
-  const syncThemeSelectors = useCallback(() => {
-    const selTop = $<HTMLSelectElement>('#theme-mode');
-    const selMisc = $<HTMLSelectElement>('#misc-theme-mode');
-
-    /**
-     * ---agentspec
-     * what: |
-     *   Synchronizes theme selection across multiple UI dropdowns and persists the choice to localStorage.
-     *   Takes an HTMLSelectElement as input (the dropdown that triggered the change).
-     *   Reads the selected value from the source element and propagates it to two other optional selectors (selTop and selMisc).
-     *   Attempts to save the theme value to localStorage under the key 'THEME_MODE'; silently fails if localStorage is unavailable (private browsing, quota exceeded, etc.).
-     *   Returns void; side effects include DOM mutations (updating other select elements) and localStorage writes.
-     *
-     * why: |
-     *   Provides a single source of truth for theme selection by synchronizing multiple UI controls that may exist in different parts of the page.
-     *   Persists user preference across sessions so the theme survives page reloads.
-     *   The try-catch silently handles localStorage failures gracefully rather than breaking the UI, which is appropriate for theme switching where persistence is a nice-to-have, not critical.
-     *
-     * guardrails:
-     *   - DO NOT remove the try-catch around localStorage.setItem; localStorage access can fail in private browsing mode, incognito windows, or when quota is exceeded, and theme switching must remain functional
-     *   - ALWAYS check that selTop and selMisc are defined and not null before updating their values; the current guards (selTop && selTop !== src) prevent unnecessary updates and self-referential assignments
-     *   - NOTE: This function assumes selTop and selMisc are global or closure-scoped variables; if they become stale references or are reassigned elsewhere, synchronization will break silently
-     *   - ASK USER: Before adding error logging or telemetry to the catch block, confirm whether failed localStorage writes should be reported or remain silent for user experience reasons
-     * ---/agentspec
-     */
-    const onThemeChange = (src: HTMLSelectElement) => {
-      const v = src.value;
-      if (selTop && selTop !== src) selTop.value = v;
-      if (selMisc && selMisc !== src) selMisc.value = v;
-
-      try {
-        localStorage.setItem('THEME_MODE', v);
-      } catch {}
-
-      // Call theme apply function if available
-      if (typeof (window as any).Theme?.applyTheme === 'function') {
-        (window as any).Theme.applyTheme(v);
-      }
-    };
-
-    if (selTop) {
-      selTop.addEventListener('change', () => onThemeChange(selTop));
-    }
-    if (selMisc) {
-      selMisc.addEventListener('change', () => onThemeChange(selMisc));
-    }
-  }, [$]);
-
   // Toast notification helper
   const showToast = useCallback((message: string, type: 'success' | 'error' | 'info' = 'info') => {
     // Create toast element
@@ -427,20 +371,6 @@ export function useUIHelpers() {
     }, 3000);
   }, []);
 
-  // Expose helpers to window for backwards compatibility during migration
-  useEffect(() => {
-    (window as any).UiHelpers = {
-      bindCollapsibleSections,
-      bindResizableSidepanel,
-      getNum,
-      setNum,
-      attachCommaFormatting,
-      wireDayConverters
-    };
-
-    console.log('[useUIHelpers] Loaded');
-  }, [bindCollapsibleSections, bindResizableSidepanel, getNum, setNum, attachCommaFormatting, wireDayConverters]);
-
   return {
     $,
     $$,
@@ -450,7 +380,6 @@ export function useUIHelpers() {
     bindCollapsibleSections,
     bindResizableSidepanel,
     wireDayConverters,
-    syncThemeSelectors,
     showToast
   };
 }

@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useAPI } from '@/hooks';
+import { CostEstimatorPanel } from '@/components/Analytics/CostEstimatorPanel';
 
 interface CostData {
   breakdown: {
@@ -80,6 +81,13 @@ export function Cost() {
 
   return (
     <div className="cost-container">
+      <details style={{ background: 'var(--bg-elev1)', border: '1px solid var(--line)', borderRadius: '8px', padding: '12px' }}>
+        <summary style={{ cursor: 'pointer', fontSize: '13px', fontWeight: 700, color: 'var(--fg)' }}>💸 Cost estimator</summary>
+        <div style={{ marginTop: '12px' }}>
+          <CostEstimatorPanel />
+        </div>
+      </details>
+
       {/* Period Selector */}
       <div className="period-selector">
         <button

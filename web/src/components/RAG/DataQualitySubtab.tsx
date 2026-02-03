@@ -10,6 +10,7 @@ import type {
 } from '@/types/generated';
 import { useActiveRepo } from '@/stores';
 import { RepoSelectorCompact } from '@/components/RAG/RepoSelector';
+import { TooltipIcon } from '@/components/ui/TooltipIcon';
 
 function parseList(text: string): string[] {
   return text
@@ -278,7 +279,10 @@ export function DataQualitySubtab() {
         <div style={{ fontWeight: 600, marginBottom: 10 }}>Chunk summaries configuration</div>
         <div className="input-row">
           <div className="input-group">
-            <label>Max chunk summaries</label>
+            <label>
+              Max chunk summaries
+              <TooltipIcon name="CHUNK_SUMMARIES_MAX" />
+            </label>
             <input
               type="number"
               min={10}
@@ -295,13 +299,17 @@ export function DataQualitySubtab() {
                 onChange={(e) => setChunkSummariesEnrichDefault(e.target.checked ? 1 : 0)}
               />{' '}
               Enrich by default
+              <TooltipIcon name="CHUNK_SUMMARIES_ENRICH_DEFAULT" />
             </label>
           </div>
         </div>
 
         <div className="input-row">
           <div className="input-group">
-            <label>Exclude directories (one per line)</label>
+            <label>
+              Exclude directories (one per line)
+              <TooltipIcon name="CHUNK_SUMMARIES_EXCLUDE_DIRS" />
+            </label>
             <textarea
               rows={6}
               value={excludeDirsDraft}
@@ -310,7 +318,10 @@ export function DataQualitySubtab() {
             />
           </div>
           <div className="input-group">
-            <label>Exclude patterns (one per line)</label>
+            <label>
+              Exclude patterns (one per line)
+              <TooltipIcon name="CHUNK_SUMMARIES_EXCLUDE_PATTERNS" />
+            </label>
             <textarea
               rows={6}
               value={excludePatternsDraft}
@@ -322,7 +333,10 @@ export function DataQualitySubtab() {
 
         <div className="input-row">
           <div className="input-group">
-            <label>Exclude keywords (one per line)</label>
+            <label>
+              Exclude keywords (one per line)
+              <TooltipIcon name="CHUNK_SUMMARIES_EXCLUDE_KEYWORDS" />
+            </label>
             <textarea
               rows={4}
               value={excludeKeywordsDraft}
@@ -359,7 +373,10 @@ export function DataQualitySubtab() {
         <div style={{ fontWeight: 600, marginBottom: 10 }}>Keywords configuration</div>
         <div className="input-row">
           <div className="input-group">
-            <label>Max keywords per corpus</label>
+            <label>
+              Max keywords per corpus
+              <TooltipIcon name="KEYWORDS_MAX_PER_REPO" />
+            </label>
             <input
               type="number"
               min={10}
@@ -369,7 +386,10 @@ export function DataQualitySubtab() {
             />
           </div>
           <div className="input-group">
-            <label>Min frequency</label>
+            <label>
+              Min frequency
+              <TooltipIcon name="KEYWORDS_MIN_FREQ" />
+            </label>
             <input
               type="number"
               min={1}
@@ -379,7 +399,10 @@ export function DataQualitySubtab() {
             />
           </div>
           <div className="input-group">
-            <label>Boost</label>
+            <label>
+              Boost
+              <TooltipIcon name="KEYWORDS_BOOST" />
+            </label>
             <input
               type="number"
               min={1.0}
@@ -392,14 +415,20 @@ export function DataQualitySubtab() {
         </div>
         <div className="input-row">
           <div className="input-group">
-            <label>Auto-generate</label>
+            <label>
+              Auto-generate
+              <TooltipIcon name="KEYWORDS_AUTO_GENERATE" />
+            </label>
             <select value={keywordsAutoGenerate} onChange={(e) => setKeywordsAutoGenerate(parseInt(e.target.value, 10))}>
               <option value={1}>Enabled</option>
               <option value={0}>Disabled</option>
             </select>
           </div>
           <div className="input-group">
-            <label>Refresh hours</label>
+            <label>
+              Refresh hours
+              <TooltipIcon name="KEYWORDS_REFRESH_HOURS" />
+            </label>
             <input
               type="number"
               min={1}

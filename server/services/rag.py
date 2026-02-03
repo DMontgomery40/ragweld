@@ -9,6 +9,7 @@ from typing import Any, Literal, Protocol
 from pydantic_ai import Agent, RunContext
 from pydantic_ai.models.openai import OpenAIResponsesModel, OpenAIResponsesModelSettings
 
+from server.models.chat_config import RecallPlan
 from server.models.retrieval import ChunkMatch
 from server.models.tribrid_config_model import ChatDebugInfo, FusionConfig, TriBridConfig
 from server.services.conversation_store import Conversation
@@ -19,7 +20,7 @@ class FusionProtocol(Protocol):
 
     async def search(
         self,
-        repo_id: str,
+        corpus_ids: list[str],
         query: str,
         config: FusionConfig,
         *,
@@ -117,7 +118,7 @@ async def retrieve_context(ctx: RunContext[RAGDeps], query: str) -> str:
         Formatted string with matching code chunks and their locations.
     """
     chunks = await ctx.deps.fusion.search(
-        ctx.deps.repo_id,
+        [ctx.deps.repo_id],
         query,
         ctx.deps.config.fusion,
         include_vector=ctx.deps.include_vector,
@@ -217,7 +218,7 @@ async def generate_response(
     async def retrieve_context_inner(ctx: RunContext[RAGDeps], query: str) -> str:
         """Search the codebase for relevant code chunks."""
         chunks = await ctx.deps.fusion.search(
-            ctx.deps.repo_id,
+            [ctx.deps.repo_id],
             query,
             ctx.deps.config.fusion,
             include_vector=ctx.deps.include_vector,
@@ -303,7 +304,7 @@ async def stream_response(
     async def retrieve_context_stream(ctx: RunContext[RAGDeps], query: str) -> str:
         """Search the codebase for relevant code chunks."""
         chunks = await ctx.deps.fusion.search(
-            ctx.deps.repo_id,
+            [ctx.deps.repo_id],
             query,
             ctx.deps.config.fusion,
             include_vector=ctx.deps.include_vector,
@@ -400,6 +401,7 @@ def build_chat_debug_info(
     include_graph: bool,
     top_k: int | None,
     sources: list[ChunkMatch],
+    recall_plan: RecallPlan | None = None,
 ) -> ChatDebugInfo:
     """Build ChatDebugInfo from fusion debug + config."""
     fusion_debug: dict[str, Any] = getattr(fusion, "last_debug", None) or {}
@@ -451,6 +453,7 @@ def build_chat_debug_info(
 
     return ChatDebugInfo(
         confidence=confidence,
+        recall_plan=recall_plan,
         include_vector=bool(include_vector),
         include_sparse=bool(include_sparse),
         include_graph=bool(include_graph),

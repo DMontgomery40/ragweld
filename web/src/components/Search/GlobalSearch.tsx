@@ -4,11 +4,13 @@ import { useGlobalSearch } from '@/hooks/useGlobalSearch';
 export function GlobalSearch() {
   const {
     isOpen,
+    setIsOpen,
     query,
     results,
     cursor: selectedIndex,
     search,
-    navigateToResult
+    navigateToResult,
+    handleKeyDown
   } = useGlobalSearch();
 
   const inputRef = useRef<HTMLInputElement>(null);
@@ -20,16 +22,13 @@ export function GlobalSearch() {
     }
   }, [isOpen]);
 
-  if (!isOpen) {
-    return null;
-  }
-
   const highlightText = (text: string, query: string) => {
     if (!query) return text;
-    const regex = new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
+    const safe = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const regex = new RegExp(`(${safe})`, 'gi');
     const parts = text.split(regex);
     return parts.map((part, i) =>
-      regex.test(part) ? (
+      i % 2 === 1 ? (
         <span key={i} style={{ background: 'var(--accent)', color: 'white', padding: '0 2px', borderRadius: '2px' }}>
           {part}
         </span>
@@ -40,67 +39,90 @@ export function GlobalSearch() {
   };
 
   return (
-    <div style={{
-      position: 'fixed',
-      top: 0,
-      left: 0,
-      right: 0,
-      bottom: 0,
-      background: 'rgba(0, 0, 0, 0.6)',
-      display: 'flex',
-      alignItems: 'flex-start',
-      justifyContent: 'center',
-      padding: '10vh 20px',
-      zIndex: 9999
-    }}>
-      <div
-        className="global-search-modal"
-        style={{
-          width: '100%',
-          maxWidth: '600px',
-          background: 'var(--bg-elev2)',
-          borderRadius: '12px',
-          boxShadow: '0 20px 60px rgba(0, 0, 0, 0.4)',
-          overflow: 'hidden',
-          border: '1px solid var(--line)'
-        }}
-      >
-        {/* Search Input */}
-        <div style={{ padding: '20px', borderBottom: '1px solid var(--line)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ color: 'var(--fg-muted)' }}>
-              <circle cx="11" cy="11" r="8"></circle>
-              <path d="m21 21-4.35-4.35"></path>
-            </svg>
-            <input
-              ref={inputRef}
-              type="text"
-              value={query}
-              onChange={(e) => search(e.target.value)}
-              placeholder="Search all settings... (Ctrl+K)"
-              style={{
-                flex: 1,
-                border: 'none',
-                outline: 'none',
-                background: 'transparent',
-                color: 'var(--fg)',
-                fontSize: '16px',
-                fontFamily: 'inherit'
-              }}
-            />
-            <kbd style={{
-              padding: '4px 8px',
-              background: 'var(--bg-elev1)',
-              border: '1px solid var(--line)',
-              borderRadius: '4px',
-              fontSize: '11px',
-              color: 'var(--fg-muted)',
-              fontFamily: 'monospace'
-            }}>
-              ESC
-            </kbd>
-          </div>
-        </div>
+    <>
+      {/* Topbar trigger input (keeps the old layout, opens the modal) */}
+      <input
+        id="global-search"
+        type="search"
+        placeholder="Search settings (Ctrl+K)"
+        value={query}
+        readOnly
+        onFocus={() => setIsOpen(true)}
+        onClick={() => setIsOpen(true)}
+        style={{ cursor: 'pointer' }}
+        aria-label="Open global search"
+      />
+
+      {isOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Global search"
+          onClick={() => setIsOpen(false)}
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(0, 0, 0, 0.6)',
+            display: 'flex',
+            alignItems: 'flex-start',
+            justifyContent: 'center',
+            padding: '10vh 20px',
+            zIndex: 9999
+          }}
+        >
+          <div
+            className="global-search-modal"
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: '100%',
+              maxWidth: '600px',
+              background: 'var(--bg-elev2)',
+              borderRadius: '12px',
+              boxShadow: '0 20px 60px rgba(0, 0, 0, 0.4)',
+              overflow: 'hidden',
+              border: '1px solid var(--line)'
+            }}
+          >
+            {/* Search Input */}
+            <div style={{ padding: '20px', borderBottom: '1px solid var(--line)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ color: 'var(--fg-muted)' }}>
+                  <circle cx="11" cy="11" r="8"></circle>
+                  <path d="m21 21-4.35-4.35"></path>
+                </svg>
+                <input
+                  ref={inputRef}
+                  type="text"
+                  value={query}
+                  onChange={(e) => search(e.target.value)}
+                  onKeyDown={handleKeyDown as any}
+                  placeholder="Search all settings... (Ctrl+K)"
+                  style={{
+                    flex: 1,
+                    border: 'none',
+                    outline: 'none',
+                    background: 'transparent',
+                    color: 'var(--fg)',
+                    fontSize: '16px',
+                    fontFamily: 'inherit'
+                  }}
+                />
+                <kbd style={{
+                  padding: '4px 8px',
+                  background: 'var(--bg-elev1)',
+                  border: '1px solid var(--line)',
+                  borderRadius: '4px',
+                  fontSize: '11px',
+                  color: 'var(--fg-muted)',
+                  fontFamily: 'monospace'
+                }}>
+                  ESC
+                </kbd>
+              </div>
+            </div>
 
         {/* Results */}
         {results.length > 0 && (
@@ -172,7 +194,7 @@ export function GlobalSearch() {
         )}
 
         {/* Help Text */}
-        {!query && (
+            {!query && (
           <div style={{
             padding: '20px',
             color: 'var(--fg-muted)',
@@ -223,8 +245,10 @@ export function GlobalSearch() {
               </div>
             </div>
           </div>
-        )}
-      </div>
-    </div>
+            )}
+          </div>
+        </div>
+      )}
+    </>
   );
 }

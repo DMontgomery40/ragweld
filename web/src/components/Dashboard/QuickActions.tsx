@@ -8,6 +8,7 @@ import { TerminalService } from '../../services/TerminalService';
 import { RepoSwitcherModal } from '../ui/RepoSwitcherModal';
 import { useRepoStore } from '@/stores/useRepoStore';
 import * as DashAPI from '@/api/dashboard';
+import { useIndexing } from '@/hooks/useIndexing';
 
 const FALLBACK_EVAL_OPTIONS: DashAPI.RerankerOption[] = [
   {
@@ -41,6 +42,7 @@ export function QuickActions() {
   
   // Use centralized repo store
   const { activeRepo, switching, loadRepos, initialized, getRepoByName } = useRepoStore();
+  const { startIndex } = useIndexing();
 
   // Load repos once on mount if not yet initialized
   useEffect(() => {
@@ -142,29 +144,16 @@ export function QuickActions() {
         throw new Error('Select a corpus with a valid path before indexing');
       }
 
-      const response = await fetch('/api/index/start', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ repo_id: activeRepo, repo_path: repoPath })
-      });
-
-      if (!response.ok) {
-        const error = await response.text();
-        setStatusMessage(`✗ Error: ${error}`);
-        if (terminal) {
-          terminal.appendLine(`\x1b[31m✗ Failed to start indexer: ${error}\x1b[0m`);
-        }
-        return;
-      }
+      await startIndex({ corpus_id: String(activeRepo), repo_path: String(repoPath), force_reindex: false });
 
       setStatusMessage('✓ Indexer started');
       if (terminal) {
         terminal.appendLine('✓ Indexer started, connecting to log stream...');
       }
 
-      // Connect to SSE stream for real logs
-      TerminalService.streamOperation('dashboard_indexer', 'index', {
-        repo: activeRepo,
+      // Connect to SSE stream for real logs/progress
+      TerminalService.streamIndexRun('dashboard_indexer', {
+        repo: String(activeRepo),
         onLine: (line) => {
           if (terminal) {
             terminal.appendLine(line);

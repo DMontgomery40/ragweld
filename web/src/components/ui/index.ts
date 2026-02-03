@@ -27,7 +27,6 @@ export { SkeletonLoader, SkeletonCard, SkeletonList } from './SkeletonLoader';
 export type { SkeletonLoaderProps } from './SkeletonLoader';
 
 // Repository components
-export { RepoSelector } from './RepoSelector';
 export { RepoSwitcherModal } from './RepoSwitcherModal';
 
 // Embedding mismatch warning (critical for search accuracy)

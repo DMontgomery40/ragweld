@@ -38,6 +38,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.responses import Response
 
 from server.config import load_config
+from server.api.benchmark import router as benchmark_router
 from server.api.chat import router as chat_router
 from server.api.chunk_summaries import router as chunk_summaries_router
 from server.api.config import router as config_router
@@ -131,6 +132,7 @@ app.include_router(chunk_summaries_router, prefix="/api")
 app.include_router(keywords_router, prefix="/api")
 app.include_router(search_router, prefix="/api")
 app.include_router(chat_router, prefix="/api")
+app.include_router(benchmark_router, prefix="/api")
 app.include_router(graph_router, prefix="/api")
 app.include_router(eval_router, prefix="/api")
 app.include_router(dataset_router, prefix="/api")

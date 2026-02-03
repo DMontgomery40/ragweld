@@ -9,6 +9,7 @@ import ChatTab from '../components/tabs/ChatTab';
 import GrafanaTab from '../components/tabs/GrafanaTab';
 import RAGTab from '../components/tabs/RAGTab';
 import EvalAnalysisTab from '../components/tabs/EvalAnalysisTab';
+import BenchmarkTab from '../components/Benchmark/BenchmarkTab';
 // ProfilesTab removed - banned feature per CLAUDE.md
 import InfrastructureTab from '../components/tabs/InfrastructureTab';
 import AdminTab from '../components/tabs/AdminTab';
@@ -66,6 +67,14 @@ export const routes: RouteConfig[] = [
     label: 'Grafana',
     icon: '📈',
     order: 4,
+    subtabs: []
+  },
+  {
+    path: '/benchmark',
+    element: BenchmarkTab,
+    label: 'Benchmark',
+    icon: '🏁',
+    order: 5,
     subtabs: []
   },
   {
