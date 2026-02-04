@@ -318,6 +318,7 @@ def main() -> None:
             EvalRunMeta,
             EvalRunsResponse,
             EvalAnalyzeComparisonResponse,
+            EvalAnalyzeComparisonRequest,
             EvalComparisonResult,
             # Domain models - Reranker training eval
             CorpusEvalProfile,
@@ -330,6 +331,11 @@ def main() -> None:
             RerankerTrainMetricsResponse,
             RerankerTrainDiffRequest,
             RerankerTrainDiffResponse,
+            # Domain models - Prompts (Eval → System Prompts)
+            PromptsResponse,
+            PromptMetadata,
+            PromptUpdateRequest,
+            PromptUpdateResponse,
         )
     except ImportError as e:
         print(f"ERROR: Could not import models: {e}")
@@ -407,6 +413,7 @@ def main() -> None:
         EvalRunMeta,
         EvalRunsResponse,
         EvalAnalyzeComparisonResponse,
+        EvalAnalyzeComparisonRequest,
         EvalComparisonResult,
         CorpusEvalProfile,
         RerankerTrainStartRequest,
@@ -418,6 +425,10 @@ def main() -> None:
         RerankerTrainMetricsResponse,
         RerankerTrainDiffRequest,
         RerankerTrainDiffResponse,
+        PromptsResponse,
+        PromptMetadata,
+        PromptUpdateRequest,
+        PromptUpdateResponse,
     ]
 
     print(f"Processing {len(all_models)} models...")

@@ -1,5 +1,6 @@
 import type { ActiveSources, Corpus, RecallIntensity } from '@/types/generated';
 import { useEffect, useState } from 'react';
+import { TooltipIcon } from '@/components/ui/TooltipIcon';
 
 type SourceDropdownProps = {
   value: ActiveSources;
@@ -195,30 +196,33 @@ export function SourceDropdown(props: SourceDropdownProps) {
               <span>🧠 Recall</span>
             </label>
 
-            <select
-              data-testid="recall-intensity-select"
-              value={(props.recallIntensity ?? 'auto') as string}
-              disabled={!isChecked(RECALL_CORPUS_ID)}
-              onChange={(e) => {
-                const v = e.target.value;
-                props.onRecallIntensityChange(v === 'auto' ? null : (v as RecallIntensity));
-              }}
-              style={{
-                padding: '6px 8px',
-                background: 'var(--input-bg)',
-                border: '1px solid var(--line)',
-                borderRadius: '8px',
-                color: 'var(--fg)',
-                fontSize: '12px',
-              }}
-              aria-label="Recall intensity override"
-            >
-              <option value="auto">auto</option>
-              <option value="skip">skip this message</option>
-              <option value="light">light (sparse-only)</option>
-              <option value="standard">standard</option>
-              <option value="deep">deep</option>
-            </select>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <TooltipIcon name="chat_recall_intensity" />
+              <select
+                data-testid="recall-intensity-select"
+                value={(props.recallIntensity ?? 'auto') as string}
+                disabled={!isChecked(RECALL_CORPUS_ID)}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  props.onRecallIntensityChange(v === 'auto' ? null : (v as RecallIntensity));
+                }}
+                style={{
+                  padding: '6px 8px',
+                  background: 'var(--input-bg)',
+                  border: '1px solid var(--line)',
+                  borderRadius: '8px',
+                  color: 'var(--fg)',
+                  fontSize: '12px',
+                }}
+                aria-label="Recall intensity override"
+              >
+                <option value="auto">auto</option>
+                <option value="skip">skip this message</option>
+                <option value="light">light (sparse-only)</option>
+                <option value="standard">standard</option>
+                <option value="deep">deep</option>
+              </select>
+            </div>
           </div>
 
           {availableCorpora.map((corpus) => (

@@ -325,8 +325,8 @@ export const EvalAnalysisTab: React.FC = () => {
     </div>
   );
 
-  // Determine if header should be shown (only for analysis subtab with runs)
-  const showHeader = activeSubtab === 'analysis' && !loading && !error && runs.length > 0;
+  const showAnalysisHeader = activeSubtab === 'analysis';
+  const showRunSelectors = activeSubtab === 'analysis' && !loading && !error && runs.length > 0;
 
   const clamp = (n: number, min: number, max: number): number => Math.min(max, Math.max(min, n));
 
@@ -872,7 +872,7 @@ export const EvalAnalysisTab: React.FC = () => {
       </div>
 
       {/* Header with Run Selectors - only show for analysis subtab when runs exist */}
-      {showHeader && (
+      {showAnalysisHeader && (
       <div style={{
         padding: '20px 24px',
         borderBottom: '1px solid var(--line)',
@@ -924,84 +924,88 @@ export const EvalAnalysisTab: React.FC = () => {
           alignItems: 'flex-end',
           flexWrap: 'wrap'
         }}>
-          {/* Primary Run Selector */}
-          <div style={{ flex: '1', minWidth: '280px' }}>
-            <label 
-              style={{ 
-                display: 'block', 
-                fontSize: '11px', 
-                fontWeight: 600, 
-                color: 'var(--accent)',
-                textTransform: 'uppercase',
-                marginBottom: '6px',
-                letterSpacing: '0.5px'
-              }}
-            >
-              Primary Run (AFTER)
-              <span className="help-icon" data-tooltip="EVAL_PRIMARY_RUN" style={{ marginLeft: '4px', cursor: 'help' }}>?</span>
-            </label>
-            <select
-              value={selectedRunId || ''}
-              onChange={(e) => setSelectedRunId(e.target.value)}
-              style={{
-                width: '100%',
-                padding: '10px 12px',
-                background: 'var(--input-bg)',
-                color: 'var(--fg)',
-                border: '2px solid var(--accent)',
-                borderRadius: '8px',
-                fontSize: '13px',
-                fontWeight: 500,
-                cursor: 'pointer'
-              }}
-            >
-              {runs.map(run => (
-                <option key={run.run_id} value={run.run_id}>
-                  {formatRunLabel(run)}
-                </option>
-              ))}
-            </select>
-          </div>
+          {showRunSelectors && (
+            <>
+              {/* Primary Run Selector */}
+              <div style={{ flex: '1', minWidth: '280px' }}>
+                <label 
+                  style={{ 
+                    display: 'block', 
+                    fontSize: '11px', 
+                    fontWeight: 600, 
+                    color: 'var(--accent)',
+                    textTransform: 'uppercase',
+                    marginBottom: '6px',
+                    letterSpacing: '0.5px'
+                  }}
+                >
+                  Primary Run (AFTER)
+                  <span className="help-icon" data-tooltip="EVAL_PRIMARY_RUN" style={{ marginLeft: '4px', cursor: 'help' }}>?</span>
+                </label>
+                <select
+                  value={selectedRunId || ''}
+                  onChange={(e) => setSelectedRunId(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '10px 12px',
+                    background: 'var(--input-bg)',
+                    color: 'var(--fg)',
+                    border: '2px solid var(--accent)',
+                    borderRadius: '8px',
+                    fontSize: '13px',
+                    fontWeight: 500,
+                    cursor: 'pointer'
+                  }}
+                >
+                  {runs.map(run => (
+                    <option key={run.run_id} value={run.run_id}>
+                      {formatRunLabel(run)}
+                    </option>
+                  ))}
+                </select>
+              </div>
 
-          {/* Comparison Run Selector */}
-          <div style={{ flex: '1', minWidth: '280px' }}>
-            <label 
-              style={{ 
-                display: 'block', 
-                fontSize: '11px', 
-                fontWeight: 600, 
-                color: 'var(--link)',
-                textTransform: 'uppercase',
-                marginBottom: '6px',
-                letterSpacing: '0.5px'
-              }}
-            >
-              Compare With (BEFORE)
-              <span className="help-icon" data-tooltip="EVAL_COMPARE_RUN" style={{ marginLeft: '4px', cursor: 'help' }}>?</span>
-            </label>
-            <select
-              value={compareRunId || ''}
-              onChange={(e) => setCompareRunId(e.target.value || null)}
-              style={{
-                width: '100%',
-                padding: '10px 12px',
-                background: 'var(--input-bg)',
-                color: 'var(--fg)',
-                border: '2px solid var(--link)',
-                borderRadius: '8px',
-                fontSize: '13px',
-                fontWeight: 500,
-                cursor: 'pointer'
-              }}
-            >
-              <option value="">— No comparison (single run view) —</option>
-              {runs.filter(r => r.run_id !== selectedRunId).map(run => (
-                <option key={run.run_id} value={run.run_id}>
-                  {formatRunLabel(run)}
-                </option>
-              ))}
-            </select>
-          </div>
+              {/* Comparison Run Selector */}
+              <div style={{ flex: '1', minWidth: '280px' }}>
+                <label 
+                  style={{ 
+                    display: 'block', 
+                    fontSize: '11px', 
+                    fontWeight: 600, 
+                    color: 'var(--link)',
+                    textTransform: 'uppercase',
+                    marginBottom: '6px',
+                    letterSpacing: '0.5px'
+                  }}
+                >
+                  Compare With (BEFORE)
+                  <span className="help-icon" data-tooltip="EVAL_COMPARE_RUN" style={{ marginLeft: '4px', cursor: 'help' }}>?</span>
+                </label>
+                <select
+                  value={compareRunId || ''}
+                  onChange={(e) => setCompareRunId(e.target.value || null)}
+                  style={{
+                    width: '100%',
+                    padding: '10px 12px',
+                    background: 'var(--input-bg)',
+                    color: 'var(--fg)',
+                    border: '2px solid var(--link)',
+                    borderRadius: '8px',
+                    fontSize: '13px',
+                    fontWeight: 500,
+                    cursor: 'pointer'
+                  }}
+                >
+                  <option value="">— No comparison (single run view) —</option>
+                  {runs.filter(r => r.run_id !== selectedRunId).map(run => (
+                    <option key={run.run_id} value={run.run_id}>
+                      {formatRunLabel(run)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </>
+          )}
 
           {/* Quick Actions */}
           <div style={{ display: 'flex', gap: '8px' }}>
@@ -1165,7 +1169,6 @@ export const EvalAnalysisTab: React.FC = () => {
             <AnalysisErrorState />
           ) : runs.length === 0 ? (
             <div style={{ padding: '24px' }}>
-              {renderRunSettings()}
               <AnalysisEmptyState />
             </div>
           ) : selectedRunId ? (

@@ -106,6 +106,18 @@ SERVER_ENV_GETENV_ALLOWLIST = {
     "OPENAI_API_KEY",
     "OPENROUTER_API_KEY",
     "COHERE_API_KEY",
+    "ANTHROPIC_API_KEY",
+    "GOOGLE_API_KEY",
+    "VOYAGE_API_KEY",
+    "JINA_API_KEY",
+    # Integrations (UI-only presence checks; values are never returned)
+    "LANGTRACE_API_KEY",
+    "LANGCHAIN_API_KEY",
+    "LANGSMITH_API_KEY",
+    "NETLIFY_API_KEY",
+    "GRAFANA_API_KEY",
+    "SLACK_WEBHOOK_URL",
+    "DISCORD_WEBHOOK_URL",
     # Postgres infra
     "POSTGRES_DSN",
     "POSTGRES_HOST",

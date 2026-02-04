@@ -20,6 +20,22 @@ class CorpusNotFoundError(RuntimeError):
     """Raised when a corpus-scoped config is requested for a missing corpus."""
 
 
+def _migrate_config_in_place(cfg: TriBridConfig) -> None:
+    """Apply small backward-compatible config migrations.
+
+    This is intentionally minimal and only handles known-bad historical values.
+    """
+
+    # OpenRouter model ids must be valid OpenRouter `provider/model` strings.
+    # A prior default shipped with a non-existent suffix, which breaks provider calls.
+    try:
+        if cfg.chat.openrouter.default_model == "anthropic/claude-sonnet-4-20250514":
+            cfg.chat.openrouter.default_model = "anthropic/claude-sonnet-4"
+    except Exception:
+        # Best-effort; never block config loads.
+        pass
+
+
 class ConfigStore:
     """Load/save TriBridConfig for global and per-corpus scopes."""
 
@@ -30,10 +46,13 @@ class ConfigStore:
     async def get(self, repo_id: str | None = None) -> TriBridConfig:
         """Get config for a corpus (repo_id) or global when repo_id is None."""
         if repo_id in self._cache:
-            return self._cache[repo_id]
+            cfg = self._cache[repo_id]
+            _migrate_config_in_place(cfg)
+            return cfg
 
         if repo_id is None:
             cfg = load_global_config()
+            _migrate_config_in_place(cfg)
             self._cache[None] = cfg
             return cfg
 
@@ -54,6 +73,7 @@ class ConfigStore:
         else:
             cfg = TriBridConfig.model_validate(raw)
 
+        _migrate_config_in_place(cfg)
         self._cache[repo_id] = cfg
         return cfg
 

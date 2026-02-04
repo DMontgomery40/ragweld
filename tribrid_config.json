@@ -447,7 +447,7 @@
       "enabled": false,
       "api_key": "",
       "base_url": "https://openrouter.ai/api/v1",
-      "default_model": "anthropic/claude-sonnet-4-20250514",
+      "default_model": "anthropic/claude-sonnet-4",
       "site_name": "TriBridRAG",
       "fallback_models": [
         "openai/gpt-4o",

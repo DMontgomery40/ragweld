@@ -24,6 +24,26 @@ from server.services.config_store import CorpusNotFoundError
 
 router = APIRouter(tags=["config"])
 
+_SECRETS_CHECK_ALLOWLIST = {
+    # Provider secrets
+    "OPENAI_API_KEY",
+    "OPENROUTER_API_KEY",
+    "ANTHROPIC_API_KEY",
+    "GOOGLE_API_KEY",
+    "COHERE_API_KEY",
+    "VOYAGE_API_KEY",
+    "JINA_API_KEY",
+    # Integrations (UI surfaces these; backend does not expose values)
+    "LANGTRACE_API_KEY",
+    "LANGCHAIN_API_KEY",
+    "LANGSMITH_API_KEY",
+    "NETLIFY_API_KEY",
+    "GRAFANA_API_KEY",
+    "SLACK_WEBHOOK_URL",
+    "DISCORD_WEBHOOK_URL",
+}
+
+
 @router.get("/config", response_model=TriBridConfig)
 async def get_config(scope: CorpusScope = Depends()) -> TriBridConfig:
     repo_id = scope.resolved_repo_id
@@ -106,7 +126,35 @@ async def reset_config(scope: CorpusScope = Depends()) -> TriBridConfig:
 async def check_secrets(keys: str = Query(..., description="Comma-separated env var names")) -> dict[str, bool]:
     """Return which secret env vars are configured (never returns values)."""
     names = [k.strip() for k in (keys or "").split(",") if k.strip()]
-    return {name: bool(os.getenv(name)) for name in names}
+    if not names:
+        return {}
+
+    invalid = [name for name in names if name not in _SECRETS_CHECK_ALLOWLIST]
+    if invalid:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported secret key(s): {', '.join(sorted(set(invalid)))}",
+        )
+
+    # Use explicit getenv calls (no dynamic env lookups) to keep env usage auditable/"LAW"-compliant.
+    status = {
+        "OPENAI_API_KEY": bool(os.getenv("OPENAI_API_KEY")),
+        "OPENROUTER_API_KEY": bool(os.getenv("OPENROUTER_API_KEY")),
+        "ANTHROPIC_API_KEY": bool(os.getenv("ANTHROPIC_API_KEY")),
+        "GOOGLE_API_KEY": bool(os.getenv("GOOGLE_API_KEY")),
+        "COHERE_API_KEY": bool(os.getenv("COHERE_API_KEY")),
+        "VOYAGE_API_KEY": bool(os.getenv("VOYAGE_API_KEY")),
+        "JINA_API_KEY": bool(os.getenv("JINA_API_KEY")),
+        "LANGTRACE_API_KEY": bool(os.getenv("LANGTRACE_API_KEY")),
+        "LANGCHAIN_API_KEY": bool(os.getenv("LANGCHAIN_API_KEY")),
+        "LANGSMITH_API_KEY": bool(os.getenv("LANGSMITH_API_KEY")),
+        "NETLIFY_API_KEY": bool(os.getenv("NETLIFY_API_KEY")),
+        "GRAFANA_API_KEY": bool(os.getenv("GRAFANA_API_KEY")),
+        "SLACK_WEBHOOK_URL": bool(os.getenv("SLACK_WEBHOOK_URL")),
+        "DISCORD_WEBHOOK_URL": bool(os.getenv("DISCORD_WEBHOOK_URL")),
+    }
+
+    return {name: status[name] for name in names}
 
 
 @router.get("/mcp/status", response_model=MCPStatusResponse)

@@ -139,9 +139,9 @@ export const EvalDrillDown: React.FC<EvalDrillDownProps> = ({ runId, compareWith
         top1_regressions_count: top1RegressionsCount,
         top1_improvements_count: top1ImprovementsCount
       });
+      setModelUsed(data.model_used ?? null);
       if (data.ok) {
         setLlmAnalysis(data.analysis ?? null);
-        setModelUsed(data.model_used ?? null);
       } else {
         setLlmError(data.error || 'Failed to generate analysis');
       }
@@ -963,7 +963,8 @@ export const EvalDrillDown: React.FC<EvalDrillDownProps> = ({ runId, compareWith
                 borderRadius: '8px',
                 padding: '16px',
                 color: 'var(--err)',
-                fontSize: '13px'
+                fontSize: '13px',
+                whiteSpace: 'pre-wrap'
               }}>
                 <strong>Error:</strong> {llmError}
               </div>

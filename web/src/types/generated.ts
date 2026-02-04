@@ -451,6 +451,25 @@ export interface Entity {
   properties?: Record<string, unknown>;
 }
 
+/** Lightweight eval-run summary (used by /eval/analyze_comparison). */
+export interface EvalAnalyzeComparisonRun {
+  /** Eval run ID */
+  run_id: string;
+  /** Top-1 accuracy */
+  top1_accuracy?: number; // default: 0.0
+  /** Top-k accuracy */
+  topk_accuracy?: number; // default: 0.0
+  /** Total questions evaluated */
+  total?: number; // default: 0
+  /** Total run duration (seconds) */
+  duration_secs?: number; // default: 0.0
+}
+
+export interface EvalAnalyzeQuestionItem {
+  /** Evaluation question text */
+  question: string;
+}
+
 /** Lightweight scored retrieval doc for eval drill-down. */
 export interface EvalDoc {
   /** Retrieved file path */
@@ -936,9 +955,25 @@ export interface OpenRouterConfig {
   enabled?: boolean; // default: False
   api_key?: string; // default: ""
   base_url?: string; // default: "https://openrouter.ai/api/v1"
-  default_model?: string; // default: "anthropic/claude-sonnet-4-20250514"
+  default_model?: string; // default: "anthropic/claude-sonnet-4"
   site_name?: string; // default: "TriBridRAG"
   fallback_models?: string[]; // default: ["openai/gpt-4o", "google/gemini-2.0-flash"]
+}
+
+/** Metadata describing how a prompt is used and edited in the UI. */
+export interface PromptMetadata {
+  /** Human-friendly label */
+  label: string;
+  /** What this prompt is used for */
+  description: string;
+  /** Prompt category */
+  category: "chat" | "retrieval" | "indexing" | "evaluation";
+  /** Whether this prompt is editable in the System Prompts tab */
+  editable?: boolean; // default: True
+  /** Optional route to edit this prompt elsewhere (e.g. Chat → Settings) */
+  link_route?: string | null; // default: None
+  /** Label for the link button shown when editable=false */
+  link_label?: string | null; // default: None
 }
 
 /** Health status for a configured provider endpoint. */
@@ -1728,6 +1763,24 @@ export interface DockerStatus {
   containers_count?: number;
 }
 
+/** Request payload for /eval/analyze_comparison. */
+export interface EvalAnalyzeComparisonRequest {
+  /** Current (after) run */
+  current_run: EvalAnalyzeComparisonRun;
+  /** Baseline (before) run */
+  compare_run: EvalAnalyzeComparisonRun;
+  /** Config diffs (best-effort) */
+  config_diffs?: Record<string, unknown>[];
+  /** Top-k regressions (question-level) */
+  topk_regressions?: EvalAnalyzeQuestionItem[];
+  /** Top-k improvements (question-level) */
+  topk_improvements?: EvalAnalyzeQuestionItem[];
+  /** Top-1 regressions count */
+  top1_regressions_count?: number;
+  /** Top-1 improvements count */
+  top1_improvements_count?: number;
+}
+
 /** Response for /eval/analyze_comparison. */
 export interface EvalAnalyzeComparisonResponse {
   /** Whether analysis succeeded */
@@ -1938,6 +1991,28 @@ export interface MCPStatusResponse {
   python_stdio_available?: boolean;
   /** Human-readable diagnostic details (best-effort). */
   details?: string[];
+}
+
+export interface PromptUpdateRequest {
+  /** New prompt value */
+  value: string;
+}
+
+export interface PromptUpdateResponse {
+  /** Whether the update succeeded */
+  ok?: boolean;
+  /** Prompt key that was updated */
+  prompt_key: string;
+  /** Human-readable status message */
+  message: string;
+}
+
+/** Response containing prompt text and UI metadata. */
+export interface PromptsResponse {
+  /** Prompt key -> value */
+  prompts?: Record<string, string>;
+  /** Prompt key -> metadata */
+  metadata?: Record<string, PromptMetadata>;
 }
 
 /** Response payload for GET /api/chat/health. */

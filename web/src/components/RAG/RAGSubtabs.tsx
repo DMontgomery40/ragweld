@@ -12,7 +12,7 @@ type RAGSubtabsProps = {
 /**
  * ---agentspec
  * what: |
- *   Renders tabbed navigation for RAG pipeline stages. Takes activeSubtab ID and onSubtabChange callback; renders 6 subtab buttons (Data Quality, Retrieval, External Rerankers, Learning Ranker, Indexing, Evaluate).
+ *   Renders tabbed navigation for RAG pipeline stages. Takes activeSubtab ID and onSubtabChange callback; renders 6 subtab buttons (Data Quality, Retrieval, Graph, Reranker, Learning Reranker, Indexing).
  *
  * why: |
  *   Centralizes RAG workflow UI into reusable component with consistent tab state management.
@@ -29,8 +29,7 @@ export function RAGSubtabs({ activeSubtab, onSubtabChange }: RAGSubtabsProps) {
     { id: 'graph', title: 'Graph' },
     { id: 'reranker-config', title: 'Reranker' },
     { id: 'learning-ranker', title: 'Learning Reranker' },
-    { id: 'indexing', title: 'Indexing' },
-    { id: 'evaluate', title: 'Evaluate' }
+    { id: 'indexing', title: 'Indexing' }
   ];
 
   // Ensure a default subtab is selected
@@ -55,4 +54,3 @@ export function RAGSubtabs({ activeSubtab, onSubtabChange }: RAGSubtabsProps) {
     </div>
   );
 }
-

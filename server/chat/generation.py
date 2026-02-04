@@ -60,6 +60,38 @@ def _bearer_headers(*, api_key: str) -> dict[str, str]:
         "Content-Type": "application/json",
     }
 
+def _summarize_provider_error(resp: httpx.Response) -> str:
+    """Best-effort extraction of provider error details (safe for UI/debug logs)."""
+    try:
+        raw = resp.text or ""
+    except Exception:
+        raw = ""
+
+    if not raw:
+        return ""
+
+    # Prefer structured JSON error messages when available.
+    try:
+        data: Any = resp.json()
+        # OpenAI-style: {"error": {"message": "...", ...}}
+        if isinstance(data, dict):
+            err = data.get("error")
+            if isinstance(err, dict):
+                msg = err.get("message")
+                if isinstance(msg, str) and msg.strip():
+                    return msg.strip()
+                # Some providers use {"error":{"type":"...","code":"...","param":"..."}}
+                return json.dumps(err, ensure_ascii=False)[:400]
+            # OpenRouter sometimes: {"message":"..."} or {"error":"..."}
+            msg = data.get("message") or data.get("error")
+            if isinstance(msg, str) and msg.strip():
+                return msg.strip()
+    except Exception:
+        pass
+
+    # Fallback to raw body snippet (keep bounded).
+    return raw.strip()[:400]
+
 
 async def generate_chat_text(
     *,
@@ -116,12 +148,19 @@ async def generate_chat_text(
             data: Any = resp.json()
         except httpx.HTTPStatusError as e:
             status = int(getattr(e.response, "status_code", 0) or 0)
+            detail = ""
+            try:
+                msg = _summarize_provider_error(e.response)
+                if msg:
+                    detail = f": {msg}"
+            except Exception:
+                detail = ""
             if status == 401:
                 if route.kind == "openrouter":
                     raise RuntimeError("OpenRouter unauthorized (check OPENROUTER_API_KEY)") from e
                 if route.kind == "cloud_direct":
                     raise RuntimeError("OpenAI unauthorized (check OPENAI_API_KEY)") from e
-            raise RuntimeError(f"LLM request failed (HTTP {status})") from e
+            raise RuntimeError(f"LLM request failed (HTTP {status}){detail}") from e
         except httpx.RequestError as e:
             raise RuntimeError(
                 f"Provider request failed ({route.kind} {route.provider_name} @ {route.base_url}): "

@@ -8,23 +8,12 @@
 import { useState, useEffect } from 'react';
 import { useEvalDataset } from '@/hooks/useEvalDataset';
 import { useUIHelpers } from '@/hooks/useUIHelpers';
+import { useActiveRepo } from '@/stores';
 import type { EvalDatasetItem } from '@/types/generated';
 
 interface QuestionManagerProps {
   className?: string;
 }
-
-// Recommended eval dataset entries for TriBridRAG testing
-const RECOMMENDED_ENTRIES: Array<{ question: string; corpus_id: string; expected_paths: string[] }> = [
-  { question: 'Where is hybrid retrieval implemented?', corpus_id: 'tribrid', expected_paths: ['retrieval/fusion.py'] },
-  { question: 'Where is the graph search logic?', corpus_id: 'tribrid', expected_paths: ['retrieval/graph.py'] },
-  { question: 'Where is the vector search implemented?', corpus_id: 'tribrid', expected_paths: ['retrieval/vector.py'] },
-  { question: 'Where is the sparse/BM25 search logic?', corpus_id: 'tribrid', expected_paths: ['retrieval/sparse.py'] },
-  { question: 'Where is the reranking logic?', corpus_id: 'tribrid', expected_paths: ['retrieval/rerank.py'] },
-  { question: 'Where is the indexing pipeline implemented?', corpus_id: 'tribrid', expected_paths: ['indexing/embedder.py', 'indexing/chunker.py'] },
-  { question: 'Where is the graph builder?', corpus_id: 'tribrid', expected_paths: ['indexing/graph_builder.py'] },
-  { question: 'Where is the Pydantic config model?', corpus_id: 'tribrid', expected_paths: ['models/tribrid_config_model.py'] },
-];
 
 export const QuestionManager: React.FC<QuestionManagerProps> = ({ className = '' }) => {
   const {
@@ -39,9 +28,9 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({ className = ''
   } = useEvalDataset();
 
   const { showToast } = useUIHelpers();
+  const activeRepo = useActiveRepo();
 
   const [newQuestion, setNewQuestion] = useState('');
-  const [newCorpus, setNewCorpus] = useState('tribrid');
   const [newPaths, setNewPaths] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editQuestion, setEditQuestion] = useState('');
@@ -52,6 +41,10 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({ className = ''
   }, [refreshEntries]);
 
   const handleAddEntry = async () => {
+    if (!activeRepo) {
+      showToast('Select a corpus first', 'error');
+      return;
+    }
     if (!newQuestion.trim()) {
       showToast('Please enter a question', 'error');
       return;
@@ -65,7 +58,6 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({ className = ''
     const result = await addEntry({
       question: newQuestion,
       expected_paths: expectedChunks,
-      tags: [newCorpus],
     });
 
     if (result) {
@@ -99,22 +91,6 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({ className = ''
     if (success) {
       showToast('Entry deleted', 'success');
     }
-  };
-
-  const handleBulkAdd = async () => {
-    if (!confirm(`Add ${RECOMMENDED_ENTRIES.length} recommended eval entries?`)) return;
-
-    let added = 0;
-    for (const entry of RECOMMENDED_ENTRIES) {
-      const result = await addEntry({
-        question: entry.question,
-        expected_paths: entry.expected_paths,
-        tags: [entry.corpus_id],
-      });
-      if (result) added++;
-    }
-
-    showToast(`Added ${added} entries`, 'success');
   };
 
   const startEditing = (entry: EvalDatasetItem) => {
@@ -181,39 +157,24 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({ className = ''
             }}
           />
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '8px' }}>
-            <input
-              type="text"
-              placeholder="Corpus ID"
-              value={newCorpus}
-              onChange={(e) => setNewCorpus(e.target.value)}
-              style={{
-                padding: '10px',
-                background: 'var(--input-bg)',
-                border: '1px solid var(--line)',
-                borderRadius: '4px',
-                color: 'var(--fg)',
-              }}
-            />
-            <input
-              type="text"
-              placeholder="Expected chunks (comma-separated paths)"
-              value={newPaths}
-              onChange={(e) => setNewPaths(e.target.value)}
-              style={{
-                padding: '10px',
-                background: 'var(--input-bg)',
-                border: '1px solid var(--line)',
-                borderRadius: '4px',
-                color: 'var(--fg)',
-              }}
-            />
-          </div>
+          <input
+            type="text"
+            placeholder="Expected paths (comma-separated)"
+            value={newPaths}
+            onChange={(e) => setNewPaths(e.target.value)}
+            style={{
+              padding: '10px',
+              background: 'var(--input-bg)',
+              border: '1px solid var(--line)',
+              borderRadius: '4px',
+              color: 'var(--fg)',
+            }}
+          />
 
           <div style={{ display: 'flex', gap: '8px' }}>
             <button
               onClick={handleAddEntry}
-              disabled={saving || !newQuestion.trim()}
+              disabled={saving || !newQuestion.trim() || !activeRepo}
               style={{
                 flex: 1,
                 padding: '10px',
@@ -227,20 +188,6 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({ className = ''
               }}
             >
               {saving ? 'Adding...' : 'Add Entry'}
-            </button>
-            <button
-              onClick={handleBulkAdd}
-              disabled={saving}
-              style={{
-                padding: '10px 16px',
-                background: 'var(--bg-elev1)',
-                color: 'var(--link)',
-                border: '1px solid var(--link)',
-                borderRadius: '4px',
-                cursor: saving ? 'not-allowed' : 'pointer',
-              }}
-            >
-              Add Recommended ({RECOMMENDED_ENTRIES.length})
             </button>
           </div>
         </div>
@@ -282,7 +229,7 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({ className = ''
 
         {entries.length === 0 ? (
           <div style={{ padding: '32px', textAlign: 'center', color: 'var(--fg-muted)' }}>
-            No eval entries yet. Add some above or use recommended entries.
+            No eval entries yet. Add one above.
           </div>
         ) : (
           <div style={{ maxHeight: '400px', overflow: 'auto' }}>

@@ -108,8 +108,7 @@ export const routes: RouteConfig[] = [
       { id: 'graph', title: 'Graph' },
       { id: 'reranker-config', title: 'Reranker' },
       { id: 'learning-ranker', title: 'Learning Ranker' },
-      { id: 'indexing', title: 'Indexing' },
-      { id: 'evaluate', title: 'Evaluate RAG Pipeline' }
+      { id: 'indexing', title: 'Indexing' }
     ],
     nav: { visible: true }
   },
@@ -121,6 +120,7 @@ export const routes: RouteConfig[] = [
     order: 7,
     subtabs: [
       { id: 'analysis', title: 'Analysis' },
+      { id: 'dataset', title: 'Eval Dataset' },
       { id: 'prompts', title: 'System Prompts' },
       { id: 'trace', title: 'Trace Viewer' }
     ],

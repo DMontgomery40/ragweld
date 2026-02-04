@@ -174,6 +174,11 @@ def select_provider_route(
             model=override_model,
             api_key=openai_api_key,
         )
+    if override_model and _looks_like_openai_model_name(override_model) and (not openai_ready) and (not openrouter_ready):
+        raise RuntimeError(
+            f"Selected model '{override_model}' looks like an OpenAI cloud model, but neither OpenAI nor OpenRouter is configured. "
+            "Set OPENAI_API_KEY, or enable config.chat.openrouter.enabled and set OPENROUTER_API_KEY."
+        )
 
     # Default selection order.
     if openrouter_ready:

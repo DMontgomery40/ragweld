@@ -1,5 +1,11 @@
-import { apiClient, api } from './client';
-import type { EvalAnalyzeComparisonResponse, EvalRequest, EvalRun, EvalRunsResponse } from '@/types/generated';
+import { apiClient, api, withCorpusScope } from './client';
+import type {
+  EvalAnalyzeComparisonRequest,
+  EvalAnalyzeComparisonResponse,
+  EvalRequest,
+  EvalRun,
+  EvalRunsResponse,
+} from '@/types/generated';
 
 export const evalApi = {
   async run(request: EvalRequest): Promise<EvalRun> {
@@ -21,9 +27,11 @@ export const evalApi = {
     return data;
   },
 
-  async analyzeComparison(payload: Record<string, unknown>): Promise<EvalAnalyzeComparisonResponse> {
-    const { data } = await apiClient.post<EvalAnalyzeComparisonResponse>(api('/eval/analyze_comparison'), payload);
+  async analyzeComparison(payload: EvalAnalyzeComparisonRequest): Promise<EvalAnalyzeComparisonResponse> {
+    const { data } = await apiClient.post<EvalAnalyzeComparisonResponse>(
+      withCorpusScope(api('/eval/analyze_comparison')),
+      payload
+    );
     return data;
   },
 };
-

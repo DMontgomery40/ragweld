@@ -51,6 +51,7 @@ from server.api.health import router as health_router
 from server.api.index import router as index_router
 from server.api.keywords import router as keywords_router
 from server.api.models import router as models_router
+from server.api.prompts import router as prompts_router
 from server.api.repos import router as repos_router
 from server.api.reranker import router as reranker_router
 from server.api.search import router as search_router
@@ -136,6 +137,7 @@ app.include_router(benchmark_router, prefix="/api")
 app.include_router(graph_router, prefix="/api")
 app.include_router(eval_router, prefix="/api")
 app.include_router(dataset_router, prefix="/api")
+app.include_router(prompts_router, prefix="/api")
 app.include_router(cost_router, prefix="/api")
 app.include_router(docker_router, prefix="/api")
 app.include_router(models_router)  # Already has /api/models prefix

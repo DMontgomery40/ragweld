@@ -11,6 +11,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from starlette.responses import StreamingResponse
 
 from server.api.dataset import _load_dataset  # shared file-backed persistence
+from server.chat.generation import generate_chat_text
+from server.chat.provider_router import select_provider_route
 from server.models.eval import (
     EvalAnalyzeComparisonResponse,
     EvalDoc,
@@ -22,7 +24,7 @@ from server.models.eval import (
     EvalRunMeta,
     EvalRunsResponse,
 )
-from server.models.tribrid_config_model import CorpusScope
+from server.models.tribrid_config_model import CorpusScope, EvalAnalyzeComparisonRequest
 from server.retrieval.fusion import TriBridFusion
 from server.services.config_store import get_config as load_scoped_config
 
@@ -657,50 +659,167 @@ async def eval_results_by_run(run_id: str) -> EvalRun:
 
 
 @router.post("/eval/analyze_comparison", response_model=EvalAnalyzeComparisonResponse)
-async def analyze_eval_comparison(payload: dict[str, Any]) -> EvalAnalyzeComparisonResponse:
-    """Deterministic comparison analysis (no external LLM dependency)."""
-    try:
-        current = payload.get("current_run") or {}
-        baseline = payload.get("compare_run") or payload.get("baseline_run") or {}
-        config_diffs = payload.get("config_diffs") or []
-        topk_regressions = payload.get("topk_regressions") or payload.get("regressions") or []
-        topk_improvements = payload.get("topk_improvements") or payload.get("improvements") or []
+async def analyze_eval_comparison(
+    payload: EvalAnalyzeComparisonRequest,
+    scope: CorpusScope = Depends(),
+) -> EvalAnalyzeComparisonResponse:
+    """LLM-backed comparison analysis for the Eval drill-down UI."""
 
-        cur_top1 = float(current.get("top1_accuracy", 0.0) or 0.0)
-        cur_topk = float(current.get("topk_accuracy", 0.0) or 0.0)
-        cur_total = int(current.get("total", 0) or 0)
-        cur_id = str(current.get("run_id", "current"))
-
-        base_top1 = float(baseline.get("top1_accuracy", 0.0) or 0.0)
-        base_topk = float(baseline.get("topk_accuracy", 0.0) or 0.0)
-        base_total = int(baseline.get("total", 0) or 0)
-        base_id = str(baseline.get("run_id", "baseline"))
-
-        delta_top1 = (cur_top1 - base_top1) * 100.0
-        delta_topk = (cur_topk - base_topk) * 100.0
-
-        analysis = "\n".join(
-            [
-                "## Eval comparison",
-                f"- **Baseline**: `{base_id}` (n={base_total})",
-                f"- **Current**: `{cur_id}` (n={cur_total})",
-                "",
-                "## Metric deltas",
-                f"- **Top-1**: {delta_top1:+.1f}%",
-                f"- **Top-K**: {delta_topk:+.1f}%",
-                "",
-                "## Config changes (count)",
-                f"- {len(config_diffs)} changes detected",
-                "",
-                "## Question-level changes (Top-K)",
-                f"- Regressions: {len(topk_regressions)}",
-                f"- Improvements: {len(topk_improvements)}",
-                "",
-                "## Notes",
-                "- This analysis is deterministic (no LLM). Treat it as a quick triage summary.",
-            ]
+    repo_id = scope.resolved_repo_id
+    if not repo_id:
+        return EvalAnalyzeComparisonResponse(
+            ok=False,
+            analysis=None,
+            model_used=None,
+            error="Missing corpus scope (pass ?corpus_id=...).",
         )
 
-        return EvalAnalyzeComparisonResponse(ok=True, analysis=analysis, model_used="deterministic", error=None)
+    try:
+        cfg = await load_scoped_config(repo_id=repo_id)
     except Exception as e:
         return EvalAnalyzeComparisonResponse(ok=False, analysis=None, model_used=None, error=str(e))
+
+    def pct(x: float) -> str:
+        return f"{float(x) * 100.0:.1f}%"
+
+    def json_one_line(x: Any) -> str:
+        try:
+            return json.dumps(x, ensure_ascii=False)
+        except Exception:
+            return str(x)
+
+    current = payload.current_run
+    baseline = payload.compare_run
+
+    delta_top1 = (float(current.top1_accuracy) - float(baseline.top1_accuracy)) * 100.0
+    delta_topk = (float(current.topk_accuracy) - float(baseline.topk_accuracy)) * 100.0
+
+    # Format config diffs and question lists for the model. Keep the prompt bounded.
+    max_diffs = 80
+    diffs_lines: list[str] = []
+    for d in list(payload.config_diffs or [])[:max_diffs]:
+        if not isinstance(d, dict):
+            continue
+        key = str(d.get("key") or d.get("path") or d.get("name") or "").strip() or "(unknown)"
+        prev = d.get("previous")
+        cur = d.get("current")
+        diffs_lines.append(f"- {key}: {json_one_line(prev)} -> {json_one_line(cur)}")
+    if len(payload.config_diffs or []) > max_diffs:
+        diffs_lines.append(f"- ... ({len(payload.config_diffs) - max_diffs} more)")
+
+    max_q = 25
+    regressed_qs = [q.question for q in (payload.topk_regressions or []) if q.question][:max_q]
+    improved_qs = [q.question for q in (payload.topk_improvements or []) if q.question][:max_q]
+
+    user_prompt = "\n".join(
+        [
+            "You are analyzing a retrieval evaluation comparison between two runs of the same corpus.",
+            "",
+            "## Runs",
+            f"- Baseline run: `{baseline.run_id}` (n={baseline.total}, top1={pct(baseline.top1_accuracy)}, topk={pct(baseline.topk_accuracy)}, duration={baseline.duration_secs:.1f}s)",
+            f"- Current run: `{current.run_id}` (n={current.total}, top1={pct(current.top1_accuracy)}, topk={pct(current.topk_accuracy)}, duration={current.duration_secs:.1f}s)",
+            "",
+            "## Metric deltas (Current - Baseline)",
+            f"- Top-1: {delta_top1:+.1f}%",
+            f"- Top-K: {delta_topk:+.1f}%",
+            "",
+            "## Config changes",
+            f"- Total changes detected: {len(payload.config_diffs or [])}",
+            *(diffs_lines if diffs_lines else ["- (none)"]),
+            "",
+            "## Question-level changes",
+            f"- Top-K regressions: {len(payload.topk_regressions or [])}",
+            f"- Top-K improvements: {len(payload.topk_improvements or [])}",
+            f"- Top-1 regressions count: {int(payload.top1_regressions_count)}",
+            f"- Top-1 improvements count: {int(payload.top1_improvements_count)}",
+            "",
+            "### Example regressed questions (Top-K)",
+            *(["- (none)"] if not regressed_qs else [f"- {q}" for q in regressed_qs]),
+            "",
+            "### Example improved questions (Top-K)",
+            *(["- (none)"] if not improved_qs else [f"- {q}" for q in improved_qs]),
+            "",
+            "## What to do",
+            "- Explain likely root causes, but be skeptical and call out confounding variables.",
+            "- Suggest concrete next experiments and which config knobs to try.",
+            "- If the results are surprising, say so and propose validation steps (e.g., verify index rebuild, dataset drift).",
+        ]
+    )
+
+    def provider_setup_checklist(reason: str, *, selected_model: str | None = None, selected_kind: str | None = None) -> str:
+        model_line = ""
+        if selected_kind or selected_model:
+            model_line = (
+                "\n"
+                f"Selected route: {selected_kind or '(unknown)'}\n"
+                f"Selected model: {selected_model or '(unknown)'}\n"
+            )
+
+        openrouter_default = str(getattr(cfg.chat.openrouter, "default_model", "") or "").strip()
+        local_default = str(getattr(cfg.chat.local_models, "default_chat_model", "") or "").strip()
+        gen_model = str(getattr(cfg.generation, "gen_model", "") or "").strip()
+        openai_base_url = str(getattr(cfg.generation, "openai_base_url", "") or "").strip()
+
+        extra = [
+            "",
+            "Provider setup checklist:",
+            "1) OpenAI (cloud-direct): set `OPENAI_API_KEY` in `.env` and restart the backend.",
+            "   - If you use a proxy, set `generation.openai_base_url` in config (not `OPENAI_BASE_URL`).",
+            "2) OpenRouter: set `OPENROUTER_API_KEY` in `.env` and set `chat.openrouter.enabled=true`.",
+            "3) Local: start Ollama/llama.cpp and ensure `chat.local_models.providers` includes an enabled provider.",
+            "",
+            "Model selection notes:",
+            f"- chat.openrouter.default_model: {openrouter_default or '(empty)'}",
+            f"- chat.local_models.default_chat_model: {local_default or '(empty)'}",
+            f"- generation.gen_model: {gen_model or '(empty)'}",
+            f"- generation.openai_base_url: {openai_base_url or '(default)'}",
+        ]
+        return f"{reason}{model_line}\n" + "\n".join(extra)
+
+    try:
+        route = select_provider_route(
+            chat_config=cfg.chat,
+            # Use the configured generation model for evaluation analysis.
+            model_override=str(cfg.generation.gen_model or "").strip(),
+            openai_base_url_override=cfg.generation.openai_base_url,
+        )
+    except Exception as e:
+        return EvalAnalyzeComparisonResponse(
+            ok=False,
+            analysis=None,
+            model_used=str(getattr(cfg.generation, "gen_model", "") or "").strip() or None,
+            error=provider_setup_checklist(str(e)),
+        )
+
+    try:
+        text, _provider_response_id = await generate_chat_text(
+            route=route,
+            openrouter_cfg=cfg.chat.openrouter,
+            system_prompt=cfg.system_prompts.eval_analysis,
+            user_message=user_prompt,
+            images=[],
+            temperature=float(cfg.generation.gen_temperature),
+            max_tokens=int(cfg.generation.gen_max_tokens),
+            # Prevent "No relevant context found." injection; this endpoint provides all context in user_prompt.
+            context_text="",
+            context_chunks=[],
+            timeout_s=float(cfg.generation.gen_timeout),
+        )
+    except Exception as e:
+        return EvalAnalyzeComparisonResponse(
+            ok=False,
+            analysis=None,
+            model_used=str(route.model),
+            error=provider_setup_checklist(
+                f"Eval AI analysis failed: {e}",
+                selected_kind=str(route.kind),
+                selected_model=str(route.model),
+            ),
+        )
+
+    return EvalAnalyzeComparisonResponse(
+        ok=True,
+        analysis=str(text or "").strip(),
+        model_used=str(route.model),
+        error=None,
+    )

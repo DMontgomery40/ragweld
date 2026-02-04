@@ -1377,6 +1377,43 @@ class EvalRunsResponse(BaseModel):
     runs: list[EvalRunMeta] = Field(default_factory=list, description="Run summaries (newest first)")
 
 
+class EvalAnalyzeComparisonRun(BaseModel):
+    """Lightweight eval-run summary (used by /eval/analyze_comparison)."""
+
+    run_id: str = Field(description="Eval run ID")
+    top1_accuracy: float = Field(default=0.0, ge=0.0, le=1.0, description="Top-1 accuracy")
+    topk_accuracy: float = Field(default=0.0, ge=0.0, le=1.0, description="Top-k accuracy")
+    total: int = Field(default=0, ge=0, description="Total questions evaluated")
+    duration_secs: float = Field(default=0.0, ge=0.0, description="Total run duration (seconds)")
+
+
+class EvalAnalyzeQuestionItem(BaseModel):
+    question: str = Field(description="Evaluation question text")
+
+
+class EvalAnalyzeComparisonRequest(BaseModel):
+    """Request payload for /eval/analyze_comparison."""
+
+    current_run: EvalAnalyzeComparisonRun = Field(description="Current (after) run")
+    compare_run: EvalAnalyzeComparisonRun = Field(
+        description="Baseline (before) run",
+        validation_alias=AliasChoices("compare_run", "baseline_run"),
+    )
+    config_diffs: list[dict[str, Any]] = Field(default_factory=list, description="Config diffs (best-effort)")
+    topk_regressions: list[EvalAnalyzeQuestionItem] = Field(
+        default_factory=list,
+        description="Top-k regressions (question-level)",
+        validation_alias=AliasChoices("topk_regressions", "regressions"),
+    )
+    topk_improvements: list[EvalAnalyzeQuestionItem] = Field(
+        default_factory=list,
+        description="Top-k improvements (question-level)",
+        validation_alias=AliasChoices("topk_improvements", "improvements"),
+    )
+    top1_regressions_count: int = Field(default=0, ge=0, description="Top-1 regressions count")
+    top1_improvements_count: int = Field(default=0, ge=0, description="Top-1 improvements count")
+
+
 class EvalAnalyzeComparisonResponse(BaseModel):
     """Response for /eval/analyze_comparison."""
 
@@ -3376,6 +3413,51 @@ class EvaluationConfig(BaseModel):
     )
 
 
+# =============================================================================
+# DOMAIN MODELS - Prompt editing (Eval → System Prompts)
+# =============================================================================
+
+PromptCategory = Literal["chat", "retrieval", "indexing", "evaluation"]
+
+
+class PromptMetadata(BaseModel):
+    """Metadata describing how a prompt is used and edited in the UI."""
+
+    label: str = Field(description="Human-friendly label")
+    description: str = Field(description="What this prompt is used for")
+    category: PromptCategory = Field(description="Prompt category")
+
+    editable: bool = Field(
+        default=True,
+        description="Whether this prompt is editable in the System Prompts tab",
+    )
+    link_route: str | None = Field(
+        default=None,
+        description="Optional route to edit this prompt elsewhere (e.g. Chat → Settings)",
+    )
+    link_label: str | None = Field(
+        default=None,
+        description="Label for the link button shown when editable=false",
+    )
+
+
+class PromptsResponse(BaseModel):
+    """Response containing prompt text and UI metadata."""
+
+    prompts: dict[str, str] = Field(default_factory=dict, description="Prompt key -> value")
+    metadata: dict[str, PromptMetadata] = Field(default_factory=dict, description="Prompt key -> metadata")
+
+
+class PromptUpdateRequest(BaseModel):
+    value: str = Field(description="New prompt value")
+
+
+class PromptUpdateResponse(BaseModel):
+    ok: bool = Field(default=True, description="Whether the update succeeded")
+    prompt_key: str = Field(description="Prompt key that was updated")
+    message: str = Field(description="Human-readable status message")
+
+
 class SystemPromptsConfig(BaseModel):
     """System prompts for LLM interactions - affects RAG pipeline behavior.
 
@@ -3712,7 +3794,8 @@ class OpenRouterConfig(BaseModel):
     enabled: bool = Field(default=False)
     api_key: str = Field(default="")
     base_url: str = Field(default="https://openrouter.ai/api/v1")
-    default_model: str = Field(default="anthropic/claude-sonnet-4-20250514")
+    # NOTE: Must be a valid OpenRouter model id (provider/model).
+    default_model: str = Field(default="anthropic/claude-sonnet-4")
     site_name: str = Field(default="TriBridRAG")
     fallback_models: list[str] = Field(default=["openai/gpt-4o", "google/gemini-2.0-flash"])
 

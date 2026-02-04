@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useConfig, useConfigField } from '@/hooks';
 import { TooltipIcon } from '@/components/ui/TooltipIcon';
 import { ProviderSetup } from '@/components/Chat/ProviderSetup';
@@ -9,12 +9,37 @@ const TABS = ['Model', 'Sources', 'Recall', 'Multimodal', 'Local', 'OpenRouter',
 export function ChatSettings2() {
   const { config, loading, error, saving } = useConfig();
   const [activeTab, setActiveTab] = useState(TABS[0]);
+  const [pendingScrollPrompt, setPendingScrollPrompt] = useState<string | null>(null);
+
+  // Deep link support (?prompt=<field>) from Eval → System Prompts.
+  useEffect(() => {
+    try {
+      const prompt = new URLSearchParams(window.location.search).get('prompt');
+      if (!prompt) return;
+      setActiveTab('Model');
+      setPendingScrollPrompt(prompt);
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!pendingScrollPrompt) return;
+    if (activeTab !== 'Model') return;
+    const el = document.getElementById(`chat-prompt-${pendingScrollPrompt}`);
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+    setPendingScrollPrompt(null);
+  }, [activeTab, pendingScrollPrompt]);
 
   // Chat core
   const [systemPromptBase, setSystemPromptBase] = useConfigField(
     'chat.system_prompt_base',
     'You are a helpful assistant.'
   );
+  const [systemPromptRecallSuffix, setSystemPromptRecallSuffix] = useConfigField('chat.system_prompt_recall_suffix', '');
+  const [systemPromptRagSuffix, setSystemPromptRagSuffix] = useConfigField('chat.system_prompt_rag_suffix', '');
   const [systemPromptDirect, setSystemPromptDirect] = useConfigField('chat.system_prompt_direct', '');
   const [systemPromptRag, setSystemPromptRag] = useConfigField('chat.system_prompt_rag', '');
   const [systemPromptRecall, setSystemPromptRecall] = useConfigField('chat.system_prompt_recall', '');
@@ -75,6 +100,7 @@ export function ChatSettings2() {
                   System prompt (base) <TooltipIcon name="chat.system_prompt_base" />
                 </label>
                 <textarea
+                  id="chat-prompt-system_prompt_base"
                   value={systemPromptBase}
                   onChange={(e) => setSystemPromptBase(e.target.value)}
                   rows={6}
@@ -102,6 +128,7 @@ export function ChatSettings2() {
                     Direct (no context) <TooltipIcon name="chat.system_prompt_direct" />
                   </label>
                   <textarea
+                    id="chat-prompt-system_prompt_direct"
                     value={systemPromptDirect}
                     onChange={(e) => setSystemPromptDirect(e.target.value)}
                     rows={6}
@@ -116,6 +143,7 @@ export function ChatSettings2() {
                     RAG only <TooltipIcon name="chat.system_prompt_rag" />
                   </label>
                   <textarea
+                    id="chat-prompt-system_prompt_rag"
                     value={systemPromptRag}
                     onChange={(e) => setSystemPromptRag(e.target.value)}
                     rows={8}
@@ -130,6 +158,7 @@ export function ChatSettings2() {
                     Recall only <TooltipIcon name="chat.system_prompt_recall" />
                   </label>
                   <textarea
+                    id="chat-prompt-system_prompt_recall"
                     value={systemPromptRecall}
                     onChange={(e) => setSystemPromptRecall(e.target.value)}
                     rows={8}
@@ -144,9 +173,49 @@ export function ChatSettings2() {
                     RAG + Recall <TooltipIcon name="chat.system_prompt_rag_and_recall" />
                   </label>
                   <textarea
+                    id="chat-prompt-system_prompt_rag_and_recall"
                     value={systemPromptRagAndRecall}
                     onChange={(e) => setSystemPromptRagAndRecall(e.target.value)}
                     rows={10}
+                    style={{ width: '100%' }}
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div style={{ marginTop: 18 }}>
+              <h4 style={{ margin: '0 0 10px 0', fontSize: 14, fontWeight: 600, color: 'var(--fg)' }}>
+                Legacy suffix prompts
+              </h4>
+              <div style={{ marginBottom: 10, fontSize: 12, color: 'var(--fg-muted)' }}>
+                Used only when a 4-state prompt is empty (fallback behavior).
+              </div>
+
+              <div className="input-row">
+                <div className="input-group full-width">
+                  <label>
+                    Recall suffix <TooltipIcon name="chat.system_prompt_recall_suffix" />
+                  </label>
+                  <textarea
+                    id="chat-prompt-system_prompt_recall_suffix"
+                    value={systemPromptRecallSuffix}
+                    onChange={(e) => setSystemPromptRecallSuffix(e.target.value)}
+                    rows={4}
+                    style={{ width: '100%' }}
+                  />
+                </div>
+              </div>
+
+              <div className="input-row">
+                <div className="input-group full-width">
+                  <label>
+                    RAG suffix <TooltipIcon name="chat.system_prompt_rag_suffix" />
+                  </label>
+                  <textarea
+                    id="chat-prompt-system_prompt_rag_suffix"
+                    value={systemPromptRagSuffix}
+                    onChange={(e) => setSystemPromptRagSuffix(e.target.value)}
+                    rows={4}
                     style={{ width: '100%' }}
                   />
                 </div>

@@ -1,21 +1,13 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useActiveRepo } from '@/stores';
 import { useUIHelpers } from '@/hooks/useUIHelpers';
 import { promptsApi } from '@/api';
+import type { PromptMetadata, PromptsResponse } from '@/types/generated';
 
-interface PromptMetadata {
-  label: string;
-  description: string;
-  category: string;
-}
-
-interface PromptsResponse {
-  prompts: Record<string, string>;
-  metadata: Record<string, PromptMetadata>;
-}
-
-interface SystemPromptsSubtabProps {
+type SystemPromptsSubtabProps = {
   className?: string;
-}
+};
 
 const CATEGORY_COLORS: Record<string, string> = {
   chat: 'var(--accent)',
@@ -32,28 +24,45 @@ export const SystemPromptsSubtab: React.FC<SystemPromptsSubtabProps> = ({ classN
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const { showToast } = useUIHelpers();
+  const activeRepo = useActiveRepo();
+  const navigate = useNavigate();
 
-  // Fetch prompts on mount
-  useEffect(() => {
-    fetchPrompts();
-  }, []);
-
-  const fetchPrompts = async () => {
+  const fetchPrompts = useCallback(async () => {
     setIsLoading(true);
     try {
-      const raw = await promptsApi.list();
-      const data = raw as PromptsResponse;
-      setPrompts(data.prompts);
-      setMetadata(data.metadata);
+      const data: PromptsResponse = await promptsApi.list();
+      setPrompts(data.prompts || {});
+      setMetadata(data.metadata || {});
     } catch (error) {
       console.error('Failed to load prompts:', error);
       showToast('Failed to load system prompts', 'error');
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [showToast]);
+
+  // Fetch prompts on mount + when active corpus changes
+  useEffect(() => {
+    void fetchPrompts();
+  }, [activeRepo, fetchPrompts]);
+
+  // Optional deep link support (?prompt=<prompt_key>)
+  useEffect(() => {
+    if (isLoading) return;
+    try {
+      const key = new URLSearchParams(window.location.search).get('prompt');
+      if (!key) return;
+      const el = document.getElementById(`prompt-card-${key}`);
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } catch {
+      // ignore
+    }
+  }, [isLoading, metadata]);
+
+  const isEditable = (promptKey: string) => metadata[promptKey]?.editable !== false;
 
   const handleEdit = (promptKey: string) => {
+    if (!isEditable(promptKey)) return;
     setEditingPrompt(promptKey);
     setEditValue(prompts[promptKey] || '');
   };
@@ -66,6 +75,10 @@ export const SystemPromptsSubtab: React.FC<SystemPromptsSubtabProps> = ({ classN
   const handleSave = async () => {
     if (!editingPrompt || !editValue.trim()) {
       showToast('Prompt cannot be empty', 'error');
+      return;
+    }
+    if (!isEditable(editingPrompt)) {
+      showToast('This prompt is edited elsewhere', 'error');
       return;
     }
 
@@ -87,6 +100,10 @@ export const SystemPromptsSubtab: React.FC<SystemPromptsSubtabProps> = ({ classN
   };
 
   const handleReset = async (promptKey: string) => {
+    if (!isEditable(promptKey)) {
+      showToast('This prompt is edited elsewhere', 'error');
+      return;
+    }
     if (!confirm(`Reset "${metadata[promptKey]?.label || promptKey}" to default?`)) {
       return;
     }
@@ -172,7 +189,10 @@ export const SystemPromptsSubtab: React.FC<SystemPromptsSubtabProps> = ({ classN
           {promptKeys.map(promptKey => {
             const meta = metadata[promptKey];
             const value = prompts[promptKey] || '';
-            const isEditing = editingPrompt === promptKey;
+            const editable = meta?.editable !== false;
+            const isEditing = editable && editingPrompt === promptKey;
+            const linkRoute = meta?.link_route;
+            const linkLabel = meta?.link_label || 'Open';
 
             return (
               <div
@@ -210,7 +230,7 @@ export const SystemPromptsSubtab: React.FC<SystemPromptsSubtabProps> = ({ classN
                     </p>
                   </div>
                   <div style={{ display: 'flex', gap: '8px' }}>
-                    {!isEditing && (
+                    {!isEditing && editable && (
                       <>
                         <button
                           onClick={() => handleEdit(promptKey)}
@@ -243,6 +263,24 @@ export const SystemPromptsSubtab: React.FC<SystemPromptsSubtabProps> = ({ classN
                           Reset
                         </button>
                       </>
+                    )}
+                    {!isEditing && !editable && linkRoute && (
+                      <button
+                        onClick={() => navigate(linkRoute)}
+                        title={linkLabel}
+                        style={{
+                          padding: '6px 12px',
+                          fontSize: '12px',
+                          background: 'transparent',
+                          color: 'var(--accent)',
+                          border: '1px solid var(--accent)',
+                          borderRadius: '4px',
+                          cursor: 'pointer',
+                          fontWeight: 700,
+                        }}
+                      >
+                        {linkLabel}
+                      </button>
                     )}
                   </div>
                 </div>

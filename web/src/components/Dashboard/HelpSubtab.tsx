@@ -69,8 +69,8 @@ export function HelpSubtab() {
               <strong>Test Your Setup:</strong> Go to the Chat tab to test queries against your indexed repository.
             </li>
             <li>
-              <strong>Evaluate Performance:</strong> Use the Evaluate subtab under RAG to run eval dataset tests and measure
-              retrieval quality.
+              <strong>Evaluate Performance:</strong> Use Eval Analysis → Eval Dataset to manage questions, then run evals
+              from Eval Analysis → Analysis to measure retrieval quality.
             </li>
             <li>
               <strong>Compare Configurations:</strong> Use the Admin tab to save and compare different RAG configurations
@@ -172,7 +172,7 @@ export function HelpSubtab() {
             />
             <TaskLink
               title="How do I set up evaluation datasets?"
-              description="Go to RAG → Evaluate, add questions with expected context, then run evaluations to measure quality."
+              description="Go to Eval Analysis → Eval Dataset, add questions with expected context, then run evaluations from Eval Analysis → Analysis."
             />
             <TaskLink
               title="How do I monitor system health?"
