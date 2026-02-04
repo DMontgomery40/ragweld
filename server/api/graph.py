@@ -30,8 +30,6 @@ async def list_entities(
     try:
         await neo4j.connect()
         entities = await neo4j.list_entities(repo_id, entity_type, limit, query=q)
-        if not entities and not (q or "").strip():
-            raise HTTPException(status_code=404, detail=f"No graph for repo_id={repo_id}")
         return entities
     finally:
         await neo4j.disconnect()
@@ -158,8 +156,6 @@ async def list_communities(corpus_id: str, level: int | None = None) -> list[Com
     try:
         await neo4j.connect()
         comms = await neo4j.get_communities(repo_id, level)
-        if not comms:
-            raise HTTPException(status_code=404, detail=f"No communities for repo_id={repo_id}")
         return comms
     finally:
         await neo4j.disconnect()
@@ -179,8 +175,6 @@ async def get_graph_stats(corpus_id: str) -> GraphStats:
     try:
         await neo4j.connect()
         stats = await neo4j.get_graph_stats(repo_id)
-        if stats.total_entities == 0:
-            raise HTTPException(status_code=404, detail=f"No graph for repo_id={repo_id}")
         return stats
     finally:
         await neo4j.disconnect()

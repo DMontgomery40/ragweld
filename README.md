@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="mkdocs/docs/assets/images/tribrid-logo.png" alt="TriBridRAG" width="200" />
+  <img src="web/public/favicon.svg" alt="TriBridRAG" width="200" />
 </p>
 
 <h1 align="center">TriBridRAG</h1>
