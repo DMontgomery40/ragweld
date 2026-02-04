@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import time
+import uuid
 
 from fastapi import APIRouter, HTTPException
 from pydantic_ai.exceptions import ModelHTTPError
@@ -48,6 +49,30 @@ async def search(request: SearchRequest) -> SearchResponse:
         top_k=int(request.top_k),
     )
     dt_ms = (time.perf_counter() - t0) * 1000.0
+
+    # Best-effort query log append for triplet mining.
+    try:
+        if int(getattr(cfg.tracing, "tracing_enabled", 1) or 0) == 1:
+            from server.observability.query_log import append_query_log
+
+            await append_query_log(
+                cfg,
+                entry={
+                    "event_id": str(uuid.uuid4()),
+                    "kind": "search",
+                    "corpus_id": request.repo_id,
+                    "query": request.query,
+                    "reranker_mode": str(cfg.reranking.reranker_mode or ""),
+                    "rerank_ok": bool((fusion.last_debug or {}).get("rerank_ok", True)),
+                    "rerank_applied": bool((fusion.last_debug or {}).get("rerank_applied", False)),
+                    "rerank_skipped_reason": (fusion.last_debug or {}).get("rerank_skipped_reason"),
+                    "rerank_error": (fusion.last_debug or {}).get("rerank_error"),
+                    "rerank_candidates_reranked": int((fusion.last_debug or {}).get("rerank_candidates_reranked") or 0),
+                    "top_paths": [m.file_path for m in matches[:5]],
+                },
+            )
+    except Exception:
+        pass
 
     return SearchResponse(
         query=request.query,

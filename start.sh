@@ -305,7 +305,9 @@ if [[ "$START_FRONTEND" == "1" ]]; then
 
   log "Starting frontend (Vite) on port $FRONTEND_PORT..."
   log "UI: http://localhost:${FRONTEND_PORT}/web"
-  run npm --prefix web run dev -- --port "$FRONTEND_PORT"
+  # Bind explicitly to IPv4 loopback so tests and scripts that use 127.0.0.1 work
+  # even when "localhost" resolves to ::1 first.
+  run npm --prefix web run dev -- --host 127.0.0.1 --port "$FRONTEND_PORT"
 else
   log "Done. (Nothing left to run in foreground.)"
 fi

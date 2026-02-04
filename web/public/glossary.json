@@ -6403,6 +6403,32 @@
       "badges": []
     },
     {
+      "term": "System prompt suffix: Recall (legacy)",
+      "key": "chat.system_prompt_recall_suffix",
+      "definition": "This text is appended to the legacy base prompt <span class=\"tt-strong\">only when Recall context is present</span> and the selected four-state system prompt is blank (fallback mode). It’s meant to remind the model that conversation history snippets are available in <span class=\"mono\">&lt;recall_context&gt;...&lt;/recall_context&gt;</span> and to use them carefully.<br><br>Most users should prefer editing the four state prompts instead (Direct / RAG / Recall / RAG+Recall) and keep this suffix minimal.",
+      "category": "generation",
+      "related": [
+        "System prompt (base)",
+        "System prompt: Recall only",
+        "System prompt: RAG + Recall"
+      ],
+      "links": [],
+      "badges": []
+    },
+    {
+      "term": "System prompt suffix: RAG (legacy)",
+      "key": "chat.system_prompt_rag_suffix",
+      "definition": "This text is appended to the legacy base prompt <span class=\"tt-strong\">only when code retrieval (RAG) context is present</span> and the selected four-state system prompt is blank (fallback mode). It’s meant to keep the model grounded in retrieved code snippets and to cite file paths + line ranges.<br><br>Most users should prefer editing the four state prompts instead (Direct / RAG / Recall / RAG+Recall) and keep this suffix minimal.",
+      "category": "generation",
+      "related": [
+        "System prompt (base)",
+        "System prompt: RAG only",
+        "System prompt: RAG + Recall"
+      ],
+      "links": [],
+      "badges": []
+    },
+    {
       "term": "System prompt: Direct (no context)",
       "key": "chat.system_prompt_direct",
       "definition": "Used when the message is answered <span class=\"tt-strong\">without any retrieval context</span> — no code corpora results and no Recall snippets.<br><br>In this state the model only sees the user’s message, so this prompt should set expectations clearly: it can explain general concepts, but it should not pretend it has looked at the user’s repo unless sources are enabled.<br><br>A good Direct prompt usually encourages a tight feedback loop: if the user asks about “our code”, it should suggest enabling corpora (and/or Recall) or asking for a file path so the answer can be grounded.<br><br>If this prompt is blank, TriBridRAG falls back to the base prompt composition for this state.",

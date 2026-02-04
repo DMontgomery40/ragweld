@@ -225,7 +225,8 @@ def call_openai_unified_diff(prompt: str) -> str:
     if not api_key:
         raise RuntimeError("OPENAI_API_KEY not set")
 
-    model = os.getenv("OPENAI_MODEL", "gpt-5")
+    # Default to the latest flagship model (override via OPENAI_MODEL).
+    model = os.getenv("OPENAI_MODEL", "gpt-5.2")
     url = (os.getenv("OPENAI_API_BASE", "https://api.openai.com/v1").rstrip("/") + "/responses")
     max_output_tokens = int(os.getenv("OPENAI_MAX_OUTPUT_TOKENS", "14000"))
 
@@ -243,11 +244,11 @@ def call_openai_unified_diff(prompt: str) -> str:
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
     payload = {
         "model": model,
-        "input": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": prompt},
-        ],
-        # GPT-5 controls
+        # Responses API: prefer top-level instructions + input. This avoids relying on
+        # message-compat mode and matches the API reference examples.
+        "instructions": system_prompt,
+        "input": prompt,
+        # GPT-5 family controls
         "text": {"verbosity": os.getenv("OPENAI_VERBOSITY", "high")},
         "reasoning": {"effort": os.getenv("OPENAI_REASONING_EFFORT", "high")},
         "max_output_tokens": max_output_tokens,

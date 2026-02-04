@@ -73,7 +73,7 @@ export function LearningRankerSubtab() {
     try {
       info('Training reranker…');
       const res = await trainModel({ epochs, batch_size: trainBatch, max_length: maxLen });
-      if (res?.ok) success('Training started');
+      if (res?.ok) success(res?.run_id ? `Training started (${res.run_id})` : 'Training started');
       else notifyError(res?.error || 'Training failed');
       await refreshStats();
     } catch (e) {
@@ -286,16 +286,16 @@ export function LearningRankerSubtab() {
       </div>
 
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 14 }}>
-        <button className="small-button" onClick={handleMine} disabled={disabled}>
+        <button className="small-button" onClick={handleMine} disabled={disabled} data-testid="reranker-mine">
           {disabled && status.task === 'mining' ? 'Mining…' : 'Mine triplets'}
         </button>
-        <button className="small-button" onClick={handleTrain} disabled={disabled}>
+        <button className="small-button" onClick={handleTrain} disabled={disabled} data-testid="reranker-train">
           {disabled && status.task === 'training' ? 'Training…' : 'Train'}
         </button>
-        <button className="small-button" onClick={handleEvaluate} disabled={disabled}>
+        <button className="small-button" onClick={handleEvaluate} disabled={disabled} data-testid="reranker-evaluate">
           {disabled && status.task === 'evaluating' ? 'Evaluating…' : 'Evaluate'}
         </button>
-        <button className="small-button" onClick={() => void refreshStats()}>
+        <button className="small-button" onClick={() => void refreshStats()} data-testid="reranker-refresh-counts">
           Refresh counts
         </button>
       </div>
@@ -310,12 +310,16 @@ export function LearningRankerSubtab() {
       >
         <div style={{ background: 'var(--bg-elev1)', border: '1px solid var(--line)', borderRadius: 10, padding: 12 }}>
           <div style={{ fontSize: 12, color: 'var(--fg-muted)' }}>Logged queries</div>
-          <div style={{ fontSize: 18, fontWeight: 700 }}>{stats.queryCount}</div>
+          <div style={{ fontSize: 18, fontWeight: 700 }} data-testid="reranker-logs-count">
+            {stats.queryCount}
+          </div>
           <div style={{ fontSize: 11, color: 'var(--fg-muted)' }}>{logPath}</div>
         </div>
         <div style={{ background: 'var(--bg-elev1)', border: '1px solid var(--line)', borderRadius: 10, padding: 12 }}>
           <div style={{ fontSize: 12, color: 'var(--fg-muted)' }}>Triplets</div>
-          <div style={{ fontSize: 18, fontWeight: 700 }}>{stats.tripletCount}</div>
+          <div style={{ fontSize: 18, fontWeight: 700 }} data-testid="reranker-triplets-count">
+            {stats.tripletCount}
+          </div>
           <div style={{ fontSize: 11, color: 'var(--fg-muted)' }}>{tripletsPath}</div>
         </div>
         <div style={{ background: 'var(--bg-elev1)', border: '1px solid var(--line)', borderRadius: 10, padding: 12 }}>
@@ -339,6 +343,11 @@ export function LearningRankerSubtab() {
         <div style={{ fontSize: 12, color: 'var(--fg-muted)', marginBottom: 8 }}>
           running={String(status.running)} task={status.task || '—'} progress={status.progress}%
         </div>
+        {status.run_id && (
+          <div style={{ fontSize: 12, color: 'var(--fg-muted)', marginBottom: 8 }} data-testid="reranker-status-run-id">
+            run_id={status.run_id}
+          </div>
+        )}
         {status.message && (
           <pre
             style={{
@@ -353,6 +362,60 @@ export function LearningRankerSubtab() {
             }}
           >
             {status.message}
+          </pre>
+        )}
+        {status.result?.error && (
+          <pre
+            style={{
+              whiteSpace: 'pre-wrap',
+              fontSize: 12,
+              padding: 10,
+              borderRadius: 8,
+              border: '1px solid var(--err)',
+              background: 'rgba(var(--err-rgb), 0.08)',
+              color: 'var(--fg)',
+              marginTop: 10,
+              marginBottom: 0,
+            }}
+            data-testid="reranker-status-error"
+          >
+            {status.result.error}
+          </pre>
+        )}
+        {status.result?.output && (
+          <pre
+            style={{
+              whiteSpace: 'pre-wrap',
+              fontSize: 12,
+              padding: 10,
+              borderRadius: 8,
+              border: '1px solid var(--line)',
+              background: 'var(--bg-elev2)',
+              color: 'var(--fg)',
+              marginTop: 10,
+              marginBottom: 0,
+            }}
+            data-testid="reranker-status-output"
+          >
+            {status.result.output}
+          </pre>
+        )}
+        {status.result?.metrics && (
+          <pre
+            style={{
+              whiteSpace: 'pre-wrap',
+              fontSize: 11,
+              padding: 10,
+              borderRadius: 8,
+              border: '1px solid var(--line)',
+              background: 'var(--bg-elev2)',
+              color: 'var(--fg)',
+              marginTop: 10,
+              marginBottom: 0,
+            }}
+            data-testid="reranker-status-metrics"
+          >
+            {JSON.stringify(status.result.metrics, null, 2)}
           </pre>
         )}
       </div>
@@ -410,4 +473,3 @@ export function LearningRankerSubtab() {
     </div>
   );
 }
-

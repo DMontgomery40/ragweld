@@ -1,6 +1,7 @@
 """RAG pipeline orchestration service using PydanticAI with OpenAI Responses API."""
 
 import json
+import re
 import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
@@ -11,7 +12,13 @@ from pydantic_ai.models.openai import OpenAIResponsesModel, OpenAIResponsesModel
 
 from server.models.chat_config import RecallPlan
 from server.models.retrieval import ChunkMatch
-from server.models.tribrid_config_model import ChatDebugInfo, ChatProviderInfo, FusionConfig, TriBridConfig
+from server.models.tribrid_config_model import (
+    ChatDebugInfo,
+    ChatProviderInfo,
+    FusionConfig,
+    RerankDebugInfo,
+    TriBridConfig,
+)
 from server.services.conversation_store import Conversation
 
 
@@ -452,6 +459,90 @@ def build_chat_debug_info(
         except (TypeError, ValueError):
             return None
 
+    # Best-effort reranker status (prefer non-Recall/RAG retrieval when available).
+    rerank: RerankDebugInfo | None = None
+    try:
+        rag_debug: dict[str, Any] = {}
+        if isinstance(fusion_debug, dict):
+            candidate = fusion_debug.get("chat_rag_fusion")
+            if isinstance(candidate, dict):
+                rag_debug = candidate
+            else:
+                rag_debug = fusion_debug
+
+        if isinstance(rag_debug, dict) and (
+            "rerank_mode" in rag_debug
+            or "rerank_enabled" in rag_debug
+            or "rerank_ok" in rag_debug
+            or "rerank_error" in rag_debug
+            or "rerank_skipped_reason" in rag_debug
+        ):
+            enabled = bool(rag_debug.get("rerank_enabled"))
+            mode = str(rag_debug.get("rerank_mode") or "none")
+            ok = bool(rag_debug.get("rerank_ok", True))
+            applied = bool(rag_debug.get("rerank_applied", False))
+
+            skipped_reason_raw = rag_debug.get("rerank_skipped_reason")
+            skipped_reason: str | None
+            if isinstance(skipped_reason_raw, str):
+                skipped_reason = skipped_reason_raw.strip() or None
+            else:
+                skipped_reason = None
+
+            error_raw = rag_debug.get("rerank_error")
+            error: str | None
+            if isinstance(error_raw, str):
+                error = error_raw.strip() or None
+            else:
+                error = None
+
+            candidates_reranked = _safe_int(rag_debug.get("rerank_candidates_reranked")) or 0
+            candidates_reranked = int(max(0, candidates_reranked))
+
+            config_corpus_raw = rag_debug.get("rerank_config_corpus_id")
+            config_corpus_id: str | None
+            if isinstance(config_corpus_raw, str):
+                config_corpus_id = config_corpus_raw.strip() or None
+            else:
+                config_corpus_id = None
+
+            # Summarize error for user-facing UI (when available).
+            error_message: str | None = None
+            debug_trace_id: str | None = None
+            if error:
+                # Common in Cohere errors: "x-debug-trace-id': '...'"
+                m = re.search(r"x-debug-trace-id['\"]?:\\s*['\"]([0-9a-fA-F]+)['\"]", error)
+                if m:
+                    debug_trace_id = str(m.group(1))
+
+                # Common in provider bodies: "message": "..."
+                m = re.search(r"\"message\"\\s*:\\s*\"([^\"]+)\"", error)
+                if m:
+                    error_message = str(m.group(1)).strip() or None
+                else:
+                    # Python dict repr: 'message': "..."
+                    m = re.search(r"'message'\\s*:\\s*\"([^\"]+)\"", error)
+                    if m:
+                        error_message = str(m.group(1)).strip() or None
+
+                if not error_message:
+                    error_message = error if len(error) <= 240 else f"{error[:240]}…"
+
+            rerank = RerankDebugInfo(
+                enabled=bool(enabled),
+                mode=mode,
+                ok=bool(ok),
+                applied=bool(applied),
+                candidates_reranked=candidates_reranked,
+                skipped_reason=skipped_reason,
+                error=error,
+                error_message=error_message,
+                debug_trace_id=debug_trace_id,
+                config_corpus_id=config_corpus_id,
+            )
+    except Exception:
+        rerank = None
+
     return ChatDebugInfo(
         confidence=confidence,
         provider=provider,
@@ -478,5 +569,6 @@ def build_chat_debug_info(
         avg5_score=(float(avg5) if avg5 is not None else None),
         conf_top1_thresh=float(config.retrieval.conf_top1),
         conf_avg5_thresh=float(config.retrieval.conf_avg5),
+        rerank=rerank,
         fusion_debug=fusion_debug,
     )

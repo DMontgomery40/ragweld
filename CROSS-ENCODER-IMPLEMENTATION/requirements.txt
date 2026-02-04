@@ -1,0 +1,20 @@
+# Core MLX
+mlx>=0.30.0
+mlx-lm>=0.24.0
+mlx-data>=0.1.0
+
+# Tokenization & model loading
+sentencepiece>=0.2.0
+transformers>=4.51.0
+
+# Training data
+datasets>=3.0.0
+
+# Optional: evaluation
+# numpy  (comes with mlx)
+
+# Optional: W&B logging
+# wandb>=0.18.0
+
+# Optional: HuggingFace Hub
+# huggingface-hub>=0.25.0

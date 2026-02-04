@@ -398,6 +398,9 @@ class TriBridFusion:
         # Optional reranking stage (best-effort; never fails the search).
         rerank_ok = True
         rerank_error: str | None = None
+        rerank_applied = False
+        rerank_skipped_reason: str | None = None
+        rerank_candidates_reranked = 0
         rerank_mode = ""
         if reranking_cfg is not None:
             try:
@@ -413,6 +416,9 @@ class TriBridFusion:
                     results = rr.chunks
                     rerank_ok = bool(rr.ok)
                     rerank_error = rr.error
+                    rerank_applied = bool(rr.applied)
+                    rerank_skipped_reason = rr.skipped_reason
+                    rerank_candidates_reranked = int(getattr(rr, "candidates_reranked", 0) or 0)
             except Exception as e:
                 rerank_ok = False
                 rerank_error = str(e)
@@ -423,6 +429,9 @@ class TriBridFusion:
                 "rerank_enabled": bool(rerank_mode and rerank_mode != "none"),
                 "rerank_mode": rerank_mode or "none",
                 "rerank_ok": bool(rerank_ok),
+                "rerank_applied": bool(rerank_applied),
+                "rerank_candidates_reranked": int(rerank_candidates_reranked),
+                "rerank_skipped_reason": rerank_skipped_reason,
                 "rerank_error": rerank_error,
                 "rerank_config_corpus_id": rerank_config_corpus_id,
             }

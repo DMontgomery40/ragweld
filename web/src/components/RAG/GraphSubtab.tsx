@@ -467,42 +467,67 @@ export function GraphSubtab() {
           </div>
 
           {stats ? (
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
-                gap: '12px',
-                marginTop: '12px',
-              }}
-              data-testid="graph-stats"
-            >
-              {[
-                { label: 'Entities', value: String(stats.total_entities ?? 0), icon: '🧩' },
-                { label: 'Relationships', value: String(stats.total_relationships ?? 0), icon: '🔗' },
-                { label: 'Communities', value: String(stats.total_communities ?? 0), icon: '🧭' },
-              ].map((item) => (
+            <>
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+                  gap: '12px',
+                  marginTop: '12px',
+                }}
+                data-testid="graph-stats"
+              >
+                {[
+                  { label: 'Entities', value: String(stats.total_entities ?? 0), icon: '🧩' },
+                  { label: 'Relationships', value: String(stats.total_relationships ?? 0), icon: '🔗' },
+                  { label: 'Communities', value: String(stats.total_communities ?? 0), icon: '🧭' },
+                  { label: 'Documents', value: String(stats.total_documents ?? 0), icon: '📄' },
+                  { label: 'Chunks', value: String(stats.total_chunks ?? 0), icon: '🧱' },
+                ].map((item) => (
+                  <div
+                    key={item.label}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '10px',
+                      padding: '10px',
+                      background: 'var(--bg)',
+                      borderRadius: '10px',
+                      border: '1px solid var(--line)',
+                    }}
+                  >
+                    <span style={{ fontSize: '20px' }}>{item.icon}</span>
+                    <div>
+                      <div style={{ fontSize: '14px', fontWeight: 800, color: 'var(--fg)' }}>{item.value}</div>
+                      <div style={{ fontSize: '11px', color: 'var(--fg-muted)' }}>{item.label}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {(stats.total_entities ?? 0) === 0 && (stats.total_chunks ?? 0) > 0 ? (
                 <div
-                  key={item.label}
                   style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '10px',
-                    padding: '10px',
-                    background: 'var(--bg)',
+                    marginTop: '12px',
+                    padding: '10px 12px',
                     borderRadius: '10px',
                     border: '1px solid var(--line)',
+                    background: 'rgba(var(--accent-rgb), 0.06)',
+                    color: 'var(--fg-muted)',
+                    fontSize: '12px',
                   }}
+                  data-testid="graph-entity-empty-hint"
                 >
-                  <span style={{ fontSize: '20px' }}>{item.icon}</span>
-                  <div>
-                    <div style={{ fontSize: '14px', fontWeight: 800, color: 'var(--fg)' }}>{item.value}</div>
-                    <div style={{ fontSize: '11px', color: 'var(--fg-muted)' }}>{item.label}</div>
-                  </div>
+                  Chunk graph is present, but the entity graph is empty. Enable Semantic KG (concepts + relations) or
+                  index code entities to populate entities/communities.
                 </div>
-              ))}
-            </div>
+              ) : null}
+            </>
           ) : (
-            <div style={{ marginTop: '12px', fontSize: '12px', color: 'var(--fg-muted)' }} data-testid="graph-stats-empty">
+            <div
+              style={{ marginTop: '12px', fontSize: '12px', color: 'var(--fg-muted)' }}
+              data-testid="graph-stats-empty"
+            >
               No graph stats available for this corpus yet.
             </div>
           )}
@@ -1117,4 +1142,3 @@ export function GraphSubtab() {
     </div>
   );
 }
-

@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
 
 from server.models.tribrid_config_model import RerankingConfig
 from server.models.retrieval import ChunkMatch
-from server.retrieval.rerank import Reranker
+from server.retrieval.rerank import Reranker, resolve_reranker_device
 
 
 def make_chunk(chunk_id: str, *, score: float, content: str | None = None) -> ChunkMatch:
@@ -86,6 +87,18 @@ def tiny_cross_encoder_dir(tmp_path_factory: pytest.TempPathFactory) -> Path:
     return _build_tiny_cross_encoder_model(out)
 
 
+def test_resolve_reranker_device_matches_torch_availability() -> None:
+    import torch
+
+    has_mps = False
+    mps_backend = getattr(torch.backends, "mps", None)
+    if mps_backend is not None and callable(getattr(mps_backend, "is_available", None)):
+        has_mps = bool(mps_backend.is_available())
+
+    expected = "cuda" if torch.cuda.is_available() else ("mps" if has_mps else "cpu")
+    assert resolve_reranker_device() == expected
+
+
 @pytest.mark.asyncio
 async def test_reranker_none_passthrough() -> None:
     config = RerankingConfig(reranker_mode="none")
@@ -148,6 +161,54 @@ async def test_reranker_local_respects_topn_without_truncation(tiny_cross_encode
     # Only the top-N candidates are reranked; the remainder is appended unchanged.
     assert [c.chunk_id for c in out[-5:]] == [f"c{i}" for i in range(10, 15)]
     assert all("reranker_score_raw" not in (c.metadata or {}) for c in out[-5:])
+
+
+@pytest.mark.asyncio
+async def test_reranker_local_missing_model_reports_skipped() -> None:
+    config = RerankingConfig(
+        reranker_mode="local",
+        reranker_local_model="",
+        tribrid_reranker_topn=10,
+        tribrid_reranker_alpha=1.0,
+        tribrid_reranker_batch=4,
+        tribrid_reranker_maxlen=128,
+        rerank_input_snippet_chars=200,
+        transformers_trust_remote_code=0,
+    )
+    reranker = Reranker(config)
+
+    chunks = [make_chunk("c1", score=0.9), make_chunk("c2", score=0.8)]
+    res = await reranker.try_rerank("auth login", chunks)
+
+    assert res.ok is True
+    assert res.applied is False
+    assert res.skipped_reason == "missing_model"
+    assert res.error is None
+    assert [c.chunk_id for c in res.chunks] == ["c1", "c2"]
+
+
+@pytest.mark.asyncio
+async def test_reranker_cloud_missing_api_key_reports_skipped() -> None:
+    # Ensure no key is present for this test.
+    os.environ.pop("COHERE_API_KEY", None)
+
+    config = RerankingConfig(
+        reranker_mode="cloud",
+        reranker_cloud_provider="cohere",
+        reranker_cloud_model="rerank-3.5",
+        reranker_cloud_top_n=10,
+        reranker_timeout=5,
+    )
+    reranker = Reranker(config)
+
+    chunks = [make_chunk("c1", score=0.9), make_chunk("c2", score=0.8)]
+    res = await reranker.try_rerank("auth login", chunks)
+
+    assert res.ok is True
+    assert res.applied is False
+    assert res.skipped_reason == "missing_api_key"
+    assert res.error is None
+    assert [c.chunk_id for c in res.chunks] == ["c1", "c2"]
 
 
 @pytest.mark.asyncio

@@ -2,15 +2,47 @@ from __future__ import annotations
 
 import asyncio
 import os
+import time
 from dataclasses import dataclass
 from typing import Any
 
 from server.models.retrieval import ChunkMatch
 from server.models.tribrid_config_model import RerankingConfig
+from server.observability.metrics import (
+    RERANKER_CANDIDATES_TOTAL,
+    RERANKER_ERRORS_TOTAL,
+    RERANKER_LATENCY_SECONDS,
+    RERANKER_REQUESTS_TOTAL,
+    RERANKER_SKIPPED_TOTAL,
+)
 
-_CrossEncoderKey = tuple[str, bool]
+_CrossEncoderKey = tuple[str, bool, str]
 _cross_encoder_cache: dict[_CrossEncoderKey, Any] = {}
 _cross_encoder_lock = asyncio.Lock()
+
+
+def resolve_reranker_device() -> str:
+    """Resolve the best available device for local/learning CrossEncoder inference.
+
+    Priority:
+    - CUDA (NVIDIA GPUs)
+    - MPS (Apple Silicon GPU via Metal)
+    - CPU
+    """
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            return "cuda"
+
+        mps_backend = getattr(torch.backends, "mps", None)
+        if mps_backend is not None and callable(getattr(mps_backend, "is_available", None)):
+            if bool(mps_backend.is_available()):
+                return "mps"
+    except Exception:
+        pass
+
+    return "cpu"
 
 
 def _stable_chunk_key(chunk: ChunkMatch) -> str:
@@ -46,7 +78,8 @@ def _minmax_norm(vals: list[float]) -> list[float]:
 
 
 async def _get_cross_encoder(model_id: str, *, max_length: int, trust_remote_code: bool) -> Any:
-    key: _CrossEncoderKey = (model_id, bool(trust_remote_code))
+    device = resolve_reranker_device()
+    key: _CrossEncoderKey = (model_id, bool(trust_remote_code), device)
     async with _cross_encoder_lock:
         cached = _cross_encoder_cache.get(key)
         if cached is not None:
@@ -63,7 +96,7 @@ async def _get_cross_encoder(model_id: str, *, max_length: int, trust_remote_cod
             return CrossEncoder(
                 model_id,
                 max_length=int(max_length),
-                device="cpu",
+                device=device,
                 trust_remote_code=bool(trust_remote_code),
             )
 
@@ -100,7 +133,33 @@ async def _predict_cross_encoder(
 class RerankResult:
     chunks: list[ChunkMatch]
     ok: bool
+    applied: bool
+    candidates_reranked: int = 0
+    skipped_reason: str | None = None
     error: str | None = None
+
+
+@dataclass
+class RerankerRuntimeState:
+    """Best-effort in-process observability for reranker inference.
+
+    This is intentionally in-memory only (resets on process restart).
+    """
+
+    last_attempt_ms: int | None = None
+    last_mode: str = "none"
+    last_ok: bool = True
+    last_applied: bool = False
+    last_candidates_reranked: int = 0
+    last_skipped_reason: str | None = None
+    last_error: str | None = None
+
+
+_RUNTIME = RerankerRuntimeState()
+
+
+def get_reranker_runtime() -> RerankerRuntimeState:
+    return _RUNTIME
 
 
 class Reranker:
@@ -113,30 +172,126 @@ class Reranker:
         return res.chunks
 
     async def try_rerank(self, query: str, chunks: list[ChunkMatch]) -> RerankResult:
-        if not chunks:
-            return RerankResult(chunks=[], ok=True)
-
         q = str(query or "").strip()
-        if not q:
-            return RerankResult(chunks=chunks, ok=True)
-
         mode = str(self.config.reranker_mode or "none").strip().lower()
         if mode == "none":
-            return RerankResult(chunks=chunks, ok=True)
+            _RUNTIME.last_attempt_ms = int(time.time() * 1000)
+            _RUNTIME.last_mode = "none"
+            _RUNTIME.last_ok = True
+            _RUNTIME.last_applied = False
+            _RUNTIME.last_candidates_reranked = 0
+            _RUNTIME.last_skipped_reason = None
+            _RUNTIME.last_error = None
+            return RerankResult(chunks=chunks, ok=True, applied=False)
 
         try:
+            _RUNTIME.last_attempt_ms = int(time.time() * 1000)
+            _RUNTIME.last_mode = mode
+            _RUNTIME.last_error = None
+
+            if not chunks:
+                if mode in {"local", "learning", "cloud"}:
+                    RERANKER_REQUESTS_TOTAL.labels(mode=mode).inc()
+                    RERANKER_SKIPPED_TOTAL.labels(mode=mode, reason="no_candidates").inc()
+                _RUNTIME.last_ok = True
+                _RUNTIME.last_applied = False
+                _RUNTIME.last_candidates_reranked = 0
+                _RUNTIME.last_skipped_reason = "no_candidates"
+                return RerankResult(chunks=[], ok=True, applied=False, skipped_reason="no_candidates")
+
+            if not q:
+                if mode in {"local", "learning", "cloud"}:
+                    RERANKER_REQUESTS_TOTAL.labels(mode=mode).inc()
+                    RERANKER_SKIPPED_TOTAL.labels(mode=mode, reason="empty_query").inc()
+                _RUNTIME.last_ok = True
+                _RUNTIME.last_applied = False
+                _RUNTIME.last_candidates_reranked = 0
+                _RUNTIME.last_skipped_reason = "empty_query"
+                return RerankResult(chunks=chunks, ok=True, applied=False, skipped_reason="empty_query")
+
             if mode == "local":
-                out = await self._rerank_local(q, chunks)
-                return RerankResult(chunks=out, ok=True)
+                RERANKER_REQUESTS_TOTAL.labels(mode=mode).inc()
+                model_id = str(self.config.reranker_local_model or "").strip()
+                if not model_id:
+                    RERANKER_SKIPPED_TOTAL.labels(mode=mode, reason="missing_model").inc()
+                    _RUNTIME.last_ok = True
+                    _RUNTIME.last_applied = False
+                    _RUNTIME.last_candidates_reranked = 0
+                    _RUNTIME.last_skipped_reason = "missing_model"
+                    return RerankResult(chunks=chunks, ok=True, applied=False, skipped_reason="missing_model")
+
+                with RERANKER_LATENCY_SECONDS.labels(mode=mode).time():
+                    out = await self._rerank_local(q, chunks)
+                top_n = min(len(chunks), int(self.config.tribrid_reranker_topn))
+                if top_n > 0:
+                    RERANKER_CANDIDATES_TOTAL.labels(mode=mode).inc(top_n)
+                _RUNTIME.last_ok = True
+                _RUNTIME.last_applied = True
+                _RUNTIME.last_candidates_reranked = int(max(0, top_n))
+                _RUNTIME.last_skipped_reason = None
+                return RerankResult(chunks=out, ok=True, applied=True, candidates_reranked=int(max(0, top_n)))
             if mode == "learning":
-                out = await self._rerank_trained(q, chunks)
-                return RerankResult(chunks=out, ok=True)
+                RERANKER_REQUESTS_TOTAL.labels(mode=mode).inc()
+                model_id = str(self.trained_model_path or "").strip()
+                if not model_id:
+                    RERANKER_SKIPPED_TOTAL.labels(mode=mode, reason="missing_trained_model").inc()
+                    _RUNTIME.last_ok = True
+                    _RUNTIME.last_applied = False
+                    _RUNTIME.last_candidates_reranked = 0
+                    _RUNTIME.last_skipped_reason = "missing_trained_model"
+                    return RerankResult(
+                        chunks=chunks, ok=True, applied=False, skipped_reason="missing_trained_model"
+                    )
+
+                with RERANKER_LATENCY_SECONDS.labels(mode=mode).time():
+                    out = await self._rerank_trained(q, chunks)
+                top_n = min(len(chunks), int(self.config.tribrid_reranker_topn))
+                if top_n > 0:
+                    RERANKER_CANDIDATES_TOTAL.labels(mode=mode).inc(top_n)
+                _RUNTIME.last_ok = True
+                _RUNTIME.last_applied = True
+                _RUNTIME.last_candidates_reranked = int(max(0, top_n))
+                _RUNTIME.last_skipped_reason = None
+                return RerankResult(chunks=out, ok=True, applied=True, candidates_reranked=int(max(0, top_n)))
             if mode == "cloud":
-                out = await self._rerank_api(q, chunks)
-                return RerankResult(chunks=out, ok=True)
-            return RerankResult(chunks=chunks, ok=True)
+                RERANKER_REQUESTS_TOTAL.labels(mode=mode).inc()
+                provider = str(self.config.reranker_cloud_provider or "").strip().lower()
+                if provider == "cohere":
+                    if not os.getenv("COHERE_API_KEY"):
+                        RERANKER_SKIPPED_TOTAL.labels(mode=mode, reason="missing_api_key").inc()
+                        _RUNTIME.last_ok = True
+                        _RUNTIME.last_applied = False
+                        _RUNTIME.last_candidates_reranked = 0
+                        _RUNTIME.last_skipped_reason = "missing_api_key"
+                        return RerankResult(
+                            chunks=chunks, ok=True, applied=False, skipped_reason="missing_api_key"
+                        )
+
+                with RERANKER_LATENCY_SECONDS.labels(mode=mode).time():
+                    out = await self._rerank_api(q, chunks)
+                top_n = min(len(chunks), int(self.config.reranker_cloud_top_n))
+                if top_n > 0:
+                    RERANKER_CANDIDATES_TOTAL.labels(mode=mode).inc(top_n)
+                _RUNTIME.last_ok = True
+                _RUNTIME.last_applied = True
+                _RUNTIME.last_candidates_reranked = int(max(0, top_n))
+                _RUNTIME.last_skipped_reason = None
+                return RerankResult(chunks=out, ok=True, applied=True, candidates_reranked=int(max(0, top_n)))
+
+            _RUNTIME.last_ok = True
+            _RUNTIME.last_applied = False
+            _RUNTIME.last_candidates_reranked = 0
+            _RUNTIME.last_skipped_reason = None
+            return RerankResult(chunks=chunks, ok=True, applied=False)
         except Exception as e:
-            return RerankResult(chunks=chunks, ok=False, error=str(e))
+            if mode in {"local", "learning", "cloud"}:
+                RERANKER_ERRORS_TOTAL.labels(mode=mode).inc()
+            _RUNTIME.last_ok = False
+            _RUNTIME.last_applied = False
+            _RUNTIME.last_candidates_reranked = 0
+            _RUNTIME.last_skipped_reason = None
+            _RUNTIME.last_error = str(e)
+            return RerankResult(chunks=chunks, ok=False, applied=False, error=str(e))
 
     async def _rerank_local(self, query: str, chunks: list[ChunkMatch]) -> list[ChunkMatch]:
         model_id = str(self.config.reranker_local_model or "").strip()
@@ -192,7 +347,8 @@ class Reranker:
             client = cohere.Client(api_key)
 
             if hasattr(client, "rerank"):
-                resp = client.rerank(query=query, documents=docs, model=model, top_n=top_n, timeout=timeout_s)
+                # The Cohere Python SDK's rerank() signature varies across versions; apply timeout at the asyncio layer.
+                resp = client.rerank(query=query, documents=docs, model=model, top_n=top_n)
                 results = getattr(resp, "results", None) or []
                 scores_by_index: dict[int, float] = {}
                 for item in results:
@@ -204,7 +360,7 @@ class Reranker:
 
             raise RuntimeError("Cohere client does not support rerank()")
 
-        raw_scores = await asyncio.to_thread(_run)
+        raw_scores = await asyncio.wait_for(asyncio.to_thread(_run), timeout=timeout_s)
         rerank_norm = _minmax_norm(raw_scores)
         orig_raw = [float(c.score) for c in candidates]
         orig_norm = _minmax_norm(orig_raw)
@@ -307,13 +463,14 @@ class Reranker:
 
         from sentence_transformers import CrossEncoder
 
+        device = resolve_reranker_device()
         model = CrossEncoder(
             model_id,
             max_length=int(max_length),
-            device="cpu",
+            device=device,
             trust_remote_code=bool(trust_remote_code),
         )
-        _cross_encoder_cache[(model_id, bool(trust_remote_code))] = model
+        _cross_encoder_cache[(model_id, bool(trust_remote_code), device)] = model
 
     def reload_model(self) -> None:
         """Clear cached models so the next call reloads (best-effort)."""

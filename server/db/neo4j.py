@@ -771,14 +771,41 @@ class Neo4jClient:
     # Community operations
     async def detect_communities(self, repo_id: str) -> list[Community]:
         # Heuristic community detection (works without GDS): group by top-level directory.
-        entities = await self.list_entities(repo_id, entity_type=None, limit=100000)
+        #
+        # IMPORTANT:
+        # - Code entities have file_path.
+        # - Semantic KG entities (concepts) may have file_path=None but link to Chunk nodes via IN_CHUNK.
+        #   We still want them to appear in communities, so we infer a "home" group from linked chunks.
+        driver = self._require_driver()
+        async with driver.session(database=self.database) as session:
+            res = await session.run(
+                """
+                MATCH (e:Entity {repo_id: $repo_id})
+                OPTIONAL MATCH (e)-[:IN_CHUNK]->(c:Chunk {repo_id: $repo_id})
+                WITH e, replace(coalesce(e.file_path, c.file_path), '\\\\', '/') AS fp
+                WITH
+                  e.entity_id AS entity_id,
+                  CASE
+                    WHEN fp IS NULL THEN '(root)'
+                    WHEN fp CONTAINS '/' THEN split(fp, '/')[0]
+                    ELSE '(root)'
+                  END AS grp
+                WITH entity_id, grp, count(*) AS n
+                ORDER BY entity_id, n DESC, grp ASC
+                WITH entity_id, collect({grp: grp, n: n})[0] AS best
+                RETURN entity_id, best.grp AS grp;
+                """,
+                repo_id=repo_id,
+            )
+            records = await res.data()
+
         by_group: dict[str, list[str]] = defaultdict(list)
-        for e in entities:
-            fp = (e.file_path or "").replace("\\", "/")
-            if not fp:
+        for r in records:
+            eid = str(r.get("entity_id") or "").strip()
+            grp = str(r.get("grp") or "(root)").strip() or "(root)"
+            if not eid:
                 continue
-            group = fp.split("/", 1)[0] if "/" in fp else "(root)"
-            by_group[group].append(e.entity_id)
+            by_group[grp].append(eid)
 
         communities: list[Community] = []
         for group, member_ids in sorted(by_group.items(), key=lambda t: (-len(t[1]), t[0])):
@@ -1204,12 +1231,16 @@ class Neo4jClient:
         async with driver.session(database=self.database) as session:
             counts = await session.run(
                 """
-                MATCH (e:Entity {repo_id: $repo_id})
+                OPTIONAL MATCH (e:Entity {repo_id: $repo_id})
                 WITH count(e) AS total_entities
-                MATCH (a:Entity {repo_id: $repo_id})-[r]->(b:Entity {repo_id: $repo_id})
+                OPTIONAL MATCH (:Entity {repo_id: $repo_id})-[r]->(:Entity {repo_id: $repo_id})
                 WITH total_entities, count(r) AS total_relationships
-                MATCH (c:Community {repo_id: $repo_id})
-                RETURN total_entities, total_relationships, count(c) AS total_communities;
+                OPTIONAL MATCH (c:Community {repo_id: $repo_id})
+                WITH total_entities, total_relationships, count(c) AS total_communities
+                OPTIONAL MATCH (d:Document {repo_id: $repo_id})
+                WITH total_entities, total_relationships, total_communities, count(d) AS total_documents
+                OPTIONAL MATCH (k:Chunk {repo_id: $repo_id})
+                RETURN total_entities, total_relationships, total_communities, total_documents, count(k) AS total_chunks;
                 """,
                 repo_id=repo_id,
             )
@@ -1240,6 +1271,8 @@ class Neo4jClient:
             total_entities=int(rec["total_entities"] if rec else 0),
             total_relationships=int(rec["total_relationships"] if rec else 0),
             total_communities=int(rec["total_communities"] if rec else 0),
+            total_documents=int(rec["total_documents"] if rec else 0),
+            total_chunks=int(rec["total_chunks"] if rec else 0),
             entity_breakdown=entity_breakdown,
             relationship_breakdown=rel_breakdown,
         )

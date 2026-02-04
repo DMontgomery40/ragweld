@@ -989,7 +989,11 @@ class ChatRequest(BaseModel):
     stream: bool = Field(default=False, description="Stream the response")
     images: list[ImageAttachment] = Field(
         default_factory=list,
-        description="Optional images for vision (max 5)",
+        max_length=10,
+        description=(
+            "Optional images for vision. Max 10 by schema; server further limits by "
+            "config.chat.multimodal.max_images_per_message."
+        ),
     )
     model_override: str = Field(default="", description="Override chat model for this request (empty=default)")
     include_vector: bool = Field(default=True, description="Include vector retrieval results")
@@ -1013,6 +1017,27 @@ class ChatProviderInfo(BaseModel):
     provider_name: str = Field(description="Provider display name (e.g., OpenAI, OpenRouter, Ollama)")
     model: str = Field(description="Model identifier sent to provider")
     base_url: str | None = Field(default=None, description="Provider base URL (when applicable)")
+
+
+class RerankDebugInfo(BaseModel):
+    """Reranker status for a single retrieval run (best-effort)."""
+
+    enabled: bool = Field(description="Whether reranking was enabled for this run.")
+    mode: str = Field(description="Reranker mode used (cloud/local/learning/none).")
+    ok: bool = Field(description="Whether reranking completed without error.")
+    applied: bool = Field(description="Whether reranking was actually applied to the results.")
+    candidates_reranked: int = Field(default=0, ge=0, description="Number of candidates reranked.")
+    skipped_reason: str | None = Field(default=None, description="Reason reranking was skipped (if any).")
+    error: str | None = Field(default=None, description="Raw reranker error (if any).")
+    error_message: str | None = Field(default=None, description="Short user-facing error message (if available).")
+    debug_trace_id: str | None = Field(
+        default=None,
+        description="Provider debug trace id when available (e.g., x-debug-trace-id).",
+    )
+    config_corpus_id: str | None = Field(
+        default=None,
+        description="Corpus id whose config was used for reranking (for mixed-corpus queries).",
+    )
 
 
 class ChatDebugInfo(BaseModel):
@@ -1077,6 +1102,11 @@ class ChatDebugInfo(BaseModel):
     )
     conf_avg5_thresh: float | None = Field(
         default=None, ge=0.0, le=1.0, description="Configured avg-5 confidence threshold"
+    )
+
+    rerank: RerankDebugInfo | None = Field(
+        default=None,
+        description="Reranker status for the non-Recall (RAG) retrieval stage, when available.",
     )
 
     fusion_debug: dict[str, Any] = Field(
@@ -1163,6 +1193,171 @@ class ProvidersHealthResponse(BaseModel):
     providers: list[ProviderHealth] = Field(default_factory=list)
 
 
+class FeedbackRequest(BaseModel):
+    """Request payload for POST /api/feedback.
+
+    Supports:
+    - Learning reranker feedback correlation: event_id + signal (+ optional doc_id/note)
+    - UI meta feedback: rating (+ optional comment/timestamp/context)
+    """
+
+    # Learning reranker feedback
+    event_id: str | None = Field(default=None, description="Event id returned by chat/search for correlation")
+    signal: str | None = Field(
+        default=None,
+        description="Feedback signal (thumbsup|thumbsdown|click|noclick|note|star1..star5)",
+    )
+    doc_id: str | None = Field(default=None, description="Document id/path (for click-based signals)")
+    note: str | None = Field(default=None, description="Optional freeform note")
+
+    # UI/meta feedback (not used for triplet mining)
+    rating: int | None = Field(default=None, ge=1, le=5, description="1-5 star rating")
+    comment: str | None = Field(default=None, description="Optional comment")
+    timestamp: str | None = Field(default=None, description="Client timestamp (ISO string)")
+    context: str | None = Field(default=None, description="Feedback context (e.g., chat, evaluation)")
+
+    @model_validator(mode="after")
+    def _validate_shape(self) -> Self:
+        # Meta feedback: rating-only shape (plus optional comment/timestamp/context).
+        if self.rating is not None:
+            if self.event_id is not None or self.signal is not None or self.doc_id is not None or self.note is not None:
+                raise ValueError("rating feedback must not include event_id/signal/doc_id/note")
+            return self
+
+        # Otherwise require event-correlated signal feedback.
+        if not self.event_id or not self.signal:
+            raise ValueError("Must provide either rating or (event_id and signal)")
+        return self
+
+
+class FeedbackResponse(BaseModel):
+    """Response payload for POST /api/feedback."""
+
+    ok: bool = Field(description="Whether feedback was accepted")
+
+
+class RerankerClickRequest(BaseModel):
+    """Request payload for POST /api/reranker/click."""
+
+    event_id: str = Field(description="Event id returned by chat/search for correlation")
+    doc_id: str = Field(description="Clicked document id/path")
+
+
+# =============================================================================
+# DOMAIN MODELS - Learning reranker legacy workflow (/api/reranker/*)
+# =============================================================================
+
+RerankerLegacyTask = Literal["mining", "training", "evaluating", ""]
+
+
+class RerankerLegacyTaskResult(BaseModel):
+    """Best-effort result payload embedded in /api/reranker/status."""
+
+    ok: bool = Field(description="Whether the task succeeded")
+    output: str | None = Field(default=None, description="Human-readable output (if any)")
+    error: str | None = Field(default=None, description="Error message (if any)")
+    metrics: dict[str, float] | None = Field(default=None, description="Evaluation metrics (if any)")
+    run_id: str | None = Field(default=None, description="Training run id (if applicable)")
+
+
+class RerankerLegacyStatus(BaseModel):
+    """Status payload for GET /api/reranker/status (legacy polling + inference runtime)."""
+
+    running: bool = Field(description="Whether a task is currently running")
+    progress: int = Field(default=0, ge=0, le=100, description="0-100 progress percent")
+    task: RerankerLegacyTask = Field(default="", description="Active task (mining|training|evaluating|empty)")
+    message: str = Field(default="", description="Status message suitable for UI display")
+    result: RerankerLegacyTaskResult | None = Field(default=None, description="Task result (if available)")
+    live_output: list[str] = Field(default_factory=list, description="Best-effort streaming output lines")
+    run_id: str | None = Field(default=None, description="Training run id (if applicable)")
+
+
+class RerankerMineResponse(BaseModel):
+    """Response payload for POST /api/reranker/mine."""
+
+    ok: bool = Field(description="Whether mining succeeded")
+    output: str | None = Field(default=None, description="Human-readable output")
+    error: str | None = Field(default=None, description="Error message (if any)")
+
+
+class RerankerTrainLegacyRequest(BaseModel):
+    """Request payload for POST /api/reranker/train (legacy UI)."""
+
+    epochs: int | None = Field(default=None, ge=1, le=50)
+    batch_size: int | None = Field(default=None, ge=1, le=256)
+    max_length: int | None = Field(default=None, ge=32, le=2048)
+    lr: float | None = Field(default=None, gt=0.0)
+    warmup_ratio: float | None = Field(default=None, ge=0.0, le=1.0)
+
+
+class RerankerTrainLegacyResponse(BaseModel):
+    """Response payload for POST /api/reranker/train (legacy UI)."""
+
+    ok: bool = Field(description="Whether training was started")
+    output: str | None = Field(default=None, description="Human-readable output")
+    error: str | None = Field(default=None, description="Error message (if any)")
+    run_id: str | None = Field(default=None, description="Training run id")
+
+
+class RerankerEvaluateResponse(BaseModel):
+    """Response payload for POST /api/reranker/evaluate (proxy metrics)."""
+
+    ok: bool = Field(description="Whether evaluation succeeded")
+    output: str | None = Field(default=None, description="Human-readable output")
+    error: str | None = Field(default=None, description="Error message (if any)")
+    metrics: dict[str, float] | None = Field(default=None, description="Proxy metrics dict (if ok)")
+
+
+class CountResponse(BaseModel):
+    """Generic count response used by several endpoints."""
+
+    count: int = Field(default=0, ge=0, description="Non-negative count")
+
+
+class OkResponse(BaseModel):
+    """Generic ok response used by several endpoints."""
+
+    ok: bool = Field(description="Whether the operation succeeded")
+
+
+class RerankerCostsResponse(BaseModel):
+    """Response payload for GET /api/reranker/costs."""
+
+    total_24h: float = Field(default=0.0, ge=0.0)
+    avg_per_query: float = Field(default=0.0, ge=0.0)
+
+
+class RerankerNoHitsResponse(BaseModel):
+    """Response payload for GET /api/reranker/nohits."""
+
+    queries: list[dict[str, Any]] = Field(default_factory=list, description="Placeholder list of no-hit queries")
+
+
+class RerankerLogsResponse(BaseModel):
+    """Response payload for GET /api/reranker/logs."""
+
+    logs: list[Any] = Field(default_factory=list, description="Parsed JSONL log entries (best-effort)")
+
+
+class RerankerInfoResponse(BaseModel):
+    """Response payload for GET /api/reranker/info (no secrets)."""
+
+    enabled: bool
+    reranker_mode: str = Field(default="none", description="Resolved reranker mode")
+    reranker_cloud_provider: str | None = Field(default=None)
+    reranker_cloud_model: str | None = Field(default=None)
+    reranker_local_model: str | None = Field(default=None)
+    path: str = Field(default="", description="Selected model path (may be empty)")
+    resolved_path: str = Field(default="", description="Resolved model path (best-effort)")
+    device: str = Field(default="cpu", description="Compute device (best-effort)")
+    alpha: float | None = Field(default=None, description="Reranker alpha (if applicable)")
+    topn: int | None = Field(default=None, description="Rerank topn (if applicable)")
+    batch: int | None = Field(default=None, description="Rerank batch size (if applicable)")
+    maxlen: int | None = Field(default=None, description="Rerank max length (if applicable)")
+    snippet_chars: int | None = Field(default=None, description="Snippet chars used for rerank input")
+    trust_remote_code: bool = Field(default=False, description="Whether transformers trust_remote_code is enabled")
+
+
 class RecallIndexRequest(BaseModel):
     """Request payload for POST /api/recall/index."""
 
@@ -1228,6 +1423,8 @@ class GraphStats(BaseModel):
     total_entities: int = Field(description="Number of entities in graph")
     total_relationships: int = Field(description="Number of relationships")
     total_communities: int = Field(description="Number of detected communities")
+    total_documents: int = Field(default=0, description="Number of Document nodes in Neo4j for this corpus")
+    total_chunks: int = Field(default=0, description="Number of Chunk nodes in Neo4j for this corpus")
     entity_breakdown: dict[str, int] = Field(default_factory=dict, description="Count by entity type")
     relationship_breakdown: dict[str, int] = Field(default_factory=dict, description="Count by relation type")
 

@@ -159,6 +159,44 @@ SEARCH_GRAPH_HYDRATED_CHUNKS_COUNT = Histogram(
 )
 
 # --------------------------------------------------------------------------------------
+# Reranker metrics (inference-time)
+# --------------------------------------------------------------------------------------
+#
+# NOTE:
+# - Keep labels low-cardinality (mode/reason only).
+# - Do NOT label by corpus_id, query, model name, or file path.
+RERANKER_REQUESTS_TOTAL = Counter(
+    "tribrid_reranker_requests_total",
+    "Total number of reranker attempts (mode != none).",
+    ["mode"],
+)
+
+RERANKER_CANDIDATES_TOTAL = Counter(
+    "tribrid_reranker_candidates_total",
+    "Total number of candidates sent through reranking (top_n summed).",
+    ["mode"],
+)
+
+RERANKER_SKIPPED_TOTAL = Counter(
+    "tribrid_reranker_skipped_total",
+    "Total number of reranker skips due to missing prerequisites (mode != none).",
+    ["mode", "reason"],
+)
+
+RERANKER_ERRORS_TOTAL = Counter(
+    "tribrid_reranker_errors_total",
+    "Total number of reranker failures (exceptions).",
+    ["mode"],
+)
+
+RERANKER_LATENCY_SECONDS = Histogram(
+    "tribrid_reranker_latency_seconds",
+    "Reranker latency in seconds (local/learning/cloud).",
+    ["mode"],
+    buckets=(0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0),
+)
+
+# --------------------------------------------------------------------------------------
 # Indexing metrics
 # --------------------------------------------------------------------------------------
 
@@ -248,6 +286,7 @@ _SEARCH_STAGES = (
     "fusion_rrf",
     "normalize_scores",
     "fusion_weighted",
+    "rerank",
     # Error aggregation stages (still low-cardinality)
     "vector_leg",
     "sparse_leg",
@@ -282,6 +321,23 @@ for _leg in _SEARCH_LEGS:
 for _stage in _INDEX_STAGES:
     INDEX_STAGE_LATENCY_SECONDS.labels(stage=_stage)
     INDEX_STAGE_ERRORS_TOTAL.labels(stage=_stage)
+
+_RERANKER_MODES = ("local", "learning", "cloud")
+_RERANKER_SKIP_REASONS = (
+    "missing_model",
+    "missing_trained_model",
+    "missing_api_key",
+    "no_candidates",
+    "empty_query",
+)
+
+for _mode in _RERANKER_MODES:
+    RERANKER_REQUESTS_TOTAL.labels(mode=_mode)
+    RERANKER_CANDIDATES_TOTAL.labels(mode=_mode)
+    RERANKER_ERRORS_TOTAL.labels(mode=_mode)
+    RERANKER_LATENCY_SECONDS.labels(mode=_mode)
+    for _reason in _RERANKER_SKIP_REASONS:
+        RERANKER_SKIPPED_TOTAL.labels(mode=_mode, reason=_reason)
 
 
 @contextmanager

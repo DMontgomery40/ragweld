@@ -9,6 +9,7 @@
   const MERMAID_INIT_FLAG = "__tribrid_mermaid_initialized__";
   const MERMAID_READY_POLL_MS = 50;
   const MERMAID_READY_TIMEOUT_MS = 8000;
+  let renderInFlight = false;
 
   function normalizeMaterialGridCards() {
     // Material's card grid styling keys off the `.cards` class.
@@ -42,23 +43,8 @@
     m.initialize({
       // We explicitly render on navigation events.
       startOnLoad: false,
-      securityLevel: "strict",
+      securityLevel: "loose",
       theme,
-      look: "handDrawn", // Mermaid v11: 3D sketchy style
-      layout: "elk", // Mermaid v11: improved auto-layout
-      flowchart: {
-        useMaxWidth: true,
-        htmlLabels: false,
-        curve: "basis",
-        padding: 20,
-      },
-      sequence: {
-        useMaxWidth: true,
-        wrap: true,
-      },
-      gantt: {
-        useMaxWidth: true,
-      },
     });
 
     window[MERMAID_INIT_FLAG] = { theme };
@@ -68,26 +54,74 @@
     const m = getMermaid();
     if (!m) return false;
 
-    normalizeMaterialGridCards();
-    initMermaid(m);
-
-    const nodes = Array.from(document.querySelectorAll(".mermaid"));
-    if (nodes.length === 0) return true;
+    if (renderInFlight) return true;
+    renderInFlight = true;
 
     try {
-      // Mermaid v10/11: prefer run(); v9: fallback to init()
-      if (typeof m.run === "function") {
-        await m.run({ nodes });
-      } else if (typeof m.init === "function") {
-        m.init(undefined, nodes);
-      }
-    } catch (err) {
-      // Keep docs usable even if a diagram has syntax errors.
-      // eslint-disable-next-line no-console
-      console.warn("Mermaid render failed", err);
-    }
+      normalizeMaterialGridCards();
+      initMermaid(m);
 
-    return true;
+      // Only render unprocessed diagrams. MkDocs Material can trigger multiple renders
+      // (DOMContentLoaded + load + instant navigation), and re-running Mermaid against
+      // already-rendered nodes can produce "UnknownDiagramError" and error SVGs.
+      const nodes = Array.from(document.querySelectorAll("pre.mermaid, div.mermaid")).filter((node) => {
+        try {
+          if (!node) return false;
+          if (String(node.tagName || "").toUpperCase() === "SVG") return false;
+          if (node.getAttribute && node.getAttribute("data-processed") === "true") return false;
+          if (node.querySelector && node.querySelector("svg")) return false;
+          return true;
+        } catch (e) {
+          return false;
+        }
+      });
+      if (nodes.length === 0) return true;
+
+      try {
+        // Let Material finish its initial layout pass before running Mermaid (prevents
+        // occasional null bbox errors inside Mermaid's label layout).
+        await new Promise((resolve) => requestAnimationFrame(() => resolve()));
+
+        // MkDocs renders ```mermaid blocks as <pre class="mermaid"><code>...</code></pre>.
+        // Mermaid.run() expects the diagram text directly on the node; if we pass the <pre>
+        // as-is, Mermaid may treat the nested <code> tag as part of the diagram text.
+        for (const node of nodes) {
+          try {
+            if (node && String(node.tagName || "").toUpperCase() === "PRE") {
+              const code = node.querySelector("code");
+              const txt = code ? (code.textContent || "") : (node.textContent || "");
+              if (txt && code) {
+                node.innerHTML = txt;
+              }
+            }
+          } catch (e) {
+            // ignore per-node normalize errors
+          }
+        }
+
+        // Mermaid v10/11: prefer run(); v9: fallback to init()
+        if (typeof m.run === "function") {
+          await m.run({ nodes });
+          for (const node of nodes) {
+            try {
+              node.setAttribute("data-processed", "true");
+            } catch (e) {
+              // ignore
+            }
+          }
+        } else if (typeof m.init === "function") {
+          m.init(undefined, nodes);
+        }
+      } catch (err) {
+        // Keep docs usable even if a diagram has syntax errors.
+        // eslint-disable-next-line no-console
+        console.warn("Mermaid render failed", err);
+      }
+
+      return true;
+    } finally {
+      renderInFlight = false;
+    }
   }
 
   function waitForMermaidAndRender() {

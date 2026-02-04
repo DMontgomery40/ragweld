@@ -21,6 +21,8 @@ from server.models.chat import ChatRequest, ChatResponse, Message
 from server.models.tribrid_config_model import (
     ChatModelInfo,
     ChatModelsResponse,
+    ChatMultimodalConfig,
+    ImageAttachment,
     ProviderHealth,
     ProvidersHealthResponse,
     RecallIndexRequest,
@@ -84,6 +86,58 @@ def _primary_corpus_id_from_request(request: ChatRequest) -> str | None:
     return corpus_ids[0]
 
 
+def _approx_base64_bytes(s: str) -> int:
+    b64 = (s or "").strip()
+    if not b64:
+        return 0
+    padding = 2 if b64.endswith("==") else 1 if b64.endswith("=") else 0
+    return max(0, (len(b64) * 3) // 4 - padding)
+
+
+def _validate_chat_images(images: list[ImageAttachment], cfg: ChatMultimodalConfig) -> None:
+    if not images:
+        return
+    if not bool(cfg.vision_enabled):
+        raise HTTPException(status_code=400, detail="Vision is disabled (config.chat.multimodal.vision_enabled=false)")
+
+    max_images = int(getattr(cfg, "max_images_per_message", 5) or 5)
+    if len(images) > max_images:
+        raise HTTPException(status_code=400, detail=f"Too many images (max {max_images})")
+
+    max_bytes = int(getattr(cfg, "max_image_size_mb", 20) or 20) * 1024 * 1024
+    supported = {str(x).strip().lower() for x in (getattr(cfg, "supported_formats", []) or []) if str(x).strip()}
+
+    for idx, att in enumerate(images):
+        mime = str(getattr(att, "mime_type", "") or "").strip().lower()
+        if not mime.startswith("image/"):
+            raise HTTPException(status_code=400, detail=f"images[{idx}].mime_type must be image/*")
+
+        ext = mime.split("/", 1)[1].strip().lower() if "/" in mime else ""
+        if ext == "jpg":
+            ext = "jpeg"
+        if supported:
+            allowed = supported | ({"jpeg"} if "jpg" in supported else set()) | ({"jpg"} if "jpeg" in supported else set())
+            if ext and ext not in allowed:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"images[{idx}] format '{ext}' not supported (allowed: {sorted(allowed)})",
+                )
+
+        b64 = getattr(att, "base64", None)
+        if isinstance(b64, str) and b64.strip():
+            b64s = b64.strip()
+            if b64s.startswith("data:") or "base64," in b64s:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"images[{idx}].base64 must be raw base64 (no data: prefix)",
+                )
+            if _approx_base64_bytes(b64s) > max_bytes:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"images[{idx}] too large (max {int(max_bytes / (1024 * 1024))} MB)",
+                )
+
+
 @router.get("/traces/latest", response_model=TracesLatestResponse)
 async def get_latest_trace(
     repo: str | None = Query(default=None, description="Optional corpus_id to filter by"),
@@ -112,6 +166,8 @@ async def chat(request: ChatRequest) -> ChatResponse:
         except CorpusNotFoundError:
             config = TriBridConfig()
 
+    _validate_chat_images(list(request.images or []), config.chat.multimodal)
+
     fusion = get_fusion()
     run_id = str(uuid.uuid4())
     started_at_ms = int(time.time() * 1000)
@@ -135,6 +191,7 @@ async def chat(request: ChatRequest) -> ChatResponse:
                 "include_graph": bool(request.include_graph),
                 "top_k_override": request.top_k,
                 "stream": False,
+                "images_count": len(list(request.images or [])),
             },
         )
 
@@ -158,6 +215,42 @@ async def chat(request: ChatRequest) -> ChatResponse:
             provider=provider_info,
         )
         if trace_enabled:
+            # Back-compat for the UI TraceViewer: emit a dedicated reranker event, even if
+            # the rest of the router/gating trace is not yet implemented.
+            try:
+                fusion_debug = getattr(fusion, "last_debug", None) or {}
+                rag_debug = fusion_debug.get("chat_rag_fusion") if isinstance(fusion_debug, dict) else None
+                if not isinstance(rag_debug, dict):
+                    rag_debug = fusion_debug if isinstance(fusion_debug, dict) else {}
+
+                recall_id = str(config.chat.recall.default_corpus_id or "recall_default")
+                rag_sources = [
+                    s
+                    for s in sources
+                    if str((s.metadata or {}).get("corpus_id") or "").strip() != recall_id
+                ]
+
+                await trace_store.add_event(
+                    run_id,
+                    kind="reranker.rank",
+                    data={
+                        "enabled": bool(rag_debug.get("rerank_enabled")),
+                        "mode": str(rag_debug.get("rerank_mode") or config.reranking.reranker_mode or "none"),
+                        "ok": bool(rag_debug.get("rerank_ok", True)),
+                        "applied": bool(rag_debug.get("rerank_applied", False)),
+                        "skipped_reason": rag_debug.get("rerank_skipped_reason"),
+                        "error": rag_debug.get("rerank_error"),
+                        "candidates_reranked": int(rag_debug.get("rerank_candidates_reranked") or 0),
+                        "output_topK": len(rag_sources),
+                        "scores": [
+                            {"path": s.file_path, "score": float(s.score)}
+                            for s in (rag_sources[: min(len(rag_sources), 50)])
+                        ],
+                    },
+                )
+            except Exception:
+                pass
+
             await trace_store.add_event(
                 run_id,
                 kind="retrieval.fusion",
@@ -185,6 +278,37 @@ async def chat(request: ChatRequest) -> ChatResponse:
                 },
             )
             await trace_store.end(run_id, ended_at_ms=ended_at_ms)
+
+        # Best-effort query log append for triplet mining.
+        # Gate on tracing_enabled (observability switch), not reranker mode.
+        try:
+            if int(getattr(config.tracing, "tracing_enabled", 1) or 0) == 1:
+                from server.observability.query_log import append_query_log
+
+                fusion_debug = getattr(fusion, "last_debug", None) or {}
+                rag_debug = fusion_debug.get("chat_rag_fusion") if isinstance(fusion_debug, dict) else None
+                if not isinstance(rag_debug, dict):
+                    rag_debug = fusion_debug if isinstance(fusion_debug, dict) else {}
+
+                await append_query_log(
+                    config,
+                    entry={
+                        "event_id": run_id,
+                        "kind": "chat",
+                        "conversation_id": conv.id,
+                        "corpus_ids": resolve_sources(request.sources),
+                        "query": request.message,
+                        "reranker_mode": str(rag_debug.get("rerank_mode") or str(config.reranking.reranker_mode or "")),
+                        "rerank_ok": bool(rag_debug.get("rerank_ok", True)),
+                        "rerank_applied": bool(rag_debug.get("rerank_applied", False)),
+                        "rerank_skipped_reason": rag_debug.get("rerank_skipped_reason"),
+                        "rerank_error": rag_debug.get("rerank_error"),
+                        "rerank_candidates_reranked": int(rag_debug.get("rerank_candidates_reranked") or 0),
+                        "top_paths": [s.file_path for s in sources[:5]],
+                    },
+                )
+        except Exception:
+            pass
 
         # Store the exchange
         user_msg = Message(role="user", content=request.message)
@@ -256,6 +380,8 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
         except CorpusNotFoundError:
             config = TriBridConfig()
 
+    _validate_chat_images(list(request.images or []), config.chat.multimodal)
+
     fusion = get_fusion()
     run_id = str(uuid.uuid4())
     started_at_ms = int(time.time() * 1000)
@@ -279,6 +405,7 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
                 "include_graph": bool(request.include_graph),
                 "top_k_override": request.top_k,
                 "stream": True,
+                "images_count": len(list(request.images or [])),
             },
         )
 

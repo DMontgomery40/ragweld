@@ -1,5 +1,6 @@
-import { useState, useCallback, useMemo, useEffect } from 'react';
-import { RerankService, RerankerStatus, TrainingOptions, EvaluationMetrics } from '../services/RerankService';
+import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
+import { RerankService } from '../services/RerankService';
+import type { RerankerLegacyStatus, RerankerTrainLegacyRequest } from '@/types/generated';
 import { useAPI } from './useAPI';
 
 /**
@@ -32,15 +33,18 @@ export function useReranker() {
   const { apiBase } = useAPI();
   const service = useMemo(() => new RerankService(apiBase), [apiBase]);
 
-  const [status, setStatus] = useState<RerankerStatus>({
+  const [status, setStatus] = useState<RerankerLegacyStatus>({
     running: false,
     progress: 0,
     task: '',
-    message: ''
+    message: '',
+    result: null,
+    live_output: [],
+    run_id: null,
   });
 
   const [isPolling, setIsPolling] = useState(false);
-  const [pollingInterval, setPollingInterval] = useState<number | null>(null);
+  const pollingIntervalRef = useRef<number | null>(null);
 
   const [stats, setStats] = useState({
     queryCount: 0,
@@ -50,14 +54,25 @@ export function useReranker() {
   });
 
   /**
+   * Stop status polling
+   */
+  const stopPolling = useCallback(() => {
+    if (pollingIntervalRef.current != null) {
+      window.clearInterval(pollingIntervalRef.current);
+      pollingIntervalRef.current = null;
+    }
+    setIsPolling(false);
+  }, []);
+
+  /**
    * Start status polling
    */
   const startPolling = useCallback(() => {
-    if (isPolling) return;
+    if (pollingIntervalRef.current != null) return;
 
     setIsPolling(true);
 
-    const interval = window.setInterval(async () => {
+    pollingIntervalRef.current = window.setInterval(async () => {
       const currentStatus = await service.getStatus();
       setStatus(currentStatus);
 
@@ -66,20 +81,7 @@ export function useReranker() {
         stopPolling();
       }
     }, 2000); // poll every 2 seconds during reranker training
-
-    setPollingInterval(interval);
-  }, [service, isPolling]);
-
-  /**
-   * Stop status polling
-   */
-  const stopPolling = useCallback(() => {
-    if (pollingInterval) {
-      window.clearInterval(pollingInterval);
-      setPollingInterval(null);
-    }
-    setIsPolling(false);
-  }, [pollingInterval]);
+  }, [service, stopPolling]);
 
   /**
    * Mine triplets
@@ -93,8 +95,20 @@ export function useReranker() {
   /**
    * Train model
    */
-  const trainModel = useCallback(async (options: TrainingOptions = {}) => {
+  const trainModel = useCallback(async (options: RerankerTrainLegacyRequest = {}) => {
     const result = await service.trainModel(options);
+    if (result?.ok && result?.run_id) {
+      setStatus((prev) => ({
+        ...prev,
+        running: true,
+        progress: 0,
+        task: 'training',
+        message: `Training run started: ${result.run_id}`,
+        result: null,
+        live_output: [],
+        run_id: result.run_id,
+      }));
+    }
     startPolling();
     return result;
   }, [service, startPolling]);
@@ -160,48 +174,6 @@ export function useReranker() {
   }, [service]);
 
   /**
-   * Save baseline
-   */
-  const saveBaseline = useCallback(async () => {
-    return await service.saveBaseline();
-  }, [service]);
-
-  /**
-   * Compare with baseline
-   */
-  const compareBaseline = useCallback(async () => {
-    return await service.compareBaseline();
-  }, [service]);
-
-  /**
-   * Rollback to baseline
-   */
-  const rollbackModel = useCallback(async () => {
-    return await service.rollbackModel();
-  }, [service]);
-
-  /**
-   * Run smoke test
-   */
-  const runSmokeTest = useCallback(async (query: string) => {
-    return await service.runSmokeTest(query);
-  }, [service]);
-
-  /**
-   * Setup nightly job
-   */
-  const setupNightlyJob = useCallback(async (time: string) => {
-    return await service.setupNightlyJob(time);
-  }, [service]);
-
-  /**
-   * Remove nightly job
-   */
-  const removeNightlyJob = useCallback(async () => {
-    return await service.removeNightlyJob();
-  }, [service]);
-
-  /**
    * Refresh statistics
    */
   const refreshStats = useCallback(async () => {
@@ -228,13 +200,6 @@ export function useReranker() {
    */
   const getNoHits = useCallback(async () => {
     return await service.getNoHits();
-  }, [service]);
-
-  /**
-   * Parse metrics from output
-   */
-  const parseMetrics = useCallback((output: string): EvaluationMetrics | null => {
-    return service.parseMetrics(output);
   }, [service]);
 
   /**
@@ -266,21 +231,8 @@ export function useReranker() {
     clearLogs,
     getNoHits,
 
-    // Baselines
-    saveBaseline,
-    compareBaseline,
-    rollbackModel,
-
-    // Testing
-    runSmokeTest,
-
-    // Automation
-    setupNightlyJob,
-    removeNightlyJob,
-
     // Utilities
     refreshStats,
-    parseMetrics,
     startPolling,
     stopPolling
   };

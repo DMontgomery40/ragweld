@@ -67,13 +67,13 @@
 
 ```mermaid
 flowchart LR
-    Q["Query"] --> V["Vector Search\n(pgvector)"]
-    Q --> S["Sparse Search\n(PostgreSQL FTS)"]
-    Q --> G["Graph Search\n(Neo4j)"]
+    Q["Query"] --> V["Vector Search (pgvector)"]
+    Q --> S["Sparse Search (PostgreSQL FTS)"]
+    Q --> G["Graph Search (Neo4j)"]
     V --> F["Fusion Layer"]
     S --> F
     G --> F
-    F --> R["Reranker\n(optional)"]
+    F --> R["Reranker (optional)"]
     R --> O["Results"]
     F --> O
 ```

@@ -19,6 +19,7 @@ from server.indexing.chunker import Chunker
 from server.indexing.embedder import Embedder
 from server.indexing.graph_builder import GraphBuilder
 from server.indexing.loader import FileLoader
+from server.indexing.text_extractors import extract_text_for_path
 from server.models.graph import Entity, Relationship
 from server.models.index import IndexRequest, IndexStats, IndexStatus
 from server.models.tribrid_config_model import (
@@ -493,7 +494,10 @@ async def _run_index(
 
         try:
             with INDEX_STAGE_LATENCY_SECONDS.labels(stage="file_read").time():
-                content = abs_path.read_text(encoding="utf-8", errors="ignore")
+                content = extract_text_for_path(abs_path)
+                if content is None:
+                    # Fallback to best-effort UTF-8 decode for any remaining formats.
+                    content = abs_path.read_text(encoding="utf-8", errors="ignore")
         except Exception:
             INDEX_STAGE_ERRORS_TOTAL.labels(stage="file_read").inc()
             continue
@@ -610,12 +614,20 @@ async def _run_index(
                     concepts_raw: list[str]
                     relations_raw: list[dict[str, str]]
                     if mode == "llm" and llm_prompt:
+                        # Best-effort LLM extraction. If it fails or returns no concepts,
+                        # fall back to deterministic heuristic extraction so we still
+                        # build an entity graph for non-code corpora.
                         concepts_raw, relations_raw = await _extract_semantic_kg_llm(
                             (ch.content or "")[: max(0, llm_max_chars)],
                             prompt=llm_prompt,
                             model=llm_model,
                             timeout_s=llm_timeout_s,
                         )
+                        if not concepts_raw:
+                            concepts_raw = _extract_semantic_concepts(
+                                ch.content, min_len=min_len, max_terms=max_terms
+                            )
+                            relations_raw = []
                     else:
                         concepts_raw = _extract_semantic_concepts(ch.content, min_len=min_len, max_terms=max_terms)
                         relations_raw = []

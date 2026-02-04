@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from server.models.tribrid_config_model import (
     CorpusScope,
+    PromptCategory,
     PromptMetadata,
     PromptUpdateRequest,
     PromptUpdateResponse,
@@ -36,7 +37,7 @@ def _build_prompts_payload(cfg: TriBridConfig) -> PromptsResponse:
     sp = cfg.system_prompts
     sp_fields = SystemPromptsConfig.model_fields
 
-    def add_system_prompt(key: str, category: str, label: str | None = None) -> None:
+    def add_system_prompt(key: str, category: PromptCategory, label: str | None = None) -> None:
         if key not in sp_fields:
             return
         prompts[key] = str(getattr(sp, key) or "")

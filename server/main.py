@@ -46,6 +46,7 @@ from server.api.cost import router as cost_router
 from server.api.dataset import router as dataset_router
 from server.api.docker import router as docker_router
 from server.api.eval import router as eval_router
+from server.api.feedback import router as feedback_router
 from server.api.graph import router as graph_router
 from server.api.health import router as health_router
 from server.api.index import router as index_router
@@ -133,6 +134,7 @@ app.include_router(chunk_summaries_router, prefix="/api")
 app.include_router(keywords_router, prefix="/api")
 app.include_router(search_router, prefix="/api")
 app.include_router(chat_router, prefix="/api")
+app.include_router(feedback_router, prefix="/api")
 app.include_router(benchmark_router, prefix="/api")
 app.include_router(graph_router, prefix="/api")
 app.include_router(eval_router, prefix="/api")

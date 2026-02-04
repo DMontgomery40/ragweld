@@ -48,7 +48,8 @@ jobs:
       - name: Generate docs patch (apply)
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          OPENAI_MODEL: gpt-5
+          # OpenAI model used by scripts/docs_ai/generate_docs_from_diff.py (Responses API)
+          OPENAI_MODEL: gpt-5.2
         run: |
           BASE="${{ github.event.inputs.base_ref }}"
           if [ -z "$BASE" ]; then

@@ -197,9 +197,12 @@ async def chat_once(
         has_recall_context=bool(recall_chunks),
         config=config.chat,
     )
+    effective_model_override = (request.model_override or "").strip()
+    if (request.images or []) and not effective_model_override:
+        effective_model_override = str(config.chat.multimodal.vision_model_override or "").strip()
     route = select_provider_route(
         chat_config=config.chat,
-        model_override=request.model_override,
+        model_override=effective_model_override,
         openai_base_url_override=config.generation.openai_base_url,
     )
     provider_info = ChatProviderInfo(
@@ -218,12 +221,15 @@ async def chat_once(
         system_prompt=system_prompt,
         user_message=request.message,
         images=list(request.images or []),
+        image_detail=str(config.chat.multimodal.image_detail or "auto"),
         temperature=temperature,
         max_tokens=int(config.chat.max_tokens),
         context_text=context_text,
         context_chunks=sources,
         timeout_s=float(getattr(config.ui, "chat_stream_timeout", 120) or 120),
     )
+    if not str(text or "").strip():
+        raise RuntimeError("LLM returned an empty response")
 
     # Update in-memory conversation continuity (best-effort for local providers)
     if provider_id:
@@ -327,9 +333,12 @@ async def chat_stream(
         has_recall_context=bool(recall_chunks),
         config=config.chat,
     )
+    effective_model_override = (request.model_override or "").strip()
+    if (request.images or []) and not effective_model_override:
+        effective_model_override = str(config.chat.multimodal.vision_model_override or "").strip()
     route = select_provider_route(
         chat_config=config.chat,
-        model_override=request.model_override,
+        model_override=effective_model_override,
         openai_base_url_override=config.generation.openai_base_url,
     )
     provider_info = ChatProviderInfo(
@@ -357,6 +366,7 @@ async def chat_stream(
             system_prompt=system_prompt,
             user_message=request.message,
             images=list(request.images or []),
+            image_detail=str(config.chat.multimodal.image_detail or "auto"),
             temperature=temperature,
             max_tokens=int(config.chat.max_tokens),
             context_text=context_text,
@@ -366,6 +376,12 @@ async def chat_stream(
         ):
             accumulated += delta
             yield f"data: {json.dumps({'type': 'text', 'content': delta})}\n\n"
+
+        if not accumulated.strip():
+            # Avoid "silent" blank assistant bubbles when a provider streams no text (or a test stub yields nothing).
+            msg = "Error: LLM stream produced no content (check provider compatibility/config)"
+            accumulated = msg
+            yield f"data: {json.dumps({'type': 'text', 'content': msg})}\n\n"
 
         if provider_response_id:
             conversation.last_provider_response_id = provider_response_id

@@ -113,6 +113,8 @@ export interface ChatDebugInfo {
   conf_top1_thresh?: number | null; // default: None
   /** Configured avg-5 confidence threshold */
   conf_avg5_thresh?: number | null; // default: None
+  /** Reranker status for the non-Recall (RAG) retrieval stage, when available. */
+  rerank?: RerankDebugInfo | null; // default: None
   /** Raw fusion debug payload (for developers). */
   fusion_debug?: Record<string, unknown>;
 }
@@ -708,6 +710,10 @@ export interface GraphStats {
   total_relationships: number;
   /** Number of detected communities */
   total_communities: number;
+  /** Number of Document nodes in Neo4j for this corpus */
+  total_documents?: number; // default: 0
+  /** Number of Chunk nodes in Neo4j for this corpus */
+  total_chunks?: number; // default: 0
   /** Count by entity type */
   entity_breakdown?: Record<string, number>;
   /** Count by relation type */
@@ -1116,6 +1122,44 @@ export interface Relationship {
   properties?: Record<string, unknown>;
 }
 
+/** Reranker status for a single retrieval run (best-effort). */
+export interface RerankDebugInfo {
+  /** Whether reranking was enabled for this run. */
+  enabled: boolean;
+  /** Reranker mode used (cloud/local/learning/none). */
+  mode: string;
+  /** Whether reranking completed without error. */
+  ok: boolean;
+  /** Whether reranking was actually applied to the results. */
+  applied: boolean;
+  /** Number of candidates reranked. */
+  candidates_reranked?: number; // default: 0
+  /** Reason reranking was skipped (if any). */
+  skipped_reason?: string | null; // default: None
+  /** Raw reranker error (if any). */
+  error?: string | null; // default: None
+  /** Short user-facing error message (if available). */
+  error_message?: string | null; // default: None
+  /** Provider debug trace id when available (e.g., x-debug-trace-id). */
+  debug_trace_id?: string | null; // default: None
+  /** Corpus id whose config was used for reranking (for mixed-corpus queries). */
+  config_corpus_id?: string | null; // default: None
+}
+
+/** Best-effort result payload embedded in /api/reranker/status. */
+export interface RerankerLegacyTaskResult {
+  /** Whether the task succeeded */
+  ok: boolean;
+  /** Human-readable output (if any) */
+  output?: string | null; // default: None
+  /** Error message (if any) */
+  error?: string | null; // default: None
+  /** Evaluation metrics (if any) */
+  metrics?: Record<string, number> | null; // default: None
+  /** Training run id (if applicable) */
+  run_id?: string | null; // default: None
+}
+
 export interface RerankerTrainMetricEvent {
   type: "log" | "progress" | "metrics" | "state" | "error" | "complete";
   /** UTC timestamp */
@@ -1521,7 +1565,7 @@ export interface ChatRequest {
   conversation_id?: string | null;
   /** Stream the response */
   stream?: boolean;
-  /** Optional images for vision (max 5) */
+  /** Optional images for vision. Max 10 by schema; server further limits by config.chat.multimodal.max_images_per_message. */
   images?: ImageAttachment[];
   /** Override chat model for this request (empty=default) */
   model_override?: string;
@@ -1687,6 +1731,12 @@ export interface CorpusUpdateRequest {
   path_boosts?: string[] | null;
   /** Nested map for layer bonus scoring */
   layer_bonuses?: Record<string, Record<string, number>> | null;
+}
+
+/** Generic count response used by several endpoints. */
+export interface CountResponse {
+  /** Non-negative count */
+  count?: number;
 }
 
 /** Response payload for Dashboard storage panels. */
@@ -1899,6 +1949,32 @@ export interface EvalTestRequest {
   final_k?: number | null;
 }
 
+/** Request payload for POST /api/feedback.  Supports: - Learning reranker feedback correlation: event_id + signal (+ optional doc_id/note) - UI meta feedback: rating (+ optional comment/timestamp/context) */
+export interface FeedbackRequest {
+  /** Event id returned by chat/search for correlation */
+  event_id?: string | null;
+  /** Feedback signal (thumbsup|thumbsdown|click|noclick|note|star1..star5) */
+  signal?: string | null;
+  /** Document id/path (for click-based signals) */
+  doc_id?: string | null;
+  /** Optional freeform note */
+  note?: string | null;
+  /** 1-5 star rating */
+  rating?: number | null;
+  /** Optional comment */
+  comment?: string | null;
+  /** Client timestamp (ISO string) */
+  timestamp?: string | null;
+  /** Feedback context (e.g., chat, evaluation) */
+  context?: string | null;
+}
+
+/** Response payload for POST /api/feedback. */
+export interface FeedbackResponse {
+  /** Whether feedback was accepted */
+  ok: boolean;
+}
+
 /** Neighbor subgraph centered on a single entity. */
 export interface GraphNeighborsResponse {
   /** Entities in the neighborhood (includes the center entity) */
@@ -1993,6 +2069,12 @@ export interface MCPStatusResponse {
   details?: string[];
 }
 
+/** Generic ok response used by several endpoints. */
+export interface OkResponse {
+  /** Whether the operation succeeded */
+  ok: boolean;
+}
+
 export interface PromptUpdateRequest {
   /** New prompt value */
   value: string;
@@ -2048,6 +2130,100 @@ export interface RecallStatusResponse {
   chunk_count?: number;
 }
 
+/** Request payload for POST /api/reranker/click. */
+export interface RerankerClickRequest {
+  /** Event id returned by chat/search for correlation */
+  event_id: string;
+  /** Clicked document id/path */
+  doc_id: string;
+}
+
+/** Response payload for GET /api/reranker/costs. */
+export interface RerankerCostsResponse {
+  total_24h?: number;
+  avg_per_query?: number;
+}
+
+/** Response payload for POST /api/reranker/evaluate (proxy metrics). */
+export interface RerankerEvaluateResponse {
+  /** Whether evaluation succeeded */
+  ok: boolean;
+  /** Human-readable output */
+  output?: string | null;
+  /** Error message (if any) */
+  error?: string | null;
+  /** Proxy metrics dict (if ok) */
+  metrics?: Record<string, number> | null;
+}
+
+/** Response payload for GET /api/reranker/info (no secrets). */
+export interface RerankerInfoResponse {
+  enabled: boolean;
+  /** Resolved reranker mode */
+  reranker_mode?: string;
+  reranker_cloud_provider?: string | null;
+  reranker_cloud_model?: string | null;
+  reranker_local_model?: string | null;
+  /** Selected model path (may be empty) */
+  path?: string;
+  /** Resolved model path (best-effort) */
+  resolved_path?: string;
+  /** Compute device (best-effort) */
+  device?: string;
+  /** Reranker alpha (if applicable) */
+  alpha?: number | null;
+  /** Rerank topn (if applicable) */
+  topn?: number | null;
+  /** Rerank batch size (if applicable) */
+  batch?: number | null;
+  /** Rerank max length (if applicable) */
+  maxlen?: number | null;
+  /** Snippet chars used for rerank input */
+  snippet_chars?: number | null;
+  /** Whether transformers trust_remote_code is enabled */
+  trust_remote_code?: boolean;
+}
+
+/** Status payload for GET /api/reranker/status (legacy polling + inference runtime). */
+export interface RerankerLegacyStatus {
+  /** Whether a task is currently running */
+  running: boolean;
+  /** 0-100 progress percent */
+  progress?: number;
+  /** Active task (mining|training|evaluating|empty) */
+  task?: "mining" | "training" | "evaluating" | "";
+  /** Status message suitable for UI display */
+  message?: string;
+  /** Task result (if available) */
+  result?: RerankerLegacyTaskResult | null;
+  /** Best-effort streaming output lines */
+  live_output?: string[];
+  /** Training run id (if applicable) */
+  run_id?: string | null;
+}
+
+/** Response payload for GET /api/reranker/logs. */
+export interface RerankerLogsResponse {
+  /** Parsed JSONL log entries (best-effort) */
+  logs?: unknown[];
+}
+
+/** Response payload for POST /api/reranker/mine. */
+export interface RerankerMineResponse {
+  /** Whether mining succeeded */
+  ok: boolean;
+  /** Human-readable output */
+  output?: string | null;
+  /** Error message (if any) */
+  error?: string | null;
+}
+
+/** Response payload for GET /api/reranker/nohits. */
+export interface RerankerNoHitsResponse {
+  /** Placeholder list of no-hit queries */
+  queries?: Record<string, unknown>[];
+}
+
 export interface RerankerTrainDiffRequest {
   baseline_run_id: string;
   current_run_id: string;
@@ -2069,6 +2245,27 @@ export interface RerankerTrainDiffResponse {
   baseline_stability_stddev?: number | null;
   current_stability_stddev?: number | null;
   delta_stability_stddev?: number | null;
+}
+
+/** Request payload for POST /api/reranker/train (legacy UI). */
+export interface RerankerTrainLegacyRequest {
+  epochs?: number | null;
+  batch_size?: number | null;
+  max_length?: number | null;
+  lr?: number | null;
+  warmup_ratio?: number | null;
+}
+
+/** Response payload for POST /api/reranker/train (legacy UI). */
+export interface RerankerTrainLegacyResponse {
+  /** Whether training was started */
+  ok: boolean;
+  /** Human-readable output */
+  output?: string | null;
+  /** Error message (if any) */
+  error?: string | null;
+  /** Training run id */
+  run_id?: string | null;
 }
 
 export interface RerankerTrainMetricsResponse {

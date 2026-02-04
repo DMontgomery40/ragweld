@@ -5,6 +5,8 @@
 import type React from 'react';
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { useAPI, useConfig, useConfigField } from '@/hooks';
+import { useUIHelpers } from '@/hooks/useUIHelpers';
+import { withCorpusScope } from '@/api/client';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { EmbeddingMismatchWarning } from '@/components/ui/EmbeddingMismatchWarning';
 import { useRepoStore } from '@/stores/useRepoStore';
@@ -15,7 +17,18 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
-import type { ActiveSources, ChatDebugInfo, ChatModelInfo, ChatModelsResponse, ChunkMatch, RecallIntensity, RecallPlan } from '@/types/generated';
+import type {
+  ActiveSources,
+  ChatDebugInfo,
+  ChatModelInfo,
+  ChatModelsResponse,
+  ChatMultimodalConfig,
+  ChunkMatch,
+  ImageAttachment,
+  RecallIntensity,
+  RecallPlan,
+  RerankDebugInfo,
+} from '@/types/generated';
 
 // Useful tips shown during response generation
 // Each tip has content and optional category for styling
@@ -138,6 +151,7 @@ interface Message {
   role: 'user' | 'assistant';
   content: string;
   timestamp: number;
+  images?: ImageAttachment[];
   citations?: string[];
   confidence?: number;
   runId?: string;
@@ -207,22 +221,100 @@ interface ChatInterfaceProps {
 
 type ChatComposerProps = {
   sending: boolean;
-  onSend: (text: string) => void;
+  multimodal: ChatMultimodalConfig | null;
+  onSend: (text: string, images: ImageAttachment[]) => void;
 };
 
-const ChatComposer = memo(function ChatComposer({ sending, onSend }: ChatComposerProps) {
+const ChatComposer = memo(function ChatComposer({ sending, multimodal, onSend }: ChatComposerProps) {
+  const { showToast } = useUIHelpers();
   const [draft, setDraft] = useState('');
+  const [attachments, setAttachments] = useState<ImageAttachment[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const canSend = draft.trim().length > 0 && !sending;
+
+  const visionEnabled = Boolean(multimodal?.vision_enabled ?? true);
+  const maxImages = Math.max(1, Math.min(10, Number(multimodal?.max_images_per_message ?? 5)));
+  const maxImageSizeMb = Math.max(1, Math.min(50, Number(multimodal?.max_image_size_mb ?? 20)));
+  const supportedFormats = (multimodal?.supported_formats ?? []).map((f) => String(f).trim().toLowerCase()).filter(Boolean);
+
+  const fileToBase64NoPrefix = useCallback(async (file: File): Promise<string> => {
+    const dataUrl: string = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ''));
+      reader.onerror = () => reject(new Error('Failed to read image'));
+      reader.readAsDataURL(file);
+    });
+    const comma = dataUrl.indexOf(',');
+    if (comma < 0) return '';
+    return dataUrl.slice(comma + 1);
+  }, []);
+
+  const addFiles = useCallback(
+    async (files: File[]) => {
+      if (!files.length) return;
+      if (!visionEnabled) {
+        showToast('Vision is disabled by config.', 'error');
+        return;
+      }
+
+      const imageFiles = files.filter((f) => f && typeof f.type === 'string' && f.type.startsWith('image/'));
+      if (!imageFiles.length) return;
+
+      const room = Math.max(0, maxImages - attachments.length);
+      if (room <= 0) {
+        showToast(`Max ${maxImages} images per message.`, 'error');
+        return;
+      }
+
+      const selected = imageFiles.slice(0, room);
+      const maxBytes = maxImageSizeMb * 1024 * 1024;
+
+      const next: ImageAttachment[] = [];
+      for (const f of selected) {
+        const mime = String(f.type || 'image/png');
+        const ext = (mime.split('/', 2)[1] || '').toLowerCase();
+        const extNorm = ext === 'jpg' ? 'jpeg' : ext;
+        if (supportedFormats.length) {
+          const allowed = new Set<string>(supportedFormats);
+          if (allowed.has('jpg')) allowed.add('jpeg');
+          if (allowed.has('jpeg')) allowed.add('jpg');
+          if (extNorm && !allowed.has(extNorm)) {
+            showToast(`Unsupported image type: ${mime}`, 'error');
+            continue;
+          }
+        }
+        if (typeof f.size === 'number' && f.size > maxBytes) {
+          showToast(`Image too large (max ${maxImageSizeMb} MB).`, 'error');
+          continue;
+        }
+
+        const base64 = await fileToBase64NoPrefix(f);
+        if (!base64) {
+          showToast('Failed to read image.', 'error');
+          continue;
+        }
+
+        next.push({ base64, mime_type: mime });
+      }
+
+      if (imageFiles.length > selected.length) {
+        showToast(`Only the first ${room} images were attached.`, 'info');
+      }
+      if (next.length) setAttachments((prev) => [...prev, ...next]);
+    },
+    [attachments.length, fileToBase64NoPrefix, maxImageSizeMb, maxImages, showToast, supportedFormats, visionEnabled]
+  );
 
   const handleSend = useCallback(() => {
     const trimmed = draft.trim();
     if (!trimmed || sending) return;
-    onSend(trimmed);
+    onSend(trimmed, attachments);
     setDraft('');
+    setAttachments([]);
     requestAnimationFrame(() => textareaRef.current?.focus());
-  }, [draft, onSend, sending]);
+  }, [attachments, draft, onSend, sending]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -234,52 +326,177 @@ const ChatComposer = memo(function ChatComposer({ sending, onSend }: ChatCompose
     [handleSend]
   );
 
+  const handlePaste = useCallback(
+    (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+      const items = Array.from(e.clipboardData?.items || []);
+      const imageFiles = items
+        .filter((it) => it.kind === 'file' && (it.type || '').startsWith('image/'))
+        .map((it) => it.getAsFile())
+        .filter(Boolean) as File[];
+      if (!imageFiles.length) return;
+      e.preventDefault();
+      void addFiles(imageFiles);
+    },
+    [addFiles]
+  );
+
+  const handleFileChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const files = Array.from(e.target.files || []);
+      e.target.value = '';
+      void addFiles(files);
+    },
+    [addFiles]
+  );
+
+  const removeAttachment = useCallback((idx: number) => {
+    setAttachments((prev) => prev.filter((_, i) => i !== idx));
+  }, []);
+
   return (
-    <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
-      <textarea
-        id="chat-input"
-        ref={textareaRef}
-        value={draft}
-        onChange={(e) => setDraft(e.target.value)}
-        onKeyDown={handleKeyDown}
-        placeholder="Ask a question about your codebase..."
-        disabled={sending}
-        style={{
-          flex: 1,
-          background: 'var(--input-bg)',
-          border: '1px solid var(--line)',
-          color: 'var(--fg)',
-          padding: '12px',
-          borderRadius: '6px',
-          fontSize: '14px',
-          fontFamily: 'inherit',
-          resize: 'none',
-          minHeight: '60px',
-          maxHeight: '120px',
-        }}
-        rows={2}
-        aria-label="Chat input"
+    <div style={{ display: 'flex', gap: '8px', marginBottom: '8px', alignItems: 'flex-end' }}>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '6px' }}>
+        {attachments.length > 0 && (
+          <div
+            data-testid="chat-attachments"
+            style={{
+              display: 'flex',
+              gap: '8px',
+              flexWrap: 'wrap',
+              padding: '8px',
+              border: '1px solid var(--line)',
+              borderRadius: '6px',
+              background: 'var(--bg-elev2)',
+            }}
+          >
+            {attachments.map((att, idx) => (
+              <div
+                key={idx}
+                data-testid={`chat-attachment-${idx}`}
+                style={{
+                  position: 'relative',
+                  width: '56px',
+                  height: '56px',
+                  borderRadius: '6px',
+                  overflow: 'hidden',
+                  border: '1px solid var(--line)',
+                  background: 'var(--bg-elev1)',
+                }}
+                title={att.mime_type}
+              >
+                <img
+                  src={`data:${att.mime_type};base64,${att.base64}`}
+                  alt={`Attachment ${idx + 1}`}
+                  style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                />
+                <button
+                  type="button"
+                  onClick={() => removeAttachment(idx)}
+                  aria-label="Remove image"
+                  data-testid={`chat-attachment-remove-${idx}`}
+                  style={{
+                    position: 'absolute',
+                    top: '4px',
+                    right: '4px',
+                    width: '18px',
+                    height: '18px',
+                    borderRadius: '999px',
+                    border: '1px solid var(--line)',
+                    background: 'rgba(0,0,0,0.55)',
+                    color: '#fff',
+                    fontSize: '12px',
+                    lineHeight: '16px',
+                    cursor: 'pointer',
+                  }}
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+            <div style={{ marginLeft: 'auto', fontSize: '10px', color: 'var(--fg-muted)', alignSelf: 'center' }}>
+              Paste a screenshot or attach (max {maxImages})
+            </div>
+          </div>
+        )}
+
+        <textarea
+          id="chat-input"
+          ref={textareaRef}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={handleKeyDown}
+          onPaste={handlePaste}
+          placeholder="Ask a question about your codebase... (paste screenshot to attach)"
+          disabled={sending}
+          style={{
+            flex: 1,
+            background: 'var(--input-bg)',
+            border: '1px solid var(--line)',
+            color: 'var(--fg)',
+            padding: '12px',
+            borderRadius: '6px',
+            fontSize: '14px',
+            fontFamily: 'inherit',
+            resize: 'none',
+            minHeight: '60px',
+            maxHeight: '120px',
+          }}
+          rows={2}
+          aria-label="Chat input"
+        />
+      </div>
+
+      <input
+        ref={fileInputRef}
+        data-testid="chat-image-input"
+        type="file"
+        accept="image/*"
+        multiple
+        onChange={handleFileChange}
+        style={{ display: 'none' }}
       />
-      <button
-        id="chat-send"
-        onClick={handleSend}
-        disabled={!canSend}
-        style={{
-          background: canSend ? 'var(--accent)' : 'var(--bg-elev2)',
-          color: canSend ? 'var(--accent-contrast)' : 'var(--fg-muted)',
-          border: 'none',
-          padding: '12px 24px',
-          borderRadius: '6px',
-          fontSize: '14px',
-          fontWeight: '600',
-          cursor: canSend ? 'pointer' : 'not-allowed',
-          height: 'fit-content',
-          alignSelf: 'flex-end',
-        }}
-        aria-label="Send message"
-      >
-        {sending ? 'Sending...' : 'Send'}
-      </button>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+        <button
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={sending || !visionEnabled || attachments.length >= maxImages}
+          data-testid="chat-attach-button"
+          style={{
+            background: sending || !visionEnabled || attachments.length >= maxImages ? 'var(--bg-elev2)' : 'var(--bg-elev1)',
+            color: sending || !visionEnabled || attachments.length >= maxImages ? 'var(--fg-muted)' : 'var(--fg)',
+            border: '1px solid var(--line)',
+            padding: '10px 12px',
+            borderRadius: '6px',
+            fontSize: '14px',
+            fontWeight: 700,
+            cursor: sending || !visionEnabled || attachments.length >= maxImages ? 'not-allowed' : 'pointer',
+          }}
+          aria-label="Attach image"
+          title={!visionEnabled ? 'Vision disabled' : attachments.length >= maxImages ? `Max ${maxImages} images` : 'Attach an image'}
+        >
+          📎
+        </button>
+        <button
+          id="chat-send"
+          onClick={handleSend}
+          disabled={!canSend}
+          style={{
+            background: canSend ? 'var(--accent)' : 'var(--bg-elev2)',
+            color: canSend ? 'var(--accent-contrast)' : 'var(--fg-muted)',
+            border: 'none',
+            padding: '12px 24px',
+            borderRadius: '6px',
+            fontSize: '14px',
+            fontWeight: '600',
+            cursor: canSend ? 'pointer' : 'not-allowed',
+            height: 'fit-content',
+          }}
+          aria-label="Send message"
+        >
+          {sending ? 'Sending...' : 'Send'}
+        </button>
+      </div>
     </div>
   );
 });
@@ -455,6 +672,7 @@ const AssistantMarkdown = memo(function AssistantMarkdown({ content }: Assistant
 
 export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) {
   const { api } = useAPI();
+  const { showToast } = useUIHelpers();
   const [messages, setMessages] = useState<Message[]>([]);
   const [sending, setSending] = useState(false);
   const [streaming, setStreaming] = useState(false);
@@ -476,6 +694,7 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
   const recallGateShowDecision = Boolean(config?.chat?.recall_gate?.show_gate_decision ?? true);
   const recallGateShowSignals = Boolean(config?.chat?.recall_gate?.show_signals ?? false);
   const chatHistoryMax = Math.max(10, Math.min(500, Number(config?.ui?.chat_history_max ?? 50)));
+  const multimodalCfg = (config?.chat?.multimodal ?? null) as ChatMultimodalConfig | null;
 
   // Per-message retrieval leg toggles (do NOT persist; user requested per-message control)
   const [includeVector, setIncludeVector] = useState(true);
@@ -484,6 +703,33 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
   // Note: include_vector/sparse/graph are per-message settings on ChatRequest,
   // not config settings. They default to true in the Pydantic model.
   const [recallIntensity, setRecallIntensity] = useState<RecallIntensity | null>(null);
+
+  const maybeToastRerankOutcome = useCallback(
+    (rerank: RerankDebugInfo | null | undefined) => {
+      if (!rerank || !rerank.enabled) return;
+
+      const mode = String(rerank.mode || 'rerank').trim() || 'rerank';
+      const skipped = String(rerank.skipped_reason || '').trim();
+      const errMsg = String(rerank.error_message || '').trim();
+      const errRaw = String(rerank.error || '').trim();
+      const traceId = String(rerank.debug_trace_id || '').trim();
+
+      if (rerank.ok === false) {
+        const msg = errMsg || errRaw || 'Unknown error';
+        showToast(`Rerank failed (${mode}): ${msg}${traceId ? ` (trace ${traceId})` : ''}`, 'error');
+        return;
+      }
+
+      if (!rerank.applied && skipped) {
+        const skipKey = skipped.toLowerCase();
+        // These are expected "non-errors" and shouldn't spam the user.
+        if (skipKey === 'no_candidates' || skipKey === 'empty_query') return;
+
+        showToast(`Rerank skipped (${mode}): ${skipped}`, 'info');
+      }
+    },
+    [showToast]
+  );
 
   // Chat 2.0: composable sources + model picker
   const sourcesInitRef = useRef(false);
@@ -620,23 +866,56 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
   
   // Send feedback to API
   const sendFeedback = async (eventId: string | undefined, messageId: string, signal: string) => {
-    if (!eventId) return;
+    const normalizedSignal = String(signal || '').trim();
+    const rating = normalizedSignal.startsWith('star') ? parseInt(normalizedSignal.slice(4), 10) : null;
     
     try {
-      const response = await fetch(api('feedback'), {
+      const body: any = {
+        context: 'chat',
+        timestamp: new Date().toISOString(),
+      };
+      if (eventId) {
+        body.event_id = eventId;
+        body.signal = normalizedSignal;
+      } else if (rating && rating >= 1 && rating <= 5) {
+        // When we don't have a run_id (e.g., the assistant response errored), still allow UI meta-rating
+        // without mixing shapes (backend forbids rating + event_id/signal).
+        body.rating = rating;
+      } else {
+        showToast('Feedback not available yet (missing run_id).', 'error');
+        return;
+      }
+
+      const response = await fetch(api(withCorpusScope('feedback')), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ event_id: eventId, signal })
+        body: JSON.stringify(body)
       });
       
       if (response.ok) {
         setMessageFeedback(prev => ({
           ...prev,
-          [messageId]: { type: signal, rating: signal.startsWith('star') ? parseInt(signal.slice(4)) : undefined }
+          [messageId]: { type: signal, rating: rating && rating >= 1 && rating <= 5 ? rating : undefined }
         }));
+        showToast('Feedback recorded.', 'success');
+      } else {
+        let detail = '';
+        try {
+          const ct = response.headers.get('content-type') || '';
+          if (ct.includes('application/json')) {
+            const j: any = await response.json();
+            detail = typeof j?.detail === 'string' ? j.detail : JSON.stringify(j).slice(0, 200);
+          } else {
+            detail = (await response.text()).slice(0, 200);
+          }
+        } catch {
+          detail = '';
+        }
+        showToast(detail ? `Feedback failed: ${detail}` : 'Feedback failed.', 'error');
       }
     } catch (error) {
       console.error('[ChatInterface] Feedback error:', error);
+      showToast('Feedback failed (network error).', 'error');
     }
   };
   
@@ -763,7 +1042,18 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
 
   const persistSessions = useCallback((sessions: ChatSession[], activeId: string) => {
     try {
-      const state: ChatSessionsState = { version: 1, active_conversation_id: activeId, sessions };
+      // LocalStorage can be tight (~5MB). Image attachments are large, so strip them for persistence.
+      const compactSessions: ChatSession[] = (sessions || []).map((s) => {
+        const msgs = Array.isArray(s?.messages) ? s.messages : [];
+        const compactMsgs: Message[] = msgs.map((m) => {
+          if (!Array.isArray(m?.images) || m.images.length === 0) return m;
+          const nextMeta = { ...(m.meta || {}), image_count: m.images.length, images_stripped: true };
+          return { ...m, images: [], meta: nextMeta };
+        });
+        return { ...s, messages: compactMsgs };
+      });
+
+      const state: ChatSessionsState = { version: 1, active_conversation_id: activeId, sessions: compactSessions };
       localStorage.setItem(CHAT_SESSIONS_STORAGE_KEY, JSON.stringify(state));
     } catch (error) {
       console.error('[ChatInterface] Failed to persist chat sessions:', error);
@@ -961,7 +1251,7 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
     return `vscode://file/${filePath}:${startLine}`;
   };
 
-  const handleSend = async (text: string) => {
+  const handleSend = async (text: string, images: ImageAttachment[]) => {
     if (!text.trim() || sending) return;
     const recallIntensityOverride = recallIntensity;
     if (recallIntensityOverride !== null) {
@@ -972,6 +1262,7 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
       id: `user-${Date.now()}`,
       role: 'user',
       content: text.trim(),
+      images: Array.isArray(images) && images.length ? images : undefined,
       timestamp: Date.now()
     };
 
@@ -1019,6 +1310,22 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
   ) => {
     setStreaming(true);
 
+    const readErrorDetail = async (resp: Response): Promise<string> => {
+      try {
+        const ct = resp.headers.get('content-type') || '';
+        if (ct.includes('application/json')) {
+          const j: any = await resp.json();
+          const d = j?.detail ?? j?.message ?? j?.error ?? null;
+          if (typeof d === 'string' && d.trim()) return d.trim();
+          return JSON.stringify(j).slice(0, 500);
+        }
+        const t = await resp.text();
+        return (t || '').trim().slice(0, 500);
+      } catch {
+        return '';
+      }
+    };
+
     // Stream from /api/chat/stream (SSE)
     const response = await fetch(api('chat/stream'), {
       method: 'POST',
@@ -1028,7 +1335,7 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
         sources: activeSources,
         conversation_id: conversationId,
         stream: true,
-        images: [],
+        images: Array.isArray(userMessage.images) ? userMessage.images : [],
         model_override: modelOverride,
         include_vector: includeVector,
         include_sparse: includeSparse,
@@ -1038,13 +1345,15 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
     });
 
     if (!response.ok) {
-      throw new Error('Failed to start streaming');
+      const detail = await readErrorDetail(response);
+      throw new Error(detail ? `Failed to start streaming: ${detail}` : 'Failed to start streaming');
     }
 
     const reader = response.body?.getReader();
     const decoder = new TextDecoder();
     let streamBuffer = '';
     let accumulatedContent = '';
+    let sawTerminalChunk = false;
     const assistantMessageId = `assistant-${Date.now()}`;
     const assistantTimestamp = Date.now();
     let citations: string[] = [];
@@ -1091,6 +1400,7 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
           timestamp: assistantTimestamp,
           citations,
           runId,
+          eventId: runId,
           startedAtMs,
           endedAtMs,
           debug,
@@ -1146,6 +1456,7 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
             break;
 
           case 'done':
+            sawTerminalChunk = true;
             // Server may include conversation_id in the final event (best-effort).
             if (typeof parsed.conversation_id === 'string') {
               setConversationId(parsed.conversation_id);
@@ -1178,6 +1489,11 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
             debug = parsed && typeof parsed.debug === 'object' ? (parsed.debug as ChatDebugInfo) : null;
             confidence = typeof parsed?.debug?.confidence === 'number' ? parsed.debug.confidence : undefined;
             setLastRecallPlan((debug as any)?.recall_plan ?? null);
+            maybeToastRerankOutcome(debug?.rerank);
+            if (!accumulatedContent.trim()) {
+              accumulatedContent = 'Error: Empty response from model (stream finished without content)';
+              showToast('Chat failed: empty model response.', 'error');
+            }
 
             try {
               window.dispatchEvent(
@@ -1193,8 +1509,10 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
             break;
 
           case 'error':
+            sawTerminalChunk = true;
             console.error('[ChatInterface] Stream error:', parsed.message);
             accumulatedContent = `Error: ${parsed.message || 'Unknown error'}`;
+            showToast(`Chat error: ${parsed.message || 'Unknown error'}`, 'error');
             break;
 
           default:
@@ -1229,6 +1547,13 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
       processDataLine(streamBuffer);
     }
 
+    // Guard: some proxies/providers can terminate the stream without emitting
+    // a final done/error event. Never persist an empty assistant bubble.
+    if (!sawTerminalChunk && !accumulatedContent.trim()) {
+      accumulatedContent = 'Error: Chat stream ended without a response (no SSE events received)';
+      showToast('Chat failed: stream ended without response.', 'error');
+    }
+
     // Ensure the final assistant message is rendered + persisted exactly once.
     scheduleAssistantRender(true);
   };
@@ -1243,6 +1568,22 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
     // NOTE: `fast` is currently a UI-only toggle. The backend chat API does not accept fast_mode yet.
     void fast;
 
+    const readErrorDetail = async (resp: Response): Promise<string> => {
+      try {
+        const ct = resp.headers.get('content-type') || '';
+        if (ct.includes('application/json')) {
+          const j: any = await resp.json();
+          const d = j?.detail ?? j?.message ?? j?.error ?? null;
+          if (typeof d === 'string' && d.trim()) return d.trim();
+          return JSON.stringify(j).slice(0, 500);
+        }
+        const t = await resp.text();
+        return (t || '').trim().slice(0, 500);
+      } catch {
+        return '';
+      }
+    };
+
     const response = await fetch(api('chat'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1251,7 +1592,7 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
         sources: activeSources,
         conversation_id: conversationId,
         stream: false,
-        images: [],
+        images: Array.isArray(userMessage.images) ? userMessage.images : [],
         model_override: modelOverride,
         include_vector: includeVector,
         include_sparse: includeSparse,
@@ -1261,7 +1602,8 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
     });
 
     if (!response.ok) {
-      throw new Error('Failed to get response');
+      const detail = await readErrorDetail(response);
+      throw new Error(detail || 'Failed to get response');
     }
 
     const data = await response.json();
@@ -1283,7 +1625,13 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
       })
       .filter(Boolean) as string[];
 
-    const assistantText: string = String(data?.message?.content || '');
+    let assistantText: string = String(data?.message?.content || '');
+    if (!assistantText.trim()) {
+      const provider = data?.debug?.provider?.provider_name ? String(data.debug.provider.provider_name) : '';
+      const model = data?.debug?.provider?.model ? String(data.debug.provider.model) : '';
+      assistantText = `Error: Empty response from model${provider || model ? ` (${[provider, model].filter(Boolean).join(' ')})` : ''}`;
+      showToast('Chat failed: empty model response.', 'error');
+    }
     const runId: string | undefined = typeof data?.run_id === 'string' ? data.run_id : undefined;
     const startedAtMs: number | undefined = typeof data?.started_at_ms === 'number' ? data.started_at_ms : undefined;
     const endedAtMs: number | undefined = typeof data?.ended_at_ms === 'number' ? data.ended_at_ms : undefined;
@@ -1292,6 +1640,7 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
     }
     const debug: ChatDebugInfo | null = data && typeof data?.debug === 'object' ? (data.debug as ChatDebugInfo) : null;
     setLastRecallPlan((debug as any)?.recall_plan ?? null);
+    maybeToastRerankOutcome(debug?.rerank);
     const confidence: number | undefined = typeof data?.debug?.confidence === 'number' ? data.debug.confidence : undefined;
     const providerMeta = (() => {
       const p = (debug as any)?.provider;
@@ -1314,6 +1663,7 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
       timestamp: Date.now(),
       citations,
       runId,
+      eventId: runId,
       startedAtMs,
       endedAtMs,
       debug,
@@ -1821,13 +2171,43 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
                     
                     {/* Message content - markdown for assistant, plain for user */}
                     {message.role === 'user' ? (
-                      <div style={{
-                        fontSize: '13px',
-                        lineHeight: '1.6',
-                        whiteSpace: 'pre-wrap',
-                        wordBreak: 'break-word'
-                      }}>
-                        {message.content}
+                      <div>
+                        <div
+                          style={{
+                            fontSize: '13px',
+                            lineHeight: '1.6',
+                            whiteSpace: 'pre-wrap',
+                            wordBreak: 'break-word',
+                          }}
+                        >
+                          {message.content}
+                        </div>
+                        {Array.isArray(message.images) && message.images.length > 0 && (
+                          <div
+                            data-testid="chat-message-images"
+                            style={{
+                              marginTop: '8px',
+                              display: 'flex',
+                              gap: '8px',
+                              flexWrap: 'wrap',
+                            }}
+                          >
+                            {message.images.map((att, idx) => (
+                              <img
+                                key={idx}
+                                src={`data:${att.mime_type};base64,${att.base64}`}
+                                alt={`Sent image ${idx + 1}`}
+                                style={{
+                                  width: '88px',
+                                  height: '88px',
+                                  objectFit: 'cover',
+                                  borderRadius: '8px',
+                                  border: '1px solid rgba(255,255,255,0.25)',
+                                }}
+                              />
+                            ))}
+                          </div>
+                        )}
                       </div>
                     ) : (
                       <AssistantMarkdown content={message.content} />
@@ -1919,7 +2299,7 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
                             <>
                               {/* Thumbs up/down */}
                               <button
-                                onClick={() => sendFeedback(message.eventId, message.id, 'thumbsup')}
+                                onClick={() => sendFeedback(message.eventId ?? message.runId, message.id, 'thumbsup')}
                                 style={{
                                   background: 'none',
                                   border: 'none',
@@ -1936,7 +2316,7 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
                                 👍
                               </button>
                               <button
-                                onClick={() => sendFeedback(message.eventId, message.id, 'thumbsdown')}
+                                onClick={() => sendFeedback(message.eventId ?? message.runId, message.id, 'thumbsdown')}
                                 style={{
                                   background: 'none',
                                   border: 'none',
@@ -1964,7 +2344,7 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
                                 {[1, 2, 3, 4, 5].map((star) => (
                                   <button
                                     key={star}
-                                    onClick={() => sendFeedback(message.eventId, message.id, `star${star}`)}
+                                    onClick={() => sendFeedback(message.eventId ?? message.runId, message.id, `star${star}`)}
                                     style={{
                                       background: 'none',
                                       border: 'none',
@@ -2281,7 +2661,7 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
             borderTop: '1px solid var(--line)',
             background: 'var(--bg-elev1)'
           }}>
-            <ChatComposer sending={sending} onSend={handleSend} />
+            <ChatComposer sending={sending} multimodal={multimodalCfg} onSend={handleSend} />
 
             <div style={{ fontSize: '11px', color: 'var(--fg-muted)', marginBottom: '8px' }}>
               Press Ctrl+Enter to send • Citations appear as clickable file links when enabled in settings

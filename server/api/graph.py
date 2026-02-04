@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException
 
 from server.db.neo4j import Neo4jClient
 from server.models.graph import Community, Entity, GraphNeighborsResponse, GraphStats, Relationship
+from server.services.config_store import CorpusNotFoundError
 from server.services.config_store import get_config as load_scoped_config
 
 router = APIRouter(tags=["graph"])
@@ -19,7 +20,10 @@ async def list_entities(
     limit: int = 100,
 ) -> list[Entity]:
     repo_id = corpus_id
-    cfg = await load_scoped_config(repo_id=repo_id)
+    try:
+        cfg = await load_scoped_config(repo_id=repo_id)
+    except CorpusNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
     db_name = cfg.graph_storage.resolve_database(repo_id)
     neo4j = Neo4jClient(
         cfg.graph_storage.neo4j_uri,
@@ -38,7 +42,10 @@ async def list_entities(
 @router.get("/graph/{corpus_id}/entity/{entity_id}", response_model=Entity)
 async def get_entity(corpus_id: str, entity_id: str) -> Entity:
     repo_id = corpus_id
-    cfg = await load_scoped_config(repo_id=repo_id)
+    try:
+        cfg = await load_scoped_config(repo_id=repo_id)
+    except CorpusNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
     db_name = cfg.graph_storage.resolve_database(repo_id)
     neo4j = Neo4jClient(
         cfg.graph_storage.neo4j_uri,
@@ -59,7 +66,10 @@ async def get_entity(corpus_id: str, entity_id: str) -> Entity:
 @router.get("/graph/{corpus_id}/entity/{entity_id}/relationships", response_model=list[Relationship])
 async def get_entity_relationships(corpus_id: str, entity_id: str) -> list[Relationship]:
     repo_id = corpus_id
-    cfg = await load_scoped_config(repo_id=repo_id)
+    try:
+        cfg = await load_scoped_config(repo_id=repo_id)
+    except CorpusNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
     db_name = cfg.graph_storage.resolve_database(repo_id)
     neo4j = Neo4jClient(
         cfg.graph_storage.neo4j_uri,
@@ -77,7 +87,10 @@ async def get_entity_relationships(corpus_id: str, entity_id: str) -> list[Relat
 @router.get("/graph/{corpus_id}/entity/{entity_id}/neighbors", response_model=GraphNeighborsResponse)
 async def get_entity_neighbors(corpus_id: str, entity_id: str, max_hops: int = 2, limit: int = 200) -> GraphNeighborsResponse:
     repo_id = corpus_id
-    cfg = await load_scoped_config(repo_id=repo_id)
+    try:
+        cfg = await load_scoped_config(repo_id=repo_id)
+    except CorpusNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
     db_name = cfg.graph_storage.resolve_database(repo_id)
     neo4j = Neo4jClient(
         cfg.graph_storage.neo4j_uri,
@@ -98,7 +111,10 @@ async def get_entity_neighbors(corpus_id: str, entity_id: str, max_hops: int = 2
 @router.get("/graph/{corpus_id}/community/{community_id}/members", response_model=list[Entity])
 async def get_community_members(corpus_id: str, community_id: str, limit: int = 500) -> list[Entity]:
     repo_id = corpus_id
-    cfg = await load_scoped_config(repo_id=repo_id)
+    try:
+        cfg = await load_scoped_config(repo_id=repo_id)
+    except CorpusNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
     db_name = cfg.graph_storage.resolve_database(repo_id)
     neo4j = Neo4jClient(
         cfg.graph_storage.neo4j_uri,
@@ -124,7 +140,10 @@ async def get_community_subgraph(
 ) -> GraphNeighborsResponse:
     """Return a community subgraph (members + edges between members)."""
     repo_id = corpus_id
-    cfg = await load_scoped_config(repo_id=repo_id)
+    try:
+        cfg = await load_scoped_config(repo_id=repo_id)
+    except CorpusNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
     db_name = cfg.graph_storage.resolve_database(repo_id)
     neo4j = Neo4jClient(
         cfg.graph_storage.neo4j_uri,
@@ -145,7 +164,10 @@ async def get_community_subgraph(
 @router.get("/graph/{corpus_id}/communities", response_model=list[Community])
 async def list_communities(corpus_id: str, level: int | None = None) -> list[Community]:
     repo_id = corpus_id
-    cfg = await load_scoped_config(repo_id=repo_id)
+    try:
+        cfg = await load_scoped_config(repo_id=repo_id)
+    except CorpusNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
     db_name = cfg.graph_storage.resolve_database(repo_id)
     neo4j = Neo4jClient(
         cfg.graph_storage.neo4j_uri,
@@ -164,7 +186,10 @@ async def list_communities(corpus_id: str, level: int | None = None) -> list[Com
 @router.get("/graph/{corpus_id}/stats", response_model=GraphStats)
 async def get_graph_stats(corpus_id: str) -> GraphStats:
     repo_id = corpus_id
-    cfg = await load_scoped_config(repo_id=repo_id)
+    try:
+        cfg = await load_scoped_config(repo_id=repo_id)
+    except CorpusNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
     db_name = cfg.graph_storage.resolve_database(repo_id)
     neo4j = Neo4jClient(
         cfg.graph_storage.neo4j_uri,
@@ -183,7 +208,10 @@ async def get_graph_stats(corpus_id: str) -> GraphStats:
 @router.post("/graph/{corpus_id}/query")
 async def graph_query(corpus_id: str, cypher: str) -> list[dict[str, Any]]:
     repo_id = corpus_id
-    cfg = await load_scoped_config(repo_id=repo_id)
+    try:
+        cfg = await load_scoped_config(repo_id=repo_id)
+    except CorpusNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
     db_name = cfg.graph_storage.resolve_database(repo_id)
     neo4j = Neo4jClient(
         cfg.graph_storage.neo4j_uri,
