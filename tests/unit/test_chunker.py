@@ -150,7 +150,7 @@ def test_ast_chunking_python_preserves_top_level_blocks() -> None:
         chunking_strategy="ast",
         chunk_size=500,
         chunk_overlap=100,
-        target_tokens=60,
+        target_tokens=64,
         overlap_tokens=0,
         ast_overlap_lines=0,
         preserve_imports=0,  # imports merge into the first block chunk
@@ -159,7 +159,7 @@ def test_ast_chunking_python_preserves_top_level_blocks() -> None:
     tok_cfg = TokenizationConfig(strategy="whitespace", normalize_unicode=False, lowercase=False)
     ch = Chunker(cfg, tok_cfg)
 
-    body_tokens = " ".join([f"tok{i}" for i in range(18)])
+    body_tokens = " ".join([f"tok{i}" for i in range(45)])
     content = (
         "import os\nimport sys\n\n"
         "def foo():\n"
@@ -182,7 +182,7 @@ def test_ast_chunking_python_can_isolate_imports_when_enabled() -> None:
         chunking_strategy="ast",
         chunk_size=500,
         chunk_overlap=100,
-        target_tokens=20,
+        target_tokens=64,
         overlap_tokens=0,
         ast_overlap_lines=0,
         preserve_imports=1,
@@ -194,10 +194,10 @@ def test_ast_chunking_python_can_isolate_imports_when_enabled() -> None:
     content = (
         "import os\nimport sys\n\n"
         "def foo():\n"
-        "    # a a a a a a a a a a\n"
+        "    # " + " ".join(["a" for _i in range(90)]) + "\n"
         "    return 1\n\n"
         "def bar():\n"
-        "    # b b b b b b b b b b\n"
+        "    # " + " ".join(["b" for _i in range(90)]) + "\n"
         "    return 2\n"
     )
     chunks = ch.chunk_file("x.py", content)
@@ -213,7 +213,7 @@ def test_hybrid_chunking_falls_back_on_syntax_error() -> None:
         chunking_strategy="hybrid",
         chunk_size=500,
         chunk_overlap=100,
-        target_tokens=16,
+        target_tokens=64,
         overlap_tokens=4,
         min_chunk_chars=10,
     )
@@ -231,14 +231,14 @@ def test_ast_chunking_typescript_respects_top_level_brace_blocks() -> None:
         chunking_strategy="ast",
         chunk_size=500,
         chunk_overlap=100,
-        target_tokens=40,
+        target_tokens=64,
         overlap_tokens=0,
         min_chunk_chars=10,
     )
     tok_cfg = TokenizationConfig(strategy="whitespace", normalize_unicode=False, lowercase=False)
     ch = Chunker(cfg, tok_cfg)
 
-    toks = " ".join([f"w{i}" for i in range(18)])
+    toks = " ".join([f"w{i}" for i in range(45)])
     content = (
         "export function foo() {\n"
         f"  // {toks}\n"
