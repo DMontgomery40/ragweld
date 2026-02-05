@@ -24,11 +24,11 @@ def _title(s: str) -> str:
 
 
 def _build_prompts_payload(cfg: TriBridConfig) -> PromptsResponse:
-    """Expose a curated set of prompts for the UI editor.
+    """Expose system prompts for the UI editor.
 
     Keys are stable strings used by the frontend:
-    - system prompts: "query_expansion", "query_rewrite", "eval_analysis", ...
-    - chat prompts: "chat.system_prompt_direct", ...
+    - system prompts: fields from SystemPromptsConfig (e.g. "query_expansion")
+    - chat prompts: "chat.<field>" for ChatConfig system_prompt_* fields
     """
 
     prompts: dict[str, str] = {}
@@ -37,29 +37,35 @@ def _build_prompts_payload(cfg: TriBridConfig) -> PromptsResponse:
     sp = cfg.system_prompts
     sp_fields = SystemPromptsConfig.model_fields
 
-    def add_system_prompt(key: str, category: PromptCategory, label: str | None = None) -> None:
-        if key not in sp_fields:
-            return
+    def category_for_system_prompt(key: str) -> PromptCategory:
+        # Heuristic defaults so new prompts auto-appear without editing this file.
+        if key == "main_rag_chat":
+            return "chat"
+        if key.startswith("query_"):
+            return "retrieval"
+        if key.startswith("eval_"):
+            return "evaluation"
+        return "indexing"
+
+    label_overrides: dict[str, str] = {
+        "main_rag_chat": "Main RAG Chat",
+        "query_expansion": "Query Expansion",
+        "query_rewrite": "Query Rewrite",
+        "eval_analysis": "Eval Analysis",
+        "semantic_chunk_summaries": "Semantic Chunk Summaries",
+        "lightweight_chunk_summaries": "Lightweight Chunk Summaries",
+        "code_enrichment": "Code Enrichment",
+        "semantic_kg_extraction": "Semantic KG Extraction",
+    }
+
+    # ALL SystemPromptsConfig fields (Pydantic is the source of truth).
+    for key, field_info in sp_fields.items():
         prompts[key] = str(getattr(sp, key) or "")
         meta[key] = PromptMetadata(
-            label=label or _title(key),
-            description=str(sp_fields[key].description or ""),
-            category=category,
+            label=label_overrides.get(key) or _title(key),
+            description=str(field_info.description or ""),
+            category=category_for_system_prompt(key),
         )
-
-    # Chat-facing prompt (used for main RAG chat answers)
-    add_system_prompt("main_rag_chat", category="chat", label="Main RAG Chat")
-
-    # Retrieval / evaluation prompts (used directly in the pipeline)
-    add_system_prompt("query_expansion", category="retrieval", label="Query Expansion")
-    add_system_prompt("query_rewrite", category="retrieval", label="Query Rewrite")
-    add_system_prompt("eval_analysis", category="evaluation", label="Eval Analysis")
-
-    # Indexing prompts (LLM-assisted metadata extraction)
-    add_system_prompt("semantic_chunk_summaries", category="indexing", label="Semantic Chunk Summaries")
-    add_system_prompt("lightweight_chunk_summaries", category="indexing", label="Lightweight Chunk Summaries")
-    add_system_prompt("code_enrichment", category="indexing", label="Code Enrichment")
-    add_system_prompt("semantic_kg_extraction", category="indexing", label="Semantic KG Extraction")
 
     # Chat-level prompts (read-only here; edited in Chat Settings)
     chat = cfg.chat

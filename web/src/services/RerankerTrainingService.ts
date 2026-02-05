@@ -7,6 +7,7 @@
 import { apiClient, api, apiUrl } from '@/api/client';
 import type {
   CorpusEvalProfile,
+  OkResponse,
   RerankerTrainDiffRequest,
   RerankerTrainDiffResponse,
   RerankerTrainMetricEvent,
@@ -15,6 +16,8 @@ import type {
   RerankerTrainRunsResponse,
   RerankerTrainStartRequest,
   RerankerTrainStartResponse,
+  RerankerScoreRequest,
+  RerankerScoreResponse,
 } from '@/types/generated';
 
 export type RerankerTrainRunsScope = 'corpus' | 'all';
@@ -78,6 +81,19 @@ export class RerankerTrainingService {
     return data;
   }
 
+  async promoteRun(runId: string): Promise<OkResponse> {
+    const { data } = await apiClient.post<OkResponse>(
+      api(`/reranker/train/run/${encodeURIComponent(runId)}/promote`),
+      {}
+    );
+    return data;
+  }
+
+  async scorePair(payload: RerankerScoreRequest): Promise<RerankerScoreResponse> {
+    const { data } = await apiClient.post<RerankerScoreResponse>(api('/reranker/score'), payload);
+    return data;
+  }
+
   streamRun(
     runId: string,
     onEvent: (ev: RerankerTrainMetricEvent) => void,
@@ -109,4 +125,3 @@ export class RerankerTrainingService {
 }
 
 export const rerankerTrainingService = new RerankerTrainingService();
-

@@ -1,5 +1,7 @@
 """API tests for config endpoints."""
 
+import asyncio
+
 import pytest
 from httpx import AsyncClient
 
@@ -76,3 +78,49 @@ async def test_get_config_unknown_corpus_does_not_autocreate(client: AsyncClient
 
     assert missing_id not in after_ids
     assert after_ids == before_ids
+
+
+@pytest.mark.asyncio
+async def test_concurrent_section_patches_do_not_lose_updates(client: AsyncClient) -> None:
+    """Concurrent PATCHes to different sections must not clobber each other."""
+    corpus_id = "test_concurrent_config_patches"
+    corpus_path = "."
+
+    # Create corpus (idempotent across reruns)
+    existing = await client.get("/api/corpora")
+    assert existing.status_code == 200
+    if not any(c.get("corpus_id") == corpus_id for c in existing.json() if isinstance(c, dict)):
+        created = await client.post(
+            "/api/corpora",
+            json={"corpus_id": corpus_id, "name": corpus_id, "path": corpus_path, "description": "test corpus"},
+        )
+        assert created.status_code == 200
+
+    try:
+        # Seed cache + per-corpus config row.
+        seeded = await client.get("/api/config", params={"corpus_id": corpus_id})
+        assert seeded.status_code == 200
+
+        # Two different sections patched concurrently should both stick.
+        tokenization_patch = client.patch(
+            "/api/config/tokenization",
+            params={"corpus_id": corpus_id},
+            json={"strategy": "whitespace"},
+        )
+        indexing_patch = client.patch(
+            "/api/config/indexing",
+            params={"corpus_id": corpus_id},
+            json={"large_file_mode": "read_all"},
+        )
+
+        tokenization_resp, indexing_resp = await asyncio.gather(tokenization_patch, indexing_patch)
+        assert tokenization_resp.status_code == 200
+        assert indexing_resp.status_code == 200
+
+        final = await client.get("/api/config", params={"corpus_id": corpus_id})
+        assert final.status_code == 200
+        cfg = final.json()
+        assert str(cfg["tokenization"]["strategy"]).lower() == "whitespace"
+        assert str(cfg["indexing"]["large_file_mode"]).lower() == "read_all"
+    finally:
+        await client.delete(f"/api/corpora/{corpus_id}")

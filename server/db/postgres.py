@@ -60,6 +60,7 @@ class PostgresClient:
         self.connection_string = connection_string
         self._pool: asyncpg.Pool | None = None
         self._resolved_dsn: str | None = None
+        self._pg_search_available: bool | None = None
 
     # ---------------------------------------------------------------------
     # Connection + schema
@@ -100,6 +101,12 @@ class PostgresClient:
                 _POOLS_BY_DSN[dsn] = pool
 
             self._pool = pool
+
+        # Cache extension presence for this client instance (best-effort).
+        try:
+            self._pg_search_available = await self._detect_pg_search()
+        except Exception:
+            self._pg_search_available = False
 
     async def disconnect(self) -> None:
         # NOTE: Pools are shared per DSN. We intentionally do not close the
@@ -145,6 +152,11 @@ class PostgresClient:
     async def _ensure_schema(self, conn: asyncpg.Connection) -> None:
         # Ensure pgvector extension
         await conn.execute("CREATE EXTENSION IF NOT EXISTS vector;")
+        # Best-effort: ParadeDB pg_search extension (BM25). If unavailable, we fall back to built-in FTS.
+        try:
+            await conn.execute("CREATE EXTENSION IF NOT EXISTS pg_search;")
+        except Exception:
+            pass
 
         # Corpus registry (repo_id == corpus_id)
         await conn.execute(
@@ -157,6 +169,7 @@ class PostgresClient:
               meta JSONB NOT NULL DEFAULT '{}'::jsonb,
               created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
               last_indexed TIMESTAMPTZ,
+              embedding_provider TEXT,
               embedding_model TEXT,
               embedding_dimensions INT
             );
@@ -164,6 +177,7 @@ class PostgresClient:
         )
         # Ensure new columns exist when upgrading an existing DB
         await conn.execute("ALTER TABLE corpora ADD COLUMN IF NOT EXISTS meta JSONB NOT NULL DEFAULT '{}'::jsonb;")
+        await conn.execute("ALTER TABLE corpora ADD COLUMN IF NOT EXISTS embedding_provider TEXT;")
 
         # Per-corpus config (TriBridConfig JSON)
         await conn.execute(
@@ -241,6 +255,7 @@ class PostgresClient:
             "CREATE INDEX IF NOT EXISTS idx_chunks_repo_file ON chunks (repo_id, file_path);"
         )
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_chunks_tsv ON chunks USING GIN (tsv);")
+
         # Optional recall-only HNSW index for low-latency Recall vector search.
         # Best-effort: do not block startup if the pgvector build lacks HNSW support.
         try:
@@ -254,8 +269,29 @@ class PostgresClient:
             )
         except Exception:
             pass
-        # Optional vector index (HNSW preferred on newer pgvector; keep minimal here).
-        # Index creation can be expensive; create lazily in a later iteration.
+
+        # Optional BM25 index via ParadeDB pg_search.
+        #
+        # Best-effort: do not block startup if pg_search is not installed or not preload-enabled.
+        # Use a globally-unique key_field to avoid cross-corpus key collisions.
+        try:
+            await conn.execute(
+                """
+                ALTER TABLE chunks
+                ADD COLUMN IF NOT EXISTS bm25_id TEXT
+                GENERATED ALWAYS AS (repo_id || '::' || chunk_id) STORED;
+                """
+            )
+            await conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_chunks_bm25
+                  ON chunks
+                  USING bm25 (bm25_id, repo_id, content, file_path)
+                  WITH (key_field='bm25_id');
+                """
+            )
+        except Exception:
+            pass
 
         # Chunk summaries (data quality layer)
         await conn.execute(
@@ -288,6 +324,100 @@ class PostgresClient:
             );
             """
         )
+
+    async def _detect_pg_search(self) -> bool:
+        await self._require_pool()
+        assert self._pool is not None
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT 1 AS ok FROM pg_extension WHERE extname = 'pg_search' LIMIT 1;"
+            )
+        return bool(row is not None)
+
+    async def pg_search_available(self) -> bool:
+        if self._pg_search_available is None:
+            try:
+                self._pg_search_available = await self._detect_pg_search()
+            except Exception:
+                self._pg_search_available = False
+        return bool(self._pg_search_available)
+
+    async def bm25_search_pg_search(
+        self,
+        repo_id: str,
+        query: str,
+        top_k: int,
+        *,
+        query_mode: str = "plain",
+    ) -> list[ChunkMatch]:
+        """BM25 search using ParadeDB pg_search (@@@ operator + paradedb.score).
+
+        Falls back by raising on missing extension; caller should handle.
+        """
+        if not query.strip() or top_k <= 0:
+            return []
+        await self._require_pool()
+        assert self._pool is not None
+
+        qm = str(query_mode or "plain").strip().lower()
+        q = query.strip()
+        if qm == "phrase":
+            # Ensure the entire query is treated as a phrase.
+            if not (q.startswith('"') and q.endswith('"')):
+                q = f"\"{q}\""
+
+        if not await self.pg_search_available():
+            raise RuntimeError("pg_search extension not available")
+
+        async with self._pool.acquire() as conn:
+            # Ensure the key + index exist (idempotent, best-effort).
+            try:
+                await conn.execute(
+                    """
+                    ALTER TABLE chunks
+                    ADD COLUMN IF NOT EXISTS bm25_id TEXT
+                    GENERATED ALWAYS AS (repo_id || '::' || chunk_id) STORED;
+                    """
+                )
+                await conn.execute(
+                    """
+                    CREATE INDEX IF NOT EXISTS idx_chunks_bm25
+                      ON chunks
+                      USING bm25 (bm25_id, repo_id, content, file_path)
+                      WITH (key_field='bm25_id');
+                    """
+                )
+            except Exception:
+                pass
+
+            rows = await conn.fetch(
+                """
+                SELECT chunk_id, content, file_path, start_line, end_line, language, metadata,
+                       paradedb.score(bm25_id)::float8 AS score
+                FROM chunks
+                WHERE repo_id = $2 AND chunks @@@ $1
+                ORDER BY score DESC
+                LIMIT $3;
+                """,
+                q,
+                repo_id,
+                int(top_k),
+            )
+
+        return [
+            ChunkMatch(
+                chunk_id=str(r["chunk_id"]),
+                content=str(r["content"]),
+                file_path=str(r["file_path"]),
+                start_line=int(r["start_line"]),
+                end_line=int(r["end_line"]),
+                language=str(r["language"]) if r["language"] is not None else None,
+                score=float(r["score"] or 0.0),
+                source="sparse",
+                metadata=_coerce_jsonb_dict(r.get("metadata")),
+            )
+            for r in rows
+        ]
 
     # Vector operations
     async def upsert_embeddings(self, repo_id: str, chunks: list[Chunk]) -> int:
@@ -440,18 +570,38 @@ class PostgresClient:
         return len(chunks)
 
     async def sparse_search(self, repo_id: str, query: str, top_k: int, *, ts_config: str) -> list[ChunkMatch]:
+        """Back-compat sparse search (postgres_fts + plainto_tsquery)."""
+        return await self.fts_search(repo_id, query, top_k, ts_config=ts_config, query_mode="plain")
+
+    async def fts_search(
+        self,
+        repo_id: str,
+        query: str,
+        top_k: int,
+        *,
+        ts_config: str,
+        query_mode: str = "plain",
+    ) -> list[ChunkMatch]:
         if not query.strip() or top_k <= 0:
             return []
         await self._require_pool()
         assert self._pool is not None
 
+        qm = str(query_mode or "plain").strip().lower()
+        if qm == "phrase":
+            tsquery = "phraseto_tsquery($4::regconfig, $1)"
+        elif qm == "boolean":
+            tsquery = "websearch_to_tsquery($4::regconfig, $1)"
+        else:
+            tsquery = "plainto_tsquery($4::regconfig, $1)"
+
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(
-                """
+                f"""
                 SELECT chunk_id, content, file_path, start_line, end_line, language, metadata,
-                       ts_rank_cd(tsv, plainto_tsquery($4::regconfig, $1))::float8 AS score
+                       ts_rank_cd(tsv, {tsquery})::float8 AS score
                 FROM chunks
-                WHERE repo_id = $2 AND tsv @@ plainto_tsquery($4::regconfig, $1)
+                WHERE repo_id = $2 AND tsv @@ {tsquery}
                 ORDER BY score DESC
                 LIMIT $3;
                 """,
@@ -471,10 +621,38 @@ class PostgresClient:
                 language=str(r["language"]) if r["language"] is not None else None,
                 score=float(r["score"] or 0.0),
                 source="sparse",
-                metadata=_coerce_jsonb_dict(r.get("metadata")),
+                metadata={**_coerce_jsonb_dict(r.get("metadata")), "sparse_engine": "postgres_fts"},
             )
             for r in rows
         ]
+
+    async def sparse_search_engine(
+        self,
+        repo_id: str,
+        query: str,
+        top_k: int,
+        *,
+        ts_config: str,
+        engine: str,
+        query_mode: str = "plain",
+        highlight: bool = False,
+    ) -> list[ChunkMatch]:
+        eng = str(engine or "postgres_fts").strip().lower()
+        qm = str(query_mode or "plain").strip().lower()
+        if eng == "pg_search_bm25":
+            try:
+                rows = await self.bm25_search_pg_search(repo_id, query, top_k, query_mode=qm)
+                # Tag engine in metadata for UI/debug.
+                return [
+                    r.model_copy(update={"metadata": {**(r.metadata or {}), "sparse_engine": "pg_search_bm25"}})
+                    for r in rows
+                ]
+            except Exception:
+                # Clean fallback.
+                return await self.fts_search(repo_id, query, top_k, ts_config=ts_config, query_mode=qm)
+
+        _ = highlight
+        return await self.fts_search(repo_id, query, top_k, ts_config=ts_config, query_mode=qm)
 
     async def delete_fts(self, repo_id: str) -> int:
         await self._require_pool()
@@ -595,6 +773,99 @@ class PostgresClient:
             for r in rows
         ]
 
+    async def get_embeddings(self, repo_id: str, chunk_ids: list[str]) -> dict[str, list[float]]:
+        """Fetch dense embeddings for a list of chunk_ids (best-effort).
+
+        Returns a mapping of chunk_id -> embedding vector. Missing/null embeddings are omitted.
+        """
+        if not chunk_ids:
+            return {}
+        await self._require_pool()
+        assert self._pool is not None
+
+        # De-dupe while preserving order for predictable query size.
+        ids = list(dict.fromkeys([str(cid) for cid in chunk_ids if str(cid).strip()]))
+        if not ids:
+            return {}
+
+        async with self._pool.acquire() as conn:
+            # Ensure pgvector codecs are registered for this connection (idempotent).
+            try:
+                await register_vector(conn)
+            except Exception:
+                pass
+
+            rows = await conn.fetch(
+                """
+                SELECT c.chunk_id, c.embedding
+                FROM unnest($2::text[]) AS u(chunk_id)
+                JOIN chunks c
+                  ON c.repo_id = $1
+                 AND c.chunk_id = u.chunk_id
+                WHERE c.embedding IS NOT NULL;
+                """,
+                repo_id,
+                ids,
+            )
+
+        out: dict[str, list[float]] = {}
+        for r in rows:
+            cid = str(r["chunk_id"])
+            emb = r["embedding"]
+            if emb is None:
+                continue
+            try:
+                # pgvector may decode to list[float] or a Vector wrapper.
+                out[cid] = [float(x) for x in list(emb)]
+            except Exception:
+                try:
+                    out[cid] = [float(x) for x in emb]
+                except Exception:
+                    continue
+        return out
+
+    async def get_chunks_by_file_ordinals(self, repo_id: str, file_path: str, ordinals: list[int]) -> list[Chunk]:
+        """Fetch chunks for a file by chunk_ordinal (stored in metadata)."""
+        if not ordinals:
+            return []
+        await self._require_pool()
+        assert self._pool is not None
+
+        ords = sorted({int(o) for o in ordinals if int(o) >= 0})
+        if not ords:
+            return []
+
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT chunk_id, content, file_path, start_line, end_line, language, token_count, metadata
+                FROM chunks
+                WHERE repo_id = $1
+                  AND file_path = $2
+                  AND (NULLIF((metadata->>'chunk_ordinal'), '')::int) = ANY($3::int[])
+                ORDER BY (NULLIF((metadata->>'chunk_ordinal'), '')::int) ASC, start_line ASC, chunk_id ASC;
+                """,
+                repo_id,
+                file_path,
+                ords,
+            )
+
+        return [
+            Chunk(
+                chunk_id=str(r["chunk_id"]),
+                content=str(r["content"]),
+                file_path=str(r["file_path"]),
+                start_line=int(r["start_line"]),
+                end_line=int(r["end_line"]),
+                language=str(r["language"]) if r["language"] is not None else None,
+                token_count=int(r["token_count"] or 0),
+                embedding=None,
+                summary=None,
+                metadata=_coerce_jsonb_dict(r.get("metadata")),
+            )
+            for r in rows
+        ]
+
     async def get_index_stats(self, repo_id: str) -> IndexStats:
         await self._require_pool()
         assert self._pool is not None
@@ -602,7 +873,7 @@ class PostgresClient:
         async with self._pool.acquire() as conn:
             corpus = await conn.fetchrow(
                 """
-                SELECT repo_id, embedding_model, embedding_dimensions, last_indexed
+                SELECT repo_id, embedding_provider, embedding_model, embedding_dimensions, last_indexed
                 FROM corpora
                 WHERE repo_id = $1;
                 """,
@@ -614,6 +885,7 @@ class PostgresClient:
                     total_files=0,
                     total_chunks=0,
                     total_tokens=0,
+                    embedding_provider="",
                     embedding_model="",
                     embedding_dimensions=0,
                     last_indexed=None,
@@ -646,6 +918,7 @@ class PostgresClient:
             total_files=len(files),
             total_chunks=int(agg["total_chunks"] or 0),
             total_tokens=int(agg["total_tokens"] or 0),
+            embedding_provider=str(corpus["embedding_provider"] or ""),
             embedding_model=str(corpus["embedding_model"] or ""),
             embedding_dimensions=int(corpus["embedding_dimensions"] or 0),
             last_indexed=corpus["last_indexed"],
@@ -751,7 +1024,7 @@ class PostgresClient:
             embedding_rows_all = int(totals_row["embedding_rows_all"] or 0) if totals_row else 0
             tsv_rows_all = int(totals_row["tsv_rows_all"] or 0) if totals_row else 0
 
-            # GIN BM25/FTS index size (shared). Allocate proportional to tsv rows.
+            # GIN FTS index size (shared). Allocate proportional to tsv rows.
             gin_row = await conn.fetchrow(
                 """
                 SELECT COALESCE(pg_relation_size(c.oid), 0)::bigint AS bytes
@@ -764,6 +1037,23 @@ class PostgresClient:
             gin_alloc = 0
             if gin_total > 0 and tsv_rows_all > 0 and tsv_rows > 0:
                 gin_alloc = int(round((gin_total * float(tsv_rows)) / float(tsv_rows_all)))
+
+            # Optional BM25 index size (pg_search). Allocate proportional to chunk rows.
+            bm25_row = await conn.fetchrow(
+                """
+                SELECT COALESCE(pg_relation_size(c.oid), 0)::bigint AS bytes
+                FROM pg_class c
+                WHERE c.relname = 'idx_chunks_bm25'
+                LIMIT 1;
+                """
+            )
+            bm25_total = int(bm25_row["bytes"] or 0) if bm25_row else 0
+            bm25_alloc = 0
+            chunk_rows = int(chunks_row["chunk_rows"] or 0) if chunks_row else 0
+            totals_all = await conn.fetchrow("SELECT COUNT(*)::bigint AS n FROM chunks;")
+            chunk_rows_all = int(totals_all["n"] or 0) if totals_all else 0
+            if bm25_total > 0 and chunk_rows_all > 0 and chunk_rows > 0:
+                bm25_alloc = int(round((bm25_total * float(chunk_rows)) / float(chunk_rows_all)))
 
             # Vector index size (if present). Allocate proportional to embedding rows.
             vec_idx_row = await conn.fetchrow(
@@ -780,7 +1070,8 @@ class PostgresClient:
             if vec_idx_total > 0 and embedding_rows_all > 0 and embedding_rows > 0:
                 vec_idx_alloc = int(round((vec_idx_total * float(embedding_rows)) / float(embedding_rows_all)))
 
-        bm25_index_bytes = int(tsv_bytes + gin_alloc)
+        # Prefer pg_search BM25 index allocation when present; otherwise fall back to FTS storage estimate.
+        bm25_index_bytes = int(bm25_alloc) if int(bm25_alloc) > 0 else int(tsv_bytes + gin_alloc)
         out = {
             "chunks_bytes": int(chunks_bytes),
             "embeddings_bytes": int(embeddings_bytes),
@@ -898,18 +1189,20 @@ class PostgresClient:
                 json.dumps(config),
             )
 
-    async def update_corpus_embedding_meta(self, repo_id: str, model: str, dimensions: int) -> None:
+    async def update_corpus_embedding_meta(self, repo_id: str, *, provider: str, model: str, dimensions: int) -> None:
         await self._require_pool()
         assert self._pool is not None
         async with self._pool.acquire() as conn:
             await conn.execute(
                 """
                 UPDATE corpora
-                SET embedding_model = $2,
-                    embedding_dimensions = $3
+                SET embedding_provider = $2,
+                    embedding_model = $3,
+                    embedding_dimensions = $4
                 WHERE repo_id = $1;
                 """,
                 repo_id,
+                str(provider or ""),
                 model,
                 int(dimensions),
             )

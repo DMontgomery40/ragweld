@@ -164,6 +164,9 @@ SKIP_PATTERNS = [
     '.mypy_cache',
     # Generated/runtime artifacts (may include arbitrary corpus content)
     'data/eval_runs',
+    # Model artifacts / training outputs (may include arbitrary tokens/strings)
+    'data/reranker_train_runs',
+    'models',
 ]
 
 TEXT_SUFFIXES = {

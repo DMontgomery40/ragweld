@@ -244,6 +244,7 @@ def main() -> None:
             IndexRequest,
             IndexStatus,
             IndexStats,
+            IndexEstimate,
             # Domain models - Dashboard index summary
             DashboardIndexStorageBreakdown,
             DashboardEmbeddingConfigSummary,
@@ -348,6 +349,8 @@ def main() -> None:
             RerankerNoHitsResponse,
             RerankerLogsResponse,
             RerankerInfoResponse,
+            RerankerScoreRequest,
+            RerankerScoreResponse,
             # Domain models - Prompts (Eval → System Prompts)
             PromptsResponse,
             PromptMetadata,
@@ -367,6 +370,7 @@ def main() -> None:
         IndexRequest,
         IndexStatus,
         IndexStats,
+        IndexEstimate,
         DashboardIndexStorageBreakdown,
         DashboardEmbeddingConfigSummary,
         DashboardIndexCosts,
@@ -457,6 +461,8 @@ def main() -> None:
         RerankerNoHitsResponse,
         RerankerLogsResponse,
         RerankerInfoResponse,
+        RerankerScoreRequest,
+        RerankerScoreResponse,
         PromptsResponse,
         PromptMetadata,
         PromptUpdateRequest,

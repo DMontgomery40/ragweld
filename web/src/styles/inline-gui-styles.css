@@ -289,11 +289,15 @@
         /* RAG Subtabs - Hidden by default, shown when RAG tab active */
         .subtab-bar {
             display: flex;
+            flex-wrap: wrap;
             gap: 4px;
             padding: 8px 24px;
             background: var(--bg-elev1);
             border-bottom: 1px solid var(--line);
-            /* No sticky positioning - let it flow naturally */
+            /* STICKY: freeze at top of scrollable area */
+            position: sticky;
+            top: 0;
+            z-index: 50;
         }
         /* Default hidden; Navigation toggles visibility when RAG is active */
         #rag-subtabs { display: none; }
@@ -321,23 +325,29 @@
         }
 
         .tab-content {
-            /* React Router only renders active route, so tab-content is always visible */
+            /* THIS is the scroll container - sticky subtab-bar sticks here */
             display: flex;
             flex-direction: column;
             flex: 1;
             overflow-y: auto;
-            padding: 24px;
-            min-height: 0; /* allow nested fullscreen sections to size correctly */
+            padding: 0;
+            min-height: 0;
+            height: 0; /* Force flex to constrain height - critical for sticky */
         }
 
         .tab-content.active {
-            /* Keep for backward compatibility with legacy JS */
             display: flex;
             flex-direction: column;
             flex: 1;
             overflow-y: auto;
+            padding: 0;
+            min-height: 0;
+            height: 0;
+        }
+
+        /* Content below subtab-bar gets the padding */
+        .tab-content > div:not(.subtab-bar) {
             padding: 24px;
-            min-height: 0; /* allow nested fullscreen sections to size correctly */
         }
 
         /* RAG subtab content containers */
@@ -1488,7 +1498,7 @@
             width: 0;
             height: 0;
             border-radius: 50%;
-            background: rgba(0, 255, 136, 0.3);
+            background: rgba(59, 130, 246, 0.3);
             transform: translate(-50%, -50%);
             transition: width 0.6s, height 0.6s;
         }
@@ -1498,12 +1508,12 @@
             border-color: var(--accent);
             color: var(--accent);
             transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(0, 255, 136, 0.2);
+            box-shadow: 0 4px 12px rgba(59, 130, 246, 0.2);
         }
 
         .action-btn:active {
             transform: translateY(0) scale(0.98);
-            box-shadow: 0 2px 6px rgba(0, 255, 136, 0.3);
+            box-shadow: 0 2px 6px rgba(59, 130, 246, 0.3);
         }
 
         .action-btn:active:before {
@@ -1517,7 +1527,7 @@
 
         .action-btn:hover svg {
             stroke: var(--accent);
-            filter: drop-shadow(0 0 4px rgba(0, 255, 136, 0.5));
+            filter: drop-shadow(0 0 4px rgba(59, 130, 246, 0.5));
         }
 
         .action-btn.loading {
@@ -1707,7 +1717,7 @@
             border-color: var(--accent);
             background: var(--panel-bg);
             transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(0, 255, 136, 0.1);
+            box-shadow: 0 4px 12px rgba(59, 130, 246, 0.1);
         }
 
         .ob-card svg {
@@ -1821,7 +1831,7 @@
         .ob-text-input:focus {
             outline: none;
             border-color: var(--accent);
-            box-shadow: 0 0 0 3px rgba(0, 255, 136, 0.1);
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
         }
 
         .ob-hint {
@@ -2123,7 +2133,7 @@
         .ob-primary-btn:hover {
             opacity: 0.9;
             transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(0, 255, 136, 0.3);
+            box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
         }
 
         .ob-secondary-btn {

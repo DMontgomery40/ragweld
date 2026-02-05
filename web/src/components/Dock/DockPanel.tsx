@@ -241,16 +241,9 @@ export function DockPanel() {
         minHeight: 0,
       }}
     >
-      <div
-        style={{
-          flex: '0 0 auto',
-          padding: '14px 14px',
-          borderBottom: '1px solid var(--line)',
-          background: 'var(--card-bg)',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <div style={{ display: 'flex', gap: '8px' }}>
+      <div className="dock-header">
+        <div className="dock-header-inner">
+          <div className="dock-header-tabs">
             <SegmentedButton
               active={mode === 'settings'}
               label="Settings"
@@ -266,24 +259,14 @@ export function DockPanel() {
           </div>
 
           <div
-            style={{
-              flex: 1,
-              minWidth: 0,
-              textAlign: 'center',
-              color: 'var(--fg)',
-              fontWeight: 700,
-              fontSize: '13px',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-            }}
+            className="dock-header-title"
             title={title}
             data-testid="dock-title"
           >
             {title}
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <div className="dock-header-actions">
             <HeaderButton label="Dock Current" onClick={dockCurrentSwap} testId="dock-current" disabled={!currentMainTarget} />
             <HeaderButton label="Choose…" onClick={() => setPickerOpen(true)} testId="dock-choose" />
             {docked ? (

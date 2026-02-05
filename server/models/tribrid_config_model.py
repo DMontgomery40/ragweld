@@ -83,10 +83,53 @@ class IndexStats(BaseModel):
     total_files: int = Field(description="Number of files indexed")
     total_chunks: int = Field(description="Number of chunks created")
     total_tokens: int = Field(description="Total token count across all chunks")
+    embedding_provider: str = Field(
+        default="",
+        description="Embedding provider used for embeddings (embedding.embedding_type) at index time",
+    )
     embedding_model: str = Field(description="Model used for embeddings")
     embedding_dimensions: int = Field(description="Dimension of embedding vectors")
     last_indexed: datetime | None = Field(default=None, description="When last indexed")
     file_breakdown: dict[str, int] = Field(default_factory=dict, description="Count by file extension")
+
+
+class IndexEstimate(BaseModel):
+    """Best-effort estimate for indexing cost/time before running the indexer.
+
+    Notes:
+    - Token count is an approximation (byte-based heuristic).
+    - Time is an intentionally rough range (depends on machine, provider latency, DB speed, etc.).
+    """
+
+    repo_id: str = Field(
+        description="Corpus identifier",
+        validation_alias=AliasChoices("repo_id", "corpus_id"),
+        serialization_alias="corpus_id",
+    )
+    repo_path: str = Field(description="Resolved path on disk used for the estimate")
+    total_files: int = Field(ge=0, description="Estimated number of files that will be processed")
+    total_size_bytes: int = Field(ge=0, description="Estimated total bytes across included files")
+    skipped_large_files: int = Field(ge=0, description="Count of files skipped due to size limits")
+    estimated_total_tokens: int = Field(ge=0, description="Estimated total tokens to be chunked/embedded")
+    estimated_total_chunks: int = Field(ge=0, description="Estimated number of chunks (heuristic)")
+    embedding_backend: Literal["deterministic", "provider"] = Field(
+        description="Embedding backend used for indexing (deterministic has no external cost)"
+    )
+    embedding_provider: str = Field(description="Embedding provider used for indexing (embedding.embedding_type)")
+    embedding_model: str = Field(description="Embedding model used for indexing (effective model)")
+    skip_dense: bool = Field(description="Whether dense embeddings are skipped (indexing.skip_dense=1)")
+    embedding_cost_usd: float | None = Field(
+        default=None,
+        ge=0.0,
+        description="Estimated embedding cost (USD) when pricing data is available (0 for local/deterministic).",
+    )
+    estimated_seconds_low: float | None = Field(
+        default=None, ge=0.0, description="Very rough low-end estimate for total indexing time (seconds)"
+    )
+    estimated_seconds_high: float | None = Field(
+        default=None, ge=0.0, description="Very rough high-end estimate for total indexing time (seconds)"
+    )
+    assumptions: list[str] = Field(default_factory=list, description="Human-readable assumptions used for the estimate")
 
 
 # =============================================================================
@@ -656,7 +699,9 @@ class ChunkMatch(BaseModel):
     end_line: int = Field(description="Ending line number")
     language: str | None = Field(default=None, description="Programming language")
     score: float = Field(description="Relevance score from retrieval")
-    source: Literal["vector", "sparse", "graph"] = Field(description="Which retrieval leg found this")
+    source: Literal["vector", "sparse", "graph"] = Field(
+        description="Which retrieval leg found this"
+    )
     metadata: dict[str, Any] = Field(default_factory=dict, description="Additional match metadata")
 
 
@@ -1358,6 +1403,35 @@ class RerankerInfoResponse(BaseModel):
     trust_remote_code: bool = Field(default=False, description="Whether transformers trust_remote_code is enabled")
 
 
+class RerankerScoreRequest(BaseModel):
+    """Request payload for POST /api/reranker/score."""
+
+    repo_id: str = Field(
+        description="Corpus identifier to score against",
+        validation_alias=AliasChoices("repo_id", "corpus_id"),
+        serialization_alias="corpus_id",
+    )
+    query: str = Field(description="Query string")
+    document: str = Field(description="Document/passage text to score")
+    include_logits: int = Field(
+        default=0,
+        ge=0,
+        le=1,
+        description="Include backend-specific raw logits when available (best-effort)",
+    )
+
+
+class RerankerScoreResponse(BaseModel):
+    """Response payload for POST /api/reranker/score."""
+
+    ok: bool = Field(description="Whether scoring succeeded")
+    backend: str = Field(default="", description="Resolved backend used to score (mlx_qwen3|transformers|...)")
+    score: float | None = Field(default=None, description="Normalized score in [0,1] (best-effort)")
+    yes_logit: float | None = Field(default=None, description="Raw yes logit (if include_logits and supported)")
+    no_logit: float | None = Field(default=None, description="Raw no logit (if include_logits and supported)")
+    error: str | None = Field(default=None, description="Error message (if any)")
+
+
 class RecallIndexRequest(BaseModel):
     """Request payload for POST /api/recall/index."""
 
@@ -1922,6 +1996,51 @@ class RetrievalConfig(BaseModel):
         description="Enable chunk_summary-based retrieval"
     )
 
+    max_chunks_per_file: int = Field(
+        default=3,
+        ge=1,
+        le=50,
+        description="Max chunks to return per file_path (document-aware result shaping).",
+    )
+    dedup_by: Literal["chunk_id", "file_path"] = Field(
+        default="chunk_id",
+        description="Dedup key for final results.",
+    )
+    neighbor_window: int = Field(
+        default=1,
+        ge=0,
+        le=10,
+        description="Include adjacent chunks by ordinal for coherence (requires chunk_ordinal metadata).",
+    )
+    min_score_vector: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=1.0,
+        description="Minimum score threshold for vector leg results (0 disables).",
+    )
+    min_score_sparse: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=10.0,
+        description="Minimum score threshold for sparse leg results (0 disables). Note: sparse scores are engine-dependent (FTS vs BM25).",
+    )
+    min_score_graph: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=10.0,
+        description="Minimum score threshold for graph leg results (0 disables).",
+    )
+    enable_mmr: bool = Field(
+        default=False,
+        description="Enable MMR diversification when embeddings are available.",
+    )
+    mmr_lambda: float = Field(
+        default=0.7,
+        ge=0.0,
+        le=1.0,
+        description="MMR lambda (1=query relevance only, 0=diversity only).",
+    )
+
     multi_query_m: int = Field(
         default=4,
         ge=1,
@@ -2108,6 +2227,10 @@ class LayerBonusConfig(BaseModel):
 class EmbeddingConfig(BaseModel):
     """Embedding generation and caching configuration."""
 
+    embedding_backend: Literal["deterministic", "provider"] = Field(
+        default="deterministic",
+        description="Embedding execution backend. 'deterministic' is offline/test-friendly; 'provider' calls real providers.",
+    )
     embedding_type: str = Field(
         default="openai",
         description="Embedding provider (dynamic - validated against models.json at runtime)"
@@ -2121,6 +2244,32 @@ class EmbeddingConfig(BaseModel):
         ge=128,
         le=4096,
         description="Embedding dimensions"
+    )
+    auto_set_dimensions: bool = Field(
+        default=True,
+        description="When true, the UI auto-syncs embedding_dim from data/models.json when model changes.",
+    )
+    input_truncation: Literal["error", "truncate_end", "truncate_middle"] = Field(
+        default="truncate_end",
+        description="What to do when text exceeds embedding/token limits.",
+    )
+    embed_text_prefix: str = Field(
+        default="",
+        description="Prefix added before chunk text prior to embedding (stable document context).",
+    )
+    embed_text_suffix: str = Field(
+        default="",
+        description="Suffix added after chunk text prior to embedding.",
+    )
+    contextual_chunk_embeddings: Literal["off", "prepend_context", "late_chunking_local_only"] = Field(
+        default="off",
+        description="Contextual chunk embedding mode. 'late_chunking_local_only' requires local/HF provider backend.",
+    )
+    late_chunking_max_doc_tokens: int = Field(
+        default=8192,
+        ge=256,
+        le=65536,
+        description="Max tokens per document segment for local late chunking.",
     )
 
     @field_validator('embedding_type', mode='before')
@@ -2197,9 +2346,59 @@ class EmbeddingConfig(BaseModel):
             raise ValueError(f'Uncommon embedding dimension: {v}. Expected one of {common_dims}')
         return v
 
+    @model_validator(mode="after")
+    def _validate_contextual_embedding_mode(self) -> Self:
+        mode = str(self.contextual_chunk_embeddings or "off").strip().lower()
+        if mode == "late_chunking_local_only":
+            t = str(self.embedding_type or "").strip().lower()
+            if t not in {"local", "huggingface"}:
+                raise ValueError(
+                    "contextual_chunk_embeddings='late_chunking_local_only' requires embedding_type=local|huggingface"
+                )
+            if str(self.embedding_backend or "").strip().lower() != "provider":
+                raise ValueError(
+                    "contextual_chunk_embeddings='late_chunking_local_only' requires embedding_backend='provider'"
+                )
+        return self
+
+
+class TokenizationConfig(BaseModel):
+    """Tokenizer configuration used for token-aware chunking and budgeting."""
+
+    strategy: Literal["whitespace", "tiktoken", "huggingface"] = Field(
+        default="tiktoken",
+        description="Tokenization strategy used for chunking/budgeting.",
+    )
+    tiktoken_encoding: str = Field(
+        default="o200k_base",
+        description="tiktoken encoding name (strategy='tiktoken').",
+    )
+    hf_tokenizer_name: str = Field(
+        default="gpt2",
+        description="HuggingFace tokenizer name (strategy='huggingface').",
+    )
+    normalize_unicode: bool = Field(
+        default=True,
+        description="Normalize unicode (NFKC) before tokenization for stability.",
+    )
+    lowercase: bool = Field(
+        default=False,
+        description="Lowercase before tokenization.",
+    )
+    max_tokens_per_chunk_hard: int = Field(
+        default=8192,
+        ge=256,
+        le=65536,
+        description="Absolute hard limit for tokens per chunk (safety ceiling).",
+    )
+    estimate_only: bool = Field(
+        default=False,
+        description="If true, use fast approximate token counting.",
+    )
+
 
 class ChunkingConfig(BaseModel):
-    """Code chunking configuration."""
+    """Chunking configuration for documents and code."""
 
     chunk_size: int = Field(
         default=1000,
@@ -2220,9 +2419,9 @@ class ChunkingConfig(BaseModel):
         description="Overlap lines for AST chunking"
     )
     max_indexable_file_size: int = Field(
-        default=2000000,
+        default=250_000_000,
         ge=10000,
-        le=10000000,
+        le=2_000_000_000,
         description="Max file size to index (bytes) - files larger than this are skipped"
     )
     max_chunk_tokens: int = Field(
@@ -2245,8 +2444,8 @@ class ChunkingConfig(BaseModel):
     )
     chunking_strategy: str = Field(
         default="ast",
-        pattern="^(ast|greedy|hybrid)$",
-        description="Chunking strategy"
+        pattern="^(ast|hybrid|greedy|fixed_chars|fixed_tokens|recursive|markdown|sentence|qa_blocks|semantic)$",
+        description="Chunking strategy (document + code)"
     )
     preserve_imports: int = Field(
         default=1,
@@ -2254,11 +2453,57 @@ class ChunkingConfig(BaseModel):
         le=1,
         description="Include imports in chunks"
     )
+    target_tokens: int = Field(
+        default=512,
+        ge=64,
+        le=8192,
+        description="Target tokens per chunk (token-based strategies)",
+    )
+    overlap_tokens: int = Field(
+        default=64,
+        ge=0,
+        le=2048,
+        description="Token overlap between chunks (token-based strategies)",
+    )
+    separators: list[str] = Field(
+        default_factory=lambda: ["\n\n", "\n", ". ", " ", ""],
+        description="Separators for recursive chunking, in priority order.",
+    )
+    separator_keep: Literal["none", "prefix", "suffix"] = Field(
+        default="suffix",
+        description="Whether to keep separators when splitting (recursive strategy).",
+    )
+    recursive_max_depth: int = Field(
+        default=10,
+        ge=1,
+        le=50,
+        description="Max recursion depth for recursive chunking.",
+    )
+    markdown_max_heading_level: int = Field(
+        default=4,
+        ge=1,
+        le=6,
+        description="Max heading level to split on for markdown chunking.",
+    )
+    markdown_include_code_fences: bool = Field(
+        default=True,
+        description="Whether to include fenced code blocks in markdown sections.",
+    )
+    emit_chunk_ordinal: bool = Field(
+        default=True,
+        description="Emit chunk ordinal metadata for neighbor-window retrieval.",
+    )
+    emit_parent_doc_id: bool = Field(
+        default=True,
+        description="Emit parent document id metadata for neighbor-window retrieval.",
+    )
 
     @model_validator(mode='after')
     def validate_overlap_less_than_size(self) -> Self:
         if self.chunk_overlap >= self.chunk_size:
             raise ValueError('chunk_overlap must be less than chunk_size')
+        if self.overlap_tokens >= self.target_tokens:
+            raise ValueError("overlap_tokens must be less than target_tokens")
         return self
 
 
@@ -2311,10 +2556,51 @@ class IndexingConfig(BaseModel):
         description="Excluded file extensions (comma-separated)"
     )
     index_max_file_size_mb: int = Field(
-        default=10,
+        default=250,
         ge=1,
-        le=100,
+        le=1024,
         description="Max file size to index (MB)"
+    )
+    large_file_mode: Literal["read_all", "stream"] = Field(
+        default="stream",
+        description="How to ingest very large text files. 'stream' avoids loading entire files into memory.",
+    )
+    large_file_stream_chunk_chars: int = Field(
+        default=2_000_000,
+        ge=100_000,
+        le=50_000_000,
+        description="When large_file_mode='stream', read text files in bounded char blocks (best-effort).",
+    )
+
+    parquet_extract_max_rows: int = Field(
+        default=5000,
+        ge=1,
+        le=200000,
+        description="Max rows to extract from a single Parquet file during indexing (best-effort)",
+    )
+    parquet_extract_max_chars: int = Field(
+        default=2_000_000,
+        ge=10_000,
+        le=50_000_000,
+        description="Max characters to extract from a single Parquet file during indexing (best-effort)",
+    )
+    parquet_extract_max_cell_chars: int = Field(
+        default=20_000,
+        ge=100,
+        le=200_000,
+        description="Max characters per extracted Parquet cell (best-effort)",
+    )
+    parquet_extract_text_columns_only: int = Field(
+        default=1,
+        ge=0,
+        le=1,
+        description="Extract only text/string-like columns from Parquet files when possible",
+    )
+    parquet_extract_include_column_names: int = Field(
+        default=1,
+        ge=0,
+        le=1,
+        description="Include column headers when extracting Parquet text",
     )
     skip_dense: int = Field(
         default=0,
@@ -2540,6 +2826,18 @@ class VectorSearchConfig(BaseModel):
 class SparseSearchConfig(BaseModel):
     """Configuration for sparse (BM25) search."""
 
+    engine: Literal["postgres_fts", "pg_search_bm25"] = Field(
+        default="postgres_fts",
+        description="Sparse retrieval engine. 'postgres_fts' uses built-in FTS; 'pg_search_bm25' uses ParadeDB pg_search.",
+    )
+    query_mode: Literal["plain", "phrase", "boolean"] = Field(
+        default="plain",
+        description="How to interpret the sparse query string.",
+    )
+    highlight: bool = Field(
+        default=False,
+        description="Enable sparse highlight payloads when supported (UI later).",
+    )
     enabled: bool = Field(
         default=True,
         description="Enable sparse BM25 search in tri-brid retrieval"
@@ -2780,7 +3078,11 @@ class RerankingConfig(BaseModel):
     reranker_mode: str = Field(
         default="none",
         pattern="^(cloud|local|learning|none)$",
-        description="Reranker mode: 'cloud' (Cohere/Voyage API), 'local' (HuggingFace cross-encoder), 'learning' (TRIBRID cross-encoder-tribrid), 'none' (disabled)"
+        description=(
+            "Reranker mode: 'cloud' (Cohere/Voyage/Jina API), 'local' (HuggingFace cross-encoder), "
+            "'learning' (trainable reranker: MLX Qwen3 LoRA when available, else transformers), "
+            "'none' (disabled)"
+        ),
     )
 
     reranker_cloud_provider: str = Field(
@@ -3341,7 +3643,7 @@ class TrainingConfig(BaseModel):
 
     tribrid_reranker_model_path: str = Field(
         default="models/cross-encoder-tribrid",
-        description="Reranker model path"
+        description="Active learning reranker artifact path (HF model dir for transformers; adapter dir for MLX)"
     )
 
     tribrid_reranker_mine_mode: str = Field(
@@ -3360,6 +3662,77 @@ class TrainingConfig(BaseModel):
     tribrid_triplets_path: str = Field(
         default="data/training/triplets.jsonl",
         description="Training triplets file path"
+    )
+
+    learning_reranker_backend: Literal["auto", "transformers", "mlx_qwen3"] = Field(
+        default="auto",
+        description="Learning reranker backend: auto (prefer MLX Qwen3 on Apple Silicon), transformers (HF), mlx_qwen3 (force MLX)",
+    )
+
+    learning_reranker_base_model: str = Field(
+        default="Qwen/Qwen3-Reranker-0.6B",
+        description="Base model to fine-tune for MLX Qwen3 learning reranker",
+    )
+
+    learning_reranker_lora_rank: int = Field(
+        default=16,
+        ge=1,
+        le=128,
+        description="LoRA rank for MLX Qwen3 learning reranker",
+    )
+
+    learning_reranker_lora_alpha: float = Field(
+        default=32.0,
+        gt=0.0,
+        le=512.0,
+        description="LoRA alpha for MLX Qwen3 learning reranker",
+    )
+
+    learning_reranker_lora_dropout: float = Field(
+        default=0.05,
+        ge=0.0,
+        le=0.5,
+        description="LoRA dropout for MLX Qwen3 learning reranker",
+    )
+
+    learning_reranker_lora_target_modules: list[str] = Field(
+        default_factory=lambda: ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
+        description="Module name suffixes to apply LoRA to (MLX Qwen3)",
+    )
+
+    learning_reranker_negative_ratio: int = Field(
+        default=5,
+        ge=1,
+        le=20,
+        description="Negative pairs per positive during learning reranker training",
+    )
+
+    learning_reranker_grad_accum_steps: int = Field(
+        default=8,
+        ge=1,
+        le=128,
+        description="Gradient accumulation steps per optimizer update for MLX Qwen3 learning reranker training",
+    )
+
+    learning_reranker_promote_if_improves: int = Field(
+        default=1,
+        ge=0,
+        le=1,
+        description="Promote trained learning artifact to active path only if primary metric improves",
+    )
+
+    learning_reranker_promote_epsilon: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=1.0,
+        description="Minimum improvement required to auto-promote (primary metric delta)",
+    )
+
+    learning_reranker_unload_after_sec: int = Field(
+        default=0,
+        ge=0,
+        le=86400,
+        description="Unload MLX learning reranker model after idle seconds (0 = never)",
     )
 
 
@@ -4179,6 +4552,7 @@ class TriBridConfig(BaseModel):
     scoring: ScoringConfig = Field(default_factory=ScoringConfig)
     layer_bonus: LayerBonusConfig = Field(default_factory=LayerBonusConfig)
     embedding: EmbeddingConfig = Field(default_factory=EmbeddingConfig)
+    tokenization: TokenizationConfig = Field(default_factory=TokenizationConfig)
     chunking: ChunkingConfig = Field(default_factory=ChunkingConfig)
     indexing: IndexingConfig = Field(default_factory=IndexingConfig)
     graph_storage: GraphStorageConfig = Field(default_factory=GraphStorageConfig)
@@ -4297,6 +4671,11 @@ class TriBridConfig(BaseModel):
             'BM25_STOPWORDS_LANG': self.indexing.bm25_stopwords_lang,
             'INDEX_EXCLUDED_EXTS': self.indexing.index_excluded_exts,
             'INDEX_MAX_FILE_SIZE_MB': self.indexing.index_max_file_size_mb,
+            'PARQUET_EXTRACT_MAX_ROWS': self.indexing.parquet_extract_max_rows,
+            'PARQUET_EXTRACT_MAX_CHARS': self.indexing.parquet_extract_max_chars,
+            'PARQUET_EXTRACT_MAX_CELL_CHARS': self.indexing.parquet_extract_max_cell_chars,
+            'PARQUET_EXTRACT_TEXT_COLUMNS_ONLY': self.indexing.parquet_extract_text_columns_only,
+            'PARQUET_EXTRACT_INCLUDE_COLUMN_NAMES': self.indexing.parquet_extract_include_column_names,
             'SKIP_DENSE': self.indexing.skip_dense,
             'OUT_DIR_BASE': self.indexing.out_dir_base,
             'RAG_OUT_BASE': self.indexing.rag_out_base,
@@ -4394,7 +4773,7 @@ class TriBridConfig(BaseModel):
             'LANGCHAIN_TRACING_V2': self.tracing.langchain_tracing_v2,
             'LANGTRACE_API_HOST': self.tracing.langtrace_api_host,
             'LANGTRACE_PROJECT_ID': self.tracing.langtrace_project_id,
-    # Training params (10)
+    # Training params (21)
             'RERANKER_TRAIN_EPOCHS': self.training.reranker_train_epochs,
             'RERANKER_TRAIN_BATCH': self.training.reranker_train_batch,
             'RERANKER_TRAIN_LR': self.training.reranker_train_lr,
@@ -4405,6 +4784,17 @@ class TriBridConfig(BaseModel):
             'TRIBRID_RERANKER_MINE_MODE': self.training.tribrid_reranker_mine_mode,
             'TRIBRID_RERANKER_MINE_RESET': self.training.tribrid_reranker_mine_reset,
             'TRIBRID_TRIPLETS_PATH': self.training.tribrid_triplets_path,
+            'LEARNING_RERANKER_BACKEND': self.training.learning_reranker_backend,
+            'LEARNING_RERANKER_BASE_MODEL': self.training.learning_reranker_base_model,
+            'LEARNING_RERANKER_LORA_RANK': self.training.learning_reranker_lora_rank,
+            'LEARNING_RERANKER_LORA_ALPHA': self.training.learning_reranker_lora_alpha,
+            'LEARNING_RERANKER_LORA_DROPOUT': self.training.learning_reranker_lora_dropout,
+            'LEARNING_RERANKER_LORA_TARGET_MODULES': ', '.join(self.training.learning_reranker_lora_target_modules),
+            'LEARNING_RERANKER_NEGATIVE_RATIO': self.training.learning_reranker_negative_ratio,
+            'LEARNING_RERANKER_GRAD_ACCUM_STEPS': self.training.learning_reranker_grad_accum_steps,
+            'LEARNING_RERANKER_PROMOTE_IF_IMPROVES': self.training.learning_reranker_promote_if_improves,
+            'LEARNING_RERANKER_PROMOTE_EPSILON': self.training.learning_reranker_promote_epsilon,
+            'LEARNING_RERANKER_UNLOAD_AFTER_SEC': self.training.learning_reranker_unload_after_sec,
             # UI params (21)
             'CHAT_STREAMING_ENABLED': self.ui.chat_streaming_enabled,
             'CHAT_HISTORY_MAX': self.ui.chat_history_max,
@@ -4439,12 +4829,13 @@ class TriBridConfig(BaseModel):
             'EVAL_DATASET_PATH': self.evaluation.eval_dataset_path,
             'BASELINE_PATH': self.evaluation.baseline_path,
             'EVAL_MULTI_M': self.evaluation.eval_multi_m,
-            # System prompts (7)
+            # System prompts (8)
             'PROMPT_MAIN_RAG_CHAT': self.system_prompts.main_rag_chat,
             'PROMPT_QUERY_EXPANSION': self.system_prompts.query_expansion,
             'PROMPT_QUERY_REWRITE': self.system_prompts.query_rewrite,
             'PROMPT_SEMANTIC_CARDS': self.system_prompts.semantic_chunk_summaries,
             'PROMPT_CODE_ENRICHMENT': self.system_prompts.code_enrichment,
+            'PROMPT_SEMANTIC_KG_EXTRACTION': self.system_prompts.semantic_kg_extraction,
             'PROMPT_EVAL_ANALYSIS': self.system_prompts.eval_analysis,
             'PROMPT_LIGHTWEIGHT_CARDS': self.system_prompts.lightweight_chunk_summaries,
             # MCP (inbound) params (7)
@@ -4566,6 +4957,11 @@ class TriBridConfig(BaseModel):
                 bm25_stopwords_lang=data.get('BM25_STOPWORDS_LANG', 'en'),
                 index_excluded_exts=data.get('INDEX_EXCLUDED_EXTS', '.png,.jpg,.gif,.ico,.svg,.woff,.ttf'),
                 index_max_file_size_mb=data.get('INDEX_MAX_FILE_SIZE_MB', 10),
+                parquet_extract_max_rows=data.get('PARQUET_EXTRACT_MAX_ROWS', 5000),
+                parquet_extract_max_chars=data.get('PARQUET_EXTRACT_MAX_CHARS', 2_000_000),
+                parquet_extract_max_cell_chars=data.get('PARQUET_EXTRACT_MAX_CELL_CHARS', 20_000),
+                parquet_extract_text_columns_only=data.get('PARQUET_EXTRACT_TEXT_COLUMNS_ONLY', 1),
+                parquet_extract_include_column_names=data.get('PARQUET_EXTRACT_INCLUDE_COLUMN_NAMES', 1),
                 skip_dense=data.get('SKIP_DENSE', 0),
                 out_dir_base=data.get('OUT_DIR_BASE', './out'),
                 rag_out_base=data.get('RAG_OUT_BASE', ''),
@@ -4684,6 +5080,19 @@ class TriBridConfig(BaseModel):
                 tribrid_reranker_mine_mode=data.get('TRIBRID_RERANKER_MINE_MODE', 'replace'),
                 tribrid_reranker_mine_reset=data.get('TRIBRID_RERANKER_MINE_RESET', 0),
                 tribrid_triplets_path=data.get('TRIBRID_TRIPLETS_PATH', 'data/training/triplets.jsonl'),
+                learning_reranker_backend=data.get('LEARNING_RERANKER_BACKEND', 'auto'),
+                learning_reranker_base_model=data.get('LEARNING_RERANKER_BASE_MODEL', 'Qwen/Qwen3-Reranker-0.6B'),
+                learning_reranker_lora_rank=data.get('LEARNING_RERANKER_LORA_RANK', 16),
+                learning_reranker_lora_alpha=data.get('LEARNING_RERANKER_LORA_ALPHA', 32.0),
+                learning_reranker_lora_dropout=data.get('LEARNING_RERANKER_LORA_DROPOUT', 0.05),
+                learning_reranker_lora_target_modules=data.get(
+                    'LEARNING_RERANKER_LORA_TARGET_MODULES', ["q_proj", "k_proj", "v_proj", "o_proj"]
+                ),
+                learning_reranker_negative_ratio=data.get('LEARNING_RERANKER_NEGATIVE_RATIO', 5),
+                learning_reranker_grad_accum_steps=data.get('LEARNING_RERANKER_GRAD_ACCUM_STEPS', 8),
+                learning_reranker_promote_if_improves=data.get('LEARNING_RERANKER_PROMOTE_IF_IMPROVES', 1),
+                learning_reranker_promote_epsilon=data.get('LEARNING_RERANKER_PROMOTE_EPSILON', 0.0),
+                learning_reranker_unload_after_sec=data.get('LEARNING_RERANKER_UNLOAD_AFTER_SEC', 0),
             ),
             ui=UIConfig(
                 chat_streaming_enabled=data.get('CHAT_STREAMING_ENABLED', 1),
@@ -4728,6 +5137,9 @@ class TriBridConfig(BaseModel):
                 query_rewrite=data.get('PROMPT_QUERY_REWRITE', SystemPromptsConfig().query_rewrite),
                 semantic_chunk_summaries=data.get('PROMPT_SEMANTIC_CARDS', SystemPromptsConfig().semantic_chunk_summaries),
                 code_enrichment=data.get('PROMPT_CODE_ENRICHMENT', SystemPromptsConfig().code_enrichment),
+                semantic_kg_extraction=data.get(
+                    'PROMPT_SEMANTIC_KG_EXTRACTION', SystemPromptsConfig().semantic_kg_extraction
+                ),
                 eval_analysis=data.get('PROMPT_EVAL_ANALYSIS', SystemPromptsConfig().eval_analysis),
                 lightweight_chunk_summaries=data.get('PROMPT_LIGHTWEIGHT_CARDS', SystemPromptsConfig().lightweight_chunk_summaries),
             ),
@@ -4827,7 +5239,7 @@ TRIBRID_CONFIG_KEYS = {
     'GREEDY_FALLBACK_TARGET',
     'CHUNKING_STRATEGY',
     'PRESERVE_IMPORTS',
-    # Indexing params (15)
+    # Indexing params (20)
     'POSTGRES_URL',
     'COLLECTION_NAME',
     'COLLECTION_SUFFIX',
@@ -4840,6 +5252,11 @@ TRIBRID_CONFIG_KEYS = {
     'BM25_STOPWORDS_LANG',
     'INDEX_EXCLUDED_EXTS',
     'INDEX_MAX_FILE_SIZE_MB',
+    'PARQUET_EXTRACT_MAX_ROWS',
+    'PARQUET_EXTRACT_MAX_CHARS',
+    'PARQUET_EXTRACT_MAX_CELL_CHARS',
+    'PARQUET_EXTRACT_TEXT_COLUMNS_ONLY',
+    'PARQUET_EXTRACT_INCLUDE_COLUMN_NAMES',
     'SKIP_DENSE',
     'OUT_DIR_BASE',
     'RAG_OUT_BASE',
@@ -4919,7 +5336,7 @@ TRIBRID_CONFIG_KEYS = {
     'LANGCHAIN_TRACING_V2',
     'LANGTRACE_API_HOST',
     'LANGTRACE_PROJECT_ID',
-    # Training params (10)
+    # Training params (21)
     'RERANKER_TRAIN_EPOCHS',
     'RERANKER_TRAIN_BATCH',
     'RERANKER_TRAIN_LR',
@@ -4930,6 +5347,17 @@ TRIBRID_CONFIG_KEYS = {
     'TRIBRID_RERANKER_MINE_MODE',
     'TRIBRID_RERANKER_MINE_RESET',
     'TRIBRID_TRIPLETS_PATH',
+    'LEARNING_RERANKER_BACKEND',
+    'LEARNING_RERANKER_BASE_MODEL',
+    'LEARNING_RERANKER_LORA_RANK',
+    'LEARNING_RERANKER_LORA_ALPHA',
+    'LEARNING_RERANKER_LORA_DROPOUT',
+    'LEARNING_RERANKER_LORA_TARGET_MODULES',
+    'LEARNING_RERANKER_NEGATIVE_RATIO',
+    'LEARNING_RERANKER_GRAD_ACCUM_STEPS',
+    'LEARNING_RERANKER_PROMOTE_IF_IMPROVES',
+    'LEARNING_RERANKER_PROMOTE_EPSILON',
+    'LEARNING_RERANKER_UNLOAD_AFTER_SEC',
     # UI params (25)
     'CHAT_STREAMING_ENABLED',
     'CHAT_HISTORY_MAX',
@@ -4961,13 +5389,14 @@ TRIBRID_CONFIG_KEYS = {
     'EVAL_DATASET_PATH',
     'BASELINE_PATH',
     'EVAL_MULTI_M',
-    # System prompts (7 active)
+    # System prompts (8 active)
     'PROMPT_MAIN_RAG_CHAT',
     'PROMPT_QUERY_EXPANSION',
     'PROMPT_QUERY_REWRITE',
     'PROMPT_SEMANTIC_CARDS',
     'PROMPT_LIGHTWEIGHT_CARDS',
     'PROMPT_CODE_ENRICHMENT',
+    'PROMPT_SEMANTIC_KG_EXTRACTION',
     'PROMPT_EVAL_ANALYSIS',
     # MCP (inbound) params (7)
     'MCP_HTTP_ENABLED',

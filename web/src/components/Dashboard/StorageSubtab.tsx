@@ -328,7 +328,7 @@ export function StorageSubtab() {
               <strong>Chunk Summaries:</strong> Pre-computed summaries enable faster retrieval with minimal storage cost
             </li>
             <li>
-              <strong>Reranker Cache:</strong> Stores cross-encoder scores to avoid re-computation
+              <strong>Reranker Cache:</strong> Stores reranker scores to avoid re-computation
             </li>
             <li>
               <strong>Keywords:</strong> BM25 keyword extraction for improved sparse retrieval

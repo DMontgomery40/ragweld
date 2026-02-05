@@ -4,6 +4,7 @@ import json
 import math
 import random
 import shutil
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Iterable
@@ -343,6 +344,7 @@ def train_pairwise_reranker(
 
     for epoch_idx in range(int(epochs)):
         for batch in train_loader:
+            step_start = time.perf_counter()
             global_step += 1
             labels = batch.pop("labels")
             labels_t = labels.to(device)
@@ -359,6 +361,11 @@ def train_pairwise_reranker(
 
             if emit and (global_step == 1 or global_step % 10 == 0 or global_step == total_steps):
                 pct = (float(global_step) / float(total_steps)) * 100.0
+                step_s = max(1e-6, time.perf_counter() - step_start)
+                try:
+                    lr_now = float(scheduler.get_last_lr()[0])
+                except Exception:
+                    lr_now = float(lr)
                 emit(
                     "progress",
                     {
@@ -366,6 +373,12 @@ def train_pairwise_reranker(
                         "epoch": float(epoch_idx) + (float(global_step % max(1, len(train_loader))) / float(max(1, len(train_loader)))),
                         "percent": float(min(100.0, max(0.0, pct))),
                         "message": f"step {global_step}/{total_steps} loss={float(loss.detach().cpu().item()):.4f}",
+                        "metrics": {
+                            "train_loss": float(loss.detach().cpu().item()),
+                            "lr": float(lr_now),
+                            "step_time_ms": float(step_s * 1000.0),
+                            "examples_per_sec": float(float(labels_t.shape[0]) / float(step_s)),
+                        },
                     },
                 )
 

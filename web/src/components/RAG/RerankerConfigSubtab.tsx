@@ -4,9 +4,11 @@ import { useReranker } from '@/hooks/useReranker';
 import { TooltipIcon } from '@/components/ui/TooltipIcon';
 import { ApiKeyStatus } from '@/components/ui/ApiKeyStatus';
 import { modelsApi } from '@/api';
+import type { TrainingConfig } from '@/types/generated';
 
 const RERANKER_MODES = ['none', 'local', 'learning', 'cloud'] as const;
 type RerankerMode = (typeof RERANKER_MODES)[number];
+type LearningBackend = NonNullable<TrainingConfig['learning_reranker_backend']>;
 
 type RerankModelEntry = {
   provider?: string;
@@ -37,12 +39,12 @@ export function RerankerConfigSubtab() {
   // Config (LAW)
   const [mode, setMode] = useConfigField<RerankerMode>('reranking.reranker_mode', 'local');
   const [cloudProvider, setCloudProvider] = useConfigField<string>('reranking.reranker_cloud_provider', 'cohere');
-  const [cloudModel, setCloudModel] = useConfigField<string>('reranking.reranker_cloud_model', 'rerank-3.5');
+  const [cloudModel, setCloudModel] = useConfigField<string>('reranking.reranker_cloud_model', 'rerank-v3.5');
   const [cloudTopN, setCloudTopN] = useConfigField<number>('reranking.reranker_cloud_top_n', 50);
 
   const [localModel, setLocalModel] = useConfigField<string>(
     'reranking.reranker_local_model',
-    'BAAI/bge-reranker-v2-m3'
+    'cross-encoder/ms-marco-MiniLM-L-12-v2'
   );
 
   // Learning reranker is configured under training + reranking
@@ -50,8 +52,20 @@ export function RerankerConfigSubtab() {
     'training.tribrid_reranker_model_path',
     'models/cross-encoder-tribrid'
   );
+  const [learningBackend, setLearningBackend] = useConfigField<LearningBackend>(
+    'training.learning_reranker_backend',
+    'auto'
+  );
+  const [learningBaseModel, setLearningBaseModel] = useConfigField<string>(
+    'training.learning_reranker_base_model',
+    'Qwen/Qwen3-Reranker-0.6B'
+  );
+  const [learningUnloadAfterSec, setLearningUnloadAfterSec] = useConfigField<number>(
+    'training.learning_reranker_unload_after_sec',
+    0
+  );
   const [alpha, setAlpha] = useConfigField<number>('reranking.tribrid_reranker_alpha', 0.7);
-  const [topN, setTopN] = useConfigField<number>('reranking.tribrid_reranker_topn', 10);
+  const [topN, setTopN] = useConfigField<number>('reranking.tribrid_reranker_topn', 50);
   const [batch, setBatch] = useConfigField<number>('reranking.tribrid_reranker_batch', 16);
   const [maxLen, setMaxLen] = useConfigField<number>('reranking.tribrid_reranker_maxlen', 512);
 
@@ -217,7 +231,7 @@ export function RerankerConfigSubtab() {
               {m === 'none' && 'No reranking'}
               {m === 'local' && 'Run a local cross-encoder'}
               {m === 'cloud' && 'Use a hosted reranker API'}
-              {m === 'learning' && 'Use the trainable TriBrid reranker'}
+              {m === 'learning' && 'Use the trainable learning reranker'}
             </div>
           </button>
         ))}
@@ -356,7 +370,7 @@ export function RerankerConfigSubtab() {
             marginBottom: 18,
           }}
         >
-          <div style={{ fontWeight: 600, marginBottom: 10 }}>Learning reranker (TriBrid)</div>
+          <div style={{ fontWeight: 600, marginBottom: 10 }}>Learning reranker</div>
 
           <div className="input-row">
             <div className="input-group">
@@ -371,6 +385,29 @@ export function RerankerConfigSubtab() {
               />
             </div>
             <div className="input-group" />
+          </div>
+
+          <div className="input-row">
+            <div className="input-group">
+              <label>
+                Backend <TooltipIcon name="LEARNING_RERANKER_BACKEND" />
+              </label>
+              <select value={learningBackend} onChange={(e) => setLearningBackend(e.target.value as LearningBackend)}>
+                <option value="auto">auto (prefer MLX Qwen3)</option>
+                <option value="transformers">transformers (HF)</option>
+                <option value="mlx_qwen3">mlx_qwen3 (force)</option>
+              </select>
+            </div>
+            <div className="input-group">
+              <label>
+                Base model <TooltipIcon name="LEARNING_RERANKER_BASE_MODEL" />
+              </label>
+              <input
+                type="text"
+                value={learningBaseModel}
+                onChange={(e) => setLearningBaseModel(e.target.value)}
+              />
+            </div>
           </div>
 
           <div className="input-row">
@@ -393,7 +430,7 @@ export function RerankerConfigSubtab() {
               </label>
               <input
                 type="number"
-                min={1}
+                min={10}
                 max={200}
                 value={topN}
                 onChange={(e) => setTopN(parseInt(e.target.value || '10', 10))}
@@ -406,7 +443,7 @@ export function RerankerConfigSubtab() {
               <input
                 type="number"
                 min={1}
-                max={64}
+                max={128}
                 value={batch}
                 onChange={(e) => setBatch(parseInt(e.target.value || '16', 10))}
               />
@@ -426,7 +463,18 @@ export function RerankerConfigSubtab() {
                 onChange={(e) => setMaxLen(parseInt(e.target.value || '512', 10))}
               />
             </div>
-            <div className="input-group" />
+            <div className="input-group">
+              <label>
+                Unload after sec <TooltipIcon name="LEARNING_RERANKER_UNLOAD_AFTER_SEC" />
+              </label>
+              <input
+                type="number"
+                min={0}
+                max={86400}
+                value={learningUnloadAfterSec}
+                onChange={(e) => setLearningUnloadAfterSec(parseInt(e.target.value || '0', 10))}
+              />
+            </div>
             <div className="input-group" />
           </div>
         </div>
@@ -505,4 +553,3 @@ export function RerankerConfigSubtab() {
     </div>
   );
 }
-

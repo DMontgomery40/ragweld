@@ -74,11 +74,12 @@ export const apiUrl = (path: string): string => {
  *
  * NOTE: This should be used for endpoints that are corpus-scoped in the backend.
  */
-export function withCorpusScope(path: string): string {
+export function withCorpusScope(path: string, corpusId?: string): string {
   const p = String(path || '');
   try {
     const u = new URL(window.location.href);
     const corpus =
+      String(corpusId || '').trim() ||
       u.searchParams.get('corpus') ||
       u.searchParams.get('repo') ||
       localStorage.getItem('tribrid_active_corpus') ||
@@ -89,6 +90,7 @@ export function withCorpusScope(path: string): string {
     return `${p}${sep}corpus_id=${encodeURIComponent(corpus)}`;
   } catch {
     const corpus =
+      String(corpusId || '').trim() ||
       localStorage.getItem('tribrid_active_corpus') ||
       localStorage.getItem('tribrid_active_repo') ||
       '';

@@ -248,7 +248,7 @@ export interface ChunkSummaryConfig {
   quick_tips?: string[];
 }
 
-/** Code chunking configuration. */
+/** Chunking configuration for documents and code. */
 export interface ChunkingConfig {
   /** Target chunk size (non-whitespace chars) */
   chunk_size?: number; // default: 1000
@@ -257,17 +257,35 @@ export interface ChunkingConfig {
   /** Overlap lines for AST chunking */
   ast_overlap_lines?: number; // default: 20
   /** Max file size to index (bytes) - files larger than this are skipped */
-  max_indexable_file_size?: number; // default: 2000000
+  max_indexable_file_size?: number; // default: 250000000
   /** Maximum tokens per chunk - chunks exceeding this are split recursively */
   max_chunk_tokens?: number; // default: 8000
   /** Minimum chunk size */
   min_chunk_chars?: number; // default: 50
   /** Target size for greedy chunking */
   greedy_fallback_target?: number; // default: 800
-  /** Chunking strategy */
+  /** Chunking strategy (document + code) */
   chunking_strategy?: string; // default: "ast"
   /** Include imports in chunks */
   preserve_imports?: number; // default: 1
+  /** Target tokens per chunk (token-based strategies) */
+  target_tokens?: number; // default: 512
+  /** Token overlap between chunks (token-based strategies) */
+  overlap_tokens?: number; // default: 64
+  /** Separators for recursive chunking, in priority order. */
+  separators?: string[];
+  /** Whether to keep separators when splitting (recursive strategy). */
+  separator_keep?: "none" | "prefix" | "suffix"; // default: "suffix"
+  /** Max recursion depth for recursive chunking. */
+  recursive_max_depth?: number; // default: 10
+  /** Max heading level to split on for markdown chunking. */
+  markdown_max_heading_level?: number; // default: 4
+  /** Whether to include fenced code blocks in markdown sections. */
+  markdown_include_code_fences?: boolean; // default: True
+  /** Emit chunk ordinal metadata for neighbor-window retrieval. */
+  emit_chunk_ordinal?: boolean; // default: True
+  /** Emit parent document id metadata for neighbor-window retrieval. */
+  emit_parent_doc_id?: boolean; // default: True
 }
 
 export interface CorpusEvalProfile {
@@ -399,12 +417,26 @@ export interface DockerContainer {
 
 /** Embedding generation and caching configuration. */
 export interface EmbeddingConfig {
+  /** Embedding execution backend. 'deterministic' is offline/test-friendly; 'provider' calls real providers. */
+  embedding_backend?: "deterministic" | "provider"; // default: "deterministic"
   /** Embedding provider (dynamic - validated against models.json at runtime) */
   embedding_type?: string; // default: "openai"
   /** OpenAI embedding model */
   embedding_model?: string; // default: "text-embedding-3-large"
   /** Embedding dimensions */
   embedding_dim?: number; // default: 3072
+  /** When true, the UI auto-syncs embedding_dim from data/models.json when model changes. */
+  auto_set_dimensions?: boolean; // default: True
+  /** What to do when text exceeds embedding/token limits. */
+  input_truncation?: "error" | "truncate_end" | "truncate_middle"; // default: "truncate_end"
+  /** Prefix added before chunk text prior to embedding (stable document context). */
+  embed_text_prefix?: string; // default: ""
+  /** Suffix added after chunk text prior to embedding. */
+  embed_text_suffix?: string; // default: ""
+  /** Contextual chunk embedding mode. 'late_chunking_local_only' requires local/HF provider backend. */
+  contextual_chunk_embeddings?: "off" | "prepend_context" | "late_chunking_local_only"; // default: "off"
+  /** Max tokens per document segment for local late chunking. */
+  late_chunking_max_doc_tokens?: number; // default: 8192
   /** Voyage embedding model */
   voyage_model?: string; // default: "voyage-code-3"
   /** Local SentenceTransformer model */
@@ -800,6 +832,8 @@ export interface IndexStats {
   total_chunks: number;
   /** Total token count across all chunks */
   total_tokens: number;
+  /** Embedding provider used for embeddings (embedding.embedding_type) at index time */
+  embedding_provider?: string; // default: ""
   /** Model used for embeddings */
   embedding_model: string;
   /** Dimension of embedding vectors */
@@ -833,7 +867,21 @@ export interface IndexingConfig {
   /** Excluded file extensions (comma-separated) */
   index_excluded_exts?: string; // default: ".png,.jpg,.gif,.ico,.svg,.woff,.ttf"
   /** Max file size to index (MB) */
-  index_max_file_size_mb?: number; // default: 10
+  index_max_file_size_mb?: number; // default: 250
+  /** How to ingest very large text files. 'stream' avoids loading entire files into memory. */
+  large_file_mode?: "read_all" | "stream"; // default: "stream"
+  /** When large_file_mode='stream', read text files in bounded char blocks (best-effort). */
+  large_file_stream_chunk_chars?: number; // default: 2000000
+  /** Max rows to extract from a single Parquet file during indexing (best-effort) */
+  parquet_extract_max_rows?: number; // default: 5000
+  /** Max characters to extract from a single Parquet file during indexing (best-effort) */
+  parquet_extract_max_chars?: number; // default: 2000000
+  /** Max characters per extracted Parquet cell (best-effort) */
+  parquet_extract_max_cell_chars?: number; // default: 20000
+  /** Extract only text/string-like columns from Parquet files when possible */
+  parquet_extract_text_columns_only?: number; // default: 1
+  /** Include column headers when extracting Parquet text */
+  parquet_extract_include_column_names?: number; // default: 1
   /** Skip dense vector indexing */
   skip_dense?: number; // default: 0
   /** Base output directory */
@@ -1226,7 +1274,7 @@ export interface RerankerTrainRunSummary {
 
 /** Reranking configuration for result refinement. */
 export interface RerankingConfig {
-  /** Reranker mode: 'cloud' (Cohere/Voyage API), 'local' (HuggingFace cross-encoder), 'learning' (TRIBRID cross-encoder-tribrid), 'none' (disabled) */
+  /** Reranker mode: 'cloud' (Cohere/Voyage/Jina API), 'local' (HuggingFace cross-encoder), 'learning' (trainable reranker: MLX Qwen3 LoRA when available, else transformers), 'none' (disabled) */
   reranker_mode?: string; // default: "none"
   /** Cloud reranker provider when mode=cloud (cohere, voyage, jina) */
   reranker_cloud_provider?: string; // default: "cohere"
@@ -1292,6 +1340,22 @@ export interface RetrievalConfig {
   vector_weight?: number; // default: 0.7
   /** Enable chunk_summary-based retrieval */
   chunk_summary_search_enabled?: number; // default: 1
+  /** Max chunks to return per file_path (document-aware result shaping). */
+  max_chunks_per_file?: number; // default: 3
+  /** Dedup key for final results. */
+  dedup_by?: "chunk_id" | "file_path"; // default: "chunk_id"
+  /** Include adjacent chunks by ordinal for coherence (requires chunk_ordinal metadata). */
+  neighbor_window?: number; // default: 1
+  /** Minimum score threshold for vector leg results (0 disables). */
+  min_score_vector?: number; // default: 0.0
+  /** Minimum score threshold for sparse leg results (0 disables). Note: sparse scores are engine-dependent (FTS vs BM25). */
+  min_score_sparse?: number; // default: 0.0
+  /** Minimum score threshold for graph leg results (0 disables). */
+  min_score_graph?: number; // default: 0.0
+  /** Enable MMR diversification when embeddings are available. */
+  enable_mmr?: boolean; // default: False
+  /** MMR lambda (1=query relevance only, 0=diversity only). */
+  mmr_lambda?: number; // default: 0.7
   /** Query variants for multi-query */
   multi_query_m?: number; // default: 4
   /** Enable semantic synonym expansion */
@@ -1324,6 +1388,12 @@ export interface ScoringConfig {
 
 /** Configuration for sparse (BM25) search. */
 export interface SparseSearchConfig {
+  /** Sparse retrieval engine. 'postgres_fts' uses built-in FTS; 'pg_search_bm25' uses ParadeDB pg_search. */
+  engine?: "postgres_fts" | "pg_search_bm25"; // default: "postgres_fts"
+  /** How to interpret the sparse query string. */
+  query_mode?: "plain" | "phrase" | "boolean"; // default: "plain"
+  /** Enable sparse highlight payloads when supported (UI later). */
+  highlight?: boolean; // default: False
   /** Enable sparse BM25 search in tri-brid retrieval */
   enabled?: boolean; // default: True
   /** Number of results to retrieve from sparse search */
@@ -1352,6 +1422,24 @@ export interface SystemPromptsConfig {
   eval_analysis?: string; // default: "You are an expert RAG (Retrieval-Augmented Gene..."
   /** Lightweight chunk_summary generation prompt for faster indexing */
   lightweight_chunk_summaries?: string; // default: "Extract key information from this code: symbols..."
+}
+
+/** Tokenizer configuration used for token-aware chunking and budgeting. */
+export interface TokenizationConfig {
+  /** Tokenization strategy used for chunking/budgeting. */
+  strategy?: "whitespace" | "tiktoken" | "huggingface"; // default: "tiktoken"
+  /** tiktoken encoding name (strategy='tiktoken'). */
+  tiktoken_encoding?: string; // default: "o200k_base"
+  /** HuggingFace tokenizer name (strategy='huggingface'). */
+  hf_tokenizer_name?: string; // default: "gpt2"
+  /** Normalize unicode (NFKC) before tokenization for stability. */
+  normalize_unicode?: boolean; // default: True
+  /** Lowercase before tokenization. */
+  lowercase?: boolean; // default: False
+  /** Absolute hard limit for tokens per chunk (safety ceiling). */
+  max_tokens_per_chunk_hard?: number; // default: 8192
+  /** If true, use fast approximate token counting. */
+  estimate_only?: boolean; // default: False
 }
 
 /** Trace payload for a single run. */
@@ -1432,7 +1520,7 @@ export interface TrainingConfig {
   triplets_min_count?: number; // default: 100
   /** Triplet mining mode */
   triplets_mine_mode?: string; // default: "replace"
-  /** Reranker model path */
+  /** Active learning reranker artifact path (HF model dir for transformers; adapter dir for MLX) */
   tribrid_reranker_model_path?: string; // default: "models/cross-encoder-tribrid"
   /** Triplet mining mode */
   tribrid_reranker_mine_mode?: string; // default: "replace"
@@ -1440,6 +1528,28 @@ export interface TrainingConfig {
   tribrid_reranker_mine_reset?: number; // default: 0
   /** Training triplets file path */
   tribrid_triplets_path?: string; // default: "data/training/triplets.jsonl"
+  /** Learning reranker backend: auto (prefer MLX Qwen3 on Apple Silicon), transformers (HF), mlx_qwen3 (force MLX) */
+  learning_reranker_backend?: "auto" | "transformers" | "mlx_qwen3"; // default: "auto"
+  /** Base model to fine-tune for MLX Qwen3 learning reranker */
+  learning_reranker_base_model?: string; // default: "Qwen/Qwen3-Reranker-0.6B"
+  /** LoRA rank for MLX Qwen3 learning reranker */
+  learning_reranker_lora_rank?: number; // default: 16
+  /** LoRA alpha for MLX Qwen3 learning reranker */
+  learning_reranker_lora_alpha?: number; // default: 32.0
+  /** LoRA dropout for MLX Qwen3 learning reranker */
+  learning_reranker_lora_dropout?: number; // default: 0.05
+  /** Module name suffixes to apply LoRA to (MLX Qwen3) */
+  learning_reranker_lora_target_modules?: string[];
+  /** Negative pairs per positive during learning reranker training */
+  learning_reranker_negative_ratio?: number; // default: 5
+  /** Gradient accumulation steps per optimizer update for MLX Qwen3 learning reranker training */
+  learning_reranker_grad_accum_steps?: number; // default: 8
+  /** Promote trained learning artifact to active path only if primary metric improves */
+  learning_reranker_promote_if_improves?: number; // default: 1
+  /** Minimum improvement required to auto-promote (primary metric delta) */
+  learning_reranker_promote_epsilon?: number; // default: 0.0
+  /** Unload MLX learning reranker model after idle seconds (0 = never) */
+  learning_reranker_unload_after_sec?: number; // default: 0
 }
 
 /** User interface configuration. */
@@ -1995,6 +2105,40 @@ export interface HealthStatus {
   services?: Record<string, HealthServiceStatus>;
 }
 
+/** Best-effort estimate for indexing cost/time before running the indexer.  Notes: - Token count is an approximation (byte-based heuristic). - Time is an intentionally rough range (depends on machine, provider latency, DB speed, etc.). */
+export interface IndexEstimate {
+  /** Corpus identifier */
+  corpus_id: string;
+  /** Resolved path on disk used for the estimate */
+  repo_path: string;
+  /** Estimated number of files that will be processed */
+  total_files: number;
+  /** Estimated total bytes across included files */
+  total_size_bytes: number;
+  /** Count of files skipped due to size limits */
+  skipped_large_files: number;
+  /** Estimated total tokens to be chunked/embedded */
+  estimated_total_tokens: number;
+  /** Estimated number of chunks (heuristic) */
+  estimated_total_chunks: number;
+  /** Embedding backend used for indexing (deterministic has no external cost) */
+  embedding_backend: "deterministic" | "provider";
+  /** Embedding provider used for indexing (embedding.embedding_type) */
+  embedding_provider: string;
+  /** Embedding model used for indexing (effective model) */
+  embedding_model: string;
+  /** Whether dense embeddings are skipped (indexing.skip_dense=1) */
+  skip_dense: boolean;
+  /** Estimated embedding cost (USD) when pricing data is available (0 for local/deterministic). */
+  embedding_cost_usd?: number | null;
+  /** Very rough low-end estimate for total indexing time (seconds) */
+  estimated_seconds_low?: number | null;
+  /** Very rough high-end estimate for total indexing time (seconds) */
+  estimated_seconds_high?: number | null;
+  /** Human-readable assumptions used for the estimate */
+  assumptions?: string[];
+}
+
 /** Request to index a repository. */
 export interface IndexRequest {
   /** Corpus identifier */
@@ -2224,6 +2368,34 @@ export interface RerankerNoHitsResponse {
   queries?: Record<string, unknown>[];
 }
 
+/** Request payload for POST /api/reranker/score. */
+export interface RerankerScoreRequest {
+  /** Corpus identifier to score against */
+  corpus_id: string;
+  /** Query string */
+  query: string;
+  /** Document/passage text to score */
+  document: string;
+  /** Include backend-specific raw logits when available (best-effort) */
+  include_logits?: number;
+}
+
+/** Response payload for POST /api/reranker/score. */
+export interface RerankerScoreResponse {
+  /** Whether scoring succeeded */
+  ok: boolean;
+  /** Resolved backend used to score (mlx_qwen3|transformers|...) */
+  backend?: string;
+  /** Normalized score in [0,1] (best-effort) */
+  score?: number | null;
+  /** Raw yes logit (if include_logits and supported) */
+  yes_logit?: number | null;
+  /** Raw no logit (if include_logits and supported) */
+  no_logit?: number | null;
+  /** Error message (if any) */
+  error?: string | null;
+}
+
 export interface RerankerTrainDiffRequest {
   baseline_run_id: string;
   current_run_id: string;
@@ -2346,6 +2518,7 @@ export interface TriBridConfig {
   scoring?: ScoringConfig;
   layer_bonus?: LayerBonusConfig;
   embedding?: EmbeddingConfig;
+  tokenization?: TokenizationConfig;
   chunking?: ChunkingConfig;
   indexing?: IndexingConfig;
   graph_storage?: GraphStorageConfig;

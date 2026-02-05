@@ -21,9 +21,9 @@ export const configApi = {
   /**
    * Patch a single top-level config section (e.g. retrieval, fusion, graph_search)
    */
-  async patchSection(section: string, updates: Record<string, unknown>): Promise<TriBridConfig> {
+  async patchSection(section: string, updates: Record<string, unknown>, corpusId?: string): Promise<TriBridConfig> {
     const { data } = await apiClient.patch<TriBridConfig>(
-      withCorpusScope(api(`/config/${section}`)),
+      withCorpusScope(api(`/config/${section}`), corpusId),
       updates
     );
     return data;

@@ -1,4 +1,5 @@
 import type { RerankerTrainRun } from '@/types/generated';
+import { TooltipIcon } from '@/components/ui/TooltipIcon';
 
 type Props = {
   run: RerankerTrainRun | null;
@@ -71,8 +72,9 @@ export function RunOverview({ run, latestMetrics }: Props) {
           {rationale && (
             <div style={{ marginTop: 6, fontSize: 12, color: 'var(--fg-muted)' }}>
               <span title={rationale} style={{ cursor: 'help', textDecoration: 'underline' }}>
-                Why?
+                Why
               </span>
+              <TooltipIcon name="RERANKER_TRAIN_RECOMMENDED_METRIC" />
             </div>
           )}
         </div>
@@ -112,4 +114,3 @@ export function RunOverview({ run, latestMetrics }: Props) {
     </div>
   );
 }
-

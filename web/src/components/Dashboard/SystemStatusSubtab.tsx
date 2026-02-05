@@ -178,7 +178,7 @@ export function SystemStatusSubtab() {
     >
       {/* Compact Status + Quick Actions */}
       <div className="settings-section" style={{ background: 'var(--panel)', borderLeft: '3px solid var(--accent)' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '300px 1fr', gap: '24px', alignItems: 'start' }}>
+        <div className="dashboard-grid">
           {/* Left: System Status */}
           <div>
             <h3

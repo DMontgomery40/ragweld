@@ -728,7 +728,7 @@ input[type="radio"]:hover {
         opacity: 1;
     }
     50% {
-        opacity: 0.85;
+        opacity: 0.9;
     }
 }
 
@@ -913,18 +913,18 @@ code:hover {
 .status-dot.status-online,
 .status-dot.status-success {
   background: var(--ok);
-  box-shadow: 0 0 10px color-mix(in oklch, var(--ok) 55%, transparent 45%);
+  border: 1px solid var(--ok);
 }
 
 .status-dot.status-offline,
 .status-dot.status-error {
   background: var(--err);
-  box-shadow: 0 0 10px color-mix(in oklch, var(--err) 55%, transparent 45%);
+  border: 1px solid var(--err);
 }
 
 .status-dot.status-warning {
   background: var(--warn);
-  box-shadow: 0 0 10px color-mix(in oklch, var(--warn) 55%, transparent 45%);
+  border: 1px solid var(--warn);
 }
 
 .status-dot.status-idle {

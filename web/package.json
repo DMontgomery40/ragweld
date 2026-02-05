@@ -5,9 +5,11 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:lan": "vite --host 0.0.0.0",
     "lint": "tsc -p tsconfig.json",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "preview:lan": "vite preview --host 0.0.0.0"
   },
   "dependencies": {
     "@monaco-editor/react": "^4.7.0",

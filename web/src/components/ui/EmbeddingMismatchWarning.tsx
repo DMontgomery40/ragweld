@@ -74,7 +74,7 @@ const CompactWarning: React.FC<{ status: EmbeddingStatus }> = ({ status }) => (
       e.currentTarget.style.transform = 'translateY(0)';
       e.currentTarget.style.boxShadow = '0 2px 8px rgba(255, 107, 107, 0.3)';
     }}
-    title={`Config: ${status.configModel} (${status.configDim}d) ≠ Index: ${status.indexType} (${status.indexDim}d). Click to fix.`}
+    title={`Config: ${status.configType}/${status.configModel} (${status.configDim}d) ≠ Index: ${status.indexProvider || 'unknown'}/${status.indexType} (${status.indexDim}d). Click to fix.`}
   >
     <span style={{ fontSize: '14px' }}>⚠️</span>
     <span>Embedding Mismatch!</span>
@@ -126,12 +126,19 @@ const InlineWarning: React.FC<{ status: EmbeddingStatus; showActions: boolean }>
           </span>
         </div>
         <div style={{ fontSize: '12px', color: 'var(--fg-muted)', lineHeight: 1.5 }}>
-          Config: <code style={{ background: 'var(--code-bg)', padding: '1px 4px', borderRadius: '3px' }}>
-            {status.configModel}
-          </code> ({status.configDim}d) ≠ 
-          Index: <code style={{ background: 'var(--code-bg)', padding: '1px 4px', borderRadius: '3px' }}>
-            {status.indexType}
-          </code> ({status.indexDim}d)
+          Config:{' '}
+          <code style={{ background: 'var(--code-bg)', padding: '1px 4px', borderRadius: '3px' }}>
+            {status.configType}/{status.configModel}
+          </code>{' '}
+          ({status.configDim}d) ≠ Index:{' '}
+          <code style={{ background: 'var(--code-bg)', padding: '1px 4px', borderRadius: '3px' }}>
+            {(status.indexProvider || 'unknown')}/{status.indexType}
+          </code>{' '}
+          ({status.indexDim}d)
+          <div style={{ marginTop: '6px', display: 'flex', gap: '10px', flexWrap: 'wrap', fontSize: '11px' }}>
+            <span style={{ color: 'var(--fg-muted)' }}>Config strategy: {status.configStrategy}</span>
+            {status.indexStrategy && <span style={{ color: 'var(--fg-muted)' }}>Index strategy: {status.indexStrategy}</span>}
+          </div>
         </div>
         {showActions && (
           <div style={{ marginTop: '10px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
@@ -148,7 +155,7 @@ const InlineWarning: React.FC<{ status: EmbeddingStatus; showActions: boolean }>
                 cursor: 'pointer',
               }}
             >
-              Re-index with {status.configModel}
+              Re-index with {status.configType}/{status.configModel}
             </button>
             <button
               onClick={() => navigateToConfig(status.indexType)}
@@ -163,7 +170,7 @@ const InlineWarning: React.FC<{ status: EmbeddingStatus; showActions: boolean }>
                 cursor: 'pointer',
               }}
             >
-              Revert to {status.indexType}
+              Revert to {(status.indexProvider || 'unknown')}/{status.indexType}
             </button>
           </div>
         )}
@@ -269,7 +276,7 @@ const FullWarning: React.FC<{ status: EmbeddingStatus; showActions: boolean }> =
             color: 'var(--fg)',
             fontFamily: 'var(--font-mono)',
           }}>
-            {status.configType}
+            {status.configType}/{status.configModel}
           </div>
           <div style={{ fontSize: '11px', color: 'var(--fg-muted)', marginTop: '4px' }}>
             {status.configDim} dimensions
@@ -302,7 +309,7 @@ const FullWarning: React.FC<{ status: EmbeddingStatus; showActions: boolean }> =
             color: 'var(--fg)',
             fontFamily: 'var(--font-mono)',
           }}>
-            {status.indexType || 'unknown'}
+            {(status.indexProvider || 'unknown')}/{status.indexType || 'unknown'}
           </div>
           <div style={{ fontSize: '11px', color: 'var(--fg-muted)', marginTop: '4px' }}>
             {status.indexDim ?? '?'} dimensions
@@ -316,9 +323,9 @@ const FullWarning: React.FC<{ status: EmbeddingStatus; showActions: boolean }> =
         fontSize: '12px',
         lineHeight: 1.6,
       }}>
-        <strong>Why this matters:</strong> Your index was created using {status.indexType} embeddings 
-        ({status.indexDim} dimensions), but queries are now being embedded with {status.configType} 
-        ({status.configDim} dimensions). These vectors exist in incompatible mathematical spaces — 
+        <strong>Why this matters:</strong> Your index was created using {status.indexProvider || 'unknown'}/{status.indexType} embeddings
+        ({status.indexDim} dimensions), but queries are now being embedded with {status.configType}/{status.configModel}
+        ({status.configDim} dimensions). These vectors exist in incompatible mathematical spaces —
         like searching a French dictionary using Spanish words.
       </p>
     </div>
@@ -355,7 +362,7 @@ const FullWarning: React.FC<{ status: EmbeddingStatus; showActions: boolean }> =
           }}
         >
           <span>🔄</span>
-          Re-index with {status.configType}
+          Re-index with {status.configType}/{status.configModel}
           <span style={{ 
             fontSize: '10px', 
             opacity: 0.8,
@@ -394,7 +401,7 @@ const FullWarning: React.FC<{ status: EmbeddingStatus; showActions: boolean }> =
           }}
         >
           <span>↩️</span>
-          Revert config to {status.indexType}
+          Revert config to {(status.indexProvider || 'unknown')}/{status.indexType}
         </button>
       </div>
     )}
@@ -523,4 +530,3 @@ export function EmbeddingMatchIndicator() {
 }
 
 export default EmbeddingMismatchWarning;
-

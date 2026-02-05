@@ -22,13 +22,6 @@ export function DashboardSubtabs({ activeSubtab, onSubtabChange }: DashboardSubt
       className="subtab-bar"
       id="dashboard-subtabs"
       data-state="visible"
-      style={{
-        display: 'flex',
-        opacity: 1,
-        transform: 'translateY(0)',
-        pointerEvents: 'auto',
-        visibility: 'visible'
-      }}
     >
       {subtabs.map(subtab => (
         <button

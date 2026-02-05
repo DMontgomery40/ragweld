@@ -5,6 +5,7 @@ import { useHealthStore } from '@/stores';
 // Navigation components
 import { TabBar } from './components/Navigation/TabBar';
 import { TabRouter } from './components/Navigation/TabRouter';
+import { Breadcrumbs } from './components/Navigation/Breadcrumbs';
 
 // Right panel (Dock / Settings)
 import { DockPanel } from './components/Dock/DockPanel';
@@ -222,11 +223,10 @@ function App() {
         </div>
       </div>
 
-      {/* Main Layout */}
+      {/* Main Layout - 3-column grid: sidebar | main | sidepanel */}
       <div className="layout">
-        <div className="resize-handle"></div>
-        <div className="content" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-          {/* Tab Bar - React Router navigation */}
+        {/* Left sidebar (TabBar) */}
+        <aside className={`sidebar ${mobileNavOpen ? 'mobile-open' : ''}`}>
           <ErrorBoundary
             context="tab-bar"
             fallback={({ error, reset }) => (
@@ -240,60 +240,69 @@ function App() {
               </div>
             )}
           >
-          <TabBar mobileOpen={mobileNavOpen} onNavigate={closeMobileNav} />
+            <TabBar mobileOpen={mobileNavOpen} onNavigate={closeMobileNav} />
           </ErrorBoundary>
+        </aside>
 
-          {/* Scrollable content wrapper */}
-          <div style={{ flex: 1, overflowY: 'auto' }}>
-            {/* Routes - All tab routing */}
-            <ErrorBoundary
-              context="tab-router"
-              fallback={({ error, reset }) => (
-                <div className="p-6">
-                  <SubtabErrorFallback
-                    title="Unable to load tab content"
-                    context="The active route crashed during render. Retry to attempt a clean mount."
-                    error={error}
-                    onRetry={reset}
-                  />
-                </div>
+        {/* Main content area */}
+        <div className="main-content">
+          <Breadcrumbs />
+          <div className="content">
+            {/* Scrollable content wrapper - paddingBottom reserves space above action-buttons */}
+            <div style={{ flex: 1, overflowY: 'auto', paddingBottom: '60px' }}>
+              {/* Routes - All tab routing */}
+              <ErrorBoundary
+                context="tab-router"
+                fallback={({ error, reset }) => (
+                  <div className="p-6">
+                    <SubtabErrorFallback
+                      title="Unable to load tab content"
+                      context="The active route crashed during render. Retry to attempt a clean mount."
+                      error={error}
+                      onRetry={reset}
+                    />
+                  </div>
+                )}
+              >
+                <TabRouter />
+              </ErrorBoundary>
+            </div>
+
+            {/* Apply All Changes button - Fixed footer outside scrollable area */}
+            <div className="action-buttons" style={{
+              background: 'var(--bg)',
+              padding: '12px 24px',
+              borderTop: '1px solid var(--accent)',
+              flexShrink: 0,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '16px',
+            }}>
+              <button
+                id="save-btn"
+                onClick={handleSaveAllChanges}
+                disabled={!isDirty || isSaving}
+                style={{
+                  opacity: (!isDirty || isSaving) ? 0.6 : 1,
+                  cursor: (!isDirty || isSaving) ? 'not-allowed' : 'pointer'
+                }}
+              >
+                {isSaving ? 'Saving...' : 'Apply All Changes'}
+                {isDirty && !isSaving && ' *'}
+              </button>
+              {saveError && (
+                <span style={{ color: 'var(--err)', marginLeft: '12px' }}>
+                  Error: {saveError}
+                </span>
               )}
-            >
-            <TabRouter />
-            </ErrorBoundary>
-          </div>
-
-          {/* Apply All Changes button - Fixed footer outside scrollable area */}
-          <div className="action-buttons" style={{
-            background: 'var(--bg)',
-            padding: '12px 24px',
-            borderTop: '1px solid var(--accent)',
-            flexShrink: 0,
-            display: 'flex',
-            alignItems: 'center',
-            gap: '16px',
-          }}>
-            <button
-              id="save-btn"
-              onClick={handleSaveAllChanges}
-              disabled={!isDirty || isSaving}
-              style={{
-                opacity: (!isDirty || isSaving) ? 0.6 : 1,
-                cursor: (!isDirty || isSaving) ? 'not-allowed' : 'pointer'
-              }}
-            >
-              {isSaving ? 'Saving...' : 'Apply All Changes'}
-              {isDirty && !isSaving && ' *'}
-            </button>
-            {saveError && (
-              <span style={{ color: 'var(--err)', marginLeft: '12px' }}>
-                Error: {saveError}
-              </span>
-            )}
-            {/* Global embedding mismatch warning - appears next to Apply button */}
-            <EmbeddingMismatchWarning variant="compact" />
+              {/* Global embedding mismatch warning - appears next to Apply button */}
+              <EmbeddingMismatchWarning variant="compact" />
+            </div>
           </div>
         </div>
+
+        {/* Resize handle */}
+        <div className="resize-handle"></div>
 
         {/* Right panel */}
         <div

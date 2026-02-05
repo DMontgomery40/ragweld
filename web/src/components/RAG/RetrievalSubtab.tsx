@@ -48,9 +48,43 @@ export function RetrievalSubtab() {
   const [vectorSimilarityThreshold, setVectorSimilarityThreshold] = useConfigField<number>('vector_search.similarity_threshold', 0.0);
 
   const [sparseSearchEnabled, setSparseSearchEnabled] = useConfigField<boolean>('sparse_search.enabled', true);
+  const [sparseSearchEngine, setSparseSearchEngine] = useConfigField<'postgres_fts' | 'pg_search_bm25'>(
+    'sparse_search.engine',
+    'postgres_fts'
+  );
+  const [sparseSearchQueryMode, setSparseSearchQueryMode] = useConfigField<'plain' | 'phrase' | 'boolean'>(
+    'sparse_search.query_mode',
+    'plain'
+  );
+  const [sparseSearchHighlight, setSparseSearchHighlight] = useConfigField<boolean>('sparse_search.highlight', false);
   const [sparseSearchTopK, setSparseSearchTopK] = useConfigField<number>('sparse_search.top_k', 50);
   const [bm25K1, setBm25K1] = useConfigField<number>('sparse_search.bm25_k1', 1.2);
   const [bm25B, setBm25B] = useConfigField<number>('sparse_search.bm25_b', 0.4);
+
+  const [maxChunksPerFile, setMaxChunksPerFile] = useConfigField<number>('retrieval.max_chunks_per_file', 3);
+  const [dedupBy, setDedupBy] = useConfigField<'chunk_id' | 'file_path'>('retrieval.dedup_by', 'chunk_id');
+  const [neighborWindow, setNeighborWindow] = useConfigField<number>('retrieval.neighbor_window', 1);
+  const [minScoreVector, setMinScoreVector] = useConfigField<number>('retrieval.min_score_vector', 0.0);
+  const [minScoreSparse, setMinScoreSparse] = useConfigField<number>('retrieval.min_score_sparse', 0.0);
+  const [minScoreGraph, setMinScoreGraph] = useConfigField<number>('retrieval.min_score_graph', 0.0);
+  const [enableMmr, setEnableMmr] = useConfigField<boolean>('retrieval.enable_mmr', false);
+  const [mmrLambda, setMmrLambda] = useConfigField<number>('retrieval.mmr_lambda', 0.7);
+  void maxChunksPerFile;
+  void setMaxChunksPerFile;
+  void dedupBy;
+  void setDedupBy;
+  void neighborWindow;
+  void setNeighborWindow;
+  void minScoreVector;
+  void setMinScoreVector;
+  void minScoreSparse;
+  void setMinScoreSparse;
+  void minScoreGraph;
+  void setMinScoreGraph;
+  void enableMmr;
+  void setEnableMmr;
+  void mmrLambda;
+  void setMmrLambda;
 
   const [graphSearchEnabled, setGraphSearchEnabled] = useConfigField<boolean>('graph_search.enabled', true);
   const [graphMode, setGraphMode] = useConfigField<'chunk' | 'entity'>('graph_search.mode', 'chunk');
@@ -570,6 +604,60 @@ export function RetrievalSubtab() {
             />
           </div>
         </div>
+
+        <div className="input-row">
+          <div className="input-group">
+            <label>
+              Sparse Engine
+              <TooltipIcon name="SPARSE_SEARCH_ENGINE" />
+            </label>
+            <select
+              data-testid="sparse-engine"
+              value={sparseSearchEngine}
+              onChange={(e) => setSparseSearchEngine(e.target.value as any)}
+              disabled={!sparseSearchEnabled}
+            >
+              <option value="postgres_fts">postgres_fts (built-in)</option>
+              <option value="pg_search_bm25">pg_search_bm25 (ParadeDB)</option>
+            </select>
+          </div>
+          <div className="input-group">
+            <label>
+              Sparse Query Mode
+              <TooltipIcon name="SPARSE_SEARCH_QUERY_MODE" />
+            </label>
+            <select
+              data-testid="sparse-query-mode"
+              value={sparseSearchQueryMode}
+              onChange={(e) => setSparseSearchQueryMode(e.target.value as any)}
+              disabled={!sparseSearchEnabled}
+            >
+              <option value="plain">plain</option>
+              <option value="phrase">phrase</option>
+              <option value="boolean">boolean</option>
+            </select>
+          </div>
+          <div className="input-group">
+            <label>
+              <input
+                data-testid="sparse-highlight"
+                type="checkbox"
+                checked={sparseSearchHighlight}
+                onChange={(e) => setSparseSearchHighlight(e.target.checked)}
+                disabled={!sparseSearchEnabled}
+              />{' '}
+              Highlight (experimental)
+              <TooltipIcon name="SPARSE_SEARCH_HIGHLIGHT" />
+            </label>
+          </div>
+        </div>
+
+        {sparseSearchEngine === 'pg_search_bm25' && (
+          <div style={{ marginTop: '8px', fontSize: '12px', color: 'var(--fg-muted)' }}>
+            <strong style={{ color: 'var(--fg)' }}>Note:</strong> <code>pg_search_bm25</code> requires ParadeDB <code>pg_search</code> in Postgres. If unavailable, sparse retrieval falls back to <code>postgres_fts</code>.
+          </div>
+        )}
+
         <div className="input-row">
           <div className="input-group">
             <label>
@@ -649,6 +737,123 @@ export function RetrievalSubtab() {
               <option value="1">Enabled</option>
               <option value="0">Disabled</option>
             </select>
+          </div>
+        </div>
+
+        <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid var(--line)' }}>
+          <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--fg)', marginBottom: '10px' }}>
+            Result shaping
+          </div>
+          <div className="input-row">
+            <div className="input-group">
+              <label>
+                Max chunks per file
+                <TooltipIcon name="MAX_CHUNKS_PER_FILE" />
+              </label>
+              <input
+                data-testid="max-chunks-per-file"
+                type="number"
+                min={1}
+                max={50}
+                value={maxChunksPerFile}
+                onChange={(e) => setMaxChunksPerFile(snapNumber(e.target.value, 3))}
+              />
+            </div>
+            <div className="input-group">
+              <label>
+                Dedup by
+                <TooltipIcon name="DEDUP_BY" />
+              </label>
+              <select value={dedupBy} onChange={(e) => setDedupBy(e.target.value as any)}>
+                <option value="chunk_id">chunk_id</option>
+                <option value="file_path">file_path</option>
+              </select>
+            </div>
+            <div className="input-group">
+              <label>
+                Neighbor window
+                <TooltipIcon name="NEIGHBOR_WINDOW" />
+              </label>
+              <input
+                type="number"
+                min={0}
+                max={10}
+                value={neighborWindow}
+                onChange={(e) => setNeighborWindow(snapNumber(e.target.value, 1))}
+                disabled={dedupBy === 'file_path'}
+              />
+            </div>
+          </div>
+          <div className="input-row">
+            <div className="input-group">
+              <label>
+                <input type="checkbox" checked={enableMmr} onChange={(e) => setEnableMmr(e.target.checked)} /> Enable MMR
+                <TooltipIcon name="ENABLE_MMR" />
+              </label>
+            </div>
+            <div className="input-group">
+              <label>
+                MMR λ
+                <TooltipIcon name="MMR_LAMBDA" />
+              </label>
+              <input
+                type="number"
+                min={0}
+                max={1}
+                step={0.05}
+                value={mmrLambda}
+                onChange={(e) => setMmrLambda(snapNumber(e.target.value, 0.7))}
+                disabled={!enableMmr}
+              />
+            </div>
+            <div className="input-group" />
+          </div>
+          <div className="input-row">
+            <div className="input-group">
+              <label>
+                Min score (vector)
+                <TooltipIcon name="MIN_SCORE_VECTOR" />
+              </label>
+              <input
+                type="number"
+                min={0}
+                max={1}
+                step={0.01}
+                value={minScoreVector}
+                onChange={(e) => setMinScoreVector(snapNumber(e.target.value, 0.0))}
+              />
+            </div>
+            <div className="input-group">
+              <label>
+                Min score (sparse)
+                <TooltipIcon name="MIN_SCORE_SPARSE" />
+              </label>
+              <input
+                type="number"
+                min={0}
+                max={10}
+                step={0.01}
+                value={minScoreSparse}
+                onChange={(e) => setMinScoreSparse(snapNumber(e.target.value, 0.0))}
+              />
+            </div>
+            <div className="input-group">
+              <label>
+                Min score (graph)
+                <TooltipIcon name="MIN_SCORE_GRAPH" />
+              </label>
+              <input
+                type="number"
+                min={0}
+                max={10}
+                step={0.01}
+                value={minScoreGraph}
+                onChange={(e) => setMinScoreGraph(snapNumber(e.target.value, 0.0))}
+              />
+            </div>
+          </div>
+          <div style={{ marginTop: '8px', fontSize: '12px', color: 'var(--fg-muted)' }}>
+            Neighbor window requires <code>chunking.emit_chunk_ordinal</code> at index time (Indexing → Chunking).
           </div>
         </div>
 

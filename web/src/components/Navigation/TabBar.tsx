@@ -1,7 +1,6 @@
 // TriBridRAG - TabBar Component
-// EXACT copy of /gui tab-bar structure
+// Vertical sidebar navigation for Warm Instrument theme
 
-import type { CSSProperties } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useDockStore } from '@/stores';
 import { getRouteByPath, routes } from '@/config/routes';
@@ -12,24 +11,6 @@ interface TabBarProps {
   mobileOpen?: boolean;
   onNavigate?: () => void;
 }
-
-const TAB_STYLE: CSSProperties = {
-  background: 'var(--bg-elev2)',
-  color: 'var(--fg-muted)',
-  border: '1px solid var(--line)',
-  padding: '9px 16px',
-  borderRadius: '6px',
-  cursor: 'pointer',
-  fontSize: '13px',
-  fontWeight: 500,
-  whiteSpace: 'nowrap',
-  transition: 'all 0.15s',
-  minHeight: '44px',
-  textDecoration: 'none',
-  display: 'flex',
-  alignItems: 'center',
-  gap: '6px',
-};
 
 const TAB_ROUTES = [...routes]
   .filter((r) => r.nav?.visible !== false)
@@ -84,10 +65,9 @@ export function TabBar({ mobileOpen = false, onNavigate }: TabBarProps) {
   };
 
   return (
-    <div
+    <nav
       data-testid="tab-bar"
-      className={`tab-bar ${mobileOpen ? 'mobile-open' : ''}`} 
-      style={{ display: 'flex', gap: '8px', padding: '12px 24px', overflowX: 'auto' }}
+      className={`tab-bar ${mobileOpen ? 'mobile-open' : ''}`}
     >
       {TAB_ROUTES.map((route) => (
         <NavLink
@@ -97,13 +77,12 @@ export function TabBar({ mobileOpen = false, onNavigate }: TabBarProps) {
             [isActive ? 'active' : '', route.nav?.className ?? ''].filter(Boolean).join(' ')
           }
           onClick={handleDockAwareClick(route.path)}
-          style={TAB_STYLE}
           title={route.nav?.title}
         >
-          {route.icon} {route.label}
+          {route.label}
           {pinned(route.path)}
         </NavLink>
       ))}
-    </div>
+    </nav>
   );
 }

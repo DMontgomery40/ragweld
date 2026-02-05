@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from httpx import AsyncClient
 
-from server.models.tribrid_config_model import TriBridConfig
+from server.models.tribrid_config_model import CorpusEvalProfile, RerankerTrainMetricEvent, RerankerTrainRun, TriBridConfig
 
 
 @pytest.fixture
@@ -259,3 +259,86 @@ async def test_reranker_train_diff_computes_and_rejects_incompatible(client: Asy
         for d in run_dirs:
             shutil.rmtree(d, ignore_errors=True)
 
+
+@pytest.mark.asyncio
+async def test_reranker_train_reconciles_legacy_stub_runs(client: AsyncClient) -> None:
+    corpus_id = "pytest_reranker_stub"
+    started_at = datetime.now(UTC) - timedelta(hours=6)
+    run_id = f"{corpus_id}__{started_at.strftime('%Y%m%d_%H%M%S')}"
+
+    run_dir = _runs_dir() / run_id
+    run_json = run_dir / "run.json"
+    metrics_path = run_dir / "metrics.jsonl"
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    cfg = TriBridConfig()
+    profile = CorpusEvalProfile(
+        repo_id=corpus_id,
+        label_kind="pairwise",
+        avg_relevant_per_query=0.0,
+        p95_relevant_per_query=0.0,
+        recommended_metric="mrr",
+        recommended_k=10,
+        rationale="stub",
+    )
+    run = RerankerTrainRun(
+        run_id=run_id,
+        repo_id=corpus_id,
+        status="running",
+        started_at=started_at,
+        completed_at=None,
+        config_snapshot=cfg.model_dump(mode="json"),
+        config=cfg.to_flat_dict(),
+        primary_metric="mrr",
+        primary_k=10,
+        metrics_available=["mrr@10", "ndcg@10", "map"],
+        metric_profile=profile,
+        epochs=1,
+        batch_size=1,
+        lr=1e-4,
+        warmup_ratio=0.0,
+        max_length=128,
+    )
+    run_json.write_text(json.dumps(run.model_dump(mode="json", by_alias=True), indent=2, sort_keys=True), encoding="utf-8")
+
+    ev1 = RerankerTrainMetricEvent(
+        type="state",
+        ts=started_at,
+        run_id=run_id,
+        message="Primary metric locked: mrr@10",
+        status="running",
+    )
+    ev2 = RerankerTrainMetricEvent(
+        type="log",
+        ts=started_at + timedelta(seconds=1),
+        run_id=run_id,
+        message="Training task is a stub (no background training is running yet). Run left in status=running.",
+    )
+    metrics_path.write_text(
+        json.dumps(ev1.model_dump(mode="json", by_alias=True)) + "\n" + json.dumps(ev2.model_dump(mode="json", by_alias=True)) + "\n",
+        encoding="utf-8",
+    )
+
+    try:
+        # Loading the run should reconcile and persist it as cancelled.
+        res = await client.get(f"/api/reranker/train/run/{run_id}")
+        assert res.status_code == 200
+        body = res.json()
+        assert body["run_id"] == run_id
+        assert body["status"] == "cancelled"
+        assert body.get("completed_at")
+
+        # Listing runs should reflect the reconciled status too (UI left-rail).
+        res_list = await client.get("/api/reranker/train/runs", params={"corpus_id": corpus_id, "scope": "corpus"})
+        assert res_list.status_code == 200
+        runs = res_list.json().get("runs") or []
+        match = next((r for r in runs if r.get("run_id") == run_id), None)
+        assert match is not None
+        assert match.get("status") == "cancelled"
+
+        # run.json is updated on disk.
+        raw_after = json.loads(run_json.read_text(encoding="utf-8"))
+        assert raw_after["status"] == "cancelled"
+        assert raw_after.get("completed_at")
+    finally:
+        shutil.rmtree(run_dir, ignore_errors=True)

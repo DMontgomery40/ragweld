@@ -165,26 +165,77 @@
 
         :root {
             --sidepanel-width: 360px;
+            --sidebar-width: 170px;
         }
 
+        /* 3-column layout: sidebar | main-content | sidepanel */
         .layout {
             display: grid;
-            grid-template-columns: 1fr var(--sidepanel-width);
-            /* Use min-height so inner content can grow and push the Apply bar down */
-            min-height: calc(100vh - 65px);
+            grid-template-columns: var(--sidebar-width) 1fr var(--sidepanel-width);
+            min-height: calc(100vh - 56px);
             position: relative;
         }
 
-        /* Full‑width mode (no sidepanel): used for Grafana dashboard */
-        /* (intentionally unused) full‑width mode available if ever needed */
-
-        .content {
-            grid-column: 1 / 2;
+        /* Left sidebar (wraps TabBar) */
+        .sidebar {
+            grid-column: 1;
+            background: var(--bg-elev1);
+            border-right: 1px solid var(--line);
             display: flex;
             flex-direction: column;
-            border-right: 1px solid var(--line);
-            overflow: auto;
-            min-height: 0; /* allow child .tab-content to size correctly */
+            overflow-y: auto;
+        }
+
+        /* Main content area - MUST constrain height for sticky to work */
+        .main-content {
+            grid-column: 2;
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+            overflow: hidden;
+            /* Constrain to grid cell height */
+            height: 100%;
+            max-height: calc(100vh - 56px); /* viewport minus topbar */
+        }
+
+        /* Breadcrumbs bar */
+        .breadcrumbs {
+            padding: 10px 24px;
+            background: var(--bg-elev1);
+            border-bottom: 1px solid var(--line);
+            font-size: 13px;
+            color: var(--fg);
+            flex-shrink: 0;
+        }
+
+        .breadcrumbs .sep {
+            margin: 0 8px;
+            color: var(--fg-muted);
+        }
+
+        /* .content is now INSIDE .main-content, not direct child of .layout */
+        .content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden; /* Don't scroll here - let tab-content scroll */
+            min-height: 0;
+            height: 0; /* Force flex to constrain height */
+        }
+
+        /* Config grid - 3 columns responsive */
+        .config-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 12px;
+        }
+
+        @media (max-width: 1200px) {
+            .config-grid { grid-template-columns: repeat(2, 1fr); }
+        }
+
+        @media (max-width: 768px) {
+            .config-grid { grid-template-columns: 1fr; }
         }
 
         .resize-handle {
@@ -221,16 +272,48 @@
             background: var(--accent);
         }
 
+        /* Tab bar - vertical inside sidebar */
         .tab-bar {
             background: var(--panel);
-            padding: 10px 16px;
-            border-bottom: 1px solid var(--line);
+            position: relative;
+            z-index: auto;
+        }
+
+        /* Vertical layout when inside sidebar */
+        .sidebar .tab-bar {
             display: flex;
-            gap: 6px;
-            overflow-x: auto;
-            position: sticky;
-            top: 0;
-            z-index: 99;
+            flex-direction: column;
+            padding: 8px;
+            gap: 2px;
+            overflow-x: visible;
+        }
+
+        .sidebar .tab-bar a {
+            display: block;
+            width: 100%;
+            text-align: left;
+            text-decoration: none;
+            border-radius: 2px;
+            border-left: 2px solid transparent;
+            padding: 10px 14px;
+            margin: 0;
+            background: transparent;
+            color: var(--fg-muted);
+            font-size: 13px;
+            font-weight: 500;
+            transition: all 0.15s;
+        }
+
+        .sidebar .tab-bar a:hover {
+            background: var(--bg-elev2);
+            color: var(--fg);
+        }
+
+        .sidebar .tab-bar a.active {
+            background: var(--bg-elev2);
+            border-left-color: var(--accent);
+            color: var(--accent);
+            font-weight: 600;
         }
 
         .tab-bar::-webkit-scrollbar {
@@ -247,7 +330,7 @@
             color: var(--fg-muted);
             border: 1px solid var(--line);
             padding: 9px 16px;
-            border-radius: 6px;
+            border-radius: 2px;
             cursor: pointer;
             font-size: 13px;
             font-weight: 500;
@@ -268,34 +351,30 @@
             font-weight: 600;
         }
 
-        /* Promoted tabs (VS Code & Grafana) */
-        .tab-bar button.promoted-tab {
-            background: linear-gradient(135deg, var(--bg-elev1) 0%, var(--bg-elev2) 100%);
+        /* Promoted tabs (VS Code & Grafana) - simplified for sidebar */
+        .tab-bar a.promoted-tab {
             font-weight: 600;
             position: relative;
         }
 
-        .tab-bar button.promoted-tab::after {
-            content: '✨';
-            position: absolute;
-            top: -5px;
-            right: -5px;
-            font-size: 10px;
-        }
-
-        .tab-bar button.promoted-tab.active {
-            background: linear-gradient(135deg, var(--link) 0%, var(--accent) 100%);
-            color: var(--on-link);
+        .tab-bar a.promoted-tab.active {
+            background: var(--bg-elev2);
+            border-left-color: var(--accent);
+            color: var(--accent);
         }
 
         /* RAG Subtabs - Hidden by default, shown when RAG tab active */
         .subtab-bar {
             display: flex;
+            flex-wrap: wrap;
             gap: 4px;
             padding: 8px 24px;
             background: var(--bg-elev1);
             border-bottom: 1px solid var(--line);
-            /* No sticky positioning - let it flow naturally */
+            /* Sticky at top of scrollable content */
+            position: sticky;
+            top: 0;
+            z-index: 50;
         }
         /* Default hidden; Navigation toggles visibility when RAG is active */
         #rag-subtabs { display: none; }
@@ -324,12 +403,15 @@
 
         .tab-content {
             /* React Router only renders active route, so tab-content is always visible */
+            /* THIS is the scroll container - sticky subtab-bar sticks to top of THIS */
             display: flex;
             flex-direction: column;
             flex: 1;
             overflow-y: auto;
-            padding: 24px;
-            min-height: 0; /* allow nested fullscreen sections to size correctly */
+            /* NO padding here - subtab-bar needs to stick at true top: 0 */
+            padding: 0;
+            min-height: 0;
+            height: 0; /* Force flex to constrain height - critical for sticky */
         }
 
         .tab-content.active {
@@ -338,8 +420,14 @@
             flex-direction: column;
             flex: 1;
             overflow-y: auto;
+            padding: 0;
+            min-height: 0;
+            height: 0;
+        }
+
+        /* Content below subtab-bar gets the padding */
+        .tab-content > div:not(.subtab-bar) {
             padding: 24px;
-            min-height: 0; /* allow nested fullscreen sections to size correctly */
         }
 
         /* RAG subtab content containers */
@@ -400,6 +488,19 @@
             flex: 1;
             overflow-y: auto;
             padding: 24px;
+        }
+
+        /* Dashboard subtab bar - sticky */
+        .dashboard-subtab-bar {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px;
+            padding: 8px 24px;
+            background: var(--bg-elev1);
+            border-bottom: 1px solid var(--line);
+            position: sticky;
+            top: 0;
+            z-index: 50;
         }
 
         /* Remove top margin from first element to prevent blank space */
@@ -564,13 +665,7 @@
             transform: translateY(0);
         }
 
-        .sidepanel {
-            grid-column: 2 / 3;
-            background: var(--card-bg);
-            padding: 20px;
-            overflow-y: auto;
-            position: relative;
-        }
+        /* Note: .sidepanel is defined below with sticky header support */
 
         #profile-tooltip {
             position: fixed;
@@ -646,6 +741,70 @@
             border-radius: 8px;
             padding: 16px;
             margin-bottom: 16px;
+        }
+
+        /* Dock panel header - sticky with proper button wrapping */
+        .dock-header {
+            position: sticky;
+            top: 0;
+            z-index: 50;
+            background: var(--card-bg);
+            border-bottom: 1px solid var(--line);
+            padding: 12px;
+        }
+
+        .dock-header-inner {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .dock-header-tabs {
+            display: flex;
+            gap: 6px;
+            flex-shrink: 0;
+        }
+
+        .dock-header-title {
+            flex: 1 1 auto;
+            min-width: 80px;
+            text-align: center;
+            color: var(--fg);
+            font-weight: 700;
+            font-size: 13px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .dock-header-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            justify-content: flex-end;
+        }
+
+        .dock-header-actions button {
+            flex-shrink: 0;
+            white-space: nowrap;
+        }
+
+        /* Make sidepanel scrollable with sticky header support */
+        .sidepanel {
+            grid-column: 3 / 4;
+            background: var(--card-bg);
+            padding: 0;
+            overflow-y: auto;
+            position: relative;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .sidepanel-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
         }
 
         .sidepanel-section label {
@@ -939,6 +1098,21 @@
             margin-top: 20px;
         }
 
+        /* Dashboard grid - responsive layout for System Status + Quick Actions */
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: minmax(280px, 320px) 1fr;
+            gap: 24px;
+            align-items: start;
+        }
+
+        @media (max-width: 1024px) {
+            .dashboard-grid {
+                grid-template-columns: 1fr;
+                gap: 16px;
+            }
+        }
+
         /* Color accents for different types of info */
         .accent-blue { color: var(--link); }
         .accent-purple { color: var(--link); }
@@ -1064,33 +1238,34 @@
         }
 
         /* ===================================
-           SMALL TABLET / PHONE (<900px) - Sidepanel stacks to bottom
+           SMALL TABLET (<900px) - Hide sidebar, show hamburger
            =================================== */
         @media (max-width: 900px) {
             .layout {
-                display: flex !important;
-                flex-direction: column !important;
-                grid-template-columns: none !important;
-                height: auto !important;
-                min-height: calc(100vh - 60px);
+                display: grid !important;
+                grid-template-columns: 1fr var(--sidepanel-width) !important;
             }
 
-            .content {
-                border-right: none;
-                order: 1 !important;
-                flex: 1 1 auto !important;
-                min-height: 40vh;
-                grid-column: auto !important;
+            .sidebar {
+                position: fixed;
+                left: -200px;
+                top: 56px;
+                bottom: 0;
+                width: 200px;
+                z-index: 1000;
+                transition: left 0.2s ease;
+            }
+
+            .sidebar.mobile-open {
+                left: 0;
+            }
+
+            .main-content {
+                grid-column: 1;
             }
 
             .sidepanel {
-                order: 2 !important;
-                border-top: 1px solid var(--line);
-                max-height: 45vh;
-                overflow-y: auto;
-                flex-shrink: 0;
-                grid-column: auto !important;
-                padding: 16px;
+                grid-column: 2;
             }
 
             .resize-handle {
@@ -1102,38 +1277,40 @@
            MOBILE & SMALL TABLET (<768px)
            =================================== */
         @media (max-width: 768px) {
-            /* Convert tab-bar to collapsible mobile menu */
-            .tab-bar {
+            .layout {
+                display: flex !important;
+                flex-direction: column !important;
+                grid-template-columns: none !important;
+            }
+
+            .sidebar {
                 position: fixed;
+                left: -200px;
                 top: 56px;
+                bottom: 0;
+                width: 200px;
+                z-index: 1000;
+                transition: left 0.2s ease;
+            }
+
+            .sidebar.mobile-open {
                 left: 0;
-                right: 0;
-                background: var(--bg-elev1);
-                border-bottom: 1px solid var(--line);
-                padding: 12px;
-                flex-direction: column;
-                gap: 8px;
-                z-index: 100;
-                max-height: 70vh;
-                overflow-y: auto;
-                transform: translateY(-100%);
-                opacity: 0;
-                pointer-events: none;
-                transition: transform 0.3s ease, opacity 0.3s ease;
             }
-            
-            .tab-bar.mobile-open {
-                transform: translateY(0);
-                opacity: 1;
-                pointer-events: auto;
+
+            .main-content {
+                flex: 1 1 auto;
+                order: 1;
             }
-            
-            .tab-bar a {
-                padding: 12px 16px;
-                font-size: 14px;
-                width: 100%;
-                text-align: left;
-                border-radius: 8px;
+
+            .content {
+                min-height: 50vh;
+            }
+
+            .sidepanel {
+                order: 2;
+                max-height: 50vh;
+                border-top: 1px solid var(--line);
+                flex-shrink: 0;
             }
 
             /* Hamburger menu button */
@@ -1182,15 +1359,6 @@
                 right: 12px;
                 left: 12px;
                 width: auto;
-            }
-
-            /* Layout already column from 1024px, just adjust spacing */
-            .content {
-                min-height: 50vh;
-            }
-
-            .sidepanel {
-                max-height: 50vh;
             }
 
             /* Tab content: reduced padding */

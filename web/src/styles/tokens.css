@@ -1,76 +1,90 @@
 /* Theme tokens for TriBridRAG GUI: dark + light palettes */
 /* Default to dark to preserve current visuals */
 
-/* Dark (current) */
+/* Dark (Surgical theme - matte steel, zero glow) */
 html, :root, [data-theme="dark"] {
   /* Typography */
   --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
-  --bg: #0a0a0a;
-  --bg-elev1: #111111;
-  --bg-elev2: #1a1a1a;
-  --panel: #111111;
-  --line: #2a2a2a;
+  --bg: #09090b;
+  --bg-elev1: #0f0f12;
+  --bg-elev2: #18181b;
+  --panel: #0f0f12;
+  --line: #27272a;
 
-  --fg: #ffffff;
-  --fg-muted: #9fb1c7;
+  --fg: #e4e4e7;
+  --fg-muted: #71717a;
 
-  --accent: #00ff88;           /* brand green used across GUI */
-  --accent-contrast: #000000;
-  --link: #5b9dff;             /* informational blue */
-  --on-link: #ffffff;          /* readable text on link backgrounds */
+  /* SURGICAL: Desaturated slate, NOT neon */
+  --accent: #64748b;           /* slate-500 - matte steel */
+  --accent-contrast: #ffffff;
+  --link: #94a3b8;             /* slate-400 - muted link */
+  --on-link: #18181b;
 
-  --ok: #00ff88;
-  --warn: #ffaa00;
-  --err: #ff6b6b;
-  --on-warn: #ffffff;
-  --on-err: #ffffff;
+  --ok: #4ade80;               /* green-400 - slightly muted */
+  --warn: #fbbf24;             /* amber-400 */
+  --err: #f87171;              /* red-400 - slightly muted */
+  --on-warn: #000000;
+  --on-err: #000000;
 
-  --chip-bg: #0f0f0f;
-  --input-bg: #1a1a1a;
-  --card-bg: #0a0a0a;
-  --panel-bg: #111111;
+  --chip-bg: #18181b;
+  --input-bg: #18181b;
+  --card-bg: #09090b;
+  --panel-bg: #0f0f12;
 
-  --code-bg: #0f0f0f;
-  --code-fg: #dddddd;
+  --code-bg: #18181b;
+  --code-fg: #a1a1aa;
 
-  --ring: rgba(0, 255, 136, 0.18);
+  /* SURGICAL: No glow - just a subtle border tint */
+  --ring: rgba(100, 116, 139, 0.2);
+
+  /* Radius tokens - surgical flat */
+  --radius-sm: 2px;
+  --radius-md: 2px;
+  --radius-lg: 3px;
 }
 
-/* Light */
+/* Light (Surgical theme - matte steel, zero glow) */
 [data-theme="light"] {
   /* Typography */
   --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
-  --bg: #F7F8FB;
-  --bg-elev1: #FFFFFF;
-  --bg-elev2: #F1F3F7;
-  --panel: #FFFFFF;
-  --line: #CBD5E1;
+  --bg: #fafafa;
+  --bg-elev1: #ffffff;
+  --bg-elev2: #f4f4f5;
+  --panel: #ffffff;
+  --line: #e4e4e7;
 
-  --fg: #0F1220;
-  --fg-muted: #475569;
+  --fg: #18181b;
+  --fg-muted: #71717a;
 
-  --accent: #16A34A;           /* comfortable green on light */
-  --accent-contrast: #FFFFFF;
-  --link: #2563EB;
-  --on-link: #FFFFFF;
+  /* SURGICAL: Desaturated slate on light */
+  --accent: #475569;           /* slate-600 - matte steel */
+  --accent-contrast: #ffffff;
+  --link: #334155;             /* slate-700 */
+  --on-link: #ffffff;
 
-  --ok: #16A34A;
-  --warn: #B45309;
-  --err: #DC2626;
-  --on-warn: #FFFFFF;
-  --on-err: #FFFFFF;
+  --ok: #16a34a;
+  --warn: #d97706;
+  --err: #dc2626;
+  --on-warn: #ffffff;
+  --on-err: #ffffff;
 
-  --chip-bg: #EEF2F7;
-  --input-bg: #FFFFFF;
-  --card-bg: #FFFFFF;
-  --panel-bg: #FFFFFF;
+  --chip-bg: #f4f4f5;
+  --input-bg: #ffffff;
+  --card-bg: #ffffff;
+  --panel-bg: #ffffff;
 
-  --code-bg: #F5F7FA;
-  --code-fg: #0F1220;
+  --code-bg: #f4f4f5;
+  --code-fg: #3f3f46;
 
-  --ring: rgba(22, 163, 74, 0.30);
+  /* SURGICAL: No glow */
+  --ring: rgba(71, 85, 105, 0.15);
+
+  /* Radius tokens - surgical flat */
+  --radius-sm: 2px;
+  --radius-md: 2px;
+  --radius-lg: 3px;
 }
 
 /* Base text/background helpers that components can rely on */
@@ -81,3 +95,113 @@ body { background: var(--bg); color: var(--fg); }
 .panel { background: var(--panel-bg); border-color: var(--line); }
 .card { background: var(--card-bg); border-color: var(--line); }
 .code { background: var(--code-bg); color: var(--code-fg); }
+
+/* ===========================================
+   SURGICAL THEME GLOBAL OVERRIDES
+   Zero glow, flat, clinical aesthetic
+   =========================================== */
+
+/* Kill all rounded corners - surgical flat aesthetic */
+*,
+*::before,
+*::after {
+  border-radius: 2px !important;
+}
+
+/* Exception: circles stay circular */
+.status-dot,
+[class*="avatar"],
+[class*="spinner"],
+.help-icon,
+.tooltip-icon,
+input[type="radio"],
+input[type="checkbox"]::before {
+  border-radius: 50% !important;
+}
+
+/* Pills stay pill-shaped */
+input[type="range"]::-webkit-slider-thumb,
+input[type="range"]::-webkit-slider-runnable-track {
+  border-radius: 999px !important;
+}
+
+/* Kill all uppercase transforms - clean sentence case */
+* {
+  text-transform: none !important;
+}
+
+/* Normalize letter-spacing - no monospace all-caps look */
+* {
+  letter-spacing: normal !important;
+}
+
+/* Exception: code blocks can have tighter spacing */
+code, pre, .mono, [class*="mono"] {
+  letter-spacing: -0.01em !important;
+}
+
+/* ===========================================
+   KILL ALL GLOWS AND SHADOWS
+   Surgical = matte, flat, no luminescence
+   =========================================== */
+
+/* Nuke all box-shadows globally */
+*,
+*::before,
+*::after {
+  box-shadow: none !important;
+}
+
+/* Allow only subtle 1px borders for depth, no glow */
+*:focus,
+*:focus-visible {
+  outline: 1px solid var(--accent) !important;
+  outline-offset: 1px !important;
+  box-shadow: none !important;
+}
+
+/* Kill filter effects that create glow */
+* {
+  filter: none !important;
+}
+
+/* Exception: allow grayscale/invert for icons */
+svg, img, [class*="icon"] {
+  filter: unset !important;
+}
+
+/* Kill text-shadow */
+* {
+  text-shadow: none !important;
+}
+
+/* 3-column config grid */
+.input-row,
+.config-grid,
+.sidepanel-section .input-row,
+.rag-subtab-content .input-row,
+.settings-section .input-row {
+  display: grid !important;
+  grid-template-columns: repeat(3, 1fr) !important;
+  gap: 8px !important;
+}
+
+@media (max-width: 1200px) {
+  .input-row,
+  .config-grid,
+  .sidepanel-section .input-row,
+  .rag-subtab-content .input-row,
+  .settings-section .input-row {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+}
+
+@media (max-width: 768px) {
+  .input-row,
+  .config-grid,
+  .sidepanel-section .input-row,
+  .rag-subtab-content .input-row,
+  .settings-section .input-row {
+    grid-template-columns: 1fr !important;
+  }
+}

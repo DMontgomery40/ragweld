@@ -26,6 +26,7 @@ async def test_prompts_list_update_reset(client, tmp_path) -> None:
 
         assert "main_rag_chat" in prompts
         assert "eval_analysis" in prompts
+        assert "semantic_kg_extraction" in prompts
         assert "chat.system_prompt_base" in prompts
         assert "chat.system_prompt_direct" in prompts
         assert "chat.system_prompt_rag_suffix" in prompts
@@ -33,6 +34,7 @@ async def test_prompts_list_update_reset(client, tmp_path) -> None:
 
         assert "main_rag_chat" in meta
         assert "eval_analysis" in meta
+        assert "semantic_kg_extraction" in meta
         assert "chat.system_prompt_base" in meta
         assert "chat.system_prompt_direct" in meta
         assert "chat.system_prompt_rag_suffix" in meta

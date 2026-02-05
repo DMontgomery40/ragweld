@@ -87,10 +87,80 @@ export function useReranker() {
    * Mine triplets
    */
   const mineTriplets = useCallback(async () => {
-    const result = await service.mineTriplets();
-    startPolling();
-    return result;
-  }, [service, startPolling]);
+    // Optimistically set status immediately from the response so the UI doesn't depend on
+    // process-local backend polling state (which can drift under multi-worker servers).
+    setStatus((prev) => ({
+      ...prev,
+      running: true,
+      progress: 0,
+      task: 'mining',
+      message: 'Mining triplets…',
+      result: null,
+      live_output: [],
+      run_id: null,
+    }));
+
+    try {
+      const result = await service.mineTriplets();
+
+      if (result?.ok) {
+        setStatus((prev) => ({
+          ...prev,
+          running: false,
+          progress: 100,
+          task: 'mining',
+          message: 'Mining complete',
+          result: {
+            ok: true,
+            output: result.output ?? null,
+            metrics: null,
+            error: null,
+            run_id: null,
+          },
+          live_output: [],
+          run_id: null,
+        }));
+      } else {
+        setStatus((prev) => ({
+          ...prev,
+          running: false,
+          progress: 0,
+          task: 'mining',
+          message: 'Mining failed',
+          result: {
+            ok: false,
+            output: null,
+            metrics: null,
+            error: result?.error ?? 'Mining failed',
+            run_id: null,
+          },
+          live_output: [],
+          run_id: null,
+        }));
+      }
+
+      return result;
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Mining failed';
+      setStatus((prev) => ({
+        ...prev,
+        running: false,
+        progress: 0,
+        task: 'mining',
+        message: 'Mining failed',
+        result: {
+          ok: false,
+          output: null,
+          metrics: null,
+          error: msg,
+          run_id: null,
+        },
+        live_output: [],
+        run_id: null,
+      }));
+      throw e;
+    }
+  }, [service]);
 
   /**
    * Train model
@@ -117,10 +187,80 @@ export function useReranker() {
    * Evaluate model
    */
   const evaluateModel = useCallback(async () => {
-    const result = await service.evaluateModel();
-    startPolling();
-    return result;
-  }, [service, startPolling]);
+    // Optimistically set status immediately from the response so the UI doesn't depend on
+    // process-local backend polling state (which can drift under multi-worker servers).
+    setStatus((prev) => ({
+      ...prev,
+      running: true,
+      progress: 0,
+      task: 'evaluating',
+      message: 'Evaluating model…',
+      result: null,
+      live_output: [],
+      run_id: null,
+    }));
+
+    try {
+      const result = await service.evaluateModel();
+
+      if (result?.ok) {
+        setStatus((prev) => ({
+          ...prev,
+          running: false,
+          progress: 100,
+          task: 'evaluating',
+          message: 'Evaluation complete',
+          result: {
+            ok: true,
+            output: result.output ?? null,
+            metrics: result.metrics ?? null,
+            error: null,
+            run_id: null,
+          },
+          live_output: [],
+          run_id: null,
+        }));
+      } else {
+        setStatus((prev) => ({
+          ...prev,
+          running: false,
+          progress: 0,
+          task: 'evaluating',
+          message: 'Evaluation failed',
+          result: {
+            ok: false,
+            output: null,
+            metrics: null,
+            error: result?.error ?? 'Evaluation failed',
+            run_id: null,
+          },
+          live_output: [],
+          run_id: null,
+        }));
+      }
+
+      return result;
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Evaluation failed';
+      setStatus((prev) => ({
+        ...prev,
+        running: false,
+        progress: 0,
+        task: 'evaluating',
+        message: 'Evaluation failed',
+        result: {
+          ok: false,
+          output: null,
+          metrics: null,
+          error: msg,
+          run_id: null,
+        },
+        live_output: [],
+        run_id: null,
+      }));
+      throw e;
+    }
+  }, [service]);
 
   /**
    * Submit feedback

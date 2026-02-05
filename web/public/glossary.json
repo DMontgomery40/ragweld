@@ -1,6 +1,6 @@
 {
   "version": "1.1.0",
-  "generated_from": "web/src/modules/_archived/tooltips.js",
+  "generated_from": "data/glossary.json",
   "terms": [
     {
       "term": "Advanced Parameters",
@@ -1186,6 +1186,15 @@
       "badges": []
     },
     {
+      "term": "Dedup by",
+      "key": "DEDUP_BY",
+      "definition": "How to deduplicate fused retrieval results.<br><br><b>chunk_id</b>: keep distinct chunks (best default).<br><b>file_path</b>: at most one result per file (improves diversity but disables neighbor-window expansion).",
+      "category": "retrieval",
+      "related": [],
+      "links": [],
+      "badges": []
+    },
+    {
       "term": "Dev Local Uvicorn",
       "key": "DEV_LOCAL_UVICORN",
       "definition": "Run Uvicorn ASGI server in direct Python mode instead of Docker for faster development iteration (1=yes, 0=no). Enables hot-reload and easier debugging. Production should use 0 (Docker).",
@@ -1537,6 +1546,24 @@
       "badges": []
     },
     {
+      "term": "Auto-set embedding dimensions",
+      "key": "EMBEDDING_AUTO_SET_DIMENSIONS",
+      "definition": "When enabled, the UI automatically sets <code>embedding_dim</code> to the dimension declared for the selected embedding model in <code>data/models.json</code>. This prevents subtle mismatches that can break indexing or retrieval.",
+      "category": "embedding",
+      "related": [],
+      "links": [],
+      "badges": []
+    },
+    {
+      "term": "Embedding backend",
+      "key": "EMBEDDING_BACKEND",
+      "definition": "Selects which embedding implementation is used during indexing and retrieval.<br><br><b>deterministic</b>: produces stable fake embeddings for tests/offline development (no API calls). Retrieval works but quality is not representative.<br><b>provider</b>: uses the configured provider (OpenAI/Voyage/local/HF) to generate real embeddings.",
+      "category": "embedding",
+      "related": [],
+      "links": [],
+      "badges": []
+    },
+    {
       "term": "Embedding Batch Size",
       "key": "EMBEDDING_BATCH_SIZE",
       "definition": "Number of text chunks to embed in a single API call or local batch during indexing. Higher values (50-200) speed up indexing by reducing API round trips but may hit rate limits or memory constraints. Lower values (10-30) are safer but slower. For OpenAI/Voyage APIs, batching significantly reduces total indexing time. For local models, larger batches improve GPU utilization but require more VRAM. If indexing fails with rate limit or OOM errors, reduce this value.\n\nRecommended: 100-150 for API providers, 16-32 for local models (GPU), 4-8 for CPU-only.",
@@ -1586,6 +1613,20 @@
       "badges": []
     },
     {
+      "term": "Contextual chunk embeddings",
+      "key": "EMBEDDING_CONTEXTUAL_CHUNK_EMBEDDINGS",
+      "definition": "Controls whether chunk embeddings incorporate surrounding context.<br><br><b>off</b>: embed each chunk independently (default).<br><b>prepend_context</b>: embed chunk text with a small amount of context prepended (cheaper, simple).<br><b>late_chunking_local_only</b>: embed the document once and pool per-chunk spans (experimental, local/HF only).",
+      "category": "embedding",
+      "related": [],
+      "links": [],
+      "badges": [
+        {
+          "text": "Advanced",
+          "class": "warn"
+        }
+      ]
+    },
+    {
       "term": "Embedding Dimension",
       "key": "EMBEDDING_DIM",
       "definition": "Vector dimensionality for MXBAI/local embedding models. Common sizes: 384 (fast, lower quality), 768 (balanced, recommended), 1024 (best quality, slower). Larger dimensions capture more semantic nuance but increase Qdrant storage requirements and query latency. Must match your embedding model's output size. Changing this requires full reindexing - vectors of different dimensions are incompatible.",
@@ -1612,6 +1653,29 @@
         },
         {
           "text": "Affects storage",
+          "class": "warn"
+        }
+      ]
+    },
+    {
+      "term": "Embedding input truncation",
+      "key": "EMBEDDING_INPUT_TRUNCATION",
+      "definition": "What to do when a single chunk exceeds the embedding model’s maximum input tokens.<br><br><b>truncate_end</b>: keep the start of the text (recommended for most docs).<br><b>truncate_middle</b>: keep the beginning and end (useful when both header + footer matter).<br><b>error</b>: fail fast (best for strict pipelines).",
+      "category": "embedding",
+      "related": [],
+      "links": [],
+      "badges": []
+    },
+    {
+      "term": "Late chunking max doc tokens",
+      "key": "EMBEDDING_LATE_CHUNKING_MAX_DOC_TOKENS",
+      "definition": "Upper bound on document tokens processed for late chunking. Late chunking embeds a whole document (or long span) once, so this protects memory/latency. Only used when contextual embeddings are set to <code>late_chunking_local_only</code>.",
+      "category": "embedding",
+      "related": [],
+      "links": [],
+      "badges": [
+        {
+          "text": "Experimental",
           "class": "warn"
         }
       ]
@@ -1777,6 +1841,34 @@
       "badges": []
     },
     {
+      "term": "Embedding text prefix",
+      "key": "EMBEDDING_TEXT_PREFIX",
+      "definition": "Optional string prepended to every text before embedding. Use to add stable context (e.g., \"document: \") or to enforce consistent formatting across corpora. Changing this requires reindexing.",
+      "category": "embedding",
+      "related": [],
+      "links": [],
+      "badges": [
+        {
+          "text": "Requires reindex",
+          "class": "reindex"
+        }
+      ]
+    },
+    {
+      "term": "Embedding text suffix",
+      "key": "EMBEDDING_TEXT_SUFFIX",
+      "definition": "Optional string appended to every text before embedding. Useful for adding a delimiter or stable footer context. Changing this requires reindexing.",
+      "category": "embedding",
+      "related": [],
+      "links": [],
+      "badges": [
+        {
+          "text": "Requires reindex",
+          "class": "reindex"
+        }
+      ]
+    },
+    {
       "term": "Embedding Timeout",
       "key": "EMBEDDING_TIMEOUT",
       "definition": "Maximum seconds to wait for embedding API response. Similar to GEN_TIMEOUT but for embedding calls during indexing. Increase for large batches or slow networks. Typical: 30-60 seconds.",
@@ -1828,6 +1920,33 @@
           "class": "info"
         }
       ]
+    },
+    {
+      "term": "Emit chunk ordinal",
+      "key": "EMIT_CHUNK_ORDINAL",
+      "definition": "When enabled, chunking emits a stable <code>chunk_ordinal</code> into each chunk’s metadata (0-based). This enables neighbor-window retrieval, which pulls adjacent chunks around top hits for better coherence.",
+      "category": "chunking",
+      "related": [],
+      "links": [],
+      "badges": []
+    },
+    {
+      "term": "Emit parent doc id",
+      "key": "EMIT_PARENT_DOC_ID",
+      "definition": "When enabled, chunking emits a stable <code>parent_doc_id</code> into each chunk’s metadata (usually the file path). This helps downstream retrieval and debugging group chunks by document.",
+      "category": "chunking",
+      "related": [],
+      "links": [],
+      "badges": []
+    },
+    {
+      "term": "Enable MMR",
+      "key": "ENABLE_MMR",
+      "definition": "Maximal Marginal Relevance (MMR) reorders results to reduce redundancy. It trades off relevance vs diversity using <code>MMR_LAMBDA</code>.",
+      "category": "retrieval",
+      "related": [],
+      "links": [],
+      "badges": []
     },
     {
       "term": "Endpoint Call Frequency (calls/min)",
@@ -3271,17 +3390,12 @@
       ]
     },
     {
-      "term": "Max File Size (MB)",
+      "term": "Index max file size (MB)",
       "key": "INDEX_MAX_FILE_SIZE_MB",
-      "definition": "Skip files larger than this size (in megabytes) during indexing. Prevents huge generated files or vendor bundles from bloating the index. Typical: 1-5 MB for source code, higher for docs.",
-      "category": "infrastructure",
+      "definition": "Hard cap for indexing: files larger than this (in MB) are skipped before reading. For very large text dumps, raise this above the file size and enable streaming ingestion.",
+      "category": "chunking",
       "related": [],
-      "links": [
-        {
-          "text": "File Size Management",
-          "href": "https://en.wikipedia.org/wiki/File_size"
-        }
-      ],
+      "links": [],
       "badges": []
     },
     {
@@ -3633,6 +3747,24 @@
       "badges": []
     },
     {
+      "term": "Large file mode",
+      "key": "LARGE_FILE_MODE",
+      "definition": "How to ingest very large text files.<br><br><b>stream</b>: reads in bounded character blocks (avoids loading the full file into memory).<br><b>read_all</b>: reads the entire file into memory before chunking (simpler, but risky for huge files).",
+      "category": "chunking",
+      "related": [],
+      "links": [],
+      "badges": []
+    },
+    {
+      "term": "Large file stream chunk chars",
+      "key": "LARGE_FILE_STREAM_CHUNK_CHARS",
+      "definition": "When <code>LARGE_FILE_MODE=stream</code>, this controls the approximate number of characters to read per block. Larger blocks reduce boundary artifacts but increase memory usage.",
+      "category": "chunking",
+      "related": [],
+      "links": [],
+      "badges": []
+    },
+    {
       "term": "Latency P99 Threshold (s)",
       "key": "LATENCY_P99_THRESHOLD",
       "definition": "Threshold for alerting on tail latency: if the 99th percentile (p99) of request latency over the monitoring window exceeds this value, an alert fires.\n\np99 focuses on the slowest 1% of requests. It’s useful for catching “everything is fine… except when it isn’t” situations caused by cold starts, slow LLM calls, database contention, or network hiccups.\n\nChoose a threshold that matches your workload. If most requests include an LLM call, a higher p99 is reasonable; for retrieval-only endpoints, p99 should be much lower.\n\n• Units: seconds\n• Typical dev: 10–30s (looser)\n• Typical prod: 2–10s (depends on LLM usage)\n• Symptom too low: noisy alerts during normal LLM slowness\n• Symptom too high: tail latency regressions go unnoticed",
@@ -3737,6 +3869,205 @@
       ]
     },
     {
+      "term": "Learning Reranker Backend",
+      "key": "LEARNING_RERANKER_BACKEND",
+      "definition": "Backend used when RERANKER_MODE=\"learning\". auto prefers the MLX Qwen3 LoRA backend when MLX is available (Apple Silicon), otherwise falls back to the existing HuggingFace/SentenceTransformers CrossEncoder backend. Use transformers to force the legacy backend, or mlx_qwen3 to force the MLX backend.",
+      "category": "reranking",
+      "related": [
+        "RERANKER_MODE",
+        "TRIBRID_RERANKER_MODEL_PATH"
+      ],
+      "links": [],
+      "badges": [
+        {
+          "text": "Backend selector",
+          "class": "info"
+        }
+      ]
+    },
+    {
+      "term": "Learning Reranker Base Model",
+      "key": "LEARNING_RERANKER_BASE_MODEL",
+      "definition": "Base model identifier to fine-tune FROM when using the MLX Qwen3 learning backend (e.g. Qwen/Qwen3-Reranker-0.6B). Training produces a LoRA adapter artifact written under TRIBRID_RERANKER_MODEL_PATH and inference loads that adapter on top of this base. Changing the base model makes existing adapters incompatible.",
+      "category": "reranking",
+      "related": [
+        "LEARNING_RERANKER_BACKEND",
+        "TRIBRID_RERANKER_MODEL_PATH"
+      ],
+      "links": [],
+      "badges": [
+        {
+          "text": "MLX only",
+          "class": "info"
+        }
+      ]
+    },
+    {
+      "term": "Learning Reranker Grad Accum Steps",
+      "key": "LEARNING_RERANKER_GRAD_ACCUM_STEPS",
+      "definition": "Number of micro-batches to accumulate gradients over before applying one optimizer update when training the MLX Qwen3 learning reranker. This increases effective batch size without increasing memory. Typical: 4–16; default 8.",
+      "category": "reranking",
+      "related": [
+        "RERANKER_TRAIN_BATCH",
+        "RERANKER_TRAIN_LR"
+      ],
+      "links": [],
+      "badges": [
+        {
+          "text": "MLX only",
+          "class": "info"
+        },
+        {
+          "text": "Affects training speed",
+          "class": "warn"
+        }
+      ]
+    },
+    {
+      "term": "Learning Reranker LoRA Alpha",
+      "key": "LEARNING_RERANKER_LORA_ALPHA",
+      "definition": "LoRA scaling (alpha) for MLX Qwen3 fine-tuning. Effective LoRA scale is alpha/rank. Typical: 16–64; start at 32.",
+      "category": "reranking",
+      "related": [
+        "LEARNING_RERANKER_LORA_RANK",
+        "LEARNING_RERANKER_LORA_DROPOUT"
+      ],
+      "links": [],
+      "badges": [
+        {
+          "text": "MLX only",
+          "class": "info"
+        }
+      ]
+    },
+    {
+      "term": "Learning Reranker LoRA Dropout",
+      "key": "LEARNING_RERANKER_LORA_DROPOUT",
+      "definition": "LoRA dropout probability for MLX Qwen3 fine-tuning. Small dropout (0.0–0.1) can reduce overfitting on small mined datasets. Start at 0.05.",
+      "category": "reranking",
+      "related": [
+        "LEARNING_RERANKER_LORA_RANK",
+        "LEARNING_RERANKER_NEGATIVE_RATIO"
+      ],
+      "links": [],
+      "badges": [
+        {
+          "text": "MLX only",
+          "class": "info"
+        }
+      ]
+    },
+    {
+      "term": "Learning Reranker LoRA Rank",
+      "key": "LEARNING_RERANKER_LORA_RANK",
+      "definition": "LoRA rank (r) for MLX Qwen3 fine-tuning. Higher rank increases adapter capacity (and training/inference cost) and can improve quality with enough data. Typical: 8–32; start at 16.",
+      "category": "reranking",
+      "related": [
+        "LEARNING_RERANKER_LORA_ALPHA",
+        "LEARNING_RERANKER_LORA_TARGET_MODULES"
+      ],
+      "links": [],
+      "badges": [
+        {
+          "text": "MLX only",
+          "class": "info"
+        },
+        {
+          "text": "Affects training cost",
+          "class": "warn"
+        }
+      ]
+    },
+    {
+      "term": "Learning Reranker LoRA Target Modules",
+      "key": "LEARNING_RERANKER_LORA_TARGET_MODULES",
+      "definition": "Comma-separated list of module names to apply LoRA to for the MLX Qwen3 learning backend (typical attention projections: q_proj,k_proj,v_proj,o_proj). Targeting more modules increases capacity but costs more memory/compute.",
+      "category": "reranking",
+      "related": [
+        "LEARNING_RERANKER_LORA_RANK",
+        "LEARNING_RERANKER_BASE_MODEL"
+      ],
+      "links": [],
+      "badges": [
+        {
+          "text": "MLX only",
+          "class": "info"
+        }
+      ]
+    },
+    {
+      "term": "Learning Reranker Negative Ratio",
+      "key": "LEARNING_RERANKER_NEGATIVE_RATIO",
+      "definition": "When converting mined triplets into labeled (query, document) pairs for pairwise training, use up to this many negatives per positive. Higher ratios can improve discrimination but increase training time. Typical: 3–5; default 5.",
+      "category": "reranking",
+      "related": [
+        "TRIBRID_TRIPLETS_PATH",
+        "TRIPLETS_MINE_MODE"
+      ],
+      "links": [],
+      "badges": [
+        {
+          "text": "Quality vs cost",
+          "class": "warn"
+        }
+      ]
+    },
+    {
+      "term": "Learning Reranker Promotion Epsilon",
+      "key": "LEARNING_RERANKER_PROMOTE_EPSILON",
+      "definition": "Minimum dev-metric improvement required to auto-promote a newly trained learning reranker artifact over the active baseline. Use a small epsilon (e.g., 0.002) to avoid promoting on noise.",
+      "category": "reranking",
+      "related": [
+        "LEARNING_RERANKER_PROMOTE_IF_IMPROVES",
+        "RERANKER_TRAIN_EPOCHS"
+      ],
+      "links": [],
+      "badges": [
+        {
+          "text": "Prevents noise promotions",
+          "class": "info"
+        }
+      ]
+    },
+    {
+      "term": "Learning Reranker Promotion Gate",
+      "key": "LEARNING_RERANKER_PROMOTE_IF_IMPROVES",
+      "definition": "If enabled (1), training only promotes the newly trained artifact to TRIBRID_RERANKER_MODEL_PATH if the primary dev metric improves over the active baseline by at least LEARNING_RERANKER_PROMOTE_EPSILON. If disabled (0), successful training always promotes.",
+      "category": "reranking",
+      "related": [
+        "LEARNING_RERANKER_PROMOTE_EPSILON",
+        "TRIBRID_RERANKER_MODEL_PATH"
+      ],
+      "links": [],
+      "badges": [
+        {
+          "text": "Safety",
+          "class": "info"
+        }
+      ]
+    },
+    {
+      "term": "Learning Reranker Idle Unload",
+      "key": "LEARNING_RERANKER_UNLOAD_AFTER_SEC",
+      "definition": "If >0, unload the MLX Qwen3 reranker model from memory after this many seconds of inactivity. Set to 0 to keep the model resident (faster first rerank, higher memory use).",
+      "category": "reranking",
+      "related": [
+        "LEARNING_RERANKER_BACKEND",
+        "TRIBRID_RERANKER_TOPN"
+      ],
+      "links": [],
+      "badges": [
+        {
+          "text": "MLX only",
+          "class": "info"
+        },
+        {
+          "text": "Affects latency",
+          "class": "warn"
+        }
+      ]
+    },
+    {
       "term": "Log Level",
       "key": "LOG_LEVEL",
       "definition": "Logging verbosity level. Options: DEBUG (verbose, dev), INFO (normal, recommended), WARNING (errors + warnings only), ERROR (errors only). Higher levels reduce noise but may hide useful diagnostics.",
@@ -3752,6 +4083,33 @@
           "href": "https://docs.python.org/3/howto/logging.html"
         }
       ],
+      "badges": []
+    },
+    {
+      "term": "Markdown include code fences",
+      "key": "MARKDOWN_INCLUDE_CODE_FENCES",
+      "definition": "When using markdown chunking, controls whether fenced code blocks are included in their surrounding section. Disable if code fences add noise for your corpus.",
+      "category": "chunking",
+      "related": [],
+      "links": [],
+      "badges": []
+    },
+    {
+      "term": "Markdown max heading level",
+      "key": "MARKDOWN_MAX_HEADING_LEVEL",
+      "definition": "When using markdown chunking, split on headings up to this level (e.g., 1–4 splits on #, ##, ###, ####). Deeper headings are treated as normal text.",
+      "category": "chunking",
+      "related": [],
+      "links": [],
+      "badges": []
+    },
+    {
+      "term": "Max chunks per file",
+      "key": "MAX_CHUNKS_PER_FILE",
+      "definition": "Limits how many chunks from the same file can appear in final results. This improves document diversity and reduces “one big file dominates” behavior.",
+      "category": "retrieval",
+      "related": [],
+      "links": [],
       "badges": []
     },
     {
@@ -3987,6 +4345,42 @@
       ]
     },
     {
+      "term": "Min score (graph)",
+      "key": "MIN_SCORE_GRAPH",
+      "definition": "Minimum score threshold for graph-leg candidates before fusion. Use this to drop very weak graph hits.",
+      "category": "retrieval",
+      "related": [],
+      "links": [],
+      "badges": []
+    },
+    {
+      "term": "Min score (sparse)",
+      "key": "MIN_SCORE_SPARSE",
+      "definition": "Minimum score threshold for sparse-leg candidates before fusion. Use this to reduce noisy BM25/FTS matches.",
+      "category": "retrieval",
+      "related": [],
+      "links": [],
+      "badges": []
+    },
+    {
+      "term": "Min score (vector)",
+      "key": "MIN_SCORE_VECTOR",
+      "definition": "Minimum score threshold for vector-leg candidates before fusion (in addition to vector similarity threshold). Use this to drop weak embedding matches.",
+      "category": "retrieval",
+      "related": [],
+      "links": [],
+      "badges": []
+    },
+    {
+      "term": "MMR lambda (λ)",
+      "key": "MMR_LAMBDA",
+      "definition": "MMR relevance vs diversity tradeoff. <b>1.0</b> is pure relevance (no diversity), <b>0.0</b> is maximum diversity. Typical: 0.6–0.8.",
+      "category": "retrieval",
+      "related": [],
+      "links": [],
+      "badges": []
+    },
+    {
       "term": "Multi‑Query Rewrites",
       "key": "MQ_REWRITES",
       "definition": "Number of query variations to generate for improved recall. Each rewrite searches independently, then results are fused and reranked. For example, query \"auth flow\" might expand to \"authentication flow\", \"login process\", \"user authentication\". Higher values (4-6) improve recall for vague questions like \"Where is X implemented?\" but increase API calls and latency. Start at 2-3 for general use.",
@@ -4051,6 +4445,15 @@
           "class": "info"
         }
       ]
+    },
+    {
+      "term": "Neighbor window",
+      "key": "NEIGHBOR_WINDOW",
+      "definition": "After selecting top hits, fetch adjacent chunks by <code>chunk_ordinal</code> within this window for better coherence (e.g., 1 pulls the previous and next chunk). Requires <code>EMIT_CHUNK_ORDINAL</code> at index time.",
+      "category": "retrieval",
+      "related": [],
+      "links": [],
+      "badges": []
     },
     {
       "term": "Neo4j Connection URI",
@@ -4248,6 +4651,60 @@
           "class": "info"
         }
       ]
+    },
+    {
+      "term": "Overlap tokens",
+      "key": "OVERLAP_TOKENS",
+      "definition": "Token overlap between adjacent chunks for token-based strategies. Overlap preserves context across boundaries but increases total tokens indexed.",
+      "category": "chunking",
+      "related": [],
+      "links": [],
+      "badges": []
+    },
+    {
+      "term": "Parquet Include Column Names",
+      "key": "PARQUET_EXTRACT_INCLUDE_COLUMN_NAMES",
+      "definition": "When enabled, extracted Parquet text includes column headers like `[column]` to preserve context across fields.",
+      "category": "indexing",
+      "related": [],
+      "links": [],
+      "badges": []
+    },
+    {
+      "term": "Parquet Extract Max Cell Chars",
+      "key": "PARQUET_EXTRACT_MAX_CELL_CHARS",
+      "definition": "Maximum characters per Parquet cell when converting to text (best-effort). Long cells are truncated to keep output bounded.",
+      "category": "indexing",
+      "related": [],
+      "links": [],
+      "badges": []
+    },
+    {
+      "term": "Parquet Extract Max Chars",
+      "key": "PARQUET_EXTRACT_MAX_CHARS",
+      "definition": "Maximum total characters to extract from a single Parquet file during indexing (best-effort). Extraction stops once this limit is reached.",
+      "category": "indexing",
+      "related": [],
+      "links": [],
+      "badges": []
+    },
+    {
+      "term": "Parquet Extract Max Rows",
+      "key": "PARQUET_EXTRACT_MAX_ROWS",
+      "definition": "Maximum number of rows to read from a single Parquet file during indexing (best-effort). Prevents huge datasets from consuming excessive memory/time.",
+      "category": "indexing",
+      "related": [],
+      "links": [],
+      "badges": []
+    },
+    {
+      "term": "Parquet Text Columns Only",
+      "key": "PARQUET_EXTRACT_TEXT_COLUMNS_ONLY",
+      "definition": "When enabled, only string/text-like columns are extracted from Parquet files (best-effort). Disabling may include numeric/structured columns as text.",
+      "category": "indexing",
+      "related": [],
+      "links": [],
+      "badges": []
     },
     {
       "term": "Per-Repository Indexing Configuration",
@@ -4462,6 +4919,15 @@
           "class": "warn"
         }
       ]
+    },
+    {
+      "term": "Recursive max depth",
+      "key": "RECURSIVE_MAX_DEPTH",
+      "definition": "Maximum recursion depth for separator-based (recursive) chunking. Higher values try more separators before falling back to hard token windows.",
+      "category": "chunking",
+      "related": [],
+      "links": [],
+      "badges": []
     },
     {
       "term": "Redis URL",
@@ -4730,7 +5196,7 @@
     {
       "term": "Reranker Mode",
       "key": "RERANKER_MODE",
-      "definition": "Controls which reranking approach is used. Four options:\n\n• none: Disabled—BM25 + vector fusion only, no cross-encoder scoring.\n• local: Any local reranker model you provide (BGE, Jina, etc.).\n• learning: TriBridRAG self-training cross-encoder that improves with your usage patterns.\n• cloud: External API reranking (Cohere, Voyage, Jina).\n\nRecommended: Start with \"learning\" to leverage TriBridRAG's adaptive improvements, or \"cloud\" for lowest latency if you have API budget.",
+      "definition": "Controls which reranking approach is used. Four options:\n\n• none: Disabled—BM25 + vector fusion only (no reranker scoring).\n• local: A local HuggingFace reranker (cross-encoder) you provide (BGE, Jina, etc.).\n• learning: A trainable learning reranker that improves with your mined triplets. Uses MLX Qwen3 LoRA on Apple Silicon when available, otherwise falls back to transformers.\n• cloud: External API reranking (Cohere, Voyage, Jina).\n\nRecommended: Start with \"learning\" if you want the system to adapt over time; use \"cloud\" for managed quality if you have an API budget.",
       "category": "reranking",
       "related": [],
       "links": [
@@ -4920,6 +5386,52 @@
       "badges": []
     },
     {
+      "term": "Primary K Override (@k cutoff)",
+      "key": "RERANKER_TRAIN_PRIMARY_K_OVERRIDE",
+      "definition": "<span class=\"tt-strong\">What “k” means</span><br>For metrics like <span class=\"mono\">MRR@k</span> and <span class=\"mono\">nDCG@k</span>, <span class=\"mono\">k</span> is the <span class=\"tt-strong\">cutoff</span>: we only score how good the ranking is within the top <span class=\"mono\">k</span> items.<br><br><span class=\"tt-strong\">How to choose k</span><br>• Smaller k (e.g. 5): stricter. Rewards putting relevant chunks at the very top (more like what a user experiences).<br>• Larger k (e.g. 20): more forgiving. Gives credit when relevant chunks show up a bit deeper, but can hide “top-of-list” problems.<br><br><span class=\"tt-strong\">Why options are clamped</span><br>Training/eval can’t score beyond the number of candidates we actually retrieve for reranking. That’s why the UI clamps k to ≤ your configured reranker candidate count (<span class=\"mono\">tribrid_reranker_topn</span>).<br><br><span class=\"tt-strong\">Note</span><br>MAP does not use an @k cutoff in the same way, but for consistency TriBridRAG still stores a primary_k alongside the primary metric for each run.",
+      "category": "evaluation",
+      "related": [],
+      "links": [],
+      "badges": [
+        {
+          "text": "Advanced",
+          "class": "warn"
+        }
+      ]
+    },
+    {
+      "term": "Primary Metric Override",
+      "key": "RERANKER_TRAIN_PRIMARY_METRIC_OVERRIDE",
+      "definition": "<span class=\"tt-strong\">What this setting does</span><br>Overrides the run’s “North Star” metric <span class=\"tt-strong\">only for the next run you start</span>. If you leave it on <span class=\"mono\">Auto</span>, TriBridRAG uses the <span class=\"tt-strong\">Recommended metric</span> for this corpus.<br><br><span class=\"tt-strong\">Why this matters</span><br>Training logs and summaries track many metrics, but a run needs one headline number to answer: “Is this run getting better or worse?” This choice affects which checkpoint is considered “best” and what number is highlighted in the UI.<br><br><span class=\"tt-strong\">Metric cheat‑sheet</span><br>• <span class=\"mono\">mrr</span> (MRR@k): Best when each query has ~1 correct answer. It strongly rewards putting the first relevant chunk at rank 1–2. (Think: “How fast do I hit the first correct chunk?”)<br>• <span class=\"mono\">ndcg</span> (nDCG@k): Best when there can be <span class=\"tt-strong\">multiple</span> relevant chunks and/or <span class=\"tt-strong\">graded</span> relevance. It rewards good ordering across the whole top‑k list, not just the first hit.<br>• <span class=\"mono\">map</span> (MAP): Best when you care about overall <span class=\"tt-strong\">precision</span> across the ranked list for binary labels. It’s less common as a “North Star” for RAG when you mainly need 1–2 great chunks, but it can be useful when many chunks are relevant and you want them all early.<br><br><span class=\"tt-strong\">Practical advice</span><br>If you’re unsure, stick with <span class=\"mono\">Auto</span>. The default choice is designed to match your corpus label structure, and makes runs easier to compare.",
+      "category": "evaluation",
+      "related": [],
+      "links": [],
+      "badges": [
+        {
+          "text": "Advanced",
+          "class": "warn"
+        }
+      ]
+    },
+    {
+      "term": "Recommended Metric (North Star)",
+      "key": "RERANKER_TRAIN_RECOMMENDED_METRIC",
+      "definition": "<span class=\"tt-strong\">What this is</span><br>This is the <span class=\"tt-strong\">one headline number</span> the Training Studio treats as the “North Star” for your corpus. It is chosen automatically from your evaluation labels (the relevance data behind your training/eval questions). TriBridRAG uses it to:<br>• decide what “best checkpoint” means during training<br>• summarize runs in the Runs list / Run overview<br>• make run-to-run comparisons meaningful (same metric + same @k)<br><br><span class=\"tt-strong\">Why it’s corpus-specific</span><br>Different corpora have different “ground truth” shapes. Some questions have exactly one truly-correct chunk. Others have many acceptable chunks. Some datasets even have <span class=\"tt-strong\">graded relevance</span> (2 is “more relevant” than 1). The best metric depends on that structure, so TriBridRAG infers a profile and picks the most informative metric.<br><br><span class=\"tt-strong\">What the @10 means</span><br><span class=\"mono\">nDCG@10</span> / <span class=\"mono\">MRR@10</span> only look at the <span class=\"tt-strong\">top 10</span> ranked candidates. If the first relevant chunk is at rank 37, that does not help an @10 metric. Pick @k that roughly matches what you consider “acceptable” in the UI (how far down you’d scroll before you’d say retrieval failed).<br><br><span class=\"tt-strong\">How TriBridRAG chooses</span><br>Heuristic (deterministic):<br>• If your relevance labels are <span class=\"tt-strong\">graded</span> (not just 0/1), TriBridRAG chooses <span class=\"mono\">nDCG@k</span>.<br>• If most queries have about <span class=\"tt-strong\">one</span> relevant item, it chooses <span class=\"mono\">MRR@k</span>.<br>• If many queries have <span class=\"tt-strong\">multiple</span> relevant items, it chooses <span class=\"mono\">nDCG@k</span>.<br><br><span class=\"tt-strong\">What “Why?” shows</span><br>The “Why?” link next to the recommended metric shows the corpus profile numbers TriBridRAG computed (like average relevant items per query) and a short explanation of the choice.",
+      "category": "evaluation",
+      "related": [],
+      "links": [],
+      "badges": [
+        {
+          "text": "Auto-selected",
+          "class": "info"
+        },
+        {
+          "text": "North Star",
+          "class": "info"
+        }
+      ]
+    },
+    {
       "term": "Warmup Ratio",
       "key": "RERANKER_WARMUP_RATIO",
       "definition": "Fraction of total training steps to use for linear learning rate warmup. During warmup, the learning rate gradually increases from 0 to your target RERANKER_TRAIN_LR, preventing early training instability from large gradient updates. After warmup completes, the learning rate follows its normal schedule (typically constant or linear decay). Standard range: 0.0 (no warmup) to 0.2 (20% of training).\n\nSweet spot: 0.1 (10% warmup) for most cross-encoder training. This means if you train for 100 steps, the first 10 steps will gradually increase LR from 0 to your target. Warmup is especially important when fine-tuning from pretrained models, as it prevents catastrophic forgetting early in training. Use 0.05-0.08 for short training runs (<500 steps) and 0.1-0.15 for longer runs (>1000 steps).\n\nWarmup is critical when training with high learning rates (3e-5+) or limited data. Without warmup, the first few batches can cause large weight updates that destabilize the pretrained model. With warmup, training starts gentle and accelerates gradually. Most SBERT training recipes default to 0.1, which works well across domains.\n\n• No warmup: 0.0 (not recommended for fine-tuning)\n• Short training: 0.05-0.08 (e.g., 1-2 epochs, <500 steps)\n• Balanced default: 0.1 (recommended for most cases)\n• Long training: 0.15-0.2 (e.g., 5+ epochs, >2000 steps)\n• Effect: Stabilizes early training, prevents catastrophic forgetting\n• Combines with: RERANKER_TRAIN_LR for optimal convergence",
@@ -5032,6 +5544,24 @@
       ]
     },
     {
+      "term": "Separators (recursive chunking)",
+      "key": "SEPARATORS",
+      "definition": "Separator list used by recursive chunking, in priority order (e.g., <code>\\n\\n</code>, <code>\\n</code>, <code>. </code>, <code> </code>, <code>\"\"</code>). The empty separator is the hard fallback split.",
+      "category": "chunking",
+      "related": [],
+      "links": [],
+      "badges": []
+    },
+    {
+      "term": "Separator keep",
+      "key": "SEPARATOR_KEEP",
+      "definition": "When splitting by separators in recursive chunking, controls whether the separator is kept as part of the left chunk (suffix), right chunk (prefix), or dropped (none).",
+      "category": "chunking",
+      "related": [],
+      "links": [],
+      "badges": []
+    },
+    {
       "term": "Skip Dense Embeddings",
       "key": "SKIP_DENSE",
       "definition": "Skip vector embeddings and Qdrant during indexing to create a fast BM25-only (keyword-only) index. Useful for quick testing, CI/CD pipelines, or when Qdrant is unavailable. BM25-only mode is faster and uses less resources but loses semantic search capability - only exact keyword matches work. Not recommended for production use unless you have a purely keyword-based use case.",
@@ -5084,6 +5614,33 @@
           "class": "info"
         }
       ]
+    },
+    {
+      "term": "Sparse search engine",
+      "key": "SPARSE_SEARCH_ENGINE",
+      "definition": "Sparse retrieval engine.<br><br><b>postgres_fts</b>: built-in Postgres full text search (tsvector + tsquery).<br><b>pg_search_bm25</b>: ParadeDB pg_search BM25 index (requires extension). If unavailable, the system falls back to postgres_fts.",
+      "category": "retrieval",
+      "related": [],
+      "links": [],
+      "badges": []
+    },
+    {
+      "term": "Sparse search highlight",
+      "key": "SPARSE_SEARCH_HIGHLIGHT",
+      "definition": "Experimental toggle for returning highlight snippets for sparse matches. Availability depends on the sparse engine and may be a no-op in some deployments.",
+      "category": "retrieval",
+      "related": [],
+      "links": [],
+      "badges": []
+    },
+    {
+      "term": "Sparse search query mode",
+      "key": "SPARSE_SEARCH_QUERY_MODE",
+      "definition": "Controls how sparse queries are parsed.<br><br><b>plain</b>: simple keyword parsing.<br><b>phrase</b>: treat input as a phrase.<br><b>boolean</b>: allow boolean-style operators (implementation varies by engine).",
+      "category": "retrieval",
+      "related": [],
+      "links": [],
+      "badges": []
     },
     {
       "term": "Sparse Search Top-K",
@@ -5216,6 +5773,15 @@
       "badges": []
     },
     {
+      "term": "Target tokens",
+      "key": "TARGET_TOKENS",
+      "definition": "Target tokens per chunk for token-based chunking strategies. Smaller chunks improve retrieval granularity but increase index size.",
+      "category": "chunking",
+      "related": [],
+      "links": [],
+      "badges": []
+    },
+    {
       "term": "GUI Theme",
       "key": "THEME_MODE",
       "definition": "Color theme for web GUI. Options: \"light\" (light mode), \"dark\" (dark mode), \"auto\" (follows system preference). Changes appearance immediately when toggled.",
@@ -5265,6 +5831,69 @@
           "class": "err"
         }
       ]
+    },
+    {
+      "term": "Tokenization estimate-only",
+      "key": "TOKENIZATION_ESTIMATE_ONLY",
+      "definition": "When enabled, token counts use a fast heuristic estimate instead of running a real tokenizer. Useful for huge corpora when exact token boundaries are not critical.",
+      "category": "chunking",
+      "related": [],
+      "links": [],
+      "badges": []
+    },
+    {
+      "term": "Hugging Face tokenizer name",
+      "key": "TOKENIZATION_HF_TOKENIZER_NAME",
+      "definition": "Tokenizer name for <code>huggingface</code> tokenization strategy (e.g., <code>gpt2</code> or your embedding model’s tokenizer). Requires the backend to have Transformers installed.",
+      "category": "chunking",
+      "related": [],
+      "links": [],
+      "badges": []
+    },
+    {
+      "term": "Tokenization lowercase",
+      "key": "TOKENIZATION_LOWERCASE",
+      "definition": "Lowercase text before tokenization and chunking. Keep off for legal dumps, names, or cases where capitalization carries meaning.",
+      "category": "chunking",
+      "related": [],
+      "links": [],
+      "badges": []
+    },
+    {
+      "term": "Max tokens per chunk (hard)",
+      "key": "TOKENIZATION_MAX_TOKENS_PER_CHUNK_HARD",
+      "definition": "Hard ceiling on tokens per chunk used as a safety limit for chunking and embedding input budgeting. Prevents runaway chunk sizes.",
+      "category": "chunking",
+      "related": [],
+      "links": [],
+      "badges": []
+    },
+    {
+      "term": "Tokenization normalize Unicode",
+      "key": "TOKENIZATION_NORMALIZE_UNICODE",
+      "definition": "Normalize Unicode to NFKC before tokenization. This improves consistency across visually similar characters and reduces tokenization surprises in messy corpora.",
+      "category": "chunking",
+      "related": [],
+      "links": [],
+      "badges": []
+    },
+    {
+      "term": "Tokenization strategy",
+      "key": "TOKENIZATION_STRATEGY",
+      "definition": "Tokenizer implementation used for token-aware chunking and embedding input budgeting.<br><br><b>tiktoken</b>: fast + accurate for OpenAI-style tokenization (recommended).<br><b>whitespace</b>: simple word-ish tokens (fast, approximate).<br><b>huggingface</b>: uses a Hugging Face tokenizer (align with local embedding models).",
+      "category": "chunking",
+      "related": [],
+      "links": [],
+      "badges": []
+    },
+    {
+      "term": "tiktoken encoding",
+      "key": "TOKENIZATION_TIKTOKEN_ENCODING",
+      "definition": "The tiktoken encoding name used for token counting, chunking, and input budgeting (e.g., <code>o200k_base</code>). If the encoding is unavailable, the backend falls back to a safe default.",
+      "category": "chunking",
+      "related": [],
+      "links": [],
+      "badges": []
     },
     {
       "term": "Top‑K Dense",
@@ -5593,7 +6222,7 @@
     {
       "term": "Reranker Model Path",
       "key": "TRIBRID_RERANKER_MODEL_PATH",
-      "definition": "Filesystem path to the trained reranker model checkpoint directory (relative paths recommended). The service loads weights from this path on startup or when reloaded.",
+      "definition": "Filesystem path to the active learning reranker artifact (relative paths recommended). In transformers mode this is a HuggingFace/SentenceTransformers model directory. In MLX Qwen3 learning mode this is the active LoRA adapter directory. The service loads from this path on startup or when reloaded.",
       "category": "general",
       "related": [],
       "links": [
@@ -5630,7 +6259,7 @@
     {
       "term": "Reranker Top-N",
       "key": "TRIBRID_RERANKER_TOPN",
-      "definition": "Maximum number of candidates to pass through the cross-encoder reranker stage during retrieval. After hybrid fusion (BM25 + dense), the top-N candidates are reranked using pairwise semantic scoring before final selection. Higher values (50-100) improve recall by considering more candidates but increase reranking latency and compute cost quadratically. Lower values (20-30) are faster but may miss relevant results that scored poorly in initial retrieval but would rank highly after reranking.\n\nSweet spot: 40-60 for most use cases. Use 60-80 for complex queries where initial ranking may be noisy (e.g., ambiguous natural language queries like \"where do we handle payments?\"). Use 20-40 for tight latency budgets or when initial hybrid retrieval is already high-quality. Reranking cost scales with top-N × query length, so monitor inference time when tuning this parameter.\n\nSymptom of too low: Relevant results appear when you increase top-K but not with default settings. Symptom of too high: Reranking takes >500ms and retrieval latency dominates response time. Most production systems use 40-50 as a balanced default.\n\n• Typical range: 20-80 candidates\n• Balanced default: 40-50 for most workloads\n• High recall: 60-80 for exploratory queries\n• Low latency: 20-30 for speed-critical apps\n• Reranking cost: O(top-N × tokens) per query",
+      "definition": "Maximum number of candidates to pass through the cross-encoder reranker stage during retrieval. After hybrid fusion (BM25 + dense), the top-N candidates are reranked using pairwise semantic scoring before final selection. Higher values (50-100) improve recall by considering more candidates but increase reranking latency and compute cost quadratically. Lower values (20-30) are faster but may miss relevant results that scored poorly in initial retrieval but would rank highly after reranking.\n\nSweet spot: 40-60 for most use cases. Use 60-80 for complex queries where initial ranking may be noisy (e.g., ambiguous natural language queries like \"where do we handle payments?\"). Use 20-40 for tight latency budgets or when initial hybrid retrieval is already high-quality. Reranking cost scales with top-N × query length, so monitor inference time when tuning this parameter.\n\nNote: MLX Qwen3 reranking can be significantly slower per candidate than smaller cross-encoders. If you care about interactive latency, start with 20–30 and measure.\n\nSymptom of too low: Relevant results appear when you increase top-K but not with default settings. Symptom of too high: Reranking takes >500ms and retrieval latency dominates response time. Most production systems use 40-50 as a balanced default.\n\n• Typical range: 20-80 candidates\n• Balanced default: 40-50 for most workloads\n• High recall: 60-80 for exploratory queries\n• Low latency: 20-30 for speed-critical apps\n• Reranking cost: O(top-N × tokens) per query",
       "category": "general",
       "related": [],
       "links": [
@@ -6403,32 +7032,6 @@
       "badges": []
     },
     {
-      "term": "System prompt suffix: Recall (legacy)",
-      "key": "chat.system_prompt_recall_suffix",
-      "definition": "This text is appended to the legacy base prompt <span class=\"tt-strong\">only when Recall context is present</span> and the selected four-state system prompt is blank (fallback mode). It’s meant to remind the model that conversation history snippets are available in <span class=\"mono\">&lt;recall_context&gt;...&lt;/recall_context&gt;</span> and to use them carefully.<br><br>Most users should prefer editing the four state prompts instead (Direct / RAG / Recall / RAG+Recall) and keep this suffix minimal.",
-      "category": "generation",
-      "related": [
-        "System prompt (base)",
-        "System prompt: Recall only",
-        "System prompt: RAG + Recall"
-      ],
-      "links": [],
-      "badges": []
-    },
-    {
-      "term": "System prompt suffix: RAG (legacy)",
-      "key": "chat.system_prompt_rag_suffix",
-      "definition": "This text is appended to the legacy base prompt <span class=\"tt-strong\">only when code retrieval (RAG) context is present</span> and the selected four-state system prompt is blank (fallback mode). It’s meant to keep the model grounded in retrieved code snippets and to cite file paths + line ranges.<br><br>Most users should prefer editing the four state prompts instead (Direct / RAG / Recall / RAG+Recall) and keep this suffix minimal.",
-      "category": "generation",
-      "related": [
-        "System prompt (base)",
-        "System prompt: RAG only",
-        "System prompt: RAG + Recall"
-      ],
-      "links": [],
-      "badges": []
-    },
-    {
       "term": "System prompt: Direct (no context)",
       "key": "chat.system_prompt_direct",
       "definition": "Used when the message is answered <span class=\"tt-strong\">without any retrieval context</span> — no code corpora results and no Recall snippets.<br><br>In this state the model only sees the user’s message, so this prompt should set expectations clearly: it can explain general concepts, but it should not pretend it has looked at the user’s repo unless sources are enabled.<br><br>A good Direct prompt usually encourages a tight feedback loop: if the user asks about “our code”, it should suggest enabling corpora (and/or Recall) or asking for a file path so the answer can be grounded.<br><br>If this prompt is blank, TriBridRAG falls back to the base prompt composition for this state.",
@@ -6467,6 +7070,19 @@
       "badges": []
     },
     {
+      "term": "System prompt suffix: RAG (legacy)",
+      "key": "chat.system_prompt_rag_suffix",
+      "definition": "This text is appended to the legacy base prompt <span class=\"tt-strong\">only when code retrieval (RAG) context is present</span> and the selected four-state system prompt is blank (fallback mode). It’s meant to keep the model grounded in retrieved code snippets and to cite file paths + line ranges.<br><br>Most users should prefer editing the four state prompts instead (Direct / RAG / Recall / RAG+Recall) and keep this suffix minimal.",
+      "category": "generation",
+      "related": [
+        "System prompt (base)",
+        "System prompt: RAG only",
+        "System prompt: RAG + Recall"
+      ],
+      "links": [],
+      "badges": []
+    },
+    {
       "term": "System prompt: Recall only",
       "key": "chat.system_prompt_recall",
       "definition": "Used when Recall (chat memory) is queried and returns results, but no code corpora results are present. The model receives conversation snippets inside <span class=\"mono\">&lt;recall_context&gt;...&lt;/recall_context&gt;</span>.<br><br>Recall is search-based: it returns the most relevant fragments, not a perfect transcript. This prompt should encourage the model to use the snippets as shared context while staying careful about uncertainty and missing history.<br><br>If blank, TriBridRAG falls back to base prompt composition for this state.",
@@ -6474,6 +7090,19 @@
       "related": [
         "Chat System Prompt (Direct)",
         "Recall Gate Enabled"
+      ],
+      "links": [],
+      "badges": []
+    },
+    {
+      "term": "System prompt suffix: Recall (legacy)",
+      "key": "chat.system_prompt_recall_suffix",
+      "definition": "This text is appended to the legacy base prompt <span class=\"tt-strong\">only when Recall context is present</span> and the selected four-state system prompt is blank (fallback mode). It’s meant to remind the model that conversation history snippets are available in <span class=\"mono\">&lt;recall_context&gt;...&lt;/recall_context&gt;</span> and to use them carefully.<br><br>Most users should prefer editing the four state prompts instead (Direct / RAG / Recall / RAG+Recall) and keep this suffix minimal.",
+      "category": "generation",
+      "related": [
+        "System prompt (base)",
+        "System prompt: Recall only",
+        "System prompt: RAG + Recall"
       ],
       "links": [],
       "badges": []

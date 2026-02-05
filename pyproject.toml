@@ -51,9 +51,11 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "structlog>=24.1.0",
 
-    # Document extraction (PDF/XLSX ingestion)
+    # Document extraction (PDF/XLSX/Parquet ingestion)
     "pypdf>=4.3.1",
     "openpyxl>=3.1.5",
+    "pandas>=2.2.0",
+    "pyarrow>=15.0.0",
 ]
 
 [project.optional-dependencies]
@@ -65,6 +67,14 @@ dev = [
     "ruff>=0.2.0",
     "mypy>=1.8.0",
     "datamodel-code-generator>=0.25.0",
+]
+
+mlx = [
+    "mlx>=0.12.0",
+    "mlx-lm>=0.17.0",
+    "mlx-data>=0.0.6",
+    "sentencepiece>=0.2.0",
+    "datasets>=2.20.0",
 ]
 
 [build-system]
@@ -99,7 +109,22 @@ warn_return_any = true
 warn_unused_ignores = true
 
 [[tool.mypy.overrides]]
-module = ["asyncpg", "pgvector", "pgvector.*"]
+module = [
+    "asyncpg",
+    "asyncpg.*",
+    "pgvector",
+    "pgvector.*",
+    "openpyxl",
+    "openpyxl.*",
+    "pyarrow",
+    "pyarrow.*",
+    "mlx",
+    "mlx.*",
+    "mlx_lm",
+    "mlx_lm.*",
+    "sentence_transformers",
+    "sentence_transformers.*",
+]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

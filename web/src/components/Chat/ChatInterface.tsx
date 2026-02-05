@@ -45,7 +45,7 @@ const TRIBRID_TIPS = [
   
   // Learning Reranker
   { tip: "Every thumbs up/down you give trains the Learning Reranker to better understand your codebase.", category: "feedback" },
-  { tip: "The cross-encoder reranker learns from your feedback to improve result ordering over time.", category: "feedback" },
+  { tip: "The Learning Reranker trains from your mined triplets to improve result ordering over time (MLX Qwen3 when available, otherwise transformers).", category: "feedback" },
   { tip: "Consistent feedback helps Tri-Brid RAG learn your codebase's unique terminology and patterns.", category: "feedback" },
   { tip: "The reranker model checkpoints are saved automatically - your feedback is never lost.", category: "feedback" },
   
@@ -58,12 +58,12 @@ const TRIBRID_TIPS = [
   // Indexing
   { tip: "Re-index after major refactors to keep Tri-Brid RAG's understanding of your code current.", category: "indexing" },
   { tip: "The AST chunker preserves function boundaries - results always show complete code blocks.", category: "indexing" },
-  { tip: "Semantic cards summarize files and classes for better high-level understanding.", category: "indexing" },
+  { tip: "Chunk summaries provide fast, high-level context about files and classes.", category: "indexing" },
   { tip: "Index stats show when your codebase was last indexed - check Dashboard for details.", category: "indexing" },
   
   // Evaluation & Quality
   { tip: "Run evals regularly to track retrieval quality as your codebase evolves.", category: "eval" },
-  { tip: "Golden questions are your benchmark - add questions that matter to your team.", category: "eval" },
+  { tip: "Eval datasets are your benchmark - add questions that matter to your team.", category: "eval" },
   { tip: "MRR (Mean Reciprocal Rank) measures how quickly Tri-Brid RAG finds the right answer.", category: "eval" },
   { tip: "Compare eval runs to see if config changes improved or regressed retrieval quality.", category: "eval" },
   
@@ -80,8 +80,8 @@ const TRIBRID_TIPS = [
   { tip: "Toggle the side panel to access quick settings without leaving the chat.", category: "ux" },
   
   // Infrastructure
-  { tip: "Qdrant stores your vectors locally - no data leaves your machine unless you use cloud models.", category: "infra" },
-  { tip: "Redis caches embeddings and checkpoints for faster repeated queries.", category: "infra" },
+  { tip: "Postgres/pgvector stores your vectors locally - no data leaves your machine unless you use cloud models.", category: "infra" },
+  { tip: "Caching can speed up repeated queries (depending on your configuration).", category: "infra" },
   { tip: "The embedded Grafana dashboard shows real-time metrics and query patterns.", category: "infra" },
   { tip: "Docker containers can be configured for different deployment scenarios.", category: "infra" },
   
@@ -93,7 +93,7 @@ const TRIBRID_TIPS = [
   { tip: "Use the repo selector to focus on specific repositories in multi-repo setups.", category: "best" },
   
   // Advanced
-  { tip: "Profiles let you save and switch between different Tri-Brid RAG configurations instantly.", category: "advanced" },
+  { tip: "Each corpus has isolated storage + graph + configuration - switch corpora to change context.", category: "advanced" },
   { tip: "The MCP server enables IDE integrations - ask your editor about your code.", category: "advanced" },
   { tip: "Webhooks can trigger re-indexing automatically when you push code changes.", category: "advanced" },
   { tip: "The CLI supports all chat features for terminal-first workflows.", category: "advanced" },
@@ -1807,29 +1807,31 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
         background: 'var(--card-bg)'
       }}
     >
-      {/* Header */}
+      {/* Header - responsive flex layout with wrap */}
       <div style={{
-        padding: '16px',
+        padding: '12px 16px',
         borderBottom: '1px solid var(--line)',
         display: 'flex',
-        justifyContent: 'space-between',
+        flexWrap: 'wrap',
+        gap: '12px',
         alignItems: 'center',
         background: 'var(--bg-elev1)'
       }}>
-        <div>
-          <h3 style={{ margin: '0 0 4px 0', fontSize: '16px', fontWeight: '600' }}>
+        <div style={{ flexShrink: 0 }}>
+          <h3 style={{ margin: '0 0 2px 0', fontSize: '14px', fontWeight: '600', whiteSpace: 'nowrap' }}>
             <span style={{ color: 'var(--accent)' }}>●</span> RAG Chat
           </h3>
           <p style={{
             margin: '0',
-            fontSize: '12px',
-            color: 'var(--fg-muted)'
+            fontSize: '11px',
+            color: 'var(--fg-muted)',
+            whiteSpace: 'nowrap'
           }}>
             Ask questions about your codebase
           </p>
         </div>
 
-        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center', flex: '1 1 auto', minWidth: 0 }}>
           <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: 'var(--fg-muted)' }}>
             <input id="chat-fast-mode" type="checkbox" checked={fastMode} onChange={(e) => setFastMode(e.target.checked)} style={{ width: '14px', height: '14px', cursor: 'pointer' }} />
             Fast
@@ -1848,7 +1850,7 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
             onRecallIntensityChange={setRecallIntensity}
             onCleanupUnindexed={handleCleanupUnindexed}
           />
-          <div style={{ width: '360px', minWidth: '280px' }}>
+          <div style={{ flex: '1 1 200px', minWidth: '180px', maxWidth: '360px' }}>
             <ModelPicker value={modelOverride} onChange={setModelOverride} models={chatModels} />
           </div>
 

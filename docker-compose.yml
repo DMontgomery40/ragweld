@@ -2,7 +2,9 @@ version: '3.8'
 
 services:
   postgres:
-    image: pgvector/pgvector:pg16
+    # Default: pgvector/pgvector (dense vectors). For BM25 via ParadeDB pg_search:
+    #   POSTGRES_IMAGE=paradedb/paradedb:latest
+    image: ${POSTGRES_IMAGE:-pgvector/pgvector:pg16}
     container_name: tribrid-postgres
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-tribrid_rag}

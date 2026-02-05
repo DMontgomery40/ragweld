@@ -18,7 +18,7 @@ TriBridRAG is **corpus-first**: a **corpus** is any folder you index/search/Grap
 
 These files define what exists. If something isn't in these files, IT DOES NOT EXIST.
 
-### 1. `server/models/tribrid_config_model.py` (~500+ fields)
+### 1. `server/models/tribrid_config_model.py` (~1000+ fields)
 - Every tunable parameter in the entire system
 - Every feature flag, threshold, weight, path, URL
 - If the UI has a slider, the Pydantic model has the field
@@ -43,7 +43,7 @@ These files define what exists. If something isn't in these files, IT DOES NOT E
 │  tribrid_config_model.py   (PYDANTIC - SOURCE OF TRUTH)         │
 │  - TriBridConfig                                                │
 │  - RetrievalConfig, FusionConfig, RerankerConfig, etc.          │
-│  - ~500 fields with Field(description=..., ge=..., le=...)      │
+│  - ~1000 fields with Field(description=..., ge=..., le=...)     │
 └─────────────────────────────────────────────────────────────────┘
                               │
                               ▼ GENERATED (pydantic2ts)
@@ -169,9 +169,10 @@ import langchain                 # Banned (use langgraph directly if needed)
 
 ## FILE CREATION RULES
 
-### Before Creating Any 
-2. Does it need Pydantic types? → Add to config model FIRST
-3. Is it a new component? → What hook does it use? → What store? → What Pydantic model?
+### Before Creating Any File:
+1. Does the feature need configurable parameters? → Add to `tribrid_config_model.py` FIRST
+2. Does it need Pydantic types? → Add to config model, run `generate_types.py`
+3. Is it a new component? → Trace the chain: What hook? → What store? → What Pydantic model?
 
 ### When Adding a New Feature:
 1. Add to `tribrid_config_model.py` (if configurable)
@@ -190,11 +191,13 @@ import langchain                 # Banned (use langgraph directly if needed)
 ```
 server/
 ├── models/              # Pydantic models - THE LAW
-│   └── tribrid_config_model.py  # ~500 fields
+│   └── tribrid_config_model.py  # ~1000 fields
 ├── api/                 # FastAPI routers - return Pydantic models
 ├── db/                  # Database clients (Postgres, Neo4j)
 ├── retrieval/           # Search pipeline
+├── reranker/            # MLX/LoRA reranker inference + artifacts
 ├── indexing/            # Chunking, embedding, graph building
+├── training/            # Reranker training (LoRA fine-tuning)
 └── services/            # Business logic
 
 web/src/
@@ -231,6 +234,13 @@ Fails if generated.ts doesn't match Pydantic models.
 uv run scripts/check_banned.py
 ```
 Fails if code contains banned imports or terms.
+
+### Start Local Development Stack
+```bash
+./start.sh                      # Docker + Backend + Frontend
+./start.sh --with-observability # Include Prometheus + Grafana + Loki
+./start.sh --no-frontend        # Backend only
+```
 
 ---
 
@@ -283,6 +293,46 @@ IMPORTANT:
 
 ---
 
+## MLX LEARNING RERANKER
+
+The "learning reranker" is a fine-tunable Qwen3-based cross-encoder that runs locally via MLX on Apple Silicon.
+
+### Architecture
+- **Inference**: `server/reranker/mlx_qwen3.py` - MLXQwen3Reranker class with hot-reload + idle unload
+- **Training**: `server/training/mlx_qwen3_trainer.py` - LoRA fine-tuning with gradient accumulation
+- **Artifacts**: `server/reranker/artifacts.py` - Backend detection (transformers vs MLX)
+
+### Key Config Fields (TrainingConfig)
+| Field | Default | Purpose |
+|-------|---------|---------|
+| `learning_reranker_backend` | "auto" | auto/transformers/mlx_qwen3 |
+| `learning_reranker_base_model` | "Qwen/Qwen3-Reranker-0.6B" | HuggingFace model |
+| `learning_reranker_lora_rank` | 16 | LoRA rank (r) |
+| `learning_reranker_lora_alpha` | 32.0 | LoRA scaling |
+| `learning_reranker_grad_accum_steps` | 8 | Gradient accumulation |
+| `learning_reranker_promote_if_improves` | 1 | Auto-promote on improvement |
+
+### APIs
+- `POST /api/reranker/score` - Debug scoring endpoint
+- `POST /api/reranker/train/run/{run_id}/promote` - Promote trained adapter
+
+---
+
+## PROMPTS MANAGEMENT API
+
+System prompts are editable via API. All prompts defined in `SystemPromptsConfig`.
+
+### Endpoints
+- `GET /api/prompts` - List all prompts with metadata
+- `PUT /api/prompts/{prompt_key}` - Update a prompt
+- `POST /api/prompts/reset/{prompt_key}` - Reset to Pydantic default
+
+### Categories
+- `retrieval`: query_expansion, query_rewrite
+- `indexing`: semantic_chunk_summaries, code_enrichment
+- `evaluation`: eval_analysis
+
+Note: Chat prompts (prefixed `chat.`) are read-only here - edit via Chat Settings.
 
 ---
 

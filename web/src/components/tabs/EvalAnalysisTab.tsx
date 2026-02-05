@@ -1156,10 +1156,11 @@ export const EvalAnalysisTab: React.FC = () => {
       </div>
       )}
 
-      {/* Content Area */}
+      {/* Content Area - paddingBottom reserves space above App.tsx action-buttons */}
       <div style={{
         flex: 1,
-        overflow: 'auto'
+        overflow: 'auto',
+        paddingBottom: '80px'
       }}>
         {activeSubtab === 'analysis' ? (
           // Analysis subtab: handle loading/error/empty/data states

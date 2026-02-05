@@ -6,6 +6,7 @@ cd "$ROOT_DIR"
 
 BACKEND_PORT="${BACKEND_PORT:-8012}"
 FRONTEND_PORT="${FRONTEND_PORT:-5173}"
+FRONTEND_HOST="${FRONTEND_HOST:-127.0.0.1}"
 
 START_DOCKER=1
 START_BACKEND=1
@@ -30,6 +31,7 @@ Starts:
 Options:
   --docker-backend         Run backend via Docker Compose (maps host :8012 -> container :8000)
   --with-observability     Also start prometheus + grafana (optional)
+  --lan                    Bind frontend dev server to 0.0.0.0 (accessible on your LAN)
   --no-docker              Skip Docker services
   --no-backend             Skip backend
   --no-frontend            Skip frontend
@@ -39,6 +41,7 @@ Options:
 Environment overrides:
   BACKEND_PORT=8012        Backend host port (defaults to 8012)
   FRONTEND_PORT=5173       Frontend dev server port (defaults to 5173)
+  FRONTEND_HOST=127.0.0.1  Frontend dev server host (defaults to 127.0.0.1; set 0.0.0.0 for LAN)
 
 Notes:
   - The frontend code + Vite proxy expect the backend on port 8012 during dev.
@@ -159,6 +162,9 @@ while [[ $# -gt 0 ]]; do
       ;;
     --with-observability)
       WITH_OBSERVABILITY=1
+      ;;
+    --lan)
+      FRONTEND_HOST="0.0.0.0"
       ;;
     --no-docker)
       START_DOCKER=0
@@ -303,11 +309,14 @@ if [[ "$START_FRONTEND" == "1" ]]; then
     run npm --prefix web install
   fi
 
-  log "Starting frontend (Vite) on port $FRONTEND_PORT..."
+  log "Starting frontend (Vite) on ${FRONTEND_HOST}:${FRONTEND_PORT}..."
   log "UI: http://localhost:${FRONTEND_PORT}/web"
+  if [[ "$FRONTEND_HOST" == "0.0.0.0" ]]; then
+    log "UI (LAN): http://<your-ip>:${FRONTEND_PORT}/web"
+  fi
   # Bind explicitly to IPv4 loopback so tests and scripts that use 127.0.0.1 work
   # even when "localhost" resolves to ::1 first.
-  run npm --prefix web run dev -- --host 127.0.0.1 --port "$FRONTEND_PORT"
+  run npm --prefix web run dev -- --host "$FRONTEND_HOST" --port "$FRONTEND_PORT"
 else
   log "Done. (Nothing left to run in foreground.)"
 fi

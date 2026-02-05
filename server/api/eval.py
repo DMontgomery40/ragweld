@@ -417,7 +417,7 @@ async def eval_run_stream(
 
     if _EVAL_STATUS.get("running"):
         async def already_running() -> AsyncIterator[str]:
-            yield f"data: {json.dumps({'type': 'error', 'message': 'Evaluation already running'})}\n\n"
+            yield "data: " + json.dumps({"type": "error", "message": "Evaluation already running"}) + "\n\n"
         return StreamingResponse(already_running(), media_type="text/event-stream")
 
     async def generate() -> AsyncIterator[str]:
@@ -439,15 +439,27 @@ async def eval_run_stream(
             if not dataset:
                 msg = f"No eval_dataset entries found for repo_id={repo_id}"
                 _EVAL_STATUS["error"] = msg
-                yield f"data: {json.dumps({'type': 'error', 'message': msg})}\n\n"
+                yield "data: " + json.dumps({"type": "error", "message": msg}) + "\n\n"
                 return
 
             entries = dataset[: int(sample_limit)] if sample_limit else dataset
             total = len(entries)
             _EVAL_STATUS["total"] = total
 
-            yield f"data: {json.dumps({'type': 'log', 'message': f'Starting eval: repo_id={repo_id}, use_multi={run_use_multi}, final_k={run_final_k}, sample_limit={sample_limit or "all"}'})}\n\n"
-            yield f"data: {json.dumps({'type': 'log', 'message': f'Loaded {total} eval_dataset entries'})}\n\n"
+            yield (
+                "data: "
+                + json.dumps(
+                    {
+                        "type": "log",
+                        "message": (
+                            f"Starting eval: repo_id={repo_id}, use_multi={run_use_multi}, "
+                            f"final_k={run_final_k}, sample_limit={sample_limit or 'all'}"
+                        ),
+                    }
+                )
+                + "\n\n"
+            )
+            yield "data: " + json.dumps({"type": "log", "message": f"Loaded {total} eval_dataset entries"}) + "\n\n"
 
             fusion = TriBridFusion(vector=None, sparse=None, graph=None)
 
@@ -472,10 +484,14 @@ async def eval_run_stream(
 
             for idx, entry in enumerate(entries, start=1):
                 if await request.is_disconnected():
-                    yield f"data: {json.dumps({'type': 'error', 'message': 'Client disconnected'})}\n\n"
+                    yield "data: " + json.dumps({"type": "error", "message": "Client disconnected"}) + "\n\n"
                     return
 
-                yield f"data: {json.dumps({'type': 'log', 'message': f'[{idx}/{total}] {entry.question}'})}\n\n"
+                yield (
+                    "data: "
+                    + json.dumps({"type": "log", "message": f"[{idx}/{total}] {entry.question}"})
+                    + "\n\n"
+                )
 
                 t0 = perf_counter()
                 matches = await fusion.search(
@@ -547,7 +563,13 @@ async def eval_run_stream(
 
                 _EVAL_STATUS["progress"] = idx
                 percent = (idx / total) * 100.0 if total else 0.0
-                yield f"data: {json.dumps({'type': 'progress', 'percent': percent, 'message': f'Question {idx}/{total}'})}\n\n"
+                yield (
+                    "data: "
+                    + json.dumps(
+                        {"type": "progress", "percent": percent, "message": f"Question {idx}/{total}"}
+                    )
+                    + "\n\n"
+                )
 
             metrics = EvalMetrics(
                 mrr=float(sum(rr_vals) / len(rr_vals)) if rr_vals else 0.0,
@@ -591,12 +613,24 @@ async def eval_run_stream(
             _save_run(run)
             _EVAL_STATUS["latest_run_id"] = run_id
 
-            yield f"data: {json.dumps({'type': 'log', 'message': f'Results saved: {run_id}'})}\n\n"
-            yield f"data: {json.dumps({'type': 'log', 'message': f'Complete: top1={top1_hits}/{total}, topk={topk_hits}/{total}, mrr={metrics.mrr:.4f}, duration={duration_secs:.2f}s'})}\n\n"
+            yield "data: " + json.dumps({"type": "log", "message": f"Results saved: {run_id}"}) + "\n\n"
+            yield (
+                "data: "
+                + json.dumps(
+                    {
+                        "type": "log",
+                        "message": (
+                            f"Complete: top1={top1_hits}/{total}, topk={topk_hits}/{total}, "
+                            f"mrr={metrics.mrr:.4f}, duration={duration_secs:.2f}s"
+                        ),
+                    }
+                )
+                + "\n\n"
+            )
             yield "data: {\"type\": \"complete\"}\n\n"
         except Exception as e:
             _EVAL_STATUS["error"] = str(e)
-            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+            yield "data: " + json.dumps({"type": "error", "message": str(e)}) + "\n\n"
         finally:
             _EVAL_STATUS["running"] = False
 

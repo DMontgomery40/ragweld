@@ -24,7 +24,7 @@ mark.hl { background: var(--accent); color: var(--accent-contrast); padding:0 2p
 .tab-bar button { background: var(--bg-elev2); color: var(--fg); border: 1px solid var(--line); padding: 8px 12px; border-radius: 8px; cursor: pointer; margin-right: 6px; }
 .tab-bar button.active { background: var(--accent); }
 
-.tab-content { display:flex; flex-direction: column; flex: 1; padding: 12px; height: 100%; overflow: auto; }
+.tab-content { display:flex; flex-direction: column; flex: 1; padding: 0; height: 100%; overflow: auto; }
 .tab-content.active { display:flex; flex-direction: column; flex: 1; }
 
 #calc-frame { width: 100%; height: calc(100vh - 140px); border: none; background: var(--card-bg); }
