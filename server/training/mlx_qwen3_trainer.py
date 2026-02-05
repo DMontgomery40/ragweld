@@ -158,7 +158,9 @@ def evaluate_mlx_qwen3_reranker(
     if not mlx_is_available():
         raise RuntimeError("MLX is not available (install mlx + mlx-lm)")
 
-    lora_target_modules = list(lora_target_modules or ["q_proj", "k_proj", "v_proj", "o_proj"])
+    lora_target_modules = list(
+        lora_target_modules or ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
+    )
 
     def _load_and_score() -> dict[str, float]:
         import mlx.core as _mx
@@ -169,13 +171,18 @@ def evaluate_mlx_qwen3_reranker(
 
         model, tokenizer, *_ = mlx_load(str(base_model))
         model.freeze()
-        apply_lora_layers(
+        applied = apply_lora_layers(
             model,
             rank=int(lora_rank),
             alpha=float(lora_alpha),
             dropout=float(lora_dropout),
             target_modules=list(lora_target_modules),
         )
+        if int(applied) <= 0:
+            raise RuntimeError(
+                "LoRA injection applied to 0 modules. "
+                "This usually means training.learning_reranker_lora_target_modules does not match the model architecture."
+            )
 
         token_ids = resolve_yes_no_token_ids(tokenizer)
 
@@ -268,7 +275,9 @@ def train_mlx_qwen3_reranker(
     if not train_triplets:
         raise ValueError("No training triplets to train on")
 
-    lora_target_modules = list(lora_target_modules or ["q_proj", "k_proj", "v_proj", "o_proj"])
+    lora_target_modules = list(
+        lora_target_modules or ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
+    )
     train_pairs = triplets_to_pairs(train_triplets, negative_ratio=int(negative_ratio))
 
     num_micro_batches = max(1, math.ceil(len(train_pairs) / max(1, int(batch_size))))
@@ -304,6 +313,32 @@ def train_mlx_qwen3_reranker(
             dropout=float(lora_dropout),
             target_modules=list(lora_target_modules),
         )
+        if int(applied) <= 0:
+            raise RuntimeError(
+                "LoRA injection applied to 0 modules. "
+                "This usually means training.learning_reranker_lora_target_modules does not match the model architecture."
+            )
+
+        try:
+            trainable_scalars = 0
+            for _, param in model.trainable_parameters():
+                try:
+                    trainable_scalars += int(param.size)
+                except Exception:
+                    # Best-effort; avoid blocking training on unexpected param shapes.
+                    continue
+            _emit(
+                "log",
+                {
+                    "message": (
+                        f"MLX LoRA injected into {int(applied)} modules; "
+                        f"trainable_scalars≈{int(trainable_scalars):,}; "
+                        f"target_modules={list(lora_target_modules)}"
+                    )
+                },
+            )
+        except Exception:
+            pass
 
         token_ids = resolve_yes_no_token_ids(tokenizer)
 

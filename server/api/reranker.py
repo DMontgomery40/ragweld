@@ -653,6 +653,17 @@ async def _run_train_job(*, run_id: str, corpus_id: str) -> None:
         def _emit(event_type: str, payload: dict[str, Any]) -> None:
             nonlocal best_primary, best_step, best_ts, primary_series
             ts = datetime.now(UTC)
+            if event_type == "log":
+                try:
+                    msg = str(payload.get("message") or "").strip()
+                except Exception:
+                    msg = ""
+                if msg:
+                    _append_event(
+                        run_id,
+                        RerankerTrainMetricEvent(type="log", ts=ts, run_id=run_id, message=msg),
+                    )
+                return
             if event_type == "progress":
                 # Legacy polling hook (best-effort).
                 try:
@@ -1006,8 +1017,126 @@ async def _run_eval_job(*, corpus_id: str) -> None:
             _legacy_status.result = RerankerLegacyTaskResult(ok=False, error=str(e))
 
 
+def _latest_run_id_for_corpus(corpus_id: str) -> str | None:
+    """Return the most recent training run_id for corpus_id (best-effort)."""
+    cid = str(corpus_id or "").strip()
+    if not cid:
+        return None
+    prefix = f"{cid}__"
+    try:
+        entries = [p for p in _RUNS_DIR.iterdir() if p.is_dir() and p.name.startswith(prefix)]
+    except Exception:
+        return None
+    if not entries:
+        return None
+    # run_id includes a sortable timestamp suffix; name sort is sufficient.
+    entries.sort(key=lambda p: p.name, reverse=True)
+    return str(entries[0].name)
+
+
+def _status_from_persisted_run(*, corpus_id: str) -> RerankerLegacyStatus | None:
+    """Synthesize a legacy polling status from persisted training run files.
+
+    This avoids process-local drift under multi-worker servers: the UI polls
+    `/reranker/status`, but the background job may be running in a different
+    worker process.
+    """
+    run_id = _latest_run_id_for_corpus(corpus_id)
+    if not run_id:
+        return None
+
+    try:
+        run = _load_run(run_id)
+    except Exception:
+        return None
+
+    status = str(getattr(run, "status", "") or "").strip().lower()
+    running = status == "running"
+    task: Literal["mining", "training", "evaluating", ""] = "training"
+    message = ""
+    progress = 0
+    result: RerankerLegacyTaskResult | None = None
+
+    # Best-effort progress from the last progress event (if present).
+    try:
+        mp = _metrics_path(run_id)
+        if mp.exists():
+            lines = [ln for ln in mp.read_text(encoding="utf-8").splitlines() if ln.strip()]
+            for ln in reversed(lines[-200:]):
+                try:
+                    obj = json.loads(ln)
+                except Exception:
+                    continue
+                if not isinstance(obj, dict):
+                    continue
+                if str(obj.get("type") or "") == "progress":
+                    try:
+                        progress = int(float(obj.get("percent") or 0.0))
+                    except Exception:
+                        progress = 0
+                    message = str(obj.get("message") or "")
+                    break
+    except Exception:
+        pass
+
+    if running:
+        if not message:
+            message = f"Training run in progress: {run_id}"
+        return RerankerLegacyStatus(
+            running=True,
+            progress=max(0, min(100, int(progress))),
+            task=task,
+            message=str(message),
+            result=None,
+            live_output=[],
+            run_id=run_id,
+        )
+
+    # Completed/failed: keep message stable for legacy UI/tests.
+    if status == "completed":
+        message = "Training complete"
+        result = RerankerLegacyTaskResult(ok=True, run_id=run_id)
+        progress = 100
+    elif status == "failed":
+        message = "Training failed"
+        err = None
+        try:
+            # Find the last error event for a useful message.
+            mp = _metrics_path(run_id)
+            if mp.exists():
+                lines = [ln for ln in mp.read_text(encoding="utf-8").splitlines() if ln.strip()]
+                for ln in reversed(lines[-200:]):
+                    try:
+                        obj = json.loads(ln)
+                    except Exception:
+                        continue
+                    if isinstance(obj, dict) and str(obj.get("type") or "") == "error":
+                        err = str(obj.get("message") or "") or None
+                        break
+        except Exception:
+            err = None
+        result = RerankerLegacyTaskResult(ok=False, run_id=run_id, error=err)
+        progress = 0
+    else:
+        # Unknown persisted state; treat as not running.
+        message = f"Training status: {status or 'unknown'}"
+        result = RerankerLegacyTaskResult(ok=False, run_id=run_id, error="unknown status")
+
+    return RerankerLegacyStatus(
+        running=False,
+        progress=max(0, min(100, int(progress))),
+        task=task,
+        message=str(message),
+        result=result,
+        live_output=[],
+        run_id=run_id,
+    )
+
+
 @router.get("/reranker/status", response_model=RerankerLegacyStatus)
-async def get_reranker_status() -> RerankerLegacyStatus:
+async def get_reranker_status(
+    corpus_id: str | None = Query(default=None, description="Optional corpus_id scope for stable status across workers"),
+) -> RerankerLegacyStatus:
     # Minimal status shape expected by the UI polling loop.
     #
     # Priority:
@@ -1024,6 +1153,13 @@ async def get_reranker_status() -> RerankerLegacyStatus:
                 live_output=list(_legacy_status.live_output),
                 run_id=_legacy_status.run_id,
             )
+
+    # If the UI supplies corpus_id (it does), synthesize from persisted training
+    # runs so the status doesn't depend on process-local memory.
+    if corpus_id and str(corpus_id).strip():
+        derived = _status_from_persisted_run(corpus_id=str(corpus_id).strip())
+        if derived is not None:
+            return derived
 
     from server.retrieval.rerank import get_reranker_runtime
 
@@ -1121,7 +1257,7 @@ async def score_reranker(payload: RerankerScoreRequest) -> RerankerScoreResponse
         if not mlx_is_available():
             return RerankerScoreResponse(ok=False, backend="mlx_qwen3", error="mlx not available")
 
-        from server.reranker.mlx_qwen3 import get_mlx_qwen3_reranker
+        from server.reranker.mlx_qwen3 import get_mlx_qwen3_reranker, read_manifest, read_adapter_config
 
         adapter_dir = _resolve_path(cfg.training.tribrid_reranker_model_path)
         if not adapter_dir.exists():
@@ -1131,13 +1267,25 @@ async def score_reranker(payload: RerankerScoreRequest) -> RerankerScoreResponse
                 error=f"active adapter dir not found: {cfg.training.tribrid_reranker_model_path}",
             )
 
+        manifest = read_manifest(adapter_dir) or {}
+        manifest_base_model = str(manifest.get("base_model") or "").strip()
+        base_model = manifest_base_model or str(cfg.training.learning_reranker_base_model)
+
+        adapter_cfg = read_adapter_config(adapter_dir) or {}
+        lora_rank = int(adapter_cfg.get("lora_rank") or cfg.training.learning_reranker_lora_rank)
+        lora_alpha = float(adapter_cfg.get("lora_alpha") or cfg.training.learning_reranker_lora_alpha)
+        lora_dropout = float(adapter_cfg.get("lora_dropout") or cfg.training.learning_reranker_lora_dropout)
+        target_modules = adapter_cfg.get("target_modules")
+        if not isinstance(target_modules, list) or not target_modules:
+            target_modules = list(cfg.training.learning_reranker_lora_target_modules)
+
         rr = await get_mlx_qwen3_reranker(
-            base_model=str(cfg.training.learning_reranker_base_model),
+            base_model=str(base_model),
             adapter_dir=str(adapter_dir),
-            lora_rank=int(cfg.training.learning_reranker_lora_rank),
-            lora_alpha=float(cfg.training.learning_reranker_lora_alpha),
-            lora_dropout=float(cfg.training.learning_reranker_lora_dropout),
-            lora_target_modules=list(cfg.training.learning_reranker_lora_target_modules),
+            lora_rank=int(lora_rank),
+            lora_alpha=float(lora_alpha),
+            lora_dropout=float(lora_dropout),
+            lora_target_modules=[str(x) for x in list(target_modules)],
         )
         scores, yes_logits, no_logits = await rr.score_pairs_batched(
             [(str(payload.query), str(payload.document))],

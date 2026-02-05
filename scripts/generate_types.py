@@ -244,6 +244,7 @@ def main() -> None:
             IndexRequest,
             IndexStatus,
             IndexStats,
+            IndexEstimate,
             # Domain models - Dashboard index summary
             DashboardIndexStorageBreakdown,
             DashboardEmbeddingConfigSummary,
@@ -369,6 +370,7 @@ def main() -> None:
         IndexRequest,
         IndexStatus,
         IndexStats,
+        IndexEstimate,
         DashboardIndexStorageBreakdown,
         DashboardEmbeddingConfigSummary,
         DashboardIndexCosts,

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+import math
 from collections import defaultdict
 from typing import TYPE_CHECKING, Any
 
@@ -91,7 +93,7 @@ class TriBridFusion:
             postgres = PostgresClient(cfg.indexing.postgres_url)
             await postgres.connect()
 
-            embedder = Embedder(cfg.embedding)
+            embedder = Embedder(cfg.embedding, cfg.tokenization)
 
             # Reuse query embeddings across legs when possible (vector + graph chunk-mode).
             q_emb: list[float] | None = None
@@ -137,21 +139,30 @@ class TriBridFusion:
                         vector_results = [
                             r for r in vector_results if r.score >= cfg.vector_search.similarity_threshold
                         ]
+                    min_v = float(getattr(cfg.retrieval, "min_score_vector", 0.0) or 0.0)
+                    if min_v > 0:
+                        vector_results = [r for r in vector_results if float(r.score) >= float(min_v)]
             debug["fusion_vector_results"] = len(vector_results)
 
             if include_sparse and cfg.sparse_search.enabled:
                 with SPARSE_LEG_LATENCY_SECONDS.time():
                     try:
                         with SEARCH_STAGE_LATENCY_SECONDS.labels(stage="postgres_sparse_search").time():
-                            sparse_results = await postgres.sparse_search(
+                            sparse_results = await postgres.sparse_search_engine(
                                 cid,
                                 query,
                                 int(top_k or cfg.sparse_search.top_k),
                                 ts_config=cfg.indexing.postgres_ts_config,
+                                engine=str(getattr(cfg.sparse_search, "engine", "postgres_fts") or "postgres_fts"),
+                                query_mode=str(getattr(cfg.sparse_search, "query_mode", "plain") or "plain"),
+                                highlight=bool(getattr(cfg.sparse_search, "highlight", False)),
                             )
                     except Exception:
                         SEARCH_STAGE_ERRORS_TOTAL.labels(stage="sparse_leg").inc()
                         raise
+                min_s = float(getattr(cfg.retrieval, "min_score_sparse", 0.0) or 0.0)
+                if min_s > 0:
+                    sparse_results = [r for r in sparse_results if float(r.score) >= float(min_s)]
             debug["fusion_sparse_results"] = len(sparse_results)
 
             # Graph retrieval: query Neo4j for relevant entities, then hydrate to chunks from Postgres.
@@ -229,6 +240,7 @@ class TriBridFusion:
                                     score=float(score_by_id.get(ch.chunk_id) or 0.0),
                                     source="graph",
                                     metadata={
+                                        **(ch.metadata or {}),
                                         "corpus_id": cid,
                                         "graph_mode": "chunk",
                                         "graph_index": cfg.graph_indexing.chunk_vector_index_name,
@@ -258,7 +270,7 @@ class TriBridFusion:
                                     language=ch.language,
                                     score=float(score_by_id.get(ch.chunk_id) or 0.0),
                                     source="graph",
-                                    metadata={"corpus_id": cid, "graph_mode": "entity"},
+                                    metadata={**(ch.metadata or {}), "corpus_id": cid, "graph_mode": "entity"},
                                 )
                                 for ch in hydrated
                                 if ch.chunk_id in score_by_id
@@ -273,6 +285,9 @@ class TriBridFusion:
                             await neo4j.disconnect()
                         except Exception:
                             pass
+                min_g = float(getattr(cfg.retrieval, "min_score_graph", 0.0) or 0.0)
+                if min_g > 0:
+                    graph_results = [r for r in graph_results if float(r.score) >= float(min_g)]
 
             # Ensure corpus_id is always present for multi-corpus identity + UI reporting.
             for r in vector_results:
@@ -457,6 +472,66 @@ class TriBridFusion:
         final_k_default = max(final_k_candidates) if final_k_candidates else 0
         final_k = int(top_k or final_k_default)
 
+        # Retrieval shaping (document-RAG postprocessing; best-effort).
+        shape_cfg = None
+        shape_pg_url: str | None = None
+        try:
+            shape_corpus_id = str(rerank_config_corpus_id or (corpus_ids[0] if corpus_ids else "")).strip()
+            if shape_corpus_id:
+                shape_full = await load_scoped_config(repo_id=shape_corpus_id)
+                shape_cfg = shape_full.retrieval
+                shape_pg_url = str(getattr(shape_full.indexing, "postgres_url", "") or "").strip() or None
+        except Exception:
+            shape_cfg = None
+            shape_pg_url = None
+
+        if shape_cfg is not None and results:
+            try:
+                results_before = len(results)
+                dedup_by = str(getattr(shape_cfg, "dedup_by", "chunk_id") or "chunk_id")
+                neighbor_window = int(getattr(shape_cfg, "neighbor_window", 0) or 0)
+                max_pf = int(getattr(shape_cfg, "max_chunks_per_file", 3) or 3)
+
+                # Primary shaping: enforce doc-aware caps before neighbor expansion.
+                results = _dedup_results(results, by=dedup_by)
+                results = _cap_chunks_per_file(results, max_per_file=max_pf)
+
+                # Optional diversification (prefers dense embeddings when available; falls back to token Jaccard).
+                results = await _apply_mmr_if_enabled(
+                    results,
+                    enabled=bool(getattr(shape_cfg, "enable_mmr", False)),
+                    mmr_lambda=float(getattr(shape_cfg, "mmr_lambda", 0.7) or 0.7),
+                    final_k=int(final_k or 0),
+                    repo_id=str(shape_corpus_id or ""),
+                    postgres_url=shape_pg_url,
+                )
+
+                # Neighbor hydration: include adjacent chunks within the same file for top seeds.
+                if neighbor_window > 0 and final_k > 0:
+                    denom = max(1, (2 * int(neighbor_window)) + 1)
+                    # How many "seed" hits we can expand while staying within final_k.
+                    seed_limit = int(math.ceil(float(final_k) / float(denom)))
+                    seed_limit = max(1, min(seed_limit, len(results)))
+                    results = await _expand_neighbors(
+                        results,
+                        neighbor_window=neighbor_window,
+                        seed_limit=seed_limit,
+                    )
+                    results = _dedup_results(results, by="chunk_id")
+
+                results = results[:final_k] if final_k > 0 else results
+
+                debug["postprocess_enabled"] = True
+                debug["postprocess_dedup_by"] = dedup_by
+                debug["postprocess_neighbor_window"] = int(neighbor_window)
+                debug["postprocess_max_chunks_per_file"] = int(max_pf)
+                debug["postprocess_mmr_enabled"] = bool(getattr(shape_cfg, "enable_mmr", False))
+                debug["postprocess_results_before"] = int(results_before)
+                debug["postprocess_results_after"] = int(len(results))
+            except Exception as e:
+                debug["postprocess_enabled"] = False
+                debug["postprocess_error"] = str(e)
+
         self.last_debug = debug
         final_results = results[:final_k] if final_k > 0 else []
         SEARCH_RESULTS_FINAL_COUNT.observe(len(final_results))
@@ -469,7 +544,8 @@ class TriBridFusion:
             for rank, chunk in enumerate(result_list):
                 key = self._fusion_key(chunk)
                 scores[key] += 1.0 / (k + rank + 1)
-                chunk_map[key] = chunk
+                prev = chunk_map.get(key)
+                chunk_map[key] = _merge_match(prev, chunk) if prev is not None else chunk
         sorted_keys = sorted(scores, key=lambda key: scores[key], reverse=True)
         return [chunk_map[key].model_copy(update={"score": scores[key]}) for key in sorted_keys]
 
@@ -480,7 +556,8 @@ class TriBridFusion:
             for chunk in result_list:
                 key = self._fusion_key(chunk)
                 scores[key] += chunk.score * weight
-                chunk_map[key] = chunk
+                prev = chunk_map.get(key)
+                chunk_map[key] = _merge_match(prev, chunk) if prev is not None else chunk
         sorted_keys = sorted(scores, key=lambda key: scores[key], reverse=True)
         return [chunk_map[key].model_copy(update={"score": scores[key]}) for key in sorted_keys]
 
@@ -503,3 +580,300 @@ def _normalize(chunks: list[ChunkMatch]) -> list[ChunkMatch]:
     if mx <= 0:
         return chunks
     return [c.model_copy(update={"score": float(c.score) / float(mx)}) for c in chunks]
+
+
+def _merge_match(base: ChunkMatch, incoming: ChunkMatch) -> ChunkMatch:
+    """Merge two ChunkMatch objects, preferring base fields and filling missing metadata."""
+    meta = dict(base.metadata or {})
+    inc = dict(incoming.metadata or {})
+    for k, v in inc.items():
+        if k not in meta:
+            meta[k] = v
+            continue
+        cur = meta.get(k)
+        if cur is None or cur == "":
+            meta[k] = v
+            continue
+        if isinstance(cur, (list, dict)) and not cur:
+            meta[k] = v
+            continue
+    return base.model_copy(update={"metadata": meta})
+
+
+_MMR_TOKEN_RX = re.compile(r"[A-Za-z0-9_]{2,64}")
+
+
+def _mmr_token_set(text: str) -> set[str]:
+    toks = _MMR_TOKEN_RX.findall((text or "").lower())
+    out: set[str] = set()
+    for t in toks:
+        out.add(t)
+        if len(out) >= 64:
+            break
+    return out
+
+
+def _jaccard(a: set[str], b: set[str]) -> float:
+    if not a or not b:
+        return 0.0
+    inter = len(a & b)
+    if inter <= 0:
+        return 0.0
+    union = len(a | b)
+    return float(inter) / float(union) if union > 0 else 0.0
+
+
+def _dedup_results(results: list[ChunkMatch], *, by: str) -> list[ChunkMatch]:
+    mode = str(by or "chunk_id").strip().lower()
+    seen: set[str] = set()
+    out: list[ChunkMatch] = []
+    for r in results:
+        meta = r.metadata or {}
+        corpus_id = str(meta.get("corpus_id") or "").strip()
+        key = f"{corpus_id}::{r.file_path}" if mode == "file_path" else f"{corpus_id}::{r.chunk_id}"
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(r)
+    return out
+
+
+def _cap_chunks_per_file(results: list[ChunkMatch], *, max_per_file: int) -> list[ChunkMatch]:
+    cap = int(max_per_file)
+    if cap <= 0:
+        return results
+    counts: dict[str, int] = defaultdict(int)
+    out: list[ChunkMatch] = []
+    for r in results:
+        meta = r.metadata or {}
+        corpus_id = str(meta.get("corpus_id") or "").strip()
+        key = f"{corpus_id}::{r.file_path}"
+        counts[key] += 1
+        if counts[key] > cap:
+            continue
+        out.append(r)
+    return out
+
+
+async def _apply_mmr_if_enabled(
+    results: list[ChunkMatch],
+    *,
+    enabled: bool,
+    mmr_lambda: float,
+    final_k: int,
+    repo_id: str | None = None,
+    postgres_url: str | None = None,
+) -> list[ChunkMatch]:
+    if not enabled or not results:
+        return results
+
+    k = int(final_k or 0)
+    if k <= 0:
+        k = min(20, len(results))
+
+    lam = max(0.0, min(1.0, float(mmr_lambda)))
+    pool_size = min(len(results), max(50, min(200, k * 5)))
+    pool = list(results[:pool_size])
+    rest = list(results[pool_size:])
+
+    # Prefer dense embeddings when available; fall back to content token sets.
+    emb_by_id: dict[str, list[float]] = {}
+    if repo_id and postgres_url:
+        try:
+            pg = PostgresClient(str(postgres_url))
+            await pg.connect()
+            emb_by_id = await pg.get_embeddings(str(repo_id), [r.chunk_id for r in pool])
+            await pg.disconnect()
+        except Exception:
+            emb_by_id = {}
+
+    tokens = [_mmr_token_set(r.content) for r in pool]
+    selected_idx: list[int] = []
+    candidate_idx: list[int] = list(range(len(pool)))
+
+    while candidate_idx and len(selected_idx) < min(k, len(pool)):
+        best_i = None
+        best_score = None
+        for i in candidate_idx:
+            rel = float(pool[i].score)
+            max_sim = 0.0
+            cand_emb = emb_by_id.get(pool[i].chunk_id)
+            if cand_emb is not None and selected_idx:
+                for j in selected_idx:
+                    sel_emb = emb_by_id.get(pool[j].chunk_id)
+                    if sel_emb is None:
+                        continue
+                    max_sim = max(max_sim, _cosine_sim(cand_emb, sel_emb))
+                    if max_sim >= 0.999:
+                        break
+            else:
+                for j in selected_idx:
+                    max_sim = max(max_sim, _jaccard(tokens[i], tokens[j]))
+                    if max_sim >= 0.999:
+                        break
+            mmr_score = (lam * rel) - ((1.0 - lam) * max_sim)
+            if best_score is None or mmr_score > best_score:
+                best_score = mmr_score
+                best_i = i
+        assert best_i is not None
+        selected_idx.append(best_i)
+        candidate_idx.remove(best_i)
+
+    selected = [pool[i] for i in selected_idx]
+    remaining = [pool[i] for i in candidate_idx]
+    return selected + remaining + rest
+
+
+def _cosine_sim(a: list[float], b: list[float]) -> float:
+    if not a or not b or len(a) != len(b):
+        return 0.0
+    dot = 0.0
+    na = 0.0
+    nb = 0.0
+    for x, y in zip(a, b, strict=False):
+        fx = float(x)
+        fy = float(y)
+        dot += fx * fy
+        na += fx * fx
+        nb += fy * fy
+    if na <= 0.0 or nb <= 0.0:
+        return 0.0
+    return float(float(dot) / (float(na ** 0.5) * float(nb ** 0.5)))
+
+
+async def _expand_neighbors(
+    results: list[ChunkMatch],
+    *,
+    neighbor_window: int,
+    seed_limit: int,
+) -> list[ChunkMatch]:
+    w = int(neighbor_window)
+    if w <= 0 or not results:
+        return results
+
+    n_seeds = int(seed_limit)
+    if n_seeds <= 0:
+        n_seeds = min(10, len(results))
+    n_seeds = max(1, min(n_seeds, len(results)))
+    seeds = results[:n_seeds]
+
+    ords_by_group: dict[tuple[str, str], set[int]] = defaultdict(set)
+    seeds_by_group: dict[tuple[str, str], list[tuple[int, float, str, str]]] = defaultdict(list)
+
+    seed_keys: set[str] = set()
+    for r in seeds:
+        meta = r.metadata or {}
+        corpus_id = str(meta.get("corpus_id") or "").strip()
+        if not corpus_id:
+            continue
+        try:
+            ordinal = int(meta.get("chunk_ordinal") or -1)
+        except Exception:
+            continue
+        if ordinal < 0:
+            continue
+        group = (corpus_id, str(r.file_path))
+        seeds_by_group[group].append((ordinal, float(r.score), str(r.chunk_id), str(r.source)))
+        seed_keys.add(f"{corpus_id}::{r.chunk_id}")
+        for o in range(ordinal - w, ordinal + w + 1):
+            if o == ordinal or o < 0:
+                continue
+            ords_by_group[group].add(int(o))
+
+    if not ords_by_group:
+        return results
+
+    pg_by_corpus: dict[str, PostgresClient] = {}
+    fetched_by_group: dict[tuple[str, str], dict[int, ChunkMatch]] = {}
+    try:
+        for (corpus_id, file_path), ords in ords_by_group.items():
+            if not ords:
+                continue
+            cfg = await load_scoped_config(repo_id=corpus_id)
+            pg = pg_by_corpus.get(corpus_id)
+            if pg is None:
+                pg = PostgresClient(cfg.indexing.postgres_url)
+                await pg.connect()
+                pg_by_corpus[corpus_id] = pg
+            chunks = await pg.get_chunks_by_file_ordinals(corpus_id, file_path, sorted(ords))
+            by_ord: dict[int, ChunkMatch] = {}
+            for ch in chunks:
+                try:
+                    o = int((ch.metadata or {}).get("chunk_ordinal") or -1)
+                except Exception:
+                    continue
+                by_ord[o] = ChunkMatch(
+                    chunk_id=ch.chunk_id,
+                    content=ch.content,
+                    file_path=ch.file_path,
+                    start_line=ch.start_line,
+                    end_line=ch.end_line,
+                    language=ch.language,
+                    score=0.0,
+                    # Neighbors are attributed to the leg that found the seed chunk.
+                    # Keep schemas stable by marking neighbor-ness only via metadata.
+                    source="vector",
+                    metadata={**(ch.metadata or {}), "corpus_id": corpus_id},
+                )
+            fetched_by_group[(corpus_id, file_path)] = by_ord
+    finally:
+        for pg in pg_by_corpus.values():
+            try:
+                await pg.disconnect()
+            except Exception:
+                pass
+
+    out: list[ChunkMatch] = []
+    for r in results:
+        out.append(r)
+        meta = r.metadata or {}
+        corpus_id = str(meta.get("corpus_id") or "").strip()
+        if not corpus_id:
+            continue
+        if f"{corpus_id}::{r.chunk_id}" not in seed_keys:
+            continue
+        try:
+            ordinal = int(meta.get("chunk_ordinal") or -1)
+        except Exception:
+            continue
+        group = (corpus_id, str(r.file_path))
+        by_ord = fetched_by_group.get(group) or {}
+        seed_info = seeds_by_group.get(group) or []
+        for o in range(ordinal - w, ordinal + w + 1):
+            if o == ordinal or o < 0:
+                continue
+            nb = by_ord.get(o)
+            if nb is None:
+                continue
+            if f"{corpus_id}::{nb.chunk_id}" in seed_keys:
+                continue
+
+            best_parent = r.chunk_id
+            best_score = float(r.score)
+            best_source = str(r.source)
+            best_delta = None
+            for so, ss, sid, ssrc in seed_info:
+                d = abs(int(o) - int(so))
+                if best_delta is None or d < best_delta:
+                    best_delta = d
+                    best_parent = sid
+                    best_score = float(ss)
+                    best_source = str(ssrc)
+
+            delta = abs(int(o) - int(ordinal))
+            factor = max(0.5, 1.0 - (0.1 * float(delta)))
+            out.append(
+                nb.model_copy(
+                    update={
+                        "score": float(best_score) * float(factor),
+                        "source": best_source,
+                        "metadata": {
+                            **(nb.metadata or {}),
+                            "neighbor_of": str(best_parent),
+                            "neighbor_delta": int(delta),
+                        },
+                    }
+                )
+            )
+
+    return out

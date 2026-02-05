@@ -575,13 +575,28 @@ class Reranker:
         remainder = chunks[top_n:]
         snippets = [_snippet(c.content, max_chars=snippet_chars) for c in candidates]
 
+        from server.reranker.mlx_qwen3 import read_adapter_config, read_manifest
+
+        adapter_path = resolve_project_path(str(adapter_dir)).resolve()
+        manifest = read_manifest(adapter_path) or {}
+        manifest_base_model = str(manifest.get("base_model") or "").strip()
+        base_model = manifest_base_model or str(self.training_config.learning_reranker_base_model)
+
+        adapter_cfg = read_adapter_config(adapter_path) or {}
+        lora_rank = int(adapter_cfg.get("lora_rank") or self.training_config.learning_reranker_lora_rank)
+        lora_alpha = float(adapter_cfg.get("lora_alpha") or self.training_config.learning_reranker_lora_alpha)
+        lora_dropout = float(adapter_cfg.get("lora_dropout") or self.training_config.learning_reranker_lora_dropout)
+        target_modules = adapter_cfg.get("target_modules")
+        if not isinstance(target_modules, list) or not target_modules:
+            target_modules = list(self.training_config.learning_reranker_lora_target_modules)
+
         rr = await get_mlx_qwen3_reranker(
-            base_model=str(self.training_config.learning_reranker_base_model),
-            adapter_dir=str(adapter_dir),
-            lora_rank=int(self.training_config.learning_reranker_lora_rank),
-            lora_alpha=float(self.training_config.learning_reranker_lora_alpha),
-            lora_dropout=float(self.training_config.learning_reranker_lora_dropout),
-            lora_target_modules=list(self.training_config.learning_reranker_lora_target_modules),
+            base_model=str(base_model),
+            adapter_dir=str(adapter_path),
+            lora_rank=int(lora_rank),
+            lora_alpha=float(lora_alpha),
+            lora_dropout=float(lora_dropout),
+            lora_target_modules=[str(x) for x in list(target_modules)],
         )
 
         raw_scores: list[float] = []

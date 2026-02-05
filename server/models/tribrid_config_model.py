@@ -83,10 +83,53 @@ class IndexStats(BaseModel):
     total_files: int = Field(description="Number of files indexed")
     total_chunks: int = Field(description="Number of chunks created")
     total_tokens: int = Field(description="Total token count across all chunks")
+    embedding_provider: str = Field(
+        default="",
+        description="Embedding provider used for embeddings (embedding.embedding_type) at index time",
+    )
     embedding_model: str = Field(description="Model used for embeddings")
     embedding_dimensions: int = Field(description="Dimension of embedding vectors")
     last_indexed: datetime | None = Field(default=None, description="When last indexed")
     file_breakdown: dict[str, int] = Field(default_factory=dict, description="Count by file extension")
+
+
+class IndexEstimate(BaseModel):
+    """Best-effort estimate for indexing cost/time before running the indexer.
+
+    Notes:
+    - Token count is an approximation (byte-based heuristic).
+    - Time is an intentionally rough range (depends on machine, provider latency, DB speed, etc.).
+    """
+
+    repo_id: str = Field(
+        description="Corpus identifier",
+        validation_alias=AliasChoices("repo_id", "corpus_id"),
+        serialization_alias="corpus_id",
+    )
+    repo_path: str = Field(description="Resolved path on disk used for the estimate")
+    total_files: int = Field(ge=0, description="Estimated number of files that will be processed")
+    total_size_bytes: int = Field(ge=0, description="Estimated total bytes across included files")
+    skipped_large_files: int = Field(ge=0, description="Count of files skipped due to size limits")
+    estimated_total_tokens: int = Field(ge=0, description="Estimated total tokens to be chunked/embedded")
+    estimated_total_chunks: int = Field(ge=0, description="Estimated number of chunks (heuristic)")
+    embedding_backend: Literal["deterministic", "provider"] = Field(
+        description="Embedding backend used for indexing (deterministic has no external cost)"
+    )
+    embedding_provider: str = Field(description="Embedding provider used for indexing (embedding.embedding_type)")
+    embedding_model: str = Field(description="Embedding model used for indexing (effective model)")
+    skip_dense: bool = Field(description="Whether dense embeddings are skipped (indexing.skip_dense=1)")
+    embedding_cost_usd: float | None = Field(
+        default=None,
+        ge=0.0,
+        description="Estimated embedding cost (USD) when pricing data is available (0 for local/deterministic).",
+    )
+    estimated_seconds_low: float | None = Field(
+        default=None, ge=0.0, description="Very rough low-end estimate for total indexing time (seconds)"
+    )
+    estimated_seconds_high: float | None = Field(
+        default=None, ge=0.0, description="Very rough high-end estimate for total indexing time (seconds)"
+    )
+    assumptions: list[str] = Field(default_factory=list, description="Human-readable assumptions used for the estimate")
 
 
 # =============================================================================
@@ -656,7 +699,9 @@ class ChunkMatch(BaseModel):
     end_line: int = Field(description="Ending line number")
     language: str | None = Field(default=None, description="Programming language")
     score: float = Field(description="Relevance score from retrieval")
-    source: Literal["vector", "sparse", "graph"] = Field(description="Which retrieval leg found this")
+    source: Literal["vector", "sparse", "graph"] = Field(
+        description="Which retrieval leg found this"
+    )
     metadata: dict[str, Any] = Field(default_factory=dict, description="Additional match metadata")
 
 
@@ -1951,6 +1996,51 @@ class RetrievalConfig(BaseModel):
         description="Enable chunk_summary-based retrieval"
     )
 
+    max_chunks_per_file: int = Field(
+        default=3,
+        ge=1,
+        le=50,
+        description="Max chunks to return per file_path (document-aware result shaping).",
+    )
+    dedup_by: Literal["chunk_id", "file_path"] = Field(
+        default="chunk_id",
+        description="Dedup key for final results.",
+    )
+    neighbor_window: int = Field(
+        default=1,
+        ge=0,
+        le=10,
+        description="Include adjacent chunks by ordinal for coherence (requires chunk_ordinal metadata).",
+    )
+    min_score_vector: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=1.0,
+        description="Minimum score threshold for vector leg results (0 disables).",
+    )
+    min_score_sparse: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=10.0,
+        description="Minimum score threshold for sparse leg results (0 disables). Note: sparse scores are engine-dependent (FTS vs BM25).",
+    )
+    min_score_graph: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=10.0,
+        description="Minimum score threshold for graph leg results (0 disables).",
+    )
+    enable_mmr: bool = Field(
+        default=False,
+        description="Enable MMR diversification when embeddings are available.",
+    )
+    mmr_lambda: float = Field(
+        default=0.7,
+        ge=0.0,
+        le=1.0,
+        description="MMR lambda (1=query relevance only, 0=diversity only).",
+    )
+
     multi_query_m: int = Field(
         default=4,
         ge=1,
@@ -2137,6 +2227,10 @@ class LayerBonusConfig(BaseModel):
 class EmbeddingConfig(BaseModel):
     """Embedding generation and caching configuration."""
 
+    embedding_backend: Literal["deterministic", "provider"] = Field(
+        default="deterministic",
+        description="Embedding execution backend. 'deterministic' is offline/test-friendly; 'provider' calls real providers.",
+    )
     embedding_type: str = Field(
         default="openai",
         description="Embedding provider (dynamic - validated against models.json at runtime)"
@@ -2150,6 +2244,32 @@ class EmbeddingConfig(BaseModel):
         ge=128,
         le=4096,
         description="Embedding dimensions"
+    )
+    auto_set_dimensions: bool = Field(
+        default=True,
+        description="When true, the UI auto-syncs embedding_dim from data/models.json when model changes.",
+    )
+    input_truncation: Literal["error", "truncate_end", "truncate_middle"] = Field(
+        default="truncate_end",
+        description="What to do when text exceeds embedding/token limits.",
+    )
+    embed_text_prefix: str = Field(
+        default="",
+        description="Prefix added before chunk text prior to embedding (stable document context).",
+    )
+    embed_text_suffix: str = Field(
+        default="",
+        description="Suffix added after chunk text prior to embedding.",
+    )
+    contextual_chunk_embeddings: Literal["off", "prepend_context", "late_chunking_local_only"] = Field(
+        default="off",
+        description="Contextual chunk embedding mode. 'late_chunking_local_only' requires local/HF provider backend.",
+    )
+    late_chunking_max_doc_tokens: int = Field(
+        default=8192,
+        ge=256,
+        le=65536,
+        description="Max tokens per document segment for local late chunking.",
     )
 
     @field_validator('embedding_type', mode='before')
@@ -2226,9 +2346,59 @@ class EmbeddingConfig(BaseModel):
             raise ValueError(f'Uncommon embedding dimension: {v}. Expected one of {common_dims}')
         return v
 
+    @model_validator(mode="after")
+    def _validate_contextual_embedding_mode(self) -> Self:
+        mode = str(self.contextual_chunk_embeddings or "off").strip().lower()
+        if mode == "late_chunking_local_only":
+            t = str(self.embedding_type or "").strip().lower()
+            if t not in {"local", "huggingface"}:
+                raise ValueError(
+                    "contextual_chunk_embeddings='late_chunking_local_only' requires embedding_type=local|huggingface"
+                )
+            if str(self.embedding_backend or "").strip().lower() != "provider":
+                raise ValueError(
+                    "contextual_chunk_embeddings='late_chunking_local_only' requires embedding_backend='provider'"
+                )
+        return self
+
+
+class TokenizationConfig(BaseModel):
+    """Tokenizer configuration used for token-aware chunking and budgeting."""
+
+    strategy: Literal["whitespace", "tiktoken", "huggingface"] = Field(
+        default="tiktoken",
+        description="Tokenization strategy used for chunking/budgeting.",
+    )
+    tiktoken_encoding: str = Field(
+        default="o200k_base",
+        description="tiktoken encoding name (strategy='tiktoken').",
+    )
+    hf_tokenizer_name: str = Field(
+        default="gpt2",
+        description="HuggingFace tokenizer name (strategy='huggingface').",
+    )
+    normalize_unicode: bool = Field(
+        default=True,
+        description="Normalize unicode (NFKC) before tokenization for stability.",
+    )
+    lowercase: bool = Field(
+        default=False,
+        description="Lowercase before tokenization.",
+    )
+    max_tokens_per_chunk_hard: int = Field(
+        default=8192,
+        ge=256,
+        le=65536,
+        description="Absolute hard limit for tokens per chunk (safety ceiling).",
+    )
+    estimate_only: bool = Field(
+        default=False,
+        description="If true, use fast approximate token counting.",
+    )
+
 
 class ChunkingConfig(BaseModel):
-    """Code chunking configuration."""
+    """Chunking configuration for documents and code."""
 
     chunk_size: int = Field(
         default=1000,
@@ -2249,9 +2419,9 @@ class ChunkingConfig(BaseModel):
         description="Overlap lines for AST chunking"
     )
     max_indexable_file_size: int = Field(
-        default=2000000,
+        default=250_000_000,
         ge=10000,
-        le=10000000,
+        le=2_000_000_000,
         description="Max file size to index (bytes) - files larger than this are skipped"
     )
     max_chunk_tokens: int = Field(
@@ -2274,8 +2444,8 @@ class ChunkingConfig(BaseModel):
     )
     chunking_strategy: str = Field(
         default="ast",
-        pattern="^(ast|greedy|hybrid)$",
-        description="Chunking strategy"
+        pattern="^(ast|hybrid|greedy|fixed_chars|fixed_tokens|recursive|markdown|sentence|qa_blocks|semantic)$",
+        description="Chunking strategy (document + code)"
     )
     preserve_imports: int = Field(
         default=1,
@@ -2283,11 +2453,57 @@ class ChunkingConfig(BaseModel):
         le=1,
         description="Include imports in chunks"
     )
+    target_tokens: int = Field(
+        default=512,
+        ge=64,
+        le=8192,
+        description="Target tokens per chunk (token-based strategies)",
+    )
+    overlap_tokens: int = Field(
+        default=64,
+        ge=0,
+        le=2048,
+        description="Token overlap between chunks (token-based strategies)",
+    )
+    separators: list[str] = Field(
+        default_factory=lambda: ["\n\n", "\n", ". ", " ", ""],
+        description="Separators for recursive chunking, in priority order.",
+    )
+    separator_keep: Literal["none", "prefix", "suffix"] = Field(
+        default="suffix",
+        description="Whether to keep separators when splitting (recursive strategy).",
+    )
+    recursive_max_depth: int = Field(
+        default=10,
+        ge=1,
+        le=50,
+        description="Max recursion depth for recursive chunking.",
+    )
+    markdown_max_heading_level: int = Field(
+        default=4,
+        ge=1,
+        le=6,
+        description="Max heading level to split on for markdown chunking.",
+    )
+    markdown_include_code_fences: bool = Field(
+        default=True,
+        description="Whether to include fenced code blocks in markdown sections.",
+    )
+    emit_chunk_ordinal: bool = Field(
+        default=True,
+        description="Emit chunk ordinal metadata for neighbor-window retrieval.",
+    )
+    emit_parent_doc_id: bool = Field(
+        default=True,
+        description="Emit parent document id metadata for neighbor-window retrieval.",
+    )
 
     @model_validator(mode='after')
     def validate_overlap_less_than_size(self) -> Self:
         if self.chunk_overlap >= self.chunk_size:
             raise ValueError('chunk_overlap must be less than chunk_size')
+        if self.overlap_tokens >= self.target_tokens:
+            raise ValueError("overlap_tokens must be less than target_tokens")
         return self
 
 
@@ -2340,10 +2556,51 @@ class IndexingConfig(BaseModel):
         description="Excluded file extensions (comma-separated)"
     )
     index_max_file_size_mb: int = Field(
-        default=10,
+        default=250,
         ge=1,
-        le=100,
+        le=1024,
         description="Max file size to index (MB)"
+    )
+    large_file_mode: Literal["read_all", "stream"] = Field(
+        default="stream",
+        description="How to ingest very large text files. 'stream' avoids loading entire files into memory.",
+    )
+    large_file_stream_chunk_chars: int = Field(
+        default=2_000_000,
+        ge=100_000,
+        le=50_000_000,
+        description="When large_file_mode='stream', read text files in bounded char blocks (best-effort).",
+    )
+
+    parquet_extract_max_rows: int = Field(
+        default=5000,
+        ge=1,
+        le=200000,
+        description="Max rows to extract from a single Parquet file during indexing (best-effort)",
+    )
+    parquet_extract_max_chars: int = Field(
+        default=2_000_000,
+        ge=10_000,
+        le=50_000_000,
+        description="Max characters to extract from a single Parquet file during indexing (best-effort)",
+    )
+    parquet_extract_max_cell_chars: int = Field(
+        default=20_000,
+        ge=100,
+        le=200_000,
+        description="Max characters per extracted Parquet cell (best-effort)",
+    )
+    parquet_extract_text_columns_only: int = Field(
+        default=1,
+        ge=0,
+        le=1,
+        description="Extract only text/string-like columns from Parquet files when possible",
+    )
+    parquet_extract_include_column_names: int = Field(
+        default=1,
+        ge=0,
+        le=1,
+        description="Include column headers when extracting Parquet text",
     )
     skip_dense: int = Field(
         default=0,
@@ -2569,6 +2826,18 @@ class VectorSearchConfig(BaseModel):
 class SparseSearchConfig(BaseModel):
     """Configuration for sparse (BM25) search."""
 
+    engine: Literal["postgres_fts", "pg_search_bm25"] = Field(
+        default="postgres_fts",
+        description="Sparse retrieval engine. 'postgres_fts' uses built-in FTS; 'pg_search_bm25' uses ParadeDB pg_search.",
+    )
+    query_mode: Literal["plain", "phrase", "boolean"] = Field(
+        default="plain",
+        description="How to interpret the sparse query string.",
+    )
+    highlight: bool = Field(
+        default=False,
+        description="Enable sparse highlight payloads when supported (UI later).",
+    )
     enabled: bool = Field(
         default=True,
         description="Enable sparse BM25 search in tri-brid retrieval"
@@ -3427,7 +3696,7 @@ class TrainingConfig(BaseModel):
     )
 
     learning_reranker_lora_target_modules: list[str] = Field(
-        default_factory=lambda: ["q_proj", "k_proj", "v_proj", "o_proj"],
+        default_factory=lambda: ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
         description="Module name suffixes to apply LoRA to (MLX Qwen3)",
     )
 
@@ -4283,6 +4552,7 @@ class TriBridConfig(BaseModel):
     scoring: ScoringConfig = Field(default_factory=ScoringConfig)
     layer_bonus: LayerBonusConfig = Field(default_factory=LayerBonusConfig)
     embedding: EmbeddingConfig = Field(default_factory=EmbeddingConfig)
+    tokenization: TokenizationConfig = Field(default_factory=TokenizationConfig)
     chunking: ChunkingConfig = Field(default_factory=ChunkingConfig)
     indexing: IndexingConfig = Field(default_factory=IndexingConfig)
     graph_storage: GraphStorageConfig = Field(default_factory=GraphStorageConfig)
@@ -4401,6 +4671,11 @@ class TriBridConfig(BaseModel):
             'BM25_STOPWORDS_LANG': self.indexing.bm25_stopwords_lang,
             'INDEX_EXCLUDED_EXTS': self.indexing.index_excluded_exts,
             'INDEX_MAX_FILE_SIZE_MB': self.indexing.index_max_file_size_mb,
+            'PARQUET_EXTRACT_MAX_ROWS': self.indexing.parquet_extract_max_rows,
+            'PARQUET_EXTRACT_MAX_CHARS': self.indexing.parquet_extract_max_chars,
+            'PARQUET_EXTRACT_MAX_CELL_CHARS': self.indexing.parquet_extract_max_cell_chars,
+            'PARQUET_EXTRACT_TEXT_COLUMNS_ONLY': self.indexing.parquet_extract_text_columns_only,
+            'PARQUET_EXTRACT_INCLUDE_COLUMN_NAMES': self.indexing.parquet_extract_include_column_names,
             'SKIP_DENSE': self.indexing.skip_dense,
             'OUT_DIR_BASE': self.indexing.out_dir_base,
             'RAG_OUT_BASE': self.indexing.rag_out_base,
@@ -4682,6 +4957,11 @@ class TriBridConfig(BaseModel):
                 bm25_stopwords_lang=data.get('BM25_STOPWORDS_LANG', 'en'),
                 index_excluded_exts=data.get('INDEX_EXCLUDED_EXTS', '.png,.jpg,.gif,.ico,.svg,.woff,.ttf'),
                 index_max_file_size_mb=data.get('INDEX_MAX_FILE_SIZE_MB', 10),
+                parquet_extract_max_rows=data.get('PARQUET_EXTRACT_MAX_ROWS', 5000),
+                parquet_extract_max_chars=data.get('PARQUET_EXTRACT_MAX_CHARS', 2_000_000),
+                parquet_extract_max_cell_chars=data.get('PARQUET_EXTRACT_MAX_CELL_CHARS', 20_000),
+                parquet_extract_text_columns_only=data.get('PARQUET_EXTRACT_TEXT_COLUMNS_ONLY', 1),
+                parquet_extract_include_column_names=data.get('PARQUET_EXTRACT_INCLUDE_COLUMN_NAMES', 1),
                 skip_dense=data.get('SKIP_DENSE', 0),
                 out_dir_base=data.get('OUT_DIR_BASE', './out'),
                 rag_out_base=data.get('RAG_OUT_BASE', ''),
@@ -4959,7 +5239,7 @@ TRIBRID_CONFIG_KEYS = {
     'GREEDY_FALLBACK_TARGET',
     'CHUNKING_STRATEGY',
     'PRESERVE_IMPORTS',
-    # Indexing params (15)
+    # Indexing params (20)
     'POSTGRES_URL',
     'COLLECTION_NAME',
     'COLLECTION_SUFFIX',
@@ -4972,6 +5252,11 @@ TRIBRID_CONFIG_KEYS = {
     'BM25_STOPWORDS_LANG',
     'INDEX_EXCLUDED_EXTS',
     'INDEX_MAX_FILE_SIZE_MB',
+    'PARQUET_EXTRACT_MAX_ROWS',
+    'PARQUET_EXTRACT_MAX_CHARS',
+    'PARQUET_EXTRACT_MAX_CELL_CHARS',
+    'PARQUET_EXTRACT_TEXT_COLUMNS_ONLY',
+    'PARQUET_EXTRACT_INCLUDE_COLUMN_NAMES',
     'SKIP_DENSE',
     'OUT_DIR_BASE',
     'RAG_OUT_BASE',

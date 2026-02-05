@@ -11,14 +11,18 @@ import { useAPI } from '@/hooks/useAPI';
 import { useConfig } from '@/hooks/useConfig';
 import { useRepoStore } from '@/stores/useRepoStore';
 import type { IndexStats } from '@/types/generated';
+import { describeEmbeddingProviderStrategy } from '@/utils/embeddingStrategy';
 
 export interface EmbeddingStatus {
   // Current configuration (from tribrid_config.json / env)
   configType: string;
+  configStrategy: string;
   configDim: number;
   configModel: string;
   
   // Index configuration (from last_index.json)
+  indexProvider: string | null;
+  indexStrategy: string | null;
   indexType: string | null;
   indexDim: number | null;
   indexedAt: string | null;
@@ -31,6 +35,7 @@ export interface EmbeddingStatus {
   // Detailed comparison
   typeMatch: boolean;
   dimMatch: boolean;
+  modelMatch: boolean;
   
   // Index stats
   totalChunks: number;
@@ -87,6 +92,7 @@ export function useEmbeddingStatus(): UseEmbeddingStatusResult {
       const emb = config.embedding;
       const provider = String(emb?.embedding_type || '').toLowerCase();
       const configType = provider || 'openai';
+      const configStrategy = describeEmbeddingProviderStrategy(configType).detail;
       const configDim = Number(emb?.embedding_dim || 0);
       let configModel = String(emb?.embedding_model || '');
       if (provider === 'voyage') configModel = String(emb?.voyage_model || '');
@@ -97,8 +103,11 @@ export function useEmbeddingStatus(): UseEmbeddingStatusResult {
       if (response.status === 404) {
         setStatus({
           configType,
+          configStrategy,
           configDim,
           configModel,
+          indexProvider: null,
+          indexStrategy: null,
           indexType: null,
           indexDim: null,
           indexedAt: null,
@@ -107,6 +116,7 @@ export function useEmbeddingStatus(): UseEmbeddingStatusResult {
           isMismatched: false,
           typeMatch: true,
           dimMatch: true,
+          modelMatch: true,
           totalChunks: 0,
         });
         return;
@@ -117,29 +127,37 @@ export function useEmbeddingStatus(): UseEmbeddingStatusResult {
 
       const data: IndexStats = await response.json();
       const totalChunks = Number(data.total_chunks || 0);
+      const indexProviderRaw = String(data.embedding_provider || '').trim();
       const indexModelRaw = String(data.embedding_model || '').trim();
       const indexDimRaw = Number(data.embedding_dimensions || 0);
 
       // Treat empty/0 as “no dense embedding index” (e.g., skip_dense=1 runs).
       const indexType = indexModelRaw ? indexModelRaw : null;
       const indexDim = indexDimRaw > 0 ? indexDimRaw : null;
+      const indexProvider = indexProviderRaw ? indexProviderRaw : null;
+      const indexStrategy = indexProvider ? describeEmbeddingProviderStrategy(indexProvider).detail : null;
       const hasIndex = Boolean(indexType && indexDim && totalChunks > 0);
 
       const dimMatch = hasIndex ? configDim === indexDim : true;
       const modelMatch = hasIndex ? configModel === indexType : true;
+      const typeMatch = hasIndex && indexProvider ? configType === String(indexProvider).toLowerCase() : true;
 
       setStatus({
         configType,
+        configStrategy,
         configDim,
         configModel,
+        indexProvider,
+        indexStrategy,
         indexType,
         indexDim,
         indexedAt: data.last_indexed ? String(data.last_indexed) : null,
         indexPath: null,
         hasIndex,
-        isMismatched: hasIndex ? !(dimMatch && modelMatch) : false,
-        typeMatch: true, // provider is not persisted in index stats currently
+        isMismatched: hasIndex ? !(typeMatch && dimMatch && modelMatch) : false,
+        typeMatch,
         dimMatch,
+        modelMatch,
         totalChunks,
       });
     } catch (err) {
@@ -196,4 +214,3 @@ export function useEmbeddingStatus(): UseEmbeddingStatusResult {
     refresh: checkStatus,
   };
 }
-

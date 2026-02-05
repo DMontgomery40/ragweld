@@ -119,6 +119,9 @@ def _dump_json(path: Path, data: Any) -> None:
 
 def _load_legacy_tooltip_map() -> dict[str, str]:
     # Use Node to import the legacy tooltip map deterministically (no parsing JS in Python).
+    #
+    # NOTE: Some forks removed the legacy tooltip module entirely. In that case, callers should
+    # skip this and treat `data/glossary.json` as the source of truth.
     cmd = [
         "node",
         "--input-type=module",
@@ -158,6 +161,7 @@ def main() -> int:
     data_path = repo_root / "data" / "glossary.json"
     public_path = repo_root / "web" / "public" / "glossary.json"
     web_src = repo_root / "web" / "src"
+    legacy_module = repo_root / "web" / "src" / "modules" / "_archived" / "tooltips.js"
 
     existing = _load_existing_glossary(data_path)
     existing_terms = existing.get("terms") if isinstance(existing, dict) else None
@@ -169,41 +173,56 @@ def main() -> int:
         if isinstance(t, dict) and isinstance(t.get("key"), str):
             existing_by_key[t["key"]] = t
 
-    legacy_map = _load_legacy_tooltip_map()
+    legacy_map: dict[str, str] = {}
+    if legacy_module.exists():
+        legacy_map = _load_legacy_tooltip_map()
     ui_keys = _find_tooltipicon_literal_keys(web_src)
 
     merged: dict[str, dict[str, Any]] = {}
 
-    # 1) Legacy tooltip map is authoritative for tooltip content.
-    for key in sorted(legacy_map.keys()):
-        parsed = _parse_tooltip_html(key, legacy_map[key])
-        prior = existing_by_key.get(key, {})
-        category = prior.get("category") if isinstance(prior.get("category"), str) else "general"
-        related = prior.get("related") if isinstance(prior.get("related"), list) else []
+    if legacy_map:
+        # 1) Legacy tooltip map is authoritative for tooltip content.
+        for key in sorted(legacy_map.keys()):
+            parsed = _parse_tooltip_html(key, legacy_map[key])
+            prior = existing_by_key.get(key, {})
+            category = prior.get("category") if isinstance(prior.get("category"), str) else "general"
+            related = prior.get("related") if isinstance(prior.get("related"), list) else []
 
-        merged[key] = {
-            "term": parsed.term,
-            "key": key,
-            "definition": parsed.definition_html,
-            "category": category,
-            "related": related,
-            "links": [{"text": l.text, "href": l.href} for l in parsed.links],
-            "badges": [{"text": b.text, "class": b.class_name} for b in parsed.badges],
-        }
+            merged[key] = {
+                "term": parsed.term,
+                "key": key,
+                "definition": parsed.definition_html,
+                "category": category,
+                "related": related,
+                "links": [{"text": l.text, "href": l.href} for l in parsed.links],
+                "badges": [{"text": b.text, "class": b.class_name} for b in parsed.badges],
+            }
 
-    # 2) Keep existing glossary-only entries.
-    for key, prior in existing_by_key.items():
-        if key in merged:
-            continue
-        merged[key] = {
-            "term": prior.get("term") if isinstance(prior.get("term"), str) else key,
-            "key": key,
-            "definition": prior.get("definition") if isinstance(prior.get("definition"), str) else "",
-            "category": prior.get("category") if isinstance(prior.get("category"), str) else "general",
-            "related": prior.get("related") if isinstance(prior.get("related"), list) else [],
-            "links": prior.get("links") if isinstance(prior.get("links"), list) else [],
-            "badges": prior.get("badges") if isinstance(prior.get("badges"), list) else [],
-        }
+        # 2) Keep existing glossary-only entries.
+        for key, prior in existing_by_key.items():
+            if key in merged:
+                continue
+            merged[key] = {
+                "term": prior.get("term") if isinstance(prior.get("term"), str) else key,
+                "key": key,
+                "definition": prior.get("definition") if isinstance(prior.get("definition"), str) else "",
+                "category": prior.get("category") if isinstance(prior.get("category"), str) else "general",
+                "related": prior.get("related") if isinstance(prior.get("related"), list) else [],
+                "links": prior.get("links") if isinstance(prior.get("links"), list) else [],
+                "badges": prior.get("badges") if isinstance(prior.get("badges"), list) else [],
+            }
+    else:
+        # Legacy module missing: treat data/glossary.json as authoritative.
+        for key, prior in existing_by_key.items():
+            merged[key] = {
+                "term": prior.get("term") if isinstance(prior.get("term"), str) else key,
+                "key": key,
+                "definition": prior.get("definition") if isinstance(prior.get("definition"), str) else "",
+                "category": prior.get("category") if isinstance(prior.get("category"), str) else "general",
+                "related": prior.get("related") if isinstance(prior.get("related"), list) else [],
+                "links": prior.get("links") if isinstance(prior.get("links"), list) else [],
+                "badges": prior.get("badges") if isinstance(prior.get("badges"), list) else [],
+            }
 
     # 3) Ensure all TooltipIcon literal keys exist.
     for key in sorted(ui_keys):
@@ -223,7 +242,7 @@ def main() -> int:
     terms_out = [merged[k] for k in sorted(merged.keys())]
     out = {
         "version": "1.1.0",
-        "generated_from": "web/src/modules/_archived/tooltips.js",
+        "generated_from": "web/src/modules/_archived/tooltips.js" if legacy_map else "data/glossary.json",
         "terms": terms_out,
     }
 

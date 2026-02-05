@@ -109,7 +109,22 @@ warn_return_any = true
 warn_unused_ignores = true
 
 [[tool.mypy.overrides]]
-module = ["asyncpg", "pgvector", "pgvector.*"]
+module = [
+    "asyncpg",
+    "asyncpg.*",
+    "pgvector",
+    "pgvector.*",
+    "openpyxl",
+    "openpyxl.*",
+    "pyarrow",
+    "pyarrow.*",
+    "mlx",
+    "mlx.*",
+    "mlx_lm",
+    "mlx_lm.*",
+    "sentence_transformers",
+    "sentence_transformers.*",
+]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

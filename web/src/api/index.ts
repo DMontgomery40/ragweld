@@ -6,6 +6,7 @@ export { configApi } from './config';
 export { keywordsApi } from './keywords';
 export { chunkSummariesApi } from './chunkSummaries';
 export { modelsApi } from './models';
+export { indexingApi } from './indexing';
 export { promptsApi } from './prompts';
 export { tracesApi } from './traces';
 export { evalApi } from './eval';

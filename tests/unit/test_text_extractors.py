@@ -79,3 +79,29 @@ def test_extract_text_for_unknown_binary_returns_none(tmp_path: Path) -> None:
     p.write_bytes(b"\x00\x01\x02\x03")
     assert extract_text_for_path(p) is None
 
+
+def test_extract_text_for_parquet_is_bounded(tmp_path: Path) -> None:
+    try:
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+    except Exception:
+        # Optional dependency: if pyarrow isn't installed, parquet extraction is unsupported.
+        return
+
+    p = tmp_path / "data.parquet"
+    table = pa.table({"text": ["hello", "world"], "n": [1, 2]})
+    pq.write_table(table, str(p))
+
+    out = extract_text_for_path(
+        p,
+        parquet_max_rows=1,
+        parquet_max_chars=10_000,
+        parquet_max_cell_chars=1000,
+        parquet_text_columns_only=True,
+        parquet_include_column_names=True,
+    )
+    assert out is not None
+    assert "row 0" in out
+    assert "[text]" in out
+    assert "hello" in out
+    assert "world" not in out

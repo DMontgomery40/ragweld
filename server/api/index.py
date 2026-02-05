@@ -21,7 +21,7 @@ from server.indexing.graph_builder import GraphBuilder
 from server.indexing.loader import FileLoader
 from server.indexing.text_extractors import extract_text_for_path
 from server.models.graph import Entity, Relationship
-from server.models.index import IndexRequest, IndexStats, IndexStatus
+from server.models.index import Chunk, IndexRequest, IndexStats, IndexStatus
 from server.models.tribrid_config_model import (
     CorpusScope,
     DashboardEmbeddingConfigSummary,
@@ -30,6 +30,7 @@ from server.models.tribrid_config_model import (
     DashboardIndexStatusMetadata,
     DashboardIndexStatusResponse,
     DashboardIndexStorageBreakdown,
+    IndexEstimate,
     VocabPreviewResponse,
 )
 from server.observability.metrics import (
@@ -84,6 +85,34 @@ _SEM_STOPWORDS: set[str] = {
 }
 
 _MODELS_JSON_PATH = Path(__file__).parent.parent.parent / "data" / "models.json"
+
+# Index estimate heuristics (intentionally rough).
+_EST_BYTES_PER_TOKEN = 4.0  # common rule-of-thumb for English-ish text
+_EST_TOKENS_PER_SECOND_CLOUD = 50_000
+_EST_TOKENS_PER_SECOND_LOCAL = 8_000
+_EST_TOKENS_PER_SECOND_DETERMINISTIC = 120_000
+_EST_OVERHEAD_SECONDS = 12.0
+_EST_RANGE_LOW_MULT = 0.6
+_EST_RANGE_HIGH_MULT = 1.9
+
+
+def _estimate_tokens_from_bytes(total_bytes: int) -> int:
+    b = max(0, int(total_bytes or 0))
+    return int(float(b) / float(_EST_BYTES_PER_TOKEN)) if b > 0 else 0
+
+
+def _estimate_chunks_from_tokens(*, tokens: int, target_tokens: int, overlap_tokens: int) -> int:
+    t = max(0, int(tokens or 0))
+    target = max(1, int(target_tokens or 0))
+    overlap = max(0, int(overlap_tokens or 0))
+    stride = max(1, target - min(overlap, target - 1))
+    # Ceiling division
+    return int((t + stride - 1) // stride) if t > 0 else 0
+
+
+def _looks_cloud_provider(provider: str) -> bool:
+    p = (provider or "").strip().lower()
+    return p in {"openai", "voyage", "cohere", "google", "mistral", "jina", "deepseek"}
 
 
 @lru_cache(maxsize=1)
@@ -350,7 +379,7 @@ async def _run_index(
             ext = "." + ext
         ignore_patterns.append(f"*{ext}")
 
-    chunker = Chunker(cfg.chunking)
+    chunker = Chunker(cfg.chunking, cfg.tokenization)
     # Enforce a strict max file size before reading/chunking.
     # LAW sources:
     # - cfg.chunking.max_indexable_file_size (bytes)
@@ -360,7 +389,7 @@ async def _run_index(
         int(cfg.indexing.index_max_file_size_mb) * 1024 * 1024,
     )
     skip_dense = bool(int(cfg.indexing.skip_dense or 0) == 1)
-    embedder = None if skip_dense else Embedder(cfg.embedding)
+    embedder = None if skip_dense else Embedder(cfg.embedding, cfg.tokenization)
     postgres = PostgresClient(cfg.indexing.postgres_url)
     await postgres.connect()
     await postgres.upsert_corpus(repo_id, name=repo_id, root_path=repo_path)
@@ -445,7 +474,7 @@ async def _run_index(
     # This makes graph-only / sparse-only workflows deterministic.
     if skip_dense:
         deleted = await postgres.delete_embeddings(repo_id)
-        await postgres.update_corpus_embedding_meta(repo_id, model="", dimensions=0)
+        await postgres.update_corpus_embedding_meta(repo_id, provider="", model="", dimensions=0)
         if event_queue is not None:
             _emit_event(
                 event_queue,
@@ -492,41 +521,31 @@ async def _run_index(
                 )
             continue
 
-        try:
-            with INDEX_STAGE_LATENCY_SECONDS.labels(stage="file_read").time():
-                content = extract_text_for_path(abs_path)
-                if content is None:
-                    # Fallback to best-effort UTF-8 decode for any remaining formats.
-                    content = abs_path.read_text(encoding="utf-8", errors="ignore")
-        except Exception:
-            INDEX_STAGE_ERRORS_TOTAL.labels(stage="file_read").inc()
-            continue
-        # Postgres TEXT cannot store NUL bytes; treat as binary and skip.
-        if "\x00" in content:
-            continue
+        # Large text files: allow a streaming ingestion mode to avoid loading the entire file into memory.
+        ext_lower = abs_path.suffix.lower()
+        stream_mode = str(getattr(cfg.indexing, "large_file_mode", "read_all") or "read_all").strip().lower()
+        stream_block_chars = int(getattr(cfg.indexing, "large_file_stream_chunk_chars", 2_000_000) or 2_000_000)
+        use_stream = (
+            stream_mode == "stream"
+            and ext_lower in {".txt", ".md", ".rst", ".log"}
+            and size_bytes is not None
+            and size_bytes >= stream_block_chars
+        )
 
-        if graph_builder is not None and rel_path.lower().endswith(".py"):
-            graph_files.append((rel_path, content))
+        async def _upsert_chunks_for_file(chunks: list[Chunk]) -> list[Chunk]:
+            nonlocal total_chunks, total_tokens
+            if not chunks:
+                return []
+            total_chunks += len(chunks)
+            chunk_tokens = sum(int(c.token_count or 0) for c in chunks)
+            total_tokens += chunk_tokens
+            INDEX_CHUNKS_CREATED_TOTAL.inc(len(chunks))
+            INDEX_TOKENS_TOTAL.inc(chunk_tokens)
 
-        with INDEX_STAGE_LATENCY_SECONDS.labels(stage="chunk").time():
-            chunks = chunker.chunk_file(rel_path, content)
-        chunks_for_semantic = chunks
-        total_chunks += len(chunks)
-        chunk_tokens = sum(int(c.token_count or 0) for c in chunks)
-        total_tokens += chunk_tokens
-        INDEX_FILES_PROCESSED_TOTAL.inc()
-        INDEX_CHUNKS_CREATED_TOTAL.inc(len(chunks))
-        INDEX_TOKENS_TOTAL.inc(chunk_tokens)
-
-        if skip_dense:
-            try:
+            if skip_dense:
                 with INDEX_STAGE_LATENCY_SECONDS.labels(stage="postgres_upsert_fts").time():
                     await postgres.upsert_fts(repo_id, chunks, ts_config=cfg.indexing.postgres_ts_config)
-            except Exception:
-                INDEX_STAGE_ERRORS_TOTAL.labels(stage="postgres_upsert_fts").inc()
-                raise
-            if neo4j is not None and cfg.graph_indexing.build_lexical_graph:
-                try:
+                if neo4j is not None and cfg.graph_indexing.build_lexical_graph:
                     with INDEX_STAGE_LATENCY_SECONDS.labels(stage="neo4j_upsert_document_chunks").time():
                         await neo4j.upsert_document_and_chunks(
                             repo_id,
@@ -535,43 +554,148 @@ async def _run_index(
                             store_embeddings=False,
                             embedding_property=cfg.graph_indexing.chunk_embedding_property,
                         )
-                except Exception:
-                    INDEX_STAGE_ERRORS_TOTAL.labels(stage="neo4j_upsert_document_chunks").inc()
-                    pass
-        else:
+                return chunks
+
             assert embedder is not None
-            try:
+            if all(c.embedding is not None for c in chunks):
+                embedded = chunks
+            else:
                 with INDEX_STAGE_LATENCY_SECONDS.labels(stage="embed_chunks").time():
                     embedded = await embedder.embed_chunks(chunks)
-            except Exception:
-                INDEX_STAGE_ERRORS_TOTAL.labels(stage="embed_chunks").inc()
-                raise
-            chunks_for_semantic = embedded
-            try:
-                with INDEX_STAGE_LATENCY_SECONDS.labels(stage="postgres_upsert_embeddings").time():
-                    await postgres.upsert_embeddings(repo_id, embedded)
-            except Exception:
-                INDEX_STAGE_ERRORS_TOTAL.labels(stage="postgres_upsert_embeddings").inc()
-                raise
-            try:
-                with INDEX_STAGE_LATENCY_SECONDS.labels(stage="postgres_upsert_fts").time():
-                    await postgres.upsert_fts(repo_id, embedded, ts_config=cfg.indexing.postgres_ts_config)
-            except Exception:
-                INDEX_STAGE_ERRORS_TOTAL.labels(stage="postgres_upsert_fts").inc()
-                raise
+            with INDEX_STAGE_LATENCY_SECONDS.labels(stage="postgres_upsert_embeddings").time():
+                await postgres.upsert_embeddings(repo_id, embedded)
+            with INDEX_STAGE_LATENCY_SECONDS.labels(stage="postgres_upsert_fts").time():
+                await postgres.upsert_fts(repo_id, embedded, ts_config=cfg.indexing.postgres_ts_config)
             if neo4j is not None and cfg.graph_indexing.build_lexical_graph:
-                try:
-                    with INDEX_STAGE_LATENCY_SECONDS.labels(stage="neo4j_upsert_document_chunks").time():
-                        await neo4j.upsert_document_and_chunks(
-                            repo_id,
-                            rel_path,
-                            embedded,
-                            store_embeddings=bool(cfg.graph_indexing.store_chunk_embeddings),
-                            embedding_property=cfg.graph_indexing.chunk_embedding_property,
-                        )
-                except Exception:
-                    INDEX_STAGE_ERRORS_TOTAL.labels(stage="neo4j_upsert_document_chunks").inc()
-                    pass
+                with INDEX_STAGE_LATENCY_SECONDS.labels(stage="neo4j_upsert_document_chunks").time():
+                    await neo4j.upsert_document_and_chunks(
+                        repo_id,
+                        rel_path,
+                        embedded,
+                        store_embeddings=bool(cfg.graph_indexing.store_chunk_embeddings),
+                        embedding_property=cfg.graph_indexing.chunk_embedding_property,
+                    )
+            return embedded
+
+        indexing_batch = max(10, int(getattr(cfg.indexing, "indexing_batch_size", 100) or 100))
+
+        chunks_for_semantic: list[Chunk] = []
+
+        if use_stream:
+            base_char = 0
+            base_line = 1
+            ordinal = 0
+            try:
+                INDEX_FILES_PROCESSED_TOTAL.inc()
+                with INDEX_STAGE_LATENCY_SECONDS.labels(stage="file_read_stream").time():
+                    with abs_path.open("r", encoding="utf-8", errors="ignore") as f:
+                        while True:
+                            block = f.read(stream_block_chars)
+                            if not block:
+                                break
+                            if "\x00" in block:
+                                break
+                            with INDEX_STAGE_LATENCY_SECONDS.labels(stage="chunk").time():
+                                chunks = chunker.chunk_text(
+                                    rel_path,
+                                    block,
+                                    base_char_offset=base_char,
+                                    base_line=base_line,
+                                    starting_ordinal=ordinal,
+                                )
+                            ordinal += len(chunks)
+                            base_char += len(block)
+                            base_line += block.count("\n")
+                            if not chunks:
+                                continue
+                            for i0 in range(0, len(chunks), indexing_batch):
+                                embedded_batch = await _upsert_chunks_for_file(chunks[i0 : i0 + indexing_batch])
+                                if (
+                                    semantic_budget > 0
+                                    and semantic_processed < semantic_budget
+                                    and cfg.graph_indexing.semantic_kg_enabled
+                                    and neo4j is not None
+                                ):
+                                    remaining = max(0, semantic_budget - semantic_processed)
+                                    chunks_for_semantic.extend(embedded_batch[:remaining])
+            except Exception:
+                INDEX_STAGE_ERRORS_TOTAL.labels(stage="file_read_stream").inc()
+                continue
+        else:
+            try:
+                with INDEX_STAGE_LATENCY_SECONDS.labels(stage="file_read").time():
+                    content = extract_text_for_path(
+                        abs_path,
+                        parquet_max_rows=int(getattr(cfg.indexing, "parquet_extract_max_rows", 5000) or 5000),
+                        parquet_max_chars=int(getattr(cfg.indexing, "parquet_extract_max_chars", 2_000_000) or 2_000_000),
+                        parquet_max_cell_chars=int(
+                            getattr(cfg.indexing, "parquet_extract_max_cell_chars", 20_000) or 20_000
+                        ),
+                        parquet_text_columns_only=bool(
+                            int(getattr(cfg.indexing, "parquet_extract_text_columns_only", 1) or 0) == 1
+                        ),
+                        parquet_include_column_names=bool(
+                            int(getattr(cfg.indexing, "parquet_extract_include_column_names", 1) or 0) == 1
+                        ),
+                    )
+                    if content is None:
+                        content = abs_path.read_text(encoding="utf-8", errors="ignore")
+            except Exception:
+                INDEX_STAGE_ERRORS_TOTAL.labels(stage="file_read").inc()
+                continue
+            if "\x00" in content:
+                continue
+
+            # Local-only "late chunking": embed the full doc segment once, then pool per chunk span.
+            # This is experimental and only applies when explicitly enabled via config.
+            late_mode = (
+                not skip_dense
+                and str(getattr(cfg.embedding, "embedding_backend", "deterministic") or "deterministic").strip().lower()
+                == "provider"
+                and str(getattr(cfg.embedding, "contextual_chunk_embeddings", "off") or "off").strip().lower()
+                == "late_chunking_local_only"
+            )
+            if late_mode:
+                from server.indexing.late_chunking import late_chunk_document
+
+                strat = str(getattr(cfg.chunking, "chunking_strategy", "") or "").strip().lower()
+                if strat not in {"fixed_tokens"}:
+                    raise RuntimeError("late_chunking_local_only requires chunking.chunking_strategy='fixed_tokens'")
+                with INDEX_STAGE_LATENCY_SECONDS.labels(stage="late_chunking").time():
+                    chunks = late_chunk_document(rel_path, content, chunking=cfg.chunking, embedding=cfg.embedding)
+                INDEX_FILES_PROCESSED_TOTAL.inc()
+                if not chunks:
+                    continue
+                for i0 in range(0, len(chunks), indexing_batch):
+                    embedded_batch = await _upsert_chunks_for_file(chunks[i0 : i0 + indexing_batch])
+                    if (
+                        semantic_budget > 0
+                        and semantic_processed < semantic_budget
+                        and cfg.graph_indexing.semantic_kg_enabled
+                        and neo4j is not None
+                    ):
+                        remaining = max(0, semantic_budget - semantic_processed)
+                        chunks_for_semantic.extend(embedded_batch[:remaining])
+                continue
+
+            if graph_builder is not None and rel_path.lower().endswith(".py"):
+                graph_files.append((rel_path, content))
+
+            with INDEX_STAGE_LATENCY_SECONDS.labels(stage="chunk").time():
+                chunks = chunker.chunk_file(rel_path, content)
+            INDEX_FILES_PROCESSED_TOTAL.inc()
+            if not chunks:
+                continue
+            for i0 in range(0, len(chunks), indexing_batch):
+                embedded_batch = await _upsert_chunks_for_file(chunks[i0 : i0 + indexing_batch])
+                if (
+                    semantic_budget > 0
+                    and semantic_processed < semantic_budget
+                    and cfg.graph_indexing.semantic_kg_enabled
+                    and neo4j is not None
+                ):
+                    remaining = max(0, semantic_budget - semantic_processed)
+                    chunks_for_semantic.extend(embedded_batch[:remaining])
 
         # Optional semantic KG extraction (concept entities + related_to edges linked to chunk_ids).
         if (
@@ -759,13 +883,19 @@ async def _run_index(
 
     if not skip_dense:
         assert embedder is not None
-        await postgres.update_corpus_embedding_meta(repo_id, cfg.embedding.effective_model, embedder.dim)
+        await postgres.update_corpus_embedding_meta(
+            repo_id,
+            provider=str(cfg.embedding.embedding_type or ""),
+            model=str(cfg.embedding.effective_model or ""),
+            dimensions=int(embedder.dim),
+        )
 
     stats = IndexStats(
         repo_id=repo_id,
         total_files=total_files,
         total_chunks=total_chunks,
         total_tokens=total_tokens,
+        embedding_provider="" if skip_dense else str(cfg.embedding.embedding_type or ""),
         embedding_model="" if skip_dense else cfg.embedding.effective_model,
         embedding_dimensions=0 if skip_dense else (embedder.dim if embedder is not None else 0),
         last_indexed=datetime.now(UTC),
@@ -840,6 +970,149 @@ async def _background_index_job(request: IndexRequest, queue: asyncio.Queue[dict
         _emit_event(queue, {"type": "error", "message": str(e)}, guarantee=True)
     finally:
         _TASKS.pop(repo_id, None)
+
+
+@router.post("/index/estimate", response_model=IndexEstimate)
+async def estimate_index(request: IndexRequest) -> IndexEstimate:
+    """Estimate indexing cost/time for a corpus before running the indexer."""
+    repo_id = str(request.repo_id or "").strip()
+    repo_path = str(request.repo_path or "").strip()
+    if not repo_id:
+        raise HTTPException(status_code=422, detail="repo_id is required")
+
+    if not repo_path:
+        # Best-effort: resolve from corpus registry.
+        cfg_global = await load_scoped_config(repo_id=None)
+        pg = PostgresClient(cfg_global.indexing.postgres_url)
+        await pg.connect()
+        try:
+            corpus = await pg.get_corpus(repo_id)
+            if corpus is not None:
+                repo_path = str(corpus.get("path") or "").strip()
+        finally:
+            await pg.disconnect()
+
+    if not repo_path:
+        raise HTTPException(status_code=422, detail="repo_path is required (or create corpus first)")
+
+    cfg = await load_scoped_config(repo_id=repo_id)
+
+    # Build ignore patterns from config (same as indexer).
+    ignore_patterns: list[str] = []
+    exts = (cfg.indexing.index_excluded_exts or "").split(",")
+    for ext in exts:
+        ext = ext.strip()
+        if not ext:
+            continue
+        if not ext.startswith("."):
+            ext = "." + ext
+        ignore_patterns.append(f"*{ext}")
+
+    # Enforce a strict max file size before reading/chunking (same as indexer).
+    max_indexable_bytes = min(
+        int(cfg.chunking.max_indexable_file_size),
+        int(cfg.indexing.index_max_file_size_mb) * 1024 * 1024,
+    )
+
+    # Corpus-level exclude paths (stored in Postgres corpora.meta.exclude_paths).
+    extra_gitignore_patterns: list[str] = []
+    try:
+        pg2 = PostgresClient(cfg.indexing.postgres_url)
+        await pg2.connect()
+        try:
+            corpus = await pg2.get_corpus(repo_id)
+            meta = (corpus.get("meta") or {}) if corpus else {}
+            raw = meta.get("exclude_paths") if isinstance(meta, dict) else None
+            if isinstance(raw, list):
+                extra_gitignore_patterns = [str(x).strip() for x in raw if str(x).strip()]
+        finally:
+            await pg2.disconnect()
+    except Exception:
+        extra_gitignore_patterns = []
+
+    loader = FileLoader(ignore_patterns=ignore_patterns, extra_gitignore_patterns=extra_gitignore_patterns)
+
+    total_files = 0
+    total_bytes = 0
+    skipped_large_files = 0
+
+    root = Path(repo_path).expanduser().resolve()
+    if not root.exists():
+        raise HTTPException(status_code=422, detail=f"repo_path not found: {repo_path}")
+
+    for _rel, p in loader.iter_repo_files(str(root)):
+        try:
+            size_bytes = int(p.stat().st_size)
+        except Exception:
+            size_bytes = 0
+        if size_bytes > max_indexable_bytes:
+            skipped_large_files += 1
+            continue
+        total_files += 1
+        total_bytes += max(0, size_bytes)
+
+    est_tokens = _estimate_tokens_from_bytes(total_bytes)
+    est_chunks = _estimate_chunks_from_tokens(
+        tokens=est_tokens,
+        target_tokens=int(getattr(cfg.chunking, "target_tokens", 512) or 512),
+        overlap_tokens=int(getattr(cfg.chunking, "overlap_tokens", 64) or 64),
+    )
+
+    skip_dense = bool(int(getattr(cfg.indexing, "skip_dense", 0) or 0) == 1)
+    embedding_backend = str(getattr(cfg.embedding, "embedding_backend", "deterministic") or "deterministic").strip()
+    embedding_provider = str(getattr(cfg.embedding, "embedding_type", "") or "").strip()
+    embedding_model = str(getattr(cfg.embedding, "effective_model", "") or "").strip()
+
+    # Pricing (models.json): deterministic backend and skip_dense imply $0 external cost.
+    embedding_cost: float | None
+    if skip_dense or embedding_backend != "provider":
+        embedding_cost = 0.0
+    else:
+        embedding_cost = _estimate_embedding_cost_usd(
+            provider=embedding_provider,
+            model=embedding_model,
+            total_tokens=est_tokens,
+        )
+
+    # Time estimate (rough): token throughput + small overhead.
+    est_low: float | None = None
+    est_high: float | None = None
+    assumptions: list[str] = [
+        f"tokens≈bytes/{_EST_BYTES_PER_TOKEN:g}",
+        "time range is a heuristic (very rough)",
+    ]
+    if skipped_large_files > 0:
+        assumptions.append(f"skips files > {max_indexable_bytes} bytes")
+
+    if embedding_backend != "provider":
+        tps = _EST_TOKENS_PER_SECOND_DETERMINISTIC
+        assumptions.append("embedding_backend=deterministic → $0 external cost")
+    else:
+        tps = _EST_TOKENS_PER_SECOND_CLOUD if _looks_cloud_provider(embedding_provider) else _EST_TOKENS_PER_SECOND_LOCAL
+        assumptions.append(f"tokens/sec≈{tps:,}")
+
+    if est_tokens > 0 and tps > 0:
+        base = float(est_tokens) / float(tps)
+        est_low = max(0.0, (base * _EST_RANGE_LOW_MULT) + float(_EST_OVERHEAD_SECONDS))
+        est_high = max(est_low, (base * _EST_RANGE_HIGH_MULT) + float(_EST_OVERHEAD_SECONDS) * 2.0)
+
+    return IndexEstimate(
+        repo_id=repo_id,
+        repo_path=str(root),
+        total_files=int(total_files),
+        total_size_bytes=int(total_bytes),
+        skipped_large_files=int(skipped_large_files),
+        estimated_total_tokens=int(est_tokens),
+        estimated_total_chunks=int(est_chunks),
+        embedding_backend="provider" if embedding_backend == "provider" else "deterministic",
+        embedding_provider=embedding_provider,
+        embedding_model=embedding_model,
+        skip_dense=bool(skip_dense),
+        embedding_cost_usd=embedding_cost,
+        estimated_seconds_low=est_low,
+        estimated_seconds_high=est_high,
+        assumptions=assumptions,
+    )
 
 
 @router.post("/index", response_model=IndexStatus)

@@ -550,6 +550,20 @@ def read_manifest(active_dir: Path) -> dict[str, Any] | None:
     return None
 
 
+def read_adapter_config(active_dir: Path) -> dict[str, Any] | None:
+    """Read MLX LoRA adapter config emitted by training (best-effort)."""
+    path = active_dir / "adapter_config.json"
+    try:
+        obj = _json_load(path)
+    except FileNotFoundError:
+        return None
+    except Exception:
+        return None
+    if isinstance(obj, dict):
+        return obj
+    return None
+
+
 def is_mlx_qwen3_artifact_compatible(*, artifact_dir: Path, base_model: str) -> bool:
     """Return True if artifact_dir looks like a compatible MLX Qwen3 adapter artifact."""
     manifest = read_manifest(artifact_dir) or {}

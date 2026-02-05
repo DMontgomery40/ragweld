@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 import importlib.util
 from typing import Any
@@ -43,6 +44,18 @@ _SECRETS_CHECK_ALLOWLIST = {
     "DISCORD_WEBHOOK_URL",
 }
 
+_CONFIG_WRITE_LOCKS: dict[str | None, asyncio.Lock] = {}
+
+
+def _get_config_write_lock(repo_id: str | None) -> asyncio.Lock:
+    # Serialize config writes per corpus to avoid lost updates when multiple PATCH
+    # requests race across sections for the same corpus.
+    lock = _CONFIG_WRITE_LOCKS.get(repo_id)
+    if lock is None:
+        lock = asyncio.Lock()
+        _CONFIG_WRITE_LOCKS[repo_id] = lock
+    return lock
+
 
 @router.get("/config", response_model=TriBridConfig)
 async def get_config(scope: CorpusScope = Depends()) -> TriBridConfig:
@@ -62,7 +75,8 @@ async def update_config(
 ) -> TriBridConfig:
     repo_id = scope.resolved_repo_id
     try:
-        return await save_scoped_config(config, repo_id=repo_id)
+        async with _get_config_write_lock(repo_id):
+            return await save_scoped_config(config, repo_id=repo_id)
     except CorpusNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
     except Exception as e:
@@ -76,46 +90,48 @@ async def update_config_section(
     scope: CorpusScope = Depends(),
 ) -> TriBridConfig:
     repo_id = scope.resolved_repo_id
-    try:
-        config = await load_scoped_config(repo_id=repo_id)
-    except CorpusNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e)) from e
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
+    async with _get_config_write_lock(repo_id):
+        try:
+            config = await load_scoped_config(repo_id=repo_id)
+        except CorpusNotFoundError as e:
+            raise HTTPException(status_code=404, detail=str(e)) from e
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e)) from e
 
-    # Only allow patching known top-level sections
-    if section not in TriBridConfig.model_fields:
-        raise HTTPException(status_code=404, detail=f"Unknown config section: {section}")
+        # Only allow patching known top-level sections
+        if section not in TriBridConfig.model_fields:
+            raise HTTPException(status_code=404, detail=f"Unknown config section: {section}")
 
-    # Build a new config dict with patched section and re-validate (ensures Field constraints apply)
-    base = config.model_dump()
-    current_section = base.get(section)
-    if not isinstance(current_section, dict):
-        raise HTTPException(status_code=400, detail=f"Config section '{section}' is not patchable")
-    if not isinstance(updates, dict):
-        raise HTTPException(status_code=422, detail="PATCH body must be a JSON object")
+        # Build a new config dict with patched section and re-validate (ensures Field constraints apply)
+        base = config.model_dump()
+        current_section = base.get(section)
+        if not isinstance(current_section, dict):
+            raise HTTPException(status_code=400, detail=f"Config section '{section}' is not patchable")
+        if not isinstance(updates, dict):
+            raise HTTPException(status_code=422, detail="PATCH body must be a JSON object")
 
-    merged = {**current_section, **updates}
-    base[section] = merged
+        merged = {**current_section, **updates}
+        base[section] = merged
 
-    try:
-        new_config = TriBridConfig.model_validate(base)
-    except Exception as e:
-        raise HTTPException(status_code=422, detail=str(e)) from e
+        try:
+            new_config = TriBridConfig.model_validate(base)
+        except Exception as e:
+            raise HTTPException(status_code=422, detail=str(e)) from e
 
-    try:
-        return await save_scoped_config(new_config, repo_id=repo_id)
-    except CorpusNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e)) from e
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        try:
+            return await save_scoped_config(new_config, repo_id=repo_id)
+        except CorpusNotFoundError as e:
+            raise HTTPException(status_code=404, detail=str(e)) from e
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.post("/config/reset", response_model=TriBridConfig)
 async def reset_config(scope: CorpusScope = Depends()) -> TriBridConfig:
     repo_id = scope.resolved_repo_id
     try:
-        return await reset_scoped_config(repo_id=repo_id)
+        async with _get_config_write_lock(repo_id):
+            return await reset_scoped_config(repo_id=repo_id)
     except CorpusNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
     except Exception as e:

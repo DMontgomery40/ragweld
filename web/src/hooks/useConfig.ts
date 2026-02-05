@@ -25,10 +25,12 @@ export function useConfig() {
 
   // Reload config when active corpus changes
   useEffect(() => {
-    const handler = () => {
+    const handler = (ev: Event) => {
+      const detail = (ev as CustomEvent<any>)?.detail || {};
+      const previous = String(detail?.previous || '').trim();
       // When corpus changes, cancel patches (they're for the old corpus) and load new config.
       // Note: loadConfig() will flush patches, but we cancel here because patches are corpus-scoped.
-      cancelPendingPatches();
+      cancelPendingPatches(previous);
       loadConfig();
     };
     // New event name (preferred).
