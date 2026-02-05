@@ -143,3 +143,114 @@ def test_markdown_chunking_splits_on_headings() -> None:
     assert len(chunks) >= 2
     assert any("# Title" in c.content for c in chunks)
     assert any("## Sub" in c.content for c in chunks)
+
+
+def test_ast_chunking_python_preserves_top_level_blocks() -> None:
+    cfg = ChunkingConfig(
+        chunking_strategy="ast",
+        chunk_size=500,
+        chunk_overlap=100,
+        target_tokens=60,
+        overlap_tokens=0,
+        ast_overlap_lines=0,
+        preserve_imports=0,  # imports merge into the first block chunk
+        min_chunk_chars=10,
+    )
+    tok_cfg = TokenizationConfig(strategy="whitespace", normalize_unicode=False, lowercase=False)
+    ch = Chunker(cfg, tok_cfg)
+
+    body_tokens = " ".join([f"tok{i}" for i in range(18)])
+    content = (
+        "import os\nimport sys\n\n"
+        "def foo():\n"
+        f"    # {body_tokens}\n"
+        "    return 1\n\n"
+        "def bar():\n"
+        f"    # {body_tokens}\n"
+        "    return 2\n"
+    )
+    chunks = ch.chunk_file("x.py", content)
+    assert len(chunks) >= 2
+    assert "import os" in chunks[0].content
+    assert "def foo" in chunks[0].content
+    assert "def bar" not in chunks[0].content
+    assert any("def bar" in c.content for c in chunks[1:])
+
+
+def test_ast_chunking_python_can_isolate_imports_when_enabled() -> None:
+    cfg = ChunkingConfig(
+        chunking_strategy="ast",
+        chunk_size=500,
+        chunk_overlap=100,
+        target_tokens=20,
+        overlap_tokens=0,
+        ast_overlap_lines=0,
+        preserve_imports=1,
+        min_chunk_chars=10,
+    )
+    tok_cfg = TokenizationConfig(strategy="whitespace", normalize_unicode=False, lowercase=False)
+    ch = Chunker(cfg, tok_cfg)
+
+    content = (
+        "import os\nimport sys\n\n"
+        "def foo():\n"
+        "    # a a a a a a a a a a\n"
+        "    return 1\n\n"
+        "def bar():\n"
+        "    # b b b b b b b b b b\n"
+        "    return 2\n"
+    )
+    chunks = ch.chunk_file("x.py", content)
+    assert len(chunks) >= 3
+    assert "import os" in chunks[0].content
+    assert "def foo" not in chunks[0].content
+    assert "def foo" in chunks[1].content
+    assert "def bar" in chunks[2].content
+
+
+def test_hybrid_chunking_falls_back_on_syntax_error() -> None:
+    cfg = ChunkingConfig(
+        chunking_strategy="hybrid",
+        chunk_size=500,
+        chunk_overlap=100,
+        target_tokens=16,
+        overlap_tokens=4,
+        min_chunk_chars=10,
+    )
+    tok_cfg = TokenizationConfig(strategy="whitespace", normalize_unicode=False, lowercase=False)
+    ch = Chunker(cfg, tok_cfg)
+
+    bad_py = "def oops(:\n    return 1\n"
+    chunks = ch.chunk_file("bad.py", bad_py)
+    assert len(chunks) >= 1
+    assert any("def" in c.content for c in chunks)
+
+
+def test_ast_chunking_typescript_respects_top_level_brace_blocks() -> None:
+    cfg = ChunkingConfig(
+        chunking_strategy="ast",
+        chunk_size=500,
+        chunk_overlap=100,
+        target_tokens=40,
+        overlap_tokens=0,
+        min_chunk_chars=10,
+    )
+    tok_cfg = TokenizationConfig(strategy="whitespace", normalize_unicode=False, lowercase=False)
+    ch = Chunker(cfg, tok_cfg)
+
+    toks = " ".join([f"w{i}" for i in range(18)])
+    content = (
+        "export function foo() {\n"
+        f"  // {toks}\n"
+        "  return 1;\n"
+        "}\n\n"
+        "export function bar() {\n"
+        f"  // {toks}\n"
+        "  return 2;\n"
+        "}\n"
+    )
+    chunks = ch.chunk_file("x.ts", content)
+    assert len(chunks) >= 2
+    assert "function foo" in chunks[0].content
+    assert "function bar" not in chunks[0].content
+    assert any("function bar" in c.content for c in chunks[1:])
