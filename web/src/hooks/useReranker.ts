@@ -67,13 +67,13 @@ export function useReranker() {
   /**
    * Start status polling
    */
-  const startPolling = useCallback(() => {
+  const startPolling = useCallback((corpusId?: string) => {
     if (pollingIntervalRef.current != null) return;
 
     setIsPolling(true);
 
     pollingIntervalRef.current = window.setInterval(async () => {
-      const currentStatus = await service.getStatus();
+      const currentStatus = await service.getStatus(corpusId);
       setStatus(currentStatus);
 
       // Stop polling when task completes
@@ -86,7 +86,7 @@ export function useReranker() {
   /**
    * Mine triplets
    */
-  const mineTriplets = useCallback(async () => {
+  const mineTriplets = useCallback(async (corpusId?: string) => {
     // Optimistically set status immediately from the response so the UI doesn't depend on
     // process-local backend polling state (which can drift under multi-worker servers).
     setStatus((prev) => ({
@@ -101,7 +101,7 @@ export function useReranker() {
     }));
 
     try {
-      const result = await service.mineTriplets();
+      const result = await service.mineTriplets(corpusId);
 
       if (result?.ok) {
         setStatus((prev) => ({
@@ -165,8 +165,8 @@ export function useReranker() {
   /**
    * Train model
    */
-  const trainModel = useCallback(async (options: RerankerTrainLegacyRequest = {}) => {
-    const result = await service.trainModel(options);
+  const trainModel = useCallback(async (options: RerankerTrainLegacyRequest = {}, corpusId?: string) => {
+    const result = await service.trainModel(options, corpusId);
     if (result?.ok && result?.run_id) {
       setStatus((prev) => ({
         ...prev,
@@ -179,14 +179,14 @@ export function useReranker() {
         run_id: result.run_id,
       }));
     }
-    startPolling();
+    startPolling(corpusId);
     return result;
   }, [service, startPolling]);
 
   /**
    * Evaluate model
    */
-  const evaluateModel = useCallback(async () => {
+  const evaluateModel = useCallback(async (corpusId?: string) => {
     // Optimistically set status immediately from the response so the UI doesn't depend on
     // process-local backend polling state (which can drift under multi-worker servers).
     setStatus((prev) => ({
@@ -201,7 +201,7 @@ export function useReranker() {
     }));
 
     try {
-      const result = await service.evaluateModel();
+      const result = await service.evaluateModel(corpusId);
 
       if (result?.ok) {
         setStatus((prev) => ({
@@ -265,36 +265,36 @@ export function useReranker() {
   /**
    * Submit feedback
    */
-  const submitFeedback = useCallback(async (eventId: string, signal: string, note?: string) => {
-    await service.submitFeedback({ eventId, signal, note });
+  const submitFeedback = useCallback(async (eventId: string, signal: string, note?: string, corpusId?: string) => {
+    await service.submitFeedback({ eventId, signal, note }, corpusId);
   }, [service]);
 
   /**
    * Track file click
    */
-  const trackFileClick = useCallback(async (eventId: string, docId: string) => {
-    await service.trackFileClick(eventId, docId);
+  const trackFileClick = useCallback(async (eventId: string, docId: string, corpusId?: string) => {
+    await service.trackFileClick(eventId, docId, corpusId);
   }, [service]);
 
   /**
    * Get reranker info
    */
-  const getInfo = useCallback(async () => {
-    return await service.getInfo();
+  const getInfo = useCallback(async (corpusId?: string) => {
+    return await service.getInfo(corpusId);
   }, [service]);
 
   /**
    * Get logs
    */
-  const getLogs = useCallback(async () => {
-    return await service.getLogs();
+  const getLogs = useCallback(async (corpusId?: string) => {
+    return await service.getLogs(corpusId);
   }, [service]);
 
   /**
    * Download logs
    */
-  const downloadLogs = useCallback(async () => {
-    const blob = await service.downloadLogs();
+  const downloadLogs = useCallback(async (corpusId?: string) => {
+    const blob = await service.downloadLogs(corpusId);
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -306,22 +306,14 @@ export function useReranker() {
   }, [service]);
 
   /**
-   * Clear logs
-   */
-  const clearLogs = useCallback(async () => {
-    await service.clearLogs();
-    await refreshStats();
-  }, [service]);
-
-  /**
    * Refresh statistics
    */
-  const refreshStats = useCallback(async () => {
+  const refreshStats = useCallback(async (corpusId?: string) => {
     try {
       const [logsCount, tripletsCount, costs] = await Promise.all([
-        service.getLogsCount(),
-        service.getTripletsCount(),
-        service.getCosts()
+        service.getLogsCount(corpusId),
+        service.getTripletsCount(corpusId),
+        service.getCosts(corpusId)
       ]);
 
       setStats({
@@ -336,10 +328,18 @@ export function useReranker() {
   }, [service]);
 
   /**
+   * Clear logs
+   */
+  const clearLogs = useCallback(async (corpusId?: string) => {
+    await service.clearLogs(corpusId);
+    await refreshStats(corpusId);
+  }, [service, refreshStats]);
+
+  /**
    * Get no-hit queries
    */
-  const getNoHits = useCallback(async () => {
-    return await service.getNoHits();
+  const getNoHits = useCallback(async (corpusId?: string) => {
+    return await service.getNoHits(corpusId);
   }, [service]);
 
   /**

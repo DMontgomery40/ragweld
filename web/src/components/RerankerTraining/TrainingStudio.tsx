@@ -223,8 +223,8 @@ export function TrainingStudio() {
   }, [config, loadConfig]);
 
   useEffect(() => {
-    void refreshStats();
-  }, [refreshStats]);
+    void refreshStats(activeCorpus || undefined);
+  }, [refreshStats, activeCorpus]);
 
   useEffect(() => {
     if (!activeCorpus) {
@@ -383,8 +383,12 @@ export function TrainingStudio() {
 
   useEffect(() => {
     if (bottomTab !== 'logs') return;
+    if (!activeCorpus) {
+      setLogs([]);
+      return;
+    }
     setLogsLoading(true);
-    void getLogs()
+    void getLogs(activeCorpus)
       .then((res) => {
         setLogs(res?.logs || []);
       })
@@ -394,7 +398,7 @@ export function TrainingStudio() {
       .finally(() => {
         setLogsLoading(false);
       });
-  }, [bottomTab, getLogs, notifyError]);
+  }, [bottomTab, activeCorpus, getLogs, notifyError]);
 
   const recommended = useMemo(() => {
     if (!profile) return null;
@@ -475,33 +479,45 @@ export function TrainingStudio() {
   };
 
   const handleMine = async () => {
+    if (!activeCorpus) {
+      notifyError('No active corpus selected');
+      return;
+    }
     try {
       info('Mining triplets…');
-      const res = await mineTriplets();
+      const res = await mineTriplets(activeCorpus);
       if (res?.ok) success('Triplet mining complete');
       else notifyError(res?.error || 'Triplet mining failed');
-      await refreshStats();
+      await refreshStats(activeCorpus);
     } catch (e) {
       notifyError(e instanceof Error ? e.message : 'Triplet mining failed');
     }
   };
 
   const handleTrain = async () => {
+    if (!activeCorpus) {
+      notifyError('No active corpus selected');
+      return;
+    }
     try {
       info('Training reranker…');
-      const res = await trainModel({ epochs, batch_size: trainBatch, max_length: maxLen });
+      const res = await trainModel({ epochs, batch_size: trainBatch, max_length: maxLen }, activeCorpus);
       if (res?.ok) success(res?.run_id ? `Training started (${res.run_id})` : 'Training started');
       else notifyError(res?.error || 'Training failed');
-      await refreshStats();
+      await refreshStats(activeCorpus);
     } catch (e) {
       notifyError(e instanceof Error ? e.message : 'Training failed');
     }
   };
 
   const handleEvaluate = async () => {
+    if (!activeCorpus) {
+      notifyError('No active corpus selected');
+      return;
+    }
     try {
       info('Evaluating reranker…');
-      const res = await evaluateModel();
+      const res = await evaluateModel(activeCorpus);
       if (res?.ok) success('Evaluation complete');
       else notifyError(res?.error || 'Evaluation failed');
     } catch (e) {
@@ -573,35 +589,57 @@ export function TrainingStudio() {
         </div>
         <div className="studio-run-setup-item">
           <span className="studio-label">
-            Recommended Metric <TooltipIcon name="RERANKER_TRAIN_RECOMMENDED_METRIC" />
+            Recommended Metric
           </span>
           <span className="studio-value">
-            {profileLoading
-              ? 'Loading…'
-              : profileError
-              ? profileError
-              : recommended || '—'}
+            {profileLoading ? (
+              'Loading…'
+            ) : profileError ? (
+              profileError
+            ) : (
+              <>
+                <span className="studio-mono" style={{ fontWeight: 700 }}>{recommended || '—'}</span>
+                {profile?.rationale ? (
+                  <span style={{ marginLeft: 8, fontSize: '0.75rem', color: 'var(--studio-text-muted)' }}>
+                    <span title={profile.rationale} style={{ cursor: 'help', textDecoration: 'underline' }}>
+                      Why
+                    </span>
+                    <TooltipIcon name="RERANKER_TRAIN_RECOMMENDED_METRIC" />
+                  </span>
+                ) : null}
+              </>
+            )}
           </span>
         </div>
-        <div className="studio-run-setup-item">
-          <span className="studio-label">Primary override</span>
-          <div className="studio-inline-row">
-            <select value={primaryMetricOverride} onChange={(e) => setPrimaryMetricOverride(e.target.value)}>
-              <option value="">Auto metric</option>
-              <option value="mrr">mrr</option>
-              <option value="ndcg">ndcg</option>
-              <option value="map">map</option>
-            </select>
-            <select value={primaryKOverride} onChange={(e) => setPrimaryKOverride(e.target.value)}>
-              <option value="">Auto k</option>
-              {kOptions.map((k) => (
-                <option key={k} value={String(k)}>
-                  {k}
-                </option>
-              ))}
-            </select>
+        <details className="studio-details studio-run-setup-item">
+          <summary>Advanced</summary>
+          <div className="studio-form-grid two" style={{ marginTop: 8 }}>
+            <div className="input-group">
+              <label>
+                Primary metric override <TooltipIcon name="RERANKER_TRAIN_PRIMARY_METRIC_OVERRIDE" />
+              </label>
+              <select value={primaryMetricOverride} onChange={(e) => setPrimaryMetricOverride(e.target.value)}>
+                <option value="">Auto metric</option>
+                <option value="mrr">mrr</option>
+                <option value="ndcg">ndcg</option>
+                <option value="map">map</option>
+              </select>
+            </div>
+            <div className="input-group">
+              <label>
+                Primary k override <TooltipIcon name="RERANKER_TRAIN_PRIMARY_K_OVERRIDE" />
+              </label>
+              <select value={primaryKOverride} onChange={(e) => setPrimaryKOverride(e.target.value)}>
+                <option value="">Auto k</option>
+                {kOptions.map((k) => (
+                  <option key={k} value={String(k)}>
+                    {k}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
-        </div>
+        </details>
       </div>
 
       <div className="training-studio-grid">
@@ -914,7 +952,11 @@ export function TrainingStudio() {
                   <button className="small-button" onClick={handleEvaluate} disabled={disabledLegacy} data-testid="reranker-evaluate">
                     {disabledLegacy && status.task === 'evaluating' ? 'Evaluating…' : 'Evaluate'}
                   </button>
-                  <button className="small-button" onClick={() => void refreshStats()} data-testid="reranker-refresh-counts">
+                  <button
+                    className="small-button"
+                    onClick={() => void refreshStats(activeCorpus || undefined)}
+                    data-testid="reranker-refresh-counts"
+                  >
                     Refresh counts
                   </button>
                 </div>
@@ -997,15 +1039,15 @@ export function TrainingStudio() {
             />
           ) : (
             <div className="studio-inline-row">
-              <button className="small-button" onClick={() => void downloadLogs()}>
+              <button className="small-button" onClick={() => void downloadLogs(activeCorpus || undefined)}>
                 Download
               </button>
               <button
                 className="small-button"
                 onClick={() => {
-                  void clearLogs().then(() => {
+                  void clearLogs(activeCorpus || undefined).then(() => {
                     setLogs([]);
-                    void refreshStats();
+                    void refreshStats(activeCorpus || undefined);
                   });
                 }}
               >

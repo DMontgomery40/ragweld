@@ -769,15 +769,15 @@ async def _run_train_job(*, run_id: str, corpus_id: str) -> None:
                         run_id=run_id,
                         step=int(payload.get("step") or 0) or None,
                         epoch=float(payload.get("epoch") or 0.0) or None,
-                        proj_x=float(payload.get("proj_x")) if payload.get("proj_x") is not None else None,
-                        proj_y=float(payload.get("proj_y")) if payload.get("proj_y") is not None else None,
-                        loss=float(payload.get("loss")) if payload.get("loss") is not None else None,
-                        lr=float(payload.get("lr")) if payload.get("lr") is not None else None,
-                        grad_norm=float(payload.get("grad_norm")) if payload.get("grad_norm") is not None else None,
-                        step_time_ms=float(payload.get("step_time_ms"))
+                        proj_x=float(payload["proj_x"]) if payload.get("proj_x") is not None else None,
+                        proj_y=float(payload["proj_y"]) if payload.get("proj_y") is not None else None,
+                        loss=float(payload["loss"]) if payload.get("loss") is not None else None,
+                        lr=float(payload["lr"]) if payload.get("lr") is not None else None,
+                        grad_norm=float(payload["grad_norm"]) if payload.get("grad_norm") is not None else None,
+                        step_time_ms=float(payload["step_time_ms"])
                         if payload.get("step_time_ms") is not None
                         else None,
-                        sample_count=int(payload.get("sample_count")) if payload.get("sample_count") is not None else None,
+                        sample_count=int(payload["sample_count"]) if payload.get("sample_count") is not None else None,
                     ),
                 )
                 return

@@ -146,7 +146,7 @@ def _batch_logits_and_lengths(
     attention_mask = mx.array(masks)
 
     try:
-        logits = model(input_ids, attention_mask=attention_mask)  # type: ignore[misc]
+        logits = model(input_ids, attention_mask=attention_mask)
     except Exception:
         logits = model(input_ids)  # (B, L, V)
     bsz = int(len(pairs))

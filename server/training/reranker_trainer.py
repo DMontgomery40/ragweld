@@ -369,8 +369,18 @@ def train_pairwise_reranker(
         proj_dirs_2.append(d2.to(device=device))
 
     with torch.no_grad():
-        norm1 = torch.sqrt(sum(torch.sum(d * d) for d in proj_dirs_1)) if proj_dirs_1 else torch.tensor(1.0, device=device)
-        norm2 = torch.sqrt(sum(torch.sum(d * d) for d in proj_dirs_2)) if proj_dirs_2 else torch.tensor(1.0, device=device)
+        if proj_dirs_1:
+            sum1 = sum(torch.sum(d * d) for d in proj_dirs_1)
+            assert isinstance(sum1, torch.Tensor)
+            norm1 = torch.sqrt(sum1)
+        else:
+            norm1 = torch.tensor(1.0, device=device)
+        if proj_dirs_2:
+            sum2 = sum(torch.sum(d * d) for d in proj_dirs_2)
+            assert isinstance(sum2, torch.Tensor)
+            norm2 = torch.sqrt(sum2)
+        else:
+            norm2 = torch.tensor(1.0, device=device)
         norm1 = torch.clamp(norm1, min=1e-12)
         norm2 = torch.clamp(norm2, min=1e-12)
         proj_dirs_1 = [d / norm1 for d in proj_dirs_1]

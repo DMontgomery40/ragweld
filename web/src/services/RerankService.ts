@@ -46,11 +46,11 @@ export class RerankService {
   /**
    * Track file link click (for feedback system)
    */
-  async trackFileClick(eventId: string, docId: string): Promise<void> {
+  async trackFileClick(eventId: string, docId: string, corpusId?: string): Promise<void> {
     if (!eventId || !docId) return;
 
     try {
-      await fetch(withCorpusScope(`${this.apiBase}/reranker/click`), {
+      await fetch(withCorpusScope(`${this.apiBase}/reranker/click`, corpusId), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ event_id: eventId, doc_id: docId })
@@ -64,7 +64,7 @@ export class RerankService {
   /**
    * Submit user feedback (thumbs, stars, or note)
    */
-  async submitFeedback(feedback: { eventId: string; signal: string; note?: string }): Promise<void> {
+  async submitFeedback(feedback: { eventId: string; signal: string; note?: string }, corpusId?: string): Promise<void> {
     const payload: FeedbackRequest = {
       event_id: feedback.eventId,
       signal: feedback.signal,
@@ -75,7 +75,7 @@ export class RerankService {
       timestamp: null,
       context: null,
     };
-    const response = await fetch(withCorpusScope(`${this.apiBase}/feedback`), {
+    const response = await fetch(withCorpusScope(`${this.apiBase}/feedback`, corpusId), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
@@ -89,8 +89,8 @@ export class RerankService {
   /**
    * Mine triplets from user feedback
    */
-  async mineTriplets(): Promise<RerankerMineResponse> {
-    const response = await fetch(withCorpusScope(`${this.apiBase}/reranker/mine`), {
+  async mineTriplets(corpusId?: string): Promise<RerankerMineResponse> {
+    const response = await fetch(withCorpusScope(`${this.apiBase}/reranker/mine`, corpusId), {
       method: 'POST'
     });
 
@@ -104,8 +104,8 @@ export class RerankService {
   /**
    * Train reranker model
    */
-  async trainModel(options: RerankerTrainLegacyRequest = {}): Promise<RerankerTrainLegacyResponse> {
-    const response = await fetch(withCorpusScope(`${this.apiBase}/reranker/train`), {
+  async trainModel(options: RerankerTrainLegacyRequest = {}, corpusId?: string): Promise<RerankerTrainLegacyResponse> {
+    const response = await fetch(withCorpusScope(`${this.apiBase}/reranker/train`, corpusId), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(options)
@@ -121,8 +121,8 @@ export class RerankService {
   /**
    * Evaluate trained model
    */
-  async evaluateModel(): Promise<RerankerEvaluateResponse> {
-    const response = await fetch(withCorpusScope(`${this.apiBase}/reranker/evaluate`), {
+  async evaluateModel(corpusId?: string): Promise<RerankerEvaluateResponse> {
+    const response = await fetch(withCorpusScope(`${this.apiBase}/reranker/evaluate`, corpusId), {
       method: 'POST'
     });
 
@@ -136,9 +136,9 @@ export class RerankService {
   /**
    * Get current reranker status (for polling)
    */
-  async getStatus(): Promise<RerankerLegacyStatus> {
+  async getStatus(corpusId?: string): Promise<RerankerLegacyStatus> {
     try {
-      const response = await fetch(withCorpusScope(`${this.apiBase}/reranker/status`));
+      const response = await fetch(withCorpusScope(`${this.apiBase}/reranker/status`, corpusId));
       const data = await response.json();
       return data;
     } catch (error) {
@@ -157,8 +157,8 @@ export class RerankService {
   /**
    * Get reranker configuration info
    */
-  async getInfo(): Promise<RerankerInfoResponse> {
-    const response = await fetch(withCorpusScope(`${this.apiBase}/reranker/info`));
+  async getInfo(corpusId?: string): Promise<RerankerInfoResponse> {
+    const response = await fetch(withCorpusScope(`${this.apiBase}/reranker/info`, corpusId));
     if (!response.ok) {
       throw new Error('Failed to get reranker info');
     }
@@ -168,48 +168,48 @@ export class RerankService {
   /**
    * Get query logs count
    */
-  async getLogsCount(): Promise<CountResponse> {
-    const response = await fetch(withCorpusScope(`${this.apiBase}/reranker/logs/count`));
+  async getLogsCount(corpusId?: string): Promise<CountResponse> {
+    const response = await fetch(withCorpusScope(`${this.apiBase}/reranker/logs/count`, corpusId));
     return await response.json();
   }
 
   /**
    * Get triplets count
    */
-  async getTripletsCount(): Promise<CountResponse> {
-    const response = await fetch(withCorpusScope(`${this.apiBase}/reranker/triplets/count`));
+  async getTripletsCount(corpusId?: string): Promise<CountResponse> {
+    const response = await fetch(withCorpusScope(`${this.apiBase}/reranker/triplets/count`, corpusId));
     return await response.json();
   }
 
   /**
    * Get cost statistics
    */
-  async getCosts(): Promise<RerankerCostsResponse> {
-    const response = await fetch(withCorpusScope(`${this.apiBase}/reranker/costs`));
+  async getCosts(corpusId?: string): Promise<RerankerCostsResponse> {
+    const response = await fetch(withCorpusScope(`${this.apiBase}/reranker/costs`, corpusId));
     return await response.json();
   }
 
   /**
    * Get no-hit queries (queries that returned no results)
    */
-  async getNoHits(): Promise<RerankerNoHitsResponse> {
-    const response = await fetch(withCorpusScope(`${this.apiBase}/reranker/nohits`));
+  async getNoHits(corpusId?: string): Promise<RerankerNoHitsResponse> {
+    const response = await fetch(withCorpusScope(`${this.apiBase}/reranker/nohits`, corpusId));
     return await response.json();
   }
 
   /**
    * Get query logs
    */
-  async getLogs(): Promise<RerankerLogsResponse> {
-    const response = await fetch(withCorpusScope(`${this.apiBase}/reranker/logs`));
+  async getLogs(corpusId?: string): Promise<RerankerLogsResponse> {
+    const response = await fetch(withCorpusScope(`${this.apiBase}/reranker/logs`, corpusId));
     return await response.json();
   }
 
   /**
    * Download query logs
    */
-  async downloadLogs(): Promise<Blob> {
-    const response = await fetch(withCorpusScope(`${this.apiBase}/reranker/logs/download`));
+  async downloadLogs(corpusId?: string): Promise<Blob> {
+    const response = await fetch(withCorpusScope(`${this.apiBase}/reranker/logs/download`, corpusId));
     if (!response.ok) {
       throw new Error('Failed to download logs');
     }
@@ -219,8 +219,8 @@ export class RerankService {
   /**
    * Clear all query logs
    */
-  async clearLogs(): Promise<OkResponse> {
-    const response = await fetch(withCorpusScope(`${this.apiBase}/reranker/logs/clear`), {
+  async clearLogs(corpusId?: string): Promise<OkResponse> {
+    const response = await fetch(withCorpusScope(`${this.apiBase}/reranker/logs/clear`, corpusId), {
       method: 'POST'
     });
     if (!response.ok) {

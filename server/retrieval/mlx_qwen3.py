@@ -252,7 +252,7 @@ def _score_pairs_sync(
     # Keep compatibility with mlx_lm model call signatures that may not expose
     # attention_mask. We still construct the mask to avoid left/right padding bugs.
     try:
-        logits = model(input_ids, attention_mask=attention_mask)  # type: ignore[misc]
+        logits = model(input_ids, attention_mask=attention_mask)
     except Exception:
         logits = model(input_ids)  # (B, L, V)
 

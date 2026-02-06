@@ -669,7 +669,7 @@ code, pre, .mono { font-family: var(--font-mono); }
 
 .neural-canvas-wrap {
   position: relative;
-  min-height: 0;
+  min-height: 200px;
   overflow: hidden;
   border-bottom: 1px solid var(--panel-border);
 }
@@ -695,6 +695,8 @@ code, pre, .mono { font-family: var(--font-mono); }
   font-size: 0.78rem;
   letter-spacing: 0.03em;
   text-transform: uppercase;
+  z-index: 10;
+  pointer-events: none;
 }
 
 .neural-controls {
