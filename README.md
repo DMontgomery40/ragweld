@@ -1,8 +1,10 @@
+> **This project has been renamed to ragweld.** The internal codebase still references "tribrid" in many places — config keys, interfaces, variable names — and that will stay as-is. The product name, repo, and website are now **[ragweld](https://ragweld.com)**.
+
 <p align="center">
-  <img src="web/public/favicon.svg" alt="TriBridRAG" width="200" />
+  <img src="web/public/ragweld-wordmark.png" alt="ragweld" width="320" />
 </p>
 
-<h1 align="center">TriBridRAG</h1>
+<h1 align="center">ragweld</h1>
 
 <p align="center">
   <strong>Production-grade Retrieval-Augmented Generation combining Vector, Sparse, and Graph search</strong>
