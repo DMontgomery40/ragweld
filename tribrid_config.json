@@ -373,10 +373,7 @@
       "q_proj",
       "k_proj",
       "v_proj",
-      "o_proj",
-      "gate_proj",
-      "up_proj",
-      "down_proj"
+      "o_proj"
     ],
     "learning_reranker_negative_ratio": 5,
     "learning_reranker_grad_accum_steps": 8,
