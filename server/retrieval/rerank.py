@@ -122,6 +122,26 @@ def _mlx_platform_supported() -> bool:
 
 
 def resolve_learning_backend(training_config: TrainingConfig | None, *, artifact_path: str | None = None) -> str:
+    """Resolve the learning reranker backend to use.
+
+    Returns one of ``"mlx_qwen3"`` or ``"transformers"``.
+    Raises :class:`RuntimeError` when a forced backend is unavailable on this platform.
+    """
+    backend, _reason = resolve_learning_backend_with_reason(training_config, artifact_path=artifact_path)
+    return backend
+
+
+def resolve_learning_backend_with_reason(
+    training_config: TrainingConfig | None,
+    *,
+    artifact_path: str | None = None,
+) -> tuple[str, str]:
+    """Resolve the learning reranker backend and return a human-readable reason.
+
+    Returns ``(backend, reason)`` where *backend* is ``"mlx_qwen3"`` or
+    ``"transformers"`` and *reason* is a short string explaining *why* that
+    backend was selected (useful for API logs and diagnostics).
+    """
     del artifact_path  # kept for API compatibility
     requested = "auto"
     try:
@@ -130,19 +150,30 @@ def resolve_learning_backend(training_config: TrainingConfig | None, *, artifact
     except Exception:
         requested = "auto"
 
+    sys_name = platform.system()
+    arch = platform.machine().lower()
+
     if requested in {"transformers", "hf"}:
-        return "transformers"
+        return "transformers", f"forced by config (requested={requested})"
     if requested in {"mlx_qwen3", "mlx"}:
         if not _mlx_platform_supported():
-            raise RuntimeError("learning_reranker_backend=mlx_qwen3 requires macOS arm64")
+            raise RuntimeError(
+                f"learning_reranker_backend=mlx_qwen3 requires macOS arm64 "
+                f"(detected {sys_name}/{arch})"
+            )
         if not mlx_is_available():
-            raise RuntimeError("learning_reranker_backend=mlx_qwen3 requires MLX deps (install with `uv sync --extra mlx`)")
-        return "mlx_qwen3"
+            raise RuntimeError(
+                "learning_reranker_backend=mlx_qwen3 requires MLX deps "
+                "(install with `uv sync --extra mlx`)"
+            )
+        return "mlx_qwen3", f"forced by config (requested={requested})"
 
     # auto: strict platform gating (only Apple Silicon + MLX deps).
     if _mlx_platform_supported() and mlx_is_available():
-        return "mlx_qwen3"
-    return "transformers"
+        return "mlx_qwen3", f"auto: macOS arm64 with MLX deps available ({sys_name}/{arch})"
+    if _mlx_platform_supported():
+        return "transformers", f"auto: macOS arm64 but MLX deps missing ({sys_name}/{arch})"
+    return "transformers", f"auto: non-Apple-Silicon platform ({sys_name}/{arch})"
 
 
 async def _get_cross_encoder(model_id: str, *, max_length: int, trust_remote_code: bool) -> Any:

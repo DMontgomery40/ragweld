@@ -125,6 +125,21 @@ async def test_train_pairwise_reranker_writes_artifact_and_evaluates(tmp_path: P
     assert any(t == "progress" for t, _ in events)
     assert any(t == "metrics" for t, _ in events)
 
+    # Telemetry events must contain proj_x/proj_y for Neural Visualizer
+    telemetry_events = [(t, p) for t, p in events if t == "telemetry"]
+    assert len(telemetry_events) >= 1, "Expected at least one telemetry event"
+    for _t, payload in telemetry_events:
+        assert "proj_x" in payload, "telemetry event missing proj_x"
+        assert "proj_y" in payload, "telemetry event missing proj_y"
+        assert "loss" in payload, "telemetry event missing loss"
+        assert "lr" in payload, "telemetry event missing lr"
+        assert "grad_norm" in payload, "telemetry event missing grad_norm"
+        assert "step_time_ms" in payload, "telemetry event missing step_time_ms"
+        assert "sample_count" in payload, "telemetry event missing sample_count"
+        assert isinstance(payload["proj_x"], float)
+        assert isinstance(payload["proj_y"], float)
+        assert isinstance(payload["step"], int)
+
     metrics = await asyncio.to_thread(evaluate_pairwise_reranker, model_dir=out_dir, triplets=mats, max_length=64)
     assert 0.0 <= metrics["mrr"] <= 1.0
     assert 0.0 <= metrics["ndcg"] <= 1.0
