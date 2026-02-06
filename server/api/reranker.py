@@ -561,7 +561,7 @@ async def _run_train_job(*, run_id: str, corpus_id: str) -> None:
             if not base_model:
                 raise RuntimeError(
                     "Missing base model for learning reranker training. Set reranking.reranker_local_model "
-                    "(e.g., 'cross-encoder/ms-marco-MiniLM-L-6-v2' or a local path)."
+                    "(e.g., 'BAAI/bge-reranker-v2-m3' or a local path)."
                 )
 
         # Resolve corpus root path (for reading triplet doc_ids as files).

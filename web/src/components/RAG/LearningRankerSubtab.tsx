@@ -30,7 +30,7 @@ export function LearningRankerSubtab() {
   // Training + logging config (LAW)
   const [modelPath, setModelPath] = useConfigField<string>(
     'training.tribrid_reranker_model_path',
-    'models/cross-encoder-tribrid'
+    'models/learning-reranker-epstein-files-1'
   );
   const [logPath, setLogPath] = useConfigField<string>('tracing.tribrid_log_path', 'data/logs/queries.jsonl');
   const [tripletsPath, setTripletsPath] = useConfigField<string>(

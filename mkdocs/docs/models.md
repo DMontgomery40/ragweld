@@ -30,7 +30,7 @@
     `data/models.json` is the authoritative source for model availability, pricing, and context sizes. Update it to change selectable models.
 
 !!! note "Components"
-    The `components` field indicates usage: `GEN` for generation, `EMB` for embeddings, `RERANK` for cross-encoders.
+    The `components` field indicates usage: `GEN` for generation, `EMB` for embeddings, `RERANK` for rerankers.
 
 !!! warning "Pricing Staleness"
     Prices change over time. Keep `last_updated` current and reference sources in the file header.

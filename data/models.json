@@ -948,12 +948,12 @@
     },
     {
       "provider": "local",
-      "family": "cross-encoder-tribrid",
-      "model": "cross-encoder-tribrid",
+      "family": "learning-reranker-epstein-files-1",
+      "model": "learning-reranker-epstein-files-1",
       "components": ["RERANK"],
       "unit": "request",
       "per_request": 0.0,
-      "notes": "TriBrid learning reranker (cross-encoder, local)"
+      "notes": "TriBrid Qwen3 LoRA learning reranker artifact (local)"
     },
     {
       "provider": "local",

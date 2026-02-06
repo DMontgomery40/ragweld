@@ -44,13 +44,13 @@ export function RerankerConfigSubtab() {
 
   const [localModel, setLocalModel] = useConfigField<string>(
     'reranking.reranker_local_model',
-    'cross-encoder/ms-marco-MiniLM-L-12-v2'
+    'BAAI/bge-reranker-v2-m3'
   );
 
   // Learning reranker is configured under training + reranking
   const [learningModelPath, setLearningModelPath] = useConfigField<string>(
     'training.tribrid_reranker_model_path',
-    'models/cross-encoder-tribrid'
+    'models/learning-reranker-epstein-files-1'
   );
   const [learningBackend, setLearningBackend] = useConfigField<LearningBackend>(
     'training.learning_reranker_backend',
@@ -229,7 +229,7 @@ export function RerankerConfigSubtab() {
             </div>
             <div style={{ fontSize: 12, color: 'var(--fg-muted)' }}>
               {m === 'none' && 'No reranking'}
-              {m === 'local' && 'Run a local cross-encoder'}
+              {m === 'local' && 'Run a local reranker'}
               {m === 'cloud' && 'Use a hosted reranker API'}
               {m === 'learning' && 'Use the trainable learning reranker'}
             </div>
@@ -381,7 +381,7 @@ export function RerankerConfigSubtab() {
                 type="text"
                 value={learningModelPath}
                 onChange={(e) => setLearningModelPath(e.target.value)}
-                placeholder="models/cross-encoder-tribrid"
+                placeholder="models/learning-reranker-epstein-files-1"
               />
             </div>
             <div className="input-group" />

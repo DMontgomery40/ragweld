@@ -18,7 +18,7 @@
 
     ---
 
-    Cross-encoder can refine the fused list by understanding local context.
+    Local/cloud rerankers and the Qwen3 LoRA learning reranker can refine the fused list.
 
 -   :material-cog:{ .lg .middle } **Pydantic-Orchestrated**
 
@@ -86,7 +86,7 @@ flowchart LR
 | Sparse | `server/retrieval/sparse.py` | FTS/BM25 over chunks | `sparse_search.enabled`, `sparse_search.top_k`, `indexing.bm25_*` |
 | Graph | `server/retrieval/graph.py` | Entity traversal, context expansion | `graph_search.enabled`, `graph_search.max_hops`, `graph_storage.*` |
 | Fusion | `server/retrieval/fusion.py` | Merge lists and scores | `fusion.method`, `fusion.rrf_k`, `fusion.*_weight` |
-| Reranker | `server/retrieval/rerank.py` | Cross-encoder scoring | `reranking.reranker_mode`, `reranking.*` |
+| Reranker | `server/retrieval/rerank.py` | Local/cloud/learning reranker scoring | `reranking.reranker_mode`, `reranking.*` |
 
 ## Hot Path (Annotated)
 
@@ -157,4 +157,3 @@ flowchart TB
 ??? note "Implementation Notes"
     - All configurable fields (weights, top_k, thresholds) live in `TriBridConfig`. Frontend sliders and toggles must map 1:1 to these fields via `generated.ts`.
     - DB clients: `server/db/postgres.py` (pgvector + FTS) and `server/db/neo4j.py` (graph). Keep pools separate to avoid head-of-line blocking.
-
