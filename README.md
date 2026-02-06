@@ -95,7 +95,7 @@ Each search method compensates for the others' weaknesses. The result: **dramati
 - **Sparse Search**: PostgreSQL Full-Text Search with BM25-style ranking
 - **Graph Search**: Neo4j knowledge graph with entity extraction and relationship traversal
 - **Fusion**: Reciprocal Rank Fusion (RRF) or configurable weighted scoring
-- **Reranking**: Local cross-encoder, cloud APIs (Cohere/Voyage/Jina), or custom trained models
+- **Reranking**: Local HuggingFace rerankers, cloud APIs (Cohere/Voyage/Jina), or Qwen3 LoRA learning rerankers
 
 ### Full-Stack Application
 - **Backend**: FastAPI with async support, comprehensive API
@@ -431,13 +431,13 @@ docker compose restart postgres neo4j
 # Start backend (avoid --reload for long indexing)
 NEO4J_PASSWORD=password uv run uvicorn server.main:app --host 127.0.0.1 --port 8012
 
-# Create corpus + exclude known heavy build outputs (example: faxbot)
-curl -sS -X POST http://127.0.0.1:8012/api/repos -H 'Content-Type: application/json' -d '{"corpus_id":"faxbot","name":"faxbot","path":"/Users/davidmontgomery/faxbot_folder"}'
-curl -sS -X PATCH http://127.0.0.1:8012/api/repos/faxbot -H 'Content-Type: application/json' -d '{"exclude_paths":["faxbot.net/public/admin-demo/",".worktrees/","out.noindex/","data/qdrant/","faxbot/site/","faxbot_gh_pages/"]}'
+# Create corpus + exclude known heavy build outputs (epstein-files-1)
+curl -sS -X POST http://127.0.0.1:8012/api/repos -H 'Content-Type: application/json' -d '{"corpus_id":"epstein-files-1","name":"epstein-files-1","path":"/Users/davidmontgomery/epstein-files-1"}'
+curl -sS -X PATCH http://127.0.0.1:8012/api/repos/epstein-files-1 -H 'Content-Type: application/json' -d '{"exclude_paths":[".worktrees/","out.noindex/","data/qdrant/","node_modules/","dist/"]}'
 
 # Index + poll
-curl -sS -X POST http://127.0.0.1:8012/api/index -H 'Content-Type: application/json' -d '{"corpus_id":"faxbot","repo_path":"/Users/davidmontgomery/faxbot_folder","force_reindex":true}'
-while true; do curl -sS http://127.0.0.1:8012/api/index/faxbot/status | python -m json.tool; sleep 2; done
+curl -sS -X POST http://127.0.0.1:8012/api/index -H 'Content-Type: application/json' -d '{"corpus_id":"epstein-files-1","repo_path":"/Users/davidmontgomery/epstein-files-1","force_reindex":true}'
+while true; do curl -sS http://127.0.0.1:8012/api/index/epstein-files-1/status | python -m json.tool; sleep 2; done
 ```
 
 ### Verify GraphRAG is actually contributing results
@@ -445,7 +445,7 @@ while true; do curl -sS http://127.0.0.1:8012/api/index/faxbot/status | python -
 ```bash
 curl -sS -X POST http://127.0.0.1:8012/api/search \
   -H 'Content-Type: application/json' \
-  -d '{"corpus_id":"faxbot","query":"authentication flow","top_k":8,"include_vector":true,"include_sparse":true,"include_graph":true}' \
+  -d '{"corpus_id":"epstein-files-1","query":"authentication flow","top_k":8,"include_vector":true,"include_sparse":true,"include_graph":true}' \
   | python -m json.tool
 ```
 
@@ -486,10 +486,10 @@ docker exec tribrid-neo4j cypher-shell -u neo4j -p password 'RETURN 1 AS ok;'
 - Useful Cypher examples:
 
 ```cypher
-MATCH (c:Chunk {repo_id:"faxbot"}) RETURN count(c);
-MATCH (d:Document {repo_id:"faxbot"}) RETURN count(d);
-MATCH (e:Entity {repo_id:"faxbot"}) RETURN e.entity_type, count(*) ORDER BY count(*) DESC;
-MATCH (e:Entity {repo_id:"faxbot"})-[:IN_CHUNK]->(c:Chunk {repo_id:"faxbot"}) RETURN e.name, c.file_path, c.chunk_id LIMIT 25;
+MATCH (c:Chunk {repo_id:"epstein-files-1"}) RETURN count(c);
+MATCH (d:Document {repo_id:"epstein-files-1"}) RETURN count(d);
+MATCH (e:Entity {repo_id:"epstein-files-1"}) RETURN e.entity_type, count(*) ORDER BY count(*) DESC;
+MATCH (e:Entity {repo_id:"epstein-files-1"})-[:IN_CHUNK]->(c:Chunk {repo_id:"epstein-files-1"}) RETURN e.name, c.file_path, c.chunk_id LIMIT 25;
 SHOW INDEXES YIELD name, type, state WHERE type="VECTOR" RETURN name, state;
 ```
 
@@ -554,7 +554,7 @@ tribrid-rag/
 │   │   ├── sparse.py           # BM25/FTS retrieval
 │   │   ├── graph.py            # Graph traversal
 │   │   ├── fusion.py           # RRF and weighted fusion
-│   │   └── rerank.py           # Cross-encoder reranking
+│   │   └── rerank.py           # Reranking (local, cloud, learning)
 │   └── services/
 │       ├── rag.py              # RAG orchestration + ChatDebugInfo
 │       ├── traces.py           # Local trace store (ring buffer)

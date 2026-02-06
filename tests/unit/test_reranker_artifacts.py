@@ -45,7 +45,7 @@ async def test_learning_rerank_skips_when_trained_dir_missing_weights(tmp_path: 
             language="text",
             score=0.1,
             source="vector",
-            metadata={"corpus_id": "faxbot"},
+            metadata={"corpus_id": "epstein-files-1"},
         )
     ]
     res = await reranker.try_rerank("query", chunks)
@@ -53,4 +53,3 @@ async def test_learning_rerank_skips_when_trained_dir_missing_weights(tmp_path: 
     assert res.applied is False
     assert res.skipped_reason == "missing_trained_model"
     assert res.chunks == chunks
-
