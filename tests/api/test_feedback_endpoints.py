@@ -92,8 +92,9 @@ async def test_reranker_click_endpoint_accepts_payload(client) -> None:
 
 async def test_reranker_mine_mines_triplets_from_log(client) -> None:
     project_root = Path(__file__).resolve().parents[2]
+    cfg = TriBridConfig()
     log_path = project_root / "data" / "logs" / "queries.jsonl"
-    triplets_path = project_root / "data" / "training" / "triplets.jsonl"
+    triplets_path = project_root / cfg.training.tribrid_triplets_path
 
     original_log = log_path.read_text(encoding="utf-8") if log_path.exists() else None
     original_triplets = triplets_path.read_text(encoding="utf-8") if triplets_path.exists() else None

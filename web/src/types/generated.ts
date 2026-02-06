@@ -32,19 +32,19 @@ export interface BenchmarkConfig {
 
 /** Top-level chat configuration. Lives at TriBridConfig.chat.  KEY CONCEPT: There are no modes. The user checks/unchecks data sources. Recall is always available and ON by default. Corpora are available when indexed. Everything composes freely. */
 export interface ChatConfig {
-  /** Default checked corpus IDs for new conversations (Recall ON by default). */
-  default_corpus_ids?: string[]; // default: ["recall_default"]
+  /** Default checked user-facing corpus IDs for new conversations. */
+  default_corpus_ids?: string[]; // default: ["epstein-files-1"]
   system_prompt_base?: string; // default: "You are a helpful assistant."
   system_prompt_recall_suffix?: string; // default: " You have access to conversation history. Refer..."
-  system_prompt_rag_suffix?: string; // default: " Answer questions using the provided code conte..."
+  system_prompt_rag_suffix?: string; // default: " Answer questions using the provided database i..."
   /** State 1: No context. Nothing checked or retrieval returned empty. */
-  system_prompt_direct?: string; // default: "You are a code assistant powered by TriBridRAG...."
+  system_prompt_direct?: string; // default: "You are a helpful agentic RAG database assistan..."
   /** State 2: RAG only. Code corpora returned results; Recall did not. */
-  system_prompt_rag?: string; // default: "You are a code assistant powered by TriBridRAG,..."
+  system_prompt_rag?: string; // default: "You are a database assistant powered by TriBrid..."
   /** State 3: Recall only. Recall returned results; no RAG corpora active. */
-  system_prompt_recall?: string; // default: "You are a code assistant powered by TriBridRAG...."
+  system_prompt_recall?: string; // default: "You are an agentic RAG database assistant power..."
   /** State 4: Both. RAG and Recall both returned results. */
-  system_prompt_rag_and_recall?: string; // default: "You are a code assistant powered by TriBridRAG,..."
+  system_prompt_rag_and_recall?: string; // default: "You are an agentic RAG database assistant power..."
   reranker?: ChatRerankerConfig;
   recall?: RecallConfig;
   recall_gate?: RecallGateConfig;
@@ -163,8 +163,8 @@ export interface ChatProviderInfo {
 export interface ChatRerankerConfig {
   /** Chat reranker mode. */
   mode?: string; // default: "local"
-  /** Local cross-encoder. L-6 not L-12 — faster for chat. */
-  local_model?: string; // default: "cross-encoder/ms-marco-MiniLM-L-6-v2"
+  /** Local reranker model for chat. */
+  local_model?: string; // default: "BAAI/bge-reranker-v2-m3"
   cloud_provider?: string; // default: "cohere"
   cloud_model?: string; // default: "rerank-v3.5"
   top_n?: number; // default: 20
@@ -1281,14 +1281,14 @@ export interface RerankerTrainRunSummary {
 
 /** Reranking configuration for result refinement. */
 export interface RerankingConfig {
-  /** Reranker mode: 'cloud' (Cohere/Voyage/Jina API), 'local' (HuggingFace cross-encoder), 'learning' (trainable reranker: MLX Qwen3 LoRA when available, else transformers), 'none' (disabled) */
+  /** Reranker mode: 'cloud' (Cohere/Voyage/Jina API), 'local' (local HuggingFace reranker), 'learning' (trainable reranker: MLX Qwen3 LoRA when available, else transformers), 'none' (disabled) */
   reranker_mode?: string; // default: "none"
   /** Cloud reranker provider when mode=cloud (cohere, voyage, jina) */
   reranker_cloud_provider?: string; // default: "cohere"
   /** Cloud reranker model name when mode=cloud (Cohere: rerank-v3.5) */
   reranker_cloud_model?: string; // default: "rerank-v3.5"
-  /** Local HuggingFace cross-encoder model when mode=local */
-  reranker_local_model?: string; // default: "cross-encoder/ms-marco-MiniLM-L-12-v2"
+  /** Local HuggingFace reranker model when mode=local */
+  reranker_local_model?: string; // default: "BAAI/bge-reranker-v2-m3"
   /** Blend weight for reranker scores */
   tribrid_reranker_alpha?: number; // default: 0.7
   /** Number of candidates to rerank (local/learning mode) */
@@ -1413,22 +1413,22 @@ export interface SparseSearchConfig {
 
 /** System prompts for LLM interactions - affects RAG pipeline behavior.  These prompts control how LLMs behave during query processing, code analysis, and result generation. Changes here can significantly impact RAG accuracy. */
 export interface SystemPromptsConfig {
-  /** Main conversational AI system prompt for answering codebase questions */
-  main_rag_chat?: string; // default: "You are an expert software engineer and code an..."
+  /** Main conversational AI system prompt for answering database questions */
+  main_rag_chat?: string; // default: "You are a helpful agentic RAG database assistan..."
   /** Generate query variants for better recall in hybrid search */
-  query_expansion?: string; // default: "You are a code search query expander. Given a d..."
+  query_expansion?: string; // default: "You are a database search query expander. Given..."
   /** Optimize user query for code search - expand CamelCase, include API nouns */
   query_rewrite?: string; // default: "You rewrite developer questions into search-opt..."
   /** Generate JSON summaries for code chunks during indexing */
-  semantic_chunk_summaries?: string; // default: "Analyze this code chunk and create a comprehens..."
+  semantic_chunk_summaries?: string; // default: "Analyze this database chunk and create a compre..."
   /** Extract metadata from code chunks during indexing */
-  code_enrichment?: string; // default: "Analyze this code and return a JSON object with..."
+  code_enrichment?: string; // default: "Analyze this database and return a JSON object ..."
   /** Prompt for LLM-assisted semantic KG extraction (concepts + relations) */
   semantic_kg_extraction?: string; // default: "You are a semantic knowledge graph extractor.\n..."
   /** Analyze eval regressions with skeptical approach - avoid false explanations */
   eval_analysis?: string; // default: "You are an expert RAG (Retrieval-Augmented Gene..."
   /** Lightweight chunk_summary generation prompt for faster indexing */
-  lightweight_chunk_summaries?: string; // default: "Extract key information from this code: symbols..."
+  lightweight_chunk_summaries?: string; // default: "Extract key information from this database: sym..."
 }
 
 /** Tokenizer configuration used for token-aware chunking and budgeting. */
@@ -1528,13 +1528,13 @@ export interface TrainingConfig {
   /** Triplet mining mode */
   triplets_mine_mode?: string; // default: "replace"
   /** Active learning reranker artifact path (HF model dir for transformers; adapter dir for MLX) */
-  tribrid_reranker_model_path?: string; // default: "models/cross-encoder-tribrid"
+  tribrid_reranker_model_path?: string; // default: "models/learning-reranker-epstein-files-1"
   /** Triplet mining mode */
   tribrid_reranker_mine_mode?: string; // default: "replace"
   /** Reset triplets file before mining */
   tribrid_reranker_mine_reset?: number; // default: 0
   /** Training triplets file path */
-  tribrid_triplets_path?: string; // default: "data/training/triplets.jsonl"
+  tribrid_triplets_path?: string; // default: "data/training/triplets__epstein-files-1.jsonl"
   /** Learning reranker backend: auto (prefer MLX Qwen3 on Apple Silicon), transformers (HF), mlx_qwen3 (force MLX) */
   learning_reranker_backend?: "auto" | "transformers" | "mlx_qwen3"; // default: "auto"
   /** Base model to fine-tune for MLX Qwen3 learning reranker */

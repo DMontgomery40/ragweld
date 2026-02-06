@@ -3088,7 +3088,7 @@ class RerankingConfig(BaseModel):
         default="none",
         pattern="^(cloud|local|learning|none)$",
         description=(
-            "Reranker mode: 'cloud' (Cohere/Voyage/Jina API), 'local' (HuggingFace cross-encoder), "
+            "Reranker mode: 'cloud' (Cohere/Voyage/Jina API), 'local' (local HuggingFace reranker), "
             "'learning' (trainable reranker: MLX Qwen3 LoRA when available, else transformers), "
             "'none' (disabled)"
         ),
@@ -3105,8 +3105,8 @@ class RerankingConfig(BaseModel):
     )
 
     reranker_local_model: str = Field(
-        default="cross-encoder/ms-marco-MiniLM-L-12-v2",
-        description="Local HuggingFace cross-encoder model when mode=local"
+        default="BAAI/bge-reranker-v2-m3",
+        description="Local HuggingFace reranker model when mode=local"
     )
 
     tribrid_reranker_alpha: float = Field(
@@ -3651,7 +3651,7 @@ class TrainingConfig(BaseModel):
     )
 
     tribrid_reranker_model_path: str = Field(
-        default="models/cross-encoder-tribrid",
+        default="models/learning-reranker-epstein-files-1",
         description="Active learning reranker artifact path (HF model dir for transformers; adapter dir for MLX)"
     )
 
@@ -3669,7 +3669,7 @@ class TrainingConfig(BaseModel):
     )
 
     tribrid_triplets_path: str = Field(
-        default="data/training/triplets.jsonl",
+        default="data/training/triplets__epstein-files-1.jsonl",
         description="Training triplets file path"
     )
 
@@ -4167,34 +4167,27 @@ class SystemPromptsConfig(BaseModel):
     """
 
     main_rag_chat: str = Field(
-        default='''You are an expert software engineer and code analysis assistant.
+        default='''You are a helpful agentic RAG database assistant.
 
 ## Your Role:
-- Answer questions about the indexed codebase with precision and accuracy
-- Always cite specific file paths and line ranges from the provided code context
-- Provide clear explanations of how code works, what it does, and why design decisions were made
-- Offer practical, actionable insights based on the actual implementation
+- Answer questions about the indexed database with precision and accuracy
+- Offer practical, actionable insights based on the actual database information
 
 ## Guidelines:
-- **Be Evidence-Based**: Ground every answer in the provided code context
-- **Be Specific**: Include file paths, line numbers, function/class names, and relevant code snippets
-- **Be Clear**: Explain technical concepts in an accessible way
-- **Be Honest**: If the context doesn't contain enough information, say so
-- **Be Helpful**: Consider edge cases, error handling, and best practices when relevant
+- **Be Evidence-Based**: Ground every answer in the provided database information
+- **Be Honest**: If the information doesn't contain enough information, say so, but try to provide a helpful answer based on the information you have.
 
 ## Response Format:
 - Start with a direct answer to the question
-- Support with specific citations: `file_path:start_line-end_line`
-- Include relevant code snippets when they add clarity
-- Explain the "why" behind implementation choices when apparent
+- Provide a helpful answer based on the information you have
 
-You answer strictly from the provided code context. Always cite file paths and line ranges you used.''',
-        description="Main conversational AI system prompt for answering codebase questions"
+You answer strictly from the provided database information.''',
+        description="Main conversational AI system prompt for answering database questions"
     )
 
     query_expansion: str = Field(
-        default='''You are a code search query expander. Given a developer's question,
-generate alternative search queries that might find the same code using different terminology.
+        default='''You are a database search query expander. Given a user's question,
+generate alternative search queries that might find the same database using different terminology.
 
 Rules:
 - Output one query variant per line
@@ -4211,7 +4204,7 @@ Rules:
     )
 
     semantic_chunk_summaries: str = Field(
-        default='''Analyze this code chunk and create a comprehensive JSON summary for code search. Focus on WHAT the code does (business purpose) and HOW it works (technical details). Include all important symbols, patterns, and domain concepts.
+        default='''Analyze this database chunk and create a comprehensive JSON summary for database search. Focus on WHAT the database does (business purpose) and HOW it works (technical details). Include all important symbols, patterns, and domain concepts.
 
 JSON format:
 {
@@ -4225,7 +4218,7 @@ JSON format:
 }
 
 Focus on:
-- Domain-specific terminology and concepts from this codebase
+- Domain-specific terminology and concepts from this database
 - Technical patterns and architectural decisions
 - Business logic and problem being solved
 - Integration points, APIs, and external services
@@ -4234,14 +4227,14 @@ Focus on:
     )
 
     code_enrichment: str = Field(
-        default='''Analyze this code and return a JSON object with: symbols (array of function/class/component names), purpose (one sentence description), keywords (array of technical terms). Be concise. Return ONLY valid JSON.''',
+        default='''Analyze this database and return a JSON object with: symbols (array of function/class/component names), purpose (one sentence description), keywords (array of technical terms). Be concise. Return ONLY valid JSON.''',
         description="Extract metadata from code chunks during indexing"
     )
 
     semantic_kg_extraction: str = Field(
         default='''You are a semantic knowledge graph extractor.
 
-Given a single code/document chunk, extract a small set of reusable semantic concepts and relationships.
+Given a single database/document chunk, extract a small set of reusable semantic concepts and relationships.
 
 Rules:
 - Return ONLY valid JSON (no markdown, no extra text)
@@ -4283,7 +4276,7 @@ Format your response with clear sections using markdown headers.''',
     )
 
     lightweight_chunk_summaries: str = Field(
-        default='''Extract key information from this code: symbols (function/class names), purpose (one sentence), keywords (technical terms). Return JSON only.''',
+        default='''Extract key information from this database: symbols (function/class names), purpose (one sentence), keywords (technical terms). Return JSON only.''',
         description="Lightweight chunk_summary generation prompt for faster indexing"
     )
 
@@ -4382,8 +4375,8 @@ class ChatRerankerConfig(BaseModel):
         description="Chat reranker mode.",
     )
     local_model: str = Field(
-        default="cross-encoder/ms-marco-MiniLM-L-6-v2",
-        description="Local cross-encoder. L-6 not L-12 — faster for chat.",
+        default="BAAI/bge-reranker-v2-m3",
+        description="Local reranker model for chat.",
     )
     cloud_provider: str = Field(default="cohere")
     cloud_model: str = Field(default="rerank-v3.5")
@@ -4566,8 +4559,8 @@ class ChatConfig(BaseModel):
     """
 
     default_corpus_ids: list[str] = Field(
-        default=["recall_default"],
-        description="Default checked corpus IDs for new conversations (Recall ON by default).",
+        default=["epstein-files-1"],
+        description="Default checked user-facing corpus IDs for new conversations.",
     )
 
     # Legacy prompt composition (kept for backwards compatibility; prefer the 4 state prompts below).
@@ -4576,42 +4569,40 @@ class ChatConfig(BaseModel):
         default=" You have access to conversation history. Reference past discussions when relevant."
     )
     system_prompt_rag_suffix: str = Field(
-        default=" Answer questions using the provided code context. Cite file paths and line ranges."
+        default=" Answer questions using the provided database information."
     )
 
     # Four-state prompts (selected based on whether RAG/Recall context is present).
     system_prompt_direct: str = Field(
-        default="""You are a code assistant powered by TriBridRAG.
+        default="""You are a helpful agentic RAG database assistant.
 
-The user is chatting directly without any retrieval context. No code repositories or conversation history are being queried for this message.
+The user is chatting directly without any retrieval context. No database repositories or conversation history are being queried for this message.
 
-Answer based on your general knowledge. If the user asks about their specific codebase and no context is provided, let them know they can enable RAG corpora in the Data Sources panel to query their indexed repositories.
+Answer based on your general knowledge. If the user asks about their specific database and no context is provided, let them know they can enable RAG corpora in the Data Sources panel to query their indexed repositories.
 
-Be direct, technical, and helpful.""",
+Be direct and helpful.""",
         description="State 1: No context. Nothing checked or retrieval returned empty.",
     )
     system_prompt_rag: str = Field(
-        default="""You are a code assistant powered by TriBridRAG, a hybrid retrieval system that combines vector search, keyword search, and knowledge graphs to find relevant code.
+        default="""You are a database assistant powered by TriBridRAG, a hybrid retrieval system that combines vector search, keyword search, and knowledge graphs to find relevant database.
 
-The user has selected one or more code repositories to query. You will receive relevant code snippets in <rag_context>...</rag_context> tags.
+The user has selected one or more database repositories to query. You will receive relevant database snippets in <rag_context>...</rag_context> tags.
 
 Each snippet includes:
-- File path and line numbers (e.g., `server/auth/middleware.py:45-78`)
-- Language identifier
-- The actual code
+- File path and line numbers
 
 How to use this context:
-- Base your answers on the actual code shown, not assumptions
-- Always cite file paths and line numbers when referencing code
-- If the retrieved code doesn't fully answer the question, say what's missing
-- Don't invent code that isn't in the context
-- Connect related pieces when they appear across multiple snippets
+- Base your answers on the actual database shown, not assumptions
+- Always cite file paths and line numbers when referencing database
+- If the retrieved information doesn't fully answer the question, say what's missing
+- Don't invent information that isn't in the context
+- **Connect related pieces when they appear across multiple snippets** (e.g. if the user asks about a specific database table, and you have information about the table in the context, connect the information to the question)
 
-Be direct, technical, and precise. You're helping a developer understand their codebase.""",
+Be helpful, friendly, and engaging, and base your answers on the actual database information you have.""",
         description="State 2: RAG only. Code corpora returned results; Recall did not.",
     )
     system_prompt_recall: str = Field(
-        default="""You are a code assistant powered by TriBridRAG. You have access to your conversation history with this user via the Recall system.
+        default="""You are an agentic RAG database assistant powered by TriBridRAG. You have access to your conversation history with this user via the Recall system.
 
 Relevant snippets from past conversations appear in <recall_context>...</recall_context> tags.
 
@@ -4622,29 +4613,28 @@ Each snippet includes:
 
 How to use this context:
 - Reference past discussions naturally
-- Don't explicitly say \"according to my recall\" — incorporate it as shared context
+- Don't explicitly say "according to my recall" — incorporate it as shared context
 - Past conversations may contain decisions, preferences, or context that inform the current question
 - Prioritize recent conversations over older ones when relevant
 
-Be direct and helpful. You're continuing an ongoing collaboration with this developer.""",
+Be direct and helpful. You're continuing an ongoing collaboration with this user.""",
         description="State 3: Recall only. Recall returned results; no RAG corpora active.",
     )
     system_prompt_rag_and_recall: str = Field(
-        default="""You are a code assistant powered by TriBridRAG, a hybrid retrieval system. You have access to both:
-1) The user's indexed code repositories
+        default="""You are an agentic RAG database assistant powered by TriBridRAG, a hybrid retrieval system. You have access to both:
+1) The user's indexed database repositories
 2) Your conversation history with this user (Recall)
 
-Code context appears in <rag_context>...</rag_context> tags.
+database context appears in <rag_context>...</rag_context> tags.
 Conversation history appears in <recall_context>...</recall_context> tags.
 
 How to use both:
-- Cite file paths and line numbers when referencing code
 - Reference past discussions naturally
-- Connect them when relevant (e.g., a past decision and the code that implements it)
-- If past context contradicts current code, acknowledge the change
-- Don't say \"according to recall\" — just incorporate shared knowledge naturally
+- Connect them when relevant (e.g., a past decision and the database information that implements it)
+- If past context contradicts current database information, acknowledge the change
+- Don't say "according to recall" — just incorporate shared knowledge naturally
 
-Be direct, technical, and precise. You're helping a developer with ongoing context.""",
+Be helpful, friendly, and engaging, and base your answers on the actual database information you have.""",
         description="State 4: Both. RAG and Recall both returned results.",
     )
 
@@ -5142,7 +5132,7 @@ class TriBridConfig(BaseModel):
                 reranker_mode=data.get('RERANKER_MODE') or data.get('RERANKER_ACTIVE') or data.get('RERANKER_BACKEND') or 'none',
                 reranker_cloud_provider=data.get('RERANKER_CLOUD_PROVIDER') or data.get('RERANKER_PROVIDER') or 'cohere',
                 reranker_cloud_model=data.get('RERANKER_CLOUD_MODEL') or data.get('COHERE_RERANK_MODEL') or 'rerank-v3.5',
-                reranker_local_model=data.get('RERANKER_LOCAL_MODEL') or data.get('RERANKER_MODEL') or 'cross-encoder/ms-marco-MiniLM-L-12-v2',
+                reranker_local_model=data.get('RERANKER_LOCAL_MODEL') or data.get('RERANKER_MODEL') or 'BAAI/bge-reranker-v2-m3',
                 tribrid_reranker_alpha=data.get('TRIBRID_RERANKER_ALPHA', 0.7),
                 tribrid_reranker_topn=data.get('TRIBRID_RERANKER_TOPN', 50),
                 reranker_cloud_top_n=data.get('RERANKER_CLOUD_TOP_N', 50),
@@ -5226,10 +5216,10 @@ class TriBridConfig(BaseModel):
                 reranker_warmup_ratio=data.get('RERANKER_WARMUP_RATIO', 0.1),
                 triplets_min_count=data.get('TRIPLETS_MIN_COUNT', 100),
                 triplets_mine_mode=data.get('TRIPLETS_MINE_MODE', 'replace'),
-                tribrid_reranker_model_path=data.get('TRIBRID_RERANKER_MODEL_PATH', 'models/cross-encoder-tribrid'),
+                tribrid_reranker_model_path=data.get('TRIBRID_RERANKER_MODEL_PATH', 'models/learning-reranker-epstein-files-1'),
                 tribrid_reranker_mine_mode=data.get('TRIBRID_RERANKER_MINE_MODE', 'replace'),
                 tribrid_reranker_mine_reset=data.get('TRIBRID_RERANKER_MINE_RESET', 0),
-                tribrid_triplets_path=data.get('TRIBRID_TRIPLETS_PATH', 'data/training/triplets.jsonl'),
+                tribrid_triplets_path=data.get('TRIBRID_TRIPLETS_PATH', 'data/training/triplets__epstein-files-1.jsonl'),
                 learning_reranker_backend=data.get('LEARNING_RERANKER_BACKEND', 'auto'),
                 learning_reranker_base_model=data.get('LEARNING_RERANKER_BASE_MODEL', 'Qwen/Qwen3-Reranker-0.6B'),
                 learning_reranker_lora_rank=data.get('LEARNING_RERANKER_LORA_RANK', 16),
