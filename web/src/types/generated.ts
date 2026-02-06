@@ -1209,7 +1209,7 @@ export interface RerankerLegacyTaskResult {
 }
 
 export interface RerankerTrainMetricEvent {
-  type: "log" | "progress" | "metrics" | "state" | "error" | "complete";
+  type: "log" | "progress" | "metrics" | "state" | "error" | "complete" | "telemetry";
   /** UTC timestamp */
   ts: string;
   run_id: string;
@@ -1219,6 +1219,13 @@ export interface RerankerTrainMetricEvent {
   percent?: number | null; // default: None
   metrics?: Record<string, number> | null; // default: None
   status?: "queued" | "running" | "completed" | "failed" | "cancelled" | null; // default: None
+  proj_x?: number | null; // default: None
+  proj_y?: number | null; // default: None
+  loss?: number | null; // default: None
+  lr?: number | null; // default: None
+  grad_norm?: number | null; // default: None
+  step_time_ms?: number | null; // default: None
+  sample_count?: number | null; // default: None
 }
 
 export interface RerankerTrainRun {
@@ -2376,8 +2383,10 @@ export interface RerankerScoreRequest {
   query: string;
   /** Document/passage text to score */
   document: string;
+  /** Scoring mode override. learning uses the active learning artifact; local uses reranking.reranker_local_model. */
+  mode?: "learning" | "local" | null;
   /** Include backend-specific raw logits when available (best-effort) */
-  include_logits?: number;
+  include_logits?: boolean;
 }
 
 /** Response payload for POST /api/reranker/score. */
@@ -2387,7 +2396,7 @@ export interface RerankerScoreResponse {
   /** Resolved backend used to score (mlx_qwen3|transformers|...) */
   backend?: string;
   /** Normalized score in [0,1] (best-effort) */
-  score?: number | null;
+  score?: number;
   /** Raw yes logit (if include_logits and supported) */
   yes_logit?: number | null;
   /** Raw no logit (if include_logits and supported) */

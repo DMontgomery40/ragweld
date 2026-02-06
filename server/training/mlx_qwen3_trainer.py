@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Iterable, TypeVar, cast
 
-from server.reranker.mlx_qwen3 import (
+from server.retrieval.mlx_qwen3 import (
     DEFAULT_TASK_INSTRUCTION,
     MLXQwen3TokenIds,
     PROMPT_TEMPLATE_VERSION,
@@ -53,13 +53,37 @@ def triplets_to_pairs(
     *,
     negative_ratio: int = 5,
 ) -> list[LabeledPair]:
+    # Product policy: cap generated negatives at 5:1 even if config allows larger.
     nr = int(negative_ratio)
-    nr = max(1, min(20, nr))
+    nr = max(1, min(5, nr))
     out: list[LabeledPair] = []
+    r = random.Random(0)
+    global_neg_pool = [str(t.negative_text) for t in triplets if str(t.negative_text or "").strip()]
+
     for t in triplets:
+        pos_doc = str(t.positive_text)
         out.append(LabeledPair(query=t.query, document=t.positive_text, label=1))
-        for _ in range(nr):
-            out.append(LabeledPair(query=t.query, document=t.negative_text, label=0))
+
+        negatives: list[str] = []
+        mined_neg = str(t.negative_text)
+        if mined_neg.strip():
+            negatives.append(mined_neg)
+
+        need = max(0, nr - len(negatives))
+        if need > 0:
+            pool = [x for x in global_neg_pool if x != pos_doc and x not in negatives]
+            if pool:
+                if len(pool) <= need:
+                    negatives.extend(pool)
+                else:
+                    negatives.extend(r.sample(pool, need))
+
+        # Backstop: if pool is exhausted, duplicate mined negative to honor ratio.
+        while negatives and len(negatives) < nr:
+            negatives.append(negatives[-1])
+
+        for neg_doc in negatives[:nr]:
+            out.append(LabeledPair(query=t.query, document=neg_doc, label=0))
     return out
 
 
@@ -117,9 +141,14 @@ def _batch_logits_and_lengths(
 
     max_len = max(lengths) if lengths else 0
     padded = [toks + [pad_id] * (max_len - len(toks)) for toks in token_lists]
+    masks = [[1] * len(toks) + [0] * (max_len - len(toks)) for toks in token_lists]
     input_ids = mx.array(padded)
+    attention_mask = mx.array(masks)
 
-    logits = model(input_ids)  # (B, L, V)
+    try:
+        logits = model(input_ids, attention_mask=attention_mask)  # type: ignore[misc]
+    except Exception:
+        logits = model(input_ids)  # (B, L, V)
     bsz = int(len(pairs))
     idx = mx.arange(bsz)
     pos = mx.array([l - 1 for l in lengths])
@@ -159,7 +188,7 @@ def evaluate_mlx_qwen3_reranker(
         raise RuntimeError("MLX is not available (install mlx + mlx-lm)")
 
     lora_target_modules = list(
-        lora_target_modules or ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
+        lora_target_modules or ["q_proj", "k_proj", "v_proj", "o_proj"]
     )
 
     def _load_and_score() -> dict[str, float]:
@@ -276,7 +305,7 @@ def train_mlx_qwen3_reranker(
         raise ValueError("No training triplets to train on")
 
     lora_target_modules = list(
-        lora_target_modules or ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
+        lora_target_modules or ["q_proj", "k_proj", "v_proj", "o_proj"]
     )
     train_pairs = triplets_to_pairs(train_triplets, negative_ratio=int(negative_ratio))
 
@@ -372,7 +401,7 @@ def train_mlx_qwen3_reranker(
             mx.eval(total)
             return float(mx.sqrt(total).item())
 
-        # Optional (but real) 2D projection telemetry for a Welch-labs-style visualizer.
+        # Deterministic 2D projection telemetry in LoRA parameter space.
         # Uses a fixed random direction basis in LoRA parameter space (seed=0).
         try:
             mx.random.seed(0)
@@ -425,20 +454,99 @@ def train_mlx_qwen3_reranker(
         accumulated_grads = None
         accumulated_loss = 0.0
         micro_step_in_accum = 0
+        samples_in_accum = 0
+        effective_step_started = time.perf_counter()
+
+        def _grad_norm(tree: Any) -> float:
+            total = None
+
+            def _walk(node: Any) -> None:
+                nonlocal total
+                if isinstance(node, dict):
+                    for v in node.values():
+                        _walk(v)
+                    return
+                if isinstance(node, (list, tuple)):
+                    for v in node:
+                        _walk(v)
+                    return
+                s = mx.sum(node * node)
+                total = s if total is None else total + s
+
+            _walk(tree)
+            if total is None:
+                return 0.0
+            mx.eval(total)
+            return float(mx.sqrt(total).item())
+
+        def _emit_step(
+            *,
+            epoch_fraction: float,
+            avg_loss: float,
+            grads_avg: Any,
+            sample_count: int,
+            step_time_ms: float,
+        ) -> None:
+            nonlocal prev_x, prev_y
+            pct = 100.0 * (global_step / float(max(1, total_steps)))
+            grad_n = _grad_norm(grads_avg)
+            lr_now = float(lr)
+
+            proj_x = 0.0
+            proj_y = 0.0
+            if proj_dirs_1 is not None and proj_dirs_2 is not None:
+                dot1 = _dot_trainable(proj_dirs_1)
+                dot2 = _dot_trainable(proj_dirs_2)
+                proj_x = float(dot1 - w0_dot1)
+                proj_y = float(dot2 - w0_dot2)
+                prev_x = proj_x
+                prev_y = proj_y
+
+            _emit(
+                "telemetry",
+                {
+                    "step": int(global_step),
+                    "epoch": float(epoch_fraction),
+                    "proj_x": float(proj_x),
+                    "proj_y": float(proj_y),
+                    "loss": float(avg_loss),
+                    "lr": float(lr_now),
+                    "grad_norm": float(grad_n),
+                    "step_time_ms": float(step_time_ms),
+                    "sample_count": int(max(0, sample_count)),
+                },
+            )
+            _emit(
+                "progress",
+                {
+                    "step": int(global_step),
+                    "epoch": float(epoch_fraction),
+                    "percent": float(min(100.0, max(0.0, pct))),
+                    "message": f"loss={avg_loss:.4f}",
+                    "metrics": {
+                        "train_loss": float(avg_loss),
+                        "lr": float(lr_now),
+                        "grad_norm": float(grad_n),
+                    },
+                },
+            )
 
         for epoch in range(int(max(1, epochs))):
             indices = list(range(len(train_pairs)))
             r.shuffle(indices)
-            epoch_start = time.time()
 
             for i in range(0, len(indices), max(1, int(batch_size))):
                 batch_indices = indices[i : i + max(1, int(batch_size))]
                 batch = [train_pairs[j] for j in batch_indices]
+                if micro_step_in_accum == 0:
+                    effective_step_started = time.perf_counter()
+                    samples_in_accum = 0
 
                 loss, grads = loss_and_grad(batch)
                 accumulated_grads = accumulate_grads(accumulated_grads, grads)
                 accumulated_loss += float(loss.item())
                 micro_step_in_accum += 1
+                samples_in_accum += int(len(batch))
 
                 if micro_step_in_accum < int(max(1, gradient_accumulation_steps)):
                     continue
@@ -450,31 +558,16 @@ def train_mlx_qwen3_reranker(
 
                 global_step += 1
                 avg_loss = accumulated_loss / float(micro_step_in_accum)
+                step_time_ms = float((time.perf_counter() - effective_step_started) * 1000.0)
                 accumulated_grads = None
                 accumulated_loss = 0.0
                 micro_step_in_accum = 0
-
-                pct = 100.0 * (global_step / float(max(1, total_steps)))
-                metrics_payload: dict[str, float] = {"train_loss": float(avg_loss)}
-                if proj_dirs_1 is not None and proj_dirs_2 is not None:
-                    dot1 = _dot_trainable(proj_dirs_1)
-                    dot2 = _dot_trainable(proj_dirs_2)
-                    x = float(dot1 - w0_dot1)
-                    y = float(dot2 - w0_dot2)
-                    dx = float(x - prev_x)
-                    dy = float(y - prev_y)
-                    prev_x = x
-                    prev_y = y
-                    metrics_payload.update({"proj_x": x, "proj_y": y, "proj_dx": dx, "proj_dy": dy})
-                _emit(
-                    "progress",
-                    {
-                        "step": global_step,
-                        "epoch": float(epoch) + (i / float(max(1, len(indices)))),
-                        "percent": float(min(100.0, max(0.0, pct))),
-                        "message": f"loss={avg_loss:.4f}",
-                        "metrics": metrics_payload,
-                    },
+                _emit_step(
+                    epoch_fraction=float(epoch) + (i / float(max(1, len(indices)))),
+                    avg_loss=float(avg_loss),
+                    grads_avg=grads_avg,
+                    sample_count=int(samples_in_accum),
+                    step_time_ms=float(step_time_ms),
                 )
 
             # Flush remainder micro-batches at epoch end (if any).
@@ -483,9 +576,19 @@ def train_mlx_qwen3_reranker(
                 optimizer.update(model, grads_avg)
                 mx.eval(model.parameters(), optimizer.state)
                 global_step += 1
+                avg_loss = accumulated_loss / float(micro_step_in_accum)
+                step_time_ms = float((time.perf_counter() - effective_step_started) * 1000.0)
                 accumulated_grads = None
                 accumulated_loss = 0.0
+                _emit_step(
+                    epoch_fraction=float(epoch + 1),
+                    avg_loss=float(avg_loss),
+                    grads_avg=grads_avg,
+                    sample_count=int(samples_in_accum),
+                    step_time_ms=float(step_time_ms),
+                )
                 micro_step_in_accum = 0
+                samples_in_accum = 0
 
             # End-of-epoch evaluation on dev triplets (proxy metrics).
             if dev_triplets:
@@ -549,3 +652,8 @@ def train_mlx_qwen3_reranker(
         }
 
     return _train_sync()
+
+
+def train_qwen3_lora_reranker(**kwargs: Any) -> dict[str, object]:
+    """Compatibility alias for the MLX Qwen3 LoRA training entrypoint."""
+    return train_mlx_qwen3_reranker(**kwargs)

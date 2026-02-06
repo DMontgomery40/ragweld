@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { RerankerTrainDiffResponse, RerankerTrainRunMeta } from '@/types/generated';
 import { rerankerTrainingService } from '@/services/RerankerTrainingService';
+import type { RerankerTrainDiffResponse, RerankerTrainRunMeta } from '@/types/generated';
 
 type Props = {
   runs: RerankerTrainRunMeta[];
@@ -14,7 +14,6 @@ function formatDelta(v: number | null | undefined): string {
 
 function formatSeconds(v: number | null | undefined): string {
   if (v == null) return '—';
-  if (!Number.isFinite(v)) return String(v);
   if (v < 10) return `${v.toFixed(2)}s`;
   if (v < 60) return `${v.toFixed(1)}s`;
   return `${v.toFixed(0)}s`;
@@ -25,8 +24,8 @@ export function RunDiff({ runs }: Props) {
     return [...runs].sort((a, b) => String(b.started_at).localeCompare(String(a.started_at)));
   }, [runs]);
 
-  const [baselineRunId, setBaselineRunId] = useState<string>('');
-  const [currentRunId, setCurrentRunId] = useState<string>('');
+  const [baselineRunId, setBaselineRunId] = useState('');
+  const [currentRunId, setCurrentRunId] = useState('');
   const [loading, setLoading] = useState(false);
   const [diff, setDiff] = useState<RerankerTrainDiffResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -38,8 +37,7 @@ export function RunDiff({ runs }: Props) {
   }, [sorted, currentRunId, baselineRunId]);
 
   useEffect(() => {
-    const canDiff = baselineRunId && currentRunId && baselineRunId !== currentRunId;
-    if (!canDiff) {
+    if (!baselineRunId || !currentRunId || baselineRunId === currentRunId) {
       setDiff(null);
       return;
     }
@@ -47,6 +45,7 @@ export function RunDiff({ runs }: Props) {
     let cancelled = false;
     setLoading(true);
     setError(null);
+
     void rerankerTrainingService
       .diffRuns(baselineRunId, currentRunId)
       .then((res) => {
@@ -69,21 +68,16 @@ export function RunDiff({ runs }: Props) {
   }, [baselineRunId, currentRunId]);
 
   return (
-    <div
-      style={{
-        background: 'var(--bg-elev1)',
-        border: '1px solid var(--line)',
-        borderRadius: 10,
-        padding: 14,
-      }}
-    >
-      <div style={{ fontWeight: 600, marginBottom: 10 }}>Run diff</div>
+    <section className="studio-panel studio-compact-panel" data-testid="studio-run-diff">
+      <header className="studio-panel-header">
+        <h3 className="studio-panel-title">Run Diff</h3>
+      </header>
 
       {sorted.length < 2 ? (
-        <div style={{ fontSize: 12, color: 'var(--fg-muted)' }}>Need at least two runs to compare.</div>
+        <p className="studio-empty">Need at least two runs to compare.</p>
       ) : (
         <>
-          <div className="input-row" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <div className="studio-form-grid two">
             <div className="input-group">
               <label>Baseline</label>
               <select value={baselineRunId} onChange={(e) => setBaselineRunId(e.target.value)}>
@@ -108,76 +102,35 @@ export function RunDiff({ runs }: Props) {
             </div>
           </div>
 
-          {loading && <div style={{ marginTop: 10, fontSize: 12, color: 'var(--fg-muted)' }}>Computing…</div>}
-          {error && (
-            <div
-              style={{
-                marginTop: 10,
-                padding: '10px 12px',
-                borderRadius: 8,
-                border: '1px solid var(--err)',
-                background: 'rgba(255, 107, 107, 0.08)',
-                color: 'var(--fg)',
-                fontSize: 12,
-              }}
-            >
-              {error}
-            </div>
-          )}
+          {loading ? <p className="studio-empty">Computing diff…</p> : null}
+          {error ? <div className="studio-callout studio-callout-err">{error}</div> : null}
 
-          {diff && diff.compatible === false && (
-            <div
-              style={{
-                marginTop: 10,
-                padding: '10px 12px',
-                borderRadius: 8,
-                border: '1px solid var(--warn)',
-                background: 'rgba(var(--warn-rgb), 0.08)',
-                color: 'var(--fg)',
-                fontSize: 12,
-              }}
-            >
-              <div style={{ fontWeight: 600, marginBottom: 4 }}>Incompatible runs</div>
-              <div style={{ color: 'var(--fg-muted)' }}>{diff.reason || 'Primary metric/k differ.'}</div>
-            </div>
-          )}
+          {diff && diff.compatible === false ? (
+            <div className="studio-callout studio-callout-warn">{diff.reason || 'Primary metric/k differ.'}</div>
+          ) : null}
 
-          {diff && diff.compatible !== false && (
-            <div style={{ marginTop: 12 }}>
-              <div style={{ fontSize: 12, color: 'var(--fg-muted)', marginBottom: 8 }}>
-                Primary: <span style={{ fontFamily: 'var(--font-mono)' }}>{diff.primary_metric}</span>
-                {diff.primary_metric !== 'map' && diff.primary_k != null ? (
-                  <span style={{ fontFamily: 'var(--font-mono)' }}>@{diff.primary_k}</span>
-                ) : null}
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10 }}>
-                <div style={{ border: '1px solid var(--line)', borderRadius: 10, padding: 10 }}>
-                  <div style={{ fontSize: 12, color: 'var(--fg-muted)' }}>Δ primary best</div>
-                  <div style={{ fontSize: 16, fontWeight: 700, fontFamily: 'var(--font-mono)' }}>
-                    {formatDelta(diff.delta_primary_best)}
-                  </div>
-                </div>
-                <div style={{ border: '1px solid var(--line)', borderRadius: 10, padding: 10 }}>
-                  <div style={{ fontSize: 12, color: 'var(--fg-muted)' }}>Δ time-to-best</div>
-                  <div style={{ fontSize: 16, fontWeight: 700, fontFamily: 'var(--font-mono)' }}>
-                    {diff.delta_time_to_best_secs == null
-                      ? '—'
-                      : `${diff.delta_time_to_best_secs > 0 ? '+' : ''}${formatSeconds(diff.delta_time_to_best_secs)}`}
-                  </div>
-                </div>
-                <div style={{ border: '1px solid var(--line)', borderRadius: 10, padding: 10 }}>
-                  <div style={{ fontSize: 12, color: 'var(--fg-muted)' }}>Δ stability stddev</div>
-                  <div style={{ fontSize: 16, fontWeight: 700, fontFamily: 'var(--font-mono)' }}>
-                    {formatDelta(diff.delta_stability_stddev)}
-                  </div>
-                </div>
-              </div>
+          {diff && diff.compatible !== false ? (
+            <div className="studio-diff-grid">
+              <article className="studio-metric-card">
+                <span className="studio-metric-name">Δ primary best</span>
+                <span className="studio-metric-value studio-mono">{formatDelta(diff.delta_primary_best)}</span>
+              </article>
+              <article className="studio-metric-card">
+                <span className="studio-metric-name">Δ time-to-best</span>
+                <span className="studio-metric-value studio-mono">
+                  {diff.delta_time_to_best_secs == null
+                    ? '—'
+                    : `${diff.delta_time_to_best_secs > 0 ? '+' : ''}${formatSeconds(diff.delta_time_to_best_secs)}`}
+                </span>
+              </article>
+              <article className="studio-metric-card">
+                <span className="studio-metric-name">Δ stability stddev</span>
+                <span className="studio-metric-value studio-mono">{formatDelta(diff.delta_stability_stddev)}</span>
+              </article>
             </div>
-          )}
+          ) : null}
         </>
       )}
-    </div>
+    </section>
   );
 }
-
