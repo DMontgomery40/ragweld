@@ -704,39 +704,69 @@ export function TrainingStudio() {
     (api: DockviewApi, preset: LayoutPreset) => {
       api.clear();
 
-      const width = Math.max(api.width || 1280, 1280);
-      const height = Math.max(api.height || 720, 720);
+      const width = Math.max(api.width || 0, 640);
+      const height = Math.max(api.height || 0, 480);
 
-      const leftPct = preset === 'focus_viz' ? 16 : preset === 'focus_logs' ? 16 : preset === 'focus_inspector' ? 15 : Number(studioLeftPct);
-      const rightPct = preset === 'focus_inspector' ? 40 : preset === 'focus_viz' ? 22 : preset === 'focus_logs' ? 24 : Number(studioRightPct);
-      const bottomPct = preset === 'focus_logs' ? 42 : preset === 'focus_viz' ? 20 : preset === 'focus_inspector' ? 26 : Number(studioBottomPct);
+      const leftPctRaw =
+        preset === 'focus_viz'
+          ? 14
+          : preset === 'focus_logs'
+            ? 14
+            : preset === 'focus_inspector'
+              ? 16
+              : Number(studioLeftPct);
+      const rightPctRaw =
+        preset === 'focus_inspector'
+          ? 36
+          : preset === 'focus_viz'
+            ? 24
+            : preset === 'focus_logs'
+              ? 24
+              : Number(studioRightPct);
+      const bottomPctRaw =
+        preset === 'focus_logs'
+          ? 38
+          : preset === 'focus_viz'
+            ? 24
+            : preset === 'focus_inspector'
+              ? 24
+              : Number(studioBottomPct);
 
-      const leftPx = Math.max(260, Math.floor((width * leftPct) / 100));
-      const rightPx = Math.max(320, Math.floor((width * rightPct) / 100));
-      const bottomPx = Math.max(220, Math.floor((height * bottomPct) / 100));
+      const leftPct = clamp(leftPctRaw, 12, 26);
+      const rightPct = clamp(rightPctRaw, 20, 38);
+      const bottomPct = clamp(bottomPctRaw, 22, 44);
 
-      const runsPanel = api.addPanel({
-        id: 'studio-runs',
-        component: 'studio-runs',
-        title: 'Runs',
-        initialWidth: leftPx,
-        minimumWidth: 240,
-      });
+      const leftRatioRaw = leftPct / 100;
+      const rightRatioRaw = rightPct / 100;
+      const centerMinRatio = width < 900 ? 0.44 : 0.36;
+      const maxSideRatio = Math.max(0.2, 1 - centerMinRatio);
+      const sideTotalRatio = leftRatioRaw + rightRatioRaw;
+      const sideScale = sideTotalRatio > maxSideRatio ? maxSideRatio / sideTotalRatio : 1;
 
+      let leftPx = Math.max(180, Math.floor(width * leftRatioRaw * sideScale));
+      let rightPx = Math.max(220, Math.floor(width * rightRatioRaw * sideScale));
+
+      const centerMinPx = Math.max(320, Math.floor(width * centerMinRatio));
+      let centerWidthPx = width - leftPx - rightPx;
+      if (centerWidthPx < centerMinPx) {
+        const deficit = centerMinPx - centerWidthPx;
+        const trimLeft = Math.floor(deficit * 0.45);
+        const trimRight = deficit - trimLeft;
+        leftPx = Math.max(160, leftPx - trimLeft);
+        rightPx = Math.max(200, rightPx - trimRight);
+        centerWidthPx = Math.max(centerMinPx, width - leftPx - rightPx);
+      }
+
+      const bottomPx = clamp(Math.floor((height * bottomPct) / 100), 170, Math.floor(height * 0.58));
+
+      // Build center hero first, then split full-width activity below it, then add side docks.
+      // This avoids runs becoming the de-facto dominant pane.
       const vizPanel = api.addPanel({
         id: 'studio-visualizer',
         component: 'studio-visualizer',
         title: 'Visualizer',
-        position: { referencePanel: runsPanel, direction: 'right' },
-      });
-
-      const inspectorPanel = api.addPanel({
-        id: 'studio-inspector',
-        component: 'studio-inspector',
-        title: 'Inspector',
-        position: { referencePanel: vizPanel, direction: 'right' },
-        initialWidth: rightPx,
-        minimumWidth: 300,
+        initialWidth: centerWidthPx,
+        minimumWidth: 380,
       });
 
       const activityPanel = api.addPanel({
@@ -745,7 +775,25 @@ export function TrainingStudio() {
         title: 'Timeline + Logs',
         position: { referencePanel: vizPanel, direction: 'below' },
         initialHeight: bottomPx,
-        minimumHeight: 190,
+        minimumHeight: 180,
+      });
+
+      api.addPanel({
+        id: 'studio-runs',
+        component: 'studio-runs',
+        title: 'Runs',
+        position: { referencePanel: vizPanel, direction: 'left' },
+        initialWidth: leftPx,
+        minimumWidth: 220,
+      });
+
+      const inspectorPanel = api.addPanel({
+        id: 'studio-inspector',
+        component: 'studio-inspector',
+        title: 'Inspector',
+        position: { referencePanel: vizPanel, direction: 'right' },
+        initialWidth: rightPx,
+        minimumWidth: 280,
       });
 
       if (preset === 'focus_logs') {
@@ -1695,6 +1743,9 @@ export function TrainingStudio() {
           </button>
           <button className="small-button" onClick={() => applyLayoutPreset('focus_logs')}>
             Focus Logs
+          </button>
+          <button className="small-button" onClick={() => applyLayoutPreset('balanced')}>
+            Reset View
           </button>
           <button className="small-button" onClick={() => setShowSetupRow(showSetupRow === 1 ? 0 : 1)}>
             {showSetupRow === 1 ? 'Hide Setup' : 'Show Setup'}

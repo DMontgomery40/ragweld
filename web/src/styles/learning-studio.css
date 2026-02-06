@@ -275,6 +275,11 @@
   min-width: 0;
 }
 
+.studio-right-dock {
+  height: 100%;
+  overflow: hidden;
+}
+
 .studio-run-list,
 .studio-inspector-body,
 .studio-bottom-body {
@@ -369,11 +374,14 @@
 }
 
 .studio-inspector-body {
+  flex: 1 1 auto;
   padding: 8px;
   display: block;
   min-height: 0;
+  max-height: 100%;
   overflow-y: auto;
   overflow-x: hidden;
+  padding-bottom: 14px;
 }
 
 .studio-compact-panel {

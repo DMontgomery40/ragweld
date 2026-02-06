@@ -79,6 +79,7 @@ export function NeuralVisualizerWebGPU({
         motionIntensity={motionIntensity}
         reduceMotion={reduceMotion}
         showVectorField={showVectorField}
+        enablePostprocessing={false}
       />
     </Canvas>
   );

@@ -22,12 +22,14 @@ export function TrajectoryScene({
   motionIntensity,
   reduceMotion,
   showVectorField,
+  enablePostprocessing = true,
 }: {
   points: NeuralRenderPoint[];
   quality: Quality;
   motionIntensity: number;
   reduceMotion: boolean;
   showVectorField: boolean;
+  enablePostprocessing?: boolean;
 }) {
   const groupRef = useRef<any>(null);
 
@@ -122,7 +124,7 @@ export function TrajectoryScene({
         ) : null}
       </group>
 
-      {!reduceMotion && bloomIntensity > 0 ? (
+      {enablePostprocessing && !reduceMotion && bloomIntensity > 0 ? (
         <EffectComposer multisampling={0}>
           <Bloom
             intensity={bloomIntensity}
