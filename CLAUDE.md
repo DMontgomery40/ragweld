@@ -295,7 +295,7 @@ IMPORTANT:
 
 ## MLX LEARNING RERANKER
 
-The "learning reranker" is a fine-tunable Qwen3-based cross-encoder that runs locally via MLX on Apple Silicon.
+The "learning reranker" is a fine-tunable Qwen3 LoRA learning reranker that runs locally via MLX on Apple Silicon.
 
 ### Architecture
 - **Inference**: `server/reranker/mlx_qwen3.py` - MLXQwen3Reranker class with hot-reload + idle unload
