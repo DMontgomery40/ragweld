@@ -3871,7 +3871,7 @@
     {
       "term": "Learning Reranker Backend",
       "key": "LEARNING_RERANKER_BACKEND",
-      "definition": "Backend used when RERANKER_MODE=\"learning\". auto prefers the MLX Qwen3 LoRA backend when MLX is available (Apple Silicon), otherwise falls back to the existing HuggingFace/SentenceTransformers CrossEncoder backend. Use transformers to force the legacy backend, or mlx_qwen3 to force the MLX backend.",
+      "definition": "Backend used when RERANKER_MODE=\"learning\". auto uses MLX Qwen3 LoRA only on macOS Apple Silicon when MLX dependencies are installed; all other environments use transformers. Use transformers to force the HuggingFace/SentenceTransformers CrossEncoder backend, or mlx_qwen3 to force MLX (will error on unsupported platforms). MLX learning mode can be slower for interactive retrieval; if latency is high, lower TRIBRID_RERANKER_TOPN first.",
       "category": "reranking",
       "related": [
         "RERANKER_MODE",

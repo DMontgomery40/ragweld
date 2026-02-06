@@ -1413,10 +1413,12 @@ class RerankerScoreRequest(BaseModel):
     )
     query: str = Field(description="Query string")
     document: str = Field(description="Document/passage text to score")
-    include_logits: int = Field(
-        default=0,
-        ge=0,
-        le=1,
+    mode: Literal["learning", "local"] | None = Field(
+        default=None,
+        description="Scoring mode override. learning uses the active learning artifact; local uses reranking.reranker_local_model.",
+    )
+    include_logits: bool = Field(
+        default=False,
         description="Include backend-specific raw logits when available (best-effort)",
     )
 
@@ -1426,7 +1428,7 @@ class RerankerScoreResponse(BaseModel):
 
     ok: bool = Field(description="Whether scoring succeeded")
     backend: str = Field(default="", description="Resolved backend used to score (mlx_qwen3|transformers|...)")
-    score: float | None = Field(default=None, description="Normalized score in [0,1] (best-effort)")
+    score: float = Field(default=0.0, description="Normalized score in [0,1] (best-effort)")
     yes_logit: float | None = Field(default=None, description="Raw yes logit (if include_logits and supported)")
     no_logit: float | None = Field(default=None, description="Raw no logit (if include_logits and supported)")
     error: str | None = Field(default=None, description="Error message (if any)")
@@ -1816,7 +1818,7 @@ class RerankerTrainRunsResponse(BaseModel):
 
 # --- Metrics event stream schema (stored in metrics.jsonl and used by SSE/UI) ---
 
-RerankerTrainEventType = Literal["log", "progress", "metrics", "state", "error", "complete"]
+RerankerTrainEventType = Literal["log", "progress", "metrics", "state", "error", "complete", "telemetry"]
 
 
 class RerankerTrainMetricEvent(BaseModel):
@@ -1830,6 +1832,13 @@ class RerankerTrainMetricEvent(BaseModel):
     percent: float | None = Field(default=None, ge=0.0, le=100.0)  # for progress
     metrics: dict[str, float] | None = None  # for metrics: {'mrr@10':0.33,'ndcg@10':0.41,'map':0.22}
     status: RerankerTrainRunStatus | None = None  # for state/complete
+    proj_x: float | None = None
+    proj_y: float | None = None
+    loss: float | None = None
+    lr: float | None = None
+    grad_norm: float | None = None
+    step_time_ms: float | None = None
+    sample_count: int | None = Field(default=None, ge=0)
 
 
 class RerankerTrainStartResponse(BaseModel):
@@ -3696,7 +3705,8 @@ class TrainingConfig(BaseModel):
     )
 
     learning_reranker_lora_target_modules: list[str] = Field(
-        default_factory=lambda: ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
+        default_factory=lambda: ["q_proj", "k_proj", "v_proj", "o_proj"],
+        min_length=1,
         description="Module name suffixes to apply LoRA to (MLX Qwen3)",
     )
 

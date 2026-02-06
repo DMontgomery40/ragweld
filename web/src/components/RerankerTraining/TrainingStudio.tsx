@@ -1,19 +1,35 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useNotification } from '@/hooks';
 import { TooltipIcon } from '@/components/ui/TooltipIcon';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useActiveRepo } from '@/stores/useRepoStore';
+import { useConfigField, useNotification, useReranker } from '@/hooks';
 import { rerankerTrainingService, type RerankerTrainRunsScope } from '@/services/RerankerTrainingService';
 import type {
   CorpusEvalProfile,
+  RerankerScoreResponse,
   RerankerTrainMetricEvent,
   RerankerTrainRun,
   RerankerTrainRunMeta,
   RerankerTrainStartRequest,
+  TrainingConfig,
 } from '@/types/generated';
-import { GradientDescentViz } from './GradientDescentViz';
+import { NeuralVisualizer, type TelemetryPoint } from './NeuralVisualizer';
 import { RunDiff } from './RunDiff';
 import { RunOverview } from './RunOverview';
+
+type LearningBackend = NonNullable<TrainingConfig['learning_reranker_backend']>;
+
+type InspectorTab =
+  | 'run-hud'
+  | 'live-metrics'
+  | 'overview'
+  | 'diff'
+  | 'config'
+  | 'debug-score';
+
+type BottomTab = 'timeline' | 'logs';
+
+const TELEMETRY_RING_LIMIT = 10_000;
 
 function metricLabel(metric: 'mrr' | 'ndcg' | 'map', k: number): string {
   if (metric === 'mrr') return `MRR@${k}`;
@@ -28,11 +44,26 @@ function safeDateLabel(iso: string): string {
 }
 
 function latestMetricsFromEvents(events: RerankerTrainMetricEvent[]): Record<string, number> | null {
-  for (let i = events.length - 1; i >= 0; i--) {
+  for (let i = events.length - 1; i >= 0; i -= 1) {
     const ev = events[i];
     if (ev.metrics) return ev.metrics;
   }
   return null;
+}
+
+function toTelemetryPoint(ev: RerankerTrainMetricEvent): TelemetryPoint | null {
+  if (ev.type !== 'telemetry') return null;
+  if (ev.proj_x == null || ev.proj_y == null) return null;
+
+  return {
+    x: Number(ev.proj_x),
+    y: Number(ev.proj_y),
+    step: Number(ev.step ?? 0),
+    loss: Number(ev.loss ?? 0),
+    lr: Number(ev.lr ?? 0),
+    gradNorm: Number(ev.grad_norm ?? 0),
+    ts: String(ev.ts),
+  };
 }
 
 function formatMetricValue(v: number): string {
@@ -43,7 +74,7 @@ function formatMetricValue(v: number): string {
 }
 
 function lastEventMeta(events: RerankerTrainMetricEvent[]): { ts?: string; step?: number; epoch?: number; percent?: number } {
-  for (let i = events.length - 1; i >= 0; i--) {
+  for (let i = events.length - 1; i >= 0; i -= 1) {
     const ev = events[i];
     if (ev.step != null || ev.epoch != null || ev.percent != null) {
       return {
@@ -60,13 +91,24 @@ function lastEventMeta(events: RerankerTrainMetricEvent[]): { ts?: string; step?
 export function TrainingStudio() {
   const { success, error: notifyError, info } = useNotification();
   const activeCorpus = useActiveRepo();
-
   const config = useConfigStore((s) => s.config);
   const loadConfig = useConfigStore((s) => s.loadConfig);
 
-  const topn = config?.reranking?.tribrid_reranker_topn ?? 50;
+  const {
+    status,
+    stats,
+    mineTriplets,
+    trainModel,
+    evaluateModel,
+    getLogs,
+    downloadLogs,
+    clearLogs,
+    refreshStats,
+  } = useReranker();
 
   const [scope, setScope] = useState<RerankerTrainRunsScope>('corpus');
+  const [inspectorTab, setInspectorTab] = useState<InspectorTab>('run-hud');
+  const [bottomTab, setBottomTab] = useState<BottomTab>('timeline');
 
   const [profile, setProfile] = useState<CorpusEvalProfile | null>(null);
   const [profileLoading, setProfileLoading] = useState(false);
@@ -76,15 +118,67 @@ export function TrainingStudio() {
   const [runsLoading, setRunsLoading] = useState(false);
   const [runsError, setRunsError] = useState<string | null>(null);
 
-  const [selectedRunId, setSelectedRunId] = useState<string>('');
+  const [selectedRunId, setSelectedRunId] = useState('');
   const [selectedRun, setSelectedRun] = useState<RerankerTrainRun | null>(null);
+
   const [events, setEvents] = useState<RerankerTrainMetricEvent[]>([]);
   const [latestMetrics, setLatestMetrics] = useState<Record<string, number> | null>(null);
+
+  const telemetryRef = useRef<TelemetryPoint[]>([]);
+  const telemetryPendingRef = useRef<TelemetryPoint[]>([]);
+  const telemetryFlushRafRef = useRef<number | null>(null);
+  const [telemetryCount, setTelemetryCount] = useState(0);
+
   const [promoting, setPromoting] = useState(false);
   const [eventQuery, setEventQuery] = useState('');
 
-  const [primaryMetricOverride, setPrimaryMetricOverride] = useState<string>(''); // '' = auto
-  const [primaryKOverride, setPrimaryKOverride] = useState<string>(''); // '' = auto
+  const [primaryMetricOverride, setPrimaryMetricOverride] = useState<string>('');
+  const [primaryKOverride, setPrimaryKOverride] = useState<string>('');
+
+  const [logsLoading, setLogsLoading] = useState(false);
+  const [logs, setLogs] = useState<any[]>([]);
+
+  const [probeQuery, setProbeQuery] = useState('auth login flow');
+  const [probeDocument, setProbeDocument] = useState('auth login token flow good');
+  const [probeIncludeLogits, setProbeIncludeLogits] = useState(false);
+  const [probeLoading, setProbeLoading] = useState(false);
+  const [probeResult, setProbeResult] = useState<RerankerScoreResponse | null>(null);
+
+  const [modelPath, setModelPath] = useConfigField<string>(
+    'training.tribrid_reranker_model_path',
+    'models/cross-encoder-tribrid'
+  );
+  const [logPath, setLogPath] = useConfigField<string>('tracing.tribrid_log_path', 'data/logs/queries.jsonl');
+  const [tripletsPath, setTripletsPath] = useConfigField<string>(
+    'training.tribrid_triplets_path',
+    'data/training/triplets.jsonl'
+  );
+  const [tripletsMineMode, setTripletsMineMode] = useConfigField<string>('training.triplets_mine_mode', 'replace');
+  const [tripletsMinCount, setTripletsMinCount] = useConfigField<number>('training.triplets_min_count', 100);
+  const [epochs, setEpochs] = useConfigField<number>('training.reranker_train_epochs', 2);
+  const [trainBatch, setTrainBatch] = useConfigField<number>('training.reranker_train_batch', 16);
+  const [trainLr, setTrainLr] = useConfigField<number>('training.reranker_train_lr', 0.00002);
+  const [warmupRatio, setWarmupRatio] = useConfigField<number>('training.reranker_warmup_ratio', 0.1);
+  const [maxLen] = useConfigField<number>('reranking.tribrid_reranker_maxlen', 512);
+  const [learningBackend, setLearningBackend] = useConfigField<LearningBackend>('training.learning_reranker_backend', 'auto');
+  const [learningBaseModel, setLearningBaseModel] = useConfigField<string>(
+    'training.learning_reranker_base_model',
+    'Qwen/Qwen3-Reranker-0.6B'
+  );
+  const [loraRank, setLoraRank] = useConfigField<number>('training.learning_reranker_lora_rank', 16);
+  const [loraAlpha, setLoraAlpha] = useConfigField<number>('training.learning_reranker_lora_alpha', 32.0);
+  const [loraDropout, setLoraDropout] = useConfigField<number>('training.learning_reranker_lora_dropout', 0.05);
+  const [loraTargetModules, setLoraTargetModules] = useConfigField<string[]>(
+    'training.learning_reranker_lora_target_modules',
+    ['q_proj', 'k_proj', 'v_proj', 'o_proj']
+  );
+  const [negativeRatio, setNegativeRatio] = useConfigField<number>('training.learning_reranker_negative_ratio', 5);
+  const [gradAccumSteps, setGradAccumSteps] = useConfigField<number>('training.learning_reranker_grad_accum_steps', 8);
+  const [promoteIfImproves, setPromoteIfImproves] = useConfigField<number>('training.learning_reranker_promote_if_improves', 1);
+  const [promoteEpsilon, setPromoteEpsilon] = useConfigField<number>('training.learning_reranker_promote_epsilon', 0.0);
+  const [unloadAfterSec, setUnloadAfterSec] = useConfigField<number>('training.learning_reranker_unload_after_sec', 0);
+
+  const topn = config?.reranking?.tribrid_reranker_topn ?? 50;
 
   const kOptions = useMemo(() => {
     const base = [5, 10, 20];
@@ -104,12 +198,34 @@ export function TrainingStudio() {
     return groups;
   }, [runs, scope, activeCorpus]);
 
-  // Ensure config is loaded (needed to clamp k options)
+  const pushTelemetry = (point: TelemetryPoint) => {
+    telemetryPendingRef.current.push(point);
+    if (telemetryFlushRafRef.current != null) return;
+
+    telemetryFlushRafRef.current = requestAnimationFrame(() => {
+      telemetryFlushRafRef.current = null;
+      if (!telemetryPendingRef.current.length) return;
+      const merged = telemetryRef.current.concat(telemetryPendingRef.current);
+      telemetryPendingRef.current = [];
+      telemetryRef.current = merged.slice(-TELEMETRY_RING_LIMIT);
+      setTelemetryCount(telemetryRef.current.length);
+    });
+  };
+
+  const resetTelemetry = () => {
+    telemetryPendingRef.current = [];
+    telemetryRef.current = [];
+    setTelemetryCount(0);
+  };
+
   useEffect(() => {
     if (!config) void loadConfig();
   }, [config, loadConfig]);
 
-  // Load profile for active corpus
+  useEffect(() => {
+    void refreshStats();
+  }, [refreshStats]);
+
   useEffect(() => {
     if (!activeCorpus) {
       setProfile(null);
@@ -120,6 +236,7 @@ export function TrainingStudio() {
     let cancelled = false;
     setProfileLoading(true);
     setProfileError(null);
+
     void rerankerTrainingService
       .getProfile(activeCorpus)
       .then((p) => {
@@ -141,7 +258,6 @@ export function TrainingStudio() {
     };
   }, [activeCorpus]);
 
-  // Load runs
   useEffect(() => {
     if (!activeCorpus && scope === 'corpus') {
       setRuns([]);
@@ -152,6 +268,7 @@ export function TrainingStudio() {
     let cancelled = false;
     setRunsLoading(true);
     setRunsError(null);
+
     void rerankerTrainingService
       .listRuns(activeCorpus || '', scope, 50)
       .then((res) => {
@@ -175,13 +292,14 @@ export function TrainingStudio() {
     };
   }, [activeCorpus, scope, selectedRunId]);
 
-  // Selected run details + SSE
   const closeSseRef = useRef<null | (() => void)>(null);
+
   useEffect(() => {
     if (!selectedRunId) {
       setSelectedRun(null);
       setEvents([]);
       setLatestMetrics(null);
+      resetTelemetry();
       return;
     }
 
@@ -191,7 +309,7 @@ export function TrainingStudio() {
     let cancelled = false;
     void Promise.all([
       rerankerTrainingService.getRun(selectedRunId),
-      rerankerTrainingService.getMetrics(selectedRunId, 500),
+      rerankerTrainingService.getMetrics(selectedRunId, 2000),
     ])
       .then(([run, metricsRes]) => {
         if (cancelled) return;
@@ -199,25 +317,35 @@ export function TrainingStudio() {
         setSelectedRun(run);
         setEvents(evs);
         setLatestMetrics(latestMetricsFromEvents(evs));
+
+        const telemetry = evs
+          .map(toTelemetryPoint)
+          .filter((x): x is TelemetryPoint => x != null)
+          .slice(-TELEMETRY_RING_LIMIT);
+        telemetryRef.current = telemetry;
+        telemetryPendingRef.current = [];
+        setTelemetryCount(telemetry.length);
       })
       .catch(() => {
         if (cancelled) return;
         setSelectedRun(null);
         setEvents([]);
         setLatestMetrics(null);
+        resetTelemetry();
       });
 
-    // Stream updates (best-effort)
     closeSseRef.current = rerankerTrainingService.streamRun(
       selectedRunId,
       (ev) => {
+        const tel = toTelemetryPoint(ev);
+        if (tel) pushTelemetry(tel);
+
         setEvents((prev) => {
-          const next = [...prev, ev].slice(-2000);
+          const next = [...prev, ev].slice(-4000);
           setLatestMetrics(latestMetricsFromEvents(next));
           return next;
         });
 
-        // Keep run status in sync without requiring a manual refresh/reload.
         const terminal = ev.status && ['completed', 'failed', 'cancelled'].includes(String(ev.status));
         if (terminal) {
           setSelectedRun((prev) => {
@@ -242,9 +370,7 @@ export function TrainingStudio() {
         }
       },
       {
-        onError: (msg) => {
-          notifyError(msg);
-        },
+        onError: (msg) => notifyError(msg),
       }
     );
 
@@ -254,6 +380,21 @@ export function TrainingStudio() {
       closeSseRef.current = null;
     };
   }, [selectedRunId, notifyError]);
+
+  useEffect(() => {
+    if (bottomTab !== 'logs') return;
+    setLogsLoading(true);
+    void getLogs()
+      .then((res) => {
+        setLogs(res?.logs || []);
+      })
+      .catch((e) => {
+        notifyError(e instanceof Error ? e.message : 'Failed to load logs');
+      })
+      .finally(() => {
+        setLogsLoading(false);
+      });
+  }, [bottomTab, getLogs, notifyError]);
 
   const recommended = useMemo(() => {
     if (!profile) return null;
@@ -267,7 +408,7 @@ export function TrainingStudio() {
     const snap: any = run.config_snapshot || {};
     const backend = String(snap?.training?.learning_reranker_backend ?? '');
     const baseModel = String(snap?.training?.learning_reranker_base_model ?? '');
-    const modelPath = String(snap?.training?.tribrid_reranker_model_path ?? '');
+    const activePath = String(snap?.training?.tribrid_reranker_model_path ?? '');
 
     const started = new Date(run.started_at);
     const done = run.completed_at ? new Date(run.completed_at) : null;
@@ -276,15 +417,13 @@ export function TrainingStudio() {
       Number.isFinite(started.getTime()) && (done ? Number.isFinite(done.getTime()) : true)
         ? (done ? done.getTime() : now.getTime()) - started.getTime()
         : null;
-    const durSec = durMs == null ? null : Math.max(0, durMs / 1000);
 
-    const last = lastEventMeta(events);
     return {
       backend: backend || '—',
       baseModel: baseModel || '—',
-      modelPath: modelPath || '—',
-      durationSec: durSec,
-      last,
+      activePath: activePath || '—',
+      durationSec: durMs == null ? null : Math.max(0, durMs / 1000),
+      last: lastEventMeta(events),
     };
   }, [selectedRun, events]);
 
@@ -297,11 +436,10 @@ export function TrainingStudio() {
     });
   }, [events, eventQuery]);
 
-  const onStart = async () => {
+  const onStartRun = async () => {
     if (!activeCorpus) return;
     try {
       info('Starting training run…');
-
       const payload: RerankerTrainStartRequest = { corpus_id: activeCorpus };
       if (primaryMetricOverride) payload.primary_metric = primaryMetricOverride as any;
       if (primaryKOverride) payload.primary_k = Number(primaryKOverride);
@@ -309,10 +447,10 @@ export function TrainingStudio() {
       const res = await rerankerTrainingService.startRun(payload);
       success(`Run started: ${res.run_id}`);
 
-      // Refresh list + select new run
       const list = await rerankerTrainingService.listRuns(activeCorpus, scope, 50);
       setRuns(list.runs || []);
       setSelectedRunId(res.run_id);
+      setInspectorTab('run-hud');
     } catch (e) {
       notifyError(e instanceof Error ? e.message : 'Failed to start run');
     }
@@ -336,456 +474,599 @@ export function TrainingStudio() {
     }
   };
 
+  const handleMine = async () => {
+    try {
+      info('Mining triplets…');
+      const res = await mineTriplets();
+      if (res?.ok) success('Triplet mining complete');
+      else notifyError(res?.error || 'Triplet mining failed');
+      await refreshStats();
+    } catch (e) {
+      notifyError(e instanceof Error ? e.message : 'Triplet mining failed');
+    }
+  };
+
+  const handleTrain = async () => {
+    try {
+      info('Training reranker…');
+      const res = await trainModel({ epochs, batch_size: trainBatch, max_length: maxLen });
+      if (res?.ok) success(res?.run_id ? `Training started (${res.run_id})` : 'Training started');
+      else notifyError(res?.error || 'Training failed');
+      await refreshStats();
+    } catch (e) {
+      notifyError(e instanceof Error ? e.message : 'Training failed');
+    }
+  };
+
+  const handleEvaluate = async () => {
+    try {
+      info('Evaluating reranker…');
+      const res = await evaluateModel();
+      if (res?.ok) success('Evaluation complete');
+      else notifyError(res?.error || 'Evaluation failed');
+    } catch (e) {
+      notifyError(e instanceof Error ? e.message : 'Evaluation failed');
+    }
+  };
+
+  const handleProbeScore = async () => {
+    if (!activeCorpus) {
+      notifyError('No active corpus selected');
+      return;
+    }
+    setProbeLoading(true);
+    setProbeResult(null);
+    try {
+      const res = await rerankerTrainingService.scorePair({
+        corpus_id: activeCorpus,
+        query: String(probeQuery || ''),
+        document: String(probeDocument || ''),
+        include_logits: probeIncludeLogits,
+        mode: 'learning',
+      });
+      setProbeResult(res);
+      if (!res.ok) notifyError(res.error || 'Scoring failed');
+    } catch (e) {
+      notifyError(e instanceof Error ? e.message : 'Scoring failed');
+    } finally {
+      setProbeLoading(false);
+    }
+  };
+
+  const inspectorTabs: Array<{ id: InspectorTab; label: string }> = [
+    { id: 'run-hud', label: 'Run HUD' },
+    { id: 'live-metrics', label: 'Live Metrics' },
+    { id: 'overview', label: 'Run Overview' },
+    { id: 'diff', label: 'Run Diff' },
+    { id: 'config', label: 'Paths + Config' },
+    { id: 'debug-score', label: 'Debug Score Pair' },
+  ];
+
+  const disabledLegacy = status.running;
+
   return (
-    <div style={{ marginBottom: 18 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12 }}>
+    <section className="training-studio-root" data-testid="reranker-training-studio">
+      <header className="training-studio-header">
         <div>
-          <div style={{ fontWeight: 700, marginBottom: 4 }}>Training Studio</div>
-          <div style={{ fontSize: 12, color: 'var(--fg-muted)' }}>
-            North Star metric is chosen once at run start and persisted.
-          </div>
+          <h2 className="studio-title">Learning Reranker Training Studio</h2>
+          <p className="studio-subtitle">
+            Physics-inspired command center with real backend telemetry streaming.
+          </p>
         </div>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <div style={{ fontSize: 12, color: 'var(--fg-muted)' }}>Scope</div>
-          <div style={{ display: 'flex', gap: 6 }}>
-            <button
-              className="small-button"
-              onClick={() => setScope('corpus')}
-              style={{
-                background: scope === 'corpus' ? 'var(--accent)' : 'var(--bg-elev2)',
-                color: scope === 'corpus' ? 'var(--accent-contrast)' : 'var(--fg)',
-              }}
-            >
-              This corpus
-            </button>
-            <button
-              className="small-button"
-              onClick={() => setScope('all')}
-              style={{
-                background: scope === 'all' ? 'var(--accent)' : 'var(--bg-elev2)',
-                color: scope === 'all' ? 'var(--accent-contrast)' : 'var(--fg)',
-              }}
-            >
-              All
-            </button>
-          </div>
+        <div className="studio-header-actions">
+          <button className="small-button" onClick={() => setScope('corpus')} data-active={scope === 'corpus'}>
+            This corpus
+          </button>
+          <button className="small-button" onClick={() => setScope('all')} data-active={scope === 'all'}>
+            All corpora
+          </button>
+          <button className="small-button" onClick={onStartRun} disabled={!activeCorpus} data-testid="studio-start-run">
+            Start Run
+          </button>
         </div>
-      </div>
+      </header>
 
-      <div
-        style={{
-          background: 'var(--bg-elev1)',
-          border: '1px solid var(--line)',
-          borderRadius: 10,
-          padding: 14,
-          marginTop: 12,
-        }}
-      >
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-          <div>
-            <div style={{ fontSize: 12, color: 'var(--fg-muted)', marginBottom: 4 }}>Active corpus</div>
-            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 13 }}>{activeCorpus || '—'}</div>
-          </div>
-          <div>
-            <div style={{ fontSize: 12, color: 'var(--fg-muted)', marginBottom: 4 }}>
-              Recommended metric <TooltipIcon name="RERANKER_TRAIN_RECOMMENDED_METRIC" />
-            </div>
-            {profileLoading ? (
-              <div style={{ fontSize: 12, color: 'var(--fg-muted)' }}>Loading…</div>
-            ) : profileError ? (
-              <div style={{ fontSize: 12, color: 'var(--err)' }}>{profileError}</div>
-            ) : recommended ? (
-              <div style={{ fontSize: 13 }}>
-                <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 700 }}>{recommended}</span>{' '}
-                {profile?.rationale ? (
-                  <span style={{ marginLeft: 8, fontSize: 12, color: 'var(--fg-muted)' }}>
-                    <span title={profile.rationale} style={{ cursor: 'help', textDecoration: 'underline' }}>
-                      Why
-                    </span>
-                    <TooltipIcon name="RERANKER_TRAIN_RECOMMENDED_METRIC" />
-                  </span>
-                ) : null}
-              </div>
-            ) : (
-              <div style={{ fontSize: 12, color: 'var(--fg-muted)' }}>—</div>
-            )}
-          </div>
+      <div className="studio-run-setup">
+        <div className="studio-run-setup-item">
+          <span className="studio-label">Corpus</span>
+          <span className="studio-value studio-mono">{activeCorpus || '—'}</span>
         </div>
-
-        <div style={{ marginTop: 12 }}>
-          <details>
-            <summary style={{ cursor: 'pointer', fontWeight: 600 }}>Advanced</summary>
-            <div style={{ marginTop: 12 }}>
-              <div className="input-row" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                <div className="input-group">
-                  <label>
-                    Primary metric override <TooltipIcon name="RERANKER_TRAIN_PRIMARY_METRIC_OVERRIDE" />
-                  </label>
-                  <select value={primaryMetricOverride} onChange={(e) => setPrimaryMetricOverride(e.target.value)}>
-                    <option value="">Auto (use profile)</option>
-                    <option value="mrr">mrr</option>
-                    <option value="ndcg">ndcg</option>
-                    <option value="map">map</option>
-                  </select>
-                </div>
-                <div className="input-group">
-                  <label>
-                    Primary k override <TooltipIcon name="RERANKER_TRAIN_PRIMARY_K_OVERRIDE" />
-                  </label>
-                  <select value={primaryKOverride} onChange={(e) => setPrimaryKOverride(e.target.value)}>
-                    <option value="">Auto (use profile)</option>
-                    {kOptions.map((k) => (
-                      <option key={k} value={String(k)}>
-                        {k}
-                      </option>
-                    ))}
-                  </select>
-                  <div style={{ marginTop: 6, fontSize: 12, color: 'var(--fg-muted)' }}>
-                    Options are clamped to ≤ <span style={{ fontFamily: 'var(--font-mono)' }}>{String(topn)}</span>.
-                  </div>
-                </div>
-              </div>
-
-              <div style={{ marginTop: 12, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                <button className="small-button" onClick={onStart} disabled={!activeCorpus}>
-                  Start run
-                </button>
-              </div>
-            </div>
-          </details>
+        <div className="studio-run-setup-item">
+          <span className="studio-label">
+            Recommended Metric <TooltipIcon name="RERANKER_TRAIN_RECOMMENDED_METRIC" />
+          </span>
+          <span className="studio-value">
+            {profileLoading
+              ? 'Loading…'
+              : profileError
+              ? profileError
+              : recommended || '—'}
+          </span>
         </div>
-      </div>
-
-      <div style={{ marginTop: 12, display: 'grid', gridTemplateColumns: 'minmax(280px, 420px) 1fr', gap: 12 }}>
-        <div
-          style={{
-            background: 'var(--bg-elev1)',
-            border: '1px solid var(--line)',
-            borderRadius: 10,
-            padding: 14,
-            maxHeight: 520,
-            overflow: 'auto',
-          }}
-        >
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 10 }}>
-            <div style={{ fontWeight: 600 }}>Runs</div>
-            <div style={{ fontSize: 12, color: 'var(--fg-muted)' }}>{runsLoading ? 'Loading…' : `${runs.length}`}</div>
-          </div>
-          {runsError && <div style={{ marginTop: 8, fontSize: 12, color: 'var(--err)' }}>{runsError}</div>}
-
-          {!runsLoading && runs.length === 0 ? (
-            <div style={{ marginTop: 10, fontSize: 12, color: 'var(--fg-muted)' }}>No runs yet.</div>
-          ) : (
-            <div style={{ marginTop: 10 }}>
-              {Object.entries(groupedRuns).map(([corpusId, items]) => (
-                <div key={corpusId || 'unknown'} style={{ marginBottom: 12 }}>
-                  {scope === 'all' ? (
-                    <div style={{ marginBottom: 6, fontSize: 12, color: 'var(--fg-muted)' }}>
-                      <span
-                        style={{
-                          display: 'inline-block',
-                          padding: '2px 8px',
-                          borderRadius: 999,
-                          border: '1px solid var(--line)',
-                          background: 'var(--bg-elev2)',
-                          fontFamily: 'var(--font-mono)',
-                        }}
-                      >
-                        {corpusId || '—'}
-                      </span>
-                    </div>
-                  ) : null}
-
-                  <div style={{ display: 'grid', gap: 8 }}>
-                    {items.map((r) => {
-                      const isSelected = r.run_id === selectedRunId;
-                      const label = metricLabel(r.primary_metric, Number(r.primary_k));
-                      return (
-                        <button
-                          key={r.run_id}
-                          onClick={() => setSelectedRunId(r.run_id)}
-                          style={{
-                            textAlign: 'left',
-                            borderRadius: 10,
-                            border: isSelected ? '2px solid var(--accent)' : '1px solid var(--line)',
-                            background: isSelected ? 'rgba(var(--accent-rgb), 0.08)' : 'var(--bg-elev2)',
-                            color: 'var(--fg)',
-                            padding: 10,
-                            cursor: 'pointer',
-                          }}
-                        >
-                          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10 }}>
-                            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}>{r.run_id}</div>
-                            {scope === 'all' ? (
-                              <div style={{ fontSize: 11, color: 'var(--fg-muted)' }}>{r.corpus_id}</div>
-                            ) : null}
-                          </div>
-                          <div style={{ marginTop: 4, fontSize: 12, color: 'var(--fg-muted)' }}>
-                            {safeDateLabel(r.started_at)} · {r.status} ·{' '}
-                            <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--fg)' }}>{label}</span>
-                          </div>
-                          <div style={{ marginTop: 4, fontSize: 12, color: 'var(--fg-muted)' }}>
-                            best={r.primary_metric_best ?? '—'} · final={r.primary_metric_final ?? '—'}
-                          </div>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
+        <div className="studio-run-setup-item">
+          <span className="studio-label">Primary override</span>
+          <div className="studio-inline-row">
+            <select value={primaryMetricOverride} onChange={(e) => setPrimaryMetricOverride(e.target.value)}>
+              <option value="">Auto metric</option>
+              <option value="mrr">mrr</option>
+              <option value="ndcg">ndcg</option>
+              <option value="map">map</option>
+            </select>
+            <select value={primaryKOverride} onChange={(e) => setPrimaryKOverride(e.target.value)}>
+              <option value="">Auto k</option>
+              {kOptions.map((k) => (
+                <option key={k} value={String(k)}>
+                  {k}
+                </option>
               ))}
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div className="training-studio-grid">
+        <aside className="studio-left-dock studio-panel">
+          <header className="studio-panel-header">
+            <h3 className="studio-panel-title">Runs</h3>
+            <span className="studio-chip">{runsLoading ? 'Loading…' : `${runs.length}`}</span>
+          </header>
+
+          {runsError ? <div className="studio-callout studio-callout-err">{runsError}</div> : null}
+
+          <div className="studio-run-list">
+            {Object.entries(groupedRuns).map(([corpusId, items]) => (
+              <section key={corpusId || 'unknown'} className="studio-run-group">
+                {scope === 'all' ? <div className="studio-run-group-label studio-mono">{corpusId || '—'}</div> : null}
+                {items.map((r) => {
+                  const isSelected = r.run_id === selectedRunId;
+                  return (
+                    <button
+                      key={r.run_id}
+                      className="studio-run-item"
+                      data-selected={isSelected}
+                      onClick={() => setSelectedRunId(r.run_id)}
+                    >
+                      <div className="studio-run-item-top">
+                        <span className="studio-mono">{r.run_id}</span>
+                        <span>{r.status}</span>
+                      </div>
+                      <div className="studio-run-item-meta">
+                        {safeDateLabel(r.started_at)} · {metricLabel(r.primary_metric, Number(r.primary_k))}
+                      </div>
+                    </button>
+                  );
+                })}
+              </section>
+            ))}
+            {!runsLoading && runs.length === 0 ? <p className="studio-empty">No runs yet.</p> : null}
+          </div>
+        </aside>
+
+        <main className="studio-center-stage">
+          <NeuralVisualizer pointsRef={telemetryRef} pointCount={telemetryCount} />
+        </main>
+
+        <aside className="studio-right-dock studio-panel">
+          <div className="studio-tab-row">
+            {inspectorTabs.map((tab) => (
+              <button
+                key={tab.id}
+                className="studio-tab-btn"
+                data-active={inspectorTab === tab.id}
+                onClick={() => setInspectorTab(tab.id)}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+
+          <div className="studio-inspector-body">
+            {inspectorTab === 'run-hud' ? (
+              <section className="studio-panel studio-compact-panel">
+                <header className="studio-panel-header">
+                  <h3 className="studio-panel-title">Run HUD</h3>
+                  <button
+                    className="small-button"
+                    onClick={onPromote}
+                    disabled={!selectedRunId || selectedRun?.status !== 'completed' || promoting}
+                  >
+                    {promoting ? 'Promoting…' : 'Promote'}
+                  </button>
+                </header>
+                {selectedRun ? (
+                  <div className="studio-keyvals">
+                    <div><span>status</span><span className="studio-mono">{selectedRun.status}</span></div>
+                    <div><span>backend</span><span className="studio-mono">{hud?.backend || '—'}</span></div>
+                    <div><span>base_model</span><span className="studio-mono studio-truncate" title={hud?.baseModel || ''}>{hud?.baseModel || '—'}</span></div>
+                    <div><span>active_path</span><span className="studio-mono studio-truncate" title={hud?.activePath || ''}>{hud?.activePath || '—'}</span></div>
+                    <div><span>duration</span><span className="studio-mono">{hud?.durationSec == null ? '—' : `${hud.durationSec.toFixed(1)}s`}</span></div>
+                    <div><span>step</span><span className="studio-mono">{hud?.last?.step ?? '—'}</span></div>
+                  </div>
+                ) : (
+                  <p className="studio-empty">Select a run.</p>
+                )}
+              </section>
+            ) : null}
+
+            {inspectorTab === 'live-metrics' ? (
+              <section className="studio-panel studio-compact-panel">
+                <header className="studio-panel-header">
+                  <h3 className="studio-panel-title">Live Metrics</h3>
+                </header>
+                {latestMetrics ? (
+                  <div className="studio-metric-grid">
+                    {Object.entries(latestMetrics).map(([k, v]) => (
+                      <article key={k} className="studio-metric-card">
+                        <span className="studio-metric-name">{k}</span>
+                        <span className="studio-metric-value studio-mono">{formatMetricValue(Number(v))}</span>
+                      </article>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="studio-empty">No metric events yet.</p>
+                )}
+
+                <div className="studio-status-block">
+                  <div className="studio-status-line" data-testid="reranker-status-run-id">
+                    run_id={status.run_id || '—'}
+                  </div>
+                  <div className="studio-status-line">
+                    running={String(status.running)} task={status.task || '—'} progress={status.progress}%
+                  </div>
+                  {status.result?.output ? (
+                    <pre className="studio-pre" data-testid="reranker-status-output">{status.result.output}</pre>
+                  ) : null}
+                  {status.result?.error ? (
+                    <pre className="studio-pre studio-pre-err" data-testid="reranker-status-error">{status.result.error}</pre>
+                  ) : null}
+                </div>
+              </section>
+            ) : null}
+
+            {inspectorTab === 'overview' ? <RunOverview run={selectedRun} latestMetrics={latestMetrics} /> : null}
+            {inspectorTab === 'diff' ? <RunDiff runs={runs} /> : null}
+
+            {inspectorTab === 'config' ? (
+              <section className="studio-panel studio-compact-panel" data-testid="studio-config-panel">
+                <header className="studio-panel-header">
+                  <h3 className="studio-panel-title">Paths + Mining / Training Config</h3>
+                </header>
+
+                <div className="studio-form-grid one">
+                  <div className="input-group">
+                    <label>Model path <TooltipIcon name="TRIBRID_RERANKER_MODEL_PATH" /></label>
+                    <input type="text" value={modelPath} onChange={(e) => setModelPath(e.target.value)} />
+                  </div>
+                  <div className="input-group">
+                    <label>Logs path <TooltipIcon name="TRIBRID_LOG_PATH" /></label>
+                    <input type="text" value={logPath} onChange={(e) => setLogPath(e.target.value)} />
+                  </div>
+                  <div className="input-group">
+                    <label>Triplets path <TooltipIcon name="TRIBRID_TRIPLETS_PATH" /></label>
+                    <input type="text" value={tripletsPath} onChange={(e) => setTripletsPath(e.target.value)} />
+                  </div>
+                </div>
+
+                <div className="studio-form-grid two">
+                  <div className="input-group">
+                    <label>Backend <TooltipIcon name="LEARNING_RERANKER_BACKEND" /></label>
+                    <select value={learningBackend} onChange={(e) => setLearningBackend(e.target.value as LearningBackend)}>
+                      <option value="auto">auto (platform gated)</option>
+                      <option value="transformers">transformers</option>
+                      <option value="mlx_qwen3">mlx_qwen3</option>
+                    </select>
+                  </div>
+                  <div className="input-group">
+                    <label>Base model <TooltipIcon name="LEARNING_RERANKER_BASE_MODEL" /></label>
+                    <input type="text" value={learningBaseModel} onChange={(e) => setLearningBaseModel(e.target.value)} />
+                  </div>
+                  <div className="input-group">
+                    <label>Triplets mine mode <TooltipIcon name="TRIPLETS_MINE_MODE" /></label>
+                    <select value={tripletsMineMode} onChange={(e) => setTripletsMineMode(e.target.value)}>
+                      <option value="replace">Replace</option>
+                      <option value="append">Append</option>
+                    </select>
+                  </div>
+                  <div className="input-group">
+                    <label>Triplets min count <TooltipIcon name="TRIPLETS_MIN_COUNT" /></label>
+                    <input
+                      type="number"
+                      min={10}
+                      max={10000}
+                      value={tripletsMinCount}
+                      onChange={(e) => setTripletsMinCount(parseInt(e.target.value || '10', 10))}
+                    />
+                  </div>
+                  <div className="input-group">
+                    <label>Epochs <TooltipIcon name="RERANKER_TRAIN_EPOCHS" /></label>
+                    <input type="number" min={1} max={50} value={epochs} onChange={(e) => setEpochs(parseInt(e.target.value || '1', 10))} />
+                  </div>
+                  <div className="input-group">
+                    <label>Batch <TooltipIcon name="RERANKER_TRAIN_BATCH" /></label>
+                    <input type="number" min={1} max={256} value={trainBatch} onChange={(e) => setTrainBatch(parseInt(e.target.value || '1', 10))} />
+                  </div>
+                  <div className="input-group">
+                    <label>Warmup ratio <TooltipIcon name="RERANKER_WARMUP_RATIO" /></label>
+                    <input
+                      type="number"
+                      min={0}
+                      max={0.5}
+                      step={0.01}
+                      value={warmupRatio}
+                      onChange={(e) => setWarmupRatio(parseFloat(e.target.value || '0'))}
+                    />
+                  </div>
+                  <div className="input-group">
+                    <label>Learning rate <TooltipIcon name="RERANKER_TRAIN_LR" /></label>
+                    <input
+                      type="number"
+                      min={0.000001}
+                      max={0.001}
+                      step={0.000001}
+                      value={trainLr}
+                      onChange={(e) => setTrainLr(parseFloat(e.target.value || '0.00002'))}
+                    />
+                  </div>
+                </div>
+
+                <details className="studio-details">
+                  <summary>MLX LoRA + promotion (advanced)</summary>
+                  <div className="studio-form-grid two">
+                    <div className="input-group">
+                      <label>LoRA rank <TooltipIcon name="LEARNING_RERANKER_LORA_RANK" /></label>
+                      <input type="number" min={1} max={128} value={loraRank} onChange={(e) => setLoraRank(parseInt(e.target.value || '16', 10))} />
+                    </div>
+                    <div className="input-group">
+                      <label>LoRA alpha <TooltipIcon name="LEARNING_RERANKER_LORA_ALPHA" /></label>
+                      <input
+                        type="number"
+                        min={0.01}
+                        max={512}
+                        step={0.5}
+                        value={loraAlpha}
+                        onChange={(e) => setLoraAlpha(parseFloat(e.target.value || '32'))}
+                      />
+                    </div>
+                    <div className="input-group">
+                      <label>LoRA dropout <TooltipIcon name="LEARNING_RERANKER_LORA_DROPOUT" /></label>
+                      <input
+                        type="number"
+                        min={0}
+                        max={0.5}
+                        step={0.01}
+                        value={loraDropout}
+                        onChange={(e) => setLoraDropout(parseFloat(e.target.value || '0.05'))}
+                      />
+                    </div>
+                    <div className="input-group">
+                      <label>Target modules <TooltipIcon name="LEARNING_RERANKER_LORA_TARGET_MODULES" /></label>
+                      <input
+                        type="text"
+                        value={(loraTargetModules || []).join(', ')}
+                        onChange={(e) =>
+                          setLoraTargetModules(
+                            String(e.target.value || '')
+                              .split(',')
+                              .map((v) => v.trim())
+                              .filter(Boolean)
+                          )
+                        }
+                      />
+                    </div>
+                    <div className="input-group">
+                      <label>Negative ratio <TooltipIcon name="LEARNING_RERANKER_NEGATIVE_RATIO" /></label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={20}
+                        value={negativeRatio}
+                        onChange={(e) => setNegativeRatio(parseInt(e.target.value || '5', 10))}
+                      />
+                    </div>
+                    <div className="input-group">
+                      <label>Grad accum steps <TooltipIcon name="LEARNING_RERANKER_GRAD_ACCUM_STEPS" /></label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={128}
+                        value={gradAccumSteps}
+                        onChange={(e) => setGradAccumSteps(parseInt(e.target.value || '8', 10))}
+                      />
+                    </div>
+                    <div className="input-group">
+                      <label>Auto promote <TooltipIcon name="LEARNING_RERANKER_PROMOTE_IF_IMPROVES" /></label>
+                      <select value={promoteIfImproves} onChange={(e) => setPromoteIfImproves(parseInt(e.target.value, 10))}>
+                        <option value={1}>Yes</option>
+                        <option value={0}>No</option>
+                      </select>
+                    </div>
+                    <div className="input-group">
+                      <label>Promote epsilon <TooltipIcon name="LEARNING_RERANKER_PROMOTE_EPSILON" /></label>
+                      <input
+                        type="number"
+                        min={0}
+                        max={1}
+                        step={0.0001}
+                        value={promoteEpsilon}
+                        onChange={(e) => setPromoteEpsilon(parseFloat(e.target.value || '0'))}
+                      />
+                    </div>
+                    <div className="input-group">
+                      <label>Unload after sec <TooltipIcon name="LEARNING_RERANKER_UNLOAD_AFTER_SEC" /></label>
+                      <input
+                        type="number"
+                        min={0}
+                        max={86400}
+                        value={unloadAfterSec}
+                        onChange={(e) => setUnloadAfterSec(parseInt(e.target.value || '0', 10))}
+                      />
+                    </div>
+                  </div>
+                </details>
+
+                <div className="studio-action-row">
+                  <button className="small-button" onClick={handleMine} disabled={disabledLegacy} data-testid="reranker-mine">
+                    {disabledLegacy && status.task === 'mining' ? 'Mining…' : 'Mine triplets'}
+                  </button>
+                  <button className="small-button" onClick={handleTrain} disabled={disabledLegacy} data-testid="reranker-train">
+                    {disabledLegacy && status.task === 'training' ? 'Training…' : 'Train'}
+                  </button>
+                  <button className="small-button" onClick={handleEvaluate} disabled={disabledLegacy} data-testid="reranker-evaluate">
+                    {disabledLegacy && status.task === 'evaluating' ? 'Evaluating…' : 'Evaluate'}
+                  </button>
+                  <button className="small-button" onClick={() => void refreshStats()} data-testid="reranker-refresh-counts">
+                    Refresh counts
+                  </button>
+                </div>
+
+                <div className="studio-kpi-grid">
+                  <article className="studio-metric-card">
+                    <span className="studio-metric-name">Logged queries</span>
+                    <span className="studio-metric-value" data-testid="reranker-logs-count">{stats.queryCount}</span>
+                    <span className="studio-mini-note studio-mono" title={logPath}>{logPath}</span>
+                  </article>
+                  <article className="studio-metric-card">
+                    <span className="studio-metric-name">Triplets</span>
+                    <span className="studio-metric-value" data-testid="reranker-triplets-count">{stats.tripletCount}</span>
+                    <span className="studio-mini-note studio-mono" title={tripletsPath}>{tripletsPath}</span>
+                  </article>
+                  <article className="studio-metric-card">
+                    <span className="studio-metric-name">Cost estimate</span>
+                    <span className="studio-metric-value">${stats.cost24h.toFixed(4)}</span>
+                    <span className="studio-mini-note">avg/query ${stats.costAvg.toFixed(4)}</span>
+                  </article>
+                </div>
+              </section>
+            ) : null}
+
+            {inspectorTab === 'debug-score' ? (
+              <section className="studio-panel studio-compact-panel" data-testid="studio-debug-score">
+                <header className="studio-panel-header">
+                  <h3 className="studio-panel-title">Debug Score Pair</h3>
+                </header>
+                <div className="studio-form-grid one">
+                  <div className="input-group">
+                    <label>Query</label>
+                    <textarea value={probeQuery} onChange={(e) => setProbeQuery(e.target.value)} rows={3} />
+                  </div>
+                  <div className="input-group">
+                    <label>Document</label>
+                    <textarea value={probeDocument} onChange={(e) => setProbeDocument(e.target.value)} rows={4} />
+                  </div>
+                </div>
+                <div className="studio-inline-row">
+                  <label className="studio-checkbox-inline">
+                    <input
+                      type="checkbox"
+                      checked={probeIncludeLogits}
+                      onChange={(e) => setProbeIncludeLogits(e.target.checked)}
+                    />
+                    include logits
+                  </label>
+                  <button className="small-button" onClick={handleProbeScore} disabled={probeLoading || !activeCorpus}>
+                    {probeLoading ? 'Scoring…' : 'Score'}
+                  </button>
+                  <span className="studio-mini-note">corpus={activeCorpus || '—'}</span>
+                </div>
+                {probeResult ? (
+                  <pre className="studio-pre" data-testid="reranker-score-result">
+                    {JSON.stringify(probeResult, null, 2)}
+                  </pre>
+                ) : null}
+              </section>
+            ) : null}
+          </div>
+        </aside>
+      </div>
+
+      <section className="studio-bottom-dock studio-panel">
+        <div className="studio-tab-row">
+          <button className="studio-tab-btn" data-active={bottomTab === 'timeline'} onClick={() => setBottomTab('timeline')}>
+            Event Timeline
+          </button>
+          <button className="studio-tab-btn" data-active={bottomTab === 'logs'} onClick={() => setBottomTab('logs')}>
+            Logs
+          </button>
+          <div className="studio-tab-spacer" />
+          {bottomTab === 'timeline' ? (
+            <input
+              className="studio-search"
+              placeholder="Filter events by type/message"
+              value={eventQuery}
+              onChange={(e) => setEventQuery(e.target.value)}
+            />
+          ) : (
+            <div className="studio-inline-row">
+              <button className="small-button" onClick={() => void downloadLogs()}>
+                Download
+              </button>
+              <button
+                className="small-button"
+                onClick={() => {
+                  void clearLogs().then(() => {
+                    setLogs([]);
+                    void refreshStats();
+                  });
+                }}
+              >
+                Clear
+              </button>
             </div>
           )}
         </div>
 
-        <div style={{ display: 'grid', gap: 12 }}>
-          <div style={{ fontSize: 12, color: 'var(--fg-muted)' }}>
-            Events buffered: <span style={{ fontFamily: 'var(--font-mono)' }}>{events.length}</span>
-          </div>
-
-          <div
-            style={{
-              background: 'var(--bg-elev1)',
-              border: '1px solid var(--line)',
-              borderRadius: 10,
-              padding: 14,
-            }}
-          >
-            <GradientDescentViz events={events} />
-          </div>
-
-          <div
-            style={{
-              background: 'var(--bg-elev1)',
-              border: '1px solid var(--line)',
-              borderRadius: 10,
-              padding: 14,
-            }}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-              <div>
-                <div style={{ fontWeight: 600, marginBottom: 4 }}>Run HUD</div>
-                <div style={{ fontSize: 12, color: 'var(--fg-muted)' }}>
-                  {selectedRun ? (
-                    <>
-                      status=<span style={{ fontFamily: 'var(--font-mono)' }}>{selectedRun.status}</span>
-                      {hud?.last?.step != null ? (
-                        <>
-                          {' '}
-                          · step=<span style={{ fontFamily: 'var(--font-mono)' }}>{hud.last.step}</span>
-                        </>
-                      ) : null}
-                      {hud?.last?.epoch != null ? (
-                        <>
-                          {' '}
-                          · epoch=<span style={{ fontFamily: 'var(--font-mono)' }}>{hud.last.epoch}</span>
-                        </>
-                      ) : null}
-                      {hud?.last?.percent != null ? (
-                        <>
-                          {' '}
-                          · <span style={{ fontFamily: 'var(--font-mono)' }}>{hud.last.percent.toFixed(1)}%</span>
-                        </>
-                      ) : null}
-                    </>
-                  ) : (
-                    'Select a run to see details.'
-                  )}
-                </div>
-              </div>
-              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                <button
-                  className="small-button"
-                  onClick={onPromote}
-                  disabled={!selectedRunId || selectedRun?.status !== 'completed' || promoting}
-                >
-                  {promoting ? 'Promoting…' : 'Promote'}
-                </button>
-              </div>
-            </div>
-
-            {selectedRun ? (
-              <div
-                style={{
-                  marginTop: 10,
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
-                  gap: 10,
-                }}
-              >
-                <div
-                  style={{
-                    border: '1px solid var(--line)',
-                    borderRadius: 10,
-                    padding: 10,
-                    background: 'var(--bg-elev2)',
-                  }}
-                >
-                  <div style={{ fontSize: 12, color: 'var(--fg-muted)' }}>Backend</div>
-                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}>{hud?.backend ?? '—'}</div>
-                </div>
-                <div
-                  style={{
-                    border: '1px solid var(--line)',
-                    borderRadius: 10,
-                    padding: 10,
-                    background: 'var(--bg-elev2)',
-                  }}
-                >
-                  <div style={{ fontSize: 12, color: 'var(--fg-muted)' }}>Base model</div>
-                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}>{hud?.baseModel ?? '—'}</div>
-                </div>
-                <div
-                  style={{
-                    border: '1px solid var(--line)',
-                    borderRadius: 10,
-                    padding: 10,
-                    background: 'var(--bg-elev2)',
-                  }}
-                >
-                  <div style={{ fontSize: 12, color: 'var(--fg-muted)' }}>Active artifact path</div>
-                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}>{hud?.modelPath ?? '—'}</div>
-                </div>
-                <div
-                  style={{
-                    border: '1px solid var(--line)',
-                    borderRadius: 10,
-                    padding: 10,
-                    background: 'var(--bg-elev2)',
-                  }}
-                >
-                  <div style={{ fontSize: 12, color: 'var(--fg-muted)' }}>Wall clock</div>
-                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}>
-                    {hud?.durationSec == null ? '—' : `${hud.durationSec.toFixed(hud.durationSec < 10 ? 2 : 1)}s`}
-                  </div>
-                </div>
-              </div>
-            ) : null}
-          </div>
-
-          <div
-            style={{
-              background: 'var(--bg-elev1)',
-              border: '1px solid var(--line)',
-              borderRadius: 10,
-              padding: 14,
-            }}
-          >
-            <div style={{ fontWeight: 600, marginBottom: 8 }}>Live metrics (latest)</div>
-            {!latestMetrics ? (
-              <div style={{ fontSize: 12, color: 'var(--fg-muted)' }}>No metrics yet.</div>
-            ) : (
-              <div
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
-                  gap: 10,
-                }}
-              >
-                {[
-                  'train_loss',
-                  'eval_loss',
-                  'lr',
-                  'grad_norm',
-                  'update_norm',
-                  'tokens_per_sec',
-                  'examples_per_sec',
-                  'batch_time_ms',
-                  'step_time_ms',
-                  'mem_rss_mb',
-                  'mlx_mem_mb',
-                  'logit_margin_mean',
-                  'nan_count',
-                ].map((key) => (
-                  <div
-                    key={key}
-                    style={{
-                      border: '1px solid var(--line)',
-                      borderRadius: 10,
-                      padding: 10,
-                      background: 'var(--bg-elev2)',
-                    }}
-                  >
-                    <div style={{ fontSize: 12, color: 'var(--fg-muted)' }}>{key}</div>
-                    <div style={{ fontSize: 15, fontWeight: 700, fontFamily: 'var(--font-mono)' }}>
-                      {latestMetrics[key] == null ? '—' : formatMetricValue(Number(latestMetrics[key]))}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <div
-            style={{
-              background: 'var(--bg-elev1)',
-              border: '1px solid var(--line)',
-              borderRadius: 10,
-              padding: 14,
-            }}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'baseline' }}>
-              <div style={{ fontWeight: 600 }}>Event timeline</div>
-              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                <input
-                  type="text"
-                  value={eventQuery}
-                  onChange={(e) => setEventQuery(e.target.value)}
-                  placeholder="Filter…"
-                  style={{
-                    width: 180,
-                    padding: '6px 8px',
-                    borderRadius: 8,
-                    border: '1px solid var(--line)',
-                    background: 'var(--bg-elev2)',
-                    color: 'var(--fg)',
-                    fontSize: 12,
-                  }}
-                />
-                <div style={{ fontSize: 12, color: 'var(--fg-muted)' }}>
-                  {filteredEvents.length}/{events.length}
-                </div>
-              </div>
-            </div>
-            <div style={{ marginTop: 10, maxHeight: 260, overflow: 'auto' }}>
+        <div className="studio-bottom-body">
+          {bottomTab === 'timeline' ? (
+            <div className="studio-timeline" data-testid="studio-event-timeline">
               {filteredEvents.length === 0 ? (
-                <div style={{ fontSize: 12, color: 'var(--fg-muted)' }}>No events.</div>
+                <p className="studio-empty">No events.</p>
               ) : (
-                <div style={{ display: 'grid', gap: 8 }}>
-                  {filteredEvents
-                    .slice(-400)
-                    .reverse()
-                    .map((ev, idx) => (
-                      <div
-                        key={`${ev.ts}-${idx}`}
-                        style={{
-                          border: '1px solid var(--line)',
-                          borderRadius: 10,
-                          padding: 10,
-                          background: 'var(--bg-elev2)',
-                        }}
-                      >
-                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
-                          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--fg-muted)' }}>
-                            {safeDateLabel(ev.ts)} · {ev.type}
-                          </div>
-                          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--fg-muted)' }}>
-                            {ev.step != null ? `step=${ev.step}` : ''} {ev.epoch != null ? `epoch=${ev.epoch}` : ''}
-                          </div>
-                        </div>
-                        {ev.message ? (
-                          <div style={{ marginTop: 6, fontSize: 12, color: 'var(--fg)' }}>{ev.message}</div>
-                        ) : null}
+                filteredEvents
+                  .slice()
+                  .reverse()
+                  .map((ev, idx) => (
+                    <article key={`${ev.ts}-${idx}`} className="studio-event-row" data-type={ev.type}>
+                      <div className="studio-event-head">
+                        <span className="studio-chip">{ev.type}</span>
+                        <span className="studio-mono">{safeDateLabel(ev.ts)}</span>
+                        {ev.step != null ? <span className="studio-chip">step={ev.step}</span> : null}
+                        {ev.percent != null ? <span className="studio-chip">{Number(ev.percent).toFixed(1)}%</span> : null}
                       </div>
-                    ))}
-                </div>
+                      {ev.message ? <p className="studio-event-message">{ev.message}</p> : null}
+                      {ev.type === 'telemetry' ? (
+                        <div className="studio-mini-grid studio-mono">
+                          <span>x={ev.proj_x ?? 0}</span>
+                          <span>y={ev.proj_y ?? 0}</span>
+                          <span>loss={ev.loss ?? 0}</span>
+                          <span>lr={ev.lr ?? 0}</span>
+                          <span>grad={ev.grad_norm ?? 0}</span>
+                          <span>samples={ev.sample_count ?? 0}</span>
+                        </div>
+                      ) : null}
+                      {ev.metrics ? (
+                        <div className="studio-mini-grid studio-mono">
+                          {Object.entries(ev.metrics).map(([k, v]) => (
+                            <span key={k}>{k}={formatMetricValue(v)}</span>
+                          ))}
+                        </div>
+                      ) : null}
+                    </article>
+                  ))
               )}
             </div>
-          </div>
-
-          <RunOverview run={selectedRun} latestMetrics={latestMetrics} />
-          <RunDiff runs={runs} />
+          ) : (
+            <div className="studio-log-viewer" data-testid="studio-log-viewer">
+              {logsLoading ? (
+                <p className="studio-empty">Loading logs…</p>
+              ) : logs.length === 0 ? (
+                <p className="studio-empty">No logs.</p>
+              ) : (
+                <pre className="studio-pre">{JSON.stringify(logs, null, 2)}</pre>
+              )}
+            </div>
+          )}
         </div>
-      </div>
-    </div>
+      </section>
+    </section>
   );
 }

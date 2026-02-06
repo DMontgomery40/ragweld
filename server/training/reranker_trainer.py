@@ -207,6 +207,7 @@ def train_pairwise_reranker(
     base_model: str,
     output_dir: Path,
     triplets: list[MaterializedTriplet],
+    dev_triplets: list[MaterializedTriplet] | None = None,
     epochs: int,
     batch_size: int,
     lr: float,
@@ -214,6 +215,7 @@ def train_pairwise_reranker(
     max_length: int,
     dev_split: float = 0.1,
     seed: int = 0,
+    run_id: str = "",
     emit: Callable[[str, dict[str, Any]], None] | None = None,
 ) -> dict[str, object]:
     """Train a local cross-encoder on pairwise triplets and save to output_dir.
@@ -242,20 +244,24 @@ def train_pairwise_reranker(
             return logits
         raise ValueError(f"Unsupported logits shape for binary scoring: {tuple(int(x) for x in logits.shape)}")
 
-    r = random.Random(int(seed))
-    shuffled = list(triplets)
-    r.shuffle(shuffled)
+    if dev_triplets is not None:
+        train = list(triplets)
+        dev = list(dev_triplets)
+    else:
+        r = random.Random(int(seed))
+        shuffled = list(triplets)
+        r.shuffle(shuffled)
 
-    dev_split = float(dev_split)
-    dev_split = max(0.0, min(0.5, dev_split))
-    dev_n = int(round(len(shuffled) * dev_split))
-    dev_n = max(1, dev_n) if len(shuffled) >= 10 else min(dev_n, max(0, len(shuffled) - 1))
-    dev = shuffled[:dev_n] if dev_n > 0 else []
-    train = shuffled[dev_n:] if dev_n > 0 else shuffled
+        dev_split = float(dev_split)
+        dev_split = max(0.0, min(0.5, dev_split))
+        dev_n = int(round(len(shuffled) * dev_split))
+        dev_n = max(1, dev_n) if len(shuffled) >= 10 else min(dev_n, max(0, len(shuffled) - 1))
+        dev = shuffled[:dev_n] if dev_n > 0 else []
+        train = shuffled[dev_n:] if dev_n > 0 else shuffled
 
-    if not train:
-        train = shuffled
-        dev = []
+        if not train:
+            train = shuffled
+            dev = []
 
     tokenizer = AutoTokenizer.from_pretrained(base_model, use_fast=True)  # type: ignore[no-untyped-call]
     model = AutoModelForSequenceClassification.from_pretrained(base_model)
@@ -338,6 +344,40 @@ def train_pairwise_reranker(
 
     history: list[dict[str, float]] = []
 
+    # Deterministic 2D projection basis for telemetry over trainable params.
+    named_trainable: list[tuple[str, torch.nn.Parameter]] = [
+        (n, p) for n, p in model.named_parameters() if bool(p.requires_grad)
+    ]
+    proj_named = [
+        (n, p)
+        for n, p in named_trainable
+        if ("classifier" in n) or ("score" in n) or ("out_proj" in n) or ("dense" in n and "pooler" in n)
+    ]
+    if not proj_named:
+        proj_named = named_trainable[-1:] if named_trainable else []
+
+    seed_material = f"{int(seed)}::{str(run_id)}".encode("utf-8")
+    seed_int = int.from_bytes(seed_material[:8].ljust(8, b"\0"), "little", signed=False)
+    generator = torch.Generator(device="cpu").manual_seed(seed_int)
+
+    proj_dirs_1: list[torch.Tensor] = []
+    proj_dirs_2: list[torch.Tensor] = []
+    for _name, param in proj_named:
+        d1 = torch.randn(param.shape, generator=generator, dtype=param.dtype)
+        d2 = torch.randn(param.shape, generator=generator, dtype=param.dtype)
+        proj_dirs_1.append(d1.to(device=device))
+        proj_dirs_2.append(d2.to(device=device))
+
+    with torch.no_grad():
+        norm1 = torch.sqrt(sum(torch.sum(d * d) for d in proj_dirs_1)) if proj_dirs_1 else torch.tensor(1.0, device=device)
+        norm2 = torch.sqrt(sum(torch.sum(d * d) for d in proj_dirs_2)) if proj_dirs_2 else torch.tensor(1.0, device=device)
+        norm1 = torch.clamp(norm1, min=1e-12)
+        norm2 = torch.clamp(norm2, min=1e-12)
+        proj_dirs_1 = [d / norm1 for d in proj_dirs_1]
+        proj_dirs_2 = [d / norm2 for d in proj_dirs_2]
+        w0_dot1 = float(sum(torch.sum(p.detach() * d).item() for (_n, p), d in zip(proj_named, proj_dirs_1, strict=False))) if proj_named else 0.0
+        w0_dot2 = float(sum(torch.sum(p.detach() * d).item() for (_n, p), d in zip(proj_named, proj_dirs_2, strict=False))) if proj_named else 0.0
+
     global_step = 0
     best_primary: float | None = None
     best_step: int | None = None
@@ -355,17 +395,52 @@ def train_pairwise_reranker(
             loss = loss_fn(logits, labels_t.view(-1))
 
             loss.backward()
+            grad_sq = torch.tensor(0.0, device=device)
+            for p in model.parameters():
+                if p.grad is None:
+                    continue
+                grad_sq = grad_sq + torch.sum(p.grad.detach() * p.grad.detach())
+            grad_norm = float(torch.sqrt(torch.clamp(grad_sq, min=0.0)).item())
+
             optimizer.step()
             scheduler.step()
             optimizer.zero_grad(set_to_none=True)
 
+            step_s = max(1e-6, time.perf_counter() - step_start)
+            try:
+                lr_now = float(scheduler.get_last_lr()[0])
+            except Exception:
+                lr_now = float(lr)
+
+            should_emit_telemetry = bool(global_step == 1 or global_step == total_steps or global_step % 2 == 0)
+            if emit and should_emit_telemetry:
+                with torch.no_grad():
+                    proj_x = float(
+                        sum(torch.sum(p.detach() * d).item() for (_n, p), d in zip(proj_named, proj_dirs_1, strict=False))
+                        - w0_dot1
+                    ) if proj_named else 0.0
+                    proj_y = float(
+                        sum(torch.sum(p.detach() * d).item() for (_n, p), d in zip(proj_named, proj_dirs_2, strict=False))
+                        - w0_dot2
+                    ) if proj_named else 0.0
+                emit(
+                    "telemetry",
+                    {
+                        "step": int(global_step),
+                        "epoch": float(epoch_idx)
+                        + (float(global_step % max(1, len(train_loader))) / float(max(1, len(train_loader)))),
+                        "proj_x": float(proj_x),
+                        "proj_y": float(proj_y),
+                        "loss": float(loss.detach().cpu().item()),
+                        "lr": float(lr_now),
+                        "grad_norm": float(grad_norm),
+                        "step_time_ms": float(step_s * 1000.0),
+                        "sample_count": int(labels_t.shape[0]),
+                    },
+                )
+
             if emit and (global_step == 1 or global_step % 10 == 0 or global_step == total_steps):
                 pct = (float(global_step) / float(total_steps)) * 100.0
-                step_s = max(1e-6, time.perf_counter() - step_start)
-                try:
-                    lr_now = float(scheduler.get_last_lr()[0])
-                except Exception:
-                    lr_now = float(lr)
                 emit(
                     "progress",
                     {

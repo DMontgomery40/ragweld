@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import math
+import os
 import shutil
 import tempfile
 from collections.abc import AsyncIterator
@@ -49,11 +50,13 @@ from server.models.tribrid_config_model import (
     RerankerTrainLegacyResponse,
 )
 from server.db.postgres import PostgresClient
-from server.reranker.mlx_qwen3 import (
+from server.retrieval.mlx_qwen3 import (
+    clear_mlx_qwen3_cache,
     is_mlx_qwen3_artifact_compatible,
     mlx_is_available,
     read_manifest,
     read_manifest_backend,
+    write_mlx_manifest,
 )
 from server.reranker.artifacts import has_transformers_weights
 from server.services.config_store import get_config as load_scoped_config
@@ -61,7 +64,7 @@ from server.training.metric_policy import infer_corpus_eval_profile
 from server.training.mlx_qwen3_trainer import (
     deterministic_split,
     evaluate_mlx_qwen3_reranker,
-    train_mlx_qwen3_reranker,
+    train_qwen3_lora_reranker,
 )
 from server.training.reranker_trainer import (
     evaluate_pairwise_reranker,
@@ -194,14 +197,32 @@ async def _resolve_corpus_id(corpus_id: str | None) -> str:
 
 
 def _atomic_copy_dir(src: Path, dst: Path) -> None:
+    """Atomically replace dst with a copied version of src.
+
+    Uses rename swaps inside dst.parent to avoid readers seeing partial trees.
+    """
     dst.parent.mkdir(parents=True, exist_ok=True)
-    tmp = dst.parent / f".tmp_{dst.name}"
+    stamp = f"{int(datetime.now(UTC).timestamp())}_{os.getpid()}"
+    tmp = dst.parent / f".tmp_{dst.name}_{stamp}"
+    bak = dst.parent / f".bak_{dst.name}_{stamp}"
     shutil.rmtree(tmp, ignore_errors=True)
-    if tmp.exists():
-        shutil.rmtree(tmp, ignore_errors=True)
+    shutil.rmtree(bak, ignore_errors=True)
     shutil.copytree(src, tmp, dirs_exist_ok=True)
-    shutil.rmtree(dst, ignore_errors=True)
+    if dst.exists():
+        dst.rename(bak)
     tmp.rename(dst)
+    shutil.rmtree(bak, ignore_errors=True)
+
+
+def _write_transformers_manifest(*, dst: Path, run_id: str, base_model: str) -> None:
+    obj = {
+        "backend": "transformers",
+        "base_model": str(base_model),
+        "run_id": str(run_id),
+        "created_at": int(datetime.now(UTC).timestamp()),
+    }
+    path = dst / "tribrid_reranker_manifest.json"
+    path.write_text(json.dumps(obj, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
 @router.post("/reranker/click", response_model=OkResponse)
@@ -602,7 +623,14 @@ async def _run_train_job(*, run_id: str, corpus_id: str) -> None:
 
         baseline_primary: float | None = None
         if dev_triplets and active_dir.exists():
-            if backend == "mlx_qwen3":
+            manifest_backend = read_manifest_backend(active_dir)
+            if not manifest_backend:
+                _emit_log("Baseline eval skipped (active artifact manifest missing; treating as no baseline).")
+            elif str(manifest_backend) != str(backend):
+                _emit_log(
+                    f"Baseline eval skipped (active manifest backend={manifest_backend} != resolved backend={backend})."
+                )
+            elif backend == "mlx_qwen3":
                 if not is_mlx_qwen3_artifact_compatible(artifact_dir=active_dir, base_model=str(base_model)):
                     _emit_log("Baseline eval skipped (active artifact is missing or incompatible with mlx_qwen3).")
                 else:
@@ -732,6 +760,27 @@ async def _run_train_job(*, run_id: str, corpus_id: str) -> None:
                     ),
                 )
                 return
+            if event_type == "telemetry":
+                _append_event(
+                    run_id,
+                    RerankerTrainMetricEvent(
+                        type="telemetry",
+                        ts=ts,
+                        run_id=run_id,
+                        step=int(payload.get("step") or 0) or None,
+                        epoch=float(payload.get("epoch") or 0.0) or None,
+                        proj_x=float(payload.get("proj_x")) if payload.get("proj_x") is not None else None,
+                        proj_y=float(payload.get("proj_y")) if payload.get("proj_y") is not None else None,
+                        loss=float(payload.get("loss")) if payload.get("loss") is not None else None,
+                        lr=float(payload.get("lr")) if payload.get("lr") is not None else None,
+                        grad_norm=float(payload.get("grad_norm")) if payload.get("grad_norm") is not None else None,
+                        step_time_ms=float(payload.get("step_time_ms"))
+                        if payload.get("step_time_ms") is not None
+                        else None,
+                        sample_count=int(payload.get("sample_count")) if payload.get("sample_count") is not None else None,
+                    ),
+                )
+                return
 
         # Mark run as running (in case a previous stub left it inconsistent).
         run.status = "running"
@@ -744,7 +793,7 @@ async def _run_train_job(*, run_id: str, corpus_id: str) -> None:
         # Train (runs in thread; emits progress/metrics into metrics.jsonl).
         if backend == "mlx_qwen3":
             await asyncio.to_thread(
-                train_mlx_qwen3_reranker,
+                train_qwen3_lora_reranker,
                 run_id=run_id,
                 base_model=base_model,
                 output_dir=model_artifact_dir,
@@ -769,14 +818,15 @@ async def _run_train_job(*, run_id: str, corpus_id: str) -> None:
                 train_pairwise_reranker,
                 base_model=base_model,
                 output_dir=model_artifact_dir,
-                triplets=mats,
+                triplets=train_triplets,
+                dev_triplets=dev_triplets,
                 epochs=int(run.epochs),
                 batch_size=int(run.batch_size),
                 lr=float(run.lr),
                 warmup_ratio=float(run.warmup_ratio),
                 max_length=int(run.max_length),
-                dev_split=0.1,
                 seed=0,
+                run_id=run_id,
                 emit=_emit,
             )
 
@@ -821,8 +871,11 @@ async def _run_train_job(*, run_id: str, corpus_id: str) -> None:
         if should_promote:
             _atomic_copy_dir(model_artifact_dir, active_dir)
             if backend == "transformers":
+                _write_transformers_manifest(dst=active_dir, run_id=run_id, base_model=str(base_model))
                 # Ensure in-process rerankers and /reranker/score reflect the promoted weights.
                 clear_cross_encoder_cache_for_model(str(cfg.training.tribrid_reranker_model_path))
+            else:
+                await clear_mlx_qwen3_cache(str(active_dir))
             _emit_log(
                 f"Promoted trained artifact to {cfg.training.tribrid_reranker_model_path} (backend={backend}). "
                 f"Run artifact preserved at {model_artifact_dir}."
@@ -1232,32 +1285,66 @@ async def get_reranker_info() -> RerankerInfoResponse:
 
 @router.post("/reranker/score", response_model=RerankerScoreResponse)
 async def score_reranker(payload: RerankerScoreRequest) -> RerankerScoreResponse:
-    """Score a single (query, document) pair using the resolved learning reranker backend.
-
-    This endpoint exists to prove the learning reranker is actually changing after training.
-    """
+    """Score one (query, document) pair for debug/proof workflows."""
     cid = str(payload.repo_id or "").strip()
     if not cid:
-        return RerankerScoreResponse(ok=False, error="missing corpus_id")
+        return RerankerScoreResponse(ok=False, error="missing corpus_id", score=0.0)
 
     try:
         cfg = await load_scoped_config(repo_id=cid)
     except Exception:
         # Best-effort debug endpoint: allow scoring against the global config when scoped config is unavailable.
         cfg = load_config()
-    backend = resolve_learning_backend(
-        cfg.training,
-        artifact_path=str(getattr(cfg.training, "tribrid_reranker_model_path", "") or ""),
-    )
-
-    include_logits = bool(int(payload.include_logits or 0) == 1)
+    mode = str(payload.mode or "learning").strip().lower()
+    include_logits = bool(payload.include_logits)
     max_length = int(cfg.reranking.tribrid_reranker_maxlen)
+
+    if mode == "local":
+        from server.retrieval.rerank import score_cross_encoder_pairs
+
+        local_model = str(cfg.reranking.reranker_local_model or "").strip()
+        if not local_model:
+            return RerankerScoreResponse(ok=False, backend="transformers", error="missing reranking.reranker_local_model", score=0.0)
+        model_path = _resolve_path(local_model)
+        model_id = local_model
+        if model_path.exists():
+            if has_transformers_weights(model_path):
+                model_id = str(model_path)
+            else:
+                return RerankerScoreResponse(
+                    ok=False,
+                    backend="transformers",
+                    error=f"local model directory exists but is missing weights: {local_model}",
+                    score=0.0,
+                )
+        try:
+            clear_cross_encoder_cache_for_model(model_id)
+            raw = await score_cross_encoder_pairs(
+                model_id=model_id,
+                query=str(payload.query),
+                snippets=[str(payload.document)],
+                max_length=max_length,
+                batch_size=1,
+                trust_remote_code=bool(cfg.reranking.transformers_trust_remote_code),
+            )
+            score = float(raw[0]) if raw else 0.0
+            return RerankerScoreResponse(ok=True, backend="transformers", score=score)
+        except Exception as e:
+            return RerankerScoreResponse(ok=False, backend="transformers", error=str(e), score=0.0)
+
+    try:
+        backend = resolve_learning_backend(
+            cfg.training,
+            artifact_path=str(getattr(cfg.training, "tribrid_reranker_model_path", "") or ""),
+        )
+    except Exception as e:
+        return RerankerScoreResponse(ok=False, backend="learning", error=str(e), score=0.0)
 
     if backend == "mlx_qwen3":
         if not mlx_is_available():
-            return RerankerScoreResponse(ok=False, backend="mlx_qwen3", error="mlx not available")
+            return RerankerScoreResponse(ok=False, backend="mlx_qwen3", error="mlx not available", score=0.0)
 
-        from server.reranker.mlx_qwen3 import get_mlx_qwen3_reranker, read_manifest, read_adapter_config
+        from server.retrieval.mlx_qwen3 import get_mlx_qwen3_reranker, read_manifest, read_adapter_config
 
         adapter_dir = _resolve_path(cfg.training.tribrid_reranker_model_path)
         if not adapter_dir.exists():
@@ -1265,6 +1352,7 @@ async def score_reranker(payload: RerankerScoreRequest) -> RerankerScoreResponse
                 ok=False,
                 backend="mlx_qwen3",
                 error=f"active adapter dir not found: {cfg.training.tribrid_reranker_model_path}",
+                score=0.0,
             )
 
         manifest = read_manifest(adapter_dir) or {}
@@ -1295,7 +1383,7 @@ async def score_reranker(payload: RerankerScoreRequest) -> RerankerScoreResponse
             reload_period_sec=int(cfg.reranking.tribrid_reranker_reload_period_sec),
             unload_after_sec=int(cfg.training.learning_reranker_unload_after_sec),
         )
-        score = float(scores[0]) if scores else None
+        score = float(scores[0]) if scores else 0.0
         yes_logit = (
             float(yes_logits[0])
             if include_logits and yes_logits and yes_logits[0] is not None
@@ -1317,12 +1405,14 @@ async def score_reranker(payload: RerankerScoreRequest) -> RerankerScoreResponse
             ok=False,
             backend="transformers",
             error=f"trained model dir not found: {cfg.training.tribrid_reranker_model_path}",
+            score=0.0,
         )
     if not has_transformers_weights(model_path):
         return RerankerScoreResponse(
             ok=False,
             backend="transformers",
             error=f"trained model dir missing weights: {cfg.training.tribrid_reranker_model_path}",
+            score=0.0,
         )
     model_dir = str(model_path)
     try:
@@ -1336,10 +1426,10 @@ async def score_reranker(payload: RerankerScoreRequest) -> RerankerScoreResponse
             batch_size=1,
             trust_remote_code=bool(cfg.reranking.transformers_trust_remote_code),
         )
-        score = float(raw[0]) if raw else None
+        score = float(raw[0]) if raw else 0.0
         return RerankerScoreResponse(ok=True, backend="transformers", score=score)
     except Exception as e:
-        return RerankerScoreResponse(ok=False, backend="transformers", error=str(e))
+        return RerankerScoreResponse(ok=False, backend="transformers", error=str(e), score=0.0)
 
 
 @router.post("/reranker/mine", response_model=RerankerMineResponse)
@@ -1832,8 +1922,34 @@ async def promote_train_run(run_id: str) -> OkResponse:
 
     cfg = await load_scoped_config(repo_id=str(run.repo_id))
     dst = _resolve_path(cfg.training.tribrid_reranker_model_path)
+    src_manifest = read_manifest(src) or {}
+    backend = str(src_manifest.get("backend") or "").strip().lower()
+    if backend not in {"transformers", "mlx_qwen3"}:
+        try:
+            backend = resolve_learning_backend(
+                cfg.training,
+                artifact_path=str(getattr(cfg.training, "tribrid_reranker_model_path", "") or ""),
+            )
+        except Exception:
+            backend = "transformers"
+
     _atomic_copy_dir(src, dst)
-    clear_cross_encoder_cache_for_model(str(cfg.training.tribrid_reranker_model_path))
+    if backend == "transformers":
+        base_model = str(src_manifest.get("base_model") or cfg.reranking.reranker_local_model or "")
+        _write_transformers_manifest(dst=dst, run_id=run_id, base_model=base_model)
+        clear_cross_encoder_cache_for_model(str(cfg.training.tribrid_reranker_model_path))
+    elif backend == "mlx_qwen3":
+        yes_token_id = src_manifest.get("yes_token_id")
+        no_token_id = src_manifest.get("no_token_id")
+        if isinstance(yes_token_id, int) and isinstance(no_token_id, int):
+            write_mlx_manifest(
+                out_dir=dst,
+                base_model=str(src_manifest.get("base_model") or cfg.training.learning_reranker_base_model),
+                run_id=run_id,
+                yes_token_id=int(yes_token_id),
+                no_token_id=int(no_token_id),
+            )
+        await clear_mlx_qwen3_cache(str(cfg.training.tribrid_reranker_model_path))
     return OkResponse(ok=True)
 
 
