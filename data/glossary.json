@@ -1490,6 +1490,62 @@
       ]
     },
     {
+      "term": "Editor Bind Address",
+      "key": "EDITOR_BIND",
+      "definition": "Network interface for editor service to bind to. Use 127.0.0.1 for localhost-only access (secure), 0.0.0.0 for network access (enable remote editing).",
+      "category": "ui",
+      "related": [],
+      "links": [
+        {
+          "text": "Network Binding",
+          "href": "https://en.wikipedia.org/wiki/Network_socket"
+        }
+      ],
+      "badges": []
+    },
+    {
+      "term": "Editor Embed Mode",
+      "key": "EDITOR_EMBED_ENABLED",
+      "definition": "Enable embedded editor iframe in GUI (1=yes, 0=no). When enabled, editor opens inline. When disabled, opens in new tab/window. Embedding requires CORS configuration.",
+      "category": "embedding",
+      "related": [],
+      "links": [
+        {
+          "text": "iframe Embedding",
+          "href": "https://developer.mozilla.org/en-US/docs/Web/HTML/Element/iframe"
+        }
+      ],
+      "badges": []
+    },
+    {
+      "term": "Editor Enabled",
+      "key": "EDITOR_ENABLED",
+      "definition": "Enable embedded code editor integration in GUI (1=yes, 0=no). Allows viewing and editing code snippets from retrieval results directly in browser.",
+      "category": "ui",
+      "related": [],
+      "links": [
+        {
+          "text": "Code Editor Integration",
+          "href": "https://en.wikipedia.org/wiki/Source-code_editor"
+        }
+      ],
+      "badges": []
+    },
+    {
+      "term": "Editor Port",
+      "key": "EDITOR_PORT",
+      "definition": "TCP port for code editor service. Default: varies by editor. Must not conflict with other services (PORT, MCP_HTTP_PORT, PROMETHEUS_PORT).",
+      "category": "infrastructure",
+      "related": [],
+      "links": [
+        {
+          "text": "Port Configuration",
+          "href": "https://en.wikipedia.org/wiki/Port_(computer_networking)"
+        }
+      ],
+      "badges": []
+    },
+    {
       "term": "Auto-set embedding dimensions",
       "key": "EMBEDDING_AUTO_SET_DIMENSIONS",
       "definition": "When enabled, the UI automatically sets <code>embedding_dim</code> to the dimension declared for the selected embedding model in <code>data/models.json</code>. This prevents subtle mismatches that can break indexing or retrieval.",
@@ -3815,7 +3871,7 @@
     {
       "term": "Learning Reranker Backend",
       "key": "LEARNING_RERANKER_BACKEND",
-      "definition": "Backend used when RERANKER_MODE=\"learning\". auto uses MLX Qwen3 LoRA only on macOS Apple Silicon when MLX dependencies are installed; all other environments use transformers. Use transformers to force the HuggingFace/SentenceTransformers CrossEncoder backend, or mlx_qwen3 to force MLX (will error on unsupported platforms). MLX learning mode can be slower for interactive retrieval; if latency is high, lower TRIBRID_RERANKER_TOPN first.",
+      "definition": "Backend used when RERANKER_MODE=\"learning\". auto prefers the MLX Qwen3 LoRA backend when MLX is available (Apple Silicon), otherwise falls back to the transformers backend. Use transformers to force the legacy path, or mlx_qwen3 to force the MLX backend.",
       "category": "reranking",
       "related": [
         "RERANKER_MODE",
@@ -5018,7 +5074,7 @@
     {
       "term": "Reranker Backend",
       "key": "RERANKER_BACKEND",
-      "definition": "Choose the reranking provider to reorder retrieved results by semantic relevance (cross-encoder). Options typically include Cohere Rerank, the built‑in TriBridRAG Learning Reranker, or none. Reranking improves answer quality but adds latency.",
+      "definition": "Choose the reranking provider to reorder retrieved results by semantic relevance. Options typically include Cohere Rerank, the built‑in TriBridRAG Learning Reranker, or none. Reranking improves answer quality but adds latency.",
       "category": "reranking",
       "related": [],
       "links": [
@@ -5140,7 +5196,7 @@
     {
       "term": "Reranker Mode",
       "key": "RERANKER_MODE",
-      "definition": "Controls which reranking approach is used. Four options:\n\n• none: Disabled—BM25 + vector fusion only (no reranker scoring).\n• local: A local HuggingFace reranker (cross-encoder) you provide (BGE, Jina, etc.).\n• learning: A trainable learning reranker that improves with your mined triplets. Uses MLX Qwen3 LoRA on Apple Silicon when available, otherwise falls back to transformers.\n• cloud: External API reranking (Cohere, Voyage, Jina).\n\nRecommended: Start with \"learning\" if you want the system to adapt over time; use \"cloud\" for managed quality if you have an API budget.",
+      "definition": "Controls which reranking approach is used. Four options:\n\n• none: Disabled—BM25 + vector fusion only (no reranker scoring).\n• local: A local HuggingFace reranker you provide (BGE, Jina, etc.).\n• learning: A trainable learning reranker that improves with your mined triplets. Uses MLX Qwen3 LoRA on Apple Silicon when available, otherwise falls back to transformers.\n• cloud: External API reranking (Cohere, Voyage, Jina).\n\nRecommended: Start with \"learning\" if you want the system to adapt over time; use \"cloud\" for managed quality if you have an API budget.",
       "category": "reranking",
       "related": [],
       "links": [
@@ -5159,7 +5215,7 @@
     {
       "term": "Local Reranker (HF)",
       "key": "RERANKER_MODEL",
-      "definition": "HuggingFace model name or path for local reranking when RERANK_BACKEND=local or hf. Common options: \"cross-encoder/ms-marco-MiniLM-L-6-v2\" (fast, good quality), \"BAAI/bge-reranker-base\" (higher quality, slower), or path to your fine-tuned model like \"models/cross-encoder-tribrid\". Local reranking is free but slower than Cohere. Ensure model is downloaded before use.",
+      "definition": "HuggingFace model name or path for local reranking when RERANK_BACKEND=local or hf. Common options: \"BAAI/bge-reranker-v2-m3\" (strong quality/speed), \"jinaai/jina-reranker-v1-base-en\" (solid multilingual behavior), or a local path. Local reranking is free but slower than Cohere. Ensure model weights are available before use.",
       "category": "reranking",
       "related": [],
       "links": [
@@ -5260,7 +5316,7 @@
     {
       "term": "Training Learning Rate",
       "key": "RERANKER_TRAIN_LR",
-      "definition": "Learning rate for the cross-encoder optimizer during fine-tuning. This controls the size of weight updates during gradient descent. Standard range for cross-encoder fine-tuning is 1e-6 to 5e-5. Higher learning rates (3e-5, 5e-5) converge faster but risk overshooting optimal weights and causing training instability or divergence. Lower learning rates (1e-6, 5e-6) are safer and more stable but require more epochs to converge.\n\nSweet spot: 2e-5 for most cross-encoder fine-tuning tasks. This is the default used in many SBERT examples and works well for code reranking. Use 1e-5 for conservative training when you have limited data (<500 triplets) or notice training loss oscillating. Use 3e-5 for faster convergence when you have abundant data (>2000 triplets) and stable validation metrics. Always monitor training loss - if it spikes or increases, your learning rate is too high.\n\nCombine with RERANKER_WARMUP_RATIO for optimal results. Warmup gradually increases the learning rate from 0 to your target LR over the first N% of training, preventing early instability. Most practitioners use 2e-5 with 0.1 warmup as a reliable baseline.\n\n• Standard range: 1e-6 to 5e-5\n• Conservative (small data): 1e-5\n• Balanced default: 2e-5 (recommended)\n• Aggressive (large data): 3e-5 to 5e-5\n• Symptom too high: Loss spikes, NaN values, divergence\n• Symptom too low: Slow convergence, minimal improvement",
+      "definition": "Learning rate for learning-reranker optimization during fine-tuning. This controls the size of weight updates during gradient descent. Typical range is 1e-6 to 5e-5. Higher values (3e-5 to 5e-5) converge faster but can destabilize training; lower values (1e-6 to 1e-5) are safer but slower.\n\nSweet spot: 2e-5 for most runs. Use 1e-5 for smaller triplet sets or unstable loss curves, and 3e-5 for larger datasets with steady validation metrics.\n\nCombine with RERANKER_WARMUP_RATIO so early steps ramp smoothly from 0 to target LR.\n\n• Typical range: 1e-6 to 5e-5\n• Conservative: 1e-5\n• Balanced default: 2e-5\n• Aggressive: 3e-5 to 5e-5\n• Too high: Loss spikes, NaN values, divergence\n• Too low: Slow convergence, limited gains",
       "category": "reranking",
       "related": [],
       "links": [
@@ -5295,7 +5351,7 @@
     {
       "term": "Training Max Sequence Length",
       "key": "RERANKER_TRAIN_MAXLEN",
-      "definition": "Token limit for the cross-encoder during training. Longer sequences increase memory quadratically. If training fails with OOM (-9) under Docker/Colima, set 128–256. Sequences longer than the limit are truncated by the tokenizer and may emit warnings.",
+      "definition": "Token limit for reranker training. Longer sequences increase memory quadratically. If training fails with OOM (-9) under Docker/Colima, set 128–256. Sequences longer than the limit are truncated by the tokenizer and may emit warnings.",
       "category": "reranking",
       "related": [],
       "links": [
@@ -5378,7 +5434,7 @@
     {
       "term": "Warmup Ratio",
       "key": "RERANKER_WARMUP_RATIO",
-      "definition": "Fraction of total training steps to use for linear learning rate warmup. During warmup, the learning rate gradually increases from 0 to your target RERANKER_TRAIN_LR, preventing early training instability from large gradient updates. After warmup completes, the learning rate follows its normal schedule (typically constant or linear decay). Standard range: 0.0 (no warmup) to 0.2 (20% of training).\n\nSweet spot: 0.1 (10% warmup) for most cross-encoder training. This means if you train for 100 steps, the first 10 steps will gradually increase LR from 0 to your target. Warmup is especially important when fine-tuning from pretrained models, as it prevents catastrophic forgetting early in training. Use 0.05-0.08 for short training runs (<500 steps) and 0.1-0.15 for longer runs (>1000 steps).\n\nWarmup is critical when training with high learning rates (3e-5+) or limited data. Without warmup, the first few batches can cause large weight updates that destabilize the pretrained model. With warmup, training starts gentle and accelerates gradually. Most SBERT training recipes default to 0.1, which works well across domains.\n\n• No warmup: 0.0 (not recommended for fine-tuning)\n• Short training: 0.05-0.08 (e.g., 1-2 epochs, <500 steps)\n• Balanced default: 0.1 (recommended for most cases)\n• Long training: 0.15-0.2 (e.g., 5+ epochs, >2000 steps)\n• Effect: Stabilizes early training, prevents catastrophic forgetting\n• Combines with: RERANKER_TRAIN_LR for optimal convergence",
+      "definition": "Fraction of total training steps to use for linear learning-rate warmup. During warmup, LR ramps from 0 to RERANKER_TRAIN_LR to reduce early instability; after warmup, LR follows its normal schedule.\n\nSweet spot: 0.1 (10%). For short runs (<500 steps), 0.05-0.08 is often enough. For long runs (>1000 steps), 0.1-0.15 can improve stability.\n\n• No warmup: 0.0\n• Short training: 0.05-0.08\n• Balanced default: 0.1\n• Long training: 0.15-0.2\n• Effect: Stabilizes early updates and reduces divergence risk",
       "category": "reranking",
       "related": [],
       "links": [
