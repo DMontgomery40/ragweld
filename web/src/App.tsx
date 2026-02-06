@@ -182,7 +182,7 @@ function App() {
           </svg>
         </button>
         <h1>
-          <span className="brand">TriBrid RAG</span>
+          <span className="brand">ragweld</span>
           <span className="tagline">Vector + Sparse + Graph</span>
         </h1>
         <div className="top-actions">
