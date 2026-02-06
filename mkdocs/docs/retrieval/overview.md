@@ -30,7 +30,7 @@
 
     ---
 
-    Cross-encoder rescoring of fused candidates for precision.
+    Local/cloud/learning reranker rescoring of fused candidates for precision.
 
 </div>
 

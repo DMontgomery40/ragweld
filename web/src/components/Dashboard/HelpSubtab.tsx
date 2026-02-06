@@ -111,7 +111,7 @@ export function HelpSubtab() {
             />
             <ConceptCard
               title="Reranking"
-              description="Post-retrieval scoring using cross-encoder models. Improves relevance by re-scoring top-k results with a more expensive but accurate model."
+              description="Post-retrieval scoring using local HF rerankers, cloud APIs, or the Qwen3 LoRA learning reranker. Improves relevance by re-scoring top-k results with a more accurate model."
             />
             <ConceptCard
               title="Chunk Summaries"
@@ -227,9 +227,9 @@ export function HelpSubtab() {
               description="Anthropic's guide to retrieval-augmented generation"
             />
             <ExternalLink
-              title="Cross-Encoder Models"
-              href="https://www.sbert.net/examples/applications/cross-encoder/README.html"
-              description="Deep dive into reranking with transformers"
+              title="HF Reranker Models"
+              href="https://huggingface.co/models?pipeline_tag=text-ranking"
+              description="Explore local reranker options (BGE, Jina, and more)"
             />
           </div>
         </div>

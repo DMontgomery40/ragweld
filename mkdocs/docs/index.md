@@ -61,7 +61,7 @@
 | Sparse Search | PostgreSQL FTS/BM25 for exact terms, identifiers | ✅ Active |
 | Graph Search | Neo4j traversal to follow entities/relations | ✅ Active |
 | Fusion | Weighted/reciprocal-rank fusion of sources | ✅ Active |
-| Reranker | Optional cross-encoder reranking | ✅ Active |
+| Reranker | Optional local/cloud/learning reranking | ✅ Active |
 
 ## End-to-End Retrieval Flow
 

@@ -6,7 +6,7 @@
 
     ---
 
-    Cross-encoder stage to refine fused retrieval results.
+    Local/cloud/learning reranker stage to refine fused retrieval results.
 
 -   :material-mining:{ .lg .middle } **Triplet Mining**
 
@@ -92,7 +92,7 @@ async function trainReranker(corpus_id: string) {
 ```
 
 1. Mine triplets from logs/heuristics
-2. Train a local cross-encoder
+2. Train the Qwen3 LoRA learning reranker
 3. Evaluate results on your `eval_dataset`
 
 ### Reranker Config Fields (Selected)

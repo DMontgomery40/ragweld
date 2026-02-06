@@ -47,7 +47,7 @@ export function RerankerConfigSubtab() {
   // Learning reranker is configured under training + reranking
   const [learningModelPath, setLearningModelPath] = useConfigField<string>(
     'training.tribrid_reranker_model_path',
-    'models/cross-encoder-tribrid'
+    'models/learning-reranker-epstein-files-1'
   );
   const [alpha, setAlpha] = useConfigField<number>('reranking.tribrid_reranker_alpha', 0.7);
   const [topN, setTopN] = useConfigField<number>('reranking.tribrid_reranker_topn', 10);
@@ -215,7 +215,7 @@ export function RerankerConfigSubtab() {
             </div>
             <div style={{ fontSize: 12, color: 'var(--fg-muted)' }}>
               {m === 'none' && 'No reranking'}
-              {m === 'local' && 'Run a local cross-encoder'}
+              {m === 'local' && 'Run a local reranker'}
               {m === 'cloud' && 'Use a hosted reranker API'}
               {m === 'learning' && 'Use the trainable TriBrid reranker'}
             </div>
@@ -367,7 +367,7 @@ export function RerankerConfigSubtab() {
                 type="text"
                 value={learningModelPath}
                 onChange={(e) => setLearningModelPath(e.target.value)}
-                placeholder="models/cross-encoder-tribrid"
+                placeholder="models/learning-reranker-epstein-files-1"
               />
             </div>
             <div className="input-group" />
