@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   postgres:
     # Default: pgvector/pgvector (dense vectors). For BM25 via ParadeDB pg_search:

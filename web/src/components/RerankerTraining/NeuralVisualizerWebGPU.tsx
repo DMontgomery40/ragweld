@@ -13,17 +13,21 @@ type WebGPUState = {
 
 export function NeuralVisualizerWebGPU({
   points,
+  terrainPoints,
   quality,
   motionIntensity,
   reduceMotion,
   showVectorField,
+  resetSignal = 0,
   onFallback,
 }: {
   points: NeuralRenderPoint[];
+  terrainPoints?: NeuralRenderPoint[];
   quality: Quality;
   motionIntensity: number;
   reduceMotion: boolean;
   showVectorField: boolean;
+  resetSignal?: number;
   onFallback?: () => void;
 }) {
   const [webgpuState, setWebgpuState] = useState<WebGPUState>({ module: null, failed: false });
@@ -55,14 +59,20 @@ export function NeuralVisualizerWebGPU({
       try {
         const RendererCtor = (WebGPU as any).WebGPURenderer;
         if (!RendererCtor) throw new Error('WebGPURenderer missing');
-        return new RendererCtor({
+        const renderer = new RendererCtor({
           canvas: props.canvas,
           antialias: true,
           alpha: true,
         });
+        if (typeof renderer.setClearColor === 'function') {
+          renderer.setClearColor(0x000000, 0);
+        }
+        return renderer;
       } catch {
         onFallback?.();
-        return new THREE.WebGLRenderer(props as any);
+        const fallback = new THREE.WebGLRenderer({ ...(props as any), alpha: true });
+        fallback.setClearColor(0x000000, 0);
+        return fallback;
       }
     };
   }, [onFallback, webgpuState.failed, webgpuState.module]);
@@ -75,11 +85,13 @@ export function NeuralVisualizerWebGPU({
     <Canvas className="neural-canvas active" camera={{ position: [0, 0, 2.5], fov: 42 }} gl={createRenderer as any}>
       <TrajectoryScene
         points={points}
+        terrainPoints={terrainPoints}
         quality={quality}
         motionIntensity={motionIntensity}
         reduceMotion={reduceMotion}
         showVectorField={showVectorField}
         enablePostprocessing={false}
+        resetSignal={resetSignal}
       />
     </Canvas>
   );

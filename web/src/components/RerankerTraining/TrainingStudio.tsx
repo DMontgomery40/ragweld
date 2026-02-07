@@ -112,6 +112,24 @@ function toTelemetryPoint(ev: RerankerTrainMetricEvent): TelemetryPoint | null {
   };
 }
 
+function metricEventKey(ev: RerankerTrainMetricEvent): string {
+  return JSON.stringify({
+    type: ev.type,
+    ts: ev.ts,
+    status: ev.status ?? null,
+    step: ev.step ?? null,
+    epoch: ev.epoch ?? null,
+    percent: ev.percent ?? null,
+    message: ev.message ?? null,
+    loss: ev.loss ?? null,
+    lr: ev.lr ?? null,
+    grad_norm: ev.grad_norm ?? null,
+    proj_x: ev.proj_x ?? null,
+    proj_y: ev.proj_y ?? null,
+    metrics: ev.metrics ?? null,
+  });
+}
+
 function formatMetricValue(v: number): string {
   if (!Number.isFinite(v)) return String(v);
   if (v === 0) return '0.0000';
@@ -132,6 +150,34 @@ function lastEventMeta(events: RerankerTrainMetricEvent[]): { ts?: string; step?
     }
   }
   return {};
+}
+
+type RunStatus = NonNullable<RerankerTrainRun['status']>;
+
+function normalizeRunStatus(status: RerankerTrainRun['status'] | null | undefined): RunStatus | 'unknown' {
+  if (status === 'queued' || status === 'running' || status === 'completed' || status === 'failed' || status === 'cancelled') {
+    return status;
+  }
+  return 'unknown';
+}
+
+function formatHudProgress(status: RunStatus | 'unknown', percent: number | undefined): string {
+  const pct = Number.isFinite(percent) ? clamp(Number(percent), 0, 100) : null;
+  if (status === 'failed') return pct == null ? 'failed' : `${pct}% (failed)`;
+  if (status === 'cancelled') return pct == null ? 'cancelled' : `${pct}% (cancelled)`;
+  if (status === 'completed') return pct == null ? '100%' : `${pct}%`;
+  return pct == null ? '—' : `${pct}%`;
+}
+
+function lastTerminalMessage(events: RerankerTrainMetricEvent[]): string | null {
+  for (let i = events.length - 1; i >= 0; i -= 1) {
+    const ev = events[i];
+    const msg = String(ev.message || '').trim();
+    if (!msg) continue;
+    if (ev.type === 'error') return msg;
+    if (ev.status === 'failed' || ev.status === 'cancelled') return msg;
+  }
+  return null;
 }
 
 function presetLabel(preset: LayoutPreset): string {
@@ -180,6 +226,7 @@ export function TrainingStudio() {
   const telemetryRef = useRef<TelemetryPoint[]>([]);
   const telemetryPendingRef = useRef<TelemetryPoint[]>([]);
   const telemetryFlushRafRef = useRef<number | null>(null);
+  const seenEventKeysRef = useRef<Set<string>>(new Set());
   const [telemetryCount, setTelemetryCount] = useState(0);
 
   const [promoting, setPromoting] = useState(false);
@@ -264,6 +311,10 @@ export function TrainingStudio() {
   const [visualizerQuality, setVisualizerQuality] = useConfigField<'balanced' | 'cinematic' | 'ultra'>(
     'ui.learning_reranker_visualizer_quality',
     'cinematic'
+  );
+  const [visualizerColorMode, setVisualizerColorMode] = useConfigField<'absolute' | 'delta'>(
+    'ui.learning_reranker_visualizer_color_mode',
+    'absolute'
   );
   const [visualizerMaxPoints, setVisualizerMaxPoints] = useConfigField<number>(
     'ui.learning_reranker_visualizer_max_points',
@@ -406,6 +457,7 @@ export function TrainingStudio() {
       setSelectedRun(null);
       setEvents([]);
       setLatestMetrics(null);
+      seenEventKeysRef.current.clear();
       resetTelemetry();
       return;
     }
@@ -420,9 +472,18 @@ export function TrainingStudio() {
     ])
       .then(([run, metricsRes]) => {
         if (cancelled) return;
-        const evs = metricsRes.events || [];
+        const rawEvents = metricsRes.events || [];
+        const seen = new Set<string>();
+        const evs: RerankerTrainMetricEvent[] = [];
+        for (const ev of rawEvents) {
+          const key = metricEventKey(ev);
+          if (seen.has(key)) continue;
+          seen.add(key);
+          evs.push(ev);
+        }
         setSelectedRun(run);
         setEvents(evs);
+        seenEventKeysRef.current = seen;
         setLatestMetrics(latestMetricsFromEvents(evs));
 
         const telemetry = evs
@@ -444,11 +505,18 @@ export function TrainingStudio() {
     closeSseRef.current = rerankerTrainingService.streamRun(
       selectedRunId,
       (ev) => {
+        const key = metricEventKey(ev);
+        if (seenEventKeysRef.current.has(key)) return;
+        seenEventKeysRef.current.add(key);
+
         const tel = toTelemetryPoint(ev);
         if (tel) pushTelemetry(tel);
 
         setEvents((prev) => {
           const next = [...prev, ev].slice(-5000);
+          if (next.length >= 5000) {
+            seenEventKeysRef.current = new Set(next.map(metricEventKey));
+          }
           setLatestMetrics(latestMetricsFromEvents(next));
           return next;
         });
@@ -525,12 +593,19 @@ export function TrainingStudio() {
         ? (done ? done.getTime() : now.getTime()) - started.getTime()
         : null;
 
+    const status = normalizeRunStatus(run.status);
+    const last = lastEventMeta(events);
+    const progressLabel = formatHudProgress(status, last.percent);
+
     return {
+      status,
       backend: backend || '—',
       baseModel: baseModel || '—',
       activePath: activePath || '—',
       durationSec: durMs == null ? null : Math.max(0, durMs / 1000),
-      last: lastEventMeta(events),
+      last,
+      progressLabel,
+      terminalMessage: status === 'failed' || status === 'cancelled' ? lastTerminalMessage(events) : null,
     };
   }, [selectedRun, events]);
 
@@ -1007,7 +1082,7 @@ export function TrainingStudio() {
                   >
                     <div className="studio-run-item-top">
                       <span className="studio-mono">{run.run_id}</span>
-                      <span>{run.status}</span>
+                      <span className="studio-run-status-pill studio-mono" data-status={run.status}>{run.status}</span>
                     </div>
                     <div className="studio-run-item-meta">
                       {safeDateLabel(run.started_at)} · {metricLabel(run.primary_metric, Number(run.primary_k))}
@@ -1024,6 +1099,17 @@ export function TrainingStudio() {
   }, [runVirtualItems, runsError, runsLoading, scope, selectedRunId, sortedRuns]);
 
   const renderVisualizerPanel = useCallback(() => {
+    const progressLosses = events
+      .filter((ev) => ev.type === 'progress' && ev.metrics && typeof ev.metrics.train_loss === 'number')
+      .map((ev) => ({ step: Number(ev.step ?? 0), loss: Number(ev.metrics!.train_loss) }))
+      .filter((p) => Number.isFinite(p.loss) && Number.isFinite(p.step));
+
+    let best: { step: number; loss: number } | null = null;
+    for (const p of progressLosses) {
+      if (!best || p.loss < best.loss) best = p;
+    }
+    const last = progressLosses.length ? progressLosses[progressLosses.length - 1] : null;
+
     return (
       <section className="studio-center-stage">
         <NeuralVisualizer
@@ -1031,6 +1117,11 @@ export function TrainingStudio() {
           pointCount={telemetryCount}
           rendererPreference={visualizerRenderer}
           quality={visualizerQuality}
+          intensityMode={visualizerColorMode}
+          bestTrainLoss={best?.loss ?? null}
+          bestTrainLossStep={best?.step ?? null}
+          lastTrainLoss={last?.loss ?? null}
+          lastTrainLossStep={last?.step ?? null}
           targetFps={Number(visualizerTargetFps)}
           tailSeconds={Number(visualizerTailSeconds)}
           motionIntensity={Number(visualizerMotionIntensity)}
@@ -1040,8 +1131,10 @@ export function TrainingStudio() {
       </section>
     );
   }, [
+    events,
     telemetryCount,
     visualizerMotionIntensity,
+    visualizerColorMode,
     visualizerQuality,
     visualizerReduceMotion,
     visualizerRenderer,
@@ -1074,14 +1167,29 @@ export function TrainingStudio() {
               </header>
               {selectedRun ? (
                 <div className="studio-keyvals">
-                  <div><span>status</span><span className="studio-mono">{selectedRun.status}</span></div>
+                  <div>
+                    <span>status</span>
+                    <span
+                      className="studio-run-status-pill studio-mono"
+                      data-status={hud?.status || 'unknown'}
+                      data-testid="studio-run-hud-status"
+                    >
+                      {hud?.status || 'unknown'}
+                    </span>
+                  </div>
                   <div><span>backend</span><span className="studio-mono">{hud?.backend || '—'}</span></div>
                   <div><span>base_model</span><span className="studio-mono studio-truncate" title={hud?.baseModel || ''}>{hud?.baseModel || '—'}</span></div>
                   <div><span>active_path</span><span className="studio-mono studio-truncate" title={hud?.activePath || ''}>{hud?.activePath || '—'}</span></div>
                   <div><span>duration</span><span className="studio-mono">{hud?.durationSec == null ? '—' : `${hud.durationSec.toFixed(1)}s`}</span></div>
                   <div><span>step</span><span className="studio-mono">{hud?.last?.step ?? '—'}</span></div>
                   <div><span>epoch</span><span className="studio-mono">{hud?.last?.epoch ?? '—'}</span></div>
-                  <div><span>progress</span><span className="studio-mono">{hud?.last?.percent == null ? '—' : `${hud.last.percent}%`}</span></div>
+                  <div><span>progress</span><span className="studio-mono" data-testid="studio-run-hud-progress">{hud?.progressLabel || '—'}</span></div>
+                  {hud?.terminalMessage ? (
+                    <div>
+                      <span>{hud.status === 'cancelled' ? 'cancel_reason' : 'failure_reason'}</span>
+                      <span className="studio-mono studio-truncate" title={hud.terminalMessage}>{hud.terminalMessage}</span>
+                    </div>
+                  ) : null}
                 </div>
               ) : (
                 <p className="studio-empty">Select a run.</p>
@@ -1335,6 +1443,13 @@ export function TrainingStudio() {
                       <option value="balanced">balanced</option>
                       <option value="cinematic">cinematic</option>
                       <option value="ultra">ultra</option>
+                    </select>
+                  </div>
+                  <div className="input-group">
+                    <label>Color mode <TooltipIcon name="LEARNING_RERANKER_VISUALIZER_COLOR_MODE" /></label>
+                    <select value={visualizerColorMode} onChange={(e) => setVisualizerColorMode(e.target.value as any)}>
+                      <option value="absolute">absolute</option>
+                      <option value="delta">delta</option>
                     </select>
                   </div>
                   <div className="input-group">

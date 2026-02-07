@@ -1,0 +1,21 @@
+{
+  "backend": "mlx_qwen3",
+  "base_model": "Qwen/Qwen3-Reranker-0.6B",
+  "prompt_template_version": "mlx_qwen3_v1",
+  "lora_rank": 16,
+  "lora_alpha": 32.0,
+  "lora_dropout": 0.05,
+  "target_modules": [
+    "q_proj",
+    "k_proj",
+    "v_proj",
+    "o_proj",
+    "gate_proj",
+    "up_proj",
+    "down_proj"
+  ],
+  "applied_modules": 196,
+  "yes_token_id": 9693,
+  "no_token_id": 2152,
+  "suffix_hash": "5ca215121bd0820099042d7d3949d5b77533e17ad13bb8e6104d37029e7ea54d"
+}

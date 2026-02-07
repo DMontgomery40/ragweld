@@ -1639,6 +1639,8 @@ export interface UIConfig {
   learning_reranker_visualizer_renderer?: "auto" | "webgpu" | "webgl2" | "canvas2d"; // default: "auto"
   /** Neural Visualizer quality tier */
   learning_reranker_visualizer_quality?: "balanced" | "cinematic" | "ultra"; // default: "cinematic"
+  /** Neural Visualizer trajectory coloring mode (absolute loss vs delta loss) */
+  learning_reranker_visualizer_color_mode?: "absolute" | "delta"; // default: "absolute"
   /** Maximum telemetry points retained for Neural Visualizer */
   learning_reranker_visualizer_max_points?: number; // default: 10000
   /** Target FPS for Neural Visualizer animation loop */

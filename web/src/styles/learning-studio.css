@@ -333,6 +333,50 @@
   font-size: 0.69rem;
 }
 
+.studio-run-status-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 7px;
+  border: 1px solid var(--panel-border);
+  border-radius: 999px;
+  font-size: 0.64rem;
+  line-height: 1.1;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--studio-text-muted);
+  background: rgba(6, 16, 34, 0.7);
+}
+
+.studio-run-status-pill[data-status='queued'] {
+  border-color: color-mix(in srgb, var(--studio-warn) 52%, transparent);
+  color: var(--studio-warn);
+}
+
+.studio-run-status-pill[data-status='running'] {
+  border-color: color-mix(in srgb, var(--studio-accent) 58%, transparent);
+  color: var(--studio-accent);
+}
+
+.studio-run-status-pill[data-status='completed'] {
+  border-color: color-mix(in srgb, var(--studio-good) 60%, transparent);
+  color: var(--studio-good);
+}
+
+.studio-run-status-pill[data-status='failed'] {
+  border-color: color-mix(in srgb, var(--studio-bad) 62%, transparent);
+  color: var(--studio-bad);
+}
+
+.studio-run-status-pill[data-status='cancelled'] {
+  border-color: color-mix(in srgb, var(--studio-warn) 62%, transparent);
+  color: color-mix(in srgb, var(--studio-warn) 82%, #ffffff);
+}
+
+.studio-run-status-pill[data-status='unknown'] {
+  opacity: 0.9;
+}
+
 .studio-run-item-meta {
   color: var(--studio-text-muted);
   font-size: 0.68rem;
@@ -709,9 +753,14 @@
 
 .neural-canvas-wrap {
   position: relative;
-  min-height: 260px;
+  width: min(100%, 1400px);
+  margin-inline: auto;
+  aspect-ratio: 16 / 9;
+  min-height: 300px;
+  max-height: min(70vh, 680px);
   border-bottom: 1px solid var(--panel-border);
   overflow: hidden;
+  background: #061226;
 }
 
 .neural-canvas {
@@ -720,6 +769,8 @@
   width: 100%;
   height: 100%;
   display: none;
+  z-index: 2;
+  background: transparent;
 }
 
 .neural-canvas.active {
@@ -734,6 +785,17 @@
   color: var(--studio-text-muted);
   font-size: 0.82rem;
   pointer-events: none;
+  z-index: 3;
+}
+
+.neural-renderer-loading {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  color: var(--studio-text-muted);
+  font-size: 0.76rem;
 }
 
 .neural-controls {
@@ -742,6 +804,8 @@
   flex-wrap: wrap;
   gap: 10px;
   padding: 8px 10px;
+  width: min(100%, 1400px);
+  margin-inline: auto;
 }
 
 .neural-zoom {
@@ -757,6 +821,8 @@
   align-items: center;
   gap: 10px;
   padding: 0 10px 10px;
+  width: min(100%, 1400px);
+  margin-inline: auto;
 }
 
 .neural-scrub-row input[type='range'] {
@@ -869,6 +935,11 @@
     min-height: 520px;
   }
 
+  .neural-canvas-wrap {
+    width: 100%;
+    max-height: min(60vh, 560px);
+  }
+
   .studio-run-setup {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -915,5 +986,10 @@
 
   .studio-run-setup {
     grid-template-columns: 1fr;
+  }
+
+  .neural-canvas-wrap {
+    min-height: 240px;
+    max-height: min(52vh, 420px);
   }
 }

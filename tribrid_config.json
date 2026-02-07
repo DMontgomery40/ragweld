@@ -421,6 +421,7 @@
     "learning_reranker_studio_bottom_panel_pct": 28,
     "learning_reranker_visualizer_renderer": "auto",
     "learning_reranker_visualizer_quality": "cinematic",
+    "learning_reranker_visualizer_color_mode": "absolute",
     "learning_reranker_visualizer_max_points": 10000,
     "learning_reranker_visualizer_target_fps": 60,
     "learning_reranker_visualizer_tail_seconds": 8.0,

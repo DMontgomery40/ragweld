@@ -7409,6 +7409,214 @@
       "related": [],
       "links": [],
       "badges": []
+    },
+    {
+      "term": "Learning Reranker Visualizer: Color Mode",
+      "key": "LEARNING_RERANKER_VISUALIZER_COLOR_MODE",
+      "definition": "<span class=\"tt-strong\">What this control changes</span><br>Color mode changes only <span class=\"tt-strong\">hue/intensity encoding</span> for the trajectory points. It does <span class=\"tt-strong\">not</span> change x/y projection and it does <span class=\"tt-strong\">not</span> change terrain height. In the code path, geometry is computed first and color is assigned later in <span class=\"mono\">projectPoints(..., intensityMode)</span>.<br><br><span class=\"tt-strong\">Mode = absolute (where am I doing well?)</span><br>Each point is colored from normalized train loss at that step. Lower loss maps toward the better/cooler side of the palette, higher loss toward the worse/warmer side. This is the easiest way to answer \"which regions of this run were strong vs weak?\" In this implementation, color is mostly loss with a smaller gradient-norm blend so structure remains visible when loss is locally flat.<br><br><span class=\"tt-strong\">Mode = delta (am I improving right now?)</span><br>Each point is colored from first difference versus the previous point: <span class=\"mono\">prev_loss - current_loss</span>. Positive delta means local improvement; negative delta means local regression. This surfaces \"learning\" vs \"thrashing\" even when absolute loss is jagged because of mini-batch stochasticity.<br><br><span class=\"tt-strong\">Interpretation rule</span><br>Use <span class=\"mono\">absolute</span> when comparing quality across run regions. Use <span class=\"mono\">delta</span> when diagnosing local optimizer behavior, schedule transitions, or instability.<br><br><span class=\"tt-strong\">Code path</span><br><span class=\"mono\">web/src/components/RerankerTraining/NeuralVisualizerCore.tsx -> projectPoints(... intensityMode ...)</span>",
+      "category": "reranking",
+      "related": [
+        "LEARNING_RERANKER_VISUALIZER_BEST_SO_FAR",
+        "LEARNING_RERANKER_VISUALIZER_LAST_STEP",
+        "LEARNING_RERANKER_VISUALIZER_TAIL_SECONDS"
+      ],
+      "links": [
+        {
+          "text": "Matplotlib: Choosing Colormaps",
+          "href": "https://matplotlib.org/stable/users/explain/colors/colormaps.html"
+        },
+        {
+          "text": "Kenneth Moreland: Diverging Color Maps for Scientific Visualization",
+          "href": "https://www.kennethmoreland.com/color-maps/"
+        },
+        {
+          "text": "ColorBrewer 2.0",
+          "href": "https://colorbrewer2.org/"
+        },
+        {
+          "text": "Deep Learning Book - Optimization for Training Deep Models",
+          "href": "https://www.deeplearningbook.org/contents/optimization.html"
+        },
+        {
+          "text": "SGDR: Stochastic Gradient Descent with Warm Restarts",
+          "href": "https://arxiv.org/abs/1608.03983"
+        }
+      ],
+      "badges": [
+        {
+          "text": "Visualizer semantics",
+          "class": "info"
+        },
+        {
+          "text": "Telemetry-driven",
+          "class": "info"
+        }
+      ]
+    },
+    {
+      "term": "Learning Reranker Visualizer: Best So Far",
+      "key": "LEARNING_RERANKER_VISUALIZER_BEST_SO_FAR",
+      "definition": "<span class=\"tt-strong\">What the best chip means</span><br>The <span class=\"mono\">best=...</span> chip is the running minimum of <span class=\"mono\">metrics.train_loss</span> from progress events. It is intentionally computed from the training metric stream, not from projected 2D telemetry coordinates.<br><br><span class=\"tt-strong\">Why this is the right instrumentation</span><br>The projection stream exists for visualization and can be sampled, tailed, and transformed for readability. The progress metric stream is the authoritative source for optimization progress. Tracking \"best so far\" from that stream prevents endpoint bias and answers \"what is the best training state we observed so far?\"<br><br><span class=\"tt-strong\">Operational interpretation</span><br>If <span class=\"mono\">last</span> is worse than <span class=\"mono\">best</span>, the run ended after its minimum. This is normal for stochastic optimization and does not imply the run failed. It means the final sample is not the best checkpoint candidate.<br><br><span class=\"tt-strong\">Code path</span><br><span class=\"mono\">web/src/components/RerankerTraining/TrainingStudio.tsx -> progress events -> metrics.train_loss -> running min</span>",
+      "category": "reranking",
+      "related": [
+        "LEARNING_RERANKER_VISUALIZER_LAST_STEP",
+        "LEARNING_RERANKER_VISUALIZER_COLOR_MODE",
+        "RERANKER_TRAIN_RECOMMENDED_METRIC"
+      ],
+      "links": [
+        {
+          "text": "Hugging Face Trainer (best model + checkpoint selection)",
+          "href": "https://huggingface.co/docs/transformers/main_classes/trainer"
+        },
+        {
+          "text": "Keras ModelCheckpoint",
+          "href": "https://keras.io/api/callbacks/model_checkpoint/"
+        },
+        {
+          "text": "Keras EarlyStopping (restore_best_weights)",
+          "href": "https://keras.io/api/callbacks/early_stopping/"
+        },
+        {
+          "text": "TensorBoard Scalars (tracking noisy metrics over training)",
+          "href": "https://www.tensorflow.org/tensorboard/scalars_and_keras"
+        }
+      ],
+      "badges": [
+        {
+          "text": "Best checkpoint signal",
+          "class": "info"
+        },
+        {
+          "text": "Not endpoint-biased",
+          "class": "info"
+        }
+      ]
+    },
+    {
+      "term": "Learning Reranker Visualizer: Last Step",
+      "key": "LEARNING_RERANKER_VISUALIZER_LAST_STEP",
+      "definition": "<span class=\"tt-strong\">What the last chip means</span><br>The <span class=\"mono\">last=...</span> chip is the most recent observed training loss sample. It is a snapshot of where the run ended, not a guarantee of best quality.<br><br><span class=\"tt-strong\">Why last can be worse than best</span><br>Mini-batch SGD is stochastic, so per-step loss is noisy and non-monotonic. Learning-rate schedules can also change local dynamics (for example warmup, cosine phases, or restart boundaries). Because of this, the terminal sample can sit above the minimum even in healthy runs.<br><br><span class=\"tt-strong\">How to read best vs last together</span><br>Treat <span class=\"mono\">best</span> as the optimization floor reached during the run, and <span class=\"mono\">last</span> as the endpoint state at stop time. The gap between them is a diagnostic signal for late-stage instability, schedule transitions, or insufficient checkpoint selection policy.<br><br><span class=\"tt-strong\">Practical rule</span><br>Do not evaluate run quality from endpoint alone. Compare both chips and use checkpointing policy that can restore the best observed state when needed.",
+      "category": "reranking",
+      "related": [
+        "LEARNING_RERANKER_VISUALIZER_BEST_SO_FAR",
+        "LEARNING_RERANKER_VISUALIZER_COLOR_MODE"
+      ],
+      "links": [
+        {
+          "text": "Deep Learning Book - Stochastic Optimization",
+          "href": "https://www.deeplearningbook.org/contents/optimization.html"
+        },
+        {
+          "text": "PyTorch: How to adjust learning rate",
+          "href": "https://pytorch.org/docs/stable/optim.html#how-to-adjust-learning-rate"
+        },
+        {
+          "text": "SGDR: Stochastic Gradient Descent with Warm Restarts",
+          "href": "https://arxiv.org/abs/1608.03983"
+        },
+        {
+          "text": "On the Generalization Benefit of Noise in SGD",
+          "href": "https://arxiv.org/abs/2006.15081"
+        }
+      ],
+      "badges": [
+        {
+          "text": "Endpoint metric",
+          "class": "warn"
+        },
+        {
+          "text": "Can regress after best",
+          "class": "warn"
+        }
+      ]
+    },
+    {
+      "term": "Learning Reranker Visualizer: Live Mode",
+      "key": "LEARNING_RERANKER_VISUALIZER_LIVE_MODE",
+      "definition": "<span class=\"tt-strong\">What Live does</span><br>When Live is enabled, the visualizer follows the newest telemetry point and keeps the camera timeline anchored to \"now\". In this mode, the path can be intentionally tailed (recent segment emphasized) to keep motion readable while updates stream in.<br><br><span class=\"tt-strong\">Why the beginning can appear to disappear</span><br>If the start of the run seems gone, that is usually the configured tail behavior, not data loss. The renderer still has history; Live mode is choosing to show a recent moving window for clarity.<br><br><span class=\"tt-strong\">How to inspect full history</span><br>Disable Live or use the scrub slider. In non-live scrubbing/playback, the view shows full history up to the selected index instead of only the live tail.",
+      "category": "reranking",
+      "related": [
+        "LEARNING_RERANKER_VISUALIZER_TAIL_SECONDS",
+        "LEARNING_RERANKER_VISUALIZER_SCRUB_HISTORY"
+      ],
+      "links": [
+        {
+          "text": "TensorBoard Scalars (interpreting live, noisy curves)",
+          "href": "https://www.tensorflow.org/tensorboard/scalars_and_keras"
+        },
+        {
+          "text": "Matplotlib Animation Blitting (real-time rendering tradeoffs)",
+          "href": "https://matplotlib.org/stable/users/explain/animations/blitting.html"
+        }
+      ],
+      "badges": [
+        {
+          "text": "Playback mode",
+          "class": "info"
+        },
+        {
+          "text": "Tail-aware",
+          "class": "info"
+        }
+      ]
+    },
+    {
+      "term": "Learning Reranker Visualizer: Scrub History",
+      "key": "LEARNING_RERANKER_VISUALIZER_SCRUB_HISTORY",
+      "definition": "<span class=\"tt-strong\">What the history scrubber controls</span><br>The scrubber sets the visible timeline cutoff index. Moving it lets you inspect earlier optimization states step-by-step, including transitions where loss, gradient norm, or direction changed.<br><br><span class=\"tt-strong\">Interaction with Live mode</span><br>Dragging the scrubber exits Live and freezes the timeline at your selected index. This is the fastest way to audit early-run behavior that may be hidden by live-tail rendering.<br><br><span class=\"tt-strong\">Recommended workflow</span><br>Use Live for situational awareness during active training. Use scrubbing for forensic analysis after a run, especially when best and last diverge.",
+      "category": "reranking",
+      "related": [
+        "LEARNING_RERANKER_VISUALIZER_LIVE_MODE",
+        "LEARNING_RERANKER_VISUALIZER_BEST_SO_FAR",
+        "LEARNING_RERANKER_VISUALIZER_LAST_STEP"
+      ],
+      "links": [
+        {
+          "text": "TensorBoard Scalars (timeline inspection patterns)",
+          "href": "https://www.tensorflow.org/tensorboard/scalars_and_keras"
+        },
+        {
+          "text": "Matplotlib Animation and event loops",
+          "href": "https://matplotlib.org/stable/users/explain/figure/interactive_guide.html"
+        }
+      ],
+      "badges": [
+        {
+          "text": "Timeline forensics",
+          "class": "info"
+        }
+      ]
+    },
+    {
+      "term": "Learning Reranker Visualizer: Tail Seconds",
+      "key": "LEARNING_RERANKER_VISUALIZER_TAIL_SECONDS",
+      "definition": "<span class=\"tt-strong\">What this setting does</span><br>Controls the temporal tail length used while Live mode is on. The visualizer shows the most recent portion of the trajectory to keep motion legible and avoid overdraw in long runs.<br><br><span class=\"tt-strong\">Implementation detail</span><br>Tail seconds are converted to a displayed point count using an internal sampling heuristic (approximately <span class=\"mono\">tail_seconds * 14</span>, then clamped to a safety range). This is a rendering policy, not a training metric policy.<br><br><span class=\"tt-strong\">Troubleshooting \"snake tail\" behavior</span><br>If the run start appears to vanish, increase this value, disable Live, or scrub manually. In scrubbing mode, full history up to the selected index is shown.<br><br><span class=\"tt-strong\">Tuning guidance</span><br>Lower values emphasize short-term dynamics and make rapid motion cleaner. Higher values preserve more context but can look visually dense on noisy runs.",
+      "category": "reranking",
+      "related": [
+        "LEARNING_RERANKER_VISUALIZER_LIVE_MODE",
+        "LEARNING_RERANKER_VISUALIZER_SCRUB_HISTORY",
+        "LEARNING_RERANKER_VISUALIZER_COLOR_MODE"
+      ],
+      "links": [
+        {
+          "text": "Matplotlib Animation Blitting (performance/readability tradeoffs)",
+          "href": "https://matplotlib.org/stable/users/explain/animations/blitting.html"
+        },
+        {
+          "text": "TensorBoard Scalars (handling long, noisy trajectories)",
+          "href": "https://www.tensorflow.org/tensorboard/scalars_and_keras"
+        }
+      ],
+      "badges": [
+        {
+          "text": "Live playback only",
+          "class": "warn"
+        },
+        {
+          "text": "Visualization policy",
+          "class": "info"
+        }
+      ]
     }
   ]
 }

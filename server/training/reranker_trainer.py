@@ -218,6 +218,7 @@ def train_pairwise_reranker(
     run_id: str = "",
     telemetry_interval_steps: int = 2,
     emit: Callable[[str, dict[str, Any]], None] | None = None,
+    should_stop: Callable[[], bool] | None = None,
 ) -> dict[str, object]:
     """Train a local cross-encoder on pairwise triplets and save to output_dir.
 
@@ -226,6 +227,10 @@ def train_pairwise_reranker(
     """
     if not triplets:
         raise ValueError("No materialized triplets to train on")
+
+    def _check_cancel() -> None:
+        if should_stop is not None and should_stop():
+            raise RuntimeError("Training run cancelled")
 
     # Lazy imports (keep API startup fast)
     import torch
@@ -329,6 +334,7 @@ def train_pairwise_reranker(
         scores: list[float] = []
         with torch.no_grad():
             for q, d in rows:
+                _check_cancel()
                 enc = tokenizer(
                     q,
                     d,
@@ -371,10 +377,27 @@ def train_pairwise_reranker(
 
     with torch.no_grad():
         norm1 = torch.sqrt(sum(torch.sum(d * d) for d in proj_dirs_1)) if proj_dirs_1 else torch.tensor(1.0, device=device)
-        norm2 = torch.sqrt(sum(torch.sum(d * d) for d in proj_dirs_2)) if proj_dirs_2 else torch.tensor(1.0, device=device)
         norm1 = torch.clamp(norm1, min=1e-12)
-        norm2 = torch.clamp(norm2, min=1e-12)
         proj_dirs_1 = [d / norm1 for d in proj_dirs_1]
+
+        dot12 = (
+            sum(torch.sum(d2 * d1) for d1, d2 in zip(proj_dirs_1, proj_dirs_2, strict=False))
+            if proj_dirs_1 and proj_dirs_2
+            else torch.tensor(0.0, device=device)
+        )
+        proj_dirs_2 = [d2 - (dot12 * d1) for d1, d2 in zip(proj_dirs_1, proj_dirs_2, strict=False)]
+
+        norm2 = torch.sqrt(sum(torch.sum(d * d) for d in proj_dirs_2)) if proj_dirs_2 else torch.tensor(1.0, device=device)
+        if float(norm2.item()) <= 1e-12 and proj_named:
+            proj_dirs_2 = []
+            for _name, param in proj_named:
+                d2 = torch.randn(param.shape, generator=generator, dtype=param.dtype)
+                proj_dirs_2.append(d2.to(device=device))
+            dot12 = sum(torch.sum(d2 * d1) for d1, d2 in zip(proj_dirs_1, proj_dirs_2, strict=False))
+            proj_dirs_2 = [d2 - (dot12 * d1) for d1, d2 in zip(proj_dirs_1, proj_dirs_2, strict=False)]
+            norm2 = torch.sqrt(sum(torch.sum(d * d) for d in proj_dirs_2))
+
+        norm2 = torch.clamp(norm2, min=1e-12)
         proj_dirs_2 = [d / norm2 for d in proj_dirs_2]
         w0_dot1 = float(sum(torch.sum(p.detach() * d).item() for (_n, p), d in zip(proj_named, proj_dirs_1, strict=False))) if proj_named else 0.0
         w0_dot2 = float(sum(torch.sum(p.detach() * d).item() for (_n, p), d in zip(proj_named, proj_dirs_2, strict=False))) if proj_named else 0.0
@@ -385,7 +408,9 @@ def train_pairwise_reranker(
     telemetry_every = max(1, int(telemetry_interval_steps))
 
     for epoch_idx in range(int(epochs)):
+        _check_cancel()
         for batch in train_loader:
+            _check_cancel()
             step_start = time.perf_counter()
             global_step += 1
             labels = batch.pop("labels")
@@ -517,6 +542,7 @@ def evaluate_pairwise_reranker(
     model_dir: Path,
     triplets: list[MaterializedTriplet],
     max_length: int,
+    should_stop: Callable[[], bool] | None = None,
 ) -> dict[str, float]:
     """Evaluate a saved cross-encoder on pairwise triplets (proxy metrics)."""
     if not triplets:
@@ -544,6 +570,8 @@ def evaluate_pairwise_reranker(
         scores: list[float] = []
         with torch.no_grad():
             for q, d in rows:
+                if should_stop is not None and should_stop():
+                    raise RuntimeError("Training run cancelled")
                 enc = tokenizer(
                     q,
                     d,

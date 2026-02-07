@@ -27,7 +27,57 @@ class LabeledPair:
     label: int  # 0 or 1
 
 
+class TrainingCancelledError(RuntimeError):
+    """Raised when a caller requests cooperative cancellation."""
+
+
 T = TypeVar("T")
+
+
+def _iter_trainable_named_params(model: Any) -> Iterable[tuple[str, Any]]:
+    """Yield (name, param) from model.trainable_parameters() across MLX API variants.
+
+    Supported forms:
+    - Newer MLX/mlx-lm: nested dict/list trees of arrays
+    - Older variants: iterable of (name, param) tuples
+    - Other tuple/list metadata forms: first string components become name and
+      the tensor-like entry is selected as param
+    """
+    raw = model.trainable_parameters()
+
+    def _flatten(node: Any, path: list[str]) -> Iterable[tuple[str, Any]]:
+        if isinstance(node, dict):
+            for key, value in node.items():
+                yield from _flatten(value, path + [str(key)])
+            return
+        if isinstance(node, (list, tuple)):
+            for idx, value in enumerate(node):
+                yield from _flatten(value, path + [str(idx)])
+            return
+        if hasattr(node, "shape"):
+            name = ".".join(path) if path else "param"
+            yield (name, node)
+
+    if isinstance(raw, dict):
+        yield from _flatten(raw, [])
+        return
+
+    for item in raw:
+        if not isinstance(item, (tuple, list)) or len(item) < 2:
+            continue
+        param_idx: int | None = None
+        for idx in range(len(item) - 1, -1, -1):
+            candidate = item[idx]
+            if hasattr(candidate, "shape"):
+                param_idx = idx
+                break
+        if param_idx is None:
+            continue
+
+        param = item[param_idx]
+        name_parts = [str(x) for x in item[:param_idx] if isinstance(x, str) and str(x).strip()]
+        name = ".".join(name_parts) if name_parts else str(item[0])
+        yield (name, param)
 
 
 def deterministic_split(items: list[T], *, dev_split: float = 0.1, seed: int = 0) -> tuple[list[T], list[T]]:
@@ -97,6 +147,20 @@ def _tree_map(fn: Callable[..., Any], tree: Any, *rest: Any) -> Any:
     return fn(tree, *rest)
 
 
+def _tree_leaves(tree: Any) -> list[Any]:
+    leaves: list[Any] = []
+    if isinstance(tree, dict):
+        for value in tree.values():
+            leaves.extend(_tree_leaves(value))
+        return leaves
+    if isinstance(tree, (list, tuple)):
+        for value in tree:
+            leaves.extend(_tree_leaves(value))
+        return leaves
+    leaves.append(tree)
+    return leaves
+
+
 def accumulate_grads(accumulated: Any | None, grads: Any) -> Any:
     if accumulated is None:
         return grads
@@ -106,6 +170,25 @@ def accumulate_grads(accumulated: Any | None, grads: Any) -> Any:
 def average_grads(grads: Any, *, steps: int) -> Any:
     s = float(max(1, int(steps)))
     return _tree_map(lambda g: g / s, grads)
+
+
+def _orthogonalize_direction_dict(
+    base_dirs: dict[str, Any],
+    target_dirs: dict[str, Any],
+    *,
+    dot_fn: Callable[[dict[str, Any], dict[str, Any]], float],
+    eps: float = 1e-12,
+) -> dict[str, Any]:
+    """Project `target_dirs` onto the orthogonal complement of `base_dirs`."""
+    denom = float(dot_fn(base_dirs, base_dirs))
+    if not math.isfinite(denom) or denom <= float(eps):
+        return dict(target_dirs)
+    scale = float(dot_fn(target_dirs, base_dirs)) / float(denom)
+    out: dict[str, Any] = {}
+    for name, value in target_dirs.items():
+        base = base_dirs.get(name)
+        out[name] = value if base is None else (value - (base * float(scale)))
+    return out
 
 
 def _batch_logits_and_lengths(
@@ -183,6 +266,7 @@ def evaluate_mlx_qwen3_reranker(
     lora_alpha: float = 32.0,
     lora_dropout: float = 0.05,
     lora_target_modules: list[str] | None = None,
+    should_stop: Callable[[], bool] | None = None,
 ) -> dict[str, float]:
     if not mlx_is_available():
         raise RuntimeError("MLX is not available (install mlx + mlx-lm)")
@@ -223,6 +307,8 @@ def evaluate_mlx_qwen3_reranker(
         pos_scores: list[float] = []
         neg_scores: list[float] = []
         for t in triplets:
+            if should_stop is not None and should_stop():
+                raise TrainingCancelledError("Training run cancelled")
             pairs = [
                 LabeledPair(query=t.query, document=t.positive_text, label=1),
                 LabeledPair(query=t.query, document=t.negative_text, label=0),
@@ -251,6 +337,7 @@ def _evaluate_triplets_current(
     triplets: list[MaterializedTriplet],
     max_length: int,
     instruction: str,
+    should_stop: Callable[[], bool] | None = None,
 ) -> dict[str, float]:
     import mlx.core as _mx
 
@@ -259,6 +346,8 @@ def _evaluate_triplets_current(
     pos_scores: list[float] = []
     neg_scores: list[float] = []
     for t in triplets:
+        if should_stop is not None and should_stop():
+            raise TrainingCancelledError("Training run cancelled")
         pairs = [
             LabeledPair(query=t.query, document=t.positive_text, label=1),
             LabeledPair(query=t.query, document=t.negative_text, label=0),
@@ -299,6 +388,7 @@ def train_mlx_qwen3_reranker(
     lora_target_modules: list[str] | None = None,
     telemetry_interval_steps: int = 2,
     emit: Callable[[str, dict[str, Any]], None] | None = None,
+    should_stop: Callable[[], bool] | None = None,
 ) -> dict[str, object]:
     if not mlx_is_available():
         raise RuntimeError("MLX is not available (install mlx + mlx-lm)")
@@ -335,6 +425,11 @@ def train_mlx_qwen3_reranker(
         optim: Any = _optim
         mlx_load: Any = getattr(_mlx_lm, "load")
 
+        def _check_cancel() -> None:
+            if should_stop is not None and should_stop():
+                raise TrainingCancelledError("Training run cancelled")
+
+        _check_cancel()
         model, tokenizer, *_ = mlx_load(str(base_model))
         model.freeze()
         applied = apply_lora_layers(
@@ -352,7 +447,7 @@ def train_mlx_qwen3_reranker(
 
         try:
             trainable_scalars = 0
-            for _, param in model.trainable_parameters():
+            for _, param in _iter_trainable_named_params(model):
                 try:
                     trainable_scalars += int(param.size)
                 except Exception:
@@ -382,7 +477,7 @@ def train_mlx_qwen3_reranker(
 
         def _dot_trainable(dirs: dict[str, Any]) -> float:
             total = None
-            for name, param in model.trainable_parameters():
+            for name, param in _iter_trainable_named_params(model):
                 d = dirs.get(str(name))
                 if d is None:
                     continue
@@ -403,21 +498,45 @@ def train_mlx_qwen3_reranker(
             mx.eval(total)
             return float(mx.sqrt(total).item())
 
+        def _dirs_dot(a: dict[str, Any], b: dict[str, Any]) -> float:
+            total = None
+            for name, arr in a.items():
+                other = b.get(name)
+                if other is None:
+                    continue
+                s = mx.sum(arr * other)
+                total = s if total is None else total + s
+            if total is None:
+                return 0.0
+            mx.eval(total)
+            return float(total.item())
+
         # Deterministic 2D projection telemetry in LoRA parameter space.
         # Uses a fixed random direction basis in LoRA parameter space (seed=0).
         try:
             mx.random.seed(0)
             d1: dict[str, Any] = {}
             d2: dict[str, Any] = {}
-            for name, param in model.trainable_parameters():
+            for name, param in _iter_trainable_named_params(model):
                 nm = str(name)
                 d1[nm] = mx.random.normal(param.shape)
                 d2[nm] = mx.random.normal(param.shape)
 
             n1 = max(1e-12, _dirs_norm(d1))
-            n2 = max(1e-12, _dirs_norm(d2))
             for k in list(d1.keys()):
                 d1[k] = d1[k] / float(n1)
+
+            d2 = _orthogonalize_direction_dict(d1, d2, dot_fn=_dirs_dot)
+            n2 = _dirs_norm(d2)
+            if n2 <= 1e-12:
+                # Extremely unlikely, but regenerate deterministic fallback basis.
+                d2 = {}
+                for name, param in _iter_trainable_named_params(model):
+                    d2[str(name)] = mx.random.normal(param.shape)
+                d2 = _orthogonalize_direction_dict(d1, d2, dot_fn=_dirs_dot)
+                n2 = _dirs_norm(d2)
+            n2 = max(1e-12, n2)
+            for k in list(d2.keys()):
                 d2[k] = d2[k] / float(n2)
 
             proj_dirs_1 = d1
@@ -538,10 +657,12 @@ def train_mlx_qwen3_reranker(
             )
 
         for epoch in range(int(max(1, epochs))):
+            _check_cancel()
             indices = list(range(len(train_pairs)))
             r.shuffle(indices)
 
             for i in range(0, len(indices), max(1, int(batch_size))):
+                _check_cancel()
                 batch_indices = indices[i : i + max(1, int(batch_size))]
                 batch = [train_pairs[j] for j in batch_indices]
                 if micro_step_in_accum == 0:
@@ -549,7 +670,16 @@ def train_mlx_qwen3_reranker(
                     samples_in_accum = 0
 
                 loss, grads = loss_and_grad(batch)
+                # MLX is lazy; explicitly realize tensors each micro-step so
+                # long grad-accum windows do not retain an unbounded graph.
+                mx.eval(loss)
+                grad_leaves = _tree_leaves(grads)
+                if grad_leaves:
+                    mx.eval(*grad_leaves)
                 accumulated_grads = accumulate_grads(accumulated_grads, grads)
+                accum_leaves = _tree_leaves(accumulated_grads)
+                if accum_leaves:
+                    mx.eval(*accum_leaves)
                 accumulated_loss += float(loss.item())
                 micro_step_in_accum += 1
                 samples_in_accum += int(len(batch))
@@ -598,6 +728,7 @@ def train_mlx_qwen3_reranker(
 
             # End-of-epoch evaluation on dev triplets (proxy metrics).
             if dev_triplets:
+                _check_cancel()
                 metrics = _evaluate_triplets_current(
                     model=model,
                     tokenizer=tokenizer,
@@ -605,10 +736,12 @@ def train_mlx_qwen3_reranker(
                     triplets=dev_triplets,
                     max_length=int(max_length),
                     instruction=str(instruction),
+                    should_stop=should_stop,
                 )
                 _emit("metrics", {"step": global_step, "epoch": float(epoch + 1), "metrics": metrics})
 
         # Save adapter artifact.
+        _check_cancel()
         output_dir.mkdir(parents=True, exist_ok=True)
         if proj_dirs_1 is not None and proj_dirs_2 is not None:
             try:
@@ -623,7 +756,7 @@ def train_mlx_qwen3_reranker(
             except Exception:
                 pass
         lora_weights: dict[str, Any] = {}
-        for name, param in model.trainable_parameters():
+        for name, param in _iter_trainable_named_params(model):
             lora_weights[str(name)] = param
         mx.savez(str(output_dir / "adapter.npz"), **lora_weights)
 

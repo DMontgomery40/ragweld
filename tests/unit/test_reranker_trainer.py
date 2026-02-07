@@ -124,6 +124,12 @@ async def test_train_pairwise_reranker_writes_artifact_and_evaluates(tmp_path: P
     assert (out_dir / "pytorch_model.bin").exists() or (out_dir / "model.safetensors").exists()
     assert any(t == "progress" for t, _ in events)
     assert any(t == "metrics" for t, _ in events)
+    telemetry = [payload for t, payload in events if t == "telemetry"]
+    assert len(telemetry) >= 2
+    xs = {round(float(ev.get("proj_x", 0.0)), 10) for ev in telemetry}
+    ys = {round(float(ev.get("proj_y", 0.0)), 10) for ev in telemetry}
+    assert len(xs) > 1
+    assert len(ys) > 1
 
     metrics = await asyncio.to_thread(evaluate_pairwise_reranker, model_dir=out_dir, triplets=mats, max_length=64)
     assert 0.0 <= metrics["mrr"] <= 1.0

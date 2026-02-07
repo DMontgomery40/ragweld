@@ -62,6 +62,7 @@ from server.reranker.artifacts import has_transformers_weights
 from server.services.config_store import get_config as load_scoped_config
 from server.training.metric_policy import infer_corpus_eval_profile
 from server.training.mlx_qwen3_trainer import (
+    TrainingCancelledError,
     deterministic_split,
     evaluate_mlx_qwen3_reranker,
     train_qwen3_lora_reranker,
@@ -165,6 +166,7 @@ _legacy_status = _LegacyStatus()
 _legacy_lock = asyncio.Lock()
 
 _train_tasks: dict[str, asyncio.Task[None]] = {}
+_train_cancel_events: dict[str, asyncio.Event] = {}
 
 
 async def _resolve_corpus_id(corpus_id: str | None) -> str:
@@ -515,7 +517,7 @@ def _primary_value(run: RerankerTrainRun, metrics: dict[str, float]) -> float:
     return float(metrics.get(key) or 0.0)
 
 
-async def _run_train_job(*, run_id: str, corpus_id: str) -> None:
+async def _run_train_job(*, run_id: str, corpus_id: str, cancel_event: asyncio.Event | None = None) -> None:
     """Background training job for /reranker/train/start.
 
     Uses:
@@ -536,8 +538,16 @@ async def _run_train_job(*, run_id: str, corpus_id: str) -> None:
             RerankerTrainMetricEvent(type="log", ts=datetime.now(UTC), run_id=run_id, message=str(msg)),
         )
 
+    def _is_cancel_requested() -> bool:
+        return bool(cancel_event is not None and cancel_event.is_set())
+
+    def _raise_if_cancelled(message: str = "Training cancelled by user.") -> None:
+        if _is_cancel_requested():
+            raise TrainingCancelledError(message)
+
     try:
         cfg = await load_scoped_config(repo_id=corpus_id)
+        _raise_if_cancelled()
 
         triplets_path = _resolve_path(cfg.training.tribrid_triplets_path)
         triplets = load_triplets(triplets_path)
@@ -609,6 +619,7 @@ async def _run_train_job(*, run_id: str, corpus_id: str) -> None:
                 "No usable triplets after materialization. "
                 f"Check that positive/negative doc_ids exist under corpus root: {corpus_root}"
             )
+        _raise_if_cancelled()
 
         _emit_log(
             f"Training on {mat_stats.get('triplets_out', 0)} materialized triplets "
@@ -620,9 +631,38 @@ async def _run_train_job(*, run_id: str, corpus_id: str) -> None:
 
         train_triplets, dev_triplets = deterministic_split(mats, dev_split=0.1, seed=0)
         active_dir = _resolve_path(cfg.training.tribrid_reranker_model_path)
+        train_batch_size = int(run.batch_size)
+        train_grad_accum_steps = int(cfg.training.learning_reranker_grad_accum_steps)
+        train_max_length = int(run.max_length)
+
+        if backend == "mlx_qwen3":
+            orig_batch = int(train_batch_size)
+            orig_grad = int(train_grad_accum_steps)
+            orig_maxlen = int(train_max_length)
+            # MLX Qwen3 training can spike unified-memory usage on long sequences.
+            # Keep a strict safe lane by default on Apple Silicon.
+            train_batch_size = max(1, min(orig_batch, 1))
+            train_max_length = max(32, min(orig_maxlen, 256))
+            # Do NOT preserve effective batch by inflating grad_accum after capping
+            # micro-batch size; long accumulation windows make progress appear stuck
+            # and can amplify MLX lazy-graph memory pressure.
+            train_grad_accum_steps = max(1, min(orig_grad, 8))
+            if (
+                train_batch_size != orig_batch
+                or train_grad_accum_steps != orig_grad
+                or train_max_length != orig_maxlen
+            ):
+                _emit_log(
+                    "Applied MLX safety caps "
+                    f"(batch_size {orig_batch}->{train_batch_size}, "
+                    f"grad_accum {orig_grad}->{train_grad_accum_steps}, "
+                    f"max_length {orig_maxlen}->{train_max_length}) "
+                    "to reduce unified-memory pressure on Apple Silicon while keeping progress responsive."
+                )
 
         baseline_primary: float | None = None
         if dev_triplets and active_dir.exists():
+            _raise_if_cancelled()
             manifest_backend = read_manifest_backend(active_dir)
             if not manifest_backend:
                 _emit_log("Baseline eval skipped (active artifact manifest missing; treating as no baseline).")
@@ -640,11 +680,12 @@ async def _run_train_job(*, run_id: str, corpus_id: str) -> None:
                             base_model=str(base_model),
                             adapter_dir=active_dir,
                             triplets=dev_triplets,
-                            max_length=int(run.max_length),
+                            max_length=int(train_max_length),
                             lora_rank=int(cfg.training.learning_reranker_lora_rank),
                             lora_alpha=float(cfg.training.learning_reranker_lora_alpha),
                             lora_dropout=float(cfg.training.learning_reranker_lora_dropout),
                             lora_target_modules=list(cfg.training.learning_reranker_lora_target_modules),
+                            should_stop=_is_cancel_requested,
                         )
                         baseline_metrics = _format_metrics_for_run(run, raw_baseline)
                         baseline_primary = _primary_value(run, baseline_metrics)
@@ -663,7 +704,8 @@ async def _run_train_job(*, run_id: str, corpus_id: str) -> None:
                             evaluate_pairwise_reranker,
                             model_dir=active_dir,
                             triplets=dev_triplets,
-                            max_length=int(run.max_length),
+                            max_length=int(train_max_length),
+                            should_stop=_is_cancel_requested,
                         )
                         baseline_metrics = _format_metrics_for_run(run, raw_baseline)
                         baseline_primary = _primary_value(run, baseline_metrics)
@@ -783,6 +825,7 @@ async def _run_train_job(*, run_id: str, corpus_id: str) -> None:
                 return
 
         # Mark run as running (in case a previous stub left it inconsistent).
+        _raise_if_cancelled()
         run.status = "running"
         _save_run(run)
         _append_event(
@@ -791,6 +834,7 @@ async def _run_train_job(*, run_id: str, corpus_id: str) -> None:
         )
 
         # Train (runs in thread; emits progress/metrics into metrics.jsonl).
+        _raise_if_cancelled()
         if backend == "mlx_qwen3":
             await asyncio.to_thread(
                 train_qwen3_lora_reranker,
@@ -800,11 +844,11 @@ async def _run_train_job(*, run_id: str, corpus_id: str) -> None:
                 train_triplets=train_triplets,
                 dev_triplets=dev_triplets,
                 epochs=int(run.epochs),
-                batch_size=int(run.batch_size),
-                gradient_accumulation_steps=int(cfg.training.learning_reranker_grad_accum_steps),
+                batch_size=int(train_batch_size),
+                gradient_accumulation_steps=int(train_grad_accum_steps),
                 lr=float(run.lr),
                 warmup_ratio=float(run.warmup_ratio),
-                max_length=int(run.max_length),
+                max_length=int(train_max_length),
                 negative_ratio=int(cfg.training.learning_reranker_negative_ratio),
                 seed=0,
                 lora_rank=int(cfg.training.learning_reranker_lora_rank),
@@ -813,6 +857,7 @@ async def _run_train_job(*, run_id: str, corpus_id: str) -> None:
                 lora_target_modules=list(cfg.training.learning_reranker_lora_target_modules),
                 telemetry_interval_steps=int(cfg.training.learning_reranker_telemetry_interval_steps),
                 emit=_emit,
+                should_stop=_is_cancel_requested,
             )
         else:
             await asyncio.to_thread(
@@ -825,13 +870,15 @@ async def _run_train_job(*, run_id: str, corpus_id: str) -> None:
                 batch_size=int(run.batch_size),
                 lr=float(run.lr),
                 warmup_ratio=float(run.warmup_ratio),
-                max_length=int(run.max_length),
+                max_length=int(train_max_length),
                 seed=0,
                 run_id=run_id,
                 telemetry_interval_steps=int(cfg.training.learning_reranker_telemetry_interval_steps),
                 emit=_emit,
+                should_stop=_is_cancel_requested,
             )
 
+        _raise_if_cancelled()
         # Evaluate trained artifact on the same held-out dev split used for baseline gating.
         if not dev_triplets:
             proxy = {"mrr": 0.0, "ndcg": 0.0, "map": 0.0}
@@ -841,18 +888,20 @@ async def _run_train_job(*, run_id: str, corpus_id: str) -> None:
                 base_model=str(base_model),
                 adapter_dir=model_artifact_dir,
                 triplets=dev_triplets,
-                max_length=int(run.max_length),
+                max_length=int(train_max_length),
                 lora_rank=int(cfg.training.learning_reranker_lora_rank),
                 lora_alpha=float(cfg.training.learning_reranker_lora_alpha),
                 lora_dropout=float(cfg.training.learning_reranker_lora_dropout),
                 lora_target_modules=list(cfg.training.learning_reranker_lora_target_modules),
+                should_stop=_is_cancel_requested,
             )
         else:
             proxy = await asyncio.to_thread(
                 evaluate_pairwise_reranker,
                 model_dir=model_artifact_dir,
                 triplets=dev_triplets,
-                max_length=int(run.max_length),
+                max_length=int(train_max_length),
+                should_stop=_is_cancel_requested,
             )
 
         metrics = _format_metrics_for_run(run, proxy)
@@ -870,6 +919,7 @@ async def _run_train_job(*, run_id: str, corpus_id: str) -> None:
         if promote_if_improves and baseline_primary is not None:
             should_promote = bool(pv > (baseline_primary + eps))
 
+        _raise_if_cancelled()
         if should_promote:
             _atomic_copy_dir(model_artifact_dir, active_dir)
             if backend == "transformers":
@@ -915,10 +965,10 @@ async def _run_train_job(*, run_id: str, corpus_id: str) -> None:
                 _legacy_status.message = "Training complete"
                 _legacy_status.result = RerankerLegacyTaskResult(ok=True, run_id=run_id)
 
-    except Exception as e:
+    except TrainingCancelledError as e:
         try:
             run = _load_run(run_id)
-            run.status = "failed"
+            run.status = "cancelled"
             run.completed_at = datetime.now(UTC)
             _save_run(run)
         except Exception:
@@ -926,20 +976,82 @@ async def _run_train_job(*, run_id: str, corpus_id: str) -> None:
 
         _append_event(
             run_id,
-            RerankerTrainMetricEvent(type="error", ts=datetime.now(UTC), run_id=run_id, message=str(e), status="failed"),
+            RerankerTrainMetricEvent(
+                type="state",
+                ts=datetime.now(UTC),
+                run_id=run_id,
+                message=str(e),
+                status="cancelled",
+            ),
         )
         _append_event(
             run_id,
-            RerankerTrainMetricEvent(type="complete", ts=datetime.now(UTC), run_id=run_id, status="failed"),
+            RerankerTrainMetricEvent(type="complete", ts=datetime.now(UTC), run_id=run_id, status="cancelled"),
         )
         async with _legacy_lock:
             if _legacy_status.run_id == run_id and _legacy_status.task == "training":
                 _legacy_status.running = False
                 _legacy_status.progress = 0
-                _legacy_status.message = "Training failed"
-                _legacy_status.result = RerankerLegacyTaskResult(ok=False, run_id=run_id, error=str(e))
+                _legacy_status.message = "Training cancelled"
+                _legacy_status.result = RerankerLegacyTaskResult(ok=False, run_id=run_id, error="cancelled")
+    except Exception as e:
+        if _is_cancel_requested():
+            try:
+                run = _load_run(run_id)
+                run.status = "cancelled"
+                run.completed_at = datetime.now(UTC)
+                _save_run(run)
+            except Exception:
+                pass
+
+            _append_event(
+                run_id,
+                RerankerTrainMetricEvent(
+                    type="state",
+                    ts=datetime.now(UTC),
+                    run_id=run_id,
+                    message=str(e) or "Training cancelled by user.",
+                    status="cancelled",
+                ),
+            )
+            _append_event(
+                run_id,
+                RerankerTrainMetricEvent(type="complete", ts=datetime.now(UTC), run_id=run_id, status="cancelled"),
+            )
+            async with _legacy_lock:
+                if _legacy_status.run_id == run_id and _legacy_status.task == "training":
+                    _legacy_status.running = False
+                    _legacy_status.progress = 0
+                    _legacy_status.message = "Training cancelled"
+                    _legacy_status.result = RerankerLegacyTaskResult(ok=False, run_id=run_id, error="cancelled")
+        else:
+            try:
+                run = _load_run(run_id)
+                run.status = "failed"
+                run.completed_at = datetime.now(UTC)
+                _save_run(run)
+            except Exception:
+                pass
+
+            _append_event(
+                run_id,
+                RerankerTrainMetricEvent(
+                    type="error", ts=datetime.now(UTC), run_id=run_id, message=str(e), status="failed"
+                ),
+            )
+            _append_event(
+                run_id,
+                RerankerTrainMetricEvent(type="complete", ts=datetime.now(UTC), run_id=run_id, status="failed"),
+            )
+            async with _legacy_lock:
+                if _legacy_status.run_id == run_id and _legacy_status.task == "training":
+                    _legacy_status.running = False
+                    _legacy_status.progress = 0
+                    _legacy_status.message = "Training failed"
+                    _legacy_status.result = RerankerLegacyTaskResult(ok=False, run_id=run_id, error=str(e))
     finally:
         _train_tasks.pop(run_id, None)
+        _train_cancel_events.pop(run_id, None)
 
 
 async def _run_mine_job(*, corpus_id: str) -> None:
@@ -959,7 +1071,8 @@ async def _run_mine_job(*, corpus_id: str) -> None:
             return
 
         mine_mode = str(cfg.training.triplets_mine_mode or "replace").strip().lower()
-        if int(cfg.training.tribrid_reranker_mine_reset or 0) == 1:
+        mine_reset = int(cfg.training.tribrid_reranker_mine_reset or 0) == 1
+        if mine_reset:
             mine_mode = "replace"
         if mine_mode not in {"replace", "append"}:
             mine_mode = "replace"
@@ -970,13 +1083,23 @@ async def _run_mine_job(*, corpus_id: str) -> None:
             triplets_path=triplets_path,
             mine_mode=mine_mode,  # type: ignore[arg-type]
             corpus_id=corpus_id,
+            preserve_existing_on_empty=not mine_reset,
         )
         created = int(result.get("triplets_mined") or 0)
-        msg = (
-            f"Mined {created} triplets from {result.get('feedback_with_event_id', 0)} feedback events "
-            f"({result.get('query_events', 0)} query events) into {cfg.training.tribrid_triplets_path} "
-            f"(mode={mine_mode})."
-        )
+        preserved_existing = bool(result.get("preserved_existing"))
+        if preserved_existing and created == 0:
+            current_count = _count_lines(triplets_path)
+            msg = (
+                f"Mined 0 new triplets from {result.get('feedback_with_event_id', 0)} feedback events "
+                f"({result.get('query_events', 0)} query events); kept existing {current_count} triplets in "
+                f"{cfg.training.tribrid_triplets_path} (mode={mine_mode})."
+            )
+        else:
+            msg = (
+                f"Mined {created} triplets from {result.get('feedback_with_event_id', 0)} feedback events "
+                f"({result.get('query_events', 0)} query events) into {cfg.training.tribrid_triplets_path} "
+                f"(mode={mine_mode})."
+            )
 
         async with _legacy_lock:
             _legacy_status.running = False
@@ -1089,6 +1212,29 @@ def _latest_run_id_for_corpus(corpus_id: str) -> str | None:
     return str(entries[0].name)
 
 
+def _active_run_id_for_corpus(corpus_id: str) -> str | None:
+    """Return a currently-running run_id for a corpus (best-effort)."""
+    cid = str(corpus_id or "").strip()
+    if not cid:
+        return None
+    prefix = f"{cid}__"
+    try:
+        entries = [p for p in _RUNS_DIR.iterdir() if p.is_dir() and p.name.startswith(prefix)]
+    except Exception:
+        return None
+    if not entries:
+        return None
+    entries.sort(key=lambda p: p.name, reverse=True)
+    for entry in entries:
+        try:
+            run = _load_run(entry.name)
+        except Exception:
+            continue
+        if str(run.status) == "running":
+            return str(run.run_id)
+    return None
+
+
 def _status_from_persisted_run(*, corpus_id: str) -> RerankerLegacyStatus | None:
     """Synthesize a legacy polling status from persisted training run files.
 
@@ -1171,6 +1317,10 @@ def _status_from_persisted_run(*, corpus_id: str) -> RerankerLegacyStatus | None
         except Exception:
             err = None
         result = RerankerLegacyTaskResult(ok=False, run_id=run_id, error=err)
+        progress = 0
+    elif status == "cancelled":
+        message = "Training cancelled"
+        result = RerankerLegacyTaskResult(ok=False, run_id=run_id, error="cancelled")
         progress = 0
     else:
         # Unknown persisted state; treat as not running.
@@ -1468,7 +1618,8 @@ async def mine_triplets(
         return RerankerMineResponse(ok=True, output=msg, error=None)
 
     mine_mode = str(cfg.training.triplets_mine_mode or "replace").strip().lower()
-    if int(cfg.training.tribrid_reranker_mine_reset or 0) == 1:
+    mine_reset = int(cfg.training.tribrid_reranker_mine_reset or 0) == 1
+    if mine_reset:
         mine_mode = "replace"
     if mine_mode not in {"replace", "append"}:
         mine_mode = "replace"
@@ -1479,13 +1630,23 @@ async def mine_triplets(
         triplets_path=triplets_path,
         mine_mode=mine_mode,  # type: ignore[arg-type]
         corpus_id=cid,
+        preserve_existing_on_empty=not mine_reset,
     )
     created = int(result.get("triplets_mined") or 0)
-    msg = (
-        f"Mined {created} triplets from {result.get('feedback_with_event_id', 0)} feedback events "
-        f"({result.get('query_events', 0)} query events) into {cfg.training.tribrid_triplets_path} "
-        f"(mode={mine_mode})."
-    )
+    preserved_existing = bool(result.get("preserved_existing"))
+    if preserved_existing and created == 0:
+        current_count = _count_lines(triplets_path)
+        msg = (
+            f"Mined 0 new triplets from {result.get('feedback_with_event_id', 0)} feedback events "
+            f"({result.get('query_events', 0)} query events); kept existing {current_count} triplets in "
+            f"{cfg.training.tribrid_triplets_path} (mode={mine_mode})."
+        )
+    else:
+        msg = (
+            f"Mined {created} triplets from {result.get('feedback_with_event_id', 0)} feedback events "
+            f"({result.get('query_events', 0)} query events) into {cfg.training.tribrid_triplets_path} "
+            f"(mode={mine_mode})."
+        )
 
     async with _legacy_lock:
         _legacy_status.running = False
@@ -1534,7 +1695,7 @@ async def train_reranker(
     req = RerankerTrainStartRequest.model_validate(payload)
 
     async with _legacy_lock:
-        _legacy_status.running = True
+        _legacy_status.running = False
         _legacy_status.progress = 0
         _legacy_status.task = "training"
         _legacy_status.message = "Starting training…"
@@ -1542,8 +1703,24 @@ async def train_reranker(
         _legacy_status.live_output = []
         _legacy_status.run_id = None
 
-    res = await start_train_run(req)
+    try:
+        res = await start_train_run(req)
+    except HTTPException as e:
+        async with _legacy_lock:
+            _legacy_status.running = False
+            _legacy_status.progress = 0
+            _legacy_status.task = ""
+            _legacy_status.message = "Training start failed"
+            _legacy_status.result = RerankerLegacyTaskResult(
+                ok=False,
+                run_id=None,
+                error=str(e.detail),
+            )
+            _legacy_status.run_id = None
+        raise
+
     async with _legacy_lock:
+        _legacy_status.running = True
         _legacy_status.run_id = res.run_id
         _legacy_status.message = f"Training run started: {res.run_id}"
 
@@ -1711,6 +1888,17 @@ async def list_train_runs(
 @router.post("/reranker/train/start", response_model=RerankerTrainStartResponse)
 async def start_train_run(request: RerankerTrainStartRequest) -> RerankerTrainStartResponse:
     corpus_id = request.repo_id
+
+    active_run_id = _active_run_id_for_corpus(corpus_id)
+    if active_run_id:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"A training run is already active for corpus_id={corpus_id}: run_id={active_run_id}. "
+                "Cancel the active run before starting a new one."
+            ),
+        )
+
     cfg = await load_scoped_config(repo_id=corpus_id)
 
     default_k = min(int(cfg.reranking.tribrid_reranker_topn), 10)
@@ -1800,9 +1988,106 @@ async def start_train_run(request: RerankerTrainStartRequest) -> RerankerTrainSt
 
     # Start background training (best-effort).
     if run_id not in _train_tasks:
-        _train_tasks[run_id] = asyncio.create_task(_run_train_job(run_id=run_id, corpus_id=corpus_id))
+        cancel_event = asyncio.Event()
+        _train_cancel_events[run_id] = cancel_event
+        _train_tasks[run_id] = asyncio.create_task(
+            _run_train_job(run_id=run_id, corpus_id=corpus_id, cancel_event=cancel_event)
+        )
 
     return RerankerTrainStartResponse(ok=True, run_id=run_id, run=run)
+
+
+def _request_train_run_cancel(*, run_id: str, reason: str) -> bool:
+    """Request cancellation for a run and reconcile terminal state when needed."""
+    cancel_event = _train_cancel_events.get(run_id)
+    if cancel_event is not None:
+        cancel_event.set()
+
+    # Active in-process job will observe cancel_event and terminate itself.
+    if run_id in _train_tasks:
+        return True
+
+    # No in-memory task (orphan / already stopped). Persist cancellation so UI
+    # does not remain stuck in running forever.
+    try:
+        run = _load_run(run_id)
+    except HTTPException:
+        return False
+
+    if run.status != "running":
+        return True
+
+    now = datetime.now(UTC)
+    run.status = "cancelled"
+    run.completed_at = now
+    _save_run(run)
+    _append_event(
+        run_id,
+        RerankerTrainMetricEvent(
+            type="state",
+            ts=now,
+            run_id=run_id,
+            status="cancelled",
+            message=str(reason),
+        ),
+    )
+    _append_event(
+        run_id,
+        RerankerTrainMetricEvent(
+            type="complete",
+            ts=now,
+            run_id=run_id,
+            status="cancelled",
+        ),
+    )
+    return True
+
+
+@router.post("/reranker/train/run/{run_id}/cancel", response_model=OkResponse)
+async def cancel_train_run(run_id: str) -> OkResponse:
+    run = _load_run(run_id)
+    if str(run.status) in {"completed", "failed", "cancelled"}:
+        return OkResponse(ok=True)
+
+    _request_train_run_cancel(
+        run_id=run_id,
+        reason="Cancellation requested by user.",
+    )
+    return OkResponse(ok=True)
+
+
+@router.post("/reranker/stop", response_model=RerankerTrainLegacyResponse)
+async def stop_reranker(
+    corpus_id: str | None = Query(default=None, description="Optional corpus_id scope (required when multiple corpora)"),
+) -> RerankerTrainLegacyResponse:
+    cid = await _resolve_corpus_id(corpus_id)
+    active_run_id = _active_run_id_for_corpus(cid)
+    if not active_run_id:
+        return RerankerTrainLegacyResponse(ok=True, output="No active training run to stop.", run_id=None, error=None)
+
+    _request_train_run_cancel(
+        run_id=active_run_id,
+        reason="Cancellation requested by user via /api/reranker/stop.",
+    )
+
+    async with _legacy_lock:
+        if _legacy_status.task == "training" and (_legacy_status.run_id in {None, active_run_id}):
+            _legacy_status.running = False
+            _legacy_status.progress = 0
+            _legacy_status.task = ""
+            _legacy_status.message = "Training cancellation requested"
+            _legacy_status.result = RerankerLegacyTaskResult(
+                ok=False,
+                run_id=active_run_id,
+                error="cancelled",
+            )
+
+    return RerankerTrainLegacyResponse(
+        ok=True,
+        output=f"Cancellation requested for run: {active_run_id}",
+        run_id=active_run_id,
+        error=None,
+    )
 
 
 @router.get("/reranker/train/run/stream")

@@ -3987,6 +3987,11 @@ class UIConfig(BaseModel):
         description="Neural Visualizer quality tier",
     )
 
+    learning_reranker_visualizer_color_mode: Literal["absolute", "delta"] = Field(
+        default="absolute",
+        description="Neural Visualizer trajectory coloring mode (absolute loss vs delta loss)",
+    )
+
     learning_reranker_visualizer_max_points: int = Field(
         default=10000,
         ge=1000,
@@ -4956,6 +4961,7 @@ class TriBridConfig(BaseModel):
             'LEARNING_RERANKER_STUDIO_BOTTOM_PANEL_PCT': self.ui.learning_reranker_studio_bottom_panel_pct,
             'LEARNING_RERANKER_VISUALIZER_RENDERER': self.ui.learning_reranker_visualizer_renderer,
             'LEARNING_RERANKER_VISUALIZER_QUALITY': self.ui.learning_reranker_visualizer_quality,
+            'LEARNING_RERANKER_VISUALIZER_COLOR_MODE': self.ui.learning_reranker_visualizer_color_mode,
             'LEARNING_RERANKER_VISUALIZER_MAX_POINTS': self.ui.learning_reranker_visualizer_max_points,
             'LEARNING_RERANKER_VISUALIZER_TARGET_FPS': self.ui.learning_reranker_visualizer_target_fps,
             'LEARNING_RERANKER_VISUALIZER_TAIL_SECONDS': self.ui.learning_reranker_visualizer_tail_seconds,
@@ -5274,6 +5280,7 @@ class TriBridConfig(BaseModel):
                 learning_reranker_studio_bottom_panel_pct=data.get('LEARNING_RERANKER_STUDIO_BOTTOM_PANEL_PCT', 28),
                 learning_reranker_visualizer_renderer=data.get('LEARNING_RERANKER_VISUALIZER_RENDERER', 'auto'),
                 learning_reranker_visualizer_quality=data.get('LEARNING_RERANKER_VISUALIZER_QUALITY', 'cinematic'),
+                learning_reranker_visualizer_color_mode=data.get('LEARNING_RERANKER_VISUALIZER_COLOR_MODE', 'absolute'),
                 learning_reranker_visualizer_max_points=data.get('LEARNING_RERANKER_VISUALIZER_MAX_POINTS', 10000),
                 learning_reranker_visualizer_target_fps=data.get('LEARNING_RERANKER_VISUALIZER_TARGET_FPS', 60),
                 learning_reranker_visualizer_tail_seconds=data.get('LEARNING_RERANKER_VISUALIZER_TAIL_SECONDS', 8.0),
@@ -5558,6 +5565,7 @@ TRIBRID_CONFIG_KEYS = {
     'LEARNING_RERANKER_STUDIO_BOTTOM_PANEL_PCT',
     'LEARNING_RERANKER_VISUALIZER_RENDERER',
     'LEARNING_RERANKER_VISUALIZER_QUALITY',
+    'LEARNING_RERANKER_VISUALIZER_COLOR_MODE',
     'LEARNING_RERANKER_VISUALIZER_MAX_POINTS',
     'LEARNING_RERANKER_VISUALIZER_TARGET_FPS',
     'LEARNING_RERANKER_VISUALIZER_TAIL_SECONDS',

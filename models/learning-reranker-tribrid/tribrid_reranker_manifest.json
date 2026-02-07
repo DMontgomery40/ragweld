@@ -1,0 +1,10 @@
+{
+  "backend": "mlx_qwen3",
+  "base_model": "Qwen/Qwen3-Reranker-0.6B",
+  "created_at": 1770434515,
+  "no_token_id": 2152,
+  "prompt_template_version": "mlx_qwen3_v1",
+  "run_id": "epstein-files-1__20260207_031205",
+  "suffix_hash": "5ca215121bd0820099042d7d3949d5b77533e17ad13bb8e6104d37029e7ea54d",
+  "yes_token_id": 9693
+}
