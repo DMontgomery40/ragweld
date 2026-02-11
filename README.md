@@ -11,7 +11,6 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/DMontgomery40/tribrid-rag/actions"><img src="https://github.com/DMontgomery40/tribrid-rag/workflows/CI/badge.svg" alt="CI Status"></a>
   <a href="https://dmontgomery40.github.io/tribrid-rag/"><img src="https://img.shields.io/badge/docs-mkdocs-blue" alt="Documentation"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="License"></a>
   <a href="https://python.org"><img src="https://img.shields.io/badge/python-3.11+-blue" alt="Python"></a>
