@@ -45,6 +45,7 @@ def mine_triplets_from_query_log(
     mine_mode: Literal["replace", "append"] = "replace",
     max_triplets: int | None = None,
     corpus_id: str | None = None,
+    preserve_existing_on_empty: bool = False,
 ) -> dict[str, Any]:
     """Mine (query, positive, negative) triplets from the JSONL query/feedback log.
 
@@ -142,8 +143,16 @@ def mine_triplets_from_query_log(
             break
 
     triplets_path.parent.mkdir(parents=True, exist_ok=True)
+    had_existing = triplets_path.exists() and triplets_path.stat().st_size > 0
+    preserved_existing = False
+
     if mine_mode == "replace":
-        triplets_path.write_text("", encoding="utf-8")
+        should_truncate = True
+        if preserve_existing_on_empty and had_existing and len(triplets) == 0:
+            should_truncate = False
+            preserved_existing = True
+        if should_truncate:
+            triplets_path.write_text("", encoding="utf-8")
 
     with triplets_path.open("a", encoding="utf-8") as out:
         for t in triplets:
@@ -157,4 +166,5 @@ def mine_triplets_from_query_log(
         "triplets_mined": len(triplets),
         "triplets_path": str(triplets_path),
         "mined_from_feedback_events": mined_from_feedback,
+        "preserved_existing": preserved_existing,
     }

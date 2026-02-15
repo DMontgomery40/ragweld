@@ -100,41 +100,20 @@ function App() {
   // Show loading screen while app initializes
   if (!isInitialized) {
     return (
-      <div style={{
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        height: '100vh',
-        background: 'var(--bg)',
-        color: 'var(--fg)'
-      }}>
-        <div style={{
-          width: '48px',
-          height: '48px',
-          border: '3px solid var(--line)',
-          borderTopColor: 'var(--accent)',
-          borderRadius: '50%',
-          animation: 'spin 1s linear infinite',
-          marginBottom: '16px'
-        }}></div>
-        <div style={{ fontSize: '14px', color: 'var(--fg-muted)' }}>
-          Loading application...
-        </div>
+      <div className="app-loading-screen">
+        <div className="app-loading-spinner"></div>
+        <div className="app-loading-message">Loading application...</div>
         {initError && (
-          <div style={{ color: 'var(--err)', fontSize: '12px', marginTop: '12px', maxWidth: '400px', textAlign: 'center' }}>
-            {initError}
-          </div>
+          <div className="app-loading-error">{initError}</div>
         )}
-        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       </div>
     );
   }
 
   if (isEmbed) {
     return (
-      <div style={{ height: '100vh', background: 'var(--bg)', color: 'var(--fg)', display: 'flex', flexDirection: 'column' }}>
-        <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
+      <div className="app-embed-root">
+        <div className="app-embed-scroll">
           <ErrorBoundary
             context="embed-tab-router"
             fallback={({ error, reset }) => (
@@ -189,7 +168,7 @@ function App() {
           <button
             id="btn-learn"
             title="Open Parameter Glossary"
-            style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+            className="icon-btn"
             onClick={() => navigate('/dashboard?subtab=glossary')}
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -206,13 +185,7 @@ function App() {
             title="Theme Mode"
             value={theme}
             onChange={(e) => applyTheme(e.target.value as any)}
-            style={{
-              background: 'var(--input-bg)',
-              color: 'var(--fg)',
-              border: '1px solid var(--line)',
-              padding: '6px 8px',
-              borderRadius: '6px'
-            }}
+            className="theme-mode-select"
           >
             <option value="auto">Auto</option>
             <option value="dark">Dark</option>
@@ -249,7 +222,7 @@ function App() {
           <Breadcrumbs />
           <div className="content">
             {/* Scrollable content wrapper - paddingBottom reserves space above action-buttons */}
-            <div style={{ flex: 1, overflowY: 'auto', paddingBottom: '60px' }}>
+            <div className="content-scroll">
               {/* Routes - All tab routing */}
               <ErrorBoundary
                 context="tab-router"
@@ -269,29 +242,18 @@ function App() {
             </div>
 
             {/* Apply All Changes button - Fixed footer outside scrollable area */}
-            <div className="action-buttons" style={{
-              background: 'var(--bg)',
-              padding: '12px 24px',
-              borderTop: '1px solid var(--accent)',
-              flexShrink: 0,
-              display: 'flex',
-              alignItems: 'center',
-              gap: '16px',
-            }}>
+            <div className="action-buttons app-footer-actions">
               <button
                 id="save-btn"
                 onClick={handleSaveAllChanges}
                 disabled={!isDirty || isSaving}
-                style={{
-                  opacity: (!isDirty || isSaving) ? 0.6 : 1,
-                  cursor: (!isDirty || isSaving) ? 'not-allowed' : 'pointer'
-                }}
+                className={!isDirty || isSaving ? 'is-disabled' : ''}
               >
                 {isSaving ? 'Saving...' : 'Apply All Changes'}
                 {isDirty && !isSaving && ' *'}
               </button>
               {saveError && (
-                <span style={{ color: 'var(--err)', marginLeft: '12px' }}>
+                <span className="save-error-text">
                   Error: {saveError}
                 </span>
               )}
@@ -306,15 +268,8 @@ function App() {
 
         {/* Right panel */}
         <div
-          className="sidepanel"
+          className="sidepanel sidepanel-shell"
           id="sidepanel"
-          style={{
-            padding: 0,
-            overflow: 'hidden',
-            display: 'flex',
-            flexDirection: 'column',
-            background: 'var(--card-bg)',
-          }}
         >
           <ErrorBoundary
             context="dock-panel"

@@ -1,9 +1,9 @@
 {
   "currency": "USD",
-  "last_updated": "2025-11-29",
+  "last_updated": "2026-02-07",
   "sources": [
-    "https://openai.com/api/pricing/ (2025-11-29)",
-    "https://www.anthropic.com/pricing (2025-11-29)",
+    "https://openai.com/api/pricing/ (2026-02-07)",
+    "https://www.anthropic.com/pricing (2026-02-07)",
     "https://ai.google.dev/gemini-api/docs/pricing (2025-11-29)",
     "https://cohere.com/pricing (2025-11-29)",
     "https://docs.voyageai.com/docs/pricing (2025-11-29)",
@@ -14,58 +14,25 @@
   "models": [
     {
       "provider": "openai",
-      "family": "o3",
-      "model": "o3",
+      "family": "gpt-5.2",
+      "model": "gpt-5.2",
       "components": ["GEN"],
       "unit": "1k_tokens",
-      "input_per_1k": 0.0004,
-      "output_per_1k": 0.0016,
-      "context": 200000,
-      "notes": "o3 reasoning model - 200K context (source: per 1M = $0.40/$1.60)"
+      "input_per_1k": 0.00175,
+      "output_per_1k": 0.014,
+      "context": 400000,
+      "notes": "The best model for coding and agentic tasks across industries"
     },
     {
       "provider": "openai",
-      "family": "o4-mini",
-      "model": "o4-mini",
+      "family": "gpt-5.2",
+      "model": "gpt-5.2-mini",
       "components": ["GEN"],
       "unit": "1k_tokens",
-      "input_per_1k": 0.0004,
-      "output_per_1k": 0.0016,
+      "input_per_1k": 0.00025,
+      "output_per_1k": 0.002,
       "context": 200000,
       "notes": "o4-mini efficient reasoning (source: per 1M = $0.40/$1.60)"
-    },
-    {
-      "provider": "openai",
-      "family": "o3-mini",
-      "model": "o3-mini",
-      "components": ["GEN"],
-      "unit": "1k_tokens",
-      "input_per_1k": 0.0011,
-      "output_per_1k": 0.0044,
-      "context": 200000,
-      "notes": "o3-mini fast reasoning (source: per 1M = $1.10/$4.40)"
-    },
-    {
-      "provider": "openai",
-      "family": "gpt-5.1",
-      "model": "gpt-5.1",
-      "components": ["GEN"],
-      "unit": "1k_tokens",
-      "input_per_1k": 0.0015,
-      "output_per_1k": 0.012,
-      "context": 256000,
-      "notes": "GPT-5.1 latest flagship (source: per 1M = $1.50/$12.00)"
-    },
-    {
-      "provider": "openai",
-      "family": "gpt-5.1-mini",
-      "model": "gpt-5.1-mini",
-      "components": ["GEN"],
-      "unit": "1k_tokens",
-      "input_per_1k": 0.0003,
-      "output_per_1k": 0.0025,
-      "context": 256000,
-      "notes": "GPT-5.1 mini (source: per 1M = $0.30/$2.50)"
     },
     {
       "provider": "openai",
@@ -146,28 +113,6 @@
     },
     {
       "provider": "openai",
-      "family": "gpt-4o",
-      "model": "gpt-4o",
-      "components": ["GEN"],
-      "unit": "1k_tokens",
-      "input_per_1k": 0.0025,
-      "output_per_1k": 0.01,
-      "context": 128000,
-      "notes": "GPT-4o (source: per 1M = $2.50/$10.00)"
-    },
-    {
-      "provider": "openai",
-      "family": "gpt-4o-mini",
-      "model": "gpt-4o-mini",
-      "components": ["GEN"],
-      "unit": "1k_tokens",
-      "input_per_1k": 0.00015,
-      "output_per_1k": 0.0006,
-      "context": 128000,
-      "notes": "GPT-4o mini (source: per 1M = $0.15/$0.60)"
-    },
-    {
-      "provider": "openai",
       "family": "text-embedding-3-small",
       "model": "text-embedding-3-small",
       "components": ["EMB"],
@@ -188,25 +133,14 @@
     },
     {
       "provider": "anthropic",
-      "family": "claude-opus-4.5",
-      "model": "claude-opus-4.5",
+      "family": "claude-opus-4.6",
+      "model": "claude-opus-4.6",
       "components": ["GEN"],
       "unit": "1k_tokens",
       "input_per_1k": 0.005,
-      "output_per_1k": 0.025,
-      "context": 200000,
-      "notes": "Claude Opus 4.5 (source: per 1M = $5/$25)"
-    },
-    {
-      "provider": "anthropic",
-      "family": "claude-opus-4.1",
-      "model": "claude-opus-4.1",
-      "components": ["GEN"],
-      "unit": "1k_tokens",
-      "input_per_1k": 0.015,
-      "output_per_1k": 0.075,
-      "context": 200000,
-      "notes": "Claude Opus 4.1 (source: per 1M = $15/$75)"
+      "output_per_1k": 0.01,
+      "context": 1000000,
+      "notes": "Claude Opus 4.6  (source: per 1M = $5/$10)"
     },
     {
       "provider": "anthropic",
@@ -215,21 +149,11 @@
       "components": ["GEN"],
       "unit": "1k_tokens",
       "input_per_1k": 0.003,
-      "output_per_1k": 0.015,
-      "context": 200000,
-      "notes": "Claude Sonnet 4.5 (source: per 1M = $3/$15)"
+      "output_per_1k": 0.006,
+      "context": 400000,
+      "notes": "Claude Sonnet 4.5 (sourc`e: per 1M = $3/$15)"
     },
-    {
-      "provider": "anthropic",
-      "family": "claude-sonnet-4",
-      "model": "claude-sonnet-4",
-      "components": ["GEN"],
-      "unit": "1k_tokens",
-      "input_per_1k": 0.003,
-      "output_per_1k": 0.015,
-      "context": 200000,
-      "notes": "Claude Sonnet 4 (source: per 1M = $3/$15)"
-    },
+
     {
       "provider": "anthropic",
       "family": "claude-haiku-4.5",
@@ -237,64 +161,9 @@
       "components": ["GEN"],
       "unit": "1k_tokens",
       "input_per_1k": 0.001,
-      "output_per_1k": 0.005,
+      "output_per_1k": 0.0001,
       "context": 200000,
       "notes": "Claude Haiku 4.5 (source: per 1M = $1/$5)"
-    },
-    {
-      "provider": "anthropic",
-      "family": "claude-3.5-sonnet",
-      "model": "claude-3.5-sonnet",
-      "components": ["GEN"],
-      "unit": "1k_tokens",
-      "input_per_1k": 0.003,
-      "output_per_1k": 0.015,
-      "context": 200000,
-      "notes": "Claude 3.5 Sonnet (source: per 1M = $3/$15)"
-    },
-    {
-      "provider": "anthropic",
-      "family": "claude-3.5-haiku",
-      "model": "claude-3.5-haiku",
-      "components": ["GEN"],
-      "unit": "1k_tokens",
-      "input_per_1k": 0.0008,
-      "output_per_1k": 0.004,
-      "context": 200000,
-      "notes": "Claude 3.5 Haiku (source: per 1M = $0.80/$4)"
-    },
-    {
-      "provider": "anthropic",
-      "family": "claude-3-opus",
-      "model": "claude-3-opus",
-      "components": ["GEN"],
-      "unit": "1k_tokens",
-      "input_per_1k": 0.015,
-      "output_per_1k": 0.075,
-      "context": 200000,
-      "notes": "Claude 3 Opus (source: per 1M = $15/$75)"
-    },
-    {
-      "provider": "anthropic",
-      "family": "claude-3-sonnet",
-      "model": "claude-3-sonnet",
-      "components": ["GEN"],
-      "unit": "1k_tokens",
-      "input_per_1k": 0.003,
-      "output_per_1k": 0.015,
-      "context": 200000,
-      "notes": "Claude 3 Sonnet (source: per 1M = $3/$15)"
-    },
-    {
-      "provider": "anthropic",
-      "family": "claude-3-haiku",
-      "model": "claude-3-haiku",
-      "components": ["GEN"],
-      "unit": "1k_tokens",
-      "input_per_1k": 0.00025,
-      "output_per_1k": 0.00125,
-      "context": 200000,
-      "notes": "Claude 3 Haiku (source: per 1M = $0.25/$1.25)"
     },
     {
       "provider": "google",
@@ -350,39 +219,6 @@
       "output_per_1k": 0.0004,
       "context": 1000000,
       "notes": "Gemini 2.0 Flash (source: per 1M = $0.10/$0.40)"
-    },
-    {
-      "provider": "google",
-      "family": "gemini-2.0-flash-lite",
-      "model": "gemini-2.0-flash-lite",
-      "components": ["GEN"],
-      "unit": "1k_tokens",
-      "input_per_1k": 0.000075,
-      "output_per_1k": 0.0003,
-      "context": 1000000,
-      "notes": "Gemini 2.0 Flash-Lite (source: per 1M = $0.075/$0.30)"
-    },
-    {
-      "provider": "google",
-      "family": "gemini-1.5-pro",
-      "model": "gemini-1.5-pro",
-      "components": ["GEN"],
-      "unit": "1k_tokens",
-      "input_per_1k": 0.00125,
-      "output_per_1k": 0.005,
-      "context": 2000000,
-      "notes": "Gemini 1.5 Pro 2M context (source: per 1M = $1.25/$5.00)"
-    },
-    {
-      "provider": "google",
-      "family": "gemini-1.5-flash",
-      "model": "gemini-1.5-flash",
-      "components": ["GEN"],
-      "unit": "1k_tokens",
-      "input_per_1k": 0.000075,
-      "output_per_1k": 0.0003,
-      "context": 1000000,
-      "notes": "Gemini 1.5 Flash (source: per 1M = $0.075/$0.30)"
     },
     {
       "provider": "google",

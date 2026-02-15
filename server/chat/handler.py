@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from collections.abc import AsyncIterator
 from datetime import datetime
@@ -18,6 +19,45 @@ from server.models.retrieval import ChunkMatch
 from server.models.tribrid_config_model import ChatProviderInfo, ChatRequest, TriBridConfig
 from server.services.conversation_store import Conversation
 from server.services.rag import FusionProtocol
+
+
+def _safe_error_message(e: Exception, *, max_len: int = 400) -> str:
+    # Best-effort redaction; keep debugging useful without leaking secrets.
+    msg = str(e) or type(e).__name__
+    msg = re.sub(r"(sk-[A-Za-z0-9_\\-]{10,})", "sk-REDACTED", msg)
+    msg = re.sub(r"(Bearer\\s+)[A-Za-z0-9_.\\-]{10,}", r"\\1REDACTED", msg)
+    msg = msg.replace("\n", " ").replace("\r", " ").strip()
+    return msg[: int(max_len)]
+
+
+def _format_retrieval_only_chat_answer(*, message: str, corpus_ids: list[str], sources: list[ChunkMatch]) -> str:
+    if not sources:
+        corpora = ", ".join([cid for cid in corpus_ids if cid]) or "(none)"
+        return (
+            "No chat provider is available and retrieval returned no matches.\n\n"
+            f"Message: {message}\n"
+            f"Sources: {corpora}\n"
+            "Tip: start a local provider (Ollama/llama.cpp) or configure OpenRouter/OpenAI."
+        )
+
+    corpora = ", ".join([cid for cid in corpus_ids if cid]) or "(none)"
+    lines: list[str] = [
+        "No chat provider is available. Returning retrieval-only results.",
+        "",
+        f"Message: {message}",
+        f"Sources: {corpora}",
+        "",
+        "Top matching sources:",
+    ]
+    for i, ch in enumerate(sources[: min(len(sources), 8)]):
+        loc = f"{ch.file_path}:{int(ch.start_line)}-{int(ch.end_line)}"
+        score = f"{float(ch.score):.4f}" if ch.score is not None else "0.0000"
+        snippet = (ch.content or "").strip()
+        snippet = re.sub(r"\\s+", " ", snippet)[:220]
+        lines.append(f"{i+1}. {loc} (score {score})")
+        if snippet:
+            lines.append(f"   {snippet}")
+    return "\n".join(lines).strip()
 
 
 def _conversation_turn_for_request(*, conversation: Conversation, message: str) -> int:
@@ -106,7 +146,7 @@ async def chat_once(
     config: TriBridConfig,
     fusion: FusionProtocol,
     conversation: Conversation,
-) -> tuple[str, list[ChunkMatch], str | None, RecallPlan | None, ChatProviderInfo]:
+) -> tuple[str, list[ChunkMatch], str | None, RecallPlan | None, ChatProviderInfo | None, bool, str | None]:
     """Non-streaming chat handler."""
 
     corpus_ids = resolve_sources(request.sources)
@@ -200,42 +240,54 @@ async def chat_once(
     effective_model_override = (request.model_override or "").strip()
     if (request.images or []) and not effective_model_override:
         effective_model_override = str(config.chat.multimodal.vision_model_override or "").strip()
-    route = select_provider_route(
-        chat_config=config.chat,
-        model_override=effective_model_override,
-        openai_base_url_override=config.generation.openai_base_url,
-    )
-    provider_info = ChatProviderInfo(
-        kind=cast(Any, route.kind),
-        provider_name=str(route.provider_name),
-        model=str(route.model),
-        base_url=str(route.base_url) if getattr(route, "base_url", None) else None,
-    )
-    temperature = (
-        float(config.chat.temperature_no_retrieval) if not corpus_ids else float(config.chat.temperature)
-    )
 
-    text, provider_id = await generate_chat_text(
-        route=route,
-        openrouter_cfg=config.chat.openrouter,
-        system_prompt=system_prompt,
-        user_message=request.message,
-        images=list(request.images or []),
-        image_detail=str(config.chat.multimodal.image_detail or "auto"),
-        temperature=temperature,
-        max_tokens=int(config.chat.max_tokens),
-        context_text=context_text,
-        context_chunks=sources,
-        timeout_s=float(getattr(config.ui, "chat_stream_timeout", 120) or 120),
-    )
-    if not str(text or "").strip():
-        raise RuntimeError("LLM returned an empty response")
+    llm_used = True
+    llm_error: str | None = None
+    provider_info: ChatProviderInfo | None = None
+    provider_id: str | None = None
+
+    try:
+        route = select_provider_route(
+            chat_config=config.chat,
+            model_override=effective_model_override,
+            openai_base_url_override=config.generation.openai_base_url,
+        )
+        provider_info = ChatProviderInfo(
+            kind=cast(Any, route.kind),
+            provider_name=str(route.provider_name),
+            model=str(route.model),
+            base_url=str(route.base_url) if getattr(route, "base_url", None) else None,
+        )
+        temperature = (
+            float(config.chat.temperature_no_retrieval) if not corpus_ids else float(config.chat.temperature)
+        )
+
+        text, provider_id = await generate_chat_text(
+            route=route,
+            openrouter_cfg=config.chat.openrouter,
+            system_prompt=system_prompt,
+            user_message=request.message,
+            images=list(request.images or []),
+            image_detail=str(config.chat.multimodal.image_detail or "auto"),
+            temperature=temperature,
+            max_tokens=int(config.chat.max_tokens),
+            context_text=context_text,
+            context_chunks=sources,
+            timeout_s=float(getattr(config.ui, "chat_stream_timeout", 120) or 120),
+        )
+        if not str(text or "").strip():
+            raise RuntimeError("LLM returned an empty response")
+    except Exception as e:
+        llm_used = False
+        llm_error = _safe_error_message(e)
+        text = _format_retrieval_only_chat_answer(message=request.message, corpus_ids=corpus_ids, sources=sources)
+        provider_id = None
 
     # Update in-memory conversation continuity (best-effort for local providers)
     if provider_id:
         conversation.last_provider_response_id = provider_id
 
-    return text, sources, provider_id, recall_plan, provider_info
+    return text, sources, provider_id, recall_plan, provider_info, llm_used, llm_error
 
 
 async def chat_stream(
@@ -336,21 +388,10 @@ async def chat_stream(
     effective_model_override = (request.model_override or "").strip()
     if (request.images or []) and not effective_model_override:
         effective_model_override = str(config.chat.multimodal.vision_model_override or "").strip()
-    route = select_provider_route(
-        chat_config=config.chat,
-        model_override=effective_model_override,
-        openai_base_url_override=config.generation.openai_base_url,
-    )
-    provider_info = ChatProviderInfo(
-        kind=cast(Any, route.kind),
-        provider_name=str(route.provider_name),
-        model=str(route.model),
-        base_url=str(route.base_url) if getattr(route, "base_url", None) else None,
-    )
-    temperature = (
-        float(config.chat.temperature_no_retrieval) if not corpus_ids else float(config.chat.temperature)
-    )
 
+    llm_used = True
+    llm_error: str | None = None
+    provider_info: ChatProviderInfo | None = None
     accumulated = ""
     provider_response_id: str | None = None
 
@@ -360,6 +401,21 @@ async def chat_stream(
             provider_response_id = val.strip()
 
     try:
+        route = select_provider_route(
+            chat_config=config.chat,
+            model_override=effective_model_override,
+            openai_base_url_override=config.generation.openai_base_url,
+        )
+        provider_info = ChatProviderInfo(
+            kind=cast(Any, route.kind),
+            provider_name=str(route.provider_name),
+            model=str(route.model),
+            base_url=str(route.base_url) if getattr(route, "base_url", None) else None,
+        )
+        temperature = (
+            float(config.chat.temperature_no_retrieval) if not corpus_ids else float(config.chat.temperature)
+        )
+
         async for delta in stream_chat_text(
             route=route,
             openrouter_cfg=config.chat.openrouter,
@@ -382,26 +438,29 @@ async def chat_stream(
             msg = "Error: LLM stream produced no content (check provider compatibility/config)"
             accumulated = msg
             yield f"data: {json.dumps({'type': 'text', 'content': msg})}\n\n"
-
-        if provider_response_id:
-            conversation.last_provider_response_id = provider_response_id
-
-        ended_at_ms = int(time.time() * 1000)
-        sources_json = [s.model_dump(mode="serialization", by_alias=True) for s in sources]
-        done_payload = {
-            "type": "done",
-            "run_id": run_id,
-            "started_at_ms": int(started_at_ms),
-            "ended_at_ms": int(ended_at_ms),
-            "conversation_id": conversation.id,
-            "sources": sources_json,
-            "recall_plan": (
-                recall_plan.model_dump(mode="serialization", by_alias=True) if recall_plan is not None else None
-            ),
-            "provider": provider_info.model_dump(mode="serialization"),
-            "provider_response_id": provider_response_id,
-        }
-        yield f"data: {json.dumps(done_payload)}\n\n"
-
     except Exception as e:
-        yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+        llm_used = False
+        llm_error = _safe_error_message(e)
+        msg = _format_retrieval_only_chat_answer(message=request.message, corpus_ids=corpus_ids, sources=sources)
+        accumulated = msg
+        yield f"data: {json.dumps({'type': 'text', 'content': msg})}\n\n"
+
+    if provider_response_id:
+        conversation.last_provider_response_id = provider_response_id
+
+    ended_at_ms = int(time.time() * 1000)
+    sources_json = [s.model_dump(mode="serialization", by_alias=True) for s in sources]
+    done_payload: dict[str, Any] = {
+        "type": "done",
+        "run_id": run_id,
+        "started_at_ms": int(started_at_ms),
+        "ended_at_ms": int(ended_at_ms),
+        "conversation_id": conversation.id,
+        "sources": sources_json,
+        "recall_plan": recall_plan.model_dump(mode="serialization", by_alias=True) if recall_plan is not None else None,
+        "provider": provider_info.model_dump(mode="serialization") if provider_info is not None else None,
+        "provider_response_id": provider_response_id,
+        "llm_used": bool(llm_used),
+        "llm_error": llm_error,
+    }
+    yield f"data: {json.dumps(done_payload)}\n\n"

@@ -196,7 +196,7 @@ async def chat(request: ChatRequest) -> ChatResponse:
         )
 
     try:
-        response_text, sources, provider_id, recall_plan, provider_info = await chat_once(
+        response_text, sources, provider_id, recall_plan, provider_info, llm_used, llm_error = await chat_once(
             request=request,
             config=config,
             fusion=fusion,
@@ -213,7 +213,7 @@ async def chat(request: ChatRequest) -> ChatResponse:
             sources=sources,
             recall_plan=recall_plan,
             provider=provider_info,
-        )
+        ).model_copy(update={"llm_used": bool(llm_used), "llm_error": llm_error})
         if trace_enabled:
             # Back-compat for the UI TraceViewer: emit a dedicated reranker event, even if
             # the rest of the router/gating trace is not yet implemented.
@@ -519,6 +519,13 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
                         recall_plan=recall_plan_obj,
                         provider=provider_obj,
                     )
+                    llm_used_raw = payload.get("llm_used")
+                    llm_error_raw = payload.get("llm_error")
+                    llm_used = bool(llm_used_raw) if isinstance(llm_used_raw, bool) else True
+                    llm_error: str | None = None
+                    if isinstance(llm_error_raw, str) and llm_error_raw.strip():
+                        llm_error = llm_error_raw.strip()
+                    debug = debug.model_copy(update={"llm_used": llm_used, "llm_error": llm_error})
                     payload["debug"] = debug.model_dump(mode="serialization", by_alias=True)
 
                     if trace_enabled:

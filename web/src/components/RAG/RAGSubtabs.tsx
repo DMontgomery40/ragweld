@@ -40,7 +40,7 @@ export function RAGSubtabs({ activeSubtab, onSubtabChange }: RAGSubtabsProps) {
   }, [activeSubtab, onSubtabChange]);
 
   return (
-    <div className="subtab-bar" id="rag-subtabs" style={{ display: 'flex' }}>
+    <div className="subtab-bar" id="rag-subtabs" data-state="visible">
       {subtabs.map(subtab => (
         <button
           key={subtab.id}

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import time
 from collections import defaultdict
 from datetime import UTC, datetime
@@ -25,6 +26,80 @@ from server.models.tribrid_config_model import ChunkSummariesLastBuild, ChunkSum
 # -----------------------------------------------------------------------------
 _POOLS_BY_DSN: dict[str, asyncpg.Pool] = {}
 _POOL_LOCKS_BY_DSN: dict[str, asyncio.Lock] = {}
+
+
+_RELAXED_FTS_TERM_RE = re.compile(r"[A-Za-z0-9_]{3,64}")
+_FILE_PATH_TERM_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.\\-]{1,63}")
+
+# Intentionally small list: we only drop filler words that commonly appear in
+# natural-language queries and add noise to FTS OR fallbacks.
+_RELAXED_FTS_STOPWORDS = {
+    "about",
+    "also",
+    "and",
+    "are",
+    "but",
+    "can",
+    "code",
+    "does",
+    "document",
+    "documents",
+    "explain",
+    "file",
+    "files",
+    "find",
+    "for",
+    "from",
+    "how",
+    "i",
+    "in",
+    "is",
+    "it",
+    "me",
+    "of",
+    "on",
+    "or",
+    "related",
+    "show",
+    "the",
+    "this",
+    "to",
+    "what",
+    "where",
+    "which",
+    "why",
+    "with",
+}
+
+
+def _extract_terms(query: str, *, pattern: re.Pattern[str], max_terms: int, stopwords: set[str]) -> list[str]:
+    if not query.strip() or max_terms <= 0:
+        return []
+    terms: list[str] = []
+    seen: set[str] = set()
+    for m in pattern.finditer(query):
+        t = str(m.group(0)).lower()
+        if not t or t in stopwords or t in seen:
+            continue
+        seen.add(t)
+        terms.append(t)
+        if len(terms) >= max_terms:
+            break
+    return terms
+
+
+def _extract_relaxed_fts_terms(query: str, *, max_terms: int) -> list[str]:
+    return _extract_terms(
+        query,
+        pattern=_RELAXED_FTS_TERM_RE,
+        max_terms=max_terms,
+        stopwords=_RELAXED_FTS_STOPWORDS,
+    )
+
+
+def _extract_file_path_terms(query: str, *, max_terms: int) -> list[str]:
+    stop = _RELAXED_FTS_STOPWORDS | {"path", "paths", "src"}
+    return _extract_terms(query, pattern=_FILE_PATH_TERM_RE, max_terms=max_terms, stopwords=stop)
 
 
 def _coerce_jsonb_dict(value: Any) -> dict[str, Any]:
@@ -626,6 +701,119 @@ class PostgresClient:
             for r in rows
         ]
 
+    async def fts_search_relaxed_or(
+        self,
+        repo_id: str,
+        query: str,
+        top_k: int,
+        *,
+        ts_config: str,
+        max_terms: int,
+    ) -> list[ChunkMatch]:
+        if not query.strip() or top_k <= 0:
+            return []
+        max_terms = int(max_terms)
+        if max_terms <= 0:
+            return []
+
+        terms = _extract_relaxed_fts_terms(query, max_terms=max_terms)
+        if not terms:
+            return []
+        tsquery_text = " | ".join(f"{t}:*" for t in terms)
+
+        await self._require_pool()
+        assert self._pool is not None
+
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT chunk_id, content, file_path, start_line, end_line, language, metadata,
+                       ts_rank_cd(tsv, to_tsquery($4::regconfig, $1))::float8 AS score
+                FROM chunks
+                WHERE repo_id = $2 AND tsv @@ to_tsquery($4::regconfig, $1)
+                ORDER BY score DESC
+                LIMIT $3;
+                """,
+                tsquery_text,
+                repo_id,
+                int(top_k),
+                ts_config,
+            )
+
+        return [
+            ChunkMatch(
+                chunk_id=str(r["chunk_id"]),
+                content=str(r["content"]),
+                file_path=str(r["file_path"]),
+                start_line=int(r["start_line"]),
+                end_line=int(r["end_line"]),
+                language=str(r["language"]) if r["language"] is not None else None,
+                score=float(r["score"] or 0.0),
+                source="sparse",
+                metadata={
+                    **_coerce_jsonb_dict(r.get("metadata")),
+                    "sparse_engine": "postgres_fts_relaxed_or",
+                    "sparse_relaxed": True,
+                },
+            )
+            for r in rows
+        ]
+
+    async def file_path_search(self, repo_id: str, query: str, top_k: int, *, max_terms: int) -> list[ChunkMatch]:
+        if not query.strip() or top_k <= 0:
+            return []
+        max_terms = int(max_terms)
+        if max_terms <= 0:
+            return []
+
+        terms = _extract_file_path_terms(query, max_terms=max_terms)
+        if not terms:
+            return []
+
+        await self._require_pool()
+        assert self._pool is not None
+
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                WITH terms(term) AS (
+                  SELECT unnest($2::text[])
+                ),
+                matches AS (
+                  SELECT c.chunk_id, c.content, c.file_path, c.start_line, c.end_line, c.language, c.metadata,
+                         COUNT(DISTINCT t.term)::int AS match_count
+                  FROM chunks c
+                  JOIN terms t
+                    ON c.file_path ILIKE '%' || t.term || '%'
+                  WHERE c.repo_id = $1
+                  GROUP BY c.chunk_id, c.content, c.file_path, c.start_line, c.end_line, c.language, c.metadata
+                )
+                SELECT chunk_id, content, file_path, start_line, end_line, language, metadata,
+                       match_count::float8 AS score
+                FROM matches
+                ORDER BY match_count DESC, file_path ASC
+                LIMIT $3;
+                """,
+                repo_id,
+                list(terms),
+                int(top_k),
+            )
+
+        return [
+            ChunkMatch(
+                chunk_id=str(r["chunk_id"]),
+                content=str(r["content"]),
+                file_path=str(r["file_path"]),
+                start_line=int(r["start_line"]),
+                end_line=int(r["end_line"]),
+                language=str(r["language"]) if r["language"] is not None else None,
+                score=float(r["score"] or 0.0),
+                source="sparse",
+                metadata={**_coerce_jsonb_dict(r.get("metadata")), "sparse_engine": "file_path"},
+            )
+            for r in rows
+        ]
+
     async def sparse_search_engine(
         self,
         repo_id: str,
@@ -636,6 +824,8 @@ class PostgresClient:
         engine: str,
         query_mode: str = "plain",
         highlight: bool = False,
+        relax_on_empty: bool = True,
+        relax_max_terms: int = 8,
     ) -> list[ChunkMatch]:
         eng = str(engine or "postgres_fts").strip().lower()
         qm = str(query_mode or "plain").strip().lower()
@@ -643,16 +833,24 @@ class PostgresClient:
             try:
                 rows = await self.bm25_search_pg_search(repo_id, query, top_k, query_mode=qm)
                 # Tag engine in metadata for UI/debug.
-                return [
+                results = [
                     r.model_copy(update={"metadata": {**(r.metadata or {}), "sparse_engine": "pg_search_bm25"}})
                     for r in rows
                 ]
             except Exception:
                 # Clean fallback.
-                return await self.fts_search(repo_id, query, top_k, ts_config=ts_config, query_mode=qm)
+                results = await self.fts_search(repo_id, query, top_k, ts_config=ts_config, query_mode=qm)
+        else:
+            results = await self.fts_search(repo_id, query, top_k, ts_config=ts_config, query_mode=qm)
 
         _ = highlight
-        return await self.fts_search(repo_id, query, top_k, ts_config=ts_config, query_mode=qm)
+        if results:
+            return results
+        if not bool(relax_on_empty):
+            return results
+        return await self.fts_search_relaxed_or(
+            repo_id, query, top_k, ts_config=ts_config, max_terms=int(relax_max_terms)
+        )
 
     async def delete_fts(self, repo_id: str) -> int:
         await self._require_pool()

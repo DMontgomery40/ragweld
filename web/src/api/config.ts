@@ -41,8 +41,11 @@ export const configApi = {
    * Reload configuration from disk (best-effort).
    * Used by dashboard quick actions.
    */
-  async reload(): Promise<void> {
-    await apiClient.post(api('/config/reload'));
+  async reload(corpusId?: string): Promise<TriBridConfig> {
+    // There is no dedicated /config/reload endpoint in the backend.
+    // Reading /config always resolves from persisted scoped config.
+    const { data } = await apiClient.get<TriBridConfig>(withCorpusScope(api('/config'), corpusId));
+    return data;
   },
 
   // NOTE: Keyword, secret, integration helpers are migrated later as their

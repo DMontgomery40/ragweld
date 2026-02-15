@@ -225,11 +225,15 @@ details summary { cursor:pointer; color: var(--muted); }
 }
 .tooltip-bubble {
   position: absolute;
-  z-index: 1000;
+  z-index: 30000;
   top: 24px;
   left: 0;
   min-width: 280px;
-  max-width: 480px;
+  max-width: min(480px, calc(100vw - 16px));
+  max-height: min(420px, calc(100vh - 16px));
+  overflow-y: auto;
+  overflow-x: hidden;
+  overflow-wrap: anywhere;
   padding: 10px 12px;
   background: var(--card-bg);
   border: 1px solid var(--line);
@@ -240,6 +244,7 @@ details summary { cursor:pointer; color: var(--muted); }
   box-shadow: 0 6px 18px rgba(0,0,0,0.45);
   display: none;
 }
+.tooltip-bubble--floating { position: fixed !important; }
 .tooltip-bubble a { color: var(--link); text-decoration: none; }
 .tooltip-bubble a:hover { text-decoration: underline; }
 .tooltip-bubble .tt-title { font-weight: 700; color: var(--fg); display:block; margin-bottom: 6px; }
@@ -269,5 +274,4 @@ details summary { cursor:pointer; color: var(--muted); }
   0%, 100% { opacity: 1; box-shadow: 0 0 4px var(--accent); }
   50% { opacity: 0.3; box-shadow: 0 0 0 var(--accent); }
 }
-
 

@@ -13,6 +13,7 @@ Other files should re-export from this module.
 """
 from __future__ import annotations
 
+import os
 import re
 import uuid
 from datetime import UTC, datetime
@@ -738,8 +739,15 @@ class AnswerRequest(BaseModel):
         serialization_alias="corpus_id",
     )
     top_k: int = Field(default=10, ge=1, le=50, description="Number of chunks to use as context")
+    include_vector: bool = Field(default=True, description="Include vector retrieval results")
+    include_sparse: bool = Field(default=True, description="Include sparse/BM25 retrieval results")
+    include_graph: bool = Field(
+        default=True,
+        description="Include graph retrieval results (Neo4j), when enabled for the corpus",
+    )
     stream: bool = Field(default=False, description="Stream the response")
     system_prompt: str | None = Field(default=None, description="Override system prompt")
+    model_override: str = Field(default="", description="Override chat model for this request (empty=default)")
 
 
 class AnswerResponse(BaseModel):
@@ -750,6 +758,7 @@ class AnswerResponse(BaseModel):
     model: str = Field(description="Model used for generation")
     tokens_used: int = Field(description="Total tokens consumed")
     latency_ms: float = Field(description="Generation latency in milliseconds")
+    debug: ChatDebugInfo | None = Field(default=None, description="Developer debug metadata (best-effort)")
 
 
 class Message(BaseModel):
@@ -1088,6 +1097,15 @@ class RerankDebugInfo(BaseModel):
 class ChatDebugInfo(BaseModel):
     """Developer-facing debug metadata for a single chat answer."""
 
+    llm_used: bool = Field(
+        default=True,
+        description="Whether an LLM/provider response was used (false = retrieval-only fallback).",
+    )
+    llm_error: str | None = Field(
+        default=None,
+        description="Short reason the LLM was not used (best-effort; never includes secrets).",
+    )
+
     confidence: float | None = Field(
         default=None,
         ge=0.0,
@@ -1413,10 +1431,12 @@ class RerankerScoreRequest(BaseModel):
     )
     query: str = Field(description="Query string")
     document: str = Field(description="Document/passage text to score")
-    include_logits: int = Field(
-        default=0,
-        ge=0,
-        le=1,
+    mode: Literal["learning", "local"] | None = Field(
+        default=None,
+        description="Scoring mode override. learning uses the active learning artifact; local uses reranking.reranker_local_model.",
+    )
+    include_logits: bool = Field(
+        default=False,
         description="Include backend-specific raw logits when available (best-effort)",
     )
 
@@ -1426,7 +1446,7 @@ class RerankerScoreResponse(BaseModel):
 
     ok: bool = Field(description="Whether scoring succeeded")
     backend: str = Field(default="", description="Resolved backend used to score (mlx_qwen3|transformers|...)")
-    score: float | None = Field(default=None, description="Normalized score in [0,1] (best-effort)")
+    score: float = Field(default=0.0, description="Normalized score in [0,1] (best-effort)")
     yes_logit: float | None = Field(default=None, description="Raw yes logit (if include_logits and supported)")
     no_logit: float | None = Field(default=None, description="Raw no logit (if include_logits and supported)")
     error: str | None = Field(default=None, description="Error message (if any)")
@@ -1602,6 +1622,10 @@ class EvalResult(BaseModel):
     latency_ms: float = Field(ge=0.0, description="Latency for this query")
     duration_secs: float = Field(default=0.0, ge=0.0, description="Duration for this query (seconds)")
     docs: list[EvalDoc] = Field(default_factory=list, description="Top docs with scores for drill-down")
+    debug: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Per-query retrieval debug (best-effort, for explaining empty results).",
+    )
 
 
 class EvalRun(BaseModel):
@@ -1816,7 +1840,7 @@ class RerankerTrainRunsResponse(BaseModel):
 
 # --- Metrics event stream schema (stored in metrics.jsonl and used by SSE/UI) ---
 
-RerankerTrainEventType = Literal["log", "progress", "metrics", "state", "error", "complete"]
+RerankerTrainEventType = Literal["log", "progress", "metrics", "state", "error", "complete", "telemetry"]
 
 
 class RerankerTrainMetricEvent(BaseModel):
@@ -1830,6 +1854,13 @@ class RerankerTrainMetricEvent(BaseModel):
     percent: float | None = Field(default=None, ge=0.0, le=100.0)  # for progress
     metrics: dict[str, float] | None = None  # for metrics: {'mrr@10':0.33,'ndcg@10':0.41,'map':0.22}
     status: RerankerTrainRunStatus | None = None  # for state/complete
+    proj_x: float | None = None
+    proj_y: float | None = None
+    loss: float | None = None
+    lr: float | None = None
+    grad_norm: float | None = None
+    step_time_ms: float | None = None
+    sample_count: int | None = Field(default=None, ge=0)
 
 
 class RerankerTrainStartResponse(BaseModel):
@@ -2653,14 +2684,24 @@ class GraphStorageConfig(BaseModel):
     )
 
     neo4j_password: str = Field(
-        default="",
-        description="Neo4j password (recommend using environment variable)"
+        default_factory=lambda: os.getenv("NEO4J_PASSWORD", ""),
+        description="Neo4j password (defaults to NEO4J_PASSWORD env var when unset)",
     )
 
     neo4j_database: str = Field(
         default="neo4j",
         description="Neo4j database name"
     )
+
+    @model_validator(mode="after")
+    def _fill_password_from_env(self) -> Self:
+        # Config files often ship with neo4j_password="" for safety. Treat empty as "unset"
+        # and allow the env var to supply credentials without requiring users to edit JSON.
+        if not str(self.neo4j_password or "").strip():
+            env_pw = str(os.getenv("NEO4J_PASSWORD", "") or "").strip()
+            if env_pw:
+                self.neo4j_password = env_pw
+        return self
 
     neo4j_database_mode: Literal["shared", "per_corpus"] = Field(
         default="shared",
@@ -2837,6 +2878,26 @@ class SparseSearchConfig(BaseModel):
     highlight: bool = Field(
         default=False,
         description="Enable sparse highlight payloads when supported (UI later).",
+    )
+    relax_on_empty: bool = Field(
+        default=True,
+        description="If sparse retrieval returns empty, retry with a relaxed OR-style query (best-effort).",
+    )
+    relax_max_terms: int = Field(
+        default=8,
+        ge=1,
+        le=32,
+        description="Max extracted query terms used for relaxed sparse fallback.",
+    )
+    file_path_fallback: bool = Field(
+        default=True,
+        description="If sparse retrieval returns empty, run a file_path-based fallback ranking (best-effort).",
+    )
+    file_path_max_terms: int = Field(
+        default=6,
+        ge=1,
+        le=32,
+        description="Max extracted query terms used for file_path fallback.",
     )
     enabled: bool = Field(
         default=True,
@@ -3697,6 +3758,7 @@ class TrainingConfig(BaseModel):
 
     learning_reranker_lora_target_modules: list[str] = Field(
         default_factory=lambda: ["q_proj", "k_proj", "v_proj", "o_proj"],
+        min_length=1,
         description="Module name suffixes to apply LoRA to (MLX Qwen3)",
     )
 
@@ -3733,6 +3795,13 @@ class TrainingConfig(BaseModel):
         ge=0,
         le=86400,
         description="Unload MLX learning reranker model after idle seconds (0 = never)",
+    )
+
+    learning_reranker_telemetry_interval_steps: int = Field(
+        default=2,
+        ge=1,
+        le=20,
+        description="Emit trainer telemetry every N optimizer steps (plus first/final)",
     )
 
 
@@ -3896,6 +3965,125 @@ class UIConfig(BaseModel):
     runtime_mode: Literal["development", "production"] = Field(
         default="development",
         description="Runtime environment mode (development uses localhost, production uses deployed URLs)"
+    )
+
+    learning_reranker_studio_v2_enabled: int = Field(
+        default=1,
+        ge=0,
+        le=1,
+        description="Enable Learning Reranker Studio V2 layout and controls",
+    )
+
+    learning_reranker_studio_immersive: int = Field(
+        default=1,
+        ge=0,
+        le=1,
+        description="Use immersive full-height studio mode for Learning Reranker",
+    )
+
+    learning_reranker_layout_engine: Literal["dockview", "panels"] = Field(
+        default="dockview",
+        description="Learning Reranker Studio layout engine selection",
+    )
+
+    learning_reranker_default_preset: Literal["balanced", "focus_viz", "focus_logs", "focus_inspector"] = Field(
+        default="balanced",
+        description="Default pane layout preset applied when opening Learning Reranker Studio",
+    )
+
+    learning_reranker_show_setup_row: int = Field(
+        default=0,
+        ge=0,
+        le=1,
+        description="Show setup summary row above studio dock layout (1=show, 0=collapsed)",
+    )
+
+    learning_reranker_logs_renderer: Literal["json", "xterm"] = Field(
+        default="xterm",
+        description="Preferred logs renderer for Learning Reranker Studio",
+    )
+
+    learning_reranker_dockview_layout_json: str = Field(
+        default="",
+        description="Serialized Dockview layout JSON for Learning Reranker Studio pane persistence",
+    )
+
+    learning_reranker_studio_left_panel_pct: int = Field(
+        default=20,
+        ge=15,
+        le=35,
+        description="Default left dock width percentage for Learning Reranker Studio",
+    )
+
+    learning_reranker_studio_right_panel_pct: int = Field(
+        default=30,
+        ge=20,
+        le=45,
+        description="Default right dock width percentage for Learning Reranker Studio",
+    )
+
+    learning_reranker_studio_bottom_panel_pct: int = Field(
+        default=28,
+        ge=18,
+        le=45,
+        description="Default bottom dock height percentage for Learning Reranker Studio",
+    )
+
+    learning_reranker_visualizer_renderer: Literal["auto", "webgpu", "webgl2", "canvas2d"] = Field(
+        default="auto",
+        description="Preferred renderer for Neural Visualizer",
+    )
+
+    learning_reranker_visualizer_quality: Literal["balanced", "cinematic", "ultra"] = Field(
+        default="cinematic",
+        description="Neural Visualizer quality tier",
+    )
+
+    learning_reranker_visualizer_color_mode: Literal["absolute", "delta"] = Field(
+        default="absolute",
+        description="Neural Visualizer trajectory coloring mode (absolute loss vs delta loss)",
+    )
+
+    learning_reranker_visualizer_max_points: int = Field(
+        default=10000,
+        ge=1000,
+        le=50000,
+        description="Maximum telemetry points retained for Neural Visualizer",
+    )
+
+    learning_reranker_visualizer_target_fps: int = Field(
+        default=60,
+        ge=30,
+        le=144,
+        description="Target FPS for Neural Visualizer animation loop",
+    )
+
+    learning_reranker_visualizer_tail_seconds: float = Field(
+        default=8.0,
+        ge=1.0,
+        le=30.0,
+        description="Temporal tail length in seconds for visualizer trajectory effects",
+    )
+
+    learning_reranker_visualizer_motion_intensity: float = Field(
+        default=1.0,
+        ge=0.0,
+        le=2.0,
+        description="Global motion intensity multiplier for Neural Visualizer effects",
+    )
+
+    learning_reranker_visualizer_show_vector_field: int = Field(
+        default=1,
+        ge=0,
+        le=1,
+        description="Render animated vector field accents in Neural Visualizer",
+    )
+
+    learning_reranker_visualizer_reduce_motion: int = Field(
+        default=0,
+        ge=0,
+        le=1,
+        description="Reduce Neural Visualizer motion for accessibility/performance",
     )
 
 
@@ -4763,7 +4951,7 @@ class TriBridConfig(BaseModel):
             'LANGCHAIN_TRACING_V2': self.tracing.langchain_tracing_v2,
             'LANGTRACE_API_HOST': self.tracing.langtrace_api_host,
             'LANGTRACE_PROJECT_ID': self.tracing.langtrace_project_id,
-    # Training params (21)
+    # Training params (22)
             'RERANKER_TRAIN_EPOCHS': self.training.reranker_train_epochs,
             'RERANKER_TRAIN_BATCH': self.training.reranker_train_batch,
             'RERANKER_TRAIN_LR': self.training.reranker_train_lr,
@@ -4785,7 +4973,8 @@ class TriBridConfig(BaseModel):
             'LEARNING_RERANKER_PROMOTE_IF_IMPROVES': self.training.learning_reranker_promote_if_improves,
             'LEARNING_RERANKER_PROMOTE_EPSILON': self.training.learning_reranker_promote_epsilon,
             'LEARNING_RERANKER_UNLOAD_AFTER_SEC': self.training.learning_reranker_unload_after_sec,
-            # UI params (21)
+            'LEARNING_RERANKER_TELEMETRY_INTERVAL_STEPS': self.training.learning_reranker_telemetry_interval_steps,
+            # UI params (43)
             'CHAT_STREAMING_ENABLED': self.ui.chat_streaming_enabled,
             'CHAT_HISTORY_MAX': self.ui.chat_history_max,
             'CHAT_STREAM_INCLUDE_THINKING': self.ui.chat_stream_include_thinking,
@@ -4812,6 +5001,25 @@ class TriBridConfig(BaseModel):
             'THEME_MODE': self.ui.theme_mode,
             'OPEN_BROWSER': self.ui.open_browser,
             'RUNTIME_MODE': self.ui.runtime_mode,
+            'LEARNING_RERANKER_STUDIO_V2_ENABLED': self.ui.learning_reranker_studio_v2_enabled,
+            'LEARNING_RERANKER_STUDIO_IMMERSIVE': self.ui.learning_reranker_studio_immersive,
+            'LEARNING_RERANKER_LAYOUT_ENGINE': self.ui.learning_reranker_layout_engine,
+            'LEARNING_RERANKER_DEFAULT_PRESET': self.ui.learning_reranker_default_preset,
+            'LEARNING_RERANKER_SHOW_SETUP_ROW': self.ui.learning_reranker_show_setup_row,
+            'LEARNING_RERANKER_LOGS_RENDERER': self.ui.learning_reranker_logs_renderer,
+            'LEARNING_RERANKER_DOCKVIEW_LAYOUT_JSON': self.ui.learning_reranker_dockview_layout_json,
+            'LEARNING_RERANKER_STUDIO_LEFT_PANEL_PCT': self.ui.learning_reranker_studio_left_panel_pct,
+            'LEARNING_RERANKER_STUDIO_RIGHT_PANEL_PCT': self.ui.learning_reranker_studio_right_panel_pct,
+            'LEARNING_RERANKER_STUDIO_BOTTOM_PANEL_PCT': self.ui.learning_reranker_studio_bottom_panel_pct,
+            'LEARNING_RERANKER_VISUALIZER_RENDERER': self.ui.learning_reranker_visualizer_renderer,
+            'LEARNING_RERANKER_VISUALIZER_QUALITY': self.ui.learning_reranker_visualizer_quality,
+            'LEARNING_RERANKER_VISUALIZER_COLOR_MODE': self.ui.learning_reranker_visualizer_color_mode,
+            'LEARNING_RERANKER_VISUALIZER_MAX_POINTS': self.ui.learning_reranker_visualizer_max_points,
+            'LEARNING_RERANKER_VISUALIZER_TARGET_FPS': self.ui.learning_reranker_visualizer_target_fps,
+            'LEARNING_RERANKER_VISUALIZER_TAIL_SECONDS': self.ui.learning_reranker_visualizer_tail_seconds,
+            'LEARNING_RERANKER_VISUALIZER_MOTION_INTENSITY': self.ui.learning_reranker_visualizer_motion_intensity,
+            'LEARNING_RERANKER_VISUALIZER_SHOW_VECTOR_FIELD': self.ui.learning_reranker_visualizer_show_vector_field,
+            'LEARNING_RERANKER_VISUALIZER_REDUCE_MOTION': self.ui.learning_reranker_visualizer_reduce_motion,
             # Hydration params (2)
             'HYDRATION_MODE': self.hydration.hydration_mode,
             'HYDRATION_MAX_CHARS': self.hydration.hydration_max_chars,
@@ -5083,6 +5291,7 @@ class TriBridConfig(BaseModel):
                 learning_reranker_promote_if_improves=data.get('LEARNING_RERANKER_PROMOTE_IF_IMPROVES', 1),
                 learning_reranker_promote_epsilon=data.get('LEARNING_RERANKER_PROMOTE_EPSILON', 0.0),
                 learning_reranker_unload_after_sec=data.get('LEARNING_RERANKER_UNLOAD_AFTER_SEC', 0),
+                learning_reranker_telemetry_interval_steps=data.get('LEARNING_RERANKER_TELEMETRY_INTERVAL_STEPS', 2),
             ),
             ui=UIConfig(
                 chat_streaming_enabled=data.get('CHAT_STREAMING_ENABLED', 1),
@@ -5111,6 +5320,31 @@ class TriBridConfig(BaseModel):
                 theme_mode=data.get('THEME_MODE', 'dark'),
                 open_browser=data.get('OPEN_BROWSER', 1),
                 runtime_mode=data.get('RUNTIME_MODE', 'development'),
+                learning_reranker_studio_v2_enabled=data.get('LEARNING_RERANKER_STUDIO_V2_ENABLED', 1),
+                learning_reranker_studio_immersive=data.get('LEARNING_RERANKER_STUDIO_IMMERSIVE', 1),
+                learning_reranker_layout_engine=data.get('LEARNING_RERANKER_LAYOUT_ENGINE', 'dockview'),
+                learning_reranker_default_preset=data.get('LEARNING_RERANKER_DEFAULT_PRESET', 'balanced'),
+                learning_reranker_show_setup_row=data.get('LEARNING_RERANKER_SHOW_SETUP_ROW', 0),
+                learning_reranker_logs_renderer=data.get('LEARNING_RERANKER_LOGS_RENDERER', 'xterm'),
+                learning_reranker_dockview_layout_json=data.get('LEARNING_RERANKER_DOCKVIEW_LAYOUT_JSON', ''),
+                learning_reranker_studio_left_panel_pct=data.get('LEARNING_RERANKER_STUDIO_LEFT_PANEL_PCT', 20),
+                learning_reranker_studio_right_panel_pct=data.get('LEARNING_RERANKER_STUDIO_RIGHT_PANEL_PCT', 30),
+                learning_reranker_studio_bottom_panel_pct=data.get('LEARNING_RERANKER_STUDIO_BOTTOM_PANEL_PCT', 28),
+                learning_reranker_visualizer_renderer=data.get('LEARNING_RERANKER_VISUALIZER_RENDERER', 'auto'),
+                learning_reranker_visualizer_quality=data.get('LEARNING_RERANKER_VISUALIZER_QUALITY', 'cinematic'),
+                learning_reranker_visualizer_color_mode=data.get('LEARNING_RERANKER_VISUALIZER_COLOR_MODE', 'absolute'),
+                learning_reranker_visualizer_max_points=data.get('LEARNING_RERANKER_VISUALIZER_MAX_POINTS', 10000),
+                learning_reranker_visualizer_target_fps=data.get('LEARNING_RERANKER_VISUALIZER_TARGET_FPS', 60),
+                learning_reranker_visualizer_tail_seconds=data.get('LEARNING_RERANKER_VISUALIZER_TAIL_SECONDS', 8.0),
+                learning_reranker_visualizer_motion_intensity=data.get(
+                    'LEARNING_RERANKER_VISUALIZER_MOTION_INTENSITY', 1.0
+                ),
+                learning_reranker_visualizer_show_vector_field=data.get(
+                    'LEARNING_RERANKER_VISUALIZER_SHOW_VECTOR_FIELD', 1
+                ),
+                learning_reranker_visualizer_reduce_motion=data.get(
+                    'LEARNING_RERANKER_VISUALIZER_REDUCE_MOTION', 0
+                ),
             ),
             hydration=HydrationConfig(
                 hydration_mode=data.get('HYDRATION_MODE', 'lazy'),
@@ -5326,7 +5560,7 @@ TRIBRID_CONFIG_KEYS = {
     'LANGCHAIN_TRACING_V2',
     'LANGTRACE_API_HOST',
     'LANGTRACE_PROJECT_ID',
-    # Training params (21)
+    # Training params (22)
     'RERANKER_TRAIN_EPOCHS',
     'RERANKER_TRAIN_BATCH',
     'RERANKER_TRAIN_LR',
@@ -5348,7 +5582,8 @@ TRIBRID_CONFIG_KEYS = {
     'LEARNING_RERANKER_PROMOTE_IF_IMPROVES',
     'LEARNING_RERANKER_PROMOTE_EPSILON',
     'LEARNING_RERANKER_UNLOAD_AFTER_SEC',
-    # UI params (25)
+    'LEARNING_RERANKER_TELEMETRY_INTERVAL_STEPS',
+    # UI params (39)
     'CHAT_STREAMING_ENABLED',
     'CHAT_HISTORY_MAX',
     'CHAT_STREAM_INCLUDE_THINKING',
@@ -5375,6 +5610,20 @@ TRIBRID_CONFIG_KEYS = {
     'THEME_MODE',
     'OPEN_BROWSER',
     'RUNTIME_MODE',
+    'LEARNING_RERANKER_STUDIO_V2_ENABLED',
+    'LEARNING_RERANKER_STUDIO_IMMERSIVE',
+    'LEARNING_RERANKER_STUDIO_LEFT_PANEL_PCT',
+    'LEARNING_RERANKER_STUDIO_RIGHT_PANEL_PCT',
+    'LEARNING_RERANKER_STUDIO_BOTTOM_PANEL_PCT',
+    'LEARNING_RERANKER_VISUALIZER_RENDERER',
+    'LEARNING_RERANKER_VISUALIZER_QUALITY',
+    'LEARNING_RERANKER_VISUALIZER_COLOR_MODE',
+    'LEARNING_RERANKER_VISUALIZER_MAX_POINTS',
+    'LEARNING_RERANKER_VISUALIZER_TARGET_FPS',
+    'LEARNING_RERANKER_VISUALIZER_TAIL_SECONDS',
+    'LEARNING_RERANKER_VISUALIZER_MOTION_INTENSITY',
+    'LEARNING_RERANKER_VISUALIZER_SHOW_VECTOR_FIELD',
+    'LEARNING_RERANKER_VISUALIZER_REDUCE_MOTION',
     # Evaluation params (3)
     'EVAL_DATASET_PATH',
     'BASELINE_PATH',

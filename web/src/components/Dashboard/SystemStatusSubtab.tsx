@@ -28,6 +28,7 @@ export function SystemStatusSubtab() {
   const activeRepo = useRepoStore((s) => s.activeRepo);
   const reposInitialized = useRepoStore((s) => s.initialized);
   const reposLoading = useRepoStore((s) => s.loading);
+  const reposError = useRepoStore((s) => s.error);
   const loadRepos = useRepoStore((s) => s.loadRepos);
 
   const corporaInfo = useMemo(() => {
@@ -169,6 +170,18 @@ export function SystemStatusSubtab() {
       window.removeEventListener('dashboard-refresh', handleRefresh);
     };
   }, []); // Empty array - run once on mount, Zustand actions are stable
+
+  // If the dashboard mounted while the backend was down, `loadRepos()` can fail and the store
+  // intentionally marks itself initialized to avoid retry loops. When the backend comes back,
+  // retry once so the rest of the dashboard (index stats, active corpus display) can recover.
+  useEffect(() => {
+    if (reposLoading) return;
+    if (!reposError) return;
+    if (!devStackStatus?.backend_running) return;
+    loadRepos().catch(() => {
+      /* store owns error state */
+    });
+  }, [reposLoading, reposError, devStackStatus?.backend_running, loadRepos]);
 
   return (
     <div

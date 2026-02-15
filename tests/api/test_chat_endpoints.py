@@ -341,8 +341,10 @@ class TestChatEndpointWithMockedLLM:
                 json={"message": "Hello", "sources": {"corpus_ids": []}},
             )
 
-            assert response.status_code == 500
-            assert "LLM unavailable" in response.json()["detail"]
+            assert response.status_code == 200
+            data = response.json()
+            assert data.get("debug", {}).get("llm_used") is False
+            assert "LLM unavailable" in str(data.get("debug", {}).get("llm_error") or "")
 
 
 class TestStreamEndpoint:

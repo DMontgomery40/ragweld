@@ -9,7 +9,7 @@ from server.db.neo4j import Neo4jClient
 from server.db.postgres import PostgresClient
 from server.indexing.embedder import Embedder
 from server.models.retrieval import ChunkMatch
-from server.models.tribrid_config_model import FusionConfig, RerankingConfig, TrainingConfig
+from server.models.tribrid_config_model import FusionConfig, RerankingConfig, TrainingConfig, TriBridConfig
 from server.observability.metrics import (
     GRAPH_LEG_LATENCY_SECONDS,
     SEARCH_GRAPH_HYDRATED_CHUNKS_COUNT,
@@ -75,6 +75,14 @@ class TriBridFusion:
             SEARCH_RESULTS_FINAL_COUNT.observe(0)
             return []
 
+        def _safe_error_message(e: Exception, *, max_len: int = 400) -> str:
+            # Best-effort redaction; keep debugging useful without leaking secrets.
+            msg = str(e) or type(e).__name__
+            msg = re.sub(r"(sk-[A-Za-z0-9_\\-]{10,})", "sk-REDACTED", msg)
+            msg = re.sub(r"(Bearer\\s+)[A-Za-z0-9_.\\-]{10,}", r"\\1REDACTED", msg)
+            msg = msg.replace("\\n", " ").replace("\\r", " ").strip()
+            return msg[: int(max_len)]
+
         async def _search_single_corpus(
             cid: str,
         ) -> tuple[
@@ -87,16 +95,14 @@ class TriBridFusion:
             TrainingConfig,
             str,
         ]:
-            cfg = await load_scoped_config(repo_id=cid)
-
-            # Use real storage backends per corpus config.
-            postgres = PostgresClient(cfg.indexing.postgres_url)
-            await postgres.connect()
-
-            embedder = Embedder(cfg.embedding, cfg.tokenization)
-
-            # Reuse query embeddings across legs when possible (vector + graph chunk-mode).
-            q_emb: list[float] | None = None
+            cfg_error: Exception | None = None
+            try:
+                cfg = await load_scoped_config(repo_id=cid)
+            except Exception as e:
+                # Fail open: if corpus config cannot be loaded (missing corpus, Postgres down, etc),
+                # return empty results with debug instead of raising into a 500.
+                cfg_error = e
+                cfg = TriBridConfig()
 
             vector_results: list[ChunkMatch] = []
             sparse_results: list[ChunkMatch] = []
@@ -110,6 +116,17 @@ class TriBridFusion:
                 "fusion_graph_enabled": bool(cfg.graph_search.enabled),
                 "fusion_vector_results": 0,
                 "fusion_sparse_results": 0,
+                "fusion_vector_error": None,
+                "fusion_vector_error_kind": None,
+                "fusion_sparse_error": None,
+                "fusion_sparse_error_kind": None,
+                "fusion_sparse_engine": None,
+                "fusion_sparse_file_path_fallback_enabled": bool(
+                    getattr(cfg.sparse_search, "file_path_fallback", True)
+                ),
+                "fusion_sparse_file_path_fallback_used": False,
+                "fusion_sparse_file_path_fallback_error": None,
+                "fusion_sparse_file_path_fallback_error_kind": None,
                 "fusion_graph_entity_hits": 0,
                 "fusion_graph_hydrated_chunks": 0,
                 "fusion_graph_attempted": False,
@@ -120,6 +137,45 @@ class TriBridFusion:
                 ),
                 "fusion_graph_entity_expansion_hits": 0,
             }
+
+            if cfg_error is not None:
+                debug["fusion_config_error"] = _safe_error_message(cfg_error)
+                debug["fusion_config_error_kind"] = type(cfg_error).__name__
+                SEARCH_STAGE_ERRORS_TOTAL.labels(stage="config_load").inc()
+                return (
+                    [],
+                    [],
+                    [],
+                    debug,
+                    int(cfg.retrieval.final_k),
+                    cfg.reranking,
+                    cfg.training,
+                    str(cfg.training.tribrid_reranker_model_path or ""),
+                )
+
+            # Use real storage backends per corpus config.
+            postgres = PostgresClient(cfg.indexing.postgres_url)
+            try:
+                await postgres.connect()
+            except Exception as e:
+                debug["fusion_postgres_error"] = _safe_error_message(e)
+                debug["fusion_postgres_error_kind"] = type(e).__name__
+                SEARCH_STAGE_ERRORS_TOTAL.labels(stage="postgres_connect").inc()
+                return (
+                    [],
+                    [],
+                    [],
+                    debug,
+                    int(cfg.retrieval.final_k),
+                    cfg.reranking,
+                    cfg.training,
+                    str(cfg.training.tribrid_reranker_model_path or ""),
+                )
+
+            embedder = Embedder(cfg.embedding, cfg.tokenization)
+
+            # Reuse query embeddings across legs when possible (vector + graph chunk-mode).
+            q_emb: list[float] | None = None
 
             # Run legs (request toggles + config.*.enabled)
             if include_vector and cfg.vector_search.enabled:
@@ -132,9 +188,11 @@ class TriBridFusion:
                             vector_results = await postgres.vector_search(
                                 cid, q_emb, int(top_k or cfg.vector_search.top_k)
                             )
-                    except Exception:
+                    except Exception as e:
+                        debug["fusion_vector_error"] = _safe_error_message(e)
+                        debug["fusion_vector_error_kind"] = type(e).__name__
                         SEARCH_STAGE_ERRORS_TOTAL.labels(stage="vector_leg").inc()
-                        raise
+                        vector_results = []
                     if cfg.vector_search.similarity_threshold > 0:
                         vector_results = [
                             r for r in vector_results if r.score >= cfg.vector_search.similarity_threshold
@@ -156,13 +214,42 @@ class TriBridFusion:
                                 engine=str(getattr(cfg.sparse_search, "engine", "postgres_fts") or "postgres_fts"),
                                 query_mode=str(getattr(cfg.sparse_search, "query_mode", "plain") or "plain"),
                                 highlight=bool(getattr(cfg.sparse_search, "highlight", False)),
+                                relax_on_empty=bool(getattr(cfg.sparse_search, "relax_on_empty", True)),
+                                relax_max_terms=int(getattr(cfg.sparse_search, "relax_max_terms", 8) or 8),
                             )
-                    except Exception:
+                    except Exception as e:
+                        debug["fusion_sparse_error"] = _safe_error_message(e)
+                        debug["fusion_sparse_error_kind"] = type(e).__name__
                         SEARCH_STAGE_ERRORS_TOTAL.labels(stage="sparse_leg").inc()
-                        raise
+                        sparse_results = []
+
+                if not sparse_results and bool(getattr(cfg.sparse_search, "file_path_fallback", True)):
+                    try:
+                        with SEARCH_STAGE_LATENCY_SECONDS.labels(stage="postgres_file_path_search").time():
+                            sparse_results = await postgres.file_path_search(
+                                cid,
+                                query,
+                                int(top_k or cfg.sparse_search.top_k),
+                                max_terms=int(getattr(cfg.sparse_search, "file_path_max_terms", 6) or 6),
+                            )
+                        debug["fusion_sparse_file_path_fallback_used"] = bool(sparse_results)
+                    except Exception as e:
+                        debug["fusion_sparse_file_path_fallback_error"] = _safe_error_message(e)
+                        debug["fusion_sparse_file_path_fallback_error_kind"] = type(e).__name__
+                        SEARCH_STAGE_ERRORS_TOTAL.labels(stage="sparse_file_path_fallback").inc()
+
                 min_s = float(getattr(cfg.retrieval, "min_score_sparse", 0.0) or 0.0)
                 if min_s > 0:
                     sparse_results = [r for r in sparse_results if float(r.score) >= float(min_s)]
+                try:
+                    engines = {
+                        str((r.metadata or {}).get("sparse_engine") or "").strip()
+                        for r in sparse_results
+                        if (r.metadata or {}).get("sparse_engine")
+                    }
+                except Exception:
+                    engines = set()
+                debug["fusion_sparse_engine"] = next(iter(sorted(engines)), None) if engines else None
             debug["fusion_sparse_results"] = len(sparse_results)
 
             # Graph retrieval: query Neo4j for relevant entities, then hydrate to chunks from Postgres.

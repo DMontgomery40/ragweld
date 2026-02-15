@@ -166,20 +166,38 @@ async def test_reranker_train_diff_computes_and_rejects_incompatible(client: Asy
 
     run_dirs: list[Path] = []
     try:
-        # Create two compatible runs (same primary metric + k)
+        # Create two compatible runs (same primary metric + k).
+        # Only one run can be active per corpus; mark the first terminal before
+        # creating the second.
         b = await client.post("/api/reranker/train/start", json={"corpus_id": corpus_id})
-        c = await client.post("/api/reranker/train/start", json={"corpus_id": corpus_id})
         assert b.status_code == 200
-        assert c.status_code == 200
         baseline_run_id = str(b.json()["run_id"])
-        current_run_id = str(c.json()["run_id"])
 
         baseline_dir = _runs_dir() / baseline_run_id
-        current_dir = _runs_dir() / current_run_id
-        run_dirs.extend([baseline_dir, current_dir])
+        run_dirs.append(baseline_dir)
 
         baseline_json = json.loads((baseline_dir / "run.json").read_text(encoding="utf-8"))
+        baseline_json["status"] = "completed"
+        baseline_json["completed_at"] = baseline_json["started_at"]
+        (baseline_dir / "run.json").write_text(
+            json.dumps(baseline_json, indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
+
+        c = await client.post("/api/reranker/train/start", json={"corpus_id": corpus_id})
+        assert c.status_code == 200
+        current_run_id = str(c.json()["run_id"])
+        current_dir = _runs_dir() / current_run_id
+        run_dirs.append(current_dir)
+
         current_json = json.loads((current_dir / "run.json").read_text(encoding="utf-8"))
+        current_json["status"] = "completed"
+        current_json["completed_at"] = current_json["started_at"]
+        (current_dir / "run.json").write_text(
+            json.dumps(current_json, indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
+
         assert baseline_json["primary_metric"] == "mrr"
         assert int(baseline_json["primary_k"]) == 10
         assert current_json["primary_metric"] == "mrr"
@@ -240,6 +258,12 @@ async def test_reranker_train_diff_computes_and_rejects_incompatible(client: Asy
         assert d["delta_stability_stddev"] == pytest.approx(_pstdev(c_vals) - _pstdev(b_vals))
 
         # Incompatible diff (different k)
+        current_json["status"] = "completed"
+        current_json["completed_at"] = current_json["started_at"]
+        (current_dir / "run.json").write_text(
+            json.dumps(current_json, indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
         inc = await client.post("/api/reranker/train/start", json={"corpus_id": corpus_id, "primary_k": 20})
         assert inc.status_code == 200
         inc_run_id = str(inc.json()["run_id"])
@@ -258,6 +282,200 @@ async def test_reranker_train_diff_computes_and_rejects_incompatible(client: Asy
         dataset_path.unlink(missing_ok=True)
         for d in run_dirs:
             shutil.rmtree(d, ignore_errors=True)
+
+
+@pytest.mark.asyncio
+async def test_reranker_train_start_blocks_parallel_runs_same_corpus(
+    client: AsyncClient,
+    patch_scoped_config: None,  # noqa: ARG001
+) -> None:
+    corpus_id = "pytest_reranker_parallel_block"
+    dataset_path = _dataset_path(corpus_id)
+    dataset_path.write_text(
+        json.dumps(
+            [
+                {"question": "q1", "expected_paths": ["a.py"]},
+            ],
+            indent=2,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    run_dir: Path | None = None
+    try:
+        first = await client.post("/api/reranker/train/start", json={"corpus_id": corpus_id})
+        assert first.status_code == 200
+        run_id = str(first.json()["run_id"])
+        run_dir = _runs_dir() / run_id
+
+        second = await client.post("/api/reranker/train/start", json={"corpus_id": corpus_id})
+        assert second.status_code == 409
+        detail = str(second.json().get("detail") or "")
+        assert "already active" in detail
+        assert run_id in detail
+    finally:
+        dataset_path.unlink(missing_ok=True)
+        if run_dir is not None:
+            shutil.rmtree(run_dir, ignore_errors=True)
+
+
+@pytest.mark.asyncio
+async def test_reranker_legacy_train_conflict_resets_status(
+    client: AsyncClient,
+    patch_scoped_config: None,  # noqa: ARG001
+) -> None:
+    corpus_id = "pytest_reranker_legacy_conflict"
+    dataset_path = _dataset_path(corpus_id)
+    dataset_path.write_text(
+        json.dumps(
+            [
+                {"question": "q1", "expected_paths": ["a.py"]},
+            ],
+            indent=2,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    run_dir: Path | None = None
+    try:
+        first = await client.post("/api/reranker/train/start", json={"corpus_id": corpus_id})
+        assert first.status_code == 200
+        run_id = str(first.json()["run_id"])
+        run_dir = _runs_dir() / run_id
+
+        # Legacy /reranker/train should surface 409 while also resetting
+        # process-local status (not leaving running=true with null run_id).
+        conflict = await client.post("/api/reranker/train", params={"corpus_id": corpus_id})
+        assert conflict.status_code == 409
+
+        status = await client.get("/api/reranker/status", params={"corpus_id": corpus_id})
+        assert status.status_code == 200
+        body = status.json()
+        assert body.get("running") is False
+        assert body.get("task") in {"", "training"}
+        result = body.get("result") or {}
+        assert result.get("ok") is False
+    finally:
+        dataset_path.unlink(missing_ok=True)
+        if run_dir is not None:
+            shutil.rmtree(run_dir, ignore_errors=True)
+
+
+@pytest.mark.asyncio
+async def test_reranker_train_run_cancel_endpoint_marks_orphan_running_run(client: AsyncClient) -> None:
+    corpus_id = "pytest_reranker_cancel"
+    started_at = datetime.now(UTC) - timedelta(minutes=5)
+    run_id = f"{corpus_id}__{started_at.strftime('%Y%m%d_%H%M%S')}"
+    run_dir = _runs_dir() / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    cfg = TriBridConfig()
+    profile = CorpusEvalProfile(
+        repo_id=corpus_id,
+        label_kind="pairwise",
+        avg_relevant_per_query=0.0,
+        p95_relevant_per_query=0.0,
+        recommended_metric="mrr",
+        recommended_k=10,
+        rationale="cancel-test",
+    )
+    run = RerankerTrainRun(
+        run_id=run_id,
+        repo_id=corpus_id,
+        status="running",
+        started_at=started_at,
+        completed_at=None,
+        config_snapshot=cfg.model_dump(mode="json"),
+        config=cfg.to_flat_dict(),
+        primary_metric="mrr",
+        primary_k=10,
+        metrics_available=["mrr@10", "ndcg@10", "map"],
+        metric_profile=profile,
+        epochs=1,
+        batch_size=1,
+        lr=1e-4,
+        warmup_ratio=0.0,
+        max_length=128,
+    )
+    (run_dir / "run.json").write_text(
+        json.dumps(run.model_dump(mode="json", by_alias=True), indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+    (run_dir / "metrics.jsonl").write_text("", encoding="utf-8")
+
+    try:
+        res = await client.post(f"/api/reranker/train/run/{run_id}/cancel")
+        assert res.status_code == 200
+        assert res.json().get("ok") is True
+
+        after = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
+        assert after["status"] == "cancelled"
+        assert after.get("completed_at")
+
+        events = [ln for ln in (run_dir / "metrics.jsonl").read_text(encoding="utf-8").splitlines() if ln.strip()]
+        assert events, "expected cancellation events to be appended"
+        last = json.loads(events[-1])
+        assert last["type"] == "complete"
+        assert last["status"] == "cancelled"
+    finally:
+        shutil.rmtree(run_dir, ignore_errors=True)
+
+
+@pytest.mark.asyncio
+async def test_reranker_legacy_stop_cancels_active_run(client: AsyncClient) -> None:
+    corpus_id = "pytest_reranker_stop"
+    started_at = datetime.now(UTC) - timedelta(minutes=5)
+    run_id = f"{corpus_id}__{started_at.strftime('%Y%m%d_%H%M%S')}"
+    run_dir = _runs_dir() / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    cfg = TriBridConfig()
+    profile = CorpusEvalProfile(
+        repo_id=corpus_id,
+        label_kind="pairwise",
+        avg_relevant_per_query=0.0,
+        p95_relevant_per_query=0.0,
+        recommended_metric="mrr",
+        recommended_k=10,
+        rationale="stop-test",
+    )
+    run = RerankerTrainRun(
+        run_id=run_id,
+        repo_id=corpus_id,
+        status="running",
+        started_at=started_at,
+        completed_at=None,
+        config_snapshot=cfg.model_dump(mode="json"),
+        config=cfg.to_flat_dict(),
+        primary_metric="mrr",
+        primary_k=10,
+        metrics_available=["mrr@10", "ndcg@10", "map"],
+        metric_profile=profile,
+        epochs=1,
+        batch_size=1,
+        lr=1e-4,
+        warmup_ratio=0.0,
+        max_length=128,
+    )
+    (run_dir / "run.json").write_text(
+        json.dumps(run.model_dump(mode="json", by_alias=True), indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+    (run_dir / "metrics.jsonl").write_text("", encoding="utf-8")
+
+    try:
+        res = await client.post("/api/reranker/stop", params={"corpus_id": corpus_id})
+        assert res.status_code == 200
+        body = res.json()
+        assert body.get("ok") is True
+        assert body.get("run_id") == run_id
+
+        after = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
+        assert after["status"] == "cancelled"
+    finally:
+        shutil.rmtree(run_dir, ignore_errors=True)
 
 
 @pytest.mark.asyncio

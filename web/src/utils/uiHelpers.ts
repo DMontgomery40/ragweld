@@ -26,8 +26,8 @@ function bindCollapsibleSections(): void {
     }
 
     header.addEventListener('click', (e: Event) => {
-      // Don't collapse if clicking on help icon
-      if ((e.target as Element).closest('.tooltip-wrap')) return;
+      // Don't collapse if clicking on help icon or tooltip bubble
+      if ((e.target as Element).closest('.tooltip-wrap, .tooltip-bubble')) return;
 
       const content = document.getElementById(targetId);
       if (!content) return;

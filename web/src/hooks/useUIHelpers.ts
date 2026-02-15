@@ -78,8 +78,8 @@ export function useUIHelpers() {
 
     headers.forEach(header => {
       const onClick = (e: Event) => {
-        // Don't collapse if clicking on help icon
-        if ((e.target as HTMLElement).closest('.tooltip-wrap')) return;
+        // Don't collapse if clicking on help icon or tooltip bubble
+        if ((e.target as HTMLElement).closest('.tooltip-wrap, .tooltip-bubble')) return;
 
         const targetId = header.getAttribute('data-target');
         const content = targetId ? document.getElementById(targetId) : null;

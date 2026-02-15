@@ -187,6 +187,17 @@ TEXT_SUFFIXES = {
     ".example",
 }
 
+STUDIO_INLINE_STYLE_PATHS = [
+    "web/src/components/RerankerTraining/TrainingStudio.tsx",
+    "web/src/components/RerankerTraining/NeuralVisualizer.tsx",
+    "web/src/components/RerankerTraining/NeuralVisualizerCore.tsx",
+    "web/src/components/RerankerTraining/NeuralVisualizerWebGPU.tsx",
+    "web/src/components/RerankerTraining/NeuralVisualizerWebGL2.tsx",
+    "web/src/components/RerankerTraining/NeuralVisualizerCanvas2D.tsx",
+    "web/src/components/RerankerTraining/StudioLogTerminal.tsx",
+    "web/src/components/RAG/LearningRankerSubtab.tsx",
+]
+
 
 def should_skip(path: Path) -> bool:
     """Check if path should be skipped."""
@@ -486,6 +497,28 @@ def check_server_env_getenv_allowlist() -> List[str]:
     return errors
 
 
+def check_studio_no_inline_styles() -> List[str]:
+    """Fail when inline style props appear in studio scope files."""
+    errors: list[str] = []
+    pattern = re.compile(r"\bstyle\s*=\s*\{")
+
+    for rel in STUDIO_INLINE_STYLE_PATHS:
+        p = Path(rel)
+        if not p.exists():
+            continue
+        try:
+            content = p.read_text(errors="ignore")
+        except Exception:
+            continue
+        for i, line in enumerate(content.split("\n"), 1):
+            if pattern.search(line):
+                errors.append(
+                    f"{_normalize_relpath(p)}:{i}: Inline style is banned in studio scope. "
+                    "Move styles to CSS classes."
+                )
+    return errors
+
+
 def main() -> int:
     print("Checking for banned patterns...")
     print("")
@@ -498,6 +531,7 @@ def main() -> int:
     errors.extend(check_legacy_project_name())
     errors.extend(check_env_example_legacy_keys())
     errors.extend(check_server_env_getenv_allowlist())
+    errors.extend(check_studio_no_inline_styles())
 
     if errors:
         print("BANNED PATTERNS FOUND:")

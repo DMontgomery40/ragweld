@@ -431,7 +431,7 @@
     {
       "term": "Retrieval Confidence",
       "key": "CHAT_CONFIDENCE",
-      "definition": "Show a normalized confidence score (0–1) alongside answers to help judge reliability. Scores reflect retrieval confidence, not model certainty.",
+      "definition": "UI toggle for showing retrieval confidence with answers. This score reflects retrieval strength, not model truth certainty. Use it as a ranking signal, not a guarantee.",
       "category": "general",
       "related": [],
       "links": [
@@ -672,7 +672,7 @@
     {
       "term": "Response Creativity (Chat)",
       "key": "CHAT_TEMPERATURE",
-      "definition": "Controls randomness for chat answers. For code Q&A, prefer 0.0–0.3; for ideation, increase to 0.5–0.9.",
+      "definition": "Controls response randomness for chat generation. Lower values are more deterministic; higher values are more exploratory. Default: 0.3. Range: 0.0-2.0. For code and factual QA, keep it around 0.0-0.3.",
       "category": "general",
       "related": [],
       "links": [
@@ -2306,7 +2306,7 @@
     {
       "term": "Path Component Partial Match Multiplier",
       "key": "FILENAME_BOOST_PARTIAL",
-      "definition": "Score multiplier for matches in any path component (dir name or filename prefix). Useful for queries like \"auth\" that should find src/auth/... files.",
+      "definition": "Score multiplier when any path component partially matches query terms (directory or filename fragment). Helps queries like \"auth\" prioritize auth-related files. Default: 1.2. Range: 1.0-3.0. Keep this lower than FILENAME_BOOST_EXACT.",
       "category": "general",
       "related": [],
       "links": [],
@@ -2508,7 +2508,7 @@
     {
       "term": "RRF k Parameter",
       "key": "FUSION_RRF_K",
-      "definition": "Smoothing constant for Reciprocal Rank Fusion. Higher values (80-120) give more weight to top-ranked results, lower values (40-60) distribute weight more evenly across ranks. The original RRF paper used k=60, which is near-optimal for most cases. Recommended: 60 for standard RRF behavior.\n\nSweet spot: 60 for production systems (matches original RRF paper). Use 40-50 when you want more uniform weight distribution (less emphasis on top ranks). Use 80-100 when top-ranked results are highly reliable and should dominate.\n\n• Range: 1-200 (typical: 40-100)\n• Uniform weights: 40-50 (less top-rank emphasis)\n• Standard RRF: 60 (recommended, original paper)\n• Top-rank focused: 80-100 (more emphasis on top results)\n• Effect: Higher = more weight to top-ranked results\n• Symptom too low: Top results undervalued\n• Symptom too high: Lower-ranked results ignored",
+      "definition": "RRF constant for tri-brid fusion when method is rrf. Formula: sum(1/(k+rank)). Lower k emphasizes top ranks more; higher k distributes weight more evenly. Default: 60. Range: 1-200.",
       "category": "general",
       "related": [],
       "links": [
@@ -4320,7 +4320,7 @@
     {
       "term": "Min Chunk Chars",
       "key": "MIN_CHUNK_CHARS",
-      "definition": "Minimum character count for a valid chunk. Chunks smaller than this are discarded or merged with adjacent chunks to avoid indexing trivial code fragments (empty functions, single-line comments, import statements). Higher minimums (100-200 chars) filter out noise and reduce index size but may skip small utility functions. Lower minimums (20-50 chars) index everything but include low-value chunks.\n\nSweet spot: 50-100 characters for balanced filtering. Use 100-200 for aggressive noise reduction when you have many trivial functions or auto-generated code. Use 20-50 to index everything, including tiny utilities (useful for finding specific one-liners or constants). This threshold applies after AST chunking - if a logical unit is too small, it's skipped unless PRESERVE_IMPORTS is enabled.\n\nExample: A 2-line import block (30 chars) would be skipped with MIN_CHUNK_CHARS=50 unless PRESERVE_IMPORTS=1. A 5-line utility function (80 chars) would pass the filter. This prevents embedding API calls and index bloat from non-semantic content. Adjust based on your codebase style - functional codebases with many small functions may need lower thresholds.\n\n• Range: 20-300 characters (typical)\n• Very permissive: 20-50 chars (index everything, including tiny snippets)\n• Balanced: 50-100 chars (recommended, filter trivial fragments)\n• Aggressive filtering: 100-200 chars (skip small utilities, focus on substantial code)\n• Very aggressive: 200-300 chars (only meaningful functions/classes)\n• Trade-off: Higher threshold = cleaner index, may miss small but relevant code",
+      "definition": "Minimum characters required for a chunk to be kept. Very small fragments below this are dropped or merged to reduce indexing noise. Default: 50. Range: 10-500. Raise it for a cleaner index; lower it if you need tiny helpers and stubs searchable. Changing this requires reindexing.",
       "category": "chunking",
       "related": [],
       "links": [
@@ -4347,7 +4347,7 @@
     {
       "term": "Min score (graph)",
       "key": "MIN_SCORE_GRAPH",
-      "definition": "Minimum score threshold for graph-leg candidates before fusion. Use this to drop very weak graph hits.",
+      "definition": "Minimum graph-leg score required before fusion. Use 0 to disable graph-leg score filtering. Default: 0.0. Range: 0.0-10.0. Raise it to cut weak graph neighbors and noisy edges.",
       "category": "retrieval",
       "related": [],
       "links": [],
@@ -4356,7 +4356,7 @@
     {
       "term": "Min score (sparse)",
       "key": "MIN_SCORE_SPARSE",
-      "definition": "Minimum score threshold for sparse-leg candidates before fusion. Use this to reduce noisy BM25/FTS matches.",
+      "definition": "Minimum sparse-leg (BM25/FTS) score required before fusion. Use 0 to disable sparse-leg score filtering. Default: 0.0. Range: 0.0-10.0 (scale is engine-dependent). Raise it to reduce noisy keyword matches.",
       "category": "retrieval",
       "related": [],
       "links": [],
@@ -4365,7 +4365,7 @@
     {
       "term": "Min score (vector)",
       "key": "MIN_SCORE_VECTOR",
-      "definition": "Minimum score threshold for vector-leg candidates before fusion (in addition to vector similarity threshold). Use this to drop weak embedding matches.",
+      "definition": "Minimum vector-leg score required before fusion. Use 0 to disable vector-leg score filtering. Default: 0.0. Range: 0.0-1.0. Raise it to suppress weak semantic matches.",
       "category": "retrieval",
       "related": [],
       "links": [],
@@ -4374,7 +4374,7 @@
     {
       "term": "MMR lambda (λ)",
       "key": "MMR_LAMBDA",
-      "definition": "MMR relevance vs diversity tradeoff. <b>1.0</b> is pure relevance (no diversity), <b>0.0</b> is maximum diversity. Typical: 0.6–0.8.",
+      "definition": "MMR relevance-vs-diversity control when MMR is enabled. 1.0 favors pure relevance; 0.0 favors maximum diversity. Default: 0.7. Range: 0.0-1.0. Typical production band: 0.6-0.8.",
       "category": "retrieval",
       "related": [],
       "links": [],
@@ -4383,7 +4383,7 @@
     {
       "term": "Multi‑Query Rewrites",
       "key": "MQ_REWRITES",
-      "definition": "Number of query variations to generate for improved recall. Each rewrite searches independently, then results are fused and reranked. For example, query \"auth flow\" might expand to \"authentication flow\", \"login process\", \"user authentication\". Higher values (4-6) improve recall for vague questions like \"Where is X implemented?\" but increase API calls and latency. Start at 2-3 for general use.",
+      "definition": "Maximum number of query rewrites for multi-query retrieval (legacy alias of MAX_QUERY_REWRITES). Each rewrite adds retrieval and reranking work, increasing latency and cost. Default: 2. Range: 1-10. Start with 2-3 and increase only when recall on ambiguous queries is poor.",
       "category": "general",
       "related": [],
       "links": [
@@ -4664,7 +4664,7 @@
     {
       "term": "Parquet Include Column Names",
       "key": "PARQUET_EXTRACT_INCLUDE_COLUMN_NAMES",
-      "definition": "When enabled, extracted Parquet text includes column headers like `[column]` to preserve context across fields.",
+      "definition": "Include Parquet column headers in extracted text (0/1). Keeping headers improves context for field-specific queries and schema-aware retrieval. Default: 1. Range: 0-1.",
       "category": "indexing",
       "related": [],
       "links": [],
@@ -4691,7 +4691,7 @@
     {
       "term": "Parquet Extract Max Rows",
       "key": "PARQUET_EXTRACT_MAX_ROWS",
-      "definition": "Maximum number of rows to read from a single Parquet file during indexing (best-effort). Prevents huge datasets from consuming excessive memory/time.",
+      "definition": "Best-effort cap on rows read from a single Parquet file during indexing. Prevents huge datasets from consuming excessive memory and time. Default: 5000. Range: 1-200000. Increase for deeper coverage; lower for faster and cheaper indexing.",
       "category": "indexing",
       "related": [],
       "links": [],
@@ -4700,7 +4700,7 @@
     {
       "term": "Parquet Text Columns Only",
       "key": "PARQUET_EXTRACT_TEXT_COLUMNS_ONLY",
-      "definition": "When enabled, only string/text-like columns are extracted from Parquet files (best-effort). Disabling may include numeric/structured columns as text.",
+      "definition": "Extract only text-like Parquet columns when possible (0/1). Default: 1 to avoid noisy numeric or structured fields. Set to 0 if numeric columns are important to search.",
       "category": "indexing",
       "related": [],
       "links": [],
@@ -4767,7 +4767,7 @@
     {
       "term": "PostgreSQL pgvector URL",
       "key": "POSTGRES_URL",
-      "definition": "Connection URL for PostgreSQL with pgvector extension. Used for dense vector storage and similarity search. Format: postgresql://user:pass@host:port/db. The pgvector extension enables efficient vector indexing with HNSW or IVFFlat.",
+      "definition": "PostgreSQL DSN used for pgvector and FTS storage. Format: postgresql://user:pass@host:port/db. Default: postgresql://postgres:postgres@localhost:5432/tribrid_rag. Ensure pgvector is installed in the target database.",
       "category": "infrastructure",
       "related": [
         "Neo4j Connection URI",
@@ -4779,7 +4779,7 @@
     {
       "term": "Presence Penalty",
       "key": "PRESENCE_PENALTY",
-      "definition": "Penalizes tokens that have already appeared, encouraging the model to introduce new topics/entities. Higher values increase exploration and reduce reuse of the same concepts. Use 0.0-0.4 for factual/code responses; 0.4-0.8 for brainstorming; >0.8 can push the model toward excessive novelty. Presence penalty interacts with TEMPERATURE/TOP_P: higher penalties with high temperature can make answers meander. For RAG, keep modest (<=0.5) to prevent drifting away from cited context.",
+      "definition": "Generation-time penalty for repeating already-used tokens (provider-dependent). Higher values increase novelty; lower values keep responses focused and repetitive when needed. For retrieval-grounded answers, keep this modest to reduce drift away from cited context.",
       "category": "general",
       "related": [],
       "links": [
@@ -4810,7 +4810,7 @@
     {
       "term": "Preserve Imports",
       "key": "PRESERVE_IMPORTS",
-      "definition": "Include import/require statements in chunks even if they fall below MIN_CHUNK_CHARS threshold (1=yes, 0=no). When enabled, import blocks become searchable, helping users find dependency usage and module relationships. When disabled, imports are filtered out as low-value content. Enabling increases index size slightly but improves dependency discovery (e.g., \"where do we use requests library?\").\n\nSweet spot: 1 (enabled) for codebases where dependency tracking matters. Use 0 (disabled) to reduce index size and focus on implementation code rather than declarations. Import preservation is especially valuable in polyglot repos (Python, JavaScript, Go) where import patterns reveal architecture. Imports are still visible in full file context; this setting only affects whether they're indexed as standalone chunks.\n\nExample: With PRESERVE_IMPORTS=1, a 3-line import block becomes a searchable chunk even if it's <MIN_CHUNK_CHARS. A query like \"where do we import AuthService?\" will match this chunk. With PRESERVE_IMPORTS=0, the import block is skipped, and only code using AuthService is indexed.\n\n• 0: Disabled - skip import statements, reduce noise, smaller index, focus on implementation\n• 1: Enabled - index imports, discover dependencies, find module usage, slightly larger index (recommended)\n• Use case: Dependency audits, security reviews, architecture analysis\n• Trade-off: Slightly larger index vs better dependency discovery",
+      "definition": "Include import and require blocks even when they are below MIN_CHUNK_CHARS (0/1). Improves dependency discovery queries like \"where is X imported\". Default: 1. Range: 0-1. Changing this requires reindexing.",
       "category": "infrastructure",
       "related": [],
       "links": [
@@ -4837,7 +4837,7 @@
     {
       "term": "Prometheus Port",
       "key": "PROMETHEUS_PORT",
-      "definition": "TCP port for Prometheus metrics endpoint. Exposes /metrics for scraping by Prometheus or Grafana. Default: 9090. Change to avoid conflicts with existing monitoring tools.",
+      "definition": "TCP port for the /metrics endpoint scraped by Prometheus or Grafana. Default: 9090. Range: 1024-65535. Change it if 9090 conflicts with another service.",
       "category": "infrastructure",
       "related": [],
       "links": [
@@ -4873,7 +4873,7 @@
     {
       "term": "RAG Out Base",
       "key": "RAG_OUT_BASE",
-      "definition": "Optional override for OUT_DIR_BASE for retrieval-specific output directory. Advanced users can use this to separate indexing output from retrieval search indices while keeping OUT_DIR_BASE for main indexing. Most users should leave empty—use OUT_DIR_BASE only. Primarily for multi-environment setups needing separate retrieval and indexing directories.",
+      "definition": "Optional override for retrieval output directory. If empty, OUT_DIR_BASE is used. Use this only when you need retrieval artifacts separated from other output paths.",
       "category": "general",
       "related": [],
       "links": [
@@ -4900,7 +4900,7 @@
     {
       "term": "Rate Limit Errors (per 5 min)",
       "key": "RATE_LIMIT_ERRORS_THRESHOLD",
-      "definition": "Maximum number of rate limit errors (HTTP 429) allowed in a 5-minute window. Rate limits protect against excessive API usage and prevent cost overruns. Common sources: OpenAI API, Cohere, Voyage AI. If this alert fires frequently, consider upgrading API tier or implementing request batching.",
+      "definition": "Alert threshold for HTTP 429 errors in a rolling 5-minute window. If exceeded, monitoring flags sustained provider throttling risk. Lower values alert sooner; higher values reduce noise but can hide chronic rate-limit pressure.",
       "category": "general",
       "related": [],
       "links": [
@@ -4923,7 +4923,7 @@
     {
       "term": "Recursive max depth",
       "key": "RECURSIVE_MAX_DEPTH",
-      "definition": "Maximum recursion depth for separator-based (recursive) chunking. Higher values try more separators before falling back to hard token windows.",
+      "definition": "Maximum recursion depth for separator-based chunk splitting. Each level tries finer separators before hard fallback splitting. Default: 10. Range: 1-50. Increase for long mixed-structure docs; lower for tighter runtime bounds.",
       "category": "chunking",
       "related": [],
       "links": [],
@@ -4954,7 +4954,7 @@
     {
       "term": "Relationship Types",
       "key": "RELATIONSHIP_TYPES",
-      "definition": "Types of relationships to extract between code entities: calls (function invocations), imports (module dependencies), inherits (class hierarchy), contains (nesting), references (variable usage). Determines graph edges.",
+      "definition": "Relationship edge types extracted into the graph (for example: calls, imports, inherits, contains, references). This controls which graph connections are available to graph retrieval and traversal. Default includes all five core types.",
       "category": "retrieval",
       "related": [
         "Entity Types",
@@ -5514,7 +5514,7 @@
     {
       "term": "Reciprocal Rank Fusion (K)",
       "key": "RRF_K_DIV",
-      "definition": "Fusion parameter for combining BM25 + vector rankings: score += 1/(K+rank). Lower K increases influence of lower ranks; higher K flattens. Typical: 30–100 (60 recommended).",
+      "definition": "RRF smoothing constant used in retrieval fusion: score += 1/(K + rank). Lower K makes top-ranked hits dominate more; higher K flattens rank differences. Default: 60. Allowed range: 1-200 (practical minimum validated as 10). Typical: 30-100.",
       "category": "retrieval",
       "related": [],
       "links": [
@@ -5862,7 +5862,7 @@
     {
       "term": "Max tokens per chunk (hard)",
       "key": "TOKENIZATION_MAX_TOKENS_PER_CHUNK_HARD",
-      "definition": "Hard ceiling on tokens per chunk used as a safety limit for chunking and embedding input budgeting. Prevents runaway chunk sizes.",
+      "definition": "Absolute safety cap on chunk token count after token-aware splitting. If a chunk exceeds this, it is split again or truncated to stay within embedding and model limits. Keep this above your normal target size. Default: 8192. Range: 256-65536. Lower values reduce memory spikes but can over-fragment long functions.",
       "category": "chunking",
       "related": [],
       "links": [],
@@ -6029,7 +6029,7 @@
     {
       "term": "Tracing Mode",
       "key": "TRACING_MODE",
-      "definition": "Controls tracing behavior. Options: \"off\" (disable tracing), \"local\" (local-only), \"langsmith\" (local traces + reserved for future LangSmith export). Alias: \"none\" is normalized to \"off\".",
+      "definition": "Tracing backend mode. Options: langsmith, local, off (alias \"none\" normalizes to off). Default: langsmith. Use local or off when external trace export is not desired.",
       "category": "general",
       "related": [],
       "links": [
@@ -6043,7 +6043,7 @@
     {
       "term": "Transformers: trust_remote_code",
       "key": "TRANSFORMERS_TRUST_REMOTE_CODE",
-      "definition": "SECURITY WARNING: Set to \"true\" only if you completely trust the model source. Allows HuggingFace Transformers to execute arbitrary Python code from model repositories for custom architectures. Malicious models could run harmful code on your system. Only enable for models from verified sources (official HuggingFace, your organization). Required for some specialized models with custom model classes.",
+      "definition": "Allow Hugging Face models that require remote custom Python code (0/1). Default: 1. Set to 0 in strict security environments; use 1 only for trusted model sources.",
       "category": "general",
       "related": [],
       "links": [
@@ -6088,7 +6088,7 @@
     {
       "term": "Tri-Brid Fusion",
       "key": "TRIBRID_FUSION",
-      "definition": "The core search methodology combining three retrieval approaches: vector (dense), sparse (BM25), and graph traversal. Results from each method are fused using RRF or weighted scoring to produce final rankings. Configurable weights allow tuning for different codebases.",
+      "definition": "Core retrieval strategy that combines vector, sparse, and graph candidates before reranking. Fusion can be RRF or weighted scoring. Tune method and weights to match corpus behavior.",
       "category": "retrieval",
       "related": [
         "Vector Weight",
@@ -6102,7 +6102,7 @@
     {
       "term": "Reranker Log Path",
       "key": "TRIBRID_LOG_PATH",
-      "definition": "Directory where the reranker writes logs and training progress. Useful for monitoring and resuming experiments. Ensure the path is writable by the server process.",
+      "definition": "Path to the query and reranker log file used for diagnostics and training telemetry. Default: data/logs/queries.jsonl. Ensure the server process can write to this location.",
       "category": "general",
       "related": [],
       "links": [
@@ -6308,7 +6308,7 @@
     {
       "term": "Triplets Dataset Path",
       "key": "TRIBRID_TRIPLETS_PATH",
-      "definition": "Path to mined triplets used for training the Learning Reranker. Triplets contain (query, positive, negative) examples. Keep under version control or in a reproducible data store.",
+      "definition": "Path to the JSONL triplets dataset used for learning reranker mining and training. Default: data/training/triplets__epstein-files-1.jsonl. Keep this in durable storage for reproducible experiments.",
       "category": "general",
       "related": [],
       "links": [
@@ -6326,7 +6326,7 @@
     {
       "term": "Triplets Mine Mode",
       "key": "TRIPLETS_MINE_MODE",
-      "definition": "Strategy for mining negative examples when constructing training triplets from query logs and feedback. Negative examples are crucial for learning to rank - they teach the model what NOT to retrieve. Three strategies: \"random\" (random negatives from corpus), \"semi-hard\" (negatives that scored moderately but below positives), and \"hard\" (negatives that scored high but are actually irrelevant). Hard negatives are most effective but require careful mining to avoid false negatives.\n\n\"random\": Randomly sample documents from the corpus that aren't in the positive set. Fast and safe but produces easy negatives that don't challenge the model. Use for initial training or small datasets (<200 triplets). Converges quickly but may not improve ranking quality much beyond baseline.\n\n\"semi-hard\" (recommended): Mine negatives that scored in the 40th-70th percentile of retrieval results but weren't marked as relevant. These are plausible but wrong answers. Teaches the model nuanced distinctions. Balances training difficulty and false negative risk. Best for production systems with 500+ triplets.\n\n\"hard\": Use top-ranked results that are actually irrelevant as negatives. Most effective for learning but risky - if your relevance labels are noisy, you may train on false negatives (actually relevant docs mislabeled as negative). Use only with high-confidence human feedback or click data. Produces strongest rerankers when data quality is high.\n\n• random: Safe baseline, fast, easy negatives, less effective\n• semi-hard: Balanced default, good difficulty, low false negative risk (recommended)\n• hard: Maximum difficulty, best results, requires clean labels, high false negative risk\n• Effect on training: Harder negatives = slower convergence but better final quality\n• Combine with: TRIPLETS_MIN_COUNT (need more data for hard negatives)",
+      "definition": "How mined triplets are written: replace (overwrite dataset) or append (add to existing file). Default: replace. Use append for incremental collection; use replace for clean, reproducible runs.",
       "category": "general",
       "related": [],
       "links": [
@@ -6361,7 +6361,7 @@
     {
       "term": "Triplets Min Count",
       "key": "TRIPLETS_MIN_COUNT",
-      "definition": "Minimum number of training triplets (query, positive_doc, negative_doc) required to proceed with reranker training. Acts as a data quality gate - training with too few examples leads to severe overfitting and poor generalization. The reranker learns to distinguish relevant from irrelevant results, so it needs diverse examples to learn robust patterns. Standard minimum: 50-100 triplets for proof-of-concept, 500+ for production use.\n\nSweet spot: 200-500 triplets as a training threshold. With 200 triplets, you can run 2-3 epochs without severe overfitting. With 500+, you have enough diversity to learn generalizable patterns. Production systems should target 1000+ triplets from real user queries and feedback for best results. The quality of triplets matters more than quantity - 100 high-quality triplets from actual user interactions beat 500 synthetic triplets.\n\nTriplets are mined from your query logs, feedback data, or golden question sets using the triplet mining tools. Each triplet represents a learning signal: \"query A is more relevant to document B than document C.\" The reranker learns these preferences and generalizes to new queries. If training fails with \"insufficient data,\" increase your mining scope or lower this threshold temporarily for experimentation.\n\n• Absolute minimum: 50 triplets (proof-of-concept only)\n• Development minimum: 100-200 triplets\n• Production minimum: 500+ triplets (recommended)\n• Ideal: 1000-2000+ triplets for robust training\n• Quality over quantity: Real user data > synthetic examples\n• Symptom too low: Overfitting, poor generalization, reranker only works on training queries",
+      "definition": "Minimum mined triplets required before training starts. Default: 100. Range: 10-10000. If training skips for insufficient data, mine more triplets or lower this for experimentation.",
       "category": "general",
       "related": [],
       "links": [
@@ -6405,7 +6405,7 @@
     {
       "term": "Reranker Log Path",
       "key": "TriBridRAG_LOG_PATH",
-      "definition": "Directory where the reranker writes logs and training progress. Useful for monitoring and resuming experiments. Ensure the path is writable by the server process.",
+      "definition": "Legacy alias for TRIBRID_LOG_PATH. Prefer TRIBRID_LOG_PATH in new configuration and tooling.",
       "category": "general",
       "related": [],
       "links": [],
@@ -6495,7 +6495,7 @@
     {
       "term": "Triplets Dataset Path",
       "key": "TriBridRAG_TRIPLETS_PATH",
-      "definition": "Path to mined triplets used for training the Learning Reranker. Triplets contain (query, positive, negative) examples. Keep under version control or in a reproducible data store.",
+      "definition": "Legacy alias for TRIBRID_TRIPLETS_PATH. Prefer TRIBRID_TRIPLETS_PATH in new configuration and scripts.",
       "category": "general",
       "related": [],
       "links": [],
@@ -7128,7 +7128,7 @@
     {
       "term": "Recall intensity (next message)",
       "key": "chat_recall_intensity",
-      "definition": "Per-message override for how aggressively to query <span class=\"tt-strong\">Recall</span> (chat memory) on the <span class=\"tt-strong\">next</span> send.<br><br>Options:<br>• <span class=\"tt-strong\">auto</span>: let the Recall gate decide per message<br>• <span class=\"tt-strong\">skip this message</span>: don’t query Recall at all<br>• <span class=\"tt-strong\">light</span>: sparse-only Recall with small <span class=\"mono\">top_k</span><br>• <span class=\"tt-strong\">standard</span>: normal Recall query<br>• <span class=\"tt-strong\">deep</span>: larger Recall pull with stronger recency bias<br><br>This only matters when Recall is checked as a source. After you send a message with a non-auto selection, the UI resets back to <span class=\"tt-strong\">auto</span>.",
+      "definition": "One-message override for Recall (chat memory) query depth. Options: auto, skip this message, light, standard, deep. Applies only to the next send, then resets to auto.",
       "category": "general",
       "related": [],
       "links": [],
@@ -7386,7 +7386,7 @@
     {
       "term": "REPO_PATH (legacy)",
       "key": "tribrid_PATH",
-      "definition": "DEPRECATED: Legacy environment variable for setting the repository path. This is repo-specific and only works for a repo named \"tribrid\". Modern approach: use REPO_PATH for single repos or configure repos.json for multi-repo setups with proper routing. Kept for backwards compatibility - will be removed in future versions.",
+      "definition": "DEPRECATED legacy repo-path variable for the hardcoded \"tribrid\" repo. Prefer REPO_PATH or repos.json corpus routing in current deployments.",
       "category": "general",
       "related": [],
       "links": [],
@@ -7395,7 +7395,7 @@
     {
       "term": "Repo Path Boosts (CSV)",
       "key": "tribrid_PATH_BOOSTS",
-      "definition": "DEPRECATED: Legacy comma-separated path boosts for the \"tribrid\" repository only (e.g., \"app/,lib/,config/\"). Repo-specific environment variables like this don't scale for multi-repo setups. Modern approach: configure path boosts in repos.json per-repo settings. Kept for backwards compatibility.",
+      "definition": "DEPRECATED legacy per-repo path boost variable for the hardcoded \"tribrid\" repo. Prefer corpus-scoped path boosts in repos.json for modern multi-corpus setups.",
       "category": "general",
       "related": [],
       "links": [],
@@ -7406,6 +7406,349 @@
       "key": "ui.chat_streaming_enabled",
       "definition": "Streams tokens as they’re generated (instead of waiting for the full answer). This makes chat feel faster and lets you start reading immediately.<br><br>If streaming fails for a provider, the chat UI falls back to a normal non-streaming request automatically.<br><br>This is about delivery, not retrieval: it doesn’t change which sources are queried or what context is selected.",
       "category": "general",
+      "related": [],
+      "links": [],
+      "badges": []
+    },
+    {
+      "term": "Learning Reranker Visualizer: Color Mode",
+      "key": "LEARNING_RERANKER_VISUALIZER_COLOR_MODE",
+      "definition": "<span class=\"tt-strong\">What this control changes</span><br>Color mode changes only <span class=\"tt-strong\">hue/intensity encoding</span> for the trajectory points. It does <span class=\"tt-strong\">not</span> change x/y projection and it does <span class=\"tt-strong\">not</span> change terrain height. In the code path, geometry is computed first and color is assigned later in <span class=\"mono\">projectPoints(..., intensityMode)</span>.<br><br><span class=\"tt-strong\">Mode = absolute (where am I doing well?)</span><br>Each point is colored from normalized train loss at that step. Lower loss maps toward the better/cooler side of the palette, higher loss toward the worse/warmer side. This is the easiest way to answer \"which regions of this run were strong vs weak?\" In this implementation, color is mostly loss with a smaller gradient-norm blend so structure remains visible when loss is locally flat.<br><br><span class=\"tt-strong\">Mode = delta (am I improving right now?)</span><br>Each point is colored from first difference versus the previous point: <span class=\"mono\">prev_loss - current_loss</span>. Positive delta means local improvement; negative delta means local regression. This surfaces \"learning\" vs \"thrashing\" even when absolute loss is jagged because of mini-batch stochasticity.<br><br><span class=\"tt-strong\">Interpretation rule</span><br>Use <span class=\"mono\">absolute</span> when comparing quality across run regions. Use <span class=\"mono\">delta</span> when diagnosing local optimizer behavior, schedule transitions, or instability.<br><br><span class=\"tt-strong\">Code path</span><br><span class=\"mono\">web/src/components/RerankerTraining/NeuralVisualizerCore.tsx -> projectPoints(... intensityMode ...)</span>",
+      "category": "reranking",
+      "related": [
+        "LEARNING_RERANKER_VISUALIZER_BEST_SO_FAR",
+        "LEARNING_RERANKER_VISUALIZER_LAST_STEP",
+        "LEARNING_RERANKER_VISUALIZER_TAIL_SECONDS"
+      ],
+      "links": [
+        {
+          "text": "Matplotlib: Choosing Colormaps",
+          "href": "https://matplotlib.org/stable/users/explain/colors/colormaps.html"
+        },
+        {
+          "text": "Kenneth Moreland: Diverging Color Maps for Scientific Visualization",
+          "href": "https://www.kennethmoreland.com/color-maps/"
+        },
+        {
+          "text": "ColorBrewer 2.0",
+          "href": "https://colorbrewer2.org/"
+        },
+        {
+          "text": "Deep Learning Book - Optimization for Training Deep Models",
+          "href": "https://www.deeplearningbook.org/contents/optimization.html"
+        },
+        {
+          "text": "SGDR: Stochastic Gradient Descent with Warm Restarts",
+          "href": "https://arxiv.org/abs/1608.03983"
+        }
+      ],
+      "badges": [
+        {
+          "text": "Visualizer semantics",
+          "class": "info"
+        },
+        {
+          "text": "Telemetry-driven",
+          "class": "info"
+        }
+      ]
+    },
+    {
+      "term": "Learning Reranker Visualizer: Best So Far",
+      "key": "LEARNING_RERANKER_VISUALIZER_BEST_SO_FAR",
+      "definition": "<span class=\"tt-strong\">What the best chip means</span><br>The <span class=\"mono\">best=...</span> chip is the running minimum of <span class=\"mono\">metrics.train_loss</span> from progress events. It is intentionally computed from the training metric stream, not from projected 2D telemetry coordinates.<br><br><span class=\"tt-strong\">Why this is the right instrumentation</span><br>The projection stream exists for visualization and can be sampled, tailed, and transformed for readability. The progress metric stream is the authoritative source for optimization progress. Tracking \"best so far\" from that stream prevents endpoint bias and answers \"what is the best training state we observed so far?\"<br><br><span class=\"tt-strong\">Operational interpretation</span><br>If <span class=\"mono\">last</span> is worse than <span class=\"mono\">best</span>, the run ended after its minimum. This is normal for stochastic optimization and does not imply the run failed. It means the final sample is not the best checkpoint candidate.<br><br><span class=\"tt-strong\">Code path</span><br><span class=\"mono\">web/src/components/RerankerTraining/TrainingStudio.tsx -> progress events -> metrics.train_loss -> running min</span>",
+      "category": "reranking",
+      "related": [
+        "LEARNING_RERANKER_VISUALIZER_LAST_STEP",
+        "LEARNING_RERANKER_VISUALIZER_COLOR_MODE",
+        "RERANKER_TRAIN_RECOMMENDED_METRIC"
+      ],
+      "links": [
+        {
+          "text": "Hugging Face Trainer (best model + checkpoint selection)",
+          "href": "https://huggingface.co/docs/transformers/main_classes/trainer"
+        },
+        {
+          "text": "Keras ModelCheckpoint",
+          "href": "https://keras.io/api/callbacks/model_checkpoint/"
+        },
+        {
+          "text": "Keras EarlyStopping (restore_best_weights)",
+          "href": "https://keras.io/api/callbacks/early_stopping/"
+        },
+        {
+          "text": "TensorBoard Scalars (tracking noisy metrics over training)",
+          "href": "https://www.tensorflow.org/tensorboard/scalars_and_keras"
+        }
+      ],
+      "badges": [
+        {
+          "text": "Best checkpoint signal",
+          "class": "info"
+        },
+        {
+          "text": "Not endpoint-biased",
+          "class": "info"
+        }
+      ]
+    },
+    {
+      "term": "Learning Reranker Visualizer: Last Step",
+      "key": "LEARNING_RERANKER_VISUALIZER_LAST_STEP",
+      "definition": "<span class=\"tt-strong\">What the last chip means</span><br>The <span class=\"mono\">last=...</span> chip is the most recent observed training loss sample. It is a snapshot of where the run ended, not a guarantee of best quality.<br><br><span class=\"tt-strong\">Why last can be worse than best</span><br>Mini-batch SGD is stochastic, so per-step loss is noisy and non-monotonic. Learning-rate schedules can also change local dynamics (for example warmup, cosine phases, or restart boundaries). Because of this, the terminal sample can sit above the minimum even in healthy runs.<br><br><span class=\"tt-strong\">How to read best vs last together</span><br>Treat <span class=\"mono\">best</span> as the optimization floor reached during the run, and <span class=\"mono\">last</span> as the endpoint state at stop time. The gap between them is a diagnostic signal for late-stage instability, schedule transitions, or insufficient checkpoint selection policy.<br><br><span class=\"tt-strong\">Practical rule</span><br>Do not evaluate run quality from endpoint alone. Compare both chips and use checkpointing policy that can restore the best observed state when needed.",
+      "category": "reranking",
+      "related": [
+        "LEARNING_RERANKER_VISUALIZER_BEST_SO_FAR",
+        "LEARNING_RERANKER_VISUALIZER_COLOR_MODE"
+      ],
+      "links": [
+        {
+          "text": "Deep Learning Book - Stochastic Optimization",
+          "href": "https://www.deeplearningbook.org/contents/optimization.html"
+        },
+        {
+          "text": "PyTorch: How to adjust learning rate",
+          "href": "https://pytorch.org/docs/stable/optim.html#how-to-adjust-learning-rate"
+        },
+        {
+          "text": "SGDR: Stochastic Gradient Descent with Warm Restarts",
+          "href": "https://arxiv.org/abs/1608.03983"
+        },
+        {
+          "text": "On the Generalization Benefit of Noise in SGD",
+          "href": "https://arxiv.org/abs/2006.15081"
+        }
+      ],
+      "badges": [
+        {
+          "text": "Endpoint metric",
+          "class": "warn"
+        },
+        {
+          "text": "Can regress after best",
+          "class": "warn"
+        }
+      ]
+    },
+    {
+      "term": "Learning Reranker Visualizer: Live Mode",
+      "key": "LEARNING_RERANKER_VISUALIZER_LIVE_MODE",
+      "definition": "<span class=\"tt-strong\">What Live does</span><br>When Live is enabled, the visualizer follows the newest telemetry point and keeps the camera timeline anchored to \"now\". In this mode, the path can be intentionally tailed (recent segment emphasized) to keep motion readable while updates stream in.<br><br><span class=\"tt-strong\">Why the beginning can appear to disappear</span><br>If the start of the run seems gone, that is usually the configured tail behavior, not data loss. The renderer still has history; Live mode is choosing to show a recent moving window for clarity.<br><br><span class=\"tt-strong\">How to inspect full history</span><br>Disable Live or use the scrub slider. In non-live scrubbing/playback, the view shows full history up to the selected index instead of only the live tail.",
+      "category": "reranking",
+      "related": [
+        "LEARNING_RERANKER_VISUALIZER_TAIL_SECONDS",
+        "LEARNING_RERANKER_VISUALIZER_SCRUB_HISTORY"
+      ],
+      "links": [
+        {
+          "text": "TensorBoard Scalars (interpreting live, noisy curves)",
+          "href": "https://www.tensorflow.org/tensorboard/scalars_and_keras"
+        },
+        {
+          "text": "Matplotlib Animation Blitting (real-time rendering tradeoffs)",
+          "href": "https://matplotlib.org/stable/users/explain/animations/blitting.html"
+        }
+      ],
+      "badges": [
+        {
+          "text": "Playback mode",
+          "class": "info"
+        },
+        {
+          "text": "Tail-aware",
+          "class": "info"
+        }
+      ]
+    },
+    {
+      "term": "Learning Reranker Visualizer: Scrub History",
+      "key": "LEARNING_RERANKER_VISUALIZER_SCRUB_HISTORY",
+      "definition": "<span class=\"tt-strong\">What the history scrubber controls</span><br>The scrubber sets the visible timeline cutoff index. Moving it lets you inspect earlier optimization states step-by-step, including transitions where loss, gradient norm, or direction changed.<br><br><span class=\"tt-strong\">Interaction with Live mode</span><br>Dragging the scrubber exits Live and freezes the timeline at your selected index. This is the fastest way to audit early-run behavior that may be hidden by live-tail rendering.<br><br><span class=\"tt-strong\">Recommended workflow</span><br>Use Live for situational awareness during active training. Use scrubbing for forensic analysis after a run, especially when best and last diverge.",
+      "category": "reranking",
+      "related": [
+        "LEARNING_RERANKER_VISUALIZER_LIVE_MODE",
+        "LEARNING_RERANKER_VISUALIZER_BEST_SO_FAR",
+        "LEARNING_RERANKER_VISUALIZER_LAST_STEP"
+      ],
+      "links": [
+        {
+          "text": "TensorBoard Scalars (timeline inspection patterns)",
+          "href": "https://www.tensorflow.org/tensorboard/scalars_and_keras"
+        },
+        {
+          "text": "Matplotlib Animation and event loops",
+          "href": "https://matplotlib.org/stable/users/explain/figure/interactive_guide.html"
+        }
+      ],
+      "badges": [
+        {
+          "text": "Timeline forensics",
+          "class": "info"
+        }
+      ]
+    },
+    {
+      "term": "Learning Reranker Visualizer: Tail Seconds",
+      "key": "LEARNING_RERANKER_VISUALIZER_TAIL_SECONDS",
+      "definition": "<span class=\"tt-strong\">What this setting does</span><br>Controls the temporal tail length used while Live mode is on. The visualizer shows the most recent portion of the trajectory to keep motion legible and avoid overdraw in long runs.<br><br><span class=\"tt-strong\">Implementation detail</span><br>Tail seconds are converted to a displayed point count using an internal sampling heuristic (approximately <span class=\"mono\">tail_seconds * 14</span>, then clamped to a safety range). This is a rendering policy, not a training metric policy.<br><br><span class=\"tt-strong\">Troubleshooting \"snake tail\" behavior</span><br>If the run start appears to vanish, increase this value, disable Live, or scrub manually. In scrubbing mode, full history up to the selected index is shown.<br><br><span class=\"tt-strong\">Tuning guidance</span><br>Lower values emphasize short-term dynamics and make rapid motion cleaner. Higher values preserve more context but can look visually dense on noisy runs.",
+      "category": "reranking",
+      "related": [
+        "LEARNING_RERANKER_VISUALIZER_LIVE_MODE",
+        "LEARNING_RERANKER_VISUALIZER_SCRUB_HISTORY",
+        "LEARNING_RERANKER_VISUALIZER_COLOR_MODE"
+      ],
+      "links": [
+        {
+          "text": "Matplotlib Animation Blitting (performance/readability tradeoffs)",
+          "href": "https://matplotlib.org/stable/users/explain/animations/blitting.html"
+        },
+        {
+          "text": "TensorBoard Scalars (handling long, noisy trajectories)",
+          "href": "https://www.tensorflow.org/tensorboard/scalars_and_keras"
+        }
+      ],
+      "badges": [
+        {
+          "text": "Live playback only",
+          "class": "warn"
+        },
+        {
+          "text": "Visualization policy",
+          "class": "info"
+        }
+      ]
+    },
+    {
+      "term": "Learning Reranker Layout Engine",
+      "key": "LEARNING_RERANKER_LAYOUT_ENGINE",
+      "definition": "Layout system used by Learning Reranker Studio. Options: dockview or panels. Default: dockview. Use panels only if you need the simpler fallback layout behavior.",
+      "category": "reranking",
+      "related": [],
+      "links": [],
+      "badges": []
+    },
+    {
+      "term": "Learning Reranker Default Preset",
+      "key": "LEARNING_RERANKER_DEFAULT_PRESET",
+      "definition": "Default pane preset applied when Learning Reranker Studio opens. Options: balanced, focus_viz, focus_logs, focus_inspector. Default: balanced.",
+      "category": "reranking",
+      "related": [],
+      "links": [],
+      "badges": []
+    },
+    {
+      "term": "Learning Reranker Show Setup Row",
+      "key": "LEARNING_RERANKER_SHOW_SETUP_ROW",
+      "definition": "Show or hide the setup summary row above the studio layout (1=show, 0=collapsed). Default: 0. Range: 0-1.",
+      "category": "reranking",
+      "related": [],
+      "links": [],
+      "badges": []
+    },
+    {
+      "term": "Learning Reranker Logs Renderer",
+      "key": "LEARNING_RERANKER_LOGS_RENDERER",
+      "definition": "Preferred log output renderer in Learning Reranker Studio. Options: json or xterm. Default: xterm.",
+      "category": "reranking",
+      "related": [],
+      "links": [],
+      "badges": []
+    },
+    {
+      "term": "Learning Reranker Telemetry Interval Steps",
+      "key": "LEARNING_RERANKER_TELEMETRY_INTERVAL_STEPS",
+      "definition": "Emit trainer telemetry every N optimizer steps (plus first and final events). Default: 2. Range: 1-20. Lower values give smoother live charts but increase event volume.",
+      "category": "reranking",
+      "related": [],
+      "links": [],
+      "badges": []
+    },
+    {
+      "term": "Learning Reranker Studio Left Panel %",
+      "key": "LEARNING_RERANKER_STUDIO_LEFT_PANEL_PCT",
+      "definition": "Default left dock width percentage for Learning Reranker Studio. Default: 20. Range: 15-35.",
+      "category": "reranking",
+      "related": [],
+      "links": [],
+      "badges": []
+    },
+    {
+      "term": "Learning Reranker Studio Right Panel %",
+      "key": "LEARNING_RERANKER_STUDIO_RIGHT_PANEL_PCT",
+      "definition": "Default right dock width percentage for Learning Reranker Studio. Default: 30. Range: 20-45.",
+      "category": "reranking",
+      "related": [],
+      "links": [],
+      "badges": []
+    },
+    {
+      "term": "Learning Reranker Studio Bottom Panel %",
+      "key": "LEARNING_RERANKER_STUDIO_BOTTOM_PANEL_PCT",
+      "definition": "Default bottom dock height percentage for Learning Reranker Studio. Default: 28. Range: 18-45.",
+      "category": "reranking",
+      "related": [],
+      "links": [],
+      "badges": []
+    },
+    {
+      "term": "Learning Reranker Visualizer Renderer",
+      "key": "LEARNING_RERANKER_VISUALIZER_RENDERER",
+      "definition": "Preferred renderer backend for the Neural Visualizer. Options: auto, webgpu, webgl2, canvas2d. Default: auto.",
+      "category": "reranking",
+      "related": [],
+      "links": [],
+      "badges": []
+    },
+    {
+      "term": "Learning Reranker Visualizer Quality",
+      "key": "LEARNING_RERANKER_VISUALIZER_QUALITY",
+      "definition": "Neural Visualizer quality tier. Options: balanced, cinematic, ultra. Default: cinematic. Higher tiers look better but use more GPU/CPU.",
+      "category": "reranking",
+      "related": [],
+      "links": [],
+      "badges": []
+    },
+    {
+      "term": "Learning Reranker Visualizer Max Points",
+      "key": "LEARNING_RERANKER_VISUALIZER_MAX_POINTS",
+      "definition": "Maximum telemetry points retained for Neural Visualizer history. Default: 10000. Range: 1000-50000. Higher values preserve more history at higher memory cost.",
+      "category": "reranking",
+      "related": [],
+      "links": [],
+      "badges": []
+    },
+    {
+      "term": "Learning Reranker Visualizer Target FPS",
+      "key": "LEARNING_RERANKER_VISUALIZER_TARGET_FPS",
+      "definition": "Target frame rate for Neural Visualizer animation. Default: 60. Range: 30-144. Lower values reduce GPU load.",
+      "category": "reranking",
+      "related": [],
+      "links": [],
+      "badges": []
+    },
+    {
+      "term": "Learning Reranker Visualizer Motion Intensity",
+      "key": "LEARNING_RERANKER_VISUALIZER_MOTION_INTENSITY",
+      "definition": "Global motion multiplier for Neural Visualizer effects. Default: 1.0. Range: 0.0-2.0. Lower values produce calmer motion.",
+      "category": "reranking",
+      "related": [],
+      "links": [],
+      "badges": []
+    },
+    {
+      "term": "Learning Reranker Visualizer Show Vector Field",
+      "key": "LEARNING_RERANKER_VISUALIZER_SHOW_VECTOR_FIELD",
+      "definition": "Render animated vector-field accents in Neural Visualizer (1=on, 0=off). Default: 1. Range: 0-1.",
+      "category": "reranking",
+      "related": [],
+      "links": [],
+      "badges": []
+    },
+    {
+      "term": "Learning Reranker Visualizer Reduce Motion",
+      "key": "LEARNING_RERANKER_VISUALIZER_REDUCE_MOTION",
+      "definition": "Accessibility/performance switch to reduce visualizer motion (1=reduce, 0=full motion). Default: 0. Range: 0-1.",
+      "category": "reranking",
       "related": [],
       "links": [],
       "badges": []

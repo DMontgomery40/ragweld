@@ -32,13 +32,16 @@
         }
 
         .topbar .brand {
+            /* brand-lock: keep logo typography/color stable regardless of global theme experiments */
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             font-weight: 800;
-            color: var(--accent);
+            color: #7bb8ff;
             font-size: 28px;
             letter-spacing: 0.5px;
         }
 
         .topbar .tagline {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             font-size: 11px;
             font-weight: 400;
             letter-spacing: 3px;
@@ -51,6 +54,12 @@
             display: flex;
             gap: 10px;
             align-items: center;
+        }
+
+        .top-actions .icon-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
         }
 
         .top-actions button {
@@ -73,6 +82,21 @@
 
         .top-actions button:hover { filter: brightness(0.95); }
         .top-actions button:active { transform: scale(0.98); }
+
+        .theme-mode-select {
+            background: var(--input-bg);
+            color: var(--fg);
+            border: 1px solid var(--line);
+            padding: 6px 8px;
+            border-radius: 6px;
+            min-height: 36px;
+        }
+
+        .theme-mode-select:focus {
+            outline: none;
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px var(--ring);
+        }
 
         #health-status {
             color: var(--fg-muted);
@@ -221,6 +245,13 @@
             overflow: hidden; /* Don't scroll here - let tab-content scroll */
             min-height: 0;
             height: 0; /* Force flex to constrain height */
+        }
+
+        .content-scroll {
+            flex: 1;
+            min-height: 0;
+            overflow-y: auto;
+            padding-bottom: 60px;
         }
 
         /* Config grid - 3 columns responsive */
@@ -378,6 +409,7 @@
         }
         /* Default hidden; Navigation toggles visibility when RAG is active */
         #rag-subtabs { display: none; }
+        #rag-subtabs[data-state="visible"] { display: flex; }
 
         .subtab-bar button {
             padding: 6px 12px;
@@ -642,6 +674,21 @@
             margin-top: 20px;
         }
 
+        .app-footer-actions {
+            margin-top: 0;
+            background: var(--bg);
+            padding: 12px 24px;
+            border-top: 1px solid var(--accent);
+            flex-shrink: 0;
+            align-items: center;
+            gap: 16px;
+            pointer-events: none;
+        }
+
+        .app-footer-actions > * {
+            pointer-events: auto;
+        }
+
         .action-buttons button {
             background: var(--accent);
             color: var(--accent-contrast);
@@ -663,6 +710,17 @@
 
         .action-buttons button:active {
             transform: translateY(0);
+        }
+
+        .action-buttons button.is-disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .save-error-text {
+            color: var(--err);
+            margin-left: 12px;
         }
 
         /* Note: .sidepanel is defined below with sticky header support */
@@ -799,6 +857,60 @@
             position: relative;
             display: flex;
             flex-direction: column;
+        }
+
+        .sidepanel-shell {
+            background: var(--card-bg);
+            padding: 0;
+            overflow: hidden;
+        }
+
+        .app-loading-screen {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 0;
+            height: 100vh;
+            background: var(--bg);
+            color: var(--fg);
+        }
+
+        .app-loading-spinner {
+            width: 48px;
+            height: 48px;
+            border: 3px solid var(--line);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-bottom: 16px;
+        }
+
+        .app-loading-message {
+            font-size: 14px;
+            color: var(--fg-muted);
+        }
+
+        .app-loading-error {
+            color: var(--err);
+            font-size: 12px;
+            margin-top: 12px;
+            max-width: 400px;
+            text-align: center;
+        }
+
+        .app-embed-root {
+            height: 100vh;
+            background: var(--bg);
+            color: var(--fg);
+            display: flex;
+            flex-direction: column;
+        }
+
+        .app-embed-scroll {
+            flex: 1;
+            min-height: 0;
+            overflow: auto;
         }
 
         .sidepanel-content {
@@ -997,11 +1109,13 @@
         }
         .help-icon:hover { background: var(--accent); color: var(--accent-contrast); border-color: var(--accent); }
         .tooltip-bubble {
-            position: absolute; z-index: 1000; top: 22px; left: 0; min-width: 260px; max-width: 460px;
+            position: absolute; z-index: 30000; top: 22px; left: 0; min-width: 260px; max-width: min(460px, calc(100vw - 16px));
+            max-height: min(420px, calc(100vh - 16px)); overflow-y: auto; overflow-x: hidden; overflow-wrap: anywhere;
             padding: 8px 12px; background: var(--card-bg); color: var(--fg); border: 1px solid var(--line); border-radius: 6px;
             font-size: 12px; line-height: 1.45; box-shadow: 0 6px 18px rgba(0,0,0,0.45);
             display: none;
         }
+        .tooltip-bubble--floating { position: fixed !important; }
         .tooltip-bubble .tt-title { font-weight: 700; color: var(--fg); display:block; margin-bottom: 6px; }
         .tooltip-bubble .tt-strong { font-weight: 700; color: var(--fg); }
         .tooltip-bubble .mono {

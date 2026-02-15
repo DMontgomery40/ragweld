@@ -86,6 +86,64 @@ resolve_docker_compose() {
   return 1
 }
 
+docker_daemon_ready() {
+  docker info >/dev/null 2>&1
+}
+
+ensure_docker_daemon() {
+  if docker_daemon_ready; then
+    return 0
+  fi
+
+  if have_cmd colima; then
+    log "Docker daemon unavailable; attempting to start Colima..."
+    if ! colima start; then
+      log "colima start failed."
+      local ha_log="${HOME}/.colima/_lima/colima/ha.stderr.log"
+      if [[ -f "$ha_log" ]]; then
+        log "Recent Colima hostagent errors:"
+        tail -n 40 "$ha_log" | sed 's/^/[start.sh]   /'
+      fi
+      return 1
+    fi
+    if docker_daemon_ready; then
+      return 0
+    fi
+  fi
+
+  return 1
+}
+
+container_name_for_service() {
+  case "$1" in
+    postgres|neo4j|prometheus|grafana|loki|promtail|api)
+      echo "tribrid-$1"
+      ;;
+    *)
+      echo ""
+      ;;
+  esac
+}
+
+container_exists() {
+  local name="$1"
+  docker ps -a --format '{{.Names}}' | grep -Fxq "$name"
+}
+
+start_existing_service_container() {
+  local service="$1"
+  local cname
+  cname="$(container_name_for_service "$service")"
+  if [[ -z "$cname" ]]; then
+    return 1
+  fi
+  if ! container_exists "$cname"; then
+    return 1
+  fi
+  log "Reusing existing container for ${service}: ${cname}"
+  docker start "$cname" >/dev/null
+}
+
 run() {
   if [[ "$DRY_RUN" == "1" ]]; then
     echo "+ $*"
@@ -236,6 +294,13 @@ wait_for_backend_ready() {
 
 if [[ "$START_DOCKER" == "1" ]]; then
   resolve_docker_compose || die "Docker Compose not found. Install Docker Desktop."
+  if [[ "$DRY_RUN" == "1" ]]; then
+    if ! docker_daemon_ready; then
+      log "Docker daemon unavailable (check mode): would attempt Colima start."
+    fi
+  else
+    ensure_docker_daemon || die "Docker daemon is unavailable. Start Docker Desktop or fix Colima, then retry."
+  fi
 
   services=(postgres neo4j)
   if [[ "$WITH_OBSERVABILITY" == "1" ]]; then
@@ -246,13 +311,27 @@ if [[ "$START_DOCKER" == "1" ]]; then
   fi
 
   log "Starting Docker services: ${services[*]}"
+  compose_up_failed=0
   if [[ "$BACKEND_MODE" == "docker" && "$START_BACKEND" == "1" ]]; then
-    run env SERVER_PORT="$BACKEND_PORT" "${DOCKER_COMPOSE[@]}" up -d "${services[@]}"
+    if ! run env SERVER_PORT="$BACKEND_PORT" "${DOCKER_COMPOSE[@]}" up -d "${services[@]}"; then
+      compose_up_failed=1
+    fi
   else
-    run "${DOCKER_COMPOSE[@]}" up -d "${services[@]}"
+    if ! run "${DOCKER_COMPOSE[@]}" up -d "${services[@]}"; then
+      compose_up_failed=1
+    fi
+  fi
+
+  if [[ "$compose_up_failed" == "1" && "$DRY_RUN" == "0" ]]; then
+    log "docker compose up failed; attempting to reuse existing named tribrid containers..."
+    for svc in "${services[@]}"; do
+      start_existing_service_container "$svc" || true
+    done
   fi
 
   if [[ "$DRY_RUN" == "0" ]]; then
+    container_exists "tribrid-postgres" || die "Missing required container tribrid-postgres after startup attempt."
+    container_exists "tribrid-neo4j" || die "Missing required container tribrid-neo4j after startup attempt."
     wait_for_container_healthy "tribrid-postgres" 120
     wait_for_container_healthy "tribrid-neo4j" 180
   fi
@@ -260,9 +339,17 @@ fi
 
 if [[ "$START_BACKEND" == "1" && "$BACKEND_MODE" == "local" ]]; then
   have_cmd uv || die "uv not found. Install uv, then re-run (see README prerequisites)."
-  log "Ensuring Python deps are installed (uv sync)..."
-  # Run once per machine; safe/no-op if already synced.
-  run uv sync
+  # Apple Silicon local backend: ensure MLX extras are installed so
+  # learning_reranker_backend=auto can resolve to mlx_qwen3.
+  if [[ "$(uname -s)" == "Darwin" && "$(uname -m)" == "arm64" ]]; then
+    log "Ensuring Python deps are installed (uv sync --extra mlx)..."
+    # Run once per machine; safe/no-op if already synced.
+    run uv sync --extra mlx
+  else
+    log "Ensuring Python deps are installed (uv sync)..."
+    # Run once per machine; safe/no-op if already synced.
+    run uv sync
+  fi
 
   log "Starting backend (uvicorn) on port $BACKEND_PORT..."
   existing_pids="$(port_listen_pids "$BACKEND_PORT")"

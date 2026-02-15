@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import platform
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -16,8 +17,8 @@ from server.observability.metrics import (
     RERANKER_REQUESTS_TOTAL,
     RERANKER_SKIPPED_TOTAL,
 )
-from server.reranker.mlx_qwen3 import get_mlx_qwen3_reranker, mlx_is_available
-from server.reranker.artifacts import has_mlx_adapter_weights, has_transformers_weights, resolve_project_path
+from server.retrieval.mlx_qwen3 import get_mlx_qwen3_reranker, mlx_is_available
+from server.reranker.artifacts import has_transformers_weights, resolve_project_path
 
 _CrossEncoderKey = tuple[str, bool, str]
 _cross_encoder_cache: dict[_CrossEncoderKey, Any] = {}
@@ -116,7 +117,12 @@ def _minmax_norm(vals: list[float]) -> list[float]:
     return [(v - mn) / span for v in vals]
 
 
+def _mlx_platform_supported() -> bool:
+    return platform.system() == "Darwin" and platform.machine().lower() in {"arm64", "aarch64"}
+
+
 def resolve_learning_backend(training_config: TrainingConfig | None, *, artifact_path: str | None = None) -> str:
+    del artifact_path  # kept for API compatibility
     requested = "auto"
     try:
         if training_config is not None:
@@ -127,21 +133,16 @@ def resolve_learning_backend(training_config: TrainingConfig | None, *, artifact
     if requested in {"transformers", "hf"}:
         return "transformers"
     if requested in {"mlx_qwen3", "mlx"}:
+        if not _mlx_platform_supported():
+            raise RuntimeError("learning_reranker_backend=mlx_qwen3 requires macOS arm64")
+        if not mlx_is_available():
+            raise RuntimeError("learning_reranker_backend=mlx_qwen3 requires MLX deps (install with `uv sync --extra mlx`)")
         return "mlx_qwen3"
 
-    # auto: prefer an on-disk artifact match over "mlx installed" so we don't
-    # silently switch inference backends when a corpus already has an active model.
-    if artifact_path:
-        try:
-            resolved = resolve_project_path(str(artifact_path)).resolve()
-            if has_transformers_weights(resolved):
-                return "transformers"
-            if has_mlx_adapter_weights(resolved):
-                return "mlx_qwen3"
-        except Exception:
-            pass
-
-    return "mlx_qwen3" if mlx_is_available() else "transformers"
+    # auto: strict platform gating (only Apple Silicon + MLX deps).
+    if _mlx_platform_supported() and mlx_is_available():
+        return "mlx_qwen3"
+    return "transformers"
 
 
 async def _get_cross_encoder(model_id: str, *, max_length: int, trust_remote_code: bool) -> Any:
@@ -575,7 +576,7 @@ class Reranker:
         remainder = chunks[top_n:]
         snippets = [_snippet(c.content, max_chars=snippet_chars) for c in candidates]
 
-        from server.reranker.mlx_qwen3 import read_adapter_config, read_manifest
+        from server.retrieval.mlx_qwen3 import read_adapter_config, read_manifest
 
         adapter_path = resolve_project_path(str(adapter_dir)).resolve()
         manifest = read_manifest(adapter_path) or {}

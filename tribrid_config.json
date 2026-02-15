@@ -171,7 +171,7 @@
   "graph_storage": {
     "neo4j_uri": "bolt://localhost:7687",
     "neo4j_user": "neo4j",
-    "neo4j_password": "",
+    "neo4j_password": "password",
     "neo4j_database": "neo4j",
     "neo4j_database_mode": "shared",
     "neo4j_database_prefix": "tribrid_",
@@ -236,6 +236,10 @@
     "engine": "postgres_fts",
     "query_mode": "plain",
     "highlight": false,
+    "relax_on_empty": true,
+    "relax_max_terms": 8,
+    "file_path_fallback": true,
+    "file_path_max_terms": 6,
     "enabled": true,
     "top_k": 50,
     "bm25_k1": 1.2,
@@ -379,7 +383,8 @@
     "learning_reranker_grad_accum_steps": 8,
     "learning_reranker_promote_if_improves": 1,
     "learning_reranker_promote_epsilon": 0.0,
-    "learning_reranker_unload_after_sec": 0
+    "learning_reranker_unload_after_sec": 0,
+    "learning_reranker_telemetry_interval_steps": 2
   },
   "ui": {
     "chat_streaming_enabled": 1,
@@ -407,7 +412,26 @@
     "editor_image": "codercom/code-server:latest",
     "theme_mode": "dark",
     "open_browser": 1,
-    "runtime_mode": "development"
+    "runtime_mode": "development",
+    "learning_reranker_studio_v2_enabled": 1,
+    "learning_reranker_studio_immersive": 1,
+    "learning_reranker_layout_engine": "dockview",
+    "learning_reranker_default_preset": "balanced",
+    "learning_reranker_show_setup_row": 0,
+    "learning_reranker_logs_renderer": "xterm",
+    "learning_reranker_dockview_layout_json": "",
+    "learning_reranker_studio_left_panel_pct": 20,
+    "learning_reranker_studio_right_panel_pct": 30,
+    "learning_reranker_studio_bottom_panel_pct": 28,
+    "learning_reranker_visualizer_renderer": "auto",
+    "learning_reranker_visualizer_quality": "cinematic",
+    "learning_reranker_visualizer_color_mode": "absolute",
+    "learning_reranker_visualizer_max_points": 10000,
+    "learning_reranker_visualizer_target_fps": 60,
+    "learning_reranker_visualizer_tail_seconds": 8.0,
+    "learning_reranker_visualizer_motion_intensity": 1.0,
+    "learning_reranker_visualizer_show_vector_field": 1,
+    "learning_reranker_visualizer_reduce_motion": 0
   },
   "chat": {
     "default_corpus_ids": [

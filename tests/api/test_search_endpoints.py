@@ -79,7 +79,7 @@ async def test_answer(client: AsyncClient) -> None:
         "stream": False,
     }
     response = await client.post("/api/answer", json=request)
-    assert response.status_code in [200, 404, 503]  # 503 if no LLM configured
+    assert response.status_code in [200, 404]
 
     if response.status_code == 200:
         data = response.json()
@@ -102,7 +102,7 @@ async def test_answer_with_system_prompt(client: AsyncClient) -> None:
         "stream": False,
     }
     response = await client.post("/api/answer", json=request)
-    assert response.status_code in [200, 404, 503]
+    assert response.status_code in [200, 404]
 
 
 @pytest.mark.asyncio
@@ -118,7 +118,7 @@ async def test_answer_stream(client: AsyncClient) -> None:
         "stream": True,
     }
     response = await client.post("/api/answer/stream", json=request)
-    assert response.status_code in [200, 404, 503]
+    assert response.status_code in [200, 404]
 
 
 @pytest.mark.asyncio

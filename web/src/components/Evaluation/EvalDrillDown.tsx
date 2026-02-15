@@ -76,6 +76,67 @@ const formatConfigValue = (value: any, key?: string): React.ReactNode => {
   return JSON.stringify(value);
 };
 
+const formatEvalEmptyDebug = (debug: any): string => {
+  if (!debug || typeof debug !== 'object') return '';
+
+  const lines: string[] = [];
+  const perCorpus = (debug as any).fusion_per_corpus;
+  const hasPerCorpus = perCorpus && typeof perCorpus === 'object';
+
+  const formatLeg = (v: any) => (v === true ? 'on' : v === false ? 'off' : 'unknown');
+
+  const pushIf = (label: string, value: any) => {
+    if (value === undefined || value === null) return;
+    const s = String(value).trim();
+    if (!s) return;
+    lines.push(`${label}: ${s}`);
+  };
+
+  const formatCorpusDebug = (cid: string, d: any) => {
+    lines.push(`Corpus: ${cid}`);
+    pushIf('requested vector', formatLeg(d?.fusion_vector_requested));
+    pushIf('requested sparse', formatLeg(d?.fusion_sparse_requested));
+    pushIf('requested graph', formatLeg(d?.fusion_graph_requested));
+    pushIf('enabled vector', formatLeg(d?.fusion_vector_enabled));
+    pushIf('enabled sparse', formatLeg(d?.fusion_sparse_enabled));
+    pushIf('enabled graph', formatLeg(d?.fusion_graph_enabled));
+    pushIf('results vector', d?.fusion_vector_results);
+    pushIf('results sparse', d?.fusion_sparse_results);
+    pushIf('results graph', d?.fusion_graph_hydrated_chunks);
+
+    pushIf('sparse engine', d?.fusion_sparse_engine);
+    if (d?.fusion_sparse_file_path_fallback_used) {
+      lines.push('sparse file_path fallback: used');
+    }
+
+    // Errors (best-effort, already redacted server-side)
+    pushIf('config error', d?.fusion_config_error);
+    pushIf('postgres error', d?.fusion_postgres_error);
+    pushIf('vector error', d?.fusion_vector_error);
+    pushIf('sparse error', d?.fusion_sparse_error);
+    pushIf('graph error', d?.fusion_graph_error);
+  };
+
+  if (hasPerCorpus) {
+    const ids = Object.keys(perCorpus).sort();
+    ids.forEach((cid) => {
+      formatCorpusDebug(cid, (perCorpus as any)[cid]);
+      lines.push(''); // spacer
+    });
+  } else {
+    // Fall back to top-level fusion debug when per-corpus is absent.
+    pushIf('vector enabled', formatLeg((debug as any).fusion_vector_enabled));
+    pushIf('sparse enabled', formatLeg((debug as any).fusion_sparse_enabled));
+    pushIf('graph enabled', formatLeg((debug as any).fusion_graph_enabled));
+    pushIf('vector results', (debug as any).fusion_vector_results);
+    pushIf('sparse results', (debug as any).fusion_sparse_results);
+    pushIf('graph results', (debug as any).fusion_graph_hydrated_chunks);
+    pushIf('graph error', (debug as any).fusion_graph_error);
+  }
+
+  return lines.join('\n').trim();
+};
+
 export const EvalDrillDown: React.FC<EvalDrillDownProps> = ({ runId, compareWithRunId }) => {
   const [evalRun, setEvalRun] = useState<EvalRun | null>(null);
   const [compareRun, setCompareRun] = useState<EvalRun | null>(null);
@@ -1256,7 +1317,30 @@ export const EvalDrillDown: React.FC<EvalDrillDownProps> = ({ runId, compareWith
                                     );
                                   })
                                 ) : (
-                                  <div style={{ color: 'var(--err)' }}>No results returned</div>
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                                    <div style={{ color: 'var(--err)' }}>No results returned</div>
+                                    {result.debug && (
+                                      <div style={{
+                                        padding: '10px 12px',
+                                        border: '1px solid var(--line)',
+                                        borderRadius: '6px',
+                                        background: 'var(--bg-elev2)'
+                                      }}>
+                                        <div style={{ fontWeight: 600, color: 'var(--fg-muted)', marginBottom: '6px' }}>
+                                          Why empty?
+                                        </div>
+                                        <div style={{
+                                          fontFamily: 'monospace',
+                                          fontSize: '11px',
+                                          color: 'var(--fg-muted)',
+                                          whiteSpace: 'pre-wrap',
+                                          lineHeight: 1.35
+                                        }}>
+                                          {formatEvalEmptyDebug(result.debug) || 'No debug recorded for this result.'}
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
                                 )}
                               </div>
                             </div>

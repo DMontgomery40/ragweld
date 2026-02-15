@@ -250,6 +250,7 @@ async def run_evaluation(request: EvalRequest) -> EvalRun:
                 latency_ms=latency_ms,
                 duration_secs=latency_ms / 1000.0,
                 docs=docs,
+                debug=dict(getattr(fusion, "last_debug", None) or {}),
             )
         )
 

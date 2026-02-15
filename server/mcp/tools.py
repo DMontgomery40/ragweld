@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import time
 from datetime import UTC, datetime
 from typing import Literal
@@ -14,8 +13,7 @@ from server.db.postgres import PostgresClient
 from server.models.tribrid_config_model import AnswerResponse, ChunkMatch, Corpus, MCPConfig
 from server.retrieval.fusion import TriBridFusion
 from server.services.config_store import get_config as load_scoped_config
-from server.services.conversation_store import get_conversation_store
-from server.services.rag import generate_response
+from server.services.answer_service import answer_best_effort
 
 MCPMode = Literal["tribrid", "dense_only", "sparse_only", "graph_only"]
 
@@ -81,8 +79,6 @@ def register_mcp_tools(mcp: FastMCP, cfg: MCPConfig) -> None:
         """Answer a question using tri-brid retrieval + an LLM."""
         if not query.strip():
             raise ValueError("Query must not be empty")
-        if not os.getenv("OPENAI_API_KEY"):
-            raise ValueError("No LLM configured (set OPENAI_API_KEY)")
 
         await _ensure_corpus_exists(corpus_id)
         scoped_cfg = await load_scoped_config(repo_id=corpus_id)
@@ -92,14 +88,11 @@ def register_mcp_tools(mcp: FastMCP, cfg: MCPConfig) -> None:
         effective_top_k = int(top_k or cfg.default_top_k)
 
         fusion = TriBridFusion(vector=None, sparse=None, graph=None)
-        store = get_conversation_store()
-        conv = store.get_or_create(None)
 
         t0 = time.perf_counter()
-        text, sources, _provider_id = await generate_response(
-            message=query,
-            repo_id=corpus_id,
-            conversation=conv,
+        text, sources, provider_info, debug = await answer_best_effort(
+            query=query,
+            corpus_id=corpus_id,
             config=scoped_cfg,
             fusion=fusion,
             include_vector=include_vector,
@@ -114,9 +107,10 @@ def register_mcp_tools(mcp: FastMCP, cfg: MCPConfig) -> None:
             query=query,
             answer=text,
             sources=sources,
-            model=scoped_cfg.generation.gen_model,
+            model=(provider_info.model if (provider_info is not None and debug.llm_used) else "retrieval-only"),
             tokens_used=0,
             latency_ms=float(dt_ms),
+            debug=debug,
         )
 
     @mcp.tool()
@@ -148,4 +142,3 @@ def register_mcp_tools(mcp: FastMCP, cfg: MCPConfig) -> None:
                 )
             )
         return out
-

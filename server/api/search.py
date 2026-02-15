@@ -1,20 +1,19 @@
 from __future__ import annotations
 
-import os
 import time
 import uuid
 
 from fastapi import APIRouter, HTTPException
-from pydantic_ai.exceptions import ModelHTTPError
 from starlette.responses import StreamingResponse
 
 from server.config import load_config
 from server.db.postgres import PostgresClient
 from server.models.retrieval import AnswerRequest, AnswerResponse, SearchRequest, SearchResponse
+from server.models.tribrid_config_model import TriBridConfig
 from server.retrieval.fusion import TriBridFusion
 from server.services.config_store import CorpusNotFoundError, get_config as load_scoped_config
+from server.services.answer_service import answer_best_effort, stream_answer_best_effort
 from server.services.conversation_store import get_conversation_store
-from server.services.rag import generate_response, stream_response
 from server.observability.metrics import SEARCH_REQUESTS_TOTAL
 
 router = APIRouter(tags=["search"])
@@ -30,12 +29,26 @@ async def search(request: SearchRequest) -> SearchResponse:
     # Validate corpus exists (prevents auto-creating configs on search)
     global_cfg = load_config()
     pg = PostgresClient(global_cfg.indexing.postgres_url)
-    await pg.connect()
-    corpus = await pg.get_corpus(request.repo_id)
-    if corpus is None:
+    corpus_validation_error: str | None = None
+    corpus = None
+    try:
+        await pg.connect()
+        corpus = await pg.get_corpus(request.repo_id)
+    except Exception as e:
+        # Fail open: we can't validate corpus existence if Postgres is down, but we still return a 200
+        # with best-effort retrieval debug.
+        corpus_validation_error = str(e)
+
+    if corpus_validation_error is None and corpus is None:
         raise HTTPException(status_code=404, detail=f"Corpus not found: {request.repo_id}")
 
-    cfg = await load_scoped_config(repo_id=request.repo_id)
+    try:
+        cfg = await load_scoped_config(repo_id=request.repo_id)
+    except CorpusNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except Exception:
+        # Fail open: fall back to LAW defaults (fusion will also fail open if config load fails downstream).
+        cfg = TriBridConfig()
     fusion = TriBridFusion(vector=None, sparse=None, graph=None)
 
     t0 = time.perf_counter()
@@ -84,6 +97,7 @@ async def search(request: SearchRequest) -> SearchResponse:
             "vector_enabled": bool(request.include_vector),
             "sparse_enabled": bool(request.include_sparse),
             "graph_enabled": bool(request.include_graph),
+            "corpus_validation_error": corpus_validation_error,
             **(fusion.last_debug or {}),
         },
     )
@@ -94,39 +108,60 @@ async def answer(request: AnswerRequest) -> AnswerResponse:
     if not request.query.strip():
         raise HTTPException(status_code=400, detail="Query must not be empty")
 
-    # Require an OpenAI key for now (provider-backed generation comes later)
-    if not os.getenv("OPENAI_API_KEY"):
-        raise HTTPException(status_code=503, detail="No LLM configured (set OPENAI_API_KEY)")
+    # Validate corpus exists (return 404 rather than bubbling CorpusNotFoundError as 500).
+    global_cfg = load_config()
+    pg = PostgresClient(global_cfg.indexing.postgres_url)
+    corpus_validation_error: str | None = None
+    corpus = None
+    try:
+        await pg.connect()
+        corpus = await pg.get_corpus(request.repo_id)
+    except Exception as e:
+        corpus_validation_error = str(e)
+
+    if corpus_validation_error is None and corpus is None:
+        raise HTTPException(status_code=404, detail=f"Corpus not found: {request.repo_id}")
 
     try:
         cfg = await load_scoped_config(repo_id=request.repo_id)
     except CorpusNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
+    except Exception:
+        cfg = TriBridConfig()
     fusion = TriBridFusion(vector=None, sparse=None, graph=None)
 
-    store = get_conversation_store()
-    conv = store.get_or_create(None)
+    t0 = time.perf_counter()
+    text, sources, provider_info, debug = await answer_best_effort(
+        query=request.query,
+        corpus_id=request.repo_id,
+        config=cfg,
+        fusion=fusion,
+        include_vector=bool(request.include_vector),
+        include_sparse=bool(request.include_sparse),
+        include_graph=bool(request.include_graph),
+        top_k=int(request.top_k),
+        system_prompt_override=request.system_prompt,
+        model_override=str(request.model_override or ""),
+    )
+    dt_ms = (time.perf_counter() - t0) * 1000.0
 
-    try:
-        text, sources, _provider_id = await generate_response(
-            message=request.query,
-            repo_id=request.repo_id,
-            conversation=conv,
-            config=cfg,
-            fusion=fusion,
+    if corpus_validation_error:
+        debug = debug.model_copy(
+            update={
+                "fusion_debug": {**(debug.fusion_debug or {}), "corpus_validation_error": corpus_validation_error}
+            }
         )
-    except ModelHTTPError as e:
-        # Surface auth/config errors as "no LLM configured" for dev UX and tests.
-        # (httpx ASGITransport raises app exceptions by default unless converted to HTTPException.)
-        raise HTTPException(status_code=503, detail=f"LLM request failed: {e}") from e
+
+    model = provider_info.model if (provider_info is not None and debug.llm_used) else "retrieval-only"
 
     return AnswerResponse(
         query=request.query,
         answer=text,
         sources=sources,
-        model=cfg.generation.gen_model,
+        model=model,
         tokens_used=0,
-        latency_ms=0.0,
+        latency_ms=float(dt_ms),
+        debug=debug,
     )
 
 
@@ -135,25 +170,45 @@ async def answer_stream(request: AnswerRequest) -> StreamingResponse:
     if not request.query.strip():
         raise HTTPException(status_code=400, detail="Query must not be empty")
 
-    if not os.getenv("OPENAI_API_KEY"):
-        raise HTTPException(status_code=503, detail="No LLM configured (set OPENAI_API_KEY)")
+    # Validate corpus exists (return 404 rather than bubbling CorpusNotFoundError as 500).
+    global_cfg = load_config()
+    pg = PostgresClient(global_cfg.indexing.postgres_url)
+    corpus_validation_error: str | None = None
+    corpus = None
+    try:
+        await pg.connect()
+        corpus = await pg.get_corpus(request.repo_id)
+    except Exception as e:
+        corpus_validation_error = str(e)
+
+    if corpus_validation_error is None and corpus is None:
+        raise HTTPException(status_code=404, detail=f"Corpus not found: {request.repo_id}")
 
     try:
         cfg = await load_scoped_config(repo_id=request.repo_id)
     except CorpusNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
+    except Exception:
+        cfg = TriBridConfig()
     fusion = TriBridFusion(vector=None, sparse=None, graph=None)
 
     store = get_conversation_store()
     conv = store.get_or_create(None)
 
     return StreamingResponse(
-        stream_response(
-            message=request.query,
-            repo_id=request.repo_id,
-            conversation=conv,
+        stream_answer_best_effort(
+            query=request.query,
+            corpus_id=request.repo_id,
             config=cfg,
             fusion=fusion,
+            include_vector=bool(request.include_vector),
+            include_sparse=bool(request.include_sparse),
+            include_graph=bool(request.include_graph),
+            top_k=int(request.top_k),
+            system_prompt_override=request.system_prompt,
+            model_override=str(request.model_override or ""),
+            conversation_id=conv.id,
+            started_at_ms=int(time.time() * 1000),
         ),
         media_type="text/event-stream",
         headers={

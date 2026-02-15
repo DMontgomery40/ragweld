@@ -25,7 +25,8 @@ export function IndexDisplayPanels() {
       setLines(status.lines || []);
     } catch (err) {
       console.error('[IndexDisplay] Failed to load status:', err);
-      setError(err instanceof Error ? err.message : String(err));
+      const detail = (err as any)?.response?.data?.detail;
+      setError(String(detail || (err instanceof Error ? err.message : String(err))));
     } finally {
       setLoading(false);
     }
