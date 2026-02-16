@@ -24,8 +24,12 @@ permissions:
 
 jobs:
   docs-autopilot:
-    if: github.actor != 'github-actions[bot]' && secrets.OPENAI_API_KEY != ''
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      # OpenAI model used by scripts/docs_ai/generate_docs_from_diff.py (Responses API)
+      OPENAI_MODEL: gpt-5.2
     steps:
       - uses: actions/checkout@v4
         with:
@@ -46,10 +50,7 @@ jobs:
           pip install mkdocs-glightbox
 
       - name: Generate docs patch (apply)
-        env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          # OpenAI model used by scripts/docs_ai/generate_docs_from_diff.py (Responses API)
-          OPENAI_MODEL: gpt-5.2
+        if: env.OPENAI_API_KEY != ''
         run: |
           BASE="${{ github.event.inputs.base_ref }}"
           if [ -z "$BASE" ]; then
