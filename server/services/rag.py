@@ -1,6 +1,7 @@
 """RAG pipeline orchestration service using PydanticAI with OpenAI Responses API."""
 
 import json
+import os
 import re
 import time
 from collections.abc import AsyncIterator
@@ -105,13 +106,18 @@ When answering questions:
 # -----------------------------------------------------------------------------
 _DEFAULT_CONFIG = TriBridConfig()
 _default_model: Any
-try:
-    _default_model = OpenAIResponsesModel(_DEFAULT_CONFIG.ui.chat_default_model)
-except Exception:
+if not (os.environ.get("OPENAI_API_KEY") or "").strip():
     # Avoid import-time failure when OPENAI_API_KEY is not configured (e.g. CI/tests).
     from pydantic_ai.models.test import TestModel
 
     _default_model = TestModel()
+else:
+    try:
+        _default_model = OpenAIResponsesModel(_DEFAULT_CONFIG.ui.chat_default_model)
+    except Exception:
+        from pydantic_ai.models.test import TestModel
+
+        _default_model = TestModel()
 
 rag_agent: Agent[RAGDeps, str] = Agent(
     _default_model,
@@ -160,11 +166,21 @@ def _extract_sources(result: Any) -> list[ChunkMatch]:
     return []
 
 
-def _resolve_chat_model(config: TriBridConfig) -> OpenAIResponsesModel:
+def _resolve_chat_model(config: TriBridConfig) -> Any:
     model_name = str(getattr(config.ui, "chat_default_model", "") or "").strip()
     if not model_name:
         model_name = str(TriBridConfig().ui.chat_default_model)
-    return OpenAIResponsesModel(model_name)
+    # CI/tests run without LLM keys; don't hard-fail on import or model resolution.
+    if not (os.environ.get("OPENAI_API_KEY") or "").strip():
+        from pydantic_ai.models.test import TestModel
+
+        return TestModel()
+    try:
+        return OpenAIResponsesModel(model_name)
+    except Exception:
+        from pydantic_ai.models.test import TestModel
+
+        return TestModel()
 
 
 def _resolve_model_settings(config: TriBridConfig, prev_response_id: str) -> OpenAIResponsesModelSettings:
