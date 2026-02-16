@@ -104,7 +104,14 @@ When answering questions:
 # execution builds an agent per request using the scoped config passed in.
 # -----------------------------------------------------------------------------
 _DEFAULT_CONFIG = TriBridConfig()
-_default_model = OpenAIResponsesModel(_DEFAULT_CONFIG.ui.chat_default_model)
+_default_model: Any
+try:
+    _default_model = OpenAIResponsesModel(_DEFAULT_CONFIG.ui.chat_default_model)
+except Exception:
+    # Avoid import-time failure when OPENAI_API_KEY is not configured (e.g. CI/tests).
+    from pydantic_ai.models.test import TestModel
+
+    _default_model = TestModel()
 
 rag_agent: Agent[RAGDeps, str] = Agent(
     _default_model,
