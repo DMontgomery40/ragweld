@@ -17,14 +17,12 @@ const SOURCE_LABELS = {
 const SOURCE_ORDER = ['local', 'ragweld', 'openrouter', 'cloud_direct'] as const;
 
 function toOptionValue(model: ChatModelInfo): string {
-  if (model.source === 'local') return `local:${model.id}`;
-  if (model.source === 'openrouter') return `openrouter:${model.id}`;
-  if (model.source === 'ragweld') return `ragweld:${model.id}`;
-  return model.id;
+  return String(model.override || model.id || '');
 }
 
 function toOptionLabel(model: ChatModelInfo): string {
-  return `${model.provider} · ${model.id}`;
+  const name = String(model.catalog_model || model.id || '').trim();
+  return `${model.provider} · ${name}`;
 }
 
 export function ModelPicker({ value, onChange, models }: ModelPickerProps) {

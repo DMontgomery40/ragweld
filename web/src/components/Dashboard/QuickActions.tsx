@@ -43,7 +43,7 @@ export function QuickActions() {
   
   // Use centralized repo store
   const { activeRepo, switching, loadRepos, initialized, getRepoByName } = useRepoStore();
-  const { startIndex } = useIndexing();
+  const { startAndStream } = useIndexing();
 
   // Load repos once on mount if not yet initialized
   useEffect(() => {
@@ -131,43 +131,44 @@ export function QuickActions() {
         throw new Error('Select a corpus with a valid path before indexing');
       }
 
-      await startIndex({ corpus_id: String(activeRepo), repo_path: String(repoPath), force_reindex: false });
-
-      setStatusMessage('✓ Indexer started');
-      if (terminal) {
-        terminal.appendLine('✓ Indexer started, connecting to log stream...');
-      }
-
-      // Connect to SSE stream for real logs/progress
-      TerminalService.streamIndexRun('dashboard_indexer', {
-        repo: String(activeRepo),
-        onLine: (line) => {
-          if (terminal) {
-            terminal.appendLine(line);
-          }
-        },
-        onProgress: (percent, message) => {
-          setProgress(percent);
-          setStatusMessage(message || `Indexing: ${Math.round(percent)}%`);
-          if (terminal) {
-            terminal.updateProgress(percent, message);
-          }
-        },
-        onError: (error) => {
-          setStatusMessage(`✗ Error: ${error}`);
-          if (terminal) {
-            terminal.appendLine(`\x1b[31m✗ Error: ${error}\x1b[0m`);
-          }
-        },
-        onComplete: () => {
-          setProgress(100);
-          setStatusMessage('✓ Indexing complete');
-          if (terminal) {
-            terminal.updateProgress(100, 'Complete');
-            terminal.appendLine('\x1b[32m✓ Indexing complete\x1b[0m');
-          }
+      await startAndStream(
+        { corpus_id: String(activeRepo), repo_path: String(repoPath), force_reindex: false },
+        {
+          terminalId: 'dashboard_indexer',
+          onLine: (line) => {
+            if (terminal) {
+              terminal.appendLine(line);
+            }
+          },
+          onProgress: (percent, message) => {
+            setProgress(percent);
+            setStatusMessage(message || `Indexing: ${Math.round(percent)}%`);
+            if (terminal) {
+              terminal.updateProgress(percent, message);
+            }
+          },
+          onError: (error) => {
+            setStatusMessage(`✗ Error: ${error}`);
+            if (terminal) {
+              terminal.appendLine(`\x1b[31m✗ Error: ${error}\x1b[0m`);
+            }
+          },
+          onComplete: () => {
+            setProgress(100);
+            setStatusMessage('✓ Indexing complete');
+            if (terminal) {
+              terminal.updateProgress(100, 'Complete');
+              terminal.appendLine('\x1b[32m✓ Indexing complete\x1b[0m');
+            }
+          },
+          onCancelled: () => {
+            setStatusMessage('⚠ Indexing cancelled');
+            if (terminal) {
+              terminal.appendLine('\x1b[33m⚠ Indexing cancelled\x1b[0m');
+            }
+          },
         }
-      });
+      );
     } catch (e) {
       setStatusMessage(`✗ Failed: ${e}`);
       if (terminal) {

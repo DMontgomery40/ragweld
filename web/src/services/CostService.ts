@@ -3,38 +3,22 @@
  * Replacement for legacy `web/src/modules/cost_logic.js` (no window globals).
  *
  * Notes:
- * - Pricing data comes from `models.json` (served by the web app) to avoid hand-written API models.
+ * - Pricing data comes from the backend `/api/models` catalog.
  * - Also supports delegating to backend cost endpoints when available.
  */
 import { apiClient, api } from '@/api/client';
+import { modelsApi } from '@/api/models';
+import type { ModelCatalogEntry, ModelCatalogResponse } from '@/types/generated';
 import type { AxiosResponse } from 'axios';
  
 export type CostModelType = 'chat' | 'embed' | 'rerank';
  
-export type ModelPriceSpec = {
-  provider?: string;
-  model?: string;
-  unit?: string;
- 
-  // chat
-  input_per_1k?: number | null;
-  output_per_1k?: number | null;
- 
-  // embedding
-  embed_per_1k?: number | null;
- 
-  // rerank
-  rerank_per_1k?: number | null;
-  per_request?: number | null;
-  price_per_request?: number | null; // legacy alias (some catalogs)
+export type ModelPriceSpec = ModelCatalogEntry & {
+  // Legacy alias tolerated by older payloads.
+  price_per_request?: number | null;
 };
  
-export type ModelsCatalog = {
-  models: ModelPriceSpec[];
-  version?: string | null;
-  currency?: string;
-  last_updated?: string;
-};
+export type ModelsCatalog = ModelCatalogResponse;
  
 export type CostBreakdownItem = {
   costUSD: number;
@@ -88,6 +72,11 @@ function normKey(s: unknown) {
 }
  
 function getModelType(model: ModelPriceSpec): CostModelType | null {
+  const comps = Array.isArray(model.components) ? model.components.map((c) => String(c).toUpperCase()) : [];
+  if (comps.includes('EMB')) return 'embed';
+  if (comps.includes('RERANK')) return 'rerank';
+  if (comps.includes('GEN')) return 'chat';
+
   const hasEmbed = model.embed_per_1k != null && typeof model.embed_per_1k === 'number';
   const hasRerank =
     (model.rerank_per_1k != null && typeof model.rerank_per_1k === 'number') ||
@@ -166,15 +155,9 @@ async function loadModelsCatalog(): Promise<ModelsCatalog> {
   const now = Date.now();
   if (catalogCache.data && now - catalogCache.loadedAtMs < PRICE_TTL_MS) return catalogCache.data;
   if (catalogInFlight) return catalogInFlight;
- 
-  const baseUrl = import.meta.env.BASE_URL || '/';
-  const modelsUrl = `${baseUrl}models.json`.replace(/\/+/g, '/');
- 
-  catalogInFlight = fetch(modelsUrl, { cache: 'no-store' })
-    .then(async (res) => {
-      if (!res.ok) throw new Error(`Failed to load models.json: ${res.status}`);
-      return (await res.json()) as ModelsCatalog;
-    })
+
+  catalogInFlight = modelsApi
+    .listAll()
     .then((data) => {
       catalogCache = { data, loadedAtMs: now };
       return data;
@@ -215,7 +198,7 @@ export class CostService {
     return {
       totalUSD: Number(total.toFixed(6)),
       breakdown,
-      modelsVersion: models?.version ? String(models.version) : null,
+      modelsVersion: models?.last_updated ? String(models.last_updated) : null,
     };
   }
  
@@ -266,4 +249,3 @@ export class CostService {
     }
   }
 }
-

@@ -4,18 +4,13 @@ import { useReranker } from '@/hooks/useReranker';
 import { TooltipIcon } from '@/components/ui/TooltipIcon';
 import { ApiKeyStatus } from '@/components/ui/ApiKeyStatus';
 import { modelsApi } from '@/api';
-import type { TrainingConfig } from '@/types/generated';
+import type { ModelCatalogEntry, TrainingConfig } from '@/types/generated';
 
 const RERANKER_MODES = ['none', 'local', 'learning', 'cloud'] as const;
 type RerankerMode = (typeof RERANKER_MODES)[number];
 type LearningBackend = NonNullable<TrainingConfig['learning_reranker_backend']>;
 
-type RerankModelEntry = {
-  provider?: string;
-  model?: string;
-  family?: string;
-  notes?: string;
-};
+type RerankModelEntry = ModelCatalogEntry;
 
 function uniqueSorted(values: string[]): string[] {
   return Array.from(new Set(values.filter(Boolean))).sort((a, b) => a.localeCompare(b));
@@ -86,8 +81,7 @@ export function RerankerConfigSubtab() {
       setModelsLoading(true);
       setModelsError(null);
       try {
-        const data = await modelsApi.listByType('RERANK');
-        const list = Array.isArray(data) ? (data as RerankModelEntry[]) : [];
+        const list = await modelsApi.listByType('RERANK');
         if (mounted) setRerankModels(list);
       } catch (e) {
         if (mounted) setModelsError(e instanceof Error ? e.message : 'Failed to load reranker models');
@@ -286,7 +280,7 @@ export function RerankerConfigSubtab() {
                 {cloudModelOptions.length === 0 && <option value="">No models for provider</option>}
                 {cloudModelOptions.map((m) => (
                   <option key={m} value={m}>
-                    {m}
+                    {`${cloudProvider} · ${m}`}
                   </option>
                 ))}
               </select>
@@ -338,7 +332,7 @@ export function RerankerConfigSubtab() {
                 {localModelOptions.length === 0 && <option value="">No local rerank models</option>}
                 {localModelOptions.map((m) => (
                   <option key={m} value={m}>
-                    {m}
+                    {`local · ${m}`}
                   </option>
                 ))}
               </select>

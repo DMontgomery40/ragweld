@@ -197,7 +197,7 @@ function ModelInfo({ model }: { model?: Model }) {
     >
       {model.dimensions && <span>Dimensions: {model.dimensions}</span>}
       {model.context && <span>Context: {model.context.toLocaleString()} tokens</span>}
-      {model.embed_per_1k !== undefined && (
+      {model.embed_per_1k != null && (
         <span>Cost: ${model.embed_per_1k.toFixed(5)}/1k tokens</span>
       )}
     </div>

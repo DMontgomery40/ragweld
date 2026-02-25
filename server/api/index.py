@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import re
 from collections import defaultdict
@@ -97,6 +98,68 @@ _EST_TOKENS_PER_SECOND_DETERMINISTIC = 120_000
 _EST_OVERHEAD_SECONDS = 12.0
 _EST_RANGE_LOW_MULT = 0.6
 _EST_RANGE_HIGH_MULT = 1.9
+
+
+def _idle_status(repo_id: str) -> IndexStatus:
+    return IndexStatus(
+        repo_id=repo_id,
+        status="idle",
+        progress=0.0,
+        current_file=None,
+        error=None,
+        started_at=None,
+        completed_at=None,
+    )
+
+
+def _clear_runtime_state_for_repo(repo_id: str, *, queue: asyncio.Queue[dict[str, Any]] | None = None) -> None:
+    # Remove task only when this cleanup corresponds to the currently-registered task.
+    cur_task = _TASKS.get(repo_id)
+    if cur_task is not None and (queue is None or _EVENT_QUEUES.get(repo_id) is queue):
+        if cur_task.done():
+            _TASKS.pop(repo_id, None)
+
+    # Remove queue only when this cleanup corresponds to the currently-registered queue.
+    if queue is None:
+        _EVENT_QUEUES.pop(repo_id, None)
+    elif _EVENT_QUEUES.get(repo_id) is queue:
+        _EVENT_QUEUES.pop(repo_id, None)
+
+
+async def _cancel_index_run(repo_id: str) -> IndexStatus:
+    repo_id = str(repo_id or "").strip()
+    if not repo_id:
+        raise HTTPException(status_code=422, detail="repo_id is required")
+
+    task = _TASKS.get(repo_id)
+    if task is None:
+        return _STATUS.get(repo_id) or _idle_status(repo_id)
+
+    prev = _STATUS.get(repo_id)
+    queue = _EVENT_QUEUES.get(repo_id)
+    _STATUS[repo_id] = IndexStatus(
+        repo_id=repo_id,
+        status="cancelled",
+        progress=float(prev.progress) if prev else 0.0,
+        current_file=prev.current_file if prev else None,
+        error=None,
+        started_at=prev.started_at if prev else None,
+        completed_at=datetime.now(UTC),
+    )
+    if queue is not None:
+        _emit_event(
+            queue,
+            {"type": "cancelled", "message": "⚠ Indexing cancelled"},
+            guarantee=True,
+        )
+
+    task.cancel()
+    with contextlib.suppress(asyncio.CancelledError, Exception):
+        await task
+
+    _TASKS.pop(repo_id, None)
+    _clear_runtime_state_for_repo(repo_id, queue=queue)
+    return _STATUS[repo_id]
 
 
 def _estimate_tokens_from_bytes(total_bytes: int) -> int:
@@ -985,6 +1048,7 @@ async def _run_index(
 async def _background_index_job(request: IndexRequest, queue: asyncio.Queue[dict[str, Any]]) -> None:
     repo_id = request.repo_id
     started_at = datetime.now(UTC)
+    this_task = asyncio.current_task()
     try:
         INDEX_RUNS_TOTAL.inc()
         _emit_event(queue, {"type": "log", "message": f"🚀 Indexing started: {repo_id}"}, drop_oldest=True)
@@ -1032,6 +1096,19 @@ async def _background_index_job(request: IndexRequest, queue: asyncio.Queue[dict
             completed_at=datetime.now(UTC),
         )
         _emit_event(queue, {"type": "complete", "message": "✓ Indexing complete"}, guarantee=True)
+    except asyncio.CancelledError:
+        prev = _STATUS.get(repo_id)
+        _STATUS[repo_id] = IndexStatus(
+            repo_id=repo_id,
+            status="cancelled",
+            progress=float(prev.progress) if prev else 0.0,
+            current_file=prev.current_file if prev else None,
+            error=None,
+            started_at=prev.started_at if prev else started_at,
+            completed_at=datetime.now(UTC),
+        )
+        _emit_event(queue, {"type": "cancelled", "message": "⚠ Indexing cancelled"}, guarantee=True)
+        raise
     except Exception as e:
         INDEX_ERRORS_TOTAL.inc()
         prev = _STATUS.get(repo_id)
@@ -1046,7 +1123,10 @@ async def _background_index_job(request: IndexRequest, queue: asyncio.Queue[dict
         )
         _emit_event(queue, {"type": "error", "message": str(e)}, guarantee=True)
     finally:
-        _TASKS.pop(repo_id, None)
+        # Avoid clearing a newer task/queue for the same repo if a new run already started.
+        if _TASKS.get(repo_id) is this_task:
+            _TASKS.pop(repo_id, None)
+        _clear_runtime_state_for_repo(repo_id, queue=queue)
 
 
 @router.post("/index/estimate", response_model=IndexEstimate)
@@ -1243,6 +1323,34 @@ async def start_index_compat(payload: dict[str, Any] | None = None) -> IndexStat
     return await start_index(IndexRequest(repo_id=repo_id, repo_path=repo_path, force_reindex=force_reindex))
 
 
+@router.post("/index/{corpus_id}/stop", response_model=IndexStatus)
+async def stop_index_for_corpus(corpus_id: str) -> IndexStatus:
+    """Cancel an active indexing run for a specific corpus."""
+    repo_id = str(corpus_id or "").strip()
+    if not repo_id:
+        raise HTTPException(status_code=422, detail="corpus_id is required")
+    return await _cancel_index_run(repo_id)
+
+
+@router.post("/index/stop", response_model=IndexStatus)
+async def stop_index_compat(
+    payload: dict[str, Any] | None = None,
+    scope: CorpusScope = _CORPUS_SCOPE_DEP,
+) -> IndexStatus:
+    """Legacy-compatible stop endpoint for dashboard callers."""
+    payload = payload or {}
+    repo_id = str(
+        payload.get("corpus_id")
+        or payload.get("repo_id")
+        or payload.get("repo")
+        or (scope.resolved_repo_id or "")
+        or (_LAST_STARTED_REPO or "")
+    ).strip()
+    if not repo_id:
+        raise HTTPException(status_code=422, detail="repo_id (or corpus_id) is required")
+    return await _cancel_index_run(repo_id)
+
+
 @router.get("/index/status", response_model=DashboardIndexStatusResponse)
 async def get_dashboard_index_status(scope: CorpusScope = _CORPUS_SCOPE_DEP) -> DashboardIndexStatusResponse:
     """Dashboard index summary (legacy-compatible endpoint).
@@ -1369,15 +1477,7 @@ async def get_index_status(corpus_id: str) -> IndexStatus:
     repo_id = corpus_id
     if repo_id in _STATUS:
         return _STATUS[repo_id]
-    return IndexStatus(
-        repo_id=repo_id,
-        status="idle",
-        progress=0.0,
-        current_file=None,
-        error=None,
-        started_at=None,
-        completed_at=None,
-    )
+    return _idle_status(repo_id)
 
 
 @router.get("/index/{corpus_id}/stats", response_model=IndexStats)
@@ -1398,6 +1498,8 @@ async def get_index_stats(corpus_id: str) -> IndexStats:
 @router.delete("/index/{corpus_id}")
 async def delete_index(corpus_id: str) -> dict[str, Any]:
     repo_id = corpus_id
+    if repo_id in _TASKS:
+        await _cancel_index_run(repo_id)
     cfg = await load_scoped_config(repo_id=repo_id)
     postgres = PostgresClient(cfg.indexing.postgres_url)
     await postgres.connect()
@@ -1421,6 +1523,8 @@ async def delete_index(corpus_id: str) -> dict[str, Any]:
         pass
     _STATUS.pop(repo_id, None)
     _STATS.pop(repo_id, None)
+    _TASKS.pop(repo_id, None)
+    _EVENT_QUEUES.pop(repo_id, None)
     # Best-effort gauges (process-level; no per-corpus labels).
     # Reset to zero to avoid stale dashboards in single-corpus dev flows.
     try:
@@ -1477,10 +1581,10 @@ async def stream_index_operation(scope: CorpusScope = _CORPUS_SCOPE_DEP) -> Stre
     repo_id = (scope.resolved_repo_id or _LAST_STARTED_REPO or "").strip()
     if not repo_id:
         raise HTTPException(status_code=400, detail="Missing repo query parameter")
-    if repo_id not in _EVENT_QUEUES:
+    queue = _EVENT_QUEUES.get(repo_id)
+    task = _TASKS.get(repo_id)
+    if queue is None or task is None or task.done():
         raise HTTPException(status_code=404, detail=f"No active stream for repo_id={repo_id}")
-
-    queue = _EVENT_QUEUES[repo_id]
 
     async def _gen() -> AsyncGenerator[str, None]:
         # Immediately emit a status snapshot
@@ -1488,9 +1592,15 @@ async def stream_index_operation(scope: CorpusScope = _CORPUS_SCOPE_DEP) -> Stre
             s = _STATUS[repo_id]
             yield f"data: {json.dumps({'type': 'progress', 'percent': int(s.progress * 100), 'message': s.current_file or ''})}\n\n"
         while True:
-            event = await queue.get()
+            try:
+                event = await asyncio.wait_for(queue.get(), timeout=1.0)
+            except asyncio.TimeoutError:
+                active = _TASKS.get(repo_id)
+                if active is None or active.done():
+                    break
+                continue
             yield f"data: {json.dumps(event)}\n\n"
-            if event.get("type") in {"complete", "error"}:
+            if event.get("type") in {"complete", "error", "cancelled"}:
                 break
 
     return StreamingResponse(

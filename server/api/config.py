@@ -60,6 +60,193 @@ def _get_config_write_lock(repo_id: str | None) -> asyncio.Lock:
     return lock
 
 
+def _norm_components(raw: Any) -> set[str]:
+    if not isinstance(raw, list):
+        return set()
+    out: set[str] = set()
+    for item in raw:
+        c = str(item or "").strip().upper()
+        if c in {"GEN", "EMB", "RERANK"}:
+            out.add(c)
+    return out
+
+
+def _load_catalog_models_for_validation() -> list[dict[str, Any]]:
+    try:
+        from server.api.models import _catalog_models, _load_catalog
+
+        return _catalog_models(_load_catalog())
+    except Exception:
+        return []
+
+
+def _catalog_capabilities_for_model(
+    catalog_models: list[dict[str, Any]],
+    *,
+    model_value: str,
+    provider_hint: str | None = None,
+) -> set[str]:
+    raw = str(model_value or "").strip()
+    if not raw:
+        return set()
+
+    # Ragweld uses an in-process generation route.
+    if raw.lower().startswith("ragweld:"):
+        return {"GEN"}
+
+    # Prefix-based route override format (local:/openrouter:).
+    if ":" in raw:
+        prefix, rest = raw.split(":", 1)
+        p = prefix.strip().lower()
+        if p == "ragweld":
+            return {"GEN"}
+        if p in {"local", "openrouter"}:
+            raw = rest.strip()
+
+    model_core = raw
+    scoped_provider = str(provider_hint or "").strip().lower() or None
+    if "/" in raw:
+        pfx, model_name = raw.split("/", 1)
+        pfx = pfx.strip().lower()
+        model_core = model_name.strip()
+        if pfx:
+            scoped_provider = pfx
+
+    if not model_core:
+        return set()
+
+    caps: set[str] = set()
+    if scoped_provider:
+        for row in catalog_models:
+            provider = str(row.get("provider") or "").strip().lower()
+            model = str(row.get("model") or "").strip()
+            if provider == scoped_provider and model == model_core:
+                caps |= _norm_components(row.get("components"))
+    if caps:
+        return caps
+
+    # Fallback: model-only lookup (for unqualified model ids).
+    for row in catalog_models:
+        model = str(row.get("model") or "").strip()
+        if model == model_core:
+            caps |= _norm_components(row.get("components"))
+    return caps
+
+
+def _validate_capability(
+    catalog_models: list[dict[str, Any]],
+    *,
+    field_name: str,
+    model_value: str,
+    required_component: str,
+    provider_hint: str | None = None,
+) -> None:
+    model_str = str(model_value or "").strip()
+    if not model_str:
+        return
+
+    caps = _catalog_capabilities_for_model(
+        catalog_models,
+        model_value=model_str,
+        provider_hint=provider_hint,
+    )
+    # Unknown/custom models are allowed; we only reject known-incompatible assignments.
+    if not caps:
+        return
+    if required_component in caps:
+        return
+
+    found = ", ".join(sorted(caps))
+    raise HTTPException(
+        status_code=422,
+        detail=(
+            f"Invalid model capability for {field_name}: "
+            f"'{model_str}' supports [{found}] but this field requires [{required_component}]."
+        ),
+    )
+
+
+def _validate_model_capabilities(config: TriBridConfig) -> None:
+    catalog_models = _load_catalog_models_for_validation()
+    if not catalog_models:
+        return
+
+    # Generation fields (must be GEN-capable).
+    _validate_capability(
+        catalog_models,
+        field_name="generation.gen_model",
+        model_value=str(config.generation.gen_model or ""),
+        required_component="GEN",
+    )
+    _validate_capability(
+        catalog_models,
+        field_name="generation.enrich_model",
+        model_value=str(config.generation.enrich_model or ""),
+        required_component="GEN",
+    )
+    _validate_capability(
+        catalog_models,
+        field_name="generation.enrich_model_ollama",
+        model_value=str(config.generation.enrich_model_ollama or ""),
+        required_component="GEN",
+    )
+    _validate_capability(
+        catalog_models,
+        field_name="generation.gen_model_http",
+        model_value=str(config.generation.gen_model_http or ""),
+        required_component="GEN",
+    )
+    _validate_capability(
+        catalog_models,
+        field_name="generation.gen_model_mcp",
+        model_value=str(config.generation.gen_model_mcp or ""),
+        required_component="GEN",
+    )
+    _validate_capability(
+        catalog_models,
+        field_name="generation.gen_model_cli",
+        model_value=str(config.generation.gen_model_cli or ""),
+        required_component="GEN",
+    )
+    _validate_capability(
+        catalog_models,
+        field_name="chat.multimodal.vision_model_override",
+        model_value=str(config.chat.multimodal.vision_model_override or ""),
+        required_component="GEN",
+    )
+
+    # Embedding fields (must be EMB-capable).
+    embedding_provider = str(config.embedding.embedding_type or "").strip().lower() or None
+    if embedding_provider == "voyage":
+        emb_model = str(config.embedding.voyage_model or "")
+    elif embedding_provider in {"local", "huggingface", "ollama"}:
+        emb_model = str(config.embedding.embedding_model_local or "")
+    else:
+        emb_model = str(config.embedding.embedding_model or "")
+    _validate_capability(
+        catalog_models,
+        field_name="embedding.*",
+        model_value=emb_model,
+        required_component="EMB",
+        provider_hint=embedding_provider,
+    )
+
+    # Reranker fields (must be RERANK-capable).
+    _validate_capability(
+        catalog_models,
+        field_name="reranking.reranker_cloud_model",
+        model_value=str(config.reranking.reranker_cloud_model or ""),
+        required_component="RERANK",
+        provider_hint=str(config.reranking.reranker_cloud_provider or "").strip().lower() or None,
+    )
+    _validate_capability(
+        catalog_models,
+        field_name="reranking.reranker_local_model",
+        model_value=str(config.reranking.reranker_local_model or ""),
+        required_component="RERANK",
+    )
+
+
 @router.get("/config", response_model=TriBridConfig)
 async def get_config(scope: CorpusScope = _CORPUS_SCOPE_DEP) -> TriBridConfig:
     repo_id = scope.resolved_repo_id
@@ -79,7 +266,10 @@ async def update_config(
     repo_id = scope.resolved_repo_id
     try:
         async with _get_config_write_lock(repo_id):
+            _validate_model_capabilities(config)
             return await save_scoped_config(config, repo_id=repo_id)
+    except HTTPException:
+        raise
     except CorpusNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
     except Exception as e:
@@ -120,6 +310,8 @@ async def update_config_section(
             new_config = TriBridConfig.model_validate(base)
         except Exception as e:
             raise HTTPException(status_code=422, detail=str(e)) from e
+
+        _validate_model_capabilities(new_config)
 
         try:
             return await save_scoped_config(new_config, repo_id=repo_id)

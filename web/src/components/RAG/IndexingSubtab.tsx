@@ -8,10 +8,9 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useAPI, useConfig, useConfigField } from '@/hooks';
+import { useAPI, useConfig, useConfigField, useIndexing } from '@/hooks';
 import { useRepoStore } from '@/stores/useRepoStore';
 import { LiveTerminal, type LiveTerminalHandle } from '@/components/LiveTerminal/LiveTerminal';
-import { TerminalService } from '@/services/TerminalService';
 import { RepositoryConfig } from '@/components/RAG/RepositoryConfig';
 import { EmbeddingMismatchWarning } from '@/components/ui/EmbeddingMismatchWarning';
 import { TooltipIcon } from '@/components/ui/TooltipIcon';
@@ -49,6 +48,12 @@ export function IndexingSubtab() {
   const { api } = useAPI();
   const { config } = useConfig();
   const { activeRepo, repos, loadRepos, setActiveRepo } = useRepoStore();
+  const {
+    fetchStatus: fetchIndexStatus,
+    fetchStats: fetchIndexStats,
+    startAndStream,
+    stopIndex,
+  } = useIndexing();
 
   // Terminal ref (slide-down UI)
   const terminalRef = useRef<LiveTerminalHandle>(null);
@@ -190,6 +195,11 @@ export function IndexingSubtab() {
   const [indexStats, setIndexStats] = useState<IndexStats | null>(null);
   const [statsLoading, setStatsLoading] = useState(false);
   const [statsExpanded, setStatsExpanded] = useState(false);
+  const activeRepoRef = useRef<string>('');
+  const statusRequestSeq = useRef(0);
+  const statsRequestSeq = useRef(0);
+  const statusAbortRef = useRef<AbortController | null>(null);
+  const statsAbortRef = useRef<AbortController | null>(null);
 
   // Vocab preview state
   const [vocabPreview, setVocabPreview] = useState<VocabPreviewTerm[]>([]);
@@ -218,6 +228,17 @@ export function IndexingSubtab() {
   useEffect(() => {
     setIndexEstimate(null);
   }, [activeRepo, effectivePath]);
+
+  useEffect(() => {
+    activeRepoRef.current = String(activeRepo || '').trim();
+  }, [activeRepo]);
+
+  useEffect(() => {
+    return () => {
+      statusAbortRef.current?.abort();
+      statsAbortRef.current?.abort();
+    };
+  }, []);
 
   // Derived model field (based on provider)
   const currentModel = useMemo(() => {
@@ -344,35 +365,49 @@ export function IndexingSubtab() {
 
   const refreshStatus = useCallback(async () => {
     const rid = String(activeRepo || '').trim();
-    if (!rid) return;
-    try {
-      const r = await fetch(api(`index/${encodeURIComponent(rid)}/status`));
-      if (!r.ok) return;
-      const data: IndexStatus = await r.json();
-      setIndexStatus(data);
-    } catch {
-      // ignore
+    if (!rid) {
+      setIndexStatus(null);
+      return;
     }
-  }, [activeRepo, api]);
+    const seq = ++statusRequestSeq.current;
+    statusAbortRef.current?.abort();
+    const controller = new AbortController();
+    statusAbortRef.current = controller;
+    try {
+      const data = await fetchIndexStatus(rid, { signal: controller.signal, quiet: true });
+      if (seq !== statusRequestSeq.current) return;
+      if (activeRepoRef.current !== rid) return;
+      setIndexStatus(data);
+    } catch (e) {
+      if ((e as Error)?.name === 'AbortError') return;
+    }
+  }, [activeRepo, fetchIndexStatus]);
 
   const loadStats = useCallback(async () => {
     const rid = String(activeRepo || '').trim();
-    if (!rid) return;
+    if (!rid) {
+      setIndexStats(null);
+      return;
+    }
+    const seq = ++statsRequestSeq.current;
+    statsAbortRef.current?.abort();
+    const controller = new AbortController();
+    statsAbortRef.current = controller;
     setStatsLoading(true);
     try {
-      const r = await fetch(api(`index/${encodeURIComponent(rid)}/stats`));
-      if (!r.ok) {
-        setIndexStats(null);
-        return;
-      }
-      const data: IndexStats = await r.json();
+      const data = await fetchIndexStats(rid, { signal: controller.signal, quiet: true });
+      if (seq !== statsRequestSeq.current) return;
+      if (activeRepoRef.current !== rid) return;
       setIndexStats(data);
-    } catch {
+    } catch (e) {
+      if ((e as Error)?.name === 'AbortError') return;
       setIndexStats(null);
     } finally {
-      setStatsLoading(false);
+      if (seq === statsRequestSeq.current && activeRepoRef.current === rid) {
+        setStatsLoading(false);
+      }
     }
-  }, [activeRepo, api]);
+  }, [activeRepo, fetchIndexStats]);
 
   useEffect(() => {
     void refreshStatus();
@@ -386,37 +421,22 @@ export function IndexingSubtab() {
     t?.setTitle(title);
   }, []);
 
-  const startStream = useCallback(() => {
+  const handleStopIndex = useCallback(async () => {
     const rid = String(activeRepo || '').trim();
     if (!rid) return;
-    TerminalService.connectToStream('indexing_terminal', `operations/index?corpus_id=${encodeURIComponent(rid)}`, {
-      onLine: (line) => terminalRef.current?.appendLine(line),
-      onProgress: (percent, message) => {
-        setProgress({ current: percent, total: 100, status: message || `Progress: ${percent}%` });
-        terminalRef.current?.updateProgress(percent, message);
-      },
-      onError: (err) => {
-        terminalRef.current?.appendLine(`\x1b[31mERROR: ${err}\x1b[0m`);
-        setProgress(prev => ({ ...prev, status: `Error: ${err}` }));
-        setIsIndexing(false);
-      },
-      onComplete: () => {
-        terminalRef.current?.updateProgress(100, 'Complete');
-        terminalRef.current?.appendLine(`\x1b[32m✓ Indexing complete!\x1b[0m`);
-        setProgress({ current: 100, total: 100, status: 'Complete' });
-        setIsIndexing(false);
-        void loadStats();
-        void refreshStatus();
-      },
-    });
-  }, [activeRepo, loadStats, refreshStatus]);
-
-  const handleStopIndex = useCallback(() => {
-    TerminalService.disconnect('indexing_terminal');
-    setIsIndexing(false);
-    setProgress(prev => ({ ...prev, status: 'Stopped' }));
-    terminalRef.current?.appendLine(`\x1b[33m⚠ Indexing stopped by user\x1b[0m`);
-  }, []);
+    try {
+      await stopIndex(rid, { terminalId: 'indexing_terminal' });
+      setIsIndexing(false);
+      setProgress((prev) => ({ ...prev, status: 'Cancelled' }));
+      terminalRef.current?.appendLine(`\x1b[33m⚠ Indexing cancelled by user\x1b[0m`);
+      await loadStats();
+      await refreshStatus();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Failed to cancel indexing';
+      setErrorBanner(msg);
+      terminalRef.current?.appendLine(`\x1b[31mFailed to cancel: ${msg}\x1b[0m`);
+    }
+  }, [activeRepo, loadStats, refreshStatus, stopIndex]);
 
   const handleStartIndex = useCallback(async () => {
     const rid = String(activeRepo || '').trim();
@@ -486,20 +506,35 @@ export function IndexingSubtab() {
       terminalRef.current?.appendLine(`   Chunk Size: ${chunkSize}, Strategy: ${chunkingStrategy}`);
       terminalRef.current?.appendLine(`   Graph indexing: ${graphIndexingEnabled ? 'enabled' : 'disabled'} • Skip dense: ${skipDense ? 'yes' : 'no'}`);
 
-      const r = await fetch(api('index'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+      const st = await startAndStream(body, {
+        terminalId: 'indexing_terminal',
+        onLine: (line) => terminalRef.current?.appendLine(line),
+        onProgress: (percent, message) => {
+          setProgress({ current: percent, total: 100, status: message || `Progress: ${percent}%` });
+          terminalRef.current?.updateProgress(percent, message);
+        },
+        onError: (err) => {
+          terminalRef.current?.appendLine(`\x1b[31mERROR: ${err}\x1b[0m`);
+          setProgress((prev) => ({ ...prev, status: `Error: ${err}` }));
+          setIsIndexing(false);
+        },
+        onComplete: () => {
+          terminalRef.current?.updateProgress(100, 'Complete');
+          terminalRef.current?.appendLine(`\x1b[32m✓ Indexing complete!\x1b[0m`);
+          setProgress({ current: 100, total: 100, status: 'Complete' });
+          setIsIndexing(false);
+          void loadStats();
+          void refreshStatus();
+        },
+        onCancelled: () => {
+          terminalRef.current?.appendLine(`\x1b[33m⚠ Indexing cancelled\x1b[0m`);
+          setProgress((prev) => ({ ...prev, status: 'Cancelled' }));
+          setIsIndexing(false);
+          void loadStats();
+          void refreshStatus();
+        },
       });
-      if (!r.ok) {
-        const text = await r.text().catch(() => '');
-        throw new Error(text || `Index request failed (${r.status})`);
-      }
-      const st: IndexStatus = await r.json();
       setIndexStatus(st);
-
-      // Start streaming logs/progress immediately after kickoff
-      startStream();
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Indexing failed';
       setErrorBanner(msg);
@@ -516,9 +551,11 @@ export function IndexingSubtab() {
     embeddingType,
     forceReindex,
     graphIndexingEnabled,
+    loadStats,
     resetTerminal,
+    refreshStatus,
     skipDense,
-    startStream,
+    startAndStream,
   ]);
 
   const handleDeleteIndex = useCallback(async () => {
@@ -960,7 +997,7 @@ export function IndexingSubtab() {
                   {providerEmbedModels.length ? (
                     providerEmbedModels.map((m) => (
                       <option key={m.model} value={m.model}>
-                        {m.model}
+                        {`${embeddingType} · ${m.model}`}
                       </option>
                     ))
                   ) : (

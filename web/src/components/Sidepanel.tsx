@@ -26,8 +26,16 @@ export function Sidepanel() {
   } = useModels('RERANK');
 
   const genModelOptions = useMemo(() => {
-    const unique = new Set(genModels.map((m) => m.model));
-    return Array.from(unique).sort();
+    const dedup = new Map<string, { key: string; value: string; label: string }>();
+    for (const row of genModels) {
+      const provider = String(row.provider || '').trim();
+      const model = String(row.model || '').trim();
+      if (!provider || !model) continue;
+      const key = `${provider}::${model}`;
+      if (dedup.has(key)) continue;
+      dedup.set(key, { key, value: model, label: `${provider} · ${model}` });
+    }
+    return Array.from(dedup.values()).sort((a, b) => a.label.localeCompare(b.label));
   }, [genModels]);
 
   const [genModel, setGenModel] = useState<string>('');
@@ -218,9 +226,9 @@ export function Sidepanel() {
               disabled={genLoading}
             >
               {genModelOptions.length > 0 ? (
-                genModelOptions.map((m) => (
-                  <option key={m} value={m}>
-                    {m}
+                genModelOptions.map((opt) => (
+                  <option key={opt.key} value={opt.value}>
+                    {opt.label}
                   </option>
                 ))
               ) : (
@@ -264,7 +272,7 @@ export function Sidepanel() {
                 {embeddingModelOptions.length > 0 ? (
                   embeddingModelOptions.map((m) => (
                     <option key={m} value={m}>
-                      {m}
+                      {`${embeddingProvider} · ${m}`}
                     </option>
                   ))
                 ) : (
@@ -313,7 +321,7 @@ export function Sidepanel() {
                 ) : rerankModelOptions.length > 0 ? (
                   rerankModelOptions.map((m) => (
                     <option key={m} value={m}>
-                      {m}
+                      {`${rerankProvider} · ${m}`}
                     </option>
                   ))
                 ) : (

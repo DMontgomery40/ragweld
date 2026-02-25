@@ -15,8 +15,8 @@ export function useModelFlows() {
       try {
         const res = await service.upsertModel(entry);
         setLastResponse(res);
-        if (res && (res.error || res.ok === false || res.success === false)) {
-          throw new Error(String(res.error || 'Upsert failed'));
+        if (res && res.ok === false) {
+          throw new Error('Upsert failed');
         }
         return res;
       } catch (e) {
@@ -40,4 +40,3 @@ export function useModelFlows() {
     upsertModel,
   };
 }
-

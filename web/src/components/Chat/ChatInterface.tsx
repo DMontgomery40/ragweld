@@ -788,10 +788,7 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
     const openrouterDefaultTrimmed = typeof openrouterDefault === 'string' ? openrouterDefault.trim() : '';
 
     const toOverrideValue = (m: ChatModelInfo): string => {
-      if (m.source === 'local') return `local:${m.id}`;
-      if (m.source === 'openrouter') return `openrouter:${m.id}`;
-      if (m.source === 'ragweld') return `ragweld:${m.id}`;
-      return String(m.id || '');
+      return String(m.override || m.id || '').trim();
     };
 
     // If current selection is valid, don't override it.
@@ -803,26 +800,43 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
     const localModels = chatModels.filter((m) => m.source === 'local');
     const localDefaultTrimmed = typeof localDefault === 'string' ? localDefault.trim() : '';
     const localDefaultOption =
-      localDefaultTrimmed ? localModels.find((m) => String(m.id) === localDefaultTrimmed) : undefined;
+      localDefaultTrimmed
+        ? localModels.find(
+            (m) =>
+              String(m.id || '').trim() === localDefaultTrimmed ||
+              String(m.catalog_model || '').trim() === localDefaultTrimmed
+          )
+        : undefined;
 
     const openrouterDefaultOption =
       openrouterEnabled && openrouterDefaultTrimmed
-        ? chatModels.find((m) => m.source === 'openrouter' && String(m.id) === openrouterDefaultTrimmed)
+        ? chatModels.find(
+            (m) =>
+              m.source === 'openrouter' &&
+              (String(m.id || '').trim() === openrouterDefaultTrimmed ||
+                String(m.catalog_model || '').trim() === openrouterDefaultTrimmed)
+          )
         : undefined;
 
     const uiDefault = typeof config.ui?.chat_default_model === 'string' ? config.ui.chat_default_model.trim() : '';
     const cloudDefaultOption = uiDefault
       ? chatModels.find((m) => {
           const id = String(m.id || '').trim();
-          return id === uiDefault || id.endsWith(`/${uiDefault}`);
+          const catalogModel = String(m.catalog_model || '').trim();
+          const override = String(m.override || '').trim();
+          return (
+            id === uiDefault ||
+            catalogModel === uiDefault ||
+            override === uiDefault ||
+            id.endsWith(`/${uiDefault}`) ||
+            override.endsWith(`/${uiDefault}`)
+          );
         })
       : undefined;
 
     const preferred =
-      (openrouterDefaultOption ? `openrouter:${openrouterDefaultTrimmed}` : '') ||
-      (localModels.length
-        ? (localDefaultOption ? `local:${localDefaultTrimmed}` : `local:${localModels[0].id}`)
-        : '') ||
+      (openrouterDefaultOption ? toOverrideValue(openrouterDefaultOption) : '') ||
+      (localModels.length ? (localDefaultOption ? toOverrideValue(localDefaultOption) : toOverrideValue(localModels[0])) : '') ||
       (cloudDefaultOption ? toOverrideValue(cloudDefaultOption) : '');
 
     const nextOverride = preferred
@@ -974,7 +988,14 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
   useEffect(() => {
     (async () => {
       const fallbackModels: ChatModelInfo[] = [
-        { id: 'gpt-4o-mini', provider: 'OpenAI', source: 'cloud_direct' },
+        {
+          id: 'gpt-4o-mini',
+          override: 'openai/gpt-4o-mini',
+          provider: 'OpenAI',
+          provider_key: 'openai',
+          catalog_model: 'gpt-4o-mini',
+          source: 'cloud_direct',
+        },
       ];
       try {
         const qs = activeRepo ? `?corpus_id=${encodeURIComponent(activeRepo)}` : '';

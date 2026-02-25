@@ -1,35 +1,8 @@
-/**
- * useModels - Load models from models.json filtered by component type
- *
- * Replaces legacy app.js:172-218 pattern of loading models.json into state.models
- * and populating datalists. Now provides typed React hook for model selection.
- */
-
 import { useState, useEffect, useMemo } from 'react';
+import { modelsApi } from '@/api/models';
+import type { ModelCatalogEntry, ModelCatalogResponse } from '@/types/generated';
 
-export interface Model {
-  provider: string;
-  family: string;
-  model: string;
-  components: string[];
-  dimensions?: number;
-  context?: number;
-  unit?: string;
-  notes?: string;
-  // Pricing fields (optional)
-  input_per_1k?: number;
-  output_per_1k?: number;
-  embed_per_1k?: number;
-  rerank_per_1k?: number;
-  per_request?: number;
-}
-
-interface ModelsData {
-  currency: string;
-  last_updated: string;
-  sources: string[];
-  models: Model[];
-}
+export type Model = ModelCatalogEntry;
 
 type ComponentType = 'EMB' | 'GEN' | 'RERANK';
 
@@ -45,28 +18,21 @@ interface UseModelsResult {
   findModel: (provider: string, modelName: string) => Model | undefined;
 }
 
-// Cache models.json globally to avoid refetching
-let modelsCache: ModelsData | null = null;
-let modelsFetchPromise: Promise<ModelsData> | null = null;
+// Cache /api/models globally to avoid refetching.
+let modelsCache: ModelCatalogResponse | null = null;
+let modelsFetchPromise: Promise<ModelCatalogResponse> | null = null;
 
-async function fetchModels(): Promise<ModelsData> {
+async function fetchModels(): Promise<ModelCatalogResponse> {
   if (modelsCache) return modelsCache;
   if (modelsFetchPromise) return modelsFetchPromise;
 
-  // Use Vite's base URL to correctly resolve the models.json path
-  const baseUrl = import.meta.env.BASE_URL || '/';
-  const modelsUrl = `${baseUrl}models.json`.replace(/\/+/g, '/');
-
-  modelsFetchPromise = fetch(modelsUrl)
-    .then(res => {
-      if (!res.ok) throw new Error(`Failed to load models.json: ${res.status}`);
-      return res.json();
-    })
-    .then((data: ModelsData) => {
+  modelsFetchPromise = modelsApi
+    .listAll()
+    .then((data) => {
       modelsCache = data;
       return data;
     })
-    .catch(err => {
+    .catch((err) => {
       modelsFetchPromise = null;
       throw err;
     });
@@ -83,12 +49,13 @@ export function useModels(component: ComponentType): UseModelsResult {
     let mounted = true;
 
     fetchModels()
-      .then(data => {
+      .then((data) => {
         if (!mounted) return;
-        setAllModels(data.models);
+        const rows = Array.isArray(data?.models) ? data.models : [];
+        setAllModels(rows);
         setLoading(false);
       })
-      .catch(err => {
+      .catch((err) => {
         if (!mounted) return;
         setError(err instanceof Error ? err.message : 'Failed to load models');
         setLoading(false);
@@ -99,24 +66,38 @@ export function useModels(component: ComponentType): UseModelsResult {
 
   // Filter models by component type
   const models = useMemo(() => {
-    return allModels.filter(m => m.components.includes(component));
+    return allModels.filter((m) => {
+      const comps = Array.isArray(m.components) ? m.components.map((c) => String(c).toUpperCase()) : [];
+      return comps.includes(component);
+    });
   }, [allModels, component]);
 
   // Get unique providers
   const providers = useMemo(() => {
-    const unique = new Set(models.map(m => m.provider));
-    return Array.from(unique).sort();
+    const unique = new Set(
+      models
+        .map((m) => String(m.provider || '').trim())
+        .filter(Boolean)
+    );
+    return Array.from(unique).sort((a, b) => a.localeCompare(b));
   }, [models]);
 
   // Get models for a specific provider
   const getModelsForProvider = useMemo(() => {
-    return (provider: string) => models.filter(m => m.provider === provider);
+    return (provider: string) => {
+      const p = String(provider || '').trim().toLowerCase();
+      return models.filter((m) => String(m.provider || '').trim().toLowerCase() === p);
+    };
   }, [models]);
 
   // Find specific model
   const findModel = useMemo(() => {
     return (provider: string, modelName: string) =>
-      models.find(m => m.provider === provider && m.model === modelName);
+      models.find(
+        (m) =>
+          String(m.provider || '').trim().toLowerCase() === String(provider || '').trim().toLowerCase() &&
+          String(m.model || '').trim() === String(modelName || '').trim()
+      );
   }, [models]);
 
   return {
@@ -134,6 +115,7 @@ export function useModels(component: ComponentType): UseModelsResult {
  * Returns 80% of context to leave headroom for safety
  */
 export function getRecommendedChunkSize(model: Model | undefined): number | null {
-  if (!model?.context) return null;
-  return Math.floor(model.context * 0.8);
+  const context = Number(model?.context || 0);
+  if (context <= 0) return null;
+  return Math.floor(context * 0.8);
 }

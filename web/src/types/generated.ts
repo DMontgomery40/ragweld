@@ -169,8 +169,16 @@ export interface ChatDebugInfo {
 export interface ChatModelInfo {
   /** Model identifier */
   id: string;
+  /** Canonical model_override value to send in chat requests */
+  override: string;
   /** Provider display name (e.g., OpenRouter, Ollama) */
   provider: string;
+  /** Provider key used in the model catalog */
+  provider_key?: string | null; // default: None
+  /** Catalog model identifier when sourced from /api/models */
+  catalog_model?: string | null; // default: None
+  /** Capabilities for this model option */
+  components?: "GEN" | "EMB" | "RERANK"[];
   /** Model source group for UI grouping. */
   source: "cloud_direct" | "openrouter" | "local" | "ragweld";
   /** Provider type (ollama, llamacpp, openrouter, etc) */
@@ -1050,6 +1058,38 @@ export interface Message {
   content: string;
   /** When message was created */
   timestamp?: string;
+}
+
+/** Single model catalog entry served by /api/models. */
+export interface ModelCatalogEntry {
+  /** Provider identifier (for example: openai, anthropic, ragweld) */
+  provider: string;
+  /** Model family */
+  family: string;
+  /** Model identifier */
+  model: string;
+  /** Capabilities supported by this model */
+  components?: "GEN" | "EMB" | "RERANK"[];
+  /** Maximum context tokens when known */
+  context?: number | null; // default: None
+  /** Embedding dimensions when applicable */
+  dimensions?: number | null; // default: None
+  /** Pricing unit (if priced) */
+  unit?: "1k_tokens" | "request" | string | null; // default: None
+  /** GEN input cost per 1k tokens */
+  input_per_1k?: number | null; // default: None
+  /** GEN output cost per 1k tokens */
+  output_per_1k?: number | null; // default: None
+  /** EMB cost per 1k tokens */
+  embed_per_1k?: number | null; // default: None
+  /** RERANK cost per 1k tokens */
+  rerank_per_1k?: number | null; // default: None
+  /** Cost per request */
+  per_request?: number | null; // default: None
+  /** Optional provider base URL */
+  base_url?: string | null; // default: None
+  /** Freeform notes */
+  notes?: string | null; // default: None
 }
 
 /** Unified gateway to 400+ cloud models. OpenAI-compatible.  MANDATORY P0 provider. */
@@ -2374,7 +2414,7 @@ export interface IndexStatus {
   /** Corpus identifier */
   corpus_id: string;
   /** Current indexing state */
-  status: "idle" | "indexing" | "complete" | "error";
+  status: "idle" | "indexing" | "complete" | "error" | "cancelled";
   /** Progress from 0.0 to 1.0 */
   progress: number;
   /** File currently being indexed */
@@ -2431,6 +2471,43 @@ export interface MCPStatusResponse {
   python_stdio_available?: boolean;
   /** Human-readable diagnostic details (best-effort). */
   details?: string[];
+}
+
+/** Response payload for GET /api/models. */
+export interface ModelCatalogResponse {
+  currency?: string | null;
+  last_updated?: string | null;
+  sources?: string[];
+  models?: ModelCatalogEntry[];
+}
+
+/** Request payload for POST /api/models/upsert. */
+export interface ModelCatalogUpsertRequest {
+  /** Provider identifier */
+  provider: string;
+  /** Model identifier */
+  model: string;
+  family?: "gen" | "embed" | "rerank" | "misc";
+  /** Provider base URL (optional) */
+  base_url?: string | null;
+  unit?: "1k_tokens" | "request";
+  input_per_1k?: number | null;
+  output_per_1k?: number | null;
+  embed_per_1k?: number | null;
+  rerank_per_1k?: number | null;
+  per_request?: number | null;
+  context?: number | null;
+  dimensions?: number | null;
+  notes?: string | null;
+}
+
+/** Response payload for POST /api/models/upsert. */
+export interface ModelCatalogUpsertResponse {
+  ok?: boolean;
+  /** Whether an entry was created or updated */
+  action: "created" | "updated";
+  /** Upserted catalog model entry */
+  model: ModelCatalogEntry;
 }
 
 /** Generic ok response used by several endpoints. */

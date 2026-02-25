@@ -2,8 +2,29 @@
 
 These tests verify that models.json is correctly served and filtered.
 """
+from __future__ import annotations
+
+import json
+from contextlib import contextmanager
+from pathlib import Path
+
 import pytest
 from httpx import AsyncClient
+
+import server.api.models as models_api
+
+
+@contextmanager
+def _temporary_catalog_paths(data_path: Path, web_path: Path):
+    old_data_path = models_api.MODELS_PATH
+    old_web_path = models_api.WEB_MODELS_PATH
+    models_api.MODELS_PATH = data_path
+    models_api.WEB_MODELS_PATH = web_path
+    try:
+        yield
+    finally:
+        models_api.MODELS_PATH = old_data_path
+        models_api.WEB_MODELS_PATH = old_web_path
 
 
 @pytest.mark.asyncio
@@ -108,3 +129,105 @@ async def test_case_insensitive_component_type(client: AsyncClient) -> None:
     assert response_mixed.status_code == 200
 
     assert len(response_upper.json()) == len(response_lower.json())
+
+
+@pytest.mark.asyncio
+async def test_models_by_type_matches_catalog_for_ragweld_gen_entries(client: AsyncClient) -> None:
+    """Ragweld augmentation in /api/models must be reflected in /api/models/by-type/GEN."""
+    all_resp = await client.get("/api/models")
+    assert all_resp.status_code == 200
+    all_models = all_resp.json()["models"]
+    ragweld_gen_models = {
+        str(m.get("model"))
+        for m in all_models
+        if str(m.get("provider", "")).strip().lower() == "ragweld"
+    }
+
+    gen_resp = await client.get("/api/models/by-type/GEN")
+    assert gen_resp.status_code == 200
+    gen_models = gen_resp.json()
+    gen_ids = {str(m.get("model")) for m in gen_models}
+
+    assert ragweld_gen_models.issubset(gen_ids)
+    for model in gen_models:
+        assert "GEN" in model.get("components", [])
+
+
+@pytest.mark.asyncio
+async def test_models_upsert_creates_entry_and_autofills_provider_base_url(
+    client: AsyncClient, tmp_path: Path
+) -> None:
+    """POST /api/models/upsert should create a model and infer base_url from provider peers."""
+    data_path = tmp_path / "models.json"
+    web_path = tmp_path / "models-web.json"
+    seed = {
+        "currency": "USD",
+        "last_updated": "2026-01-01",
+        "sources": ["test"],
+        "models": [
+            {
+                "provider": "openai",
+                "family": "gen",
+                "model": "gpt-seed",
+                "components": ["GEN"],
+                "unit": "1k_tokens",
+                "input_per_1k": 0.001,
+                "output_per_1k": 0.002,
+                "base_url": "https://proxy.example/v1",
+            }
+        ],
+    }
+    data_path.write_text(json.dumps(seed, indent=2) + "\n", encoding="utf-8")
+    web_path.write_text(json.dumps(seed, indent=2) + "\n", encoding="utf-8")
+
+    payload = {
+        "provider": "openai",
+        "model": "gpt-upserted",
+        "family": "gen",
+        "unit": "1k_tokens",
+        "input_per_1k": 0.003,
+        "output_per_1k": 0.004,
+    }
+
+    with _temporary_catalog_paths(data_path, web_path):
+        response = await client.post("/api/models/upsert", json=payload)
+        assert response.status_code == 200
+        body = response.json()
+        assert body["ok"] is True
+        assert body["action"] == "created"
+        assert body["model"]["provider"] == "openai"
+        assert body["model"]["model"] == "gpt-upserted"
+        assert body["model"]["base_url"] == "https://proxy.example/v1"
+        assert "GEN" in body["model"]["components"]
+
+        data_catalog = json.loads(data_path.read_text(encoding="utf-8"))
+        web_catalog = json.loads(web_path.read_text(encoding="utf-8"))
+        assert data_catalog == web_catalog
+        created = [m for m in data_catalog["models"] if m.get("model") == "gpt-upserted"]
+        assert len(created) == 1
+
+
+@pytest.mark.asyncio
+async def test_models_upsert_rejects_invalid_family_pricing_combo(
+    client: AsyncClient, tmp_path: Path
+) -> None:
+    """POST /api/models/upsert must reject known invalid capability/unit/pricing combinations."""
+    data_path = tmp_path / "models.json"
+    web_path = tmp_path / "models-web.json"
+    seed = {"currency": "USD", "last_updated": "2026-01-01", "sources": [], "models": []}
+    data_path.write_text(json.dumps(seed, indent=2) + "\n", encoding="utf-8")
+    web_path.write_text(json.dumps(seed, indent=2) + "\n", encoding="utf-8")
+
+    invalid_payload = {
+        "provider": "openai",
+        "model": "bad-embed-model",
+        "family": "embed",
+        "unit": "request",
+        "per_request": 0.01,
+    }
+
+    with _temporary_catalog_paths(data_path, web_path):
+        response = await client.post("/api/models/upsert", json=invalid_payload)
+        assert response.status_code == 422
+        detail = str(response.json().get("detail") or "")
+        assert "EMB models must use unit=1k_tokens" in detail

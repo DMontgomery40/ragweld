@@ -12,6 +12,7 @@ Exit codes:
     0 - No violations found
     1 - Violations found (see output for details)
 """
+import json
 import re
 import sys
 from pathlib import Path
@@ -159,6 +160,7 @@ SKIP_PATTERNS = [
     '.venv',
     'venv',
     '.pytest_cache',
+    'output/playwright',
     'dist',
     'build',
     '.mypy_cache',
@@ -519,6 +521,79 @@ def check_studio_no_inline_styles() -> List[str]:
     return errors
 
 
+def check_no_frontend_runtime_models_json_fetches() -> List[str]:
+    """Fail when frontend runtime code fetches static models.json directly."""
+    errors: list[str] = []
+    web_src = Path("web/src")
+    if not web_src.exists():
+        return errors
+
+    banned_patterns = [
+        (
+            re.compile(r"fetch\(\s*['\"][^'\"]*models\.json", re.IGNORECASE),
+            "Runtime catalog fetch from models.json is banned. Use /api/models via web/src/api/models.ts.",
+        ),
+        (
+            re.compile(r"axios\.(get|post|request)\(\s*['\"][^'\"]*models\.json", re.IGNORECASE),
+            "Runtime catalog fetch from models.json is banned. Use /api/models via web/src/api/models.ts.",
+        ),
+        (
+            re.compile(r"api\(\s*['\"][^'\"]*models\.json", re.IGNORECASE),
+            "Runtime catalog fetch from models.json is banned. Use /api/models via web/src/api/models.ts.",
+        ),
+    ]
+
+    for f in web_src.rglob("*"):
+        if should_skip(f) or not f.is_file():
+            continue
+        if f.suffix not in {".ts", ".tsx", ".js", ".jsx"}:
+            continue
+        # Generated file comments can mention models.json.
+        if str(f).endswith("web/src/types/generated.ts"):
+            continue
+        try:
+            content = f.read_text(errors="ignore")
+        except Exception:
+            continue
+        for i, line in enumerate(content.split("\n"), 1):
+            for pattern, message in banned_patterns:
+                if pattern.search(line):
+                    errors.append(f"{_normalize_relpath(f)}:{i}: {message}")
+    return errors
+
+
+def check_models_catalog_mirror_sync() -> List[str]:
+    """Fail when data/models.json and web/public/models.json diverge."""
+    errors: list[str] = []
+    data_path = Path("data/models.json")
+    web_path = Path("web/public/models.json")
+
+    if not data_path.exists():
+        errors.append("data/models.json missing (authoritative runtime catalog is required).")
+        return errors
+    if not web_path.exists():
+        errors.append("web/public/models.json missing (legacy mirror is required for compatibility).")
+        return errors
+
+    try:
+        data_obj = json.loads(data_path.read_text(errors="ignore"))
+    except Exception as e:
+        errors.append(f"data/models.json: failed to parse JSON ({e})")
+        return errors
+    try:
+        web_obj = json.loads(web_path.read_text(errors="ignore"))
+    except Exception as e:
+        errors.append(f"web/public/models.json: failed to parse JSON ({e})")
+        return errors
+
+    if data_obj != web_obj:
+        errors.append(
+            "data/models.json and web/public/models.json are out of sync. "
+            "Update both atomically (or use POST /api/models/upsert)."
+        )
+    return errors
+
+
 def main() -> int:
     print("Checking for banned patterns...")
     print("")
@@ -532,6 +607,8 @@ def main() -> int:
     errors.extend(check_env_example_legacy_keys())
     errors.extend(check_server_env_getenv_allowlist())
     errors.extend(check_studio_no_inline_styles())
+    errors.extend(check_no_frontend_runtime_models_json_fetches())
+    errors.extend(check_models_catalog_mirror_sync())
 
     if errors:
         print("BANNED PATTERNS FOUND:")

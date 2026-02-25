@@ -1,12 +1,28 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { modelsApi } from '@/api';
 import { useModelFlows } from '@/hooks/useModelFlows';
 import type { ModelsUpsertRequest } from '@/services/ModelFlowsService';
+import type { ModelCatalogEntry } from '@/types/generated';
 
 function numOrNull(v: string): number | null {
   if (v === '') return null;
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
 }
+
+const KNOWN_PROVIDER_BASE_URLS: Record<string, string> = {
+  openai: 'https://api.openai.com/v1',
+  anthropic: 'https://api.anthropic.com',
+  google: 'https://generativelanguage.googleapis.com',
+  cohere: 'https://api.cohere.ai/v2',
+  voyage: 'https://api.voyageai.com/v1',
+  jina: 'https://api.jina.ai/v1',
+  openrouter: 'https://openrouter.ai/api/v1',
+  mistral: 'https://api.mistral.ai/v1',
+  deepseek: 'https://api.deepseek.com/v1',
+  ollama: 'http://127.0.0.1:11434',
+  local: 'http://127.0.0.1:11434',
+};
 
 export function ModelCatalogPanel() {
   const { saving, error, lastResponse, upsertModel } = useModelFlows();
@@ -16,12 +32,47 @@ export function ModelCatalogPanel() {
   const [family, setFamily] = useState<'gen' | 'embed' | 'rerank' | 'misc'>('gen');
   const [unit, setUnit] = useState<'1k_tokens' | 'request'>('1k_tokens');
   const [baseUrl, setBaseUrl] = useState('');
+  const [baseUrlEdited, setBaseUrlEdited] = useState(false);
+  const [catalogModels, setCatalogModels] = useState<ModelCatalogEntry[]>([]);
 
   const [inputPer1k, setInputPer1k] = useState('');
   const [outputPer1k, setOutputPer1k] = useState('');
   const [embedPer1k, setEmbedPer1k] = useState('');
   const [rerankPer1k, setRerankPer1k] = useState('');
   const [perRequest, setPerRequest] = useState('');
+
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const catalog = await modelsApi.listAll();
+        if (!mounted) return;
+        setCatalogModels(Array.isArray(catalog.models) ? catalog.models : []);
+      } catch {
+        if (!mounted) return;
+        setCatalogModels([]);
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const inferredBaseUrl = useMemo(() => {
+    const p = String(provider || '').trim().toLowerCase();
+    if (!p) return '';
+    const fromCatalog = catalogModels.find(
+      (m) => String(m.provider || '').trim().toLowerCase() === p && String(m.base_url || '').trim()
+    );
+    const catalogBase = String(fromCatalog?.base_url || '').trim();
+    if (catalogBase) return catalogBase;
+    return KNOWN_PROVIDER_BASE_URLS[p] || '';
+  }, [catalogModels, provider]);
+
+  useEffect(() => {
+    if (baseUrlEdited && String(baseUrl || '').trim()) return;
+    setBaseUrl(inferredBaseUrl);
+  }, [baseUrlEdited, baseUrl, inferredBaseUrl]);
 
   const showPricing = useMemo(() => {
     if (family === 'gen') return { input: true, output: true, embed: false, rerank: false, req: false };
@@ -58,11 +109,11 @@ export function ModelCatalogPanel() {
       style={{ borderLeft: '3px solid var(--link)' }}
     >
       <h3 style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-        <span style={{ color: 'var(--link)' }}>●</span> Model catalog (pricing)
+        <span style={{ color: 'var(--link)' }}>●</span> New Model Out? If the catalog hasn't updated, add it here!
       </h3>
       <p className="small" style={{ marginTop: 0 }}>
-        Add or update an entry in the server-side pricing catalog (<code>POST /api/models/upsert</code>).
-        This does <strong>not</strong> configure API keys.
+        Add or update an entry in the runtime server-side model catalog (<code>POST /api/models/upsert</code>).
+        Base URL auto-fills by provider and stays editable before submit.
       </p>
 
       {error && (
@@ -74,7 +125,15 @@ export function ModelCatalogPanel() {
       <div className="input-row">
         <div className="input-group">
           <label>Provider</label>
-          <input data-testid="model-catalog-provider" value={provider} onChange={(e) => setProvider(e.target.value)} placeholder="openai" />
+          <input
+            data-testid="model-catalog-provider"
+            value={provider}
+            onChange={(e) => {
+              setProvider(e.target.value);
+              setBaseUrlEdited(false);
+            }}
+            placeholder="openai"
+          />
         </div>
         <div className="input-group">
           <label>Model</label>
@@ -101,7 +160,18 @@ export function ModelCatalogPanel() {
         </div>
         <div className="input-group">
           <label>Base URL (optional)</label>
-          <input data-testid="model-catalog-base-url" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="http://127.0.0.1:11434" />
+          <input
+            data-testid="model-catalog-base-url"
+            value={baseUrl}
+            onChange={(e) => {
+              setBaseUrl(e.target.value);
+              setBaseUrlEdited(true);
+            }}
+            placeholder="http://127.0.0.1:11434"
+          />
+          <div style={{ marginTop: '4px', fontSize: '11px', color: 'var(--fg-muted)' }}>
+            Autofill: {inferredBaseUrl || 'No known default'}
+          </div>
         </div>
       </div>
 
@@ -169,4 +239,3 @@ export function ModelCatalogPanel() {
     </div>
   );
 }
-

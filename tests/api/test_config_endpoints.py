@@ -124,3 +124,19 @@ async def test_concurrent_section_patches_do_not_lose_updates(client: AsyncClien
         assert str(cfg["indexing"]["large_file_mode"]).lower() == "read_all"
     finally:
         await client.delete(f"/api/corpora/{corpus_id}")
+
+
+@pytest.mark.asyncio
+async def test_put_config_rejects_reranker_model_for_generation_override(client: AsyncClient) -> None:
+    """Known non-GEN models assigned to generation override fields must fail with 422."""
+    baseline = await client.get("/api/config")
+    assert baseline.status_code == 200
+    cfg = baseline.json()
+
+    cfg["generation"]["gen_model_mcp"] = "cohere/rerank-3.5"
+    response = await client.put("/api/config", json=cfg)
+    assert response.status_code == 422
+
+    detail = str(response.json().get("detail") or "")
+    assert "generation.gen_model_mcp" in detail
+    assert "requires [GEN]" in detail

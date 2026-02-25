@@ -36,14 +36,12 @@ const SOURCE_LABELS: Record<ChatModelInfo['source'], string> = {
 const SOURCE_ORDER: Array<ChatModelInfo['source']> = ['ragweld', 'local', 'openrouter', 'cloud_direct'] as const;
 
 function toModelValue(model: ChatModelInfo): string {
-  if (model.source === 'local') return `local:${model.id}`;
-  if (model.source === 'openrouter') return `openrouter:${model.id}`;
-  if (model.source === 'ragweld') return `ragweld:${model.id}`;
-  return model.id;
+  return String(model.override || model.id || '').trim();
 }
 
 function toModelLabel(model: ChatModelInfo): string {
-  return `${model.provider} · ${model.id}`;
+  const name = String(model.catalog_model || model.id || '').trim();
+  return `${model.provider} · ${name}`;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -12,6 +12,7 @@ interface TerminalInstance {
   onProgress?: (percent: number, message: string) => void;
   onError?: (error: string) => void;
   onComplete?: () => void;
+  onCancelled?: () => void;
 }
 
 class TerminalServiceClass {
@@ -111,6 +112,7 @@ class TerminalServiceClass {
       onProgress?: (percent: number, message: string) => void;
       onError?: (error: string) => void;
       onComplete?: () => void;
+      onCancelled?: () => void;
     }
   ): void {
     const { onLine, onProgress, onError, onComplete, ...queryParams } = params;
@@ -145,6 +147,7 @@ class TerminalServiceClass {
       onProgress?: (percent: number, message: string) => void;
       onError?: (error: string) => void;
       onComplete?: () => void;
+      onCancelled?: () => void;
     }
   ): void {
     // Close existing connection if any
@@ -190,6 +193,13 @@ class TerminalServiceClass {
           case 'complete':
             if (callbacks.onComplete) {
               callbacks.onComplete();
+            }
+            this.disconnect(terminalId);
+            break;
+
+          case 'cancelled':
+            if (callbacks.onCancelled) {
+              callbacks.onCancelled();
             }
             this.disconnect(terminalId);
             break;

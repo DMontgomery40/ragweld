@@ -1,55 +1,28 @@
 import { create } from 'zustand';
+import { modelsApi } from '@/api/models';
 import type { TriBridConfig } from '@/types/generated';
+import type { ModelCatalogEntry, ModelCatalogResponse } from '@/types/generated';
 
 // Model types for cost calculation
 type ModelType = 'inference' | 'embedding' | 'rerank';
 
-// Model definition from models.json
-interface ModelEntry {
-  provider: string;
-  family: string;
-  model: string;
-  components: string[]; // "GEN" | "EMB" | "RERANK"
-  unit?: string;
-  input_per_1k?: number;
-  output_per_1k?: number;
-  embed_per_1k?: number;
-  rerank_per_1k?: number;
-  per_request?: number;
-  dimensions?: number;
-  context?: number;
-  notes?: string;
-}
+type ModelsData = ModelCatalogResponse;
 
-interface ModelsData {
-  currency: string;
-  last_updated: string;
-  sources: string[];
-  models: ModelEntry[];
-}
-
-// Cache for models.json - shared across all store instances
+// Cache for /api/models - shared across all store instances.
 let modelsCache: ModelsData | null = null;
 let modelsFetchPromise: Promise<ModelsData> | null = null;
 
-async function fetchModelsJson(): Promise<ModelsData> {
+async function fetchModelCatalog(): Promise<ModelsData> {
   if (modelsCache) return modelsCache;
   if (modelsFetchPromise) return modelsFetchPromise;
 
-  // Use Vite's base URL to correctly resolve the models.json path
-  const baseUrl = import.meta.env.BASE_URL || '/';
-  const modelsUrl = `${baseUrl}models.json`.replace(/\/+/g, '/');
-
-  modelsFetchPromise = fetch(modelsUrl)
-    .then(res => {
-      if (!res.ok) throw new Error(`Failed to load models.json: ${res.status}`);
-      return res.json();
-    })
-    .then((data: ModelsData) => {
+  modelsFetchPromise = modelsApi
+    .listAll()
+    .then((data) => {
       modelsCache = data;
       return data;
     })
-    .catch(err => {
+    .catch((err) => {
       modelsFetchPromise = null;
       throw err;
     });
@@ -64,6 +37,15 @@ function normalizeProvider(provider: string): string {
     return 'Local';
   }
   return provider;
+}
+
+function hasComponent(entry: ModelCatalogEntry, component: 'GEN' | 'EMB' | 'RERANK'): boolean {
+  const raw = entry.components as unknown;
+  if (Array.isArray(raw)) {
+    return raw.some((c) => String(c).toUpperCase() === component);
+  }
+  if (raw == null) return false;
+  return String(raw).toUpperCase() === component;
 }
 
 interface CostCalculatorStore {
@@ -88,7 +70,7 @@ interface CostCalculatorStore {
   calculating: boolean;
   error: string | null;
 
-  // Model lists (populated from models.json)
+  // Model lists (populated from /api/models)
   providers: string[];
   chatModels: string[];
   embedModels: string[];
@@ -195,11 +177,11 @@ export const useCostCalculatorStore = create<CostCalculatorStore>((set, get) => 
       // Load models data if not cached
       let modelsData = state._modelsData;
       if (!modelsData) {
-        modelsData = await fetchModelsJson();
+        modelsData = await fetchModelCatalog();
         set({ _modelsData: modelsData });
       }
 
-      const models = modelsData.models;
+      const models = Array.isArray(modelsData.models) ? modelsData.models : [];
       let totalCost = 0;
 
       // Find and calculate chat/inference cost
@@ -208,7 +190,7 @@ export const useCostCalculatorStore = create<CostCalculatorStore>((set, get) => 
              normalizeProvider(m.provider) === state.inferenceProvider
       ) || models.find(m => m.model === state.inferenceModel);
 
-      if (chatModel && chatModel.components.includes('GEN')) {
+      if (chatModel && hasComponent(chatModel, 'GEN')) {
         const inputCost = (state.tokensIn / 1000) * (chatModel.input_per_1k || 0);
         const outputCost = (state.tokensOut / 1000) * (chatModel.output_per_1k || 0);
         totalCost += inputCost + outputCost;
@@ -220,7 +202,7 @@ export const useCostCalculatorStore = create<CostCalculatorStore>((set, get) => 
              normalizeProvider(m.provider) === state.embeddingProvider
       ) || models.find(m => m.model === state.embeddingModel);
 
-      if (embedModel && embedModel.components.includes('EMB')) {
+      if (embedModel && hasComponent(embedModel, 'EMB')) {
         // embeds is number of chunks, assume avg 1000 tokens per chunk
         const embedTokens = state.embeds * 1000;
         totalCost += (embedTokens / 1000) * (embedModel.embed_per_1k || 0);
@@ -232,7 +214,7 @@ export const useCostCalculatorStore = create<CostCalculatorStore>((set, get) => 
              normalizeProvider(m.provider) === state.rerankProvider
       ) || models.find(m => m.model === state.rerankModel);
 
-      if (rerankModel && rerankModel.components.includes('RERANK')) {
+      if (rerankModel && hasComponent(rerankModel, 'RERANK')) {
         if (rerankModel.per_request) {
           // Per-request pricing (e.g., Cohere)
           totalCost += state.reranks * rerankModel.per_request;
@@ -267,12 +249,12 @@ export const useCostCalculatorStore = create<CostCalculatorStore>((set, get) => 
   loadProviders: async () => {
     set({ modelsLoading: true });
     try {
-      const modelsData = await fetchModelsJson();
+      const modelsData = await fetchModelCatalog();
       set({ _modelsData: modelsData });
 
       // Extract unique providers (grouping local/ollama/huggingface as "Local")
       const providersSet = new Set<string>();
-      modelsData.models.forEach(m => {
+      (modelsData.models || []).forEach((m) => {
         if (m.provider) {
           providersSet.add(normalizeProvider(m.provider));
         }
@@ -302,7 +284,7 @@ export const useCostCalculatorStore = create<CostCalculatorStore>((set, get) => 
       // Ensure models data is loaded
       let modelsData = get()._modelsData;
       if (!modelsData) {
-        modelsData = await fetchModelsJson();
+        modelsData = await fetchModelCatalog();
         set({ _modelsData: modelsData });
       }
 
@@ -323,7 +305,7 @@ export const useCostCalculatorStore = create<CostCalculatorStore>((set, get) => 
       const normalizedProvider = provider.toLowerCase();
 
       // Filter models by provider and component type
-      const filtered = modelsData.models.filter(m => {
+      const filtered = (modelsData.models || []).filter((m) => {
         const mProv = m.provider.toLowerCase();
 
         // Handle "Local" group (includes local, ollama, huggingface)
@@ -338,7 +320,8 @@ export const useCostCalculatorStore = create<CostCalculatorStore>((set, get) => 
         }
 
         // Filter by component type
-        return m.components.includes(componentType);
+        const comps = Array.isArray(m.components) ? m.components.map((c) => String(c).toUpperCase()) : [];
+        return comps.includes(componentType);
       });
 
       const modelNames = filtered.map(m => m.model).filter(Boolean).sort();

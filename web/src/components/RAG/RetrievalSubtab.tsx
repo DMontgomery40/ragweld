@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { EmbeddingMismatchWarning } from '@/components/ui/EmbeddingMismatchWarning';
 import { LiveTerminal, LiveTerminalHandle } from '@/components/LiveTerminal/LiveTerminal';
 import { CollapsibleSection } from '@/components/ui/CollapsibleSection';
@@ -9,11 +9,11 @@ import { TooltipIcon } from '@/components/ui/TooltipIcon';
 import { createAlertError, createInlineError } from '@/utils/errorHelpers';
 import { useConfig, useConfigField } from '@/hooks';
 import { modelsApi, tracesApi } from '@/api';
-import type { TracesLatestResponse } from '@/types/generated';
+import type { ModelCatalogEntry, TracesLatestResponse } from '@/types/generated';
 
 export function RetrievalSubtab() {
   // --- Shared UI state -----------------------------------------------------
-  const [availableModels, setAvailableModels] = useState<string[]>([]);
+  const [availableModels, setAvailableModels] = useState<ModelCatalogEntry[]>([]);
   const [hydrating, setHydrating] = useState(true);
   const [traceLoading, setTraceLoading] = useState(false);
   const [traceStatus, setTraceStatus] = useState<{ type: 'info' | 'error'; message: string } | null>(null);
@@ -151,14 +151,17 @@ export function RetrievalSubtab() {
 
   const loadModels = useCallback(async () => {
     try {
-      const data = await modelsApi.listByType('GEN');
-      const models = Array.isArray(data) ? data.map((m: any) => m.model).filter(Boolean) : [];
-
-      const unique: string[] = [];
-      for (const m of models) {
-        if (!m) continue;
-        if (unique.includes(m)) continue;
-        unique.push(m);
+      const rows = await modelsApi.listByType('GEN');
+      const unique: ModelCatalogEntry[] = [];
+      const seen = new Set<string>();
+      for (const row of rows) {
+        const provider = String(row.provider || '').trim();
+        const model = String(row.model || '').trim();
+        if (!provider || !model) continue;
+        const key = `${provider}::${model}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        unique.push(row);
       }
       setAvailableModels(unique);
     } catch (error) {
@@ -166,6 +169,18 @@ export function RetrievalSubtab() {
       setAvailableModels([]);
     }
   }, []);
+
+  const generationModelOptions = useMemo(() => {
+    return availableModels.map((row) => {
+      const provider = String(row.provider || '').trim();
+      const model = String(row.model || '').trim();
+      return {
+        key: `${provider}::${model}`,
+        value: model,
+        label: `${provider} · ${model}`,
+      };
+    });
+  }, [availableModels]);
 
   useEffect(() => {
     loadModels();
@@ -267,9 +282,9 @@ export function RetrievalSubtab() {
             </label>
             <select value={genModel} onChange={(e) => setGenModel(e.target.value)}>
               <option value="">Select a model...</option>
-              {availableModels.map((model) => (
-                <option key={model} value={model}>
-                  {model}
+              {generationModelOptions.map((opt) => (
+                <option key={opt.key} value={opt.value}>
+                  {opt.label}
                 </option>
               ))}
             </select>
@@ -305,9 +320,9 @@ export function RetrievalSubtab() {
             </label>
             <select value={enrichModel} onChange={(e) => setEnrichModel(e.target.value)}>
               <option value="">Select a model...</option>
-              {availableModels.map((model) => (
-                <option key={model} value={model}>
-                  {model}
+              {generationModelOptions.map((opt) => (
+                <option key={opt.key} value={opt.value}>
+                  {opt.label}
                 </option>
               ))}
             </select>
@@ -375,9 +390,9 @@ export function RetrievalSubtab() {
             </label>
             <select value={genModelHttp} onChange={(e) => setGenModelHttp(e.target.value)}>
               <option value="">Select a model...</option>
-              {availableModels.map((model) => (
-                <option key={model} value={model}>
-                  {model}
+              {generationModelOptions.map((opt) => (
+                <option key={opt.key} value={opt.value}>
+                  {opt.label}
                 </option>
               ))}
             </select>
@@ -392,9 +407,9 @@ export function RetrievalSubtab() {
             </label>
             <select value={genModelMcp} onChange={(e) => setGenModelMcp(e.target.value)}>
               <option value="">Select a model...</option>
-              {availableModels.map((model) => (
-                <option key={model} value={model}>
-                  {model}
+              {generationModelOptions.map((opt) => (
+                <option key={opt.key} value={opt.value}>
+                  {opt.label}
                 </option>
               ))}
             </select>
@@ -406,9 +421,9 @@ export function RetrievalSubtab() {
             </label>
             <select value={genModelCli} onChange={(e) => setGenModelCli(e.target.value)}>
               <option value="">Select a model...</option>
-              {availableModels.map((model) => (
-                <option key={model} value={model}>
-                  {model}
+              {generationModelOptions.map((opt) => (
+                <option key={opt.key} value={opt.value}>
+                  {opt.label}
                 </option>
               ))}
             </select>

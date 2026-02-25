@@ -66,7 +66,7 @@ class IndexStatus(BaseModel):
         validation_alias=AliasChoices("repo_id", "corpus_id"),
         serialization_alias="corpus_id",
     )
-    status: Literal["idle", "indexing", "complete", "error"] = Field(description="Current indexing state")
+    status: Literal["idle", "indexing", "complete", "error", "cancelled"] = Field(description="Current indexing state")
     progress: float = Field(ge=0.0, le=1.0, description="Progress from 0.0 to 1.0")
     current_file: str | None = Field(default=None, description="File currently being indexed")
     error: str | None = Field(default=None, description="Error message if status is 'error'")
@@ -1221,11 +1221,78 @@ class ChatResponse(BaseModel):
     tokens_used: int = Field(description="Tokens consumed")
 
 
+class ModelCatalogEntry(BaseModel):
+    """Single model catalog entry served by /api/models."""
+
+    provider: str = Field(description="Provider identifier (for example: openai, anthropic, ragweld)")
+    family: str = Field(description="Model family")
+    model: str = Field(description="Model identifier")
+    components: list[Literal["GEN", "EMB", "RERANK"]] = Field(
+        default_factory=list,
+        description="Capabilities supported by this model",
+    )
+    context: int | None = Field(default=None, ge=0, description="Maximum context tokens when known")
+    dimensions: int | None = Field(default=None, ge=0, description="Embedding dimensions when applicable")
+    unit: Literal["1k_tokens", "request"] | str | None = Field(
+        default=None,
+        description="Pricing unit (if priced)",
+    )
+    input_per_1k: float | None = Field(default=None, ge=0.0, description="GEN input cost per 1k tokens")
+    output_per_1k: float | None = Field(default=None, ge=0.0, description="GEN output cost per 1k tokens")
+    embed_per_1k: float | None = Field(default=None, ge=0.0, description="EMB cost per 1k tokens")
+    rerank_per_1k: float | None = Field(default=None, ge=0.0, description="RERANK cost per 1k tokens")
+    per_request: float | None = Field(default=None, ge=0.0, description="Cost per request")
+    base_url: str | None = Field(default=None, description="Optional provider base URL")
+    notes: str | None = Field(default=None, description="Freeform notes")
+
+
+class ModelCatalogResponse(BaseModel):
+    """Response payload for GET /api/models."""
+
+    currency: str | None = Field(default="USD")
+    last_updated: str | None = Field(default=None)
+    sources: list[str] = Field(default_factory=list)
+    models: list[ModelCatalogEntry] = Field(default_factory=list)
+
+
+class ModelCatalogUpsertRequest(BaseModel):
+    """Request payload for POST /api/models/upsert."""
+
+    provider: str = Field(min_length=1, description="Provider identifier")
+    model: str = Field(min_length=1, description="Model identifier")
+    family: Literal["gen", "embed", "rerank", "misc"] = Field(default="gen")
+    base_url: str | None = Field(default=None, description="Provider base URL (optional)")
+    unit: Literal["1k_tokens", "request"] = Field(default="1k_tokens")
+    input_per_1k: float | None = Field(default=None, ge=0.0)
+    output_per_1k: float | None = Field(default=None, ge=0.0)
+    embed_per_1k: float | None = Field(default=None, ge=0.0)
+    rerank_per_1k: float | None = Field(default=None, ge=0.0)
+    per_request: float | None = Field(default=None, ge=0.0)
+    context: int | None = Field(default=None, ge=0)
+    dimensions: int | None = Field(default=None, ge=0)
+    notes: str | None = Field(default=None)
+
+
+class ModelCatalogUpsertResponse(BaseModel):
+    """Response payload for POST /api/models/upsert."""
+
+    ok: bool = Field(default=True)
+    action: Literal["created", "updated"] = Field(description="Whether an entry was created or updated")
+    model: ModelCatalogEntry = Field(description="Upserted catalog model entry")
+
+
 class ChatModelInfo(BaseModel):
     """Single chat model option resolved from providers."""
 
     id: str = Field(description="Model identifier")
+    override: str = Field(description="Canonical model_override value to send in chat requests")
     provider: str = Field(description="Provider display name (e.g., OpenRouter, Ollama)")
+    provider_key: str | None = Field(default=None, description="Provider key used in the model catalog")
+    catalog_model: str | None = Field(default=None, description="Catalog model identifier when sourced from /api/models")
+    components: list[Literal["GEN", "EMB", "RERANK"]] = Field(
+        default_factory=lambda: ["GEN"],
+        description="Capabilities for this model option",
+    )
     source: Literal["cloud_direct", "openrouter", "local", "ragweld"] = Field(
         description="Model source group for UI grouping."
     )
