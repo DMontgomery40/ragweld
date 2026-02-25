@@ -90,21 +90,77 @@ docker_daemon_ready() {
   docker info >/dev/null 2>&1
 }
 
+# ---------------------------------------------------------------------------
+# Colima resource requirements
+#
+# Neo4j defaults: heap_max=4G + pagecache=2G = 6G bare minimum.
+# Add headroom for Postgres, the Docker daemon, and the guest OS.
+# ---------------------------------------------------------------------------
+COLIMA_MIN_CPU=4
+COLIMA_MIN_MEMORY_GB=8
+COLIMA_VM_TYPE="vz"
+
+colima_running() {
+  colima status >/dev/null 2>&1
+}
+
+colima_memory_gb() {
+  local mem_bytes
+  mem_bytes="$(colima status --json 2>/dev/null \
+    | grep -o '"memory":[0-9]*' | head -1 | cut -d: -f2)" || true
+  if [[ -z "${mem_bytes:-}" || "$mem_bytes" == "0" ]]; then
+    echo 0
+    return
+  fi
+  echo $(( mem_bytes / 1073741824 ))
+}
+
+colima_start_with_resources() {
+  log "Starting Colima (cpu=${COLIMA_MIN_CPU}, memory=${COLIMA_MIN_MEMORY_GB}G, vm-type=${COLIMA_VM_TYPE})..."
+  colima start \
+    --vm-type "$COLIMA_VM_TYPE" \
+    --cpu "$COLIMA_MIN_CPU" \
+    --memory "$COLIMA_MIN_MEMORY_GB" 2>&1
+}
+
+colima_recover_stale_vm() {
+  log "Colima start failed — attempting to recover stale VM state..."
+  local ha_log="${HOME}/.colima/_lima/colima/ha.stderr.log"
+  if [[ -f "$ha_log" ]]; then
+    log "Recent Colima hostagent errors:"
+    tail -n 10 "$ha_log" | sed 's/^/[start.sh]   /'
+  fi
+  log "Running: colima delete --force"
+  colima delete --force 2>&1 || true
+  log "Retrying Colima start after cleanup..."
+  colima_start_with_resources
+}
+
 ensure_docker_daemon() {
+  # Fast path: Docker already reachable (Docker Desktop, or Colima already up).
   if docker_daemon_ready; then
-    return 0
+    # If Colima is the provider, make sure it has enough memory.
+    if have_cmd colima && colima_running; then
+      local mem_gb
+      mem_gb="$(colima_memory_gb)"
+      if [[ "$mem_gb" -gt 0 && "$mem_gb" -lt "$COLIMA_MIN_MEMORY_GB" ]]; then
+        log "Colima is running with ${mem_gb}GB RAM but ragweld needs at least ${COLIMA_MIN_MEMORY_GB}GB."
+        log "Restarting Colima with adequate resources..."
+        colima stop 2>&1 || true
+        if ! colima_start_with_resources; then
+          colima_recover_stale_vm || return 1
+        fi
+      fi
+    fi
+    if docker_daemon_ready; then
+      return 0
+    fi
   fi
 
+  # Docker not running — try Colima.
   if have_cmd colima; then
-    log "Docker daemon unavailable; attempting to start Colima..."
-    if ! colima start; then
-      log "colima start failed."
-      local ha_log="${HOME}/.colima/_lima/colima/ha.stderr.log"
-      if [[ -f "$ha_log" ]]; then
-        log "Recent Colima hostagent errors:"
-        tail -n 40 "$ha_log" | sed 's/^/[start.sh]   /'
-      fi
-      return 1
+    if ! colima_start_with_resources; then
+      colima_recover_stale_vm || return 1
     fi
     if docker_daemon_ready; then
       return 0
