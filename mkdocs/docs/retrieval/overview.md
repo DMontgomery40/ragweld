@@ -30,7 +30,7 @@
 
     ---
 
-    Local/cloud/learning reranker rescoring of fused candidates for precision.
+    Cloud/learning reranker rescoring of fused candidates for precision.
 
 </div>
 
@@ -55,7 +55,7 @@
 | Sparse | `sparse_search.enabled`, `sparse_search.top_k`, `sparse_search.bm25_k1`, `sparse_search.bm25_b` | 50 / 1.2 / 0.4 |
 | Graph | `graph_search.enabled`, `graph_search.max_hops`, `graph_search.top_k` | true / 2 / 30 |
 | Fusion | `fusion.method`, `fusion.rrf_k`, `fusion.*_weight` | rrf / 60 |
-| Reranker | `reranking.reranker_mode`, `tribrid_reranker_topn` | local / 50 |
+| Reranker | `reranking.reranker_mode`, `tribrid_reranker_topn` | none / 50 |
 
 ```mermaid
 flowchart LR
@@ -75,7 +75,7 @@ flowchart LR
 === "Python"
 ```python
 import httpx
-BASE = "http://localhost:8000"
+BASE = "http://127.0.0.1:8012/api"
 body = {"corpus_id": "tribrid", "query": "How are pgvector indexes created?", "top_k": 10}
 res = httpx.post(f"{BASE}/search", json=body).json()  # (1)
 for r in res.get("matches", []):
@@ -84,7 +84,7 @@ for r in res.get("matches", []):
 
 === "curl"
 ```bash
-curl -sS -X POST http://localhost:8000/search \
+curl -sS -X POST http://127.0.0.1:8012/api/search \
   -H 'Content-Type: application/json' \
   -d '{"corpus_id":"tribrid","query":"pgvector index","top_k":10}' | jq '.matches[0]'
 ```
@@ -94,7 +94,7 @@ curl -sS -X POST http://localhost:8000/search \
 import type { SearchRequest, SearchResponse } from "../../web/src/types/generated";
 
 async function run(req: SearchRequest): Promise<SearchResponse> {
-  const r = await fetch("/search", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify(req) });
+  const r = await fetch("/api/search", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify(req) });
   return await r.json();
 }
 ```

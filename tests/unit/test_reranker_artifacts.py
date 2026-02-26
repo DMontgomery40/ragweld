@@ -2,54 +2,23 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
-from server.models.tribrid_config_model import ChunkMatch, RerankingConfig, TrainingConfig
-from server.reranker.artifacts import has_transformers_weights
-from server.retrieval.rerank import Reranker
+from server.reranker.artifacts import has_mlx_adapter_weights, resolve_project_path
 
 
-def test_has_transformers_weights_false_when_only_config_present(tmp_path: Path) -> None:
-    model_dir = tmp_path / "model"
-    model_dir.mkdir(parents=True, exist_ok=True)
-    (model_dir / "config.json").write_text("{}", encoding="utf-8")
-    (model_dir / "tokenizer.json").write_text("{}", encoding="utf-8")
-    assert has_transformers_weights(model_dir) is False
+def test_resolve_project_path_resolves_relative_against_repo_root() -> None:
+    p = resolve_project_path("data")
+    assert p.is_absolute()
+    assert p.name == "data"
 
 
-def test_has_transformers_weights_true_for_model_safetensors(tmp_path: Path) -> None:
-    model_dir = tmp_path / "model"
-    model_dir.mkdir(parents=True, exist_ok=True)
-    (model_dir / "config.json").write_text("{}", encoding="utf-8")
-    (model_dir / "model.safetensors").write_bytes(b"")
-    assert has_transformers_weights(model_dir) is True
+def test_has_mlx_adapter_weights_false_when_missing(tmp_path: Path) -> None:
+    adapter_dir = tmp_path / "adapter"
+    adapter_dir.mkdir(parents=True, exist_ok=True)
+    assert has_mlx_adapter_weights(adapter_dir) is False
 
 
-@pytest.mark.asyncio
-async def test_learning_rerank_skips_when_trained_dir_missing_weights(tmp_path: Path) -> None:
-    model_dir = tmp_path / "trained_model"
-    model_dir.mkdir(parents=True, exist_ok=True)
-    (model_dir / "config.json").write_text("{}", encoding="utf-8")
-
-    cfg = RerankingConfig(reranker_mode="learning")
-    train_cfg = TrainingConfig(learning_reranker_backend="transformers")
-    reranker = Reranker(cfg, training_config=train_cfg, trained_model_path=str(model_dir))
-
-    chunks = [
-        ChunkMatch(
-            chunk_id="c1",
-            content="alpha",
-            file_path="a.txt",
-            start_line=1,
-            end_line=1,
-            language="text",
-            score=0.1,
-            source="vector",
-            metadata={"corpus_id": "epstein-files-1"},
-        )
-    ]
-    res = await reranker.try_rerank("query", chunks)
-    assert res.ok is True
-    assert res.applied is False
-    assert res.skipped_reason == "missing_trained_model"
-    assert res.chunks == chunks
+def test_has_mlx_adapter_weights_true_when_adapter_npz_present(tmp_path: Path) -> None:
+    adapter_dir = tmp_path / "adapter"
+    adapter_dir.mkdir(parents=True, exist_ok=True)
+    (adapter_dir / "adapter.npz").write_bytes(b"")
+    assert has_mlx_adapter_weights(adapter_dir) is True

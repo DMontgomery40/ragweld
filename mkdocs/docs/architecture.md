@@ -18,7 +18,7 @@
 
     ---
 
-    Local/cloud rerankers and the Qwen3 LoRA learning reranker can refine the fused list.
+    Cloud rerankers and the Qwen3 LoRA learning reranker can refine the fused list.
 
 -   :material-cog:{ .lg .middle } **Pydantic-Orchestrated**
 
@@ -86,7 +86,7 @@ flowchart LR
 | Sparse | `server/retrieval/sparse.py` | FTS/BM25 over chunks | `sparse_search.enabled`, `sparse_search.top_k`, `indexing.bm25_*` |
 | Graph | `server/retrieval/graph.py` | Entity traversal, context expansion | `graph_search.enabled`, `graph_search.max_hops`, `graph_storage.*` |
 | Fusion | `server/retrieval/fusion.py` | Merge lists and scores | `fusion.method`, `fusion.rrf_k`, `fusion.*_weight` |
-| Reranker | `server/retrieval/rerank.py` | Local/cloud/learning reranker scoring | `reranking.reranker_mode`, `reranking.*` |
+| Reranker | `server/retrieval/rerank.py` | Cloud/learning reranker scoring | `reranking.reranker_mode`, `reranking.*` |
 
 ## Hot Path (Annotated)
 
@@ -111,7 +111,7 @@ async def search(query: str, corpus_id: str, cfg):  # (1)!
 
 === "curl"
 ```bash
-BASE=http://localhost:8000
+BASE=http://127.0.0.1:8012/api
 # (2)! Fusion (vector+sparse+graph)
 curl -sS -X POST "$BASE/search" \
   -H 'Content-Type: application/json' \
@@ -127,7 +127,7 @@ curl -sS -X POST "$BASE/search" \
 import type { SearchRequest, SearchResponse } from "./web/src/types/generated";
 
 export async function triSearch(req: SearchRequest): Promise<SearchResponse> {
-  const resp = await fetch("/search", {
+  const resp = await fetch("/api/search", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(req),

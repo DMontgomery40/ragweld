@@ -322,9 +322,8 @@ for _stage in _INDEX_STAGES:
     INDEX_STAGE_LATENCY_SECONDS.labels(stage=_stage)
     INDEX_STAGE_ERRORS_TOTAL.labels(stage=_stage)
 
-_RERANKER_MODES = ("local", "learning", "cloud")
+_RERANKER_MODES = ("learning", "cloud")
 _RERANKER_SKIP_REASONS = (
-    "missing_model",
     "missing_trained_model",
     "missing_api_key",
     "no_candidates",

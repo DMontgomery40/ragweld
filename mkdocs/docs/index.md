@@ -61,7 +61,7 @@
 | Sparse Search | PostgreSQL FTS/BM25 for exact terms, identifiers | ✅ Active |
 | Graph Search | Neo4j traversal to follow entities/relations | ✅ Active |
 | Fusion | Weighted/reciprocal-rank fusion of sources | ✅ Active |
-| Reranker | Optional local/cloud/learning reranking | ✅ Active |
+| Reranker | Optional cloud/learning reranking | ✅ Active |
 
 ## End-to-End Retrieval Flow
 
@@ -94,7 +94,7 @@ Use ++ctrl+c++ to stop local `uvicorn` or Docker tail sessions.
 ```python
 import httpx, subprocess
 
-BASE = "http://localhost:8000"
+BASE = "http://127.0.0.1:8012/api"
 
 # 1) Generate TS types from Pydantic (required for UI) (1)!
 subprocess.check_call(["uv", "run", "scripts/generate_types.py"])  # (1) Types derive from Pydantic
@@ -108,7 +108,7 @@ req = {
 httpx.post(f"{BASE}/index", json=req).raise_for_status()
 
 # 3) Poll status (4)!
-status = httpx.get(f"{BASE}/index/status", params={"corpus_id": "tribrid"}).json()
+status = httpx.get(f"{BASE}/index/tribrid/status").json()
 print(status)
 
 # 4) Search (parallel vector/sparse/graph -> fusion -> optional rerank) (5)!
@@ -130,7 +130,7 @@ for m in res.get("matches", []):
 
 === "curl"
 ```bash
-BASE=http://localhost:8000
+BASE=http://127.0.0.1:8012/api
 
 # Start indexing (1)!
 curl -sS -X POST "$BASE/index" \
@@ -142,7 +142,7 @@ curl -sS -X POST "$BASE/index" \
   }'
 
 # Status (2)!
-curl -sS "$BASE/index/status?corpus_id=tribrid" | jq .
+curl -sS "$BASE/index/tribrid/status" | jq .
 
 # Search (3)!
 curl -sS -X POST "$BASE/search" \
@@ -164,7 +164,7 @@ curl -sS -X POST "$BASE/search" \
 import type { IndexRequest, SearchRequest, SearchResponse } from "./web/src/types/generated";
 
 async function indexAndSearch() {
-  const base = "http://localhost:8000";
+  const base = "http://127.0.0.1:8012/api";
 
   const indexReq: IndexRequest = {
     corpus_id: "tribrid", // (2)! repo_id alias also accepted server-side

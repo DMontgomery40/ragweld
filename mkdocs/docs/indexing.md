@@ -78,7 +78,7 @@ flowchart LR
 === "Python"
 ```python
 import httpx
-base = "http://localhost:8000"
+base = "http://127.0.0.1:8012/api"
 
 req = {
     "corpus_id": "tribrid",   # (1)!
@@ -87,7 +87,7 @@ req = {
 }
 httpx.post(f"{base}/index", json=req).raise_for_status()  # (2)!
 
-status = httpx.get(f"{base}/index/status", params={"corpus_id": "tribrid"}).json()
+status = httpx.get(f"{base}/index/tribrid/status").json()
 print(status["status"], status.get("progress"))          # (3)!
 ```
 
@@ -97,11 +97,11 @@ print(status["status"], status.get("progress"))          # (3)!
 
 === "curl"
 ```bash
-BASE=http://localhost:8000
+BASE=http://127.0.0.1:8012/api
 curl -sS -X POST "$BASE/index" -H 'Content-Type: application/json' -d '{
   "corpus_id":"tribrid","repo_path":"/work/src/tribrid","force_reindex":false
 }'
-curl -sS "$BASE/index/status?corpus_id=tribrid" | jq .
+curl -sS "$BASE/index/tribrid/status" | jq .
 ```
 
 === "TypeScript"
@@ -110,8 +110,8 @@ import type { IndexRequest, IndexStatus } from "./web/src/types/generated";
 
 async function reindex(path: string) {
   const req: IndexRequest = { corpus_id: "tribrid", repo_path: path, force_reindex: false } as any;
-  await fetch("/index", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify(req) }); // (2)!
-  const status: IndexStatus = await (await fetch("/index/status?corpus_id=tribrid")).json(); // (3)!
+  await fetch("/api/index", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify(req) }); // (2)!
+  const status: IndexStatus = await (await fetch("/api/index/tribrid/status")).json(); // (3)!
   console.log(status.status, status.progress);
 }
 ```

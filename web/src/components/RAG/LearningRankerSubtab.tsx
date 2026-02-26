@@ -3,7 +3,7 @@ import { useConfigField } from '@/hooks';
 import { TrainingStudio } from '@/components/RerankerTraining/TrainingStudio';
 
 export function LearningRankerSubtab() {
-  const [rerankerMode] = useConfigField<string>('reranking.reranker_mode', 'local');
+  const [rerankerMode] = useConfigField<string>('reranking.reranker_mode', 'learning');
   const modeWarning = useMemo(() => {
     const mode = String(rerankerMode || '').toLowerCase();
     if (mode === 'learning') return null;

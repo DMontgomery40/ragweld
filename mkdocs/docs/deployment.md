@@ -76,7 +76,7 @@ os.system("uvicorn server.main:app --reload --port 8000")  # (2) Dev server
 === "curl"
 ```bash
 # After containers are up:
-curl -sS http://localhost:8000/ready | jq .  # readiness check (3)!
+curl -sS http://127.0.0.1:8012/api/ready | jq .  # readiness check (3)!
 ```
 
 === "TypeScript"
@@ -91,7 +91,7 @@ flowchart TB
     P["Pydantic"] --> Types["generated.ts"]
     Types --> UI["Frontend"]
     Compose --> API["API"]
-    API --> READY["/ready"]
+    API --> READY["/api/ready"]
 ```
 
 ??? note "Container Logs"

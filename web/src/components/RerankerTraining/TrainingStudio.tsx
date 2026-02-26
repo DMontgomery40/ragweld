@@ -241,14 +241,13 @@ export function TrainingStudio() {
 
   const [probeQuery, setProbeQuery] = useState('auth login flow');
   const [probeDocument, setProbeDocument] = useState('auth login token flow good');
-  const [probeMode, setProbeMode] = useState<'learning' | 'local'>('learning');
   const [probeIncludeLogits, setProbeIncludeLogits] = useState(false);
   const [probeLoading, setProbeLoading] = useState(false);
   const [probeResult, setProbeResult] = useState<RerankerScoreResponse | null>(null);
 
   const [modelPath, setModelPath] = useConfigField<string>(
     'training.tribrid_reranker_model_path',
-    'models/cross-encoder-tribrid'
+    'models/learning-reranker-epstein-files-1'
   );
   const [logPath, setLogPath] = useConfigField<string>('tracing.tribrid_log_path', 'data/logs/queries.jsonl');
   const [tripletsPath, setTripletsPath] = useConfigField<string>(
@@ -749,7 +748,6 @@ export function TrainingStudio() {
         query: String(probeQuery || ''),
         document: String(probeDocument || ''),
         include_logits: probeIncludeLogits,
-        mode: probeMode,
       });
       setProbeResult(res);
       if (!res.ok) notifyError(res.error || 'Scoring failed');
@@ -1262,7 +1260,6 @@ export function TrainingStudio() {
                   <label>Backend <TooltipIcon name="LEARNING_RERANKER_BACKEND" /></label>
                   <select value={learningBackend} onChange={(e) => setLearningBackend(e.target.value as LearningBackend)}>
                     <option value="auto">auto (platform gated)</option>
-                    <option value="transformers">transformers</option>
                     <option value="mlx_qwen3">mlx_qwen3</option>
                   </select>
                 </div>
@@ -1499,14 +1496,6 @@ export function TrainingStudio() {
 
               <div className="studio-form-grid one">
                 <div className="input-group">
-                  <label>Mode</label>
-                  <select value={probeMode} onChange={(e) => setProbeMode(e.target.value as any)}>
-                    <option value="learning">learning</option>
-                    <option value="local">local</option>
-                  </select>
-                </div>
-
-                <div className="input-group">
                   <label>Query</label>
                   <textarea value={probeQuery} onChange={(e) => setProbeQuery(e.target.value)} rows={3} />
                 </div>
@@ -1567,7 +1556,6 @@ export function TrainingStudio() {
     probeDocument,
     probeIncludeLogits,
     probeLoading,
-    probeMode,
     probeQuery,
     probeResult,
     promoteEpsilon,
@@ -1591,7 +1579,6 @@ export function TrainingStudio() {
     setNegativeRatio,
     setProbeDocument,
     setProbeIncludeLogits,
-    setProbeMode,
     setProbeQuery,
     setPromoteEpsilon,
     setPromoteIfImproves,

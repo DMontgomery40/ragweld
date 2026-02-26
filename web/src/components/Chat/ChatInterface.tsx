@@ -45,7 +45,7 @@ const TRIBRID_TIPS = [
   
   // Learning Reranker
   { tip: "Every thumbs up/down you give trains the Learning Reranker to better understand your codebase.", category: "feedback" },
-  { tip: "The Learning Reranker trains from your mined triplets to improve result ordering over time (MLX Qwen3 when available, otherwise transformers).", category: "feedback" },
+  { tip: "The Learning Reranker trains from your mined triplets to improve result ordering over time (MLX Qwen3 on Apple Silicon).", category: "feedback" },
   { tip: "Consistent feedback helps Tri-Brid RAG learn your codebase's unique terminology and patterns.", category: "feedback" },
   { tip: "The reranker model checkpoints are saved automatically - your feedback is never lost.", category: "feedback" },
   

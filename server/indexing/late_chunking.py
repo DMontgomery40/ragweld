@@ -21,6 +21,8 @@ def _load_hf_tokenizer(model_name: str) -> Any:
 def _load_hf_model(model_name: str) -> Any:
     model = AutoModel.from_pretrained(model_name)
     model.eval()
+    if torch.backends.mps.is_available():
+        model.to(torch.device("mps"))
     return model
 
 
@@ -73,6 +75,10 @@ def late_chunk_document(
     if offsets is None:
         raise RuntimeError("late chunking requires a fast tokenizer with offset_mapping support")
 
+    device = next(model.parameters()).device
+    input_ids = input_ids.to(device)
+    if attn is not None:
+        attn = attn.to(device)
     with torch.no_grad():
         out = model(input_ids=input_ids, attention_mask=attn)
         h = getattr(out, "last_hidden_state", None)

@@ -6,7 +6,7 @@ import { ApiKeyStatus } from '@/components/ui/ApiKeyStatus';
 import { modelsApi } from '@/api';
 import type { ModelCatalogEntry, TrainingConfig } from '@/types/generated';
 
-const RERANKER_MODES = ['none', 'local', 'learning', 'cloud'] as const;
+const RERANKER_MODES = ['none', 'learning', 'cloud'] as const;
 type RerankerMode = (typeof RERANKER_MODES)[number];
 type LearningBackend = NonNullable<TrainingConfig['learning_reranker_backend']>;
 
@@ -32,15 +32,10 @@ function toApiKeyName(provider: string): string {
 
 export function RerankerConfigSubtab() {
   // Config (LAW)
-  const [mode, setMode] = useConfigField<RerankerMode>('reranking.reranker_mode', 'local');
+  const [mode, setMode] = useConfigField<RerankerMode>('reranking.reranker_mode', 'learning');
   const [cloudProvider, setCloudProvider] = useConfigField<string>('reranking.reranker_cloud_provider', 'cohere');
   const [cloudModel, setCloudModel] = useConfigField<string>('reranking.reranker_cloud_model', 'rerank-v3.5');
   const [cloudTopN, setCloudTopN] = useConfigField<number>('reranking.reranker_cloud_top_n', 50);
-
-  const [localModel, setLocalModel] = useConfigField<string>(
-    'reranking.reranker_local_model',
-    'BAAI/bge-reranker-v2-m3'
-  );
 
   // Learning reranker is configured under training + reranking
   const [learningModelPath, setLearningModelPath] = useConfigField<string>(
@@ -65,10 +60,6 @@ export function RerankerConfigSubtab() {
   const [maxLen, setMaxLen] = useConfigField<number>('reranking.tribrid_reranker_maxlen', 512);
 
   const [snippetChars, setSnippetChars] = useConfigField<number>('reranking.rerank_input_snippet_chars', 700);
-  const [trustRemoteCode, setTrustRemoteCode] = useConfigField<number>(
-    'reranking.transformers_trust_remote_code',
-    1
-  );
 
   // Model catalog (from /api/models)
   const [rerankModels, setRerankModels] = useState<RerankModelEntry[]>([]);
@@ -109,14 +100,6 @@ export function RerankerConfigSubtab() {
     );
   }, [rerankModels, cloudProvider]);
 
-  const localModelOptions = useMemo(() => {
-    return uniqueSorted(
-      rerankModels
-        .filter((m) => ['huggingface', 'local'].includes((m.provider || '').toLowerCase()))
-        .map((m) => m.model || '')
-    );
-  }, [rerankModels]);
-
   // Keep config values sane when switching modes / providers
   useEffect(() => {
     if (mode !== 'cloud') return;
@@ -133,14 +116,6 @@ export function RerankerConfigSubtab() {
       setCloudModel(cloudModelOptions[0]);
     }
   }, [mode, cloudModelOptions, cloudModel, setCloudModel]);
-
-  useEffect(() => {
-    if (mode !== 'local') return;
-    if (!localModelOptions.length) return;
-    if (!localModelOptions.includes(localModel)) {
-      setLocalModel(localModelOptions[0]);
-    }
-  }, [mode, localModelOptions, localModel, setLocalModel]);
 
   // Runtime info (server)
   const { getInfo } = useReranker();
@@ -188,7 +163,7 @@ export function RerankerConfigSubtab() {
           <TooltipIcon name="RERANKER_MODE" />
         </h3>
         <div style={{ fontSize: 13, color: 'var(--fg-muted)' }}>
-          Configure reranking for TriBrid retrieval (local, cloud, or learning).
+          Configure reranking for TriBrid retrieval (learning or cloud).
         </div>
       </div>
 
@@ -217,13 +192,11 @@ export function RerankerConfigSubtab() {
           >
             <div style={{ fontWeight: 600, marginBottom: 4 }}>
               {m === 'none' && '🚫 Disabled'}
-              {m === 'local' && '💻 Local'}
               {m === 'cloud' && '☁️ Cloud'}
               {m === 'learning' && '🧠 Learning'}
             </div>
             <div style={{ fontSize: 12, color: 'var(--fg-muted)' }}>
               {m === 'none' && 'No reranking'}
-              {m === 'local' && 'Run a local reranker'}
               {m === 'cloud' && 'Use a hosted reranker API'}
               {m === 'learning' && 'Use the trainable learning reranker'}
             </div>
@@ -307,53 +280,6 @@ export function RerankerConfigSubtab() {
         </div>
       )}
 
-      {mode === 'local' && (
-        <div
-          style={{
-            background: 'var(--bg-elev1)',
-            border: '1px solid var(--line)',
-            borderRadius: 10,
-            padding: 14,
-            marginBottom: 18,
-          }}
-        >
-          <div style={{ fontWeight: 600, marginBottom: 10 }}>Local reranker</div>
-
-          <div className="input-row">
-            <div className="input-group">
-              <label>
-                Local model <TooltipIcon name="RERANKER_LOCAL_MODEL" />
-              </label>
-              <select
-                value={localModel}
-                onChange={(e) => setLocalModel(e.target.value)}
-                disabled={modelsLoading || localModelOptions.length === 0}
-              >
-                {localModelOptions.length === 0 && <option value="">No local rerank models</option>}
-                {localModelOptions.map((m) => (
-                  <option key={m} value={m}>
-                    {`local · ${m}`}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="input-group">
-              <label>
-                Trust remote code <TooltipIcon name="TRANSFORMERS_TRUST_REMOTE_CODE" />
-              </label>
-              <select
-                value={trustRemoteCode}
-                onChange={(e) => setTrustRemoteCode(parseInt(e.target.value, 10))}
-              >
-                <option value={1}>Yes</option>
-                <option value={0}>No</option>
-              </select>
-            </div>
-          </div>
-        </div>
-      )}
-
       {mode === 'learning' && (
         <div
           style={{
@@ -388,7 +314,6 @@ export function RerankerConfigSubtab() {
               </label>
               <select value={learningBackend} onChange={(e) => setLearningBackend(e.target.value as LearningBackend)}>
                 <option value="auto">auto (prefer MLX Qwen3)</option>
-                <option value="transformers">transformers (HF)</option>
                 <option value="mlx_qwen3">mlx_qwen3 (force)</option>
               </select>
             </div>

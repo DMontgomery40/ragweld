@@ -239,12 +239,6 @@ def _validate_model_capabilities(config: TriBridConfig) -> None:
         required_component="RERANK",
         provider_hint=str(config.reranking.reranker_cloud_provider or "").strip().lower() or None,
     )
-    _validate_capability(
-        catalog_models,
-        field_name="reranking.reranker_local_model",
-        model_value=str(config.reranking.reranker_local_model or ""),
-        required_component="RERANK",
-    )
 
 
 @router.get("/config", response_model=TriBridConfig)

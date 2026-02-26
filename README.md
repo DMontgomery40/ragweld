@@ -12,7 +12,7 @@
 
 <p align="center">
   <a href="https://dmontgomery40.github.io/tribrid-rag/"><img src="https://img.shields.io/badge/docs-mkdocs-blue" alt="Documentation"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="License"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0--or--later-blue" alt="License"></a>
   <a href="https://python.org"><img src="https://img.shields.io/badge/python-3.11+-blue" alt="Python"></a>
   <a href="#mcp-integration"><img src="https://img.shields.io/badge/MCP-enabled-purple" alt="MCP Enabled"></a>
 </p>
@@ -96,7 +96,7 @@ Each search method compensates for the others' weaknesses. The result: **dramati
 - **Sparse Search**: PostgreSQL Full-Text Search with BM25-style ranking
 - **Graph Search**: Neo4j knowledge graph with entity extraction and relationship traversal
 - **Fusion**: Reciprocal Rank Fusion (RRF) or configurable weighted scoring
-- **Reranking**: Local HuggingFace rerankers, cloud APIs (Cohere/Voyage/Jina), or Qwen3 LoRA learning rerankers
+- **Reranking**: Cloud APIs (Cohere/Voyage/Jina) or Qwen3 LoRA learning rerankers (MLX)
 
 ### Full-Stack Application
 - **Backend**: FastAPI with async support, comprehensive API
@@ -123,7 +123,7 @@ Each search method compensates for the others' weaknesses. The result: **dramati
 - **Ring Buffer Storage**: Configurable retention, no external dependencies for dev tracing
 
 ### Evaluation & Cost Tracking
-- Built-in evaluation framework with golden question sets
+- Built-in evaluation framework with eval datasets
 - **Detailed Cost Breakdowns**: Per-request costs for generation, embeddings, and reranking
 - Model comparison tools with accurate pricing from `data/models.json`
 - Retrieval quality metrics (MRR, Recall@K, NDCG)
@@ -850,7 +850,7 @@ Response includes:
 
 ## Documentation
 
-Full documentation: https://dmontgomery40.github.io/tribrid-rag/
+Full documentation: https://dmontgomery40.github.io/ragweld/
 
 Build locally:
 ```bash
@@ -871,7 +871,7 @@ mkdocs serve
 
 ## License
 
-MIT License. See [LICENSE](LICENSE) for details.
+GPL-3.0-or-later. See [LICENSE](LICENSE) for details.
 
 ---
 

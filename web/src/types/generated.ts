@@ -87,7 +87,6 @@ export interface ChatConfig {
   system_prompt_recall?: string; // default: "You are an agentic RAG database assistant power..."
   /** State 4: Both. RAG and Recall both returned results. */
   system_prompt_rag_and_recall?: string; // default: "You are an agentic RAG database assistant power..."
-  reranker?: ChatRerankerConfig;
   recall?: RecallConfig;
   recall_gate?: RecallGateConfig;
   multimodal?: ChatMultimodalConfig;
@@ -211,21 +210,6 @@ export interface ChatProviderInfo {
   model: string;
   /** Provider base URL (when applicable) */
   base_url?: string | null; // default: None
-}
-
-/** Chat-specific reranker.  Separate from RAG reranker because: - Shorter passages (conversation turns, not code blocks) - Recency bias (recent messages matter more) - Lower latency tolerance (chat feels slow >500ms) */
-export interface ChatRerankerConfig {
-  /** Chat reranker mode. */
-  mode?: string; // default: "local"
-  /** Local reranker model for chat. */
-  local_model?: string; // default: "BAAI/bge-reranker-v2-m3"
-  cloud_provider?: string; // default: "cohere"
-  cloud_model?: string; // default: "rerank-v3.5"
-  top_n?: number; // default: 20
-  /** Blend weight for recency. 0=pure relevance, 1=pure recency. */
-  recency_weight?: number; // default: 0.3
-  /** Only retrieve messages from last N hours. 0=no limit. */
-  max_age_hours?: number; // default: 0
 }
 
 /** Unified result shape for vector/sparse/graph retrieval. */
@@ -1369,17 +1353,15 @@ export interface RerankerTrainRunSummary {
 
 /** Reranking configuration for result refinement. */
 export interface RerankingConfig {
-  /** Reranker mode: 'cloud' (Cohere/Voyage/Jina API), 'local' (local HuggingFace reranker), 'learning' (trainable reranker: MLX Qwen3 LoRA when available, else transformers), 'none' (disabled) */
+  /** Reranker mode: 'cloud' (Cohere/Voyage/Jina API), 'learning' (MLX Qwen3 LoRA learning reranker), 'none' (disabled). Legacy values 'local'/'hf' normalize to 'learning'. */
   reranker_mode?: string; // default: "none"
   /** Cloud reranker provider when mode=cloud (cohere, voyage, jina) */
   reranker_cloud_provider?: string; // default: "cohere"
   /** Cloud reranker model name when mode=cloud (Cohere: rerank-v3.5) */
   reranker_cloud_model?: string; // default: "rerank-v3.5"
-  /** Local HuggingFace reranker model when mode=local */
-  reranker_local_model?: string; // default: "BAAI/bge-reranker-v2-m3"
   /** Blend weight for reranker scores */
   tribrid_reranker_alpha?: number; // default: 0.7
-  /** Number of candidates to rerank (local/learning mode) */
+  /** Number of candidates to rerank (learning mode) */
   tribrid_reranker_topn?: number; // default: 50
   /** Number of candidates to rerank (cloud mode) */
   reranker_cloud_top_n?: number; // default: 50
@@ -1395,8 +1377,6 @@ export interface RerankingConfig {
   reranker_timeout?: number; // default: 10
   /** Snippet chars for reranking input */
   rerank_input_snippet_chars?: number; // default: 700
-  /** Allow transformers remote code for HF rerankers that require it */
-  transformers_trust_remote_code?: number; // default: 1
 }
 
 /** Configuration for retrieval and search parameters. */
@@ -1623,7 +1603,7 @@ export interface TrainingConfig {
   triplets_min_count?: number; // default: 100
   /** Triplet mining mode */
   triplets_mine_mode?: string; // default: "replace"
-  /** Active learning reranker artifact path (HF model dir for transformers; adapter dir for MLX) */
+  /** Active learning reranker artifact path (MLX adapter directory). */
   tribrid_reranker_model_path?: string; // default: "models/learning-reranker-epstein-files-1"
   /** Triplet mining mode */
   tribrid_reranker_mine_mode?: string; // default: "replace"
@@ -1631,8 +1611,8 @@ export interface TrainingConfig {
   tribrid_reranker_mine_reset?: number; // default: 0
   /** Training triplets file path */
   tribrid_triplets_path?: string; // default: "data/training/triplets__epstein-files-1.jsonl"
-  /** Learning reranker backend: auto (prefer MLX Qwen3 on Apple Silicon), transformers (HF), mlx_qwen3 (force MLX) */
-  learning_reranker_backend?: "auto" | "transformers" | "mlx_qwen3"; // default: "auto"
+  /** Learning reranker backend: auto (prefer MLX Qwen3 on Apple Silicon), mlx_qwen3 (force). Legacy values 'transformers'/'hf' normalize to 'auto'. */
+  learning_reranker_backend?: "auto" | "mlx_qwen3"; // default: "auto"
   /** Base model to fine-tune for MLX Qwen3 learning reranker */
   learning_reranker_base_model?: string; // default: "Qwen/Qwen3-Reranker-0.6B"
   /** LoRA rank for MLX Qwen3 learning reranker */
@@ -2604,7 +2584,6 @@ export interface RerankerInfoResponse {
   reranker_mode?: string;
   reranker_cloud_provider?: string | null;
   reranker_cloud_model?: string | null;
-  reranker_local_model?: string | null;
   /** Selected model path (may be empty) */
   path?: string;
   /** Resolved model path (best-effort) */
@@ -2621,8 +2600,6 @@ export interface RerankerInfoResponse {
   maxlen?: number | null;
   /** Snippet chars used for rerank input */
   snippet_chars?: number | null;
-  /** Whether transformers trust_remote_code is enabled */
-  trust_remote_code?: boolean;
 }
 
 /** Status payload for GET /api/reranker/status (legacy polling + inference runtime). */
@@ -2673,8 +2650,8 @@ export interface RerankerScoreRequest {
   query: string;
   /** Document/passage text to score */
   document: string;
-  /** Scoring mode override. learning uses the active learning artifact; local uses reranking.reranker_local_model. */
-  mode?: "learning" | "local" | null;
+  /** Scoring mode override. Only 'learning' is supported; legacy values normalize to 'learning'. */
+  mode?: "learning" | null;
   /** Include backend-specific raw logits when available (best-effort) */
   include_logits?: boolean;
 }

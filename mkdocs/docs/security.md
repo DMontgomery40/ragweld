@@ -12,7 +12,7 @@
 
     ---
 
-    `/secrets/check` verifies presence and connectivity.
+    `/api/secrets/check` verifies which provider keys are configured (never returns values).
 
 -   :material-file-lock:{ .lg .middle } **Least Privilege**
 
@@ -40,18 +40,18 @@
 === "Python"
 ```python
 import httpx
-print(httpx.get("http://localhost:8000/secrets/check").json())
+print(httpx.get("http://127.0.0.1:8012/api/secrets/check", params={"keys": "OPENAI_API_KEY,ANTHROPIC_API_KEY"}).json())
 ```
 
 === "curl"
 ```bash
-curl -sS http://localhost:8000/secrets/check | jq .
+curl -sS "http://127.0.0.1:8012/api/secrets/check?keys=OPENAI_API_KEY,ANTHROPIC_API_KEY" | jq .
 ```
 
 === "TypeScript"
 ```typescript
 async function secrets() {
-  console.log(await (await fetch('/secrets/check')).json());
+  console.log(await (await fetch('/api/secrets/check?keys=OPENAI_API_KEY,ANTHROPIC_API_KEY')).json());
 }
 ```
 
@@ -68,9 +68,9 @@ async function secrets() {
 ```mermaid
 flowchart LR
     Env["Environment"] --> API
-    API --> Check["/secrets/check"]
+    API --> Check["/api/secrets/check"]
     Check --> Report["Status"]
 ```
 
 !!! success "Audit"
-    Log access to admin endpoints (`/config`, `/docker/*`, `/reranker/*`). Monitor for unusual patterns in logs and metrics.
+    Log access to admin endpoints (`/api/config`, `/api/docker/*`, `/api/reranker/*`). Monitor for unusual patterns in logs and metrics.

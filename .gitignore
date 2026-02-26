@@ -46,6 +46,9 @@ CLAUDE.local.md
 # Local artifacts (generated output, recordings, etc.)
 output/
 models/learning-agent-*/
+site/
+mkdocs-docs-plan.md
+mkdocs-docs-llm.patch
 
 # ===== Virtual Environment =====
 .venv/

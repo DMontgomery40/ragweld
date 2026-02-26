@@ -3871,7 +3871,7 @@
     {
       "term": "Learning Reranker Backend",
       "key": "LEARNING_RERANKER_BACKEND",
-      "definition": "Backend used when RERANKER_MODE=\"learning\". auto prefers the MLX Qwen3 LoRA backend when MLX is available (Apple Silicon), otherwise falls back to the transformers backend. Use transformers to force the legacy path, or mlx_qwen3 to force the MLX backend.",
+      "definition": "Backend used when RERANKER_MODE=\"learning\". auto selects the MLX Qwen3 LoRA backend (Apple Silicon). mlx_qwen3 forces the same MLX backend. Legacy values (transformers/hf) are accepted for backward compatibility but normalize to auto.",
       "category": "reranking",
       "related": [
         "RERANKER_MODE",
@@ -3903,6 +3903,15 @@
       ]
     },
     {
+      "term": "Learning Reranker Default Preset",
+      "key": "LEARNING_RERANKER_DEFAULT_PRESET",
+      "definition": "Default pane preset applied when Learning Reranker Studio opens. Options: balanced, focus_viz, focus_logs, focus_inspector. Default: balanced.",
+      "category": "reranking",
+      "related": [],
+      "links": [],
+      "badges": []
+    },
+    {
       "term": "Learning Reranker Grad Accum Steps",
       "key": "LEARNING_RERANKER_GRAD_ACCUM_STEPS",
       "definition": "Number of micro-batches to accumulate gradients over before applying one optimizer update when training the MLX Qwen3 learning reranker. This increases effective batch size without increasing memory. Typical: 4–16; default 8.",
@@ -3922,6 +3931,24 @@
           "class": "warn"
         }
       ]
+    },
+    {
+      "term": "Learning Reranker Layout Engine",
+      "key": "LEARNING_RERANKER_LAYOUT_ENGINE",
+      "definition": "Layout system used by Learning Reranker Studio. Options: dockview or panels. Default: dockview. Use panels only if you need the simpler fallback layout behavior.",
+      "category": "reranking",
+      "related": [],
+      "links": [],
+      "badges": []
+    },
+    {
+      "term": "Learning Reranker Logs Renderer",
+      "key": "LEARNING_RERANKER_LOGS_RENDERER",
+      "definition": "Preferred log output renderer in Learning Reranker Studio. Options: json or xterm. Default: xterm.",
+      "category": "reranking",
+      "related": [],
+      "links": [],
+      "badges": []
     },
     {
       "term": "Learning Reranker LoRA Alpha",
@@ -4047,6 +4074,51 @@
       ]
     },
     {
+      "term": "Learning Reranker Show Setup Row",
+      "key": "LEARNING_RERANKER_SHOW_SETUP_ROW",
+      "definition": "Show or hide the setup summary row above the studio layout (1=show, 0=collapsed). Default: 0. Range: 0-1.",
+      "category": "reranking",
+      "related": [],
+      "links": [],
+      "badges": []
+    },
+    {
+      "term": "Learning Reranker Studio Bottom Panel %",
+      "key": "LEARNING_RERANKER_STUDIO_BOTTOM_PANEL_PCT",
+      "definition": "Default bottom dock height percentage for Learning Reranker Studio. Default: 28. Range: 18-45.",
+      "category": "reranking",
+      "related": [],
+      "links": [],
+      "badges": []
+    },
+    {
+      "term": "Learning Reranker Studio Left Panel %",
+      "key": "LEARNING_RERANKER_STUDIO_LEFT_PANEL_PCT",
+      "definition": "Default left dock width percentage for Learning Reranker Studio. Default: 20. Range: 15-35.",
+      "category": "reranking",
+      "related": [],
+      "links": [],
+      "badges": []
+    },
+    {
+      "term": "Learning Reranker Studio Right Panel %",
+      "key": "LEARNING_RERANKER_STUDIO_RIGHT_PANEL_PCT",
+      "definition": "Default right dock width percentage for Learning Reranker Studio. Default: 30. Range: 20-45.",
+      "category": "reranking",
+      "related": [],
+      "links": [],
+      "badges": []
+    },
+    {
+      "term": "Learning Reranker Telemetry Interval Steps",
+      "key": "LEARNING_RERANKER_TELEMETRY_INTERVAL_STEPS",
+      "definition": "Emit trainer telemetry every N optimizer steps (plus first and final events). Default: 2. Range: 1-20. Lower values give smoother live charts but increase event volume.",
+      "category": "reranking",
+      "related": [],
+      "links": [],
+      "badges": []
+    },
+    {
       "term": "Learning Reranker Idle Unload",
       "key": "LEARNING_RERANKER_UNLOAD_AFTER_SEC",
       "definition": "If >0, unload the MLX Qwen3 reranker model from memory after this many seconds of inactivity. Set to 0 to keep the model resident (faster first rerank, higher memory use).",
@@ -4066,6 +4138,277 @@
           "class": "warn"
         }
       ]
+    },
+    {
+      "term": "Learning Reranker Visualizer: Best So Far",
+      "key": "LEARNING_RERANKER_VISUALIZER_BEST_SO_FAR",
+      "definition": "<span class=\"tt-strong\">What the best chip means</span><br>The <span class=\"mono\">best=...</span> chip is the running minimum of <span class=\"mono\">metrics.train_loss</span> from progress events. It is intentionally computed from the training metric stream, not from projected 2D telemetry coordinates.<br><br><span class=\"tt-strong\">Why this is the right instrumentation</span><br>The projection stream exists for visualization and can be sampled, tailed, and transformed for readability. The progress metric stream is the authoritative source for optimization progress. Tracking \"best so far\" from that stream prevents endpoint bias and answers \"what is the best training state we observed so far?\"<br><br><span class=\"tt-strong\">Operational interpretation</span><br>If <span class=\"mono\">last</span> is worse than <span class=\"mono\">best</span>, the run ended after its minimum. This is normal for stochastic optimization and does not imply the run failed. It means the final sample is not the best checkpoint candidate.<br><br><span class=\"tt-strong\">Code path</span><br><span class=\"mono\">web/src/components/RerankerTraining/TrainingStudio.tsx -> progress events -> metrics.train_loss -> running min</span>",
+      "category": "reranking",
+      "related": [
+        "LEARNING_RERANKER_VISUALIZER_LAST_STEP",
+        "LEARNING_RERANKER_VISUALIZER_COLOR_MODE",
+        "RERANKER_TRAIN_RECOMMENDED_METRIC"
+      ],
+      "links": [
+        {
+          "text": "Hugging Face Trainer (best model + checkpoint selection)",
+          "href": "https://huggingface.co/docs/transformers/main_classes/trainer"
+        },
+        {
+          "text": "Keras ModelCheckpoint",
+          "href": "https://keras.io/api/callbacks/model_checkpoint/"
+        },
+        {
+          "text": "Keras EarlyStopping (restore_best_weights)",
+          "href": "https://keras.io/api/callbacks/early_stopping/"
+        },
+        {
+          "text": "TensorBoard Scalars (tracking noisy metrics over training)",
+          "href": "https://www.tensorflow.org/tensorboard/scalars_and_keras"
+        }
+      ],
+      "badges": [
+        {
+          "text": "Best checkpoint signal",
+          "class": "info"
+        },
+        {
+          "text": "Not endpoint-biased",
+          "class": "info"
+        }
+      ]
+    },
+    {
+      "term": "Learning Reranker Visualizer: Color Mode",
+      "key": "LEARNING_RERANKER_VISUALIZER_COLOR_MODE",
+      "definition": "<span class=\"tt-strong\">What this control changes</span><br>Color mode changes only <span class=\"tt-strong\">hue/intensity encoding</span> for the trajectory points. It does <span class=\"tt-strong\">not</span> change x/y projection and it does <span class=\"tt-strong\">not</span> change terrain height. In the code path, geometry is computed first and color is assigned later in <span class=\"mono\">projectPoints(..., intensityMode)</span>.<br><br><span class=\"tt-strong\">Mode = absolute (where am I doing well?)</span><br>Each point is colored from normalized train loss at that step. Lower loss maps toward the better/cooler side of the palette, higher loss toward the worse/warmer side. This is the easiest way to answer \"which regions of this run were strong vs weak?\" In this implementation, color is mostly loss with a smaller gradient-norm blend so structure remains visible when loss is locally flat.<br><br><span class=\"tt-strong\">Mode = delta (am I improving right now?)</span><br>Each point is colored from first difference versus the previous point: <span class=\"mono\">prev_loss - current_loss</span>. Positive delta means local improvement; negative delta means local regression. This surfaces \"learning\" vs \"thrashing\" even when absolute loss is jagged because of mini-batch stochasticity.<br><br><span class=\"tt-strong\">Interpretation rule</span><br>Use <span class=\"mono\">absolute</span> when comparing quality across run regions. Use <span class=\"mono\">delta</span> when diagnosing local optimizer behavior, schedule transitions, or instability.<br><br><span class=\"tt-strong\">Code path</span><br><span class=\"mono\">web/src/components/RerankerTraining/NeuralVisualizerCore.tsx -> projectPoints(... intensityMode ...)</span>",
+      "category": "reranking",
+      "related": [
+        "LEARNING_RERANKER_VISUALIZER_BEST_SO_FAR",
+        "LEARNING_RERANKER_VISUALIZER_LAST_STEP",
+        "LEARNING_RERANKER_VISUALIZER_TAIL_SECONDS"
+      ],
+      "links": [
+        {
+          "text": "Matplotlib: Choosing Colormaps",
+          "href": "https://matplotlib.org/stable/users/explain/colors/colormaps.html"
+        },
+        {
+          "text": "Kenneth Moreland: Diverging Color Maps for Scientific Visualization",
+          "href": "https://www.kennethmoreland.com/color-maps/"
+        },
+        {
+          "text": "ColorBrewer 2.0",
+          "href": "https://colorbrewer2.org/"
+        },
+        {
+          "text": "Deep Learning Book - Optimization for Training Deep Models",
+          "href": "https://www.deeplearningbook.org/contents/optimization.html"
+        },
+        {
+          "text": "SGDR: Stochastic Gradient Descent with Warm Restarts",
+          "href": "https://arxiv.org/abs/1608.03983"
+        }
+      ],
+      "badges": [
+        {
+          "text": "Visualizer semantics",
+          "class": "info"
+        },
+        {
+          "text": "Telemetry-driven",
+          "class": "info"
+        }
+      ]
+    },
+    {
+      "term": "Learning Reranker Visualizer: Last Step",
+      "key": "LEARNING_RERANKER_VISUALIZER_LAST_STEP",
+      "definition": "<span class=\"tt-strong\">What the last chip means</span><br>The <span class=\"mono\">last=...</span> chip is the most recent observed training loss sample. It is a snapshot of where the run ended, not a guarantee of best quality.<br><br><span class=\"tt-strong\">Why last can be worse than best</span><br>Mini-batch SGD is stochastic, so per-step loss is noisy and non-monotonic. Learning-rate schedules can also change local dynamics (for example warmup, cosine phases, or restart boundaries). Because of this, the terminal sample can sit above the minimum even in healthy runs.<br><br><span class=\"tt-strong\">How to read best vs last together</span><br>Treat <span class=\"mono\">best</span> as the optimization floor reached during the run, and <span class=\"mono\">last</span> as the endpoint state at stop time. The gap between them is a diagnostic signal for late-stage instability, schedule transitions, or insufficient checkpoint selection policy.<br><br><span class=\"tt-strong\">Practical rule</span><br>Do not evaluate run quality from endpoint alone. Compare both chips and use checkpointing policy that can restore the best observed state when needed.",
+      "category": "reranking",
+      "related": [
+        "LEARNING_RERANKER_VISUALIZER_BEST_SO_FAR",
+        "LEARNING_RERANKER_VISUALIZER_COLOR_MODE"
+      ],
+      "links": [
+        {
+          "text": "Deep Learning Book - Stochastic Optimization",
+          "href": "https://www.deeplearningbook.org/contents/optimization.html"
+        },
+        {
+          "text": "PyTorch: How to adjust learning rate",
+          "href": "https://pytorch.org/docs/stable/optim.html#how-to-adjust-learning-rate"
+        },
+        {
+          "text": "SGDR: Stochastic Gradient Descent with Warm Restarts",
+          "href": "https://arxiv.org/abs/1608.03983"
+        },
+        {
+          "text": "On the Generalization Benefit of Noise in SGD",
+          "href": "https://arxiv.org/abs/2006.15081"
+        }
+      ],
+      "badges": [
+        {
+          "text": "Endpoint metric",
+          "class": "warn"
+        },
+        {
+          "text": "Can regress after best",
+          "class": "warn"
+        }
+      ]
+    },
+    {
+      "term": "Learning Reranker Visualizer: Live Mode",
+      "key": "LEARNING_RERANKER_VISUALIZER_LIVE_MODE",
+      "definition": "<span class=\"tt-strong\">What Live does</span><br>When Live is enabled, the visualizer follows the newest telemetry point and keeps the camera timeline anchored to \"now\". In this mode, the path can be intentionally tailed (recent segment emphasized) to keep motion readable while updates stream in.<br><br><span class=\"tt-strong\">Why the beginning can appear to disappear</span><br>If the start of the run seems gone, that is usually the configured tail behavior, not data loss. The renderer still has history; Live mode is choosing to show a recent moving window for clarity.<br><br><span class=\"tt-strong\">How to inspect full history</span><br>Disable Live or use the scrub slider. In non-live scrubbing/playback, the view shows full history up to the selected index instead of only the live tail.",
+      "category": "reranking",
+      "related": [
+        "LEARNING_RERANKER_VISUALIZER_TAIL_SECONDS",
+        "LEARNING_RERANKER_VISUALIZER_SCRUB_HISTORY"
+      ],
+      "links": [
+        {
+          "text": "TensorBoard Scalars (interpreting live, noisy curves)",
+          "href": "https://www.tensorflow.org/tensorboard/scalars_and_keras"
+        },
+        {
+          "text": "Matplotlib Animation Blitting (real-time rendering tradeoffs)",
+          "href": "https://matplotlib.org/stable/users/explain/animations/blitting.html"
+        }
+      ],
+      "badges": [
+        {
+          "text": "Playback mode",
+          "class": "info"
+        },
+        {
+          "text": "Tail-aware",
+          "class": "info"
+        }
+      ]
+    },
+    {
+      "term": "Learning Reranker Visualizer Max Points",
+      "key": "LEARNING_RERANKER_VISUALIZER_MAX_POINTS",
+      "definition": "Maximum telemetry points retained for Neural Visualizer history. Default: 10000. Range: 1000-50000. Higher values preserve more history at higher memory cost.",
+      "category": "reranking",
+      "related": [],
+      "links": [],
+      "badges": []
+    },
+    {
+      "term": "Learning Reranker Visualizer Motion Intensity",
+      "key": "LEARNING_RERANKER_VISUALIZER_MOTION_INTENSITY",
+      "definition": "Global motion multiplier for Neural Visualizer effects. Default: 1.0. Range: 0.0-2.0. Lower values produce calmer motion.",
+      "category": "reranking",
+      "related": [],
+      "links": [],
+      "badges": []
+    },
+    {
+      "term": "Learning Reranker Visualizer Quality",
+      "key": "LEARNING_RERANKER_VISUALIZER_QUALITY",
+      "definition": "Neural Visualizer quality tier. Options: balanced, cinematic, ultra. Default: cinematic. Higher tiers look better but use more GPU/CPU.",
+      "category": "reranking",
+      "related": [],
+      "links": [],
+      "badges": []
+    },
+    {
+      "term": "Learning Reranker Visualizer Reduce Motion",
+      "key": "LEARNING_RERANKER_VISUALIZER_REDUCE_MOTION",
+      "definition": "Accessibility/performance switch to reduce visualizer motion (1=reduce, 0=full motion). Default: 0. Range: 0-1.",
+      "category": "reranking",
+      "related": [],
+      "links": [],
+      "badges": []
+    },
+    {
+      "term": "Learning Reranker Visualizer Renderer",
+      "key": "LEARNING_RERANKER_VISUALIZER_RENDERER",
+      "definition": "Preferred renderer backend for the Neural Visualizer. Options: auto, webgpu, webgl2, canvas2d. Default: auto.",
+      "category": "reranking",
+      "related": [],
+      "links": [],
+      "badges": []
+    },
+    {
+      "term": "Learning Reranker Visualizer: Scrub History",
+      "key": "LEARNING_RERANKER_VISUALIZER_SCRUB_HISTORY",
+      "definition": "<span class=\"tt-strong\">What the history scrubber controls</span><br>The scrubber sets the visible timeline cutoff index. Moving it lets you inspect earlier optimization states step-by-step, including transitions where loss, gradient norm, or direction changed.<br><br><span class=\"tt-strong\">Interaction with Live mode</span><br>Dragging the scrubber exits Live and freezes the timeline at your selected index. This is the fastest way to audit early-run behavior that may be hidden by live-tail rendering.<br><br><span class=\"tt-strong\">Recommended workflow</span><br>Use Live for situational awareness during active training. Use scrubbing for forensic analysis after a run, especially when best and last diverge.",
+      "category": "reranking",
+      "related": [
+        "LEARNING_RERANKER_VISUALIZER_LIVE_MODE",
+        "LEARNING_RERANKER_VISUALIZER_BEST_SO_FAR",
+        "LEARNING_RERANKER_VISUALIZER_LAST_STEP"
+      ],
+      "links": [
+        {
+          "text": "TensorBoard Scalars (timeline inspection patterns)",
+          "href": "https://www.tensorflow.org/tensorboard/scalars_and_keras"
+        },
+        {
+          "text": "Matplotlib Animation and event loops",
+          "href": "https://matplotlib.org/stable/users/explain/figure/interactive_guide.html"
+        }
+      ],
+      "badges": [
+        {
+          "text": "Timeline forensics",
+          "class": "info"
+        }
+      ]
+    },
+    {
+      "term": "Learning Reranker Visualizer Show Vector Field",
+      "key": "LEARNING_RERANKER_VISUALIZER_SHOW_VECTOR_FIELD",
+      "definition": "Render animated vector-field accents in Neural Visualizer (1=on, 0=off). Default: 1. Range: 0-1.",
+      "category": "reranking",
+      "related": [],
+      "links": [],
+      "badges": []
+    },
+    {
+      "term": "Learning Reranker Visualizer: Tail Seconds",
+      "key": "LEARNING_RERANKER_VISUALIZER_TAIL_SECONDS",
+      "definition": "<span class=\"tt-strong\">What this setting does</span><br>Controls the temporal tail length used while Live mode is on. The visualizer shows the most recent portion of the trajectory to keep motion legible and avoid overdraw in long runs.<br><br><span class=\"tt-strong\">Implementation detail</span><br>Tail seconds are converted to a displayed point count using an internal sampling heuristic (approximately <span class=\"mono\">tail_seconds * 14</span>, then clamped to a safety range). This is a rendering policy, not a training metric policy.<br><br><span class=\"tt-strong\">Troubleshooting \"snake tail\" behavior</span><br>If the run start appears to vanish, increase this value, disable Live, or scrub manually. In scrubbing mode, full history up to the selected index is shown.<br><br><span class=\"tt-strong\">Tuning guidance</span><br>Lower values emphasize short-term dynamics and make rapid motion cleaner. Higher values preserve more context but can look visually dense on noisy runs.",
+      "category": "reranking",
+      "related": [
+        "LEARNING_RERANKER_VISUALIZER_LIVE_MODE",
+        "LEARNING_RERANKER_VISUALIZER_SCRUB_HISTORY",
+        "LEARNING_RERANKER_VISUALIZER_COLOR_MODE"
+      ],
+      "links": [
+        {
+          "text": "Matplotlib Animation Blitting (performance/readability tradeoffs)",
+          "href": "https://matplotlib.org/stable/users/explain/animations/blitting.html"
+        },
+        {
+          "text": "TensorBoard Scalars (handling long, noisy trajectories)",
+          "href": "https://www.tensorflow.org/tensorboard/scalars_and_keras"
+        }
+      ],
+      "badges": [
+        {
+          "text": "Live playback only",
+          "class": "warn"
+        },
+        {
+          "text": "Visualization policy",
+          "class": "info"
+        }
+      ]
+    },
+    {
+      "term": "Learning Reranker Visualizer Target FPS",
+      "key": "LEARNING_RERANKER_VISUALIZER_TARGET_FPS",
+      "definition": "Target frame rate for Neural Visualizer animation. Default: 60. Range: 30-144. Lower values reduce GPU load.",
+      "category": "reranking",
+      "related": [],
+      "links": [],
+      "badges": []
     },
     {
       "term": "Log Level",
@@ -4871,6 +5214,114 @@
       "badges": []
     },
     {
+      "term": "RAGWELD_AGENT_BACKEND",
+      "key": "RAGWELD_AGENT_BACKEND",
+      "definition": "No detailed tooltip available yet.",
+      "category": "general",
+      "related": [],
+      "links": [],
+      "badges": []
+    },
+    {
+      "term": "RAGWELD_AGENT_BASE_MODEL",
+      "key": "RAGWELD_AGENT_BASE_MODEL",
+      "definition": "No detailed tooltip available yet.",
+      "category": "general",
+      "related": [],
+      "links": [],
+      "badges": []
+    },
+    {
+      "term": "RAGWELD_AGENT_GRAD_ACCUM_STEPS",
+      "key": "RAGWELD_AGENT_GRAD_ACCUM_STEPS",
+      "definition": "No detailed tooltip available yet.",
+      "category": "general",
+      "related": [],
+      "links": [],
+      "badges": []
+    },
+    {
+      "term": "RAGWELD_AGENT_LORA_ALPHA",
+      "key": "RAGWELD_AGENT_LORA_ALPHA",
+      "definition": "No detailed tooltip available yet.",
+      "category": "general",
+      "related": [],
+      "links": [],
+      "badges": []
+    },
+    {
+      "term": "RAGWELD_AGENT_LORA_DROPOUT",
+      "key": "RAGWELD_AGENT_LORA_DROPOUT",
+      "definition": "No detailed tooltip available yet.",
+      "category": "general",
+      "related": [],
+      "links": [],
+      "badges": []
+    },
+    {
+      "term": "RAGWELD_AGENT_LORA_RANK",
+      "key": "RAGWELD_AGENT_LORA_RANK",
+      "definition": "No detailed tooltip available yet.",
+      "category": "general",
+      "related": [],
+      "links": [],
+      "badges": []
+    },
+    {
+      "term": "RAGWELD_AGENT_LORA_TARGET_MODULES",
+      "key": "RAGWELD_AGENT_LORA_TARGET_MODULES",
+      "definition": "No detailed tooltip available yet.",
+      "category": "general",
+      "related": [],
+      "links": [],
+      "badges": []
+    },
+    {
+      "term": "RAGWELD_AGENT_MODEL_PATH",
+      "key": "RAGWELD_AGENT_MODEL_PATH",
+      "definition": "No detailed tooltip available yet.",
+      "category": "general",
+      "related": [],
+      "links": [],
+      "badges": []
+    },
+    {
+      "term": "RAGWELD_AGENT_PROMOTE_EPSILON",
+      "key": "RAGWELD_AGENT_PROMOTE_EPSILON",
+      "definition": "No detailed tooltip available yet.",
+      "category": "general",
+      "related": [],
+      "links": [],
+      "badges": []
+    },
+    {
+      "term": "RAGWELD_AGENT_PROMOTE_IF_IMPROVES",
+      "key": "RAGWELD_AGENT_PROMOTE_IF_IMPROVES",
+      "definition": "No detailed tooltip available yet.",
+      "category": "general",
+      "related": [],
+      "links": [],
+      "badges": []
+    },
+    {
+      "term": "RAGWELD_AGENT_TELEMETRY_INTERVAL_STEPS",
+      "key": "RAGWELD_AGENT_TELEMETRY_INTERVAL_STEPS",
+      "definition": "No detailed tooltip available yet.",
+      "category": "general",
+      "related": [],
+      "links": [],
+      "badges": []
+    },
+    {
+      "term": "RAGWELD_AGENT_TRAIN_DATASET_PATH",
+      "key": "RAGWELD_AGENT_TRAIN_DATASET_PATH",
+      "definition": "No detailed tooltip available yet.",
+      "category": "general",
+      "related": [],
+      "links": [],
+      "badges": []
+    },
+    {
       "term": "RAG Out Base",
       "key": "RAG_OUT_BASE",
       "definition": "Optional override for retrieval output directory. If empty, OUT_DIR_BASE is used. Use this only when you need retrieval artifacts separated from other output paths.",
@@ -5081,10 +5532,6 @@
         {
           "text": "Cohere Rerank",
           "href": "https://docs.cohere.com/docs/rerank"
-        },
-        {
-          "text": "Sentence‑Transformers (Cross‑Encoders)",
-          "href": "https://www.sbert.net/examples/training/cross-encoder/README.html"
         }
       ],
       "badges": [
@@ -5138,7 +5585,7 @@
     {
       "term": "Cloud Reranker Top-N",
       "key": "RERANKER_CLOUD_TOP_N",
-      "definition": "Maximum number of candidates to send to cloud reranking APIs (Cohere, Voyage, Jina). Cloud rerankers have rate limits and per-request pricing, so this setting is separate from the local reranker top-N. Lower values reduce API costs and stay within rate limits. Higher values improve recall but increase costs per query.\n\n• Typical range: 20-100 candidates\n• Cost-conscious: 20-30 for budget limits\n• Balanced default: 50 for most workloads\n• High recall: 80-100 for exploratory queries\n• Note: Cloud reranking is billed per candidate, so monitor costs",
+      "definition": "Maximum number of candidates to send to cloud reranking APIs (Cohere, Voyage, Jina). Cloud rerankers have rate limits and per-request pricing, so this setting is separate from the learning reranker top-N. Lower values reduce API costs and stay within rate limits. Higher values improve recall but increase costs per query.\n\n• Typical range: 20-100 candidates\n• Cost-conscious: 20-30 for budget limits\n• Balanced default: 50 for most workloads\n• High recall: 80-100 for exploratory queries\n• Note: Cloud reranking is billed per candidate, so monitor costs",
       "category": "reranking",
       "related": [],
       "links": [
@@ -5163,79 +5610,16 @@
       ]
     },
     {
-      "term": "Local Reranker Model",
-      "key": "RERANKER_LOCAL_MODEL",
-      "definition": "When RERANKER_MODE=local, specifies the model to load. Can be:\n• A HuggingFace model ID (e.g., BAAI/bge-reranker-v2-m3)\n• A local filesystem path (e.g., /models/my-reranker)\n• Any sentence-transformers compatible model\n\nPopular options: BAAI/bge-reranker-v2-m3 (high quality), jinaai/jina-reranker-v1-base-en, cross-encoder/ms-marco-MiniLM-L-12-v2 (fast).",
-      "category": "reranking",
-      "related": [],
-      "links": [
-        {
-          "text": "BGE Reranker",
-          "href": "https://huggingface.co/BAAI/bge-reranker-v2-m3"
-        },
-        {
-          "text": "Jina Reranker",
-          "href": "https://huggingface.co/jinaai/jina-reranker-v1-base-en"
-        },
-        {
-          "text": "SBERT Cross-Encoders",
-          "href": "https://www.sbert.net/docs/cross_encoder/pretrained_models.html"
-        }
-      ],
-      "badges": [
-        {
-          "text": "Free (no API costs)",
-          "class": "info"
-        },
-        {
-          "text": "Requires download",
-          "class": "warn"
-        }
-      ]
-    },
-    {
       "term": "Reranker Mode",
       "key": "RERANKER_MODE",
-      "definition": "Controls which reranking approach is used. Four options:\n\n• none: Disabled—BM25 + vector fusion only (no reranker scoring).\n• local: A local HuggingFace reranker you provide (BGE, Jina, etc.).\n• learning: A trainable learning reranker that improves with your mined triplets. Uses MLX Qwen3 LoRA on Apple Silicon when available, otherwise falls back to transformers.\n• cloud: External API reranking (Cohere, Voyage, Jina).\n\nRecommended: Start with \"learning\" if you want the system to adapt over time; use \"cloud\" for managed quality if you have an API budget.",
+      "definition": "Controls which reranking approach is used.\n\n• none: Disabled—BM25 + vector fusion only (no reranker scoring).\n• learning: Trainable learning reranker (MLX Qwen3 LoRA).\n• cloud: External API reranking (Cohere, Voyage, Jina).\n\nLegacy values:\n• local / hf: normalized to \"learning\" for backward compatibility.\n\nRecommended: Start with \"learning\" if you want the system to adapt over time; use \"cloud\" for managed quality if you have an API budget.",
       "category": "reranking",
       "related": [],
-      "links": [
-        {
-          "text": "Cross-Encoder Overview",
-          "href": "https://www.sbert.net/examples/applications/cross-encoder/README.html"
-        }
-      ],
+      "links": [],
       "badges": [
         {
           "text": "Controls reranking behavior",
           "class": "info"
-        }
-      ]
-    },
-    {
-      "term": "Local Reranker (HF)",
-      "key": "RERANKER_MODEL",
-      "definition": "HuggingFace model name or path for local reranking when RERANK_BACKEND=local or hf. Common options: \"BAAI/bge-reranker-v2-m3\" (strong quality/speed), \"jinaai/jina-reranker-v1-base-en\" (solid multilingual behavior), or a local path. Local reranking is free but slower than Cohere. Ensure model weights are available before use.",
-      "category": "reranking",
-      "related": [],
-      "links": [
-        {
-          "text": "Cross-Encoder Models",
-          "href": "https://www.sbert.net/docs/cross_encoder/pretrained_models.html"
-        },
-        {
-          "text": "HuggingFace Model Hub",
-          "href": "https://huggingface.co/models?pipeline_tag=text-classification&sort=downloads"
-        }
-      ],
-      "badges": [
-        {
-          "text": "Free (no API costs)",
-          "class": "info"
-        },
-        {
-          "text": "Requires download",
-          "class": "warn"
         }
       ]
     },
@@ -5296,16 +5680,7 @@
       "definition": "Number of full passes over the training triplets for the learning reranker. More epochs can improve quality but risk overfitting when data is small. Start with 1–2 and increase as your mined dataset grows.",
       "category": "reranking",
       "related": [],
-      "links": [
-        {
-          "text": "Fine-tuning Cross-Encoders",
-          "href": "https://www.sbert.net/examples/training/cross-encoder/README.html"
-        },
-        {
-          "text": "InputExample format",
-          "href": "https://www.sbert.net/docs/package_reference/cross_encoder.html#inputexample"
-        }
-      ],
+      "links": [],
       "badges": [
         {
           "text": "Quality vs overfit",
@@ -5325,16 +5700,8 @@
           "href": "https://machinelearningmastery.com/understand-the-dynamics-of-learning-rate-on-deep-learning-neural-networks/"
         },
         {
-          "text": "Fine-tuning Cross-Encoders",
-          "href": "https://www.sbert.net/examples/training/cross-encoder/README.html"
-        },
-        {
           "text": "Learning Rate Schedules",
           "href": "https://huggingface.co/docs/transformers/main_classes/optimizer_schedules"
-        },
-        {
-          "text": "Cross-Encoder Training Guide",
-          "href": "https://arxiv.org/abs/1908.10084"
         }
       ],
       "badges": [
@@ -5358,10 +5725,6 @@
         {
           "text": "Tokenization & Truncation",
           "href": "https://huggingface.co/docs/tokenizers/index"
-        },
-        {
-          "text": "Cross-Encoder Training",
-          "href": "https://www.sbert.net/examples/training/cross-encoder/README.html"
         }
       ],
       "badges": [
@@ -5447,10 +5810,6 @@
           "href": "https://arxiv.org/abs/1706.02677"
         },
         {
-          "text": "Fine-tuning Best Practices",
-          "href": "https://www.sbert.net/examples/training/cross-encoder/README.html"
-        },
-        {
           "text": "Scheduler Visualization",
           "href": "https://huggingface.co/docs/transformers/main_classes/optimizer_schedules"
         }
@@ -5469,7 +5828,7 @@
     {
       "term": "Rerank Backend",
       "key": "RERANK_BACKEND",
-      "definition": "Reranks fused candidates for better ordering.\n• cohere — best quality, paid (COHERE_API_KEY)\n• local/hf — no cost (ensure model installed)\nDisable only to save cost.",
+      "definition": "Legacy alias for `reranking.reranker_mode`. Reranks fused candidates for better ordering.\n• cloud — paid API reranking (configure provider/model + API key)\n• learning — MLX Qwen3 learning reranker\n• none/off — disables reranking\n\nLegacy values:\n• local/hf — normalized to learning for backward compatibility.",
       "category": "reranking",
       "related": [],
       "links": [
@@ -6041,37 +6400,6 @@
       "badges": []
     },
     {
-      "term": "Transformers: trust_remote_code",
-      "key": "TRANSFORMERS_TRUST_REMOTE_CODE",
-      "definition": "Allow Hugging Face models that require remote custom Python code (0/1). Default: 1. Set to 0 in strict security environments; use 1 only for trusted model sources.",
-      "category": "general",
-      "related": [],
-      "links": [
-        {
-          "text": "Security Notes",
-          "href": "https://huggingface.co/docs/transformers/installation#security-notes"
-        },
-        {
-          "text": "Custom Code in Models",
-          "href": "https://huggingface.co/docs/transformers/custom_models"
-        },
-        {
-          "text": "Model Security",
-          "href": "https://huggingface.co/docs/hub/security"
-        }
-      ],
-      "badges": [
-        {
-          "text": "Security risk",
-          "class": "warn"
-        },
-        {
-          "text": "Only for trusted models",
-          "class": "warn"
-        }
-      ]
-    },
-    {
       "term": "Edition",
       "key": "TRIBRID_EDITION",
       "definition": "Product edition identifier for feature gating in multi-tier deployments. Values: \"oss\" (open source, all community features), \"pro\" (professional tier with advanced features), \"enterprise\" (full feature set with support). This flag enables/disables certain UI elements and API endpoints based on licensing. Most users should leave this as \"oss\".",
@@ -6116,14 +6444,10 @@
     {
       "term": "Reranker Blend Alpha",
       "key": "TRIBRID_RERANKER_ALPHA",
-      "definition": "Weight of the cross-encoder reranker score during final fusion. Higher alpha prioritizes semantic pairwise scoring; lower alpha relies more on initial hybrid retrieval (BM25 + dense). Typical range 0.6–0.8. Increasing alpha can improve ordering for nuanced queries but may surface false positives if your model is undertrained.",
+      "definition": "Weight of the learning reranker score during final fusion. Higher alpha prioritizes pairwise reranker scoring; lower alpha relies more on initial hybrid retrieval (BM25 + dense). Typical range 0.6–0.8. Increasing alpha can improve ordering for nuanced queries but may surface false positives if your reranker is undertrained.",
       "category": "general",
       "related": [],
       "links": [
-        {
-          "text": "Cross-Encoder Overview (SBERT)",
-          "href": "https://www.sbert.net/examples/applications/cross-encoder/README.html"
-        },
         {
           "text": "Reciprocal Rank Fusion (RRF)",
           "href": "https://plg.uwaterloo.ca/~gvcormac/cormacksigir09-rrf.pdf"
@@ -6222,7 +6546,7 @@
     {
       "term": "Reranker Model Path",
       "key": "TRIBRID_RERANKER_MODEL_PATH",
-      "definition": "Filesystem path to the active learning reranker artifact (relative paths recommended). In transformers mode this is a HuggingFace/SentenceTransformers model directory. In MLX Qwen3 learning mode this is the active LoRA adapter directory. The service loads from this path on startup or when reloaded.",
+      "definition": "Filesystem path to the active learning reranker artifact (relative paths recommended). For the MLX Qwen3 learning reranker this is the active LoRA adapter directory. The service loads from this path on startup or when reloaded.",
       "category": "general",
       "related": [],
       "links": [
@@ -6236,7 +6560,7 @@
     {
       "term": "Reranker Auto-Reload",
       "key": "TRIBRID_RERANKER_RELOAD_ON_CHANGE",
-      "definition": "Automatically reload the local reranker model when RERANKER_MODEL path changes during runtime (1=yes, 0=no). When enabled, the system detects model path changes and hot-reloads the new model without server restart. Useful during development when switching between reranker models or testing fine-tuned versions. In production, disable to avoid unexpected reloads and ensure stability. Model reloading adds 2-5 seconds of latency on first query after change.\n\nRecommended: 1 for development/testing, 0 for production deployments.",
+      "definition": "Automatically reload the learning reranker artifact when `training.tribrid_reranker_model_path` changes during runtime (1=yes, 0=no). When enabled, the system detects adapter directory changes and hot-reloads the new weights without a server restart. Useful during development and in Training Studio workflows when promoting or swapping artifacts.\n\nRecommended: 1 for development/testing, 0 for production deployments.",
       "category": "general",
       "related": [],
       "links": [
@@ -6259,21 +6583,13 @@
     {
       "term": "Reranker Top-N",
       "key": "TRIBRID_RERANKER_TOPN",
-      "definition": "Maximum number of candidates to pass through the cross-encoder reranker stage during retrieval. After hybrid fusion (BM25 + dense), the top-N candidates are reranked using pairwise semantic scoring before final selection. Higher values (50-100) improve recall by considering more candidates but increase reranking latency and compute cost quadratically. Lower values (20-30) are faster but may miss relevant results that scored poorly in initial retrieval but would rank highly after reranking.\n\nSweet spot: 40-60 for most use cases. Use 60-80 for complex queries where initial ranking may be noisy (e.g., ambiguous natural language queries like \"where do we handle payments?\"). Use 20-40 for tight latency budgets or when initial hybrid retrieval is already high-quality. Reranking cost scales with top-N × query length, so monitor inference time when tuning this parameter.\n\nNote: MLX Qwen3 reranking can be significantly slower per candidate than smaller cross-encoders. If you care about interactive latency, start with 20–30 and measure.\n\nSymptom of too low: Relevant results appear when you increase top-K but not with default settings. Symptom of too high: Reranking takes >500ms and retrieval latency dominates response time. Most production systems use 40-50 as a balanced default.\n\n• Typical range: 20-80 candidates\n• Balanced default: 40-50 for most workloads\n• High recall: 60-80 for exploratory queries\n• Low latency: 20-30 for speed-critical apps\n• Reranking cost: O(top-N × tokens) per query",
+      "definition": "Maximum number of candidates to pass through the reranker stage during retrieval. After hybrid fusion (BM25 + dense), the top-N candidates are reranked using pairwise scoring before final selection. Higher values (50-100) can improve quality by considering more candidates but increase reranking latency and compute cost. Lower values (20-30) are faster but may miss items that scored poorly in initial retrieval but would rank highly after reranking.\n\nSweet spot: 40-60 for most use cases. Use 60-80 for complex queries where initial ranking may be noisy. Use 20-40 for tight latency budgets or when initial hybrid retrieval is already high-quality.\n\nNote: MLX Qwen3 reranking can be significantly slower per candidate than smaller rerankers. If you care about interactive latency, start with 20–30 and measure.\n\n• Typical range: 20-80 candidates\n• Balanced default: 40-50 for most workloads\n• High recall: 60-80 for exploratory queries\n• Low latency: 20-30 for speed-critical apps",
       "category": "general",
       "related": [],
       "links": [
         {
-          "text": "Cross-Encoder Reranking",
-          "href": "https://www.sbert.net/examples/applications/cross-encoder/README.html"
-        },
-        {
           "text": "Reranking in RAG",
           "href": "https://arxiv.org/abs/2407.21059"
-        },
-        {
-          "text": "SBERT Reranking Docs",
-          "href": "https://www.sbert.net/docs/cross_encoder/pretrained_models.html"
         },
         {
           "text": "Hybrid Search + Rerank",
@@ -6315,10 +6631,6 @@
         {
           "text": "Triplet Loss",
           "href": "https://en.wikipedia.org/wiki/Triplet_loss"
-        },
-        {
-          "text": "SBERT Training Data",
-          "href": "https://www.sbert.net/examples/training/cross-encoder/README.html"
         }
       ],
       "badges": []
@@ -6341,10 +6653,6 @@
         {
           "text": "Triplet Mining (ACL 2025)",
           "href": "https://aclanthology.org/2025.acl-industry.72.pdf"
-        },
-        {
-          "text": "Learning to Rank with Negatives",
-          "href": "https://www.sbert.net/examples/training/cross-encoder/README.html"
         }
       ],
       "badges": [
@@ -6414,7 +6722,7 @@
     {
       "term": "Reranker Blend Alpha",
       "key": "TriBridRAG_RERANKER_ALPHA",
-      "definition": "Weight of the cross-encoder reranker score during final fusion. Higher alpha prioritizes semantic pairwise scoring; lower alpha relies more on initial hybrid retrieval (BM25 + dense). Typical range 0.6–0.8. Increasing alpha can improve ordering for nuanced queries but may surface false positives if your model is undertrained.",
+      "definition": "Legacy alias for TRIBRID_RERANKER_ALPHA. Weight of the learning reranker score during final fusion. Higher alpha prioritizes pairwise reranker scoring; lower alpha relies more on initial hybrid retrieval (BM25 + dense). Typical range 0.6–0.8.",
       "category": "reranking",
       "related": [],
       "links": [],
@@ -6468,7 +6776,7 @@
     {
       "term": "Reranker Auto-Reload",
       "key": "TriBridRAG_RERANKER_RELOAD_ON_CHANGE",
-      "definition": "Automatically reload the local reranker model when RERANKER_MODEL path changes during runtime (1=yes, 0=no). When enabled, the system detects model path changes and hot-reloads the new model without server restart. Useful during development when switching between reranker models or testing fine-tuned versions. In production, disable to avoid unexpected reloads and ensure stability. Model reloading adds 2-5 seconds of latency on first query after change.  Recommended: 1 for development/testing, 0",
+      "definition": "Legacy alias for TRIBRID_RERANKER_RELOAD_ON_CHANGE. Automatically reload the learning reranker artifact when `training.tribrid_reranker_model_path` changes during runtime (1=yes, 0=no).",
       "category": "reranking",
       "related": [],
       "links": [],
@@ -6477,7 +6785,7 @@
     {
       "term": "Reranker Top-N",
       "key": "TriBridRAG_RERANKER_TOPN",
-      "definition": "Maximum number of candidates to pass through the cross-encoder reranker stage during retrieval. After hybrid fusion (BM25 + dense), the top-N candidates are reranked using pairwise semantic scoring before final selection. Higher values (50-100) improve recall by considering more candidates but increase reranking latency and compute cost quadratically. Lower values (20-30) are faster but may miss relevant results that scored poorly in initial retrieval but would rank highly after reranking.  Swee",
+      "definition": "Legacy alias for TRIBRID_RERANKER_TOPN. Maximum number of candidates to pass through the reranker stage during retrieval (after hybrid fusion). Higher values can improve quality but increase latency and compute cost.",
       "category": "reranking",
       "related": [],
       "links": [],
@@ -6778,7 +7086,7 @@
     {
       "term": "Voyage Rerank Model",
       "key": "VOYAGE_RERANK_MODEL",
-      "definition": "Voyage AI reranker model name when RERANK_BACKEND=voyage. Current option: \"rerank-2\" (latest, best quality). Voyage rerankers are cross-encoders that score (query, document) pairs for precise relevance ranking. Generally more accurate than open-source rerankers but costs per API call. Use when retrieval quality is critical and budget allows. Pricing is per rerank request (typically $0.05-0.10 per 1000 candidates).\n\nRecommended: Use Voyage reranking for production systems with quality requirements; use local rerankers (RERANKER_MODEL) for development/testing.",
+      "definition": "Voyage AI reranker model name for cloud reranking when provider is Voyage. Example: \"rerank-2\". Voyage rerankers score (query, document) pairs for precise relevance ranking and cost per API call.\n\nRecommended: Use Voyage reranking for production systems with strict quality requirements; use the learning reranker to adapt to your corpus without per-request API costs.",
       "category": "reranking",
       "related": [],
       "links": [
@@ -7406,349 +7714,6 @@
       "key": "ui.chat_streaming_enabled",
       "definition": "Streams tokens as they’re generated (instead of waiting for the full answer). This makes chat feel faster and lets you start reading immediately.<br><br>If streaming fails for a provider, the chat UI falls back to a normal non-streaming request automatically.<br><br>This is about delivery, not retrieval: it doesn’t change which sources are queried or what context is selected.",
       "category": "general",
-      "related": [],
-      "links": [],
-      "badges": []
-    },
-    {
-      "term": "Learning Reranker Visualizer: Color Mode",
-      "key": "LEARNING_RERANKER_VISUALIZER_COLOR_MODE",
-      "definition": "<span class=\"tt-strong\">What this control changes</span><br>Color mode changes only <span class=\"tt-strong\">hue/intensity encoding</span> for the trajectory points. It does <span class=\"tt-strong\">not</span> change x/y projection and it does <span class=\"tt-strong\">not</span> change terrain height. In the code path, geometry is computed first and color is assigned later in <span class=\"mono\">projectPoints(..., intensityMode)</span>.<br><br><span class=\"tt-strong\">Mode = absolute (where am I doing well?)</span><br>Each point is colored from normalized train loss at that step. Lower loss maps toward the better/cooler side of the palette, higher loss toward the worse/warmer side. This is the easiest way to answer \"which regions of this run were strong vs weak?\" In this implementation, color is mostly loss with a smaller gradient-norm blend so structure remains visible when loss is locally flat.<br><br><span class=\"tt-strong\">Mode = delta (am I improving right now?)</span><br>Each point is colored from first difference versus the previous point: <span class=\"mono\">prev_loss - current_loss</span>. Positive delta means local improvement; negative delta means local regression. This surfaces \"learning\" vs \"thrashing\" even when absolute loss is jagged because of mini-batch stochasticity.<br><br><span class=\"tt-strong\">Interpretation rule</span><br>Use <span class=\"mono\">absolute</span> when comparing quality across run regions. Use <span class=\"mono\">delta</span> when diagnosing local optimizer behavior, schedule transitions, or instability.<br><br><span class=\"tt-strong\">Code path</span><br><span class=\"mono\">web/src/components/RerankerTraining/NeuralVisualizerCore.tsx -> projectPoints(... intensityMode ...)</span>",
-      "category": "reranking",
-      "related": [
-        "LEARNING_RERANKER_VISUALIZER_BEST_SO_FAR",
-        "LEARNING_RERANKER_VISUALIZER_LAST_STEP",
-        "LEARNING_RERANKER_VISUALIZER_TAIL_SECONDS"
-      ],
-      "links": [
-        {
-          "text": "Matplotlib: Choosing Colormaps",
-          "href": "https://matplotlib.org/stable/users/explain/colors/colormaps.html"
-        },
-        {
-          "text": "Kenneth Moreland: Diverging Color Maps for Scientific Visualization",
-          "href": "https://www.kennethmoreland.com/color-maps/"
-        },
-        {
-          "text": "ColorBrewer 2.0",
-          "href": "https://colorbrewer2.org/"
-        },
-        {
-          "text": "Deep Learning Book - Optimization for Training Deep Models",
-          "href": "https://www.deeplearningbook.org/contents/optimization.html"
-        },
-        {
-          "text": "SGDR: Stochastic Gradient Descent with Warm Restarts",
-          "href": "https://arxiv.org/abs/1608.03983"
-        }
-      ],
-      "badges": [
-        {
-          "text": "Visualizer semantics",
-          "class": "info"
-        },
-        {
-          "text": "Telemetry-driven",
-          "class": "info"
-        }
-      ]
-    },
-    {
-      "term": "Learning Reranker Visualizer: Best So Far",
-      "key": "LEARNING_RERANKER_VISUALIZER_BEST_SO_FAR",
-      "definition": "<span class=\"tt-strong\">What the best chip means</span><br>The <span class=\"mono\">best=...</span> chip is the running minimum of <span class=\"mono\">metrics.train_loss</span> from progress events. It is intentionally computed from the training metric stream, not from projected 2D telemetry coordinates.<br><br><span class=\"tt-strong\">Why this is the right instrumentation</span><br>The projection stream exists for visualization and can be sampled, tailed, and transformed for readability. The progress metric stream is the authoritative source for optimization progress. Tracking \"best so far\" from that stream prevents endpoint bias and answers \"what is the best training state we observed so far?\"<br><br><span class=\"tt-strong\">Operational interpretation</span><br>If <span class=\"mono\">last</span> is worse than <span class=\"mono\">best</span>, the run ended after its minimum. This is normal for stochastic optimization and does not imply the run failed. It means the final sample is not the best checkpoint candidate.<br><br><span class=\"tt-strong\">Code path</span><br><span class=\"mono\">web/src/components/RerankerTraining/TrainingStudio.tsx -> progress events -> metrics.train_loss -> running min</span>",
-      "category": "reranking",
-      "related": [
-        "LEARNING_RERANKER_VISUALIZER_LAST_STEP",
-        "LEARNING_RERANKER_VISUALIZER_COLOR_MODE",
-        "RERANKER_TRAIN_RECOMMENDED_METRIC"
-      ],
-      "links": [
-        {
-          "text": "Hugging Face Trainer (best model + checkpoint selection)",
-          "href": "https://huggingface.co/docs/transformers/main_classes/trainer"
-        },
-        {
-          "text": "Keras ModelCheckpoint",
-          "href": "https://keras.io/api/callbacks/model_checkpoint/"
-        },
-        {
-          "text": "Keras EarlyStopping (restore_best_weights)",
-          "href": "https://keras.io/api/callbacks/early_stopping/"
-        },
-        {
-          "text": "TensorBoard Scalars (tracking noisy metrics over training)",
-          "href": "https://www.tensorflow.org/tensorboard/scalars_and_keras"
-        }
-      ],
-      "badges": [
-        {
-          "text": "Best checkpoint signal",
-          "class": "info"
-        },
-        {
-          "text": "Not endpoint-biased",
-          "class": "info"
-        }
-      ]
-    },
-    {
-      "term": "Learning Reranker Visualizer: Last Step",
-      "key": "LEARNING_RERANKER_VISUALIZER_LAST_STEP",
-      "definition": "<span class=\"tt-strong\">What the last chip means</span><br>The <span class=\"mono\">last=...</span> chip is the most recent observed training loss sample. It is a snapshot of where the run ended, not a guarantee of best quality.<br><br><span class=\"tt-strong\">Why last can be worse than best</span><br>Mini-batch SGD is stochastic, so per-step loss is noisy and non-monotonic. Learning-rate schedules can also change local dynamics (for example warmup, cosine phases, or restart boundaries). Because of this, the terminal sample can sit above the minimum even in healthy runs.<br><br><span class=\"tt-strong\">How to read best vs last together</span><br>Treat <span class=\"mono\">best</span> as the optimization floor reached during the run, and <span class=\"mono\">last</span> as the endpoint state at stop time. The gap between them is a diagnostic signal for late-stage instability, schedule transitions, or insufficient checkpoint selection policy.<br><br><span class=\"tt-strong\">Practical rule</span><br>Do not evaluate run quality from endpoint alone. Compare both chips and use checkpointing policy that can restore the best observed state when needed.",
-      "category": "reranking",
-      "related": [
-        "LEARNING_RERANKER_VISUALIZER_BEST_SO_FAR",
-        "LEARNING_RERANKER_VISUALIZER_COLOR_MODE"
-      ],
-      "links": [
-        {
-          "text": "Deep Learning Book - Stochastic Optimization",
-          "href": "https://www.deeplearningbook.org/contents/optimization.html"
-        },
-        {
-          "text": "PyTorch: How to adjust learning rate",
-          "href": "https://pytorch.org/docs/stable/optim.html#how-to-adjust-learning-rate"
-        },
-        {
-          "text": "SGDR: Stochastic Gradient Descent with Warm Restarts",
-          "href": "https://arxiv.org/abs/1608.03983"
-        },
-        {
-          "text": "On the Generalization Benefit of Noise in SGD",
-          "href": "https://arxiv.org/abs/2006.15081"
-        }
-      ],
-      "badges": [
-        {
-          "text": "Endpoint metric",
-          "class": "warn"
-        },
-        {
-          "text": "Can regress after best",
-          "class": "warn"
-        }
-      ]
-    },
-    {
-      "term": "Learning Reranker Visualizer: Live Mode",
-      "key": "LEARNING_RERANKER_VISUALIZER_LIVE_MODE",
-      "definition": "<span class=\"tt-strong\">What Live does</span><br>When Live is enabled, the visualizer follows the newest telemetry point and keeps the camera timeline anchored to \"now\". In this mode, the path can be intentionally tailed (recent segment emphasized) to keep motion readable while updates stream in.<br><br><span class=\"tt-strong\">Why the beginning can appear to disappear</span><br>If the start of the run seems gone, that is usually the configured tail behavior, not data loss. The renderer still has history; Live mode is choosing to show a recent moving window for clarity.<br><br><span class=\"tt-strong\">How to inspect full history</span><br>Disable Live or use the scrub slider. In non-live scrubbing/playback, the view shows full history up to the selected index instead of only the live tail.",
-      "category": "reranking",
-      "related": [
-        "LEARNING_RERANKER_VISUALIZER_TAIL_SECONDS",
-        "LEARNING_RERANKER_VISUALIZER_SCRUB_HISTORY"
-      ],
-      "links": [
-        {
-          "text": "TensorBoard Scalars (interpreting live, noisy curves)",
-          "href": "https://www.tensorflow.org/tensorboard/scalars_and_keras"
-        },
-        {
-          "text": "Matplotlib Animation Blitting (real-time rendering tradeoffs)",
-          "href": "https://matplotlib.org/stable/users/explain/animations/blitting.html"
-        }
-      ],
-      "badges": [
-        {
-          "text": "Playback mode",
-          "class": "info"
-        },
-        {
-          "text": "Tail-aware",
-          "class": "info"
-        }
-      ]
-    },
-    {
-      "term": "Learning Reranker Visualizer: Scrub History",
-      "key": "LEARNING_RERANKER_VISUALIZER_SCRUB_HISTORY",
-      "definition": "<span class=\"tt-strong\">What the history scrubber controls</span><br>The scrubber sets the visible timeline cutoff index. Moving it lets you inspect earlier optimization states step-by-step, including transitions where loss, gradient norm, or direction changed.<br><br><span class=\"tt-strong\">Interaction with Live mode</span><br>Dragging the scrubber exits Live and freezes the timeline at your selected index. This is the fastest way to audit early-run behavior that may be hidden by live-tail rendering.<br><br><span class=\"tt-strong\">Recommended workflow</span><br>Use Live for situational awareness during active training. Use scrubbing for forensic analysis after a run, especially when best and last diverge.",
-      "category": "reranking",
-      "related": [
-        "LEARNING_RERANKER_VISUALIZER_LIVE_MODE",
-        "LEARNING_RERANKER_VISUALIZER_BEST_SO_FAR",
-        "LEARNING_RERANKER_VISUALIZER_LAST_STEP"
-      ],
-      "links": [
-        {
-          "text": "TensorBoard Scalars (timeline inspection patterns)",
-          "href": "https://www.tensorflow.org/tensorboard/scalars_and_keras"
-        },
-        {
-          "text": "Matplotlib Animation and event loops",
-          "href": "https://matplotlib.org/stable/users/explain/figure/interactive_guide.html"
-        }
-      ],
-      "badges": [
-        {
-          "text": "Timeline forensics",
-          "class": "info"
-        }
-      ]
-    },
-    {
-      "term": "Learning Reranker Visualizer: Tail Seconds",
-      "key": "LEARNING_RERANKER_VISUALIZER_TAIL_SECONDS",
-      "definition": "<span class=\"tt-strong\">What this setting does</span><br>Controls the temporal tail length used while Live mode is on. The visualizer shows the most recent portion of the trajectory to keep motion legible and avoid overdraw in long runs.<br><br><span class=\"tt-strong\">Implementation detail</span><br>Tail seconds are converted to a displayed point count using an internal sampling heuristic (approximately <span class=\"mono\">tail_seconds * 14</span>, then clamped to a safety range). This is a rendering policy, not a training metric policy.<br><br><span class=\"tt-strong\">Troubleshooting \"snake tail\" behavior</span><br>If the run start appears to vanish, increase this value, disable Live, or scrub manually. In scrubbing mode, full history up to the selected index is shown.<br><br><span class=\"tt-strong\">Tuning guidance</span><br>Lower values emphasize short-term dynamics and make rapid motion cleaner. Higher values preserve more context but can look visually dense on noisy runs.",
-      "category": "reranking",
-      "related": [
-        "LEARNING_RERANKER_VISUALIZER_LIVE_MODE",
-        "LEARNING_RERANKER_VISUALIZER_SCRUB_HISTORY",
-        "LEARNING_RERANKER_VISUALIZER_COLOR_MODE"
-      ],
-      "links": [
-        {
-          "text": "Matplotlib Animation Blitting (performance/readability tradeoffs)",
-          "href": "https://matplotlib.org/stable/users/explain/animations/blitting.html"
-        },
-        {
-          "text": "TensorBoard Scalars (handling long, noisy trajectories)",
-          "href": "https://www.tensorflow.org/tensorboard/scalars_and_keras"
-        }
-      ],
-      "badges": [
-        {
-          "text": "Live playback only",
-          "class": "warn"
-        },
-        {
-          "text": "Visualization policy",
-          "class": "info"
-        }
-      ]
-    },
-    {
-      "term": "Learning Reranker Layout Engine",
-      "key": "LEARNING_RERANKER_LAYOUT_ENGINE",
-      "definition": "Layout system used by Learning Reranker Studio. Options: dockview or panels. Default: dockview. Use panels only if you need the simpler fallback layout behavior.",
-      "category": "reranking",
-      "related": [],
-      "links": [],
-      "badges": []
-    },
-    {
-      "term": "Learning Reranker Default Preset",
-      "key": "LEARNING_RERANKER_DEFAULT_PRESET",
-      "definition": "Default pane preset applied when Learning Reranker Studio opens. Options: balanced, focus_viz, focus_logs, focus_inspector. Default: balanced.",
-      "category": "reranking",
-      "related": [],
-      "links": [],
-      "badges": []
-    },
-    {
-      "term": "Learning Reranker Show Setup Row",
-      "key": "LEARNING_RERANKER_SHOW_SETUP_ROW",
-      "definition": "Show or hide the setup summary row above the studio layout (1=show, 0=collapsed). Default: 0. Range: 0-1.",
-      "category": "reranking",
-      "related": [],
-      "links": [],
-      "badges": []
-    },
-    {
-      "term": "Learning Reranker Logs Renderer",
-      "key": "LEARNING_RERANKER_LOGS_RENDERER",
-      "definition": "Preferred log output renderer in Learning Reranker Studio. Options: json or xterm. Default: xterm.",
-      "category": "reranking",
-      "related": [],
-      "links": [],
-      "badges": []
-    },
-    {
-      "term": "Learning Reranker Telemetry Interval Steps",
-      "key": "LEARNING_RERANKER_TELEMETRY_INTERVAL_STEPS",
-      "definition": "Emit trainer telemetry every N optimizer steps (plus first and final events). Default: 2. Range: 1-20. Lower values give smoother live charts but increase event volume.",
-      "category": "reranking",
-      "related": [],
-      "links": [],
-      "badges": []
-    },
-    {
-      "term": "Learning Reranker Studio Left Panel %",
-      "key": "LEARNING_RERANKER_STUDIO_LEFT_PANEL_PCT",
-      "definition": "Default left dock width percentage for Learning Reranker Studio. Default: 20. Range: 15-35.",
-      "category": "reranking",
-      "related": [],
-      "links": [],
-      "badges": []
-    },
-    {
-      "term": "Learning Reranker Studio Right Panel %",
-      "key": "LEARNING_RERANKER_STUDIO_RIGHT_PANEL_PCT",
-      "definition": "Default right dock width percentage for Learning Reranker Studio. Default: 30. Range: 20-45.",
-      "category": "reranking",
-      "related": [],
-      "links": [],
-      "badges": []
-    },
-    {
-      "term": "Learning Reranker Studio Bottom Panel %",
-      "key": "LEARNING_RERANKER_STUDIO_BOTTOM_PANEL_PCT",
-      "definition": "Default bottom dock height percentage for Learning Reranker Studio. Default: 28. Range: 18-45.",
-      "category": "reranking",
-      "related": [],
-      "links": [],
-      "badges": []
-    },
-    {
-      "term": "Learning Reranker Visualizer Renderer",
-      "key": "LEARNING_RERANKER_VISUALIZER_RENDERER",
-      "definition": "Preferred renderer backend for the Neural Visualizer. Options: auto, webgpu, webgl2, canvas2d. Default: auto.",
-      "category": "reranking",
-      "related": [],
-      "links": [],
-      "badges": []
-    },
-    {
-      "term": "Learning Reranker Visualizer Quality",
-      "key": "LEARNING_RERANKER_VISUALIZER_QUALITY",
-      "definition": "Neural Visualizer quality tier. Options: balanced, cinematic, ultra. Default: cinematic. Higher tiers look better but use more GPU/CPU.",
-      "category": "reranking",
-      "related": [],
-      "links": [],
-      "badges": []
-    },
-    {
-      "term": "Learning Reranker Visualizer Max Points",
-      "key": "LEARNING_RERANKER_VISUALIZER_MAX_POINTS",
-      "definition": "Maximum telemetry points retained for Neural Visualizer history. Default: 10000. Range: 1000-50000. Higher values preserve more history at higher memory cost.",
-      "category": "reranking",
-      "related": [],
-      "links": [],
-      "badges": []
-    },
-    {
-      "term": "Learning Reranker Visualizer Target FPS",
-      "key": "LEARNING_RERANKER_VISUALIZER_TARGET_FPS",
-      "definition": "Target frame rate for Neural Visualizer animation. Default: 60. Range: 30-144. Lower values reduce GPU load.",
-      "category": "reranking",
-      "related": [],
-      "links": [],
-      "badges": []
-    },
-    {
-      "term": "Learning Reranker Visualizer Motion Intensity",
-      "key": "LEARNING_RERANKER_VISUALIZER_MOTION_INTENSITY",
-      "definition": "Global motion multiplier for Neural Visualizer effects. Default: 1.0. Range: 0.0-2.0. Lower values produce calmer motion.",
-      "category": "reranking",
-      "related": [],
-      "links": [],
-      "badges": []
-    },
-    {
-      "term": "Learning Reranker Visualizer Show Vector Field",
-      "key": "LEARNING_RERANKER_VISUALIZER_SHOW_VECTOR_FIELD",
-      "definition": "Render animated vector-field accents in Neural Visualizer (1=on, 0=off). Default: 1. Range: 0-1.",
-      "category": "reranking",
-      "related": [],
-      "links": [],
-      "badges": []
-    },
-    {
-      "term": "Learning Reranker Visualizer Reduce Motion",
-      "key": "LEARNING_RERANKER_VISUALIZER_REDUCE_MOTION",
-      "definition": "Accessibility/performance switch to reduce visualizer motion (1=reduce, 0=full motion). Default: 0. Range: 0-1.",
-      "category": "reranking",
       "related": [],
       "links": [],
       "badges": []

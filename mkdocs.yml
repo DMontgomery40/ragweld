@@ -1,10 +1,10 @@
-site_name: TriBridRAG Docs
-site_description: Tri-Brid Retrieval-Augmented Generation combining Vector, Sparse, and Graph search
-site_url: https://dmontgomery40.github.io/tribrid-rag/
-repo_url: https://github.com/DMontgomery40/tribrid-rag
-repo_name: DMontgomery40/tribrid-rag
+site_name: ragweld Docs
+site_description: Tri-brid Retrieval-Augmented Generation (Vector + Sparse + Graph) — product docs for ragweld
+site_url: https://dmontgomery40.github.io/ragweld/
+repo_url: https://github.com/DMontgomery40/ragweld
+repo_name: DMontgomery40/ragweld
 edit_uri: edit/main/mkdocs/docs/
-copyright: Copyright &copy; 2025 TriBridRAG
+copyright: Copyright &copy; 2026 ragweld
 docs_dir: mkdocs/docs
 
 theme:
@@ -103,7 +103,7 @@ markdown_extensions:
 extra:
   social:
     - icon: fontawesome/brands/github
-      link: https://github.com/DMontgomery40/tribrid-rag
+      link: https://github.com/DMontgomery40/ragweld
   version:
     provider: mike
     default: latest
@@ -114,30 +114,34 @@ extra_javascript:
 
 nav:
   - Home: index.md
-  - Architecture:
-      - Overview: architecture.md
-      - Health & metrics: architecture/health-metrics.md
-  - Retrieval:
-      - Overview: retrieval/overview.md
-  - Indexing: indexing.md
-  - Database: database.md
-  - Models: models.md
-  - Frontend: frontend.md
-  - Configuration: configuration.md
-  - API: api.md
-  - Operations: operations.md
-  - Deployment: deployment.md
-  - Security: security.md
-  - Troubleshooting: troubleshooting.md
-  - Guides:
-      - Corpus: guides/corpus.md
-      - Reranker: howto/reranker.md
-  - Dev:
+  - User Manual:
+      - Overview: manual/index.md
+      - Quickstart: manual/quickstart.md
+      - Native Postgres (macOS): manual/native_postgres.md
+      - Indexing a corpus: manual/indexing.md
+      - Searching & answering: manual/search.md
+      - UI tour: manual/ui.md
+      - Troubleshooting: manual/troubleshooting.md
+  - Concepts:
+      - Architecture: architecture.md
+      - Retrieval overview: retrieval/overview.md
+      - Indexing pipeline: indexing.md
+      - Corpus vs repo_id: guides/corpus.md
+  - Reference:
+      - Configuration: configuration.md
+      - API: api.md
+      - Models: models.md
+      - Glossary: glossary.md
+  - Operations:
+      - Deployment: deployment.md
+      - Operations & metrics: operations.md
+      - Security: security.md
+      - Troubleshooting: troubleshooting.md
+  - Developer:
+      - Dev workflow: dev_workflow.md
+      - Docs Autopilot: dev/docs-autopilot.md
       - Pydantic: dev/pydantic.md
-  - Repo KB:
-      - Overview: repo/index.md
-      - Core beliefs: repo/design-docs/core-beliefs.md
-      - Exec plans: repo/exec-plans/index.md
-      - Tech debt: repo/exec-plans/tech-debt-tracker.md
-      - References: repo/references/index.md
-  - Glossary: glossary.md
+      - Frontend: frontend.md
+      - Testing: testing.md
+      - Observability: observability.md
+

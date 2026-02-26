@@ -178,7 +178,7 @@ class TestSearchModels:
             query="test query",
             matches=[match],
             fusion_method="rrf",
-            reranker_mode="local",
+            reranker_mode="learning",
             latency_ms=42.5,
         )
         assert len(resp.matches) == 1

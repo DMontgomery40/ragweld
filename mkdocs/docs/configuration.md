@@ -59,7 +59,7 @@ flowchart TB
 | graph_search | `enabled`, `mode`, `max_hops`, `top_k`, `chunk_neighbor_window`, `chunk_entity_expansion_*` | Neo4j traversal behavior |
 | embedding | `embedding_type`, `embedding_model`, `embedding_dim`, `embedding_batch_size` | Embedding provider + dimensions |
 | chunking | `chunking_strategy`, `chunk_size`, `chunk_overlap`, `max_chunk_tokens`, `preserve_imports` | Index quality and performance |
-| reranking | `reranker_mode`, `reranker_*`, `tribrid_reranker_*` | Local/cloud/learning reranker stage tuning |
+| reranking | `reranker_mode`, `reranker_*`, `tribrid_reranker_*` | Cloud/learning reranker stage tuning |
 | graph_storage | `neo4j_*`, `neo4j_database_mode` | Graph connectivity and isolation |
 | chat.recall_gate | `enabled`, `default_intensity`, `skip_*`, `*top_k`, `*recency_weight` | Smart memory gating |
 
@@ -118,7 +118,7 @@ flowchart TB
 === "Python"
 ```python
 import httpx
-base = "http://localhost:8000"
+base = "http://127.0.0.1:8012/api"
 
 # Read full config (1)!
 cfg = httpx.get(f"{base}/config").json()
@@ -137,7 +137,7 @@ httpx.post(f"{base}/config/reset").raise_for_status()
 
 === "curl"
 ```bash
-BASE=http://localhost:8000
+BASE=http://127.0.0.1:8012/api
 
 # Read (1)!
 curl -sS "$BASE/config" | jq .
@@ -160,12 +160,12 @@ curl -sS -X POST "$BASE/config/reset" | jq .
 import type { TriBridConfig } from "./web/src/types/generated";
 
 async function loadConfig(): Promise<TriBridConfig> {
-  const r = await fetch("/config");
+  const r = await fetch("/api/config");
   return await r.json(); // (1)!
 }
 
 async function patchFusion() {
-  await fetch("/config/fusion", {
+  await fetch("/api/config/fusion", {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ method: "weighted", vector_weight: 0.5, sparse_weight: 0.3, graph_weight: 0.2 }),

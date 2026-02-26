@@ -111,7 +111,7 @@ export function HelpSubtab() {
             />
             <ConceptCard
               title="Reranking"
-              description="Post-retrieval scoring using local HF rerankers, cloud APIs, or the Qwen3 LoRA learning reranker. Improves relevance by re-scoring top-k results with a more accurate model."
+              description="Post-retrieval scoring using cloud APIs or the Qwen3 LoRA learning reranker. Improves relevance by re-scoring top-k results with a more accurate model."
             />
             <ConceptCard
               title="Chunk Summaries"
@@ -225,11 +225,6 @@ export function HelpSubtab() {
               title="RAG Best Practices"
               href="https://www.anthropic.com/index/contextual-retrieval"
               description="Anthropic's guide to retrieval-augmented generation"
-            />
-            <ExternalLink
-              title="HF Reranker Models"
-              href="https://huggingface.co/models?pipeline_tag=text-ranking"
-              description="Explore local reranker options (BGE, Jina, and more)"
             />
           </div>
         </div>

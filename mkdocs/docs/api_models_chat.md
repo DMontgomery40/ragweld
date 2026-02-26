@@ -51,17 +51,17 @@ flowchart LR
 === "Python"
 ```python
 import httpx
-print(httpx.post("http://localhost:8000/chat", json={"corpus_id":"tribrid","message":"where is auth?"}).json())
+print(httpx.post("http://127.0.0.1:8012/api/chat", json={"corpus_id":"tribrid","message":"where is auth?"}).json())
 ```
 
 === "curl"
 ```bash
-curl -sS -X POST http://localhost:8000/chat -H 'Content-Type: application/json' -d '{"corpus_id":"tribrid","message":"where is auth?"}' | jq .
+curl -sS -X POST http://127.0.0.1:8012/api/chat -H 'Content-Type: application/json' -d '{"corpus_id":"tribrid","message":"where is auth?"}' | jq .
 ```
 
 === "TypeScript"
 ```typescript
-const r = await (await fetch('/chat', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ corpus_id:'tribrid', message:'where is auth?' }) })).json();
+const r = await (await fetch('/api/chat', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ corpus_id:'tribrid', message:'where is auth?' }) })).json();
 ```
 
 ??? info "Recall Gate"

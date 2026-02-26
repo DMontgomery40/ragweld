@@ -48,10 +48,14 @@ def test_fusion_config_weights() -> None:
 
 def test_reranker_modes() -> None:
     """Test reranker mode options - LAW uses 'reranker_mode' not 'mode'."""
-    # LAW's valid modes: cloud, local, learning, none
-    for mode in ["none", "local", "learning", "cloud"]:
-        config = RerankingConfig(reranker_mode=mode)
-        assert config.reranker_mode == mode
+    # LAW's supported modes: cloud, learning, none (legacy aliases normalize).
+    assert RerankingConfig(reranker_mode="none").reranker_mode == "none"
+    assert RerankingConfig(reranker_mode="learning").reranker_mode == "learning"
+    assert RerankingConfig(reranker_mode="cloud").reranker_mode == "cloud"
+
+    # Back-compat: legacy configs used 'local'/'hf' for the old CrossEncoder path.
+    assert RerankingConfig(reranker_mode="local").reranker_mode == "learning"
+    assert RerankingConfig(reranker_mode="hf").reranker_mode == "learning"
 
 
 def test_tribrid_config_defaults() -> None:

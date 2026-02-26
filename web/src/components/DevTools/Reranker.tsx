@@ -34,7 +34,6 @@ export function Reranker() {
     { id: 'cohere', name: 'Cohere Rerank', description: 'Cohere rerank-english-v2.0' },
     { id: 'voyage', name: 'Voyage AI', description: 'Voyage reranker-lite-1' },
     { id: 'learning-ranker', name: 'Learning Ranker', description: 'Qwen3 LoRA learning reranker' },
-    { id: 'cross-encoder', name: 'Local HF Reranker', description: 'Local HuggingFace reranker (BGE/Jina/etc.)' }
   ];
 
   const toggleReranker = (id: string) => {

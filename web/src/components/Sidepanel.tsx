@@ -60,16 +60,14 @@ export function Sidepanel() {
     }
     setEmbeddingModel(embModel);
 
-    const rrMode = String(config.reranking?.reranker_mode || '').toLowerCase();
+    const rrModeRaw = String(config.reranking?.reranker_mode || '').toLowerCase();
+    const rrMode = rrModeRaw === 'local' ? 'learning' : rrModeRaw;
     if (rrMode === 'cloud') {
       setRerankProvider(String(config.reranking?.reranker_cloud_provider || 'cohere'));
       setRerankModel(String(config.reranking?.reranker_cloud_model || ''));
-    } else if (rrMode === 'local') {
-      setRerankProvider('local');
-      setRerankModel(String(config.reranking?.reranker_local_model || ''));
     } else if (rrMode === 'learning') {
       setRerankProvider('learning');
-      setRerankModel(String(config.reranking?.reranker_local_model || ''));
+      setRerankModel('');
     } else if (rrMode === 'none') {
       setRerankProvider('none');
       setRerankModel('');
@@ -88,9 +86,10 @@ export function Sidepanel() {
   }, [embeddingProvider, getEmbeddingModelsForProvider]);
 
   const rerankProviderOptions = useMemo(() => {
-    const s = new Set<string>(rerankProviders);
+    const s = new Set<string>(
+      rerankProviders.filter((p) => !['local', 'huggingface'].includes(String(p || '').toLowerCase()))
+    );
     // Ensure common logical modes remain selectable even if absent from models.json
-    s.add('local');
     s.add('learning');
     s.add('none');
     if (rerankProvider && !s.has(rerankProvider)) s.add(rerankProvider);
@@ -99,13 +98,7 @@ export function Sidepanel() {
 
   const rerankModelOptions = useMemo(() => {
     if (!rerankProvider || rerankProvider === 'none') return [];
-    if (rerankProvider === 'local' || rerankProvider === 'learning') {
-      // For local/learning, present all RERANK models across providers as a fallback.
-      const localModels = getRerankModelsForProvider('local').map((m) => m.model);
-      const hfModels = getRerankModelsForProvider('huggingface').map((m) => m.model);
-      const all = [...localModels, ...hfModels];
-      return Array.from(new Set(all)).sort();
-    }
+    if (rerankProvider === 'learning') return [];
     const models = getRerankModelsForProvider(rerankProvider).map((m) => m.model);
     return Array.from(new Set(models)).sort();
   }, [getRerankModelsForProvider, rerankProvider]);
@@ -144,14 +137,14 @@ export function Sidepanel() {
           rerankingUpdates.reranker_mode = 'none';
         } else if (p === 'learning') {
           rerankingUpdates.reranker_mode = 'learning';
-          if (rerankModel) rerankingUpdates.reranker_local_model = rerankModel;
         } else if (p === 'cohere' || p === 'voyage' || p === 'jina') {
           rerankingUpdates.reranker_mode = 'cloud';
           rerankingUpdates.reranker_cloud_provider = p;
           if (rerankModel) rerankingUpdates.reranker_cloud_model = rerankModel;
         } else {
-          rerankingUpdates.reranker_mode = 'local';
-          if (rerankModel) rerankingUpdates.reranker_local_model = rerankModel;
+          rerankingUpdates.reranker_mode = 'cloud';
+          rerankingUpdates.reranker_cloud_provider = p;
+          if (rerankModel) rerankingUpdates.reranker_cloud_model = rerankModel;
         }
       }
 
@@ -290,6 +283,10 @@ export function Sidepanel() {
                 onChange={(e) => {
                   const next = e.target.value;
                   setRerankProvider(next);
+                  if (next === 'learning') {
+                    setRerankModel('');
+                    return;
+                  }
                   const nextModels =
                     next === 'none' ? [] : getRerankModelsForProvider(next).map((m) => m.model);
                   const nextUnique = Array.from(new Set(nextModels)).sort();
@@ -314,10 +311,12 @@ export function Sidepanel() {
                 value={rerankModel}
                 onChange={(e) => setRerankModel(e.target.value)}
                 style={selectStyle}
-                disabled={rerankModelsLoading || rerankProvider === 'none'}
+                disabled={rerankModelsLoading || rerankProvider === 'none' || rerankProvider === 'learning'}
               >
                 {rerankProvider === 'none' ? (
                   <option value="">(disabled)</option>
+                ) : rerankProvider === 'learning' ? (
+                  <option value="">(learning reranker)</option>
                 ) : rerankModelOptions.length > 0 ? (
                   rerankModelOptions.map((m) => (
                     <option key={m} value={m}>

@@ -70,7 +70,7 @@ flowchart TB
     function useConfig() {
       // typed fetch
       const [cfg, setCfg] = React.useState<TriBridConfig | null>(null);
-      React.useEffect(() => { fetch('/config').then(r => r.json()).then(setCfg); }, []); // (3)
+      React.useEffect(() => { fetch('/api/config').then(r => r.json()).then(setCfg); }, []); // (3)
       return cfg;
     }
     ```

@@ -42,7 +42,7 @@ Use `POST /api/models/upsert` to add or update entries safely:
 ## Example
 
 ```bash
-BASE=http://localhost:8000
+BASE=http://127.0.0.1:8012
 curl -sS "$BASE/api/models/by-type/GEN" | jq '.[0]'
 curl -sS "$BASE/api/models/providers" | jq .
 curl -sS -X POST "$BASE/api/models/upsert" \

@@ -5,7 +5,6 @@ import os
 import platform
 import time
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
 from server.models.retrieval import ChunkMatch
@@ -17,73 +16,8 @@ from server.observability.metrics import (
     RERANKER_REQUESTS_TOTAL,
     RERANKER_SKIPPED_TOTAL,
 )
-from server.reranker.artifacts import has_transformers_weights, resolve_project_path
+from server.reranker.artifacts import resolve_project_path
 from server.retrieval.mlx_qwen3 import get_mlx_qwen3_reranker, mlx_is_available
-
-_CrossEncoderKey = tuple[str, bool, str]
-_cross_encoder_cache: dict[_CrossEncoderKey, Any] = {}
-_cross_encoder_lock = asyncio.Lock()
-
-def clear_cross_encoder_cache_for_model(model_id: str) -> None:
-    """Best-effort cache invalidation for local Transformers CrossEncoder models.
-
-    Used after atomic promotion so the next inference/scoring call reloads weights.
-    """
-    target = str(model_id or "").strip()
-    if not target:
-        return
-
-    target_resolved: Path | None = None
-    try:
-        target_resolved = resolve_project_path(target).resolve()
-    except Exception:
-        target_resolved = None
-
-    # Best-effort: do not block on the async lock here. This is safe because callers
-    # use this only after a promotion event; worst case we clear slightly late.
-    to_del: list[_CrossEncoderKey] = []
-    for key in list(_cross_encoder_cache.keys()):
-        mid = str(key[0] or "")
-        if mid == target:
-            to_del.append(key)
-            continue
-        if target_resolved is not None:
-            try:
-                if resolve_project_path(mid).resolve() == target_resolved:
-                    to_del.append(key)
-            except Exception:
-                continue
-
-    for key in to_del:
-        try:
-            _cross_encoder_cache.pop(key, None)
-        except Exception:
-            continue
-
-
-def resolve_reranker_device() -> str:
-    """Resolve the best available device for local/learning CrossEncoder inference.
-
-    Priority:
-    - CUDA (NVIDIA GPUs)
-    - MPS (Apple Silicon GPU via Metal)
-    - CPU
-    """
-    try:
-        import torch
-
-        if torch.cuda.is_available():
-            return "cuda"
-
-        mps_backend = getattr(torch.backends, "mps", None)
-        if mps_backend is not None and callable(getattr(mps_backend, "is_available", None)):
-            if bool(mps_backend.is_available()):
-                return "mps"
-    except Exception:
-        pass
-
-    return "cpu"
-
 
 def _stable_chunk_key(chunk: ChunkMatch) -> str:
     meta = chunk.metadata or {}
@@ -130,89 +64,17 @@ def resolve_learning_backend(training_config: TrainingConfig | None, *, artifact
     except Exception:
         requested = "auto"
 
+    # Back-compat: 'transformers'/'hf' backends are deprecated; the learning reranker is MLX Qwen3.
     if requested in {"transformers", "hf"}:
-        return "transformers"
-    if requested in {"mlx_qwen3", "mlx"}:
-        if not _mlx_platform_supported():
-            raise RuntimeError("learning_reranker_backend=mlx_qwen3 requires macOS arm64")
-        if not mlx_is_available():
-            raise RuntimeError("learning_reranker_backend=mlx_qwen3 requires MLX deps (install with `uv sync --extra mlx`)")
-        return "mlx_qwen3"
+        requested = "auto"
+    if requested not in {"auto", "mlx_qwen3", "mlx"}:
+        requested = "auto"
 
-    # auto: strict platform gating (only Apple Silicon + MLX deps).
-    if _mlx_platform_supported() and mlx_is_available():
-        return "mlx_qwen3"
-    return "transformers"
-
-
-async def _get_cross_encoder(model_id: str, *, max_length: int, trust_remote_code: bool) -> Any:
-    device = resolve_reranker_device()
-    key: _CrossEncoderKey = (model_id, bool(trust_remote_code), device)
-    async with _cross_encoder_lock:
-        cached = _cross_encoder_cache.get(key)
-        if cached is not None:
-            try:
-                if hasattr(cached, "max_length"):
-                    cached.max_length = int(max_length)
-            except Exception:
-                pass
-            return cached
-
-        def _load() -> Any:
-            from sentence_transformers import CrossEncoder
-
-            return CrossEncoder(
-                model_id,
-                max_length=int(max_length),
-                device=device,
-                trust_remote_code=bool(trust_remote_code),
-            )
-
-        model = await asyncio.to_thread(_load)
-        _cross_encoder_cache[key] = model
-        return model
-
-
-async def _predict_cross_encoder(
-    model: Any,
-    *,
-    query: str,
-    snippets: list[str],
-    batch_size: int,
-) -> list[float]:
-    pairs = [(query, s) for s in snippets]
-
-    def _run() -> list[float]:
-        preds = model.predict(
-            pairs,
-            batch_size=int(batch_size),
-            show_progress_bar=False,
-            convert_to_numpy=True,
-        )
-        try:
-            return [float(x) for x in list(preds)]
-        except Exception:
-            return [float(x) for x in preds]
-
-    return await asyncio.to_thread(_run)
-
-
-async def score_cross_encoder_pairs(
-    *,
-    model_id: str,
-    query: str,
-    snippets: list[str],
-    max_length: int,
-    batch_size: int,
-    trust_remote_code: bool,
-) -> list[float]:
-    model = await _get_cross_encoder(str(model_id), max_length=int(max_length), trust_remote_code=bool(trust_remote_code))
-    return await _predict_cross_encoder(
-        model,
-        query=str(query),
-        snippets=list(snippets),
-        batch_size=int(batch_size),
-    )
+    if not _mlx_platform_supported():
+        raise RuntimeError("learning reranker requires macOS arm64 (Apple Silicon)")
+    if not mlx_is_available():
+        raise RuntimeError("learning reranker requires MLX deps (install with `uv sync --extra mlx`)")
+    return "mlx_qwen3"
 
 
 @dataclass(frozen=True)
@@ -267,6 +129,9 @@ class Reranker:
     async def try_rerank(self, query: str, chunks: list[ChunkMatch]) -> RerankResult:
         q = str(query or "").strip()
         mode = str(self.config.reranker_mode or "none").strip().lower()
+        # Defensive back-compat: older configs may still supply 'local'/'hf'.
+        if mode in {"local", "hf"}:
+            mode = "learning"
         if mode == "none":
             _RUNTIME.last_attempt_ms = int(time.time() * 1000)
             _RUNTIME.last_mode = "none"
@@ -283,7 +148,7 @@ class Reranker:
             _RUNTIME.last_error = None
 
             if not chunks:
-                if mode in {"local", "learning", "cloud"}:
+                if mode in {"learning", "cloud"}:
                     RERANKER_REQUESTS_TOTAL.labels(mode=mode).inc()
                     RERANKER_SKIPPED_TOTAL.labels(mode=mode, reason="no_candidates").inc()
                 _RUNTIME.last_ok = True
@@ -293,7 +158,7 @@ class Reranker:
                 return RerankResult(chunks=[], ok=True, applied=False, skipped_reason="no_candidates")
 
             if not q:
-                if mode in {"local", "learning", "cloud"}:
+                if mode in {"learning", "cloud"}:
                     RERANKER_REQUESTS_TOTAL.labels(mode=mode).inc()
                     RERANKER_SKIPPED_TOTAL.labels(mode=mode, reason="empty_query").inc()
                 _RUNTIME.last_ok = True
@@ -302,27 +167,6 @@ class Reranker:
                 _RUNTIME.last_skipped_reason = "empty_query"
                 return RerankResult(chunks=chunks, ok=True, applied=False, skipped_reason="empty_query")
 
-            if mode == "local":
-                RERANKER_REQUESTS_TOTAL.labels(mode=mode).inc()
-                model_id = str(self.config.reranker_local_model or "").strip()
-                if not model_id:
-                    RERANKER_SKIPPED_TOTAL.labels(mode=mode, reason="missing_model").inc()
-                    _RUNTIME.last_ok = True
-                    _RUNTIME.last_applied = False
-                    _RUNTIME.last_candidates_reranked = 0
-                    _RUNTIME.last_skipped_reason = "missing_model"
-                    return RerankResult(chunks=chunks, ok=True, applied=False, skipped_reason="missing_model")
-
-                with RERANKER_LATENCY_SECONDS.labels(mode=mode).time():
-                    out = await self._rerank_local(q, chunks)
-                top_n = min(len(chunks), int(self.config.tribrid_reranker_topn))
-                if top_n > 0:
-                    RERANKER_CANDIDATES_TOTAL.labels(mode=mode).inc(top_n)
-                _RUNTIME.last_ok = True
-                _RUNTIME.last_applied = True
-                _RUNTIME.last_candidates_reranked = int(max(0, top_n))
-                _RUNTIME.last_skipped_reason = None
-                return RerankResult(chunks=out, ok=True, applied=True, candidates_reranked=int(max(0, top_n)))
             if mode == "learning":
                 RERANKER_REQUESTS_TOTAL.labels(mode=mode).inc()
                 model_id = str(self.trained_model_path or "").strip()
@@ -335,22 +179,6 @@ class Reranker:
                     return RerankResult(
                         chunks=chunks, ok=True, applied=False, skipped_reason="missing_trained_model"
                     )
-
-                backend = resolve_learning_backend(self.training_config, artifact_path=model_id)
-                if backend != "mlx_qwen3":
-                    resolved = resolve_project_path(model_id)
-                    if resolved.exists() and resolved.is_dir() and not has_transformers_weights(resolved):
-                        RERANKER_SKIPPED_TOTAL.labels(mode=mode, reason="missing_trained_model").inc()
-                        _RUNTIME.last_ok = True
-                        _RUNTIME.last_applied = False
-                        _RUNTIME.last_candidates_reranked = 0
-                        _RUNTIME.last_skipped_reason = "missing_trained_model"
-                        return RerankResult(
-                            chunks=chunks,
-                            ok=True,
-                            applied=False,
-                            skipped_reason="missing_trained_model",
-                        )
 
                 with RERANKER_LATENCY_SECONDS.labels(mode=mode).time():
                     out = await self._rerank_trained(q, chunks)
@@ -393,7 +221,7 @@ class Reranker:
             _RUNTIME.last_skipped_reason = None
             return RerankResult(chunks=chunks, ok=True, applied=False)
         except Exception as e:
-            if mode in {"local", "learning", "cloud"}:
+            if mode in {"learning", "cloud"}:
                 RERANKER_ERRORS_TOTAL.labels(mode=mode).inc()
             _RUNTIME.last_ok = False
             _RUNTIME.last_applied = False
@@ -402,32 +230,14 @@ class Reranker:
             _RUNTIME.last_error = str(e)
             return RerankResult(chunks=chunks, ok=False, applied=False, error=str(e))
 
-    async def _rerank_local(self, query: str, chunks: list[ChunkMatch]) -> list[ChunkMatch]:
-        model_id = str(self.config.reranker_local_model or "").strip()
-        if not model_id:
-            return chunks
-        return await self._rerank_cross_encoder(
-            query,
-            chunks,
-            model_id=model_id,
-            top_n=int(self.config.tribrid_reranker_topn),
-            mode="local",
-        )
-
     async def _rerank_trained(self, query: str, chunks: list[ChunkMatch]) -> list[ChunkMatch]:
         model_id = str(self.trained_model_path or "").strip()
         if not model_id:
             return chunks
         backend = resolve_learning_backend(self.training_config, artifact_path=model_id)
-        if backend == "mlx_qwen3":
-            return await self._rerank_mlx_qwen3(query, chunks, adapter_dir=model_id)
-        return await self._rerank_cross_encoder(
-            query,
-            chunks,
-            model_id=model_id,
-            top_n=int(self.config.tribrid_reranker_topn),
-            mode="learning",
-        )
+        if backend != "mlx_qwen3":
+            raise RuntimeError(f"unsupported learning reranker backend: {backend}")
+        return await self._rerank_mlx_qwen3(query, chunks, adapter_dir=model_id)
 
     async def _rerank_api(self, query: str, chunks: list[ChunkMatch]) -> list[ChunkMatch]:
         provider = str(self.config.reranker_cloud_provider or "").strip().lower()
@@ -489,64 +299,6 @@ class Reranker:
                     "reranker_mode": "cloud",
                     "reranker_cloud_provider": provider,
                     "reranker_model": str(self.config.reranker_cloud_model or "").strip(),
-                    "reranker_score_raw": float(s_raw),
-                    "reranker_score": float(s_norm),
-                    "fusion_score_raw": float(f_raw),
-                    "fusion_score": float(f_norm),
-                }
-            )
-            updated.append(c.model_copy(update={"score": float(s), "metadata": meta}))
-
-        updated.sort(key=lambda c: (-float(c.score), _stable_chunk_key(c)))
-        return [*updated, *remainder]
-
-    async def _rerank_cross_encoder(
-        self,
-        query: str,
-        chunks: list[ChunkMatch],
-        *,
-        model_id: str,
-        top_n: int,
-        mode: str,
-    ) -> list[ChunkMatch]:
-        top_n = min(len(chunks), int(top_n))
-        if top_n <= 0:
-            return chunks
-
-        snippet_chars = int(self.config.rerank_input_snippet_chars)
-        max_length = int(self.config.tribrid_reranker_maxlen)
-        batch_size = int(self.config.tribrid_reranker_batch)
-        trust_remote_code = bool(self.config.transformers_trust_remote_code)
-
-        candidates = chunks[:top_n]
-        remainder = chunks[top_n:]
-
-        snippets = [_snippet(c.content, max_chars=snippet_chars) for c in candidates]
-        model = await _get_cross_encoder(model_id, max_length=max_length, trust_remote_code=trust_remote_code)
-        raw_scores = await _predict_cross_encoder(
-            model,
-            query=query,
-            snippets=snippets,
-            batch_size=batch_size,
-        )
-
-        rerank_norm = _minmax_norm(raw_scores)
-        orig_raw = [float(c.score) for c in candidates]
-        orig_norm = _minmax_norm(orig_raw)
-
-        alpha = float(self.config.tribrid_reranker_alpha)
-        blended = [((1.0 - alpha) * o) + (alpha * r) for o, r in zip(orig_norm, rerank_norm, strict=False)]
-
-        updated: list[ChunkMatch] = []
-        for c, s_raw, s_norm, f_raw, f_norm, s in zip(
-            candidates, raw_scores, rerank_norm, orig_raw, orig_norm, blended, strict=False
-        ):
-            meta = dict(c.metadata or {})
-            meta.update(
-                {
-                    "reranker_mode": mode,
-                    "reranker_backend": "transformers",
-                    "reranker_model": str(model_id),
                     "reranker_score_raw": float(s_raw),
                     "reranker_score": float(s_norm),
                     "fusion_score_raw": float(f_raw),
@@ -644,32 +396,12 @@ class Reranker:
         return [*updated, *remainder]
 
     def load_model(self) -> None:
-        """Eagerly load the configured local/learning model (best-effort)."""
-        mode = str(self.config.reranker_mode or "none").strip().lower()
-        if mode == "local":
-            model_id = str(self.config.reranker_local_model or "").strip()
-        elif mode == "learning":
-            model_id = str(self.trained_model_path or "").strip()
-        else:
-            return
+        """Best-effort warmup for the in-process learning reranker.
 
-        if not model_id:
-            return
-
-        max_length = int(self.config.tribrid_reranker_maxlen)
-        trust_remote_code = bool(self.config.transformers_trust_remote_code)
-
-        from sentence_transformers import CrossEncoder
-
-        device = resolve_reranker_device()
-        model = CrossEncoder(
-            model_id,
-            max_length=int(max_length),
-            device=device,
-            trust_remote_code=bool(trust_remote_code),
-        )
-        _cross_encoder_cache[(model_id, bool(trust_remote_code), device)] = model
+        The MLX learning reranker loads lazily on first use.
+        """
+        return
 
     def reload_model(self) -> None:
-        """Clear cached models so the next call reloads (best-effort)."""
-        _cross_encoder_cache.clear()
+        """Best-effort model reload (no-op for MLX backend)."""
+        return

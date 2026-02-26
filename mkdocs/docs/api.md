@@ -18,7 +18,7 @@
 
     ---
 
-    Validate configured API keys and DB connections via `/secrets/check`.
+    Validate configured provider keys via `/api/secrets/check`.
 
 </div>
 
@@ -27,7 +27,7 @@
 [API](api.md){ .md-button }
 
 !!! tip "Inspect Schemas"
-    Prefer calling `/config` first to align UI interactions with actual server capabilities. All shapes are Pydantic-driven.
+    Prefer calling `/api/config` first to align UI interactions with actual server capabilities. All shapes are Pydantic-driven.
 
 !!! note "HTTP Conventions"
     - JSON requests/responses
@@ -41,30 +41,30 @@
 
 | Area | Route | Method | Purpose |
 |------|-------|--------|---------|
-| Config | `/config` | GET | Get full config |
-| Config | `/config` | PUT | Replace config |
-| Config | `/config/{section}` | PATCH | Sectional patch, e.g., `fusion` |
-| Config | `/config/reset` | POST | Reset to defaults |
-| Secrets | `/secrets/check` | GET | Check provider keys + DB connections |
-| Index | `/index` | POST | Start indexing |
-| Index | `/index/status` | GET | Status for a corpus |
-| Index | `/index/stats` | GET | Storage stats summary |
-| Index | `/index/{corpus_id}/status` | GET | Per-corpus status |
-| Index | `/index/{corpus_id}/stats` | GET | Per-corpus storage breakdown |
-| Index | `/index/vocab-preview` | GET | BM25 vocabulary sample |
-| Search | `/search` | POST | Tri-brid retrieval + fusion (+reranker) |
-| Answer | `/answer` | POST | Retrieval + LLM answer generation |
-| Graph | `/graph/{corpus_id}/entities` | GET | List entities |
-| Graph | `/graph/{corpus_id}/entity/{id}` | GET | Entity details |
-| Graph | `/graph/{corpus_id}/entity/{id}/neighbors` | GET | Neighborhood |
-| Models | `/models/by-type/{component}` | GET | Models by component `GEN/EMB/RERANK` |
-| Keywords | `/keywords/generate` | POST | Generate discriminative keywords |
-| Reranker | `/reranker/*` | mixed | Status / mine / train / evaluate |
-| Health | `/health` | GET | Liveness |
-| Health | `/ready` | GET | Readiness |
-| Metrics | `/metrics` | GET | Prometheus exposition |
-| Docker | `/docker/*` | GET/POST | Infra status, logs, restart |
-| MCP | `/mcp/status` | GET | MCP inbound transport status |
+| Config | `/api/config` | GET | Get full config |
+| Config | `/api/config` | PUT | Replace config |
+| Config | `/api/config/{section}` | PATCH | Sectional patch, e.g., `fusion` |
+| Config | `/api/config/reset` | POST | Reset to defaults |
+| Secrets | `/api/secrets/check` | GET | Check provider keys (never returns values) |
+| Index | `/api/index` | POST | Start indexing |
+| Index | `/api/index/{corpus_id}/status` | GET | Per-corpus status |
+| Index | `/api/index/{corpus_id}/stats` | GET | Per-corpus storage breakdown |
+| Index | `/api/index/estimate` | POST | Best-effort indexing estimate |
+| Index | `/api/index/vocab-preview` | GET | BM25 vocabulary sample |
+| Search | `/api/search` | POST | Tri-brid retrieval + fusion (+reranker) |
+| Answer | `/api/answer` | POST | Retrieval + LLM answer generation |
+| Answer | `/api/answer/stream` | POST | Stream answer generation |
+| Graph | `/api/graph/{corpus_id}/entities` | GET | List entities |
+| Graph | `/api/graph/{corpus_id}/entity/{id}` | GET | Entity details |
+| Graph | `/api/graph/{corpus_id}/entity/{id}/neighbors` | GET | Neighborhood |
+| Models | `/api/models/by-type/{component}` | GET | Models by component `GEN/EMB/RERANK` |
+| Keywords | `/api/keywords/generate` | POST | Generate discriminative keywords |
+| Reranker | `/api/reranker/*` | mixed | Status / mine / train / evaluate |
+| Health | `/api/health` | GET | Liveness |
+| Health | `/api/ready` | GET | Readiness |
+| Metrics | `/api/metrics` | GET | Prometheus exposition |
+| Docker | `/api/docker/*` | GET/POST | Infra status, logs, restart |
+| MCP | `/api/mcp/status` | GET | MCP inbound transport status |
 
 ```mermaid
 flowchart TB
@@ -82,7 +82,7 @@ flowchart TB
 === "Python"
 ```python
 import httpx
-base = "http://localhost:8000"
+base = "http://127.0.0.1:8012/api"
 
 payload = {
     "corpus_id": "tribrid",  # (1)!
@@ -100,7 +100,7 @@ print(res["fusion_method"], len(res["matches"]))
 
 === "curl"
 ```bash
-BASE=http://localhost:8000
+BASE=http://127.0.0.1:8012/api
 curl -sS -X POST "$BASE/search" \
   -H 'Content-Type: application/json' \
   -d '{"corpus_id":"tribrid","query":"authentication flow","top_k":10}' | jq '.fusion_method, .matches | length'
@@ -111,7 +111,7 @@ curl -sS -X POST "$BASE/search" \
 import type { SearchRequest, SearchResponse } from "./web/src/types/generated";
 
 async function run(req: SearchRequest): Promise<SearchResponse> {
-  const r = await fetch("/search", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify(req) });
+  const r = await fetch("/api/search", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify(req) });
   return await r.json(); // (2)!
 }
 ```
@@ -121,21 +121,21 @@ async function run(req: SearchRequest): Promise<SearchResponse> {
 === "Python"
 ```python
 import httpx
-print(httpx.get("http://localhost:8000/ready").json())   # readiness
-print(httpx.get("http://localhost:8000/metrics").text[:300])  # metrics sample
+print(httpx.get("http://127.0.0.1:8012/api/ready").json())   # readiness
+print(httpx.get("http://127.0.0.1:8012/api/metrics").text[:300])  # metrics sample
 ```
 
 === "curl"
 ```bash
-curl -sS http://localhost:8000/health | jq .
-curl -sS http://localhost:8000/ready | jq .
-curl -sS http://localhost:8000/metrics | head -n 20
+curl -sS http://127.0.0.1:8012/api/health | jq .
+curl -sS http://127.0.0.1:8012/api/ready | jq .
+curl -sS http://127.0.0.1:8012/api/metrics | head -n 20
 ```
 
 === "TypeScript"
 ```typescript
-await fetch('/ready').then(r => r.ok || Promise.reject('Not ready'))
-const metrics = await (await fetch('/metrics')).text()
+await fetch('/api/ready').then(r => r.ok || Promise.reject('Not ready'))
+const metrics = await (await fetch('/api/metrics')).text()
 console.log(metrics.split('\n').slice(0,5))
 ```
 

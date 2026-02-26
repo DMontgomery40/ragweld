@@ -82,7 +82,7 @@ def test_search_response() -> None:
         query="test query",
         matches=matches,
         fusion_method="rrf",
-        reranker_mode="local",
+        reranker_mode="learning",
         latency_ms=125.5,
         debug={"vector_count": 3, "sparse_count": 2},
     )

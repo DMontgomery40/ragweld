@@ -14,6 +14,7 @@ START_FRONTEND=1
 
 BACKEND_MODE="local" # local|docker
 WITH_OBSERVABILITY=0
+NATIVE_POSTGRES=0
 DRY_RUN=0
 
 BACKEND_PID=""
@@ -31,6 +32,7 @@ Starts:
 Options:
   --docker-backend         Run backend via Docker Compose (maps host :8012 -> container :8000)
   --with-observability     Also start prometheus + grafana (optional)
+  --native-postgres        Use a host-installed Postgres (skip Docker postgres)
   --lan                    Bind frontend dev server to 0.0.0.0 (accessible on your LAN)
   --no-docker              Skip Docker services
   --no-backend             Skip backend
@@ -46,6 +48,7 @@ Environment overrides:
 Notes:
   - The frontend code + Vite proxy expect the backend on port 8012 during dev.
   - If .env is missing, this script copies .env.example -> .env (you still need to add keys).
+  - --native-postgres is only supported with the local backend (uvicorn) and without observability.
 EOF
 }
 
@@ -277,6 +280,9 @@ while [[ $# -gt 0 ]]; do
     --with-observability)
       WITH_OBSERVABILITY=1
       ;;
+    --native-postgres)
+      NATIVE_POSTGRES=1
+      ;;
     --lan)
       FRONTEND_HOST="0.0.0.0"
       ;;
@@ -303,6 +309,15 @@ while [[ $# -gt 0 ]]; do
   esac
   shift
 done
+
+if [[ "$NATIVE_POSTGRES" == "1" ]]; then
+  if [[ "$BACKEND_MODE" == "docker" ]]; then
+    die "--native-postgres is not supported with --docker-backend (api container depends on docker postgres)"
+  fi
+  if [[ "$WITH_OBSERVABILITY" == "1" ]]; then
+    die "--native-postgres is not supported with --with-observability (prometheus stack depends on docker postgres-exporter)"
+  fi
+fi
 
 if [[ ! -f ".env" ]]; then
   if [[ -f ".env.example" ]]; then
@@ -359,6 +374,9 @@ if [[ "$START_DOCKER" == "1" ]]; then
   fi
 
   services=(postgres neo4j)
+  if [[ "$NATIVE_POSTGRES" == "1" ]]; then
+    services=(neo4j)
+  fi
   if [[ "$WITH_OBSERVABILITY" == "1" ]]; then
     services+=(prometheus grafana loki promtail)
   fi
@@ -386,9 +404,13 @@ if [[ "$START_DOCKER" == "1" ]]; then
   fi
 
   if [[ "$DRY_RUN" == "0" ]]; then
-    container_exists "tribrid-postgres" || die "Missing required container tribrid-postgres after startup attempt."
+    if [[ "$NATIVE_POSTGRES" == "0" ]]; then
+      container_exists "tribrid-postgres" || die "Missing required container tribrid-postgres after startup attempt."
+    fi
     container_exists "tribrid-neo4j" || die "Missing required container tribrid-neo4j after startup attempt."
-    wait_for_container_healthy "tribrid-postgres" 120
+    if [[ "$NATIVE_POSTGRES" == "0" ]]; then
+      wait_for_container_healthy "tribrid-postgres" 120
+    fi
     wait_for_container_healthy "tribrid-neo4j" 180
   fi
 fi

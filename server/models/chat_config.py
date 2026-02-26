@@ -11,7 +11,6 @@ from .tribrid_config_model import (  # noqa: F401
     BenchmarkConfig,
     ChatConfig,
     ChatMultimodalConfig,
-    ChatRerankerConfig,
     ImageAttachment,
     ImageGenConfig,
     LocalModelConfig,
@@ -28,7 +27,6 @@ from .tribrid_config_model import (  # noqa: F401
 __all__ = [
     "ActiveSources",
     "ImageAttachment",
-    "ChatRerankerConfig",
     "RecallConfig",
     "RecallIntensity",
     "RecallSignals",

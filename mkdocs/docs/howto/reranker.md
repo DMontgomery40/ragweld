@@ -6,7 +6,7 @@
 
     ---
 
-    Local/cloud/learning reranker stage to refine fused retrieval results.
+    Cloud/learning reranker stage to refine fused retrieval results.
 
 -   :material-mining:{ .lg .middle } **Triplet Mining**
 
@@ -99,9 +99,8 @@ async function trainReranker(corpus_id: string) {
 
 | Field | Description |
 |-------|-------------|
-| `reranking.reranker_mode` | `none | local | learning | cloud` |
+| `reranking.reranker_mode` | `none | learning | cloud` (legacy `local`/`hf` normalize to `learning`) |
 | `reranking.reranker_cloud_provider` | Provider id when cloud mode |
-| `reranking.reranker_local_model` | HuggingFace/local model id |
 | `reranking.tribrid_reranker_topn` | Candidates to rerank |
 | `reranking.rerank_input_snippet_chars` | Max chars per candidate snippet |
 

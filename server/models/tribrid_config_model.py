@@ -1476,7 +1476,6 @@ class RerankerInfoResponse(BaseModel):
     reranker_mode: str = Field(default="none", description="Resolved reranker mode")
     reranker_cloud_provider: str | None = Field(default=None)
     reranker_cloud_model: str | None = Field(default=None)
-    reranker_local_model: str | None = Field(default=None)
     path: str = Field(default="", description="Selected model path (may be empty)")
     resolved_path: str = Field(default="", description="Resolved model path (best-effort)")
     device: str = Field(default="cpu", description="Compute device (best-effort)")
@@ -1485,7 +1484,6 @@ class RerankerInfoResponse(BaseModel):
     batch: int | None = Field(default=None, description="Rerank batch size (if applicable)")
     maxlen: int | None = Field(default=None, description="Rerank max length (if applicable)")
     snippet_chars: int | None = Field(default=None, description="Snippet chars used for rerank input")
-    trust_remote_code: bool = Field(default=False, description="Whether transformers trust_remote_code is enabled")
 
 
 class RerankerScoreRequest(BaseModel):
@@ -1498,14 +1496,24 @@ class RerankerScoreRequest(BaseModel):
     )
     query: str = Field(description="Query string")
     document: str = Field(description="Document/passage text to score")
-    mode: Literal["learning", "local"] | None = Field(
+    mode: Literal["learning"] | None = Field(
         default=None,
-        description="Scoring mode override. learning uses the active learning artifact; local uses reranking.reranker_local_model.",
+        description="Scoring mode override. Only 'learning' is supported; legacy values normalize to 'learning'.",
     )
     include_logits: bool = Field(
         default=False,
         description="Include backend-specific raw logits when available (best-effort)",
     )
+
+    @field_validator("mode", mode="before")
+    @classmethod
+    def normalize_mode(cls, v: str | None) -> str | None:
+        if isinstance(v, str):
+            val = v.strip().lower()
+            if val in {"local", "hf"}:
+                return "learning"
+            return val
+        return v
 
 
 class RerankerScoreResponse(BaseModel):
@@ -3363,9 +3371,8 @@ class RerankingConfig(BaseModel):
         default="none",
         pattern="^(cloud|local|learning|none)$",
         description=(
-            "Reranker mode: 'cloud' (Cohere/Voyage/Jina API), 'local' (local HuggingFace reranker), "
-            "'learning' (trainable reranker: MLX Qwen3 LoRA when available, else transformers), "
-            "'none' (disabled)"
+            "Reranker mode: 'cloud' (Cohere/Voyage/Jina API), 'learning' (MLX Qwen3 LoRA learning reranker), "
+            "'none' (disabled). Legacy values 'local'/'hf' normalize to 'learning'."
         ),
     )
 
@@ -3379,11 +3386,6 @@ class RerankingConfig(BaseModel):
         description="Cloud reranker model name when mode=cloud (Cohere: rerank-v3.5)"
     )
 
-    reranker_local_model: str = Field(
-        default="BAAI/bge-reranker-v2-m3",
-        description="Local HuggingFace reranker model when mode=local"
-    )
-
     tribrid_reranker_alpha: float = Field(
         default=0.7,
         ge=0.0,
@@ -3395,7 +3397,7 @@ class RerankingConfig(BaseModel):
         default=50,
         ge=10,
         le=200,
-        description="Number of candidates to rerank (local/learning mode)"
+        description="Number of candidates to rerank (learning mode)"
     )
 
     reranker_cloud_top_n: int = Field(
@@ -3447,13 +3449,6 @@ class RerankingConfig(BaseModel):
         description="Snippet chars for reranking input"
     )
 
-    transformers_trust_remote_code: int = Field(
-        default=1,
-        ge=0,
-        le=1,
-        description="Allow transformers remote code for HF rerankers that require it"
-    )
-
     @field_validator('reranker_mode', mode='before')
     @classmethod
     def normalize_mode(cls, v: str) -> str:
@@ -3462,8 +3457,10 @@ class RerankingConfig(BaseModel):
             val = v.strip().lower()
             if val in {'off', 'disabled'}:
                 return 'none'
-            if val == 'hf':
-                return 'local'
+            if val in {'hf', 'local'}:
+                # Back-compat: older configs used 'hf'/'local' for the legacy CrossEncoder reranker.
+                # The product path is now the MLX Qwen3 learning reranker.
+                return 'learning'
             # Map old 'cohere', 'voyage', 'jina' values to 'cloud'
             if val in {'cohere', 'voyage', 'jina'}:
                 return 'cloud'
@@ -3927,7 +3924,7 @@ class TrainingConfig(BaseModel):
 
     tribrid_reranker_model_path: str = Field(
         default="models/learning-reranker-epstein-files-1",
-        description="Active learning reranker artifact path (HF model dir for transformers; adapter dir for MLX)"
+        description="Active learning reranker artifact path (MLX adapter directory)."
     )
 
     tribrid_reranker_mine_mode: str = Field(
@@ -3948,10 +3945,26 @@ class TrainingConfig(BaseModel):
         description="Training triplets file path"
     )
 
-    learning_reranker_backend: Literal["auto", "transformers", "mlx_qwen3"] = Field(
+    learning_reranker_backend: Literal["auto", "mlx_qwen3"] = Field(
         default="auto",
-        description="Learning reranker backend: auto (prefer MLX Qwen3 on Apple Silicon), transformers (HF), mlx_qwen3 (force MLX)",
+        description=(
+            "Learning reranker backend: auto (prefer MLX Qwen3 on Apple Silicon), mlx_qwen3 (force). "
+            "Legacy values 'transformers'/'hf' normalize to 'auto'."
+        ),
     )
+
+    @field_validator("learning_reranker_backend", mode="before")
+    @classmethod
+    def normalize_learning_backend(cls, v: str) -> str:
+        """Normalize learning reranker backend aliases."""
+        if isinstance(v, str):
+            val = v.strip().lower()
+            if val in {"transformers", "hf"}:
+                return "auto"
+            if val == "mlx":
+                return "mlx_qwen3"
+            return val
+        return v
 
     learning_reranker_base_model: str = Field(
         default="Qwen/Qwen3-Reranker-0.6B",
@@ -4733,40 +4746,6 @@ class DockerConfig(BaseModel):
     )
 
 
-class ChatRerankerConfig(BaseModel):
-    """Chat-specific reranker.
-
-    Separate from RAG reranker because:
-    - Shorter passages (conversation turns, not code blocks)
-    - Recency bias (recent messages matter more)
-    - Lower latency tolerance (chat feels slow >500ms)
-    """
-
-    mode: str = Field(
-        default="local",
-        pattern="^(cloud|local|none)$",
-        description="Chat reranker mode.",
-    )
-    local_model: str = Field(
-        default="BAAI/bge-reranker-v2-m3",
-        description="Local reranker model for chat.",
-    )
-    cloud_provider: str = Field(default="cohere")
-    cloud_model: str = Field(default="rerank-v3.5")
-    top_n: int = Field(default=20, ge=5, le=100)
-    recency_weight: float = Field(
-        default=0.3,
-        ge=0.0,
-        le=1.0,
-        description="Blend weight for recency. 0=pure relevance, 1=pure recency.",
-    )
-    max_age_hours: int = Field(
-        default=0,
-        ge=0,
-        description="Only retrieve messages from last N hours. 0=no limit.",
-    )
-
-
 class RecallConfig(BaseModel):
     """Persistent chat memory. ON by default.
 
@@ -5011,7 +4990,6 @@ Be helpful, friendly, and engaging, and base your answers on the actual database
         description="State 4: Both. RAG and Recall both returned results.",
     )
 
-    reranker: ChatRerankerConfig = Field(default_factory=ChatRerankerConfig)
     recall: RecallConfig = Field(default_factory=RecallConfig)
     recall_gate: RecallGateConfig = Field(default_factory=RecallGateConfig)
     multimodal: ChatMultimodalConfig = Field(default_factory=ChatMultimodalConfig)
@@ -5196,7 +5174,6 @@ class TriBridConfig(BaseModel):
             'RERANKER_MODE': self.reranking.reranker_mode,
             'RERANKER_CLOUD_PROVIDER': self.reranking.reranker_cloud_provider,
             'RERANKER_CLOUD_MODEL': self.reranking.reranker_cloud_model,
-            'RERANKER_LOCAL_MODEL': self.reranking.reranker_local_model,
             'TRIBRID_RERANKER_ALPHA': self.reranking.tribrid_reranker_alpha,
             'TRIBRID_RERANKER_TOPN': self.reranking.tribrid_reranker_topn,
             'RERANKER_CLOUD_TOP_N': self.reranking.reranker_cloud_top_n,
@@ -5206,7 +5183,6 @@ class TriBridConfig(BaseModel):
             'TRIBRID_RERANKER_RELOAD_PERIOD_SEC': self.reranking.tribrid_reranker_reload_period_sec,
             'RERANKER_TIMEOUT': self.reranking.reranker_timeout,
             'RERANK_INPUT_SNIPPET_CHARS': self.reranking.rerank_input_snippet_chars,
-            'TRANSFORMERS_TRUST_REMOTE_CODE': self.reranking.transformers_trust_remote_code,
     # Generation params (12)
             'GEN_MODEL': self.generation.gen_model,
             'GEN_TEMPERATURE': self.generation.gen_temperature,
@@ -5533,7 +5509,6 @@ class TriBridConfig(BaseModel):
                 reranker_mode=data.get('RERANKER_MODE') or data.get('RERANKER_ACTIVE') or data.get('RERANKER_BACKEND') or 'none',
                 reranker_cloud_provider=data.get('RERANKER_CLOUD_PROVIDER') or data.get('RERANKER_PROVIDER') or 'cohere',
                 reranker_cloud_model=data.get('RERANKER_CLOUD_MODEL') or data.get('COHERE_RERANK_MODEL') or 'rerank-v3.5',
-                reranker_local_model=data.get('RERANKER_LOCAL_MODEL') or data.get('RERANKER_MODEL') or 'BAAI/bge-reranker-v2-m3',
                 tribrid_reranker_alpha=data.get('TRIBRID_RERANKER_ALPHA', 0.7),
                 tribrid_reranker_topn=data.get('TRIBRID_RERANKER_TOPN', 50),
                 reranker_cloud_top_n=data.get('RERANKER_CLOUD_TOP_N', 50),
@@ -5543,7 +5518,6 @@ class TriBridConfig(BaseModel):
                 tribrid_reranker_reload_period_sec=data.get('TRIBRID_RERANKER_RELOAD_PERIOD_SEC', 60),
                 reranker_timeout=data.get('RERANKER_TIMEOUT', 10),
                 rerank_input_snippet_chars=data.get('RERANK_INPUT_SNIPPET_CHARS', 700),
-                transformers_trust_remote_code=data.get('TRANSFORMERS_TRUST_REMOTE_CODE', 1),
             ),
             generation=GenerationConfig(
                 gen_model=data.get('GEN_MODEL', 'gpt-4o-mini'),
@@ -5857,7 +5831,6 @@ TRIBRID_CONFIG_KEYS = {
     'RERANKER_MODE',
     'RERANKER_CLOUD_PROVIDER',
     'RERANKER_CLOUD_MODEL',
-    'RERANKER_LOCAL_MODEL',
     'TRIBRID_RERANKER_ALPHA',
     'TRIBRID_RERANKER_TOPN',
     'RERANKER_CLOUD_TOP_N',
@@ -5867,7 +5840,6 @@ TRIBRID_CONFIG_KEYS = {
     'TRIBRID_RERANKER_RELOAD_PERIOD_SEC',
     'RERANKER_TIMEOUT',
     'RERANK_INPUT_SNIPPET_CHARS',
-    'TRANSFORMERS_TRUST_REMOTE_CODE',
     # Generation params (17)
     'GEN_MODEL',
     'GEN_TEMPERATURE',
@@ -6064,7 +6036,7 @@ RAG_EVAL_CONFIG_KEYS: set[str] = {
     'PROMPT_QUERY_EXPANSION', 'PROMPT_QUERY_REWRITE', 'PROMPT_SEMANTIC_CARDS',
     # Reranking
     'RERANKER_MODE', 'RERANKER_CLOUD_PROVIDER', 'RERANKER_CLOUD_MODEL',
-    'RERANKER_LOCAL_MODEL', 'TRIBRID_RERANKER_ALPHA', 'TRIBRID_RERANKER_TOPN',
+    'TRIBRID_RERANKER_ALPHA', 'TRIBRID_RERANKER_TOPN',
     'TRIBRID_RERANKER_BATCH', 'TRIBRID_RERANKER_MAXLEN', 'RERANK_INPUT_SNIPPET_CHARS',
     # Chunking
     'CHUNK_SIZE', 'CHUNK_OVERLAP', 'AST_OVERLAP_LINES', 'MAX_INDEXABLE_FILE_SIZE',
@@ -6136,7 +6108,6 @@ def get_eval_key_categories() -> dict[str, str]:
         'RERANKER_MODE': 'Reranking',
         'RERANKER_CLOUD_PROVIDER': 'Reranking',
         'RERANKER_CLOUD_MODEL': 'Reranking',
-        'RERANKER_LOCAL_MODEL': 'Reranking',
         'TRIBRID_RERANKER_ALPHA': 'Reranking',
         'TRIBRID_RERANKER_TOPN': 'Reranking',
         'RERANKER_CLOUD_TOP_N': 'Reranking',

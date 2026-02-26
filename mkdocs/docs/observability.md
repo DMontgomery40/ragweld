@@ -39,14 +39,14 @@
 
 | Service | Port | Notes |
 |---------|------|-------|
-| Prometheus | 9090 | Scrapes `/metrics` and exporter |
+| Prometheus | 9090 | Scrapes `/api/metrics` and exporter |
 | Grafana | 3001 | Embedded dashboard in UI |
 | Loki | 3100 | Log aggregation |
 | Promtail | — | Ships container/host logs |
 
 ```mermaid
 flowchart LR
-    App["TriBridRAG"] --> METRICS["/metrics"]
+    App["TriBridRAG"] --> METRICS["/api/metrics"]
     METRICS --> PROM["Prometheus"]
     PROM --> GRAF["Grafana"]
     LOGS["Docker Logs"] --> PROMTAIL["Promtail"]
@@ -57,17 +57,17 @@ flowchart LR
 === "Python"
 ```python
 import httpx
-print(httpx.get("http://localhost:8000/metrics").text.splitlines()[:5])
+print(httpx.get("http://127.0.0.1:8012/api/metrics").text.splitlines()[:5])
 ```
 
 === "curl"
 ```bash
-curl -sS http://localhost:8000/metrics | head -n 20
+curl -sS http://127.0.0.1:8012/api/metrics | head -n 20
 ```
 
 === "TypeScript"
 ```typescript
-const m = await (await fetch('/metrics')).text();
+const m = await (await fetch('/api/metrics')).text();
 console.log(m.split('\n').slice(0,5));
 ```
 

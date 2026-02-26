@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Tri-brid RAG engine combining vector, sparse, and graph search"
 readme = "README.md"
 requires-python = ">=3.11,<3.13"
-license = { text = "MIT" }
+license = { file = "LICENSE" }
 authors = [
     { name = "TriBridRAG Team" }
 ]
@@ -75,6 +75,7 @@ mlx = [
     "mlx-data>=0.0.6",
     "sentencepiece>=0.2.0",
     "datasets>=2.20.0",
+    "mlx-embeddings>=0.0.5",
 ]
 
 [build-system]
@@ -120,6 +121,8 @@ module = [
     "pyarrow.*",
     "mlx",
     "mlx.*",
+    "mlx_embeddings",
+    "mlx_embeddings.*",
     "mlx_lm",
     "mlx_lm.*",
     "sentence_transformers",

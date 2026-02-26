@@ -2,25 +2,19 @@ name: Docs Autopilot (push)
 on:
   push:
     branches: ["main", "development"]
-    paths:
-      - "server/**"
-      - "web/**"
-      - "scripts/docs_ai/**"
-      - "data/models.json"
-      - "data/glossary.json"
-      - "docker-compose.yml"
-      - "pyproject.toml"
-      - "tribrid_config.json"
-      - "start.sh"
   workflow_dispatch:
     inputs:
       base_ref:
-        description: "Base ref to diff against (default: previous push SHA)"
+        description: "Base ref to diff against (default: previous push SHA). Use EMPTY for a full bootstrap (empty-tree → HEAD)."
         required: false
         default: ""
 
 permissions:
   contents: write
+
+concurrency:
+  group: docs-autopilot-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   docs-autopilot:
@@ -29,7 +23,7 @@ jobs:
     env:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       # OpenAI model used by scripts/docs_ai/generate_docs_from_diff.py (Responses API)
-      OPENAI_MODEL: gpt-5.2
+      OPENAI_MODEL: ${{ vars.OPENAI_MODEL || 'gpt-5' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -49,8 +43,33 @@ jobs:
           pip install mike==2.1.0 mkdocs-git-revision-date-localized-plugin==1.2.6 mkdocs-minify-plugin==0.8.0
           pip install mkdocs-glightbox
 
+      - name: Generate docs plan (artifact)
+        run: |
+          BASE="${{ github.event.inputs.base_ref }}"
+          if [ -z "$BASE" ]; then
+            BASE="${{ github.event.before }}"
+          fi
+          if [ -z "$BASE" ] || [ "$BASE" = "0000000000000000000000000000000000000000" ]; then
+            BASE="origin/${{ github.ref_name }}"
+          fi
+          echo "Using base ref: $BASE"
+          python scripts/docs_ai/generate_docs_from_diff.py --base "$BASE" --output mkdocs-docs-plan.md
+
+      - name: Upload plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: mkdocs-docs-plan
+          path: mkdocs-docs-plan.md
+
+      - name: Require OPENAI_API_KEY
+        run: |
+          if [ -z "${OPENAI_API_KEY}" ]; then
+            echo "ERROR: OPENAI_API_KEY is not set."
+            echo "Add it in GitHub → Settings → Secrets and variables → Actions → New repository secret."
+            exit 1
+          fi
+
       - name: Generate docs patch (apply)
-        if: env.OPENAI_API_KEY != ''
         run: |
           BASE="${{ github.event.inputs.base_ref }}"
           if [ -z "$BASE" ]; then
@@ -61,6 +80,14 @@ jobs:
           fi
           echo "Using base ref: $BASE"
           python scripts/docs_ai/generate_docs_from_diff.py --base "$BASE" --llm openai --apply
+
+      - name: Upload patch (best-effort)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mkdocs-docs-llm-patch
+          path: mkdocs-docs-llm.patch
+          if-no-files-found: ignore
 
       - name: Build documentation
         run: mkdocs build --strict

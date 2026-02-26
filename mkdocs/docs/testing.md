@@ -55,7 +55,7 @@
 import httpx
 
 def test_search_returns_relevant_chunks():
-    r = httpx.post("http://localhost:8000/search", json={
+    r = httpx.post("http://127.0.0.1:8012/api/search", json={
         "query": "authentication flow",
         "corpus_id": "my-corpus",
         "top_k": 10,
@@ -68,7 +68,7 @@ def test_search_returns_relevant_chunks():
 
 === "curl"
 ```bash
-curl -sS -X POST http://localhost:8000/search -H 'Content-Type: application/json' \
+curl -sS -X POST http://127.0.0.1:8012/api/search -H 'Content-Type: application/json' \
   -d '{"corpus_id":"my-corpus","query":"authentication flow","top_k":10}' | jq '[.matches[].file_path] | length'
 ```
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import math
+import platform
 import re
 import time
 from functools import lru_cache
@@ -85,6 +86,9 @@ class Embedder:
             mode = str(getattr(self.config, "contextual_chunk_embeddings", "off") or "off").strip().lower()
             if mode == "late_chunking_local_only":
                 return await self._embed_local_hf_mean_pool(prepared)
+            mlx_vecs = await self._try_embed_local_mlx_embeddings(prepared)
+            if mlx_vecs is not None:
+                return mlx_vecs
             return await self._embed_local_sentence_transformers(prepared)
         raise RuntimeError(f"Unsupported embedding provider: {provider}")
 
@@ -142,6 +146,140 @@ class Embedder:
 
         return SentenceTransformer(model_name)
 
+    @staticmethod
+    def _mlx_platform_supported() -> bool:
+        return platform.system() == "Darwin" and platform.machine().lower() in {"arm64", "aarch64"}
+
+    @staticmethod
+    @lru_cache(maxsize=16)
+    def _load_mlx_embeddings(model_name: str) -> tuple[Any, Any] | None:
+        """Load an MLX embedding model/tokenizer pair (cached).
+
+        Returns None if mlx-embeddings is unavailable or the model fails to load.
+        """
+        if not Embedder._mlx_platform_supported():
+            return None
+        try:
+            from mlx_embeddings.utils import load  # type: ignore[import-not-found]
+
+            model, tokenizer = load(str(model_name))
+            return (model, tokenizer)
+        except Exception:
+            return None
+
+    @staticmethod
+    def _mlx_candidate_models(model_name: str) -> list[tuple[str, bool]]:
+        """Return [(candidate_name, derived)] in priority order.
+
+        - derived=True means we inferred the candidate (safe to ignore on mismatch).
+        """
+        raw = str(model_name or "").strip()
+        if not raw:
+            return []
+
+        # If user points at a local path, don't try to guess.
+        if raw.startswith(("/", "./", "../", "~")):
+            return [(raw, False)]
+
+        # If the repo name already looks MLX-specific, use it as-is.
+        lowered = raw.lower()
+        if raw.startswith("mlx-community/") or lowered.endswith("-mlx") or lowered.endswith("-mlx-4bit"):
+            return [(raw, False)]
+
+        # Heuristic: many MLX community conversions keep the *tail* name and add a quant suffix.
+        tail = raw.split("/")[-1]
+        cands: list[tuple[str, bool]] = [
+            (f"mlx-community/{tail}-4bit", True),
+            (f"mlx-community/{tail}", True),
+        ]
+        if raw not in {c for c, _ in cands}:
+            # Allow explicit non-mlx-community repos that still host MLX-format weights.
+            cands.append((raw, False))
+        return cands
+
+    @staticmethod
+    def _resolve_max_length(tokenizer: Any, requested: int | None) -> int | None:
+        req = int(requested) if requested is not None else 0
+        if req <= 0:
+            req = 0
+
+        model_max = getattr(tokenizer, "model_max_length", None)
+        try:
+            model_max_int = int(model_max)
+        except Exception:
+            model_max_int = 0
+
+        # HuggingFace uses very large sentinels for "infinite"; treat those as unknown.
+        if model_max_int <= 0 or model_max_int >= 1_000_000:
+            return int(req) if req > 0 else None
+
+        if req > 0:
+            return int(min(req, model_max_int))
+        return int(model_max_int)
+
+    async def _try_embed_local_mlx_embeddings(self, texts: list[str]) -> list[list[float]] | None:
+        """Best-effort MLX embeddings (Apple Silicon only).
+
+        Returns None when MLX embeddings are unavailable for the configured model; callers should
+        fall back to a CPU/GPU torch backend (SentenceTransformers / HF).
+        """
+        if not self._mlx_platform_supported():
+            return None
+
+        model_name = str(getattr(self.config, "embedding_model_local", "") or "").strip()
+        if not model_name:
+            return None
+
+        batch_size = int(getattr(self.config, "embedding_batch_size", 32) or 32)
+        requested_max = int(getattr(self.config, "embedding_max_tokens", 0) or 0) or None
+
+        candidates = self._mlx_candidate_models(model_name)
+        for cand, derived in candidates:
+            loaded = self._load_mlx_embeddings(cand)
+            if loaded is None:
+                continue
+            model, tokenizer = loaded
+            max_length = self._resolve_max_length(tokenizer, requested_max)
+
+            def _run() -> list[list[float]]:
+                out: list[list[float]] = []
+                for i in range(0, len(texts), max(1, batch_size)):
+                    batch = texts[i : i + max(1, batch_size)]
+                    enc = tokenizer.batch_encode_plus(
+                        batch,
+                        return_tensors="mlx",
+                        padding=True,
+                        truncation=True,
+                        max_length=int(max_length) if max_length else None,
+                    )
+                    outputs = model(enc["input_ids"], attention_mask=enc.get("attention_mask"))
+                    embeds = getattr(outputs, "text_embeds", None)
+                    if embeds is None:
+                        raise RuntimeError("mlx-embeddings output missing text_embeds")
+                    rows = embeds.tolist()
+                    if isinstance(rows, list) and rows and not isinstance(rows[0], list):
+                        rows = [rows]
+                    for v in rows:
+                        out.append([float(x) for x in list(v)])
+                return out
+
+            try:
+                vecs = await asyncio.to_thread(_run)
+            except Exception:
+                continue
+
+            if any(len(v) != self.dim for v in vecs):
+                if derived:
+                    # If we guessed the candidate name, don't hard-fail.
+                    continue
+                raise RuntimeError(
+                    "Embedding dimension mismatch. "
+                    f"Configured embedding_dim={self.dim}, but MLX model '{cand}' returned {len(vecs[0]) if vecs else 0}."
+                )
+            return vecs
+
+        return None
+
     async def _embed_local_sentence_transformers(self, texts: list[str]) -> list[list[float]]:
         model_name = str(getattr(self.config, "embedding_model_local", "") or "").strip()
         if not model_name:
@@ -185,10 +323,13 @@ class Embedder:
     @staticmethod
     @lru_cache(maxsize=4)
     def _load_hf_model(model_name: str) -> Any:
+        import torch
         from transformers import AutoModel
 
         m = AutoModel.from_pretrained(model_name)
         m.eval()
+        if torch.backends.mps.is_available():
+            m.to(torch.device("mps"))
         return m
 
     async def _embed_local_hf_mean_pool(self, texts: list[str]) -> list[list[float]]:
@@ -203,6 +344,7 @@ class Embedder:
         max_len = int(getattr(self.config, "embedding_max_tokens", 0) or 0) or None
 
         def _run() -> list[list[float]]:
+            device = next(model.parameters()).device
             enc = tokenizer(
                 texts,
                 padding=True,
@@ -211,16 +353,19 @@ class Embedder:
                 add_special_tokens=False,
                 return_tensors="pt",
             )
+            input_ids = enc["input_ids"].to(device)
+            attention_mask = enc.get("attention_mask")
+            if attention_mask is not None:
+                attention_mask = attention_mask.to(device)
             with torch.no_grad():
-                out = model(input_ids=enc["input_ids"], attention_mask=enc.get("attention_mask"))
+                out = model(input_ids=input_ids, attention_mask=attention_mask)
                 h = getattr(out, "last_hidden_state", None)
                 if h is None:
                     raise RuntimeError("HF model output missing last_hidden_state")
-                mask = enc.get("attention_mask")
-                if mask is None:
+                if attention_mask is None:
                     pooled = h.mean(dim=1)
                 else:
-                    m = mask.unsqueeze(-1).to(h.dtype)
+                    m = attention_mask.unsqueeze(-1).to(h.dtype)
                     denom = m.sum(dim=1).clamp_min(1.0)
                     pooled = (h * m).sum(dim=1) / denom
                 pooled = pooled / torch.linalg.norm(pooled, ord=2, dim=-1, keepdim=True).clamp_min(1e-12)

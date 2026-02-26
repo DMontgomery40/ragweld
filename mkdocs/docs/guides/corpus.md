@@ -56,13 +56,13 @@ flowchart LR
 ```python
 import httpx
 req = {"corpus_id": "tribrid", "repo_path": "/code/tribrid", "force_reindex": False}
-httpx.post("http://localhost:8000/index", json=req)
-httpx.get("http://localhost:8000/index/status", params={"corpus_id": "tribrid"})
+httpx.post("http://127.0.0.1:8012/api/index", json=req)
+httpx.get("http://127.0.0.1:8012/api/index/tribrid/status")
 ```
 
 === "curl"
 ```bash
-curl -sS -X POST http://localhost:8000/index -H 'Content-Type: application/json' -d '{
+curl -sS -X POST http://127.0.0.1:8012/api/index -H 'Content-Type: application/json' -d '{
   "corpus_id": "tribrid", "repo_path": "/code/tribrid", "force_reindex": false
 }'
 ```

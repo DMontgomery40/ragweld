@@ -43,19 +43,19 @@ export const HistoryViewer: React.FC<HistoryViewerProps> = ({ className = '' }) 
   const getConfigDisplay = (entry: EvalHistoryEntry) => {
     if (entry.reranker_mode === 'local') {
       return {
-        display: 'BM25 + Local CE',
+        display: 'BM25 + Learning (legacy local)',
         color: 'var(--accent)',
         bg: 'rgba(var(--accent-rgb), 0.1)'
       };
     } else if (entry.reranker_mode === 'cloud') {
       return {
-        display: `BM25 + ${entry.reranker_cloud_provider || 'Cloud'} CE`,
+        display: `BM25 + Cloud (${entry.reranker_cloud_provider || 'provider'})`,
         color: 'var(--link)',
         bg: 'rgba(var(--link-rgb), 0.1)'
       };
     } else if (entry.reranker_mode === 'learning') {
       return {
-        display: 'BM25 + Learning CE',
+        display: 'BM25 + Learning',
         color: 'var(--success)',
         bg: 'rgba(var(--success-rgb), 0.1)'
       };

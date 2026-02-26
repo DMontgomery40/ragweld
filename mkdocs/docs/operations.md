@@ -27,7 +27,7 @@
 [API](api.md){ .md-button }
 
 !!! tip "Readiness Gate"
-    Gate traffic on `/ready`. It verifies DB connectivity before admitting load.
+    Gate traffic on `/api/ready`. It verifies DB connectivity before admitting load.
 
 !!! note "Container Logs"
     Use `/docker/{container}/logs` for ad-hoc log pulls, or rely on Loki for aggregation.
@@ -39,11 +39,11 @@
 
 | Endpoint | Description |
 |----------|-------------|
-| `/docker/status` | Container status |
-| `/docker/containers` | List TriBrid-managed containers |
-| `/docker/containers/all` | List all containers |
-| `/docker/{container}/restart` | Restart container |
-| `/docker/{container}/logs` | Tail logs |
+| `/api/docker/status` | Container status |
+| `/api/docker/containers` | List TriBrid-managed containers |
+| `/api/docker/containers/all` | List all containers |
+| `/api/docker/{container}/restart` | Restart container |
+| `/api/docker/{container}/logs` | Tail logs |
 
 ```mermaid
 flowchart LR
@@ -57,17 +57,17 @@ flowchart LR
 === "Python"
 ```python
 import httpx
-print(httpx.get("http://localhost:8000/docker/status").json())
+print(httpx.get("http://127.0.0.1:8012/api/docker/status").json())
 ```
 
 === "curl"
 ```bash
-curl -sS http://localhost:8000/docker/status | jq .
+curl -sS http://127.0.0.1:8012/api/docker/status | jq .
 ```
 
 === "TypeScript"
 ```typescript
-await fetch('/docker/status').then(r => r.json())
+await fetch('/api/docker/status').then(r => r.json())
 ```
 
 - [x] Gate traffic with readiness

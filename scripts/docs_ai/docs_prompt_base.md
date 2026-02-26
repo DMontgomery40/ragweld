@@ -28,6 +28,15 @@ MkDocs theme: **Material for MkDocs** (v9.x).
 - Corpus separation is fundamental (code uses `repo_id` to mean corpus id).
 - Retrieval = vector + sparse + graph (fused), optionally reranked.
 
+## Product URLs + API prefix (critical for accuracy)
+
+- In dev, the backend is mounted under **`/api`** (FastAPI routers are included with `prefix="/api"`).
+  - Correct examples: `http://127.0.0.1:8012/api/search`, `fetch("/api/config")`
+  - Incorrect examples: `/search`, `/config`, `http://localhost:8000/search`
+- Default dev entrypoints (unless overridden by env vars):
+  - **UI**: `http://127.0.0.1:5173/web`
+  - **API**: `http://127.0.0.1:8012/api`
+
 ## MkDocs Material formatting (mandatory)
 
 Plain markdown without Material features is unacceptable. Use these heavily:
@@ -72,3 +81,9 @@ Use Material buttons (adjust relative paths correctly for nested pages):
 - You may **create, move, or delete** pages and restructure folders as needed.
 - After your changes, **every** relative link must resolve and `mkdocs build --strict` must pass.
 - Do not create relative links to repository source files; reference code paths as inline code (`` `path/to/file.py` ``) or use absolute GitHub URLs when a clickable link is required.
+
+## Navigation + audience (do not regress)
+
+- The docs MUST include a real, human-first **User Manual** (task-focused, step-by-step, practical).
+- Do not publish internal planning artifacts as product docs (no exec plans/runbooks; no `repo/` knowledge base mirroring).
+- Prefer narrative explanations and “how to” flows over terse bullet lists; use bullets as checklists, not as the whole page.
