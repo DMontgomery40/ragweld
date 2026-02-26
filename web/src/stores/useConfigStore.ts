@@ -24,6 +24,8 @@ interface ConfigStore {
   patchSectionDebounced: (section: keyof TriBridConfig, updates: Record<string, unknown>) => void;
   /** Cancel any pending debounced patch timers (e.g. when switching corpora). */
   cancelPendingPatches: (corpusId?: string) => void;
+  /** Immediately flush all pending debounced patches for the active corpus. */
+  flushPendingPatches: () => Promise<void>;
   resetConfig: () => Promise<void>;
   loadEvalKeyCategories: () => void;
 
@@ -224,6 +226,9 @@ export const useConfigStore = create<ConfigStore>((set) => {
 
   patchSectionDebounced,
   cancelPendingPatches,
+  flushPendingPatches: async () => {
+    await flushAllPendingPatches(String(getActiveCorpusId() || ''));
+  },
 
   resetConfig: async () => {
     set({ saving: true, error: null });

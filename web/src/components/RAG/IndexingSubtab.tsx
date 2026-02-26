@@ -46,7 +46,7 @@ const CHUNKING_STRATEGIES = [
 
 export function IndexingSubtab() {
   const { api } = useAPI();
-  const { config } = useConfig();
+  const { config, flushPendingPatches } = useConfig();
   const { activeRepo, repos, loadRepos, setActiveRepo } = useRepoStore();
   const {
     fetchStatus: fetchIndexStatus,
@@ -458,6 +458,10 @@ export function IndexingSubtab() {
     if (!effectivePath.trim()) return;
 
     try {
+      // Flush any pending debounced config patches so the backend reads
+      // up-to-date settings when it loads scoped config for this index run.
+      await flushPendingPatches();
+
       const body: IndexRequest = {
         corpus_id: rid,
         repo_path: effectivePath,
@@ -563,6 +567,7 @@ export function IndexingSubtab() {
     currentModel,
     effectivePath,
     embeddingType,
+    flushPendingPatches,
     forceReindex,
     graphIndexingEnabled,
     loadStats,

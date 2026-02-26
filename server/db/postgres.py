@@ -250,13 +250,15 @@ class PostgresClient:
               last_indexed TIMESTAMPTZ,
               embedding_provider TEXT,
               embedding_model TEXT,
-              embedding_dimensions INT
+              embedding_dimensions INT,
+              ts_config TEXT
             );
             """
         )
         # Ensure new columns exist when upgrading an existing DB
         await conn.execute("ALTER TABLE corpora ADD COLUMN IF NOT EXISTS meta JSONB NOT NULL DEFAULT '{}'::jsonb;")
         await conn.execute("ALTER TABLE corpora ADD COLUMN IF NOT EXISTS embedding_provider TEXT;")
+        await conn.execute("ALTER TABLE corpora ADD COLUMN IF NOT EXISTS ts_config TEXT;")
 
         # Per-corpus config (TriBridConfig JSON)
         await conn.execute(
@@ -550,9 +552,17 @@ class PostgresClient:
             )
         return len(chunks)
 
-    async def vector_search(self, repo_id: str, embedding: list[float], top_k: int) -> list[ChunkMatch]:
+    async def vector_search(
+        self, repo_id: str, embedding: list[float], top_k: int, *, expected_dimensions: int = 0
+    ) -> list[ChunkMatch]:
         if top_k <= 0:
             return []
+        if expected_dimensions > 0 and len(embedding) != expected_dimensions:
+            raise ValueError(
+                f"Query embedding dimension ({len(embedding)}) does not match "
+                f"indexed dimension ({expected_dimensions}) for corpus '{repo_id}'. "
+                "Re-index with force_reindex=true after changing embedding config."
+            )
         await self._require_pool()
         assert self._pool is not None
 
@@ -1318,7 +1328,8 @@ class PostgresClient:
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
-                SELECT repo_id, name, root_path, description, meta, created_at, last_indexed
+                SELECT repo_id, name, root_path, description, meta, created_at, last_indexed,
+                       embedding_provider, embedding_model, embedding_dimensions, ts_config
                 FROM corpora
                 WHERE repo_id = $1;
                 """,
@@ -1334,6 +1345,10 @@ class PostgresClient:
             "meta": _coerce_jsonb_dict(row["meta"]),
             "created_at": row["created_at"],
             "last_indexed": row["last_indexed"],
+            "embedding_provider": str(row["embedding_provider"] or ""),
+            "embedding_model": str(row["embedding_model"] or ""),
+            "embedding_dimensions": int(row["embedding_dimensions"] or 0),
+            "ts_config": str(row["ts_config"] or ""),
         }
 
     async def upsert_corpus(
@@ -1391,7 +1406,9 @@ class PostgresClient:
                 json.dumps(config),
             )
 
-    async def update_corpus_embedding_meta(self, repo_id: str, *, provider: str, model: str, dimensions: int) -> None:
+    async def update_corpus_embedding_meta(
+        self, repo_id: str, *, provider: str, model: str, dimensions: int, ts_config: str = ""
+    ) -> None:
         await self._require_pool()
         assert self._pool is not None
         async with self._pool.acquire() as conn:
@@ -1400,13 +1417,15 @@ class PostgresClient:
                 UPDATE corpora
                 SET embedding_provider = $2,
                     embedding_model = $3,
-                    embedding_dimensions = $4
+                    embedding_dimensions = $4,
+                    ts_config = $5
                 WHERE repo_id = $1;
                 """,
                 repo_id,
                 str(provider or ""),
                 model,
                 int(dimensions),
+                str(ts_config or ""),
             )
 
     async def get_chunks_for_file_span(

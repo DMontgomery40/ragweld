@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import logging
 import math
 import re
 from collections import defaultdict
 from typing import TYPE_CHECKING, Any
+
+logger = logging.getLogger(__name__)
 
 from server.db.neo4j import Neo4jClient
 from server.db.postgres import PostgresClient
@@ -179,11 +182,29 @@ class TriBridFusion:
 
             embedder = Embedder(cfg.embedding, cfg.tokenization)
 
+            # ---- Query-time embedding dimension guard ----
+            # Detect when the current embedding config produces a different
+            # dimension than what was used to build the corpus index.  If
+            # mismatched, skip the vector leg rather than letting pgvector
+            # return garbage or crash with a cryptic error.
+            corpus_meta = await postgres.get_corpus(cid)
+            stored_dim = int((corpus_meta or {}).get("embedding_dimensions") or 0)
+            dim_mismatch = stored_dim > 0 and stored_dim != int(embedder.dim)
+            if dim_mismatch:
+                logger.warning(
+                    "Embedding dimension mismatch for corpus '%s': "
+                    "indexed=%d, query=%d — skipping vector leg",
+                    cid, stored_dim, embedder.dim,
+                )
+                debug["fusion_vector_dim_mismatch"] = True
+                debug["fusion_vector_dim_stored"] = stored_dim
+                debug["fusion_vector_dim_query"] = int(embedder.dim)
+
             # Reuse query embeddings across legs when possible (vector + graph chunk-mode).
             q_emb: list[float] | None = None
 
             # Run legs (request toggles + config.*.enabled)
-            if include_vector and cfg.vector_search.enabled:
+            if include_vector and cfg.vector_search.enabled and not dim_mismatch:
                 with VECTOR_LEG_LATENCY_SECONDS.time():
                     try:
                         if q_emb is None:
@@ -191,7 +212,8 @@ class TriBridFusion:
                                 q_emb = await embedder.embed(query)
                         with SEARCH_STAGE_LATENCY_SECONDS.labels(stage="postgres_vector_search").time():
                             vector_results = await postgres.vector_search(
-                                cid, q_emb, int(top_k or cfg.vector_search.top_k)
+                                cid, q_emb, int(top_k or cfg.vector_search.top_k),
+                                expected_dimensions=stored_dim,
                             )
                     except Exception as e:
                         debug["fusion_vector_error"] = _safe_error_message(e)
@@ -206,6 +228,24 @@ class TriBridFusion:
                     if min_v > 0:
                         vector_results = [r for r in vector_results if float(r.score) >= float(min_v)]
             debug["fusion_vector_results"] = len(vector_results)
+
+            # ---- ts_config mismatch warning ----
+            # If the FTS text-search config used at index time differs from the
+            # current query config, tsvector/tsquery matching will silently
+            # degrade (different stemming, stop-words, etc.).  We still run the
+            # sparse leg but surface the mismatch in debug metadata so the user
+            # can investigate.
+            stored_ts = str((corpus_meta or {}).get("ts_config") or "").strip()
+            current_ts = str(cfg.indexing.postgres_ts_config or "").strip()
+            if stored_ts and current_ts and stored_ts != current_ts:
+                logger.warning(
+                    "FTS ts_config mismatch for corpus '%s': "
+                    "indexed=%s, query=%s — sparse results may be degraded",
+                    cid, stored_ts, current_ts,
+                )
+                debug["fusion_sparse_ts_config_mismatch"] = True
+                debug["fusion_sparse_ts_config_stored"] = stored_ts
+                debug["fusion_sparse_ts_config_query"] = current_ts
 
             if include_sparse and cfg.sparse_search.enabled:
                 with SPARSE_LEG_LATENCY_SECONDS.time():

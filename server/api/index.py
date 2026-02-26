@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import logging
 import re
 from collections import defaultdict
 from collections.abc import AsyncGenerator
@@ -51,6 +52,8 @@ from server.observability.metrics import (
     INDEX_TOKENS_TOTAL,
 )
 from server.services.config_store import get_config as load_scoped_config
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["index"])
 
@@ -604,6 +607,7 @@ async def _run_index(
 
     # Corpus-level exclude paths (stored in Postgres corpora.meta.exclude_paths)
     extra_gitignore_patterns: list[str] = []
+    corpus: dict[str, Any] | None = None
     try:
         corpus = await postgres.get_corpus(repo_id)
         meta = (corpus.get("meta") or {}) if corpus else {}
@@ -612,6 +616,46 @@ async def _run_index(
             extra_gitignore_patterns = [str(x).strip() for x in raw if str(x).strip()]
     except Exception:
         extra_gitignore_patterns = []
+
+    # ---- Embedding mismatch guard ----
+    # Detect when the current embedding config differs from what was used to
+    # build the existing index.  Mixed-dimension vectors in the same corpus
+    # cause pgvector query errors (unhandled 500s) and silently corrupt search
+    # results.  Block the run unless force_reindex is set.
+    if corpus and not force_reindex and not skip_dense and embedder is not None:
+        stored_model = str(corpus.get("embedding_model") or "").strip()
+        stored_dim = int(corpus.get("embedding_dimensions") or 0)
+        stored_provider = str(corpus.get("embedding_provider") or "").strip()
+
+        # Only check if the corpus has been indexed before (non-empty metadata).
+        if stored_model and stored_dim > 0:
+            current_model = str(cfg.embedding.effective_model or "").strip()
+            current_dim = int(embedder.dim)
+            current_provider = str(cfg.embedding.embedding_type or "").strip()
+
+            mismatches: list[str] = []
+            if stored_dim != current_dim:
+                mismatches.append(f"dimensions: stored={stored_dim}, config={current_dim}")
+            if stored_model != current_model:
+                mismatches.append(f"model: stored={stored_model}, config={current_model}")
+            if stored_provider != current_provider:
+                mismatches.append(f"provider: stored={stored_provider}, config={current_provider}")
+
+            if mismatches:
+                detail = "; ".join(mismatches)
+                msg = (
+                    f"Embedding configuration mismatch for corpus '{repo_id}': {detail}. "
+                    "Re-indexing without force_reindex would mix incompatible vectors. "
+                    "Set force_reindex=true to clear the existing index first, "
+                    "or restore the embedding config to match the current index."
+                )
+                if event_queue is not None:
+                    _emit_event(
+                        event_queue,
+                        {"type": "error", "message": msg},
+                        guarantee=True,
+                    )
+                raise RuntimeError(msg)
 
     loader = FileLoader(ignore_patterns=ignore_patterns, extra_gitignore_patterns=extra_gitignore_patterns)
 
@@ -645,11 +689,56 @@ async def _run_index(
                 except Exception:
                     # Graph indexing should never block dense/sparse indexing.
                     pass
-    except Exception:
+    except Exception as exc:
         # Graph layer is optional at runtime; vector + sparse indexing should still work.
+        logger.warning("Neo4j graph initialization failed; graph indexing disabled for this run: %s", exc, exc_info=True)
+        _emit_event(
+            event_queue,
+            {"type": "warning", "message": f"Graph indexing disabled: {exc}"},
+            drop_oldest=True,
+        )
         neo4j = None
         graph_builder = None
 
+    try:
+        return await _run_index_body(
+            repo_id=repo_id,
+            repo_path=repo_path,
+            force_reindex=force_reindex,
+            cfg=cfg,
+            chunker=chunker,
+            max_indexable_bytes=max_indexable_bytes,
+            skip_dense=skip_dense,
+            embedder=embedder,
+            postgres=postgres,
+            neo4j=neo4j,
+            graph_builder=graph_builder,
+            loader=loader,
+            event_queue=event_queue,
+        )
+    finally:
+        if neo4j is not None:
+            with contextlib.suppress(Exception):
+                await neo4j.disconnect()
+
+
+async def _run_index_body(
+    *,
+    repo_id: str,
+    repo_path: str,
+    force_reindex: bool,
+    cfg: TriBridConfig,
+    chunker: Chunker,
+    max_indexable_bytes: int,
+    skip_dense: bool,
+    embedder: Embedder | None,
+    postgres: PostgresClient,
+    neo4j: Neo4jClient | None,
+    graph_builder: GraphBuilder | None,
+    loader: FileLoader,
+    event_queue: asyncio.Queue[dict[str, Any]] | None,
+) -> IndexStats:
+    """Core indexing loop -- extracted to allow _run_index() to guarantee Neo4j cleanup via finally."""
     total_files = 0
     total_chunks = 0
     total_tokens = 0
@@ -682,7 +771,10 @@ async def _run_index(
     # This makes graph-only / sparse-only workflows deterministic.
     if skip_dense:
         deleted = await postgres.delete_embeddings(repo_id)
-        await postgres.update_corpus_embedding_meta(repo_id, provider="", model="", dimensions=0)
+        await postgres.update_corpus_embedding_meta(
+            repo_id, provider="", model="", dimensions=0,
+            ts_config=str(cfg.indexing.postgres_ts_config or ""),
+        )
         if event_queue is not None:
             _emit_event(
                 event_queue,
@@ -1130,10 +1222,14 @@ async def _run_index(
             if neo4j is not None and cfg.graph_indexing.build_lexical_graph:
                 with INDEX_STAGE_LATENCY_SECONDS.labels(stage="neo4j_rebuild_entity_chunk_links").time():
                     await neo4j.rebuild_entity_chunk_links(repo_id)
-        except Exception:
+        except Exception as exc:
             INDEX_STAGE_ERRORS_TOTAL.labels(stage="graph_build").inc()
-            # Do not fail indexing if graph extraction is partial.
-            pass
+            logger.warning("Graph AST build failed for repo_id=%s: %s", repo_id, exc, exc_info=True)
+            _emit_event(
+                event_queue,
+                {"type": "warning", "message": f"Graph build incomplete: {exc}"},
+                drop_oldest=True,
+            )
 
     if not skip_dense:
         assert embedder is not None
@@ -1142,6 +1238,7 @@ async def _run_index(
             provider=str(cfg.embedding.embedding_type or ""),
             model=str(cfg.embedding.effective_model or ""),
             dimensions=int(embedder.dim),
+            ts_config=str(cfg.indexing.postgres_ts_config or ""),
         )
 
     stats = IndexStats(

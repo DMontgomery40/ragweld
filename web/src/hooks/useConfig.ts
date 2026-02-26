@@ -13,6 +13,7 @@ export function useConfig() {
   const patchSection = useConfigStore((s) => s.patchSection);
   const patchSectionDebounced = useConfigStore((s) => s.patchSectionDebounced);
   const cancelPendingPatches = useConfigStore((s) => s.cancelPendingPatches);
+  const flushPendingPatches = useConfigStore((s) => s.flushPendingPatches);
   const resetConfig = useConfigStore((s) => s.resetConfig);
 
   // Load config on mount (once)
@@ -61,6 +62,7 @@ export function useConfig() {
     saveConfig,
     patchSection,
     patchSectionDebounced,
+    flushPendingPatches,
     resetConfig,
     reload,
     clearError,

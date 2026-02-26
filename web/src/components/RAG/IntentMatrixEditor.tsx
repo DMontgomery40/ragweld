@@ -22,6 +22,17 @@ const DEFAULT_INTENT_MATRIX: Record<string, Record<string, number>> = {
   server: { server: 1.3, retrieval: 1.15, common: 1.1, web: 0.7, gui: 0.6 }
 };
 
+const EDITOR_ACTION_BUTTON_STYLE = {
+  padding: '10px 12px',
+  borderRadius: 8,
+  border: '1px solid var(--line)',
+  background: 'var(--bg-elev1)',
+  color: 'var(--fg)',
+  cursor: 'pointer',
+  fontSize: 12,
+  fontWeight: 600,
+};
+
 export function IntentMatrixEditor() {
   const [matrix, setMatrix] = useConfigField<Record<string, Record<string, number>>>(
     'layer_bonus.intent_matrix',
@@ -101,17 +112,26 @@ export function IntentMatrixEditor() {
         </label>
         <div className="editor-panel-actions">
           <button
+            type="button"
+            data-testid="intent-matrix-reset"
             onClick={handleReset}
-            className="small-button"
-            style={{ width: 'auto', marginTop: 0 }}
+            style={EDITOR_ACTION_BUTTON_STYLE}
           >
             Reset to Default
           </button>
           <button
+            type="button"
+            data-testid="intent-matrix-apply"
             onClick={handleApply}
             disabled={!!jsonError || !isDirty}
-            className={`small-button ${isDirty && !jsonError ? 'primary' : ''}`}
-            style={{ width: 'auto', marginTop: 0 }}
+            style={{
+              ...EDITOR_ACTION_BUTTON_STYLE,
+              border: `1px solid ${isDirty && !jsonError ? 'var(--accent)' : 'var(--line)'}`,
+              background: isDirty && !jsonError ? 'rgba(var(--accent-rgb), 0.12)' : 'var(--bg-elev1)',
+              color: isDirty && !jsonError ? 'var(--accent)' : 'var(--fg)',
+              cursor: !!jsonError || !isDirty ? 'not-allowed' : 'pointer',
+              opacity: !!jsonError || !isDirty ? 0.6 : 1,
+            }}
           >
             Apply Changes
           </button>
