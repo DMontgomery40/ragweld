@@ -103,6 +103,7 @@
     "late_chunking_max_doc_tokens": 8192,
     "voyage_model": "voyage-code-3",
     "embedding_model_local": "all-MiniLM-L6-v2",
+    "embedding_model_mlx": "mlx-community/all-MiniLM-L6-v2-4bit",
     "embedding_batch_size": 64,
     "embedding_max_tokens": 8000,
     "embedding_cache_enabled": 1,

@@ -48,7 +48,7 @@ Environment overrides:
 Notes:
   - The frontend code + Vite proxy expect the backend on port 8012 during dev.
   - If .env is missing, this script copies .env.example -> .env (you still need to add keys).
-  - --native-postgres is only supported with the local backend (uvicorn) and without observability.
+  - --native-postgres uses host-installed Postgres. Docker services connect via host.docker.internal.
 EOF
 }
 
@@ -110,7 +110,9 @@ colima_running() {
 colima_memory_gb() {
   local mem_bytes
   mem_bytes="$(colima status --json 2>/dev/null \
-    | grep -o '"memory":[0-9]*' | head -1 | cut -d: -f2)" || true
+    | grep -Eo '"memory"[[:space:]]*:[[:space:]]*"?[0-9]+' \
+    | head -1 \
+    | grep -Eo '[0-9]+')" || true
   if [[ -z "${mem_bytes:-}" || "$mem_bytes" == "0" ]]; then
     echo 0
     return
@@ -262,6 +264,36 @@ wait_for_http_ok() {
   done
 }
 
+wait_for_native_postgres() {
+  local timeout_s="${1:-60}"
+  have_cmd pg_isready || die "pg_isready not found. Install Postgres (or use Docker Postgres) before using --native-postgres."
+
+  local host="${POSTGRES_HOST:-localhost}"
+  local port="${POSTGRES_PORT:-5432}"
+  local user="${POSTGRES_USER:-postgres}"
+
+  # host.docker.internal is for containers; on the host we should check localhost.
+  if [[ "$host" == "host.docker.internal" ]]; then
+    host="127.0.0.1"
+  fi
+
+  log "Waiting for native Postgres (pg_isready -h ${host} -p ${port}) (timeout ${timeout_s}s)..."
+  local start_s
+  start_s="$(date +%s)"
+  while true; do
+    if PGPASSWORD="${POSTGRES_PASSWORD:-}" pg_isready -h "$host" -p "$port" -U "$user" >/dev/null 2>&1; then
+      log "Native Postgres is ready."
+      return 0
+    fi
+    local now_s
+    now_s="$(date +%s)"
+    if (( now_s - start_s >= timeout_s )); then
+      die "Timed out waiting for native Postgres readiness (pg_isready). Check POSTGRES_HOST/POSTGRES_PORT and ensure Postgres is running."
+    fi
+    sleep 1
+  done
+}
+
 cleanup() {
   if [[ -n "${BACKEND_PID:-}" ]]; then
     if kill -0 "$BACKEND_PID" >/dev/null 2>&1; then
@@ -310,15 +342,6 @@ while [[ $# -gt 0 ]]; do
   shift
 done
 
-if [[ "$NATIVE_POSTGRES" == "1" ]]; then
-  if [[ "$BACKEND_MODE" == "docker" ]]; then
-    die "--native-postgres is not supported with --docker-backend (api container depends on docker postgres)"
-  fi
-  if [[ "$WITH_OBSERVABILITY" == "1" ]]; then
-    die "--native-postgres is not supported with --with-observability (prometheus stack depends on docker postgres-exporter)"
-  fi
-fi
-
 if [[ ! -f ".env" ]]; then
   if [[ -f ".env.example" ]]; then
     log ".env not found; copying .env.example -> .env"
@@ -337,6 +360,12 @@ if [[ -f ".env" ]]; then
   # shellcheck disable=SC1091
   source ".env"
   set +a
+fi
+
+if [[ "$NATIVE_POSTGRES" == "1" && "$DRY_RUN" == "0" ]]; then
+  if [[ "$START_BACKEND" == "1" || "$START_DOCKER" == "1" ]]; then
+    wait_for_native_postgres 60
+  fi
 fi
 
 wait_for_backend_ready() {
@@ -365,6 +394,10 @@ wait_for_backend_ready() {
 
 if [[ "$START_DOCKER" == "1" ]]; then
   resolve_docker_compose || die "Docker Compose not found. Install Docker Desktop."
+  COMPOSE_FILE_ARGS=()
+  if [[ "$NATIVE_POSTGRES" == "1" ]]; then
+    COMPOSE_FILE_ARGS=(-f docker-compose.yml -f infra/docker-compose.native-postgres.yml)
+  fi
   if [[ "$DRY_RUN" == "1" ]]; then
     if ! docker_daemon_ready; then
       log "Docker daemon unavailable (check mode): would attempt Colima start."
@@ -387,11 +420,11 @@ if [[ "$START_DOCKER" == "1" ]]; then
   log "Starting Docker services: ${services[*]}"
   compose_up_failed=0
   if [[ "$BACKEND_MODE" == "docker" && "$START_BACKEND" == "1" ]]; then
-    if ! run env SERVER_PORT="$BACKEND_PORT" "${DOCKER_COMPOSE[@]}" up -d "${services[@]}"; then
+    if ! run env SERVER_PORT="$BACKEND_PORT" "${DOCKER_COMPOSE[@]}" "${COMPOSE_FILE_ARGS[@]}" up -d "${services[@]}"; then
       compose_up_failed=1
     fi
   else
-    if ! run "${DOCKER_COMPOSE[@]}" up -d "${services[@]}"; then
+    if ! run "${DOCKER_COMPOSE[@]}" "${COMPOSE_FILE_ARGS[@]}" up -d "${services[@]}"; then
       compose_up_failed=1
     fi
   fi

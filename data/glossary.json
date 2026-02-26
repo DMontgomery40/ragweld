@@ -1823,6 +1823,28 @@
       ]
     },
     {
+      "term": "MLX Embedding Model",
+      "key": "EMBEDDING_MODEL_MLX",
+      "definition": "MLX model identifier when EMBEDDING_TYPE=mlx. Runs locally on Apple Silicon via MLX/Metal for very fast embedding inference. Default: \"mlx-community/all-MiniLM-L6-v2-4bit\". The model is downloaded on first use and cached locally. Changing this requires a full reindex (embeddings are not comparable across models).",
+      "category": "embedding",
+      "related": [],
+      "links": [],
+      "badges": [
+        {
+          "text": "Metal GPU",
+          "class": "info"
+        },
+        {
+          "text": "Free (no API)",
+          "class": "info"
+        },
+        {
+          "text": "Requires reindex",
+          "class": "reindex"
+        }
+      ]
+    },
+    {
       "term": "Embedding Max Retries",
       "key": "EMBEDDING_RETRY_MAX",
       "definition": "Retry attempts for failed embedding API calls during indexing. Higher values ensure indexing completes despite transient errors but slow down failure recovery. Typical: 2-3 retries.",
@@ -1889,7 +1911,7 @@
     {
       "term": "Embedding Provider",
       "key": "EMBEDDING_TYPE",
-      "definition": "Selects the embedding provider for dense vector search. Also determines the token counter used during code chunking, which affects chunk boundaries and splitting behavior.\n\n• openai — strong quality, paid (cl100k tokenizer)\n• voyage — strong retrieval, paid (voyage tokenizer)\n• mxbai — OSS via SentenceTransformers\n• local — any HuggingFace SentenceTransformer model\n• gemini — Google Gemini embeddings\n\nNote: Changing this setting affects both retrieval quality AND how code is split into chunks during indexing. A reindex is required after changing.",
+      "definition": "Selects the embedding provider for dense vector search. Also determines the token counter used during code chunking, which affects chunk boundaries and splitting behavior.\n\n• openai — strong quality, paid (cl100k tokenizer)\n• voyage — strong retrieval, paid (voyage tokenizer)\n• mlx — Apple Silicon local embeddings via MLX/Metal (fast)\n• mxbai — OSS via SentenceTransformers\n• local — any HuggingFace SentenceTransformer model\n• gemini — Google Gemini embeddings\n\nNote: Changing this setting affects both retrieval quality AND how code is split into chunks during indexing. A reindex is required after changing.",
       "category": "embedding",
       "related": [],
       "links": [

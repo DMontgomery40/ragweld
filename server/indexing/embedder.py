@@ -69,6 +69,8 @@ class Embedder:
         provider = str(getattr(self.config, "embedding_type", "") or "").strip().lower()
         if provider == "openai":
             return (await self.embed_batch([t]))[0]
+        if provider == "mlx":
+            return (await self.embed_batch([t]))[0]
         if provider in {"local", "huggingface"}:
             return (await self.embed_batch([t]))[0]
         raise RuntimeError(f"Unsupported embedding provider: {provider}")
@@ -82,6 +84,8 @@ class Embedder:
         provider = str(getattr(self.config, "embedding_type", "") or "").strip().lower()
         if provider == "openai":
             return await self._embed_openai(prepared)
+        if provider == "mlx":
+            return await self._embed_mlx_embeddings(prepared)
         if provider in {"local", "huggingface"}:
             mode = str(getattr(self.config, "contextual_chunk_embeddings", "off") or "off").strip().lower()
             if mode == "late_chunking_local_only":
@@ -279,6 +283,72 @@ class Embedder:
             return vecs
 
         return None
+
+    async def _embed_mlx_embeddings(self, texts: list[str]) -> list[list[float]]:
+        """MLX embeddings backend (Apple Silicon only).
+
+        Unlike _try_embed_local_mlx_embeddings, this is NOT best-effort: it raises on unsupported platforms
+        or missing/failed model loads.
+        """
+        if not self._mlx_platform_supported():
+            raise RuntimeError("embedding_type='mlx' requires Apple Silicon macOS (Darwin arm64) with MLX installed")
+
+        model_name = str(getattr(self.config, "embedding_model_mlx", "") or "").strip()
+        if not model_name:
+            raise RuntimeError("embedding_model_mlx is required when embedding_type='mlx'")
+
+        batch_size = int(getattr(self.config, "embedding_batch_size", 32) or 32)
+        requested_max = int(getattr(self.config, "embedding_max_tokens", 0) or 0) or None
+
+        last_err: Exception | None = None
+        candidates = self._mlx_candidate_models(model_name)
+        if not candidates:
+            raise RuntimeError("No MLX embedding model configured")
+
+        for cand, derived in candidates:
+            loaded = self._load_mlx_embeddings(cand)
+            if loaded is None:
+                continue
+            model, tokenizer = loaded
+            max_length = self._resolve_max_length(tokenizer, requested_max)
+
+            def _run() -> list[list[float]]:
+                out: list[list[float]] = []
+                for i in range(0, len(texts), max(1, batch_size)):
+                    batch = texts[i : i + max(1, batch_size)]
+                    enc = tokenizer.batch_encode_plus(
+                        batch,
+                        return_tensors="mlx",
+                        padding=True,
+                        truncation=True,
+                        max_length=int(max_length) if max_length else None,
+                    )
+                    outputs = model(enc["input_ids"], attention_mask=enc.get("attention_mask"))
+                    embeds = getattr(outputs, "text_embeds", None)
+                    if embeds is None:
+                        raise RuntimeError("mlx-embeddings output missing text_embeds")
+                    rows = embeds.tolist()
+                    if isinstance(rows, list) and rows and not isinstance(rows[0], list):
+                        rows = [rows]
+                    for v in rows:
+                        out.append([float(x) for x in list(v)])
+                return out
+
+            try:
+                vecs = await asyncio.to_thread(_run)
+                if any(len(v) != self.dim for v in vecs):
+                    if derived:
+                        continue
+                    raise RuntimeError(
+                        "Embedding dimension mismatch. "
+                        f"Configured embedding_dim={self.dim}, but MLX model '{cand}' returned {len(vecs[0]) if vecs else 0}."
+                    )
+                return vecs
+            except Exception as e:
+                last_err = e
+                continue
+
+        raise RuntimeError(f"MLX embeddings failed to load/embed for '{model_name}': {last_err}")
 
     async def _embed_local_sentence_transformers(self, texts: list[str]) -> list[list[float]]:
         model_name = str(getattr(self.config, "embedding_model_local", "") or "").strip()

@@ -76,6 +76,7 @@ export function IndexingSubtab() {
   const [embeddingModel, setEmbeddingModel] = useConfigField<string>('embedding.embedding_model', '');
   const [voyageModel, setVoyageModel] = useConfigField<string>('embedding.voyage_model', '');
   const [embeddingModelLocal, setEmbeddingModelLocal] = useConfigField<string>('embedding.embedding_model_local', '');
+  const [embeddingModelMlx, setEmbeddingModelMlx] = useConfigField<string>('embedding.embedding_model_mlx', '');
   const [embeddingDim, setEmbeddingDim] = useConfigField<number>('embedding.embedding_dim', 0);
   const [embeddingBatchSize, setEmbeddingBatchSize] = useConfigField<number>('embedding.embedding_batch_size', 0);
   const [embeddingMaxTokens, setEmbeddingMaxTokens] = useConfigField<number>('embedding.embedding_max_tokens', 0);
@@ -245,8 +246,17 @@ export function IndexingSubtab() {
     const t = String(embeddingType || '').toLowerCase();
     if (t === 'voyage') return String(voyageModel || '');
     if (t === 'openai') return String(embeddingModel || '');
+    if (t === 'mlx') return String(embeddingModelMlx || '');
     return String(embeddingModelLocal || '');
-  }, [embeddingType, embeddingModel, embeddingModelLocal, voyageModel]);
+  }, [embeddingType, embeddingModel, embeddingModelLocal, embeddingModelMlx, voyageModel]);
+
+  const modelTooltipKey = useMemo(() => {
+    const t = String(embeddingType || '').toLowerCase();
+    if (t === 'voyage') return 'VOYAGE_MODEL';
+    if (t === 'openai') return 'EMBEDDING_MODEL';
+    if (t === 'mlx') return 'EMBEDDING_MODEL_MLX';
+    return 'EMBEDDING_MODEL_LOCAL';
+  }, [embeddingType]);
 
   const setCurrentModel = useCallback((modelName: string) => {
     const t = String(embeddingType || '').toLowerCase();
@@ -258,8 +268,12 @@ export function IndexingSubtab() {
       setEmbeddingModel(modelName);
       return;
     }
+    if (t === 'mlx') {
+      setEmbeddingModelMlx(modelName);
+      return;
+    }
     setEmbeddingModelLocal(modelName);
-  }, [embeddingType, setEmbeddingModel, setEmbeddingModelLocal, setVoyageModel]);
+  }, [embeddingType, setEmbeddingModel, setEmbeddingModelLocal, setEmbeddingModelMlx, setVoyageModel]);
 
   // Models loading (EMB only)
   useEffect(() => {
@@ -979,7 +993,7 @@ export function IndexingSubtab() {
               <div className="input-group">
                 <label style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px' }}>
                   Model
-                  <TooltipIcon name="EMBEDDING_MODEL" />
+                  <TooltipIcon name={modelTooltipKey} />
                 </label>
                 <select
                   value={currentModel}

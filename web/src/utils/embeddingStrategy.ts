@@ -4,6 +4,7 @@ export function describeEmbeddingProviderStrategy(provider: string): { badge: st
 
   // Local / on-device execution.
   if (p === 'local' || p === 'huggingface') return { badge: 'local', detail: 'Local (Python runtime)' };
+  if (p === 'mlx') return { badge: 'local', detail: 'Local (MLX / Metal GPU)' };
   if (p === 'ollama') return { badge: 'local', detail: 'Local (Ollama server)' };
 
   // Cloud APIs.

@@ -116,6 +116,34 @@ def _read_text(path: Path) -> str:
         return ""
 
 
+def _maybe_load_dotenv() -> None:
+    """Best-effort load of repo-local `.env` for local runs.
+
+    GitHub Actions should provide secrets via env vars; locally it's common to keep keys in `.env`.
+    This loader is intentionally minimal (no export of empty values, ignores comments).
+    """
+
+    env_path = ROOT / ".env"
+    if not env_path.exists():
+        return
+    try:
+        for raw in env_path.read_text(encoding="utf-8").splitlines():
+            line = (raw or "").strip()
+            if not line or line.startswith("#"):
+                continue
+            if "=" not in line:
+                continue
+            k, v = line.split("=", 1)
+            k = (k or "").strip()
+            if not k or k in os.environ:
+                continue
+            v = (v or "").strip().strip('"').strip("'")
+            if v:
+                os.environ[k] = v
+    except Exception:
+        return
+
+
 def should_include_file(path: str) -> bool:
     p = (path or "").replace("\\", "/")
     p_lower = p.lower()
@@ -395,6 +423,8 @@ def _validate_patch_paths(patch_text: str) -> List[str]:
 
 def call_openai_unified_diff(prompt: str) -> str:
     import requests
+
+    _maybe_load_dotenv()
 
     api_key = (os.getenv("OPENAI_API_KEY") or "").strip().strip('"').strip("'")
     if not api_key:

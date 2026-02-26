@@ -659,6 +659,16 @@
       "notes": "BGE-small-en local"
     },
     {
+      "provider": "mlx",
+      "family": "mlx-community/all-MiniLM-L6-v2-4bit",
+      "model": "mlx-community/all-MiniLM-L6-v2-4bit",
+      "components": ["EMB"],
+      "unit": "1k_tokens",
+      "embed_per_1k": 0.0,
+      "dimensions": 384,
+      "notes": "MLX MiniLM embeddings (Metal GPU)"
+    },
+    {
       "provider": "huggingface",
       "family": "BAAI/bge-reranker-v2-m3",
       "model": "BAAI/bge-reranker-v2-m3",

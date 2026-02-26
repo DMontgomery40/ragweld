@@ -36,6 +36,7 @@ There are two GitHub Actions workflows:
   - Builds a **plan artifact** from `git diff`
   - Calls the LLM to generate a **unified diff patch**
   - Applies + commits doc updates back to the branch
+  - Regenerates the **full config reference** from Pydantic + glossary
   - Verifies `mkdocs build --strict`
 
 - `Publish MkDocs (mike)`:
@@ -67,6 +68,7 @@ Generate + apply patch (requires `OPENAI_API_KEY`):
 ```bash
 export OPENAI_API_KEY=...
 python scripts/docs_ai/generate_docs_from_diff.py --base origin/main --llm openai --apply
+uv run python scripts/generate_config_reference_docs.py --clean
 mkdocs build --strict
 ```
 

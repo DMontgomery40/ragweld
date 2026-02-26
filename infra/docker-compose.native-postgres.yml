@@ -1,0 +1,22 @@
+services:
+  # Use host-installed Postgres (pgvector) via host.docker.internal.
+  # This keeps Neo4j/observability in Docker but eliminates the Docker Postgres VM overhead.
+  api:
+    environment:
+      POSTGRES_HOST: host.docker.internal
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      NEO4J_URI: bolt://neo4j:7687
+    # Override depends_on to avoid pulling up the docker Postgres service.
+    depends_on:
+      - neo4j
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  postgres-exporter:
+    environment:
+      DATA_SOURCE_NAME: "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@host.docker.internal:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-tribrid_rag}?sslmode=disable"
+    # Override depends_on to avoid pulling up the docker Postgres service.
+    depends_on: []
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+

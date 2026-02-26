@@ -32,6 +32,7 @@ export function GraphSubtab() {
     selectedCommunity,
     isLoading,
     error,
+    viewMode,
     maxHops,
     visibleEntityTypes,
     visibleRelationTypes,
@@ -39,6 +40,7 @@ export function GraphSubtab() {
     loadGraph,
     selectEntity,
     selectCommunity,
+    setViewMode,
     setMaxHops,
     setVisibleEntityTypes,
     setVisibleRelationTypes,
@@ -47,7 +49,6 @@ export function GraphSubtab() {
   } = useGraph();
 
   const [entityQuery, setEntityQuery] = useState('');
-  const [viewMode, setViewMode] = useState<'table' | 'viz'>('table');
   const [accentColor, setAccentColor] = useState<string>('#00ff88');
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [fullscreenAnimating, setFullscreenAnimating] = useState(false);

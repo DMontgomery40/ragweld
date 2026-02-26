@@ -29,6 +29,12 @@ Optional (Actions variables or secrets):
   - `mkdocs/docs/**`
   - `mkdocs.yml`
 
+- `../generate_config_reference_docs.py` (**authoritative for config docs**)  
+  Deterministic generator that builds a full **configuration reference** (1000+ parameters) from:
+  - `server/models/tribrid_config_model.py` (defaults + constraints)
+  - `data/glossary.json` (tooltip-level tuning guidance)
+  Output: `mkdocs/docs/reference/config/**`
+
 - `docs_prompt_base.md` (**authoritative**)  
   The shared style + accuracy constraints used by the autopilot.
 
@@ -51,6 +57,7 @@ Generate + apply patch (requires `OPENAI_API_KEY`):
 ```bash
 export OPENAI_API_KEY=...
 python scripts/docs_ai/generate_docs_from_diff.py --base origin/main --llm openai --apply
+uv run python scripts/generate_config_reference_docs.py --clean
 mkdocs build --strict
 ```
 
@@ -65,6 +72,7 @@ python scripts/docs_ai/generate_docs_from_diff.py --base EMPTY --output mkdocs-d
 # Generates + applies a docs-only patch (requires OPENAI_API_KEY)
 export OPENAI_API_KEY=...
 python scripts/docs_ai/generate_docs_from_diff.py --base EMPTY --llm openai --apply
+uv run python scripts/generate_config_reference_docs.py --clean
 mkdocs build --strict
 ```
 

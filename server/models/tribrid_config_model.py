@@ -1554,7 +1554,7 @@ class Entity(BaseModel):
     """Knowledge graph node representing a code entity."""
     entity_id: str = Field(description="Unique identifier")
     name: str = Field(description="Entity name (function name, class name, etc)")
-    entity_type: Literal["function", "class", "module", "variable", "concept"] = Field(
+    entity_type: Literal["function", "class", "module", "variable", "concept", "person", "org", "location", "event"] = Field(
         description="Type of entity"
     )
     file_path: str | None = Field(default=None, description="File where entity is defined")
@@ -2541,6 +2541,8 @@ class EmbeddingConfig(BaseModel):
         if isinstance(v, str):
             val = v.strip().lower()
             # Map common aliases
+            if val in {'mlx', 'mlx-embeddings', 'metal', 'metal_gpu', 'apple_mlx'}:
+                return 'mlx'
             if val in {'hf', 'hugging_face', 'hugging-face'}:
                 return 'huggingface'
             if val in {'sentence_transformers', 'sentence-transformers', 'st'}:
@@ -2557,6 +2559,10 @@ class EmbeddingConfig(BaseModel):
     embedding_model_local: str = Field(
         default="all-MiniLM-L6-v2",
         description="Local SentenceTransformer model"
+    )
+    embedding_model_mlx: str = Field(
+        default="mlx-community/all-MiniLM-L6-v2-4bit",
+        description="MLX-optimized embedding model (used when embedding_type=mlx)"
     )
     embedding_batch_size: int = Field(
         default=64,
@@ -2595,6 +2601,8 @@ class EmbeddingConfig(BaseModel):
         t = (self.embedding_type or "").strip().lower()
         if t == "voyage":
             return self.voyage_model
+        if t == "mlx":
+            return self.embedding_model_mlx
         if t in {"local", "huggingface"}:
             return self.embedding_model_local
         return self.embedding_model
@@ -3280,6 +3288,26 @@ class GraphIndexingConfig(BaseModel):
         default="heuristic",
         description="Semantic KG extraction mode. 'heuristic' is deterministic and test-friendly; "
         "'llm' uses an LLM to extract entities + relations.",
+    )
+
+    semantic_kg_typed_entities_enabled: bool = Field(
+        default=False,
+        description="When true, semantic KG extraction preserves/uses typed entities (person, org, location, event, concept).",
+    )
+
+    semantic_kg_allowed_entity_types: list[Literal["person", "org", "location", "event", "concept"]] = Field(
+        default=["concept"],
+        description="Allowed semantic KG entity types produced by extraction.",
+    )
+
+    semantic_kg_require_llm_success: bool = Field(
+        default=False,
+        description="When true in LLM mode, fail semantic KG extraction for a chunk if LLM extraction fails instead of falling back.",
+    )
+
+    semantic_kg_reasoning_effort: Literal["minimal", "low", "medium", "high", "xhigh"] = Field(
+        default="medium",
+        description="Reasoning effort for semantic KG extraction when using OpenAI Responses-compatible models.",
     )
 
     semantic_kg_relation_weight_llm: float = Field(
@@ -4620,25 +4648,31 @@ Focus on:
     semantic_kg_extraction: str = Field(
         default='''You are a semantic knowledge graph extractor.
 
-Given a single database/document chunk, extract a small set of reusable semantic concepts and relationships.
+Given one corpus chunk, extract only entities and relations explicitly grounded in that text.
 
 Rules:
-- Return ONLY valid JSON (no markdown, no extra text)
-- Concepts must be short, lowercase, and reusable across the corpus (e.g. "authentication", "rate_limit", "vector_index")
-- Prefer domain concepts and architectural concepts over implementation noise
-- Do NOT include file paths or line numbers as concepts
-- Keep the list small and high-signal
+- Return ONLY valid JSON (no markdown, no prose).
+- Never fabricate entities, aliases, or links.
+- Prefer exact surface forms for names (for example full person/organization names when present).
+- Do not emit file paths or line numbers as entities.
+- Keep output high-signal and deduplicated.
 
 JSON format:
 {
-  "concepts": ["concept1", "concept2"],
+  "entities": [
+    {"name": "Jeffrey Epstein", "entity_type": "person"},
+    {"name": "Bill Clinton", "entity_type": "person"},
+    {"name": "Epstein files", "entity_type": "concept"}
+  ],
   "relations": [
-    {"source": "concept1", "target": "concept2", "relation_type": "related_to"}
+    {"source": "Jeffrey Epstein", "target": "Bill Clinton", "relation_type": "related_to"},
+    {"source": "Epstein files", "target": "Jeffrey Epstein", "relation_type": "references"}
   ]
 }
 
+Allowed entity_type values: person, org, location, event, concept
 Allowed relation_type values: related_to, references''',
-        description="Prompt for LLM-assisted semantic KG extraction (concepts + relations)"
+        description="Prompt for LLM-assisted semantic KG extraction (typed entities + relations)"
     )
 
     eval_analysis: str = Field(
@@ -4997,6 +5031,10 @@ Be helpful, friendly, and engaging, and base your answers on the actual database
     local_models: LocalModelConfig = Field(default_factory=LocalModelConfig)
     openrouter: OpenRouterConfig = Field(default_factory=OpenRouterConfig)
     benchmark: BenchmarkConfig = Field(default_factory=BenchmarkConfig)
+    openai_protocol: Literal["auto", "responses", "chat_completions"] = Field(
+        default="auto",
+        description="Protocol for OpenAI cloud_direct calls. 'auto' routes codex-only models to Responses.",
+    )
 
     temperature: float = Field(default=0.3, ge=0.0, le=2.0)
     temperature_no_retrieval: float = Field(
@@ -5116,6 +5154,7 @@ class TriBridConfig(BaseModel):
             'EMBEDDING_DIM': self.embedding.embedding_dim,
             'VOYAGE_MODEL': self.embedding.voyage_model,
             'EMBEDDING_MODEL_LOCAL': self.embedding.embedding_model_local,
+            'EMBEDDING_MODEL_MLX': self.embedding.embedding_model_mlx,
             'EMBEDDING_BATCH_SIZE': self.embedding.embedding_batch_size,
             'EMBEDDING_MAX_TOKENS': self.embedding.embedding_max_tokens,
             'EMBEDDING_CACHE_ENABLED': self.embedding.embedding_cache_enabled,
@@ -5445,6 +5484,7 @@ class TriBridConfig(BaseModel):
                 embedding_dim=data.get('EMBEDDING_DIM', 3072),
                 voyage_model=data.get('VOYAGE_MODEL', 'voyage-code-3'),
                 embedding_model_local=data.get('EMBEDDING_MODEL_LOCAL', 'all-MiniLM-L6-v2'),
+                embedding_model_mlx=data.get('EMBEDDING_MODEL_MLX', 'mlx-community/all-MiniLM-L6-v2-4bit'),
                 embedding_batch_size=data.get('EMBEDDING_BATCH_SIZE', 64),
                 embedding_max_tokens=data.get('EMBEDDING_MAX_TOKENS', 8000),
                 embedding_cache_enabled=data.get('EMBEDDING_CACHE_ENABLED', 1),
@@ -6025,7 +6065,7 @@ RAG_EVAL_CONFIG_KEYS: set[str] = {
     'BM25_K1', 'BM25_B', 'BM25_WEIGHT',
     # Embedding
     'EMBEDDING_TYPE', 'EMBEDDING_MODEL', 'EMBEDDING_DIM',
-    'EMBEDDING_MODEL_LOCAL', 'EMBEDDING_BATCH_SIZE', 'VOYAGE_MODEL',
+    'EMBEDDING_MODEL_LOCAL', 'EMBEDDING_MODEL_MLX', 'EMBEDDING_BATCH_SIZE', 'VOYAGE_MODEL',
     # Retrieval
     'RRF_K_DIV', 'LANGGRAPH_FINAL_K', 'FINAL_K', 'EVAL_FINAL_K',
     'TOPK_DENSE', 'TOPK_SPARSE', 'VECTOR_WEIGHT',
@@ -6078,6 +6118,7 @@ def get_eval_key_categories() -> dict[str, str]:
         'EMBEDDING_MODEL': 'Embedding',
         'EMBEDDING_DIM': 'Embedding',
         'EMBEDDING_MODEL_LOCAL': 'Embedding',
+        'EMBEDDING_MODEL_MLX': 'Embedding',
         'EMBEDDING_BATCH_SIZE': 'Embedding',
         'VOYAGE_MODEL': 'Embedding',
         # Retrieval

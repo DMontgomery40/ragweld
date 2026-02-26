@@ -219,6 +219,8 @@ def _validate_model_capabilities(config: TriBridConfig) -> None:
     embedding_provider = str(config.embedding.embedding_type or "").strip().lower() or None
     if embedding_provider == "voyage":
         emb_model = str(config.embedding.voyage_model or "")
+    elif embedding_provider == "mlx":
+        emb_model = str(getattr(config.embedding, "embedding_model_mlx", "") or "")
     elif embedding_provider in {"local", "huggingface", "ollama"}:
         emb_model = str(config.embedding.embedding_model_local or "")
     else:

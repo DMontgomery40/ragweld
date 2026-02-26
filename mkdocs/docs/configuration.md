@@ -24,6 +24,7 @@
 
 [Get started](index.md){ .md-button .md-button--primary }
 [Configuration](configuration.md){ .md-button }
+[Config reference](reference/config/index.md){ .md-button }
 [API](api.md){ .md-button }
 
 !!! tip "Workflow: Pydantic First"
@@ -49,6 +50,13 @@ flowchart TB
 ```
 
 ## Major Sections (Selected Fields)
+
+!!! tip "Need the full 1000+ parameter surface?"
+    Use the auto-generated [Configuration Reference](reference/config/index.md) pages. They enumerate **every** tunable key with:
+    - JSON path (`retrieval.rrf_k_div`)
+    - env-style key (when available, via `TriBridConfig.to_flat_dict()`)
+    - type, default, and validation constraints
+    - long-form “tooltip” guidance pulled from `data/glossary.json` (when present)
 
 | Section | Key Fields (examples) | Why it matters |
 |--------|------------------------|----------------|

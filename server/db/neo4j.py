@@ -16,7 +16,7 @@ from server.models.graph import Community, Entity, GraphNeighborsResponse, Graph
 from server.models.index import Chunk
 from server.models.retrieval import ChunkMatch
 
-EntityType = Literal["function", "class", "module", "variable", "concept"]
+EntityType = Literal["function", "class", "module", "variable", "concept", "person", "org", "location", "event"]
 RelationshipType = Literal["calls", "imports", "inherits", "contains", "references", "related_to"]
 
 
@@ -392,7 +392,12 @@ class Neo4jClient:
             params["entity_type"] = entity_type
         q = (query or "").strip().lower()
         if q:
-            where += " AND toLower(n.name) CONTAINS $q"
+            q = re.sub(r"[_-]+", " ", q)
+            q = re.sub(r"\s+", " ", q).strip()
+            where += (
+                " AND (toLower(n.name) CONTAINS $q "
+                "OR toLower(replace(replace(n.name, '_', ' '), '-', ' ')) CONTAINS $q)"
+            )
             params["q"] = q
         query = f"""
         MATCH (n:Entity)
@@ -1375,7 +1380,7 @@ def _entity_from_mapping(mapping: dict[str, Any]) -> Entity:
 
 
 def _coerce_entity_type(value: str) -> EntityType:
-    allowed: set[str] = {"function", "class", "module", "variable", "concept"}
+    allowed: set[str] = {"function", "class", "module", "variable", "concept", "person", "org", "location", "event"}
     if value in allowed:
         return cast(EntityType, value)
     return "concept"

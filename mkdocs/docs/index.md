@@ -1,4 +1,4 @@
-# TriBridRAG Documentation
+# ragweld Documentation
 
 <div class="grid chunk_summaries" markdown>
 
@@ -42,7 +42,11 @@
 
 [Get started](index.md){ .md-button .md-button--primary }
 [Configuration](configuration.md){ .md-button }
+[Config reference](reference/config/index.md){ .md-button }
 [API](api.md){ .md-button }
+
+!!! note "Naming: ragweld vs tribrid"
+    The repo/product is **ragweld**. Many internal names still say **tribrid** (config keys, module names, older docs). Treat `tribrid` as stable internal naming; don’t mass-rename it.
 
 !!! tip "Read This First"
     TriBridRAG is strictly Pydantic-first. If a field or feature is not in `server/models/tribrid_config_model.py`, it does not exist. Add it there, regenerate TypeScript types, then build the rest.

@@ -9,7 +9,7 @@ This repo supports that workflow via:
 ```
 
 !!! important "Compatibility"
-    `--native-postgres` is supported only with the **local backend** (uvicorn) and **without** `--with-observability`.
+    `--native-postgres` works with the local backend and with the Docker backend/observability stack. When Docker is involved, containers connect to your host Postgres via `host.docker.internal`.
 
 ## 1) Stop Docker Postgres (if it’s running)
 

@@ -383,16 +383,19 @@ async def _extract_semantic_kg_llm(
     prompt: str,
     model: str,
     timeout_s: float,
-) -> tuple[list[str], list[dict[str, str]]]:
+    reasoning_effort: str,
+    typed_entities_enabled: bool,
+    allowed_entity_types: set[str],
+    require_success: bool = False,
+) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
     """LLM-assisted semantic KG extraction (best-effort).
 
     Returns:
-    - concepts: list[str]
+    - entities: list[dict] with keys: name, entity_type
     - relations: list[dict] with keys: source, target, relation_type
     """
     # Route via Chat 2.0 providers so semantic KG extraction can use ragweld/local/openrouter
-    # as well as cloud_direct. This is best-effort: on any failure we return empty so the
-    # caller can fall back to deterministic heuristic extraction.
+    # as well as cloud_direct.
     safe_text = (text or "").strip()
     if "json" not in safe_text.lower():
         safe_text = f"{safe_text}\n\nReturn JSON.".strip()
@@ -430,69 +433,135 @@ async def _extract_semantic_kg_llm(
                 pass
         return None
 
-    try:
-        route = select_provider_route(config=cfg, model_override=str(model or "").strip())
+    def _normalize_entity_type(value: str) -> str | None:
+        v = (value or "").strip().lower()
+        aliases = {"organization": "org", "organisation": "org"}
+        v = aliases.get(v, v)
+        if not typed_entities_enabled:
+            v = "concept"
+        if v not in {"person", "org", "location", "event", "concept"}:
+            return None
+        if allowed_entity_types and v not in allowed_entity_types:
+            return None
+        return v
 
-        # Preserve the previous high-reliability OpenAI JSON mode when routing cloud-direct.
-        # For other routes (ragweld/local/openrouter), fall back to plain chat generation and
-        # best-effort JSON parsing.
-        if route.kind == "cloud_direct" and str(getattr(route, "provider_name", "") or "").strip().lower() == "openai":
-            try:
-                import openai as _openai
-            except Exception:
-                _openai = None  # type: ignore[assignment]
+    def _clean_entity_name(value: str) -> str:
+        out = re.sub(r"\s+", " ", str(value or "").replace("_", " ").strip())
+        return out
 
-            openai_client_cls = getattr(_openai, "AsyncOpenAI", None) if _openai is not None else None
-            if openai_client_cls is not None and getattr(route, "api_key", None):
-                client = openai_client_cls(api_key=str(route.api_key), base_url=str(route.base_url or "") or None)
-                resp = await client.responses.create(
-                    model=str(route.model),
-                    instructions=str(prompt or "").strip(),
-                    input=safe_text,
-                    temperature=0,
-                    text={"format": {"type": "json_object"}},
-                    timeout=float(timeout_s),
+    llm_attempts = 3
+    last_err: Exception | None = None
+    for attempt in range(llm_attempts):
+        try:
+            route = select_provider_route(config=cfg, model_override=str(model or "").strip())
+            data: dict[str, Any] | None = None
+
+            is_openai_responses = (
+                route.kind == "cloud_direct"
+                and str(getattr(route, "provider_name", "") or "").strip().lower() == "openai"
+                and str(getattr(route, "openai_protocol", "") or "").strip().lower() == "responses"
+            )
+
+            if is_openai_responses:
+                try:
+                    import openai as _openai
+                except Exception:
+                    _openai = None  # type: ignore[assignment]
+
+                openai_client_cls = getattr(_openai, "AsyncOpenAI", None) if _openai is not None else None
+                if openai_client_cls is not None and getattr(route, "api_key", None):
+                    client = openai_client_cls(api_key=str(route.api_key), base_url=str(route.base_url or "") or None)
+                    req: dict[str, Any] = {
+                        "model": str(route.model),
+                        "instructions": str(prompt or "").strip(),
+                        "input": safe_text,
+                        "text": {"format": {"type": "json_object"}},
+                        "timeout": float(timeout_s),
+                    }
+                    effort = (reasoning_effort or "").strip().lower()
+                    if effort in {"minimal", "low", "medium", "high", "xhigh"}:
+                        req["reasoning"] = {"effort": effort}
+                    resp = await client.responses.create(**req)
+                    raw = str(getattr(resp, "output_text", "") or "").strip()
+                    data = _try_parse_json_object(raw)
+
+            if data is None:
+                raw, _provider_id = await generate_chat_text(
+                    route=route,
+                    openrouter_cfg=cfg.chat.openrouter,
+                    system_prompt=str(prompt or "").strip(),
+                    user_message=safe_text,
+                    images=[],
+                    temperature=0.0,
+                    max_tokens=512,
+                    context_text="",
+                    context_chunks=[],
+                    timeout_s=float(timeout_s),
                 )
-                raw = str(getattr(resp, "output_text", "") or "").strip()
-                data = _try_parse_json_object(raw)
-                if data:
-                    concepts_raw = data.get("concepts") if isinstance(data, dict) else None
-                    relations_raw = data.get("relations") if isinstance(data, dict) else None
-                    concepts_out: list[str] = [str(x) for x in (concepts_raw or [])] if isinstance(concepts_raw, list) else []
-                    relations_out: list[dict[str, str]] = []
-                    if isinstance(relations_raw, list):
-                        for r in relations_raw:
-                            if isinstance(r, dict):
-                                relations_out.append({str(k): str(v) for k, v in r.items()})
-                    return (concepts_out, relations_out)
+                data = _try_parse_json_object(str(raw or ""))
 
-        raw, _provider_id = await generate_chat_text(
-            route=route,
-            openrouter_cfg=cfg.chat.openrouter,
-            system_prompt=str(prompt or "").strip(),
-            user_message=safe_text,
-            images=[],
-            temperature=0.0,
-            max_tokens=512,
-            context_text="",
-            context_chunks=[],
-            timeout_s=float(timeout_s),
-        )
-        data = _try_parse_json_object(str(raw or ""))
-        if not data:
+            if not data:
+                if require_success:
+                    raise RuntimeError("Semantic KG LLM returned non-JSON or empty JSON output")
+                return ([], [])
+            break
+        except Exception as exc:
+            last_err = exc
+            if attempt < (llm_attempts - 1):
+                await asyncio.sleep(0.5 * (attempt + 1))
+                continue
+            if require_success:
+                raise
             return ([], [])
-    except Exception:
-        return ([], [])
 
+    entities_raw = data.get("entities") if isinstance(data, dict) else None
     concepts_raw = data.get("concepts") if isinstance(data, dict) else None
     relations_raw = data.get("relations") if isinstance(data, dict) else None
-    concepts: list[str] = [str(x) for x in (concepts_raw or [])] if isinstance(concepts_raw, list) else []
+
+    entities: list[dict[str, str]] = []
+    seen_entities: set[tuple[str, str]] = set()
+
+    if isinstance(entities_raw, list):
+        for item in entities_raw:
+            if not isinstance(item, dict):
+                continue
+            name = _clean_entity_name(str(item.get("name") or ""))
+            et = _normalize_entity_type(str(item.get("entity_type") or "concept"))
+            if not name or not et:
+                continue
+            key = (et, name.lower())
+            if key in seen_entities:
+                continue
+            seen_entities.add(key)
+            entities.append({"name": name, "entity_type": et})
+
+    if not entities and isinstance(concepts_raw, list):
+        for c in concepts_raw:
+            name = _clean_entity_name(str(c or ""))
+            et = _normalize_entity_type("concept")
+            if not name or not et:
+                continue
+            key = (et, name.lower())
+            if key in seen_entities:
+                continue
+            seen_entities.add(key)
+            entities.append({"name": name, "entity_type": et})
+
     relations: list[dict[str, str]] = []
     if isinstance(relations_raw, list):
         for r in relations_raw:
-            if isinstance(r, dict):
-                relations.append({str(k): str(v) for k, v in r.items()})
-    return (concepts, relations)
+            if not isinstance(r, dict):
+                continue
+            src = _clean_entity_name(str(r.get("source") or ""))
+            tgt = _clean_entity_name(str(r.get("target") or ""))
+            rel_type = str(r.get("relation_type") or "related_to").strip().lower()
+            if not src or not tgt or src == tgt:
+                continue
+            if rel_type not in {"related_to", "references"}:
+                continue
+            relations.append({"source": src, "target": tgt, "relation_type": rel_type})
+
+    return (entities, relations)
 
 
 async def _run_index(
@@ -836,10 +905,9 @@ async def _run_index(
                     remaining = max(0, semantic_budget - semantic_processed)
                     chunks_for_semantic.extend(embedded_batch[:remaining])
 
-        # Optional semantic KG extraction (concept entities + related_to edges linked to chunk_ids).
+        # Optional semantic KG extraction (typed entities + relations linked to chunk_ids).
         if (
             neo4j is not None
-            and cfg.graph_indexing.build_lexical_graph
             and cfg.graph_indexing.semantic_kg_enabled
             and semantic_budget > 0
             and semantic_processed < semantic_budget
@@ -853,19 +921,39 @@ async def _run_index(
                 llm_prompt = str(cfg.system_prompts.semantic_kg_extraction or "").strip()
                 llm_timeout_s = float(cfg.graph_indexing.semantic_kg_llm_timeout_s)
                 llm_max_chars = int(cfg.enrichment.enrich_max_chars)
+                typed_entities_enabled = bool(cfg.graph_indexing.semantic_kg_typed_entities_enabled)
+                require_llm_success = bool(cfg.graph_indexing.semantic_kg_require_llm_success)
+                reasoning_effort = str(cfg.graph_indexing.semantic_kg_reasoning_effort or "medium").strip().lower()
 
-                def _norm_concept(name: str, *, _min_len: int = min_len) -> str | None:
-                    v = (name or "").strip().lower()
-                    v = re.sub(r"[^a-z0-9_]+", "_", v).strip("_")
-                    if len(v) < _min_len:
-                        return None
-                    if v in _SEM_STOPWORDS:
-                        return None
-                    if not _SEM_TOKEN_RE.fullmatch(v):
-                        return None
-                    return v
+                allowed_entity_types = {
+                    str(t).strip().lower() for t in (cfg.graph_indexing.semantic_kg_allowed_entity_types or [])
+                }
+                if not allowed_entity_types:
+                    allowed_entity_types = {"concept"}
 
-                concept_entities: dict[str, Entity] = {}
+                def _normalize_semantic_entity(name: str, entity_type: str) -> tuple[str, str] | None:
+                    et = str(entity_type or "").strip().lower()
+                    raw = str(name or "").strip()
+                    if not raw:
+                        return None
+                    if et == "concept":
+                        v = raw.lower()
+                        v = re.sub(r"[^a-z0-9_]+", "_", v).strip("_")
+                        if len(v) < min_len:
+                            return None
+                        if v in _SEM_STOPWORDS:
+                            return None
+                        if not _SEM_TOKEN_RE.fullmatch(v):
+                            return None
+                        return (v, v)
+                    v = re.sub(r"[_-]+", " ", raw)
+                    v = re.sub(r"\s+", " ", v).strip()
+                    if len(v) < 2:
+                        return None
+                    key = v.lower()
+                    return (v, key)
+
+                semantic_entities: dict[str, Entity] = {}
                 rels: list[Relationship] = []
                 link_set: set[tuple[str, str]] = set()
 
@@ -874,106 +962,130 @@ async def _run_index(
                         break
                     semantic_processed += 1
 
-                    concepts_raw: list[str]
+                    entities_raw: list[dict[str, str]]
                     relations_raw: list[dict[str, str]]
                     if mode == "llm" and llm_prompt:
-                        # Best-effort LLM extraction. If it fails or returns no concepts,
-                        # fall back to deterministic heuristic extraction so we still
-                        # build an entity graph for non-code corpora.
-                        concepts_raw, relations_raw = await _extract_semantic_kg_llm(
+                        entities_raw, relations_raw = await _extract_semantic_kg_llm(
                             (ch.content or "")[: max(0, llm_max_chars)],
                             cfg=cfg,
                             prompt=llm_prompt,
                             model=llm_model,
                             timeout_s=llm_timeout_s,
+                            reasoning_effort=reasoning_effort,
+                            typed_entities_enabled=typed_entities_enabled,
+                            allowed_entity_types=allowed_entity_types,
+                            require_success=require_llm_success,
                         )
-                        if not concepts_raw:
-                            concepts_raw = _extract_semantic_concepts(
-                                ch.content, min_len=min_len, max_terms=max_terms
-                            )
+                        if not entities_raw:
+                            if require_llm_success:
+                                raise RuntimeError("semantic_kg_require_llm_success=true and LLM extraction returned no entities")
+                            concepts = _extract_semantic_concepts(ch.content, min_len=min_len, max_terms=max_terms)
+                            entities_raw = [{"name": c, "entity_type": "concept"} for c in concepts]
                             relations_raw = []
                     else:
-                        concepts_raw = _extract_semantic_concepts(ch.content, min_len=min_len, max_terms=max_terms)
+                        concepts = _extract_semantic_concepts(ch.content, min_len=min_len, max_terms=max_terms)
+                        entities_raw = [{"name": c, "entity_type": "concept"} for c in concepts]
                         relations_raw = []
 
-                    concepts: list[str] = []
-                    seen_concepts: set[str] = set()
-                    for name in concepts_raw:
-                        n = _norm_concept(name)
-                        if not n or n in seen_concepts:
+                    chunk_entity_ids: list[str] = []
+                    chunk_name_to_id: dict[str, str] = {}
+                    seen_entities: set[tuple[str, str]] = set()
+                    for entry in entities_raw:
+                        if not isinstance(entry, dict):
                             continue
-                        seen_concepts.add(n)
-                        concepts.append(n)
-                        if len(concepts) >= max_terms:
-                            break
-                    if not concepts:
-                        continue
-
-                    concept_ids: list[str] = []
-                    for name in concepts:
-                        ent_id = GraphBuilder._stable_id(repo_id, "", "concept", name)
-                        concept_ids.append(ent_id)
-                        if ent_id not in concept_entities:
-                            concept_entities[ent_id] = Entity(
+                        et = str(entry.get("entity_type") or "concept").strip().lower()
+                        if et not in {"person", "org", "location", "event", "concept"}:
+                            continue
+                        if et not in allowed_entity_types:
+                            continue
+                        normalized = _normalize_semantic_entity(str(entry.get("name") or ""), et)
+                        if not normalized:
+                            continue
+                        display_name, stable_name = normalized
+                        entity_key = (et, stable_name)
+                        if entity_key in seen_entities:
+                            continue
+                        seen_entities.add(entity_key)
+                        ent_id = GraphBuilder._stable_id(repo_id, "", et, stable_name)
+                        if ent_id not in semantic_entities:
+                            semantic_entities[ent_id] = Entity(
                                 entity_id=ent_id,
-                                name=name,
-                                entity_type="concept",
+                                name=display_name,
+                                entity_type=et,  # type: ignore[arg-type]
                                 file_path=None,
                                 description=None,
-                                properties={"source": "semantic"},
+                                properties={"source": "semantic", "mode": "llm" if mode == "llm" else "heuristic"},
                             )
+                        chunk_entity_ids.append(ent_id)
+                        chunk_name_to_id[stable_name] = ent_id
                         link_set.add((ent_id, ch.chunk_id))
+                        if len(chunk_entity_ids) >= max_terms and et == "concept":
+                            break
+
+                    if not chunk_entity_ids:
+                        continue
 
                     if max_rels_per_chunk > 0:
-                        # LLM mode: use suggested relations if present, otherwise fall back.
                         rels_added = 0
                         if mode == "llm" and relations_raw:
-                            name_to_id = {n: GraphBuilder._stable_id(repo_id, "", "concept", n) for n in concepts}
                             for r in relations_raw:
                                 if rels_added >= max_rels_per_chunk:
                                     break
-                                src = _norm_concept(str(r.get("source") or ""))
-                                tgt = _norm_concept(str(r.get("target") or ""))
+                                src_raw = str(r.get("source") or "")
+                                tgt_raw = str(r.get("target") or "")
                                 rel_type = str(r.get("relation_type") or "related_to").strip().lower()
-                                if not src or not tgt or src == tgt:
-                                    continue
                                 if rel_type not in {"related_to", "references"}:
                                     continue
-                                # Ensure entities exist even if relation mentions a concept not in concepts list.
-                                for nm in (src, tgt):
-                                    if nm not in name_to_id:
-                                        eid = GraphBuilder._stable_id(repo_id, "", "concept", nm)
-                                        name_to_id[nm] = eid
-                                        if eid not in concept_entities:
-                                            concept_entities[eid] = Entity(
-                                                entity_id=eid,
-                                                name=nm,
-                                                entity_type="concept",
-                                                file_path=None,
-                                                description=None,
-                                                properties={"source": "semantic", "mode": "llm"},
-                                            )
-                                        link_set.add((eid, ch.chunk_id))
+                                src_norm = _normalize_semantic_entity(src_raw, "concept")
+                                tgt_norm = _normalize_semantic_entity(tgt_raw, "concept")
+                                if not src_norm or not tgt_norm:
+                                    continue
+                                src_key = src_norm[1]
+                                tgt_key = tgt_norm[1]
+                                src_id = chunk_name_to_id.get(src_key)
+                                tgt_id = chunk_name_to_id.get(tgt_key)
+                                # If relation names are not in extracted entity list, materialize as concept entities.
+                                for key, norm in ((src_key, src_norm), (tgt_key, tgt_norm)):
+                                    if key in chunk_name_to_id:
+                                        continue
+                                    if "concept" not in allowed_entity_types:
+                                        continue
+                                    eid = GraphBuilder._stable_id(repo_id, "", "concept", key)
+                                    if eid not in semantic_entities:
+                                        semantic_entities[eid] = Entity(
+                                            entity_id=eid,
+                                            name=norm[0],
+                                            entity_type="concept",
+                                            file_path=None,
+                                            description=None,
+                                            properties={"source": "semantic", "mode": "llm"},
+                                        )
+                                    chunk_name_to_id[key] = eid
+                                    chunk_entity_ids.append(eid)
+                                    link_set.add((eid, ch.chunk_id))
+                                src_id = chunk_name_to_id.get(src_key)
+                                tgt_id = chunk_name_to_id.get(tgt_key)
+                                if not src_id or not tgt_id or src_id == tgt_id:
+                                    continue
                                 rels.append(
                                     Relationship(
-                                        source_id=name_to_id[src],
-                                        target_id=name_to_id[tgt],
+                                        source_id=src_id,
+                                        target_id=tgt_id,
                                         relation_type=rel_type,  # type: ignore[arg-type]
                                         weight=float(cfg.graph_indexing.semantic_kg_relation_weight_llm),
                                         properties={"source": "semantic", "mode": "llm"},
                                     )
                                 )
                                 rels_added += 1
-                        # Heuristic fallback: star graph around the top concept in this chunk.
-                        if rels_added == 0 and len(concept_ids) >= 2:
-                            root = concept_ids[0]
-                            for tgt in concept_ids[1:]:
+                        if rels_added == 0 and len(chunk_entity_ids) >= 2 and not require_llm_success:
+                            root = chunk_entity_ids[0]
+                            for tgt in chunk_entity_ids[1:]:
                                 rels.append(
                                     Relationship(
                                         source_id=root,
                                         target_id=tgt,
                                         relation_type="related_to",
-                                            weight=float(cfg.graph_indexing.semantic_kg_relation_weight_heuristic),
+                                        weight=float(cfg.graph_indexing.semantic_kg_relation_weight_heuristic),
                                         properties={"source": "semantic", "mode": "heuristic"},
                                     )
                                 )
@@ -981,9 +1093,9 @@ async def _run_index(
                                 if rels_added >= max_rels_per_chunk:
                                     break
 
-                if concept_entities:
+                if semantic_entities:
                     with INDEX_STAGE_LATENCY_SECONDS.labels(stage="neo4j_upsert_semantic_entities").time():
-                        await neo4j.upsert_entities(repo_id, list(concept_entities.values()))
+                        await neo4j.upsert_entities(repo_id, list(semantic_entities.values()))
                 if rels:
                     with INDEX_STAGE_LATENCY_SECONDS.labels(stage="neo4j_upsert_semantic_relationships").time():
                         await neo4j.upsert_relationships(repo_id, rels)
@@ -995,7 +1107,9 @@ async def _run_index(
                         )
             except Exception:
                 INDEX_STAGE_ERRORS_TOTAL.labels(stage="semantic_kg").inc()
-                # Semantic KG is optional; never block baseline indexing.
+                if bool(cfg.graph_indexing.semantic_kg_require_llm_success):
+                    raise
+                # Semantic KG is optional unless strict mode is enabled.
                 pass
 
     if graph_builder is not None:

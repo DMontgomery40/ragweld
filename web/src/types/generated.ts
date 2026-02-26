@@ -94,6 +94,8 @@ export interface ChatConfig {
   local_models?: LocalModelConfig;
   openrouter?: OpenRouterConfig;
   benchmark?: BenchmarkConfig;
+  /** Protocol for OpenAI cloud_direct calls. 'auto' routes codex-only models to Responses. */
+  openai_protocol?: "auto" | "responses" | "chat_completions"; // default: "auto"
   temperature?: number; // default: 0.3
   /** Temperature when nothing is checked (direct chat = more creative) */
   temperature_no_retrieval?: number; // default: 0.7
@@ -479,6 +481,8 @@ export interface EmbeddingConfig {
   voyage_model?: string; // default: "voyage-code-3"
   /** Local SentenceTransformer model */
   embedding_model_local?: string; // default: "all-MiniLM-L6-v2"
+  /** MLX-optimized embedding model (used when embedding_type=mlx) */
+  embedding_model_mlx?: string; // default: "mlx-community/all-MiniLM-L6-v2-4bit"
   /** Batch size for embedding generation */
   embedding_batch_size?: number; // default: 64
   /** Max tokens per embedding chunk */
@@ -514,7 +518,7 @@ export interface Entity {
   /** Entity name (function name, class name, etc) */
   name: string;
   /** Type of entity */
-  entity_type: "function" | "class" | "module" | "variable" | "concept";
+  entity_type: "function" | "class" | "module" | "variable" | "concept" | "person" | "org" | "location" | "event";
   /** File where entity is defined */
   file_path?: string | null; // default: None
   /** AI-generated description */
@@ -722,6 +726,14 @@ export interface GraphIndexingConfig {
   ast_calls_weight?: number; // default: 1.0
   /** Semantic KG extraction mode. 'heuristic' is deterministic and test-friendly; 'llm' uses an LLM to extract entities + relations. */
   semantic_kg_mode?: "heuristic" | "llm"; // default: "heuristic"
+  /** When true, semantic KG extraction preserves/uses typed entities (person, org, location, event, concept). */
+  semantic_kg_typed_entities_enabled?: boolean; // default: False
+  /** Allowed semantic KG entity types produced by extraction. */
+  semantic_kg_allowed_entity_types?: string[]; // default: ["concept"]
+  /** When true in LLM mode, fail semantic KG extraction for a chunk if LLM extraction fails instead of falling back. */
+  semantic_kg_require_llm_success?: boolean; // default: False
+  /** Reasoning effort for semantic KG extraction when using OpenAI Responses-compatible models. */
+  semantic_kg_reasoning_effort?: "minimal" | "low" | "medium" | "high" | "xhigh"; // default: "medium"
   /** Edge weight for semantic concept relations in LLM mode. */
   semantic_kg_relation_weight_llm?: number; // default: 0.7
   /** Edge weight for semantic concept relations in heuristic fallback mode. */
@@ -1499,7 +1511,7 @@ export interface SystemPromptsConfig {
   semantic_chunk_summaries?: string; // default: "Analyze this database chunk and create a compre..."
   /** Extract metadata from code chunks during indexing */
   code_enrichment?: string; // default: "Analyze this database and return a JSON object ..."
-  /** Prompt for LLM-assisted semantic KG extraction (concepts + relations) */
+  /** Prompt for LLM-assisted semantic KG extraction (typed entities + relations) */
   semantic_kg_extraction?: string; // default: "You are a semantic knowledge graph extractor.\n..."
   /** Analyze eval regressions with skeptical approach - avoid false explanations */
   eval_analysis?: string; // default: "You are an expert RAG (Retrieval-Augmented Gene..."

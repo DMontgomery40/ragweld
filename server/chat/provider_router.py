@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass
+from typing import Literal
 
 from server.models.tribrid_config_model import TriBridConfig
 from server.retrieval.mlx_qwen3 import mlx_is_available
@@ -35,6 +36,23 @@ def _looks_like_openai_model_name(model: str) -> bool:
     return m.startswith("gpt-") or m.startswith("o1") or m.startswith("o3") or m.startswith("o4")
 
 
+def _requires_openai_responses(model: str) -> bool:
+    """Return True when a model must use Responses API for cloud-direct OpenAI."""
+    m = (model or "").strip().lower()
+    if not m:
+        return False
+    return "codex" in m or m.startswith("gpt-5.2-pro")
+
+
+def _resolve_openai_protocol(policy: str, model: str) -> Literal["responses", "chat_completions"]:
+    p = (policy or "auto").strip().lower()
+    if p == "responses":
+        return "responses"
+    if p == "chat_completions":
+        return "chat_completions"
+    return "responses" if _requires_openai_responses(model) else "chat_completions"
+
+
 @dataclass(frozen=True, slots=True)
 class ProviderRoute:
     """Selected chat provider route.
@@ -53,6 +71,7 @@ class ProviderRoute:
     ragweld_adapter_dir: str | None = None
     ragweld_reload_period_sec: int | None = None
     ragweld_unload_after_sec: int | None = None
+    openai_protocol: Literal["responses", "chat_completions"] | None = None
 
 
 def select_provider_route(
@@ -81,6 +100,7 @@ def select_provider_route(
     openrouter_api_key = os.getenv("OPENROUTER_API_KEY", "").strip()
     openai_api_key = os.getenv("OPENAI_API_KEY", "").strip()
     openai_base_url = (str(getattr(config.generation, "openai_base_url", "") or "").strip() or _OPENAI_DEFAULT_BASE_URL)
+    openai_protocol_policy = str(getattr(config.chat, "openai_protocol", "auto") or "auto").strip().lower()
 
     # Explicit provider prefixes (to disambiguate local vs cloud ids like "gpt-4o-mini").
     override_kind = ""
@@ -173,6 +193,7 @@ def select_provider_route(
                     base_url=openai_base_url,
                     model=model_name,
                     api_key=openai_api_key,
+                    openai_protocol=_resolve_openai_protocol(openai_protocol_policy, model_name),
                 )
             if openrouter_ready:
                 # OpenRouter can proxy OpenAI models using the openai/<model> id.
@@ -209,6 +230,7 @@ def select_provider_route(
             base_url=openai_base_url,
             model=override_model,
             api_key=openai_api_key,
+            openai_protocol=_resolve_openai_protocol(openai_protocol_policy, override_model),
         )
     if override_model and _looks_like_openai_model_name(override_model) and (not openai_ready) and (not openrouter_ready):
         raise RuntimeError(
@@ -248,6 +270,7 @@ def select_provider_route(
             base_url=openai_base_url,
             model=model,
             api_key=openai_api_key,
+            openai_protocol=_resolve_openai_protocol(openai_protocol_policy, model),
         )
 
     raise RuntimeError(

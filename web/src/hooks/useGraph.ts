@@ -35,6 +35,7 @@ export function useGraph() {
     selectedCommunity,
     isLoading,
     error,
+    viewMode,
     visibleEntityTypes,
     visibleRelationTypes,
     maxHops,
@@ -46,6 +47,7 @@ export function useGraph() {
     setSelectedCommunity,
     setIsLoading,
     setError,
+    setViewMode,
     setVisibleEntityTypes,
     setVisibleRelationTypes,
     setMaxHops,
@@ -374,6 +376,7 @@ export function useGraph() {
     selectedCommunity,
     isLoading,
     error,
+    viewMode,
     visibleEntityTypes,
     visibleRelationTypes,
     maxHops,
@@ -394,6 +397,7 @@ export function useGraph() {
     setVisibleEntityTypes,
     setVisibleRelationTypes,
     setMaxHops,
+    setViewMode,
 
     // Computed
     getEntitiesByType,

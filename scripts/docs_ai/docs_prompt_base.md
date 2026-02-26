@@ -87,3 +87,11 @@ Use Material buttons (adjust relative paths correctly for nested pages):
 - The docs MUST include a real, human-first **User Manual** (task-focused, step-by-step, practical).
 - Do not publish internal planning artifacts as product docs (no exec plans/runbooks; no `repo/` knowledge base mirroring).
 - Prefer narrative explanations and “how to” flows over terse bullet lists; use bullets as checklists, not as the whole page.
+
+## Generated config reference (do not hand-edit)
+
+- Pages under `mkdocs/docs/reference/config/**` are **auto-generated** from:
+  - `server/models/tribrid_config_model.py` (defaults + constraints)
+  - `data/glossary.json` (long-form tooltip guidance, keyed by env-style names)
+- Do not propose manual edits to those pages. If a parameter description is wrong/missing, fix it in Pydantic and/or the glossary, then re-run:
+  - `uv run python scripts/generate_config_reference_docs.py --clean`
