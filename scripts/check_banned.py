@@ -13,6 +13,7 @@ Exit codes:
     1 - Violations found (see output for details)
 """
 import json
+import importlib.util
 import re
 import sys
 from pathlib import Path
@@ -594,6 +595,34 @@ def check_models_catalog_mirror_sync() -> List[str]:
     return errors
 
 
+def check_retrieval_config_surface() -> List[str]:
+    """Run Retrieval UI/Pydantic surface coverage validation."""
+    errors: list[str] = []
+    validator_path = Path(__file__).resolve().parent / "validate_retrieval_config_surface.py"
+
+    if not validator_path.exists():
+        return [f"{_normalize_relpath(validator_path)}: Retrieval surface validator script is missing."]
+
+    try:
+        spec = importlib.util.spec_from_file_location("validate_retrieval_config_surface", validator_path)
+        if spec is None or spec.loader is None:
+            return [f"{_normalize_relpath(validator_path)}: Could not load validator module spec."]
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        validate_fn = getattr(module, "validate_retrieval_config_surface", None)
+        if not callable(validate_fn):
+            return [f"{_normalize_relpath(validator_path)}: validate_retrieval_config_surface() not found."]
+        result = validate_fn()
+        if not isinstance(result, list):
+            return [f"{_normalize_relpath(validator_path)}: Validator returned non-list result."]
+        for item in result:
+            errors.append(f"{_normalize_relpath(validator_path)}: {item}")
+    except Exception as e:
+        return [f"{_normalize_relpath(validator_path)}: Validator execution failed ({e})."]
+
+    return errors
+
+
 def main() -> int:
     print("Checking for banned patterns...")
     print("")
@@ -609,6 +638,7 @@ def main() -> int:
     errors.extend(check_studio_no_inline_styles())
     errors.extend(check_no_frontend_runtime_models_json_fetches())
     errors.extend(check_models_catalog_mirror_sync())
+    errors.extend(check_retrieval_config_surface())
 
     if errors:
         print("BANNED PATTERNS FOUND:")

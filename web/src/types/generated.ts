@@ -729,7 +729,7 @@ export interface GraphIndexingConfig {
   /** When true, semantic KG extraction preserves/uses typed entities (person, org, location, event, concept). */
   semantic_kg_typed_entities_enabled?: boolean; // default: False
   /** Allowed semantic KG entity types produced by extraction. */
-  semantic_kg_allowed_entity_types?: string[]; // default: ["concept"]
+  semantic_kg_allowed_entity_types?: "person" | "org" | "location" | "event" | "concept"[]; // default: ["concept"]
   /** When true in LLM mode, fail semantic KG extraction for a chunk if LLM extraction fails instead of falling back. */
   semantic_kg_require_llm_success?: boolean; // default: False
   /** Reasoning effort for semantic KG extraction when using OpenAI Responses-compatible models. */
