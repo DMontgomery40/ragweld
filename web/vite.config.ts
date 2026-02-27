@@ -1,4 +1,4 @@
-import { defineConfig, type Plugin } from 'vite'
+import { defineConfig, loadEnv, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import path from 'path'
 import { spawn, type ChildProcess } from 'child_process'
@@ -130,38 +130,41 @@ function devStackLauncher(frontendBase: string): Plugin {
   }
 }
 
-const buildBase = normalizeBuildBase(process.env.VITE_BUILD_BASE)
+export default defineConfig(({ mode }) => {
+  const env = loadEnv(mode, process.cwd(), '')
+  const buildBase = normalizeBuildBase(env.VITE_BUILD_BASE)
 
-export default defineConfig({
-  // Ensure built assets resolve under the configured mount path (defaults to /web/).
-  base: buildBase,
-  plugins: [devStackLauncher(buildBase), react()],
-  resolve: {
-    alias: {
-      '@': path.resolve(__dirname, './src'),
-      '@/components': path.resolve(__dirname, './src/components'),
-      '@/stores': path.resolve(__dirname, './src/stores'),
-      '@/hooks': path.resolve(__dirname, './src/hooks'),
-      '@/types': path.resolve(__dirname, './src/types'),
-      '@/api': path.resolve(__dirname, './src/api'),
-      '@/utils': path.resolve(__dirname, './src/utils'),
-      '@web': path.resolve(__dirname, './src'),
-      '@web/types': path.resolve(__dirname, './src/types'),
-      '@web/utils': path.resolve(__dirname, './src/utils'),
+  return {
+    // Ensure built assets resolve under the configured mount path (defaults to /web/).
+    base: buildBase,
+    plugins: [devStackLauncher(buildBase), react()],
+    resolve: {
+      alias: {
+        '@': path.resolve(__dirname, './src'),
+        '@/components': path.resolve(__dirname, './src/components'),
+        '@/stores': path.resolve(__dirname, './src/stores'),
+        '@/hooks': path.resolve(__dirname, './src/hooks'),
+        '@/types': path.resolve(__dirname, './src/types'),
+        '@/api': path.resolve(__dirname, './src/api'),
+        '@/utils': path.resolve(__dirname, './src/utils'),
+        '@web': path.resolve(__dirname, './src'),
+        '@web/types': path.resolve(__dirname, './src/types'),
+        '@web/utils': path.resolve(__dirname, './src/utils'),
+      },
     },
-  },
-  server: {
-    port: 5173,
-    proxy: {
-      '/api': {
-        // Use IPv4 loopback explicitly to avoid localhost->::1 resolution issues
-        // when backend binds only 127.0.0.1 (which causes Axios "Network Error").
-        target: 'http://127.0.0.1:8012',
-        changeOrigin: true
+    server: {
+      port: 5173,
+      proxy: {
+        '/api': {
+          // Use IPv4 loopback explicitly to avoid localhost->::1 resolution issues
+          // when backend binds only 127.0.0.1 (which causes Axios "Network Error").
+          target: 'http://127.0.0.1:8012',
+          changeOrigin: true
+        }
       }
+    },
+    build: {
+      outDir: 'dist'
     }
-  },
-  build: {
-    outDir: 'dist'
   }
 })

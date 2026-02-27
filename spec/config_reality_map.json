@@ -1,0 +1,147 @@
+{
+  "sections": {
+    "retrieval": {
+      "disposition": "runtime_effect",
+      "evidence": ["server/retrieval/fusion.py"]
+    },
+    "semantic_cache": {
+      "disposition": "runtime_effect",
+      "evidence": ["server/retrieval/cache.py"]
+    },
+    "scoring": {
+      "disposition": "runtime_effect",
+      "evidence": ["server/retrieval/fusion.py"]
+    },
+    "layer_bonus": {
+      "disposition": "runtime_effect",
+      "evidence": ["server/retrieval/fusion.py"]
+    },
+    "embedding": {
+      "disposition": "runtime_effect",
+      "evidence": ["server/indexing/embedder.py"]
+    },
+    "tokenization": {
+      "disposition": "runtime_effect",
+      "evidence": ["server/indexing/tokenizer.py"]
+    },
+    "chunking": {
+      "disposition": "runtime_effect",
+      "evidence": ["server/indexing/chunker.py"]
+    },
+    "indexing": {
+      "disposition": "runtime_effect",
+      "evidence": ["server/api/index.py"]
+    },
+    "graph_storage": {
+      "disposition": "runtime_effect",
+      "evidence": ["server/db/neo4j.py"]
+    },
+    "graph_indexing": {
+      "disposition": "runtime_effect",
+      "evidence": ["server/api/index.py"]
+    },
+    "fusion": {
+      "disposition": "runtime_effect",
+      "evidence": ["server/retrieval/fusion.py"]
+    },
+    "vector_search": {
+      "disposition": "runtime_effect",
+      "evidence": ["server/retrieval/vector.py"]
+    },
+    "sparse_search": {
+      "disposition": "runtime_effect",
+      "evidence": ["server/retrieval/sparse.py"]
+    },
+    "graph_search": {
+      "disposition": "runtime_effect",
+      "evidence": ["server/retrieval/graph.py"]
+    },
+    "reranking": {
+      "disposition": "runtime_effect",
+      "evidence": ["server/retrieval/rerank.py"]
+    },
+    "generation": {
+      "disposition": "runtime_effect",
+      "evidence": ["server/chat/generation.py"]
+    },
+    "enrichment": {
+      "disposition": "runtime_effect",
+      "evidence": ["server/api/index.py"]
+    },
+    "chunk_summaries": {
+      "disposition": "runtime_effect",
+      "evidence": ["server/api/index.py"]
+    },
+    "keywords": {
+      "disposition": "runtime_effect",
+      "evidence": ["server/api/keywords.py"]
+    },
+    "tracing": {
+      "disposition": "runtime_effect",
+      "evidence": ["server/api/metrics.py"]
+    },
+    "training": {
+      "disposition": "runtime_effect",
+      "evidence": ["server/training/reranker_trainer.py"]
+    },
+    "ui": {
+      "disposition": "ui_effect",
+      "evidence": ["web/src/stores/useUIStore.ts"]
+    },
+    "chat": {
+      "disposition": "runtime_effect",
+      "evidence": ["server/api/chat.py"]
+    },
+    "hydration": {
+      "disposition": "runtime_effect",
+      "evidence": ["server/retrieval/fusion.py"]
+    },
+    "evaluation": {
+      "disposition": "runtime_effect",
+      "evidence": ["server/api/eval.py"]
+    },
+    "system_prompts": {
+      "disposition": "runtime_effect",
+      "evidence": ["server/api/prompts.py"]
+    },
+    "mcp": {
+      "disposition": "runtime_effect",
+      "evidence": ["server/mcp/server.py"]
+    },
+    "docker": {
+      "disposition": "runtime_effect",
+      "evidence": ["server/api/docker.py"]
+    }
+  },
+  "overrides": {},
+  "legacy_removed": {
+    "indexing.table_name": {
+      "disposition": "remove",
+      "evidence": ["server/services/config_store.py", "server/models/tribrid_config_model.py"]
+    },
+    "indexing.collection_suffix": {
+      "disposition": "remove",
+      "evidence": ["server/services/config_store.py", "server/models/tribrid_config_model.py"]
+    },
+    "indexing.repo_path": {
+      "disposition": "remove",
+      "evidence": ["server/services/config_store.py", "server/models/tribrid_config_model.py"]
+    },
+    "indexing.out_dir_base": {
+      "disposition": "remove",
+      "evidence": ["server/services/config_store.py", "server/models/tribrid_config_model.py"]
+    },
+    "indexing.rag_out_base": {
+      "disposition": "remove",
+      "evidence": ["server/services/config_store.py", "server/models/tribrid_config_model.py"]
+    },
+    "indexing.repos_file": {
+      "disposition": "remove",
+      "evidence": ["server/services/config_store.py", "server/models/tribrid_config_model.py"]
+    },
+    "indexing.bm25_stopwords_lang": {
+      "disposition": "remove",
+      "evidence": ["server/services/config_store.py", "server/models/tribrid_config_model.py"]
+    }
+  }
+}

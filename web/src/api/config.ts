@@ -1,5 +1,5 @@
 import { apiClient, api, withCorpusScope } from './client';
-import type { TriBridConfig } from '@/types/generated';
+import type { TriBridConfig, ModelValidationResult } from '@/types/generated';
 
 export const configApi = {
   /**
@@ -45,6 +45,15 @@ export const configApi = {
     // There is no dedicated /config/reload endpoint in the backend.
     // Reading /config always resolves from persisted scoped config.
     const { data } = await apiClient.get<TriBridConfig>(withCorpusScope(api('/config'), corpusId));
+    return data;
+  },
+
+  /**
+   * Validate current config model assignments against the catalog.
+   * Returns soft warnings without blocking saves.
+   */
+  async validate(): Promise<ModelValidationResult> {
+    const { data } = await apiClient.get<ModelValidationResult>(withCorpusScope(api('/config/validate')));
     return data;
   },
 

@@ -4,7 +4,6 @@ import asyncio
 import json
 import math
 import os
-import platform
 import shutil
 import tempfile
 from collections.abc import AsyncIterator
@@ -1365,7 +1364,6 @@ async def score_reranker(payload: RerankerScoreRequest) -> RerankerScoreResponse
     except Exception:
         # Best-effort debug endpoint: allow scoring against the global config when scoped config is unavailable.
         cfg = load_config()
-    mode = str(payload.mode or "learning").strip().lower()
     include_logits = bool(payload.include_logits)
     max_length = int(cfg.reranking.tribrid_reranker_maxlen)
 

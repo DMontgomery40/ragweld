@@ -36,6 +36,8 @@ class FusionProtocol(Protocol):
         include_sparse: bool = True,
         include_graph: bool = True,
         top_k: int | None = None,
+        cache_mode: str = "default",
+        cache_namespace: str = "search",
     ) -> list[ChunkMatch]:
         ...
 

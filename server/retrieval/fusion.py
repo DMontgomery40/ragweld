@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import math
 import re
 from collections import defaultdict
@@ -25,6 +26,7 @@ from server.observability.metrics import (
     SPARSE_LEG_LATENCY_SECONDS,
     VECTOR_LEG_LATENCY_SECONDS,
 )
+from server.retrieval.cache import CacheEndpoint, CacheMode, SemanticCacheService
 from server.retrieval.rerank import Reranker
 from server.services.config_store import get_config as load_scoped_config
 
@@ -32,6 +34,8 @@ if TYPE_CHECKING:
     from server.retrieval.graph import GraphRetriever
     from server.retrieval.sparse import SparseRetriever
     from server.retrieval.vector import VectorRetriever
+
+logger = logging.getLogger(__name__)
 
 
 class TriBridFusion:
@@ -55,6 +59,8 @@ class TriBridFusion:
         include_sparse: bool = True,
         include_graph: bool = True,
         top_k: int | None = None,
+        cache_mode: CacheMode = "default",
+        cache_namespace: str = "search",
     ) -> list[ChunkMatch]:
         # Resolve corpus_ids from backwards-compatible inputs.
         if corpus_ids is None:
@@ -80,6 +86,227 @@ class TriBridFusion:
             SEARCH_RESULTS_FINAL_COUNT.observe(0)
             return []
 
+        cache_service: SemanticCacheService | None = None
+        cache_scope_key = SemanticCacheService.scope_key(corpus_ids)
+        cache_endpoint = self._cache_endpoint_from_namespace(cache_namespace)
+        cache_lookup_outcome = "disabled"
+        cache_lookup_match_type: str | None = None
+        cache_lookup_similarity: float | None = None
+        cache_lookup_enabled = False
+        cache_fingerprint_enabled = False
+        scoped_cfgs: dict[str, TriBridConfig] = {}
+        for cid in corpus_ids:
+            try:
+                scoped_cfgs[cid] = await load_scoped_config(repo_id=cid)
+            except Exception:
+                continue
+        primary_cfg: TriBridConfig | None = None
+        primary_cfg = scoped_cfgs.get(corpus_ids[0])
+        if primary_cfg is not None:
+            cache_service = SemanticCacheService(primary_cfg)
+            cache_lookup_outcome = "ready"
+        else:
+            try:
+                primary_cfg = await load_scoped_config(repo_id=corpus_ids[0])
+                scoped_cfgs[corpus_ids[0]] = primary_cfg
+                cache_service = SemanticCacheService(primary_cfg)
+                cache_lookup_outcome = "ready"
+            except Exception:
+                primary_cfg = None
+                cache_service = None
+                cache_lookup_outcome = "unavailable"
+        if primary_cfg is not None:
+            cache_cfg = primary_cfg.semantic_cache
+            mode = str(cache_mode or "default").strip().lower()
+            configured = str(getattr(cache_cfg, "mode", "read_write") or "read_write").strip().lower()
+            enabled = int(getattr(cache_cfg, "enabled", 0) or 0) == 1
+            reads_allowed = mode != "bypass" and mode != "refresh" and configured in {"read_only", "read_write"}
+            writes_allowed = mode != "bypass" and configured in {"write_only", "read_write"}
+            min_chars = int(getattr(cache_cfg, "min_query_chars", 1) or 1)
+            query_eligible = len(SemanticCacheService.canonical_query(query)) >= min_chars
+            cache_lookup_enabled = bool(enabled and reads_allowed and query_eligible)
+            cache_fingerprint_enabled = bool(enabled and query_eligible and (reads_allowed or writes_allowed))
+            if not cache_lookup_enabled and cache_lookup_outcome == "ready":
+                cache_lookup_outcome = "disabled"
+        if top_k is not None:
+            effective_final_k = int(top_k or 0)
+        else:
+            final_k_candidates_for_cache: list[int] = []
+            for cid in corpus_ids:
+                cfg_for_corpus = scoped_cfgs.get(cid)
+                if cfg_for_corpus is None:
+                    continue
+                final_k_candidates_for_cache.append(int(getattr(cfg_for_corpus.retrieval, "final_k", 0) or 0))
+            if not final_k_candidates_for_cache and primary_cfg is not None:
+                final_k_candidates_for_cache.append(int(getattr(primary_cfg.retrieval, "final_k", 0) or 0))
+            effective_final_k = int(max(final_k_candidates_for_cache) if final_k_candidates_for_cache else 0)
+        primary_reranking = primary_cfg.reranking if primary_cfg is not None else RerankingConfig()
+        primary_training = primary_cfg.training if primary_cfg is not None else TrainingConfig()
+        primary_vector = primary_cfg.vector_search if primary_cfg is not None else None
+        primary_sparse = primary_cfg.sparse_search if primary_cfg is not None else None
+        primary_graph = primary_cfg.graph_search if primary_cfg is not None else None
+        primary_retrieval = primary_cfg.retrieval if primary_cfg is not None else None
+        corpus_config_fingerprints: list[str] = []
+        for cid in corpus_ids:
+            cfg_for_corpus = scoped_cfgs.get(cid)
+            if cfg_for_corpus is None:
+                corpus_config_fingerprints.append(f"{cid}:missing")
+                continue
+            cfg_fp = SemanticCacheService.fingerprint(cfg_for_corpus.model_dump(mode="serialization", by_alias=True))
+            corpus_config_fingerprints.append(f"{cid}:{cfg_fp}")
+        index_revisions: list[str] = []
+        if cache_fingerprint_enabled:
+            pg_by_dsn: dict[str, PostgresClient] = {}
+            try:
+                for cid in corpus_ids:
+                    cfg_for_corpus = scoped_cfgs.get(cid)
+                    if cfg_for_corpus is None:
+                        index_revisions.append(f"{cid}:::")
+                        continue
+                    dsn = str(getattr(cfg_for_corpus.indexing, "postgres_url", "") or "")
+                    if not dsn:
+                        index_revisions.append(f"{cid}:::")
+                        continue
+                    pg = pg_by_dsn.get(dsn)
+                    if pg is None:
+                        try:
+                            pg = PostgresClient(dsn)
+                            await pg.connect()
+                            pg_by_dsn[dsn] = pg
+                        except Exception:
+                            index_revisions.append(f"{cid}:::")
+                            continue
+                    try:
+                        corpus_meta = await pg.get_corpus(cid)
+                    except Exception:
+                        corpus_meta = None
+                    if not corpus_meta:
+                        index_revisions.append(f"{cid}:::")
+                        continue
+                    try:
+                        raw_last = corpus_meta.get("last_indexed")
+                        if raw_last is None:
+                            last_indexed = ""
+                        else:
+                            try:
+                                last_indexed = str(raw_last.isoformat())
+                            except Exception:
+                                last_indexed = str(raw_last)
+                        provider = str(corpus_meta.get("embedding_provider") or "")
+                        model = str(corpus_meta.get("embedding_model") or "")
+                        dims = int(corpus_meta.get("embedding_dimensions") or 0)
+                        index_revisions.append(f"{cid}:{last_indexed}:{provider}:{model}:{dims}")
+                    except Exception:
+                        index_revisions.append(f"{cid}:::")
+            finally:
+                for pg in pg_by_dsn.values():
+                    try:
+                        await pg.disconnect()
+                    except Exception:
+                        pass
+        cache_request_fingerprint = SemanticCacheService.fingerprint(
+            {
+                "namespace": str(cache_namespace or "search"),
+                "include_vector": bool(include_vector),
+                "include_sparse": bool(include_sparse),
+                "include_graph": bool(include_graph),
+                "top_k": int(effective_final_k),
+                "corpus_configs": corpus_config_fingerprints,
+                "index_revisions": index_revisions,
+                "fusion_method": str(config.method),
+                "fusion_rrf_k": int(config.rrf_k),
+                "fusion_vector_weight": float(config.vector_weight),
+                "fusion_sparse_weight": float(config.sparse_weight),
+                "fusion_graph_weight": float(config.graph_weight),
+                "fusion_normalize_scores": bool(config.normalize_scores),
+                "vector_enabled": bool(getattr(primary_vector, "enabled", True)),
+                "vector_top_k": int(getattr(primary_vector, "top_k", 0) or 0),
+                "vector_similarity_threshold": float(getattr(primary_vector, "similarity_threshold", 0.0) or 0.0),
+                "sparse_enabled": bool(getattr(primary_sparse, "enabled", True)),
+                "sparse_top_k": int(getattr(primary_sparse, "top_k", 0) or 0),
+                "sparse_engine": str(getattr(primary_sparse, "engine", "") or ""),
+                "sparse_query_mode": str(getattr(primary_sparse, "query_mode", "") or ""),
+                "sparse_bm25_k1": float(getattr(primary_sparse, "bm25_k1", 0.0) or 0.0),
+                "sparse_bm25_b": float(getattr(primary_sparse, "bm25_b", 0.0) or 0.0),
+                "sparse_relax_on_empty": bool(getattr(primary_sparse, "relax_on_empty", False)),
+                "sparse_file_path_fallback": bool(getattr(primary_sparse, "file_path_fallback", False)),
+                "graph_enabled": bool(getattr(primary_graph, "enabled", True)),
+                "graph_mode": str(getattr(primary_graph, "mode", "") or ""),
+                "graph_top_k": int(getattr(primary_graph, "top_k", 0) or 0),
+                "graph_max_hops": int(getattr(primary_graph, "max_hops", 0) or 0),
+                "graph_include_communities": bool(getattr(primary_graph, "include_communities", False)),
+                "graph_chunk_neighbor_window": int(getattr(primary_graph, "chunk_neighbor_window", 0) or 0),
+                "graph_chunk_entity_expansion_enabled": bool(
+                    getattr(primary_graph, "chunk_entity_expansion_enabled", False)
+                ),
+                "graph_chunk_entity_expansion_weight": float(
+                    getattr(primary_graph, "chunk_entity_expansion_weight", 0.0) or 0.0
+                ),
+                "retrieval_final_k": int(getattr(primary_retrieval, "final_k", 0) or 0),
+                "retrieval_dedup_by": str(getattr(primary_retrieval, "dedup_by", "") or ""),
+                "retrieval_max_chunks_per_file": int(getattr(primary_retrieval, "max_chunks_per_file", 0) or 0),
+                "retrieval_neighbor_window": int(getattr(primary_retrieval, "neighbor_window", 0) or 0),
+                "retrieval_enable_mmr": bool(getattr(primary_retrieval, "enable_mmr", False)),
+                "retrieval_mmr_lambda": float(getattr(primary_retrieval, "mmr_lambda", 0.0) or 0.0),
+                "reranker_mode": str(getattr(primary_reranking, "reranker_mode", "") or "").strip().lower(),
+                "reranker_cloud_provider": str(getattr(primary_reranking, "reranker_cloud_provider", "") or ""),
+                "reranker_cloud_model": str(getattr(primary_reranking, "reranker_cloud_model", "") or ""),
+                "reranker_cloud_top_n": int(getattr(primary_reranking, "reranker_cloud_top_n", 0) or 0),
+                "tribrid_reranker_alpha": float(getattr(primary_reranking, "tribrid_reranker_alpha", 0.0) or 0.0),
+                "tribrid_reranker_topn": int(getattr(primary_reranking, "tribrid_reranker_topn", 0) or 0),
+                "tribrid_reranker_batch": int(getattr(primary_reranking, "tribrid_reranker_batch", 0) or 0),
+                "tribrid_reranker_maxlen": int(getattr(primary_reranking, "tribrid_reranker_maxlen", 0) or 0),
+                "learning_reranker_backend": str(
+                    getattr(primary_training, "learning_reranker_backend", "") or ""
+                ),
+                "learning_reranker_base_model": str(
+                    getattr(primary_training, "learning_reranker_base_model", "") or ""
+                ),
+                "tribrid_reranker_model_path": str(
+                    getattr(primary_training, "tribrid_reranker_model_path", "") or ""
+                ),
+            }
+        )
+
+        if cache_service is not None and cache_lookup_enabled:
+            try:
+                hit = await cache_service.lookup(
+                    endpoint=cache_endpoint,
+                    scope_key=cache_scope_key,
+                    query=query,
+                    request_fingerprint=cache_request_fingerprint,
+                    cache_mode=cache_mode,
+                    allow_semantic=True,
+                )
+                cache_lookup_outcome = "miss"
+            except Exception:
+                hit = None
+                cache_lookup_outcome = "error"
+            if hit is not None:
+                try:
+                    cached = [ChunkMatch.model_validate(r) for r in (hit.payload.get("matches") or [])]
+                except Exception:
+                    hit = None
+                    cache_lookup_outcome = "miss"
+                if hit is not None:
+                    cache_lookup_outcome = "hit"
+                    cache_lookup_match_type = str(hit.match_type)
+                    cache_lookup_similarity = float(hit.similarity)
+                    cache_debug = dict(hit.payload.get("debug") or {})
+                    cache_debug.update(
+                        {
+                            "cache_hit": True,
+                            "cache_match_type": hit.match_type,
+                            "cache_similarity": float(hit.similarity),
+                            "cache_namespace": str(cache_namespace or "search"),
+                        }
+                    )
+                    self.last_debug = cache_debug
+                    final_k = int(effective_final_k or len(cached))
+                    final_results = cached[:final_k] if final_k > 0 else []
+                    SEARCH_RESULTS_FINAL_COUNT.observe(len(final_results))
+                    return final_results
+
         def _safe_error_message(e: Exception, *, max_len: int = 400) -> str:
             # Best-effort redaction; keep debugging useful without leaking secrets.
             msg = str(e) or type(e).__name__
@@ -102,7 +329,10 @@ class TriBridFusion:
         ]:
             cfg_error: Exception | None = None
             try:
-                cfg = await load_scoped_config(repo_id=cid)
+                cfg = scoped_cfgs.get(cid)
+                if cfg is None:
+                    cfg = await load_scoped_config(repo_id=cid)
+                    scoped_cfgs[cid] = cfg
             except Exception as e:
                 # Fail open: if corpus config cannot be loaded (missing corpus, Postgres down, etc),
                 # return empty results with debug instead of raising into a 500.
@@ -179,11 +409,38 @@ class TriBridFusion:
 
             embedder = Embedder(cfg.embedding, cfg.tokenization)
 
+            # ---- Query-time embedding dimension guard ----
+            # Detect when the current embedding config produces a different
+            # dimension than what was used to build the corpus index.  If
+            # mismatched, skip the vector leg rather than letting pgvector
+            # return garbage or crash with a cryptic error.
+            try:
+                corpus_meta = await postgres.get_corpus(cid)
+            except Exception as e:
+                logger.warning(
+                    "Failed to fetch corpus metadata for '%s': %s — "
+                    "proceeding without dimension/ts_config guards",
+                    cid, e,
+                )
+                debug["fusion_corpus_meta_error"] = _safe_error_message(e)
+                corpus_meta = None
+            stored_dim = int((corpus_meta or {}).get("embedding_dimensions") or 0)
+            dim_mismatch = stored_dim > 0 and stored_dim != int(embedder.dim)
+            if dim_mismatch:
+                logger.warning(
+                    "Embedding dimension mismatch for corpus '%s': "
+                    "indexed=%d, query=%d — skipping vector leg",
+                    cid, stored_dim, embedder.dim,
+                )
+                debug["fusion_vector_dim_mismatch"] = True
+                debug["fusion_vector_dim_stored"] = stored_dim
+                debug["fusion_vector_dim_query"] = int(embedder.dim)
+
             # Reuse query embeddings across legs when possible (vector + graph chunk-mode).
             q_emb: list[float] | None = None
 
             # Run legs (request toggles + config.*.enabled)
-            if include_vector and cfg.vector_search.enabled:
+            if include_vector and cfg.vector_search.enabled and not dim_mismatch:
                 with VECTOR_LEG_LATENCY_SECONDS.time():
                     try:
                         if q_emb is None:
@@ -191,7 +448,8 @@ class TriBridFusion:
                                 q_emb = await embedder.embed(query)
                         with SEARCH_STAGE_LATENCY_SECONDS.labels(stage="postgres_vector_search").time():
                             vector_results = await postgres.vector_search(
-                                cid, q_emb, int(top_k or cfg.vector_search.top_k)
+                                cid, q_emb, int(top_k or cfg.vector_search.top_k),
+                                expected_dimensions=stored_dim,
                             )
                     except Exception as e:
                         debug["fusion_vector_error"] = _safe_error_message(e)
@@ -206,6 +464,24 @@ class TriBridFusion:
                     if min_v > 0:
                         vector_results = [r for r in vector_results if float(r.score) >= float(min_v)]
             debug["fusion_vector_results"] = len(vector_results)
+
+            # ---- ts_config mismatch warning ----
+            # If the FTS text-search config used at index time differs from the
+            # current query config, tsvector/tsquery matching will silently
+            # degrade (different stemming, stop-words, etc.).  We still run the
+            # sparse leg but surface the mismatch in debug metadata so the user
+            # can investigate.
+            stored_ts = str((corpus_meta or {}).get("ts_config") or "").strip()
+            current_ts = str(cfg.indexing.postgres_ts_config or "").strip()
+            if stored_ts and current_ts and stored_ts != current_ts:
+                logger.warning(
+                    "FTS ts_config mismatch for corpus '%s': "
+                    "indexed=%s, query=%s — sparse results may be degraded",
+                    cid, stored_ts, current_ts,
+                )
+                debug["fusion_sparse_ts_config_mismatch"] = True
+                debug["fusion_sparse_ts_config_stored"] = stored_ts
+                debug["fusion_sparse_ts_config_query"] = current_ts
 
             if include_sparse and cfg.sparse_search.enabled:
                 with SPARSE_LEG_LATENCY_SECONDS.time():
@@ -557,6 +833,10 @@ class TriBridFusion:
                 "rerank_skipped_reason": rerank_skipped_reason,
                 "rerank_error": rerank_error,
                 "rerank_config_corpus_id": rerank_config_corpus_id,
+                "cache_hit": False,
+                "cache_lookup_outcome": cache_lookup_outcome,
+                "cache_match_type": cache_lookup_match_type,
+                "cache_similarity": cache_lookup_similarity,
             }
         )
 
@@ -624,8 +904,51 @@ class TriBridFusion:
                 debug["postprocess_enabled"] = False
                 debug["postprocess_error"] = str(e)
 
-        self.last_debug = debug
         final_results = results[:final_k] if final_k > 0 else []
+        if cache_service is not None:
+            top_level_error_keys = (
+                "fusion_graph_error",
+                "rerank_error",
+            )
+            per_corpus_error_keys = (
+                "fusion_config_error",
+                "fusion_postgres_error",
+                "fusion_corpus_meta_error",
+                "fusion_vector_error",
+                "fusion_sparse_error",
+                "fusion_graph_error",
+            )
+            has_retrieval_errors = any(bool(debug.get(k)) for k in top_level_error_keys)
+            per_corpus_debug = debug.get("fusion_per_corpus")
+            if isinstance(per_corpus_debug, dict):
+                has_retrieval_errors = has_retrieval_errors or any(
+                    isinstance(cdbg, dict) and any(bool(cdbg.get(k)) for k in per_corpus_error_keys)
+                    for cdbg in per_corpus_debug.values()
+                )
+            skip_cache_write = bool(has_retrieval_errors and not final_results)
+            if skip_cache_write:
+                debug["cache_write"] = False
+                debug["cache_write_skipped"] = "retrieval_error_empty_results"
+            else:
+                try:
+                    cache_written = await cache_service.write(
+                        endpoint=cache_endpoint,
+                        scope_key=cache_scope_key,
+                        query=query,
+                        request_fingerprint=cache_request_fingerprint,
+                        payload={
+                            "matches": [m.model_dump(mode="serialization", by_alias=True) for m in final_results],
+                            "debug": debug,
+                        },
+                        cache_mode=cache_mode,
+                    )
+                    debug["cache_write"] = bool(cache_written)
+                    debug["cache_namespace"] = str(cache_namespace or "search")
+                except Exception as e:
+                    debug["cache_write"] = False
+                    debug["cache_write_error"] = str(e)
+
+        self.last_debug = debug
         SEARCH_RESULTS_FINAL_COUNT.observe(len(final_results))
         return final_results
 
@@ -663,6 +986,15 @@ class TriBridFusion:
         except Exception:
             corpus_id = ""
         return f"{corpus_id}::{chunk.chunk_id}" if corpus_id else str(chunk.chunk_id)
+
+    @staticmethod
+    def _cache_endpoint_from_namespace(namespace: str) -> CacheEndpoint:
+        ns = str(namespace or "search").strip().lower()
+        if ns.startswith("chat"):
+            return "chat"
+        if ns.startswith("answer"):
+            return "answer"
+        return "search"
 
 
 def _normalize(chunks: list[ChunkMatch]) -> list[ChunkMatch]:

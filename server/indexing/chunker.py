@@ -33,7 +33,8 @@ class Chunker:
         base_line: int,
         starting_ordinal: int,
     ) -> list[Chunk]:
-        strategy = self._normalize_strategy(self.config.chunking_strategy)
+        strategy_raw = str(self.config.chunking_strategy or "").strip().lower()
+        strategy = self._normalize_strategy(strategy_raw)
         language = self._detect_language(file_path)
         parent_doc_id = file_path if bool(self.config.emit_parent_doc_id) else None
         nl_positions = [i for i, ch in enumerate(content) if ch == "\n"]
@@ -45,7 +46,11 @@ class Chunker:
                 # Fallback behavior:
                 # - ast: preserve legacy behavior for non-code/parse failures (fixed_chars)
                 # - hybrid: prefer token windows when AST/braces cannot be used
-                spans = self._spans_fixed_tokens(content) if strategy == "hybrid" else self._spans_fixed_chars(content)
+                spans = (
+                    self._spans_fixed_tokens(content)
+                    if strategy == "hybrid"
+                    else self._spans_fixed_chars(content, use_greedy_target=True)
+                )
         elif strategy == "fixed_tokens":
             spans = self._spans_fixed_tokens(content)
         elif strategy == "recursive":
@@ -57,7 +62,7 @@ class Chunker:
         elif strategy == "qa_blocks":
             spans = self._spans_qa_blocks(content)
         else:
-            spans = self._spans_fixed_chars(content)
+            spans = self._spans_fixed_chars(content, use_greedy_target=(strategy_raw == "greedy"))
 
         min_chars = int(self.config.min_chunk_chars)
         allow_small_singleton = len(spans) == 1 and bool((content or "").strip())
@@ -419,9 +424,12 @@ class Chunker:
             end_line = start_line
         return (int(start_line), int(end_line))
 
-    def _spans_fixed_chars(self, content: str) -> list[tuple[int, int]]:
+    def _spans_fixed_chars(self, content: str, *, use_greedy_target: bool = False) -> list[tuple[int, int]]:
         # Chunk by characters with overlap.
-        size = max(100, int(self.config.chunk_size))
+        if use_greedy_target:
+            size = max(100, int(getattr(self.config, "greedy_fallback_target", self.config.chunk_size) or 0))
+        else:
+            size = max(100, int(self.config.chunk_size))
         overlap = max(0, int(self.config.chunk_overlap))
         if overlap >= size:
             overlap = max(0, size // 5)
@@ -561,18 +569,72 @@ class Chunker:
     def _spans_markdown(self, content: str) -> list[tuple[int, int]]:
         import re
 
-        max_level = int(self.config.markdown_max_heading_level)
-        rx = re.compile(rf"^(#{{1,{max_level}}})\s+.+$", re.MULTILINE)
-        hits = [m.start() for m in rx.finditer(content)]
-        if not hits:
-            return self._spans_recursive(content)
-        cuts = sorted(set([0, *hits, len(content)]))
+        include_code_fences = bool(getattr(self.config, "markdown_include_code_fences", True))
+
+        def _split_markdown_sections(text: str) -> list[tuple[int, int]]:
+            if not text:
+                return []
+            max_level = int(self.config.markdown_max_heading_level)
+            rx = re.compile(rf"^(#{{1,{max_level}}})\s+.+$", re.MULTILINE)
+            hits = [m.start() for m in rx.finditer(text)]
+            if not hits:
+                return self._spans_recursive(text)
+            cuts = sorted(set([0, *hits, len(text)]))
+            spans: list[tuple[int, int]] = []
+            for a, b in zip(cuts, cuts[1:], strict=False):
+                if b <= a:
+                    continue
+                for s, e in self._spans_recursive(text[a:b]):
+                    spans.append((int(a) + int(s), int(a) + int(e)))
+            return [(s, e) for s, e in spans if e > s]
+
+        if include_code_fences:
+            return _split_markdown_sections(content)
+
+        def _non_fence_ranges(text: str) -> list[tuple[int, int]]:
+            lines = text.splitlines(keepends=True)
+            if not lines:
+                return [(0, len(text))] if text else []
+
+            ranges: list[tuple[int, int]] = []
+            pos = 0
+            seg_start: int | None = 0
+            in_fence = False
+            fence_char = ""
+            fence_len = 0
+            fence_rx = re.compile(r"^\s*(```+|~~~+)")
+            for line in lines:
+                line_start = pos
+                line_end = pos + len(line)
+                pos = line_end
+                m = fence_rx.match(line)
+                marker = str(m.group(1)) if m else ""
+                if marker:
+                    marker_char = marker[0]
+                    marker_len = len(marker)
+                    if not in_fence:
+                        if seg_start is not None and line_start > seg_start:
+                            ranges.append((int(seg_start), int(line_start)))
+                        in_fence = True
+                        fence_char = marker_char
+                        fence_len = marker_len
+                        seg_start = None
+                    elif marker_char == fence_char and marker_len >= fence_len:
+                        in_fence = False
+                        seg_start = line_end
+                    continue
+
+                if not in_fence and seg_start is None:
+                    seg_start = line_start
+
+            if not in_fence and seg_start is not None and seg_start < len(text):
+                ranges.append((int(seg_start), int(len(text))))
+            return [(s, e) for s, e in ranges if e > s]
+
         spans: list[tuple[int, int]] = []
-        for a, b in zip(cuts, cuts[1:], strict=False):
-            if b <= a:
-                continue
-            for s, e in self._spans_recursive(content[a:b]):
-                spans.append((int(a) + int(s), int(a) + int(e)))
+        for start, end in _non_fence_ranges(content):
+            local = _split_markdown_sections(content[start:end])
+            spans.extend((int(start) + int(s), int(start) + int(e)) for s, e in local if e > s)
         return [(s, e) for s, e in spans if e > s]
 
     def _spans_sentence(self, content: str) -> list[tuple[int, int]]:

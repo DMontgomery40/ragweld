@@ -6,6 +6,7 @@ import math
 import platform
 import re
 import time
+from collections.abc import Awaitable, Callable
 from functools import lru_cache
 from typing import Any
 
@@ -31,6 +32,22 @@ class Embedder:
         # Deterministic embeddings must match the configured dimensionality so that
         # Postgres pgvector storage and stats are consistent across the system.
         self.dim = max(32, int(getattr(config, "embedding_dim", 256) or 256))
+        self._cache_enabled = bool(int(getattr(config, "embedding_cache_enabled", 0) or 0) == 1)
+        self._cache_lookup_batch: Callable[[list[str]], Awaitable[dict[str, list[float]]]] | None = None
+        self._cache_upsert_batch: Callable[[dict[str, tuple[str, list[float]]]], Awaitable[int | None]] | None = None
+
+    def configure_cache_backend(
+        self,
+        *,
+        lookup_batch: Callable[[list[str]], Awaitable[dict[str, list[float]]]],
+        upsert_batch: Callable[[dict[str, tuple[str, list[float]]]], Awaitable[int | None]],
+    ) -> None:
+        self._cache_lookup_batch = lookup_batch
+        self._cache_upsert_batch = upsert_batch
+
+    def clear_cache_backend(self) -> None:
+        self._cache_lookup_batch = None
+        self._cache_upsert_batch = None
 
     def _prepare_text(self, text: str) -> str:
         t = str(text or "")
@@ -77,6 +94,59 @@ class Embedder:
 
     async def embed_batch(self, texts: list[str]) -> list[list[float]]:
         prepared = [self._prepare_text(t) for t in (texts or [])]
+        if not prepared:
+            return []
+
+        cache_ready = (
+            self._cache_enabled
+            and self._cache_lookup_batch is not None
+            and self._cache_upsert_batch is not None
+        )
+        if not cache_ready:
+            return await self._embed_batch_uncached(prepared)
+
+        input_hashes = [hashlib.sha256(t.encode("utf-8")).hexdigest() for t in prepared]
+        unique_hashes = list(dict.fromkeys(input_hashes))
+        try:
+            cache_hits = await self._cache_lookup_batch(unique_hashes)
+        except Exception:
+            cache_hits = {}
+
+        missing_by_hash: dict[str, str] = {}
+        for h, txt in zip(input_hashes, prepared, strict=True):
+            if h not in cache_hits:
+                missing_by_hash[h] = txt
+
+        newly_embedded: dict[str, list[float]] = {}
+        if missing_by_hash:
+            miss_hashes = list(missing_by_hash.keys())
+            miss_texts = [missing_by_hash[h] for h in miss_hashes]
+            miss_vecs = await self._embed_batch_uncached(miss_texts)
+            for h, vec in zip(miss_hashes, miss_vecs, strict=True):
+                newly_embedded[h] = [float(x) for x in vec]
+            try:
+                await self._cache_upsert_batch(
+                    {h: (missing_by_hash[h], newly_embedded[h]) for h in miss_hashes if h in newly_embedded}
+                )
+            except Exception:
+                pass
+
+        out: list[list[float]] = []
+        for h in input_hashes:
+            cached = cache_hits.get(h)
+            if cached is not None:
+                out.append([float(x) for x in cached])
+                continue
+            fresh = newly_embedded.get(h)
+            if fresh is not None:
+                out.append([float(x) for x in fresh])
+                continue
+            # Defensive fallback (should be unreachable): compute from original text for this hash.
+            fallback_text = next((t for hh, t in zip(input_hashes, prepared, strict=True) if hh == h), "")
+            out.append((await self._embed_batch_uncached([fallback_text]))[0])
+        return out
+
+    async def _embed_batch_uncached(self, prepared: list[str]) -> list[list[float]]:
         backend = str(getattr(self.config, "embedding_backend", "deterministic") or "deterministic").strip().lower()
         if backend != "provider":
             return await asyncio.to_thread(lambda: [self._embed_sync(t) for t in prepared])
@@ -96,10 +166,13 @@ class Embedder:
             return await self._embed_local_sentence_transformers(prepared)
         raise RuntimeError(f"Unsupported embedding provider: {provider}")
 
-    async def embed_chunks(self, chunks: list[Chunk]) -> list[Chunk]:
+    async def embed_chunks(self, chunks: list[Chunk], *, embed_texts: list[str] | None = None) -> list[Chunk]:
         if not chunks:
             return []
-        embeddings = await self.embed_batch([c.content for c in chunks])
+        texts = [c.content for c in chunks] if embed_texts is None else list(embed_texts)
+        if len(texts) != len(chunks):
+            raise ValueError("embed_texts length must match chunks length")
+        embeddings = await self.embed_batch(texts)
         return [c.model_copy(update={"embedding": emb}) for c, emb in zip(chunks, embeddings, strict=True)]
 
     # ---------------------------------------------------------------------
@@ -245,18 +318,24 @@ class Embedder:
             model, tokenizer = loaded
             max_length = self._resolve_max_length(tokenizer, requested_max)
 
-            def _run() -> list[list[float]]:
+            def _run(
+                _model: Any = model,
+                _tokenizer: Any = tokenizer,
+                _max_length: int | None = max_length,
+                _texts: list[str] = texts,
+                _batch_size: int = batch_size,
+            ) -> list[list[float]]:
                 out: list[list[float]] = []
-                for i in range(0, len(texts), max(1, batch_size)):
-                    batch = texts[i : i + max(1, batch_size)]
-                    enc = tokenizer.batch_encode_plus(
+                for i in range(0, len(_texts), max(1, _batch_size)):
+                    batch = _texts[i : i + max(1, _batch_size)]
+                    enc = _tokenizer.batch_encode_plus(
                         batch,
                         return_tensors="mlx",
                         padding=True,
                         truncation=True,
-                        max_length=int(max_length) if max_length else None,
+                        max_length=int(_max_length) if _max_length else None,
                     )
-                    outputs = model(enc["input_ids"], attention_mask=enc.get("attention_mask"))
+                    outputs = _model(enc["input_ids"], attention_mask=enc.get("attention_mask"))
                     embeds = getattr(outputs, "text_embeds", None)
                     if embeds is None:
                         raise RuntimeError("mlx-embeddings output missing text_embeds")
@@ -312,18 +391,24 @@ class Embedder:
             model, tokenizer = loaded
             max_length = self._resolve_max_length(tokenizer, requested_max)
 
-            def _run() -> list[list[float]]:
+            def _run(
+                _model: Any = model,
+                _tokenizer: Any = tokenizer,
+                _max_length: int | None = max_length,
+                _texts: list[str] = texts,
+                _batch_size: int = batch_size,
+            ) -> list[list[float]]:
                 out: list[list[float]] = []
-                for i in range(0, len(texts), max(1, batch_size)):
-                    batch = texts[i : i + max(1, batch_size)]
-                    enc = tokenizer.batch_encode_plus(
+                for i in range(0, len(_texts), max(1, _batch_size)):
+                    batch = _texts[i : i + max(1, _batch_size)]
+                    enc = _tokenizer.batch_encode_plus(
                         batch,
                         return_tensors="mlx",
                         padding=True,
                         truncation=True,
-                        max_length=int(max_length) if max_length else None,
+                        max_length=int(_max_length) if _max_length else None,
                     )
-                    outputs = model(enc["input_ids"], attention_mask=enc.get("attention_mask"))
+                    outputs = _model(enc["input_ids"], attention_mask=enc.get("attention_mask"))
                     embeds = getattr(outputs, "text_embeds", None)
                     if embeds is None:
                         raise RuntimeError("mlx-embeddings output missing text_embeds")

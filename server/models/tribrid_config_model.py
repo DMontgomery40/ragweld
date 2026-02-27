@@ -607,7 +607,6 @@ class VocabPreviewResponse(BaseModel):
     top_n: int = Field(ge=10, le=500, description="Number of top terms requested")
     tokenizer: str = Field(description="BM25 tokenizer setting (indexing.bm25_tokenizer)")
     stemmer_lang: str | None = Field(default=None, description="Stemmer language (indexing.bm25_stemmer_lang)")
-    stopwords_lang: str | None = Field(default=None, description="Stopwords language code (indexing.bm25_stopwords_lang)")
     ts_config: str = Field(description="Postgres text search configuration used for tsv + query parsing")
     total_terms: int = Field(ge=0, description="Total unique terms in the corpus vocabulary")
     terms: list[VocabPreviewTerm] = Field(default_factory=list, description="Top terms by document frequency")
@@ -718,6 +717,10 @@ class SearchRequest(BaseModel):
     include_vector: bool = Field(default=True, description="Include vector search results")
     include_sparse: bool = Field(default=True, description="Include sparse/BM25 results")
     include_graph: bool = Field(default=True, description="Include graph search results")
+    cache_mode: Literal["default", "bypass", "refresh"] = Field(
+        default="default",
+        description="Per-request cache mode override.",
+    )
 
 
 class SearchResponse(BaseModel):
@@ -748,6 +751,10 @@ class AnswerRequest(BaseModel):
     stream: bool = Field(default=False, description="Stream the response")
     system_prompt: str | None = Field(default=None, description="Override system prompt")
     model_override: str = Field(default="", description="Override chat model for this request (empty=default)")
+    cache_mode: Literal["default", "bypass", "refresh"] = Field(
+        default="default",
+        description="Per-request cache mode override.",
+    )
 
 
 class AnswerResponse(BaseModel):
@@ -1061,6 +1068,10 @@ class ChatRequest(BaseModel):
         ge=1,
         le=100,
         description="Override retrieval.final_k for this message (leave null to use config default)",
+    )
+    cache_mode: Literal["default", "bypass", "refresh"] = Field(
+        default="default",
+        description="Per-request cache mode override.",
     )
 
 
@@ -1448,6 +1459,24 @@ class OkResponse(BaseModel):
     """Generic ok response used by several endpoints."""
 
     ok: bool = Field(description="Whether the operation succeeded")
+
+
+class ModelValidationWarning(BaseModel):
+    """A single soft warning about a model assignment in the config."""
+
+    field: str = Field(description="Dotted config field path (e.g. generation.gen_model)")
+    model_value: str = Field(description="The model string that triggered the warning")
+    message: str = Field(description="Human-readable warning message")
+
+
+class ModelValidationResult(BaseModel):
+    """Result of validating current config model assignments against the catalog."""
+
+    valid: bool = Field(description="True when no hard errors found (warnings are soft)")
+    warnings: list[ModelValidationWarning] = Field(
+        default_factory=list,
+        description="Soft warnings about model assignments",
+    )
 
 
 class RerankerCostsResponse(BaseModel):
@@ -2388,6 +2417,87 @@ class RetrievalConfig(BaseModel):
         return self
 
 
+class SemanticCacheConfig(BaseModel):
+    """Configuration for semantic caching across search/answer/chat endpoints."""
+
+    enabled: int = Field(
+        default=0,
+        ge=0,
+        le=1,
+        description="Enable semantic cache reads/writes (0=off, 1=on).",
+    )
+    mode: Literal["read_write", "read_only", "write_only"] = Field(
+        default="read_write",
+        description="Cache mode when enabled.",
+    )
+    max_entries: int = Field(
+        default=5000,
+        ge=100,
+        le=500000,
+        description="Maximum cache rows to retain per scope/endpoint.",
+    )
+    min_query_chars: int = Field(
+        default=3,
+        ge=1,
+        le=200,
+        description="Minimum query length before cache is eligible.",
+    )
+    similarity_threshold_search: float = Field(
+        default=0.90,
+        ge=0.0,
+        le=1.0,
+        description="Minimum cosine similarity for semantic search cache hits.",
+    )
+    similarity_threshold_answer: float = Field(
+        default=0.93,
+        ge=0.0,
+        le=1.0,
+        description="Minimum cosine similarity for semantic answer cache hits.",
+    )
+    similarity_threshold_chat: float = Field(
+        default=0.95,
+        ge=0.0,
+        le=1.0,
+        description="Minimum cosine similarity for semantic chat cache hits.",
+    )
+    ttl_seconds_search: int = Field(
+        default=900,
+        ge=10,
+        le=86_400,
+        description="TTL in seconds for search cache entries.",
+    )
+    ttl_seconds_answer: int = Field(
+        default=1800,
+        ge=10,
+        le=86_400,
+        description="TTL in seconds for answer cache entries.",
+    )
+    ttl_seconds_chat: int = Field(
+        default=600,
+        ge=10,
+        le=86_400,
+        description="TTL in seconds for chat cache entries.",
+    )
+    chat_history_window: int = Field(
+        default=6,
+        ge=0,
+        le=50,
+        description="Number of prior conversation turns included in chat cache fingerprint.",
+    )
+    bypass_if_images: int = Field(
+        default=1,
+        ge=0,
+        le=1,
+        description="Bypass chat generation cache when images are attached.",
+    )
+    max_temperature_for_write: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=2.0,
+        description="Skip generation-cache writes when temperature exceeds this value.",
+    )
+
+
 class ScoringConfig(BaseModel):
     """Configuration for result scoring and boosting."""
 
@@ -2784,18 +2894,6 @@ class IndexingConfig(BaseModel):
         default="postgresql://postgres:postgres@localhost:5432/tribrid_rag",
         description="PostgreSQL connection string (DSN) for pgvector + FTS storage"
     )
-    table_name: str = Field(
-        default="code_chunks_{repo}",
-        description="pgvector table name template"
-    )
-    collection_suffix: str = Field(
-        default="default",
-        description="Collection suffix for multi-index scenarios"
-    )
-    repo_path: str = Field(
-        default="",
-        description="Fallback repository path if not found in repos.json"
-    )
     indexing_batch_size: int = Field(
         default=100,
         ge=10,
@@ -2816,10 +2914,6 @@ class IndexingConfig(BaseModel):
     bm25_stemmer_lang: str = Field(
         default="english",
         description="Stemmer language"
-    )
-    bm25_stopwords_lang: str = Field(
-        default="en",
-        description="Stopwords language code"
     )
     index_excluded_exts: str = Field(
         default=".png,.jpg,.gif,.ico,.svg,.woff,.ttf",
@@ -2877,18 +2971,6 @@ class IndexingConfig(BaseModel):
         ge=0,
         le=1,
         description="Skip dense vector indexing"
-    )
-    out_dir_base: str = Field(
-        default="./out",
-        description="Base output directory"
-    )
-    rag_out_base: str = Field(
-        default="",
-        description="Override for OUT_DIR_BASE if specified"
-    )
-    repos_file: str = Field(
-        default="./repos.json",
-        description="Repository configuration file"
     )
 
     @property
@@ -3553,6 +3635,19 @@ class GenerationConfig(BaseModel):
     enrich_model: str = Field(
         default="gpt-4o-mini",
         description="Model for code enrichment"
+    )
+
+    # --- Backend resolution rules ---
+    # 1. gen_model uses gen_backend as provider
+    # 2. gen_model_ollama / enrich_model_ollama — provider is always "ollama"
+    # 3. enrich_model uses enrich_backend (below)
+    # 4. semantic_kg_llm_model — inherits gen_backend when non-empty;
+    #    falls back to enrich_model with enrich_backend
+    # 5. Channel overrides (gen_model_cli/http/mcp) inherit gen_backend
+    gen_backend: str = Field(
+        default="openai",
+        pattern="^(openai|anthropic|ollama|mlx|openrouter)$",
+        description="Provider backend for gen_model and channel overrides"
     )
 
     enrich_backend: str = Field(
@@ -5059,6 +5154,7 @@ class TriBridConfig(BaseModel):
     """
 
     retrieval: RetrievalConfig = Field(default_factory=RetrievalConfig)
+    semantic_cache: SemanticCacheConfig = Field(default_factory=SemanticCacheConfig)
     scoring: ScoringConfig = Field(default_factory=ScoringConfig)
     layer_bonus: LayerBonusConfig = Field(default_factory=LayerBonusConfig)
     embedding: EmbeddingConfig = Field(default_factory=EmbeddingConfig)
@@ -5134,6 +5230,20 @@ class TriBridConfig(BaseModel):
             'TRIBRID_SYNONYMS_PATH': self.retrieval.tribrid_synonyms_path,
             'TOPK_DENSE': self.retrieval.topk_dense,
             'TOPK_SPARSE': self.retrieval.topk_sparse,
+            # Semantic cache
+            'SEMANTIC_CACHE_ENABLED': self.semantic_cache.enabled,
+            'SEMANTIC_CACHE_MODE': self.semantic_cache.mode,
+            'SEMANTIC_CACHE_MAX_ENTRIES': self.semantic_cache.max_entries,
+            'SEMANTIC_CACHE_MIN_QUERY_CHARS': self.semantic_cache.min_query_chars,
+            'SEMANTIC_CACHE_THRESHOLD_SEARCH': self.semantic_cache.similarity_threshold_search,
+            'SEMANTIC_CACHE_THRESHOLD_ANSWER': self.semantic_cache.similarity_threshold_answer,
+            'SEMANTIC_CACHE_THRESHOLD_CHAT': self.semantic_cache.similarity_threshold_chat,
+            'SEMANTIC_CACHE_TTL_SEARCH_SEC': self.semantic_cache.ttl_seconds_search,
+            'SEMANTIC_CACHE_TTL_ANSWER_SEC': self.semantic_cache.ttl_seconds_answer,
+            'SEMANTIC_CACHE_TTL_CHAT_SEC': self.semantic_cache.ttl_seconds_chat,
+            'SEMANTIC_CACHE_CHAT_HISTORY_WINDOW': self.semantic_cache.chat_history_window,
+            'SEMANTIC_CACHE_BYPASS_IF_IMAGES': self.semantic_cache.bypass_if_images,
+            'SEMANTIC_CACHE_MAX_TEMPERATURE_FOR_WRITE': self.semantic_cache.max_temperature_for_write,
             # REMOVED: DISABLE_RERANK - use RERANKER_MODE='none' instead
             # Scoring params
             'CHUNK_SUMMARY_BONUS': self.scoring.chunk_summary_bonus,
@@ -5172,14 +5282,10 @@ class TriBridConfig(BaseModel):
             'PRESERVE_IMPORTS': self.chunking.preserve_imports,
             # Indexing params (9 new)
             'POSTGRES_URL': self.indexing.postgres_url,
-            'COLLECTION_NAME': self.indexing.table_name,
-            'COLLECTION_SUFFIX': self.indexing.collection_suffix,
-            'REPO_PATH': self.indexing.repo_path,
             'INDEXING_BATCH_SIZE': self.indexing.indexing_batch_size,
             'INDEXING_WORKERS': self.indexing.indexing_workers,
             'BM25_TOKENIZER': self.indexing.bm25_tokenizer,
             'BM25_STEMMER_LANG': self.indexing.bm25_stemmer_lang,
-            'BM25_STOPWORDS_LANG': self.indexing.bm25_stopwords_lang,
             'INDEX_EXCLUDED_EXTS': self.indexing.index_excluded_exts,
             'INDEX_MAX_FILE_SIZE_MB': self.indexing.index_max_file_size_mb,
             'PARQUET_EXTRACT_MAX_ROWS': self.indexing.parquet_extract_max_rows,
@@ -5188,9 +5294,6 @@ class TriBridConfig(BaseModel):
             'PARQUET_EXTRACT_TEXT_COLUMNS_ONLY': self.indexing.parquet_extract_text_columns_only,
             'PARQUET_EXTRACT_INCLUDE_COLUMN_NAMES': self.indexing.parquet_extract_include_column_names,
             'SKIP_DENSE': self.indexing.skip_dense,
-            'OUT_DIR_BASE': self.indexing.out_dir_base,
-            'RAG_OUT_BASE': self.indexing.rag_out_base,
-            'REPOS_FILE': self.indexing.repos_file,
             # Graph storage params (Neo4j)
             'NEO4J_URI': self.graph_storage.neo4j_uri,
             'NEO4J_USER': self.graph_storage.neo4j_user,
@@ -5229,6 +5332,7 @@ class TriBridConfig(BaseModel):
             'GEN_TOP_P': self.generation.gen_top_p,
             'GEN_TIMEOUT': self.generation.gen_timeout,
             'GEN_RETRY_MAX': self.generation.gen_retry_max,
+            'GEN_BACKEND': self.generation.gen_backend,
             'ENRICH_MODEL': self.generation.enrich_model,
             'ENRICH_BACKEND': self.generation.enrich_backend,
             'ENRICH_DISABLED': self.generation.enrich_disabled,
@@ -5463,6 +5567,21 @@ class TriBridConfig(BaseModel):
                 hydration_max_chars=data.get('HYDRATION_MAX_CHARS', 2000),
                 # REMOVED: disable_rerank - use RERANKER_MODE='none' instead
             ),
+            semantic_cache=SemanticCacheConfig(
+                enabled=data.get('SEMANTIC_CACHE_ENABLED', 0),
+                mode=data.get('SEMANTIC_CACHE_MODE', 'read_write'),
+                max_entries=data.get('SEMANTIC_CACHE_MAX_ENTRIES', 5000),
+                min_query_chars=data.get('SEMANTIC_CACHE_MIN_QUERY_CHARS', 3),
+                similarity_threshold_search=data.get('SEMANTIC_CACHE_THRESHOLD_SEARCH', 0.90),
+                similarity_threshold_answer=data.get('SEMANTIC_CACHE_THRESHOLD_ANSWER', 0.93),
+                similarity_threshold_chat=data.get('SEMANTIC_CACHE_THRESHOLD_CHAT', 0.95),
+                ttl_seconds_search=data.get('SEMANTIC_CACHE_TTL_SEARCH_SEC', 900),
+                ttl_seconds_answer=data.get('SEMANTIC_CACHE_TTL_ANSWER_SEC', 1800),
+                ttl_seconds_chat=data.get('SEMANTIC_CACHE_TTL_CHAT_SEC', 600),
+                chat_history_window=data.get('SEMANTIC_CACHE_CHAT_HISTORY_WINDOW', 6),
+                bypass_if_images=data.get('SEMANTIC_CACHE_BYPASS_IF_IMAGES', 1),
+                max_temperature_for_write=data.get('SEMANTIC_CACHE_MAX_TEMPERATURE_FOR_WRITE', 0.5),
+            ),
             scoring=ScoringConfig(
                 chunk_summary_bonus=data.get('CHUNK_SUMMARY_BONUS', 0.08),
                 filename_boost_exact=data.get('FILENAME_BOOST_EXACT', 1.5),
@@ -5503,26 +5622,19 @@ class TriBridConfig(BaseModel):
                 preserve_imports=data.get('PRESERVE_IMPORTS', 1),
             ),
             indexing=IndexingConfig(
-                postgres_url=data.get('POSTGRES_URL', 'http://127.0.0.1:6333'),
-                table_name=data.get('COLLECTION_NAME', 'code_chunks_{repo}'),
-                collection_suffix=data.get('COLLECTION_SUFFIX', 'default'),
-                repo_path=data.get('REPO_PATH', ''),
+                postgres_url=data.get('POSTGRES_URL', 'postgresql://postgres:postgres@localhost:5432/tribrid_rag'),
                 indexing_batch_size=data.get('INDEXING_BATCH_SIZE', 100),
                 indexing_workers=data.get('INDEXING_WORKERS', 4),
                 bm25_tokenizer=data.get('BM25_TOKENIZER', 'stemmer'),
                 bm25_stemmer_lang=data.get('BM25_STEMMER_LANG', 'english'),
-                bm25_stopwords_lang=data.get('BM25_STOPWORDS_LANG', 'en'),
                 index_excluded_exts=data.get('INDEX_EXCLUDED_EXTS', '.png,.jpg,.gif,.ico,.svg,.woff,.ttf'),
-                index_max_file_size_mb=data.get('INDEX_MAX_FILE_SIZE_MB', 10),
+                index_max_file_size_mb=data.get('INDEX_MAX_FILE_SIZE_MB', 250),
                 parquet_extract_max_rows=data.get('PARQUET_EXTRACT_MAX_ROWS', 5000),
                 parquet_extract_max_chars=data.get('PARQUET_EXTRACT_MAX_CHARS', 2_000_000),
                 parquet_extract_max_cell_chars=data.get('PARQUET_EXTRACT_MAX_CELL_CHARS', 20_000),
                 parquet_extract_text_columns_only=data.get('PARQUET_EXTRACT_TEXT_COLUMNS_ONLY', 1),
                 parquet_extract_include_column_names=data.get('PARQUET_EXTRACT_INCLUDE_COLUMN_NAMES', 1),
                 skip_dense=data.get('SKIP_DENSE', 0),
-                out_dir_base=data.get('OUT_DIR_BASE', './out'),
-                rag_out_base=data.get('RAG_OUT_BASE', ''),
-                repos_file=data.get('REPOS_FILE', './repos.json'),
             ),
             graph_storage=GraphStorageConfig(
                 neo4j_uri=data.get('NEO4J_URI', 'bolt://localhost:7687'),
@@ -5566,6 +5678,7 @@ class TriBridConfig(BaseModel):
                 gen_top_p=data.get('GEN_TOP_P', 1.0),
                 gen_timeout=data.get('GEN_TIMEOUT', 60),
                 gen_retry_max=data.get('GEN_RETRY_MAX', 2),
+                gen_backend=data.get('GEN_BACKEND', 'openai'),
                 enrich_model=data.get('ENRICH_MODEL', 'gpt-4o-mini'),
                 enrich_backend=data.get('ENRICH_BACKEND', 'openai'),
                 enrich_disabled=data.get('ENRICH_DISABLED', 0),
@@ -5810,6 +5923,20 @@ TRIBRID_CONFIG_KEYS = {
     'TOPK_SPARSE',
     'HYDRATION_MODE',
     'HYDRATION_MAX_CHARS',
+    # Semantic cache params (13)
+    'SEMANTIC_CACHE_ENABLED',
+    'SEMANTIC_CACHE_MODE',
+    'SEMANTIC_CACHE_MAX_ENTRIES',
+    'SEMANTIC_CACHE_MIN_QUERY_CHARS',
+    'SEMANTIC_CACHE_THRESHOLD_SEARCH',
+    'SEMANTIC_CACHE_THRESHOLD_ANSWER',
+    'SEMANTIC_CACHE_THRESHOLD_CHAT',
+    'SEMANTIC_CACHE_TTL_SEARCH_SEC',
+    'SEMANTIC_CACHE_TTL_ANSWER_SEC',
+    'SEMANTIC_CACHE_TTL_CHAT_SEC',
+    'SEMANTIC_CACHE_CHAT_HISTORY_WINDOW',
+    'SEMANTIC_CACHE_BYPASS_IF_IMAGES',
+    'SEMANTIC_CACHE_MAX_TEMPERATURE_FOR_WRITE',
     # REMOVED: DISABLE_RERANK - use RERANKER_MODE='none' instead
     # Scoring params (5 - added 2 new)
     'CHUNK_SUMMARY_BONUS',
@@ -5847,15 +5974,11 @@ TRIBRID_CONFIG_KEYS = {
     'PRESERVE_IMPORTS',
     # Indexing params (20)
     'POSTGRES_URL',
-    'COLLECTION_NAME',
-    'COLLECTION_SUFFIX',
-    'REPO_PATH',
     'VECTOR_BACKEND',
     'INDEXING_BATCH_SIZE',
     'INDEXING_WORKERS',
     'BM25_TOKENIZER',
     'BM25_STEMMER_LANG',
-    'BM25_STOPWORDS_LANG',
     'INDEX_EXCLUDED_EXTS',
     'INDEX_MAX_FILE_SIZE_MB',
     'PARQUET_EXTRACT_MAX_ROWS',
@@ -5864,9 +5987,6 @@ TRIBRID_CONFIG_KEYS = {
     'PARQUET_EXTRACT_TEXT_COLUMNS_ONLY',
     'PARQUET_EXTRACT_INCLUDE_COLUMN_NAMES',
     'SKIP_DENSE',
-    'OUT_DIR_BASE',
-    'RAG_OUT_BASE',
-    'REPOS_FILE',
     # Reranking params (14) - unified with RERANKER_MODE
     'RERANKER_MODE',
     'RERANKER_CLOUD_PROVIDER',
@@ -6061,7 +6181,7 @@ TRIBRID_CONFIG_KEYS = {
 # Only keys that affect retrieval accuracy - NOT post-retrieval prompts, hydration, or eval paths
 RAG_EVAL_CONFIG_KEYS: set[str] = {
     # BM25 Search
-    'BM25_TOKENIZER', 'BM25_STEMMER_LANG', 'BM25_STOPWORDS_LANG',
+    'BM25_TOKENIZER', 'BM25_STEMMER_LANG',
     'BM25_K1', 'BM25_B', 'BM25_WEIGHT',
     # Embedding
     'EMBEDDING_TYPE', 'EMBEDDING_MODEL', 'EMBEDDING_DIM',
@@ -6109,7 +6229,6 @@ def get_eval_key_categories() -> dict[str, str]:
         # BM25 Search
         'BM25_TOKENIZER': 'BM25 Search',
         'BM25_STEMMER_LANG': 'BM25 Search',
-        'BM25_STOPWORDS_LANG': 'BM25 Search',
         'BM25_K1': 'BM25 Search',
         'BM25_B': 'BM25 Search',
         'BM25_WEIGHT': 'BM25 Search',

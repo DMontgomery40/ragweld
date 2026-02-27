@@ -33,6 +33,21 @@
     "hydration_mode": "lazy",
     "hydration_max_chars": 2000
   },
+  "semantic_cache": {
+    "enabled": 0,
+    "mode": "read_write",
+    "max_entries": 5000,
+    "min_query_chars": 3,
+    "similarity_threshold_search": 0.9,
+    "similarity_threshold_answer": 0.93,
+    "similarity_threshold_chat": 0.95,
+    "ttl_seconds_search": 900,
+    "ttl_seconds_answer": 1800,
+    "ttl_seconds_chat": 600,
+    "chat_history_window": 6,
+    "bypass_if_images": 1,
+    "max_temperature_for_write": 0.5
+  },
   "scoring": {
     "chunk_summary_bonus": 0.08,
     "filename_boost_exact": 1.5,
@@ -147,14 +162,10 @@
   },
   "indexing": {
     "postgres_url": "postgresql://postgres:postgres@localhost:5432/tribrid_rag",
-    "table_name": "code_chunks_{repo}",
-    "collection_suffix": "default",
-    "repo_path": "",
     "indexing_batch_size": 100,
     "indexing_workers": 4,
     "bm25_tokenizer": "stemmer",
     "bm25_stemmer_lang": "english",
-    "bm25_stopwords_lang": "en",
     "index_excluded_exts": ".png,.jpg,.gif,.ico,.svg,.woff,.ttf",
     "index_max_file_size_mb": 250,
     "large_file_mode": "stream",
@@ -164,10 +175,7 @@
     "parquet_extract_max_cell_chars": 20000,
     "parquet_extract_text_columns_only": 1,
     "parquet_extract_include_column_names": 1,
-    "skip_dense": 0,
-    "out_dir_base": "./out",
-    "rag_out_base": "",
-    "repos_file": "./repos.json"
+    "skip_dense": 0
   },
   "graph_storage": {
     "neo4j_uri": "bolt://localhost:7687",
@@ -206,6 +214,12 @@
     "ast_imports_weight": 1.0,
     "ast_calls_weight": 1.0,
     "semantic_kg_mode": "heuristic",
+    "semantic_kg_typed_entities_enabled": false,
+    "semantic_kg_allowed_entity_types": [
+      "concept"
+    ],
+    "semantic_kg_require_llm_success": false,
+    "semantic_kg_reasoning_effort": "medium",
     "semantic_kg_relation_weight_llm": 0.7,
     "semantic_kg_relation_weight_heuristic": 0.5,
     "semantic_kg_max_concepts_per_chunk": 8,
@@ -272,13 +286,14 @@
     "rerank_input_snippet_chars": 700
   },
   "generation": {
-    "gen_model": "gpt-4o-mini",
+    "gen_model": "gpt-5.2",
     "gen_temperature": 0.0,
     "gen_max_tokens": 2048,
     "gen_top_p": 1.0,
     "gen_timeout": 60,
     "gen_retry_max": 2,
     "enrich_model": "gpt-4o-mini",
+    "gen_backend": "openai",
     "enrich_backend": "openai",
     "enrich_disabled": 0,
     "ollama_num_ctx": 8192,
@@ -560,6 +575,7 @@
       "include_cost_tracking": true,
       "include_timing_breakdown": true
     },
+    "openai_protocol": "auto",
     "temperature": 0.3,
     "temperature_no_retrieval": 0.7,
     "max_tokens": 4096,
@@ -586,7 +602,7 @@
     "query_rewrite": "You rewrite developer questions into search-optimized queries without changing meaning.",
     "semantic_chunk_summaries": "Analyze this database chunk and create a comprehensive JSON summary for database search. Focus on WHAT the database does (business purpose) and HOW it works (technical details). Include all important symbols, patterns, and domain concepts.\n\nJSON format:\n{\n  \"symbols\": [\"function_name\", \"class_name\", \"variable_name\"],\n  \"purpose\": \"Clear business purpose - what problem this solves\",\n  \"technical_details\": \"Key technical implementation details\",\n  \"domain_concepts\": [\"business_term1\", \"business_term2\"],\n  \"routes\": [\"api/endpoint\", \"webhook/path\"],\n  \"dependencies\": [\"external_service\", \"library\"],\n  \"patterns\": [\"design_pattern\", \"architectural_concept\"]\n}\n\nFocus on:\n- Domain-specific terminology and concepts from this database\n- Technical patterns and architectural decisions\n- Business logic and problem being solved\n- Integration points, APIs, and external services\n- Key algorithms, data structures, and workflows",
     "code_enrichment": "Analyze this database and return a JSON object with: symbols (array of function/class/component names), purpose (one sentence description), keywords (array of technical terms). Be concise. Return ONLY valid JSON.",
-    "semantic_kg_extraction": "You are a semantic knowledge graph extractor.\n\nGiven a single database/document chunk, extract a small set of reusable semantic concepts and relationships.\n\nRules:\n- Return ONLY valid JSON (no markdown, no extra text)\n- Concepts must be short, lowercase, and reusable across the corpus (e.g. \"authentication\", \"rate_limit\", \"vector_index\")\n- Prefer domain concepts and architectural concepts over implementation noise\n- Do NOT include file paths or line numbers as concepts\n- Keep the list small and high-signal\n\nJSON format:\n{\n  \"concepts\": [\"concept1\", \"concept2\"],\n  \"relations\": [\n    {\"source\": \"concept1\", \"target\": \"concept2\", \"relation_type\": \"related_to\"}\n  ]\n}\n\nAllowed relation_type values: related_to, references",
+    "semantic_kg_extraction": "You are a semantic knowledge graph extractor.\n\nGiven one corpus chunk, extract only entities and relations explicitly grounded in that text.\n\nRules:\n- Return ONLY valid JSON (no markdown, no prose).\n- Never fabricate entities, aliases, or links.\n- Prefer exact surface forms for names (for example full person/organization names when present).\n- Do not emit file paths or line numbers as entities.\n- Keep output high-signal and deduplicated.\n\nJSON format:\n{\n  \"entities\": [\n    {\"name\": \"Jeffrey Epstein\", \"entity_type\": \"person\"},\n    {\"name\": \"Bill Clinton\", \"entity_type\": \"person\"},\n    {\"name\": \"Epstein files\", \"entity_type\": \"concept\"}\n  ],\n  \"relations\": [\n    {\"source\": \"Jeffrey Epstein\", \"target\": \"Bill Clinton\", \"relation_type\": \"related_to\"},\n    {\"source\": \"Epstein files\", \"target\": \"Jeffrey Epstein\", \"relation_type\": \"references\"}\n  ]\n}\n\nAllowed entity_type values: person, org, location, event, concept\nAllowed relation_type values: related_to, references",
     "eval_analysis": "You are an expert RAG (Retrieval-Augmented Generation) system analyst.\nYour job is to analyze evaluation comparisons and provide HONEST, SKEPTICAL insights.\n\nCRITICAL: Do NOT force explanations that don't make sense. If the data is contradictory or confusing:\n- Say so clearly: \"This result is surprising and may indicate other factors at play\"\n- Consider: index changes, data drift, eval dataset updates, or measurement noise\n- Acknowledge when correlation != causation\n- It's BETTER to say \"I'm not sure why this happened\" than to fabricate a plausible-sounding but wrong explanation\n\nBe rigorous:\n1. Question whether the config changes ACTUALLY explain the performance delta\n2. Flag when results seem counterintuitive (e.g., disabling a feature improving results)\n3. Consider confounding variables: Was the index rebuilt? Did the test set change?\n4. Provide actionable suggestions only when you have reasonable confidence\n\nFormat your response with clear sections using markdown headers.",
     "lightweight_chunk_summaries": "Extract key information from this database: symbols (function/class names), purpose (one sentence), keywords (technical terms). Return JSON only."
   },

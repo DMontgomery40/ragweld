@@ -5,7 +5,12 @@ from __future__ import annotations
 import os
 
 from server.chat.provider_router import select_provider_route
-from server.models.chat_config import ChatConfig, LocalModelConfig, LocalProviderEntry, OpenRouterConfig
+from server.models.chat_config import (
+    ChatConfig,
+    LocalModelConfig,
+    LocalProviderEntry,
+    OpenRouterConfig,
+)
 from server.models.tribrid_config_model import TriBridConfig
 
 
@@ -61,6 +66,7 @@ def test_select_provider_route_prefers_openrouter_when_enabled_and_key_present()
 
 def test_select_provider_route_falls_back_to_local_when_openrouter_key_missing() -> None:
     old = _set_openrouter_api_key(None)
+    old_openai = _set_openai_api_key(None)
     try:
         local = LocalModelConfig(
             providers=[
@@ -91,6 +97,7 @@ def test_select_provider_route_falls_back_to_local_when_openrouter_key_missing()
         assert route.model == "local-default"
         assert route.api_key is None
     finally:
+        _restore_openai_api_key(old_openai)
         _restore_openrouter_api_key(old)
 
 
@@ -165,6 +172,78 @@ def test_select_provider_route_routes_unqualified_gpt_models_cloud_direct_when_o
         _restore_openrouter_api_key(old_openrouter)
 
 
+def test_select_provider_route_honors_openai_backend_with_saved_default_generation_values() -> None:
+    old_openrouter = _set_openrouter_api_key("test-openrouter-key")
+    old_openai = _set_openai_api_key("test-openai-key")
+    try:
+        cfg = TriBridConfig(
+            chat=ChatConfig(openrouter=OpenRouterConfig(enabled=True, default_model="openrouter-default"))
+        )
+        # Simulate persisted config round-trip (full payload written/read).
+        cfg = TriBridConfig.model_validate(cfg.model_dump(mode="serialization", by_alias=True))
+        route = select_provider_route(config=cfg)
+        assert route.kind == "cloud_direct"
+        assert route.provider_name == "OpenAI"
+        assert route.model == "gpt-4o-mini"
+        assert route.api_key == "test-openai-key"
+    finally:
+        _restore_openai_api_key(old_openai)
+        _restore_openrouter_api_key(old_openrouter)
+
+
+def test_select_provider_route_uses_openrouter_for_default_openai_backend_without_openai_key() -> None:
+    old_openrouter = _set_openrouter_api_key("test-openrouter-key")
+    old_openai = _set_openai_api_key(None)
+    try:
+        cfg = TriBridConfig(
+            chat=ChatConfig(openrouter=OpenRouterConfig(enabled=True, default_model="openrouter-default")),
+        )
+        route = select_provider_route(config=cfg)
+        assert route.kind == "openrouter"
+        assert route.provider_name == "OpenRouter"
+        assert route.model == "openai/gpt-4o-mini"
+    finally:
+        _restore_openai_api_key(old_openai)
+        _restore_openrouter_api_key(old_openrouter)
+
+
+def test_select_provider_route_honors_non_default_openai_generation_model() -> None:
+    old_openrouter = _set_openrouter_api_key("test-openrouter-key")
+    old_openai = _set_openai_api_key("test-openai-key")
+    try:
+        cfg = TriBridConfig(
+            chat=ChatConfig(openrouter=OpenRouterConfig(enabled=True, default_model="openrouter-default")),
+        )
+        cfg.generation.gen_backend = "openai"
+        cfg.generation.gen_model = "gpt-5.2"
+        route = select_provider_route(config=cfg)
+        assert route.kind == "cloud_direct"
+        assert route.provider_name == "OpenAI"
+        assert route.model == "gpt-5.2"
+        assert route.api_key == "test-openai-key"
+    finally:
+        _restore_openai_api_key(old_openai)
+        _restore_openrouter_api_key(old_openrouter)
+
+
+def test_select_provider_route_preserves_non_default_openai_model_without_openai_key() -> None:
+    old_openrouter = _set_openrouter_api_key("test-openrouter-key")
+    old_openai = _set_openai_api_key(None)
+    try:
+        cfg = TriBridConfig(
+            chat=ChatConfig(openrouter=OpenRouterConfig(enabled=True, default_model="openrouter-default")),
+        )
+        cfg.generation.gen_backend = "openai"
+        cfg.generation.gen_model = "gpt-5.2"
+        route = select_provider_route(config=cfg)
+        assert route.kind == "openrouter"
+        assert route.provider_name == "OpenRouter"
+        assert route.model == "openai/gpt-5.2"
+    finally:
+        _restore_openai_api_key(old_openai)
+        _restore_openrouter_api_key(old_openrouter)
+
+
 def test_select_provider_route_local_prefix_forces_local_even_when_openrouter_ready() -> None:
     old = _set_openrouter_api_key("test-openrouter-key")
     try:
@@ -196,7 +275,7 @@ def test_select_provider_route_raises_when_no_provider_configured() -> None:
         cfg = ChatConfig(openrouter=OpenRouterConfig(enabled=False), local_models=local)
         try:
             select_provider_route(config=TriBridConfig(chat=cfg))
-            assert False, "Expected select_provider_route to raise"
+            raise AssertionError("Expected select_provider_route to raise")
         except RuntimeError as e:
             assert "No chat provider configured" in str(e)
     finally:

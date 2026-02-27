@@ -1,17 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useConfigStore } from '@/stores';
 import { EmbeddingMismatchWarning } from './ui/EmbeddingMismatchWarning';
-import { useModels } from '@/hooks';
+import { ModelPicker } from './RAG/ModelPicker';
+import { useEmbeddingModel, useModels } from '@/hooks';
 
 export function Sidepanel() {
   const config = useConfigStore((s) => s.config);
   const patchSection = useConfigStore((s) => s.patchSection);
 
-  const {
-    models: genModels,
-    loading: genLoading,
-    error: genError,
-  } = useModels('GEN');
+  const genBackend = String(config?.generation?.gen_backend || 'openai');
   const {
     providers: embeddingProviders,
     getModelsForProvider: getEmbeddingModelsForProvider,
@@ -25,18 +22,8 @@ export function Sidepanel() {
     error: rerankModelsError,
   } = useModels('RERANK');
 
-  const genModelOptions = useMemo(() => {
-    const dedup = new Map<string, { key: string; value: string; label: string }>();
-    for (const row of genModels) {
-      const provider = String(row.provider || '').trim();
-      const model = String(row.model || '').trim();
-      if (!provider || !model) continue;
-      const key = `${provider}::${model}`;
-      if (dedup.has(key)) continue;
-      dedup.set(key, { key, value: model, label: `${provider} · ${model}` });
-    }
-    return Array.from(dedup.values()).sort((a, b) => a.label.localeCompare(b.label));
-  }, [genModels]);
+  // Embedding model (derived from config via shared hook)
+  const { embeddingType: configEmbeddingType, currentModel: configEmbeddingModel } = useEmbeddingModel();
 
   const [genModel, setGenModel] = useState<string>('');
   const [embeddingProvider, setEmbeddingProvider] = useState<string>('openai');
@@ -50,15 +37,9 @@ export function Sidepanel() {
 
     setGenModel(String(config.generation?.gen_model || ''));
 
-    const embType = String(config.embedding?.embedding_type || 'openai');
-    setEmbeddingProvider(embType);
-    const embTypeLower = embType.toLowerCase();
-    let embModel = String(config.embedding?.embedding_model || '');
-    if (embTypeLower === 'voyage') embModel = String(config.embedding?.voyage_model || '');
-    if (embTypeLower === 'local' || embTypeLower === 'huggingface' || embTypeLower === 'ollama') {
-      embModel = String(config.embedding?.embedding_model_local || '');
-    }
-    setEmbeddingModel(embModel);
+    // Embedding provider + model (via useEmbeddingModel hook)
+    setEmbeddingProvider(configEmbeddingType || 'openai');
+    setEmbeddingModel(configEmbeddingModel);
 
     const rrModeRaw = String(config.reranking?.reranker_mode || '').toLowerCase();
     const rrMode = rrModeRaw === 'local' ? 'learning' : rrModeRaw;
@@ -72,7 +53,7 @@ export function Sidepanel() {
       setRerankProvider('none');
       setRerankModel('');
     }
-  }, [config]);
+  }, [config, configEmbeddingType, configEmbeddingModel]);
 
   const embeddingProviderOptions = useMemo(() => {
     const s = new Set<string>(embeddingProviders);
@@ -203,31 +184,22 @@ export function Sidepanel() {
           </span>
         </div>
 
-        {(genError || embeddingModelsError || rerankModelsError) ? (
+        {(embeddingModelsError || rerankModelsError) ? (
           <div style={{ color: 'var(--err)', fontSize: '12px', marginBottom: '10px' }}>
-            {genError || embeddingModelsError || rerankModelsError}
+            {embeddingModelsError || rerankModelsError}
           </div>
         ) : null}
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
           <div>
-            <label style={labelStyle}>GENERATION MODEL</label>
-            <select
+            <ModelPicker
+              componentType="GEN"
+              provider={genBackend}
               value={genModel}
-              onChange={(e) => setGenModel(e.target.value)}
-              style={selectStyle}
-              disabled={genLoading}
-            >
-              {genModelOptions.length > 0 ? (
-                genModelOptions.map((opt) => (
-                  <option key={opt.key} value={opt.value}>
-                    {opt.label}
-                  </option>
-                ))
-              ) : (
-                <option value={genModel}>{genLoading ? 'Loading…' : (genModel || '—')}</option>
-              )}
-            </select>
+              onChange={setGenModel}
+              label="GENERATION MODEL"
+              allowCustom
+            />
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>

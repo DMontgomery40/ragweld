@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import logging
 import re
 from collections import defaultdict
 from collections.abc import AsyncGenerator
@@ -51,6 +52,8 @@ from server.observability.metrics import (
     INDEX_TOKENS_TOTAL,
 )
 from server.services.config_store import get_config as load_scoped_config
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["index"])
 
@@ -124,6 +127,18 @@ def _clear_runtime_state_for_repo(repo_id: str, *, queue: asyncio.Queue[dict[str
         _EVENT_QUEUES.pop(repo_id, None)
     elif _EVENT_QUEUES.get(repo_id) is queue:
         _EVENT_QUEUES.pop(repo_id, None)
+
+
+async def _clear_semantic_cache_for_repo(repo_id: str) -> None:
+    """Best-effort corpus cache invalidation used by indexing terminal paths."""
+    cfg = await load_scoped_config(repo_id=repo_id)
+    postgres = PostgresClient(cfg.indexing.postgres_url)
+    await postgres.connect()
+    try:
+        await postgres.semantic_cache_clear_for_corpus(repo_id)
+    finally:
+        with contextlib.suppress(Exception):
+            await postgres.disconnect()
 
 
 async def _cancel_index_run(repo_id: str) -> IndexStatus:
@@ -450,7 +465,6 @@ async def _extract_semantic_kg_llm(
         return out
 
     llm_attempts = 3
-    last_err: Exception | None = None
     for attempt in range(llm_attempts):
         try:
             route = select_provider_route(config=cfg, model_override=str(model or "").strip())
@@ -505,8 +519,7 @@ async def _extract_semantic_kg_llm(
                     raise RuntimeError("Semantic KG LLM returned non-JSON or empty JSON output")
                 return ([], [])
             break
-        except Exception as exc:
-            last_err = exc
+        except Exception:
             if attempt < (llm_attempts - 1):
                 await asyncio.sleep(0.5 * (attempt + 1))
                 continue
@@ -601,9 +614,36 @@ async def _run_index(
     postgres = PostgresClient(cfg.indexing.postgres_url)
     await postgres.connect()
     await postgres.upsert_corpus(repo_id, name=repo_id, root_path=repo_path)
+    if embedder is not None and bool(int(getattr(cfg.embedding, "embedding_cache_enabled", 0) or 0) == 1):
+        cache_backend = str(getattr(cfg.embedding, "embedding_backend", "") or "").strip().lower() or "deterministic"
+        cache_provider = str(getattr(cfg.embedding, "embedding_type", "") or "").strip().lower() or "deterministic"
+        cache_provider_key = f"{cache_backend}:{cache_provider}"
+        cache_model = str(getattr(cfg.embedding, "effective_model", "") or "").strip() or "deterministic"
+        cache_dim = int(embedder.dim)
+
+        async def _cache_lookup(input_hashes: list[str]) -> dict[str, list[float]]:
+            return await postgres.embedding_cache_lookup_batch(
+                provider=cache_provider_key,
+                model=cache_model,
+                dimensions=cache_dim,
+                input_hashes=input_hashes,
+            )
+
+        async def _cache_upsert(entries: dict[str, tuple[str, list[float]]]) -> int:
+            return await postgres.embedding_cache_upsert_batch(
+                provider=cache_provider_key,
+                model=cache_model,
+                dimensions=cache_dim,
+                entries=entries,
+            )
+
+        embedder.configure_cache_backend(lookup_batch=_cache_lookup, upsert_batch=_cache_upsert)
+    elif embedder is not None:
+        embedder.clear_cache_backend()
 
     # Corpus-level exclude paths (stored in Postgres corpora.meta.exclude_paths)
     extra_gitignore_patterns: list[str] = []
+    corpus: dict[str, Any] | None = None
     try:
         corpus = await postgres.get_corpus(repo_id)
         meta = (corpus.get("meta") or {}) if corpus else {}
@@ -612,6 +652,65 @@ async def _run_index(
             extra_gitignore_patterns = [str(x).strip() for x in raw if str(x).strip()]
     except Exception:
         extra_gitignore_patterns = []
+
+    # ---- Embedding mismatch guard ----
+    # Detect when the current embedding config differs from what was used to
+    # build the existing index.  Mixed-dimension vectors in the same corpus
+    # cause pgvector query errors (unhandled 500s) and silently corrupt search
+    # results.  Block the run unless force_reindex is set.
+    # NOTE: Only guard when the corpus actually has non-null embeddings.
+    # After a delete operation, embedding metadata lingers on the corpora row
+    # even though vectors may be gone, so the guard must not block a fresh run.
+    if corpus and not force_reindex and not skip_dense and embedder is not None:
+        meta = corpus.get("meta") if isinstance(corpus.get("meta"), dict) else {}
+        stored_backend = str((meta or {}).get("embedding_backend") or "").strip().lower()
+        if not stored_backend:
+            # Legacy corpora did not persist backend identity. Treat as deterministic
+            # to avoid silently mixing deterministic and provider vectors.
+            stored_backend = "deterministic"
+        stored_model = str(corpus.get("embedding_model") or "").strip()
+        stored_dim = int(corpus.get("embedding_dimensions") or 0)
+        stored_provider = str(corpus.get("embedding_provider") or "").strip()
+
+        # Only check if the corpus has been indexed before (non-empty metadata)
+        # AND still contains embedded vectors. If vectors were deleted but
+        # metadata was not cleared, there is nothing to protect.
+        has_embeddings = False
+        if stored_model and stored_dim > 0:
+            embedding_chunks = await postgres.count_chunks_with_embeddings(repo_id)
+            has_embeddings = embedding_chunks > 0
+        if stored_model and stored_dim > 0 and has_embeddings:
+            current_model = str(cfg.embedding.effective_model or "").strip()
+            current_dim = int(embedder.dim)
+            current_backend = str(cfg.embedding.embedding_backend or "").strip().lower() or "deterministic"
+            current_provider = str(cfg.embedding.embedding_type or "").strip()
+            both_deterministic = current_backend == "deterministic" and stored_backend == "deterministic"
+
+            mismatches: list[str] = []
+            if stored_dim != current_dim:
+                mismatches.append(f"dimensions: stored={stored_dim}, config={current_dim}")
+            if not both_deterministic and stored_model != current_model:
+                mismatches.append(f"model: stored={stored_model}, config={current_model}")
+            if stored_backend != current_backend:
+                mismatches.append(f"backend: stored={stored_backend}, config={current_backend}")
+            if not both_deterministic and stored_provider != current_provider:
+                mismatches.append(f"provider: stored={stored_provider}, config={current_provider}")
+
+            if mismatches:
+                detail = "; ".join(mismatches)
+                msg = (
+                    f"Embedding configuration mismatch for corpus '{repo_id}': {detail}. "
+                    "Re-indexing without force_reindex would mix incompatible vectors. "
+                    "Set force_reindex=true to clear the existing index first, "
+                    "or restore the embedding config to match the current index."
+                )
+                if event_queue is not None:
+                    _emit_event(
+                        event_queue,
+                        {"type": "error", "message": msg},
+                        guarantee=True,
+                    )
+                raise RuntimeError(msg)
 
     loader = FileLoader(ignore_patterns=ignore_patterns, extra_gitignore_patterns=extra_gitignore_patterns)
 
@@ -645,11 +744,56 @@ async def _run_index(
                 except Exception:
                     # Graph indexing should never block dense/sparse indexing.
                     pass
-    except Exception:
+    except Exception as exc:
         # Graph layer is optional at runtime; vector + sparse indexing should still work.
+        logger.warning("Neo4j graph initialization failed; graph indexing disabled for this run: %s", exc, exc_info=True)
+        _emit_event(
+            event_queue,
+            {"type": "warning", "message": f"Graph indexing disabled: {exc}"},
+            drop_oldest=True,
+        )
         neo4j = None
         graph_builder = None
 
+    try:
+        return await _run_index_body(
+            repo_id=repo_id,
+            repo_path=repo_path,
+            force_reindex=force_reindex,
+            cfg=cfg,
+            chunker=chunker,
+            max_indexable_bytes=max_indexable_bytes,
+            skip_dense=skip_dense,
+            embedder=embedder,
+            postgres=postgres,
+            neo4j=neo4j,
+            graph_builder=graph_builder,
+            loader=loader,
+            event_queue=event_queue,
+        )
+    finally:
+        if neo4j is not None:
+            with contextlib.suppress(Exception):
+                await neo4j.disconnect()
+
+
+async def _run_index_body(
+    *,
+    repo_id: str,
+    repo_path: str,
+    force_reindex: bool,
+    cfg: TriBridConfig,
+    chunker: Chunker,
+    max_indexable_bytes: int,
+    skip_dense: bool,
+    embedder: Embedder | None,
+    postgres: PostgresClient,
+    neo4j: Neo4jClient | None,
+    graph_builder: GraphBuilder | None,
+    loader: FileLoader,
+    event_queue: asyncio.Queue[dict[str, Any]] | None,
+) -> IndexStats:
+    """Core indexing loop -- extracted to allow _run_index() to guarantee Neo4j cleanup via finally."""
     total_files = 0
     total_chunks = 0
     total_tokens = 0
@@ -682,7 +826,6 @@ async def _run_index(
     # This makes graph-only / sparse-only workflows deterministic.
     if skip_dense:
         deleted = await postgres.delete_embeddings(repo_id)
-        await postgres.update_corpus_embedding_meta(repo_id, provider="", model="", dimensions=0)
         if event_queue is not None:
             _emit_event(
                 event_queue,
@@ -692,6 +835,8 @@ async def _run_index(
 
     semantic_budget = int(cfg.graph_indexing.semantic_kg_max_chunks) if cfg.graph_indexing.semantic_kg_enabled else 0
     semantic_processed = 0
+    contextual_mode = str(getattr(cfg.embedding, "contextual_chunk_embeddings", "off") or "off").strip().lower()
+    indexing_workers = max(1, int(getattr(cfg.indexing, "indexing_workers", 1) or 1))
 
     for idx, (rel_path, abs_path) in enumerate(file_entries, start=1):
         ext = "." + rel_path.split(".")[-1] if "." in rel_path else ""
@@ -768,8 +913,17 @@ async def _run_index(
             if all(c.embedding is not None for c in chunks):
                 embedded = chunks
             else:
+                contextual_inputs: list[str] | None = None
+                if contextual_mode == "prepend_context":
+                    contextual_inputs = [
+                        (
+                            f"[file_path={rel_path}] [line_range={int(c.start_line)}-{int(c.end_line)}]\n"
+                            f"{c.content}"
+                        )
+                        for c in chunks
+                    ]
                 with INDEX_STAGE_LATENCY_SECONDS.labels(stage="embed_chunks").time():
-                    embedded = await embedder.embed_chunks(chunks)
+                    embedded = await embedder.embed_chunks(chunks, embed_texts=contextual_inputs)
             with INDEX_STAGE_LATENCY_SECONDS.labels(stage="postgres_upsert_embeddings").time():
                 await postgres.upsert_embeddings(repo_id, embedded)
             with INDEX_STAGE_LATENCY_SECONDS.labels(stage="postgres_upsert_fts").time():
@@ -787,7 +941,39 @@ async def _run_index(
 
         indexing_batch = max(10, int(getattr(cfg.indexing, "indexing_batch_size", 100) or 100))
 
-        chunks_for_semantic: list[Chunk] = []
+        async def _upsert_chunk_batches(
+            chunks: list[Chunk],
+            *,
+            _indexing_batch: int = indexing_batch,
+            _indexing_workers: int = indexing_workers,
+        ) -> list[Chunk]:
+            if not chunks:
+                return []
+            batches = [chunks[i0 : i0 + _indexing_batch] for i0 in range(0, len(chunks), _indexing_batch)]
+            if len(batches) <= 1 or _indexing_workers <= 1:
+                out: list[Chunk] = []
+                for b in batches:
+                    out.extend(await _upsert_chunks_for_file(b))
+                return out
+
+            sem = asyncio.Semaphore(_indexing_workers)
+            results: list[list[Chunk] | None] = [None] * len(batches)
+
+            async def _run_batch(i: int, batch: list[Chunk]) -> None:
+                async with sem:
+                    results[i] = await _upsert_chunks_for_file(batch)
+
+            await asyncio.gather(*(_run_batch(i, batch) for i, batch in enumerate(batches)))
+            merged: list[Chunk] = []
+            for r in results:
+                if r:
+                    merged.extend(r)
+            return merged
+
+        # Chunks queued for semantic KG extraction during this file iteration.
+        # Keep this as a per-iteration queue; reprocessing prior chunks on every
+        # file causes quadratic work and makes indexing appear stalled.
+        semantic_pending_chunks: list[Chunk] = []
 
         if use_stream:
             base_char = 0
@@ -816,16 +1002,15 @@ async def _run_index(
                             base_line += block.count("\n")
                             if not chunks:
                                 continue
-                            for i0 in range(0, len(chunks), indexing_batch):
-                                embedded_batch = await _upsert_chunks_for_file(chunks[i0 : i0 + indexing_batch])
-                                if (
-                                    semantic_budget > 0
-                                    and semantic_processed < semantic_budget
-                                    and cfg.graph_indexing.semantic_kg_enabled
-                                    and neo4j is not None
-                                ):
-                                    remaining = max(0, semantic_budget - semantic_processed)
-                                    chunks_for_semantic.extend(embedded_batch[:remaining])
+                            embedded_batches = await _upsert_chunk_batches(chunks)
+                            if (
+                                semantic_budget > 0
+                                and semantic_processed < semantic_budget
+                                and cfg.graph_indexing.semantic_kg_enabled
+                                and neo4j is not None
+                            ):
+                                remaining = max(0, semantic_budget - semantic_processed)
+                                semantic_pending_chunks.extend(embedded_batches[:remaining])
             except Exception:
                 INDEX_STAGE_ERRORS_TOTAL.labels(stage="file_read_stream").inc()
                 continue
@@ -874,16 +1059,15 @@ async def _run_index(
                 INDEX_FILES_PROCESSED_TOTAL.inc()
                 if not chunks:
                     continue
-                for i0 in range(0, len(chunks), indexing_batch):
-                    embedded_batch = await _upsert_chunks_for_file(chunks[i0 : i0 + indexing_batch])
-                    if (
-                        semantic_budget > 0
-                        and semantic_processed < semantic_budget
-                        and cfg.graph_indexing.semantic_kg_enabled
-                        and neo4j is not None
-                    ):
-                        remaining = max(0, semantic_budget - semantic_processed)
-                        chunks_for_semantic.extend(embedded_batch[:remaining])
+                embedded_batches = await _upsert_chunk_batches(chunks)
+                if (
+                    semantic_budget > 0
+                    and semantic_processed < semantic_budget
+                    and cfg.graph_indexing.semantic_kg_enabled
+                    and neo4j is not None
+                ):
+                    remaining = max(0, semantic_budget - semantic_processed)
+                    semantic_pending_chunks.extend(embedded_batches[:remaining])
                 continue
 
             if graph_builder is not None and rel_path.lower().endswith(".py"):
@@ -894,16 +1078,15 @@ async def _run_index(
             INDEX_FILES_PROCESSED_TOTAL.inc()
             if not chunks:
                 continue
-            for i0 in range(0, len(chunks), indexing_batch):
-                embedded_batch = await _upsert_chunks_for_file(chunks[i0 : i0 + indexing_batch])
-                if (
-                    semantic_budget > 0
-                    and semantic_processed < semantic_budget
-                    and cfg.graph_indexing.semantic_kg_enabled
-                    and neo4j is not None
-                ):
-                    remaining = max(0, semantic_budget - semantic_processed)
-                    chunks_for_semantic.extend(embedded_batch[:remaining])
+            embedded_batches = await _upsert_chunk_batches(chunks)
+            if (
+                semantic_budget > 0
+                and semantic_processed < semantic_budget
+                and cfg.graph_indexing.semantic_kg_enabled
+                and neo4j is not None
+            ):
+                remaining = max(0, semantic_budget - semantic_processed)
+                semantic_pending_chunks.extend(embedded_batches[:remaining])
 
         # Optional semantic KG extraction (typed entities + relations linked to chunk_ids).
         if (
@@ -931,7 +1114,12 @@ async def _run_index(
                 if not allowed_entity_types:
                     allowed_entity_types = {"concept"}
 
-                def _normalize_semantic_entity(name: str, entity_type: str) -> tuple[str, str] | None:
+                def _normalize_semantic_entity(
+                    name: str,
+                    entity_type: str,
+                    *,
+                    _min_len: int = min_len,
+                ) -> tuple[str, str] | None:
                     et = str(entity_type or "").strip().lower()
                     raw = str(name or "").strip()
                     if not raw:
@@ -939,7 +1127,7 @@ async def _run_index(
                     if et == "concept":
                         v = raw.lower()
                         v = re.sub(r"[^a-z0-9_]+", "_", v).strip("_")
-                        if len(v) < min_len:
+                        if len(v) < _min_len:
                             return None
                         if v in _SEM_STOPWORDS:
                             return None
@@ -957,6 +1145,54 @@ async def _run_index(
                 rels: list[Relationship] = []
                 link_set: set[tuple[str, str]] = set()
 
+                # Respect indexing_workers for semantic KG LLM extraction so
+                # this setting has a measurable indexing-time effect.
+                semantic_workers = max(1, int(getattr(cfg.indexing, "indexing_workers", 1) or 1))
+                remaining_budget = max(0, semantic_budget - semantic_processed)
+                chunks_for_semantic = semantic_pending_chunks[:remaining_budget]
+                llm_extract_by_chunk: dict[str, tuple[list[dict[str, str]], list[dict[str, str]]]] = {}
+
+                if mode == "llm" and llm_prompt and chunks_for_semantic:
+                    async def _extract_for_chunk(
+                        ch: Chunk,
+                        *,
+                        _llm_max_chars: int = llm_max_chars,
+                        _llm_prompt: str = llm_prompt,
+                        _llm_model: str = llm_model,
+                        _llm_timeout_s: float = llm_timeout_s,
+                        _reasoning_effort: str = reasoning_effort,
+                        _typed_entities_enabled: bool = typed_entities_enabled,
+                        _allowed_entity_types: set[str] = allowed_entity_types,
+                        _require_llm_success: bool = require_llm_success,
+                    ) -> tuple[str, list[dict[str, str]], list[dict[str, str]]]:
+                        entities_raw, relations_raw = await _extract_semantic_kg_llm(
+                            (ch.content or "")[: max(0, _llm_max_chars)],
+                            cfg=cfg,
+                            prompt=_llm_prompt,
+                            model=_llm_model,
+                            timeout_s=_llm_timeout_s,
+                            reasoning_effort=_reasoning_effort,
+                            typed_entities_enabled=_typed_entities_enabled,
+                            allowed_entity_types=_allowed_entity_types,
+                            require_success=_require_llm_success,
+                        )
+                        return ch.chunk_id, entities_raw, relations_raw
+
+                    for i0 in range(0, len(chunks_for_semantic), semantic_workers):
+                        batch = chunks_for_semantic[i0 : i0 + semantic_workers]
+                        coros = [_extract_for_chunk(ch) for ch in batch]
+                        if require_llm_success:
+                            batch_results = await asyncio.gather(*coros)
+                            for chunk_id, entities_raw_one, relations_raw_one in batch_results:
+                                llm_extract_by_chunk[chunk_id] = (entities_raw_one, relations_raw_one)
+                        else:
+                            batch_results_with_errors = await asyncio.gather(*coros, return_exceptions=True)
+                            for item in batch_results_with_errors:
+                                if isinstance(item, BaseException):
+                                    continue
+                                chunk_id, entities_raw_one, relations_raw_one = item
+                                llm_extract_by_chunk[chunk_id] = (entities_raw_one, relations_raw_one)
+
                 for ch in chunks_for_semantic:
                     if semantic_processed >= semantic_budget:
                         break
@@ -965,17 +1201,7 @@ async def _run_index(
                     entities_raw: list[dict[str, str]]
                     relations_raw: list[dict[str, str]]
                     if mode == "llm" and llm_prompt:
-                        entities_raw, relations_raw = await _extract_semantic_kg_llm(
-                            (ch.content or "")[: max(0, llm_max_chars)],
-                            cfg=cfg,
-                            prompt=llm_prompt,
-                            model=llm_model,
-                            timeout_s=llm_timeout_s,
-                            reasoning_effort=reasoning_effort,
-                            typed_entities_enabled=typed_entities_enabled,
-                            allowed_entity_types=allowed_entity_types,
-                            require_success=require_llm_success,
-                        )
+                        entities_raw, relations_raw = llm_extract_by_chunk.get(ch.chunk_id, ([], []))
                         if not entities_raw:
                             if require_llm_success:
                                 raise RuntimeError("semantic_kg_require_llm_success=true and LLM extraction returned no entities")
@@ -1111,6 +1337,9 @@ async def _run_index(
                     raise
                 # Semantic KG is optional unless strict mode is enabled.
                 pass
+            finally:
+                # Important: only process each queued chunk once.
+                semantic_pending_chunks.clear()
 
     if graph_builder is not None:
         try:
@@ -1130,19 +1359,40 @@ async def _run_index(
             if neo4j is not None and cfg.graph_indexing.build_lexical_graph:
                 with INDEX_STAGE_LATENCY_SECONDS.labels(stage="neo4j_rebuild_entity_chunk_links").time():
                     await neo4j.rebuild_entity_chunk_links(repo_id)
-        except Exception:
+        except Exception as exc:
             INDEX_STAGE_ERRORS_TOTAL.labels(stage="graph_build").inc()
-            # Do not fail indexing if graph extraction is partial.
-            pass
+            logger.warning("Graph AST build failed for repo_id=%s: %s", repo_id, exc, exc_info=True)
+            _emit_event(
+                event_queue,
+                {"type": "warning", "message": f"Graph build incomplete: {exc}"},
+                drop_oldest=True,
+            )
 
-    if not skip_dense:
+    if skip_dense:
+        await postgres.update_corpus_embedding_meta(
+            repo_id,
+            backend="deterministic",
+            provider="",
+            model="",
+            dimensions=0,
+            ts_config=str(cfg.indexing.postgres_ts_config or ""),
+        )
+    else:
         assert embedder is not None
         await postgres.update_corpus_embedding_meta(
             repo_id,
+            backend=str(cfg.embedding.embedding_backend or "deterministic"),
             provider=str(cfg.embedding.embedding_type or ""),
             model=str(cfg.embedding.effective_model or ""),
             dimensions=int(embedder.dim),
+            ts_config=str(cfg.indexing.postgres_ts_config or ""),
         )
+    # Invalidate semantic cache for this corpus after indexing to prevent stale
+    # retrieval/generation payloads from pre-index content.
+    try:
+        await postgres.semantic_cache_clear_for_corpus(repo_id)
+    except Exception:
+        pass
 
     stats = IndexStats(
         repo_id=repo_id,
@@ -1211,6 +1461,14 @@ async def _background_index_job(request: IndexRequest, queue: asyncio.Queue[dict
         )
         _emit_event(queue, {"type": "complete", "message": "✓ Indexing complete"}, guarantee=True)
     except asyncio.CancelledError:
+        # Cancelled tasks cannot rely on direct awaits for cleanup, so shield
+        # invalidation to let it continue even while this task is cancelled.
+        try:
+            await asyncio.shield(_clear_semantic_cache_for_repo(repo_id))
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            pass
         prev = _STATUS.get(repo_id)
         _STATUS[repo_id] = IndexStatus(
             repo_id=repo_id,
@@ -1224,6 +1482,10 @@ async def _background_index_job(request: IndexRequest, queue: asyncio.Queue[dict
         _emit_event(queue, {"type": "cancelled", "message": "⚠ Indexing cancelled"}, guarantee=True)
         raise
     except Exception as e:
+        # If indexing failed after deleting/updating chunks, stale cache entries can
+        # point to content that no longer exists. Best-effort clear on errors.
+        with contextlib.suppress(Exception):
+            await _clear_semantic_cache_for_repo(repo_id)
         INDEX_ERRORS_TOTAL.inc()
         prev = _STATUS.get(repo_id)
         _STATUS[repo_id] = IndexStatus(
@@ -1591,6 +1853,39 @@ async def get_index_status(corpus_id: str) -> IndexStatus:
     repo_id = corpus_id
     if repo_id in _STATUS:
         return _STATUS[repo_id]
+    # In-memory status is lost on server reload; infer "complete" from persisted
+    # index stats so clients don't see a misleading "idle" state.
+    if repo_id in _STATS and int(getattr(_STATS[repo_id], "total_chunks", 0) or 0) > 0:
+        s = _STATS[repo_id]
+        return IndexStatus(
+            repo_id=repo_id,
+            status="complete",
+            progress=1.0,
+            current_file=None,
+            error=None,
+            started_at=None,
+            completed_at=getattr(s, "last_indexed", None),
+        )
+    try:
+        cfg = await load_scoped_config(repo_id=repo_id)
+        postgres = PostgresClient(cfg.indexing.postgres_url)
+        await postgres.connect()
+        try:
+            persisted = await postgres.get_index_stats(repo_id)
+        finally:
+            await postgres.disconnect()
+        if int(getattr(persisted, "total_chunks", 0) or 0) > 0:
+            return IndexStatus(
+                repo_id=repo_id,
+                status="complete",
+                progress=1.0,
+                current_file=None,
+                error=None,
+                started_at=None,
+                completed_at=getattr(persisted, "last_indexed", None),
+            )
+    except Exception:
+        pass
     return _idle_status(repo_id)
 
 
@@ -1620,6 +1915,10 @@ async def delete_index(corpus_id: str) -> dict[str, Any]:
     deleted_vec = await postgres.delete_embeddings(repo_id)
     deleted_fts = await postgres.delete_fts(repo_id)
     deleted_rows = await postgres.delete_chunks(repo_id)
+    try:
+        await postgres.semantic_cache_clear_for_corpus(repo_id)
+    except Exception:
+        pass
 
     try:
         db_name = cfg.graph_storage.resolve_database(repo_id)
@@ -1682,7 +1981,6 @@ async def get_vocab_preview(
         top_n=int(top_n),
         tokenizer=tokenizer,
         stemmer_lang=str(cfg.indexing.bm25_stemmer_lang or "") or None,
-        stopwords_lang=str(cfg.indexing.bm25_stopwords_lang or "") or None,
         ts_config=ts_config,
         total_terms=int(total_terms),
         terms=terms,
@@ -1708,7 +2006,7 @@ async def stream_index_operation(scope: CorpusScope = _CORPUS_SCOPE_DEP) -> Stre
         while True:
             try:
                 event = await asyncio.wait_for(queue.get(), timeout=1.0)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 active = _TASKS.get(repo_id)
                 if active is None or active.done():
                     break

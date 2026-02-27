@@ -295,8 +295,8 @@ async def generate_chat_text(
             "input": _build_responses_input(user_message=user_message, images=images, image_detail=image_detail),
             "max_output_tokens": int(max_tokens),
         }
-        # Codex and responses-only models require reasoning through Responses API.
-        payload["reasoning"] = {"effort": "xhigh"}
+        # Responses-only models require explicit reasoning settings.
+        payload["reasoning"] = {"effort": "medium"}
     else:
         url = (
             f"{base_url}/chat/completions"
@@ -428,7 +428,7 @@ async def stream_chat_text(
                     "instructions": prompt,
                     "input": _build_responses_input(user_message=user_message, images=images, image_detail=image_detail),
                     "max_output_tokens": int(max_tokens),
-                    "reasoning": {"effort": "xhigh"},
+                    "reasoning": {"effort": "medium"},
                     "stream": True,
                 }
                 current_event = ""

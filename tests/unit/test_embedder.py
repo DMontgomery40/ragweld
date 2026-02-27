@@ -4,8 +4,8 @@ import pytest
 from unittest.mock import AsyncMock, patch
 
 from server.indexing.embedder import Embedder
-from server.models.tribrid_config_model import EmbeddingConfig
 from server.models.index import Chunk
+from server.models.tribrid_config_model import EmbeddingConfig
 
 
 @pytest.fixture
@@ -70,3 +70,64 @@ async def test_embed_chunks(embedder: Embedder) -> None:
         assert len(result) == 2
         assert result[0].embedding is not None
         assert result[1].embedding is not None
+
+
+@pytest.mark.asyncio
+async def test_embed_batch_persistent_cache_reuses_vectors() -> None:
+    embedder = Embedder(
+        EmbeddingConfig(
+            embedding_backend="deterministic",
+            embedding_type="openai",
+            embedding_model="text-embedding-3-small",
+            embedding_dim=128,
+            embedding_cache_enabled=1,
+        )
+    )
+
+    cache_store: dict[str, list[float]] = {}
+    upsert_calls = 0
+
+    async def _lookup(input_hashes: list[str]) -> dict[str, list[float]]:
+        return {h: cache_store[h] for h in input_hashes if h in cache_store}
+
+    async def _upsert(entries: dict[str, tuple[str, list[float]]]) -> int:
+        nonlocal upsert_calls
+        upsert_calls += 1
+        for h, (_, vec) in entries.items():
+            cache_store[h] = list(vec)
+        return len(entries)
+
+    embedder.configure_cache_backend(lookup_batch=_lookup, upsert_batch=_upsert)
+
+    first = await embedder.embed_batch(["hello cache"])
+    second = await embedder.embed_batch(["hello cache"])
+
+    assert len(first) == 1 and len(first[0]) == 128
+    assert first == second
+    assert upsert_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_embed_chunks_accepts_contextual_override_texts() -> None:
+    embedder = Embedder(
+        EmbeddingConfig(
+            embedding_backend="deterministic",
+            embedding_type="openai",
+            embedding_model="text-embedding-3-small",
+            embedding_dim=128,
+        )
+    )
+    chunk = Chunk(
+        chunk_id="c1",
+        content="same content",
+        file_path="a.py",
+        start_line=1,
+        end_line=3,
+        language="python",
+        token_count=4,
+    )
+
+    plain = await embedder.embed_chunks([chunk])
+    with_context = await embedder.embed_chunks([chunk], embed_texts=["[file=a.py] [line_range=1-3]\nsame content"])
+
+    assert plain[0].embedding != with_context[0].embedding

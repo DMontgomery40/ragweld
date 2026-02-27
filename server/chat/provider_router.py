@@ -12,7 +12,7 @@ import os
 from dataclasses import dataclass
 from typing import Literal
 
-from server.models.tribrid_config_model import TriBridConfig
+from server.models.tribrid_config_model import GenerationConfig, TriBridConfig
 from server.retrieval.mlx_qwen3 import mlx_is_available
 
 _OPENAI_DEFAULT_BASE_URL = "https://api.openai.com/v1"
@@ -97,6 +97,32 @@ def select_provider_route(
 
     chat_config = config.chat
     override = model_override.strip()
+    openai_api_key_hint = os.getenv("OPENAI_API_KEY", "").strip()
+    openrouter_api_key_hint = os.getenv("OPENROUTER_API_KEY", "").strip()
+    if not override:
+        gen_backend = str(getattr(config.generation, "gen_backend", "") or "").strip().lower()
+        gen_model = str(getattr(config.generation, "gen_model", "") or "").strip()
+        if gen_model and gen_backend:
+            if gen_backend == "openai":
+                normalized_openai_model = gen_model if ("/" in gen_model or ":" in gen_model) else f"openai/{gen_model}"
+                default_gen_model = str(GenerationConfig.model_fields["gen_model"].default or "gpt-4o-mini").strip()
+                cloud_capable = bool(openai_api_key_hint or (chat_config.openrouter.enabled and openrouter_api_key_hint))
+                if gen_model != default_gen_model or cloud_capable:
+                    override = normalized_openai_model
+            elif gen_backend in {"ollama", "mlx"}:
+                override = f"local:{gen_model}"
+            elif gen_backend == "openrouter":
+                route_model = gen_model
+                if "/" not in route_model and ":" not in route_model:
+                    route_model = f"openai/{route_model}"
+                override = f"openrouter:{route_model}"
+            elif gen_backend == "anthropic":
+                if "/" in gen_model or ":" in gen_model:
+                    override = gen_model
+                else:
+                    override = f"anthropic/{gen_model}"
+            else:
+                override = gen_model
     openrouter_api_key = os.getenv("OPENROUTER_API_KEY", "").strip()
     openai_api_key = os.getenv("OPENAI_API_KEY", "").strip()
     openai_base_url = (str(getattr(config.generation, "openai_base_url", "") or "").strip() or _OPENAI_DEFAULT_BASE_URL)

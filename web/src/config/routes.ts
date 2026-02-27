@@ -94,7 +94,7 @@ export const routes: RouteConfig[] = [
     icon: '🏁',
     order: 5,
     subtabs: [],
-    nav: { visible: true }
+    nav: { visible: false }
   },
   {
     path: '/rag',

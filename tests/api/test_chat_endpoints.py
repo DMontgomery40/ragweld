@@ -1,7 +1,7 @@
 """Tests for chat API endpoints with PydanticAI integration."""
 
 import json
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 import pytest_asyncio
@@ -10,8 +10,8 @@ from httpx import ASGITransport, AsyncClient
 from server.api.chat import set_config, set_fusion
 from server.main import app
 from server.models.chat import Message
-from server.models.tribrid_config_model import FusionConfig, TriBridConfig
 from server.models.retrieval import ChunkMatch
+from server.models.tribrid_config_model import FusionConfig, TriBridConfig
 from server.services.conversation_store import ConversationStore, get_conversation_store
 
 
@@ -394,7 +394,6 @@ class TestStreamEndpoint:
             assert len(messages) == 2
             assert messages[0].content == "Stream test message"
             assert messages[0].role == "user"
-
 
 class TestChatCitationsRealPipeline:
     """Exercise the real rag pipeline without external API calls.

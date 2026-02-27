@@ -110,7 +110,10 @@ async def test_search_multiple_corpora_dedupes_by_corpus_and_chunk_id(monkeypatc
         async def connect(self) -> None:
             return None
 
-        async def vector_search(self, repo_id: str, _embedding: list[float], top_k: int):
+        async def get_corpus(self, repo_id: str) -> None:
+            return None
+
+        async def vector_search(self, repo_id: str, _embedding: list[float], top_k: int, **_kw):
             _ = top_k
             return [
                 ChunkMatch(
@@ -168,6 +171,9 @@ async def test_search_graph_leg_records_error_in_debug(monkeypatch) -> None:
         async def connect(self) -> None:
             return None
 
+        async def get_corpus(self, repo_id: str) -> None:
+            return None
+
     class _FailingNeo4j:
         def __init__(self, *_args, **_kwargs) -> None:
             pass
@@ -221,6 +227,9 @@ async def test_search_graph_chunk_mode_hydrates_by_chunk_id(monkeypatch) -> None
             pass
 
         async def connect(self) -> None:
+            return None
+
+        async def get_corpus(self, repo_id: str) -> None:
             return None
 
         async def get_chunks(self, repo_id: str, chunk_ids: list[str]) -> list[Chunk]:
@@ -332,6 +341,9 @@ async def test_search_graph_chunk_mode_entity_expansion_adds_chunks(monkeypatch)
         async def connect(self) -> None:
             return None
 
+        async def get_corpus(self, repo_id: str) -> None:
+            return None
+
         async def get_chunks(self, repo_id: str, chunk_ids: list[str]) -> list[Chunk]:
             return [
                 Chunk(
@@ -435,6 +447,9 @@ async def test_search_graph_entity_mode_hydrates_by_chunk_id(monkeypatch) -> Non
         async def connect(self) -> None:
             return None
 
+        async def get_corpus(self, repo_id: str) -> None:
+            return None
+
         async def get_chunks(self, repo_id: str, chunk_ids: list[str]) -> list[Chunk]:
             assert repo_id == "test-corpus"
             return [
@@ -496,3 +511,4 @@ async def test_search_graph_entity_mode_hydrates_by_chunk_id(monkeypatch) -> Non
     )
     assert [c.chunk_id for c in out] == ["c1"]
     assert fusion.last_debug.get("fusion_graph_mode") == "entity"
+
