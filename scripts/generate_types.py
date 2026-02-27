@@ -245,6 +245,8 @@ def main() -> None:
             # Domain models - Index
             Chunk,
             IndexRequest,
+            IndexRunEvent,
+            IndexRunSummary,
             IndexStatus,
             IndexStats,
             IndexEstimate,
@@ -387,6 +389,8 @@ def main() -> None:
         # Domain models
         Chunk,
         IndexRequest,
+        IndexRunEvent,
+        IndexRunSummary,
         IndexStatus,
         IndexStats,
         IndexEstimate,

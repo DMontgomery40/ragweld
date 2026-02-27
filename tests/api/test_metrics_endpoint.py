@@ -130,8 +130,28 @@ async def test_metrics_increment_on_index_job(client: AsyncClient, monkeypatch: 
         # Disable graph indexing to avoid Neo4j in unit tests.
         return base.model_copy(update={"graph_indexing": base.graph_indexing.model_copy(update={"enabled": False})})
 
+    class _FakePostgres:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        async def connect(self) -> None:
+            return None
+
+        async def disconnect(self) -> None:
+            return None
+
+        async def get_corpus(self, repo_id: str) -> dict[str, object]:
+            return {"repo_id": repo_id, "name": repo_id, "description": "", "meta": {}}
+
+        async def promote_staging_index(self, **_kwargs: object) -> None:
+            return None
+
+        async def delete_corpus_with_data(self, _repo_id: str) -> None:
+            return None
+
     monkeypatch.setattr(index_api, "_run_index", _fake_run_index, raising=True)
     monkeypatch.setattr(index_api, "load_scoped_config", _fake_load_scoped_config, raising=True)
+    monkeypatch.setattr(index_api, "PostgresClient", _FakePostgres, raising=True)
 
     r0 = await client.get("/metrics")
     assert r0.status_code == 200

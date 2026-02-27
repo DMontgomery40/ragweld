@@ -5,9 +5,11 @@ This file re-exports them for backwards compatibility.
 """
 from server.models.tribrid_config_model import (
     Chunk,
+    IndexRunEvent,
+    IndexRunSummary,
     IndexRequest,
     IndexStats,
     IndexStatus,
 )
 
-__all__ = ["Chunk", "IndexRequest", "IndexStats", "IndexStatus"]
+__all__ = ["Chunk", "IndexRequest", "IndexStats", "IndexStatus", "IndexRunSummary", "IndexRunEvent"]

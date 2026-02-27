@@ -260,7 +260,24 @@ class TestRelationship:
 
     def test_relationship_all_types(self) -> None:
         """Test all valid relationship types."""
-        for rtype in ["calls", "imports", "inherits", "contains", "references", "related_to"]:
+        for rtype in [
+            "calls",
+            "imports",
+            "inherits",
+            "contains",
+            "associated_with",
+            "met_with",
+            "communicated_with",
+            "works_for",
+            "member_of",
+            "founded",
+            "owns",
+            "funded",
+            "participated_in",
+            "located_in",
+            "references",
+            "related_to",
+        ]:
             rel = Relationship(
                 source_id="src",
                 target_id="tgt",

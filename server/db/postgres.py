@@ -34,6 +34,7 @@ _POOL_LOCKS_BY_DSN: dict[str, asyncio.Lock] = {}
 
 _RELAXED_FTS_TERM_RE = re.compile(r"[A-Za-z0-9_]{3,64}")
 _FILE_PATH_TERM_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.\\-]{1,63}")
+_STAGING_REPO_PREFIX = "__staging__"
 
 # Intentionally small list: we only drop filler words that commonly appear in
 # natural-language queries and add noise to FTS OR fallbacks.
@@ -1433,8 +1434,11 @@ class PostgresClient:
                 """
                 SELECT repo_id, name, root_path, description, meta, created_at, last_indexed
                 FROM corpora
+                WHERE repo_id NOT LIKE $1
                 ORDER BY created_at DESC;
                 """
+                ,
+                f"{_STAGING_REPO_PREFIX}%",
             )
         return [
             {
@@ -2244,6 +2248,129 @@ class PostgresClient:
         async with self._pool.acquire() as conn:
             result = await conn.execute("DELETE FROM chunks WHERE repo_id = $1;", repo_id)
         return int(result.split()[-1])
+
+    async def delete_corpus_with_data(self, repo_id: str) -> None:
+        """Delete a corpus row and all index data tied to it."""
+        await self._require_pool()
+        assert self._pool is not None
+        async with self._pool.acquire() as conn:
+            async with conn.transaction():
+                await conn.execute("DELETE FROM chunk_summaries_last_build WHERE repo_id = $1;", repo_id)
+                await conn.execute("DELETE FROM chunk_summaries WHERE repo_id = $1;", repo_id)
+                await conn.execute("DELETE FROM chunks WHERE repo_id = $1;", repo_id)
+                await conn.execute("DELETE FROM corpus_configs WHERE repo_id = $1;", repo_id)
+                await conn.execute("DELETE FROM corpora WHERE repo_id = $1;", repo_id)
+
+    async def promote_staging_index(
+        self,
+        *,
+        active_repo_id: str,
+        staging_repo_id: str,
+        active_name: str,
+        active_root_path: str,
+        active_description: str | None = None,
+        active_meta: dict[str, Any] | None = None,
+    ) -> None:
+        """Atomically promote staged chunks/stats into the active corpus id."""
+        await self._require_pool()
+        assert self._pool is not None
+
+        async with self._pool.acquire() as conn:
+            async with conn.transaction():
+                staging = await conn.fetchrow(
+                    """
+                    SELECT repo_id, name, root_path, description, meta, last_indexed,
+                           embedding_backend, embedding_provider, embedding_model, embedding_dimensions, ts_config
+                    FROM corpora
+                    WHERE repo_id = $1;
+                    """,
+                    staging_repo_id,
+                )
+                if not staging:
+                    raise RuntimeError(f"Staging corpus not found: {staging_repo_id}")
+
+                active = await conn.fetchrow(
+                    """
+                    SELECT repo_id, name, root_path, description, meta
+                    FROM corpora
+                    WHERE repo_id = $1;
+                    """,
+                    active_repo_id,
+                )
+
+                if active is None:
+                    await self._ensure_corpus_row(
+                        conn,
+                        active_repo_id,
+                        name=active_name or str(staging["name"] or active_repo_id),
+                        root_path=active_root_path or str(staging["root_path"] or "."),
+                        description=active_description if active_description is not None else str(staging["description"] or ""),
+                        meta=active_meta or _coerce_jsonb_dict(staging["meta"]),
+                    )
+
+                merged_meta = (
+                    _coerce_jsonb_dict(active["meta"])
+                    if active is not None
+                    else (_coerce_jsonb_dict(staging["meta"]) if active_meta is None else dict(active_meta))
+                )
+                if active_meta:
+                    merged_meta = {**merged_meta, **active_meta}
+
+                await conn.execute("DELETE FROM chunks WHERE repo_id = $1;", active_repo_id)
+                await conn.execute(
+                    "UPDATE chunks SET repo_id = $1 WHERE repo_id = $2;",
+                    active_repo_id,
+                    staging_repo_id,
+                )
+
+                await conn.execute("DELETE FROM chunk_summaries WHERE repo_id = $1;", active_repo_id)
+                await conn.execute(
+                    "UPDATE chunk_summaries SET repo_id = $1 WHERE repo_id = $2;",
+                    active_repo_id,
+                    staging_repo_id,
+                )
+
+                await conn.execute("DELETE FROM chunk_summaries_last_build WHERE repo_id = $1;", active_repo_id)
+                await conn.execute(
+                    "UPDATE chunk_summaries_last_build SET repo_id = $1 WHERE repo_id = $2;",
+                    active_repo_id,
+                    staging_repo_id,
+                )
+
+                await conn.execute(
+                    """
+                    UPDATE corpora
+                    SET name = $2,
+                        root_path = $3,
+                        description = $4,
+                        meta = $5::jsonb,
+                        last_indexed = $6,
+                        embedding_backend = $7,
+                        embedding_provider = $8,
+                        embedding_model = $9,
+                        embedding_dimensions = $10,
+                        ts_config = $11
+                    WHERE repo_id = $1;
+                    """,
+                    active_repo_id,
+                    str((active["name"] if active is not None else None) or active_name or staging["name"] or active_repo_id),
+                    str((active["root_path"] if active is not None else None) or active_root_path or staging["root_path"] or "."),
+                    (
+                        str(active["description"])
+                        if (active is not None and active["description"] is not None)
+                        else (active_description if active_description is not None else staging["description"])
+                    ),
+                    json.dumps(merged_meta),
+                    staging["last_indexed"],
+                    str(staging["embedding_backend"] or ""),
+                    str(staging["embedding_provider"] or ""),
+                    str(staging["embedding_model"] or ""),
+                    int(staging["embedding_dimensions"] or 0),
+                    str(staging["ts_config"] or ""),
+                )
+
+                await conn.execute("DELETE FROM corpus_configs WHERE repo_id = $1;", staging_repo_id)
+                await conn.execute("DELETE FROM corpora WHERE repo_id = $1;", staging_repo_id)
 
     async def _ensure_corpus_row(
         self,

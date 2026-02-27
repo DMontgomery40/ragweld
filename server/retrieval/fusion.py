@@ -560,14 +560,30 @@ class TriBridFusion:
                                 else 1
                             )
                             with SEARCH_STAGE_LATENCY_SECONDS.labels(stage="neo4j_chunk_vector_search").time():
-                                hits = await neo4j.chunk_vector_search(
-                                    cid,
-                                    q_emb,
-                                    index_name=cfg.graph_indexing.chunk_vector_index_name,
-                                    top_k=graph_k,
-                                    neighbor_window=int(getattr(cfg.graph_search, "chunk_neighbor_window", 0) or 0),
-                                    overfetch_multiplier=overfetch,
-                                )
+                                try:
+                                    hits = await neo4j.chunk_vector_search(
+                                        cid,
+                                        q_emb,
+                                        index_name=cfg.graph_indexing.chunk_vector_index_name,
+                                        top_k=graph_k,
+                                        neighbor_window=int(getattr(cfg.graph_search, "chunk_neighbor_window", 0) or 0),
+                                        overfetch_multiplier=overfetch,
+                                        query_mode=str(
+                                            getattr(cfg.graph_storage, "neo4j_vector_query_mode", "auto") or "auto"
+                                        ),
+                                    )
+                                except TypeError as e:
+                                    # Backward-compat for test doubles / older client stubs.
+                                    if "query_mode" not in str(e):
+                                        raise
+                                    hits = await neo4j.chunk_vector_search(
+                                        cid,
+                                        q_emb,
+                                        index_name=cfg.graph_indexing.chunk_vector_index_name,
+                                        top_k=graph_k,
+                                        neighbor_window=int(getattr(cfg.graph_search, "chunk_neighbor_window", 0) or 0),
+                                        overfetch_multiplier=overfetch,
+                                    )
                             debug["fusion_graph_entity_hits"] = len(hits)
 
                             score_by_id = {chunk_id: float(score) for chunk_id, score in hits}

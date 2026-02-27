@@ -22,10 +22,26 @@ function formatRelLabel(r: Relationship, byId: Map<string, Entity>): string {
   return `${srcName} ─ ${r.relation_type} → ${dstName}`;
 }
 
+function formatRelProvenance(r: Relationship): string {
+  const props = (r.properties || {}) as Record<string, unknown>;
+  const chunk = String(props.chunk_id || '').trim();
+  const filePath = String(props.file_path || '').trim();
+  const runId = String(props.run_id || '').trim();
+  const model = String(props.model || '').trim();
+  const bits: string[] = [];
+  if (chunk) bits.push(`chunk:${chunk}`);
+  if (filePath) bits.push(`file:${filePath}`);
+  if (runId) bits.push(`run:${runId}`);
+  if (model) bits.push(`model:${model}`);
+  if (!bits.length) return 'No provenance';
+  return bits.join(' • ');
+}
+
 export function GraphSubtab() {
   const { repos, activeRepo, loadRepos, setActiveRepo } = useRepoStore();
   const {
     entities,
+    relationships,
     communities,
     stats,
     selectedEntity,
@@ -242,6 +258,14 @@ export function GraphSubtab() {
         return '#a78bfa';
       case 'concept':
         return '#94a3b8';
+      case 'person':
+        return '#f97316';
+      case 'org':
+        return '#0ea5e9';
+      case 'location':
+        return '#10b981';
+      case 'event':
+        return '#eab308';
       default:
         return '#9fb1c7';
     }
@@ -313,12 +337,28 @@ export function GraphSubtab() {
   );
 
   const entityTypes = useMemo(() => {
-    return ['function', 'class', 'module', 'variable', 'concept'];
-  }, []);
+    const types = new Set<string>();
+    Object.keys(stats?.entity_breakdown || {}).forEach((k) => {
+      if (k) types.add(String(k));
+    });
+    (entities || []).forEach((e) => {
+      const t = String(e.entity_type || '').trim();
+      if (t) types.add(t);
+    });
+    return Array.from(types).sort((a, b) => a.localeCompare(b));
+  }, [stats, entities]);
 
   const relationTypes = useMemo(() => {
-    return ['calls', 'imports', 'inherits', 'contains', 'references', 'related_to'];
-  }, []);
+    const types = new Set<string>();
+    Object.keys(stats?.relationship_breakdown || {}).forEach((k) => {
+      if (k) types.add(String(k));
+    });
+    (relationships || []).forEach((r) => {
+      const t = String(r.relation_type || '').trim();
+      if (t) types.add(t);
+    });
+    return Array.from(types).sort((a, b) => a.localeCompare(b));
+  }, [stats, relationships]);
 
   const handleSearch = async () => {
     await searchEntities(entityQuery, 200);
@@ -780,6 +820,9 @@ export function GraphSubtab() {
                       }}
                     >
                       <div style={{ fontFamily: 'var(--font-mono)' }}>{formatRelLabel(r, entityById)}</div>
+                      <div style={{ marginTop: '6px', fontSize: '11px', color: 'var(--fg-muted)' }}>
+                        {formatRelProvenance(r)}
+                      </div>
                     </div>
                   ))}
                   {!filteredRelationships.length && (
@@ -825,6 +868,19 @@ export function GraphSubtab() {
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                 <div style={{ fontSize: '11px', color: 'var(--fg-muted)' }}>
                   {filteredEntities.length} nodes • {vizRelationships.length} edges
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '11px', color: 'var(--fg-muted)' }}>
+                  {[
+                    ['person', '#f97316'],
+                    ['org', '#0ea5e9'],
+                    ['location', '#10b981'],
+                    ['event', '#eab308'],
+                  ].map(([label, color]) => (
+                    <span key={label as string} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                      <span style={{ width: '8px', height: '8px', borderRadius: '999px', background: color as string, display: 'inline-block' }} />
+                      {label as string}
+                    </span>
+                  ))}
                 </div>
                 <button
                   onClick={handleOpenFullscreen}

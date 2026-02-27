@@ -18,7 +18,16 @@ import { EmbeddingMismatchWarning } from '@/components/ui/EmbeddingMismatchWarni
 import { TooltipIcon } from '@/components/ui/TooltipIcon';
 import { indexingApi } from '@/api';
 import { formatBytes, formatCurrency, formatDuration, formatNumber } from '@/utils/formatters';
-import type { IndexEstimate, IndexRequest, IndexStats, IndexStatus, VocabPreviewResponse, VocabPreviewTerm } from '@/types/generated';
+import type {
+  IndexEstimate,
+  IndexRequest,
+  IndexRunEvent,
+  IndexRunSummary,
+  IndexStats,
+  IndexStatus,
+  VocabPreviewResponse,
+  VocabPreviewTerm,
+} from '@/types/generated';
 import { describeEmbeddingProviderStrategy } from '@/utils/embeddingStrategy';
 
 type IndexingComponent = 'embedding' | 'chunking' | 'bm25' | 'enrichment';
@@ -188,6 +197,8 @@ export function IndexingSubtab() {
 
   // Index stats + status
   const [_indexStatus, setIndexStatus] = useState<IndexStatus | null>(null);
+  const [latestRun, setLatestRun] = useState<IndexRunSummary | null>(null);
+  const [latestRunEvents, setLatestRunEvents] = useState<IndexRunEvent[]>([]);
   const [indexStats, setIndexStats] = useState<IndexStats | null>(null);
   const [statsLoading, setStatsLoading] = useState(false);
   const [statsExpanded, setStatsExpanded] = useState(false);
@@ -357,17 +368,71 @@ export function IndexingSubtab() {
     }
   }, [activeRepo, fetchIndexStats]);
 
-  useEffect(() => {
-    void refreshStatus();
-    void loadStats();
-  }, [refreshStatus, loadStats]);
-
   const resetTerminal = useCallback((title: string) => {
     const t = terminalRef.current;
     t?.show();
     t?.clear();
     t?.setTitle(title);
   }, []);
+
+  const loadLatestRunReplay = useCallback(async () => {
+    const rid = String(activeRepo || '').trim();
+    if (!rid || isIndexing) {
+      return;
+    }
+    try {
+      const latestResp = await fetch(api(`index/${encodeURIComponent(rid)}/runs/latest`));
+      if (!latestResp.ok) {
+        setLatestRun(null);
+        setLatestRunEvents([]);
+        return;
+      }
+      const latest: IndexRunSummary = await latestResp.json();
+      setLatestRun(latest);
+
+      const eventsResp = await fetch(
+        api(`index/${encodeURIComponent(rid)}/runs/${encodeURIComponent(String(latest.run_id || ''))}/events?limit=500`)
+      );
+      if (!eventsResp.ok) {
+        setLatestRunEvents([]);
+        return;
+      }
+      const events: IndexRunEvent[] = await eventsResp.json();
+      setLatestRunEvents(Array.isArray(events) ? events : []);
+
+      if (Array.isArray(events) && events.length > 0) {
+        resetTerminal(`Indexing Output (${String(latest.run_id || '').slice(0, 12)})`);
+        for (const ev of events) {
+          const msg = String(ev.message || '').trim();
+          if (!msg) continue;
+          if (ev.type === 'error') {
+            terminalRef.current?.appendLine(`\x1b[31m${msg}\x1b[0m`);
+            continue;
+          }
+          if (ev.type === 'warning') {
+            terminalRef.current?.appendLine(`\x1b[33m${msg}\x1b[0m`);
+            continue;
+          }
+          if (ev.type === 'complete') {
+            terminalRef.current?.appendLine(`\x1b[32m${msg}\x1b[0m`);
+            continue;
+          }
+          terminalRef.current?.appendLine(msg);
+        }
+      }
+      if (latest.status === 'error') {
+        setTerminalVisible(true);
+      }
+    } catch {
+      // best effort only
+    }
+  }, [activeRepo, api, isIndexing, resetTerminal]);
+
+  useEffect(() => {
+    void refreshStatus();
+    void loadStats();
+    void loadLatestRunReplay();
+  }, [refreshStatus, loadStats, loadLatestRunReplay]);
 
   const handleStopIndex = useCallback(async () => {
     const rid = String(activeRepo || '').trim();
@@ -379,12 +444,13 @@ export function IndexingSubtab() {
       terminalRef.current?.appendLine(`\x1b[33m⚠ Indexing cancelled by user\x1b[0m`);
       await loadStats();
       await refreshStatus();
+      await loadLatestRunReplay();
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Failed to cancel indexing';
       setErrorBanner(msg);
       terminalRef.current?.appendLine(`\x1b[31mFailed to cancel: ${msg}\x1b[0m`);
     }
-  }, [activeRepo, loadStats, refreshStatus, stopIndex]);
+  }, [activeRepo, loadLatestRunReplay, loadStats, refreshStatus, stopIndex]);
 
   const handleStartIndex = useCallback(async () => {
     const rid = String(activeRepo || '').trim();
@@ -469,6 +535,7 @@ export function IndexingSubtab() {
           terminalRef.current?.appendLine(`\x1b[31mERROR: ${err}\x1b[0m`);
           setProgress((prev) => ({ ...prev, status: `Error: ${err}` }));
           setIsIndexing(false);
+          void loadLatestRunReplay();
         },
         onComplete: () => {
           terminalRef.current?.updateProgress(100, 'Complete');
@@ -477,6 +544,7 @@ export function IndexingSubtab() {
           setIsIndexing(false);
           void loadStats();
           void refreshStatus();
+          void loadLatestRunReplay();
         },
         onCancelled: () => {
           terminalRef.current?.appendLine(`\x1b[33m⚠ Indexing cancelled\x1b[0m`);
@@ -484,6 +552,7 @@ export function IndexingSubtab() {
           setIsIndexing(false);
           void loadStats();
           void refreshStatus();
+          void loadLatestRunReplay();
         },
       });
       setIndexStatus(st);
@@ -504,6 +573,7 @@ export function IndexingSubtab() {
     flushPendingPatches,
     forceReindex,
     graphIndexingEnabled,
+    loadLatestRunReplay,
     loadStats,
     resetTerminal,
     refreshStatus,
@@ -527,6 +597,8 @@ export function IndexingSubtab() {
       }
       setIndexStats(null);
       setIndexStatus(null);
+      setLatestRun(null);
+      setLatestRunEvents([]);
       await loadStats();
       await refreshStatus();
     } catch (e) {
@@ -613,6 +685,69 @@ export function IndexingSubtab() {
           }}
         >
           {errorBanner}
+        </div>
+      )}
+
+      {(_indexStatus || latestRun) && (
+        <div
+          style={{
+            background: 'var(--card-bg)',
+            border: '1px solid var(--line)',
+            borderRadius: '8px',
+            padding: '12px 14px',
+            marginBottom: '16px',
+          }}
+          data-testid="index-run-status-panel"
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+            <span style={{ fontSize: '12px', color: 'var(--fg-muted)' }}>Last run status</span>
+            <span
+              style={{
+                fontSize: '11px',
+                fontWeight: 800,
+                padding: '4px 8px',
+                borderRadius: '999px',
+                border: '1px solid var(--line)',
+                color:
+                  (_indexStatus?.status || latestRun?.status) === 'error'
+                    ? 'var(--error)'
+                    : (_indexStatus?.status || latestRun?.status) === 'complete'
+                      ? 'var(--ok)'
+                      : 'var(--fg)',
+              }}
+              data-testid="index-run-status-pill"
+            >
+              {String(_indexStatus?.status || latestRun?.status || 'idle')}
+            </span>
+            {latestRun?.run_id ? (
+              <span style={{ fontSize: '11px', color: 'var(--fg-muted)', fontFamily: 'var(--font-mono)' }}>
+                run_id: {String(latestRun.run_id)}
+              </span>
+            ) : null}
+            {latestRunEvents.length > 0 ? (
+              <span style={{ fontSize: '11px', color: 'var(--fg-muted)' }}>
+                {latestRunEvents.length} replayed events
+              </span>
+            ) : null}
+          </div>
+
+          {(_indexStatus?.error || latestRun?.error) && (
+            <div
+              style={{
+                marginTop: '10px',
+                padding: '10px',
+                borderRadius: '8px',
+                border: '1px solid var(--error)',
+                background: 'rgba(var(--error-rgb), 0.08)',
+                color: 'var(--error)',
+                fontSize: '12px',
+                whiteSpace: 'pre-wrap',
+              }}
+              data-testid="index-run-error-panel"
+            >
+              {String(_indexStatus?.error || latestRun?.error || '')}
+            </div>
+          )}
         </div>
       )}
 
