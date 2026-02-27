@@ -1,11 +1,3 @@
-# Sync tribrid-rag/web to ragweld.com/vendor/demo when web/ changes
-# This ensures the live demo stays in sync with the source code
-#
-# Setup required:
-# 1. Create a GitHub Personal Access Token (PAT) with repo scope
-# 2. Add it as a secret: RAGWELD_DEPLOY_TOKEN
-#    Settings > Secrets > Actions > New repository secret
-
 name: Sync ragweld.com Demo
 
 on:
@@ -13,17 +5,35 @@ on:
     branches: [main]
     paths:
       - 'web/**'
+      - 'data/glossary.json'
+      - 'data/models.json'
+      - 'server/models/tribrid_config_model.py'
+      - 'scripts/generate_types.py'
       - '.github/workflows/sync-ragweld.yml'
-  workflow_dispatch:  # Allow manual trigger
+  schedule:
+    - cron: '17 6 * * *'
+  workflow_dispatch:
 
 jobs:
   sync-demo:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout tribrid-rag
+      - name: Require sync token
+        env:
+          RAGWELD_DEPLOY_TOKEN: ${{ secrets.RAGWELD_DEPLOY_TOKEN }}
+        run: |
+          if [ -z "${RAGWELD_DEPLOY_TOKEN}" ]; then
+            echo "ERROR: RAGWELD_DEPLOY_TOKEN is required."
+            echo "Create a classic or fine-grained PAT with write access to DMontgomery40/ragweld.com."
+            echo "Then set it in this repo as Actions secret: RAGWELD_DEPLOY_TOKEN."
+            exit 1
+          fi
+
+      - name: Checkout ragweld
         uses: actions/checkout@v4
         with:
-          path: tribrid-rag
+          path: ragweld
 
       - name: Checkout ragweld.com
         uses: actions/checkout@v4
@@ -32,69 +42,46 @@ jobs:
           token: ${{ secrets.RAGWELD_DEPLOY_TOKEN }}
           path: ragweld.com
 
-      - name: Sync web/ to vendor/demo/
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Sync demo + parity check
         run: |
-          # Backup MSW mocks (ragweld-specific)
-          if [ -d "ragweld.com/vendor/demo/src/mocks" ]; then
-            cp -R ragweld.com/vendor/demo/src/mocks /tmp/ragweld-mocks-backup
-          fi
+          node ragweld.com/scripts/sync-demo.cjs \
+            --source ragweld/web \
+            --source-sha "${GITHUB_SHA}" \
+            --source-repo "DMontgomery40/ragweld"
 
-          # Remove old demo source (keep node_modules if exists)
-          cd ragweld.com/vendor/demo
-          find . -maxdepth 1 ! -name 'node_modules' ! -name '.' -exec rm -rf {} +
-          cd ../../..
-
-          # Copy fresh web/ source
-          cp -R tribrid-rag/web/* ragweld.com/vendor/demo/
-
-          # Remove build artifacts and node_modules from copy
-          rm -rf ragweld.com/vendor/demo/node_modules
-          rm -rf ragweld.com/vendor/demo/dist
-          rm -rf ragweld.com/vendor/demo/.tests
-
-          # Restore MSW mocks
-          if [ -d "/tmp/ragweld-mocks-backup" ]; then
-            rm -rf ragweld.com/vendor/demo/src/mocks
-            cp -R /tmp/ragweld-mocks-backup ragweld.com/vendor/demo/src/mocks
-          fi
-
-          # Patch vite.config.ts: base /web/ -> /demo/
-          sed -i "s|base: '/web/'|base: '/demo/'|g" ragweld.com/vendor/demo/vite.config.ts
-
-          # Patch demo entrypoint to keep ragweld-specific MSW bootstrap + /demo basename
-          node ragweld.com/scripts/patch-demo-entry.cjs
-
-      - name: Check for changes
-        id: changes
+      - name: Repair unexpected drift (non-allowlisted only)
         run: |
-          cd ragweld.com
-          git add -A
-          if git diff --staged --quiet; then
-            echo "No changes to commit"
-            echo "has_changes=false" >> $GITHUB_OUTPUT
-          else
-            echo "Changes detected"
-            echo "has_changes=true" >> $GITHUB_OUTPUT
-          fi
+          node ragweld.com/scripts/check-demo-parity.cjs --source ragweld/web --fix
+          node ragweld.com/scripts/check-demo-parity.cjs --source ragweld/web
 
-      - name: Commit and push
-        if: steps.changes.outputs.has_changes == 'true'
+      - name: Remove OS junk files
         run: |
-          cd ragweld.com
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git commit -m "chore: sync demo from tribrid-rag/web
+          find ragweld.com -name '.DS_Store' -delete
 
-          Auto-synced from tribrid-rag commit: ${{ github.sha }}
+      - name: Open or update sync PR
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ secrets.RAGWELD_DEPLOY_TOKEN }}
+          path: ragweld.com
+          commit-message: "chore: sync demo from ragweld/web (${{ github.sha }})"
+          branch: codex/sync-demo-${{ github.sha }}
+          base: main
+          title: "chore: sync demo from ragweld/web (${{ github.sha }})"
+          body: |
+            Automated sync from `DMontgomery40/ragweld` to `DMontgomery40/ragweld.com`.
 
-          Co-Authored-By: github-actions[bot] <github-actions[bot]@users.noreply.github.com>"
-          git push
+            Source commit: `${{ github.sha }}`
+            Trigger: `${{ github.event_name }}`
 
-      - name: Summary
-        run: |
-          if [ "${{ steps.changes.outputs.has_changes }}" == "true" ]; then
-            echo "✅ Demo synced and pushed to ragweld.com"
-            echo "Netlify will auto-deploy from the push"
-          else
-            echo "ℹ️ No changes detected - demo already in sync"
-          fi
+            This PR was generated by `.github/workflows/sync-ragweld.yml`.
+          add-paths: |
+            vendor/demo/**
+            public/glossary.json
+          labels: |
+            automation
+            sync

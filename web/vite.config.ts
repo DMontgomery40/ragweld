@@ -5,7 +5,15 @@ import { spawn, type ChildProcess } from 'child_process'
 import net from 'net'
 
 // https://vitejs.dev/config/
-function devStackLauncher(): Plugin {
+function normalizeBuildBase(input: string | undefined): string {
+  const raw = String(input || '').trim() || '/web/'
+  let normalized = raw.startsWith('/') ? raw : `/${raw}`
+  normalized = normalized.replace(/\/{2,}/g, '/')
+  if (!normalized.endsWith('/')) normalized += '/'
+  return normalized
+}
+
+function devStackLauncher(frontendBase: string): Plugin {
   const repoRoot = path.resolve(__dirname, '..')
   const backendHost = '127.0.0.1'
   const backendPort = 8012
@@ -97,7 +105,7 @@ function devStackLauncher(): Plugin {
             backend_running,
             frontend_port: frontendPort,
             backend_port: backendPort,
-            frontend_url: `http://127.0.0.1:${frontendPort}/web`,
+            frontend_url: `http://127.0.0.1:${frontendPort}${frontendBase}`,
             backend_url: `http://${backendHost}:${backendPort}/api`,
             details: backend_running ? [] : ['Backend not reachable; use the Dev Stack buttons to start it.'],
           })
@@ -122,10 +130,12 @@ function devStackLauncher(): Plugin {
   }
 }
 
+const buildBase = normalizeBuildBase(process.env.VITE_BUILD_BASE)
+
 export default defineConfig({
-  // Ensure built assets resolve under FastAPI mount at /web
-  base: '/web/',
-  plugins: [devStackLauncher(), react()],
+  // Ensure built assets resolve under the configured mount path (defaults to /web/).
+  base: buildBase,
+  plugins: [devStackLauncher(buildBase), react()],
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),

@@ -37,6 +37,7 @@ export function GrafanaDashboard() {
     if (k) params.set('kiosk', k);
     const org = Number(orgId || 0);
     if (org > 0) params.set('orgId', String(org));
+    if (base.startsWith('/')) params.set('embed', '1');
 
     return `${base}/d/${encodeURIComponent(uid)}/${encodeURIComponent(slug)}?${params.toString()}`;
   }, [baseUrl, dashboardUid, dashboardSlug, kiosk, orgId, refresh, timeRange]);

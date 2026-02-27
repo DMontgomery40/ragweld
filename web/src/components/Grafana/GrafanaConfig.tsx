@@ -19,6 +19,12 @@ export function GrafanaConfig() {
   const normalizedBase = String(baseUrl || '').replace(/\/$/, '');
   const normalizedUid = String(dashboardUid || '').trim();
   const normalizedSlug = String(dashboardSlug || normalizedUid).trim() || normalizedUid;
+  const dashboardHref =
+    normalizedBase && normalizedUid
+      ? `${normalizedBase}/d/${encodeURIComponent(normalizedUid)}/${encodeURIComponent(normalizedSlug)}${
+          normalizedBase.startsWith('/') ? '?embed=1' : ''
+        }`
+      : '';
 
   return (
     <div style={{ maxWidth: '980px', margin: '0 auto', padding: '24px' }}>
@@ -227,9 +233,9 @@ export function GrafanaConfig() {
           Open Grafana
         </a>
 
-        {normalizedBase && normalizedUid && (
+        {dashboardHref && (
           <a
-            href={`${normalizedBase}/d/${encodeURIComponent(normalizedUid)}/${encodeURIComponent(normalizedSlug)}`}
+            href={dashboardHref}
             target="_blank"
             rel="noopener noreferrer"
             style={{
