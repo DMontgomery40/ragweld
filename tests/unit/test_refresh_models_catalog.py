@@ -19,6 +19,7 @@ def _text_feed_row(
     prompt: str | None,
     completion: str | None,
     context: int,
+    created: int = 1_765_000_000,
 ) -> dict[str, Any]:
     pricing: dict[str, str] = {}
     if prompt is not None:
@@ -29,6 +30,7 @@ def _text_feed_row(
         "id": model_id,
         "context_length": context,
         "pricing": pricing,
+        "created": created,
         "architecture": {
             "output_modalities": ["text"],
             "modality": "text->text",
@@ -288,3 +290,136 @@ def test_write_catalog_files_makes_canonical_and_mirror_byte_identical(tmp_path:
     expected = serialize_catalog(catalog)
     assert canonical.read_text(encoding="utf-8") == expected
     assert mirror.read_text(encoding="utf-8") == expected
+
+
+def test_existing_snapshot_is_replaced_by_latest_family_variant() -> None:
+    catalog = {
+        "currency": "USD",
+        "last_updated": "2026-02-01",
+        "sources": [f"{OPENROUTER_SOURCE_PREFIX} (2026-02-01)"],
+        "models": [
+            {
+                "provider": "openai",
+                "family": "gpt-4o-2024-08-06",
+                "model": "gpt-4o-2024-08-06",
+                "components": ["GEN"],
+                "unit": "1k_tokens",
+                "input_per_1k": 0.003,
+                "output_per_1k": 0.012,
+                "context": 128_000,
+            }
+        ],
+    }
+    feed_rows = [
+        _text_feed_row(
+            "openai/gpt-4o-2024-08-06",
+            prompt="0.0000025",
+            completion="0.00001",
+            context=128_000,
+            created=1_722_975_600,
+        ),
+        _text_feed_row(
+            "openai/gpt-4o-2024-11-20",
+            prompt="0.0000025",
+            completion="0.00001",
+            context=128_000,
+            created=1_732_127_594,
+        ),
+    ]
+
+    refreshed, _stats, changed = build_refreshed_catalog(catalog, feed_rows, as_of_date="2026-02-26")
+    assert changed is True
+    replacement = _find_model(refreshed, provider="openai", model="gpt-4o-2024-11-20")
+    assert replacement["family"] == "gpt-4o-2024-11-20"
+    assert replacement["input_per_1k"] == 0.0025
+    assert replacement["output_per_1k"] == 0.01
+    models = refreshed.get("models")
+    assert isinstance(models, list)
+    assert sum(1 for row in models if isinstance(row, dict) and row.get("provider") == "openai") == 1
+
+
+def test_brand_new_old_family_is_not_auto_added() -> None:
+    catalog = {"currency": "USD", "last_updated": "2026-02-01", "sources": [], "models": []}
+    feed_rows = [
+        _text_feed_row(
+            "openai/gpt-legacy-2024-01-10",
+            prompt="0.000001",
+            completion="0.000004",
+            context=128_000,
+            created=1_704_844_800,  # 2024-01-10
+        ),
+        _text_feed_row(
+            "openai/gpt-fresh-2026-02-20",
+            prompt="0.0000015",
+            completion="0.000006",
+            context=256_000,
+            created=1_771_545_600,  # 2026-02-20
+        ),
+    ]
+
+    refreshed, _stats, changed = build_refreshed_catalog(catalog, feed_rows, as_of_date="2026-02-26")
+    assert changed is True
+    _find_model(refreshed, provider="openai", model="gpt-fresh-2026-02-20")
+    models = refreshed.get("models")
+    assert isinstance(models, list)
+    assert all(
+        not (
+            isinstance(row, dict)
+            and str(row.get("provider") or "").strip().lower() == "openai"
+            and str(row.get("model") or "").strip() == "gpt-legacy-2024-01-10"
+        )
+        for row in models
+    )
+
+
+def test_existing_version_line_moves_to_latest_model_in_same_family() -> None:
+    catalog = {
+        "currency": "USD",
+        "last_updated": "2026-02-01",
+        "sources": [f"{OPENROUTER_SOURCE_PREFIX} (2026-02-01)"],
+        "models": [
+            {
+                "provider": "openai",
+                "family": "gpt-5.1-codex",
+                "model": "gpt-5.1-codex",
+                "components": ["GEN"],
+                "unit": "1k_tokens",
+                "input_per_1k": 0.00125,
+                "output_per_1k": 0.01,
+                "context": 400_000,
+            }
+        ],
+    }
+    feed_rows = [
+        _text_feed_row(
+            "openai/gpt-5.1-codex",
+            prompt="0.00000125",
+            completion="0.00001",
+            context=400_000,
+            created=1_763_060_298,
+        ),
+        _text_feed_row(
+            "openai/gpt-5.2-codex",
+            prompt="0.00000175",
+            completion="0.000014",
+            context=400_000,
+            created=1_768_409_315,
+        ),
+        _text_feed_row(
+            "openai/gpt-5.3-codex",
+            prompt="0.00000175",
+            completion="0.000014",
+            context=400_000,
+            created=1_771_959_164,
+        ),
+    ]
+
+    refreshed, _stats, changed = build_refreshed_catalog(catalog, feed_rows, as_of_date="2026-02-27")
+    assert changed is True
+    latest = _find_model(refreshed, provider="openai", model="gpt-5.3-codex")
+    assert latest["family"] == "gpt-5.3-codex"
+    assert latest["input_per_1k"] == 0.00175
+    assert latest["output_per_1k"] == 0.014
+    models = refreshed.get("models")
+    assert isinstance(models, list)
+    assert sum(1 for row in models if isinstance(row, dict) and row.get("provider") == "openai") == 1
