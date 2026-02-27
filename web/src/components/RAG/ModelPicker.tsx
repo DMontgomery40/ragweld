@@ -2,7 +2,8 @@
  * ModelPicker - Model dropdown from models.json
  *
  * Uses useModels hook to load models filtered by component type (EMB/GEN/RERANK).
- * Shows models for a specific provider with optional custom input.
+ * When `provider` is given, shows models for that provider only.
+ * When `provider` is omitted, shows all providers grouped via <optgroup>.
  */
 
 import { useState, useMemo } from 'react';
@@ -12,8 +13,8 @@ import { TooltipIcon } from '@/components/ui/TooltipIcon';
 interface ModelPickerProps {
   /** Component type filter */
   componentType: 'EMB' | 'GEN' | 'RERANK';
-  /** Provider to filter models by */
-  provider: string;
+  /** Provider to filter models by. When omitted, all providers shown grouped. */
+  provider?: string;
   /** Current selected model name */
   value: string;
   /** Called when selection changes */
@@ -38,14 +39,26 @@ export function ModelPicker({
   allowCustom = false,
   disabled = false,
 }: ModelPickerProps) {
-  const { models: _models, loading, error, getModelsForProvider } = useModels(componentType);
+  const { models, loading, error, providers, getModelsForProvider } = useModels(componentType);
   const [customMode, setCustomMode] = useState(false);
   const [customValue, setCustomValue] = useState('');
 
-  // Get models for the current provider
+  // When provider is given, filter to that provider; otherwise use all models
   const providerModels = useMemo(() => {
-    return getModelsForProvider(provider);
-  }, [getModelsForProvider, provider]);
+    if (provider) return getModelsForProvider(provider);
+    return models;
+  }, [getModelsForProvider, provider, models]);
+
+  // Grouped models by provider (used when provider is omitted)
+  const groupedModels = useMemo(() => {
+    if (provider) return null;
+    const groups: Array<{ provider: string; models: Model[] }> = [];
+    for (const p of providers) {
+      const pModels = getModelsForProvider(p);
+      if (pModels.length > 0) groups.push({ provider: p, models: pModels });
+    }
+    return groups;
+  }, [provider, providers, getModelsForProvider]);
 
   // Check if current value is in the list (for custom detection)
   const isValueCustom = useMemo(() => {
@@ -153,7 +166,23 @@ export function ModelPicker({
           onChange={handleSelectChange}
           disabled={disabled}
         >
-          {providerModels.length === 0 ? (
+          {groupedModels ? (
+            // No provider given: show all grouped by provider
+            groupedModels.length === 0 ? (
+              <option value="">No models available</option>
+            ) : (
+              groupedModels.map(g => (
+                <optgroup key={g.provider} label={g.provider}>
+                  {g.models.map(m => (
+                    <option key={`${g.provider}::${m.model}`} value={m.model}>
+                      {m.model}
+                      {m.dimensions && ` (${m.dimensions}d)`}
+                    </option>
+                  ))}
+                </optgroup>
+              ))
+            )
+          ) : providerModels.length === 0 ? (
             <option value="">No models for {provider}</option>
           ) : (
             providerModels.map(m => (

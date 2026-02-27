@@ -8,10 +8,12 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useAPI, useConfig, useConfigField, useIndexing } from '@/hooks';
+import { useAPI, useConfig, useConfigField, useEmbeddingModel, useIndexing, useModels } from '@/hooks';
 import { useRepoStore } from '@/stores/useRepoStore';
 import { LiveTerminal, type LiveTerminalHandle } from '@/components/LiveTerminal/LiveTerminal';
 import { RepositoryConfig } from '@/components/RAG/RepositoryConfig';
+import { ModelPicker } from '@/components/RAG/ModelPicker';
+import { PromptLink } from '@/components/ui/PromptLink';
 import { EmbeddingMismatchWarning } from '@/components/ui/EmbeddingMismatchWarning';
 import { TooltipIcon } from '@/components/ui/TooltipIcon';
 import { indexingApi } from '@/api';
@@ -73,10 +75,7 @@ export function IndexingSubtab() {
 
   // Config fields (TriBridConfig-backed)
   const [embeddingType, setEmbeddingType] = useConfigField<string>('embedding.embedding_type', '');
-  const [embeddingModel, setEmbeddingModel] = useConfigField<string>('embedding.embedding_model', '');
-  const [voyageModel, setVoyageModel] = useConfigField<string>('embedding.voyage_model', '');
-  const [embeddingModelLocal, setEmbeddingModelLocal] = useConfigField<string>('embedding.embedding_model_local', '');
-  const [embeddingModelMlx, setEmbeddingModelMlx] = useConfigField<string>('embedding.embedding_model_mlx', '');
+  // (embedding model per-provider fields now managed by useEmbeddingModel hook)
   const [embeddingDim, setEmbeddingDim] = useConfigField<number>('embedding.embedding_dim', 0);
   const [embeddingBatchSize, setEmbeddingBatchSize] = useConfigField<number>('embedding.embedding_batch_size', 0);
   const [embeddingMaxTokens, setEmbeddingMaxTokens] = useConfigField<number>('embedding.embedding_max_tokens', 0);
@@ -180,16 +179,13 @@ export function IndexingSubtab() {
   const [semanticKgEnabled, setSemanticKgEnabled] = useConfigField<boolean>('graph_indexing.semantic_kg_enabled', false);
   const [semanticKgMode, setSemanticKgMode] = useConfigField<'heuristic' | 'llm'>('graph_indexing.semantic_kg_mode', 'heuristic');
   const [semanticKgMaxChunks, setSemanticKgMaxChunks] = useConfigField<number>('graph_indexing.semantic_kg_max_chunks', 200);
+  const [semanticKgLlmModel, setSemanticKgLlmModel] = useConfigField<string>('graph_indexing.semantic_kg_llm_model', '');
   const [semanticKgMaxConcepts, setSemanticKgMaxConcepts] = useConfigField<number>(
     'graph_indexing.semantic_kg_max_concepts_per_chunk',
     8
   );
 
-  // Models (from /api/models, no hardcoded lists)
-  const [embedModels, setEmbedModels] = useState<any[]>([]);
-  const [embedProviders, setEmbedProviders] = useState<string[]>([]);
-  const [modelsLoading, setModelsLoading] = useState(true);
-  const [modelsError, setModelsError] = useState<string | null>(null);
+  // (Models loaded via useModels hook below — no manual state needed)
 
   // Index stats + status
   const [_indexStatus, setIndexStatus] = useState<IndexStatus | null>(null);
@@ -241,83 +237,23 @@ export function IndexingSubtab() {
     };
   }, []);
 
-  // Derived model field (based on provider)
-  const currentModel = useMemo(() => {
-    const t = String(embeddingType || '').toLowerCase();
-    if (t === 'voyage') return String(voyageModel || '');
-    if (t === 'openai') return String(embeddingModel || '');
-    if (t === 'mlx') return String(embeddingModelMlx || '');
-    return String(embeddingModelLocal || '');
-  }, [embeddingType, embeddingModel, embeddingModelLocal, embeddingModelMlx, voyageModel]);
+  // Derived model field (based on provider) — via shared hook
+  const { currentModel, setCurrentModel, tooltipKey: modelTooltipKey } = useEmbeddingModel();
 
-  const modelTooltipKey = useMemo(() => {
-    const t = String(embeddingType || '').toLowerCase();
-    if (t === 'voyage') return 'VOYAGE_MODEL';
-    if (t === 'openai') return 'EMBEDDING_MODEL';
-    if (t === 'mlx') return 'EMBEDDING_MODEL_MLX';
-    return 'EMBEDDING_MODEL_LOCAL';
-  }, [embeddingType]);
+  // Embedding model catalog (via useModels hook)
+  const {
+    providers: embedProviders,
+    getModelsForProvider: getEmbedModelsForProvider,
+    loading: modelsLoading,
+    error: modelsError,
+    findModel: findEmbedModel,
+  } = useModels('EMB');
 
-  const setCurrentModel = useCallback((modelName: string) => {
-    const t = String(embeddingType || '').toLowerCase();
-    if (t === 'voyage') {
-      setVoyageModel(modelName);
-      return;
-    }
-    if (t === 'openai') {
-      setEmbeddingModel(modelName);
-      return;
-    }
-    if (t === 'mlx') {
-      setEmbeddingModelMlx(modelName);
-      return;
-    }
-    setEmbeddingModelLocal(modelName);
-  }, [embeddingType, setEmbeddingModel, setEmbeddingModelLocal, setEmbeddingModelMlx, setVoyageModel]);
-
-  // Models loading (EMB only)
-  useEffect(() => {
-    (async () => {
-      setModelsLoading(true);
-      setModelsError(null);
-      try {
-        const r = await fetch(api('/api/models/by-type/EMB'));
-        if (!r.ok) throw new Error(`Failed to load embedding models (${r.status})`);
-        const data = await r.json();
-        const list = Array.isArray(data) ? data : [];
-        setEmbedModels(list);
-        const providers = Array.from(
-          new Set(
-            list
-              .map((m: any) => String(m?.provider || '').trim())
-              .filter(Boolean)
-          )
-        ).sort((a, b) => a.localeCompare(b));
-        setEmbedProviders(providers);
-      } catch (e) {
-        setModelsError(e instanceof Error ? e.message : 'Failed to load models');
-        setEmbedModels([]);
-        setEmbedProviders([]);
-      } finally {
-        setModelsLoading(false);
-      }
-    })();
-  }, [api]);
-
-  // Provider-specific embedding model list
+  // Auto-select first model when provider changes and current model is not valid
   const providerEmbedModels = useMemo(() => {
-    const p = String(embeddingType || '').toLowerCase();
-    if (!p) return [];
-    return embedModels
-      .filter((m: any) => String(m?.provider || '').toLowerCase() === p)
-      .map((m: any) => ({
-        model: String(m?.model || ''),
-        dimensions: typeof m?.dimensions === 'number' ? m.dimensions : null,
-      }))
-      .filter((m: any) => Boolean(m.model));
-  }, [embedModels, embeddingType]);
+    return getEmbedModelsForProvider(embeddingType);
+  }, [getEmbedModelsForProvider, embeddingType]);
 
-  // If provider changes and current model isn't valid, auto-select first model (from models.json only)
   useEffect(() => {
     if (!providerEmbedModels.length) return;
     const existing = String(currentModel || '').trim();
@@ -327,12 +263,12 @@ export function IndexingSubtab() {
 
   // If selected model has known dimensions, keep embedding_dim aligned (no hardcoded dims)
   useEffect(() => {
-    const hit = providerEmbedModels.find(m => m.model === currentModel);
+    const hit = findEmbedModel(embeddingType, currentModel);
     const dims = hit?.dimensions;
     if (autoSetDimensions && typeof dims === 'number' && dims > 0 && embeddingDim !== dims) {
       setEmbeddingDim(dims);
     }
-  }, [autoSetDimensions, currentModel, embeddingDim, providerEmbedModels, setEmbeddingDim]);
+  }, [autoSetDimensions, currentModel, embeddingDim, embeddingType, findEmbedModel, setEmbeddingDim]);
 
   // Resolved tokenizer description (UX-only helper)
   const resolvedTokenizerDesc = useMemo(() => {
@@ -996,33 +932,14 @@ export function IndexingSubtab() {
             {/* Model + dimensions */}
             <div className="input-row" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '20px' }}>
               <div className="input-group">
-                <label style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px' }}>
-                  Model
-                  <TooltipIcon name={modelTooltipKey} />
-                </label>
-                <select
+                <ModelPicker
+                  componentType="EMB"
+                  provider={embeddingType}
                   value={currentModel}
-                  onChange={(e) => setCurrentModel(e.target.value)}
-                  style={{
-                    width: '100%',
-                    padding: '10px 12px',
-                    background: 'var(--input-bg)',
-                    border: '1px solid var(--line)',
-                    borderRadius: '6px',
-                    color: 'var(--fg)',
-                    fontSize: '13px',
-                  }}
-                >
-                  {providerEmbedModels.length ? (
-                    providerEmbedModels.map((m) => (
-                      <option key={m.model} value={m.model}>
-                        {`${embeddingType} · ${m.model}`}
-                      </option>
-                    ))
-                  ) : (
-                    <option value={currentModel}>{currentModel || 'No models found for provider'}</option>
-                  )}
-                </select>
+                  onChange={setCurrentModel}
+                  label="Model"
+                  tooltipKey={modelTooltipKey}
+                />
               </div>
 
               <div className="input-group">
@@ -2250,43 +2167,62 @@ export function IndexingSubtab() {
                 </label>
 
                 {semanticKgEnabled && (
-                  <div style={{ marginTop: '12px', display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px' }}>
-                    <div className="input-group">
-                      <label style={{ fontSize: '11px', color: 'var(--fg-muted)', marginBottom: '6px' }}>Mode</label>
-                      <select
-                        data-testid="semantic-kg-mode"
-                        value={semanticKgMode}
-                        onChange={(e) => setSemanticKgMode(e.target.value as any)}
-                        style={{ width: '100%' }}
-                      >
-                        <option value="heuristic">Heuristic</option>
-                        <option value="llm">LLM</option>
-                      </select>
+                  <div style={{ marginTop: '12px' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px' }}>
+                      <div className="input-group">
+                        <label style={{ fontSize: '11px', color: 'var(--fg-muted)', marginBottom: '6px' }}>Mode</label>
+                        <select
+                          data-testid="semantic-kg-mode"
+                          value={semanticKgMode}
+                          onChange={(e) => setSemanticKgMode(e.target.value as any)}
+                          style={{ width: '100%' }}
+                        >
+                          <option value="heuristic">Heuristic</option>
+                          <option value="llm">LLM</option>
+                        </select>
+                      </div>
+                      <div className="input-group">
+                        <label style={{ fontSize: '11px', color: 'var(--fg-muted)', marginBottom: '6px' }}>Max chunks</label>
+                        <input
+                          data-testid="semantic-kg-max-chunks"
+                          type="number"
+                          min={0}
+                          max={100000}
+                          value={semanticKgMaxChunks}
+                          onChange={(e) => setSemanticKgMaxChunks(parseInt(e.target.value || '0', 10))}
+                          style={{ width: '100%' }}
+                        />
+                      </div>
+                      <div className="input-group">
+                        <label style={{ fontSize: '11px', color: 'var(--fg-muted)', marginBottom: '6px' }}>Max concepts / chunk</label>
+                        <input
+                          data-testid="semantic-kg-max-concepts"
+                          type="number"
+                          min={0}
+                          max={50}
+                          value={semanticKgMaxConcepts}
+                          onChange={(e) => setSemanticKgMaxConcepts(parseInt(e.target.value || '0', 10))}
+                          style={{ width: '100%' }}
+                        />
+                      </div>
                     </div>
-                    <div className="input-group">
-                      <label style={{ fontSize: '11px', color: 'var(--fg-muted)', marginBottom: '6px' }}>Max chunks</label>
-                      <input
-                        data-testid="semantic-kg-max-chunks"
-                        type="number"
-                        min={0}
-                        max={100000}
-                        value={semanticKgMaxChunks}
-                        onChange={(e) => setSemanticKgMaxChunks(parseInt(e.target.value || '0', 10))}
-                        style={{ width: '100%' }}
-                      />
-                    </div>
-                    <div className="input-group">
-                      <label style={{ fontSize: '11px', color: 'var(--fg-muted)', marginBottom: '6px' }}>Max concepts / chunk</label>
-                      <input
-                        data-testid="semantic-kg-max-concepts"
-                        type="number"
-                        min={0}
-                        max={50}
-                        value={semanticKgMaxConcepts}
-                        onChange={(e) => setSemanticKgMaxConcepts(parseInt(e.target.value || '0', 10))}
-                        style={{ width: '100%' }}
-                      />
-                    </div>
+
+                    {semanticKgMode === 'llm' && (
+                      <div style={{ marginTop: '12px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', alignItems: 'end' }}>
+                        <ModelPicker
+                          componentType="GEN"
+                          value={semanticKgLlmModel}
+                          onChange={setSemanticKgLlmModel}
+                          label="KG LLM Model"
+                          tooltipKey="SEMANTIC_KG_LLM_MODEL"
+                          allowCustom
+                        />
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                          <span style={{ fontSize: '11px', color: 'var(--fg-muted)' }}>empty = uses enrich_model</span>
+                          <PromptLink promptKey="semantic_kg_extraction">Edit KG Prompt</PromptLink>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -2395,6 +2331,22 @@ export function IndexingSubtab() {
                     <span style={{ fontSize: '12px', color: 'var(--fg)' }}>Include column names</span>
                     <TooltipIcon name="PARQUET_EXTRACT_INCLUDE_COLUMN_NAMES" />
                   </label>
+                </div>
+              </div>
+
+              <div
+                style={{
+                  padding: '16px',
+                  background: 'var(--bg-elev2)',
+                  borderRadius: '8px',
+                  border: '1px solid var(--line)',
+                }}
+              >
+                <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--fg)', marginBottom: '8px' }}>Prompt Templates</div>
+                <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+                  <PromptLink promptKey="code_enrichment">Edit Code Enrichment Prompt</PromptLink>
+                  <PromptLink promptKey="lightweight_chunk_summaries">Edit Lightweight Summary Prompt</PromptLink>
+                  <PromptLink promptKey="semantic_chunk_summaries">Edit Summary Prompt</PromptLink>
                 </div>
               </div>
             </div>

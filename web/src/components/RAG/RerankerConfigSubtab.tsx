@@ -1,20 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useConfigField } from '@/hooks';
+import { useConfigField, useModels } from '@/hooks';
 import { useReranker } from '@/hooks/useReranker';
 import { TooltipIcon } from '@/components/ui/TooltipIcon';
 import { ApiKeyStatus } from '@/components/ui/ApiKeyStatus';
-import { modelsApi } from '@/api';
-import type { ModelCatalogEntry, TrainingConfig } from '@/types/generated';
+import { ModelPicker } from '@/components/RAG/ModelPicker';
+import type { TrainingConfig } from '@/types/generated';
 
 const RERANKER_MODES = ['none', 'learning', 'cloud'] as const;
 type RerankerMode = (typeof RERANKER_MODES)[number];
 type LearningBackend = NonNullable<TrainingConfig['learning_reranker_backend']>;
-
-type RerankModelEntry = ModelCatalogEntry;
-
-function uniqueSorted(values: string[]): string[] {
-  return Array.from(new Set(values.filter(Boolean))).sort((a, b) => a.localeCompare(b));
-}
 
 function toApiKeyName(provider: string): string {
   const p = (provider || '').toLowerCase();
@@ -61,44 +55,17 @@ export function RerankerConfigSubtab() {
 
   const [snippetChars, setSnippetChars] = useConfigField<number>('reranking.rerank_input_snippet_chars', 700);
 
-  // Model catalog (from /api/models)
-  const [rerankModels, setRerankModels] = useState<RerankModelEntry[]>([]);
-  const [modelsLoading, setModelsLoading] = useState(true);
-  const [modelsError, setModelsError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let mounted = true;
-    const load = async () => {
-      setModelsLoading(true);
-      setModelsError(null);
-      try {
-        const list = await modelsApi.listByType('RERANK');
-        if (mounted) setRerankModels(list);
-      } catch (e) {
-        if (mounted) setModelsError(e instanceof Error ? e.message : 'Failed to load reranker models');
-      } finally {
-        if (mounted) setModelsLoading(false);
-      }
-    };
-    void load();
-    return () => {
-      mounted = false;
-    };
-  }, []);
+  // Model catalog (via useModels hook)
+  const {
+    providers: allRerankProviders,
+    getModelsForProvider: getRerankModelsForProvider,
+    loading: modelsLoading,
+    error: modelsError,
+  } = useModels('RERANK');
 
   const cloudProviders = useMemo(() => {
-    const providers = uniqueSorted(rerankModels.map((m) => m.provider || ''));
-    return providers.filter((p) => !['huggingface', 'local'].includes(p.toLowerCase()));
-  }, [rerankModels]);
-
-  const cloudModelOptions = useMemo(() => {
-    const p = (cloudProvider || '').toLowerCase();
-    return uniqueSorted(
-      rerankModels
-        .filter((m) => (m.provider || '').toLowerCase() === p)
-        .map((m) => m.model || '')
-    );
-  }, [rerankModels, cloudProvider]);
+    return allRerankProviders.filter((p) => !['huggingface', 'local'].includes(p.toLowerCase()));
+  }, [allRerankProviders]);
 
   // Keep config values sane when switching modes / providers
   useEffect(() => {
@@ -111,11 +78,12 @@ export function RerankerConfigSubtab() {
 
   useEffect(() => {
     if (mode !== 'cloud') return;
-    if (!cloudModelOptions.length) return;
-    if (!cloudModelOptions.includes(cloudModel)) {
-      setCloudModel(cloudModelOptions[0]);
+    const models = getRerankModelsForProvider(cloudProvider);
+    if (!models.length) return;
+    if (!models.some((m) => m.model === cloudModel)) {
+      setCloudModel(models[0].model);
     }
-  }, [mode, cloudModelOptions, cloudModel, setCloudModel]);
+  }, [mode, cloudProvider, cloudModel, getRerankModelsForProvider, setCloudModel]);
 
   // Runtime info (server)
   const { getInfo } = useReranker();
@@ -242,21 +210,15 @@ export function RerankerConfigSubtab() {
             </div>
 
             <div className="input-group">
-              <label>
-                Model <TooltipIcon name="RERANKER_CLOUD_MODEL" />
-              </label>
-              <select
+              <ModelPicker
+                componentType="RERANK"
+                provider={cloudProvider}
                 value={cloudModel}
-                onChange={(e) => setCloudModel(e.target.value)}
-                disabled={modelsLoading || cloudModelOptions.length === 0}
-              >
-                {cloudModelOptions.length === 0 && <option value="">No models for provider</option>}
-                {cloudModelOptions.map((m) => (
-                  <option key={m} value={m}>
-                    {`${cloudProvider} · ${m}`}
-                  </option>
-                ))}
-              </select>
+                onChange={setCloudModel}
+                label="Model"
+                tooltipKey="RERANKER_CLOUD_MODEL"
+                disabled={modelsLoading}
+              />
             </div>
           </div>
 
@@ -318,13 +280,13 @@ export function RerankerConfigSubtab() {
               </select>
             </div>
             <div className="input-group">
-              <label>
-                Base model <TooltipIcon name="LEARNING_RERANKER_BASE_MODEL" />
-              </label>
-              <input
-                type="text"
+              <ModelPicker
+                componentType="RERANK"
                 value={learningBaseModel}
-                onChange={(e) => setLearningBaseModel(e.target.value)}
+                onChange={setLearningBaseModel}
+                label="Base model"
+                tooltipKey="LEARNING_RERANKER_BASE_MODEL"
+                allowCustom
               />
             </div>
           </div>

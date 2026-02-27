@@ -32,6 +32,9 @@ export { useConfigStore } from '../stores/useConfigStore';
 // Embedding status (critical mismatch detection)
 export { useEmbeddingStatus } from '@/hooks/useEmbeddingStatus';
 
+// Embedding model (derives active model/setter/tooltip from embedding_type)
+export { useEmbeddingModel } from './useEmbeddingModel';
+
 // Feature hooks
 export { useIndexing } from './useIndexing';
 export { useModels, getRecommendedChunkSize } from './useModels';

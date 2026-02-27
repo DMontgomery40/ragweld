@@ -2,10 +2,11 @@
 // External service integrations and webhooks
 // API keys are configured in .env ONLY - never written programmatically
 
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { webhooksApi } from '@/api/webhooks';
+import { ModelPicker } from '@/components/RAG/ModelPicker';
 import { ApiKeyStatus } from '@/components/ui/ApiKeyStatus';
-import { useConfig, useConfigField, useModels } from '@/hooks';
+import { useConfig, useConfigField } from '@/hooks';
 
 export function IntegrationsSubtab() {
   const { config, saveConfig } = useConfig();
@@ -38,28 +39,10 @@ export function IntegrationsSubtab() {
   const [httpModel, setHttpModel] = useConfigField<string>('generation.gen_model_http', '');
   const [mcpModel, setMcpModel] = useConfigField<string>('generation.gen_model_mcp', '');
   const [cliModel, setCliModel] = useConfigField<string>('generation.gen_model_cli', '');
-  const {
-    models: generationModels,
-    loading: generationModelsLoading,
-    error: generationModelsError,
-  } = useModels('GEN');
+  const [genBackend] = useConfigField<string>('generation.gen_backend', 'openai');
   const [mcpHttpHost, setMcpHttpHost] = useState('0.0.0.0');
   const [mcpHttpPort, setMcpHttpPort] = useState('8013');
   const [mcpHttpPath, setMcpHttpPath] = useState('/mcp');
-  const generationModelOptions = useMemo(() => {
-    const seen = new Set<string>();
-    const out: Array<{ key: string; value: string; label: string }> = [];
-    for (const row of generationModels) {
-      const provider = String(row.provider || '').trim();
-      const model = String(row.model || '').trim();
-      if (!provider || !model) continue;
-      const key = `${provider}::${model}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      out.push({ key, value: model, label: `${provider} · ${model}` });
-    }
-    return out.sort((a, b) => a.label.localeCompare(b.label));
-  }, [generationModels]);
 
   // Alert Notifications (webhook URLs are secrets - configured in .env only)
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
@@ -176,93 +159,40 @@ export function IntegrationsSubtab() {
         <p className="small" style={{ marginBottom: '16px' }}>
           Set per-channel generation overrides. GEN-only models are shown to prevent invalid capability assignments.
         </p>
-        {generationModelsError && (
-          <div style={{ marginBottom: '12px', fontSize: '12px', color: 'var(--err)' }}>
-            {generationModelsError}
-          </div>
-        )}
 
         <div className="input-row">
           <div className="input-group">
-            <label>HTTP Responses Model</label>
-            <select
+            <ModelPicker
+              componentType="GEN"
+              provider={genBackend}
               value={httpModel}
-              onChange={(e) => setHttpModel(e.target.value)}
-              disabled={generationModelsLoading}
-              style={{
-                width: '100%',
-                padding: '8px',
-                background: 'var(--input-bg)',
-                border: '1px solid var(--line)',
-                borderRadius: '4px',
-                color: 'var(--fg)'
-              }}
-            >
-              <option value="">(no override)</option>
-              {!generationModelOptions.some((opt) => opt.value === httpModel) && httpModel && (
-                <option value={httpModel}>{`Custom · ${httpModel}`}</option>
-              )}
-              {generationModelOptions.map((opt) => (
-                <option key={opt.key} value={opt.value}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
+              onChange={setHttpModel}
+              label="HTTP Responses Model"
+              allowCustom
+            />
           </div>
           <div className="input-group">
-            <label>MCP stdio Model</label>
-            <select
+            <ModelPicker
+              componentType="GEN"
+              provider={genBackend}
               value={mcpModel}
-              onChange={(e) => setMcpModel(e.target.value)}
-              disabled={generationModelsLoading}
-              style={{
-                width: '100%',
-                padding: '8px',
-                background: 'var(--input-bg)',
-                border: '1px solid var(--line)',
-                borderRadius: '4px',
-                color: 'var(--fg)'
-              }}
-            >
-              <option value="">(no override)</option>
-              {!generationModelOptions.some((opt) => opt.value === mcpModel) && mcpModel && (
-                <option value={mcpModel}>{`Custom · ${mcpModel}`}</option>
-              )}
-              {generationModelOptions.map((opt) => (
-                <option key={opt.key} value={opt.value}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
+              onChange={setMcpModel}
+              label="MCP stdio Model"
+              allowCustom
+            />
           </div>
         </div>
 
         <div className="input-row">
           <div className="input-group">
-            <label>CLI Chat Model</label>
-            <select
+            <ModelPicker
+              componentType="GEN"
+              provider={genBackend}
               value={cliModel}
-              onChange={(e) => setCliModel(e.target.value)}
-              disabled={generationModelsLoading}
-              style={{
-                width: '100%',
-                padding: '8px',
-                background: 'var(--input-bg)',
-                border: '1px solid var(--line)',
-                borderRadius: '4px',
-                color: 'var(--fg)'
-              }}
-            >
-              <option value="">(no override)</option>
-              {!generationModelOptions.some((opt) => opt.value === cliModel) && cliModel && (
-                <option value={cliModel}>{`Custom · ${cliModel}`}</option>
-              )}
-              {generationModelOptions.map((opt) => (
-                <option key={opt.key} value={opt.value}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
+              onChange={setCliModel}
+              label="CLI Chat Model"
+              allowCustom
+            />
           </div>
           <div className="input-group">
             <label>MCP HTTP Configuration</label>
