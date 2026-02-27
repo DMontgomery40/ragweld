@@ -93,6 +93,7 @@ class TriBridFusion:
         cache_lookup_match_type: str | None = None
         cache_lookup_similarity: float | None = None
         cache_lookup_enabled = False
+        cache_fingerprint_enabled = False
         scoped_cfgs: dict[str, TriBridConfig] = {}
         for cid in corpus_ids:
             try:
@@ -120,8 +121,11 @@ class TriBridFusion:
             configured = str(getattr(cache_cfg, "mode", "read_write") or "read_write").strip().lower()
             enabled = int(getattr(cache_cfg, "enabled", 0) or 0) == 1
             reads_allowed = mode != "bypass" and mode != "refresh" and configured in {"read_only", "read_write"}
+            writes_allowed = mode != "bypass" and configured in {"write_only", "read_write"}
             min_chars = int(getattr(cache_cfg, "min_query_chars", 1) or 1)
-            cache_lookup_enabled = bool(enabled and reads_allowed and len(SemanticCacheService.canonical_query(query)) >= min_chars)
+            query_eligible = len(SemanticCacheService.canonical_query(query)) >= min_chars
+            cache_lookup_enabled = bool(enabled and reads_allowed and query_eligible)
+            cache_fingerprint_enabled = bool(enabled and query_eligible and (reads_allowed or writes_allowed))
             if not cache_lookup_enabled and cache_lookup_outcome == "ready":
                 cache_lookup_outcome = "disabled"
         if top_k is not None:
@@ -151,7 +155,7 @@ class TriBridFusion:
             cfg_fp = SemanticCacheService.fingerprint(cfg_for_corpus.model_dump(mode="serialization", by_alias=True))
             corpus_config_fingerprints.append(f"{cid}:{cfg_fp}")
         index_revisions: list[str] = []
-        if cache_lookup_enabled:
+        if cache_fingerprint_enabled:
             pg_by_dsn: dict[str, PostgresClient] = {}
             for cid in corpus_ids:
                 cfg_for_corpus = scoped_cfgs.get(cid)
@@ -269,24 +273,29 @@ class TriBridFusion:
                 hit = None
                 cache_lookup_outcome = "error"
             if hit is not None:
-                cache_lookup_outcome = "hit"
-                cache_lookup_match_type = str(hit.match_type)
-                cache_lookup_similarity = float(hit.similarity)
-                cached = [ChunkMatch.model_validate(r) for r in (hit.payload.get("matches") or [])]
-                cache_debug = dict(hit.payload.get("debug") or {})
-                cache_debug.update(
-                    {
-                        "cache_hit": True,
-                        "cache_match_type": hit.match_type,
-                        "cache_similarity": float(hit.similarity),
-                        "cache_namespace": str(cache_namespace or "search"),
-                    }
-                )
-                self.last_debug = cache_debug
-                final_k = int(effective_final_k or len(cached))
-                final_results = cached[:final_k] if final_k > 0 else []
-                SEARCH_RESULTS_FINAL_COUNT.observe(len(final_results))
-                return final_results
+                try:
+                    cached = [ChunkMatch.model_validate(r) for r in (hit.payload.get("matches") or [])]
+                except Exception:
+                    hit = None
+                    cache_lookup_outcome = "miss"
+                if hit is not None:
+                    cache_lookup_outcome = "hit"
+                    cache_lookup_match_type = str(hit.match_type)
+                    cache_lookup_similarity = float(hit.similarity)
+                    cache_debug = dict(hit.payload.get("debug") or {})
+                    cache_debug.update(
+                        {
+                            "cache_hit": True,
+                            "cache_match_type": hit.match_type,
+                            "cache_similarity": float(hit.similarity),
+                            "cache_namespace": str(cache_namespace or "search"),
+                        }
+                    )
+                    self.last_debug = cache_debug
+                    final_k = int(effective_final_k or len(cached))
+                    final_results = cached[:final_k] if final_k > 0 else []
+                    SEARCH_RESULTS_FINAL_COUNT.observe(len(final_results))
+                    return final_results
 
         def _safe_error_message(e: Exception, *, max_len: int = 400) -> str:
             # Best-effort redaction; keep debugging useful without leaking secrets.

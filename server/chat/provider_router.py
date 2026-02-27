@@ -101,14 +101,19 @@ def select_provider_route(
     if not override:
         gen_backend = str(getattr(config.generation, "gen_backend", "") or "").strip().lower()
         gen_model = str(getattr(config.generation, "gen_model", "") or "").strip()
+        gen_fields_set = set(getattr(config.generation, "model_fields_set", set()))
         if gen_model and gen_backend:
             if gen_backend == "openai":
-                if openai_api_key_hint and gen_model != "gpt-4o-mini":
+                openai_explicit = "gen_backend" in gen_fields_set or "gen_model" in gen_fields_set
+                if openai_api_key_hint and openai_explicit:
                     override = gen_model
             elif gen_backend in {"ollama", "mlx"}:
                 override = f"local:{gen_model}"
             elif gen_backend == "openrouter":
-                override = f"openrouter:{gen_model}"
+                route_model = gen_model
+                if "/" not in route_model and ":" not in route_model:
+                    route_model = f"openai/{route_model}"
+                override = f"openrouter:{route_model}"
             elif gen_backend == "anthropic":
                 if "/" in gen_model or ":" in gen_model:
                     override = gen_model

@@ -77,11 +77,17 @@ def _conversation_turn_for_request(*, conversation: Conversation, message: str) 
     return max(0, int(user_count))
 
 
-def _history_for_cache(*, conversation: Conversation, message: str, max_messages: int) -> list[dict[str, str]]:
+def _history_for_cache(
+    *,
+    conversation: Conversation,
+    message: str,
+    max_messages: int,
+    exclude_current_user_tail: bool,
+) -> list[dict[str, str]]:
     msgs = list(conversation.messages or [])
     # Streaming path stores current user message before calling handler; exclude it
     # so non-stream and stream cache fingerprints align.
-    if msgs:
+    if exclude_current_user_tail and msgs:
         last = msgs[-1]
         if last.role == "user" and (last.content or "").strip() == (message or "").strip():
             msgs = msgs[:-1]
@@ -387,6 +393,7 @@ async def chat_once(
                     conversation=conversation,
                     message=request.message,
                     max_messages=max(0, int(config.semantic_cache.chat_history_window or 0)),
+                    exclude_current_user_tail=False,
                 )
             ),
             "context_fp": SemanticCacheService.context_fingerprint(
@@ -670,6 +677,7 @@ async def chat_stream(
                     conversation=conversation,
                     message=request.message,
                     max_messages=max(0, int(config.semantic_cache.chat_history_window or 0)),
+                    exclude_current_user_tail=True,
                 )
             ),
             "context_fp": SemanticCacheService.context_fingerprint(
