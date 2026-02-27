@@ -97,7 +97,6 @@ def select_provider_route(
 
     chat_config = config.chat
     override = model_override.strip()
-    openai_api_key_hint = os.getenv("OPENAI_API_KEY", "").strip()
     if not override:
         gen_backend = str(getattr(config.generation, "gen_backend", "") or "").strip().lower()
         gen_model = str(getattr(config.generation, "gen_model", "") or "").strip()
@@ -106,7 +105,7 @@ def select_provider_route(
                 default_gen_backend = str(GenerationConfig.model_fields["gen_backend"].default or "openai").strip().lower()
                 default_gen_model = str(GenerationConfig.model_fields["gen_model"].default or "gpt-4o-mini").strip()
                 openai_selected = gen_backend != default_gen_backend or gen_model != default_gen_model
-                if openai_api_key_hint and openai_selected:
+                if openai_selected:
                     override = gen_model
             elif gen_backend in {"ollama", "mlx"}:
                 override = f"local:{gen_model}"

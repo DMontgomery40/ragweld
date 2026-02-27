@@ -207,6 +207,24 @@ def test_select_provider_route_honors_non_default_openai_generation_model() -> N
         _restore_openrouter_api_key(old_openrouter)
 
 
+def test_select_provider_route_preserves_non_default_openai_model_without_openai_key() -> None:
+    old_openrouter = _set_openrouter_api_key("test-openrouter-key")
+    old_openai = _set_openai_api_key(None)
+    try:
+        cfg = TriBridConfig(
+            chat=ChatConfig(openrouter=OpenRouterConfig(enabled=True, default_model="openrouter-default")),
+        )
+        cfg.generation.gen_backend = "openai"
+        cfg.generation.gen_model = "gpt-5.2"
+        route = select_provider_route(config=cfg)
+        assert route.kind == "openrouter"
+        assert route.provider_name == "OpenRouter"
+        assert route.model == "gpt-5.2"
+    finally:
+        _restore_openai_api_key(old_openai)
+        _restore_openrouter_api_key(old_openrouter)
+
+
 def test_select_provider_route_local_prefix_forces_local_even_when_openrouter_ready() -> None:
     old = _set_openrouter_api_key("test-openrouter-key")
     try:
