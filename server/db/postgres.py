@@ -670,6 +670,21 @@ class PostgresClient:
         # asyncpg returns "UPDATE <n>"
         return int(result.split()[-1])
 
+    async def count_chunks_with_embeddings(self, repo_id: str) -> int:
+        await self._require_pool()
+        assert self._pool is not None
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT COUNT(*)::int AS embedding_chunks
+                FROM chunks
+                WHERE repo_id = $1
+                  AND embedding IS NOT NULL;
+                """,
+                repo_id,
+            )
+        return int((row or {}).get("embedding_chunks") or 0)
+
     # FTS operations
     async def upsert_fts(self, repo_id: str, chunks: list[Chunk], *, ts_config: str) -> int:
         if not chunks:
