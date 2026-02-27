@@ -248,6 +248,7 @@ class PostgresClient:
               meta JSONB NOT NULL DEFAULT '{}'::jsonb,
               created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
               last_indexed TIMESTAMPTZ,
+              embedding_backend TEXT,
               embedding_provider TEXT,
               embedding_model TEXT,
               embedding_dimensions INT,
@@ -257,6 +258,7 @@ class PostgresClient:
         )
         # Ensure new columns exist when upgrading an existing DB
         await conn.execute("ALTER TABLE corpora ADD COLUMN IF NOT EXISTS meta JSONB NOT NULL DEFAULT '{}'::jsonb;")
+        await conn.execute("ALTER TABLE corpora ADD COLUMN IF NOT EXISTS embedding_backend TEXT;")
         await conn.execute("ALTER TABLE corpora ADD COLUMN IF NOT EXISTS embedding_provider TEXT;")
         await conn.execute("ALTER TABLE corpora ADD COLUMN IF NOT EXISTS ts_config TEXT;")
 
@@ -1454,7 +1456,7 @@ class PostgresClient:
             row = await conn.fetchrow(
                 """
                 SELECT repo_id, name, root_path, description, meta, created_at, last_indexed,
-                       embedding_provider, embedding_model, embedding_dimensions, ts_config
+                       embedding_backend, embedding_provider, embedding_model, embedding_dimensions, ts_config
                 FROM corpora
                 WHERE repo_id = $1;
                 """,
@@ -1470,6 +1472,7 @@ class PostgresClient:
             "meta": _coerce_jsonb_dict(row["meta"]),
             "created_at": row["created_at"],
             "last_indexed": row["last_indexed"],
+            "embedding_backend": str(row["embedding_backend"] or ""),
             "embedding_provider": str(row["embedding_provider"] or ""),
             "embedding_model": str(row["embedding_model"] or ""),
             "embedding_dimensions": int(row["embedding_dimensions"] or 0),
@@ -1892,7 +1895,14 @@ class PostgresClient:
         return len(rows)
 
     async def update_corpus_embedding_meta(
-        self, repo_id: str, *, provider: str, model: str, dimensions: int, ts_config: str = ""
+        self,
+        repo_id: str,
+        *,
+        backend: str,
+        provider: str,
+        model: str,
+        dimensions: int,
+        ts_config: str = "",
     ) -> None:
         await self._require_pool()
         assert self._pool is not None
@@ -1900,13 +1910,16 @@ class PostgresClient:
             await conn.execute(
                 """
                 UPDATE corpora
-                SET embedding_provider = $2,
-                    embedding_model = $3,
-                    embedding_dimensions = $4,
-                    ts_config = $5
+                SET embedding_backend = $2,
+                    embedding_provider = $3,
+                    embedding_model = $4,
+                    embedding_dimensions = $5,
+                    ts_config = $6,
+                    meta = COALESCE(meta, '{}'::jsonb) || jsonb_build_object('embedding_backend', $2)
                 WHERE repo_id = $1;
                 """,
                 repo_id,
+                str(backend or ""),
                 str(provider or ""),
                 model,
                 int(dimensions),

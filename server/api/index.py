@@ -650,6 +650,12 @@ async def _run_index(
     # After a delete operation, embedding metadata lingers on the corpora row
     # even though vectors may be gone, so the guard must not block a fresh run.
     if corpus and not force_reindex and not skip_dense and embedder is not None:
+        meta = corpus.get("meta") if isinstance(corpus.get("meta"), dict) else {}
+        stored_backend = str((meta or {}).get("embedding_backend") or "").strip().lower()
+        if not stored_backend:
+            # Legacy corpora did not persist backend identity. Treat as deterministic
+            # to avoid silently mixing deterministic and provider vectors.
+            stored_backend = "deterministic"
         stored_model = str(corpus.get("embedding_model") or "").strip()
         stored_dim = int(corpus.get("embedding_dimensions") or 0)
         stored_provider = str(corpus.get("embedding_provider") or "").strip()
@@ -664,6 +670,7 @@ async def _run_index(
         if stored_model and stored_dim > 0 and has_embeddings:
             current_model = str(cfg.embedding.effective_model or "").strip()
             current_dim = int(embedder.dim)
+            current_backend = str(cfg.embedding.embedding_backend or "").strip().lower() or "deterministic"
             current_provider = str(cfg.embedding.embedding_type or "").strip()
 
             mismatches: list[str] = []
@@ -671,6 +678,8 @@ async def _run_index(
                 mismatches.append(f"dimensions: stored={stored_dim}, config={current_dim}")
             if stored_model != current_model:
                 mismatches.append(f"model: stored={stored_model}, config={current_model}")
+            if stored_backend != current_backend:
+                mismatches.append(f"backend: stored={stored_backend}, config={current_backend}")
             if stored_provider != current_provider:
                 mismatches.append(f"provider: stored={stored_provider}, config={current_provider}")
 
@@ -805,7 +814,11 @@ async def _run_index_body(
     if skip_dense:
         deleted = await postgres.delete_embeddings(repo_id)
         await postgres.update_corpus_embedding_meta(
-            repo_id, provider="", model="", dimensions=0,
+            repo_id,
+            backend="deterministic",
+            provider="",
+            model="",
+            dimensions=0,
             ts_config=str(cfg.indexing.postgres_ts_config or ""),
         )
         if event_queue is not None:
@@ -820,6 +833,7 @@ async def _run_index_body(
         assert embedder is not None
         await postgres.update_corpus_embedding_meta(
             repo_id,
+            backend=str(cfg.embedding.embedding_backend or "deterministic"),
             provider=str(cfg.embedding.embedding_type or ""),
             model=str(cfg.embedding.effective_model or ""),
             dimensions=int(embedder.dim),
@@ -1181,7 +1195,7 @@ async def _run_index_body(
                         else:
                             batch_results_with_errors = await asyncio.gather(*coros, return_exceptions=True)
                             for item in batch_results_with_errors:
-                                if isinstance(item, Exception):
+                                if isinstance(item, BaseException):
                                     continue
                                 chunk_id, entities_raw_one, relations_raw_one = item
                                 llm_extract_by_chunk[chunk_id] = (entities_raw_one, relations_raw_one)
@@ -1365,11 +1379,18 @@ async def _run_index_body(
         assert embedder is not None
         await postgres.update_corpus_embedding_meta(
             repo_id,
+            backend=str(cfg.embedding.embedding_backend or "deterministic"),
             provider=str(cfg.embedding.embedding_type or ""),
             model=str(cfg.embedding.effective_model or ""),
             dimensions=int(embedder.dim),
             ts_config=str(cfg.indexing.postgres_ts_config or ""),
         )
+    # Invalidate semantic cache for this corpus after indexing to prevent stale
+    # retrieval/generation payloads from pre-index content.
+    try:
+        await postgres.semantic_cache_clear(scope_key=f"corpora:{repo_id}")
+    except Exception:
+        pass
 
     stats = IndexStats(
         repo_id=repo_id,

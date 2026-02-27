@@ -344,6 +344,14 @@ async def chat_once(
     temperature = (
         float(config.chat.temperature_no_retrieval) if not corpus_ids else float(config.chat.temperature)
     )
+    resolved_route = None
+    try:
+        resolved_route = select_provider_route(
+            config=config,
+            model_override=effective_model_override,
+        )
+    except Exception:
+        resolved_route = None
 
     cache_service = SemanticCacheService(config)
     cache_scope_key = SemanticCacheService.scope_key(corpus_ids or ["direct_chat"])
@@ -366,6 +374,10 @@ async def chat_once(
                 else (str(recall_plan.intensity) if recall_plan is not None else "")
             ),
             "model_override": str(effective_model_override or ""),
+            "route_kind": str(getattr(resolved_route, "kind", "") or ""),
+            "route_provider": str(getattr(resolved_route, "provider_name", "") or ""),
+            "route_model": str(getattr(resolved_route, "model", "") or ""),
+            "route_base_url": str(getattr(resolved_route, "base_url", "") or ""),
             "prompt": str(system_prompt),
             "temperature": float(temperature),
             "max_tokens": int(config.chat.max_tokens),
@@ -433,7 +445,7 @@ async def chat_once(
             return cached_text, sources, provider_id, recall_plan, provider_info, True, None
 
     try:
-        route = select_provider_route(
+        route = resolved_route or select_provider_route(
             config=config,
             model_override=effective_model_override,
         )

@@ -173,6 +173,14 @@ async def answer_best_effort(
             config=config.chat,
         )
     temperature = float(config.chat.temperature_no_retrieval) if not chunks else float(config.chat.temperature)
+    resolved_route = None
+    try:
+        resolved_route = select_provider_route(
+            config=config,
+            model_override=(model_override or "").strip(),
+        )
+    except Exception:
+        resolved_route = None
 
     cache_service = SemanticCacheService(config)
     cache_scope_key = SemanticCacheService.scope_key([corpus_id])
@@ -185,6 +193,10 @@ async def answer_best_effort(
             "include_graph": bool(include_graph),
             "top_k": int(top_k or 0),
             "model_override": str(model_override or ""),
+            "route_kind": str(getattr(resolved_route, "kind", "") or ""),
+            "route_provider": str(getattr(resolved_route, "provider_name", "") or ""),
+            "route_model": str(getattr(resolved_route, "model", "") or ""),
+            "route_base_url": str(getattr(resolved_route, "base_url", "") or ""),
             "system_prompt_override": str(system_prompt_override or ""),
             "prompt": str(system_prompt),
             "temperature": float(temperature),
@@ -245,7 +257,7 @@ async def answer_best_effort(
 
     answer_text: str
     try:
-        route = select_provider_route(
+        route = resolved_route or select_provider_route(
             config=config,
             model_override=(model_override or "").strip(),
         )
@@ -374,6 +386,14 @@ async def stream_answer_best_effort(
             config=config.chat,
         )
     temperature = float(config.chat.temperature_no_retrieval) if not chunks else float(config.chat.temperature)
+    resolved_route = None
+    try:
+        resolved_route = select_provider_route(
+            config=config,
+            model_override=(model_override or "").strip(),
+        )
+    except Exception:
+        resolved_route = None
 
     cache_service = SemanticCacheService(config)
     cache_scope_key = SemanticCacheService.scope_key([corpus_id])
@@ -386,6 +406,10 @@ async def stream_answer_best_effort(
             "include_graph": bool(include_graph),
             "top_k": int(top_k or 0),
             "model_override": str(model_override or ""),
+            "route_kind": str(getattr(resolved_route, "kind", "") or ""),
+            "route_provider": str(getattr(resolved_route, "provider_name", "") or ""),
+            "route_model": str(getattr(resolved_route, "model", "") or ""),
+            "route_base_url": str(getattr(resolved_route, "base_url", "") or ""),
             "system_prompt_override": str(system_prompt_override or ""),
             "prompt": str(system_prompt),
             "temperature": float(temperature),
@@ -465,7 +489,7 @@ async def stream_answer_best_effort(
             return
 
     try:
-        route = select_provider_route(
+        route = resolved_route or select_provider_route(
             config=config,
             model_override=(model_override or "").strip(),
         )

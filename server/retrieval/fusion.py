@@ -107,6 +107,34 @@ class TriBridFusion:
             effective_final_k = int(top_k or 0)
         primary_reranking = primary_cfg.reranking if primary_cfg is not None else RerankingConfig()
         primary_training = primary_cfg.training if primary_cfg is not None else TrainingConfig()
+        primary_vector = primary_cfg.vector_search if primary_cfg is not None else None
+        primary_sparse = primary_cfg.sparse_search if primary_cfg is not None else None
+        primary_graph = primary_cfg.graph_search if primary_cfg is not None else None
+        primary_retrieval = primary_cfg.retrieval if primary_cfg is not None else None
+        index_revisions: list[str] = []
+        if primary_cfg is not None:
+            try:
+                cache_pg = PostgresClient(primary_cfg.indexing.postgres_url)
+                await cache_pg.connect()
+                for cid in corpus_ids:
+                    corpus_meta = await cache_pg.get_corpus(cid)
+                    if not corpus_meta:
+                        index_revisions.append(f"{cid}:::")
+                        continue
+                    raw_last = corpus_meta.get("last_indexed")
+                    if raw_last is None:
+                        last_indexed = ""
+                    else:
+                        try:
+                            last_indexed = str(raw_last.isoformat())
+                        except Exception:
+                            last_indexed = str(raw_last)
+                    provider = str(corpus_meta.get("embedding_provider") or "")
+                    model = str(corpus_meta.get("embedding_model") or "")
+                    dims = int(corpus_meta.get("embedding_dimensions") or 0)
+                    index_revisions.append(f"{cid}:{last_indexed}:{provider}:{model}:{dims}")
+            except Exception:
+                index_revisions = []
         cache_request_fingerprint = SemanticCacheService.fingerprint(
             {
                 "namespace": str(cache_namespace or "search"),
@@ -114,12 +142,42 @@ class TriBridFusion:
                 "include_sparse": bool(include_sparse),
                 "include_graph": bool(include_graph),
                 "top_k": int(effective_final_k),
+                "index_revisions": index_revisions,
                 "fusion_method": str(config.method),
                 "fusion_rrf_k": int(config.rrf_k),
                 "fusion_vector_weight": float(config.vector_weight),
                 "fusion_sparse_weight": float(config.sparse_weight),
                 "fusion_graph_weight": float(config.graph_weight),
                 "fusion_normalize_scores": bool(config.normalize_scores),
+                "vector_enabled": bool(getattr(primary_vector, "enabled", True)),
+                "vector_top_k": int(getattr(primary_vector, "top_k", 0) or 0),
+                "vector_similarity_threshold": float(getattr(primary_vector, "similarity_threshold", 0.0) or 0.0),
+                "sparse_enabled": bool(getattr(primary_sparse, "enabled", True)),
+                "sparse_top_k": int(getattr(primary_sparse, "top_k", 0) or 0),
+                "sparse_engine": str(getattr(primary_sparse, "engine", "") or ""),
+                "sparse_query_mode": str(getattr(primary_sparse, "query_mode", "") or ""),
+                "sparse_bm25_k1": float(getattr(primary_sparse, "bm25_k1", 0.0) or 0.0),
+                "sparse_bm25_b": float(getattr(primary_sparse, "bm25_b", 0.0) or 0.0),
+                "sparse_relax_on_empty": bool(getattr(primary_sparse, "relax_on_empty", False)),
+                "sparse_file_path_fallback": bool(getattr(primary_sparse, "file_path_fallback", False)),
+                "graph_enabled": bool(getattr(primary_graph, "enabled", True)),
+                "graph_mode": str(getattr(primary_graph, "mode", "") or ""),
+                "graph_top_k": int(getattr(primary_graph, "top_k", 0) or 0),
+                "graph_max_hops": int(getattr(primary_graph, "max_hops", 0) or 0),
+                "graph_include_communities": bool(getattr(primary_graph, "include_communities", False)),
+                "graph_chunk_neighbor_window": int(getattr(primary_graph, "chunk_neighbor_window", 0) or 0),
+                "graph_chunk_entity_expansion_enabled": bool(
+                    getattr(primary_graph, "chunk_entity_expansion_enabled", False)
+                ),
+                "graph_chunk_entity_expansion_weight": float(
+                    getattr(primary_graph, "chunk_entity_expansion_weight", 0.0) or 0.0
+                ),
+                "retrieval_final_k": int(getattr(primary_retrieval, "final_k", 0) or 0),
+                "retrieval_dedup_by": str(getattr(primary_retrieval, "dedup_by", "") or ""),
+                "retrieval_max_chunks_per_file": int(getattr(primary_retrieval, "max_chunks_per_file", 0) or 0),
+                "retrieval_neighbor_window": int(getattr(primary_retrieval, "neighbor_window", 0) or 0),
+                "retrieval_enable_mmr": bool(getattr(primary_retrieval, "enable_mmr", False)),
+                "retrieval_mmr_lambda": float(getattr(primary_retrieval, "mmr_lambda", 0.0) or 0.0),
                 "reranker_mode": str(getattr(primary_reranking, "reranker_mode", "") or "").strip().lower(),
                 "reranker_cloud_provider": str(getattr(primary_reranking, "reranker_cloud_provider", "") or ""),
                 "reranker_cloud_model": str(getattr(primary_reranking, "reranker_cloud_model", "") or ""),
