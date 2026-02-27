@@ -90,6 +90,9 @@ def property_to_ts_type(prop: dict[str, Any], definitions: dict[str, Any]) -> st
     if prop.get("type") == "array":
         if "items" in prop:
             item_type = property_to_ts_type(prop["items"], definitions)
+            # Parenthesize union types so `"a" | "b"[]` becomes `("a" | "b")[]`
+            if " | " in item_type:
+                return f"({item_type})[]"
             return f"{item_type}[]"
         return "unknown[]"
 
