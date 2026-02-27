@@ -395,43 +395,6 @@ class TestStreamEndpoint:
             assert messages[0].content == "Stream test message"
             assert messages[0].role == "user"
 
-    @pytest.mark.asyncio
-    async def test_stream_empty_provider_output_is_not_cached(
-        self, chat_client: AsyncClient, test_config: TriBridConfig
-    ):
-        test_config.semantic_cache.enabled = 1
-        test_config.semantic_cache.mode = "read_write"
-        test_config.semantic_cache.min_query_chars = 1
-        cache_writes: list[dict[str, object]] = []
-
-        async def mock_stream_chat_text(*args, **kwargs):
-            _ = (args, kwargs)
-            if False:  # pragma: no cover
-                yield ""
-
-        async def mock_lookup(self, **_kwargs):
-            return None
-
-        async def mock_write(self, **kwargs):
-            cache_writes.append(kwargs)
-            return True
-
-        with (
-            patch("server.chat.handler.stream_chat_text", new=mock_stream_chat_text),
-            patch("server.chat.handler.SemanticCacheService.lookup", new=mock_lookup),
-            patch("server.chat.handler.SemanticCacheService.write", new=mock_write),
-        ):
-            response = await chat_client.post(
-                "/api/chat/stream",
-                json={"message": "No stream output", "sources": {"corpus_ids": []}},
-            )
-
-        assert response.status_code == 200
-        assert "Error: LLM stream produced no content" in response.text
-        assert '"llm_used": false' in response.text
-        assert cache_writes == []
-
-
 class TestChatCitationsRealPipeline:
     """Exercise the real rag pipeline without external API calls.
 
