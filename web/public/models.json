@@ -1,6 +1,6 @@
 {
   "currency": "USD",
-  "last_updated": "2026-02-07",
+  "last_updated": "2026-02-27",
   "sources": [
     "https://openai.com/api/pricing/ (2026-02-07)",
     "https://www.anthropic.com/pricing (2026-02-07)",
@@ -9,287 +9,293 @@
     "https://docs.voyageai.com/docs/pricing (2025-11-29)",
     "https://mistral.ai/pricing (2025-11-29)",
     "https://api-docs.deepseek.com/quick_start/pricing (2025-11-29)",
-    "https://jina.ai/embeddings/ (2025-11-29)"
+    "https://jina.ai/embeddings/ (2025-11-29)",
+    "https://openrouter.ai/api/v1/models (2026-02-27)"
   ],
   "models": [
     {
-      "provider": "openai",
-      "family": "gpt-5.2",
-      "model": "gpt-5.2",
-      "components": ["GEN"],
+      "provider": "anthropic",
+      "family": "claude-3-haiku",
+      "model": "claude-3-haiku",
+      "components": [
+        "GEN"
+      ],
       "unit": "1k_tokens",
-      "input_per_1k": 0.00175,
-      "output_per_1k": 0.014,
-      "context": 400000,
-      "notes": "The best model for coding and agentic tasks across industries"
-    },
-    {
-      "provider": "openai",
-      "family": "gpt-5.2",
-      "model": "gpt-5.2-mini",
-      "components": ["GEN"],
-      "unit": "1k_tokens",
+      "context": 200000,
       "input_per_1k": 0.00025,
-      "output_per_1k": 0.002,
+      "output_per_1k": 0.00125,
+      "base_url": "https://api.anthropic.com",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "anthropic",
+      "family": "claude-3.5-haiku",
+      "model": "claude-3.5-haiku",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
       "context": 200000,
-      "notes": "o4-mini efficient reasoning (source: per 1M = $0.40/$1.60)"
+      "input_per_1k": 0.0008,
+      "output_per_1k": 0.004,
+      "base_url": "https://api.anthropic.com",
+      "notes": "Added automatically from OpenRouter feed."
     },
     {
-      "provider": "openai",
-      "family": "gpt-5.1-nano",
-      "model": "gpt-5.1-nano",
-      "components": ["GEN"],
+      "provider": "anthropic",
+      "family": "claude-3.5-sonnet",
+      "model": "claude-3.5-sonnet",
+      "components": [
+        "GEN"
+      ],
       "unit": "1k_tokens",
-      "input_per_1k": 0.00006,
-      "output_per_1k": 0.0005,
-      "context": 256000,
-      "notes": "GPT-5.1 nano ultra-budget (source: per 1M = $0.06/$0.50)"
+      "context": 200000,
+      "input_per_1k": 0.006,
+      "output_per_1k": 0.03,
+      "base_url": "https://api.anthropic.com",
+      "notes": "Added automatically from OpenRouter feed."
     },
     {
-      "provider": "openai",
-      "family": "gpt-5",
-      "model": "gpt-5",
-      "components": ["GEN"],
+      "provider": "anthropic",
+      "family": "claude-3.7-sonnet",
+      "model": "claude-3.7-sonnet",
+      "components": [
+        "GEN"
+      ],
       "unit": "1k_tokens",
+      "context": 200000,
       "input_per_1k": 0.003,
-      "output_per_1k": 0.012,
+      "output_per_1k": 0.015,
+      "base_url": "https://api.anthropic.com",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "anthropic",
+      "family": "claude-haiku-4.5",
+      "model": "claude-haiku-4.5",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "input_per_1k": 0.001,
+      "output_per_1k": 0.005,
       "context": 200000,
-      "notes": "GPT-5 flagship (source: per 1M = $3.00/$12.00)"
+      "notes": "Claude Haiku 4.5 (source: per 1M = $1/$5)",
+      "base_url": "https://api.anthropic.com"
     },
     {
-      "provider": "openai",
-      "family": "gpt-5-mini",
-      "model": "gpt-5-mini",
-      "components": ["GEN"],
+      "provider": "anthropic",
+      "family": "claude-opus-4",
+      "model": "claude-opus-4",
+      "components": [
+        "GEN"
+      ],
       "unit": "1k_tokens",
-      "input_per_1k": 0.0006,
-      "output_per_1k": 0.0024,
       "context": 200000,
-      "notes": "GPT-5 mini (source: per 1M = $0.60/$2.40)"
+      "input_per_1k": 0.015,
+      "output_per_1k": 0.075,
+      "base_url": "https://api.anthropic.com",
+      "notes": "Added automatically from OpenRouter feed."
     },
     {
-      "provider": "openai",
-      "family": "gpt-5-nano",
-      "model": "gpt-5-nano",
-      "components": ["GEN"],
+      "provider": "anthropic",
+      "family": "claude-opus-4.1",
+      "model": "claude-opus-4.1",
+      "components": [
+        "GEN"
+      ],
       "unit": "1k_tokens",
-      "input_per_1k": 0.00012,
-      "output_per_1k": 0.00048,
       "context": 200000,
-      "notes": "GPT-5 nano ultra-budget (source: per 1M = $0.12/$0.48)"
+      "input_per_1k": 0.015,
+      "output_per_1k": 0.075,
+      "base_url": "https://api.anthropic.com",
+      "notes": "Added automatically from OpenRouter feed."
     },
     {
-      "provider": "openai",
-      "family": "gpt-4.1",
-      "model": "gpt-4.1",
-      "components": ["GEN"],
+      "provider": "anthropic",
+      "family": "claude-opus-4.5",
+      "model": "claude-opus-4.5",
+      "components": [
+        "GEN"
+      ],
       "unit": "1k_tokens",
-      "input_per_1k": 0.002,
-      "output_per_1k": 0.008,
-      "context": 1000000,
-      "notes": "GPT-4.1 1M context (source: per 1M = $2.00/$8.00)"
-    },
-    {
-      "provider": "openai",
-      "family": "gpt-4.1-mini",
-      "model": "gpt-4.1-mini",
-      "components": ["GEN"],
-      "unit": "1k_tokens",
-      "input_per_1k": 0.0004,
-      "output_per_1k": 0.0016,
-      "context": 1000000,
-      "notes": "GPT-4.1 mini (source: per 1M = $0.40/$1.60)"
-    },
-    {
-      "provider": "openai",
-      "family": "gpt-4.1-nano",
-      "model": "gpt-4.1-nano",
-      "components": ["GEN"],
-      "unit": "1k_tokens",
-      "input_per_1k": 0.0001,
-      "output_per_1k": 0.0004,
-      "context": 1000000,
-      "notes": "GPT-4.1 nano (source: per 1M = $0.10/$0.40)"
-    },
-    {
-      "provider": "openai",
-      "family": "text-embedding-3-small",
-      "model": "text-embedding-3-small",
-      "components": ["EMB"],
-      "unit": "1k_tokens",
-      "embed_per_1k": 0.00002,
-      "dimensions": 1536,
-      "notes": "Small embeddings (source: per 1M = $0.02)"
-    },
-    {
-      "provider": "openai",
-      "family": "text-embedding-3-large",
-      "model": "text-embedding-3-large",
-      "components": ["EMB"],
-      "unit": "1k_tokens",
-      "embed_per_1k": 0.00013,
-      "dimensions": 3072,
-      "notes": "Large embeddings (source: per 1M = $0.13)"
+      "context": 200000,
+      "input_per_1k": 0.005,
+      "output_per_1k": 0.025,
+      "base_url": "https://api.anthropic.com",
+      "notes": "Added automatically from OpenRouter feed."
     },
     {
       "provider": "anthropic",
       "family": "claude-opus-4.6",
       "model": "claude-opus-4.6",
-      "components": ["GEN"],
+      "components": [
+        "GEN"
+      ],
       "unit": "1k_tokens",
       "input_per_1k": 0.005,
-      "output_per_1k": 0.01,
+      "output_per_1k": 0.025,
       "context": 1000000,
-      "notes": "Claude Opus 4.6  (source: per 1M = $5/$10)"
+      "notes": "Claude Opus 4.6  (source: per 1M = $5/$10)",
+      "base_url": "https://api.anthropic.com"
+    },
+    {
+      "provider": "anthropic",
+      "family": "claude-sonnet-4",
+      "model": "claude-sonnet-4",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 1000000,
+      "input_per_1k": 0.003,
+      "output_per_1k": 0.015,
+      "base_url": "https://api.anthropic.com",
+      "notes": "Added automatically from OpenRouter feed."
     },
     {
       "provider": "anthropic",
       "family": "claude-sonnet-4.5",
       "model": "claude-sonnet-4.5",
-      "components": ["GEN"],
+      "components": [
+        "GEN"
+      ],
       "unit": "1k_tokens",
       "input_per_1k": 0.003,
-      "output_per_1k": 0.006,
-      "context": 400000,
-      "notes": "Claude Sonnet 4.5 (sourc`e: per 1M = $3/$15)"
+      "output_per_1k": 0.015,
+      "context": 1000000,
+      "notes": "Claude Sonnet 4.5 (sourc`e: per 1M = $3/$15)",
+      "base_url": "https://api.anthropic.com"
     },
-
     {
       "provider": "anthropic",
-      "family": "claude-haiku-4.5",
-      "model": "claude-haiku-4.5",
-      "components": ["GEN"],
+      "family": "claude-sonnet-4.6",
+      "model": "claude-sonnet-4.6",
+      "components": [
+        "GEN"
+      ],
       "unit": "1k_tokens",
-      "input_per_1k": 0.001,
-      "output_per_1k": 0.0001,
-      "context": 200000,
-      "notes": "Claude Haiku 4.5 (source: per 1M = $1/$5)"
-    },
-    {
-      "provider": "google",
-      "family": "gemini-3-pro-preview",
-      "model": "gemini-3-pro-preview",
-      "components": ["GEN"],
-      "unit": "1k_tokens",
-      "input_per_1k": 0.002,
-      "output_per_1k": 0.012,
-      "context": 200000,
-      "notes": "Gemini 3 Pro Preview <=200k (source: per 1M = $2.00/$12.00)"
-    },
-    {
-      "provider": "google",
-      "family": "gemini-2.5-pro",
-      "model": "gemini-2.5-pro",
-      "components": ["GEN"],
-      "unit": "1k_tokens",
-      "input_per_1k": 0.00125,
-      "output_per_1k": 0.01,
-      "context": 200000,
-      "notes": "Gemini 2.5 Pro <=200k (source: per 1M = $1.25/$10.00)"
-    },
-    {
-      "provider": "google",
-      "family": "gemini-2.5-flash",
-      "model": "gemini-2.5-flash",
-      "components": ["GEN"],
-      "unit": "1k_tokens",
-      "input_per_1k": 0.0003,
-      "output_per_1k": 0.0025,
       "context": 1000000,
-      "notes": "Gemini 2.5 Flash (source: per 1M = $0.30/$2.50)"
-    },
-    {
-      "provider": "google",
-      "family": "gemini-2.5-flash-lite",
-      "model": "gemini-2.5-flash-lite",
-      "components": ["GEN"],
-      "unit": "1k_tokens",
-      "input_per_1k": 0.0001,
-      "output_per_1k": 0.0004,
-      "context": 1000000,
-      "notes": "Gemini 2.5 Flash-Lite (source: per 1M = $0.10/$0.40)"
-    },
-    {
-      "provider": "google",
-      "family": "gemini-2.0-flash",
-      "model": "gemini-2.0-flash",
-      "components": ["GEN"],
-      "unit": "1k_tokens",
-      "input_per_1k": 0.0001,
-      "output_per_1k": 0.0004,
-      "context": 1000000,
-      "notes": "Gemini 2.0 Flash (source: per 1M = $0.10/$0.40)"
-    },
-    {
-      "provider": "google",
-      "family": "gemini-embedding-001",
-      "model": "gemini-embedding-001",
-      "components": ["EMB"],
-      "unit": "1k_tokens",
-      "embed_per_1k": 0.00015,
-      "dimensions": 3072,
-      "notes": "Gemini embeddings (source: per 1M = $0.15)"
-    },
-    {
-      "provider": "cohere",
-      "family": "command-a",
-      "model": "command-a",
-      "components": ["GEN"],
-      "unit": "1k_tokens",
-      "input_per_1k": 0.0025,
-      "output_per_1k": 0.01,
-      "context": 128000,
-      "notes": "Command A (source: per 1M = $2.50/$10.00)"
-    },
-    {
-      "provider": "cohere",
-      "family": "command-r-plus",
-      "model": "command-r-plus",
-      "components": ["GEN"],
-      "unit": "1k_tokens",
-      "input_per_1k": 0.0025,
-      "output_per_1k": 0.01,
-      "context": 128000,
-      "notes": "Command R+ 08-2024 (source: per 1M = $2.50/$10.00)"
-    },
-    {
-      "provider": "cohere",
-      "family": "command-r",
-      "model": "command-r",
-      "components": ["GEN"],
-      "unit": "1k_tokens",
-      "input_per_1k": 0.0005,
-      "output_per_1k": 0.0015,
-      "context": 128000,
-      "notes": "Command R 03-2024 (source: per 1M = $0.50/$1.50)"
+      "input_per_1k": 0.003,
+      "output_per_1k": 0.015,
+      "base_url": "https://api.anthropic.com",
+      "notes": "Added automatically from OpenRouter feed."
     },
     {
       "provider": "cohere",
       "family": "command",
       "model": "command",
-      "components": ["GEN"],
+      "components": [
+        "GEN"
+      ],
       "unit": "1k_tokens",
       "input_per_1k": 0.001,
       "output_per_1k": 0.002,
       "context": 128000,
-      "notes": "Command legacy (source: per 1M = $1.00/$2.00)"
+      "notes": "Command legacy (source: per 1M = $1.00/$2.00) | [auto-refresh] deprecated_on=2026-02-27"
+    },
+    {
+      "provider": "cohere",
+      "family": "command-a",
+      "model": "command-a",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "input_per_1k": 0.0025,
+      "output_per_1k": 0.01,
+      "context": 256000,
+      "notes": "Command A (source: per 1M = $2.50/$10.00)",
+      "base_url": "https://api.cohere.ai/v2"
     },
     {
       "provider": "cohere",
       "family": "command-light",
       "model": "command-light",
-      "components": ["GEN"],
+      "components": [
+        "GEN"
+      ],
       "unit": "1k_tokens",
       "input_per_1k": 0.0003,
       "output_per_1k": 0.0006,
       "context": 128000,
-      "notes": "Command Light (source: per 1M = $0.30/$0.60)"
+      "notes": "Command Light (source: per 1M = $0.30/$0.60) | [auto-refresh] deprecated_on=2026-02-27"
+    },
+    {
+      "provider": "cohere",
+      "family": "command-r",
+      "model": "command-r",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "input_per_1k": 0.0005,
+      "output_per_1k": 0.0015,
+      "context": 128000,
+      "notes": "Command R 03-2024 (source: per 1M = $0.50/$1.50) | [auto-refresh] deprecated_on=2026-02-27"
+    },
+    {
+      "provider": "cohere",
+      "family": "command-r-08-2024",
+      "model": "command-r-08-2024",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 128000,
+      "input_per_1k": 0.00015,
+      "output_per_1k": 0.0006,
+      "base_url": "https://api.cohere.ai/v2",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "cohere",
+      "family": "command-r-plus",
+      "model": "command-r-plus",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "input_per_1k": 0.0025,
+      "output_per_1k": 0.01,
+      "context": 128000,
+      "notes": "Command R+ 08-2024 (source: per 1M = $2.50/$10.00) | [auto-refresh] deprecated_on=2026-02-27"
+    },
+    {
+      "provider": "cohere",
+      "family": "command-r-plus-08-2024",
+      "model": "command-r-plus-08-2024",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 128000,
+      "input_per_1k": 0.0025,
+      "output_per_1k": 0.01,
+      "base_url": "https://api.cohere.ai/v2",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "cohere",
+      "family": "command-r7b-12-2024",
+      "model": "command-r7b-12-2024",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 128000,
+      "input_per_1k": 3.75e-05,
+      "output_per_1k": 0.00015,
+      "base_url": "https://api.cohere.ai/v2",
+      "notes": "Added automatically from OpenRouter feed."
     },
     {
       "provider": "cohere",
       "family": "embed-4",
       "model": "embed-4",
-      "components": ["EMB"],
+      "components": [
+        "EMB"
+      ],
       "unit": "1k_tokens",
       "embed_per_1k": 0.00012,
       "dimensions": 1024,
@@ -299,7 +305,9 @@
       "provider": "cohere",
       "family": "embed-english-v3.0",
       "model": "embed-english-v3.0",
-      "components": ["EMB"],
+      "components": [
+        "EMB"
+      ],
       "unit": "1k_tokens",
       "embed_per_1k": 0.0001,
       "dimensions": 1024,
@@ -309,7 +317,9 @@
       "provider": "cohere",
       "family": "embed-multilingual-v3.0",
       "model": "embed-multilingual-v3.0",
-      "components": ["EMB"],
+      "components": [
+        "EMB"
+      ],
       "unit": "1k_tokens",
       "embed_per_1k": 0.0001,
       "dimensions": 1024,
@@ -319,7 +329,9 @@
       "provider": "cohere",
       "family": "rerank-3.5",
       "model": "rerank-3.5",
-      "components": ["RERANK"],
+      "components": [
+        "RERANK"
+      ],
       "unit": "request",
       "per_request": 0.002,
       "notes": "Rerank 3.5 - $2.00 per 1k searches (1 search = 1 query + up to 100 docs)"
@@ -328,7 +340,9 @@
       "provider": "cohere",
       "family": "rerank-english-v3.0",
       "model": "rerank-english-v3.0",
-      "components": ["RERANK"],
+      "components": [
+        "RERANK"
+      ],
       "unit": "request",
       "per_request": 0.002,
       "notes": "English reranker v3.0 - $2.00 per 1k searches"
@@ -337,312 +351,506 @@
       "provider": "cohere",
       "family": "rerank-multilingual-v3.0",
       "model": "rerank-multilingual-v3.0",
-      "components": ["RERANK"],
+      "components": [
+        "RERANK"
+      ],
       "unit": "request",
       "per_request": 0.002,
       "notes": "Multilingual reranker v3.0 - $2.00 per 1k searches"
     },
     {
-      "provider": "voyage",
-      "family": "voyage-3-large",
-      "model": "voyage-3-large",
-      "components": ["EMB"],
-      "unit": "1k_tokens",
-      "embed_per_1k": 0.00018,
-      "dimensions": 1024,
-      "notes": "Voyage 3 Large (source: per 1M = $0.18)"
-    },
-    {
-      "provider": "voyage",
-      "family": "voyage-code-3",
-      "model": "voyage-code-3",
-      "components": ["EMB"],
-      "unit": "1k_tokens",
-      "embed_per_1k": 0.00018,
-      "dimensions": 1024,
-      "notes": "Voyage Code 3 (source: per 1M = $0.18)"
-    },
-    {
-      "provider": "voyage",
-      "family": "voyage-context-3",
-      "model": "voyage-context-3",
-      "components": ["EMB"],
-      "unit": "1k_tokens",
-      "embed_per_1k": 0.00018,
-      "dimensions": 1024,
-      "notes": "Voyage Context 3 (source: per 1M = $0.18)"
-    },
-    {
-      "provider": "voyage",
-      "family": "voyage-3.5",
-      "model": "voyage-3.5",
-      "components": ["EMB"],
-      "unit": "1k_tokens",
-      "embed_per_1k": 0.00006,
-      "dimensions": 1024,
-      "notes": "Voyage 3.5 balanced (source: per 1M = $0.06)"
-    },
-    {
-      "provider": "voyage",
-      "family": "voyage-3.5-lite",
-      "model": "voyage-3.5-lite",
-      "components": ["EMB"],
-      "unit": "1k_tokens",
-      "embed_per_1k": 0.00002,
-      "dimensions": 1024,
-      "notes": "Voyage 3.5 Lite fastest (source: per 1M = $0.02)"
-    },
-    {
-      "provider": "voyage",
-      "family": "voyage-multilingual-2",
-      "model": "voyage-multilingual-2",
-      "components": ["EMB"],
-      "unit": "1k_tokens",
-      "embed_per_1k": 0.00012,
-      "dimensions": 1024,
-      "notes": "Voyage Multilingual 2 (source: per 1M = $0.12)"
-    },
-    {
-      "provider": "voyage",
-      "family": "voyage-finance-2",
-      "model": "voyage-finance-2",
-      "components": ["EMB"],
-      "unit": "1k_tokens",
-      "embed_per_1k": 0.00012,
-      "dimensions": 1024,
-      "notes": "Voyage Finance 2 (source: per 1M = $0.12)"
-    },
-    {
-      "provider": "voyage",
-      "family": "voyage-law-2",
-      "model": "voyage-law-2",
-      "components": ["EMB"],
-      "unit": "1k_tokens",
-      "embed_per_1k": 0.00012,
-      "dimensions": 1024,
-      "notes": "Voyage Law 2 (source: per 1M = $0.12)"
-    },
-    {
-      "provider": "voyage",
-      "family": "voyage-code-2",
-      "model": "voyage-code-2",
-      "components": ["EMB"],
-      "unit": "1k_tokens",
-      "embed_per_1k": 0.00012,
-      "dimensions": 1024,
-      "notes": "Voyage Code 2 (source: per 1M = $0.12)"
-    },
-    {
-      "provider": "voyage",
-      "family": "rerank-2.5",
-      "model": "rerank-2.5",
-      "components": ["RERANK"],
-      "unit": "1k_tokens",
-      "rerank_per_1k": 0.00005,
-      "notes": "Voyage Rerank 2.5 (source: per 1M = $0.05)"
-    },
-    {
-      "provider": "voyage",
-      "family": "rerank-2.5-lite",
-      "model": "rerank-2.5-lite",
-      "components": ["RERANK"],
-      "unit": "1k_tokens",
-      "rerank_per_1k": 0.00002,
-      "notes": "Voyage Rerank 2.5 Lite (source: per 1M = $0.02)"
-    },
-    {
-      "provider": "voyage",
-      "family": "rerank-2",
-      "model": "rerank-2",
-      "components": ["RERANK"],
-      "unit": "1k_tokens",
-      "rerank_per_1k": 0.00005,
-      "notes": "Voyage Rerank 2 (source: per 1M = $0.05)"
-    },
-    {
-      "provider": "voyage",
-      "family": "rerank-2-lite",
-      "model": "rerank-2-lite",
-      "components": ["RERANK"],
-      "unit": "1k_tokens",
-      "rerank_per_1k": 0.00002,
-      "notes": "Voyage Rerank 2 Lite (source: per 1M = $0.02)"
-    },
-    {
-      "provider": "mistral",
-      "family": "mistral-large",
-      "model": "mistral-large",
-      "components": ["GEN"],
-      "unit": "1k_tokens",
-      "input_per_1k": 0.002,
-      "output_per_1k": 0.006,
-      "context": 128000,
-      "notes": "Mistral Large (source: per 1M = $2.00/$6.00)"
-    },
-    {
-      "provider": "mistral",
-      "family": "mistral-medium-3",
-      "model": "mistral-medium-3",
-      "components": ["GEN"],
-      "unit": "1k_tokens",
-      "input_per_1k": 0.0004,
-      "output_per_1k": 0.002,
-      "context": 128000,
-      "notes": "Mistral Medium 3 (source: per 1M = $0.40/$2.00)"
-    },
-    {
-      "provider": "mistral",
-      "family": "mistral-small",
-      "model": "mistral-small",
-      "components": ["GEN"],
-      "unit": "1k_tokens",
-      "input_per_1k": 0.0001,
-      "output_per_1k": 0.0003,
-      "context": 128000,
-      "notes": "Mistral Small (source: per 1M = $0.10/$0.30)"
-    },
-    {
-      "provider": "mistral",
-      "family": "codestral",
-      "model": "codestral",
-      "components": ["GEN"],
-      "unit": "1k_tokens",
-      "input_per_1k": 0.0003,
-      "output_per_1k": 0.0009,
-      "context": 256000,
-      "notes": "Codestral code generation (source: per 1M = $0.30/$0.90)"
-    },
-    {
-      "provider": "mistral",
-      "family": "mixtral-8x22b",
-      "model": "mixtral-8x22b",
-      "components": ["GEN"],
-      "unit": "1k_tokens",
-      "input_per_1k": 0.002,
-      "output_per_1k": 0.006,
-      "context": 64000,
-      "notes": "Mixtral 8x22B MOE (source: per 1M = $2.00/$6.00)"
-    },
-    {
-      "provider": "mistral",
-      "family": "mixtral-8x7b",
-      "model": "mixtral-8x7b",
-      "components": ["GEN"],
-      "unit": "1k_tokens",
-      "input_per_1k": 0.0007,
-      "output_per_1k": 0.0007,
-      "context": 32768,
-      "notes": "Mixtral 8x7B (source: per 1M = $0.70/$0.70)"
-    },
-    {
-      "provider": "mistral",
-      "family": "mistral-7b",
-      "model": "mistral-7b",
-      "components": ["GEN"],
-      "unit": "1k_tokens",
-      "input_per_1k": 0.00025,
-      "output_per_1k": 0.00025,
-      "context": 32768,
-      "notes": "Mistral 7B open (source: per 1M = $0.25/$0.25)"
-    },
-    {
-      "provider": "mistral",
-      "family": "mistral-embed",
-      "model": "mistral-embed",
-      "components": ["EMB"],
-      "unit": "1k_tokens",
-      "embed_per_1k": 0.00001,
-      "dimensions": 1024,
-      "notes": "Mistral Embed (source: per 1M = $0.01)"
-    },
-    {
       "provider": "deepseek",
       "family": "deepseek-chat",
       "model": "deepseek-chat",
-      "components": ["GEN"],
+      "components": [
+        "GEN"
+      ],
       "unit": "1k_tokens",
-      "input_per_1k": 0.00028,
-      "output_per_1k": 0.00042,
-      "context": 128000,
-      "notes": "DeepSeek V3.2-Exp non-thinking (source: per 1M = $0.28/$0.42, cache hit $0.028)"
+      "input_per_1k": 0.00032,
+      "output_per_1k": 0.00089,
+      "context": 163840,
+      "notes": "DeepSeek V3.2-Exp non-thinking (source: per 1M = $0.28/$0.42, cache hit $0.028)",
+      "base_url": "https://api.deepseek.com/v1"
+    },
+    {
+      "provider": "deepseek",
+      "family": "deepseek-chat-v3-0324",
+      "model": "deepseek-chat-v3-0324",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 163840,
+      "input_per_1k": 0.00019,
+      "output_per_1k": 0.00087,
+      "base_url": "https://api.deepseek.com/v1",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "deepseek",
+      "family": "deepseek-chat-v3.1",
+      "model": "deepseek-chat-v3.1",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 32768,
+      "input_per_1k": 0.00015,
+      "output_per_1k": 0.00075,
+      "base_url": "https://api.deepseek.com/v1",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "deepseek",
+      "family": "deepseek-r1",
+      "model": "deepseek-r1",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 64000,
+      "input_per_1k": 0.0007,
+      "output_per_1k": 0.0025,
+      "base_url": "https://api.deepseek.com/v1",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "deepseek",
+      "family": "deepseek-r1-0528",
+      "model": "deepseek-r1-0528",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 163840,
+      "input_per_1k": 0.0004,
+      "output_per_1k": 0.00175,
+      "base_url": "https://api.deepseek.com/v1",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "deepseek",
+      "family": "deepseek-r1-distill-llama-70b",
+      "model": "deepseek-r1-distill-llama-70b",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 131072,
+      "input_per_1k": 0.0007,
+      "output_per_1k": 0.0008,
+      "base_url": "https://api.deepseek.com/v1",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "deepseek",
+      "family": "deepseek-r1-distill-qwen-32b",
+      "model": "deepseek-r1-distill-qwen-32b",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 32768,
+      "input_per_1k": 0.00029,
+      "output_per_1k": 0.00029,
+      "base_url": "https://api.deepseek.com/v1",
+      "notes": "Added automatically from OpenRouter feed."
     },
     {
       "provider": "deepseek",
       "family": "deepseek-reasoner",
       "model": "deepseek-reasoner",
-      "components": ["GEN"],
+      "components": [
+        "GEN"
+      ],
       "unit": "1k_tokens",
       "input_per_1k": 0.00028,
       "output_per_1k": 0.00042,
       "context": 128000,
-      "notes": "DeepSeek V3.2-Exp thinking mode (source: per 1M = $0.28/$0.42, cache hit $0.028)"
+      "notes": "DeepSeek V3.2-Exp thinking mode (source: per 1M = $0.28/$0.42, cache hit $0.028) | [auto-refresh] deprecated_on=2026-02-27"
     },
     {
-      "provider": "jina",
-      "family": "jina-embeddings-v3",
-      "model": "jina-embeddings-v3",
-      "components": ["EMB"],
+      "provider": "deepseek",
+      "family": "deepseek-v3.1-terminus",
+      "model": "deepseek-v3.1-terminus",
+      "components": [
+        "GEN"
+      ],
       "unit": "1k_tokens",
-      "embed_per_1k": 0.00002,
-      "dimensions": 1024,
-      "notes": "Jina Embeddings v3 8192 tokens (source: ~$0.02 per 1M)"
+      "context": 163840,
+      "input_per_1k": 0.00021,
+      "output_per_1k": 0.00079,
+      "base_url": "https://api.deepseek.com/v1",
+      "notes": "Added automatically from OpenRouter feed."
     },
     {
-      "provider": "jina",
-      "family": "jina-reranker-v3",
-      "model": "jina-reranker-v3",
-      "components": ["RERANK"],
+      "provider": "deepseek",
+      "family": "deepseek-v3.2",
+      "model": "deepseek-v3.2",
+      "components": [
+        "GEN"
+      ],
       "unit": "1k_tokens",
-      "rerank_per_1k": 0.00002,
-      "notes": "Jina Reranker v3 (source: ~$0.02 per 1M)"
+      "context": 163840,
+      "input_per_1k": 0.00025,
+      "output_per_1k": 0.0004,
+      "base_url": "https://api.deepseek.com/v1",
+      "notes": "Added automatically from OpenRouter feed."
     },
     {
-      "provider": "jina",
-      "family": "jina-clip-v2",
-      "model": "jina-clip-v2",
-      "components": ["EMB"],
+      "provider": "deepseek",
+      "family": "deepseek-v3.2-exp",
+      "model": "deepseek-v3.2-exp",
+      "components": [
+        "GEN"
+      ],
       "unit": "1k_tokens",
-      "embed_per_1k": 0.00002,
-      "dimensions": 768,
-      "notes": "Jina CLIP v2 multimodal (source: ~$0.02 per 1M)"
+      "context": 163840,
+      "input_per_1k": 0.00027,
+      "output_per_1k": 0.00041,
+      "base_url": "https://api.deepseek.com/v1",
+      "notes": "Added automatically from OpenRouter feed."
     },
     {
-      "provider": "xai",
-      "family": "grok-4",
-      "model": "grok-4",
-      "components": ["GEN"],
+      "provider": "deepseek",
+      "family": "deepseek-v3.2-speciale",
+      "model": "deepseek-v3.2-speciale",
+      "components": [
+        "GEN"
+      ],
       "unit": "1k_tokens",
-      "input_per_1k": 0.003,
-      "output_per_1k": 0.015,
-      "context": 2000000,
-      "notes": "Grok 4 - 2M context (pricing estimated)"
+      "context": 163840,
+      "input_per_1k": 0.0004,
+      "output_per_1k": 0.0012,
+      "base_url": "https://api.deepseek.com/v1",
+      "notes": "Added automatically from OpenRouter feed."
     },
     {
-      "provider": "xai",
-      "family": "grok-3",
-      "model": "grok-3",
-      "components": ["GEN"],
+      "provider": "google",
+      "family": "gemini-2.0-flash",
+      "model": "gemini-2.0-flash",
+      "components": [
+        "GEN"
+      ],
       "unit": "1k_tokens",
-      "input_per_1k": 0.003,
-      "output_per_1k": 0.015,
+      "input_per_1k": 0.0001,
+      "output_per_1k": 0.0004,
+      "context": 1000000,
+      "notes": "Gemini 2.0 Flash (source: per 1M = $0.10/$0.40) | [auto-refresh] deprecated_on=2026-02-27"
+    },
+    {
+      "provider": "google",
+      "family": "gemini-2.0-flash-001",
+      "model": "gemini-2.0-flash-001",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 1048576,
+      "input_per_1k": 0.0001,
+      "output_per_1k": 0.0004,
+      "base_url": "https://generativelanguage.googleapis.com",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "google",
+      "family": "gemini-2.0-flash-lite-001",
+      "model": "gemini-2.0-flash-lite-001",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 1048576,
+      "input_per_1k": 7.5e-05,
+      "output_per_1k": 0.0003,
+      "base_url": "https://generativelanguage.googleapis.com",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "google",
+      "family": "gemini-2.5-flash",
+      "model": "gemini-2.5-flash",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "input_per_1k": 0.0003,
+      "output_per_1k": 0.0025,
+      "context": 1048576,
+      "notes": "Gemini 2.5 Flash (source: per 1M = $0.30/$2.50)",
+      "base_url": "https://generativelanguage.googleapis.com"
+    },
+    {
+      "provider": "google",
+      "family": "gemini-2.5-flash-image",
+      "model": "gemini-2.5-flash-image",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 32768,
+      "input_per_1k": 0.0003,
+      "output_per_1k": 0.0025,
+      "base_url": "https://generativelanguage.googleapis.com",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "google",
+      "family": "gemini-2.5-flash-lite",
+      "model": "gemini-2.5-flash-lite",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "input_per_1k": 0.0001,
+      "output_per_1k": 0.0004,
+      "context": 1048576,
+      "notes": "Gemini 2.5 Flash-Lite (source: per 1M = $0.10/$0.40)",
+      "base_url": "https://generativelanguage.googleapis.com"
+    },
+    {
+      "provider": "google",
+      "family": "gemini-2.5-flash-lite-preview-09-2025",
+      "model": "gemini-2.5-flash-lite-preview-09-2025",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 1048576,
+      "input_per_1k": 0.0001,
+      "output_per_1k": 0.0004,
+      "base_url": "https://generativelanguage.googleapis.com",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "google",
+      "family": "gemini-2.5-pro",
+      "model": "gemini-2.5-pro",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "input_per_1k": 0.00125,
+      "output_per_1k": 0.01,
+      "context": 1048576,
+      "notes": "Gemini 2.5 Pro <=200k (source: per 1M = $1.25/$10.00)",
+      "base_url": "https://generativelanguage.googleapis.com"
+    },
+    {
+      "provider": "google",
+      "family": "gemini-2.5-pro-preview",
+      "model": "gemini-2.5-pro-preview",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 1048576,
+      "input_per_1k": 0.00125,
+      "output_per_1k": 0.01,
+      "base_url": "https://generativelanguage.googleapis.com",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "google",
+      "family": "gemini-2.5-pro-preview-05-06",
+      "model": "gemini-2.5-pro-preview-05-06",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 1048576,
+      "input_per_1k": 0.00125,
+      "output_per_1k": 0.01,
+      "base_url": "https://generativelanguage.googleapis.com",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "google",
+      "family": "gemini-3-flash-preview",
+      "model": "gemini-3-flash-preview",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 1048576,
+      "input_per_1k": 0.0005,
+      "output_per_1k": 0.003,
+      "base_url": "https://generativelanguage.googleapis.com",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "google",
+      "family": "gemini-3-pro-image-preview",
+      "model": "gemini-3-pro-image-preview",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 65536,
+      "input_per_1k": 0.002,
+      "output_per_1k": 0.012,
+      "base_url": "https://generativelanguage.googleapis.com",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "google",
+      "family": "gemini-3-pro-preview",
+      "model": "gemini-3-pro-preview",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "input_per_1k": 0.002,
+      "output_per_1k": 0.012,
+      "context": 1048576,
+      "notes": "Gemini 3 Pro Preview <=200k (source: per 1M = $2.00/$12.00)",
+      "base_url": "https://generativelanguage.googleapis.com"
+    },
+    {
+      "provider": "google",
+      "family": "gemini-3.1-flash-image-preview",
+      "model": "gemini-3.1-flash-image-preview",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 65536,
+      "input_per_1k": 0.00025,
+      "output_per_1k": 0.0015,
+      "base_url": "https://generativelanguage.googleapis.com",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "google",
+      "family": "gemini-3.1-pro-preview",
+      "model": "gemini-3.1-pro-preview",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 1048576,
+      "input_per_1k": 0.002,
+      "output_per_1k": 0.012,
+      "base_url": "https://generativelanguage.googleapis.com",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "google",
+      "family": "gemini-3.1-pro-preview-customtools",
+      "model": "gemini-3.1-pro-preview-customtools",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 1048576,
+      "input_per_1k": 0.002,
+      "output_per_1k": 0.012,
+      "base_url": "https://generativelanguage.googleapis.com",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "google",
+      "family": "gemini-embedding-001",
+      "model": "gemini-embedding-001",
+      "components": [
+        "EMB"
+      ],
+      "unit": "1k_tokens",
+      "embed_per_1k": 0.00015,
+      "dimensions": 3072,
+      "notes": "Gemini embeddings (source: per 1M = $0.15)"
+    },
+    {
+      "provider": "google",
+      "family": "gemma-2-27b-it",
+      "model": "gemma-2-27b-it",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 8192,
+      "input_per_1k": 0.00065,
+      "output_per_1k": 0.00065,
+      "base_url": "https://generativelanguage.googleapis.com",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "google",
+      "family": "gemma-2-9b-it",
+      "model": "gemma-2-9b-it",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 8192,
+      "input_per_1k": 3e-05,
+      "output_per_1k": 9e-05,
+      "base_url": "https://generativelanguage.googleapis.com",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "google",
+      "family": "gemma-3-12b-it",
+      "model": "gemma-3-12b-it",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
       "context": 131072,
-      "notes": "Grok 3 base (source: per 1M = $3/$15)"
+      "input_per_1k": 4e-05,
+      "output_per_1k": 0.00013,
+      "base_url": "https://generativelanguage.googleapis.com",
+      "notes": "Added automatically from OpenRouter feed."
     },
     {
-      "provider": "huggingface",
-      "family": "intfloat/e5-large-v2",
-      "model": "intfloat/e5-large-v2",
-      "components": ["EMB"],
+      "provider": "google",
+      "family": "gemma-3-27b-it",
+      "model": "gemma-3-27b-it",
+      "components": [
+        "GEN"
+      ],
       "unit": "1k_tokens",
-      "embed_per_1k": 0.0,
-      "dimensions": 1024,
-      "notes": "E5-large-v2 local"
+      "context": 128000,
+      "input_per_1k": 4e-05,
+      "output_per_1k": 0.00015,
+      "base_url": "https://generativelanguage.googleapis.com",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "google",
+      "family": "gemma-3-4b-it",
+      "model": "gemma-3-4b-it",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 131072,
+      "input_per_1k": 4e-05,
+      "output_per_1k": 8e-05,
+      "base_url": "https://generativelanguage.googleapis.com",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "google",
+      "family": "gemma-3n-e4b-it",
+      "model": "gemma-3n-e4b-it",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 32768,
+      "input_per_1k": 2e-05,
+      "output_per_1k": 4e-05,
+      "base_url": "https://generativelanguage.googleapis.com",
+      "notes": "Added automatically from OpenRouter feed."
     },
     {
       "provider": "huggingface",
       "family": "BAAI/bge-m3",
       "model": "BAAI/bge-m3",
-      "components": ["EMB"],
+      "components": [
+        "EMB"
+      ],
       "unit": "1k_tokens",
       "embed_per_1k": 0.0,
       "dimensions": 1024,
@@ -650,131 +858,151 @@
     },
     {
       "provider": "huggingface",
-      "family": "BAAI/bge-small-en-v1.5",
-      "model": "BAAI/bge-small-en-v1.5",
-      "components": ["EMB"],
-      "unit": "1k_tokens",
-      "embed_per_1k": 0.0,
-      "dimensions": 384,
-      "notes": "BGE-small-en local"
-    },
-    {
-      "provider": "mlx",
-      "family": "mlx-community/all-MiniLM-L6-v2-4bit",
-      "model": "mlx-community/all-MiniLM-L6-v2-4bit",
-      "components": ["EMB"],
-      "unit": "1k_tokens",
-      "embed_per_1k": 0.0,
-      "dimensions": 384,
-      "notes": "MLX MiniLM embeddings (Metal GPU)"
-    },
-    {
-      "provider": "huggingface",
       "family": "BAAI/bge-reranker-v2-m3",
       "model": "BAAI/bge-reranker-v2-m3",
-      "components": ["RERANK"],
+      "components": [
+        "RERANK"
+      ],
       "unit": "1k_tokens",
       "rerank_per_1k": 0.0,
       "notes": "BGE-reranker-v2-m3 local"
     },
     {
       "provider": "huggingface",
+      "family": "BAAI/bge-small-en-v1.5",
+      "model": "BAAI/bge-small-en-v1.5",
+      "components": [
+        "EMB"
+      ],
+      "unit": "1k_tokens",
+      "embed_per_1k": 0.0,
+      "dimensions": 384,
+      "notes": "BGE-small-en local"
+    },
+    {
+      "provider": "huggingface",
+      "family": "intfloat/e5-large-v2",
+      "model": "intfloat/e5-large-v2",
+      "components": [
+        "EMB"
+      ],
+      "unit": "1k_tokens",
+      "embed_per_1k": 0.0,
+      "dimensions": 1024,
+      "notes": "E5-large-v2 local"
+    },
+    {
+      "provider": "huggingface",
       "family": "jinaai/jina-reranker-v3",
       "model": "jinaai/jina-reranker-v3",
-      "components": ["RERANK"],
+      "components": [
+        "RERANK"
+      ],
       "unit": "1k_tokens",
       "rerank_per_1k": 0.0,
       "notes": "Jina-reranker-v3 local"
     },
     {
       "provider": "huggingface",
-      "family": "mixedbread-ai/mxbai-rerank-large-v2",
-      "model": "mixedbread-ai/mxbai-rerank-large-v2",
-      "components": ["RERANK"],
-      "unit": "1k_tokens",
-      "rerank_per_1k": 0.0,
-      "notes": "MXBAI-rerank-v2-large local"
-    },
-    {
-      "provider": "huggingface",
       "family": "mixedbread-ai/mxbai-embed-large-v1",
       "model": "mixedbread-ai/mxbai-embed-large-v1",
-      "components": ["EMB"],
+      "components": [
+        "EMB"
+      ],
       "unit": "1k_tokens",
       "embed_per_1k": 0.0,
       "dimensions": 768,
       "notes": "MXBAI-embed-large local"
     },
     {
-      "provider": "ollama",
-      "family": "qwen3-coder:30b",
-      "model": "qwen3-coder:30b",
-      "components": ["GEN"],
+      "provider": "huggingface",
+      "family": "mixedbread-ai/mxbai-rerank-large-v2",
+      "model": "mixedbread-ai/mxbai-rerank-large-v2",
+      "components": [
+        "RERANK"
+      ],
       "unit": "1k_tokens",
-      "input_per_1k": 0.0,
-      "output_per_1k": 0.0,
-      "context": 256000,
-      "notes": "Qwen3 Coder 30B local"
+      "rerank_per_1k": 0.0,
+      "notes": "MXBAI-rerank-v2-large local"
     },
     {
-      "provider": "ollama",
-      "family": "qwen3-coder:14b",
-      "model": "qwen3-coder:14b",
-      "components": ["GEN"],
-      "unit": "1k_tokens",
-      "input_per_1k": 0.0,
-      "output_per_1k": 0.0,
-      "context": 256000,
-      "notes": "Qwen3 Coder 14B local"
-    },
-    {
-      "provider": "ollama",
-      "family": "qwen3-coder:7b",
-      "model": "qwen3-coder:7b",
-      "components": ["GEN"],
-      "unit": "1k_tokens",
-      "input_per_1k": 0.0,
-      "output_per_1k": 0.0,
-      "context": 256000,
-      "notes": "Qwen3 Coder 7B local"
-    },
-    {
-      "provider": "ollama",
-      "family": "llama3.2:3b",
-      "model": "llama3.2:3b",
-      "components": ["GEN"],
-      "unit": "1k_tokens",
-      "input_per_1k": 0.0,
-      "output_per_1k": 0.0,
-      "context": 128000,
-      "notes": "Llama 3.2 3B local"
-    },
-    {
-      "provider": "ollama",
-      "family": "llama3.2:1b",
-      "model": "llama3.2:1b",
-      "components": ["GEN"],
-      "unit": "1k_tokens",
-      "input_per_1k": 0.0,
-      "output_per_1k": 0.0,
-      "context": 128000,
-      "notes": "Llama 3.2 1B local"
-    },
-    {
-      "provider": "ollama",
-      "family": "nomic-embed-text",
-      "model": "nomic-embed-text",
-      "components": ["EMB"],
+      "provider": "huggingface",
+      "family": "nomic-ai/nomic-embed-text-v1",
+      "model": "nomic-ai/nomic-embed-text-v1",
+      "components": [
+        "EMB"
+      ],
       "unit": "1k_tokens",
       "embed_per_1k": 0.0,
       "dimensions": 768,
-      "notes": "Nomic embed text local"
+      "notes": "Nomic Embed v1 local"
+    },
+    {
+      "provider": "huggingface",
+      "family": "nomic-ai/nomic-embed-text-v1.5",
+      "model": "nomic-ai/nomic-embed-text-v1.5",
+      "components": [
+        "EMB"
+      ],
+      "unit": "1k_tokens",
+      "embed_per_1k": 0.0,
+      "dimensions": 768,
+      "notes": "Nomic Embed v1.5 8192 context local"
+    },
+    {
+      "provider": "jina",
+      "family": "jina-clip-v2",
+      "model": "jina-clip-v2",
+      "components": [
+        "EMB"
+      ],
+      "unit": "1k_tokens",
+      "embed_per_1k": 2e-05,
+      "dimensions": 768,
+      "notes": "Jina CLIP v2 multimodal (source: ~$0.02 per 1M)"
+    },
+    {
+      "provider": "jina",
+      "family": "jina-embeddings-v3",
+      "model": "jina-embeddings-v3",
+      "components": [
+        "EMB"
+      ],
+      "unit": "1k_tokens",
+      "embed_per_1k": 2e-05,
+      "dimensions": 1024,
+      "notes": "Jina Embeddings v3 8192 tokens (source: ~$0.02 per 1M)"
+    },
+    {
+      "provider": "jina",
+      "family": "jina-reranker-v3",
+      "model": "jina-reranker-v3",
+      "components": [
+        "RERANK"
+      ],
+      "unit": "1k_tokens",
+      "rerank_per_1k": 2e-05,
+      "notes": "Jina Reranker v3 (source: ~$0.02 per 1M)"
+    },
+    {
+      "provider": "local",
+      "family": "NV-Embed-v2",
+      "model": "NV-Embed-v2",
+      "components": [
+        "EMB"
+      ],
+      "unit": "1k_tokens",
+      "embed_per_1k": 0.0,
+      "dimensions": 1024,
+      "notes": "NV Embed v2 local"
     },
     {
       "provider": "local",
       "family": "deepseek-coder-v3:16b",
       "model": "deepseek-coder-v3:16b",
-      "components": ["GEN"],
+      "components": [
+        "GEN"
+      ],
       "unit": "1k_tokens",
       "input_per_1k": 0.0,
       "output_per_1k": 0.0,
@@ -785,7 +1013,9 @@
       "provider": "local",
       "family": "deepseek-coder-v3:236b",
       "model": "deepseek-coder-v3:236b",
-      "components": ["GEN"],
+      "components": [
+        "GEN"
+      ],
       "unit": "1k_tokens",
       "input_per_1k": 0.0,
       "output_per_1k": 0.0,
@@ -796,46 +1026,20 @@
       "provider": "local",
       "family": "learning-reranker-epstein-files-1",
       "model": "learning-reranker-epstein-files-1",
-      "components": ["RERANK"],
+      "components": [
+        "RERANK"
+      ],
       "unit": "request",
       "per_request": 0.0,
       "notes": "TriBrid Qwen3 LoRA learning reranker artifact (local)"
     },
     {
       "provider": "local",
-      "family": "NV-Embed-v2",
-      "model": "NV-Embed-v2",
-      "components": ["EMB"],
-      "unit": "1k_tokens",
-      "embed_per_1k": 0.0,
-      "dimensions": 1024,
-      "notes": "NV Embed v2 local"
-    },
-    {
-      "provider": "huggingface",
-      "family": "nomic-ai/nomic-embed-text-v1.5",
-      "model": "nomic-ai/nomic-embed-text-v1.5",
-      "components": ["EMB"],
-      "unit": "1k_tokens",
-      "embed_per_1k": 0.0,
-      "dimensions": 768,
-      "notes": "Nomic Embed v1.5 8192 context local"
-    },
-    {
-      "provider": "huggingface",
-      "family": "nomic-ai/nomic-embed-text-v1",
-      "model": "nomic-ai/nomic-embed-text-v1",
-      "components": ["EMB"],
-      "unit": "1k_tokens",
-      "embed_per_1k": 0.0,
-      "dimensions": 768,
-      "notes": "Nomic Embed v1 local"
-    },
-    {
-      "provider": "local",
       "family": "nemo-retriever-llama3.2-embed",
       "model": "nemo-retriever-llama3.2-embed",
-      "components": ["EMB"],
+      "components": [
+        "EMB"
+      ],
       "unit": "1k_tokens",
       "embed_per_1k": 0.0,
       "dimensions": 1024,
@@ -845,10 +1049,1612 @@
       "provider": "local",
       "family": "nemo-retriever-llama3.2-rerank",
       "model": "nemo-retriever-llama3.2-rerank",
-      "components": ["RERANK"],
+      "components": [
+        "RERANK"
+      ],
       "unit": "1k_tokens",
       "rerank_per_1k": 0.0,
       "notes": "NVIDIA NeMo Retriever Llama 3.2 reranking local"
+    },
+    {
+      "provider": "mistral",
+      "family": "codestral",
+      "model": "codestral",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "input_per_1k": 0.0003,
+      "output_per_1k": 0.0009,
+      "context": 256000,
+      "notes": "Codestral code generation (source: per 1M = $0.30/$0.90) | [auto-refresh] deprecated_on=2026-02-27"
+    },
+    {
+      "provider": "mistral",
+      "family": "codestral-2508",
+      "model": "codestral-2508",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 256000,
+      "input_per_1k": 0.0003,
+      "output_per_1k": 0.0009,
+      "base_url": "https://api.mistral.ai/v1",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "mistral",
+      "family": "devstral-2512",
+      "model": "devstral-2512",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 262144,
+      "input_per_1k": 0.0004,
+      "output_per_1k": 0.002,
+      "base_url": "https://api.mistral.ai/v1",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "mistral",
+      "family": "devstral-medium",
+      "model": "devstral-medium",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 131072,
+      "input_per_1k": 0.0004,
+      "output_per_1k": 0.002,
+      "base_url": "https://api.mistral.ai/v1",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "mistral",
+      "family": "devstral-small",
+      "model": "devstral-small",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 131072,
+      "input_per_1k": 0.0001,
+      "output_per_1k": 0.0003,
+      "base_url": "https://api.mistral.ai/v1",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "mistral",
+      "family": "ministral-14b-2512",
+      "model": "ministral-14b-2512",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 262144,
+      "input_per_1k": 0.0002,
+      "output_per_1k": 0.0002,
+      "base_url": "https://api.mistral.ai/v1",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "mistral",
+      "family": "ministral-3b-2512",
+      "model": "ministral-3b-2512",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 131072,
+      "input_per_1k": 0.0001,
+      "output_per_1k": 0.0001,
+      "base_url": "https://api.mistral.ai/v1",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "mistral",
+      "family": "ministral-8b-2512",
+      "model": "ministral-8b-2512",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 262144,
+      "input_per_1k": 0.00015,
+      "output_per_1k": 0.00015,
+      "base_url": "https://api.mistral.ai/v1",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "mistral",
+      "family": "mistral-7b",
+      "model": "mistral-7b",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "input_per_1k": 0.00025,
+      "output_per_1k": 0.00025,
+      "context": 32768,
+      "notes": "Mistral 7B open (source: per 1M = $0.25/$0.25) | [auto-refresh] deprecated_on=2026-02-27"
+    },
+    {
+      "provider": "mistral",
+      "family": "mistral-7b-instruct",
+      "model": "mistral-7b-instruct",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 32768,
+      "input_per_1k": 0.0002,
+      "output_per_1k": 0.0002,
+      "base_url": "https://api.mistral.ai/v1",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "mistral",
+      "family": "mistral-7b-instruct-v0.1",
+      "model": "mistral-7b-instruct-v0.1",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 2824,
+      "input_per_1k": 0.00011,
+      "output_per_1k": 0.00019,
+      "base_url": "https://api.mistral.ai/v1",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "mistral",
+      "family": "mistral-7b-instruct-v0.3",
+      "model": "mistral-7b-instruct-v0.3",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 32768,
+      "input_per_1k": 0.0002,
+      "output_per_1k": 0.0002,
+      "base_url": "https://api.mistral.ai/v1",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "mistral",
+      "family": "mistral-embed",
+      "model": "mistral-embed",
+      "components": [
+        "EMB"
+      ],
+      "unit": "1k_tokens",
+      "embed_per_1k": 1e-05,
+      "dimensions": 1024,
+      "notes": "Mistral Embed (source: per 1M = $0.01)"
+    },
+    {
+      "provider": "mistral",
+      "family": "mistral-large",
+      "model": "mistral-large",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "input_per_1k": 0.002,
+      "output_per_1k": 0.006,
+      "context": 128000,
+      "notes": "Mistral Large (source: per 1M = $2.00/$6.00)",
+      "base_url": "https://api.mistral.ai/v1"
+    },
+    {
+      "provider": "mistral",
+      "family": "mistral-large-2407",
+      "model": "mistral-large-2407",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 131072,
+      "input_per_1k": 0.002,
+      "output_per_1k": 0.006,
+      "base_url": "https://api.mistral.ai/v1",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "mistral",
+      "family": "mistral-large-2411",
+      "model": "mistral-large-2411",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 131072,
+      "input_per_1k": 0.002,
+      "output_per_1k": 0.006,
+      "base_url": "https://api.mistral.ai/v1",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "mistral",
+      "family": "mistral-large-2512",
+      "model": "mistral-large-2512",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 262144,
+      "input_per_1k": 0.0005,
+      "output_per_1k": 0.0015,
+      "base_url": "https://api.mistral.ai/v1",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "mistral",
+      "family": "mistral-medium-3",
+      "model": "mistral-medium-3",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "input_per_1k": 0.0004,
+      "output_per_1k": 0.002,
+      "context": 131072,
+      "notes": "Mistral Medium 3 (source: per 1M = $0.40/$2.00)",
+      "base_url": "https://api.mistral.ai/v1"
+    },
+    {
+      "provider": "mistral",
+      "family": "mistral-medium-3.1",
+      "model": "mistral-medium-3.1",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 131072,
+      "input_per_1k": 0.0004,
+      "output_per_1k": 0.002,
+      "base_url": "https://api.mistral.ai/v1",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "mistral",
+      "family": "mistral-nemo",
+      "model": "mistral-nemo",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 131072,
+      "input_per_1k": 2e-05,
+      "output_per_1k": 4e-05,
+      "base_url": "https://api.mistral.ai/v1",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "mistral",
+      "family": "mistral-saba",
+      "model": "mistral-saba",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 32768,
+      "input_per_1k": 0.0002,
+      "output_per_1k": 0.0006,
+      "base_url": "https://api.mistral.ai/v1",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "mistral",
+      "family": "mistral-small",
+      "model": "mistral-small",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "input_per_1k": 0.0001,
+      "output_per_1k": 0.0003,
+      "context": 128000,
+      "notes": "Mistral Small (source: per 1M = $0.10/$0.30) | [auto-refresh] deprecated_on=2026-02-27"
+    },
+    {
+      "provider": "mistral",
+      "family": "mistral-small-24b-instruct-2501",
+      "model": "mistral-small-24b-instruct-2501",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 32768,
+      "input_per_1k": 5e-05,
+      "output_per_1k": 8e-05,
+      "base_url": "https://api.mistral.ai/v1",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "mistral",
+      "family": "mistral-small-3.1-24b-instruct",
+      "model": "mistral-small-3.1-24b-instruct",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 128000,
+      "input_per_1k": 0.00035,
+      "output_per_1k": 0.00056,
+      "base_url": "https://api.mistral.ai/v1",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "mistral",
+      "family": "mistral-small-3.2-24b-instruct",
+      "model": "mistral-small-3.2-24b-instruct",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 131072,
+      "input_per_1k": 6e-05,
+      "output_per_1k": 0.00018,
+      "base_url": "https://api.mistral.ai/v1",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "mistral",
+      "family": "mistral-small-creative",
+      "model": "mistral-small-creative",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 32768,
+      "input_per_1k": 0.0001,
+      "output_per_1k": 0.0003,
+      "base_url": "https://api.mistral.ai/v1",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "mistral",
+      "family": "mixtral-8x22b",
+      "model": "mixtral-8x22b",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "input_per_1k": 0.002,
+      "output_per_1k": 0.006,
+      "context": 64000,
+      "notes": "Mixtral 8x22B MOE (source: per 1M = $2.00/$6.00) | [auto-refresh] deprecated_on=2026-02-27"
+    },
+    {
+      "provider": "mistral",
+      "family": "mixtral-8x22b-instruct",
+      "model": "mixtral-8x22b-instruct",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 65536,
+      "input_per_1k": 0.002,
+      "output_per_1k": 0.006,
+      "base_url": "https://api.mistral.ai/v1",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "mistral",
+      "family": "mixtral-8x7b",
+      "model": "mixtral-8x7b",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "input_per_1k": 0.0007,
+      "output_per_1k": 0.0007,
+      "context": 32768,
+      "notes": "Mixtral 8x7B (source: per 1M = $0.70/$0.70) | [auto-refresh] deprecated_on=2026-02-27"
+    },
+    {
+      "provider": "mistral",
+      "family": "mixtral-8x7b-instruct",
+      "model": "mixtral-8x7b-instruct",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 32768,
+      "input_per_1k": 0.00054,
+      "output_per_1k": 0.00054,
+      "base_url": "https://api.mistral.ai/v1",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "mistral",
+      "family": "pixtral-large-2411",
+      "model": "pixtral-large-2411",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 131072,
+      "input_per_1k": 0.002,
+      "output_per_1k": 0.006,
+      "base_url": "https://api.mistral.ai/v1",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "mistral",
+      "family": "voxtral-small-24b-2507",
+      "model": "voxtral-small-24b-2507",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 32000,
+      "input_per_1k": 0.0001,
+      "output_per_1k": 0.0003,
+      "base_url": "https://api.mistral.ai/v1",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "mlx",
+      "family": "mlx-community/all-MiniLM-L6-v2-4bit",
+      "model": "mlx-community/all-MiniLM-L6-v2-4bit",
+      "components": [
+        "EMB"
+      ],
+      "unit": "1k_tokens",
+      "embed_per_1k": 0.0,
+      "dimensions": 384,
+      "notes": "MLX MiniLM embeddings (Metal GPU)"
+    },
+    {
+      "provider": "ollama",
+      "family": "llama3.2:1b",
+      "model": "llama3.2:1b",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "input_per_1k": 0.0,
+      "output_per_1k": 0.0,
+      "context": 128000,
+      "notes": "Llama 3.2 1B local"
+    },
+    {
+      "provider": "ollama",
+      "family": "llama3.2:3b",
+      "model": "llama3.2:3b",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "input_per_1k": 0.0,
+      "output_per_1k": 0.0,
+      "context": 128000,
+      "notes": "Llama 3.2 3B local"
+    },
+    {
+      "provider": "ollama",
+      "family": "nomic-embed-text",
+      "model": "nomic-embed-text",
+      "components": [
+        "EMB"
+      ],
+      "unit": "1k_tokens",
+      "embed_per_1k": 0.0,
+      "dimensions": 768,
+      "notes": "Nomic embed text local"
+    },
+    {
+      "provider": "ollama",
+      "family": "qwen3-coder:14b",
+      "model": "qwen3-coder:14b",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "input_per_1k": 0.0,
+      "output_per_1k": 0.0,
+      "context": 256000,
+      "notes": "Qwen3 Coder 14B local"
+    },
+    {
+      "provider": "ollama",
+      "family": "qwen3-coder:30b",
+      "model": "qwen3-coder:30b",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "input_per_1k": 0.0,
+      "output_per_1k": 0.0,
+      "context": 256000,
+      "notes": "Qwen3 Coder 30B local"
+    },
+    {
+      "provider": "ollama",
+      "family": "qwen3-coder:7b",
+      "model": "qwen3-coder:7b",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "input_per_1k": 0.0,
+      "output_per_1k": 0.0,
+      "context": 256000,
+      "notes": "Qwen3 Coder 7B local"
+    },
+    {
+      "provider": "openai",
+      "family": "gpt-3.5-turbo",
+      "model": "gpt-3.5-turbo",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 16385,
+      "input_per_1k": 0.0005,
+      "output_per_1k": 0.0015,
+      "base_url": "https://api.openai.com/v1",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "openai",
+      "family": "gpt-3.5-turbo-0613",
+      "model": "gpt-3.5-turbo-0613",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 4095,
+      "input_per_1k": 0.001,
+      "output_per_1k": 0.002,
+      "base_url": "https://api.openai.com/v1",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "openai",
+      "family": "gpt-3.5-turbo-16k",
+      "model": "gpt-3.5-turbo-16k",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 16385,
+      "input_per_1k": 0.003,
+      "output_per_1k": 0.004,
+      "base_url": "https://api.openai.com/v1",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "openai",
+      "family": "gpt-3.5-turbo-instruct",
+      "model": "gpt-3.5-turbo-instruct",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 4095,
+      "input_per_1k": 0.0015,
+      "output_per_1k": 0.002,
+      "base_url": "https://api.openai.com/v1",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "openai",
+      "family": "gpt-4",
+      "model": "gpt-4",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 8191,
+      "input_per_1k": 0.03,
+      "output_per_1k": 0.06,
+      "base_url": "https://api.openai.com/v1",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "openai",
+      "family": "gpt-4-0314",
+      "model": "gpt-4-0314",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 8191,
+      "input_per_1k": 0.03,
+      "output_per_1k": 0.06,
+      "base_url": "https://api.openai.com/v1",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "openai",
+      "family": "gpt-4-1106-preview",
+      "model": "gpt-4-1106-preview",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 128000,
+      "input_per_1k": 0.01,
+      "output_per_1k": 0.03,
+      "base_url": "https://api.openai.com/v1",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "openai",
+      "family": "gpt-4-turbo",
+      "model": "gpt-4-turbo",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 128000,
+      "input_per_1k": 0.01,
+      "output_per_1k": 0.03,
+      "base_url": "https://api.openai.com/v1",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "openai",
+      "family": "gpt-4-turbo-preview",
+      "model": "gpt-4-turbo-preview",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 128000,
+      "input_per_1k": 0.01,
+      "output_per_1k": 0.03,
+      "base_url": "https://api.openai.com/v1",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "openai",
+      "family": "gpt-4.1",
+      "model": "gpt-4.1",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "input_per_1k": 0.002,
+      "output_per_1k": 0.008,
+      "context": 1047576,
+      "notes": "GPT-4.1 1M context (source: per 1M = $2.00/$8.00)",
+      "base_url": "https://api.openai.com/v1"
+    },
+    {
+      "provider": "openai",
+      "family": "gpt-4.1-mini",
+      "model": "gpt-4.1-mini",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "input_per_1k": 0.0004,
+      "output_per_1k": 0.0016,
+      "context": 1047576,
+      "notes": "GPT-4.1 mini (source: per 1M = $0.40/$1.60)",
+      "base_url": "https://api.openai.com/v1"
+    },
+    {
+      "provider": "openai",
+      "family": "gpt-4.1-nano",
+      "model": "gpt-4.1-nano",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "input_per_1k": 0.0001,
+      "output_per_1k": 0.0004,
+      "context": 1047576,
+      "notes": "GPT-4.1 nano (source: per 1M = $0.10/$0.40)",
+      "base_url": "https://api.openai.com/v1"
+    },
+    {
+      "provider": "openai",
+      "family": "gpt-4o",
+      "model": "gpt-4o",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 128000,
+      "input_per_1k": 0.0025,
+      "output_per_1k": 0.01,
+      "base_url": "https://api.openai.com/v1",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "openai",
+      "family": "gpt-4o-2024-05-13",
+      "model": "gpt-4o-2024-05-13",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 128000,
+      "input_per_1k": 0.005,
+      "output_per_1k": 0.015,
+      "base_url": "https://api.openai.com/v1",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "openai",
+      "family": "gpt-4o-2024-08-06",
+      "model": "gpt-4o-2024-08-06",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 128000,
+      "input_per_1k": 0.0025,
+      "output_per_1k": 0.01,
+      "base_url": "https://api.openai.com/v1",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "openai",
+      "family": "gpt-4o-2024-11-20",
+      "model": "gpt-4o-2024-11-20",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 128000,
+      "input_per_1k": 0.0025,
+      "output_per_1k": 0.01,
+      "base_url": "https://api.openai.com/v1",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "openai",
+      "family": "gpt-4o-audio-preview",
+      "model": "gpt-4o-audio-preview",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 128000,
+      "input_per_1k": 0.0025,
+      "output_per_1k": 0.01,
+      "base_url": "https://api.openai.com/v1",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "openai",
+      "family": "gpt-4o-mini",
+      "model": "gpt-4o-mini",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 128000,
+      "input_per_1k": 0.00015,
+      "output_per_1k": 0.0006,
+      "base_url": "https://api.openai.com/v1",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "openai",
+      "family": "gpt-4o-mini-2024-07-18",
+      "model": "gpt-4o-mini-2024-07-18",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 128000,
+      "input_per_1k": 0.00015,
+      "output_per_1k": 0.0006,
+      "base_url": "https://api.openai.com/v1",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "openai",
+      "family": "gpt-4o-mini-search-preview",
+      "model": "gpt-4o-mini-search-preview",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 128000,
+      "input_per_1k": 0.00015,
+      "output_per_1k": 0.0006,
+      "base_url": "https://api.openai.com/v1",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "openai",
+      "family": "gpt-4o-search-preview",
+      "model": "gpt-4o-search-preview",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 128000,
+      "input_per_1k": 0.0025,
+      "output_per_1k": 0.01,
+      "base_url": "https://api.openai.com/v1",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "openai",
+      "family": "gpt-5",
+      "model": "gpt-5",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "input_per_1k": 0.00125,
+      "output_per_1k": 0.01,
+      "context": 400000,
+      "notes": "GPT-5 flagship (source: per 1M = $3.00/$12.00)",
+      "base_url": "https://api.openai.com/v1"
+    },
+    {
+      "provider": "openai",
+      "family": "gpt-5-chat",
+      "model": "gpt-5-chat",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 128000,
+      "input_per_1k": 0.00125,
+      "output_per_1k": 0.01,
+      "base_url": "https://api.openai.com/v1",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "openai",
+      "family": "gpt-5-codex",
+      "model": "gpt-5-codex",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 400000,
+      "input_per_1k": 0.00125,
+      "output_per_1k": 0.01,
+      "base_url": "https://api.openai.com/v1",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "openai",
+      "family": "gpt-5-image",
+      "model": "gpt-5-image",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 400000,
+      "input_per_1k": 0.01,
+      "output_per_1k": 0.01,
+      "base_url": "https://api.openai.com/v1",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "openai",
+      "family": "gpt-5-image-mini",
+      "model": "gpt-5-image-mini",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 400000,
+      "input_per_1k": 0.0025,
+      "output_per_1k": 0.002,
+      "base_url": "https://api.openai.com/v1",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "openai",
+      "family": "gpt-5-mini",
+      "model": "gpt-5-mini",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "input_per_1k": 0.00025,
+      "output_per_1k": 0.002,
+      "context": 400000,
+      "notes": "GPT-5 mini (source: per 1M = $0.60/$2.40)",
+      "base_url": "https://api.openai.com/v1"
+    },
+    {
+      "provider": "openai",
+      "family": "gpt-5-nano",
+      "model": "gpt-5-nano",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "input_per_1k": 5e-05,
+      "output_per_1k": 0.0004,
+      "context": 400000,
+      "notes": "GPT-5 nano ultra-budget (source: per 1M = $0.12/$0.48)",
+      "base_url": "https://api.openai.com/v1"
+    },
+    {
+      "provider": "openai",
+      "family": "gpt-5-pro",
+      "model": "gpt-5-pro",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 400000,
+      "input_per_1k": 0.015,
+      "output_per_1k": 0.12,
+      "base_url": "https://api.openai.com/v1",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "openai",
+      "family": "gpt-5.1",
+      "model": "gpt-5.1",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 400000,
+      "input_per_1k": 0.00125,
+      "output_per_1k": 0.01,
+      "base_url": "https://api.openai.com/v1",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "openai",
+      "family": "gpt-5.1-chat",
+      "model": "gpt-5.1-chat",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 128000,
+      "input_per_1k": 0.00125,
+      "output_per_1k": 0.01,
+      "base_url": "https://api.openai.com/v1",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "openai",
+      "family": "gpt-5.1-codex",
+      "model": "gpt-5.1-codex",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 400000,
+      "input_per_1k": 0.00125,
+      "output_per_1k": 0.01,
+      "base_url": "https://api.openai.com/v1",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "openai",
+      "family": "gpt-5.1-codex-max",
+      "model": "gpt-5.1-codex-max",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 400000,
+      "input_per_1k": 0.00125,
+      "output_per_1k": 0.01,
+      "base_url": "https://api.openai.com/v1",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "openai",
+      "family": "gpt-5.1-codex-mini",
+      "model": "gpt-5.1-codex-mini",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 400000,
+      "input_per_1k": 0.00025,
+      "output_per_1k": 0.002,
+      "base_url": "https://api.openai.com/v1",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "openai",
+      "family": "gpt-5.1-nano",
+      "model": "gpt-5.1-nano",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "input_per_1k": 6e-05,
+      "output_per_1k": 0.0005,
+      "context": 256000,
+      "notes": "GPT-5.1 nano ultra-budget (source: per 1M = $0.06/$0.50) | [auto-refresh] deprecated_on=2026-02-27"
+    },
+    {
+      "provider": "openai",
+      "family": "gpt-5.2",
+      "model": "gpt-5.2",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "input_per_1k": 0.00175,
+      "output_per_1k": 0.014,
+      "context": 400000,
+      "notes": "The best model for coding and agentic tasks across industries",
+      "base_url": "https://api.openai.com/v1"
+    },
+    {
+      "provider": "openai",
+      "family": "gpt-5.2-chat",
+      "model": "gpt-5.2-chat",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 128000,
+      "input_per_1k": 0.00175,
+      "output_per_1k": 0.014,
+      "base_url": "https://api.openai.com/v1",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "openai",
+      "family": "gpt-5.2-codex",
+      "model": "gpt-5.2-codex",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 400000,
+      "input_per_1k": 0.00175,
+      "output_per_1k": 0.014,
+      "base_url": "https://api.openai.com/v1",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "openai",
+      "family": "gpt-5.2",
+      "model": "gpt-5.2-mini",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "input_per_1k": 0.00025,
+      "output_per_1k": 0.002,
+      "context": 200000,
+      "notes": "o4-mini efficient reasoning (source: per 1M = $0.40/$1.60) | [auto-refresh] deprecated_on=2026-02-27"
+    },
+    {
+      "provider": "openai",
+      "family": "gpt-5.2-pro",
+      "model": "gpt-5.2-pro",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 400000,
+      "input_per_1k": 0.021,
+      "output_per_1k": 0.168,
+      "base_url": "https://api.openai.com/v1",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "openai",
+      "family": "gpt-5.3-codex",
+      "model": "gpt-5.3-codex",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 400000,
+      "input_per_1k": 0.00175,
+      "output_per_1k": 0.014,
+      "base_url": "https://api.openai.com/v1",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "openai",
+      "family": "gpt-audio",
+      "model": "gpt-audio",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 128000,
+      "input_per_1k": 0.0025,
+      "output_per_1k": 0.01,
+      "base_url": "https://api.openai.com/v1",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "openai",
+      "family": "gpt-audio-mini",
+      "model": "gpt-audio-mini",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 128000,
+      "input_per_1k": 0.0006,
+      "output_per_1k": 0.0024,
+      "base_url": "https://api.openai.com/v1",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "openai",
+      "family": "gpt-oss-120b",
+      "model": "gpt-oss-120b",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 131072,
+      "input_per_1k": 3.9e-05,
+      "output_per_1k": 0.00019,
+      "base_url": "https://api.openai.com/v1",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "openai",
+      "family": "gpt-oss-20b",
+      "model": "gpt-oss-20b",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 131072,
+      "input_per_1k": 3e-05,
+      "output_per_1k": 0.00014,
+      "base_url": "https://api.openai.com/v1",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "openai",
+      "family": "gpt-oss-safeguard-20b",
+      "model": "gpt-oss-safeguard-20b",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 131072,
+      "input_per_1k": 7.5e-05,
+      "output_per_1k": 0.0003,
+      "base_url": "https://api.openai.com/v1",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "openai",
+      "family": "o1",
+      "model": "o1",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 200000,
+      "input_per_1k": 0.015,
+      "output_per_1k": 0.06,
+      "base_url": "https://api.openai.com/v1",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "openai",
+      "family": "o1-pro",
+      "model": "o1-pro",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 200000,
+      "input_per_1k": 0.15,
+      "output_per_1k": 0.6,
+      "base_url": "https://api.openai.com/v1",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "openai",
+      "family": "o3",
+      "model": "o3",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 200000,
+      "input_per_1k": 0.002,
+      "output_per_1k": 0.008,
+      "base_url": "https://api.openai.com/v1",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "openai",
+      "family": "o3-deep-research",
+      "model": "o3-deep-research",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 200000,
+      "input_per_1k": 0.01,
+      "output_per_1k": 0.04,
+      "base_url": "https://api.openai.com/v1",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "openai",
+      "family": "o3-mini",
+      "model": "o3-mini",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 200000,
+      "input_per_1k": 0.0011,
+      "output_per_1k": 0.0044,
+      "base_url": "https://api.openai.com/v1",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "openai",
+      "family": "o3-mini-high",
+      "model": "o3-mini-high",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 200000,
+      "input_per_1k": 0.0011,
+      "output_per_1k": 0.0044,
+      "base_url": "https://api.openai.com/v1",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "openai",
+      "family": "o3-pro",
+      "model": "o3-pro",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 200000,
+      "input_per_1k": 0.02,
+      "output_per_1k": 0.08,
+      "base_url": "https://api.openai.com/v1",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "openai",
+      "family": "o4-mini",
+      "model": "o4-mini",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 200000,
+      "input_per_1k": 0.0011,
+      "output_per_1k": 0.0044,
+      "base_url": "https://api.openai.com/v1",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "openai",
+      "family": "o4-mini-deep-research",
+      "model": "o4-mini-deep-research",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 200000,
+      "input_per_1k": 0.002,
+      "output_per_1k": 0.008,
+      "base_url": "https://api.openai.com/v1",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "openai",
+      "family": "o4-mini-high",
+      "model": "o4-mini-high",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 200000,
+      "input_per_1k": 0.0011,
+      "output_per_1k": 0.0044,
+      "base_url": "https://api.openai.com/v1",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "openai",
+      "family": "text-embedding-3-large",
+      "model": "text-embedding-3-large",
+      "components": [
+        "EMB"
+      ],
+      "unit": "1k_tokens",
+      "embed_per_1k": 0.00013,
+      "dimensions": 3072,
+      "notes": "Large embeddings (source: per 1M = $0.13)"
+    },
+    {
+      "provider": "openai",
+      "family": "text-embedding-3-small",
+      "model": "text-embedding-3-small",
+      "components": [
+        "EMB"
+      ],
+      "unit": "1k_tokens",
+      "embed_per_1k": 2e-05,
+      "dimensions": 1536,
+      "notes": "Small embeddings (source: per 1M = $0.02)"
+    },
+    {
+      "provider": "voyage",
+      "family": "rerank-2",
+      "model": "rerank-2",
+      "components": [
+        "RERANK"
+      ],
+      "unit": "1k_tokens",
+      "rerank_per_1k": 5e-05,
+      "notes": "Voyage Rerank 2 (source: per 1M = $0.05)"
+    },
+    {
+      "provider": "voyage",
+      "family": "rerank-2-lite",
+      "model": "rerank-2-lite",
+      "components": [
+        "RERANK"
+      ],
+      "unit": "1k_tokens",
+      "rerank_per_1k": 2e-05,
+      "notes": "Voyage Rerank 2 Lite (source: per 1M = $0.02)"
+    },
+    {
+      "provider": "voyage",
+      "family": "rerank-2.5",
+      "model": "rerank-2.5",
+      "components": [
+        "RERANK"
+      ],
+      "unit": "1k_tokens",
+      "rerank_per_1k": 5e-05,
+      "notes": "Voyage Rerank 2.5 (source: per 1M = $0.05)"
+    },
+    {
+      "provider": "voyage",
+      "family": "rerank-2.5-lite",
+      "model": "rerank-2.5-lite",
+      "components": [
+        "RERANK"
+      ],
+      "unit": "1k_tokens",
+      "rerank_per_1k": 2e-05,
+      "notes": "Voyage Rerank 2.5 Lite (source: per 1M = $0.02)"
+    },
+    {
+      "provider": "voyage",
+      "family": "voyage-3-large",
+      "model": "voyage-3-large",
+      "components": [
+        "EMB"
+      ],
+      "unit": "1k_tokens",
+      "embed_per_1k": 0.00018,
+      "dimensions": 1024,
+      "notes": "Voyage 3 Large (source: per 1M = $0.18)"
+    },
+    {
+      "provider": "voyage",
+      "family": "voyage-3.5",
+      "model": "voyage-3.5",
+      "components": [
+        "EMB"
+      ],
+      "unit": "1k_tokens",
+      "embed_per_1k": 6e-05,
+      "dimensions": 1024,
+      "notes": "Voyage 3.5 balanced (source: per 1M = $0.06)"
+    },
+    {
+      "provider": "voyage",
+      "family": "voyage-3.5-lite",
+      "model": "voyage-3.5-lite",
+      "components": [
+        "EMB"
+      ],
+      "unit": "1k_tokens",
+      "embed_per_1k": 2e-05,
+      "dimensions": 1024,
+      "notes": "Voyage 3.5 Lite fastest (source: per 1M = $0.02)"
+    },
+    {
+      "provider": "voyage",
+      "family": "voyage-code-2",
+      "model": "voyage-code-2",
+      "components": [
+        "EMB"
+      ],
+      "unit": "1k_tokens",
+      "embed_per_1k": 0.00012,
+      "dimensions": 1024,
+      "notes": "Voyage Code 2 (source: per 1M = $0.12)"
+    },
+    {
+      "provider": "voyage",
+      "family": "voyage-code-3",
+      "model": "voyage-code-3",
+      "components": [
+        "EMB"
+      ],
+      "unit": "1k_tokens",
+      "embed_per_1k": 0.00018,
+      "dimensions": 1024,
+      "notes": "Voyage Code 3 (source: per 1M = $0.18)"
+    },
+    {
+      "provider": "voyage",
+      "family": "voyage-context-3",
+      "model": "voyage-context-3",
+      "components": [
+        "EMB"
+      ],
+      "unit": "1k_tokens",
+      "embed_per_1k": 0.00018,
+      "dimensions": 1024,
+      "notes": "Voyage Context 3 (source: per 1M = $0.18)"
+    },
+    {
+      "provider": "voyage",
+      "family": "voyage-finance-2",
+      "model": "voyage-finance-2",
+      "components": [
+        "EMB"
+      ],
+      "unit": "1k_tokens",
+      "embed_per_1k": 0.00012,
+      "dimensions": 1024,
+      "notes": "Voyage Finance 2 (source: per 1M = $0.12)"
+    },
+    {
+      "provider": "voyage",
+      "family": "voyage-law-2",
+      "model": "voyage-law-2",
+      "components": [
+        "EMB"
+      ],
+      "unit": "1k_tokens",
+      "embed_per_1k": 0.00012,
+      "dimensions": 1024,
+      "notes": "Voyage Law 2 (source: per 1M = $0.12)"
+    },
+    {
+      "provider": "voyage",
+      "family": "voyage-multilingual-2",
+      "model": "voyage-multilingual-2",
+      "components": [
+        "EMB"
+      ],
+      "unit": "1k_tokens",
+      "embed_per_1k": 0.00012,
+      "dimensions": 1024,
+      "notes": "Voyage Multilingual 2 (source: per 1M = $0.12)"
+    },
+    {
+      "provider": "xai",
+      "family": "grok-3",
+      "model": "grok-3",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "input_per_1k": 0.003,
+      "output_per_1k": 0.015,
+      "context": 131072,
+      "notes": "Grok 3 base (source: per 1M = $3/$15)",
+      "base_url": "https://api.x.ai/v1"
+    },
+    {
+      "provider": "xai",
+      "family": "grok-3-beta",
+      "model": "grok-3-beta",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 131072,
+      "input_per_1k": 0.003,
+      "output_per_1k": 0.015,
+      "base_url": "https://api.x.ai/v1",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "xai",
+      "family": "grok-3-mini",
+      "model": "grok-3-mini",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 131072,
+      "input_per_1k": 0.0003,
+      "output_per_1k": 0.0005,
+      "base_url": "https://api.x.ai/v1",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "xai",
+      "family": "grok-3-mini-beta",
+      "model": "grok-3-mini-beta",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 131072,
+      "input_per_1k": 0.0003,
+      "output_per_1k": 0.0005,
+      "base_url": "https://api.x.ai/v1",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "xai",
+      "family": "grok-4",
+      "model": "grok-4",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "input_per_1k": 0.003,
+      "output_per_1k": 0.015,
+      "context": 256000,
+      "notes": "Grok 4 - 2M context (pricing estimated)",
+      "base_url": "https://api.x.ai/v1"
+    },
+    {
+      "provider": "xai",
+      "family": "grok-4-fast",
+      "model": "grok-4-fast",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 2000000,
+      "input_per_1k": 0.0002,
+      "output_per_1k": 0.0005,
+      "base_url": "https://api.x.ai/v1",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "xai",
+      "family": "grok-4.1-fast",
+      "model": "grok-4.1-fast",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 2000000,
+      "input_per_1k": 0.0002,
+      "output_per_1k": 0.0005,
+      "base_url": "https://api.x.ai/v1",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "xai",
+      "family": "grok-code-fast-1",
+      "model": "grok-code-fast-1",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 256000,
+      "input_per_1k": 0.0002,
+      "output_per_1k": 0.0015,
+      "base_url": "https://api.x.ai/v1",
+      "notes": "Added automatically from OpenRouter feed."
     }
   ]
 }
