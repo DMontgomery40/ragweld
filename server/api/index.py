@@ -1867,7 +1867,7 @@ async def get_index_status(corpus_id: str) -> IndexStatus:
             completed_at=getattr(s, "last_indexed", None),
         )
     try:
-        cfg = await load_scoped_config(repo_id=None)
+        cfg = await load_scoped_config(repo_id=repo_id)
         postgres = PostgresClient(cfg.indexing.postgres_url)
         await postgres.connect()
         try:
