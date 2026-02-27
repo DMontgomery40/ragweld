@@ -12,7 +12,7 @@ import os
 from dataclasses import dataclass
 from typing import Literal
 
-from server.models.tribrid_config_model import TriBridConfig
+from server.models.tribrid_config_model import GenerationConfig, TriBridConfig
 from server.retrieval.mlx_qwen3 import mlx_is_available
 
 _OPENAI_DEFAULT_BASE_URL = "https://api.openai.com/v1"
@@ -101,11 +101,12 @@ def select_provider_route(
     if not override:
         gen_backend = str(getattr(config.generation, "gen_backend", "") or "").strip().lower()
         gen_model = str(getattr(config.generation, "gen_model", "") or "").strip()
-        gen_fields_set = set(getattr(config.generation, "model_fields_set", set()))
         if gen_model and gen_backend:
             if gen_backend == "openai":
-                openai_explicit = "gen_backend" in gen_fields_set or "gen_model" in gen_fields_set
-                if openai_api_key_hint and openai_explicit:
+                default_gen_backend = str(GenerationConfig.model_fields["gen_backend"].default or "openai").strip().lower()
+                default_gen_model = str(GenerationConfig.model_fields["gen_model"].default or "gpt-4o-mini").strip()
+                openai_selected = gen_backend != default_gen_backend or gen_model != default_gen_model
+                if openai_api_key_hint and openai_selected:
                     override = gen_model
             elif gen_backend in {"ollama", "mlx"}:
                 override = f"local:{gen_model}"
