@@ -92,6 +92,7 @@ class TriBridFusion:
         cache_lookup_outcome = "disabled"
         cache_lookup_match_type: str | None = None
         cache_lookup_similarity: float | None = None
+        cache_lookup_enabled = False
         scoped_cfgs: dict[str, TriBridConfig] = {}
         for cid in corpus_ids:
             try:
@@ -113,6 +114,16 @@ class TriBridFusion:
                 primary_cfg = None
                 cache_service = None
                 cache_lookup_outcome = "unavailable"
+        if primary_cfg is not None:
+            cache_cfg = primary_cfg.semantic_cache
+            mode = str(cache_mode or "default").strip().lower()
+            configured = str(getattr(cache_cfg, "mode", "read_write") or "read_write").strip().lower()
+            enabled = int(getattr(cache_cfg, "enabled", 0) or 0) == 1
+            reads_allowed = mode != "bypass" and mode != "refresh" and configured in {"read_only", "read_write"}
+            min_chars = int(getattr(cache_cfg, "min_query_chars", 1) or 1)
+            cache_lookup_enabled = bool(enabled and reads_allowed and len(SemanticCacheService.canonical_query(query)) >= min_chars)
+            if not cache_lookup_enabled and cache_lookup_outcome == "ready":
+                cache_lookup_outcome = "disabled"
         if top_k is not None:
             effective_final_k = int(top_k or 0)
         else:
@@ -140,44 +151,45 @@ class TriBridFusion:
             cfg_fp = SemanticCacheService.fingerprint(cfg_for_corpus.model_dump(mode="serialization", by_alias=True))
             corpus_config_fingerprints.append(f"{cid}:{cfg_fp}")
         index_revisions: list[str] = []
-        pg_by_dsn: dict[str, PostgresClient] = {}
-        for cid in corpus_ids:
-            cfg_for_corpus = scoped_cfgs.get(cid)
-            if cfg_for_corpus is None:
-                index_revisions.append(f"{cid}:::")
-                continue
-            dsn = str(getattr(cfg_for_corpus.indexing, "postgres_url", "") or "")
-            if not dsn:
-                index_revisions.append(f"{cid}:::")
-                continue
-            pg = pg_by_dsn.get(dsn)
-            if pg is None:
-                try:
-                    pg = PostgresClient(dsn)
-                    await pg.connect()
-                    pg_by_dsn[dsn] = pg
-                except Exception:
+        if cache_lookup_enabled:
+            pg_by_dsn: dict[str, PostgresClient] = {}
+            for cid in corpus_ids:
+                cfg_for_corpus = scoped_cfgs.get(cid)
+                if cfg_for_corpus is None:
                     index_revisions.append(f"{cid}:::")
                     continue
-            try:
-                corpus_meta = await pg.get_corpus(cid)
-            except Exception:
-                corpus_meta = None
-            if not corpus_meta:
-                index_revisions.append(f"{cid}:::")
-                continue
-            raw_last = corpus_meta.get("last_indexed")
-            if raw_last is None:
-                last_indexed = ""
-            else:
+                dsn = str(getattr(cfg_for_corpus.indexing, "postgres_url", "") or "")
+                if not dsn:
+                    index_revisions.append(f"{cid}:::")
+                    continue
+                pg = pg_by_dsn.get(dsn)
+                if pg is None:
+                    try:
+                        pg = PostgresClient(dsn)
+                        await pg.connect()
+                        pg_by_dsn[dsn] = pg
+                    except Exception:
+                        index_revisions.append(f"{cid}:::")
+                        continue
                 try:
-                    last_indexed = str(raw_last.isoformat())
+                    corpus_meta = await pg.get_corpus(cid)
                 except Exception:
-                    last_indexed = str(raw_last)
-            provider = str(corpus_meta.get("embedding_provider") or "")
-            model = str(corpus_meta.get("embedding_model") or "")
-            dims = int(corpus_meta.get("embedding_dimensions") or 0)
-            index_revisions.append(f"{cid}:{last_indexed}:{provider}:{model}:{dims}")
+                    corpus_meta = None
+                if not corpus_meta:
+                    index_revisions.append(f"{cid}:::")
+                    continue
+                raw_last = corpus_meta.get("last_indexed")
+                if raw_last is None:
+                    last_indexed = ""
+                else:
+                    try:
+                        last_indexed = str(raw_last.isoformat())
+                    except Exception:
+                        last_indexed = str(raw_last)
+                provider = str(corpus_meta.get("embedding_provider") or "")
+                model = str(corpus_meta.get("embedding_model") or "")
+                dims = int(corpus_meta.get("embedding_dimensions") or 0)
+                index_revisions.append(f"{cid}:{last_indexed}:{provider}:{model}:{dims}")
         cache_request_fingerprint = SemanticCacheService.fingerprint(
             {
                 "namespace": str(cache_namespace or "search"),
@@ -242,7 +254,7 @@ class TriBridFusion:
             }
         )
 
-        if cache_service is not None:
+        if cache_service is not None and cache_lookup_enabled:
             try:
                 hit = await cache_service.lookup(
                     endpoint=cache_endpoint,

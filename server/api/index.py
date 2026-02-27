@@ -1890,6 +1890,10 @@ async def delete_index(corpus_id: str) -> dict[str, Any]:
     deleted_vec = await postgres.delete_embeddings(repo_id)
     deleted_fts = await postgres.delete_fts(repo_id)
     deleted_rows = await postgres.delete_chunks(repo_id)
+    try:
+        await postgres.semantic_cache_clear_for_corpus(repo_id)
+    except Exception:
+        pass
 
     try:
         db_name = cfg.graph_storage.resolve_database(repo_id)
