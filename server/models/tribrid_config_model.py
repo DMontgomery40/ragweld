@@ -607,7 +607,6 @@ class VocabPreviewResponse(BaseModel):
     top_n: int = Field(ge=10, le=500, description="Number of top terms requested")
     tokenizer: str = Field(description="BM25 tokenizer setting (indexing.bm25_tokenizer)")
     stemmer_lang: str | None = Field(default=None, description="Stemmer language (indexing.bm25_stemmer_lang)")
-    stopwords_lang: str | None = Field(default=None, description="Stopwords language code (indexing.bm25_stopwords_lang)")
     ts_config: str = Field(description="Postgres text search configuration used for tsv + query parsing")
     total_terms: int = Field(ge=0, description="Total unique terms in the corpus vocabulary")
     terms: list[VocabPreviewTerm] = Field(default_factory=list, description="Top terms by document frequency")
@@ -2895,18 +2894,6 @@ class IndexingConfig(BaseModel):
         default="postgresql://postgres:postgres@localhost:5432/tribrid_rag",
         description="PostgreSQL connection string (DSN) for pgvector + FTS storage"
     )
-    table_name: str = Field(
-        default="code_chunks_{repo}",
-        description="pgvector table name template"
-    )
-    collection_suffix: str = Field(
-        default="default",
-        description="Collection suffix for multi-index scenarios"
-    )
-    repo_path: str = Field(
-        default="",
-        description="Fallback repository path if not found in repos.json"
-    )
     indexing_batch_size: int = Field(
         default=100,
         ge=10,
@@ -2927,10 +2914,6 @@ class IndexingConfig(BaseModel):
     bm25_stemmer_lang: str = Field(
         default="english",
         description="Stemmer language"
-    )
-    bm25_stopwords_lang: str = Field(
-        default="en",
-        description="Stopwords language code"
     )
     index_excluded_exts: str = Field(
         default=".png,.jpg,.gif,.ico,.svg,.woff,.ttf",
@@ -2988,18 +2971,6 @@ class IndexingConfig(BaseModel):
         ge=0,
         le=1,
         description="Skip dense vector indexing"
-    )
-    out_dir_base: str = Field(
-        default="./out",
-        description="Base output directory"
-    )
-    rag_out_base: str = Field(
-        default="",
-        description="Override for OUT_DIR_BASE if specified"
-    )
-    repos_file: str = Field(
-        default="./repos.json",
-        description="Repository configuration file"
     )
 
     @property
@@ -5311,14 +5282,10 @@ class TriBridConfig(BaseModel):
             'PRESERVE_IMPORTS': self.chunking.preserve_imports,
             # Indexing params (9 new)
             'POSTGRES_URL': self.indexing.postgres_url,
-            'COLLECTION_NAME': self.indexing.table_name,
-            'COLLECTION_SUFFIX': self.indexing.collection_suffix,
-            'REPO_PATH': self.indexing.repo_path,
             'INDEXING_BATCH_SIZE': self.indexing.indexing_batch_size,
             'INDEXING_WORKERS': self.indexing.indexing_workers,
             'BM25_TOKENIZER': self.indexing.bm25_tokenizer,
             'BM25_STEMMER_LANG': self.indexing.bm25_stemmer_lang,
-            'BM25_STOPWORDS_LANG': self.indexing.bm25_stopwords_lang,
             'INDEX_EXCLUDED_EXTS': self.indexing.index_excluded_exts,
             'INDEX_MAX_FILE_SIZE_MB': self.indexing.index_max_file_size_mb,
             'PARQUET_EXTRACT_MAX_ROWS': self.indexing.parquet_extract_max_rows,
@@ -5327,9 +5294,6 @@ class TriBridConfig(BaseModel):
             'PARQUET_EXTRACT_TEXT_COLUMNS_ONLY': self.indexing.parquet_extract_text_columns_only,
             'PARQUET_EXTRACT_INCLUDE_COLUMN_NAMES': self.indexing.parquet_extract_include_column_names,
             'SKIP_DENSE': self.indexing.skip_dense,
-            'OUT_DIR_BASE': self.indexing.out_dir_base,
-            'RAG_OUT_BASE': self.indexing.rag_out_base,
-            'REPOS_FILE': self.indexing.repos_file,
             # Graph storage params (Neo4j)
             'NEO4J_URI': self.graph_storage.neo4j_uri,
             'NEO4J_USER': self.graph_storage.neo4j_user,
@@ -5658,26 +5622,19 @@ class TriBridConfig(BaseModel):
                 preserve_imports=data.get('PRESERVE_IMPORTS', 1),
             ),
             indexing=IndexingConfig(
-                postgres_url=data.get('POSTGRES_URL', 'http://127.0.0.1:6333'),
-                table_name=data.get('COLLECTION_NAME', 'code_chunks_{repo}'),
-                collection_suffix=data.get('COLLECTION_SUFFIX', 'default'),
-                repo_path=data.get('REPO_PATH', ''),
+                postgres_url=data.get('POSTGRES_URL', 'postgresql://postgres:postgres@localhost:5432/tribrid_rag'),
                 indexing_batch_size=data.get('INDEXING_BATCH_SIZE', 100),
                 indexing_workers=data.get('INDEXING_WORKERS', 4),
                 bm25_tokenizer=data.get('BM25_TOKENIZER', 'stemmer'),
                 bm25_stemmer_lang=data.get('BM25_STEMMER_LANG', 'english'),
-                bm25_stopwords_lang=data.get('BM25_STOPWORDS_LANG', 'en'),
                 index_excluded_exts=data.get('INDEX_EXCLUDED_EXTS', '.png,.jpg,.gif,.ico,.svg,.woff,.ttf'),
-                index_max_file_size_mb=data.get('INDEX_MAX_FILE_SIZE_MB', 10),
+                index_max_file_size_mb=data.get('INDEX_MAX_FILE_SIZE_MB', 250),
                 parquet_extract_max_rows=data.get('PARQUET_EXTRACT_MAX_ROWS', 5000),
                 parquet_extract_max_chars=data.get('PARQUET_EXTRACT_MAX_CHARS', 2_000_000),
                 parquet_extract_max_cell_chars=data.get('PARQUET_EXTRACT_MAX_CELL_CHARS', 20_000),
                 parquet_extract_text_columns_only=data.get('PARQUET_EXTRACT_TEXT_COLUMNS_ONLY', 1),
                 parquet_extract_include_column_names=data.get('PARQUET_EXTRACT_INCLUDE_COLUMN_NAMES', 1),
                 skip_dense=data.get('SKIP_DENSE', 0),
-                out_dir_base=data.get('OUT_DIR_BASE', './out'),
-                rag_out_base=data.get('RAG_OUT_BASE', ''),
-                repos_file=data.get('REPOS_FILE', './repos.json'),
             ),
             graph_storage=GraphStorageConfig(
                 neo4j_uri=data.get('NEO4J_URI', 'bolt://localhost:7687'),
@@ -6017,15 +5974,11 @@ TRIBRID_CONFIG_KEYS = {
     'PRESERVE_IMPORTS',
     # Indexing params (20)
     'POSTGRES_URL',
-    'COLLECTION_NAME',
-    'COLLECTION_SUFFIX',
-    'REPO_PATH',
     'VECTOR_BACKEND',
     'INDEXING_BATCH_SIZE',
     'INDEXING_WORKERS',
     'BM25_TOKENIZER',
     'BM25_STEMMER_LANG',
-    'BM25_STOPWORDS_LANG',
     'INDEX_EXCLUDED_EXTS',
     'INDEX_MAX_FILE_SIZE_MB',
     'PARQUET_EXTRACT_MAX_ROWS',
@@ -6034,9 +5987,6 @@ TRIBRID_CONFIG_KEYS = {
     'PARQUET_EXTRACT_TEXT_COLUMNS_ONLY',
     'PARQUET_EXTRACT_INCLUDE_COLUMN_NAMES',
     'SKIP_DENSE',
-    'OUT_DIR_BASE',
-    'RAG_OUT_BASE',
-    'REPOS_FILE',
     # Reranking params (14) - unified with RERANKER_MODE
     'RERANKER_MODE',
     'RERANKER_CLOUD_PROVIDER',
@@ -6231,7 +6181,7 @@ TRIBRID_CONFIG_KEYS = {
 # Only keys that affect retrieval accuracy - NOT post-retrieval prompts, hydration, or eval paths
 RAG_EVAL_CONFIG_KEYS: set[str] = {
     # BM25 Search
-    'BM25_TOKENIZER', 'BM25_STEMMER_LANG', 'BM25_STOPWORDS_LANG',
+    'BM25_TOKENIZER', 'BM25_STEMMER_LANG',
     'BM25_K1', 'BM25_B', 'BM25_WEIGHT',
     # Embedding
     'EMBEDDING_TYPE', 'EMBEDDING_MODEL', 'EMBEDDING_DIM',
@@ -6279,7 +6229,6 @@ def get_eval_key_categories() -> dict[str, str]:
         # BM25 Search
         'BM25_TOKENIZER': 'BM25 Search',
         'BM25_STEMMER_LANG': 'BM25 Search',
-        'BM25_STOPWORDS_LANG': 'BM25 Search',
         'BM25_K1': 'BM25 Search',
         'BM25_B': 'BM25 Search',
         'BM25_WEIGHT': 'BM25 Search',

@@ -146,7 +146,6 @@ export function IndexingSubtab() {
 
   const [bm25Tokenizer, setBm25Tokenizer] = useConfigField<string>('indexing.bm25_tokenizer', '');
   const [bm25StemmerLang, setBm25StemmerLang] = useConfigField<string>('indexing.bm25_stemmer_lang', '');
-  const [bm25StopwordsLang, setBm25StopwordsLang] = useConfigField<string>('indexing.bm25_stopwords_lang', '');
   const [indexMaxFileSizeMb, setIndexMaxFileSizeMb] = useConfigField<number>('indexing.index_max_file_size_mb', 250);
   const [largeFileMode, setLargeFileMode] = useConfigField<'read_all' | 'stream'>('indexing.large_file_mode', 'stream');
   const [largeFileStreamChunkChars, setLargeFileStreamChunkChars] = useConfigField<number>(
@@ -276,13 +275,12 @@ export function IndexingSubtab() {
     if (!tok) return '—';
     if (tok === 'stemmer') {
       const lang = bm25StemmerLang || '—';
-      const sw = bm25StopwordsLang || '—';
-      return `Stemmer (${lang}) with ${sw} stopwords`;
+      return `Stemmer (${lang})`;
     }
     if (tok === 'whitespace') return 'Whitespace-ish (no stemming)';
     if (tok === 'lowercase') return 'Lowercase (no stemming)';
     return tok;
-  }, [bm25Tokenizer, bm25StemmerLang, bm25StopwordsLang]);
+  }, [bm25Tokenizer, bm25StemmerLang]);
 
   const chunkingStrategyNorm = useMemo(() => String(chunkingStrategy || '').trim().toLowerCase(), [chunkingStrategy]);
   const usesTokenChunking = useMemo(
@@ -1851,7 +1849,7 @@ export function IndexingSubtab() {
               </div>
             </div>
 
-            <div className="input-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '20px' }}>
+            <div className="input-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '20px' }}>
               <div className="input-group">
                 <label style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px' }}>
                   Postgres FTS tokenizer
@@ -1885,27 +1883,6 @@ export function IndexingSubtab() {
                   value={bm25StemmerLang}
                   onChange={(e) => setBm25StemmerLang(e.target.value)}
                   placeholder="english"
-                  style={{
-                    width: '100%',
-                    padding: '10px 12px',
-                    background: 'var(--input-bg)',
-                    border: '1px solid var(--line)',
-                    borderRadius: '6px',
-                    color: 'var(--fg)',
-                    fontSize: '13px',
-                  }}
-                />
-              </div>
-              <div className="input-group">
-                <label style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px' }}>
-                  Stopwords language
-                  <TooltipIcon name="BM25_STOPWORDS_LANG" />
-                </label>
-                <input
-                  type="text"
-                  value={bm25StopwordsLang}
-                  onChange={(e) => setBm25StopwordsLang(e.target.value)}
-                  placeholder="en"
                   style={{
                     width: '100%',
                     padding: '10px 12px',

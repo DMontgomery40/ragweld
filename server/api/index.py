@@ -453,7 +453,6 @@ async def _extract_semantic_kg_llm(
         return out
 
     llm_attempts = 3
-    last_err: Exception | None = None
     for attempt in range(llm_attempts):
         try:
             route = select_provider_route(config=cfg, model_override=str(model or "").strip())
@@ -508,8 +507,7 @@ async def _extract_semantic_kg_llm(
                     raise RuntimeError("Semantic KG LLM returned non-JSON or empty JSON output")
                 return ([], [])
             break
-        except Exception as exc:
-            last_err = exc
+        except Exception:
             if attempt < (llm_attempts - 1):
                 await asyncio.sleep(0.5 * (attempt + 1))
                 continue
@@ -604,6 +602,30 @@ async def _run_index(
     postgres = PostgresClient(cfg.indexing.postgres_url)
     await postgres.connect()
     await postgres.upsert_corpus(repo_id, name=repo_id, root_path=repo_path)
+    if embedder is not None and bool(int(getattr(cfg.embedding, "embedding_cache_enabled", 0) or 0) == 1):
+        cache_provider = str(getattr(cfg.embedding, "embedding_type", "") or "").strip().lower() or "deterministic"
+        cache_model = str(getattr(cfg.embedding, "effective_model", "") or "").strip() or "deterministic"
+        cache_dim = int(embedder.dim)
+
+        async def _cache_lookup(input_hashes: list[str]) -> dict[str, list[float]]:
+            return await postgres.embedding_cache_lookup_batch(
+                provider=cache_provider,
+                model=cache_model,
+                dimensions=cache_dim,
+                input_hashes=input_hashes,
+            )
+
+        async def _cache_upsert(entries: dict[str, tuple[str, list[float]]]) -> int:
+            return await postgres.embedding_cache_upsert_batch(
+                provider=cache_provider,
+                model=cache_model,
+                dimensions=cache_dim,
+                entries=entries,
+            )
+
+        embedder.configure_cache_backend(lookup_batch=_cache_lookup, upsert_batch=_cache_upsert)
+    elif embedder is not None:
+        embedder.clear_cache_backend()
 
     # Corpus-level exclude paths (stored in Postgres corpora.meta.exclude_paths)
     extra_gitignore_patterns: list[str] = []
@@ -790,9 +812,22 @@ async def _run_index_body(
                 {"type": "log", "message": f"⚡ skip_dense=1 → skipping embeddings (cleared {deleted} existing vectors)"},
                 drop_oldest=True,
             )
+    else:
+        # Publish active embedding metadata up-front so in-flight stats reflect
+        # the configured vector backend/model before the run completes.
+        assert embedder is not None
+        await postgres.update_corpus_embedding_meta(
+            repo_id,
+            provider=str(cfg.embedding.embedding_type or ""),
+            model=str(cfg.embedding.effective_model or ""),
+            dimensions=int(embedder.dim),
+            ts_config=str(cfg.indexing.postgres_ts_config or ""),
+        )
 
     semantic_budget = int(cfg.graph_indexing.semantic_kg_max_chunks) if cfg.graph_indexing.semantic_kg_enabled else 0
     semantic_processed = 0
+    contextual_mode = str(getattr(cfg.embedding, "contextual_chunk_embeddings", "off") or "off").strip().lower()
+    indexing_workers = max(1, int(getattr(cfg.indexing, "indexing_workers", 1) or 1))
 
     for idx, (rel_path, abs_path) in enumerate(file_entries, start=1):
         ext = "." + rel_path.split(".")[-1] if "." in rel_path else ""
@@ -869,8 +904,17 @@ async def _run_index_body(
             if all(c.embedding is not None for c in chunks):
                 embedded = chunks
             else:
+                contextual_inputs: list[str] | None = None
+                if contextual_mode == "prepend_context":
+                    contextual_inputs = [
+                        (
+                            f"[file_path={rel_path}] [line_range={int(c.start_line)}-{int(c.end_line)}]\n"
+                            f"{c.content}"
+                        )
+                        for c in chunks
+                    ]
                 with INDEX_STAGE_LATENCY_SECONDS.labels(stage="embed_chunks").time():
-                    embedded = await embedder.embed_chunks(chunks)
+                    embedded = await embedder.embed_chunks(chunks, embed_texts=contextual_inputs)
             with INDEX_STAGE_LATENCY_SECONDS.labels(stage="postgres_upsert_embeddings").time():
                 await postgres.upsert_embeddings(repo_id, embedded)
             with INDEX_STAGE_LATENCY_SECONDS.labels(stage="postgres_upsert_fts").time():
@@ -888,7 +932,34 @@ async def _run_index_body(
 
         indexing_batch = max(10, int(getattr(cfg.indexing, "indexing_batch_size", 100) or 100))
 
-        chunks_for_semantic: list[Chunk] = []
+        async def _upsert_chunk_batches(chunks: list[Chunk]) -> list[Chunk]:
+            if not chunks:
+                return []
+            batches = [chunks[i0 : i0 + indexing_batch] for i0 in range(0, len(chunks), indexing_batch)]
+            if len(batches) <= 1 or indexing_workers <= 1:
+                out: list[Chunk] = []
+                for b in batches:
+                    out.extend(await _upsert_chunks_for_file(b))
+                return out
+
+            sem = asyncio.Semaphore(indexing_workers)
+            results: list[list[Chunk] | None] = [None] * len(batches)
+
+            async def _run_batch(i: int, batch: list[Chunk]) -> None:
+                async with sem:
+                    results[i] = await _upsert_chunks_for_file(batch)
+
+            await asyncio.gather(*(_run_batch(i, batch) for i, batch in enumerate(batches)))
+            out: list[Chunk] = []
+            for r in results:
+                if r:
+                    out.extend(r)
+            return out
+
+        # Chunks queued for semantic KG extraction during this file iteration.
+        # Keep this as a per-iteration queue; reprocessing prior chunks on every
+        # file causes quadratic work and makes indexing appear stalled.
+        semantic_pending_chunks: list[Chunk] = []
 
         if use_stream:
             base_char = 0
@@ -917,16 +988,15 @@ async def _run_index_body(
                             base_line += block.count("\n")
                             if not chunks:
                                 continue
-                            for i0 in range(0, len(chunks), indexing_batch):
-                                embedded_batch = await _upsert_chunks_for_file(chunks[i0 : i0 + indexing_batch])
-                                if (
-                                    semantic_budget > 0
-                                    and semantic_processed < semantic_budget
-                                    and cfg.graph_indexing.semantic_kg_enabled
-                                    and neo4j is not None
-                                ):
-                                    remaining = max(0, semantic_budget - semantic_processed)
-                                    chunks_for_semantic.extend(embedded_batch[:remaining])
+                            embedded_batches = await _upsert_chunk_batches(chunks)
+                            if (
+                                semantic_budget > 0
+                                and semantic_processed < semantic_budget
+                                and cfg.graph_indexing.semantic_kg_enabled
+                                and neo4j is not None
+                            ):
+                                remaining = max(0, semantic_budget - semantic_processed)
+                                semantic_pending_chunks.extend(embedded_batches[:remaining])
             except Exception:
                 INDEX_STAGE_ERRORS_TOTAL.labels(stage="file_read_stream").inc()
                 continue
@@ -975,16 +1045,15 @@ async def _run_index_body(
                 INDEX_FILES_PROCESSED_TOTAL.inc()
                 if not chunks:
                     continue
-                for i0 in range(0, len(chunks), indexing_batch):
-                    embedded_batch = await _upsert_chunks_for_file(chunks[i0 : i0 + indexing_batch])
-                    if (
-                        semantic_budget > 0
-                        and semantic_processed < semantic_budget
-                        and cfg.graph_indexing.semantic_kg_enabled
-                        and neo4j is not None
-                    ):
-                        remaining = max(0, semantic_budget - semantic_processed)
-                        chunks_for_semantic.extend(embedded_batch[:remaining])
+                embedded_batches = await _upsert_chunk_batches(chunks)
+                if (
+                    semantic_budget > 0
+                    and semantic_processed < semantic_budget
+                    and cfg.graph_indexing.semantic_kg_enabled
+                    and neo4j is not None
+                ):
+                    remaining = max(0, semantic_budget - semantic_processed)
+                    semantic_pending_chunks.extend(embedded_batches[:remaining])
                 continue
 
             if graph_builder is not None and rel_path.lower().endswith(".py"):
@@ -995,16 +1064,15 @@ async def _run_index_body(
             INDEX_FILES_PROCESSED_TOTAL.inc()
             if not chunks:
                 continue
-            for i0 in range(0, len(chunks), indexing_batch):
-                embedded_batch = await _upsert_chunks_for_file(chunks[i0 : i0 + indexing_batch])
-                if (
-                    semantic_budget > 0
-                    and semantic_processed < semantic_budget
-                    and cfg.graph_indexing.semantic_kg_enabled
-                    and neo4j is not None
-                ):
-                    remaining = max(0, semantic_budget - semantic_processed)
-                    chunks_for_semantic.extend(embedded_batch[:remaining])
+            embedded_batches = await _upsert_chunk_batches(chunks)
+            if (
+                semantic_budget > 0
+                and semantic_processed < semantic_budget
+                and cfg.graph_indexing.semantic_kg_enabled
+                and neo4j is not None
+            ):
+                remaining = max(0, semantic_budget - semantic_processed)
+                semantic_pending_chunks.extend(embedded_batches[:remaining])
 
         # Optional semantic KG extraction (typed entities + relations linked to chunk_ids).
         if (
@@ -1032,7 +1100,12 @@ async def _run_index_body(
                 if not allowed_entity_types:
                     allowed_entity_types = {"concept"}
 
-                def _normalize_semantic_entity(name: str, entity_type: str) -> tuple[str, str] | None:
+                def _normalize_semantic_entity(
+                    name: str,
+                    entity_type: str,
+                    *,
+                    _min_len: int = min_len,
+                ) -> tuple[str, str] | None:
                     et = str(entity_type or "").strip().lower()
                     raw = str(name or "").strip()
                     if not raw:
@@ -1040,7 +1113,7 @@ async def _run_index_body(
                     if et == "concept":
                         v = raw.lower()
                         v = re.sub(r"[^a-z0-9_]+", "_", v).strip("_")
-                        if len(v) < min_len:
+                        if len(v) < _min_len:
                             return None
                         if v in _SEM_STOPWORDS:
                             return None
@@ -1058,14 +1131,17 @@ async def _run_index_body(
                 rels: list[Relationship] = []
                 link_set: set[tuple[str, str]] = set()
 
-                for ch in chunks_for_semantic:
-                    if semantic_processed >= semantic_budget:
-                        break
-                    semantic_processed += 1
+                # Respect indexing_workers for semantic KG LLM extraction so
+                # this setting has a measurable indexing-time effect.
+                semantic_workers = max(1, int(getattr(cfg.indexing, "indexing_workers", 1) or 1))
+                remaining_budget = max(0, semantic_budget - semantic_processed)
+                chunks_for_semantic = semantic_pending_chunks[:remaining_budget]
+                llm_extract_by_chunk: dict[str, tuple[list[dict[str, str]], list[dict[str, str]]]] = {}
 
-                    entities_raw: list[dict[str, str]]
-                    relations_raw: list[dict[str, str]]
-                    if mode == "llm" and llm_prompt:
+                if mode == "llm" and llm_prompt and chunks_for_semantic:
+                    async def _extract_for_chunk(
+                        ch: Chunk,
+                    ) -> tuple[str, list[dict[str, str]], list[dict[str, str]]]:
                         entities_raw, relations_raw = await _extract_semantic_kg_llm(
                             (ch.content or "")[: max(0, llm_max_chars)],
                             cfg=cfg,
@@ -1077,6 +1153,32 @@ async def _run_index_body(
                             allowed_entity_types=allowed_entity_types,
                             require_success=require_llm_success,
                         )
+                        return ch.chunk_id, entities_raw, relations_raw
+
+                    for i0 in range(0, len(chunks_for_semantic), semantic_workers):
+                        batch = chunks_for_semantic[i0 : i0 + semantic_workers]
+                        coros = [_extract_for_chunk(ch) for ch in batch]
+                        if require_llm_success:
+                            results = await asyncio.gather(*coros)
+                            for chunk_id, entities_raw, relations_raw in results:
+                                llm_extract_by_chunk[chunk_id] = (entities_raw, relations_raw)
+                        else:
+                            results = await asyncio.gather(*coros, return_exceptions=True)
+                            for item in results:
+                                if isinstance(item, Exception):
+                                    continue
+                                chunk_id, entities_raw, relations_raw = item
+                                llm_extract_by_chunk[chunk_id] = (entities_raw, relations_raw)
+
+                for ch in chunks_for_semantic:
+                    if semantic_processed >= semantic_budget:
+                        break
+                    semantic_processed += 1
+
+                    entities_raw: list[dict[str, str]]
+                    relations_raw: list[dict[str, str]]
+                    if mode == "llm" and llm_prompt:
+                        entities_raw, relations_raw = llm_extract_by_chunk.get(ch.chunk_id, ([], []))
                         if not entities_raw:
                             if require_llm_success:
                                 raise RuntimeError("semantic_kg_require_llm_success=true and LLM extraction returned no entities")
@@ -1212,6 +1314,9 @@ async def _run_index_body(
                     raise
                 # Semantic KG is optional unless strict mode is enabled.
                 pass
+            finally:
+                # Important: only process each queued chunk once.
+                semantic_pending_chunks.clear()
 
     if graph_builder is not None:
         try:
@@ -1697,6 +1802,39 @@ async def get_index_status(corpus_id: str) -> IndexStatus:
     repo_id = corpus_id
     if repo_id in _STATUS:
         return _STATUS[repo_id]
+    # In-memory status is lost on server reload; infer "complete" from persisted
+    # index stats so clients don't see a misleading "idle" state.
+    if repo_id in _STATS and int(getattr(_STATS[repo_id], "total_chunks", 0) or 0) > 0:
+        s = _STATS[repo_id]
+        return IndexStatus(
+            repo_id=repo_id,
+            status="complete",
+            progress=1.0,
+            current_file=None,
+            error=None,
+            started_at=None,
+            completed_at=getattr(s, "last_indexed", None),
+        )
+    try:
+        cfg = await load_scoped_config(repo_id=None)
+        postgres = PostgresClient(cfg.indexing.postgres_url)
+        await postgres.connect()
+        try:
+            persisted = await postgres.get_index_stats(repo_id)
+        finally:
+            await postgres.disconnect()
+        if int(getattr(persisted, "total_chunks", 0) or 0) > 0:
+            return IndexStatus(
+                repo_id=repo_id,
+                status="complete",
+                progress=1.0,
+                current_file=None,
+                error=None,
+                started_at=None,
+                completed_at=getattr(persisted, "last_indexed", None),
+            )
+    except Exception:
+        pass
     return _idle_status(repo_id)
 
 
@@ -1788,7 +1926,6 @@ async def get_vocab_preview(
         top_n=int(top_n),
         tokenizer=tokenizer,
         stemmer_lang=str(cfg.indexing.bm25_stemmer_lang or "") or None,
-        stopwords_lang=str(cfg.indexing.bm25_stopwords_lang or "") or None,
         ts_config=ts_config,
         total_terms=int(total_terms),
         terms=terms,
@@ -1814,7 +1951,7 @@ async def stream_index_operation(scope: CorpusScope = _CORPUS_SCOPE_DEP) -> Stre
         while True:
             try:
                 event = await asyncio.wait_for(queue.get(), timeout=1.0)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 active = _TASKS.get(repo_id)
                 if active is None or active.done():
                     break

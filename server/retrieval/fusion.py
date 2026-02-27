@@ -6,8 +6,6 @@ import re
 from collections import defaultdict
 from typing import TYPE_CHECKING, Any
 
-logger = logging.getLogger(__name__)
-
 from server.db.neo4j import Neo4jClient
 from server.db.postgres import PostgresClient
 from server.indexing.embedder import Embedder
@@ -28,8 +26,7 @@ from server.observability.metrics import (
     SPARSE_LEG_LATENCY_SECONDS,
     VECTOR_LEG_LATENCY_SECONDS,
 )
-from server.retrieval.cache import CacheEndpoint, CacheMode
-from server.retrieval.cache import SemanticCacheService
+from server.retrieval.cache import CacheEndpoint, CacheMode, SemanticCacheService
 from server.retrieval.rerank import Reranker
 from server.services.config_store import get_config as load_scoped_config
 
@@ -37,6 +34,8 @@ if TYPE_CHECKING:
     from server.retrieval.graph import GraphRetriever
     from server.retrieval.sparse import SparseRetriever
     from server.retrieval.vector import VectorRetriever
+
+logger = logging.getLogger(__name__)
 
 
 class TriBridFusion:
@@ -145,7 +144,7 @@ class TriBridFusion:
                     }
                 )
                 self.last_debug = debug
-                final_k = int(top_k or len(cached))
+                final_k = int(top_k or config.final_k)
                 final_results = cached[:final_k] if final_k > 0 else []
                 SEARCH_RESULTS_FINAL_COUNT.observe(len(final_results))
                 return final_results

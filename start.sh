@@ -418,13 +418,18 @@ if [[ "$START_DOCKER" == "1" ]]; then
   fi
 
   log "Starting Docker services: ${services[*]}"
+  compose_cmd=("${DOCKER_COMPOSE[@]}")
+  if (( ${#COMPOSE_FILE_ARGS[@]} > 0 )); then
+    compose_cmd+=("${COMPOSE_FILE_ARGS[@]}")
+  fi
+
   compose_up_failed=0
   if [[ "$BACKEND_MODE" == "docker" && "$START_BACKEND" == "1" ]]; then
-    if ! run env SERVER_PORT="$BACKEND_PORT" "${DOCKER_COMPOSE[@]}" "${COMPOSE_FILE_ARGS[@]}" up -d "${services[@]}"; then
+    if ! run env SERVER_PORT="$BACKEND_PORT" "${compose_cmd[@]}" up -d "${services[@]}"; then
       compose_up_failed=1
     fi
   else
-    if ! run "${DOCKER_COMPOSE[@]}" "${COMPOSE_FILE_ARGS[@]}" up -d "${services[@]}"; then
+    if ! run "${compose_cmd[@]}" up -d "${services[@]}"; then
       compose_up_failed=1
     fi
   fi

@@ -902,12 +902,6 @@ export interface IndexStats {
 export interface IndexingConfig {
   /** PostgreSQL connection string (DSN) for pgvector + FTS storage */
   postgres_url?: string; // default: "postgresql://postgres:postgres@localhost:5432/t..."
-  /** pgvector table name template */
-  table_name?: string; // default: "code_chunks_{repo}"
-  /** Collection suffix for multi-index scenarios */
-  collection_suffix?: string; // default: "default"
-  /** Fallback repository path if not found in repos.json */
-  repo_path?: string; // default: ""
   /** Batch size for indexing */
   indexing_batch_size?: number; // default: 100
   /** Parallel workers for indexing */
@@ -916,8 +910,6 @@ export interface IndexingConfig {
   bm25_tokenizer?: string; // default: "stemmer"
   /** Stemmer language */
   bm25_stemmer_lang?: string; // default: "english"
-  /** Stopwords language code */
-  bm25_stopwords_lang?: string; // default: "en"
   /** Excluded file extensions (comma-separated) */
   index_excluded_exts?: string; // default: ".png,.jpg,.gif,.ico,.svg,.woff,.ttf"
   /** Max file size to index (MB) */
@@ -938,12 +930,6 @@ export interface IndexingConfig {
   parquet_extract_include_column_names?: number; // default: 1
   /** Skip dense vector indexing */
   skip_dense?: number; // default: 0
-  /** Base output directory */
-  out_dir_base?: string; // default: "./out"
-  /** Override for OUT_DIR_BASE if specified */
-  rag_out_base?: string; // default: ""
-  /** Repository configuration file */
-  repos_file?: string; // default: "./repos.json"
 }
 
 /** Discriminative keywords configuration. */
@@ -2898,8 +2884,6 @@ export interface VocabPreviewResponse {
   tokenizer: string;
   /** Stemmer language (indexing.bm25_stemmer_lang) */
   stemmer_lang?: string | null;
-  /** Stopwords language code (indexing.bm25_stopwords_lang) */
-  stopwords_lang?: string | null;
   /** Postgres text search configuration used for tsv + query parsing */
   ts_config: string;
   /** Total unique terms in the corpus vocabulary */

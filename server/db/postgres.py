@@ -333,6 +333,54 @@ class PostgresClient:
             """
         )
 
+        # Embedding cache store (indexing-time embedding reuse).
+        # Keyed by provider/model/dim/input hash so changing embedding model or
+        # dimensions never reuses stale vectors.
+        try:
+            await conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS embedding_cache_entries (
+                  provider TEXT NOT NULL,
+                  model TEXT NOT NULL,
+                  dimensions INT NOT NULL,
+                  input_hash TEXT NOT NULL,
+                  input_text TEXT NOT NULL DEFAULT '',
+                  embedding vector,
+                  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                  PRIMARY KEY (provider, model, dimensions, input_hash)
+                );
+                """
+            )
+        except Exception:
+            try:
+                from server.config import load_config as _load_global_config
+
+                dim = int(_load_global_config().embedding.embedding_dim)
+            except Exception:
+                from server.models.tribrid_config_model import TriBridConfig
+
+                dim = int(TriBridConfig().embedding.embedding_dim)
+            await conn.execute(
+                f"""
+                CREATE TABLE IF NOT EXISTS embedding_cache_entries (
+                  provider TEXT NOT NULL,
+                  model TEXT NOT NULL,
+                  dimensions INT NOT NULL,
+                  input_hash TEXT NOT NULL,
+                  input_text TEXT NOT NULL DEFAULT '',
+                  embedding vector({dim}),
+                  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                  PRIMARY KEY (provider, model, dimensions, input_hash)
+                );
+                """
+            )
+        await conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_embedding_cache_created_at
+            ON embedding_cache_entries(created_at);
+            """
+        )
+
         # Chunk store
         #
         # pgvector supports both dimensioned and (in newer versions) undimensioned vector columns.
@@ -1744,6 +1792,104 @@ class PostgresClient:
             else:
                 result = await conn.execute("DELETE FROM semantic_cache_entries;")
         return int(str(result).split()[-1])
+
+    async def embedding_cache_lookup_batch(
+        self,
+        *,
+        provider: str,
+        model: str,
+        dimensions: int,
+        input_hashes: list[str],
+    ) -> dict[str, list[float]]:
+        keys = [str(h or "").strip() for h in (input_hashes or []) if str(h or "").strip()]
+        if not keys:
+            return {}
+        await self._require_pool()
+        assert self._pool is not None
+        async with self._pool.acquire() as conn:
+            try:
+                await register_vector(conn)
+            except Exception:
+                pass
+            rows = await conn.fetch(
+                """
+                SELECT input_hash, embedding
+                FROM embedding_cache_entries
+                WHERE provider = $1
+                  AND model = $2
+                  AND dimensions = $3
+                  AND input_hash = ANY($4::text[]);
+                """,
+                str(provider or ""),
+                str(model or ""),
+                int(dimensions),
+                keys,
+            )
+        out: dict[str, list[float]] = {}
+        for r in rows:
+            h = str(r["input_hash"] or "").strip()
+            emb = r["embedding"]
+            if not h or emb is None:
+                continue
+            try:
+                out[h] = [float(x) for x in emb]
+            except Exception:
+                try:
+                    out[h] = [float(x) for x in list(emb)]
+                except Exception:
+                    continue
+        return out
+
+    async def embedding_cache_upsert_batch(
+        self,
+        *,
+        provider: str,
+        model: str,
+        dimensions: int,
+        entries: dict[str, tuple[str, list[float]]],
+    ) -> int:
+        if not entries:
+            return 0
+        rows: list[tuple[str, str, int, str, str, list[float]]] = []
+        for h, payload in entries.items():
+            hh = str(h or "").strip()
+            if not hh:
+                continue
+            text, vec = payload
+            rows.append(
+                (
+                    str(provider or ""),
+                    str(model or ""),
+                    int(dimensions),
+                    hh,
+                    str(text or ""),
+                    [float(x) for x in list(vec)],
+                )
+            )
+        if not rows:
+            return 0
+
+        await self._require_pool()
+        assert self._pool is not None
+        async with self._pool.acquire() as conn:
+            try:
+                await register_vector(conn)
+            except Exception:
+                pass
+            await conn.executemany(
+                """
+                INSERT INTO embedding_cache_entries (
+                  provider, model, dimensions, input_hash, input_text, embedding, created_at
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, now())
+                ON CONFLICT (provider, model, dimensions, input_hash) DO UPDATE SET
+                  input_text = EXCLUDED.input_text,
+                  embedding = EXCLUDED.embedding,
+                  created_at = now();
+                """,
+                rows,
+            )
+        return len(rows)
 
     async def update_corpus_embedding_meta(
         self, repo_id: str, *, provider: str, model: str, dimensions: int, ts_config: str = ""

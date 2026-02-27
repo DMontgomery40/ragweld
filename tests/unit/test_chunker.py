@@ -145,6 +145,68 @@ def test_markdown_chunking_splits_on_headings() -> None:
     assert any("## Sub" in c.content for c in chunks)
 
 
+def test_fixed_chars_greedy_fallback_target_changes_boundaries() -> None:
+    cfg_default = ChunkingConfig(
+        chunking_strategy="greedy",
+        chunk_size=1000,
+        chunk_overlap=0,
+        greedy_fallback_target=400,
+        min_chunk_chars=10,
+    )
+    cfg_tighter = ChunkingConfig(
+        chunking_strategy="greedy",
+        chunk_size=1000,
+        chunk_overlap=0,
+        greedy_fallback_target=250,
+        min_chunk_chars=10,
+    )
+    tok_cfg = TokenizationConfig(strategy="whitespace", normalize_unicode=False, lowercase=False)
+    ch_default = Chunker(cfg_default, tok_cfg)
+    ch_tighter = Chunker(cfg_tighter, tok_cfg)
+
+    content = "x" * 1200
+    default_chunks = ch_default.chunk_file("doc.txt", content)
+    tighter_chunks = ch_tighter.chunk_file("doc.txt", content)
+
+    assert len(default_chunks) < len(tighter_chunks)
+    assert default_chunks[0].content != tighter_chunks[0].content
+
+
+def test_markdown_include_code_fences_toggle_changes_output() -> None:
+    base = dict(
+        chunking_strategy="markdown",
+        chunk_size=500,
+        chunk_overlap=100,
+        target_tokens=64,
+        overlap_tokens=0,
+        markdown_max_heading_level=2,
+        min_chunk_chars=10,
+    )
+    with_fences = Chunker(ChunkingConfig(**base, markdown_include_code_fences=True), TokenizationConfig(strategy="whitespace"))
+    without_fences = Chunker(
+        ChunkingConfig(**base, markdown_include_code_fences=False), TokenizationConfig(strategy="whitespace")
+    )
+
+    content = (
+        "# Title\n\n"
+        "Intro paragraph for context.\n\n"
+        "```python\n"
+        "def hello():\n"
+        "    return 'world'\n"
+        "```\n\n"
+        "## Next\n\n"
+        "More prose content.\n"
+    )
+
+    chunks_with = with_fences.chunk_file("doc.md", content)
+    chunks_without = without_fences.chunk_file("doc.md", content)
+    joined_with = "\n".join(c.content for c in chunks_with)
+    joined_without = "\n".join(c.content for c in chunks_without)
+
+    assert "def hello" in joined_with
+    assert "def hello" not in joined_without
+
+
 def test_ast_chunking_python_preserves_top_level_blocks() -> None:
     cfg = ChunkingConfig(
         chunking_strategy="ast",

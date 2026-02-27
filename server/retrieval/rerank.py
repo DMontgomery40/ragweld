@@ -5,7 +5,6 @@ import os
 import platform
 import time
 from dataclasses import dataclass
-from typing import Any
 
 from server.models.retrieval import ChunkMatch
 from server.models.tribrid_config_model import RerankingConfig, TrainingConfig
@@ -18,6 +17,7 @@ from server.observability.metrics import (
 )
 from server.reranker.artifacts import resolve_project_path
 from server.retrieval.mlx_qwen3 import get_mlx_qwen3_reranker, mlx_is_available
+
 
 def _stable_chunk_key(chunk: ChunkMatch) -> str:
     meta = chunk.metadata or {}
