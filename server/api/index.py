@@ -622,13 +622,22 @@ async def _run_index(
     # build the existing index.  Mixed-dimension vectors in the same corpus
     # cause pgvector query errors (unhandled 500s) and silently corrupt search
     # results.  Block the run unless force_reindex is set.
+    # NOTE: Only guard when the corpus actually has chunks.  After a delete
+    # operation, embedding metadata lingers on the corpora row even though no
+    # vectors exist, so the guard must not block a fresh re-index.
     if corpus and not force_reindex and not skip_dense and embedder is not None:
         stored_model = str(corpus.get("embedding_model") or "").strip()
         stored_dim = int(corpus.get("embedding_dimensions") or 0)
         stored_provider = str(corpus.get("embedding_provider") or "").strip()
 
-        # Only check if the corpus has been indexed before (non-empty metadata).
+        # Only check if the corpus has been indexed before (non-empty metadata)
+        # AND actually contains chunks (vectors).  If chunks were deleted but
+        # metadata was not cleared, there is nothing to protect.
+        has_chunks = False
         if stored_model and stored_dim > 0:
+            stats = await postgres.get_index_stats(repo_id)
+            has_chunks = stats.total_chunks > 0
+        if stored_model and stored_dim > 0 and has_chunks:
             current_model = str(cfg.embedding.effective_model or "").strip()
             current_dim = int(embedder.dim)
             current_provider = str(cfg.embedding.embedding_type or "").strip()

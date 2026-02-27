@@ -179,7 +179,7 @@ export interface ChatModelInfo {
   /** Catalog model identifier when sourced from /api/models */
   catalog_model?: string | null; // default: None
   /** Capabilities for this model option */
-  components?: "GEN" | "EMB" | "RERANK"[];
+  components?: ("GEN" | "EMB" | "RERANK")[];
   /** Model source group for UI grouping. */
   source: "cloud_direct" | "openrouter" | "local" | "ragweld";
   /** Provider type (ollama, llamacpp, openrouter, etc) */
@@ -731,7 +731,7 @@ export interface GraphIndexingConfig {
   /** When true, semantic KG extraction preserves/uses typed entities (person, org, location, event, concept). */
   semantic_kg_typed_entities_enabled?: boolean; // default: False
   /** Allowed semantic KG entity types produced by extraction. */
-  semantic_kg_allowed_entity_types?: "person" | "org" | "location" | "event" | "concept"[]; // default: ["concept"]
+  semantic_kg_allowed_entity_types?: ("person" | "org" | "location" | "event" | "concept")[]; // default: ["concept"]
   /** When true in LLM mode, fail semantic KG extraction for a chunk if LLM extraction fails instead of falling back. */
   semantic_kg_require_llm_success?: boolean; // default: False
   /** Reasoning effort for semantic KG extraction when using OpenAI Responses-compatible models. */
@@ -1067,7 +1067,7 @@ export interface ModelCatalogEntry {
   /** Model identifier */
   model: string;
   /** Capabilities supported by this model */
-  components?: "GEN" | "EMB" | "RERANK"[];
+  components?: ("GEN" | "EMB" | "RERANK")[];
   /** Maximum context tokens when known */
   context?: number | null; // default: None
   /** Embedding dimensions when applicable */

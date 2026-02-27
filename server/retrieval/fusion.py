@@ -28,6 +28,8 @@ from server.observability.metrics import (
     SPARSE_LEG_LATENCY_SECONDS,
     VECTOR_LEG_LATENCY_SECONDS,
 )
+from server.retrieval.cache import CacheEndpoint, CacheMode
+from server.retrieval.cache import SemanticCacheService
 from server.retrieval.rerank import Reranker
 from server.services.config_store import get_config as load_scoped_config
 
@@ -58,6 +60,8 @@ class TriBridFusion:
         include_sparse: bool = True,
         include_graph: bool = True,
         top_k: int | None = None,
+        cache_mode: CacheMode = "default",
+        cache_namespace: str = "search",
     ) -> list[ChunkMatch]:
         # Resolve corpus_ids from backwards-compatible inputs.
         if corpus_ids is None:
@@ -82,6 +86,69 @@ class TriBridFusion:
             }
             SEARCH_RESULTS_FINAL_COUNT.observe(0)
             return []
+
+        cache_service: SemanticCacheService | None = None
+        cache_scope_key = SemanticCacheService.scope_key(corpus_ids)
+        cache_endpoint = self._cache_endpoint_from_namespace(cache_namespace)
+        cache_lookup_outcome = "disabled"
+        cache_lookup_match_type: str | None = None
+        cache_lookup_similarity: float | None = None
+        cache_request_fingerprint = SemanticCacheService.fingerprint(
+            {
+                "namespace": str(cache_namespace or "search"),
+                "include_vector": bool(include_vector),
+                "include_sparse": bool(include_sparse),
+                "include_graph": bool(include_graph),
+                "top_k": int(top_k or 0),
+                "fusion_method": str(config.method),
+                "fusion_rrf_k": int(config.rrf_k),
+                "fusion_vector_weight": float(config.vector_weight),
+                "fusion_sparse_weight": float(config.sparse_weight),
+                "fusion_graph_weight": float(config.graph_weight),
+                "fusion_normalize_scores": bool(config.normalize_scores),
+            }
+        )
+        try:
+            primary_cfg = await load_scoped_config(repo_id=corpus_ids[0])
+            cache_service = SemanticCacheService(primary_cfg)
+            cache_lookup_outcome = "ready"
+        except Exception:
+            cache_service = None
+            cache_lookup_outcome = "unavailable"
+
+        if cache_service is not None:
+            try:
+                hit = await cache_service.lookup(
+                    endpoint=cache_endpoint,
+                    scope_key=cache_scope_key,
+                    query=query,
+                    request_fingerprint=cache_request_fingerprint,
+                    cache_mode=cache_mode,
+                    allow_semantic=True,
+                )
+                cache_lookup_outcome = "miss"
+            except Exception:
+                hit = None
+                cache_lookup_outcome = "error"
+            if hit is not None:
+                cache_lookup_outcome = "hit"
+                cache_lookup_match_type = str(hit.match_type)
+                cache_lookup_similarity = float(hit.similarity)
+                cached = [ChunkMatch.model_validate(r) for r in (hit.payload.get("matches") or [])]
+                debug = dict(hit.payload.get("debug") or {})
+                debug.update(
+                    {
+                        "cache_hit": True,
+                        "cache_match_type": hit.match_type,
+                        "cache_similarity": float(hit.similarity),
+                        "cache_namespace": str(cache_namespace or "search"),
+                    }
+                )
+                self.last_debug = debug
+                final_k = int(top_k or len(cached))
+                final_results = cached[:final_k] if final_k > 0 else []
+                SEARCH_RESULTS_FINAL_COUNT.observe(len(final_results))
+                return final_results
 
         def _safe_error_message(e: Exception, *, max_len: int = 400) -> str:
             # Best-effort redaction; keep debugging useful without leaking secrets.
@@ -187,7 +254,16 @@ class TriBridFusion:
             # dimension than what was used to build the corpus index.  If
             # mismatched, skip the vector leg rather than letting pgvector
             # return garbage or crash with a cryptic error.
-            corpus_meta = await postgres.get_corpus(cid)
+            try:
+                corpus_meta = await postgres.get_corpus(cid)
+            except Exception as e:
+                logger.warning(
+                    "Failed to fetch corpus metadata for '%s': %s — "
+                    "proceeding without dimension/ts_config guards",
+                    cid, e,
+                )
+                debug["fusion_corpus_meta_error"] = _safe_error_message(e)
+                corpus_meta = None
             stored_dim = int((corpus_meta or {}).get("embedding_dimensions") or 0)
             dim_mismatch = stored_dim > 0 and stored_dim != int(embedder.dim)
             if dim_mismatch:
@@ -597,6 +673,10 @@ class TriBridFusion:
                 "rerank_skipped_reason": rerank_skipped_reason,
                 "rerank_error": rerank_error,
                 "rerank_config_corpus_id": rerank_config_corpus_id,
+                "cache_hit": False,
+                "cache_lookup_outcome": cache_lookup_outcome,
+                "cache_match_type": cache_lookup_match_type,
+                "cache_similarity": cache_lookup_similarity,
             }
         )
 
@@ -664,8 +744,27 @@ class TriBridFusion:
                 debug["postprocess_enabled"] = False
                 debug["postprocess_error"] = str(e)
 
-        self.last_debug = debug
         final_results = results[:final_k] if final_k > 0 else []
+        if cache_service is not None:
+            try:
+                cache_written = await cache_service.write(
+                    endpoint=cache_endpoint,
+                    scope_key=cache_scope_key,
+                    query=query,
+                    request_fingerprint=cache_request_fingerprint,
+                    payload={
+                        "matches": [m.model_dump(mode="serialization", by_alias=True) for m in final_results],
+                        "debug": debug,
+                    },
+                    cache_mode=cache_mode,
+                )
+                debug["cache_write"] = bool(cache_written)
+                debug["cache_namespace"] = str(cache_namespace or "search")
+            except Exception as e:
+                debug["cache_write"] = False
+                debug["cache_write_error"] = str(e)
+
+        self.last_debug = debug
         SEARCH_RESULTS_FINAL_COUNT.observe(len(final_results))
         return final_results
 
@@ -703,6 +802,15 @@ class TriBridFusion:
         except Exception:
             corpus_id = ""
         return f"{corpus_id}::{chunk.chunk_id}" if corpus_id else str(chunk.chunk_id)
+
+    @staticmethod
+    def _cache_endpoint_from_namespace(namespace: str) -> CacheEndpoint:
+        ns = str(namespace or "search").strip().lower()
+        if ns.startswith("chat"):
+            return "chat"
+        if ns.startswith("answer"):
+            return "answer"
+        return "search"
 
 
 def _normalize(chunks: list[ChunkMatch]) -> list[ChunkMatch]:
