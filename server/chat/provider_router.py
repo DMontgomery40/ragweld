@@ -97,6 +97,21 @@ def select_provider_route(
 
     chat_config = config.chat
     override = model_override.strip()
+    if not override:
+        gen_backend = str(getattr(config.generation, "gen_backend", "") or "").strip().lower()
+        gen_model = str(getattr(config.generation, "gen_model", "") or "").strip()
+        if gen_model and gen_backend and gen_backend != "openai":
+            if gen_backend in {"ollama", "mlx"}:
+                override = f"local:{gen_model}"
+            elif gen_backend == "openrouter":
+                override = f"openrouter:{gen_model}"
+            elif gen_backend == "anthropic":
+                if "/" in gen_model or ":" in gen_model:
+                    override = gen_model
+                else:
+                    override = f"anthropic/{gen_model}"
+            else:
+                override = gen_model
     openrouter_api_key = os.getenv("OPENROUTER_API_KEY", "").strip()
     openai_api_key = os.getenv("OPENAI_API_KEY", "").strip()
     openai_base_url = (str(getattr(config.generation, "openai_base_url", "") or "").strip() or _OPENAI_DEFAULT_BASE_URL)

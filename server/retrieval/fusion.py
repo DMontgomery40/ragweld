@@ -113,10 +113,18 @@ class TriBridFusion:
                 primary_cfg = None
                 cache_service = None
                 cache_lookup_outcome = "unavailable"
-        if primary_cfg is not None and top_k is None:
-            effective_final_k = int(getattr(primary_cfg.retrieval, "final_k", 0) or 0)
-        else:
+        if top_k is not None:
             effective_final_k = int(top_k or 0)
+        else:
+            final_k_candidates_for_cache: list[int] = []
+            for cid in corpus_ids:
+                cfg_for_corpus = scoped_cfgs.get(cid)
+                if cfg_for_corpus is None:
+                    continue
+                final_k_candidates_for_cache.append(int(getattr(cfg_for_corpus.retrieval, "final_k", 0) or 0))
+            if not final_k_candidates_for_cache and primary_cfg is not None:
+                final_k_candidates_for_cache.append(int(getattr(primary_cfg.retrieval, "final_k", 0) or 0))
+            effective_final_k = int(max(final_k_candidates_for_cache) if final_k_candidates_for_cache else 0)
         primary_reranking = primary_cfg.reranking if primary_cfg is not None else RerankingConfig()
         primary_training = primary_cfg.training if primary_cfg is not None else TrainingConfig()
         primary_vector = primary_cfg.vector_search if primary_cfg is not None else None

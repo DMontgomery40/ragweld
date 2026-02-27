@@ -101,8 +101,7 @@ def _upgrade_raw_config(raw: dict[str, Any]) -> tuple[TriBridConfig, bool, list[
 
     cfg = TriBridConfig.model_validate(working)
     migrated_keys.extend(_migrate_config_in_place(cfg))
-    normalized = cfg.model_dump()
-    changed = normalized != original
+    changed = bool(migrated_keys)
     return (cfg, changed, sorted(set(migrated_keys)))
 
 
