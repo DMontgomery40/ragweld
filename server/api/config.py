@@ -15,6 +15,8 @@ from server.models.tribrid_config_model import (
     MCPRagSearchResponse,
     MCPRagSearchResult,
     MCPStatusResponse,
+    ModelValidationResult,
+    ModelValidationWarning,
     TriBridConfig,
 )
 from server.retrieval.fusion import TriBridFusion
@@ -241,6 +243,73 @@ def _validate_model_capabilities(config: TriBridConfig) -> None:
         required_component="RERANK",
         provider_hint=str(config.reranking.reranker_cloud_provider or "").strip().lower() or None,
     )
+
+
+def _collect_model_warnings(config: TriBridConfig) -> list[ModelValidationWarning]:
+    """Collect soft warnings for model assignments against the catalog.
+
+    Unlike _validate_model_capabilities (which raises HTTPException for hard errors),
+    this function returns warnings for unknown/unrecognized models so the UI can
+    surface non-blocking advice.
+    """
+    catalog_models = _load_catalog_models_for_validation()
+    if not catalog_models:
+        return []
+
+    warnings: list[ModelValidationWarning] = []
+
+    def _check(field_name: str, model_value: str, required_component: str, provider_hint: str | None = None) -> None:
+        raw = str(model_value or "").strip()
+        if not raw:
+            return
+        caps = _catalog_capabilities_for_model(catalog_models, model_value=raw, provider_hint=provider_hint)
+        if not caps:
+            warnings.append(ModelValidationWarning(
+                field=field_name,
+                model_value=raw,
+                message=f"Model '{raw}' is not in the catalog. It may work but cannot be validated.",
+            ))
+        elif required_component not in caps:
+            found = ", ".join(sorted(caps))
+            warnings.append(ModelValidationWarning(
+                field=field_name,
+                model_value=raw,
+                message=f"Model '{raw}' supports [{found}] but this field requires [{required_component}].",
+            ))
+
+    _check("generation.gen_model", str(config.generation.gen_model or ""), "GEN")
+    _check("generation.gen_model_ollama", str(config.generation.gen_model_ollama or ""), "GEN")
+    _check("generation.gen_model_http", str(config.generation.gen_model_http or ""), "GEN")
+    _check("generation.gen_model_mcp", str(config.generation.gen_model_mcp or ""), "GEN")
+    _check("generation.gen_model_cli", str(config.generation.gen_model_cli or ""), "GEN")
+    _check("generation.enrich_model", str(config.generation.enrich_model or ""), "GEN")
+    _check("generation.enrich_model_ollama", str(config.generation.enrich_model_ollama or ""), "GEN")
+    _check(
+        "graph_indexing.semantic_kg_llm_model",
+        str(config.graph_indexing.semantic_kg_llm_model or ""),
+        "GEN",
+    )
+
+    return warnings
+
+
+@router.get("/config/validate", response_model=ModelValidationResult)
+async def validate_config(scope: CorpusScope = _CORPUS_SCOPE_DEP) -> ModelValidationResult:
+    """Validate current config model assignments against the catalog.
+
+    Returns soft warnings (unknown models, capability mismatches) without
+    blocking config saves. The PUT /api/config response is unchanged.
+    """
+    repo_id = scope.resolved_repo_id
+    try:
+        config = await load_scoped_config(repo_id=repo_id)
+    except CorpusNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+    warnings = _collect_model_warnings(config)
+    return ModelValidationResult(valid=True, warnings=warnings)
 
 
 @router.get("/config", response_model=TriBridConfig)

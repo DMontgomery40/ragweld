@@ -680,6 +680,8 @@ export interface GenerationConfig {
   gen_retry_max?: number; // default: 2
   /** Model for code enrichment */
   enrich_model?: string; // default: "gpt-4o-mini"
+  /** Provider backend for gen_model and channel overrides */
+  gen_backend?: string; // default: "openai"
   /** Enrichment backend */
   enrich_backend?: string; // default: "openai"
   /** Disable code enrichment */
@@ -1088,6 +1090,16 @@ export interface ModelCatalogEntry {
   notes?: string | null; // default: None
 }
 
+/** A single soft warning about a model assignment in the config. */
+export interface ModelValidationWarning {
+  /** Dotted config field path (e.g. generation.gen_model) */
+  field: string;
+  /** The model string that triggered the warning */
+  model_value: string;
+  /** Human-readable warning message */
+  message: string;
+}
+
 /** Unified gateway to 400+ cloud models. OpenAI-compatible.  MANDATORY P0 provider. */
 export interface OpenRouterConfig {
   enabled?: boolean; // default: False
@@ -1471,6 +1483,36 @@ export interface ScoringConfig {
   vendor_mode?: string; // default: "prefer_first_party"
   /** Comma-separated path prefixes to boost */
   path_boosts?: string; // default: "/gui,/server,/indexer,/retrieval"
+}
+
+/** Configuration for semantic caching across search/answer/chat endpoints. */
+export interface SemanticCacheConfig {
+  /** Enable semantic cache reads/writes (0=off, 1=on). */
+  enabled?: number; // default: 0
+  /** Cache mode when enabled. */
+  mode?: "read_write" | "read_only" | "write_only"; // default: "read_write"
+  /** Maximum cache rows to retain per scope/endpoint. */
+  max_entries?: number; // default: 5000
+  /** Minimum query length before cache is eligible. */
+  min_query_chars?: number; // default: 3
+  /** Minimum cosine similarity for semantic search cache hits. */
+  similarity_threshold_search?: number; // default: 0.9
+  /** Minimum cosine similarity for semantic answer cache hits. */
+  similarity_threshold_answer?: number; // default: 0.93
+  /** Minimum cosine similarity for semantic chat cache hits. */
+  similarity_threshold_chat?: number; // default: 0.95
+  /** TTL in seconds for search cache entries. */
+  ttl_seconds_search?: number; // default: 900
+  /** TTL in seconds for answer cache entries. */
+  ttl_seconds_answer?: number; // default: 1800
+  /** TTL in seconds for chat cache entries. */
+  ttl_seconds_chat?: number; // default: 600
+  /** Number of prior conversation turns included in chat cache fingerprint. */
+  chat_history_window?: number; // default: 6
+  /** Bypass chat generation cache when images are attached. */
+  bypass_if_images?: number; // default: 1
+  /** Skip generation-cache writes when temperature exceeds this value. */
+  max_temperature_for_write?: number; // default: 0.5
 }
 
 /** Configuration for sparse (BM25) search. */
@@ -1888,6 +1930,8 @@ export interface AnswerRequest {
   system_prompt?: string | null;
   /** Override chat model for this request (empty=default) */
   model_override?: string;
+  /** Per-request cache mode override. */
+  cache_mode?: "default" | "bypass" | "refresh";
 }
 
 /** Response from AI answer generation. */
@@ -1939,6 +1983,8 @@ export interface ChatRequest {
   include_graph?: boolean;
   /** Override retrieval.final_k for this message (leave null to use config default) */
   top_k?: number | null;
+  /** Per-request cache mode override. */
+  cache_mode?: "default" | "bypass" | "refresh";
 }
 
 /** Response from chat endpoint. */
@@ -2502,6 +2548,14 @@ export interface ModelCatalogUpsertResponse {
   model: ModelCatalogEntry;
 }
 
+/** Result of validating current config model assignments against the catalog. */
+export interface ModelValidationResult {
+  /** True when no hard errors found (warnings are soft) */
+  valid: boolean;
+  /** Soft warnings about model assignments */
+  warnings?: ModelValidationWarning[];
+}
+
 /** Generic ok response used by several endpoints. */
 export interface OkResponse {
   /** Whether the operation succeeded */
@@ -2772,6 +2826,8 @@ export interface SearchRequest {
   include_sparse?: boolean;
   /** Include graph search results */
   include_graph?: boolean;
+  /** Per-request cache mode override. */
+  cache_mode?: "default" | "bypass" | "refresh";
 }
 
 /** Response from tri-brid search. */
@@ -2803,6 +2859,7 @@ export interface TracesLatestResponse {
 /** TRIBRID RAG Engine tunable configuration parameters */
 export interface TriBridConfig {
   retrieval?: RetrievalConfig;
+  semantic_cache?: SemanticCacheConfig;
   scoring?: ScoringConfig;
   layer_bonus?: LayerBonusConfig;
   embedding?: EmbeddingConfig;

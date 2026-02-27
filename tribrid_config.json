@@ -33,6 +33,21 @@
     "hydration_mode": "lazy",
     "hydration_max_chars": 2000
   },
+  "semantic_cache": {
+    "enabled": 0,
+    "mode": "read_write",
+    "max_entries": 5000,
+    "min_query_chars": 3,
+    "similarity_threshold_search": 0.9,
+    "similarity_threshold_answer": 0.93,
+    "similarity_threshold_chat": 0.95,
+    "ttl_seconds_search": 900,
+    "ttl_seconds_answer": 1800,
+    "ttl_seconds_chat": 600,
+    "chat_history_window": 6,
+    "bypass_if_images": 1,
+    "max_temperature_for_write": 0.5
+  },
   "scoring": {
     "chunk_summary_bonus": 0.08,
     "filename_boost_exact": 1.5,
@@ -278,13 +293,14 @@
     "rerank_input_snippet_chars": 700
   },
   "generation": {
-    "gen_model": "gpt-4o-mini",
+    "gen_model": "totally-fake-model-xyz-9999",
     "gen_temperature": 0.0,
     "gen_max_tokens": 2048,
     "gen_top_p": 1.0,
     "gen_timeout": 60,
     "gen_retry_max": 2,
     "enrich_model": "gpt-4o-mini",
+    "gen_backend": "openai",
     "enrich_backend": "openai",
     "enrich_disabled": 0,
     "ollama_num_ctx": 8192,

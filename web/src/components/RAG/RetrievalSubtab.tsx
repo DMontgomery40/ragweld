@@ -1,15 +1,17 @@
-import { useState, useEffect, useCallback, useMemo, useRef, type CSSProperties } from 'react';
+import { useState, useEffect, useCallback, useRef, type CSSProperties } from 'react';
 import { EmbeddingMismatchWarning } from '@/components/ui/EmbeddingMismatchWarning';
 import { LiveTerminal, type LiveTerminalHandle } from '@/components/LiveTerminal/LiveTerminal';
 import { IntentMatrixEditor } from '@/components/RAG/IntentMatrixEditor';
+import { ModelAssignments } from '@/components/RAG/ModelAssignments';
+import { ModelPicker } from '@/components/RAG/ModelPicker';
 import { PromptLink } from '@/components/ui/PromptLink';
 import { ApiKeyStatus } from '@/components/ui/ApiKeyStatus';
 import { TooltipIcon } from '@/components/ui/TooltipIcon';
 import { createAlertError, createInlineError } from '@/utils/errorHelpers';
 import { useConfig, useConfigField } from '@/hooks';
-import { modelsApi, tracesApi } from '@/api';
+import { tracesApi } from '@/api';
 import { useRepoStore } from '@/stores/useRepoStore';
-import type { ModelCatalogEntry, TracesLatestResponse } from '@/types/generated';
+import type { TracesLatestResponse } from '@/types/generated';
 
 type RetrievalCardId = 'search_paths' | 'fusion_scoring' | 'generation' | 'ops_tracing';
 type OpsTracingViewId = 'runtime_compatibility' | 'observability_integrations';
@@ -101,7 +103,6 @@ const SECTION_DESC_STYLE: CSSProperties = {
 export function RetrievalSubtab() {
   const [selectedCard, setSelectedCard] = useState<RetrievalCardId>('search_paths');
   const [opsTracingView, setOpsTracingView] = useState<OpsTracingViewId>('runtime_compatibility');
-  const [availableModels, setAvailableModels] = useState<ModelCatalogEntry[]>([]);
   const [hydrating, setHydrating] = useState(true);
   const [traceLoading, setTraceLoading] = useState(false);
   const [traceStatus, setTraceStatus] = useState<{ type: 'info' | 'error'; message: string } | null>(null);
@@ -120,6 +121,7 @@ export function RetrievalSubtab() {
   const [genModelHttp, setGenModelHttp] = useConfigField<string>('generation.gen_model_http', '');
   const [genModelMcp, setGenModelMcp] = useConfigField<string>('generation.gen_model_mcp', '');
   const [genModelCli, setGenModelCli] = useConfigField<string>('generation.gen_model_cli', '');
+  const [genBackend] = useConfigField<string>('generation.gen_backend', 'openai');
   const [enrichBackend, setEnrichBackend] = useConfigField<string>('generation.enrich_backend', 'openai');
   const [genMaxTokens, setGenMaxTokens] = useConfigField<number>('generation.gen_max_tokens', 2048);
   const [genTopP, setGenTopP] = useConfigField<number>('generation.gen_top_p', 1.0);
@@ -268,48 +270,12 @@ export function RetrievalSubtab() {
     clearError,
   } = useConfig();
 
-  const loadModels = useCallback(async () => {
-    try {
-      const rows = await modelsApi.listByType('GEN');
-      const unique: ModelCatalogEntry[] = [];
-      const seen = new Set<string>();
-      for (const row of rows) {
-        const provider = String(row.provider || '').trim();
-        const model = String(row.model || '').trim();
-        if (!provider || !model) continue;
-        const key = `${provider}::${model}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        unique.push(row);
-      }
-      setAvailableModels(unique);
-    } catch (error) {
-      console.error('Failed to load models from /api/models/by-type/GEN:', error);
-      setAvailableModels([]);
-    }
-  }, []);
-
-  const generationModelOptions = useMemo(() => {
-    return availableModels.map((row) => {
-      const provider = String(row.provider || '').trim();
-      const model = String(row.model || '').trim();
-      return {
-        key: `${provider}::${model}`,
-        value: model,
-        label: `${provider} · ${model}`,
-      };
-    });
-  }, [availableModels]);
 
   useEffect(() => {
     if (!repos.length) {
       void loadRepos();
     }
   }, [repos.length, loadRepos]);
-
-  useEffect(() => {
-    void loadModels();
-  }, [loadModels]);
 
   useEffect(() => {
     if (config) {
@@ -469,16 +435,15 @@ export function RetrievalSubtab() {
           </div>
 
           <div className="input-group">
-            <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              Primary Model
-              <TooltipIcon name="GEN_MODEL" />
-            </label>
-            <select value={genModel} onChange={(e) => setGenModel(e.target.value)}>
-              <option value="">Select a model...</option>
-              {generationModelOptions.map((opt) => (
-                <option key={opt.key} value={opt.value}>{opt.label}</option>
-              ))}
-            </select>
+            <ModelPicker
+              componentType="GEN"
+              provider={genBackend}
+              value={genModel}
+              onChange={setGenModel}
+              label="Primary Model"
+              tooltipKey="GEN_MODEL"
+              allowCustom
+            />
           </div>
 
           <div className="input-group">
@@ -1322,15 +1287,16 @@ export function RetrievalSubtab() {
 
               <div className="input-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 16 }}>
                 <div className="input-group">
-                  <label>
-                    Primary Model <TooltipIcon name="GEN_MODEL" />
-                  </label>
-                  <select value={genModel} onChange={(e) => setGenModel(e.target.value)}>
-                    <option value="">Select a model...</option>
-                    {generationModelOptions.map((opt) => (
-                      <option key={opt.key} value={opt.value}>{opt.label}</option>
-                    ))}
-                  </select>
+                  <ModelPicker
+                    componentType="GEN"
+                    provider={genBackend}
+                    value={genModel}
+                    onChange={setGenModel}
+                    label="Primary Model"
+                    tooltipKey="GEN_MODEL"
+                    allowCustom
+                  />
+                  <PromptLink promptKey="main_rag_chat">Edit Chat Prompt</PromptLink>
                 </div>
                 <div className="input-group">
                   <label>
@@ -1347,37 +1313,37 @@ export function RetrievalSubtab() {
 
               <div className="input-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 16 }}>
                 <div className="input-group">
-                  <label>
-                    HTTP Override <TooltipIcon name="GEN_MODEL_HTTP" />
-                  </label>
-                  <select value={genModelHttp} onChange={(e) => setGenModelHttp(e.target.value)}>
-                    <option value="">Select a model...</option>
-                    {generationModelOptions.map((opt) => (
-                      <option key={opt.key} value={opt.value}>{opt.label}</option>
-                    ))}
-                  </select>
+                  <ModelPicker
+                    componentType="GEN"
+                    provider={genBackend}
+                    value={genModelHttp}
+                    onChange={setGenModelHttp}
+                    label="HTTP Override"
+                    tooltipKey="GEN_MODEL_HTTP"
+                    allowCustom
+                  />
                 </div>
                 <div className="input-group">
-                  <label>
-                    MCP Override <TooltipIcon name="GEN_MODEL_MCP" />
-                  </label>
-                  <select value={genModelMcp} onChange={(e) => setGenModelMcp(e.target.value)}>
-                    <option value="">Select a model...</option>
-                    {generationModelOptions.map((opt) => (
-                      <option key={opt.key} value={opt.value}>{opt.label}</option>
-                    ))}
-                  </select>
+                  <ModelPicker
+                    componentType="GEN"
+                    provider={genBackend}
+                    value={genModelMcp}
+                    onChange={setGenModelMcp}
+                    label="MCP Override"
+                    tooltipKey="GEN_MODEL_MCP"
+                    allowCustom
+                  />
                 </div>
                 <div className="input-group">
-                  <label>
-                    CLI Override <TooltipIcon name="GEN_MODEL_CLI" />
-                  </label>
-                  <select value={genModelCli} onChange={(e) => setGenModelCli(e.target.value)}>
-                    <option value="">Select a model...</option>
-                    {generationModelOptions.map((opt) => (
-                      <option key={opt.key} value={opt.value}>{opt.label}</option>
-                    ))}
-                  </select>
+                  <ModelPicker
+                    componentType="GEN"
+                    provider={genBackend}
+                    value={genModelCli}
+                    onChange={setGenModelCli}
+                    label="CLI Override"
+                    tooltipKey="GEN_MODEL_CLI"
+                    allowCustom
+                  />
                 </div>
               </div>
             </div>
@@ -1390,15 +1356,15 @@ export function RetrievalSubtab() {
 
               <div className="input-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 16 }}>
                 <div className="input-group">
-                  <label>
-                    Enrich Model <TooltipIcon name="ENRICH_MODEL" />
-                  </label>
-                  <select value={enrichModel} onChange={(e) => setEnrichModel(e.target.value)}>
-                    <option value="">Select a model...</option>
-                    {generationModelOptions.map((opt) => (
-                      <option key={opt.key} value={opt.value}>{opt.label}</option>
-                    ))}
-                  </select>
+                  <ModelPicker
+                    componentType="GEN"
+                    provider={enrichBackend}
+                    value={enrichModel}
+                    onChange={setEnrichModel}
+                    label="Enrich Model"
+                    tooltipKey="ENRICH_MODEL"
+                    allowCustom
+                  />
                 </div>
                 <div className="input-group">
                   <label>
@@ -1614,6 +1580,15 @@ export function RetrievalSubtab() {
                 </div>
               </div>
             </div>
+
+            <details style={{ ...SECTION_STYLE, marginTop: 14 }} data-testid="retrieval-section-model-assignments">
+              <summary style={{ ...SECTION_TITLE_STYLE, cursor: 'pointer', marginBottom: 0 }}>
+                Model Assignments Overview
+              </summary>
+              <div style={{ marginTop: 12 }}>
+                <ModelAssignments />
+              </div>
+            </details>
           </div>
         )}
 

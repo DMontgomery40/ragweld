@@ -4746,6 +4746,15 @@
       "badges": []
     },
     {
+      "term": "Model Assignments",
+      "key": "MODEL_ASSIGNMENTS",
+      "definition": "Overview of every model-dependent task in the pipeline, showing which provider and model is assigned, plus a link to the system prompt that governs each task. Use this table to audit model routing before indexing or querying.",
+      "category": "general",
+      "related": [],
+      "links": [],
+      "badges": []
+    },
+    {
       "term": "Multi\u2011Query Rewrites",
       "key": "MQ_REWRITES",
       "definition": "Maximum number of query rewrites for multi-query retrieval (legacy alias of MAX_QUERY_REWRITES). Each rewrite adds retrieval and reranking work, increasing latency and cost. Default: 2. Range: 1-10. Start with 2-3 and increase only when recall on ambiguous queries is poor.",
@@ -5923,6 +5932,15 @@
           "class": "warn"
         }
       ]
+    },
+    {
+      "term": "Semantic KG LLM Model",
+      "key": "SEMANTIC_KG_LLM_MODEL",
+      "definition": "LLM model used for semantic KG extraction when mode is 'llm'. When empty, falls back to the enrich_model.",
+      "category": "graph",
+      "related": [],
+      "links": [],
+      "badges": []
     },
     {
       "term": "Separators (recursive chunking)",

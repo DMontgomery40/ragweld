@@ -2609,6 +2609,28 @@
       ]
     },
     {
+      "term": "Generation Backend",
+      "key": "GEN_BACKEND",
+      "definition": "Provider backend for the primary generation model (gen_model) and channel overrides (gen_model_cli, gen_model_http, gen_model_mcp). Options: \"openai\" (GPT models), \"anthropic\" (Claude models), \"ollama\" (local models), \"mlx\" (Apple Silicon optimized), \"openrouter\" (multi-provider gateway). This controls which API the generation model is routed to. Ollama-specific model overrides (gen_model_ollama, enrich_model_ollama) always use the Ollama backend regardless of this setting. Enrichment uses its own enrich_backend setting.",
+      "category": "generation",
+      "related": [],
+      "links": [
+        {
+          "text": "OpenAI Models",
+          "href": "https://platform.openai.com/docs/models"
+        },
+        {
+          "text": "Anthropic Claude",
+          "href": "https://docs.anthropic.com/en/docs/about-claude/models"
+        },
+        {
+          "text": "OpenRouter",
+          "href": "https://openrouter.ai/docs"
+        }
+      ],
+      "badges": []
+    },
+    {
       "term": "Max Tokens",
       "key": "GEN_MAX_TOKENS",
       "definition": "Maximum number of tokens the LLM can generate in a single response. Higher values allow longer answers but increase cost and latency. Typical: 512-1024 for concise answers, 2048-4096 for detailed explanations.",
@@ -4746,6 +4768,15 @@
       "badges": []
     },
     {
+      "term": "Model Assignments",
+      "key": "MODEL_ASSIGNMENTS",
+      "definition": "Overview of every model-dependent task in the pipeline, showing which provider and model is assigned, plus a link to the system prompt that governs each task. Use this table to audit model routing before indexing or querying.",
+      "category": "general",
+      "related": [],
+      "links": [],
+      "badges": []
+    },
+    {
       "term": "Multi\u2011Query Rewrites",
       "key": "MQ_REWRITES",
       "definition": "Maximum number of query rewrites for multi-query retrieval (legacy alias of MAX_QUERY_REWRITES). Each rewrite adds retrieval and reranking work, increasing latency and cost. Default: 2. Range: 1-10. Start with 2-3 and increase only when recall on ambiguous queries is poor.",
@@ -5923,6 +5954,15 @@
           "class": "warn"
         }
       ]
+    },
+    {
+      "term": "Semantic KG LLM Model",
+      "key": "SEMANTIC_KG_LLM_MODEL",
+      "definition": "LLM model used for semantic KG extraction when mode is 'llm'. When empty, falls back to the enrich_model.",
+      "category": "graph",
+      "related": [],
+      "links": [],
+      "badges": []
     },
     {
       "term": "Separators (recursive chunking)",
