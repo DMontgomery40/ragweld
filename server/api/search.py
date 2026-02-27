@@ -61,6 +61,8 @@ async def search(request: SearchRequest) -> SearchResponse:
         include_sparse=bool(request.include_sparse),
         include_graph=bool(request.include_graph),
         top_k=int(request.top_k),
+        cache_mode=str(request.cache_mode or "default"),
+        cache_namespace="search",
     )
     dt_ms = (time.perf_counter() - t0) * 1000.0
 
@@ -143,6 +145,7 @@ async def answer(request: AnswerRequest) -> AnswerResponse:
         top_k=int(request.top_k),
         system_prompt_override=request.system_prompt,
         model_override=str(request.model_override or ""),
+        cache_mode=str(request.cache_mode or "default"),
     )
     dt_ms = (time.perf_counter() - t0) * 1000.0
 
@@ -208,6 +211,7 @@ async def answer_stream(request: AnswerRequest) -> StreamingResponse:
             top_k=int(request.top_k),
             system_prompt_override=request.system_prompt,
             model_override=str(request.model_override or ""),
+            cache_mode=str(request.cache_mode or "default"),
             conversation_id=conv.id,
             started_at_ms=int(time.time() * 1000),
         ),

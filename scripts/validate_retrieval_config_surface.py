@@ -19,6 +19,7 @@ REQUIRED_SECTIONS: tuple[str, ...] = (
     "generation",
     "tracing",
     "hydration",
+    "semantic_cache",
 )
 
 USE_CONFIG_FIELD_RE = re.compile(r"useConfigField(?:<[^()]*>)?\(\s*['\"]([^'\"]+)['\"]", re.MULTILINE)

@@ -159,6 +159,36 @@ SEARCH_GRAPH_HYDRATED_CHUNKS_COUNT = Histogram(
 )
 
 # --------------------------------------------------------------------------------------
+# Semantic cache metrics
+# --------------------------------------------------------------------------------------
+
+SEMANTIC_CACHE_LOOKUPS_TOTAL = Counter(
+    "tribrid_semantic_cache_lookups_total",
+    "Total semantic cache lookups by endpoint and outcome.",
+    ["endpoint", "outcome"],
+)
+
+SEMANTIC_CACHE_LOOKUP_LATENCY_SECONDS = Histogram(
+    "tribrid_semantic_cache_lookup_latency_seconds",
+    "Semantic cache lookup latency by endpoint.",
+    ["endpoint"],
+    buckets=(0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0),
+)
+
+SEMANTIC_CACHE_WRITES_TOTAL = Counter(
+    "tribrid_semantic_cache_writes_total",
+    "Total semantic cache writes by endpoint and outcome.",
+    ["endpoint", "outcome"],
+)
+
+SEMANTIC_CACHE_SEMANTIC_SIMILARITY = Histogram(
+    "tribrid_semantic_cache_semantic_similarity",
+    "Similarity score distribution for semantic cache hits.",
+    ["endpoint"],
+    buckets=(0.5, 0.6, 0.7, 0.8, 0.85, 0.9, 0.93, 0.95, 0.97, 0.99, 1.0),
+)
+
+# --------------------------------------------------------------------------------------
 # Reranker metrics (inference-time)
 # --------------------------------------------------------------------------------------
 #
@@ -295,6 +325,10 @@ _SEARCH_STAGES = (
 
 _SEARCH_LEGS = ("vector", "sparse", "graph")
 
+_CACHE_ENDPOINTS = ("search", "answer", "chat")
+_CACHE_LOOKUP_OUTCOMES = ("hit_exact", "hit_semantic", "miss", "bypass", "too_short", "error")
+_CACHE_WRITE_OUTCOMES = ("ok", "bypass", "too_short", "error")
+
 _INDEX_STAGES = (
     "collect_file_paths",
     "file_read",
@@ -317,6 +351,14 @@ for _stage in _SEARCH_STAGES:
 
 for _leg in _SEARCH_LEGS:
     SEARCH_LEG_RESULTS_COUNT.labels(leg=_leg)
+
+for _endpoint in _CACHE_ENDPOINTS:
+    SEMANTIC_CACHE_LOOKUP_LATENCY_SECONDS.labels(endpoint=_endpoint)
+    SEMANTIC_CACHE_SEMANTIC_SIMILARITY.labels(endpoint=_endpoint)
+    for _outcome in _CACHE_LOOKUP_OUTCOMES:
+        SEMANTIC_CACHE_LOOKUPS_TOTAL.labels(endpoint=_endpoint, outcome=_outcome)
+    for _outcome in _CACHE_WRITE_OUTCOMES:
+        SEMANTIC_CACHE_WRITES_TOTAL.labels(endpoint=_endpoint, outcome=_outcome)
 
 for _stage in _INDEX_STAGES:
     INDEX_STAGE_LATENCY_SECONDS.labels(stage=_stage)

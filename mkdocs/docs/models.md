@@ -39,6 +39,30 @@ Use `POST /api/models/upsert` to add or update entries safely:
 - Writes are atomic and update both `data/models.json` and `web/public/models.json`.
 - Provider `base_url` may be inferred from existing catalog entries/defaults if omitted, and remains editable in UI before submit.
 
+## Automated Daily Refresh
+
+`data/models.json` can be refreshed automatically every 24 hours with:
+
+- Script: `scripts/refresh_models_catalog.py`
+- Workflow: `.github/workflows/refresh-models-catalog.yml`
+- Feed: `https://openrouter.ai/api/v1/models`
+
+Behavior:
+
+- Runs daily in GitHub Actions (UTC schedule) plus manual `workflow_dispatch`.
+- Uses a single machine-readable source (OpenRouter feed) for managed providers:
+  - `openai`, `anthropic`, `google`, `cohere`, `mistral`, `deepseek`, `xai`
+- Normalizes only text-output models and ignores `:` snapshot/alias variants to reduce churn.
+- Updates existing managed `GEN` rows in place (pricing, context, base URL, components, unit).
+- Keeps removed managed rows and marks them deprecated in `notes` with:
+  - `[auto-refresh] deprecated_on=YYYY-MM-DD`
+- Adds newly discovered models even if pricing is unavailable:
+  - Missing price rows are added with null price fields and
+    `[auto-refresh] pricing_unknown=true`.
+- Leaves unmanaged providers (`voyage`, `jina`, `huggingface`, `local`, `ollama`, `mlx`, etc.) untouched.
+- Writes canonical + mirror catalogs atomically and byte-identically.
+- No-op runs make no commit when nothing changed.
+
 ## Example
 
 ```bash

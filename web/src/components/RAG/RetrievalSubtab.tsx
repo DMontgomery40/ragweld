@@ -262,6 +262,29 @@ export function RetrievalSubtab() {
   const [hydrationMode, setHydrationMode] = useConfigField<string>('hydration.hydration_mode', 'lazy');
   const [hydrationMaxChars, setHydrationMaxChars] = useConfigField<number>('hydration.hydration_max_chars', 2000);
 
+  // --- Semantic cache -----------------------------------------------------
+  const [semanticCacheEnabled, setSemanticCacheEnabled] = useConfigField<number>('semantic_cache.enabled', 0);
+  const [semanticCacheMode, setSemanticCacheMode] =
+    useConfigField<'read_write' | 'read_only' | 'write_only'>('semantic_cache.mode', 'read_write');
+  const [semanticCacheMaxEntries, setSemanticCacheMaxEntries] = useConfigField<number>('semantic_cache.max_entries', 5000);
+  const [semanticCacheMinQueryChars, setSemanticCacheMinQueryChars] =
+    useConfigField<number>('semantic_cache.min_query_chars', 3);
+  const [semanticCacheThresholdSearch, setSemanticCacheThresholdSearch] =
+    useConfigField<number>('semantic_cache.similarity_threshold_search', 0.9);
+  const [semanticCacheThresholdAnswer, setSemanticCacheThresholdAnswer] =
+    useConfigField<number>('semantic_cache.similarity_threshold_answer', 0.93);
+  const [semanticCacheThresholdChat, setSemanticCacheThresholdChat] =
+    useConfigField<number>('semantic_cache.similarity_threshold_chat', 0.95);
+  const [semanticCacheTtlSearch, setSemanticCacheTtlSearch] = useConfigField<number>('semantic_cache.ttl_seconds_search', 900);
+  const [semanticCacheTtlAnswer, setSemanticCacheTtlAnswer] = useConfigField<number>('semantic_cache.ttl_seconds_answer', 1800);
+  const [semanticCacheTtlChat, setSemanticCacheTtlChat] = useConfigField<number>('semantic_cache.ttl_seconds_chat', 600);
+  const [semanticCacheChatHistoryWindow, setSemanticCacheChatHistoryWindow] =
+    useConfigField<number>('semantic_cache.chat_history_window', 6);
+  const [semanticCacheBypassIfImages, setSemanticCacheBypassIfImages] =
+    useConfigField<number>('semantic_cache.bypass_if_images', 1);
+  const [semanticCacheMaxTemperatureForWrite, setSemanticCacheMaxTemperatureForWrite] =
+    useConfigField<number>('semantic_cache.max_temperature_for_write', 0.5);
+
   const {
     config,
     loading: configLoading,
@@ -1825,7 +1848,7 @@ export function RetrievalSubtab() {
                   </div>
                 </div>
 
-                <div style={SECTION_STYLE} data-testid="retrieval-section-ops-retrieval-balance">
+                <div style={{ ...SECTION_STYLE, marginBottom: 14 }} data-testid="retrieval-section-ops-retrieval-balance">
                   <div style={SECTION_TITLE_STYLE}>3) Retrieval Balance</div>
                   <div style={SECTION_DESC_STYLE}>
                     Tune hybrid weighting and candidate fan-out for compatibility with existing retrieval/evaluation flows.
@@ -1892,6 +1915,169 @@ export function RetrievalSubtab() {
                         max={200}
                         value={topkSparse}
                         onChange={(e) => setTopkSparse(snapNumber(e.target.value, 75))}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div style={SECTION_STYLE} data-testid="retrieval-section-ops-semantic-cache">
+                  <div style={SECTION_TITLE_STYLE}>4) Semantic Cache</div>
+                  <div style={SECTION_DESC_STYLE}>
+                    Configure semantic cache policy for retrieval, answer generation, and chat generation.
+                  </div>
+
+                  <div className="input-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 16 }}>
+                    <div className="input-group">
+                      <label>Cache Enabled</label>
+                      <select value={semanticCacheEnabled} onChange={(e) => setSemanticCacheEnabled(parseInt(e.target.value, 10))}>
+                        <option value={1}>Enabled</option>
+                        <option value={0}>Disabled</option>
+                      </select>
+                    </div>
+                    <div className="input-group">
+                      <label>Cache Mode</label>
+                      <select
+                        value={semanticCacheMode}
+                        onChange={(e) => setSemanticCacheMode(e.target.value as 'read_write' | 'read_only' | 'write_only')}
+                        disabled={semanticCacheEnabled === 0}
+                      >
+                        <option value="read_write">read_write</option>
+                        <option value="read_only">read_only</option>
+                        <option value="write_only">write_only</option>
+                      </select>
+                    </div>
+                    <div className="input-group">
+                      <label>Max Entries</label>
+                      <input
+                        type="number"
+                        min={100}
+                        max={500000}
+                        value={semanticCacheMaxEntries}
+                        onChange={(e) => setSemanticCacheMaxEntries(snapNumber(e.target.value, 5000))}
+                        disabled={semanticCacheEnabled === 0}
+                      />
+                    </div>
+                    <div className="input-group">
+                      <label>Min Query Chars</label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={200}
+                        value={semanticCacheMinQueryChars}
+                        onChange={(e) => setSemanticCacheMinQueryChars(snapNumber(e.target.value, 3))}
+                        disabled={semanticCacheEnabled === 0}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="input-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 16 }}>
+                    <div className="input-group">
+                      <label>Similarity Threshold (Search)</label>
+                      <input
+                        type="number"
+                        min={0}
+                        max={1}
+                        step={0.01}
+                        value={semanticCacheThresholdSearch}
+                        onChange={(e) => setSemanticCacheThresholdSearch(snapNumber(e.target.value, 0.9))}
+                        disabled={semanticCacheEnabled === 0}
+                      />
+                    </div>
+                    <div className="input-group">
+                      <label>Similarity Threshold (Answer)</label>
+                      <input
+                        type="number"
+                        min={0}
+                        max={1}
+                        step={0.01}
+                        value={semanticCacheThresholdAnswer}
+                        onChange={(e) => setSemanticCacheThresholdAnswer(snapNumber(e.target.value, 0.93))}
+                        disabled={semanticCacheEnabled === 0}
+                      />
+                    </div>
+                    <div className="input-group">
+                      <label>Similarity Threshold (Chat)</label>
+                      <input
+                        type="number"
+                        min={0}
+                        max={1}
+                        step={0.01}
+                        value={semanticCacheThresholdChat}
+                        onChange={(e) => setSemanticCacheThresholdChat(snapNumber(e.target.value, 0.95))}
+                        disabled={semanticCacheEnabled === 0}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="input-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 16 }}>
+                    <div className="input-group">
+                      <label>TTL Seconds (Search)</label>
+                      <input
+                        type="number"
+                        min={10}
+                        max={86400}
+                        value={semanticCacheTtlSearch}
+                        onChange={(e) => setSemanticCacheTtlSearch(snapNumber(e.target.value, 900))}
+                        disabled={semanticCacheEnabled === 0}
+                      />
+                    </div>
+                    <div className="input-group">
+                      <label>TTL Seconds (Answer)</label>
+                      <input
+                        type="number"
+                        min={10}
+                        max={86400}
+                        value={semanticCacheTtlAnswer}
+                        onChange={(e) => setSemanticCacheTtlAnswer(snapNumber(e.target.value, 1800))}
+                        disabled={semanticCacheEnabled === 0}
+                      />
+                    </div>
+                    <div className="input-group">
+                      <label>TTL Seconds (Chat)</label>
+                      <input
+                        type="number"
+                        min={10}
+                        max={86400}
+                        value={semanticCacheTtlChat}
+                        onChange={(e) => setSemanticCacheTtlChat(snapNumber(e.target.value, 600))}
+                        disabled={semanticCacheEnabled === 0}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="input-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 16 }}>
+                    <div className="input-group">
+                      <label>Chat History Window</label>
+                      <input
+                        type="number"
+                        min={0}
+                        max={50}
+                        value={semanticCacheChatHistoryWindow}
+                        onChange={(e) => setSemanticCacheChatHistoryWindow(snapNumber(e.target.value, 6))}
+                        disabled={semanticCacheEnabled === 0}
+                      />
+                    </div>
+                    <div className="input-group">
+                      <label>Bypass if Images</label>
+                      <select
+                        value={semanticCacheBypassIfImages}
+                        onChange={(e) => setSemanticCacheBypassIfImages(parseInt(e.target.value, 10))}
+                        disabled={semanticCacheEnabled === 0}
+                      >
+                        <option value={1}>Enabled</option>
+                        <option value={0}>Disabled</option>
+                      </select>
+                    </div>
+                    <div className="input-group">
+                      <label>Max Temperature for Write</label>
+                      <input
+                        type="number"
+                        min={0}
+                        max={2}
+                        step={0.05}
+                        value={semanticCacheMaxTemperatureForWrite}
+                        onChange={(e) => setSemanticCacheMaxTemperatureForWrite(snapNumber(e.target.value, 0.5))}
+                        disabled={semanticCacheEnabled === 0}
                       />
                     </div>
                   </div>

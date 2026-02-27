@@ -293,7 +293,7 @@
     "rerank_input_snippet_chars": 700
   },
   "generation": {
-    "gen_model": "totally-fake-model-xyz-9999",
+    "gen_model": "gpt-5.2",
     "gen_temperature": 0.0,
     "gen_max_tokens": 2048,
     "gen_top_p": 1.0,

@@ -29,6 +29,7 @@ models:
     include_vector: bool = True
     include_sparse: bool = True
     include_graph: bool = True
+    cache_mode: Literal["default","bypass","refresh"] = "default"
 
   SearchResponse:
     query: str
@@ -37,6 +38,18 @@ models:
     reranker_mode: str
     latency_ms: float
     debug: dict | None
+
+  AnswerRequest:
+    query: str
+    repo_id: str
+    top_k: int = 10
+    include_vector: bool = True
+    include_sparse: bool = True
+    include_graph: bool = True
+    stream: bool = False
+    system_prompt: str | None = None
+    model_override: str = ""
+    cache_mode: Literal["default","bypass","refresh"] = "default"
 
   ChunkMatch:
     chunk_id: str
