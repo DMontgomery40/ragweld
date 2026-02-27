@@ -158,14 +158,8 @@ class TextTokenizer:
 
         try:
             return tiktoken.get_encoding(name)
-        except Exception:
-            # Keep tokenization resilient for bad config values/tests.
-            for fallback in ("o200k_base", "cl100k_base"):
-                try:
-                    return tiktoken.get_encoding(fallback)
-                except Exception:
-                    continue
-            raise ValueError(f"Unknown tiktoken encoding '{name}'")
+        except Exception as e:
+            raise ValueError(f"Unknown tiktoken encoding '{name}'") from e
 
     @classmethod
     def _tokenize_tiktoken(cls, text: str, encoding_name: str) -> TokenizationResult:

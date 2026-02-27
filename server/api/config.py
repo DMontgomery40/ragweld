@@ -9,7 +9,6 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from server.config import load_config as load_global_config
 from server.db.postgres import PostgresClient
-from server.indexing.tokenizer import TextTokenizer
 from server.models.tribrid_config_model import (
     CorpusScope,
     MCPHTTPTransportStatus,
@@ -195,6 +194,9 @@ def _validate_capability(
 
 
 def _validate_model_capabilities(config: TriBridConfig) -> None:
+    _validate_embedding_runtime_support(config)
+    _validate_embedding_tokenization_compat(config)
+
     catalog_models = _load_catalog_models_for_validation()
     if not catalog_models:
         return
@@ -242,9 +244,6 @@ def _validate_model_capabilities(config: TriBridConfig) -> None:
         model_value=str(config.chat.multimodal.vision_model_override or ""),
         required_component="GEN",
     )
-
-    _validate_embedding_runtime_support(config)
-    _validate_embedding_tokenization_compat(config)
 
     # Embedding fields (must be EMB-capable).
     embedding_provider = str(config.embedding.embedding_type or "").strip().lower() or None
@@ -314,7 +313,9 @@ def _validate_embedding_tokenization_compat(config: TriBridConfig) -> None:
     if strategy == "tiktoken":
         enc = str(config.tokenization.tiktoken_encoding or "").strip()
         try:
-            TextTokenizer._get_tiktoken_encoding(enc)  # noqa: SLF001 - centralized runtime validation.
+            import tiktoken
+
+            tiktoken.get_encoding(enc)
         except Exception as e:
             raise HTTPException(
                 status_code=422,

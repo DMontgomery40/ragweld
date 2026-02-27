@@ -280,6 +280,14 @@ export function IndexingSubtab() {
     }
     return filtered;
   }, [embedProviders, normalizedEmbeddingType]);
+  const hasIndexedCorpus = useMemo(() => {
+    if (!embeddingStatus) return false;
+    return Boolean(embeddingStatus.hasIndex && Number(embeddingStatus.totalChunks || 0) > 0);
+  }, [embeddingStatus]);
+  const contractLocked = useMemo(
+    () => hasIndexedCorpus && !isIndexing && !forceReindex,
+    [forceReindex, hasIndexedCorpus, isIndexing]
+  );
 
   // Auto-select first model when provider changes and current model is not valid
   const providerEmbedModels = useMemo(() => {
@@ -359,16 +367,6 @@ export function IndexingSubtab() {
       message: `embedding_type=${provider} requires tokenization.strategy=${required.join(' or ')}`,
     };
   }, [embeddingBackend, normalizedEmbeddingType, skipDense, tokenizationStrategy]);
-
-  const hasIndexedCorpus = useMemo(() => {
-    if (!embeddingStatus) return false;
-    return Boolean(embeddingStatus.hasIndex && Number(embeddingStatus.totalChunks || 0) > 0);
-  }, [embeddingStatus]);
-
-  const contractLocked = useMemo(
-    () => hasIndexedCorpus && !isIndexing && !forceReindex,
-    [forceReindex, hasIndexedCorpus, isIndexing]
-  );
 
   const indexBlockingReason = useMemo(() => {
     if (skipDense !== 1 && String(embeddingBackend || '').toLowerCase() === 'provider' && !supportedRuntimeProvider) {
