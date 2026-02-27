@@ -1796,6 +1796,21 @@ class PostgresClient:
                 result = await conn.execute("DELETE FROM semantic_cache_entries;")
         return int(str(result).split()[-1])
 
+    async def semantic_cache_clear_for_corpus(self, repo_id: str) -> int:
+        """Clear semantic cache entries whose scope includes the corpus id."""
+        await self._require_pool()
+        assert self._pool is not None
+        async with self._pool.acquire() as conn:
+            result = await conn.execute(
+                """
+                DELETE FROM semantic_cache_entries
+                WHERE scope_key LIKE 'corpora:%'
+                  AND $1 = ANY(string_to_array(SUBSTRING(scope_key FROM 9), '|'));
+                """,
+                str(repo_id or ""),
+            )
+        return int(str(result).split()[-1])
+
     async def embedding_cache_lookup_batch(
         self,
         *,

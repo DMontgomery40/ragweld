@@ -1388,7 +1388,7 @@ async def _run_index_body(
     # Invalidate semantic cache for this corpus after indexing to prevent stale
     # retrieval/generation payloads from pre-index content.
     try:
-        await postgres.semantic_cache_clear(scope_key=f"corpora:{repo_id}")
+        await postgres.semantic_cache_clear_for_corpus(repo_id)
     except Exception:
         pass
 

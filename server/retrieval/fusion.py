@@ -92,15 +92,27 @@ class TriBridFusion:
         cache_lookup_outcome = "disabled"
         cache_lookup_match_type: str | None = None
         cache_lookup_similarity: float | None = None
+        scoped_cfgs: dict[str, TriBridConfig] = {}
+        for cid in corpus_ids:
+            try:
+                scoped_cfgs[cid] = await load_scoped_config(repo_id=cid)
+            except Exception:
+                continue
         primary_cfg: TriBridConfig | None = None
-        try:
-            primary_cfg = await load_scoped_config(repo_id=corpus_ids[0])
+        primary_cfg = scoped_cfgs.get(corpus_ids[0])
+        if primary_cfg is not None:
             cache_service = SemanticCacheService(primary_cfg)
             cache_lookup_outcome = "ready"
-        except Exception:
-            primary_cfg = None
-            cache_service = None
-            cache_lookup_outcome = "unavailable"
+        else:
+            try:
+                primary_cfg = await load_scoped_config(repo_id=corpus_ids[0])
+                scoped_cfgs[corpus_ids[0]] = primary_cfg
+                cache_service = SemanticCacheService(primary_cfg)
+                cache_lookup_outcome = "ready"
+            except Exception:
+                primary_cfg = None
+                cache_service = None
+                cache_lookup_outcome = "unavailable"
         if primary_cfg is not None and top_k is None:
             effective_final_k = int(getattr(primary_cfg.retrieval, "final_k", 0) or 0)
         else:
@@ -111,6 +123,14 @@ class TriBridFusion:
         primary_sparse = primary_cfg.sparse_search if primary_cfg is not None else None
         primary_graph = primary_cfg.graph_search if primary_cfg is not None else None
         primary_retrieval = primary_cfg.retrieval if primary_cfg is not None else None
+        corpus_config_fingerprints: list[str] = []
+        for cid in corpus_ids:
+            cfg_for_corpus = scoped_cfgs.get(cid)
+            if cfg_for_corpus is None:
+                corpus_config_fingerprints.append(f"{cid}:missing")
+                continue
+            cfg_fp = SemanticCacheService.fingerprint(cfg_for_corpus.model_dump(mode="serialization", by_alias=True))
+            corpus_config_fingerprints.append(f"{cid}:{cfg_fp}")
         index_revisions: list[str] = []
         if primary_cfg is not None:
             try:
@@ -142,6 +162,7 @@ class TriBridFusion:
                 "include_sparse": bool(include_sparse),
                 "include_graph": bool(include_graph),
                 "top_k": int(effective_final_k),
+                "corpus_configs": corpus_config_fingerprints,
                 "index_revisions": index_revisions,
                 "fusion_method": str(config.method),
                 "fusion_rrf_k": int(config.rrf_k),
@@ -254,7 +275,10 @@ class TriBridFusion:
         ]:
             cfg_error: Exception | None = None
             try:
-                cfg = await load_scoped_config(repo_id=cid)
+                cfg = scoped_cfgs.get(cid)
+                if cfg is None:
+                    cfg = await load_scoped_config(repo_id=cid)
+                    scoped_cfgs[cid] = cfg
             except Exception as e:
                 # Fail open: if corpus config cannot be loaded (missing corpus, Postgres down, etc),
                 # return empty results with debug instead of raising into a 500.
