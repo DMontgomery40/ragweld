@@ -5,6 +5,7 @@ import contextlib
 import json
 import logging
 import re
+import uuid
 from collections import defaultdict
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
@@ -25,7 +26,14 @@ from server.indexing.graph_builder import GraphBuilder
 from server.indexing.loader import FileLoader
 from server.indexing.text_extractors import extract_text_for_path
 from server.models.graph import Entity, Relationship
-from server.models.index import Chunk, IndexRequest, IndexStats, IndexStatus
+from server.models.index import (
+    Chunk,
+    IndexRequest,
+    IndexRunEvent,
+    IndexRunSummary,
+    IndexStats,
+    IndexStatus,
+)
 from server.models.tribrid_config_model import (
     CorpusScope,
     DashboardEmbeddingConfigSummary,
@@ -92,6 +100,26 @@ _SEM_STOPWORDS: set[str] = {
 }
 
 _MODELS_JSON_PATH = Path(__file__).parent.parent.parent / "data" / "models.json"
+_INDEX_RUNS_DIR = Path(__file__).parent.parent.parent / "data" / "index_runs"
+_STAGING_REPO_PREFIX = "__staging__"
+
+SEMANTIC_RELATION_TYPES: set[str] = {
+    "associated_with",
+    "met_with",
+    "communicated_with",
+    "works_for",
+    "member_of",
+    "founded",
+    "owns",
+    "funded",
+    "participated_in",
+    "located_in",
+    "references",
+    "related_to",
+}
+
+_ACTIVE_RUNS: dict[str, str] = {}
+_QUEUE_RUN_CONTEXT: dict[int, tuple[str, str]] = {}
 
 # Index estimate heuristics (intentionally rough).
 _EST_BYTES_PER_TOKEN = 4.0  # common rule-of-thumb for English-ish text
@@ -127,6 +155,129 @@ def _clear_runtime_state_for_repo(repo_id: str, *, queue: asyncio.Queue[dict[str
         _EVENT_QUEUES.pop(repo_id, None)
     elif _EVENT_QUEUES.get(repo_id) is queue:
         _EVENT_QUEUES.pop(repo_id, None)
+
+    _ACTIVE_RUNS.pop(repo_id, None)
+    if queue is not None:
+        _QUEUE_RUN_CONTEXT.pop(id(queue), None)
+
+
+def _sanitize_fs_component(value: str) -> str:
+    v = re.sub(r"[^A-Za-z0-9._-]+", "_", str(value or "").strip())
+    v = re.sub(r"_+", "_", v).strip("_")
+    return v or "unknown"
+
+
+def _repo_runs_dir(repo_id: str) -> Path:
+    return _INDEX_RUNS_DIR / _sanitize_fs_component(repo_id)
+
+
+def _run_dir(repo_id: str, run_id: str) -> Path:
+    return _repo_runs_dir(repo_id) / _sanitize_fs_component(run_id)
+
+
+def _run_summary_path(repo_id: str, run_id: str) -> Path:
+    return _run_dir(repo_id, run_id) / "summary.json"
+
+
+def _run_events_path(repo_id: str, run_id: str) -> Path:
+    return _run_dir(repo_id, run_id) / "events.jsonl"
+
+
+def _persist_run_summary(summary: IndexRunSummary) -> None:
+    path = _run_summary_path(summary.repo_id, summary.run_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(summary.model_dump_json(by_alias=True, exclude_none=False, indent=2))
+
+
+def _load_run_summary(repo_id: str, run_id: str) -> IndexRunSummary | None:
+    path = _run_summary_path(repo_id, run_id)
+    if not path.exists():
+        return None
+    try:
+        return IndexRunSummary.model_validate_json(path.read_text())
+    except Exception:
+        return None
+
+
+def _load_latest_run_summary(repo_id: str) -> IndexRunSummary | None:
+    repo_dir = _repo_runs_dir(repo_id)
+    if not repo_dir.exists():
+        return None
+    candidates = sorted(
+        [p for p in repo_dir.glob("*/summary.json") if p.is_file()],
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    for p in candidates:
+        try:
+            return IndexRunSummary.model_validate_json(p.read_text())
+        except Exception:
+            continue
+    return None
+
+
+def _to_optional_int(value: Any) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except Exception:
+        return None
+
+
+def _to_optional_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except Exception:
+        return None
+
+
+def _append_run_event(repo_id: str, run_id: str, event: dict[str, Any]) -> None:
+    event_type = str(event.get("type") or "").strip()
+    if not event_type:
+        return
+    evt = IndexRunEvent(
+        run_id=run_id,
+        ts=datetime.now(UTC),
+        type=event_type,
+        message=str(event.get("message")) if event.get("message") is not None else None,
+        percent=_to_optional_int(event.get("percent")),
+        current_file=str(event.get("current_file")) if event.get("current_file") is not None else None,
+        meta={
+            k: v
+            for k, v in event.items()
+            if k not in {"type", "message", "percent", "current_file"}
+        },
+    )
+    path = _run_events_path(repo_id, run_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as f:
+        f.write(evt.model_dump_json(by_alias=True, exclude_none=True) + "\n")
+
+
+def _load_run_events(repo_id: str, run_id: str, *, limit: int) -> list[IndexRunEvent]:
+    path = _run_events_path(repo_id, run_id)
+    if not path.exists():
+        return []
+    out: list[IndexRunEvent] = []
+    try:
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            try:
+                out.append(IndexRunEvent.model_validate_json(line))
+            except Exception:
+                continue
+    except Exception:
+        return []
+    lim = max(1, min(int(limit or 200), 5000))
+    return out[-lim:]
+
+
+def _build_staging_repo_id(repo_id: str, run_id: str) -> str:
+    return f"{_STAGING_REPO_PREFIX}{repo_id}__{run_id}"
 
 
 async def _clear_semantic_cache_for_repo(repo_id: str) -> None:
@@ -347,6 +498,12 @@ def _emit_event(
     if queue is None:
         return
 
+    ctx = _QUEUE_RUN_CONTEXT.get(id(queue))
+    if ctx is not None:
+        repo_id, run_id = ctx
+        with contextlib.suppress(Exception):
+            _append_run_event(repo_id, run_id, event)
+
     if guarantee:
         # Ensure this event is delivered by dropping older events until there is room.
         while True:
@@ -402,7 +559,7 @@ async def _extract_semantic_kg_llm(
     typed_entities_enabled: bool,
     allowed_entity_types: set[str],
     require_success: bool = False,
-) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
+) -> tuple[list[dict[str, str]], list[dict[str, Any]]]:
     """LLM-assisted semantic KG extraction (best-effort).
 
     Returns:
@@ -560,7 +717,7 @@ async def _extract_semantic_kg_llm(
             seen_entities.add(key)
             entities.append({"name": name, "entity_type": et})
 
-    relations: list[dict[str, str]] = []
+    relations: list[dict[str, Any]] = []
     if isinstance(relations_raw, list):
         for r in relations_raw:
             if not isinstance(r, dict):
@@ -570,9 +727,15 @@ async def _extract_semantic_kg_llm(
             rel_type = str(r.get("relation_type") or "related_to").strip().lower()
             if not src or not tgt or src == tgt:
                 continue
-            if rel_type not in {"related_to", "references"}:
+            if rel_type not in SEMANTIC_RELATION_TYPES:
                 continue
-            relations.append({"source": src, "target": tgt, "relation_type": rel_type})
+            relation_item: dict[str, Any] = {"source": src, "target": tgt, "relation_type": rel_type}
+            if r.get("evidence_text") is not None:
+                relation_item["evidence_text"] = str(r.get("evidence_text") or "")
+            confidence_val = _to_optional_float(r.get("confidence"))
+            if confidence_val is not None:
+                relation_item["confidence"] = confidence_val
+            relations.append(relation_item)
 
     return (entities, relations)
 
@@ -583,8 +746,11 @@ async def _run_index(
     force_reindex: bool,
     *,
     event_queue: asyncio.Queue[dict[str, Any]] | None = None,
+    run_id: str,
+    write_repo_id: str | None = None,
 ) -> IndexStats:
     cfg = await load_scoped_config(repo_id=repo_id)
+    target_repo_id = str(write_repo_id or repo_id)
 
     if not force_reindex and repo_id in _STATS:
         return _STATS[repo_id]
@@ -613,7 +779,17 @@ async def _run_index(
     embedder = None if skip_dense else Embedder(cfg.embedding, cfg.tokenization)
     postgres = PostgresClient(cfg.indexing.postgres_url)
     await postgres.connect()
-    await postgres.upsert_corpus(repo_id, name=repo_id, root_path=repo_path)
+    active_corpus = await postgres.get_corpus(repo_id)
+    active_meta = (active_corpus.get("meta") or {}) if active_corpus else {}
+    active_name = str((active_corpus or {}).get("name") or repo_id)
+    active_description = (active_corpus or {}).get("description")
+    await postgres.upsert_corpus(
+        target_repo_id,
+        name=active_name,
+        root_path=repo_path,
+        description=str(active_description) if active_description is not None else None,
+        meta={**active_meta, "internal_staging": target_repo_id != repo_id},
+    )
     if embedder is not None and bool(int(getattr(cfg.embedding, "embedding_cache_enabled", 0) or 0) == 1):
         cache_backend = str(getattr(cfg.embedding, "embedding_backend", "") or "").strip().lower() or "deterministic"
         cache_provider = str(getattr(cfg.embedding, "embedding_type", "") or "").strip().lower() or "deterministic"
@@ -726,13 +902,22 @@ async def _run_index(
                 database=db_name,
             )
             await neo4j.connect()
+            try:
+                await neo4j.ensure_schema()
+            except Exception as exc:
+                _emit_event(
+                    event_queue,
+                    {"type": "error", "message": f"Neo4j schema initialization failed: {exc}"},
+                    guarantee=True,
+                )
+                raise RuntimeError(f"Neo4j schema initialization failed: {exc}") from exc
             graph_builder = GraphBuilder(neo4j, cfg.graph_indexing)
 
             # Lexical chunk vector index (Neo4j native vector indexes)
             if cfg.graph_indexing.build_lexical_graph and cfg.graph_indexing.store_chunk_embeddings and not skip_dense:
                 try:
                     assert embedder is not None
-                    await neo4j.ensure_vector_index(
+                    online = await neo4j.ensure_vector_index(
                         index_name=cfg.graph_indexing.chunk_vector_index_name,
                         label="Chunk",
                         embedding_property=cfg.graph_indexing.chunk_embedding_property,
@@ -741,25 +926,36 @@ async def _run_index(
                         wait_online=cfg.graph_indexing.wait_vector_index_online,
                         timeout_s=float(cfg.graph_indexing.vector_index_online_timeout_s),
                     )
+                    if not online:
+                        _emit_event(
+                            event_queue,
+                            {
+                                "type": "warning",
+                                "message": (
+                                    "Neo4j chunk vector index did not reach ONLINE state "
+                                    f"({cfg.graph_indexing.chunk_vector_index_name})"
+                                ),
+                            },
+                            drop_oldest=True,
+                        )
                 except Exception:
-                    # Graph indexing should never block dense/sparse indexing.
-                    pass
+                    logger.warning("Neo4j vector index ensure failed", exc_info=True)
+                    _emit_event(
+                        event_queue,
+                        {"type": "warning", "message": "Neo4j chunk vector index setup failed for this run"},
+                        drop_oldest=True,
+                    )
     except Exception as exc:
-        # Graph layer is optional at runtime; vector + sparse indexing should still work.
-        logger.warning("Neo4j graph initialization failed; graph indexing disabled for this run: %s", exc, exc_info=True)
-        _emit_event(
-            event_queue,
-            {"type": "warning", "message": f"Graph indexing disabled: {exc}"},
-            drop_oldest=True,
-        )
-        neo4j = None
-        graph_builder = None
+        # Explicitly fail when graph indexing was requested but cannot initialize.
+        logger.warning("Neo4j graph initialization failed for repo_id=%s: %s", repo_id, exc, exc_info=True)
+        raise
 
     try:
         return await _run_index_body(
             repo_id=repo_id,
             repo_path=repo_path,
             force_reindex=force_reindex,
+            run_id=run_id,
             cfg=cfg,
             chunker=chunker,
             max_indexable_bytes=max_indexable_bytes,
@@ -770,6 +966,7 @@ async def _run_index(
             graph_builder=graph_builder,
             loader=loader,
             event_queue=event_queue,
+            write_repo_id=target_repo_id,
         )
     finally:
         if neo4j is not None:
@@ -782,6 +979,7 @@ async def _run_index_body(
     repo_id: str,
     repo_path: str,
     force_reindex: bool,
+    run_id: str,
     cfg: TriBridConfig,
     chunker: Chunker,
     max_indexable_bytes: int,
@@ -792,6 +990,7 @@ async def _run_index_body(
     graph_builder: GraphBuilder | None,
     loader: FileLoader,
     event_queue: asyncio.Queue[dict[str, Any]] | None,
+    write_repo_id: str,
 ) -> IndexStats:
     """Core indexing loop -- extracted to allow _run_index() to guarantee Neo4j cleanup via finally."""
     total_files = 0
@@ -812,9 +1011,9 @@ async def _run_index_body(
     graph_files: list[tuple[str, str]] = []
 
     if force_reindex:
-        await postgres.delete_chunks(repo_id)
+        await postgres.delete_chunks(write_repo_id)
         if neo4j is not None:
-            await neo4j.delete_graph(repo_id)
+            await neo4j.delete_graph(write_repo_id)
         if event_queue is not None:
             _emit_event(
                 event_queue,
@@ -825,7 +1024,7 @@ async def _run_index_body(
     # If skip_dense is enabled, ensure no stale embeddings remain from previous runs.
     # This makes graph-only / sparse-only workflows deterministic.
     if skip_dense:
-        deleted = await postgres.delete_embeddings(repo_id)
+        deleted = await postgres.delete_embeddings(write_repo_id)
         if event_queue is not None:
             _emit_event(
                 event_queue,
@@ -835,6 +1034,10 @@ async def _run_index_body(
 
     semantic_budget = int(cfg.graph_indexing.semantic_kg_max_chunks) if cfg.graph_indexing.semantic_kg_enabled else 0
     semantic_processed = 0
+    semantic_entities_total = 0
+    semantic_relations_total = 0
+    semantic_empty_chunks = 0
+    semantic_llm_errors = 0
     contextual_mode = str(getattr(cfg.embedding, "contextual_chunk_embeddings", "off") or "off").strip().lower()
     indexing_workers = max(1, int(getattr(cfg.indexing, "indexing_workers", 1) or 1))
 
@@ -852,7 +1055,12 @@ async def _run_index_body(
         if event_queue is not None:
             _emit_event(
                 event_queue,
-                {"type": "progress", "percent": int((_STATUS[repo_id].progress) * 100), "message": rel_path},
+                {
+                    "type": "progress",
+                    "percent": int((_STATUS[repo_id].progress) * 100),
+                    "message": rel_path,
+                    "current_file": rel_path,
+                },
                 drop_oldest=True,
             )
 
@@ -897,11 +1105,11 @@ async def _run_index_body(
 
             if skip_dense:
                 with INDEX_STAGE_LATENCY_SECONDS.labels(stage="postgres_upsert_fts").time():
-                    await postgres.upsert_fts(repo_id, chunks, ts_config=cfg.indexing.postgres_ts_config)
+                    await postgres.upsert_fts(write_repo_id, chunks, ts_config=cfg.indexing.postgres_ts_config)
                 if neo4j is not None and cfg.graph_indexing.build_lexical_graph:
                     with INDEX_STAGE_LATENCY_SECONDS.labels(stage="neo4j_upsert_document_chunks").time():
                         await neo4j.upsert_document_and_chunks(
-                            repo_id,
+                            write_repo_id,
                             rel_path,
                             chunks,
                             store_embeddings=False,
@@ -925,13 +1133,13 @@ async def _run_index_body(
                 with INDEX_STAGE_LATENCY_SECONDS.labels(stage="embed_chunks").time():
                     embedded = await embedder.embed_chunks(chunks, embed_texts=contextual_inputs)
             with INDEX_STAGE_LATENCY_SECONDS.labels(stage="postgres_upsert_embeddings").time():
-                await postgres.upsert_embeddings(repo_id, embedded)
+                await postgres.upsert_embeddings(write_repo_id, embedded)
             with INDEX_STAGE_LATENCY_SECONDS.labels(stage="postgres_upsert_fts").time():
-                await postgres.upsert_fts(repo_id, embedded, ts_config=cfg.indexing.postgres_ts_config)
+                await postgres.upsert_fts(write_repo_id, embedded, ts_config=cfg.indexing.postgres_ts_config)
             if neo4j is not None and cfg.graph_indexing.build_lexical_graph:
                 with INDEX_STAGE_LATENCY_SECONDS.labels(stage="neo4j_upsert_document_chunks").time():
                     await neo4j.upsert_document_and_chunks(
-                        repo_id,
+                        write_repo_id,
                         rel_path,
                         embedded,
                         store_embeddings=bool(cfg.graph_indexing.store_chunk_embeddings),
@@ -1141,16 +1349,34 @@ async def _run_index_body(
                     key = v.lower()
                     return (v, key)
 
+                def _relation_lookup_keys(value: str) -> list[str]:
+                    raw = str(value or "").strip()
+                    if not raw:
+                        return []
+                    cleaned = re.sub(r"[_-]+", " ", raw)
+                    cleaned = re.sub(r"\s+", " ", cleaned).strip().lower()
+                    out: list[str] = []
+                    if cleaned:
+                        out.append(cleaned)
+                    concept_key = re.sub(r"[^a-z0-9_]+", "_", cleaned).strip("_")
+                    if concept_key and concept_key not in out:
+                        out.append(concept_key)
+                    return out
+
                 semantic_entities: dict[str, Entity] = {}
                 rels: list[Relationship] = []
                 link_set: set[tuple[str, str]] = set()
+                batch_entities_added = 0
+                batch_relations_added = 0
+                batch_empty_chunks = 0
+                batch_llm_errors = 0
 
                 # Respect indexing_workers for semantic KG LLM extraction so
                 # this setting has a measurable indexing-time effect.
                 semantic_workers = max(1, int(getattr(cfg.indexing, "indexing_workers", 1) or 1))
                 remaining_budget = max(0, semantic_budget - semantic_processed)
                 chunks_for_semantic = semantic_pending_chunks[:remaining_budget]
-                llm_extract_by_chunk: dict[str, tuple[list[dict[str, str]], list[dict[str, str]]]] = {}
+                llm_extract_by_chunk: dict[str, tuple[list[dict[str, str]], list[dict[str, Any]]]] = {}
 
                 if mode == "llm" and llm_prompt and chunks_for_semantic:
                     async def _extract_for_chunk(
@@ -1164,7 +1390,7 @@ async def _run_index_body(
                         _typed_entities_enabled: bool = typed_entities_enabled,
                         _allowed_entity_types: set[str] = allowed_entity_types,
                         _require_llm_success: bool = require_llm_success,
-                    ) -> tuple[str, list[dict[str, str]], list[dict[str, str]]]:
+                    ) -> tuple[str, list[dict[str, str]], list[dict[str, Any]]]:
                         entities_raw, relations_raw = await _extract_semantic_kg_llm(
                             (ch.content or "")[: max(0, _llm_max_chars)],
                             cfg=cfg,
@@ -1189,6 +1415,8 @@ async def _run_index_body(
                             batch_results_with_errors = await asyncio.gather(*coros, return_exceptions=True)
                             for item in batch_results_with_errors:
                                 if isinstance(item, BaseException):
+                                    batch_llm_errors += 1
+                                    semantic_llm_errors += 1
                                     continue
                                 chunk_id, entities_raw_one, relations_raw_one = item
                                 llm_extract_by_chunk[chunk_id] = (entities_raw_one, relations_raw_one)
@@ -1199,22 +1427,20 @@ async def _run_index_body(
                     semantic_processed += 1
 
                     entities_raw: list[dict[str, str]]
-                    relations_raw: list[dict[str, str]]
+                    relations_raw: list[dict[str, Any]]
                     if mode == "llm" and llm_prompt:
                         entities_raw, relations_raw = llm_extract_by_chunk.get(ch.chunk_id, ([], []))
                         if not entities_raw:
-                            if require_llm_success:
-                                raise RuntimeError("semantic_kg_require_llm_success=true and LLM extraction returned no entities")
-                            concepts = _extract_semantic_concepts(ch.content, min_len=min_len, max_terms=max_terms)
-                            entities_raw = [{"name": c, "entity_type": "concept"} for c in concepts]
-                            relations_raw = []
+                            semantic_empty_chunks += 1
+                            batch_empty_chunks += 1
+                            continue
                     else:
                         concepts = _extract_semantic_concepts(ch.content, min_len=min_len, max_terms=max_terms)
                         entities_raw = [{"name": c, "entity_type": "concept"} for c in concepts]
                         relations_raw = []
 
                     chunk_entity_ids: list[str] = []
-                    chunk_name_to_id: dict[str, str] = {}
+                    chunk_name_to_ids: dict[str, list[str]] = defaultdict(list)
                     seen_entities: set[tuple[str, str]] = set()
                     for entry in entities_raw:
                         if not isinstance(entry, dict):
@@ -1232,7 +1458,7 @@ async def _run_index_body(
                         if entity_key in seen_entities:
                             continue
                         seen_entities.add(entity_key)
-                        ent_id = GraphBuilder._stable_id(repo_id, "", et, stable_name)
+                        ent_id = GraphBuilder._stable_id(write_repo_id, "", et, stable_name)
                         if ent_id not in semantic_entities:
                             semantic_entities[ent_id] = Entity(
                                 entity_id=ent_id,
@@ -1240,10 +1466,22 @@ async def _run_index_body(
                                 entity_type=et,  # type: ignore[arg-type]
                                 file_path=None,
                                 description=None,
-                                properties={"source": "semantic", "mode": "llm" if mode == "llm" else "heuristic"},
+                                properties={
+                                    "source": "semantic",
+                                    "mode": "llm" if mode == "llm" else "heuristic",
+                                    "run_id": run_id,
+                                },
                             )
+                            semantic_entities_total += 1
+                            batch_entities_added += 1
                         chunk_entity_ids.append(ent_id)
-                        chunk_name_to_id[stable_name] = ent_id
+                        keys = _relation_lookup_keys(display_name)
+                        if stable_name not in keys:
+                            keys.append(stable_name)
+                        for key in keys:
+                            bucket = chunk_name_to_ids.setdefault(key, [])
+                            if ent_id not in bucket:
+                                bucket.append(ent_id)
                         link_set.add((ent_id, ch.chunk_id))
                         if len(chunk_entity_ids) >= max_terms and et == "concept":
                             break
@@ -1260,50 +1498,48 @@ async def _run_index_body(
                                 src_raw = str(r.get("source") or "")
                                 tgt_raw = str(r.get("target") or "")
                                 rel_type = str(r.get("relation_type") or "related_to").strip().lower()
-                                if rel_type not in {"related_to", "references"}:
+                                if rel_type not in SEMANTIC_RELATION_TYPES:
                                     continue
-                                src_norm = _normalize_semantic_entity(src_raw, "concept")
-                                tgt_norm = _normalize_semantic_entity(tgt_raw, "concept")
-                                if not src_norm or not tgt_norm:
-                                    continue
-                                src_key = src_norm[1]
-                                tgt_key = tgt_norm[1]
-                                src_id = chunk_name_to_id.get(src_key)
-                                tgt_id = chunk_name_to_id.get(tgt_key)
-                                # If relation names are not in extracted entity list, materialize as concept entities.
-                                for key, norm in ((src_key, src_norm), (tgt_key, tgt_norm)):
-                                    if key in chunk_name_to_id:
-                                        continue
-                                    if "concept" not in allowed_entity_types:
-                                        continue
-                                    eid = GraphBuilder._stable_id(repo_id, "", "concept", key)
-                                    if eid not in semantic_entities:
-                                        semantic_entities[eid] = Entity(
-                                            entity_id=eid,
-                                            name=norm[0],
-                                            entity_type="concept",
-                                            file_path=None,
-                                            description=None,
-                                            properties={"source": "semantic", "mode": "llm"},
-                                        )
-                                    chunk_name_to_id[key] = eid
-                                    chunk_entity_ids.append(eid)
-                                    link_set.add((eid, ch.chunk_id))
-                                src_id = chunk_name_to_id.get(src_key)
-                                tgt_id = chunk_name_to_id.get(tgt_key)
+                                src_id: str | None = None
+                                tgt_id: str | None = None
+                                for key in _relation_lookup_keys(src_raw):
+                                    ids = chunk_name_to_ids.get(key) or []
+                                    if ids:
+                                        src_id = ids[0]
+                                        break
+                                for key in _relation_lookup_keys(tgt_raw):
+                                    ids = chunk_name_to_ids.get(key) or []
+                                    if ids:
+                                        tgt_id = ids[0]
+                                        break
                                 if not src_id or not tgt_id or src_id == tgt_id:
                                     continue
+                                rel_props: dict[str, Any] = {
+                                    "source": "semantic",
+                                    "mode": "llm",
+                                    "chunk_id": ch.chunk_id,
+                                    "file_path": ch.file_path,
+                                    "run_id": run_id,
+                                    "model": llm_model,
+                                }
+                                if r.get("evidence_text") is not None:
+                                    rel_props["evidence_text"] = str(r.get("evidence_text") or "")
+                                confidence_val = _to_optional_float(r.get("confidence"))
+                                if confidence_val is not None:
+                                    rel_props["confidence"] = confidence_val
                                 rels.append(
                                     Relationship(
                                         source_id=src_id,
                                         target_id=tgt_id,
                                         relation_type=rel_type,  # type: ignore[arg-type]
                                         weight=float(cfg.graph_indexing.semantic_kg_relation_weight_llm),
-                                        properties={"source": "semantic", "mode": "llm"},
+                                        properties=rel_props,
                                     )
                                 )
                                 rels_added += 1
-                        if rels_added == 0 and len(chunk_entity_ids) >= 2 and not require_llm_success:
+                                batch_relations_added += 1
+                                semantic_relations_total += 1
+                        if mode != "llm" and rels_added == 0 and len(chunk_entity_ids) >= 2:
                             root = chunk_entity_ids[0]
                             for tgt in chunk_entity_ids[1:]:
                                 rels.append(
@@ -1312,25 +1548,50 @@ async def _run_index_body(
                                         target_id=tgt,
                                         relation_type="related_to",
                                         weight=float(cfg.graph_indexing.semantic_kg_relation_weight_heuristic),
-                                        properties={"source": "semantic", "mode": "heuristic"},
+                                        properties={
+                                            "source": "semantic",
+                                            "mode": "heuristic",
+                                            "chunk_id": ch.chunk_id,
+                                            "file_path": ch.file_path,
+                                            "run_id": run_id,
+                                            "model": "",
+                                        },
                                     )
                                 )
                                 rels_added += 1
+                                batch_relations_added += 1
+                                semantic_relations_total += 1
                                 if rels_added >= max_rels_per_chunk:
                                     break
 
                 if semantic_entities:
                     with INDEX_STAGE_LATENCY_SECONDS.labels(stage="neo4j_upsert_semantic_entities").time():
-                        await neo4j.upsert_entities(repo_id, list(semantic_entities.values()))
+                        await neo4j.upsert_entities(write_repo_id, list(semantic_entities.values()))
                 if rels:
                     with INDEX_STAGE_LATENCY_SECONDS.labels(stage="neo4j_upsert_semantic_relationships").time():
-                        await neo4j.upsert_relationships(repo_id, rels)
+                        await neo4j.upsert_relationships(write_repo_id, rels)
                 if link_set:
                     with INDEX_STAGE_LATENCY_SECONDS.labels(stage="neo4j_link_entities_to_chunks").time():
                         await neo4j.link_entities_to_chunks(
-                            repo_id,
+                            write_repo_id,
                             links=[{"entity_id": eid, "chunk_id": cid} for (eid, cid) in sorted(link_set)],
                         )
+                if event_queue is not None and chunks_for_semantic:
+                    _emit_event(
+                        event_queue,
+                        {
+                            "type": "log",
+                            "message": (
+                                "🧠 Semantic KG batch: "
+                                f"chunks={len(chunks_for_semantic)} "
+                                f"entities={batch_entities_added} "
+                                f"relations={batch_relations_added} "
+                                f"empty_chunks={batch_empty_chunks} "
+                                f"parse_api_errors={batch_llm_errors}"
+                            ),
+                        },
+                        drop_oldest=True,
+                    )
             except Exception:
                 INDEX_STAGE_ERRORS_TOTAL.labels(stage="semantic_kg").inc()
                 if bool(cfg.graph_indexing.semantic_kg_require_llm_success):
@@ -1351,14 +1612,14 @@ async def _run_index_body(
                 )
             with INDEX_STAGE_LATENCY_SECONDS.labels(stage="graph_build").time():
                 await graph_builder.build_graph_for_files(
-                    repo_id,
+                    write_repo_id,
                     graph_files,
                     batch_size=int(cfg.indexing.indexing_batch_size),
                 )
             # Link entities to chunk_ids so the graph leg can hydrate deterministically.
             if neo4j is not None and cfg.graph_indexing.build_lexical_graph:
                 with INDEX_STAGE_LATENCY_SECONDS.labels(stage="neo4j_rebuild_entity_chunk_links").time():
-                    await neo4j.rebuild_entity_chunk_links(repo_id)
+                    await neo4j.rebuild_entity_chunk_links(write_repo_id)
         except Exception as exc:
             INDEX_STAGE_ERRORS_TOTAL.labels(stage="graph_build").inc()
             logger.warning("Graph AST build failed for repo_id=%s: %s", repo_id, exc, exc_info=True)
@@ -1370,7 +1631,7 @@ async def _run_index_body(
 
     if skip_dense:
         await postgres.update_corpus_embedding_meta(
-            repo_id,
+            write_repo_id,
             backend="deterministic",
             provider="",
             model="",
@@ -1380,7 +1641,7 @@ async def _run_index_body(
     else:
         assert embedder is not None
         await postgres.update_corpus_embedding_meta(
-            repo_id,
+            write_repo_id,
             backend=str(cfg.embedding.embedding_backend or "deterministic"),
             provider=str(cfg.embedding.embedding_type or ""),
             model=str(cfg.embedding.effective_model or ""),
@@ -1393,6 +1654,23 @@ async def _run_index_body(
         await postgres.semantic_cache_clear_for_corpus(repo_id)
     except Exception:
         pass
+
+    if event_queue is not None and cfg.graph_indexing.semantic_kg_enabled:
+        _emit_event(
+            event_queue,
+            {
+                "type": "log",
+                "message": (
+                    "🧠 Semantic KG summary: "
+                    f"processed_chunks={semantic_processed} "
+                    f"entities={semantic_entities_total} "
+                    f"relations={semantic_relations_total} "
+                    f"empty_chunks={semantic_empty_chunks} "
+                    f"parse_api_errors={semantic_llm_errors}"
+                ),
+            },
+            drop_oldest=True,
+        )
 
     stats = IndexStats(
         repo_id=repo_id,
@@ -1411,18 +1689,80 @@ async def _run_index_body(
 
 async def _background_index_job(request: IndexRequest, queue: asyncio.Queue[dict[str, Any]]) -> None:
     repo_id = request.repo_id
+    run_id = f"{datetime.now(UTC).strftime('%Y%m%dT%H%M%S')}_{uuid.uuid4().hex[:10]}"
+    staging_repo_id = _build_staging_repo_id(repo_id, run_id)
     started_at = datetime.now(UTC)
     this_task = asyncio.current_task()
+    _ACTIVE_RUNS[repo_id] = run_id
+    _QUEUE_RUN_CONTEXT[id(queue)] = (repo_id, run_id)
+
+    summary = IndexRunSummary(
+        run_id=run_id,
+        repo_id=repo_id,
+        status="indexing",
+        started_at=started_at,
+        completed_at=None,
+        progress=0.0,
+        error=None,
+        total_files=0,
+        total_chunks=0,
+        total_tokens=0,
+        embedding_provider=None,
+        embedding_model=None,
+        embedding_dimensions=None,
+    )
+    with contextlib.suppress(Exception):
+        _persist_run_summary(summary)
+
     try:
         INDEX_RUNS_TOTAL.inc()
-        _emit_event(queue, {"type": "log", "message": f"🚀 Indexing started: {repo_id}"}, drop_oldest=True)
+        _emit_event(
+            queue,
+            {"type": "log", "message": f"🚀 Indexing started: {repo_id} (run_id={run_id})"},
+            drop_oldest=True,
+        )
         with INDEX_DURATION_SECONDS.time():
             stats = await _run_index(
                 repo_id,
                 request.repo_path,
                 request.force_reindex,
                 event_queue=queue,
+                run_id=run_id,
+                write_repo_id=staging_repo_id,
             )
+        cfg = await load_scoped_config(repo_id=repo_id)
+        postgres = PostgresClient(cfg.indexing.postgres_url)
+        await postgres.connect()
+        try:
+            active_corpus = await postgres.get_corpus(repo_id)
+            active_name = str((active_corpus or {}).get("name") or repo_id)
+            active_description = (active_corpus or {}).get("description")
+            active_meta = (active_corpus.get("meta") or {}) if active_corpus else {}
+            await postgres.promote_staging_index(
+                active_repo_id=repo_id,
+                staging_repo_id=staging_repo_id,
+                active_name=active_name,
+                active_root_path=request.repo_path,
+                active_description=str(active_description) if active_description is not None else None,
+                active_meta=active_meta,
+            )
+        finally:
+            with contextlib.suppress(Exception):
+                await postgres.disconnect()
+
+        if cfg.graph_indexing.enabled:
+            db_name = cfg.graph_storage.resolve_database(repo_id)
+            neo4j = Neo4jClient(
+                cfg.graph_storage.neo4j_uri,
+                cfg.graph_storage.neo4j_user,
+                cfg.graph_storage.neo4j_password,
+                database=db_name,
+            )
+            await neo4j.connect()
+            try:
+                await neo4j.promote_repo_graph(active_repo_id=repo_id, staging_repo_id=staging_repo_id)
+            finally:
+                await neo4j.disconnect()
         # Update process-level “size” gauges (best-effort; no per-corpus labels).
         try:
             CHUNKS_INDEXED_CURRENT.set(int(getattr(stats, "total_chunks", 0) or 0))
@@ -1459,8 +1799,46 @@ async def _background_index_job(request: IndexRequest, queue: asyncio.Queue[dict
             started_at=started_at,
             completed_at=datetime.now(UTC),
         )
+        summary = IndexRunSummary(
+            run_id=run_id,
+            repo_id=repo_id,
+            status="complete",
+            started_at=started_at,
+            completed_at=datetime.now(UTC),
+            progress=1.0,
+            error=None,
+            total_files=int(getattr(stats, "total_files", 0) or 0),
+            total_chunks=int(getattr(stats, "total_chunks", 0) or 0),
+            total_tokens=int(getattr(stats, "total_tokens", 0) or 0),
+            embedding_provider=str(getattr(stats, "embedding_provider", "") or ""),
+            embedding_model=str(getattr(stats, "embedding_model", "") or ""),
+            embedding_dimensions=int(getattr(stats, "embedding_dimensions", 0) or 0),
+        )
+        with contextlib.suppress(Exception):
+            _persist_run_summary(summary)
         _emit_event(queue, {"type": "complete", "message": "✓ Indexing complete"}, guarantee=True)
     except asyncio.CancelledError:
+        with contextlib.suppress(Exception):
+            cfg = await load_scoped_config(repo_id=repo_id)
+            pg = PostgresClient(cfg.indexing.postgres_url)
+            await pg.connect()
+            try:
+                await pg.delete_corpus_with_data(staging_repo_id)
+            finally:
+                await pg.disconnect()
+            if cfg.graph_indexing.enabled:
+                db_name = cfg.graph_storage.resolve_database(repo_id)
+                neo4j = Neo4jClient(
+                    cfg.graph_storage.neo4j_uri,
+                    cfg.graph_storage.neo4j_user,
+                    cfg.graph_storage.neo4j_password,
+                    database=db_name,
+                )
+                await neo4j.connect()
+                try:
+                    await neo4j.delete_graph(staging_repo_id)
+                finally:
+                    await neo4j.disconnect()
         # Cancelled tasks cannot rely on direct awaits for cleanup, so shield
         # invalidation to let it continue even while this task is cancelled.
         try:
@@ -1479,9 +1857,47 @@ async def _background_index_job(request: IndexRequest, queue: asyncio.Queue[dict
             started_at=prev.started_at if prev else started_at,
             completed_at=datetime.now(UTC),
         )
+        summary = IndexRunSummary(
+            run_id=run_id,
+            repo_id=repo_id,
+            status="cancelled",
+            started_at=started_at,
+            completed_at=datetime.now(UTC),
+            progress=float(prev.progress) if prev else 0.0,
+            error=None,
+            total_files=0,
+            total_chunks=0,
+            total_tokens=0,
+            embedding_provider=None,
+            embedding_model=None,
+            embedding_dimensions=None,
+        )
+        with contextlib.suppress(Exception):
+            _persist_run_summary(summary)
         _emit_event(queue, {"type": "cancelled", "message": "⚠ Indexing cancelled"}, guarantee=True)
         raise
     except Exception as e:
+        with contextlib.suppress(Exception):
+            cfg = await load_scoped_config(repo_id=repo_id)
+            pg = PostgresClient(cfg.indexing.postgres_url)
+            await pg.connect()
+            try:
+                await pg.delete_corpus_with_data(staging_repo_id)
+            finally:
+                await pg.disconnect()
+            if cfg.graph_indexing.enabled:
+                db_name = cfg.graph_storage.resolve_database(repo_id)
+                neo4j = Neo4jClient(
+                    cfg.graph_storage.neo4j_uri,
+                    cfg.graph_storage.neo4j_user,
+                    cfg.graph_storage.neo4j_password,
+                    database=db_name,
+                )
+                await neo4j.connect()
+                try:
+                    await neo4j.delete_graph(staging_repo_id)
+                finally:
+                    await neo4j.disconnect()
         # If indexing failed after deleting/updating chunks, stale cache entries can
         # point to content that no longer exists. Best-effort clear on errors.
         with contextlib.suppress(Exception):
@@ -1497,6 +1913,23 @@ async def _background_index_job(request: IndexRequest, queue: asyncio.Queue[dict
             started_at=started_at,
             completed_at=datetime.now(UTC),
         )
+        summary = IndexRunSummary(
+            run_id=run_id,
+            repo_id=repo_id,
+            status="error",
+            started_at=started_at,
+            completed_at=datetime.now(UTC),
+            progress=float(prev.progress) if prev else 0.0,
+            error=str(e),
+            total_files=0,
+            total_chunks=0,
+            total_tokens=0,
+            embedding_provider=None,
+            embedding_model=None,
+            embedding_dimensions=None,
+        )
+        with contextlib.suppress(Exception):
+            _persist_run_summary(summary)
         _emit_event(queue, {"type": "error", "message": str(e)}, guarantee=True)
     finally:
         # Avoid clearing a newer task/queue for the same repo if a new run already started.
@@ -1848,11 +2281,45 @@ async def get_dashboard_index_stats(scope: CorpusScope = _CORPUS_SCOPE_DEP) -> D
     )
 
 
+@router.get("/index/{corpus_id}/runs/latest", response_model=IndexRunSummary)
+async def get_latest_index_run(corpus_id: str) -> IndexRunSummary:
+    repo_id = str(corpus_id or "").strip()
+    if not repo_id:
+        raise HTTPException(status_code=422, detail="corpus_id is required")
+    run = _load_latest_run_summary(repo_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail=f"No persisted index runs found for repo_id={repo_id}")
+    return run
+
+
+@router.get("/index/{corpus_id}/runs/{run_id}/events", response_model=list[IndexRunEvent])
+async def get_index_run_events(corpus_id: str, run_id: str, limit: int = Query(default=200, ge=1, le=5000)) -> list[IndexRunEvent]:
+    repo_id = str(corpus_id or "").strip()
+    rid = str(run_id or "").strip()
+    if not repo_id:
+        raise HTTPException(status_code=422, detail="corpus_id is required")
+    if not rid:
+        raise HTTPException(status_code=422, detail="run_id is required")
+    events = _load_run_events(repo_id, rid, limit=limit)
+    return events
+
+
 @router.get("/index/{corpus_id}/status", response_model=IndexStatus)
 async def get_index_status(corpus_id: str) -> IndexStatus:
     repo_id = corpus_id
     if repo_id in _STATUS:
         return _STATUS[repo_id]
+    persisted_run = _load_latest_run_summary(repo_id)
+    if persisted_run is not None:
+        return IndexStatus(
+            repo_id=repo_id,
+            status=persisted_run.status,
+            progress=float(persisted_run.progress or 0.0),
+            current_file=None,
+            error=persisted_run.error,
+            started_at=persisted_run.started_at,
+            completed_at=persisted_run.completed_at,
+        )
     # In-memory status is lost on server reload; infer "complete" from persisted
     # index stats so clients don't see a misleading "idle" state.
     if repo_id in _STATS and int(getattr(_STATS[repo_id], "total_chunks", 0) or 0) > 0:

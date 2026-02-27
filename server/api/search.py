@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 import uuid
+from typing import cast
 
 from fastapi import APIRouter, HTTPException
 from starlette.responses import StreamingResponse
@@ -11,13 +12,26 @@ from server.db.postgres import PostgresClient
 from server.models.retrieval import AnswerRequest, AnswerResponse, SearchRequest, SearchResponse
 from server.models.tribrid_config_model import TriBridConfig
 from server.observability.metrics import SEARCH_REQUESTS_TOTAL
+from server.retrieval.cache import CacheMode
+from server.retrieval.errors import RetrievalContractMismatchError
 from server.retrieval.fusion import TriBridFusion
-from server.services.answer_service import answer_best_effort, stream_answer_best_effort
+from server.services.answer_service import (
+    answer_best_effort,
+    retrieve_best_effort,
+    stream_answer_best_effort,
+)
 from server.services.config_store import CorpusNotFoundError
 from server.services.config_store import get_config as load_scoped_config
 from server.services.conversation_store import get_conversation_store
 
 router = APIRouter(tags=["search"])
+
+
+def _normalize_cache_mode(cache_mode: str | None) -> CacheMode:
+    mode = str(cache_mode or "default").strip().lower()
+    if mode in {"bypass", "refresh"}:
+        return cast(CacheMode, mode)
+    return "default"
 
 
 @router.post("/search", response_model=SearchResponse)
@@ -51,19 +65,23 @@ async def search(request: SearchRequest) -> SearchResponse:
         # Fail open: fall back to LAW defaults (fusion will also fail open if config load fails downstream).
         cfg = TriBridConfig()
     fusion = TriBridFusion(vector=None, sparse=None, graph=None)
+    request_cache_mode = _normalize_cache_mode(request.cache_mode)
 
     t0 = time.perf_counter()
-    matches = await fusion.search(
-        [request.repo_id],
-        request.query,
-        cfg.fusion,
-        include_vector=bool(request.include_vector),
-        include_sparse=bool(request.include_sparse),
-        include_graph=bool(request.include_graph),
-        top_k=int(request.top_k),
-        cache_mode=str(request.cache_mode or "default"),
-        cache_namespace="search",
-    )
+    try:
+        matches = await fusion.search(
+            [request.repo_id],
+            request.query,
+            cfg.fusion,
+            include_vector=bool(request.include_vector),
+            include_sparse=bool(request.include_sparse),
+            include_graph=bool(request.include_graph),
+            top_k=int(request.top_k),
+            cache_mode=request_cache_mode,
+            cache_namespace="search",
+        )
+    except RetrievalContractMismatchError as e:
+        raise HTTPException(status_code=409, detail=e.to_detail()) from e
     dt_ms = (time.perf_counter() - t0) * 1000.0
 
     # Best-effort query log append for triplet mining.
@@ -132,21 +150,25 @@ async def answer(request: AnswerRequest) -> AnswerResponse:
     except Exception:
         cfg = TriBridConfig()
     fusion = TriBridFusion(vector=None, sparse=None, graph=None)
+    request_cache_mode = _normalize_cache_mode(request.cache_mode)
 
     t0 = time.perf_counter()
-    text, sources, provider_info, debug = await answer_best_effort(
-        query=request.query,
-        corpus_id=request.repo_id,
-        config=cfg,
-        fusion=fusion,
-        include_vector=bool(request.include_vector),
-        include_sparse=bool(request.include_sparse),
-        include_graph=bool(request.include_graph),
-        top_k=int(request.top_k),
-        system_prompt_override=request.system_prompt,
-        model_override=str(request.model_override or ""),
-        cache_mode=str(request.cache_mode or "default"),
-    )
+    try:
+        text, sources, provider_info, debug = await answer_best_effort(
+            query=request.query,
+            corpus_id=request.repo_id,
+            config=cfg,
+            fusion=fusion,
+            include_vector=bool(request.include_vector),
+            include_sparse=bool(request.include_sparse),
+            include_graph=bool(request.include_graph),
+            top_k=int(request.top_k),
+            system_prompt_override=request.system_prompt,
+            model_override=str(request.model_override or ""),
+            cache_mode=request_cache_mode,
+        )
+    except RetrievalContractMismatchError as e:
+        raise HTTPException(status_code=409, detail=e.to_detail()) from e
     dt_ms = (time.perf_counter() - t0) * 1000.0
 
     if corpus_validation_error:
@@ -195,9 +217,24 @@ async def answer_stream(request: AnswerRequest) -> StreamingResponse:
     except Exception:
         cfg = TriBridConfig()
     fusion = TriBridFusion(vector=None, sparse=None, graph=None)
+    request_cache_mode = _normalize_cache_mode(request.cache_mode)
 
     store = get_conversation_store()
     conv = store.get_or_create(None)
+    try:
+        prefetched_chunks, _ = await retrieve_best_effort(
+            query=request.query,
+            corpus_id=request.repo_id,
+            config=cfg,
+            fusion=fusion,
+            include_vector=bool(request.include_vector),
+            include_sparse=bool(request.include_sparse),
+            include_graph=bool(request.include_graph),
+            top_k=int(request.top_k),
+            cache_mode=request_cache_mode,
+        )
+    except RetrievalContractMismatchError as e:
+        raise HTTPException(status_code=409, detail=e.to_detail()) from e
 
     return StreamingResponse(
         stream_answer_best_effort(
@@ -211,7 +248,8 @@ async def answer_stream(request: AnswerRequest) -> StreamingResponse:
             top_k=int(request.top_k),
             system_prompt_override=request.system_prompt,
             model_override=str(request.model_override or ""),
-            cache_mode=str(request.cache_mode or "default"),
+            cache_mode=request_cache_mode,
+            prefetched_chunks=prefetched_chunks,
             conversation_id=conv.id,
             started_at_ms=int(time.time() * 1000),
         ),

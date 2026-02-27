@@ -355,9 +355,8 @@ export function useGraph() {
     if (!activeRepo) return;
 
     reset();
-    await loadStats();
-    await loadCommunities();
-  }, [activeRepo, reset, loadStats, loadCommunities]);
+    await Promise.all([loadStats(), loadCommunities(), searchEntities('', 200)]);
+  }, [activeRepo, reset, loadStats, loadCommunities, searchEntities]);
 
   // Load graph when active repo changes
   useEffect(() => {

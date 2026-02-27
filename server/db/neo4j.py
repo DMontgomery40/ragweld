@@ -8,7 +8,7 @@ import time
 from collections import defaultdict
 from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import Any, Literal, TypeVar, cast
 
 from neo4j import AsyncDriver, AsyncGraphDatabase
 
@@ -17,7 +17,43 @@ from server.models.index import Chunk
 from server.models.retrieval import ChunkMatch
 
 EntityType = Literal["function", "class", "module", "variable", "concept", "person", "org", "location", "event"]
-RelationshipType = Literal["calls", "imports", "inherits", "contains", "references", "related_to"]
+RelationshipType = Literal[
+    "calls",
+    "imports",
+    "inherits",
+    "contains",
+    "associated_with",
+    "met_with",
+    "communicated_with",
+    "works_for",
+    "member_of",
+    "founded",
+    "owns",
+    "funded",
+    "participated_in",
+    "located_in",
+    "references",
+    "related_to",
+]
+
+CODE_RELATION_TYPES: set[str] = {"calls", "imports", "inherits", "contains"}
+SEMANTIC_RELATION_TYPES: set[str] = {
+    "associated_with",
+    "met_with",
+    "communicated_with",
+    "works_for",
+    "member_of",
+    "founded",
+    "owns",
+    "funded",
+    "participated_in",
+    "located_in",
+    "references",
+    "related_to",
+}
+ALL_RELATION_TYPES: set[str] = CODE_RELATION_TYPES | SEMANTIC_RELATION_TYPES
+
+_BATCH_SIZE_DEFAULT = 500
 
 
 class Neo4jClient:
@@ -27,6 +63,7 @@ class Neo4jClient:
         self.password = password
         self.database = database or "neo4j"
         self._driver: AsyncDriver | None = None
+        self._server_version: str | None = None
 
     async def connect(self) -> None:
         uri = os.getenv("NEO4J_URI") or self.uri
@@ -48,14 +85,23 @@ class Neo4jClient:
         async with driver.session(database="system") as session:
             # Works in Neo4j 5+; returns (name, versions, edition).
             res = await session.run("CALL dbms.components() YIELD name, versions, edition RETURN name, versions, edition LIMIT 1;")
-            rec = await res.single()
+            rec: Any | None
+            if hasattr(res, "single"):
+                rec = await res.single()
+            else:
+                # Test doubles may only implement data().
+                rows = await res.data() if hasattr(res, "data") else []
+                rec = rows[0] if rows else None
         if not rec:
             return {"ok": True, "name": None, "versions": None, "edition": None}
         versions = rec.get("versions")
+        parsed_versions = [str(v) for v in (versions or [])] if isinstance(versions, list) else []
+        if parsed_versions:
+            self._server_version = parsed_versions[0]
         return {
             "ok": True,
             "name": str(rec.get("name") or ""),
-            "versions": [str(v) for v in (versions or [])] if isinstance(versions, list) else [],
+            "versions": parsed_versions,
             "edition": str(rec.get("edition") or ""),
         }
 
@@ -106,6 +152,62 @@ class Neo4jClient:
             # STATES: ONLINE, OFFLINE, STARTING, STOPPING, STORE_COPYING, INITIAL, DRAINING...
             await asyncio.sleep(0.2)
         return False
+
+    async def ensure_schema(self) -> None:
+        """Ensure identity constraints used by MERGE paths exist."""
+        driver = self._require_driver()
+        statements = [
+            (
+                "CREATE CONSTRAINT rw_document_repo_file IF NOT EXISTS "
+                "FOR (d:Document) REQUIRE (d.repo_id, d.file_path) IS UNIQUE;"
+            ),
+            (
+                "CREATE CONSTRAINT rw_chunk_repo_chunk IF NOT EXISTS "
+                "FOR (c:Chunk) REQUIRE (c.repo_id, c.chunk_id) IS UNIQUE;"
+            ),
+            (
+                "CREATE CONSTRAINT rw_entity_repo_entity IF NOT EXISTS "
+                "FOR (e:Entity) REQUIRE (e.repo_id, e.entity_id) IS UNIQUE;"
+            ),
+            (
+                "CREATE CONSTRAINT rw_community_repo_community IF NOT EXISTS "
+                "FOR (c:Community) REQUIRE (c.repo_id, c.community_id) IS UNIQUE;"
+            ),
+        ]
+        async with driver.session(database=self.database) as session:
+            for stmt in statements:
+                await session.run(stmt)
+
+    async def _get_server_version(self) -> str:
+        if self._server_version:
+            return self._server_version
+        info = await self.ping()
+        versions = info.get("versions") if isinstance(info, dict) else None
+        if isinstance(versions, list) and versions:
+            self._server_version = str(versions[0] or "").strip()
+        else:
+            self._server_version = ""
+        return self._server_version or ""
+
+    async def _supports_search_clause_vector(self) -> bool:
+        """Best-effort capability gate for SEARCH-clause vector querying."""
+        version = await self._get_server_version()
+        if not version:
+            return False
+        # Current runtime pin is 5.x; SEARCH support is expected in newer tracks.
+        if version.startswith("2026.") or version.startswith("6."):
+            return True
+        return False
+
+    async def _resolve_vector_query_mode(self, mode: str) -> str:
+        normalized = str(mode or "auto").strip().lower()
+        if normalized == "auto":
+            if await self._supports_search_clause_vector():
+                return "search"
+            return "procedure"
+        if normalized in {"procedure", "search"}:
+            return normalized
+        return "procedure"
 
     # ------------------------------------------------------------------
     # Lexical chunk graph (Document/Chunk) + vector index
@@ -159,11 +261,19 @@ class Neo4jClient:
         deadline = loop.time() + max(0.1, float(timeout_s))
         while loop.time() < deadline:
             async with driver.session(database=self.database) as session:
-                res = await session.run(
-                    "SHOW INDEXES YIELD name, state WHERE name = $name RETURN state AS state LIMIT 1;",
-                    name=idx,
-                )
-                rec = await res.single()
+                rec = None
+                try:
+                    res = await session.run(
+                        "SHOW VECTOR INDEXES YIELD name, state WHERE name = $name RETURN state AS state LIMIT 1;",
+                        name=idx,
+                    )
+                    rec = await res.single()
+                except Exception:
+                    res = await session.run(
+                        "SHOW INDEXES YIELD name, state WHERE name = $name RETURN state AS state LIMIT 1;",
+                        name=idx,
+                    )
+                    rec = await res.single()
             state = str(rec.get("state") if rec else "").upper()
             if state == "ONLINE":
                 return True
@@ -265,14 +375,20 @@ class Neo4jClient:
         top_k: int,
         neighbor_window: int = 0,
         overfetch_multiplier: int = 1,
+        query_mode: str = "auto",
     ) -> list[tuple[str, float]]:
         """Vector search over Chunk nodes in Neo4j; returns (chunk_id, score)."""
         if not embedding or top_k <= 0:
             return []
 
         driver = self._require_driver()
+        resolved_mode = await self._resolve_vector_query_mode(query_mode)
         seed_k = max(1, int(top_k) * max(1, int(overfetch_multiplier)))
         window = max(0, int(neighbor_window))
+
+        # On the pinned runtime, procedure mode is the authoritative implementation.
+        # SEARCH mode is version-gated and currently falls back to procedure querying.
+        _ = resolved_mode
 
         # Neo4j does not allow parameterized variable-length patterns (e.g., *0..$window),
         # so we safely inline the integer window (validated + clamped above).
@@ -358,7 +474,8 @@ class Neo4jClient:
         """
 
         async with driver.session(database=self.database) as session:
-            await session.run(query, repo_id=repo_id, entities=payload)
+            for batch in _iter_batches(payload):
+                await session.run(query, repo_id=repo_id, entities=batch)
         return len(entities)
 
     async def get_entity(self, entity_id: str) -> Entity | None:
@@ -441,18 +558,10 @@ class Neo4jClient:
             return 0
         driver = self._require_driver()
 
-        allowed = {
-            "calls",
-            "imports",
-            "inherits",
-            "contains",
-            "references",
-            "related_to",
-        }
         grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
         for r in rels:
             rel_type = str(r.relation_type)
-            if rel_type not in allowed:
+            if rel_type not in ALL_RELATION_TYPES:
                 continue
             grouped[rel_type].append(
                 {
@@ -474,7 +583,8 @@ class Neo4jClient:
                 SET rel.weight = r.weight,
                     rel.properties_json = r.properties_json;
                 """
-                await session.run(query, repo_id=repo_id, rels=payload)
+                for batch in _iter_batches(payload):
+                    await session.run(query, repo_id=repo_id, rels=batch)
         return sum(len(v) for v in grouped.values())
 
     async def get_relationships(self, entity_id: str) -> list[Relationship]:
@@ -493,14 +603,7 @@ class Neo4jClient:
             )
             records = await res.data()
         out: list[Relationship] = []
-        allowed: set[str] = {
-            "calls",
-            "imports",
-            "inherits",
-            "contains",
-            "references",
-            "related_to",
-        }
+        allowed: set[str] = set(ALL_RELATION_TYPES)
         for r in records:
             props = {}
             if r.get("properties_json"):
@@ -542,7 +645,7 @@ class Neo4jClient:
         lim = int(max(0, limit or 0))
         lim = min(lim, 2000)
 
-        allowed_rels = ["calls", "imports", "inherits", "contains", "references", "related_to"]
+        allowed_rels = sorted(ALL_RELATION_TYPES)
         driver = self._require_driver()
 
         cypher = f"""
@@ -607,7 +710,7 @@ class Neo4jClient:
                     entities.append(_entity_from_mapping(item))
 
         rels: list[Relationship] = []
-        allowed: set[str] = {"calls", "imports", "inherits", "contains", "references", "related_to"}
+        allowed: set[str] = set(ALL_RELATION_TYPES)
         if isinstance(relationships_raw, list):
             for r in relationships_raw:
                 if not isinstance(r, dict):
@@ -682,7 +785,7 @@ class Neo4jClient:
         if not community_id.strip() or lim <= 0:
             return None
 
-        allowed_rels = ["calls", "imports", "inherits", "contains", "references", "related_to"]
+        allowed_rels = sorted(ALL_RELATION_TYPES)
         driver = self._require_driver()
 
         cypher = """
@@ -743,7 +846,7 @@ class Neo4jClient:
                     entities.append(_entity_from_mapping(item))
 
         rels: list[Relationship] = []
-        allowed: set[str] = {"calls", "imports", "inherits", "contains", "references", "related_to"}
+        allowed: set[str] = set(ALL_RELATION_TYPES)
         if isinstance(relationships_raw, list):
             for r in relationships_raw:
                 if not isinstance(r, dict):
@@ -879,7 +982,7 @@ class Neo4jClient:
         tokens = list(dict.fromkeys(tokens))[:8]
 
         max_hops = int(max(0, max_hops or 0))
-        allowed_rels = ["calls", "imports", "inherits", "contains", "references", "related_to"]
+        allowed_rels = sorted(ALL_RELATION_TYPES)
         # Neo4j does not allow parameterized variable-length patterns (*0..$max_hops),
         # so we safely inline the integer hop limit (validated + clamped above).
         cypher = f"""
@@ -996,16 +1099,17 @@ class Neo4jClient:
             return 0
         driver = self._require_driver()
         async with driver.session(database=self.database) as session:
-            await session.run(
-                """
-                UNWIND $links AS l
-                MATCH (e:Entity {repo_id: $repo_id, entity_id: l.entity_id})
-                MATCH (c:Chunk {repo_id: $repo_id, chunk_id: l.chunk_id})
-                MERGE (e)-[:IN_CHUNK]->(c);
-                """,
-                repo_id=repo_id,
-                links=links,
-            )
+            for batch in _iter_batches(links):
+                await session.run(
+                    """
+                    UNWIND $links AS l
+                    MATCH (e:Entity {repo_id: $repo_id, entity_id: l.entity_id})
+                    MATCH (c:Chunk {repo_id: $repo_id, chunk_id: l.chunk_id})
+                    MERGE (e)-[:IN_CHUNK]->(c);
+                    """,
+                    repo_id=repo_id,
+                    links=batch,
+                )
         return len(links)
 
     async def expand_chunks_via_entities(
@@ -1051,7 +1155,7 @@ class Neo4jClient:
                 cypher,
                 repo_id=repo_id,
                 seeds=payload,
-                allowed_rels=["calls", "imports", "inherits", "contains", "references", "related_to"],
+                allowed_rels=sorted(ALL_RELATION_TYPES),
                 limit=int(top_k),
             )
             records = await res.data()
@@ -1078,7 +1182,7 @@ class Neo4jClient:
         tokens = list(dict.fromkeys(tokens))[:8]
 
         max_hops = int(max(0, max_hops or 0))
-        allowed_rels = ["calls", "imports", "inherits", "contains", "references", "related_to"]
+        allowed_rels = sorted(ALL_RELATION_TYPES)
         # Neo4j does not allow parameterized variable-length patterns (*0..$max_hops),
         # so we safely inline the integer hop limit (validated + clamped above).
         cypher = f"""
@@ -1286,7 +1390,41 @@ class Neo4jClient:
         """Delete all graph data (entities, rels, communities) for a corpus."""
         driver = self._require_driver()
         async with driver.session(database=self.database) as session:
-            await session.run("MATCH (n {repo_id: $repo_id}) DETACH DELETE n;", repo_id=repo_id)
+            while True:
+                res = await session.run(
+                    """
+                    MATCH (n {repo_id: $repo_id})
+                    WITH n LIMIT $batch_size
+                    DETACH DELETE n
+                    RETURN count(*) AS n;
+                    """,
+                    repo_id=repo_id,
+                    batch_size=int(_BATCH_SIZE_DEFAULT * 10),
+                )
+                rec = await res.single()
+                deleted = int(rec.get("n") or 0) if rec else 0
+                if deleted <= 0:
+                    break
+
+    async def promote_repo_graph(self, *, active_repo_id: str, staging_repo_id: str) -> None:
+        """Atomically promote a staged graph to active by repo_id swap."""
+        driver = self._require_driver()
+        async with driver.session(database=self.database) as session:
+            tx = await session.begin_transaction()
+            try:
+                await tx.run(
+                    "MATCH (n {repo_id: $active_repo_id}) DETACH DELETE n;",
+                    active_repo_id=active_repo_id,
+                )
+                await tx.run(
+                    "MATCH (n {repo_id: $staging_repo_id}) SET n.repo_id = $active_repo_id;",
+                    staging_repo_id=staging_repo_id,
+                    active_repo_id=active_repo_id,
+                )
+                await tx.commit()
+            except Exception:
+                await tx.rollback()
+                raise
 
     # ------------------------------------------------------------------
     # Internals
@@ -1384,6 +1522,15 @@ def _coerce_entity_type(value: str) -> EntityType:
     if value in allowed:
         return cast(EntityType, value)
     return "concept"
+
+
+_T = TypeVar("_T")
+
+
+def _iter_batches(items: list[_T], batch_size: int = _BATCH_SIZE_DEFAULT) -> Iterable[list[_T]]:
+    size = max(1, int(batch_size or _BATCH_SIZE_DEFAULT))
+    for i in range(0, len(items), size):
+        yield items[i : i + size]
 
 
 def _sanitize_database_name(name: str) -> str:

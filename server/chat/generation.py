@@ -289,7 +289,7 @@ async def generate_chat_text(
 
     if is_openai_responses:
         url = f"{base_url}/responses" if base_url.endswith("/v1") else f"{base_url}/v1/responses"
-        payload = {
+        payload: dict[str, Any] = {
             "model": route.model,
             "instructions": prompt,
             "input": _build_responses_input(user_message=user_message, images=images, image_detail=image_detail),
@@ -423,7 +423,7 @@ async def stream_chat_text(
         try:
             if is_openai_responses:
                 url = f"{base_url}/responses" if base_url.endswith("/v1") else f"{base_url}/v1/responses"
-                payload = {
+                payload: dict[str, Any] = {
                     "model": route.model,
                     "instructions": prompt,
                     "input": _build_responses_input(user_message=user_message, images=images, image_detail=image_detail),
@@ -470,10 +470,10 @@ async def stream_chat_text(
                                 on_provider_response_id(rid.strip())
                         evt_type = str(evt.get("type") or current_event or "").strip()
                         if evt_type in {"response.output_text.delta", "response.refusal.delta"}:
-                            delta = evt.get("delta")
-                            if isinstance(delta, str) and delta:
+                            evt_delta = evt.get("delta")
+                            if isinstance(evt_delta, str) and evt_delta:
                                 yielded_any = True
-                                yield delta
+                                yield evt_delta
                                 continue
                         if evt_type == "response.completed":
                             response_obj = evt.get("response") if isinstance(evt.get("response"), dict) else evt

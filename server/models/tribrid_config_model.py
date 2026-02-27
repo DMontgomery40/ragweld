@@ -74,6 +74,40 @@ class IndexStatus(BaseModel):
     completed_at: datetime | None = Field(default=None, description="When indexing completed")
 
 
+class IndexRunSummary(BaseModel):
+    """Persisted indexing run summary for replay/status truthfulness."""
+
+    run_id: str = Field(description="Unique indexing run identifier")
+    repo_id: str = Field(
+        description="Corpus identifier",
+        validation_alias=AliasChoices("repo_id", "corpus_id"),
+        serialization_alias="corpus_id",
+    )
+    status: Literal["indexing", "complete", "error", "cancelled"] = Field(description="Final or current run state")
+    started_at: datetime = Field(description="When indexing run started")
+    completed_at: datetime | None = Field(default=None, description="When indexing run completed")
+    progress: float = Field(default=0.0, ge=0.0, le=1.0, description="Best-effort progress for this run")
+    error: str | None = Field(default=None, description="Error message when status='error'")
+    total_files: int = Field(default=0, ge=0, description="Indexed file count for this run")
+    total_chunks: int = Field(default=0, ge=0, description="Indexed chunk count for this run")
+    total_tokens: int = Field(default=0, ge=0, description="Indexed token count for this run")
+    embedding_provider: str | None = Field(default=None, description="Embedding provider used by this run")
+    embedding_model: str | None = Field(default=None, description="Embedding model used by this run")
+    embedding_dimensions: int | None = Field(default=None, ge=0, description="Embedding dimensions used by this run")
+
+
+class IndexRunEvent(BaseModel):
+    """Persisted index terminal event for replay."""
+
+    run_id: str = Field(description="Run identifier")
+    ts: datetime = Field(description="Event timestamp (UTC)")
+    type: str = Field(description="Event type (log/progress/warning/error/complete/cancelled)")
+    message: str | None = Field(default=None, description="Human-readable message")
+    percent: int | None = Field(default=None, ge=0, le=100, description="Progress percentage when present")
+    current_file: str | None = Field(default=None, description="Current file when present")
+    meta: dict[str, Any] = Field(default_factory=dict, description="Additional event payload")
+
+
 class IndexStats(BaseModel):
     """Statistics about an indexed repository."""
     repo_id: str = Field(
@@ -1292,6 +1326,10 @@ class ModelCatalogUpsertResponse(BaseModel):
     model: ModelCatalogEntry = Field(description="Upserted catalog model entry")
 
 
+def _default_chat_model_components() -> list[Literal["GEN", "EMB", "RERANK"]]:
+    return ["GEN"]
+
+
 class ChatModelInfo(BaseModel):
     """Single chat model option resolved from providers."""
 
@@ -1301,7 +1339,7 @@ class ChatModelInfo(BaseModel):
     provider_key: str | None = Field(default=None, description="Provider key used in the model catalog")
     catalog_model: str | None = Field(default=None, description="Catalog model identifier when sourced from /api/models")
     components: list[Literal["GEN", "EMB", "RERANK"]] = Field(
-        default_factory=lambda: ["GEN"],
+        default_factory=_default_chat_model_components,
         description="Capabilities for this model option",
     )
     source: Literal["cloud_direct", "openrouter", "local", "ragweld"] = Field(
@@ -1595,7 +1633,24 @@ class Relationship(BaseModel):
     """Knowledge graph edge connecting two entities."""
     source_id: str = Field(description="Source entity ID")
     target_id: str = Field(description="Target entity ID")
-    relation_type: Literal["calls", "imports", "inherits", "contains", "references", "related_to"] = Field(
+    relation_type: Literal[
+        "calls",
+        "imports",
+        "inherits",
+        "contains",
+        "associated_with",
+        "met_with",
+        "communicated_with",
+        "works_for",
+        "member_of",
+        "founded",
+        "owns",
+        "funded",
+        "participated_in",
+        "located_in",
+        "references",
+        "related_to",
+    ] = Field(
         description="Type of relationship"
     )
     weight: float = Field(default=1.0, ge=0.0, le=1.0, description="Relationship strength")
@@ -2713,7 +2768,7 @@ class EmbeddingConfig(BaseModel):
             return self.voyage_model
         if t == "mlx":
             return self.embedding_model_mlx
-        if t in {"local", "huggingface"}:
+        if t in {"local", "huggingface", "ollama"}:
             return self.embedding_model_local
         return self.embedding_model
 
@@ -3038,6 +3093,11 @@ class GraphStorageConfig(BaseModel):
     neo4j_auto_create_databases: bool = Field(
         default=True,
         description="Automatically create per-corpus Neo4j databases when missing (Enterprise).",
+    )
+
+    neo4j_vector_query_mode: Literal["auto", "procedure", "search"] = Field(
+        default="auto",
+        description="Neo4j chunk-vector query mode. 'auto' prefers runtime-safe defaults and only uses SEARCH where supported.",
     )
 
     max_hops: int = Field(
@@ -4760,13 +4820,30 @@ JSON format:
     {"name": "Epstein files", "entity_type": "concept"}
   ],
   "relations": [
-    {"source": "Jeffrey Epstein", "target": "Bill Clinton", "relation_type": "related_to"},
+    {"source": "Jeffrey Epstein", "target": "Bill Clinton", "relation_type": "met_with", "evidence_text": "Epstein met with Bill Clinton", "confidence": 0.81},
     {"source": "Epstein files", "target": "Jeffrey Epstein", "relation_type": "references"}
   ]
 }
 
 Allowed entity_type values: person, org, location, event, concept
-Allowed relation_type values: related_to, references''',
+Allowed relation_type values:
+- associated_with
+- met_with
+- communicated_with
+- works_for
+- member_of
+- founded
+- owns
+- funded
+- participated_in
+- located_in
+- references
+- related_to
+
+Constraints:
+- Extract only relations explicitly supported by the chunk text.
+- Use canonical, grounded names for source/target (no invented aliases).
+- If present, include optional "evidence_text" and "confidence" per relation.''',
         description="Prompt for LLM-assisted semantic KG extraction (typed entities + relations)"
     )
 
@@ -5299,6 +5376,7 @@ class TriBridConfig(BaseModel):
             'NEO4J_USER': self.graph_storage.neo4j_user,
             'NEO4J_PASSWORD': self.graph_storage.neo4j_password,
             'NEO4J_DATABASE': self.graph_storage.neo4j_database,
+            'NEO4J_VECTOR_QUERY_MODE': self.graph_storage.neo4j_vector_query_mode,
             'GRAPH_MAX_HOPS': self.graph_storage.max_hops,
             'GRAPH_INCLUDE_COMMUNITIES': self.graph_storage.include_communities,
             'GRAPH_COMMUNITY_ALGORITHM': self.graph_storage.community_algorithm,
@@ -5641,6 +5719,7 @@ class TriBridConfig(BaseModel):
                 neo4j_user=data.get('NEO4J_USER', 'neo4j'),
                 neo4j_password=data.get('NEO4J_PASSWORD', ''),
                 neo4j_database=data.get('NEO4J_DATABASE', 'neo4j'),
+                neo4j_vector_query_mode=data.get('NEO4J_VECTOR_QUERY_MODE', 'auto'),
                 max_hops=data.get('GRAPH_MAX_HOPS', 2),
                 include_communities=data.get('GRAPH_INCLUDE_COMMUNITIES', True),
                 community_algorithm=data.get('GRAPH_COMMUNITY_ALGORITHM', 'louvain'),

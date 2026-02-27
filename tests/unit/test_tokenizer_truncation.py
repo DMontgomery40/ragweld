@@ -28,7 +28,7 @@ def test_truncate_error_raises() -> None:
         tok.truncate_by_tokens("a b c d e", 3, mode="error")
 
 
-def test_tiktoken_unknown_encoding_falls_back() -> None:
+def test_tiktoken_unknown_encoding_raises() -> None:
     tok = TextTokenizer(TokenizationConfig(strategy="tiktoken", tiktoken_encoding="__does_not_exist__"))
-    assert tok.count_tokens("hello world") > 0
-
+    with pytest.raises(ValueError, match="Unknown tiktoken encoding"):
+        tok.count_tokens("hello world")

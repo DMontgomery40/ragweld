@@ -158,8 +158,8 @@ class TextTokenizer:
 
         try:
             return tiktoken.get_encoding(name)
-        except Exception:
-            return tiktoken.get_encoding("o200k_base")
+        except Exception as e:
+            raise ValueError(f"Unknown tiktoken encoding '{name}'") from e
 
     @classmethod
     def _tokenize_tiktoken(cls, text: str, encoding_name: str) -> TokenizationResult:

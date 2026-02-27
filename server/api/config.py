@@ -19,6 +19,12 @@ from server.models.tribrid_config_model import (
     ModelValidationWarning,
     TriBridConfig,
 )
+from server.retrieval.contracts import (
+    SUPPORTED_PROVIDER_BACKEND_EMBEDDING_PROVIDERS,
+    dense_contract_from_config,
+    provider_requires_tokenizer,
+    sparse_contract_from_config,
+)
 from server.retrieval.fusion import TriBridFusion
 from server.services.config_store import CorpusNotFoundError
 from server.services.config_store import get_config as load_scoped_config
@@ -135,6 +141,17 @@ def _catalog_capabilities_for_model(
     return caps
 
 
+def _resolve_embedding_model(config: TriBridConfig) -> str:
+    provider = str(config.embedding.embedding_type or "").strip().lower()
+    if provider == "voyage":
+        return str(config.embedding.voyage_model or "")
+    if provider == "mlx":
+        return str(getattr(config.embedding, "embedding_model_mlx", "") or "")
+    if provider in {"local", "huggingface", "ollama"}:
+        return str(config.embedding.embedding_model_local or "")
+    return str(config.embedding.embedding_model or "")
+
+
 def _validate_capability(
     catalog_models: list[dict[str, Any]],
     *,
@@ -142,6 +159,7 @@ def _validate_capability(
     model_value: str,
     required_component: str,
     provider_hint: str | None = None,
+    strict_unknown: bool = False,
 ) -> None:
     model_str = str(model_value or "").strip()
     if not model_str:
@@ -152,8 +170,15 @@ def _validate_capability(
         model_value=model_str,
         provider_hint=provider_hint,
     )
-    # Unknown/custom models are allowed; we only reject known-incompatible assignments.
     if not caps:
+        if strict_unknown:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"Unknown model for {field_name}: '{model_str}'. "
+                    "Select a catalog model for this field."
+                ),
+            )
         return
     if required_component in caps:
         return
@@ -169,6 +194,9 @@ def _validate_capability(
 
 
 def _validate_model_capabilities(config: TriBridConfig) -> None:
+    _validate_embedding_runtime_support(config)
+    _validate_embedding_tokenization_compat(config)
+
     catalog_models = _load_catalog_models_for_validation()
     if not catalog_models:
         return
@@ -219,20 +247,18 @@ def _validate_model_capabilities(config: TriBridConfig) -> None:
 
     # Embedding fields (must be EMB-capable).
     embedding_provider = str(config.embedding.embedding_type or "").strip().lower() or None
-    if embedding_provider == "voyage":
-        emb_model = str(config.embedding.voyage_model or "")
-    elif embedding_provider == "mlx":
-        emb_model = str(getattr(config.embedding, "embedding_model_mlx", "") or "")
-    elif embedding_provider in {"local", "huggingface", "ollama"}:
-        emb_model = str(config.embedding.embedding_model_local or "")
-    else:
-        emb_model = str(config.embedding.embedding_model or "")
+    emb_model = _resolve_embedding_model(config)
+    strict_unknown_embedding = (
+        str(config.embedding.embedding_backend or "").strip().lower() == "provider"
+        and int(getattr(config.indexing, "skip_dense", 0) or 0) != 1
+    )
     _validate_capability(
         catalog_models,
         field_name="embedding.*",
         model_value=emb_model,
         required_component="EMB",
         provider_hint=embedding_provider,
+        strict_unknown=strict_unknown_embedding,
     )
 
     # Reranker fields (must be RERANK-capable).
@@ -243,6 +269,134 @@ def _validate_model_capabilities(config: TriBridConfig) -> None:
         required_component="RERANK",
         provider_hint=str(config.reranking.reranker_cloud_provider or "").strip().lower() or None,
     )
+
+
+def _validate_embedding_runtime_support(config: TriBridConfig) -> None:
+    if int(getattr(config.indexing, "skip_dense", 0) or 0) == 1:
+        return
+    backend = str(config.embedding.embedding_backend or "").strip().lower()
+    provider = str(config.embedding.embedding_type or "").strip().lower()
+    if backend != "provider":
+        return
+    if provider in SUPPORTED_PROVIDER_BACKEND_EMBEDDING_PROVIDERS:
+        return
+    allowed = ", ".join(sorted(SUPPORTED_PROVIDER_BACKEND_EMBEDDING_PROVIDERS))
+    raise HTTPException(
+        status_code=422,
+        detail=(
+            "Unsupported embedding provider for embedding_backend='provider': "
+            f"'{provider}'. Allowed providers: [{allowed}]."
+        ),
+    )
+
+
+def _validate_embedding_tokenization_compat(config: TriBridConfig) -> None:
+    if int(getattr(config.indexing, "skip_dense", 0) or 0) == 1:
+        return
+    backend = str(config.embedding.embedding_backend or "").strip().lower()
+    if backend != "provider":
+        return
+
+    provider = str(config.embedding.embedding_type or "").strip().lower()
+    strategy = str(config.tokenization.strategy or "").strip().lower()
+    required = provider_requires_tokenizer(provider)
+    if required is not None and strategy not in required:
+        req_text = ", ".join(sorted(required))
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Invalid tokenizer strategy for embedding provider: "
+                f"provider='{provider}' requires tokenization.strategy in [{req_text}], got '{strategy}'."
+            ),
+        )
+
+    if strategy == "tiktoken":
+        enc = str(config.tokenization.tiktoken_encoding or "").strip()
+        try:
+            import tiktoken
+
+            tiktoken.get_encoding(enc)
+        except Exception as e:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Unknown tiktoken encoding '{enc}': {e}",
+            ) from e
+
+
+async def _enforce_index_contract_lock(
+    *,
+    repo_id: str | None,
+    existing_config: TriBridConfig,
+    new_config: TriBridConfig,
+) -> None:
+    rid = str(repo_id or "").strip()
+    if not rid:
+        return
+
+    old_dense = dense_contract_from_config(existing_config)
+    new_dense = dense_contract_from_config(new_config)
+    old_sparse = sparse_contract_from_config(existing_config)
+    new_sparse = sparse_contract_from_config(new_config)
+    dense_changed = old_dense != new_dense
+    sparse_changed = old_sparse != new_sparse
+    if not dense_changed and not sparse_changed:
+        return
+
+    pg = PostgresClient(existing_config.indexing.postgres_url)
+    try:
+        await pg.connect()
+        corpus = await pg.get_corpus(rid)
+        if not corpus:
+            return
+
+        stats = await pg.get_index_stats(rid)
+        total_chunks = int(getattr(stats, "total_chunks", 0) or 0)
+        if total_chunks <= 0:
+            return
+        dense_chunks = await pg.count_chunks_with_embeddings(rid)
+        has_dense_index = dense_chunks > 0
+
+        blocked_dense = bool(dense_changed and has_dense_index)
+        blocked_sparse = bool(sparse_changed and total_chunks > 0)
+        if not blocked_dense and not blocked_sparse:
+            return
+
+        changed_legs: list[str] = []
+        if blocked_dense:
+            changed_legs.append("dense")
+        if blocked_sparse:
+            changed_legs.append("sparse")
+
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "index_contract_change_requires_reindex",
+                "corpus_id": rid,
+                "changed_legs": changed_legs,
+                "expected_contract": {
+                    "dense": old_dense if blocked_dense else None,
+                    "sparse": old_sparse if blocked_sparse else None,
+                },
+                "current_contract": {
+                    "dense": new_dense if blocked_dense else None,
+                    "sparse": new_sparse if blocked_sparse else None,
+                },
+                "required_action": (
+                    "Run indexing with force_reindex=true (or delete the existing index first), "
+                    "then apply contract changes."
+                ),
+            },
+        )
+    except HTTPException:
+        raise
+    except Exception:
+        # Infra validation outage should not block all config writes.
+        return
+    finally:
+        try:
+            await pg.disconnect()
+        except Exception:
+            pass
 
 
 def _collect_model_warnings(config: TriBridConfig) -> list[ModelValidationWarning]:
@@ -331,7 +485,13 @@ async def update_config(
     repo_id = scope.resolved_repo_id
     try:
         async with _get_config_write_lock(repo_id):
+            existing_config = await load_scoped_config(repo_id=repo_id)
             _validate_model_capabilities(config)
+            await _enforce_index_contract_lock(
+                repo_id=repo_id,
+                existing_config=existing_config,
+                new_config=config,
+            )
             return await save_scoped_config(config, repo_id=repo_id)
     except HTTPException:
         raise
@@ -377,6 +537,11 @@ async def update_config_section(
             raise HTTPException(status_code=422, detail=str(e)) from e
 
         _validate_model_capabilities(new_config)
+        await _enforce_index_contract_lock(
+            repo_id=repo_id,
+            existing_config=config,
+            new_config=new_config,
+        )
 
         try:
             return await save_scoped_config(new_config, repo_id=repo_id)

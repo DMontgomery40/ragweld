@@ -12,7 +12,8 @@ from server.chat.prompt_builder import get_system_prompt
 from server.chat.provider_router import select_provider_route
 from server.models.retrieval import ChunkMatch
 from server.models.tribrid_config_model import ChatDebugInfo, ChatProviderInfo, TriBridConfig
-from server.retrieval.cache import SemanticCacheService
+from server.retrieval.cache import CacheMode, SemanticCacheService
+from server.retrieval.errors import RetrievalContractMismatchError
 from server.services.rag import FusionProtocol, build_chat_debug_info
 
 
@@ -54,6 +55,15 @@ def _format_retrieval_only_answer(*, query: str, corpus_id: str, chunks: list[Ch
     return "\n".join(lines).strip()
 
 
+def _normalize_cache_mode(cache_mode: str | CacheMode | None) -> CacheMode:
+    mode = str(cache_mode or "default").strip().lower()
+    if mode == "bypass":
+        return "bypass"
+    if mode == "refresh":
+        return "refresh"
+    return "default"
+
+
 async def _fusion_search_with_cache(
     *,
     fusion: FusionProtocol,
@@ -64,7 +74,7 @@ async def _fusion_search_with_cache(
     include_sparse: bool,
     include_graph: bool,
     top_k: int | None,
-    cache_mode: str,
+    cache_mode: str | CacheMode,
     cache_namespace: str,
 ) -> list[ChunkMatch]:
     try:
@@ -76,7 +86,7 @@ async def _fusion_search_with_cache(
             include_sparse=bool(include_sparse),
             include_graph=bool(include_graph),
             top_k=top_k,
-            cache_mode=str(cache_mode or "default"),
+            cache_mode=_normalize_cache_mode(cache_mode),
             cache_namespace=str(cache_namespace or "search"),
         )
     except TypeError:
@@ -101,7 +111,7 @@ async def retrieve_best_effort(
     include_sparse: bool = True,
     include_graph: bool = True,
     top_k: int | None = None,
-    cache_mode: str = "default",
+    cache_mode: str | CacheMode = "default",
 ) -> tuple[list[ChunkMatch], dict[str, Any]]:
     if not query.strip() or not str(corpus_id or "").strip():
         return ([], {"retrieval_error": "Missing query or corpus_id"})
@@ -121,6 +131,8 @@ async def retrieve_best_effort(
         )
         retrieval_debug: dict[str, Any] = getattr(fusion, "last_debug", None) or {}
         return (chunks, retrieval_debug)
+    except RetrievalContractMismatchError:
+        raise
     except Exception as e:
         return (
             [],
@@ -143,8 +155,9 @@ async def answer_best_effort(
     top_k: int | None = None,
     system_prompt_override: str | None = None,
     model_override: str = "",
-    cache_mode: str = "default",
+    cache_mode: str | CacheMode = "default",
 ) -> tuple[str, list[ChunkMatch], ChatProviderInfo | None, ChatDebugInfo]:
+    normalized_cache_mode = _normalize_cache_mode(cache_mode)
     chunks, _ = await retrieve_best_effort(
         query=query,
         corpus_id=corpus_id,
@@ -154,7 +167,7 @@ async def answer_best_effort(
         include_sparse=include_sparse,
         include_graph=include_graph,
         top_k=top_k,
-        cache_mode=cache_mode,
+        cache_mode=normalized_cache_mode,
     )
 
     provider_info: ChatProviderInfo | None = None
@@ -218,7 +231,7 @@ async def answer_best_effort(
         scope_key=cache_scope_key,
         query=query,
         request_fingerprint=cache_request_fingerprint,
-        cache_mode=str(cache_mode or "default"),
+        cache_mode=normalized_cache_mode,
         allow_semantic=True,
     )
     if hit is not None:
@@ -255,7 +268,6 @@ async def answer_best_effort(
             )
             return answer_text, chunks, provider_info, debug
 
-    answer_text: str
     try:
         route = resolved_route or select_provider_route(
             config=config,
@@ -320,7 +332,7 @@ async def answer_best_effort(
             query=query,
             request_fingerprint=cache_request_fingerprint,
             payload=payload,
-            cache_mode=str(cache_mode or "default"),
+            cache_mode=normalized_cache_mode,
         )
         debug = debug.model_copy(
             update={
@@ -347,22 +359,27 @@ async def stream_answer_best_effort(
     top_k: int | None = None,
     system_prompt_override: str | None = None,
     model_override: str = "",
-    cache_mode: str = "default",
+    cache_mode: str | CacheMode = "default",
+    prefetched_chunks: list[ChunkMatch] | None = None,
     conversation_id: str | None = None,
     run_id: str | None = None,
     started_at_ms: int | None = None,
 ) -> AsyncIterator[str]:
-    chunks, _ = await retrieve_best_effort(
-        query=query,
-        corpus_id=corpus_id,
-        config=config,
-        fusion=fusion,
-        include_vector=include_vector,
-        include_sparse=include_sparse,
-        include_graph=include_graph,
-        top_k=top_k,
-        cache_mode=cache_mode,
-    )
+    normalized_cache_mode = _normalize_cache_mode(cache_mode)
+    if prefetched_chunks is not None:
+        chunks = list(prefetched_chunks)
+    else:
+        chunks, _ = await retrieve_best_effort(
+            query=query,
+            corpus_id=corpus_id,
+            config=config,
+            fusion=fusion,
+            include_vector=include_vector,
+            include_sparse=include_sparse,
+            include_graph=include_graph,
+            top_k=top_k,
+            cache_mode=normalized_cache_mode,
+        )
 
     provider_info: ChatProviderInfo | None = None
     provider_response_id: str | None = None
@@ -431,7 +448,7 @@ async def stream_answer_best_effort(
         scope_key=cache_scope_key,
         query=query,
         request_fingerprint=cache_request_fingerprint,
-        cache_mode=str(cache_mode or "default"),
+        cache_mode=normalized_cache_mode,
         allow_semantic=True,
     )
     if hit is not None:
@@ -561,7 +578,7 @@ async def stream_answer_best_effort(
                 "answer": accumulated,
                 "provider": provider_info.model_dump(mode="serialization") if provider_info is not None else None,
             },
-            cache_mode=str(cache_mode or "default"),
+            cache_mode=normalized_cache_mode,
         )
         debug = debug.model_copy(
             update={
@@ -574,7 +591,7 @@ async def stream_answer_best_effort(
         )
 
     sources_json = [s.model_dump(mode="serialization", by_alias=True) for s in chunks]
-    done_payload: dict[str, Any] = {
+    done_event_payload: dict[str, Any] = {
         "type": "done",
         "sources": sources_json,
         "provider": provider_info.model_dump(mode="serialization") if provider_info is not None else None,
@@ -582,11 +599,11 @@ async def stream_answer_best_effort(
         "debug": debug.model_dump(mode="serialization", by_alias=True),
     }
     if conversation_id:
-        done_payload["conversation_id"] = str(conversation_id)
+        done_event_payload["conversation_id"] = str(conversation_id)
     if run_id:
-        done_payload["run_id"] = str(run_id)
+        done_event_payload["run_id"] = str(run_id)
     if started_at_ms is not None:
-        done_payload["started_at_ms"] = int(started_at_ms)
-    done_payload["ended_at_ms"] = int(ended_at_ms)
+        done_event_payload["started_at_ms"] = int(started_at_ms)
+    done_event_payload["ended_at_ms"] = int(ended_at_ms)
 
-    yield f"data: {json.dumps(done_payload)}\n\n"
+    yield f"data: {json.dumps(done_event_payload)}\n\n"

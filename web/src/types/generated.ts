@@ -822,6 +822,8 @@ export interface GraphStorageConfig {
   neo4j_database_prefix?: string; // default: "tribrid_"
   /** Automatically create per-corpus Neo4j databases when missing (Enterprise). */
   neo4j_auto_create_databases?: boolean; // default: True
+  /** Neo4j chunk-vector query mode. 'auto' prefers runtime-safe defaults and only uses SEARCH where supported. */
+  neo4j_vector_query_mode?: "auto" | "procedure" | "search"; // default: "auto"
   /** Maximum traversal hops for graph search */
   max_hops?: number; // default: 2
   /** Include community detection in graph analysis */
@@ -1245,7 +1247,7 @@ export interface Relationship {
   /** Target entity ID */
   target_id: string;
   /** Type of relationship */
-  relation_type: "calls" | "imports" | "inherits" | "contains" | "references" | "related_to";
+  relation_type: "calls" | "imports" | "inherits" | "contains" | "associated_with" | "met_with" | "communicated_with" | "works_for" | "member_of" | "founded" | "owns" | "funded" | "participated_in" | "located_in" | "references" | "related_to";
   /** Relationship strength */
   weight?: number; // default: 1.0
   /** Additional properties */
@@ -2431,6 +2433,54 @@ export interface IndexRequest {
   repo_path: string;
   /** Force full reindex even if up-to-date */
   force_reindex?: boolean;
+}
+
+/** Persisted index terminal event for replay. */
+export interface IndexRunEvent {
+  /** Run identifier */
+  run_id: string;
+  /** Event timestamp (UTC) */
+  ts: string;
+  /** Event type (log/progress/warning/error/complete/cancelled) */
+  type: string;
+  /** Human-readable message */
+  message?: string | null;
+  /** Progress percentage when present */
+  percent?: number | null;
+  /** Current file when present */
+  current_file?: string | null;
+  /** Additional event payload */
+  meta?: Record<string, unknown>;
+}
+
+/** Persisted indexing run summary for replay/status truthfulness. */
+export interface IndexRunSummary {
+  /** Unique indexing run identifier */
+  run_id: string;
+  /** Corpus identifier */
+  corpus_id: string;
+  /** Final or current run state */
+  status: "indexing" | "complete" | "error" | "cancelled";
+  /** When indexing run started */
+  started_at: string;
+  /** When indexing run completed */
+  completed_at?: string | null;
+  /** Best-effort progress for this run */
+  progress?: number;
+  /** Error message when status='error' */
+  error?: string | null;
+  /** Indexed file count for this run */
+  total_files?: number;
+  /** Indexed chunk count for this run */
+  total_chunks?: number;
+  /** Indexed token count for this run */
+  total_tokens?: number;
+  /** Embedding provider used by this run */
+  embedding_provider?: string | null;
+  /** Embedding model used by this run */
+  embedding_model?: string | null;
+  /** Embedding dimensions used by this run */
+  embedding_dimensions?: number | null;
 }
 
 /** Current status of repository indexing. */
