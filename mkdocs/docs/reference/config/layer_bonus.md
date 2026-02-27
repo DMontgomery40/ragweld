@@ -93,6 +93,16 @@
     **Links**:
     - [Architecture-Aware Retrieval](https://arxiv.org/abs/2312.10997)
 
+??? info "`layer_bonus.indexer` (`LAYER_BONUS_INDEXER`) — Layer Bonus (Indexer)"
+    **Category**: `retrieval`
+
+    Base layer bonus multiplier applied to content associated with indexing-layer paths/modules. This static bias is added before intent-matrix overrides, helping prioritize indexing-related files for mixed-intent queries.
+
+    Increase when retrieval under-ranks indexer code despite relevant matches. Reduce when indexer modules appear too often for unrelated intents.
+
+    - Works with: LAYER_BONUS_GUI, LAYER_BONUS_RETRIEVAL, LAYER_INTENT_MATRIX
+    - Goal: coarse structural bias before fine intent tuning
+
 ??? info "`layer_bonus.intent_matrix` (`LAYER_INTENT_MATRIX`) — Intent Matrix (Advanced)"
     **Category**: `general`
 

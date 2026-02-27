@@ -65,12 +65,27 @@
 ??? info "`scoring.filename_boost_exact` (`FILENAME_BOOST_EXACT`) — Filename Exact Match Multiplier"
     **Category**: `general`
 
-    Score multiplier applied when the filename matches the query exactly (e.g., auth.py). Increase to prioritize file‑specific queries.
+    Score multiplier applied when query terms exactly match a filename or key path segment. This is a deterministic lexical boost layered on top of retrieval/fusion scoring, useful for identifier-heavy code search where exact file names are strong intent signals.
+
+    Increase this when users frequently search by known file names (for example: auth_service.py, package-lock.json). Reduce it if path matches overpower semantically better chunks.
+
+    - High values: prioritize exact path hits
+    - Lower values: keep semantic and content relevance dominant
 
 ??? info "`scoring.filename_boost_partial` (`FILENAME_BOOST_PARTIAL`) — Path Component Partial Match Multiplier"
     **Category**: `general`
 
     Score multiplier when any path component partially matches query terms (directory or filename fragment). Helps queries like "auth" prioritize auth-related files. Default: 1.2. Range: 1.0-3.0. Keep this lower than FILENAME_BOOST_EXACT.
+
+??? info "`scoring.path_boosts` (`PATH_BOOSTS`) — Path Boosts"
+    **Category**: `retrieval`
+
+    Comma-separated path prefixes that receive additional scoring preference during ranking (for example: /gui,/server,/indexer,/retrieval). This is a deterministic bias layer for emphasizing known important code areas.
+
+    Use this when organizational structure is meaningful to query intent. Keep boosts narrow and intentional; overly broad prefixes can distort relevance and hide better matches outside favored paths.
+
+    - Good for: domain-priority routing, mono-repo subarea focus
+    - Revisit after major repo restructuring
 
 ??? info "`scoring.vendor_mode` (`VENDOR_MODE`) — Vendor Mode"
     **Category**: `general`

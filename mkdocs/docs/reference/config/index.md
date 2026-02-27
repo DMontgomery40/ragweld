@@ -53,6 +53,7 @@
 | `reranking` | [`reranking.md`](reranking.md) |
 | `retrieval` | [`retrieval.md`](retrieval.md) |
 | `scoring` | [`scoring.md`](scoring.md) |
+| `semantic_cache` | [`semantic_cache.md`](semantic_cache.md) |
 | `sparse_search` | [`sparse_search.md`](sparse_search.md) |
 | `system_prompts` | [`system_prompts.md`](system_prompts.md) |
 | `tokenization` | [`tokenization.md`](tokenization.md) |

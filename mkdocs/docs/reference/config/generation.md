@@ -26,7 +26,7 @@
 [Config API & workflow](../../configuration.md){ .md-button }
 [Glossary](../../glossary.md){ .md-button }
 
-**Total parameters**: 19
+**Total parameters**: 20
 
 ??? info "Group index"
     - `(root)`
@@ -39,6 +39,7 @@
 | `generation.enrich_disabled` | `ENRICH_DISABLED` | `int` | `0` | ≥ 0, ≤ 1 | Disable code enrichment |
 | `generation.enrich_model` | `ENRICH_MODEL` | `str` | `"gpt-4o-mini"` | — | Model for code enrichment |
 | `generation.enrich_model_ollama` | `ENRICH_MODEL_OLLAMA` | `str` | `""` | — | Ollama enrichment model |
+| `generation.gen_backend` | `GEN_BACKEND` | `str` | `"openai"` | pattern=^(openai\|anthropic\|ollama\|mlx\|openrouter)$ | Provider backend for gen_model and channel overrides |
 | `generation.gen_max_tokens` | `GEN_MAX_TOKENS` | `int` | `2048` | ≥ 100, ≤ 8192 | Max tokens for generation |
 | `generation.gen_model` | `GEN_MODEL` | `str` | `"gpt-4o-mini"` | — | Primary generation model |
 | `generation.gen_model_cli` | `GEN_MODEL_CLI` | `str` | `"qwen3-coder:14b"` | — | CLI generation model |
@@ -107,6 +108,16 @@
     - [Pull Models](https://github.com/ollama/ollama#quickstart)
     - [Code-Focused Models](https://ollama.com/search?c=tools)
 
+??? info "`generation.gen_backend` (`GEN_BACKEND`) — Generation Backend"
+    **Category**: `generation`
+
+    Provider backend for the primary generation model (gen_model) and channel overrides (gen_model_cli, gen_model_http, gen_model_mcp). Options: "openai" (GPT models), "anthropic" (Claude models), "ollama" (local models), "mlx" (Apple Silicon optimized), "openrouter" (multi-provider gateway). This controls which API the generation model is routed to. Ollama-specific model overrides (gen_model_ollama, enrich_model_ollama) always use the Ollama backend regardless of this setting. Enrichment uses its own enrich_backend setting.
+
+    **Links**:
+    - [OpenAI Models](https://platform.openai.com/docs/models)
+    - [Anthropic Claude](https://docs.anthropic.com/en/docs/about-claude/models)
+    - [OpenRouter](https://openrouter.ai/docs)
+
 ??? info "`generation.gen_max_tokens` (`GEN_MAX_TOKENS`) — Max Tokens"
     **Category**: `generation`
 
@@ -119,7 +130,12 @@
 ??? info "`generation.gen_model` (`GEN_MODEL`) — Generation Model"
     **Category**: `generation`
 
-    Answer model. Local: qwen3-coder:14b via Ollama. Cloud: gpt-4o-mini, etc. Larger models cost more and can be slower; smaller ones are faster/cheaper.
+    Primary generation model used for answer synthesis in the retrieval pipeline. This model receives retrieved context and is responsible for final response quality, style, and latency profile.
+
+    Choose the model based on your target balance of correctness, speed, and cost. Keep this aligned with provider credentials and endpoint overrides so fallback behavior is predictable.
+
+    - Affects: answer quality, latency, token cost, tool-call behavior
+    - Re-evaluate when switching corpus/domain or SLA target
 
     **Badges**:
     - Affects latency
@@ -159,6 +175,16 @@
     **Links**:
     - [Model Pricing](https://openai.com/api/pricing/)
 
+??? info "`generation.gen_model_ollama` (`GEN_MODEL_OLLAMA`) — Generation Model (Ollama)"
+    **Category**: `generation`
+
+    Local Ollama model override used when generation is routed through Ollama. This allows a local model choice that differs from the cloud/default generation model while keeping the same retrieval flow.
+
+    Use explicit model tags (including version/size) so behavior is reproducible across machines. Confirm the model is pulled and compatible with your configured context window/timeouts.
+
+    - Example: qwen3-coder:30b
+    - Pair with: OLLAMA_NUM_CTX, OLLAMA_REQUEST_TIMEOUT, OLLAMA_STREAM_IDLE_TIMEOUT
+
 ??? info "`generation.gen_retry_max` (`GEN_RETRY_MAX`) — Generation Max Retries"
     **Category**: `generation`
 
@@ -171,7 +197,13 @@
 ??? info "`generation.gen_temperature` (`GEN_TEMPERATURE`) — Default Response Creativity"
     **Category**: `generation`
 
-    Global default temperature for generation. 0.0 = deterministic; small values (0.04-0.2) add slight variation in prose. Use per-model tuning for creative tasks vs. code answers.
+    Default sampling temperature for generation. Lower values produce more deterministic answers; higher values increase variability and creative paraphrasing.
+
+    For technical retrieval QA, start near 0.0-0.3 to reduce hallucinated variation. Increase only when you explicitly want brainstorming-style or stylistically varied outputs.
+
+    - 0.0-0.3: stable, factual, repeatable
+    - 0.4-0.8: more diverse phrasing, higher drift risk
+    - >0.8: rarely ideal for grounded code retrieval
 
     **Links**:
     - [Sampling Controls](https://platform.openai.com/docs/guides/text-generation)
@@ -195,10 +227,25 @@
     - [Nucleus Sampling](https://platform.openai.com/docs/guides/text-generation/parameter-details)
     - [Top-P Explanation](https://en.wikipedia.org/wiki/Top-p_sampling)
 
+??? info "`generation.ollama_num_ctx` (`OLLAMA_NUM_CTX`) — Ollama Context Window"
+    **Category**: `generation`
+
+    Context window size requested from Ollama for generation calls. This defines how many tokens of prompt + retrieved context + response budget the model can handle in one request.
+
+    Set high enough to fit your retrieval payload and answer target, but avoid unnecessary inflation because larger contexts increase memory usage and can degrade latency.
+
+    - Too low: truncation, missing context, weaker answers
+    - Too high: slower inference, higher local resource pressure
+
 ??? info "`generation.ollama_request_timeout` (`OLLAMA_REQUEST_TIMEOUT`) — Local Request Timeout (seconds)"
     **Category**: `generation`
 
-    Maximum total time to wait for a single local (Ollama) generation request to complete. Increase for long answers; decrease to fail fast on slow models or poor connectivity.
+    Maximum end-to-end request timeout (seconds) for Ollama generation calls. This is the hard upper bound for waiting on local model inference before failing the request.
+
+    Choose based on model size and hardware capability. Large local models can require higher values, but extremely high timeouts hide operational problems and increase user wait time.
+
+    - Lower values: faster failure detection
+    - Higher values: tolerate heavy local inference
 
     **Links**:
     - [Ollama API: Generate](https://github.com/ollama/ollama/blob/main/docs/api.md#generate-a-completion)
@@ -207,7 +254,12 @@
 ??? info "`generation.ollama_stream_idle_timeout` (`OLLAMA_STREAM_IDLE_TIMEOUT`) — Local Stream Idle Timeout (seconds)"
     **Category**: `generation`
 
-    Maximum idle time allowed between streamed chunks from local (Ollama). If no tokens arrive within this window, the request aborts to prevent hanging streams.
+    Maximum idle time (seconds) allowed between streamed tokens/chunks from Ollama before considering the stream stalled. This protects clients from hanging connections when generation stops mid-response.
+
+    Increase only if models legitimately pause for long intervals on your hardware. If idle timeouts trigger often, inspect model load, GPU/CPU saturation, and prompt size.
+
+    - Too low: premature stream cancellation
+    - Too high: slower detection of stuck streams
 
     **Links**:
     - [Streaming Basics](https://developer.mozilla.org/en-US/docs/Web/API/ReadableStream)

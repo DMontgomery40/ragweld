@@ -55,10 +55,30 @@
 
 ### Details (glossary)
 
+??? info "`tracing.alert_include_resolved` (`ALERT_INCLUDE_RESOLVED`) — Alert Include Resolved"
+    **Category**: `general`
+
+    Controls whether resolved events are included in outbound alert notifications. Set to on (1) to receive recovery/resolution notices alongside active alerts, or off (0) to only notify on active issues.
+
+??? info "`tracing.alert_notify_severities` (`ALERT_NOTIFY_SEVERITIES`) — Alert Notify Severities"
+    **Category**: `general`
+
+    Comma-separated severity levels that are allowed to trigger outbound alert notifications (for example: critical,warning). This acts as the final routing filter after alert generation, so misconfigured values can silently suppress notifications you expected to see.
+
+    Use this to align operational noise with team on-call policy: start narrow (critical only), then expand once signal quality is stable. Keep values synchronized with the severity vocabulary emitted by your tracing/alert pipeline.
+
+    - Typical progression: critical -> critical,warning -> critical,warning,info
+    - Affects: webhook fan-out volume, pager noise, incident MTTA
+
 ??? info "`tracing.alert_webhook_timeout` (`ALERT_WEBHOOK_TIMEOUT`) — Alert Webhook Timeout"
     **Category**: `general`
 
-    Maximum seconds to wait for alert webhook response (Slack, Discord, etc.). Prevents slow webhooks from blocking the main process. Typical: 5-10 seconds.
+    Maximum time in seconds to wait for alert webhook delivery before the request is treated as failed. This timeout protects retrieval/tracing workflows from hanging on slow third-party incident tooling.
+
+    Set this high enough for normal network jitter, but low enough to avoid backlog growth during outages. If notifications are frequently timing out, fix endpoint reliability before increasing this value aggressively.
+
+    - Lower timeout: faster failure detection, more dropped notifications under transient latency
+    - Higher timeout: better delivery chance, slower failure feedback
 
     **Links**:
     - [Webhook Timeouts](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Timeout)
@@ -67,7 +87,12 @@
 ??? info "`tracing.langchain_endpoint` (`LANGCHAIN_ENDPOINT`) — LangChain Endpoint"
     **Category**: `general`
 
-    LangSmith API endpoint URL (external provider). Stored in config field tracing.langchain_endpoint. Reserved for future integration.
+    Base endpoint used for LangSmith/LangChain trace ingestion. This controls where trace payloads are sent when tracing integration is enabled.
+
+    Override this for self-hosted gateways, enterprise proxies, or region-specific endpoints. Keep endpoint, project name, and API key aligned or traces will fail silently or fragment across projects.
+
+    - Default commonly points to api.smith.langchain.com
+    - Verify network egress and TLS policy in production
 
     **Links**:
     - [LangSmith API](https://docs.smith.langchain.com/)
@@ -75,7 +100,12 @@
 ??? info "`tracing.langchain_project` (`LANGCHAIN_PROJECT`) — LangChain Project"
     **Category**: `general`
 
-    Project name for organizing traces in LangSmith (external provider). Stored in config field tracing.langchain_project. Reserved for future integration.
+    Logical project/container name used when publishing traces to LangSmith. It determines where runs appear in dashboards and how teams segment environments (dev/staging/prod) or product areas.
+
+    Use a stable naming convention so trend analysis remains coherent over time. Avoid ad-hoc names that split observability history across many near-duplicate projects.
+
+    - Example convention: ragweld-dev, ragweld-staging, ragweld-prod
+    - Affects: trace discoverability, dashboard hygiene
 
     **Links**:
     - [LangSmith Projects](https://docs.smith.langchain.com/tracing/faq#how-do-i-use-projects)
@@ -121,7 +151,12 @@
 ??? info "`tracing.metrics_enabled` (`METRICS_ENABLED`) — Metrics Enabled"
     **Category**: `evaluation`
 
-    Enable Prometheus metrics collection and /metrics endpoint. When on, exposes query latency, cache hits, error rates, etc. Essential for production monitoring. Minimal overhead.
+    Master toggle for exporting internal metrics (for example Prometheus-compatible counters/gauges/histograms). When disabled, trace logs may still exist but metric endpoints/series emission are reduced or silent.
+
+    Enable in environments where dashboards/alerts depend on metric streams. Disable only for constrained local runs where telemetry overhead must be minimized.
+
+    - Affects: observability dashboards, alert pipelines, SLO reporting
+    - Pair with: PROMETHEUS_PORT, TRACE_SAMPLING_RATE
 
     **Links**:
     - [Prometheus Metrics](https://prometheus.io/docs/concepts/metric_types/)
@@ -130,7 +165,12 @@
 ??? info "`tracing.prometheus_port` (`PROMETHEUS_PORT`) — Prometheus Port"
     **Category**: `infrastructure`
 
-    TCP port for the /metrics endpoint scraped by Prometheus or Grafana. Default: 9090. Range: 1024-65535. Change it if 9090 conflicts with another service.
+    Network port used to expose Prometheus-compatible metrics endpoint. Monitoring systems scrape this port to collect retrieval/tracing health and performance metrics.
+
+    Ensure this port is reachable from your monitoring plane and does not conflict with other services on the host. In containerized setups, verify both container and host mapping are correct.
+
+    - Typical default: 9090
+    - Affects: metrics ingestion and dashboard freshness
 
     **Links**:
     - [Prometheus Basics](https://prometheus.io/docs/introduction/overview/)
@@ -147,7 +187,12 @@
 ??? info "`tracing.trace_retention` (`TRACE_RETENTION`) — Trace Retention"
     **Category**: `general`
 
-    Number of traces to retain in the in-memory ring buffer (10-500). Higher values preserve more history for debugging; lower values use less memory.
+    Retention cap for stored trace records/events in local history. Older traces beyond this limit are pruned to keep storage and UI performance manageable.
+
+    Set based on debugging horizon and storage budget. Higher retention helps long-tail incident analysis but increases disk usage and list/query overhead.
+
+    - Lower retention: lean local storage
+    - Higher retention: richer historical diagnostics
 
     **Links**:
     - [Data Retention](https://en.wikipedia.org/wiki/Data_retention)
@@ -179,7 +224,13 @@
 ??? info "`tracing.tracing_mode` (`TRACING_MODE`) — Tracing Mode"
     **Category**: `general`
 
-    Tracing backend mode. Options: langsmith, local, off (alias "none" normalizes to off). Default: langsmith. Use local or off when external trace export is not desired.
+    Selects the tracing backend mode used by the retrieval pipeline (for example off, local, or langsmith export). Mode determines where trace data is emitted and how debugging/observability workflows operate.
+
+    Use local mode for quick iteration and deterministic local introspection; use external modes for team-level dashboards and long-term telemetry. Keep credentials/endpoints aligned with selected mode.
+
+    - off: minimal overhead, no trace diagnostics
+    - local: local debugging visibility
+    - langsmith: remote observability and sharing
 
     **Links**:
     - [LangSmith](https://docs.smith.langchain.com/)
@@ -187,7 +238,12 @@
 ??? info "`tracing.tribrid_log_path` (`TRIBRID_LOG_PATH`) — Reranker Log Path"
     **Category**: `general`
 
-    Path to the query and reranker log file used for diagnostics and training telemetry. Default: data/logs/queries.jsonl. Ensure the server process can write to this location.
+    Filesystem path for local query/trace log persistence. This file is used for audit trails, debugging replay, and compatibility tooling that reads historical run data.
+
+    Choose a stable writable location with predictable rotation/backup behavior. In production, pair with retention management to avoid unbounded log growth.
+
+    - Affects: local trace replay and diagnostics
+    - Verify path permissions in containerized environments
 
     **Links**:
     - [Python logging](https://docs.python.org/3/library/logging.html)

@@ -26,7 +26,7 @@
 [Config API & workflow](../../configuration.md){ .md-button }
 [Glossary](../../glossary.md){ .md-button }
 
-**Total parameters**: 73
+**Total parameters**: 74
 
 ??? info "Group index"
     - `(root)`
@@ -44,6 +44,7 @@
 |---------|------------|------|---------|-------------|---------|
 | `chat.default_corpus_ids` | — | `list[str]` | `["epstein-files-1"]` | — | Default checked user-facing corpus IDs for new conversations. |
 | `chat.max_tokens` | — | `int` | `4096` | ≥ 100, ≤ 16384 | — |
+| `chat.openai_protocol` | — | `Literal["auto", "responses", "chat_completions"]` | `"auto"` | allowed="auto", "responses", "chat_completions" | Protocol for OpenAI cloud_direct calls. 'auto' routes codex-only models to Responses. |
 | `chat.send_shortcut` | — | `str` | `"ctrl+enter"` | — | — |
 | `chat.show_source_dropdown` | — | `bool` | `true` | — | — |
 | `chat.system_prompt_base` | — | `str` | `"You are a helpful assistant."` | — | — |

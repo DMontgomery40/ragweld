@@ -26,7 +26,7 @@
 [Config API & workflow](../../configuration.md){ .md-button }
 [Glossary](../../glossary.md){ .md-button }
 
-**Total parameters**: 13
+**Total parameters**: 14
 
 ??? info "Group index"
     - `(root)`
@@ -47,6 +47,7 @@
 | `graph_storage.neo4j_password` | `NEO4J_PASSWORD` | `str` | `""` | — | Neo4j password (defaults to NEO4J_PASSWORD env var when unset) |
 | `graph_storage.neo4j_uri` | `NEO4J_URI` | `str` | `"bolt://localhost:7687"` | — | Neo4j connection URI (bolt:// or neo4j://) |
 | `graph_storage.neo4j_user` | `NEO4J_USER` | `str` | `"neo4j"` | — | Neo4j username |
+| `graph_storage.neo4j_vector_query_mode` | `NEO4J_VECTOR_QUERY_MODE` | `Literal["auto", "procedure", "search"]` | `"auto"` | allowed="auto", "procedure", "search" | Neo4j chunk-vector query mode. 'auto' prefers runtime-safe defaults and only uses SEARCH where supported. |
 | `graph_storage.relationship_types` | — | `list[str]` | `["calls", "imports", "inherits", "contains", "references"]` | — | Relationship types to extract |
 
 ### Details (glossary)

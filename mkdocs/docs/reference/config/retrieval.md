@@ -279,7 +279,12 @@
 ??? info "`retrieval.langgraph_final_k` (`LANGGRAPH_FINAL_K`) — LangGraph Final K"
     **Category**: `general`
 
-    Documents retrieved for LangGraph pipeline in /answer. Separate from retrieval FINAL_K. Higher = more context, higher cost. Typical: 10–30.
+    Compatibility control for LangGraph-style retrieval flows: target number of candidates passed forward after retrieval/fusion stages. This can differ from primary retrieval final_k when running alternate orchestration paths.
+
+    Tune this to keep evaluation and runtime behavior aligned. If this diverges too far from main retrieval settings, debugging cross-path discrepancies becomes difficult.
+
+    - Higher values: more recall, more downstream latency/cost
+    - Lower values: tighter precision, less context diversity
 
     **Links**:
     - [LangGraph](https://langchain-ai.github.io/langgraph/)
@@ -336,6 +341,16 @@
     - [Multi-Query RAG](https://arxiv.org/abs/2305.14283)
     - [Fusion Strategies](https://arxiv.org/abs/2402.14734)
 
+??? info "`retrieval.query_expansion_enabled` (`QUERY_EXPANSION_ENABLED`) — Query Expansion Enabled"
+    **Category**: `retrieval`
+
+    Controls whether additional rewritten/expanded query variants are generated and used during retrieval. Expansion can improve recall for underspecified prompts but may add latency and noise.
+
+    Enable when users ask vague natural-language questions and miss relevant identifiers. Disable when exact-query behavior and deterministic latency are more important than recall breadth.
+
+    - Enabled: broader retrieval coverage
+    - Disabled: stricter, faster lexical/semantic matching
+
 ??? info "`retrieval.rrf_k_div` (`RRF_K_DIV`) — Reciprocal Rank Fusion (K)"
     **Category**: `retrieval`
 
@@ -387,7 +402,13 @@
 ??? info "`retrieval.use_semantic_synonyms` (`USE_SEMANTIC_SYNONYMS`) — Semantic Synonyms Expansion"
     **Category**: `general`
 
-    Expands queries with curated domain synonyms and abbreviations (e.g., auth → authentication, oauth, jwt). Complements LLM rewrites. Configure in data/semantic_synonyms.json.
+    Enables semantic synonym expansion before retrieval so queries can match related concepts, aliases, or variant terminology beyond exact user wording.
+
+    This improves recall for natural-language and cross-team vocabulary differences, but can introduce off-topic drift if synonym lists are too broad. Keep synonym sources curated and domain-specific.
+
+    - Enabled: better conceptual recall
+    - Disabled: stricter literal query behavior
+    - Pair with: TRIBRID_SYNONYMS_PATH
 
 ??? info "`retrieval.vector_weight` (`VECTOR_WEIGHT`) — Vector Weight (Hybrid Fusion)"
     **Category**: `retrieval`

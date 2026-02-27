@@ -26,7 +26,7 @@
 [Config API & workflow](../../configuration.md){ .md-button }
 [Glossary](../../glossary.md){ .md-button }
 
-**Total parameters**: 22
+**Total parameters**: 26
 
 ??? info "Group index"
     - `(root)`
@@ -43,6 +43,7 @@
 | `graph_indexing.chunk_embedding_property` | — | `str` | `"embedding"` | — | Chunk node property that stores the embedding vector |
 | `graph_indexing.chunk_vector_index_name` | — | `str` | `"tribrid_chunk_embeddings"` | — | Neo4j vector index name for Chunk embeddings (mode='chunk') |
 | `graph_indexing.enabled` | — | `bool` | `true` | — | Enable graph building during indexing (Neo4j) |
+| `graph_indexing.semantic_kg_allowed_entity_types` | — | `list[Literal["person", "org", "location", "event", "concept"]]` | `["concept"]` | — | Allowed semantic KG entity types produced by extraction. |
 | `graph_indexing.semantic_kg_enabled` | — | `bool` | `false` | — | Build semantic knowledge graph (concept entities + relations) linked to chunks during indexing |
 | `graph_indexing.semantic_kg_llm_model` | — | `str` | `""` | — | LLM model name for semantic KG extraction when semantic_kg_mode='llm' (empty = use generation.enrich_model) |
 | `graph_indexing.semantic_kg_llm_timeout_s` | — | `int` | `30` | ≥ 5, ≤ 120 | Timeout (seconds) for semantic KG LLM extraction per chunk |
@@ -51,8 +52,11 @@
 | `graph_indexing.semantic_kg_max_relations_per_chunk` | — | `int` | `12` | ≥ 0, ≤ 200 | Maximum semantic relations to create per chunk (heuristic mode) |
 | `graph_indexing.semantic_kg_min_concept_len` | — | `int` | `4` | ≥ 3, ≤ 20 | Minimum length for semantic concept tokens |
 | `graph_indexing.semantic_kg_mode` | — | `Literal["heuristic", "llm"]` | `"heuristic"` | allowed="heuristic", "llm" | Semantic KG extraction mode. 'heuristic' is deterministic and test-friendly; 'llm' uses an LLM to extract entities + relations. |
+| `graph_indexing.semantic_kg_reasoning_effort` | — | `Literal["minimal", "low", "medium", "high", "xhigh"]` | `"medium"` | allowed="minimal", "low", "medium", "high", "xhigh" | Reasoning effort for semantic KG extraction when using OpenAI Responses-compatible models. |
 | `graph_indexing.semantic_kg_relation_weight_heuristic` | — | `float` | `0.5` | ≥ 0.0, ≤ 1.0 | Edge weight for semantic concept relations in heuristic fallback mode. |
 | `graph_indexing.semantic_kg_relation_weight_llm` | — | `float` | `0.7` | ≥ 0.0, ≤ 1.0 | Edge weight for semantic concept relations in LLM mode. |
+| `graph_indexing.semantic_kg_require_llm_success` | — | `bool` | `false` | — | When true in LLM mode, fail semantic KG extraction for a chunk if LLM extraction fails instead of falling back. |
+| `graph_indexing.semantic_kg_typed_entities_enabled` | — | `bool` | `false` | — | When true, semantic KG extraction preserves/uses typed entities (person, org, location, event, concept). |
 | `graph_indexing.store_chunk_embeddings` | — | `bool` | `true` | — | Store chunk embeddings on Chunk nodes for Neo4j vector search (requires dense embeddings) |
 | `graph_indexing.vector_index_online_timeout_s` | — | `float` | `60.0` | ≥ 1.0, ≤ 600.0 | Timeout waiting for Neo4j vector index ONLINE (seconds) |
 | `graph_indexing.vector_similarity_function` | — | `Literal["cosine", "euclidean"]` | `"cosine"` | allowed="cosine", "euclidean" | Neo4j vector similarity function |
