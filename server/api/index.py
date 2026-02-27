@@ -672,15 +672,16 @@ async def _run_index(
             current_dim = int(embedder.dim)
             current_backend = str(cfg.embedding.embedding_backend or "").strip().lower() or "deterministic"
             current_provider = str(cfg.embedding.embedding_type or "").strip()
+            both_deterministic = current_backend == "deterministic" and stored_backend == "deterministic"
 
             mismatches: list[str] = []
             if stored_dim != current_dim:
                 mismatches.append(f"dimensions: stored={stored_dim}, config={current_dim}")
-            if stored_model != current_model:
+            if not both_deterministic and stored_model != current_model:
                 mismatches.append(f"model: stored={stored_model}, config={current_model}")
             if stored_backend != current_backend:
                 mismatches.append(f"backend: stored={stored_backend}, config={current_backend}")
-            if stored_provider != current_provider:
+            if not both_deterministic and stored_provider != current_provider:
                 mismatches.append(f"provider: stored={stored_provider}, config={current_provider}")
 
             if mismatches:

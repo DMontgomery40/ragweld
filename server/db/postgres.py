@@ -1593,15 +1593,20 @@ class PostgresClient:
                 pass
             row = await conn.fetchrow(
                 """
+                WITH candidates AS (
+                    SELECT scope_key, endpoint, exact_key, request_fingerprint, payload, query_embedding
+                    FROM semantic_cache_entries
+                    WHERE scope_key = $1
+                      AND endpoint = $2
+                      AND request_fingerprint = $4
+                      AND expires_at > now()
+                      AND query_embedding IS NOT NULL
+                      AND vector_dims(query_embedding) = $6
+                )
                 SELECT scope_key, endpoint, exact_key, request_fingerprint, payload,
                        (1 - (query_embedding <=> $3))::float8 AS similarity
-                FROM semantic_cache_entries
-                WHERE scope_key = $1
-                  AND endpoint = $2
-                  AND request_fingerprint = $4
-                  AND expires_at > now()
-                  AND query_embedding IS NOT NULL
-                  AND (1 - (query_embedding <=> $3)) >= $5
+                FROM candidates
+                WHERE (1 - (query_embedding <=> $3)) >= $5
                 ORDER BY query_embedding <=> $3
                 LIMIT 1;
                 """,
@@ -1610,6 +1615,7 @@ class PostgresClient:
                 [float(x) for x in query_embedding],
                 str(request_fingerprint or ""),
                 float(min_similarity),
+                int(len(query_embedding)),
             )
         if row is None:
             return None

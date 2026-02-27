@@ -1,6 +1,11 @@
 from __future__ import annotations
 
-from scripts.check_config_reality import MAP_PATH, iter_leaf_keys, load_reality_map, validate_reality_map
+from scripts.check_config_reality import (
+    MAP_PATH,
+    iter_leaf_keys,
+    load_reality_map,
+    validate_reality_map,
+)
 from server.models.tribrid_config_model import TriBridConfig
 from server.services.config_store import _upgrade_raw_config
 
