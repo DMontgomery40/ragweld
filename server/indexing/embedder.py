@@ -6,8 +6,9 @@ import math
 import platform
 import re
 import time
+from collections.abc import Awaitable, Callable
 from functools import lru_cache
-from typing import Any, Awaitable, Callable
+from typing import Any
 
 from server.indexing.tokenizer import TextTokenizer
 from server.models.index import Chunk

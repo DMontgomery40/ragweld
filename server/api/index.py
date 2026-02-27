@@ -932,17 +932,22 @@ async def _run_index_body(
 
         indexing_batch = max(10, int(getattr(cfg.indexing, "indexing_batch_size", 100) or 100))
 
-        async def _upsert_chunk_batches(chunks: list[Chunk]) -> list[Chunk]:
+        async def _upsert_chunk_batches(
+            chunks: list[Chunk],
+            *,
+            _indexing_batch: int = indexing_batch,
+            _indexing_workers: int = indexing_workers,
+        ) -> list[Chunk]:
             if not chunks:
                 return []
-            batches = [chunks[i0 : i0 + indexing_batch] for i0 in range(0, len(chunks), indexing_batch)]
-            if len(batches) <= 1 or indexing_workers <= 1:
+            batches = [chunks[i0 : i0 + _indexing_batch] for i0 in range(0, len(chunks), _indexing_batch)]
+            if len(batches) <= 1 or _indexing_workers <= 1:
                 out: list[Chunk] = []
                 for b in batches:
                     out.extend(await _upsert_chunks_for_file(b))
                 return out
 
-            sem = asyncio.Semaphore(indexing_workers)
+            sem = asyncio.Semaphore(_indexing_workers)
             results: list[list[Chunk] | None] = [None] * len(batches)
 
             async def _run_batch(i: int, batch: list[Chunk]) -> None:
@@ -1141,17 +1146,26 @@ async def _run_index_body(
                 if mode == "llm" and llm_prompt and chunks_for_semantic:
                     async def _extract_for_chunk(
                         ch: Chunk,
+                        *,
+                        _llm_max_chars: int = llm_max_chars,
+                        _llm_prompt: str = llm_prompt,
+                        _llm_model: str = llm_model,
+                        _llm_timeout_s: int = llm_timeout_s,
+                        _reasoning_effort: str = reasoning_effort,
+                        _typed_entities_enabled: bool = typed_entities_enabled,
+                        _allowed_entity_types: set[str] = allowed_entity_types,
+                        _require_llm_success: bool = require_llm_success,
                     ) -> tuple[str, list[dict[str, str]], list[dict[str, str]]]:
                         entities_raw, relations_raw = await _extract_semantic_kg_llm(
-                            (ch.content or "")[: max(0, llm_max_chars)],
+                            (ch.content or "")[: max(0, _llm_max_chars)],
                             cfg=cfg,
-                            prompt=llm_prompt,
-                            model=llm_model,
-                            timeout_s=llm_timeout_s,
-                            reasoning_effort=reasoning_effort,
-                            typed_entities_enabled=typed_entities_enabled,
-                            allowed_entity_types=allowed_entity_types,
-                            require_success=require_llm_success,
+                            prompt=_llm_prompt,
+                            model=_llm_model,
+                            timeout_s=_llm_timeout_s,
+                            reasoning_effort=_reasoning_effort,
+                            typed_entities_enabled=_typed_entities_enabled,
+                            allowed_entity_types=_allowed_entity_types,
+                            require_success=_require_llm_success,
                         )
                         return ch.chunk_id, entities_raw, relations_raw
 

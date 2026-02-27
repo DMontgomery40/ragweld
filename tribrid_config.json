@@ -162,14 +162,10 @@
   },
   "indexing": {
     "postgres_url": "postgresql://postgres:postgres@localhost:5432/tribrid_rag",
-    "table_name": "code_chunks_{repo}",
-    "collection_suffix": "default",
-    "repo_path": "",
     "indexing_batch_size": 100,
     "indexing_workers": 4,
     "bm25_tokenizer": "stemmer",
     "bm25_stemmer_lang": "english",
-    "bm25_stopwords_lang": "en",
     "index_excluded_exts": ".png,.jpg,.gif,.ico,.svg,.woff,.ttf",
     "index_max_file_size_mb": 250,
     "large_file_mode": "stream",
@@ -179,10 +175,7 @@
     "parquet_extract_max_cell_chars": 20000,
     "parquet_extract_text_columns_only": 1,
     "parquet_extract_include_column_names": 1,
-    "skip_dense": 0,
-    "out_dir_base": "./out",
-    "rag_out_base": "",
-    "repos_file": "./repos.json"
+    "skip_dense": 0
   },
   "graph_storage": {
     "neo4j_uri": "bolt://localhost:7687",

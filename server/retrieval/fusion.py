@@ -92,28 +92,53 @@ class TriBridFusion:
         cache_lookup_outcome = "disabled"
         cache_lookup_match_type: str | None = None
         cache_lookup_similarity: float | None = None
+        primary_cfg: TriBridConfig | None = None
+        try:
+            primary_cfg = await load_scoped_config(repo_id=corpus_ids[0])
+            cache_service = SemanticCacheService(primary_cfg)
+            cache_lookup_outcome = "ready"
+        except Exception:
+            primary_cfg = None
+            cache_service = None
+            cache_lookup_outcome = "unavailable"
+        if primary_cfg is not None and top_k is None:
+            effective_final_k = int(getattr(primary_cfg.retrieval, "final_k", 0) or 0)
+        else:
+            effective_final_k = int(top_k or 0)
+        primary_reranking = primary_cfg.reranking if primary_cfg is not None else RerankingConfig()
+        primary_training = primary_cfg.training if primary_cfg is not None else TrainingConfig()
         cache_request_fingerprint = SemanticCacheService.fingerprint(
             {
                 "namespace": str(cache_namespace or "search"),
                 "include_vector": bool(include_vector),
                 "include_sparse": bool(include_sparse),
                 "include_graph": bool(include_graph),
-                "top_k": int(top_k or 0),
+                "top_k": int(effective_final_k),
                 "fusion_method": str(config.method),
                 "fusion_rrf_k": int(config.rrf_k),
                 "fusion_vector_weight": float(config.vector_weight),
                 "fusion_sparse_weight": float(config.sparse_weight),
                 "fusion_graph_weight": float(config.graph_weight),
                 "fusion_normalize_scores": bool(config.normalize_scores),
+                "reranker_mode": str(getattr(primary_reranking, "reranker_mode", "") or "").strip().lower(),
+                "reranker_cloud_provider": str(getattr(primary_reranking, "reranker_cloud_provider", "") or ""),
+                "reranker_cloud_model": str(getattr(primary_reranking, "reranker_cloud_model", "") or ""),
+                "reranker_cloud_top_n": int(getattr(primary_reranking, "reranker_cloud_top_n", 0) or 0),
+                "tribrid_reranker_alpha": float(getattr(primary_reranking, "tribrid_reranker_alpha", 0.0) or 0.0),
+                "tribrid_reranker_topn": int(getattr(primary_reranking, "tribrid_reranker_topn", 0) or 0),
+                "tribrid_reranker_batch": int(getattr(primary_reranking, "tribrid_reranker_batch", 0) or 0),
+                "tribrid_reranker_maxlen": int(getattr(primary_reranking, "tribrid_reranker_maxlen", 0) or 0),
+                "learning_reranker_backend": str(
+                    getattr(primary_training, "learning_reranker_backend", "") or ""
+                ),
+                "learning_reranker_base_model": str(
+                    getattr(primary_training, "learning_reranker_base_model", "") or ""
+                ),
+                "tribrid_reranker_model_path": str(
+                    getattr(primary_training, "tribrid_reranker_model_path", "") or ""
+                ),
             }
         )
-        try:
-            primary_cfg = await load_scoped_config(repo_id=corpus_ids[0])
-            cache_service = SemanticCacheService(primary_cfg)
-            cache_lookup_outcome = "ready"
-        except Exception:
-            cache_service = None
-            cache_lookup_outcome = "unavailable"
 
         if cache_service is not None:
             try:
@@ -144,7 +169,7 @@ class TriBridFusion:
                     }
                 )
                 self.last_debug = debug
-                final_k = int(top_k or config.final_k)
+                final_k = int(effective_final_k or len(cached))
                 final_results = cached[:final_k] if final_k > 0 else []
                 SEARCH_RESULTS_FINAL_COUNT.observe(len(final_results))
                 return final_results
