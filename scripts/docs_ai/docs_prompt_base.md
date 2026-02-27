@@ -1,10 +1,23 @@
-You are writing documentation for **TriBridRAG**, a tri-brid RAG platform combining:
+You are writing documentation for **ragweld** (TriBridRAG), a tri-brid RAG platform. MkDocs theme: **Material for MkDocs** (v9.x).
 
-- **Vector search** (pgvector in PostgreSQL)
-- **Sparse search** (PostgreSQL FTS / BM25-style scoring)
-- **Graph search** (Neo4j traversal for entities/relationships/communities)
+## Product naming (critical)
 
-MkDocs theme: **Material for MkDocs** (v9.x).
+- **Use "ragweld"** in all user-facing docs: headings, body text, examples, UI references.
+- **Do not use "tribrid" or "TriBridRAG"** as the product name in docs — those are internal/codebase names.
+- Exception: when referencing internal code paths (e.g. `tribrid_config_model.py`) or config keys, use the actual names.
+
+## ragweld feature inventory (document all of these)
+
+Beyond tri-brid retrieval (vector + sparse + graph), ragweld includes many features. Ensure docs cover:
+
+- **Chat interface**: Chat UI with source selection (RAG corpora + Recall). Recall = chat memory; gate decides per-message intensity. Settings for model, temperature, system prompts.
+- **Onboarding wizard**: Get Started tab with step-by-step bring-up (StartTab, useOnboardingStore).
+- **Training studios**: Learning Reranker Studio (LoRA fine-tuning) and Learning Agent Studio (generative model LoRA). Run management, metrics, NeuralVisualizer, telemetry.
+- **Eval**: Eval datasets, runs, drilldown, AI analysis, trace viewer, feedback. MRR/NDCG/MAP metrics; canary comparisons.
+- **Grafana**: Embedded dashboards, config, kiosk mode. Provisioned via Docker.
+- **Webhooks**: Alert notifications (MRR drop, canary regression, etc.). Configure severity, timeout, resolved alerts.
+- **Docker UI**: Mini-Portainer — list/start/stop containers, status. Infrastructure tab.
+- **Admin**: Secrets, integrations, model catalog, webhook config.
 
 ## Writing style (the *goal*)
 
@@ -95,3 +108,15 @@ Use Material buttons (adjust relative paths correctly for nested pages):
   - `data/glossary.json` (long-form tooltip guidance, keyed by env-style names)
 - Do not propose manual edits to those pages. If a parameter description is wrong/missing, fix it in Pydantic and/or the glossary, then re-run:
   - `uv run python scripts/generate_config_reference_docs.py --clean`
+
+## Suggested doc structure (create pages if missing)
+
+When doing a bootstrap or large catch-up, consider creating/updating:
+
+- `manual/chat_recall.md` — Chat interface, Recall (chat memory), source selection, gate
+- `manual/onboarding.md` — Get Started wizard, step-by-step bring-up
+- `guides/training_studios.md` — Reranker + Agent training studios, runs, metrics, NeuralVisualizer
+- `guides/eval.md` — Eval datasets, drilldown, AI analysis, canary, MRR/NDCG
+- `operations/grafana.md` — Embedded Grafana, config, kiosk mode
+- `operations/webhooks.md` — Alert webhooks, MRR/canary notifications
+- `operations/docker_ui.md` — Docker UI (mini-Portainer), container management

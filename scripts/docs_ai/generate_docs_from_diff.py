@@ -218,6 +218,9 @@ def _select_context_files(changed: List[str], *, limit: int) -> List[str]:
         "server/api/eval.py",
         "server/api/docker.py",
         "server/api/health.py",
+        "server/api/reranker.py",
+        "server/api/agent.py",
+        "server/api/dataset.py",
         # Backend services/pipeline
         "server/services/rag.py",
         "server/services/answer_service.py",
@@ -232,13 +235,41 @@ def _select_context_files(changed: List[str], *, limit: int) -> List[str]:
         "server/indexing/graph_builder.py",
         "server/db/postgres.py",
         "server/db/neo4j.py",
-        # Frontend API client layer (stays stable + reflects backend routes)
+        # Frontend API client layer
         "web/src/api/client.ts",
         "web/src/api/config.ts",
         "web/src/api/indexing.ts",
         "web/src/api/models.ts",
         "web/src/api/health.ts",
         "web/src/api/docker.ts",
+        "web/src/api/webhooks.ts",
+        # Chat UI + Recall
+        "web/src/components/Chat/ChatInterface.tsx",
+        "web/src/components/Chat/ChatSettings2.tsx",
+        "web/src/components/Chat/SourceDropdown.tsx",
+        # Onboarding
+        "web/src/components/tabs/StartTab.tsx",
+        "web/src/stores/useOnboardingStore.ts",
+        # Training studios (reranker + agent)
+        "web/src/components/RerankerTraining/TrainingStudio.tsx",
+        "web/src/components/AgentTraining/TrainingStudio.tsx",
+        "web/src/components/RAG/LearningRankerSubtab.tsx",
+        "web/src/components/RAG/LearningAgentSubtab.tsx",
+        # Eval
+        "web/src/components/Evaluation/EvalDrillDown.tsx",
+        "web/src/components/tabs/EvalAnalysisTab.tsx",
+        "web/src/components/Evaluation/HistoryViewer.tsx",
+        "web/src/components/Evaluation/TraceViewer.tsx",
+        # Grafana + Webhooks
+        "web/src/components/Grafana/GrafanaDashboard.tsx",
+        "web/src/components/Grafana/GrafanaConfig.tsx",
+        "web/src/pages/GrafanaEmbed.tsx",
+        "web/src/components/Admin/IntegrationsSubtab.tsx",
+        "web/src/components/Admin/GeneralSubtab.tsx",
+        # Docker UI (mini-Portainer)
+        "web/src/components/Infrastructure/DockerSubtab.tsx",
+        "web/src/components/Docker/ContainerCard.tsx",
+        "web/src/pages/Docker.tsx",
     ]
 
     changed_set = set(changed)
@@ -301,6 +332,9 @@ def _selected_docs_context(*, max_chars_per_file: int = 7000) -> List[str]:
         "deployment.md",
         "security.md",
         "troubleshooting.md",
+        "eval_guide.md",
+        "howto/reranker.md",
+        "observability.md",
     ]
 
     blocks: list[str] = []
@@ -439,13 +473,13 @@ def call_openai_unified_diff(prompt: str) -> str:
     system_prompt = (
         (base_prompt + "\n\n") if base_prompt else ""
     ) + (
-        "You are generating documentation updates for TriBridRAG based on code changes.\n"
+        "You are generating documentation updates for ragweld based on code changes.\n"
+        "Use 'ragweld' (not 'tribrid' or 'TriBridRAG') as the product name in all doc text.\n"
         "You may create, move, or delete pages and restructure folders, and you may update mkdocs.yml nav accordingly.\n"
         "Only modify MkDocs sources: mkdocs/docs/** and mkdocs.yml.\n"
         "Output ONLY a standard git unified diff patch suitable for `git apply`.\n"
-        "Your output MUST use git patch headers starting with lines like: `diff --git a/... b/...`.\n"
-        "Do NOT output the '*** Begin Patch' / '*** Add File' format.\n"
-        "Do NOT include code fences or any commentary.\n"
+        "Your output MUST use git patch headers: `diff --git a/path b/path`.\n"
+        "Each hunk must have correct @@ line counts. No stray characters, no code fences, no commentary.\n"
         "The result must pass `mkdocs build --strict`.\n"
     )
 
@@ -615,13 +649,30 @@ def _apply_cursor_style_patch(patch_text: str) -> List[str]:
     return touched
 
 
-def apply_patch(patch_path: Path) -> None:
+def apply_patch(patch_path: Path) -> bool:
+    """Apply patch. Returns True if applied, False if failed (workflow can continue)."""
     patch_text = _read_text(patch_path)
     if (patch_text or "").lstrip().startswith("*** Begin Patch"):
-        _apply_cursor_style_patch(patch_text)
-        return
+        try:
+            _apply_cursor_style_patch(patch_text)
+            return True
+        except Exception as e:
+            print(f"Cursor-style patch apply failed: {e}")
+            return False
 
-    run(f"git apply --index {shlex.quote(str(patch_path))}")
+    try:
+        run(f"git apply --index {shlex.quote(str(patch_path))}")
+        return True
+    except RuntimeError as e:
+        print(f"git apply failed: {e}")
+        # Try Cursor-style as fallback if patch looks like it might be that format
+        if "*** Begin Patch" in (patch_text or ""):
+            try:
+                _apply_cursor_style_patch(patch_text)
+                return True
+            except Exception:
+                pass
+        return False
 
 
 def main() -> None:
@@ -637,7 +688,8 @@ def main() -> None:
         patch_path = Path(args.apply_patch)
         if not patch_path.is_absolute():
             patch_path = ROOT / patch_path
-        apply_patch(patch_path)
+        if not apply_patch(patch_path):
+            raise RuntimeError("Patch apply failed.")
         print("Patch applied to index.")
         return
 
@@ -666,8 +718,10 @@ def main() -> None:
     print(f"LLM patch saved: {PATCH_FILE.relative_to(ROOT)}")
 
     if args.apply:
-        apply_patch(PATCH_FILE)
-        print("Patch applied to index.")
+        if apply_patch(PATCH_FILE):
+            print("Patch applied to index.")
+        else:
+            print("WARNING: Patch apply failed (corrupt or incompatible). Config reference will still run.")
 
 
 if __name__ == "__main__":
