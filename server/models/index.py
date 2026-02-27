@@ -5,9 +5,9 @@ This file re-exports them for backwards compatibility.
 """
 from server.models.tribrid_config_model import (
     Chunk,
+    IndexRequest,
     IndexRunEvent,
     IndexRunSummary,
-    IndexRequest,
     IndexStats,
     IndexStatus,
 )
