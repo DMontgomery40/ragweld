@@ -159,8 +159,8 @@ class TriBridFusion:
                 cache_lookup_match_type = str(hit.match_type)
                 cache_lookup_similarity = float(hit.similarity)
                 cached = [ChunkMatch.model_validate(r) for r in (hit.payload.get("matches") or [])]
-                debug = dict(hit.payload.get("debug") or {})
-                debug.update(
+                cache_debug = dict(hit.payload.get("debug") or {})
+                cache_debug.update(
                     {
                         "cache_hit": True,
                         "cache_match_type": hit.match_type,
@@ -168,7 +168,7 @@ class TriBridFusion:
                         "cache_namespace": str(cache_namespace or "search"),
                     }
                 )
-                self.last_debug = debug
+                self.last_debug = cache_debug
                 final_k = int(effective_final_k or len(cached))
                 final_results = cached[:final_k] if final_k > 0 else []
                 SEARCH_RESULTS_FINAL_COUNT.observe(len(final_results))

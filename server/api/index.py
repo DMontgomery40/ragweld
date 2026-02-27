@@ -603,13 +603,15 @@ async def _run_index(
     await postgres.connect()
     await postgres.upsert_corpus(repo_id, name=repo_id, root_path=repo_path)
     if embedder is not None and bool(int(getattr(cfg.embedding, "embedding_cache_enabled", 0) or 0) == 1):
+        cache_backend = str(getattr(cfg.embedding, "embedding_backend", "") or "").strip().lower() or "deterministic"
         cache_provider = str(getattr(cfg.embedding, "embedding_type", "") or "").strip().lower() or "deterministic"
+        cache_provider_key = f"{cache_backend}:{cache_provider}"
         cache_model = str(getattr(cfg.embedding, "effective_model", "") or "").strip() or "deterministic"
         cache_dim = int(embedder.dim)
 
         async def _cache_lookup(input_hashes: list[str]) -> dict[str, list[float]]:
             return await postgres.embedding_cache_lookup_batch(
-                provider=cache_provider,
+                provider=cache_provider_key,
                 model=cache_model,
                 dimensions=cache_dim,
                 input_hashes=input_hashes,
@@ -617,7 +619,7 @@ async def _run_index(
 
         async def _cache_upsert(entries: dict[str, tuple[str, list[float]]]) -> int:
             return await postgres.embedding_cache_upsert_batch(
-                provider=cache_provider,
+                provider=cache_provider_key,
                 model=cache_model,
                 dimensions=cache_dim,
                 entries=entries,
@@ -955,11 +957,11 @@ async def _run_index_body(
                     results[i] = await _upsert_chunks_for_file(batch)
 
             await asyncio.gather(*(_run_batch(i, batch) for i, batch in enumerate(batches)))
-            out: list[Chunk] = []
+            merged: list[Chunk] = []
             for r in results:
                 if r:
-                    out.extend(r)
-            return out
+                    merged.extend(r)
+            return merged
 
         # Chunks queued for semantic KG extraction during this file iteration.
         # Keep this as a per-iteration queue; reprocessing prior chunks on every
@@ -1150,7 +1152,7 @@ async def _run_index_body(
                         _llm_max_chars: int = llm_max_chars,
                         _llm_prompt: str = llm_prompt,
                         _llm_model: str = llm_model,
-                        _llm_timeout_s: int = llm_timeout_s,
+                        _llm_timeout_s: float = llm_timeout_s,
                         _reasoning_effort: str = reasoning_effort,
                         _typed_entities_enabled: bool = typed_entities_enabled,
                         _allowed_entity_types: set[str] = allowed_entity_types,
@@ -1173,16 +1175,16 @@ async def _run_index_body(
                         batch = chunks_for_semantic[i0 : i0 + semantic_workers]
                         coros = [_extract_for_chunk(ch) for ch in batch]
                         if require_llm_success:
-                            results = await asyncio.gather(*coros)
-                            for chunk_id, entities_raw, relations_raw in results:
-                                llm_extract_by_chunk[chunk_id] = (entities_raw, relations_raw)
+                            batch_results = await asyncio.gather(*coros)
+                            for chunk_id, entities_raw_one, relations_raw_one in batch_results:
+                                llm_extract_by_chunk[chunk_id] = (entities_raw_one, relations_raw_one)
                         else:
-                            results = await asyncio.gather(*coros, return_exceptions=True)
-                            for item in results:
+                            batch_results_with_errors = await asyncio.gather(*coros, return_exceptions=True)
+                            for item in batch_results_with_errors:
                                 if isinstance(item, Exception):
                                     continue
-                                chunk_id, entities_raw, relations_raw = item
-                                llm_extract_by_chunk[chunk_id] = (entities_raw, relations_raw)
+                                chunk_id, entities_raw_one, relations_raw_one = item
+                                llm_extract_by_chunk[chunk_id] = (entities_raw_one, relations_raw_one)
 
                 for ch in chunks_for_semantic:
                     if semantic_processed >= semantic_budget:

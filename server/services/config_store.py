@@ -10,6 +10,7 @@ This module provides a small API to load/save either global or per-corpus config
 
 from __future__ import annotations
 
+import copy
 import json
 import logging
 from typing import Any
@@ -85,7 +86,8 @@ def _migrate_config_in_place(cfg: TriBridConfig) -> list[str]:
 
 def _upgrade_raw_config(raw: dict[str, Any]) -> tuple[TriBridConfig, bool, list[str]]:
     """Upgrade stored JSON config and return (validated_cfg, changed, migrated_keys)."""
-    working = dict(raw or {})
+    original = copy.deepcopy(raw or {})
+    working = copy.deepcopy(original)
     migrated_keys: list[str] = []
 
     for key in _REMOVED_FLAT_KEYS:
@@ -100,7 +102,7 @@ def _upgrade_raw_config(raw: dict[str, Any]) -> tuple[TriBridConfig, bool, list[
     cfg = TriBridConfig.model_validate(working)
     migrated_keys.extend(_migrate_config_in_place(cfg))
     normalized = cfg.model_dump()
-    changed = normalized != raw
+    changed = normalized != original
     return (cfg, changed, sorted(set(migrated_keys)))
 
 
