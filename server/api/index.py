@@ -216,6 +216,24 @@ def _load_latest_run_summary(repo_id: str) -> IndexRunSummary | None:
     return None
 
 
+def _to_optional_int(value: Any) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except Exception:
+        return None
+
+
+def _to_optional_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except Exception:
+        return None
+
+
 def _append_run_event(repo_id: str, run_id: str, event: dict[str, Any]) -> None:
     event_type = str(event.get("type") or "").strip()
     if not event_type:
@@ -225,7 +243,7 @@ def _append_run_event(repo_id: str, run_id: str, event: dict[str, Any]) -> None:
         ts=datetime.now(UTC),
         type=event_type,
         message=str(event.get("message")) if event.get("message") is not None else None,
-        percent=int(event.get("percent")) if event.get("percent") is not None else None,
+        percent=_to_optional_int(event.get("percent")),
         current_file=str(event.get("current_file")) if event.get("current_file") is not None else None,
         meta={
             k: v
@@ -711,15 +729,13 @@ async def _extract_semantic_kg_llm(
                 continue
             if rel_type not in SEMANTIC_RELATION_TYPES:
                 continue
-            item: dict[str, Any] = {"source": src, "target": tgt, "relation_type": rel_type}
+            relation_item: dict[str, Any] = {"source": src, "target": tgt, "relation_type": rel_type}
             if r.get("evidence_text") is not None:
-                item["evidence_text"] = str(r.get("evidence_text") or "")
-            if r.get("confidence") is not None:
-                try:
-                    item["confidence"] = float(r.get("confidence"))
-                except Exception:
-                    pass
-            relations.append(item)
+                relation_item["evidence_text"] = str(r.get("evidence_text") or "")
+            confidence_val = _to_optional_float(r.get("confidence"))
+            if confidence_val is not None:
+                relation_item["confidence"] = confidence_val
+            relations.append(relation_item)
 
     return (entities, relations)
 
@@ -1508,11 +1524,9 @@ async def _run_index_body(
                                 }
                                 if r.get("evidence_text") is not None:
                                     rel_props["evidence_text"] = str(r.get("evidence_text") or "")
-                                if r.get("confidence") is not None:
-                                    try:
-                                        rel_props["confidence"] = float(r.get("confidence"))
-                                    except Exception:
-                                        pass
+                                confidence_val = _to_optional_float(r.get("confidence"))
+                                if confidence_val is not None:
+                                    rel_props["confidence"] = confidence_val
                                 rels.append(
                                     Relationship(
                                         source_id=src_id,

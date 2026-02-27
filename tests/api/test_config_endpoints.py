@@ -140,3 +140,54 @@ async def test_put_config_rejects_reranker_model_for_generation_override(client:
     detail = str(response.json().get("detail") or "")
     assert "generation.gen_model_mcp" in detail
     assert "requires [GEN]" in detail
+
+
+@pytest.mark.asyncio
+async def test_put_config_rejects_unsupported_embedding_provider_runtime(client: AsyncClient) -> None:
+    baseline = await client.get("/api/config")
+    assert baseline.status_code == 200
+    cfg = baseline.json()
+
+    cfg["indexing"]["skip_dense"] = 0
+    cfg["embedding"]["embedding_backend"] = "provider"
+    cfg["embedding"]["embedding_type"] = "cohere"
+
+    response = await client.put("/api/config", json=cfg)
+    assert response.status_code == 422
+    detail = str(response.json().get("detail") or "")
+    assert "Unsupported embedding provider" in detail
+
+
+@pytest.mark.asyncio
+async def test_put_config_rejects_embedding_tokenizer_mismatch(client: AsyncClient) -> None:
+    baseline = await client.get("/api/config")
+    assert baseline.status_code == 200
+    cfg = baseline.json()
+
+    cfg["indexing"]["skip_dense"] = 0
+    cfg["embedding"]["embedding_backend"] = "provider"
+    cfg["embedding"]["embedding_type"] = "openai"
+    cfg["tokenization"]["strategy"] = "huggingface"
+
+    response = await client.put("/api/config", json=cfg)
+    assert response.status_code == 422
+    detail = str(response.json().get("detail") or "")
+    assert "requires tokenization.strategy" in detail
+
+
+@pytest.mark.asyncio
+async def test_put_config_rejects_unknown_tiktoken_encoding(client: AsyncClient) -> None:
+    baseline = await client.get("/api/config")
+    assert baseline.status_code == 200
+    cfg = baseline.json()
+
+    cfg["indexing"]["skip_dense"] = 0
+    cfg["embedding"]["embedding_backend"] = "provider"
+    cfg["embedding"]["embedding_type"] = "openai"
+    cfg["tokenization"]["strategy"] = "tiktoken"
+    cfg["tokenization"]["tiktoken_encoding"] = "definitely_not_a_real_encoding"
+
+    response = await client.put("/api/config", json=cfg)
+    assert response.status_code == 422
+    detail = str(response.json().get("detail") or "")
+    assert "Unknown tiktoken encoding" in detail

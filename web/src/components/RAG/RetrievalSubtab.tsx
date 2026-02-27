@@ -463,7 +463,7 @@ export function RetrievalSubtab() {
               provider={genBackend}
               value={genModel}
               onChange={setGenModel}
-              label="Primary Model"
+              label="Generation Model"
               tooltipKey="GEN_MODEL"
               allowCustom
             />
@@ -1315,7 +1315,7 @@ export function RetrievalSubtab() {
                     provider={genBackend}
                     value={genModel}
                     onChange={setGenModel}
-                    label="Primary Model"
+                    label="Generation Model"
                     tooltipKey="GEN_MODEL"
                     allowCustom
                   />

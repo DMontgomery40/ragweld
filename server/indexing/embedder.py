@@ -97,18 +97,15 @@ class Embedder:
         if not prepared:
             return []
 
-        cache_ready = (
-            self._cache_enabled
-            and self._cache_lookup_batch is not None
-            and self._cache_upsert_batch is not None
-        )
-        if not cache_ready:
+        lookup_batch = self._cache_lookup_batch
+        upsert_batch = self._cache_upsert_batch
+        if not (self._cache_enabled and lookup_batch is not None and upsert_batch is not None):
             return await self._embed_batch_uncached(prepared)
 
         input_hashes = [hashlib.sha256(t.encode("utf-8")).hexdigest() for t in prepared]
         unique_hashes = list(dict.fromkeys(input_hashes))
         try:
-            cache_hits = await self._cache_lookup_batch(unique_hashes)
+            cache_hits = await lookup_batch(unique_hashes)
         except Exception:
             cache_hits = {}
 
@@ -125,7 +122,7 @@ class Embedder:
             for h, vec in zip(miss_hashes, miss_vecs, strict=True):
                 newly_embedded[h] = [float(x) for x in vec]
             try:
-                await self._cache_upsert_batch(
+                await upsert_batch(
                     {h: (missing_by_hash[h], newly_embedded[h]) for h in miss_hashes if h in newly_embedded}
                 )
             except Exception:
@@ -237,7 +234,7 @@ class Embedder:
         if not Embedder._mlx_platform_supported():
             return None
         try:
-            from mlx_embeddings.utils import load  # type: ignore[import-not-found]
+            from mlx_embeddings.utils import load
 
             model, tokenizer = load(str(model_name))
             return (model, tokenizer)
@@ -281,10 +278,13 @@ class Embedder:
             req = 0
 
         model_max = getattr(tokenizer, "model_max_length", None)
-        try:
-            model_max_int = int(model_max)
-        except Exception:
+        if model_max is None:
             model_max_int = 0
+        else:
+            try:
+                model_max_int = int(model_max)
+            except Exception:
+                model_max_int = 0
 
         # HuggingFace uses very large sentinels for "infinite"; treat those as unknown.
         if model_max_int <= 0 or model_max_int >= 1_000_000:

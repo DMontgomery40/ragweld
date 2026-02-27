@@ -164,10 +164,17 @@ export function ModelAssignments() {
 
   // Validate model against catalog
   const isInCatalog = useMemo(() => {
-    const catalogSet = new Set(allModels.map((m) => String(m.model || '').trim()));
-    return (model: string) => {
-      if (!model || model.startsWith('(')) return true; // skip placeholders
-      return catalogSet.has(model.trim());
+    const byProvider = new Set(
+      allModels.map((m) => `${String(m.provider || '').trim().toLowerCase()}::${String(m.model || '').trim()}`)
+    );
+    const byModelOnly = new Set(allModels.map((m) => String(m.model || '').trim()));
+    return (provider: string, model: string) => {
+      if (!model || model.startsWith('(')) return true; // placeholders
+      const p = String(provider || '').trim().toLowerCase();
+      if (p === 'learning' || p === 'none') return true;
+      const m = model.trim();
+      if (byProvider.has(`${p}::${m}`)) return true;
+      return byModelOnly.has(m);
     };
   }, [allModels]);
 
@@ -206,7 +213,7 @@ export function ModelAssignments() {
           </thead>
           <tbody>
             {rows.map((row) => {
-              const valid = isInCatalog(row.model);
+              const valid = isInCatalog(row.provider, row.model);
               return (
                 <tr
                   key={row.task}

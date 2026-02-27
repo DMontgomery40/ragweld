@@ -1326,6 +1326,10 @@ class ModelCatalogUpsertResponse(BaseModel):
     model: ModelCatalogEntry = Field(description="Upserted catalog model entry")
 
 
+def _default_chat_model_components() -> list[Literal["GEN", "EMB", "RERANK"]]:
+    return ["GEN"]
+
+
 class ChatModelInfo(BaseModel):
     """Single chat model option resolved from providers."""
 
@@ -1335,7 +1339,7 @@ class ChatModelInfo(BaseModel):
     provider_key: str | None = Field(default=None, description="Provider key used in the model catalog")
     catalog_model: str | None = Field(default=None, description="Catalog model identifier when sourced from /api/models")
     components: list[Literal["GEN", "EMB", "RERANK"]] = Field(
-        default_factory=lambda: ["GEN"],
+        default_factory=_default_chat_model_components,
         description="Capabilities for this model option",
     )
     source: Literal["cloud_direct", "openrouter", "local", "ragweld"] = Field(
@@ -2764,7 +2768,7 @@ class EmbeddingConfig(BaseModel):
             return self.voyage_model
         if t == "mlx":
             return self.embedding_model_mlx
-        if t in {"local", "huggingface"}:
+        if t in {"local", "huggingface", "ollama"}:
             return self.embedding_model_local
         return self.embedding_model
 

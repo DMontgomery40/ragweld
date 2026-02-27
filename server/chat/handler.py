@@ -18,7 +18,7 @@ from server.db.postgres import PostgresClient
 from server.models.chat_config import RecallConfig, RecallIntensity, RecallPlan
 from server.models.retrieval import ChunkMatch
 from server.models.tribrid_config_model import ChatProviderInfo, ChatRequest, TriBridConfig
-from server.retrieval.cache import SemanticCacheService
+from server.retrieval.cache import CacheMode, SemanticCacheService
 from server.services.conversation_store import Conversation
 from server.services.rag import FusionProtocol
 
@@ -30,6 +30,15 @@ def _safe_error_message(e: Exception, *, max_len: int = 400) -> str:
     msg = re.sub(r"(Bearer\\s+)[A-Za-z0-9_.\\-]{10,}", r"\\1REDACTED", msg)
     msg = msg.replace("\n", " ").replace("\r", " ").strip()
     return msg[: int(max_len)]
+
+
+def _normalize_cache_mode(cache_mode: str | CacheMode | None) -> CacheMode:
+    mode = str(cache_mode or "default").strip().lower()
+    if mode == "bypass":
+        return "bypass"
+    if mode == "refresh":
+        return "refresh"
+    return "default"
 
 
 def _format_retrieval_only_chat_answer(*, message: str, corpus_ids: list[str], sources: list[ChunkMatch]) -> str:
@@ -208,7 +217,7 @@ async def _fusion_search_with_cache(
     include_sparse: bool,
     include_graph: bool,
     top_k: int | None,
-    cache_mode: str,
+    cache_mode: str | CacheMode,
     cache_namespace: str,
 ) -> list[ChunkMatch]:
     try:
@@ -220,7 +229,7 @@ async def _fusion_search_with_cache(
             include_sparse=include_sparse,
             include_graph=include_graph,
             top_k=top_k,
-            cache_mode=str(cache_mode or "default"),
+            cache_mode=_normalize_cache_mode(cache_mode),
             cache_namespace=str(cache_namespace or "search"),
         )
     except TypeError:
@@ -246,6 +255,7 @@ async def chat_once(
     """Non-streaming chat handler."""
 
     corpus_ids = resolve_sources(request.sources)
+    request_cache_mode = _normalize_cache_mode(request.cache_mode)
     recall_id = str(config.chat.recall.default_corpus_id or "recall_default")
     recall_selected = bool(config.chat.recall.enabled) and recall_id in set(corpus_ids)
     rag_corpus_ids = [cid for cid in corpus_ids if cid != recall_id]
@@ -267,7 +277,7 @@ async def chat_once(
             include_sparse=bool(request.include_sparse),
             include_graph=bool(request.include_graph),
             top_k=request.top_k,
-            cache_mode=str(request.cache_mode or "default"),
+            cache_mode=request_cache_mode,
             cache_namespace="chat_retrieval",
         )
         rag_debug = getattr(fusion, "last_debug", None) or {}
@@ -302,7 +312,7 @@ async def chat_once(
                     include_sparse=include_sparse,
                     include_graph=False,  # Graph is never enabled for Recall.
                     top_k=top_k,
-                    cache_mode=str(request.cache_mode or "default"),
+                    cache_mode=request_cache_mode,
                     cache_namespace="chat_recall_retrieval",
                 )
                 recall_debug = getattr(fusion, "last_debug", None) or {}
@@ -418,7 +428,7 @@ async def chat_once(
             scope_key=cache_scope_key,
             query=request.message,
             request_fingerprint=cache_request_fingerprint,
-            cache_mode=str(request.cache_mode or "default"),
+            cache_mode=request_cache_mode,
             allow_semantic=True,
         )
     else:
@@ -504,7 +514,7 @@ async def chat_once(
                 "provider": provider_info.model_dump(mode="serialization") if provider_info is not None else None,
                 "provider_response_id": provider_id,
             },
-            cache_mode=str(request.cache_mode or "default"),
+            cache_mode=request_cache_mode,
         )
         try:
             dbg = dict(getattr(fusion, "last_debug", None) or {})
@@ -533,6 +543,7 @@ async def chat_stream(
     """Streaming chat handler that yields SSE events (type=text/done/error)."""
 
     corpus_ids = resolve_sources(request.sources)
+    request_cache_mode = _normalize_cache_mode(request.cache_mode)
     recall_id = str(config.chat.recall.default_corpus_id or "recall_default")
     recall_selected = bool(config.chat.recall.enabled) and recall_id in set(corpus_ids)
     rag_corpus_ids = [cid for cid in corpus_ids if cid != recall_id]
@@ -553,7 +564,7 @@ async def chat_stream(
             include_sparse=bool(request.include_sparse),
             include_graph=bool(request.include_graph),
             top_k=request.top_k,
-            cache_mode=str(request.cache_mode or "default"),
+            cache_mode=request_cache_mode,
             cache_namespace="chat_retrieval",
         )
         rag_debug = getattr(fusion, "last_debug", None) or {}
@@ -587,7 +598,7 @@ async def chat_stream(
                     include_sparse=include_sparse,
                     include_graph=False,
                     top_k=top_k,
-                    cache_mode=str(request.cache_mode or "default"),
+                    cache_mode=request_cache_mode,
                     cache_namespace="chat_recall_retrieval",
                 )
                 recall_debug = getattr(fusion, "last_debug", None) or {}
@@ -702,7 +713,7 @@ async def chat_stream(
             scope_key=cache_scope_key,
             query=request.message,
             request_fingerprint=cache_request_fingerprint,
-            cache_mode=str(request.cache_mode or "default"),
+            cache_mode=request_cache_mode,
             allow_semantic=True,
         )
     else:
@@ -821,7 +832,7 @@ async def chat_stream(
                 "provider": provider_info.model_dump(mode="serialization") if provider_info is not None else None,
                 "provider_response_id": provider_response_id,
             },
-            cache_mode=str(request.cache_mode or "default"),
+            cache_mode=request_cache_mode,
         )
         try:
             dbg = dict(getattr(fusion, "last_debug", None) or {})
@@ -837,7 +848,7 @@ async def chat_stream(
 
     ended_at_ms = int(time.time() * 1000)
     sources_json = [s.model_dump(mode="serialization", by_alias=True) for s in sources]
-    done_payload: dict[str, Any] = {
+    done_event_payload: dict[str, Any] = {
         "type": "done",
         "run_id": run_id,
         "started_at_ms": int(started_at_ms),
@@ -850,4 +861,4 @@ async def chat_stream(
         "llm_used": bool(llm_used),
         "llm_error": llm_error,
     }
-    yield f"data: {json.dumps(done_payload)}\n\n"
+    yield f"data: {json.dumps(done_event_payload)}\n\n"

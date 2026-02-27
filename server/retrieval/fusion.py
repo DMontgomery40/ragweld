@@ -27,6 +27,7 @@ from server.observability.metrics import (
     VECTOR_LEG_LATENCY_SECONDS,
 )
 from server.retrieval.cache import CacheEndpoint, CacheMode, SemanticCacheService
+from server.retrieval.errors import EmbeddingContractMismatchError, SparseContractMismatchError
 from server.retrieval.rerank import Reranker
 from server.services.config_store import get_config as load_scoped_config
 
@@ -409,11 +410,10 @@ class TriBridFusion:
 
             embedder = Embedder(cfg.embedding, cfg.tokenization)
 
-            # ---- Query-time embedding dimension guard ----
-            # Detect when the current embedding config produces a different
-            # dimension than what was used to build the corpus index.  If
-            # mismatched, skip the vector leg rather than letting pgvector
-            # return garbage or crash with a cryptic error.
+            # ---- Query-time retrieval contract guards ----
+            # Detect dense/sparse configuration drift against what the corpus
+            # was indexed with. If the requested leg cannot safely run and no
+            # other requested leg can take over, raise a typed mismatch error.
             try:
                 corpus_meta = await postgres.get_corpus(cid)
             except Exception as e:
@@ -424,23 +424,78 @@ class TriBridFusion:
                 )
                 debug["fusion_corpus_meta_error"] = _safe_error_message(e)
                 corpus_meta = None
+
+            stored_backend = str((corpus_meta or {}).get("embedding_backend") or "").strip().lower()
+            stored_provider = str((corpus_meta or {}).get("embedding_provider") or "").strip().lower()
+            stored_model = str((corpus_meta or {}).get("embedding_model") or "").strip()
             stored_dim = int((corpus_meta or {}).get("embedding_dimensions") or 0)
-            dim_mismatch = stored_dim > 0 and stored_dim != int(embedder.dim)
-            if dim_mismatch:
+            current_backend = str(cfg.embedding.embedding_backend or "").strip().lower() or "deterministic"
+            current_provider = str(cfg.embedding.embedding_type or "").strip().lower()
+            current_model = str(cfg.embedding.effective_model or "").strip()
+            current_dim = int(getattr(embedder, "dim", getattr(cfg.embedding, "embedding_dim", 0)) or 0)
+
+            both_deterministic = stored_backend == "deterministic" and current_backend == "deterministic"
+            vector_contract_mismatch_reasons: list[str] = []
+            if stored_dim > 0 and stored_dim != current_dim:
+                vector_contract_mismatch_reasons.append("dimensions")
+            if stored_dim > 0 and stored_backend and stored_backend != current_backend:
+                vector_contract_mismatch_reasons.append("backend")
+            if stored_dim > 0 and not both_deterministic and stored_provider and stored_provider != current_provider:
+                vector_contract_mismatch_reasons.append("provider")
+            if stored_dim > 0 and not both_deterministic and stored_model and stored_model != current_model:
+                vector_contract_mismatch_reasons.append("model")
+            vector_contract_mismatch = bool(vector_contract_mismatch_reasons)
+            if vector_contract_mismatch:
                 logger.warning(
-                    "Embedding dimension mismatch for corpus '%s': "
-                    "indexed=%d, query=%d — skipping vector leg",
-                    cid, stored_dim, embedder.dim,
+                    "Dense retrieval contract mismatch for corpus '%s': indexed=(backend=%s, provider=%s, model=%s, dim=%d) "
+                    "query=(backend=%s, provider=%s, model=%s, dim=%d)",
+                    cid,
+                    stored_backend,
+                    stored_provider,
+                    stored_model,
+                    stored_dim,
+                    current_backend,
+                    current_provider,
+                    current_model,
+                    current_dim,
                 )
-                debug["fusion_vector_dim_mismatch"] = True
+                debug["fusion_vector_contract_mismatch"] = True
+                debug["fusion_vector_contract_mismatch_fields"] = list(vector_contract_mismatch_reasons)
+                debug["fusion_vector_dim_mismatch"] = stored_dim > 0 and stored_dim != current_dim
                 debug["fusion_vector_dim_stored"] = stored_dim
-                debug["fusion_vector_dim_query"] = int(embedder.dim)
+                debug["fusion_vector_dim_query"] = current_dim
+                can_fallback_from_vector = bool(
+                    (include_sparse and cfg.sparse_search.enabled)
+                    or (include_graph and cfg.graph_search.enabled)
+                )
+                if include_vector and cfg.vector_search.enabled and not can_fallback_from_vector:
+                    raise EmbeddingContractMismatchError(
+                        corpus_id=cid,
+                        expected_contract={
+                            "backend": stored_backend,
+                            "provider": stored_provider,
+                            "model": stored_model,
+                            "dimensions": stored_dim,
+                        },
+                        current_contract={
+                            "backend": current_backend,
+                            "provider": current_provider,
+                            "model": current_model,
+                            "dimensions": current_dim,
+                        },
+                    )
+                if include_vector and cfg.vector_search.enabled and can_fallback_from_vector:
+                    debug["fusion_degraded_retrieval"] = True
+                    reasons = [str(x) for x in list(debug.get("fusion_degraded_reasons") or [])]
+                    if "vector_contract_mismatch" not in reasons:
+                        reasons.append("vector_contract_mismatch")
+                    debug["fusion_degraded_reasons"] = reasons
 
             # Reuse query embeddings across legs when possible (vector + graph chunk-mode).
             q_emb: list[float] | None = None
 
             # Run legs (request toggles + config.*.enabled)
-            if include_vector and cfg.vector_search.enabled and not dim_mismatch:
+            if include_vector and cfg.vector_search.enabled and not vector_contract_mismatch:
                 with VECTOR_LEG_LATENCY_SECONDS.time():
                     try:
                         if q_emb is None:
@@ -465,25 +520,43 @@ class TriBridFusion:
                         vector_results = [r for r in vector_results if float(r.score) >= float(min_v)]
             debug["fusion_vector_results"] = len(vector_results)
 
-            # ---- ts_config mismatch warning ----
-            # If the FTS text-search config used at index time differs from the
-            # current query config, tsvector/tsquery matching will silently
-            # degrade (different stemming, stop-words, etc.).  We still run the
-            # sparse leg but surface the mismatch in debug metadata so the user
-            # can investigate.
             stored_ts = str((corpus_meta or {}).get("ts_config") or "").strip()
             current_ts = str(cfg.indexing.postgres_ts_config or "").strip()
-            if stored_ts and current_ts and stored_ts != current_ts:
+            sparse_contract_mismatch = bool(stored_ts and current_ts and stored_ts != current_ts)
+            skip_sparse_due_contract_mismatch = False
+            if sparse_contract_mismatch:
                 logger.warning(
                     "FTS ts_config mismatch for corpus '%s': "
-                    "indexed=%s, query=%s — sparse results may be degraded",
+                    "indexed=%s, query=%s",
                     cid, stored_ts, current_ts,
                 )
                 debug["fusion_sparse_ts_config_mismatch"] = True
                 debug["fusion_sparse_ts_config_stored"] = stored_ts
                 debug["fusion_sparse_ts_config_query"] = current_ts
+                can_fallback_from_sparse = bool(
+                    (include_vector and cfg.vector_search.enabled and not vector_contract_mismatch)
+                    or (include_graph and cfg.graph_search.enabled)
+                )
+                if include_sparse and cfg.sparse_search.enabled and not can_fallback_from_sparse:
+                    raise SparseContractMismatchError(
+                        corpus_id=cid,
+                        expected_contract={"ts_config": stored_ts},
+                        current_contract={
+                            "ts_config": current_ts,
+                            "bm25_tokenizer": str(cfg.indexing.bm25_tokenizer or "").strip().lower(),
+                            "bm25_stemmer_lang": str(cfg.indexing.bm25_stemmer_lang or "").strip().lower(),
+                        },
+                    )
+                if include_sparse and cfg.sparse_search.enabled and can_fallback_from_sparse:
+                    skip_sparse_due_contract_mismatch = True
+                    debug["fusion_sparse_disabled_due_contract_mismatch"] = True
+                    debug["fusion_degraded_retrieval"] = True
+                    reasons = [str(x) for x in list(debug.get("fusion_degraded_reasons") or [])]
+                    if "sparse_contract_mismatch" not in reasons:
+                        reasons.append("sparse_contract_mismatch")
+                    debug["fusion_degraded_reasons"] = reasons
 
-            if include_sparse and cfg.sparse_search.enabled:
+            if include_sparse and cfg.sparse_search.enabled and not skip_sparse_due_contract_mismatch:
                 with SPARSE_LEG_LATENCY_SECONDS.time():
                     try:
                         with SEARCH_STAGE_LATENCY_SECONDS.labels(stage="postgres_sparse_search").time():
@@ -710,6 +783,8 @@ class TriBridFusion:
         any_sparse_enabled = False
         any_graph_enabled = False
         any_graph_attempted = False
+        any_degraded_retrieval = False
+        degraded_reasons: list[str] = []
         graph_errors: list[dict[str, str]] = []
 
         for cid in corpus_ids:
@@ -734,6 +809,11 @@ class TriBridFusion:
             any_sparse_enabled = any_sparse_enabled or bool(dbg.get("fusion_sparse_enabled"))
             any_graph_enabled = any_graph_enabled or bool(dbg.get("fusion_graph_enabled"))
             any_graph_attempted = any_graph_attempted or bool(dbg.get("fusion_graph_attempted"))
+            any_degraded_retrieval = any_degraded_retrieval or bool(dbg.get("fusion_degraded_retrieval"))
+            for reason in list(dbg.get("fusion_degraded_reasons") or []):
+                r = str(reason or "").strip()
+                if r and r not in degraded_reasons:
+                    degraded_reasons.append(r)
             if dbg.get("fusion_graph_error"):
                 graph_errors.append({"corpus_id": cid, "error": str(dbg.get("fusion_graph_error"))})
 
@@ -775,6 +855,8 @@ class TriBridFusion:
                 any(bool(d.get("fusion_graph_entity_expansion_enabled")) for d in per_corpus_debug.values())
             ),
             "fusion_graph_entity_expansion_hits": int(total_graph_exp_hits),
+            "fusion_degraded_retrieval": bool(any_degraded_retrieval),
+            "fusion_degraded_reasons": degraded_reasons,
             "fusion_per_corpus": per_corpus_debug,
         }
 
@@ -935,11 +1017,11 @@ class TriBridFusion:
                 "fusion_graph_error",
             )
             has_retrieval_errors = any(bool(debug.get(k)) for k in top_level_error_keys)
-            per_corpus_debug = debug.get("fusion_per_corpus")
-            if isinstance(per_corpus_debug, dict):
+            per_corpus_payload = debug.get("fusion_per_corpus")
+            if isinstance(per_corpus_payload, dict):
                 has_retrieval_errors = has_retrieval_errors or any(
                     isinstance(cdbg, dict) and any(bool(cdbg.get(k)) for k in per_corpus_error_keys)
-                    for cdbg in per_corpus_debug.values()
+                    for cdbg in per_corpus_payload.values()
                 )
             skip_cache_write = bool(has_retrieval_errors and not final_results)
             if skip_cache_write:

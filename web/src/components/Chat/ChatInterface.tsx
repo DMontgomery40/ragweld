@@ -4,7 +4,7 @@
 
 import type React from 'react';
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
-import { useAPI, useConfig, useConfigField } from '@/hooks';
+import { useAPI, useConfig, useConfigField, useEmbeddingStatus } from '@/hooks';
 import { useUIHelpers } from '@/hooks/useUIHelpers';
 import { withCorpusScope } from '@/api/client';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
@@ -222,17 +222,18 @@ interface ChatInterfaceProps {
 type ChatComposerProps = {
   sending: boolean;
   multimodal: ChatMultimodalConfig | null;
+  blockedReason?: string | null;
   onSend: (text: string, images: ImageAttachment[]) => void;
 };
 
-const ChatComposer = memo(function ChatComposer({ sending, multimodal, onSend }: ChatComposerProps) {
+const ChatComposer = memo(function ChatComposer({ sending, multimodal, blockedReason, onSend }: ChatComposerProps) {
   const { showToast } = useUIHelpers();
   const [draft, setDraft] = useState('');
   const [attachments, setAttachments] = useState<ImageAttachment[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const canSend = draft.trim().length > 0 && !sending;
+  const canSend = draft.trim().length > 0 && !sending && !blockedReason;
 
   const visionEnabled = Boolean(multimodal?.vision_enabled ?? true);
   const maxImages = Math.max(1, Math.min(10, Number(multimodal?.max_images_per_message ?? 5)));
@@ -309,12 +310,12 @@ const ChatComposer = memo(function ChatComposer({ sending, multimodal, onSend }:
 
   const handleSend = useCallback(() => {
     const trimmed = draft.trim();
-    if (!trimmed || sending) return;
+    if (!trimmed || sending || blockedReason) return;
     onSend(trimmed, attachments);
     setDraft('');
     setAttachments([]);
     requestAnimationFrame(() => textareaRef.current?.focus());
-  }, [attachments, draft, onSend, sending]);
+  }, [attachments, blockedReason, draft, onSend, sending]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -427,7 +428,7 @@ const ChatComposer = memo(function ChatComposer({ sending, multimodal, onSend }:
           onKeyDown={handleKeyDown}
           onPaste={handlePaste}
           placeholder="Ask a question about your codebase... (paste screenshot to attach)"
-          disabled={sending}
+          disabled={sending || Boolean(blockedReason)}
           style={{
             flex: 1,
             background: 'var(--input-bg)',
@@ -460,17 +461,26 @@ const ChatComposer = memo(function ChatComposer({ sending, multimodal, onSend }:
         <button
           type="button"
           onClick={() => fileInputRef.current?.click()}
-          disabled={sending || !visionEnabled || attachments.length >= maxImages}
+          disabled={sending || Boolean(blockedReason) || !visionEnabled || attachments.length >= maxImages}
           data-testid="chat-attach-button"
           style={{
-            background: sending || !visionEnabled || attachments.length >= maxImages ? 'var(--bg-elev2)' : 'var(--bg-elev1)',
-            color: sending || !visionEnabled || attachments.length >= maxImages ? 'var(--fg-muted)' : 'var(--fg)',
+            background:
+              sending || Boolean(blockedReason) || !visionEnabled || attachments.length >= maxImages
+                ? 'var(--bg-elev2)'
+                : 'var(--bg-elev1)',
+            color:
+              sending || Boolean(blockedReason) || !visionEnabled || attachments.length >= maxImages
+                ? 'var(--fg-muted)'
+                : 'var(--fg)',
             border: '1px solid var(--line)',
             padding: '10px 12px',
             borderRadius: '6px',
             fontSize: '14px',
             fontWeight: 700,
-            cursor: sending || !visionEnabled || attachments.length >= maxImages ? 'not-allowed' : 'pointer',
+            cursor:
+              sending || Boolean(blockedReason) || !visionEnabled || attachments.length >= maxImages
+                ? 'not-allowed'
+                : 'pointer',
           }}
           aria-label="Attach image"
           title={!visionEnabled ? 'Vision disabled' : attachments.length >= maxImages ? `Max ${maxImages} images` : 'Attach an image'}
@@ -497,6 +507,11 @@ const ChatComposer = memo(function ChatComposer({ sending, multimodal, onSend }:
           {sending ? 'Sending...' : 'Send'}
         </button>
       </div>
+      {blockedReason && (
+        <div style={{ fontSize: '11px', color: 'var(--warn)' }}>
+          {blockedReason}
+        </div>
+      )}
     </div>
   );
 });
@@ -673,6 +688,7 @@ const AssistantMarkdown = memo(function AssistantMarkdown({ content }: Assistant
 export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) {
   const { api } = useAPI();
   const { showToast } = useUIHelpers();
+  const { status: embeddingStatus, loading: embeddingStatusLoading, error: embeddingStatusError } = useEmbeddingStatus();
   const [messages, setMessages] = useState<Message[]>([]);
   const [sending, setSending] = useState(false);
   const [streaming, setStreaming] = useState(false);
@@ -754,6 +770,17 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
       console.error('[ChatInterface] Failed to delete unindexed corpora:', e);
     }
   }, [activeSources, deleteUnindexedCorpora, handleSourcesChange]);
+  const retrievalSelected = (activeSources?.corpus_ids ?? []).length > 0;
+  const chatBlockedReason =
+    embeddingStatusError
+      ? `Retrieval compatibility check failed: ${embeddingStatusError}`
+      : !embeddingStatusLoading
+        && retrievalSelected
+        && Boolean(embeddingStatus?.hasIndex)
+        && Boolean(embeddingStatus?.isMismatched)
+        && (includeVector || includeSparse)
+        ? 'Retrieval/index contract mismatch detected. Re-index or restore indexing config before sending.'
+        : null;
 
   // Prune selected sources when corpora are deleted/changed.
   useEffect(() => {
@@ -1275,6 +1302,10 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
 
   const handleSend = async (text: string, images: ImageAttachment[]) => {
     if (!text.trim() || sending) return;
+    if (chatBlockedReason) {
+      showToast(chatBlockedReason, 'error');
+      return;
+    }
     const recallIntensityOverride = recallIntensity;
     if (recallIntensityOverride !== null) {
       setRecallIntensity(null);
@@ -2685,7 +2716,7 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
             borderTop: '1px solid var(--line)',
             background: 'var(--bg-elev1)'
           }}>
-            <ChatComposer sending={sending} multimodal={multimodalCfg} onSend={handleSend} />
+            <ChatComposer sending={sending} multimodal={multimodalCfg} blockedReason={chatBlockedReason} onSend={handleSend} />
 
             <div style={{ fontSize: '11px', color: 'var(--fg-muted)', marginBottom: '8px' }}>
               Press Ctrl+Enter to send • Citations appear as clickable file links when enabled in settings

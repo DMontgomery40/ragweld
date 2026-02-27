@@ -10,7 +10,7 @@ import asyncio
 import json
 import logging
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 
@@ -360,7 +360,7 @@ async def upsert_model(payload: ModelCatalogUpsertRequest) -> ModelCatalogUpsert
         merged = {k: v for k, v in merged.items() if v is not None}
 
         validated = ModelCatalogEntry.model_validate(merged)
-        action = "updated" if existing_idx is not None else "created"
+        action: Literal["created", "updated"] = "updated" if existing_idx is not None else "created"
         if existing_idx is not None:
             models[existing_idx] = validated.model_dump(mode="json")
         else:

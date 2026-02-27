@@ -4,7 +4,7 @@ import json
 import os
 import time
 import uuid
-from typing import Any
+from typing import Any, Literal, cast
 
 import httpx
 from fastapi import APIRouter, HTTPException, Query
@@ -31,6 +31,7 @@ from server.models.tribrid_config_model import (
     TracesLatestResponse,
     TriBridConfig,
 )
+from server.retrieval.errors import RetrievalContractMismatchError
 from server.retrieval.fusion import TriBridFusion
 from server.services.config_store import CorpusNotFoundError
 from server.services.config_store import get_config as load_scoped_config
@@ -44,6 +45,12 @@ router = APIRouter(tags=["chat"])
 # Dependency holders (can be overridden for testing)
 _config: TriBridConfig | None = None
 _fusion: FusionProtocol | None = None
+
+ChatModelComponent = Literal["GEN", "EMB", "RERANK"]
+
+
+def _default_chat_components() -> list[ChatModelComponent]:
+    return ["GEN"]
 
 
 def get_config() -> TriBridConfig:
@@ -352,6 +359,11 @@ async def chat(request: ChatRequest) -> ChatResponse:
             tokens_used=0,  # TODO: extract from result.usage() when available
         )
 
+    except RetrievalContractMismatchError as e:
+        if trace_enabled:
+            await trace_store.add_event(run_id, kind="chat.error", msg=str(e), data={"code": e.code})
+            await trace_store.end(run_id)
+        raise HTTPException(status_code=409, detail=e.to_detail()) from e
     except Exception as e:
         if trace_enabled:
             await trace_store.add_event(run_id, kind="chat.error", msg=str(e), data={})
@@ -610,16 +622,16 @@ async def list_chat_models(
             return "Unknown"
         return p.capitalize()
 
-    def _norm_components(raw: Any) -> list[str]:
-        allowed = {"GEN", "EMB", "RERANK"}
+    def _norm_components(raw: Any) -> list[ChatModelComponent]:
+        allowed: set[ChatModelComponent] = {"GEN", "EMB", "RERANK"}
         if not isinstance(raw, list):
-            return ["GEN"]
-        out: list[str] = []
+            return _default_chat_components()
+        out: list[ChatModelComponent] = []
         for item in raw:
             c = str(item or "").strip().upper()
             if c in allowed and c not in out:
-                out.append(c)
-        return out or ["GEN"]
+                out.append(cast(ChatModelComponent, c))
+        return out or _default_chat_components()
 
     def _find_catalog_entry(
         catalog_rows: list[dict[str, Any]],
@@ -713,24 +725,24 @@ async def list_chat_models(
 
     # Cloud-direct models from runtime catalog (GEN component).
     for row in catalog_rows:
-        provider_key = str(row.get("provider", "")).strip().lower()
-        if provider_key not in cloud_direct_ready:
+        catalog_provider_key = str(row.get("provider", "")).strip().lower()
+        if catalog_provider_key not in cloud_direct_ready:
             continue
         model_name = str(row.get("model", "")).strip()
         if not model_name:
             continue
-        override = f"{provider_key}/{model_name}"
+        override = f"{catalog_provider_key}/{model_name}"
         models.append(
             ChatModelInfo(
                 id=model_name,
                 override=override,
-                provider=_provider_label(provider_key),
-                provider_key=provider_key,
+                provider=_provider_label(catalog_provider_key),
+                provider_key=catalog_provider_key,
                 catalog_model=model_name,
                 components=_norm_components(row.get("components")),
                 source="cloud_direct",
-                provider_type=provider_key,
-                base_url=openai_base_url if provider_key == "openai" else None,
+                provider_type=catalog_provider_key,
+                base_url=openai_base_url if catalog_provider_key == "openai" else None,
                 supports_vision=False,
             )
         )
@@ -742,16 +754,20 @@ async def list_chat_models(
     )
     for d in discovered:
         try:
-            source = str(d.get("source") or "").strip().lower()
-            if source not in {"openrouter", "local"}:
+            source_raw = str(d.get("source") or "").strip().lower()
+            if source_raw == "openrouter":
+                source_kind: Literal["openrouter", "local"] = "openrouter"
+            elif source_raw == "local":
+                source_kind = "local"
+            else:
                 continue
             model_id = str(d.get("id") or "").strip()
             if not model_id:
                 continue
 
-            provider_key: str | None = None
-            catalog_model: str | None = None
-            components: list[str] = ["GEN"]
+            discovered_provider_key: str | None = None
+            discovered_catalog_model: str | None = None
+            discovered_components: list[ChatModelComponent] = _default_chat_components()
 
             lookup_provider: str | None = None
             lookup_model = model_id
@@ -761,18 +777,18 @@ async def list_chat_models(
                 lookup_model = rest.strip()
             catalog_match = _find_catalog_entry(catalog_rows, provider_key=lookup_provider, model_name=lookup_model)
             if catalog_match is not None:
-                provider_key = str(catalog_match.get("provider") or "").strip().lower() or None
-                catalog_model = str(catalog_match.get("model") or "").strip() or None
-                components = _norm_components(catalog_match.get("components"))
-            elif source == "openrouter" and lookup_provider:
-                provider_key = lookup_provider
-                catalog_model = lookup_model or None
+                discovered_provider_key = str(catalog_match.get("provider") or "").strip().lower() or None
+                discovered_catalog_model = str(catalog_match.get("model") or "").strip() or None
+                discovered_components = _norm_components(catalog_match.get("components"))
+            elif source_kind == "openrouter" and lookup_provider:
+                discovered_provider_key = lookup_provider
+                discovered_catalog_model = lookup_model or None
 
-            override = f"{source}:{model_id}"
+            override = f"{source_kind}:{model_id}"
             provider_name = (
                 "OpenRouter"
-                if source == "openrouter"
-                else (str(d.get("provider") or "").strip() or _provider_label(provider_key or "local"))
+                if source_kind == "openrouter"
+                else (str(d.get("provider") or "").strip() or _provider_label(discovered_provider_key or "local"))
             )
 
             models.append(
@@ -780,10 +796,10 @@ async def list_chat_models(
                     id=model_id,
                     override=override,
                     provider=provider_name,
-                    provider_key=provider_key,
-                    catalog_model=catalog_model,
-                    components=components,
-                    source=source,  # type: ignore[arg-type]
+                    provider_key=discovered_provider_key,
+                    catalog_model=discovered_catalog_model,
+                    components=discovered_components,
+                    source=source_kind,
                     provider_type=(str(d.get("provider_type")) if d.get("provider_type") else None),
                     base_url=(str(d.get("base_url")) if d.get("base_url") else None),
                     supports_vision=False,

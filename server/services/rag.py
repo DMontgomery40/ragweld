@@ -20,6 +20,7 @@ from server.models.tribrid_config_model import (
     RerankDebugInfo,
     TriBridConfig,
 )
+from server.retrieval.cache import CacheMode
 from server.services.conversation_store import Conversation
 
 
@@ -36,7 +37,7 @@ class FusionProtocol(Protocol):
         include_sparse: bool = True,
         include_graph: bool = True,
         top_k: int | None = None,
-        cache_mode: str = "default",
+        cache_mode: CacheMode = "default",
         cache_namespace: str = "search",
     ) -> list[ChunkMatch]:
         ...

@@ -85,6 +85,7 @@ class Neo4jClient:
         async with driver.session(database="system") as session:
             # Works in Neo4j 5+; returns (name, versions, edition).
             res = await session.run("CALL dbms.components() YIELD name, versions, edition RETURN name, versions, edition LIMIT 1;")
+            rec: Any | None
             if hasattr(res, "single"):
                 rec = await res.single()
             else:
