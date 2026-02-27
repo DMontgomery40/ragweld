@@ -813,32 +813,12 @@ async def _run_index_body(
     # This makes graph-only / sparse-only workflows deterministic.
     if skip_dense:
         deleted = await postgres.delete_embeddings(repo_id)
-        await postgres.update_corpus_embedding_meta(
-            repo_id,
-            backend="deterministic",
-            provider="",
-            model="",
-            dimensions=0,
-            ts_config=str(cfg.indexing.postgres_ts_config or ""),
-        )
         if event_queue is not None:
             _emit_event(
                 event_queue,
                 {"type": "log", "message": f"⚡ skip_dense=1 → skipping embeddings (cleared {deleted} existing vectors)"},
                 drop_oldest=True,
             )
-    else:
-        # Publish active embedding metadata up-front so in-flight stats reflect
-        # the configured vector backend/model before the run completes.
-        assert embedder is not None
-        await postgres.update_corpus_embedding_meta(
-            repo_id,
-            backend=str(cfg.embedding.embedding_backend or "deterministic"),
-            provider=str(cfg.embedding.embedding_type or ""),
-            model=str(cfg.embedding.effective_model or ""),
-            dimensions=int(embedder.dim),
-            ts_config=str(cfg.indexing.postgres_ts_config or ""),
-        )
 
     semantic_budget = int(cfg.graph_indexing.semantic_kg_max_chunks) if cfg.graph_indexing.semantic_kg_enabled else 0
     semantic_processed = 0
@@ -1375,7 +1355,16 @@ async def _run_index_body(
                 drop_oldest=True,
             )
 
-    if not skip_dense:
+    if skip_dense:
+        await postgres.update_corpus_embedding_meta(
+            repo_id,
+            backend="deterministic",
+            provider="",
+            model="",
+            dimensions=0,
+            ts_config=str(cfg.indexing.postgres_ts_config or ""),
+        )
+    else:
         assert embedder is not None
         await postgres.update_corpus_embedding_meta(
             repo_id,

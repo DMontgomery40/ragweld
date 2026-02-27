@@ -97,11 +97,16 @@ def select_provider_route(
 
     chat_config = config.chat
     override = model_override.strip()
+    has_enabled_local = any(bool(getattr(p, "enabled", False)) for p in chat_config.local_models.providers)
+    openai_api_key_hint = os.getenv("OPENAI_API_KEY", "").strip()
     if not override:
         gen_backend = str(getattr(config.generation, "gen_backend", "") or "").strip().lower()
         gen_model = str(getattr(config.generation, "gen_model", "") or "").strip()
-        if gen_model and gen_backend and gen_backend != "openai":
-            if gen_backend in {"ollama", "mlx"}:
+        if gen_model and gen_backend:
+            if gen_backend == "openai":
+                if openai_api_key_hint and not has_enabled_local:
+                    override = gen_model
+            elif gen_backend in {"ollama", "mlx"}:
                 override = f"local:{gen_model}"
             elif gen_backend == "openrouter":
                 override = f"openrouter:{gen_model}"
