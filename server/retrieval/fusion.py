@@ -157,43 +157,53 @@ class TriBridFusion:
         index_revisions: list[str] = []
         if cache_fingerprint_enabled:
             pg_by_dsn: dict[str, PostgresClient] = {}
-            for cid in corpus_ids:
-                cfg_for_corpus = scoped_cfgs.get(cid)
-                if cfg_for_corpus is None:
-                    index_revisions.append(f"{cid}:::")
-                    continue
-                dsn = str(getattr(cfg_for_corpus.indexing, "postgres_url", "") or "")
-                if not dsn:
-                    index_revisions.append(f"{cid}:::")
-                    continue
-                pg = pg_by_dsn.get(dsn)
-                if pg is None:
-                    try:
-                        pg = PostgresClient(dsn)
-                        await pg.connect()
-                        pg_by_dsn[dsn] = pg
-                    except Exception:
+            try:
+                for cid in corpus_ids:
+                    cfg_for_corpus = scoped_cfgs.get(cid)
+                    if cfg_for_corpus is None:
                         index_revisions.append(f"{cid}:::")
                         continue
-                try:
-                    corpus_meta = await pg.get_corpus(cid)
-                except Exception:
-                    corpus_meta = None
-                if not corpus_meta:
-                    index_revisions.append(f"{cid}:::")
-                    continue
-                raw_last = corpus_meta.get("last_indexed")
-                if raw_last is None:
-                    last_indexed = ""
-                else:
+                    dsn = str(getattr(cfg_for_corpus.indexing, "postgres_url", "") or "")
+                    if not dsn:
+                        index_revisions.append(f"{cid}:::")
+                        continue
+                    pg = pg_by_dsn.get(dsn)
+                    if pg is None:
+                        try:
+                            pg = PostgresClient(dsn)
+                            await pg.connect()
+                            pg_by_dsn[dsn] = pg
+                        except Exception:
+                            index_revisions.append(f"{cid}:::")
+                            continue
                     try:
-                        last_indexed = str(raw_last.isoformat())
+                        corpus_meta = await pg.get_corpus(cid)
                     except Exception:
-                        last_indexed = str(raw_last)
-                provider = str(corpus_meta.get("embedding_provider") or "")
-                model = str(corpus_meta.get("embedding_model") or "")
-                dims = int(corpus_meta.get("embedding_dimensions") or 0)
-                index_revisions.append(f"{cid}:{last_indexed}:{provider}:{model}:{dims}")
+                        corpus_meta = None
+                    if not corpus_meta:
+                        index_revisions.append(f"{cid}:::")
+                        continue
+                    try:
+                        raw_last = corpus_meta.get("last_indexed")
+                        if raw_last is None:
+                            last_indexed = ""
+                        else:
+                            try:
+                                last_indexed = str(raw_last.isoformat())
+                            except Exception:
+                                last_indexed = str(raw_last)
+                        provider = str(corpus_meta.get("embedding_provider") or "")
+                        model = str(corpus_meta.get("embedding_model") or "")
+                        dims = int(corpus_meta.get("embedding_dimensions") or 0)
+                        index_revisions.append(f"{cid}:{last_indexed}:{provider}:{model}:{dims}")
+                    except Exception:
+                        index_revisions.append(f"{cid}:::")
+            finally:
+                for pg in pg_by_dsn.values():
+                    try:
+                        await pg.disconnect()
+                    except Exception:
+                        pass
         cache_request_fingerprint = SemanticCacheService.fingerprint(
             {
                 "namespace": str(cache_namespace or "search"),
