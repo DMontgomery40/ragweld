@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import copy
 import json
+import re
 import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -45,6 +46,7 @@ PROVIDER_DEFAULT_BASE_URL = {
     "deepseek": "https://api.deepseek.com/v1",
     "xai": "https://api.x.ai/v1",
 }
+NEW_FAMILY_MAX_AGE_DAYS = 180
 
 _DECIMAL_1K = Decimal("1000")
 _DECIMAL_ROUND_12 = Decimal("0.000000000001")
@@ -53,10 +55,12 @@ _DECIMAL_ROUND_12 = Decimal("0.000000000001")
 @dataclass(frozen=True)
 class FeedModel:
     provider: str
+    family: str
     model: str
     context: int | None
     input_per_1k: float | None
     output_per_1k: float | None
+    created_at: int | None
 
     @property
     def has_full_pricing(self) -> bool:
@@ -141,11 +145,71 @@ def _parse_per_1k_pricing(value: Any) -> float | None:
 
 
 def _feed_model_score(model: FeedModel) -> tuple[int, int]:
-    return (1 if model.has_full_pricing else 0, 1 if model.context is not None else 0)
+    return (
+        int(model.created_at or 0),
+        1 if model.has_full_pricing else 0,
+        1 if model.context is not None else 0,
+    )
+
+
+_SNAPSHOT_SUFFIX_RE = re.compile(
+    r"(?:-\d{4}-\d{2}-\d{2}|-\d{8}|-\d{2}-\d{4}|-\d{2}-\d{2}|-\d{4})$"
+)
+_SIZE_TOKEN_RE = re.compile(r"\d+b$|\d+x\d+b$")
+_VERSION_TOKEN_RE = re.compile(r"\d+(?:\.\d+)*")
+
+
+def _model_family(model: str) -> str:
+    """Normalize model id to a rolling family key for latest-version selection."""
+    cur = str(model or "").strip()
+    if not cur:
+        return cur
+    prev = None
+    while cur != prev:
+        prev = cur
+        cur = _SNAPSHOT_SUFFIX_RE.sub("", cur)
+    tokens = [tok for tok in cur.split("-") if tok]
+    normalized_tokens: list[str] = []
+    for token in tokens:
+        lowered = token.strip().lower()
+        if not lowered:
+            continue
+        # Keep size variants distinct (20b, 120b, 8x22b, etc.).
+        if _SIZE_TOKEN_RE.fullmatch(lowered):
+            normalized_tokens.append(lowered)
+            continue
+        stripped = _VERSION_TOKEN_RE.sub("", lowered)
+        if stripped:
+            normalized_tokens.append(stripped)
+    if not normalized_tokens:
+        return cur.lower()
+    return "-".join(normalized_tokens)
+
+
+def _parse_created_at(value: Any) -> int | None:
+    if value is None:
+        return None
+    try:
+        ts = int(value)
+    except (TypeError, ValueError):
+        return None
+    return ts if ts > 0 else None
+
+
+def _is_recent_family_candidate(*, feed: FeedModel, as_of_date: str) -> bool:
+    if feed.created_at is None:
+        return False
+    try:
+        as_of = datetime.fromisoformat(str(as_of_date)).date()
+    except Exception:
+        as_of = datetime.now(UTC).date()
+    created_date = datetime.fromtimestamp(feed.created_at, tz=UTC).date()
+    age_days = (as_of - created_date).days
+    return age_days <= NEW_FAMILY_MAX_AGE_DAYS
 
 
 def normalize_openrouter_rows(rows: list[dict[str, Any]]) -> dict[tuple[str, str], FeedModel]:
-    """Normalize OpenRouter feed rows into managed provider/model keys."""
+    """Normalize OpenRouter feed rows into managed provider/family keys."""
     normalized: dict[tuple[str, str], FeedModel] = {}
 
     for row in rows:
@@ -179,12 +243,14 @@ def normalize_openrouter_rows(rows: list[dict[str, Any]]) -> dict[tuple[str, str
 
         candidate = FeedModel(
             provider=provider,
+            family=_model_family(model),
             model=model,
             context=_parse_non_negative_int(row.get("context_length")),
             input_per_1k=prompt_per_1k,
             output_per_1k=completion_per_1k,
+            created_at=_parse_created_at(row.get("created")),
         )
-        key = (provider, model)
+        key = (provider, candidate.family)
         existing = normalized.get(key)
         if existing is None or _feed_model_score(candidate) > _feed_model_score(existing):
             normalized[key] = candidate
@@ -268,15 +334,16 @@ def _merge_sources(existing: Any, as_of_date: str, *, refresh_stamp: bool) -> li
 
 def _build_catalog_core(
     catalog: dict[str, Any],
-    feed_models: dict[tuple[str, str], FeedModel],
+    feed_models_by_family: dict[tuple[str, str], FeedModel],
     *,
     as_of_date: str,
 ) -> tuple[dict[str, Any], RefreshStats]:
-    stats = RefreshStats(normalized_feed_rows=len(feed_models))
+    stats = RefreshStats(normalized_feed_rows=len(feed_models_by_family))
     existing_rows = _catalog_models(catalog)
 
     result_rows: list[dict[str, Any]] = []
-    seen_feed_keys: set[tuple[str, str]] = set()
+    seen_feed_families: set[tuple[str, str]] = set()
+    emitted_model_keys: set[tuple[str, str]] = set()
 
     for row in existing_rows:
         provider = _canonical_provider(row.get("provider"))
@@ -288,8 +355,8 @@ def _build_catalog_core(
             continue
 
         stats.managed_existing_rows += 1
-        key = (provider, model)
-        feed = feed_models.get(key)
+        family_key = (provider, _model_family(model))
+        feed = feed_models_by_family.get(family_key)
 
         manual_notes, deprecated_on, pricing_unknown = _parse_notes(
             str(row.get("notes")) if row.get("notes") is not None else None
@@ -312,9 +379,10 @@ def _build_catalog_core(
             result_rows.append(updated)
             continue
 
-        seen_feed_keys.add(key)
+        seen_feed_families.add(family_key)
 
         updated["components"] = ["GEN"]
+        updated["model"] = feed.model
         updated["unit"] = "1k_tokens"
         _set_or_pop(updated, "context", feed.context)
         _set_or_pop(updated, "input_per_1k", feed.input_per_1k)
@@ -325,8 +393,9 @@ def _build_catalog_core(
         updated.pop("rerank_per_1k", None)
         updated.pop("per_request", None)
 
-        if not str(updated.get("family") or "").strip():
-            updated["family"] = model
+        current_family_value = str(updated.get("family") or "").strip()
+        if not current_family_value or current_family_value == model:
+            updated["family"] = feed.model
 
         new_notes = _compose_notes(
             manual_notes,
@@ -337,13 +406,20 @@ def _build_catalog_core(
 
         if updated != row:
             stats.updated_existing_rows += 1
+        output_key = (provider, str(updated.get("model") or "").strip())
+        if output_key in emitted_model_keys:
+            continue
+        emitted_model_keys.add(output_key)
         result_rows.append(updated)
 
-    for key in sorted(feed_models.keys()):
-        if key in seen_feed_keys:
+    for key in sorted(feed_models_by_family.keys()):
+        if key in seen_feed_families:
             continue
-        provider, model = key
-        feed = feed_models[key]
+        provider, _family = key
+        feed = feed_models_by_family[key]
+        if not _is_recent_family_candidate(feed=feed, as_of_date=as_of_date):
+            continue
+        model = feed.model
         row = {
             "provider": provider,
             "family": model,
@@ -388,8 +464,8 @@ def build_refreshed_catalog(
     *,
     as_of_date: str,
 ) -> tuple[dict[str, Any], RefreshStats, bool]:
-    normalized_feed = normalize_openrouter_rows(feed_rows)
-    merged, stats = _build_catalog_core(catalog, normalized_feed, as_of_date=as_of_date)
+    normalized_by_family = normalize_openrouter_rows(feed_rows)
+    merged, stats = _build_catalog_core(catalog, normalized_by_family, as_of_date=as_of_date)
     stats.total_feed_rows = len(feed_rows)
 
     candidate = copy.deepcopy(merged)
