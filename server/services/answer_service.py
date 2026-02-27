@@ -520,6 +520,8 @@ async def stream_answer_best_effort(
         if not accumulated.strip():
             msg = "Error: LLM stream produced no content (check provider compatibility/config)"
             accumulated = msg
+            llm_used = False
+            llm_error = "empty_stream"
             yield f"data: {json.dumps({'type': 'text', 'content': msg})}\n\n"
     except Exception as e:
         llm_used = False
