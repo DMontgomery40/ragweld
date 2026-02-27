@@ -792,6 +792,8 @@ async def chat_stream(
             # Avoid "silent" blank assistant bubbles when a provider streams no text (or a test stub yields nothing).
             msg = "Error: LLM stream produced no content (check provider compatibility/config)"
             accumulated = msg
+            llm_used = False
+            llm_error = "empty_stream"
             yield f"data: {json.dumps({'type': 'text', 'content': msg})}\n\n"
     except Exception as e:
         llm_used = False

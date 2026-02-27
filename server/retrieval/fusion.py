@@ -896,23 +896,47 @@ class TriBridFusion:
 
         final_results = results[:final_k] if final_k > 0 else []
         if cache_service is not None:
-            try:
-                cache_written = await cache_service.write(
-                    endpoint=cache_endpoint,
-                    scope_key=cache_scope_key,
-                    query=query,
-                    request_fingerprint=cache_request_fingerprint,
-                    payload={
-                        "matches": [m.model_dump(mode="serialization", by_alias=True) for m in final_results],
-                        "debug": debug,
-                    },
-                    cache_mode=cache_mode,
+            top_level_error_keys = (
+                "fusion_graph_error",
+                "rerank_error",
+            )
+            per_corpus_error_keys = (
+                "fusion_config_error",
+                "fusion_postgres_error",
+                "fusion_corpus_meta_error",
+                "fusion_vector_error",
+                "fusion_sparse_error",
+                "fusion_graph_error",
+            )
+            has_retrieval_errors = any(bool(debug.get(k)) for k in top_level_error_keys)
+            per_corpus_debug = debug.get("fusion_per_corpus")
+            if isinstance(per_corpus_debug, dict):
+                has_retrieval_errors = has_retrieval_errors or any(
+                    isinstance(cdbg, dict) and any(bool(cdbg.get(k)) for k in per_corpus_error_keys)
+                    for cdbg in per_corpus_debug.values()
                 )
-                debug["cache_write"] = bool(cache_written)
-                debug["cache_namespace"] = str(cache_namespace or "search")
-            except Exception as e:
+            skip_cache_write = bool(has_retrieval_errors and not final_results)
+            if skip_cache_write:
                 debug["cache_write"] = False
-                debug["cache_write_error"] = str(e)
+                debug["cache_write_skipped"] = "retrieval_error_empty_results"
+            else:
+                try:
+                    cache_written = await cache_service.write(
+                        endpoint=cache_endpoint,
+                        scope_key=cache_scope_key,
+                        query=query,
+                        request_fingerprint=cache_request_fingerprint,
+                        payload={
+                            "matches": [m.model_dump(mode="serialization", by_alias=True) for m in final_results],
+                            "debug": debug,
+                        },
+                        cache_mode=cache_mode,
+                    )
+                    debug["cache_write"] = bool(cache_written)
+                    debug["cache_namespace"] = str(cache_namespace or "search")
+                except Exception as e:
+                    debug["cache_write"] = False
+                    debug["cache_write_error"] = str(e)
 
         self.last_debug = debug
         SEARCH_RESULTS_FINAL_COUNT.observe(len(final_results))
