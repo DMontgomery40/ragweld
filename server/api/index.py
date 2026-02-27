@@ -129,6 +129,18 @@ def _clear_runtime_state_for_repo(repo_id: str, *, queue: asyncio.Queue[dict[str
         _EVENT_QUEUES.pop(repo_id, None)
 
 
+async def _clear_semantic_cache_for_repo(repo_id: str) -> None:
+    """Best-effort corpus cache invalidation used by indexing terminal paths."""
+    cfg = await load_scoped_config(repo_id=repo_id)
+    postgres = PostgresClient(cfg.indexing.postgres_url)
+    await postgres.connect()
+    try:
+        await postgres.semantic_cache_clear_for_corpus(repo_id)
+    finally:
+        with contextlib.suppress(Exception):
+            await postgres.disconnect()
+
+
 async def _cancel_index_run(repo_id: str) -> IndexStatus:
     repo_id = str(repo_id or "").strip()
     if not repo_id:
@@ -1449,6 +1461,14 @@ async def _background_index_job(request: IndexRequest, queue: asyncio.Queue[dict
         )
         _emit_event(queue, {"type": "complete", "message": "✓ Indexing complete"}, guarantee=True)
     except asyncio.CancelledError:
+        # Cancelled tasks cannot rely on direct awaits for cleanup, so shield
+        # invalidation to let it continue even while this task is cancelled.
+        try:
+            await asyncio.shield(_clear_semantic_cache_for_repo(repo_id))
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            pass
         prev = _STATUS.get(repo_id)
         _STATUS[repo_id] = IndexStatus(
             repo_id=repo_id,
@@ -1462,6 +1482,10 @@ async def _background_index_job(request: IndexRequest, queue: asyncio.Queue[dict
         _emit_event(queue, {"type": "cancelled", "message": "⚠ Indexing cancelled"}, guarantee=True)
         raise
     except Exception as e:
+        # If indexing failed after deleting/updating chunks, stale cache entries can
+        # point to content that no longer exists. Best-effort clear on errors.
+        with contextlib.suppress(Exception):
+            await _clear_semantic_cache_for_repo(repo_id)
         INDEX_ERRORS_TOTAL.inc()
         prev = _STATUS.get(repo_id)
         _STATUS[repo_id] = IndexStatus(
