@@ -20,3 +20,6 @@ This folder is for pointers and short notes that make external context discovera
 
 - `/Users/davidmontgomery/ragweld/spec/README.md`
 
+## Agent orchestration references
+
+- [Codex Agent Teams safety layer](codex-agent-teams.md)

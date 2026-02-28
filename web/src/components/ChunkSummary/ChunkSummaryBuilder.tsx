@@ -74,6 +74,9 @@ export function ChunkSummaryBuilder({ onBuildComplete, onError }: ChunkSummaryBu
         <h3 style={{ margin: '0 0 16px 0', fontSize: '18px', fontWeight: 600 }}>
           Build Chunk Summaries
         </h3>
+        <p style={{ margin: '0 0 12px 0', fontSize: '12px', color: 'var(--fg-muted)' }}>
+          Cost estimate placeholder: this build path is deterministic today (no LLM charges). If LLM-based summarization is enabled later, cost will be estimated before run.
+        </p>
 
         <div style={{ display: 'grid', gap: '12px', maxWidth: '600px' }}>
           <div>

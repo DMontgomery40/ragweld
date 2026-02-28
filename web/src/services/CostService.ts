@@ -7,11 +7,13 @@
  * - Also supports delegating to backend cost endpoints when available.
  */
 import { apiClient, api } from '@/api/client';
+import { indexingApi } from '@/api';
 import { modelsApi } from '@/api/models';
-import type { ModelCatalogEntry, ModelCatalogResponse } from '@/types/generated';
+import type { IndexEstimate, IndexRequest, ModelCatalogEntry, ModelCatalogResponse } from '@/types/generated';
 import type { AxiosResponse } from 'axios';
  
-export type CostModelType = 'chat' | 'embed' | 'rerank';
+export type CostModelType = 'chat' | 'embed' | 'rerank' | 'indexing';
+type CatalogCostModelType = Exclude<CostModelType, 'indexing'>;
  
 export type ModelPriceSpec = ModelCatalogEntry & {
   // Legacy alias tolerated by older payloads.
@@ -29,6 +31,18 @@ export type CostEstimateLocal = {
   totalUSD: number;
   breakdown: Partial<Record<CostModelType, CostBreakdownItem>>;
   modelsVersion: string | null;
+};
+
+export type CostIndexingEstimate = {
+  corpusId: string;
+  repoPath: string;
+  embeddingCostUSD: number | null;
+  semanticKgCostUSD: number | null;
+  totalCostUSD: number | null;
+  estimatedSecondsLow: number | null;
+  estimatedSecondsHigh: number | null;
+  estimatedSecondsSemanticKg: number | null;
+  raw: IndexEstimate;
 };
  
 export type CostEstimateRequest = {
@@ -71,7 +85,7 @@ function normKey(s: unknown) {
   return String(s ?? '').trim().toLowerCase();
 }
  
-function getModelType(model: ModelPriceSpec): CostModelType | null {
+function getModelType(model: ModelPriceSpec): CatalogCostModelType | null {
   const comps = Array.isArray(model.components) ? model.components.map((c) => String(c).toUpperCase()) : [];
   if (comps.includes('EMB')) return 'embed';
   if (comps.includes('RERANK')) return 'rerank';
@@ -92,7 +106,7 @@ function getModelType(model: ModelPriceSpec): CostModelType | null {
   return null;
 }
  
-function getModelSpec(models: ModelsCatalog, providerName: string, modelName: string): (ModelPriceSpec & { type: CostModelType | null }) | null {
+function getModelSpec(models: ModelsCatalog, providerName: string, modelName: string): (ModelPriceSpec & { type: CatalogCostModelType | null }) | null {
   const list = Array.isArray(models?.models) ? models.models : [];
   const prov = normKey(providerName);
   const mdl = normKey(modelName);
@@ -114,7 +128,7 @@ function getModelSpec(models: ModelsCatalog, providerName: string, modelName: st
   return null;
 }
  
-function computeUnitCost(models: ModelsCatalog, opt: { type: CostModelType } & Record<string, unknown>): CostBreakdownItem {
+function computeUnitCost(models: ModelsCatalog, opt: { type: CatalogCostModelType } & Record<string, unknown>): CostBreakdownItem {
   const provider = normKey(opt.provider);
   const model = String(opt.model ?? '');
   const spec = getModelSpec(models, provider, model);
@@ -216,7 +230,7 @@ export class CostService {
     return Array.from(providers).sort((a, b) => a.localeCompare(b));
   }
  
-  async listModels(providerName: string, modelType: CostModelType | null = null): Promise<string[]> {
+  async listModels(providerName: string, modelType: CatalogCostModelType | null = null): Promise<string[]> {
     const modelsData = await loadModelsCatalog();
     const models = Array.isArray(modelsData?.models) ? modelsData.models : [];
     const prov = normKey(providerName);
@@ -247,5 +261,20 @@ export class CostService {
       const r: AxiosResponse<CostEstimatePipelineResponse> = await apiClient.post(api('/cost/estimate'), payload);
       return r.data;
     }
+  }
+
+  async estimateIndexing(req: IndexRequest): Promise<CostIndexingEstimate> {
+    const estimate = await indexingApi.estimate(req);
+    return {
+      corpusId: estimate.corpus_id,
+      repoPath: estimate.repo_path,
+      embeddingCostUSD: estimate.embedding_cost_usd ?? null,
+      semanticKgCostUSD: estimate.semantic_kg_cost_usd ?? null,
+      totalCostUSD: estimate.total_cost_usd ?? estimate.embedding_cost_usd ?? null,
+      estimatedSecondsLow: estimate.estimated_seconds_low ?? null,
+      estimatedSecondsHigh: estimate.estimated_seconds_high ?? null,
+      estimatedSecondsSemanticKg: estimate.estimated_seconds_semantic_kg ?? null,
+      raw: estimate,
+    };
   }
 }

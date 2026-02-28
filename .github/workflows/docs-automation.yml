@@ -87,6 +87,15 @@ jobs:
           echo "Using base ref: $BASE"
           python scripts/docs_ai/generate_docs_from_diff.py --base "$BASE" --llm openai --apply
 
+      - name: Docs autopilot failed
+        if: failure()
+        run: |
+          echo "## Docs Autopilot Failed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "The LLM-generated patch could not be applied (often due to corrupt or incompatible patch format)." >> $GITHUB_STEP_SUMMARY
+          echo "Check the **Generate docs patch (apply)** step log for \`::error::\` annotations and full details." >> $GITHUB_STEP_SUMMARY
+          echo "The patch artifact (mkdocs-docs-llm-patch) may be downloaded for inspection." >> $GITHUB_STEP_SUMMARY
+
       - name: Generate config reference docs (Pydantic + glossary)
         run: |
           uv run python scripts/generate_config_reference_docs.py --clean

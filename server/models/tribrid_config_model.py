@@ -133,7 +133,8 @@ class IndexEstimate(BaseModel):
 
     Notes:
     - Token count is an approximation (byte-based heuristic).
-    - Time is an intentionally rough range (depends on machine, provider latency, DB speed, etc.).
+    - Time is an intentionally rough range (depends on machine, provider latency,
+      semantic KG mode, and local hardware throughput).
     """
 
     repo_id: str = Field(
@@ -158,11 +159,26 @@ class IndexEstimate(BaseModel):
         ge=0.0,
         description="Estimated embedding cost (USD) when pricing data is available (0 for local/deterministic).",
     )
+    semantic_kg_cost_usd: float | None = Field(
+        default=None,
+        ge=0.0,
+        description="Estimated semantic KG extraction cost (USD) when semantic_kg_mode='llm' and pricing is available.",
+    )
+    total_cost_usd: float | None = Field(
+        default=None,
+        ge=0.0,
+        description="Estimated total indexing cost (USD): embedding + semantic KG (when applicable).",
+    )
     estimated_seconds_low: float | None = Field(
         default=None, ge=0.0, description="Very rough low-end estimate for total indexing time (seconds)"
     )
     estimated_seconds_high: float | None = Field(
         default=None, ge=0.0, description="Very rough high-end estimate for total indexing time (seconds)"
+    )
+    estimated_seconds_semantic_kg: float | None = Field(
+        default=None,
+        ge=0.0,
+        description="Estimated semantic KG phase time (seconds) when semantic_kg_mode='llm'.",
     )
     assumptions: list[str] = Field(default_factory=list, description="Human-readable assumptions used for the estimate")
 
@@ -244,6 +260,16 @@ class DashboardIndexCosts(BaseModel):
         default=None,
         ge=0.0,
         description="Estimated embedding cost (USD) when pricing data is available.",
+    )
+    semantic_kg_cost: float | None = Field(
+        default=None,
+        ge=0.0,
+        description="Estimated semantic KG extraction cost (USD) when semantic_kg_mode='llm'.",
+    )
+    total_cost: float | None = Field(
+        default=None,
+        ge=0.0,
+        description="Estimated total indexing cost (USD): embedding + semantic KG (when applicable).",
     )
 
 
@@ -3027,6 +3053,12 @@ class IndexingConfig(BaseModel):
         le=1,
         description="Skip dense vector indexing"
     )
+    estimated_tokens_per_second_local: int | None = Field(
+        default=None,
+        ge=100,
+        le=500_000,
+        description="Optional local embedding throughput override for index-time estimates (tokens/sec).",
+    )
 
     @property
     def postgres_ts_config(self) -> str:
@@ -5371,6 +5403,7 @@ class TriBridConfig(BaseModel):
             'PARQUET_EXTRACT_TEXT_COLUMNS_ONLY': self.indexing.parquet_extract_text_columns_only,
             'PARQUET_EXTRACT_INCLUDE_COLUMN_NAMES': self.indexing.parquet_extract_include_column_names,
             'SKIP_DENSE': self.indexing.skip_dense,
+            'ESTIMATED_TOKENS_PER_SECOND_LOCAL': self.indexing.estimated_tokens_per_second_local,
             # Graph storage params (Neo4j)
             'NEO4J_URI': self.graph_storage.neo4j_uri,
             'NEO4J_USER': self.graph_storage.neo4j_user,
@@ -5713,6 +5746,7 @@ class TriBridConfig(BaseModel):
                 parquet_extract_text_columns_only=data.get('PARQUET_EXTRACT_TEXT_COLUMNS_ONLY', 1),
                 parquet_extract_include_column_names=data.get('PARQUET_EXTRACT_INCLUDE_COLUMN_NAMES', 1),
                 skip_dense=data.get('SKIP_DENSE', 0),
+                estimated_tokens_per_second_local=data.get('ESTIMATED_TOKENS_PER_SECOND_LOCAL', None),
             ),
             graph_storage=GraphStorageConfig(
                 neo4j_uri=data.get('NEO4J_URI', 'bolt://localhost:7687'),

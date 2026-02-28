@@ -1935,12 +1935,12 @@ class PostgresClient:
             await conn.execute(
                 """
                 UPDATE corpora
-                SET embedding_backend = $2,
-                    embedding_provider = $3,
-                    embedding_model = $4,
-                    embedding_dimensions = $5,
-                    ts_config = $6,
-                    meta = COALESCE(meta, '{}'::jsonb) || jsonb_build_object('embedding_backend', $2)
+                SET embedding_backend = $2::text,
+                    embedding_provider = $3::text,
+                    embedding_model = $4::text,
+                    embedding_dimensions = $5::int,
+                    ts_config = $6::text,
+                    meta = COALESCE(meta, '{}'::jsonb) || jsonb_build_object('embedding_backend', $2::text)
                 WHERE repo_id = $1;
                 """,
                 repo_id,

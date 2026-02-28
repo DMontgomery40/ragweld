@@ -558,14 +558,27 @@ export function IndexingSubtab() {
       }
 
       if (estimate) {
-        const cost =
-          estimate.embedding_cost_usd == null ? 'N/A' : formatCurrency(Number(estimate.embedding_cost_usd || 0));
+        const totalCostUsd = estimate.total_cost_usd ?? estimate.embedding_cost_usd;
+        const embedCostUsd = estimate.embedding_cost_usd;
+        const semanticKgCostUsd = estimate.semantic_kg_cost_usd;
+        const cost = totalCostUsd == null ? 'N/A' : formatCurrency(Number(totalCostUsd || 0));
+        const costBreakdown =
+          semanticKgCostUsd == null
+            ? null
+            : `Embed ${embedCostUsd == null ? 'N/A' : formatCurrency(Number(embedCostUsd || 0))} + Semantic KG ${formatCurrency(Number(semanticKgCostUsd || 0))}`;
         const time =
           estimate.estimated_seconds_low != null && estimate.estimated_seconds_high != null
             ? `${formatDuration(Number(estimate.estimated_seconds_low) * 1000)}–${formatDuration(
                 Number(estimate.estimated_seconds_high) * 1000
               )}`
             : 'N/A';
+        const semanticKgSeconds = estimate.estimated_seconds_semantic_kg;
+        const midTotalSeconds =
+          estimate.estimated_seconds_low != null && estimate.estimated_seconds_high != null
+            ? (Number(estimate.estimated_seconds_low) + Number(estimate.estimated_seconds_high)) / 2
+            : null;
+        const embedSecondsApprox =
+          semanticKgSeconds != null && midTotalSeconds != null ? Math.max(0, midTotalSeconds - Number(semanticKgSeconds)) : null;
         const msg = [
           `Index estimate for "${rid}"`,
           `Files: ${formatNumber(Number(estimate.total_files || 0))} • Size: ${formatBytes(
@@ -578,6 +591,14 @@ export function IndexingSubtab() {
             estimate.embedding_backend
           }, skip_dense=${estimate.skip_dense ? 'yes' : 'no'})`,
           `Cost (est): ${cost} • Time (est): ${time}`,
+          ...(costBreakdown ? [`Cost breakdown: ${costBreakdown}`] : []),
+          ...(semanticKgSeconds != null
+            ? [
+                `Time breakdown (est): Embed ${
+                  embedSecondsApprox == null ? 'N/A' : `~${formatDuration(embedSecondsApprox * 1000)}`
+                } + Semantic KG ~${formatDuration(Number(semanticKgSeconds) * 1000)}`,
+              ]
+            : []),
           '',
           'Start indexing now?',
         ].join('\n');
@@ -2867,12 +2888,36 @@ export function IndexingSubtab() {
               fontFamily: "'SF Mono', monospace",
             }}
           >
-            Est: {indexEstimate.embedding_cost_usd == null ? 'N/A' : formatCurrency(Number(indexEstimate.embedding_cost_usd || 0))} •{' '}
+            Est:{' '}
+            {indexEstimate.total_cost_usd == null
+              ? indexEstimate.embedding_cost_usd == null
+                ? 'N/A'
+                : formatCurrency(Number(indexEstimate.embedding_cost_usd || 0))
+              : formatCurrency(Number(indexEstimate.total_cost_usd || 0))}
+            {indexEstimate.semantic_kg_cost_usd != null
+              ? ` (Embed ${indexEstimate.embedding_cost_usd == null ? 'N/A' : formatCurrency(Number(indexEstimate.embedding_cost_usd || 0))} + KG ${formatCurrency(
+                  Number(indexEstimate.semantic_kg_cost_usd || 0)
+                )})`
+              : ''}
+            {' • '}
             {indexEstimate.estimated_seconds_low != null && indexEstimate.estimated_seconds_high != null
               ? `${formatDuration(Number(indexEstimate.estimated_seconds_low) * 1000)}–${formatDuration(
                   Number(indexEstimate.estimated_seconds_high) * 1000
                 )}`
-              : 'N/A'}{' '}
+              : 'N/A'}
+            {indexEstimate.estimated_seconds_semantic_kg != null &&
+            indexEstimate.estimated_seconds_low != null &&
+            indexEstimate.estimated_seconds_high != null
+              ? ` (Embed ~${formatDuration(
+                  Math.max(
+                    0,
+                    ((Number(indexEstimate.estimated_seconds_low) + Number(indexEstimate.estimated_seconds_high)) / 2 -
+                      Number(indexEstimate.estimated_seconds_semantic_kg)) *
+                      1000
+                  )
+                )} + KG ~${formatDuration(Number(indexEstimate.estimated_seconds_semantic_kg) * 1000)})`
+              : ''}
+            {' '}
             • {formatNumber(Number(indexEstimate.total_files || 0))} files • {formatBytes(Number(indexEstimate.total_size_bytes || 0))}
           </div>
         ) : null}
