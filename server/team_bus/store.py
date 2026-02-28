@@ -328,7 +328,7 @@ class TeamStore:
             raise ValueError(msg)
         lead_agent_id = str(raw.get("leadAgentId") or members[0].agent_id)
         cfg = TeamConfig(
-            name=str(raw.get("name") or team_name),
+            name=team_name,
             description=str(raw.get("description") or ""),
             lead_agent_id=lead_agent_id,
             members=members,

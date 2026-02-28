@@ -475,10 +475,8 @@ def _find_model_spec(
             if _norm_key(m.get("model")) == mdl:
                 return m
 
-    if prov:
-        for m in models:
-            if _norm_key(m.get("provider")) == prov:
-                return m
+    # No provider-only fallback: returning the first model for a provider
+    # when the requested model is missing would silently price the wrong model.
     return None
 
 
