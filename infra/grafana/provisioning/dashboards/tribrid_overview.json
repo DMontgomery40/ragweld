@@ -190,7 +190,7 @@
       },
       "targets": [
         {
-          "expr": "tribrid_chunks_indexed_current",
+          "expr": "max_over_time(tribrid_chunks_indexed_current[1h])",
           "legendFormat": "chunks"
         }
       ],
@@ -223,7 +223,7 @@
       },
       "targets": [
         {
-          "expr": "tribrid_graph_entities_current",
+          "expr": "max_over_time(tribrid_graph_entities_current[1h])",
           "legendFormat": "entities"
         }
       ],
@@ -256,7 +256,7 @@
       },
       "targets": [
         {
-          "expr": "tribrid_graph_relationships_current",
+          "expr": "max_over_time(tribrid_graph_relationships_current[1h])",
           "legendFormat": "relationships"
         }
       ],

@@ -26,6 +26,7 @@ async def test_prompts_list_update_reset(client, tmp_path) -> None:
 
         assert "main_rag_chat" in prompts
         assert "eval_analysis" in prompts
+        assert "synthetic_judge" in prompts
         assert "semantic_kg_extraction" in prompts
         assert "chat.system_prompt_base" in prompts
         assert "chat.system_prompt_direct" in prompts
@@ -34,11 +35,15 @@ async def test_prompts_list_update_reset(client, tmp_path) -> None:
 
         assert "main_rag_chat" in meta
         assert "eval_analysis" in meta
+        assert "synthetic_judge" in meta
         assert "semantic_kg_extraction" in meta
         assert "chat.system_prompt_base" in meta
         assert "chat.system_prompt_direct" in meta
         assert "chat.system_prompt_rag_suffix" in meta
         assert "chat.system_prompt_recall_suffix" in meta
+
+        synthetic_meta = meta["synthetic_judge"]
+        assert synthetic_meta.get("category") == "evaluation"
 
         # Chat prompts are read-only in this tab and should include a link to Chat Settings.
         chat_meta = meta["chat.system_prompt_direct"]

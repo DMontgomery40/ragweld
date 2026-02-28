@@ -14,6 +14,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, HTTPException, Query, Request
 from starlette.responses import StreamingResponse
 
+from server.api.dataset import _dataset_path_for_corpus
 from server.chat.context_formatter import format_context_for_llm
 from server.chat.prompt_builder import get_system_prompt
 from server.chat.ragweld_mlx import clear_cache as clear_ragweld_cache
@@ -55,6 +56,52 @@ def _resolve_path(path_str: str) -> Path:
     if not p.is_absolute():
         p = PROJECT_ROOT / p
     return p
+
+
+def _resolve_training_dataset_path(
+    *,
+    corpus_id: str,
+    request_override: str,
+    config_default: str,
+    evaluation_default: str,
+) -> tuple[Path | None, list[str]]:
+    legacy_eval_default = "data/evaluation_dataset.json"
+    corpus_dataset_path = _dataset_path_for_corpus(corpus_id)
+    messages: list[str] = []
+
+    candidates: list[tuple[str, Path, bool]] = []
+    if request_override:
+        candidates.append(("request override", _resolve_path(request_override), False))
+    if config_default:
+        candidates.append(("training.ragweld_agent_train_dataset_path", _resolve_path(config_default), False))
+    if evaluation_default and evaluation_default != legacy_eval_default:
+        candidates.append(("evaluation.eval_dataset_path", _resolve_path(evaluation_default), False))
+    elif evaluation_default == legacy_eval_default:
+        candidates.append(("evaluation.eval_dataset_path (legacy default)", _resolve_path(evaluation_default), True))
+    candidates.append(("corpus eval dataset", corpus_dataset_path, False))
+
+    deduped: list[tuple[str, Path, bool]] = []
+    seen_paths: set[str] = set()
+    for label, path, legacy_default_path in candidates:
+        key = str(path)
+        if key in seen_paths:
+            continue
+        seen_paths.add(key)
+        deduped.append((label, path, legacy_default_path))
+
+    for label, candidate_path, is_legacy_default in deduped:
+        if is_legacy_default and not candidate_path.exists():
+            messages.append(
+                f"Skipping missing legacy default dataset path: {candidate_path}. "
+                "Falling back to corpus-scoped dataset."
+            )
+            continue
+        if candidate_path.exists():
+            messages.append(f"Loading agent training dataset from {label}: {candidate_path}")
+            return candidate_path, messages
+        messages.append(f"Dataset path not found for {label}: {candidate_path}")
+
+    return None, messages
 
 
 def _atomic_copy_dir(src: Path, dst: Path) -> None:
@@ -516,7 +563,9 @@ async def _run_train_job(*, run_id: str, corpus_id: str, cancel_event: asyncio.E
         # Determine dataset path precedence.
         # 1) request override (stored in run.config as RAGWELD_AGENT_TRAIN_DATASET_PATH, if present)
         # 2) training.ragweld_agent_train_dataset_path
-        # 3) evaluation.eval_dataset_path
+        # 3) evaluation.eval_dataset_path (if non-default/non-empty)
+        # 4) corpus-scoped dataset path (data/eval_datasets/<corpus>.json)
+        # If the legacy default evaluation path is configured but missing, fall through to corpus dataset.
         req_override = ""
         try:
             req_override = str(getattr(run, "config", {}).get("RAGWELD_AGENT_TRAIN_DATASET_PATH") or "").strip()
@@ -524,12 +573,24 @@ async def _run_train_job(*, run_id: str, corpus_id: str, cancel_event: asyncio.E
             req_override = ""
         cfg_default = str(getattr(cfg.training, "ragweld_agent_train_dataset_path", "") or "").strip()
         eval_default = str(getattr(cfg.evaluation, "eval_dataset_path", "") or "").strip()
-        chosen = req_override or cfg_default or eval_default
-        if not chosen:
-            raise RuntimeError("No dataset configured (set training.ragweld_agent_train_dataset_path or evaluation.eval_dataset_path)")
 
-        dataset_path = _resolve_path(chosen)
-        _emit_log(f"Loading agent training dataset: {chosen}")
+        dataset_path, ds_messages = _resolve_training_dataset_path(
+            corpus_id=corpus_id,
+            request_override=req_override,
+            config_default=cfg_default,
+            evaluation_default=eval_default,
+        )
+        for msg in ds_messages:
+            _emit_log(msg)
+
+        if dataset_path is None:
+            tried = ", ".join(
+                str(_resolve_path(x))
+                for x in [req_override, cfg_default, eval_default]
+                if str(x or "").strip()
+            )
+            tried = ", ".join([t for t in [tried, str(_dataset_path_for_corpus(corpus_id))] if t])
+            raise RuntimeError(f"No readable training dataset found. Tried: {tried}")
 
         examples = await _load_training_messages(cfg=cfg, corpus_id=corpus_id, dataset_path=dataset_path)
         if not examples:

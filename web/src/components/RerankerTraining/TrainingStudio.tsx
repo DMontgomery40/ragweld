@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { DockviewReact, type DockviewApi, type DockviewReadyEvent, type IDockviewPanelProps } from 'dockview';
 import { Group, Panel, Separator } from 'react-resizable-panels';
 import { useVirtualizer } from '@tanstack/react-virtual';
+import { useNavigate } from 'react-router-dom';
 import 'dockview/dist/styles/dockview.css';
 import { TooltipIcon } from '@/components/ui/TooltipIcon';
 import { useConfigStore } from '@/stores/useConfigStore';
@@ -24,6 +25,7 @@ import { RunOverview } from './RunOverview';
 import { StudioLogTerminal } from './StudioLogTerminal';
 
 type LearningBackend = NonNullable<TrainingConfig['learning_reranker_backend']>;
+type SyntheticRecipeKind = 'triplets' | 'full_stack';
 
 type InspectorTab =
   | 'run-hud'
@@ -191,6 +193,7 @@ function presetLabel(preset: LayoutPreset): string {
 export function TrainingStudio() {
   const { success, error: notifyError, info } = useNotification();
   const activeCorpus = useActiveRepo();
+  const navigate = useNavigate();
   const config = useConfigStore((s) => s.config);
   const loadConfig = useConfigStore((s) => s.loadConfig);
 
@@ -232,6 +235,7 @@ export function TrainingStudio() {
 
   const [promoting, setPromoting] = useState(false);
   const [eventQuery, setEventQuery] = useState('');
+  const [syntheticRecipe, setSyntheticRecipe] = useState<SyntheticRecipeKind>('triplets');
 
   const [primaryMetricOverride, setPrimaryMetricOverride] = useState<string>('');
   const [primaryKOverride, setPrimaryKOverride] = useState<string>('');
@@ -734,6 +738,15 @@ export function TrainingStudio() {
       notifyError(e instanceof Error ? e.message : 'Evaluation failed');
     }
   };
+
+  const openSyntheticLab = useCallback(() => {
+    const qs = new URLSearchParams();
+    qs.set('subtab', 'synthetic');
+    qs.set('synthetic_context', 'learning-ranker');
+    qs.set('synthetic_recipe', syntheticRecipe);
+    qs.set('synthetic_autorun', '0');
+    navigate({ pathname: '/rag', search: `?${qs.toString()}` });
+  }, [navigate, syntheticRecipe]);
 
   const handleProbeScore = async () => {
     if (!activeCorpus) {
@@ -1253,6 +1266,26 @@ export function TrainingStudio() {
                   <label>Triplets path <TooltipIcon name="TRIBRID_TRIPLETS_PATH" /></label>
                   <input type="text" value={tripletsPath} onChange={(e) => setTripletsPath(e.target.value)} />
                 </div>
+              </div>
+
+              <div className="studio-callout">
+                <strong>Synthetic Triplets</strong>
+                <div className="studio-form-grid two">
+                  <div className="input-group">
+                    <label>Recipe</label>
+                    <select value={syntheticRecipe} onChange={(e) => setSyntheticRecipe(e.target.value as SyntheticRecipeKind)}>
+                      <option value="triplets">Generate from current eval dataset</option>
+                      <option value="full_stack">Generate fresh eval + triplets</option>
+                    </select>
+                  </div>
+                  <div className="input-group">
+                    <label>Execution</label>
+                    <input type="text" value="Run from Synthetic Lab (model selection required)" readOnly />
+                  </div>
+                </div>
+                <button className="small-button" onClick={openSyntheticLab} disabled={!activeCorpus}>
+                  Open Synthetic Lab
+                </button>
               </div>
 
               <div className="studio-form-grid two">

@@ -683,6 +683,19 @@ class ChunkSummary(BaseModel):
     symbols: list[str] = Field(default_factory=list, description="Symbols mentioned in this chunk")
     technical_details: str | None = Field(default=None, description="Technical details summary")
     domain_concepts: list[str] = Field(default_factory=list, description="Domain concepts mentioned in this chunk")
+    routes: list[str] = Field(default_factory=list, description="Detected route/path signals")
+    dependencies: list[str] = Field(default_factory=list, description="Key dependencies/imports")
+    patterns: list[str] = Field(default_factory=list, description="Implementation patterns")
+    card_source: Literal["deterministic", "llm"] = Field(
+        default="deterministic",
+        description="How this summary was produced",
+    )
+    card_score: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=10.0,
+        description="Optional quality score for llm-enriched summaries",
+    )
 
 
 class ChunkSummariesLastBuild(BaseModel):
@@ -2110,7 +2123,7 @@ class AgentTrainStartRequest(BaseModel):
         default=None,
         description=(
             "Optional dataset path override. If empty/omitted, uses training.ragweld_agent_train_dataset_path; "
-            "if that is empty, uses evaluation.eval_dataset_path."
+            "then evaluation.eval_dataset_path; then corpus eval dataset under data/eval_datasets/<corpus>.json."
         ),
     )
 
@@ -2239,6 +2252,193 @@ class AgentTrainDiffResponse(BaseModel):
         default=None,
         description="Whether the current run improved vs baseline (respects primary_goal).",
     )
+
+
+# =============================================================================
+# DOMAIN MODELS - Synthetic run orchestration
+# =============================================================================
+
+SyntheticProvider = Literal[
+    "internal_ragweld",
+    "synthetic_data_kit",
+]
+
+SyntheticRunStatus = Literal["queued", "running", "completed", "failed", "cancelled"]
+
+SyntheticArtifactKind = Literal[
+    "eval_dataset_json",
+    "semantic_cards_jsonl",
+    "keywords_json",
+    "triplets_jsonl",
+    "config_patch_json",
+    "quality_eval_json",
+    "report_md",
+]
+
+SyntheticRecipeKind = Literal[
+    "eval_dataset",
+    "semantic_cards",
+    "keywords",
+    "triplets",
+    "autotune_retrieval",
+    "full_stack",
+]
+
+
+class SyntheticRunStartRequest(BaseModel):
+    repo_id: str = Field(
+        validation_alias=AliasChoices("repo_id", "corpus_id"),
+        serialization_alias="corpus_id",
+    )
+    provider: SyntheticProvider = Field(default="internal_ragweld")
+    recipe: SyntheticRecipeKind = Field(default="eval_dataset")
+
+    max_source_chunks: int | None = Field(default=300, ge=10, le=20000)
+    max_pairs: int | None = Field(default=200, ge=10, le=50000)
+    pairs_per_source: int | None = Field(default=2, ge=1, le=20)
+
+    curate_enabled: bool = Field(default=True)
+    curate_threshold: float = Field(default=7.0, ge=0.0, le=10.0)
+    include_expected_answer: bool = Field(default=True)
+    include_tags: bool = Field(default=True)
+
+    seed: int | None = Field(default=1337)
+    generator_model: str = Field(
+        validation_alias=AliasChoices("generator_model", "generator_model_override"),
+        serialization_alias="generator_model",
+        min_length=1,
+    )
+    judge_model: str = Field(
+        validation_alias=AliasChoices("judge_model", "judge_model_override"),
+        serialization_alias="judge_model",
+        min_length=1,
+    )
+
+    @field_validator("generator_model", "judge_model")
+    @classmethod
+    def _validate_non_blank_models(cls, value: str) -> str:
+        model_name = str(value or "").strip()
+        if not model_name:
+            raise ValueError("must not be empty")
+        return model_name
+
+    @field_validator("repo_id")
+    @classmethod
+    def _validate_repo_id_slug(cls, value: str) -> str:
+        repo_id = str(value or "").strip()
+        if not repo_id:
+            raise ValueError("must not be empty")
+        if not re.fullmatch(r"[A-Za-z0-9._-]+", repo_id):
+            raise ValueError("must contain only letters, numbers, dot, underscore, and hyphen")
+        if repo_id in {".", ".."} or ".." in repo_id:
+            raise ValueError("must not contain path traversal segments")
+        return repo_id
+
+
+class SyntheticArtifactRef(BaseModel):
+    kind: SyntheticArtifactKind
+    path: str
+    bytes: int | None = Field(default=None, ge=0)
+    created_at: datetime
+
+
+class SyntheticRunSummary(BaseModel):
+    sources_used: int = Field(default=0, ge=0)
+    items_generated: int = Field(default=0, ge=0)
+    items_curated_in: int = Field(default=0, ge=0)
+    items_curated_out: int = Field(default=0, ge=0)
+    avg_judge_score: float | None = Field(default=None, ge=0.0, le=10.0)
+    quality_top1_accuracy: float | None = Field(default=None, ge=0.0, le=1.0)
+    quality_topk_accuracy: float | None = Field(default=None, ge=0.0, le=1.0)
+    quality_mrr: float | None = Field(default=None, ge=0.0, le=1.0)
+    quality_sample_size: int | None = Field(default=None, ge=0)
+    quality_gate_threshold: float | None = Field(default=None, ge=0.0, le=1.0)
+    quality_gate_passed: bool | None = Field(default=None)
+    quality_failure_reason: str | None = Field(default=None)
+
+
+class SyntheticRun(BaseModel):
+    run_id: str
+    repo_id: str = Field(
+        validation_alias=AliasChoices("repo_id", "corpus_id"),
+        serialization_alias="corpus_id",
+    )
+    status: SyntheticRunStatus = Field(default="queued")
+    started_at: datetime
+    completed_at: datetime | None = Field(default=None)
+
+    provider: SyntheticProvider
+    recipe: SyntheticRecipeKind
+
+    config_snapshot: dict[str, Any] = Field(default_factory=dict)
+    config: dict[str, Any] = Field(default_factory=dict)
+
+    request: SyntheticRunStartRequest
+    artifacts: list[SyntheticArtifactRef] = Field(default_factory=list)
+    summary: SyntheticRunSummary = Field(default_factory=SyntheticRunSummary)
+    error: str | None = Field(default=None)
+
+
+class SyntheticRunMeta(BaseModel):
+    run_id: str
+    repo_id: str = Field(
+        validation_alias=AliasChoices("repo_id", "corpus_id"),
+        serialization_alias="corpus_id",
+    )
+    status: SyntheticRunStatus
+    started_at: datetime
+    completed_at: datetime | None = Field(default=None)
+    recipe: SyntheticRecipeKind
+    provider: SyntheticProvider
+    items_generated: int | None = Field(default=None)
+
+
+class SyntheticRunsResponse(BaseModel):
+    ok: bool = Field(default=True)
+    runs: list[SyntheticRunMeta] = Field(default_factory=list)
+
+
+SyntheticEventType = Literal["log", "progress", "state", "error", "complete", "artifact"]
+
+
+class SyntheticRunEvent(BaseModel):
+    type: SyntheticEventType
+    ts: datetime
+    run_id: str
+    message: str | None = Field(default=None)
+    percent: float | None = Field(default=None, ge=0.0, le=100.0)
+    status: SyntheticRunStatus | None = Field(default=None)
+    artifact: SyntheticArtifactRef | None = Field(default=None)
+
+
+class SyntheticPublishResponse(BaseModel):
+    ok: bool = Field(default=True)
+    run_id: str
+    repo_id: str = Field(
+        validation_alias=AliasChoices("repo_id", "corpus_id"),
+        serialization_alias="corpus_id",
+    )
+    kind: SyntheticArtifactKind
+    target_path: str | None = Field(default=None)
+    message: str | None = Field(default=None)
+
+
+class SyntheticConfigPatchResponse(BaseModel):
+    ok: bool = Field(default=True)
+    run_id: str
+    repo_id: str = Field(
+        validation_alias=AliasChoices("repo_id", "corpus_id"),
+        serialization_alias="corpus_id",
+    )
+    patch: dict[str, Any] = Field(default_factory=dict)
+    artifact_path: str | None = Field(default=None)
+
+
+class SyntheticArtifactPreviewResponse(BaseModel):
+    ok: bool = Field(default=True)
+    run_id: str
+    kind: SyntheticArtifactKind
+    rows: list[dict[str, Any]] = Field(default_factory=list)
 
 
 # =============================================================================
@@ -4899,6 +5099,38 @@ Format your response with clear sections using markdown headers.''',
         description="Analyze eval regressions with skeptical approach - avoid false explanations"
     )
 
+    synthetic_judge: str = Field(
+        default='''You are a strict evaluator for synthetic retrieval QA rows.
+
+You receive:
+- question
+- expected_paths
+- expected_answer
+- source_file_path
+- source_excerpt
+
+Decide whether this row is useful for retrieval evaluation.
+
+Scoring rubric (0-10):
+- 9-10: specific, answerable from source, unambiguous grounding
+- 7-8: mostly grounded, minor ambiguity
+- 4-6: weak grounding, generic wording, low discriminative value
+- 0-3: invalid, contradictory, or not answerable from source
+
+Output JSON only:
+{
+  "score": 0.0,
+  "keep": false,
+  "reason": "short reason"
+}
+
+Rules:
+- Keep reason concise (<200 chars)
+- Set keep=true only when score >= 7.0
+- Never output markdown or prose outside JSON''',
+        description="Judge prompt for synthetic eval row curation and quality filtering"
+    )
+
     lightweight_chunk_summaries: str = Field(
         default='''Extract key information from this database: symbols (function/class names), purpose (one sentence), keywords (technical terms). Return JSON only.''',
         description="Lightweight chunk_summary generation prompt for faster indexing"
@@ -5587,7 +5819,7 @@ class TriBridConfig(BaseModel):
             'EVAL_DATASET_PATH': self.evaluation.eval_dataset_path,
             'BASELINE_PATH': self.evaluation.baseline_path,
             'EVAL_MULTI_M': self.evaluation.eval_multi_m,
-            # System prompts (8)
+            # System prompts (9)
             'PROMPT_MAIN_RAG_CHAT': self.system_prompts.main_rag_chat,
             'PROMPT_QUERY_EXPANSION': self.system_prompts.query_expansion,
             'PROMPT_QUERY_REWRITE': self.system_prompts.query_rewrite,
@@ -5596,6 +5828,7 @@ class TriBridConfig(BaseModel):
             'PROMPT_SEMANTIC_KG_EXTRACTION': self.system_prompts.semantic_kg_extraction,
             'PROMPT_EVAL_ANALYSIS': self.system_prompts.eval_analysis,
             'PROMPT_LIGHTWEIGHT_CARDS': self.system_prompts.lightweight_chunk_summaries,
+            'PROMPT_SYNTHETIC_JUDGE': self.system_prompts.synthetic_judge,
             # MCP (inbound) params (7)
             'MCP_HTTP_ENABLED': self.mcp.enabled,
             'MCP_HTTP_PATH': self.mcp.mount_path,
@@ -5967,6 +6200,7 @@ class TriBridConfig(BaseModel):
                 ),
                 eval_analysis=data.get('PROMPT_EVAL_ANALYSIS', SystemPromptsConfig().eval_analysis),
                 lightweight_chunk_summaries=data.get('PROMPT_LIGHTWEIGHT_CARDS', SystemPromptsConfig().lightweight_chunk_summaries),
+                synthetic_judge=data.get('PROMPT_SYNTHETIC_JUDGE', SystemPromptsConfig().synthetic_judge),
             ),
             mcp=MCPConfig(
                 enabled=data.get('MCP_HTTP_ENABLED', MCPConfig().enabled),
@@ -6255,7 +6489,7 @@ TRIBRID_CONFIG_KEYS = {
     'EVAL_DATASET_PATH',
     'BASELINE_PATH',
     'EVAL_MULTI_M',
-    # System prompts (8 active)
+    # System prompts (9 active)
     'PROMPT_MAIN_RAG_CHAT',
     'PROMPT_QUERY_EXPANSION',
     'PROMPT_QUERY_REWRITE',
@@ -6264,6 +6498,7 @@ TRIBRID_CONFIG_KEYS = {
     'PROMPT_CODE_ENRICHMENT',
     'PROMPT_SEMANTIC_KG_EXTRACTION',
     'PROMPT_EVAL_ANALYSIS',
+    'PROMPT_SYNTHETIC_JUDGE',
     # MCP (inbound) params (7)
     'MCP_HTTP_ENABLED',
     'MCP_HTTP_PATH',

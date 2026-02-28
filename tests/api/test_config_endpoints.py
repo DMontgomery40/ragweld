@@ -191,3 +191,24 @@ async def test_put_config_rejects_unknown_tiktoken_encoding(client: AsyncClient)
     assert response.status_code == 422
     detail = str(response.json().get("detail") or "")
     assert "Unknown tiktoken encoding" in detail
+
+
+@pytest.mark.asyncio
+async def test_put_config_accepts_mlx_model_id_with_slash(client: AsyncClient) -> None:
+    baseline = await client.get("/api/config")
+    assert baseline.status_code == 200
+    cfg = baseline.json()
+
+    cfg["indexing"]["skip_dense"] = 0
+    cfg["embedding"]["embedding_backend"] = "provider"
+    cfg["embedding"]["embedding_type"] = "mlx"
+    cfg["embedding"]["embedding_model_mlx"] = "mlx-community/all-MiniLM-L6-v2-4bit"
+    cfg["embedding"]["embedding_dim"] = 384
+    cfg["tokenization"]["strategy"] = "huggingface"
+    cfg["tokenization"]["hf_tokenizer_name"] = "sentence-transformers/all-MiniLM-L6-v2"
+
+    response = await client.put("/api/config", json=cfg)
+    assert response.status_code == 200
+    body = response.json()
+    assert str(body["embedding"]["embedding_type"]).lower() == "mlx"
+    assert str(body["embedding"]["embedding_model_mlx"]) == "mlx-community/all-MiniLM-L6-v2-4bit"

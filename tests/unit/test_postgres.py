@@ -12,6 +12,7 @@ import pytest
 
 from server.db.postgres import PostgresClient
 from server.models.index import Chunk
+from server.models.tribrid_config_model import ChunkSummariesLastBuild, ChunkSummary
 
 
 def _postgres_available() -> bool:
@@ -160,6 +161,51 @@ async def test_file_path_search_finds_filename_like_queries() -> None:
         assert hits
         assert hits[0].chunk_id == "c1"
         assert hits[0].metadata.get("sparse_engine") == "file_path"
+    finally:
+        try:
+            await pg.delete_corpus(repo_id)
+        except Exception:
+            pass
+
+
+@pytest.mark.asyncio
+async def test_chunk_summaries_roundtrip_extended_fields() -> None:
+    if not _postgres_available():
+        pytest.skip("POSTGRES_DSN/POSTGRES_HOST not set")
+
+    repo_id = f"test_chunk_summary_ext_{uuid.uuid4().hex[:10]}"
+    pg = PostgresClient("postgresql://ignored")
+    await pg.connect()
+    try:
+        await pg.upsert_corpus(repo_id, name=repo_id, root_path=".")
+        summaries = [
+            ChunkSummary(
+                chunk_id="c1",
+                file_path="server/api/example.py",
+                start_line=1,
+                end_line=10,
+                purpose="Example summary",
+                symbols=["foo", "bar"],
+                technical_details="details",
+                domain_concepts=["auth"],
+                routes=["/api/example"],
+                dependencies=["fastapi"],
+                patterns=["async_io"],
+                card_source="llm",
+                card_score=8.5,
+            )
+        ]
+        last_build = ChunkSummariesLastBuild(repo_id=repo_id, total=1, enriched=1)
+        await pg.replace_chunk_summaries(repo_id, summaries=summaries, last_build=last_build)
+
+        listed = await pg.list_chunk_summaries(repo_id)
+        assert len(listed) == 1
+        got = listed[0]
+        assert got.routes == ["/api/example"]
+        assert got.dependencies == ["fastapi"]
+        assert got.patterns == ["async_io"]
+        assert got.card_source == "llm"
+        assert got.card_score == pytest.approx(8.5)
     finally:
         try:
             await pg.delete_corpus(repo_id)

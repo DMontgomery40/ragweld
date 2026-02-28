@@ -46,6 +46,8 @@ def _build_prompts_payload(cfg: TriBridConfig) -> PromptsResponse:
             return "chat"
         if key.startswith("query_"):
             return "retrieval"
+        if key.startswith("synthetic_"):
+            return "evaluation"
         if key.startswith("eval_"):
             return "evaluation"
         return "indexing"
@@ -59,6 +61,7 @@ def _build_prompts_payload(cfg: TriBridConfig) -> PromptsResponse:
         "lightweight_chunk_summaries": "Lightweight Chunk Summaries",
         "code_enrichment": "Code Enrichment",
         "semantic_kg_extraction": "Semantic KG Extraction",
+        "synthetic_judge": "Synthetic Judge",
     }
 
     # ALL SystemPromptsConfig fields (Pydantic is the source of truth).

@@ -10,3 +10,4 @@ export { indexingApi } from './indexing';
 export { promptsApi } from './prompts';
 export { tracesApi } from './traces';
 export { evalApi } from './eval';
+export { syntheticApi } from './synthetic';

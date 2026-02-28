@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import ForceGraph2D from 'react-force-graph-2d';
 import { useGraph } from '@/hooks/useGraph';
+import { SyntheticCallout } from '@/components/RAG/SyntheticCallout';
 import { useRepoStore } from '@/stores/useRepoStore';
 import type { Community, Entity, Relationship } from '@/types/generated';
 
@@ -421,6 +422,8 @@ export function GraphSubtab() {
           </button>
         </div>
       </div>
+
+      <SyntheticCallout context="graph" />
 
       {error && (
         <div
