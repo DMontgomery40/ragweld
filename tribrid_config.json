@@ -175,7 +175,8 @@
     "parquet_extract_max_cell_chars": 20000,
     "parquet_extract_text_columns_only": 1,
     "parquet_extract_include_column_names": 1,
-    "skip_dense": 0
+    "skip_dense": 0,
+    "estimated_tokens_per_second_local": null
   },
   "graph_storage": {
     "neo4j_uri": "bolt://localhost:7687",
@@ -287,7 +288,7 @@
     "rerank_input_snippet_chars": 700
   },
   "generation": {
-    "gen_model": "gpt-5.2",
+    "gen_model": "totally-fake-model-xyz-9999",
     "gen_temperature": 0.0,
     "gen_max_tokens": 2048,
     "gen_top_p": 1.0,

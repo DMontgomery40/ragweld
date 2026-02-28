@@ -112,3 +112,69 @@ async def test_index_status_prefers_persisted_run_over_stats_inference(client: A
     payload = response.json()
     assert payload["status"] == "error"
     assert payload["error"] == "neo4j schema initialization failed"
+
+
+@pytest.mark.asyncio
+async def test_latest_run_coerces_stale_indexing_run_to_error(client: AsyncClient) -> None:
+    corpus_id = "stale-run-corpus"
+    run_id = "run_20260227_stale"
+    summary = IndexRunSummary(
+        run_id=run_id,
+        repo_id=corpus_id,
+        status="indexing",
+        started_at=datetime.now(UTC),
+        completed_at=None,
+        progress=0.12,
+        error=None,
+        total_files=0,
+        total_chunks=0,
+        total_tokens=0,
+        embedding_provider=None,
+        embedding_model=None,
+        embedding_dimensions=None,
+    )
+    index_api._persist_run_summary(summary)
+    index_api._append_run_event(corpus_id, run_id, {"type": "progress", "message": "foo.txt", "percent": 12})
+
+    latest = await client.get(f"/api/index/{corpus_id}/runs/latest")
+    assert latest.status_code == 200
+    latest_payload = latest.json()
+    assert latest_payload["status"] == "error"
+    assert "interrupted before completion" in str(latest_payload.get("error") or "").lower()
+    assert latest_payload["completed_at"] is not None
+
+    events = await client.get(f"/api/index/{corpus_id}/runs/{run_id}/events", params={"limit": 50})
+    assert events.status_code == 200
+    events_payload = events.json()
+    assert len(events_payload) >= 2
+    assert events_payload[-1]["type"] == "error"
+    assert "interrupted before completion" in str(events_payload[-1].get("message") or "").lower()
+
+
+@pytest.mark.asyncio
+async def test_index_status_coerces_stale_indexing_run_to_error(client: AsyncClient) -> None:
+    corpus_id = "stale-status-corpus"
+    run_id = "run_20260227_stale_status"
+    summary = IndexRunSummary(
+        run_id=run_id,
+        repo_id=corpus_id,
+        status="indexing",
+        started_at=datetime.now(UTC),
+        completed_at=None,
+        progress=0.42,
+        error=None,
+        total_files=0,
+        total_chunks=0,
+        total_tokens=0,
+        embedding_provider=None,
+        embedding_model=None,
+        embedding_dimensions=None,
+    )
+    index_api._persist_run_summary(summary)
+
+    response = await client.get(f"/api/index/{corpus_id}/status")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "error"
+    assert payload["completed_at"] is not None
+    assert "interrupted before completion" in str(payload.get("error") or "").lower()

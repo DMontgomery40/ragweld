@@ -82,6 +82,11 @@ export function IndexDisplayPanels() {
   const embedding = metadata.embedding_config || {};
   const costs = metadata.costs || {};
   const storage = metadata.storage_breakdown || {};
+  const hasCostCard =
+    Number(costs.total_tokens || 0) > 0 ||
+    costs.embedding_cost != null ||
+    costs.semantic_kg_cost != null ||
+    costs.total_cost != null;
 
   const storageCards = [
     { label: 'Chunks', value: formatBytes(storage.chunks_bytes), accent: 'var(--link)' },
@@ -92,6 +97,20 @@ export function IndexDisplayPanels() {
     { label: 'Neo4j Store', value: formatBytes(storage.neo4j_store_bytes), accent: 'var(--warn)' },
     { label: 'Keywords', value: (metadata.keywords_count ?? 0).toLocaleString(), accent: 'var(--warn)' },
     { label: 'Postgres Total', value: formatBytes(storage.postgres_total_bytes), accent: 'var(--link)' }
+  ];
+
+  const costCards = [
+    { label: 'Total Tokens', value: costs.total_tokens?.toLocaleString() || '0' },
+    {
+      label: 'Embedding Cost',
+      value: costs.embedding_cost == null ? 'N/A' : `$${Number(costs.embedding_cost || 0).toFixed(4)}`
+    },
+    ...(costs.semantic_kg_cost != null
+      ? [{ label: 'Semantic KG Cost', value: `$${Number(costs.semantic_kg_cost || 0).toFixed(4)}` }]
+      : []),
+    ...(costs.total_cost != null
+      ? [{ label: 'Total Cost', value: `$${Number(costs.total_cost || 0).toFixed(4)}` }]
+      : []),
   ];
 
   return (
@@ -180,7 +199,7 @@ export function IndexDisplayPanels() {
         </div>
       </div>
 
-      {costs.total_tokens ? (
+      {hasCostCard ? (
         <div
           style={{
             background: 'linear-gradient(135deg,color-mix(in oklch,var(--ok) 6%,var(--bg)) 0%,var(--card-bg) 100%)',
@@ -208,12 +227,10 @@ export function IndexDisplayPanels() {
             </svg>
             Indexing Costs
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-            <CostStat label="Total Tokens" value={costs.total_tokens?.toLocaleString() || '0'} />
-            <CostStat
-              label="Embedding Cost"
-              value={costs.embedding_cost == null ? 'N/A' : `$${Number(costs.embedding_cost || 0).toFixed(4)}`}
-            />
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '10px' }}>
+            {costCards.map((card) => (
+              <CostStat key={card.label} label={card.label} value={card.value} />
+            ))}
           </div>
         </div>
       ) : null}

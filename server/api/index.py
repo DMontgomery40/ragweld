@@ -2,9 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import importlib.util
 import json
 import logging
+import multiprocessing
+import platform
 import re
+import sys
 import uuid
 from collections import defaultdict
 from collections.abc import AsyncGenerator
@@ -124,11 +128,32 @@ _QUEUE_RUN_CONTEXT: dict[int, tuple[str, str]] = {}
 # Index estimate heuristics (intentionally rough).
 _EST_BYTES_PER_TOKEN = 4.0  # common rule-of-thumb for English-ish text
 _EST_TOKENS_PER_SECOND_CLOUD = 50_000
-_EST_TOKENS_PER_SECOND_LOCAL = 8_000
 _EST_TOKENS_PER_SECOND_DETERMINISTIC = 120_000
 _EST_OVERHEAD_SECONDS = 12.0
 _EST_RANGE_LOW_MULT = 0.6
 _EST_RANGE_HIGH_MULT = 1.9
+
+# Local embedding throughput heuristics (tokens/sec) by hardware class.
+_LOCAL_EMBED_TPS_TABLE: dict[str, dict[str, int]] = {
+    "apple_silicon_mlx": {"mlx": 60_000, "huggingface": 12_000, "local": 10_000, "_default": 12_000},
+    "apple_silicon_cpu": {"mlx": 18_000, "huggingface": 9_000, "local": 8_000, "_default": 8_000},
+    "cuda_gpu": {"mlx": 25_000, "huggingface": 40_000, "local": 35_000, "_default": 32_000},
+    "cpu_only": {"mlx": 6_000, "huggingface": 5_000, "local": 4_000, "_default": 4_500},
+}
+
+# Semantic KG LLM extraction throughput heuristic (calls/sec) by provider.
+_SEMANTIC_KG_CALLS_PER_SECOND: dict[str, float] = {
+    "openai": 1.6,
+    "anthropic": 1.0,
+    "google": 2.0,
+    "mistral": 1.3,
+    "cohere": 1.5,
+    "deepseek": 1.2,
+    "openrouter": 1.2,
+    "ollama": 0.6,
+    "mlx": 0.7,
+    "local": 0.8,
+}
 
 
 def _idle_status(repo_id: str) -> IndexStatus:
@@ -214,6 +239,70 @@ def _load_latest_run_summary(repo_id: str) -> IndexRunSummary | None:
         except Exception:
             continue
     return None
+
+
+def _coerce_stale_indexing_run_to_error(repo_id: str, run: IndexRunSummary) -> IndexRunSummary:
+    """Coerce a persisted indexing run to an error when no active task owns it.
+
+    This handles process restarts/crashes where in-memory task state is lost and
+    a run would otherwise appear to be "indexing" forever.
+    """
+    if str(getattr(run, "status", "") or "").strip().lower() != "indexing":
+        return run
+
+    task = _TASKS.get(repo_id)
+    if task is not None and not task.done():
+        return run
+
+    msg = (
+        "Indexing interrupted before completion (server restart or worker crash). "
+        "Start a new indexing run."
+    )
+    finalized = run.model_copy(
+        update={
+            "status": "error",
+            "completed_at": datetime.now(UTC),
+            "error": str(run.error or msg),
+        }
+    )
+    with contextlib.suppress(Exception):
+        _persist_run_summary(finalized)
+
+    # Append one terminal event if one has not been recorded yet.
+    with contextlib.suppress(Exception):
+        tail = _load_run_events(repo_id, run.run_id, limit=5)
+        has_terminal = any(ev.type in {"complete", "error", "cancelled"} for ev in tail)
+        if not has_terminal:
+            _append_run_event(
+                repo_id,
+                run.run_id,
+                {
+                    "type": "error",
+                    "message": finalized.error,
+                    "percent": int(max(0.0, min(1.0, float(finalized.progress or 0.0))) * 100),
+                },
+            )
+    return finalized
+
+
+def _allow_parallel_chunk_batches(*, indexing_workers: int, batch_count: int, has_graph_upserts: bool) -> bool:
+    """Whether chunk upsert batches can safely run concurrently.
+
+    Neo4j chunk/document writes can deadlock under concurrent per-file batch
+    upserts. Keep those writes serialized even when indexing_workers > 1.
+    """
+    if int(batch_count or 0) <= 1:
+        return False
+    if int(indexing_workers or 0) <= 1:
+        return False
+    if has_graph_upserts:
+        return False
+    return True
+
+
+def _should_run_ast_graph_build(*, has_graph_builder: bool, graph_file_count: int) -> bool:
+    """Whether the AST graph build pass should run."""
+    return bool(has_graph_builder and int(graph_file_count or 0) > 0)
 
 
 def _to_optional_int(value: Any) -> int | None:
@@ -345,6 +434,157 @@ def _estimate_chunks_from_tokens(*, tokens: int, target_tokens: int, overlap_tok
 def _looks_cloud_provider(provider: str) -> bool:
     p = (provider or "").strip().lower()
     return p in {"openai", "voyage", "cohere", "google", "mistral", "jina", "deepseek"}
+
+
+def _norm_key(s: str | None) -> str:
+    return str(s or "").strip().lower()
+
+
+def _to_float(x: Any) -> float | None:
+    try:
+        v = float(x)
+    except Exception:
+        return None
+    if v != v:  # NaN guard
+        return None
+    return v
+
+
+def _model_has_component(spec: dict[str, Any], component: str) -> bool:
+    comps = spec.get("components")
+    if not isinstance(comps, list):
+        return False
+    target = str(component or "").strip().upper()
+    return any(str(c or "").strip().upper() == target for c in comps)
+
+
+def _find_model_spec(
+    models: list[dict[str, Any]], *, provider: str | None, model: str | None
+) -> dict[str, Any] | None:
+    """Best-effort model lookup (provider+model, then model, then provider)."""
+    prov = _norm_key(provider)
+    mdl = _norm_key(model)
+
+    if prov and mdl:
+        for m in models:
+            if _norm_key(m.get("provider")) == prov and _norm_key(m.get("model")) == mdl:
+                return m
+
+    if mdl:
+        for m in models:
+            if _norm_key(m.get("model")) == mdl:
+                return m
+
+    if prov:
+        for m in models:
+            if _norm_key(m.get("provider")) == prov:
+                return m
+    return None
+
+
+def _detect_local_hardware_class() -> str:
+    machine = str(platform.machine() or "").strip().lower()
+    is_apple_silicon = sys.platform == "darwin" and machine in {"arm64", "aarch64"}
+
+    has_mlx = importlib.util.find_spec("mlx") is not None
+    has_cuda = False
+    if importlib.util.find_spec("torch") is not None:
+        with contextlib.suppress(Exception):
+            import torch  # type: ignore[import-not-found]
+
+            has_cuda = bool(torch.cuda.is_available())
+
+    if is_apple_silicon and has_mlx:
+        return "apple_silicon_mlx"
+    if is_apple_silicon:
+        return "apple_silicon_cpu"
+    if has_cuda:
+        return "cuda_gpu"
+    return "cpu_only"
+
+
+def _estimate_local_tokens_per_second(*, cfg: TriBridConfig, provider: str) -> int:
+    override = getattr(cfg.indexing, "estimated_tokens_per_second_local", None)
+    if override is not None:
+        with contextlib.suppress(Exception):
+            ov = int(override)
+            if ov > 0:
+                return ov
+
+    hw_class = _detect_local_hardware_class()
+    table = _LOCAL_EMBED_TPS_TABLE.get(hw_class, _LOCAL_EMBED_TPS_TABLE["cpu_only"])
+    p = _norm_key(provider)
+    est = int(table.get(p) or table.get("_default") or _LOCAL_EMBED_TPS_TABLE["cpu_only"]["_default"])
+    if hw_class == "cpu_only":
+        cores = max(1, multiprocessing.cpu_count())
+        if cores >= 24:
+            est = max(est, 8_000)
+        elif cores >= 12:
+            est = max(est, 6_000)
+    return est
+
+
+def _resolve_semantic_kg_model_and_provider(cfg: TriBridConfig) -> tuple[str, str]:
+    explicit_semantic_model = str(cfg.graph_indexing.semantic_kg_llm_model or "").strip()
+    if explicit_semantic_model:
+        provider = str(cfg.generation.gen_backend or "").strip().lower()
+        return explicit_semantic_model, provider
+    fallback_model = str(cfg.generation.enrich_model or "").strip()
+    provider = str(cfg.generation.enrich_backend or "").strip().lower()
+    return fallback_model, provider
+
+
+def _estimate_semantic_kg_cost_usd(
+    *,
+    provider_hint: str,
+    model: str,
+    chunks_in_scope: int,
+    enrich_max_chars: int,
+) -> float | None:
+    """Estimate semantic KG LLM extraction cost from models.json GEN pricing."""
+    count = max(0, int(chunks_in_scope or 0))
+    if count <= 0:
+        return 0.0
+    mname = str(model or "").strip()
+    if not mname:
+        return None
+
+    # Per chunk heuristic: fixed prompt overhead + bounded chunk text + concise JSON output.
+    input_tokens_per_chunk = max(0, 500 + int(max(0, enrich_max_chars) / 4))
+    output_tokens_per_chunk = 100
+    total_input_tokens = count * input_tokens_per_chunk
+    total_output_tokens = count * output_tokens_per_chunk
+
+    spec = _find_model_spec(_load_models_json(), provider=provider_hint, model=mname)
+    if not spec or not _model_has_component(spec, "GEN"):
+        return None
+    if str(spec.get("unit") or "").strip() != "1k_tokens":
+        return None
+
+    in_rate = _to_float(spec.get("input_per_1k"))
+    out_rate = _to_float(spec.get("output_per_1k"))
+    if in_rate is None and out_rate is None:
+        return None
+    return ((float(total_input_tokens) / 1000.0) * float(in_rate or 0.0)) + (
+        (float(total_output_tokens) / 1000.0) * float(out_rate or 0.0)
+    )
+
+
+def _estimate_semantic_kg_seconds(
+    *,
+    provider: str,
+    chunks_in_scope: int,
+    indexing_workers: int,
+) -> float:
+    count = max(0, int(chunks_in_scope or 0))
+    if count <= 0:
+        return 0.0
+    p = _norm_key(provider)
+    calls_per_second = float(_SEMANTIC_KG_CALLS_PER_SECOND.get(p, 1.0))
+    workers = max(1, int(indexing_workers or 1))
+    # Runtime executes semantic extraction in batches up to indexing_workers.
+    effective_calls_per_second = max(0.1, calls_per_second * float(min(workers, 8)))
+    return float(count) / effective_calls_per_second
 
 
 @lru_cache(maxsize=1)
@@ -1158,7 +1398,12 @@ async def _run_index_body(
             if not chunks:
                 return []
             batches = [chunks[i0 : i0 + _indexing_batch] for i0 in range(0, len(chunks), _indexing_batch)]
-            if len(batches) <= 1 or _indexing_workers <= 1:
+            has_graph_upserts = bool(neo4j is not None and cfg.graph_indexing.build_lexical_graph)
+            if not _allow_parallel_chunk_batches(
+                indexing_workers=_indexing_workers,
+                batch_count=len(batches),
+                has_graph_upserts=has_graph_upserts,
+            ):
                 out: list[Chunk] = []
                 for b in batches:
                     out.extend(await _upsert_chunks_for_file(b))
@@ -1219,8 +1464,17 @@ async def _run_index_body(
                             ):
                                 remaining = max(0, semantic_budget - semantic_processed)
                                 semantic_pending_chunks.extend(embedded_batches[:remaining])
-            except Exception:
+            except Exception as exc:
                 INDEX_STAGE_ERRORS_TOTAL.labels(stage="file_read_stream").inc()
+                _emit_event(
+                    event_queue,
+                    {
+                        "type": "warning",
+                        "message": f"Skipping file due to stream read/chunk failure: {rel_path} ({exc})",
+                        "current_file": rel_path,
+                    },
+                    drop_oldest=True,
+                )
                 continue
         else:
             try:
@@ -1241,8 +1495,17 @@ async def _run_index_body(
                     )
                     if content is None:
                         content = abs_path.read_text(encoding="utf-8", errors="ignore")
-            except Exception:
+            except Exception as exc:
                 INDEX_STAGE_ERRORS_TOTAL.labels(stage="file_read").inc()
+                _emit_event(
+                    event_queue,
+                    {
+                        "type": "warning",
+                        "message": f"Skipping file due to read/extract failure: {rel_path} ({exc})",
+                        "current_file": rel_path,
+                    },
+                    drop_oldest=True,
+                )
                 continue
             if "\x00" in content:
                 continue
@@ -1391,17 +1654,22 @@ async def _run_index_body(
                         _allowed_entity_types: set[str] = allowed_entity_types,
                         _require_llm_success: bool = require_llm_success,
                     ) -> tuple[str, list[dict[str, str]], list[dict[str, Any]]]:
-                        entities_raw, relations_raw = await _extract_semantic_kg_llm(
-                            (ch.content or "")[: max(0, _llm_max_chars)],
-                            cfg=cfg,
-                            prompt=_llm_prompt,
-                            model=_llm_model,
-                            timeout_s=_llm_timeout_s,
-                            reasoning_effort=_reasoning_effort,
-                            typed_entities_enabled=_typed_entities_enabled,
-                            allowed_entity_types=_allowed_entity_types,
-                            require_success=_require_llm_success,
-                        )
+                        try:
+                            entities_raw, relations_raw = await _extract_semantic_kg_llm(
+                                (ch.content or "")[: max(0, _llm_max_chars)],
+                                cfg=cfg,
+                                prompt=_llm_prompt,
+                                model=_llm_model,
+                                timeout_s=_llm_timeout_s,
+                                reasoning_effort=_reasoning_effort,
+                                typed_entities_enabled=_typed_entities_enabled,
+                                allowed_entity_types=_allowed_entity_types,
+                                require_success=_require_llm_success,
+                            )
+                        except Exception as exc:
+                            raise RuntimeError(
+                                f"Semantic KG extraction failed for file={ch.file_path} chunk_id={ch.chunk_id}: {exc}"
+                            ) from exc
                         return ch.chunk_id, entities_raw, relations_raw
 
                     for i0 in range(0, len(chunks_for_semantic), semantic_workers):
@@ -1604,17 +1872,24 @@ async def _run_index_body(
 
     if graph_builder is not None:
         try:
-            if event_queue is not None:
+            if _should_run_ast_graph_build(has_graph_builder=True, graph_file_count=len(graph_files)):
+                if event_queue is not None:
+                    _emit_event(
+                        event_queue,
+                        {"type": "log", "message": "🧠 Building Neo4j graph (entities + relationships)..."},
+                        drop_oldest=True,
+                    )
+                with INDEX_STAGE_LATENCY_SECONDS.labels(stage="graph_build").time():
+                    await graph_builder.build_graph_for_files(
+                        write_repo_id,
+                        graph_files,
+                        batch_size=int(cfg.indexing.indexing_batch_size),
+                    )
+            elif event_queue is not None:
                 _emit_event(
                     event_queue,
-                    {"type": "log", "message": "🧠 Building Neo4j graph (entities + relationships)..."},
+                    {"type": "log", "message": "🧠 Skipping AST graph build (no code files matched)"},
                     drop_oldest=True,
-                )
-            with INDEX_STAGE_LATENCY_SECONDS.labels(stage="graph_build").time():
-                await graph_builder.build_graph_for_files(
-                    write_repo_id,
-                    graph_files,
-                    batch_size=int(cfg.indexing.indexing_batch_size),
                 )
             # Link entities to chunk_ids so the graph leg can hydrate deterministically.
             if neo4j is not None and cfg.graph_indexing.build_lexical_graph:
@@ -2029,7 +2304,13 @@ async def estimate_index(request: IndexRequest) -> IndexEstimate:
     embedding_provider = str(getattr(cfg.embedding, "embedding_type", "") or "").strip()
     embedding_model = str(getattr(cfg.embedding, "effective_model", "") or "").strip()
 
-    # Pricing (models.json): deterministic backend and skip_dense imply $0 external cost.
+    semantic_kg_enabled = bool(cfg.graph_indexing.semantic_kg_enabled)
+    semantic_kg_mode = str(cfg.graph_indexing.semantic_kg_mode or "heuristic").strip().lower()
+    semantic_kg_llm_enabled = semantic_kg_enabled and semantic_kg_mode == "llm"
+    semantic_kg_chunks = min(est_chunks, max(0, int(cfg.graph_indexing.semantic_kg_max_chunks or 0))) if semantic_kg_llm_enabled else 0
+    semantic_model, semantic_provider_hint = _resolve_semantic_kg_model_and_provider(cfg)
+
+    # Pricing (models.json): deterministic backend and skip_dense imply $0 external embedding cost.
     embedding_cost: float | None
     if skip_dense or embedding_backend != "provider":
         embedding_cost = 0.0
@@ -2040,9 +2321,25 @@ async def estimate_index(request: IndexRequest) -> IndexEstimate:
             total_tokens=est_tokens,
         )
 
-    # Time estimate (rough): token throughput + small overhead.
+    semantic_kg_cost: float | None = None
+    if semantic_kg_llm_enabled:
+        semantic_kg_cost = _estimate_semantic_kg_cost_usd(
+            provider_hint=semantic_provider_hint,
+            model=semantic_model,
+            chunks_in_scope=semantic_kg_chunks,
+            enrich_max_chars=int(cfg.enrichment.enrich_max_chars or 1000),
+        )
+
+    total_cost: float | None
+    if semantic_kg_llm_enabled:
+        total_cost = None if embedding_cost is None or semantic_kg_cost is None else float(embedding_cost) + float(semantic_kg_cost)
+    else:
+        total_cost = embedding_cost
+
+    # Time estimate (rough): embedding throughput + optional semantic KG extraction phase + overhead.
     est_low: float | None = None
     est_high: float | None = None
+    estimated_seconds_semantic_kg: float | None = None
     assumptions: list[str] = [
         f"tokens≈bytes/{_EST_BYTES_PER_TOKEN:g}",
         "time range is a heuristic (very rough)",
@@ -2050,17 +2347,49 @@ async def estimate_index(request: IndexRequest) -> IndexEstimate:
     if skipped_large_files > 0:
         assumptions.append(f"skips files > {max_indexable_bytes} bytes")
 
-    if embedding_backend != "provider":
+    if skip_dense:
+        tps = _EST_TOKENS_PER_SECOND_DETERMINISTIC
+        assumptions.append("skip_dense=1 → dense embedding phase skipped")
+    elif embedding_backend != "provider":
         tps = _EST_TOKENS_PER_SECOND_DETERMINISTIC
         assumptions.append("embedding_backend=deterministic → $0 external cost")
     else:
-        tps = _EST_TOKENS_PER_SECOND_CLOUD if _looks_cloud_provider(embedding_provider) else _EST_TOKENS_PER_SECOND_LOCAL
-        assumptions.append(f"tokens/sec≈{tps:,}")
+        if _looks_cloud_provider(embedding_provider):
+            tps = _EST_TOKENS_PER_SECOND_CLOUD
+            assumptions.append(f"embedding tokens/sec≈{tps:,} (cloud heuristic)")
+        else:
+            tps = _estimate_local_tokens_per_second(cfg=cfg, provider=embedding_provider)
+            override_tps = getattr(cfg.indexing, "estimated_tokens_per_second_local", None)
+            if override_tps is not None and int(override_tps or 0) > 0:
+                assumptions.append(f"embedding tokens/sec≈{tps:,} (indexing.estimated_tokens_per_second_local override)")
+            else:
+                assumptions.append(
+                    f"embedding tokens/sec≈{tps:,} (local hardware={_detect_local_hardware_class()} provider={embedding_provider or 'local'})"
+                )
 
     if est_tokens > 0 and tps > 0:
-        base = float(est_tokens) / float(tps)
-        est_low = max(0.0, (base * _EST_RANGE_LOW_MULT) + float(_EST_OVERHEAD_SECONDS))
-        est_high = max(est_low, (base * _EST_RANGE_HIGH_MULT) + float(_EST_OVERHEAD_SECONDS) * 2.0)
+        base_embedding_seconds = float(est_tokens) / float(tps)
+        base_total_seconds = base_embedding_seconds
+        if semantic_kg_llm_enabled and semantic_kg_chunks > 0:
+            semantic_provider_for_time = semantic_provider_hint
+            resolved_semantic_spec = _find_model_spec(
+                _load_models_json(),
+                provider=semantic_provider_hint,
+                model=semantic_model,
+            )
+            if resolved_semantic_spec is not None:
+                semantic_provider_for_time = str(resolved_semantic_spec.get("provider") or semantic_provider_for_time)
+            estimated_seconds_semantic_kg = _estimate_semantic_kg_seconds(
+                provider=semantic_provider_for_time,
+                chunks_in_scope=semantic_kg_chunks,
+                indexing_workers=int(getattr(cfg.indexing, "indexing_workers", 1) or 1),
+            )
+            base_total_seconds += float(estimated_seconds_semantic_kg)
+            assumptions.append(
+                f"semantic_kg_llm≈{semantic_kg_chunks:,} chunks using {semantic_provider_for_time or 'unknown'}"
+            )
+        est_low = max(0.0, (base_total_seconds * _EST_RANGE_LOW_MULT) + float(_EST_OVERHEAD_SECONDS))
+        est_high = max(est_low, (base_total_seconds * _EST_RANGE_HIGH_MULT) + float(_EST_OVERHEAD_SECONDS) * 2.0)
 
     return IndexEstimate(
         repo_id=repo_id,
@@ -2075,8 +2404,11 @@ async def estimate_index(request: IndexRequest) -> IndexEstimate:
         embedding_model=embedding_model,
         skip_dense=bool(skip_dense),
         embedding_cost_usd=embedding_cost,
+        semantic_kg_cost_usd=semantic_kg_cost,
+        total_cost_usd=total_cost,
         estimated_seconds_low=est_low,
         estimated_seconds_high=est_high,
+        estimated_seconds_semantic_kg=estimated_seconds_semantic_kg,
         assumptions=assumptions,
     )
 
@@ -2195,23 +2527,46 @@ async def get_dashboard_index_status(scope: CorpusScope = _CORPUS_SCOPE_DEP) -> 
     embedding_model = cfg.embedding.effective_model
     embedding_provider = cfg.embedding.embedding_type
     embedding_dim = int(cfg.embedding.embedding_dim)
+    skip_dense = bool(int(getattr(cfg.indexing, "skip_dense", 0) or 0) == 1)
+    embedding_backend = str(getattr(cfg.embedding, "embedding_backend", "deterministic") or "deterministic").strip()
     total_tokens = 0
+    total_chunks = 0
     try:
         pg2 = PostgresClient(cfg.indexing.postgres_url)
         await pg2.connect()
         try:
             stats = await pg2.get_index_stats(repo_id)
+            total_chunks = int(stats.total_chunks or 0)
             total_tokens = int(stats.total_tokens or 0)
         finally:
             await pg2.disconnect()
     except Exception:
+        total_chunks = 0
         total_tokens = 0
 
-    embedding_cost = _estimate_embedding_cost_usd(
-        provider=embedding_provider,
-        model=embedding_model,
-        total_tokens=total_tokens,
-    )
+    if skip_dense or embedding_backend != "provider":
+        embedding_cost = 0.0
+    else:
+        embedding_cost = _estimate_embedding_cost_usd(
+            provider=embedding_provider,
+            model=embedding_model,
+            total_tokens=total_tokens,
+        )
+
+    semantic_kg_cost: float | None = None
+    total_cost: float | None = embedding_cost
+    semantic_kg_enabled = bool(cfg.graph_indexing.semantic_kg_enabled)
+    semantic_kg_mode = str(cfg.graph_indexing.semantic_kg_mode or "heuristic").strip().lower()
+    if semantic_kg_enabled and semantic_kg_mode == "llm":
+        semantic_model, semantic_provider_hint = _resolve_semantic_kg_model_and_provider(cfg)
+        semantic_chunks = min(total_chunks, max(0, int(cfg.graph_indexing.semantic_kg_max_chunks or 0)))
+        semantic_kg_cost = _estimate_semantic_kg_cost_usd(
+            provider_hint=semantic_provider_hint,
+            model=semantic_model,
+            chunks_in_scope=semantic_chunks,
+            enrich_max_chars=int(cfg.enrichment.enrich_max_chars or 1000),
+        )
+        total_cost = None if embedding_cost is None or semantic_kg_cost is None else float(embedding_cost) + float(semantic_kg_cost)
 
     storage_breakdown = await _compute_dashboard_storage_breakdown(repo_id=repo_id)
 
@@ -2226,7 +2581,12 @@ async def get_dashboard_index_status(scope: CorpusScope = _CORPUS_SCOPE_DEP) -> 
             dimensions=embedding_dim,
             precision="float32",
         ),
-        costs=DashboardIndexCosts(total_tokens=total_tokens, embedding_cost=embedding_cost),
+        costs=DashboardIndexCosts(
+            total_tokens=total_tokens,
+            embedding_cost=embedding_cost,
+            semantic_kg_cost=semantic_kg_cost,
+            total_cost=total_cost,
+        ),
         storage_breakdown=storage_breakdown,
         keywords_count=keywords_count,
         total_storage=int(storage_breakdown.total_storage_bytes),
@@ -2289,7 +2649,7 @@ async def get_latest_index_run(corpus_id: str) -> IndexRunSummary:
     run = _load_latest_run_summary(repo_id)
     if run is None:
         raise HTTPException(status_code=404, detail=f"No persisted index runs found for repo_id={repo_id}")
-    return run
+    return _coerce_stale_indexing_run_to_error(repo_id, run)
 
 
 @router.get("/index/{corpus_id}/runs/{run_id}/events", response_model=list[IndexRunEvent])
@@ -2311,6 +2671,7 @@ async def get_index_status(corpus_id: str) -> IndexStatus:
         return _STATUS[repo_id]
     persisted_run = _load_latest_run_summary(repo_id)
     if persisted_run is not None:
+        persisted_run = _coerce_stale_indexing_run_to_error(repo_id, persisted_run)
         return IndexStatus(
             repo_id=repo_id,
             status=persisted_run.status,

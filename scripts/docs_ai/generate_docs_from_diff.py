@@ -109,6 +109,15 @@ def run(cmd: str, *, check: bool = True) -> str:
     return p.stdout
 
 
+def _gh_error(msg: str) -> None:
+    """Emit GitHub Actions error annotation (visible in Actions UI)."""
+    # GitHub truncates long annotations; keep first line concise
+    first = msg.split("\n")[0][:200]
+    print(f"::error::docs-autopilot: {first}", flush=True)
+    if len(msg) > len(first):
+        print(msg, flush=True)
+
+
 def _read_text(path: Path) -> str:
     try:
         return path.read_text(encoding="utf-8")
@@ -649,30 +658,29 @@ def _apply_cursor_style_patch(patch_text: str) -> List[str]:
     return touched
 
 
-def apply_patch(patch_path: Path) -> bool:
-    """Apply patch. Returns True if applied, False if failed (workflow can continue)."""
+def apply_patch(patch_path: Path) -> tuple[bool, str]:
+    """Apply patch. Returns (success, error_message)."""
     patch_text = _read_text(patch_path)
     if (patch_text or "").lstrip().startswith("*** Begin Patch"):
         try:
             _apply_cursor_style_patch(patch_text)
-            return True
+            return True, ""
         except Exception as e:
-            print(f"Cursor-style patch apply failed: {e}")
-            return False
+            return False, str(e)
 
     try:
         run(f"git apply --index {shlex.quote(str(patch_path))}")
-        return True
+        return True, ""
     except RuntimeError as e:
-        print(f"git apply failed: {e}")
+        err = str(e)
         # Try Cursor-style as fallback if patch looks like it might be that format
         if "*** Begin Patch" in (patch_text or ""):
             try:
                 _apply_cursor_style_patch(patch_text)
-                return True
-            except Exception:
-                pass
-        return False
+                return True, ""
+            except Exception as fallback_e:
+                return False, f"git apply: {err}\nCursor fallback: {fallback_e}"
+        return False, err
 
 
 def main() -> None:
@@ -688,8 +696,10 @@ def main() -> None:
         patch_path = Path(args.apply_patch)
         if not patch_path.is_absolute():
             patch_path = ROOT / patch_path
-        if not apply_patch(patch_path):
-            raise RuntimeError("Patch apply failed.")
+        ok, err = apply_patch(patch_path)
+        if not ok:
+            _gh_error(f"Patch apply failed: {err}")
+            raise SystemExit(1)
         print("Patch applied to index.")
         return
 
@@ -718,10 +728,12 @@ def main() -> None:
     print(f"LLM patch saved: {PATCH_FILE.relative_to(ROOT)}")
 
     if args.apply:
-        if apply_patch(PATCH_FILE):
-            print("Patch applied to index.")
-        else:
-            print("WARNING: Patch apply failed (corrupt or incompatible). Config reference will still run.")
+        ok, err = apply_patch(PATCH_FILE)
+        if not ok:
+            _gh_error("Docs autopilot: LLM patch could not be applied (corrupt or incompatible).")
+            _gh_error(f"Details: {err}")
+            raise SystemExit(1)
+        print("Patch applied to index.")
 
 
 if __name__ == "__main__":

@@ -361,6 +361,10 @@ export interface DashboardIndexCosts {
   total_tokens?: number; // default: 0
   /** Estimated embedding cost (USD) when pricing data is available. */
   embedding_cost?: number | null; // default: None
+  /** Estimated semantic KG extraction cost (USD) when semantic_kg_mode='llm'. */
+  semantic_kg_cost?: number | null; // default: None
+  /** Estimated total indexing cost (USD): embedding + semantic KG (when applicable). */
+  total_cost?: number | null; // default: None
 }
 
 /** Metadata payload for the dashboard index status panel. */
@@ -932,6 +936,8 @@ export interface IndexingConfig {
   parquet_extract_include_column_names?: number; // default: 1
   /** Skip dense vector indexing */
   skip_dense?: number; // default: 0
+  /** Optional local embedding throughput override for index-time estimates (tokens/sec). */
+  estimated_tokens_per_second_local?: number | null; // default: None
 }
 
 /** Discriminative keywords configuration. */
@@ -2391,7 +2397,7 @@ export interface HealthStatus {
   services?: Record<string, HealthServiceStatus>;
 }
 
-/** Best-effort estimate for indexing cost/time before running the indexer.  Notes: - Token count is an approximation (byte-based heuristic). - Time is an intentionally rough range (depends on machine, provider latency, DB speed, etc.). */
+/** Best-effort estimate for indexing cost/time before running the indexer.  Notes: - Token count is an approximation (byte-based heuristic). - Time is an intentionally rough range (depends on machine, provider latency,   semantic KG mode, and local hardware throughput). */
 export interface IndexEstimate {
   /** Corpus identifier */
   corpus_id: string;
@@ -2417,10 +2423,16 @@ export interface IndexEstimate {
   skip_dense: boolean;
   /** Estimated embedding cost (USD) when pricing data is available (0 for local/deterministic). */
   embedding_cost_usd?: number | null;
+  /** Estimated semantic KG extraction cost (USD) when semantic_kg_mode='llm' and pricing is available. */
+  semantic_kg_cost_usd?: number | null;
+  /** Estimated total indexing cost (USD): embedding + semantic KG (when applicable). */
+  total_cost_usd?: number | null;
   /** Very rough low-end estimate for total indexing time (seconds) */
   estimated_seconds_low?: number | null;
   /** Very rough high-end estimate for total indexing time (seconds) */
   estimated_seconds_high?: number | null;
+  /** Estimated semantic KG phase time (seconds) when semantic_kg_mode='llm'. */
+  estimated_seconds_semantic_kg?: number | null;
   /** Human-readable assumptions used for the estimate */
   assumptions?: string[];
 }

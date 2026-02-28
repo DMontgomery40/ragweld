@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { CostService, type CostEstimateLocal, type CostEstimatePipelineRequest, type CostEstimatePipelineResponse, type CostEstimateRequest, type CostModelType } from '@/services/CostService';
+import { CostService, type CostEstimateLocal, type CostEstimatePipelineRequest, type CostEstimatePipelineResponse, type CostEstimateRequest, type CostIndexingEstimate, type CostModelType } from '@/services/CostService';
+import type { IndexRequest } from '@/types/generated';
+
+type CatalogCostModelType = Exclude<CostModelType, 'indexing'>;
  
 type UseCostState = {
   providers: string[];
@@ -26,6 +29,7 @@ export function useCost() {
   const [estimateError, setEstimateError] = useState<string | null>(null);
   const [lastLocalEstimate, setLastLocalEstimate] = useState<CostEstimateLocal | null>(null);
   const [lastApiEstimate, setLastApiEstimate] = useState<CostEstimatePipelineResponse | null>(null);
+  const [lastIndexingEstimate, setLastIndexingEstimate] = useState<CostIndexingEstimate | null>(null);
  
   const refreshCatalog = useCallback(async () => {
     setState((s) => ({ ...s, loadingCatalog: true, catalogError: null }));
@@ -48,7 +52,7 @@ export function useCost() {
   }, [refreshCatalog]);
  
   const listModels = useCallback(
-    async (provider: string, modelType: CostModelType | null = null) => {
+    async (provider: string, modelType: CatalogCostModelType | null = null) => {
       return await service.listModels(provider, modelType);
     },
     [service]
@@ -91,6 +95,25 @@ export function useCost() {
     },
     [service]
   );
+
+  const estimateIndexing = useCallback(
+    async (payload: IndexRequest): Promise<CostIndexingEstimate> => {
+      setEstimating(true);
+      setEstimateError(null);
+      try {
+        const out = await service.estimateIndexing(payload);
+        setLastIndexingEstimate(out);
+        return out;
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : 'Indexing estimate failed';
+        setEstimateError(msg);
+        throw e;
+      } finally {
+        setEstimating(false);
+      }
+    },
+    [service]
+  );
  
   return {
     // catalog
@@ -106,8 +129,9 @@ export function useCost() {
     estimateError,
     lastLocalEstimate,
     lastApiEstimate,
+    lastIndexingEstimate,
     estimateLocal,
     estimateViaApi,
+    estimateIndexing,
   };
 }
-

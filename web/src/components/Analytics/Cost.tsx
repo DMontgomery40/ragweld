@@ -8,6 +8,8 @@ interface CostData {
     llm: number;
     reranker: number;
     storage: number;
+    indexing?: number;
+    [key: string]: number | undefined;
   };
   daily: Array<{ date: string; cost: number }>;
   detailed: Array<{
@@ -77,7 +79,17 @@ export function Cost() {
     );
   }
 
-  const totalCost = Object.values(costData.breakdown).reduce((sum, val) => sum + val, 0);
+  const totalCost = Object.values(costData.breakdown).reduce<number>(
+    (sum, val) => sum + (typeof val === 'number' ? val : 0),
+    0
+  );
+  const breakdownCards = [
+    { key: 'embeddings', label: 'Embeddings' },
+    { key: 'llm', label: 'LLM' },
+    { key: 'reranker', label: 'Reranker' },
+    { key: 'storage', label: 'Storage' },
+    ...(costData.breakdown.indexing != null ? [{ key: 'indexing', label: 'Indexing' }] : []),
+  ];
 
   return (
     <div className="cost-container">
@@ -130,34 +142,17 @@ export function Cost() {
       <div className="breakdown-section">
         <h3>Cost Breakdown</h3>
         <div className="breakdown-grid">
-          <div className="breakdown-card">
-            <div className="breakdown-label">Embeddings</div>
-            <div className="breakdown-value">${costData.breakdown.embeddings.toFixed(2)}</div>
-            <div className="breakdown-percent">
-              {((costData.breakdown.embeddings / totalCost) * 100).toFixed(1)}%
-            </div>
-          </div>
-          <div className="breakdown-card">
-            <div className="breakdown-label">LLM</div>
-            <div className="breakdown-value">${costData.breakdown.llm.toFixed(2)}</div>
-            <div className="breakdown-percent">
-              {((costData.breakdown.llm / totalCost) * 100).toFixed(1)}%
-            </div>
-          </div>
-          <div className="breakdown-card">
-            <div className="breakdown-label">Reranker</div>
-            <div className="breakdown-value">${costData.breakdown.reranker.toFixed(2)}</div>
-            <div className="breakdown-percent">
-              {((costData.breakdown.reranker / totalCost) * 100).toFixed(1)}%
-            </div>
-          </div>
-          <div className="breakdown-card">
-            <div className="breakdown-label">Storage</div>
-            <div className="breakdown-value">${costData.breakdown.storage.toFixed(2)}</div>
-            <div className="breakdown-percent">
-              {((costData.breakdown.storage / totalCost) * 100).toFixed(1)}%
-            </div>
-          </div>
+          {breakdownCards.map((card) => {
+            const value = Number(costData.breakdown[card.key] || 0);
+            const pct = totalCost > 0 ? ((value / totalCost) * 100).toFixed(1) : '0.0';
+            return (
+              <div key={card.key} className="breakdown-card">
+                <div className="breakdown-label">{card.label}</div>
+                <div className="breakdown-value">${value.toFixed(2)}</div>
+                <div className="breakdown-percent">{pct}%</div>
+              </div>
+            );
+          })}
         </div>
       </div>
 

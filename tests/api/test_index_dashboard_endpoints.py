@@ -73,8 +73,13 @@ async def test_dashboard_index_status_and_stats_return_storage_breakdown(
             return 60
 
     async def _fake_load_scoped_config(*, repo_id: str | None = None) -> TriBridConfig:
-        # Use defaults, but ensure embedding provider/model match the pricing mock below.
-        return TriBridConfig()
+        # Use provider embeddings so dashboard cost reflects external EMB pricing.
+        cfg = TriBridConfig()
+        cfg.embedding.embedding_backend = "provider"
+        cfg.embedding.embedding_type = "openai"
+        cfg.embedding.embedding_model = "text-embedding-3-large"
+        cfg.indexing.skip_dense = 0
+        return cfg
 
     # Pricing fixture: $0.10 per 1k tokens for embedding model
     monkeypatch.setattr(
