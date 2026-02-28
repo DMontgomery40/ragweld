@@ -2542,6 +2542,7 @@ async def get_dashboard_index_status(scope: CorpusScope = _CORPUS_SCOPE_DEP) -> 
         total_chunks = 0
         total_tokens = 0
 
+    embedding_cost: float | None
     if skip_dense or embedding_backend != "provider":
         embedding_cost = 0.0
     else:
@@ -2549,7 +2550,7 @@ async def get_dashboard_index_status(scope: CorpusScope = _CORPUS_SCOPE_DEP) -> 
             provider=embedding_provider,
             model=embedding_model,
             total_tokens=total_tokens,
-        ) or 0.0
+        )
 
     semantic_kg_cost: float | None = None
     total_cost: float | None = embedding_cost
