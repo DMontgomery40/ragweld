@@ -377,6 +377,17 @@ def main() -> None:
             PromptMetadata,
             PromptUpdateRequest,
             PromptUpdateResponse,
+            # Domain models - Synthetic Lab
+            SyntheticRunStartRequest,
+            SyntheticArtifactRef,
+            SyntheticRunSummary,
+            SyntheticRun,
+            SyntheticRunMeta,
+            SyntheticRunsResponse,
+            SyntheticRunEvent,
+            SyntheticPublishResponse,
+            SyntheticConfigPatchResponse,
+            SyntheticArtifactPreviewResponse,
         )
     except ImportError as e:
         print(f"ERROR: Could not import models: {e}")
@@ -505,6 +516,16 @@ def main() -> None:
         PromptMetadata,
         PromptUpdateRequest,
         PromptUpdateResponse,
+        SyntheticRunStartRequest,
+        SyntheticArtifactRef,
+        SyntheticRunSummary,
+        SyntheticRun,
+        SyntheticRunMeta,
+        SyntheticRunsResponse,
+        SyntheticRunEvent,
+        SyntheticPublishResponse,
+        SyntheticConfigPatchResponse,
+        SyntheticArtifactPreviewResponse,
     ]
 
     print(f"Processing {len(all_models)} models...")

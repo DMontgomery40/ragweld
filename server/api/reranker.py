@@ -1664,7 +1664,7 @@ async def get_train_profile(corpus_id: str = Query(..., description="Corpus iden
     default_k = min(int(cfg.reranking.tribrid_reranker_topn), 10)
     default_k = max(1, default_k)
 
-    dataset = _load_dataset(corpus_id)
+    dataset = _load_dataset(corpus_id=corpus_id)
     if not dataset:
         raise HTTPException(status_code=404, detail=f"No eval_dataset entries found for corpus_id={corpus_id}")
 
@@ -1739,7 +1739,7 @@ async def start_train_run(request: RerankerTrainStartRequest) -> RerankerTrainSt
     default_k = min(int(cfg.reranking.tribrid_reranker_topn), 10)
     default_k = max(1, default_k)
 
-    dataset = _load_dataset(corpus_id)
+    dataset = _load_dataset(corpus_id=corpus_id)
     if dataset:
         eval_rows: list[dict[str, Any]] = []
         for entry in dataset:

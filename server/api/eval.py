@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import math
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime
 from pathlib import Path
 from time import perf_counter
 from typing import Any
@@ -15,6 +16,7 @@ from server.chat.generation import generate_chat_text
 from server.chat.provider_router import select_provider_route
 from server.models.eval import (
     EvalAnalyzeComparisonResponse,
+    EvalDatasetItem,
     EvalDoc,
     EvalMetrics,
     EvalRequest,
@@ -90,6 +92,11 @@ def _dedupe_preserve_order(items: list[str]) -> list[str]:
     return out
 
 
+def _vector_leg_enabled(cfg: Any) -> bool:
+    # Respect corpus-level skip_dense so eval can run without dense embeddings.
+    return int(getattr(getattr(cfg, "indexing", None), "skip_dense", 0) or 0) != 1
+
+
 def _recall_at_k(expected: list[str], retrieved: list[str], k: int) -> float:
     if not expected:
         return 0.0
@@ -148,15 +155,22 @@ def _save_run(run: EvalRun) -> None:
     path.write_text(json.dumps(run.model_dump(mode="json"), indent=2, sort_keys=True), encoding="utf-8")
 
 
-@router.post("/eval/run", response_model=EvalRun)
-async def run_evaluation(request: EvalRequest) -> EvalRun:
-    repo_id = request.repo_id
-    dataset = _load_dataset(repo_id)
+async def evaluate_dataset_entries(
+    *,
+    repo_id: str,
+    dataset: list[EvalDatasetItem],
+    sample_size: int | None = None,
+    dataset_id: str = "default",
+    persist_run: bool = False,
+    include_vector: bool = True,
+    include_sparse: bool = True,
+    include_graph: bool = True,
+) -> EvalRun:
     if not dataset:
-        raise HTTPException(status_code=404, detail=f"No eval_dataset entries found for repo_id={repo_id}")
+        raise ValueError(f"No eval_dataset entries found for repo_id={repo_id}")
 
     # Deterministic sampling (first N)
-    entries = dataset[: int(request.sample_size)] if request.sample_size else dataset
+    entries = dataset[: int(sample_size)] if sample_size else dataset
 
     cfg = await load_scoped_config(repo_id=repo_id)
     fusion = TriBridFusion(vector=None, sparse=None, graph=None)
@@ -180,9 +194,6 @@ async def run_evaluation(request: EvalRequest) -> EvalRun:
     latencies: list[float] = []
 
     results: list[EvalResult] = []
-
-    from datetime import UTC, datetime
-
     started_at = datetime.now(UTC)
 
     for entry in entries:
@@ -191,9 +202,9 @@ async def run_evaluation(request: EvalRequest) -> EvalRun:
             [repo_id],
             entry.question,
             cfg.fusion,
-            include_vector=True,
-            include_sparse=True,
-            include_graph=True,
+            include_vector=bool(include_vector and _vector_leg_enabled(cfg)),
+            include_sparse=bool(include_sparse),
+            include_graph=bool(include_graph),
             top_k=eval_k,
         )
         latency_ms = (perf_counter() - t0) * 1000.0
@@ -278,7 +289,7 @@ async def run_evaluation(request: EvalRequest) -> EvalRun:
     run = EvalRun(
         run_id=run_id,
         repo_id=repo_id,
-        dataset_id=request.dataset_id or "default",
+        dataset_id=dataset_id,
         config_snapshot=cfg.model_dump(mode="json"),
         config=cfg.to_flat_dict(),
         total=total,
@@ -294,8 +305,25 @@ async def run_evaluation(request: EvalRequest) -> EvalRun:
         started_at=started_at,
         completed_at=completed_at,
     )
-    _save_run(run)
+    if persist_run:
+        _save_run(run)
     return run
+
+
+@router.post("/eval/run", response_model=EvalRun)
+async def run_evaluation(request: EvalRequest) -> EvalRun:
+    repo_id = request.repo_id
+    dataset = _load_dataset(corpus_id=repo_id)
+    try:
+        return await evaluate_dataset_entries(
+            repo_id=repo_id,
+            dataset=dataset,
+            sample_size=request.sample_size,
+            dataset_id=request.dataset_id or "default",
+            persist_run=True,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
 
 
 @router.post("/eval/test", response_model=EvalResult)
@@ -319,7 +347,7 @@ async def test_eval_entry(request: EvalTestRequest) -> EvalResult:
         [repo_id],
         request.question,
         cfg.fusion,
-        include_vector=True,
+        include_vector=_vector_leg_enabled(cfg),
         include_sparse=True,
         include_graph=True,
         top_k=eval_k,
@@ -439,7 +467,7 @@ async def eval_run_stream(
             run_final_k = int(final_k) if final_k is not None else int(cfg.retrieval.eval_final_k)
             run_final_k = max(1, run_final_k)
 
-            dataset = _load_dataset(repo_id)
+            dataset = _load_dataset(corpus_id=repo_id)
             if not dataset:
                 msg = f"No eval_dataset entries found for repo_id={repo_id}"
                 _EVAL_STATUS["error"] = msg
@@ -502,7 +530,7 @@ async def eval_run_stream(
                     [repo_id],
                     entry.question,
                     cfg.fusion,
-                    include_vector=True,
+                    include_vector=_vector_leg_enabled(cfg),
                     include_sparse=True,
                     include_graph=True,
                     top_k=eval_k,

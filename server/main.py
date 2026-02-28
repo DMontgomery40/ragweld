@@ -26,6 +26,7 @@ from server.api.prompts import router as prompts_router
 from server.api.repos import router as repos_router
 from server.api.reranker import router as reranker_router
 from server.api.search import router as search_router
+from server.api.synthetic import router as synthetic_router
 from server.config import load_config
 from server.mcp.server import get_mcp_server
 from server.observability.metrics import render_latest
@@ -147,3 +148,4 @@ app.include_router(docker_router, prefix="/api")
 app.include_router(models_router)  # Already has /api/models prefix
 app.include_router(reranker_router, prefix="/api")
 app.include_router(agent_router, prefix="/api")
+app.include_router(synthetic_router, prefix="/api")

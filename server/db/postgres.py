@@ -500,10 +500,30 @@ class PostgresClient:
               symbols JSONB NOT NULL DEFAULT '[]'::jsonb,
               technical_details TEXT,
               domain_concepts JSONB NOT NULL DEFAULT '[]'::jsonb,
+              routes JSONB NOT NULL DEFAULT '[]'::jsonb,
+              dependencies JSONB NOT NULL DEFAULT '[]'::jsonb,
+              patterns JSONB NOT NULL DEFAULT '[]'::jsonb,
+              card_source TEXT NOT NULL DEFAULT 'deterministic',
+              card_score DOUBLE PRECISION,
               created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
               PRIMARY KEY (repo_id, chunk_id)
             );
             """
+        )
+        await conn.execute(
+            "ALTER TABLE chunk_summaries ADD COLUMN IF NOT EXISTS routes JSONB NOT NULL DEFAULT '[]'::jsonb;"
+        )
+        await conn.execute(
+            "ALTER TABLE chunk_summaries ADD COLUMN IF NOT EXISTS dependencies JSONB NOT NULL DEFAULT '[]'::jsonb;"
+        )
+        await conn.execute(
+            "ALTER TABLE chunk_summaries ADD COLUMN IF NOT EXISTS patterns JSONB NOT NULL DEFAULT '[]'::jsonb;"
+        )
+        await conn.execute(
+            "ALTER TABLE chunk_summaries ADD COLUMN IF NOT EXISTS card_source TEXT NOT NULL DEFAULT 'deterministic';"
+        )
+        await conn.execute(
+            "ALTER TABLE chunk_summaries ADD COLUMN IF NOT EXISTS card_score DOUBLE PRECISION;"
         )
         await conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_chunk_summaries_repo_file ON chunk_summaries (repo_id, file_path, start_line);"
@@ -2042,7 +2062,8 @@ class PostgresClient:
                 rows = await conn.fetch(
                     """
                     SELECT chunk_id, file_path, start_line, end_line, purpose, symbols,
-                           technical_details, domain_concepts
+                           technical_details, domain_concepts, routes, dependencies, patterns,
+                           card_source, card_score
                     FROM chunk_summaries
                     WHERE repo_id = $1
                     ORDER BY file_path ASC, start_line ASC, chunk_id ASC;
@@ -2053,7 +2074,8 @@ class PostgresClient:
                 rows = await conn.fetch(
                     """
                     SELECT chunk_id, file_path, start_line, end_line, purpose, symbols,
-                           technical_details, domain_concepts
+                           technical_details, domain_concepts, routes, dependencies, patterns,
+                           card_source, card_score
                     FROM chunk_summaries
                     WHERE repo_id = $1
                     ORDER BY file_path ASC, start_line ASC, chunk_id ASC
@@ -2077,6 +2099,24 @@ class PostgresClient:
                     domain_concepts = json.loads(domain_concepts)
                 except Exception:
                     domain_concepts = []
+            routes = r.get("routes") or []
+            if isinstance(routes, str):
+                try:
+                    routes = json.loads(routes)
+                except Exception:
+                    routes = []
+            dependencies = r.get("dependencies") or []
+            if isinstance(dependencies, str):
+                try:
+                    dependencies = json.loads(dependencies)
+                except Exception:
+                    dependencies = []
+            patterns = r.get("patterns") or []
+            if isinstance(patterns, str):
+                try:
+                    patterns = json.loads(patterns)
+                except Exception:
+                    patterns = []
             out.append(
                 ChunkSummary(
                     chunk_id=str(r["chunk_id"]),
@@ -2087,6 +2127,15 @@ class PostgresClient:
                     symbols=[str(x) for x in symbols] if isinstance(symbols, list) else [],
                     technical_details=str(r["technical_details"]) if r["technical_details"] is not None else None,
                     domain_concepts=[str(x) for x in domain_concepts] if isinstance(domain_concepts, list) else [],
+                    routes=[str(x) for x in routes] if isinstance(routes, list) else [],
+                    dependencies=[str(x) for x in dependencies] if isinstance(dependencies, list) else [],
+                    patterns=[str(x) for x in patterns] if isinstance(patterns, list) else [],
+                    card_source=(
+                        "llm"
+                        if str(r.get("card_source") or "").strip().lower() == "llm"
+                        else "deterministic"
+                    ),
+                    card_score=(float(r["card_score"]) if r.get("card_score") is not None else None),
                 )
             )
         return out
@@ -2127,9 +2176,10 @@ class PostgresClient:
                         """
                         INSERT INTO chunk_summaries (
                           repo_id, chunk_id, file_path, start_line, end_line,
-                          purpose, symbols, technical_details, domain_concepts
+                          purpose, symbols, technical_details, domain_concepts,
+                          routes, dependencies, patterns, card_source, card_score
                         )
-                        VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9::jsonb);
+                        VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9::jsonb,$10::jsonb,$11::jsonb,$12::jsonb,$13,$14);
                         """,
                         [
                             (
@@ -2142,6 +2192,15 @@ class PostgresClient:
                                 json.dumps(list(s.symbols or [])),
                                 s.technical_details,
                                 json.dumps(list(s.domain_concepts or [])),
+                                json.dumps(list(s.routes or [])),
+                                json.dumps(list(s.dependencies or [])),
+                                json.dumps(list(s.patterns or [])),
+                                str(getattr(s, "card_source", "deterministic") or "deterministic"),
+                                (
+                                    float(s.card_score)
+                                    if s.card_score is not None
+                                    else None
+                                ),
                             )
                             for s in summaries
                         ],

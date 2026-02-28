@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { DockviewReact, type DockviewApi, type DockviewReadyEvent, type IDockviewPanelProps } from 'dockview';
 import { Group, Panel, Separator } from 'react-resizable-panels';
 import { useVirtualizer } from '@tanstack/react-virtual';
+import { useNavigate } from 'react-router-dom';
 import 'dockview/dist/styles/dockview.css';
 
 import { apiClient, api } from '@/api/client';
@@ -10,7 +11,14 @@ import { useConfigStore } from '@/stores/useConfigStore';
 import { useActiveRepo } from '@/stores/useRepoStore';
 import { useConfigField, useNotification } from '@/hooks';
 import { agentTrainingService, type AgentTrainRunsScope } from '@/services/AgentTrainingService';
-import type { AgentTrainMetricEvent, AgentTrainRun, AgentTrainRunMeta, AgentTrainStartRequest, ChatRequest, ChatResponse } from '@/types/generated';
+import type {
+  AgentTrainMetricEvent,
+  AgentTrainRun,
+  AgentTrainRunMeta,
+  AgentTrainStartRequest,
+  ChatRequest,
+  ChatResponse,
+} from '@/types/generated';
 
 import { NeuralVisualizer, type TelemetryPoint } from '@/components/RerankerTraining/NeuralVisualizer';
 import { GradientDescentViz } from '@/components/RerankerTraining/GradientDescentViz';
@@ -21,6 +29,7 @@ import { RunOverview } from './RunOverview';
 type InspectorTab = 'run-hud' | 'live-metrics' | 'overview' | 'diff' | 'config' | 'debug-prompt';
 type BottomTab = 'timeline' | 'logs' | 'gradient';
 type LayoutPreset = 'balanced' | 'focus_viz' | 'focus_logs' | 'focus_inspector';
+type SyntheticRecipeKind = 'eval_dataset' | 'full_stack';
 
 type StudioDockRenderers = {
   runs: () => JSX.Element;
@@ -184,6 +193,7 @@ function downloadText(filename: string, text: string) {
 export function TrainingStudio() {
   const { success, error: notifyError, info } = useNotification();
   const activeCorpus = useActiveRepo();
+  const navigate = useNavigate();
   const config = useConfigStore((s) => s.config);
   const loadConfig = useConfigStore((s) => s.loadConfig);
 
@@ -210,6 +220,7 @@ export function TrainingStudio() {
   const [promoting, setPromoting] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [eventQuery, setEventQuery] = useState('');
+  const [syntheticRecipe, setSyntheticRecipe] = useState<SyntheticRecipeKind>('eval_dataset');
 
   const [logClearIso, setLogClearIso] = useState<string | null>(null);
 
@@ -541,6 +552,15 @@ export function TrainingStudio() {
       notifyError(e instanceof Error ? e.message : 'Failed to start run');
     }
   };
+
+  const openSyntheticLab = useCallback(() => {
+    const qs = new URLSearchParams();
+    qs.set('subtab', 'synthetic');
+    qs.set('synthetic_context', 'learning-agent');
+    qs.set('synthetic_recipe', syntheticRecipe);
+    qs.set('synthetic_autorun', '0');
+    navigate({ pathname: '/rag', search: `?${qs.toString()}` });
+  }, [navigate, syntheticRecipe]);
 
   const onCancel = async () => {
     if (!selectedRunId) return;
@@ -1162,6 +1182,25 @@ export function TrainingStudio() {
                     Training dataset path <TooltipIcon name="RAGWELD_AGENT_TRAIN_DATASET_PATH" />
                   </label>
                   <input type="text" value={ragweldDatasetPath} onChange={(e) => setRagweldDatasetPath(e.target.value)} />
+                </div>
+                <div className="studio-callout">
+                  <div style={{ fontWeight: 700, marginBottom: 8 }}>Synthetic Dataset Builder</div>
+                  <div className="studio-form-grid two">
+                    <div className="input-group">
+                      <label>Recipe</label>
+                      <select value={syntheticRecipe} onChange={(e) => setSyntheticRecipe(e.target.value as SyntheticRecipeKind)}>
+                        <option value="eval_dataset">Eval dataset (trainable)</option>
+                        <option value="full_stack">Eval dataset + extras</option>
+                      </select>
+                    </div>
+                    <div className="input-group">
+                      <label>Execution</label>
+                      <input type="text" value="Run from Synthetic Lab (model selection required)" readOnly />
+                    </div>
+                  </div>
+                  <button className="small-button" onClick={openSyntheticLab} disabled={!activeCorpus}>
+                    Open Synthetic Lab
+                  </button>
                 </div>
               </div>
 

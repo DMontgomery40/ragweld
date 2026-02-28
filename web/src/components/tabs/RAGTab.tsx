@@ -10,6 +10,7 @@ import { RerankerConfigSubtab } from '@/components/RAG/RerankerConfigSubtab';
 import { LearningRankerSubtab } from '@/components/RAG/LearningRankerSubtab';
 import { LearningAgentSubtab } from '@/components/RAG/LearningAgentSubtab';
 import { IndexingSubtab } from '@/components/RAG/IndexingSubtab';
+import { SyntheticLabSubtab } from '@/components/RAG/SyntheticLabSubtab';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 
 export default function RAGTab() {
@@ -60,6 +61,12 @@ export default function RAGTab() {
       <div id="tab-rag-indexing" className={`rag-subtab-content ${activeSubtab === 'indexing' ? 'active' : ''}`}>
         <ErrorBoundary context="IndexingSubtab">
           <IndexingSubtab />
+        </ErrorBoundary>
+      </div>
+
+      <div id="tab-rag-synthetic" className={`rag-subtab-content ${activeSubtab === 'synthetic' ? 'active' : ''}`}>
+        <ErrorBoundary context="SyntheticLabSubtab">
+          <SyntheticLabSubtab />
         </ErrorBoundary>
       </div>
     </div>

@@ -10,6 +10,7 @@ import type {
 } from '@/types/generated';
 import { useActiveRepo } from '@/stores';
 import { RepoSelectorCompact } from '@/components/RAG/RepoSelector';
+import { SyntheticCallout } from '@/components/RAG/SyntheticCallout';
 import { TooltipIcon } from '@/components/ui/TooltipIcon';
 import { chunkSummariesApi, keywordsApi } from '@/api';
 
@@ -189,6 +190,8 @@ export function DataQualitySubtab() {
           Build and review <strong>chunk summaries</strong> and <strong>keywords</strong> for a corpus.
         </div>
       </div>
+
+      <SyntheticCallout context="data-quality" />
 
       {error && (
         <div

@@ -25,7 +25,7 @@ def _repo_root() -> Path:
 
 def _dataset_path(corpus_id: str) -> Path:
     root = _repo_root()
-    d = root / "data" / "eval_dataset"
+    d = root / "data" / "eval_datasets"
     d.mkdir(parents=True, exist_ok=True)
     return d / f"{corpus_id}.json"
 

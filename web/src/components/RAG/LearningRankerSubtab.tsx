@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { useConfigField } from '@/hooks';
+import { SyntheticCallout } from '@/components/RAG/SyntheticCallout';
 import { TrainingStudio } from '@/components/RerankerTraining/TrainingStudio';
 
 export function LearningRankerSubtab() {
@@ -24,6 +25,8 @@ export function LearningRankerSubtab() {
           {modeWarning}
         </div>
       ) : null}
+
+      <SyntheticCallout context="learning-ranker" />
 
       <TrainingStudio />
     </section>

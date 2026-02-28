@@ -4,6 +4,7 @@ import logging
 import math
 import re
 from collections import defaultdict
+from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from server.db.neo4j import Neo4jClient
@@ -29,6 +30,7 @@ from server.observability.metrics import (
 from server.retrieval.cache import CacheEndpoint, CacheMode, SemanticCacheService
 from server.retrieval.errors import EmbeddingContractMismatchError, SparseContractMismatchError
 from server.retrieval.rerank import Reranker
+from server.retrieval.scoring_boosts import apply_scoring_boosts
 from server.services.config_store import get_config as load_scoped_config
 
 if TYPE_CHECKING:
@@ -429,6 +431,21 @@ class TriBridFusion:
             stored_provider = str((corpus_meta or {}).get("embedding_provider") or "").strip().lower()
             stored_model = str((corpus_meta or {}).get("embedding_model") or "").strip()
             stored_dim = int((corpus_meta or {}).get("embedding_dimensions") or 0)
+            corpus_meta_payload = (corpus_meta or {}).get("meta")
+            if isinstance(corpus_meta_payload, dict):
+                corpus_keywords = corpus_meta_payload.get("keywords")
+                if isinstance(corpus_keywords, list):
+                    debug["fusion_corpus_keywords"] = [str(k) for k in corpus_keywords if str(k).strip()]
+                else:
+                    debug["fusion_corpus_keywords"] = []
+            else:
+                debug["fusion_corpus_keywords"] = []
+            last_indexed_raw = (corpus_meta or {}).get("last_indexed")
+            debug["fusion_corpus_last_indexed"] = (
+                last_indexed_raw.isoformat()
+                if isinstance(last_indexed_raw, datetime)
+                else str(last_indexed_raw or "")
+            )
             current_backend = str(cfg.embedding.embedding_backend or "").strip().lower() or "deterministic"
             current_provider = str(cfg.embedding.embedding_type or "").strip().lower()
             current_model = str(cfg.embedding.effective_model or "").strip()
@@ -1001,6 +1018,47 @@ class TriBridFusion:
             except Exception as e:
                 debug["postprocess_enabled"] = False
                 debug["postprocess_error"] = str(e)
+
+        if results:
+            score_cfg_corpus_id = str(rerank_config_corpus_id or (corpus_ids[0] if corpus_ids else "")).strip()
+            score_cfg = scoped_cfgs.get(score_cfg_corpus_id) or primary_cfg or TriBridConfig()
+            corpus_meta_by_id: dict[str, Any] = {}
+            for cid, cdbg in per_corpus_debug.items():
+                if not isinstance(cdbg, dict):
+                    continue
+                corpus_meta_by_id[str(cid)] = {
+                    "meta": {
+                        "keywords": list(cdbg.get("fusion_corpus_keywords") or []),
+                    },
+                    "last_indexed": cdbg.get("fusion_corpus_last_indexed"),
+                }
+
+            try:
+                with SEARCH_STAGE_LATENCY_SECONDS.labels(stage="scoring_boosts").time():
+                    results = apply_scoring_boosts(
+                        results,
+                        query=query,
+                        cfg=score_cfg,
+                        corpus_meta_by_id=corpus_meta_by_id,
+                    )
+                boosts_applied: list[dict[str, Any]] = []
+                for m in results[:100]:
+                    reasons = (m.metadata or {}).get("boosts_applied")
+                    if not isinstance(reasons, list):
+                        continue
+                    for reason in reasons:
+                        if isinstance(reason, dict):
+                            boosts_applied.append(
+                                {
+                                    "chunk_id": m.chunk_id,
+                                    "corpus_id": (m.metadata or {}).get("corpus_id"),
+                                    **reason,
+                                }
+                            )
+                debug["boosts_applied"] = boosts_applied
+            except Exception as e:
+                debug["boosts_applied"] = []
+                debug["boosts_error"] = str(e)
 
         final_results = results[:final_k] if final_k > 0 else []
         if cache_service is not None:

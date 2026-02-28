@@ -12,6 +12,7 @@ import { useAPI, useConfig, useConfigField, useEmbeddingModel, useEmbeddingStatu
 import { useRepoStore } from '@/stores/useRepoStore';
 import { LiveTerminal, type LiveTerminalHandle } from '@/components/LiveTerminal/LiveTerminal';
 import { RepositoryConfig } from '@/components/RAG/RepositoryConfig';
+import { SyntheticCallout } from '@/components/RAG/SyntheticCallout';
 import { ModelPicker } from '@/components/RAG/ModelPicker';
 import { PromptLink } from '@/components/ui/PromptLink';
 import { EmbeddingMismatchWarning } from '@/components/ui/EmbeddingMismatchWarning';
@@ -765,6 +766,8 @@ export function IndexingSubtab() {
           Configure embeddings, chunking, sparse tokenization, and graph build behavior. This is corpus-scoped.
         </p>
       </div>
+
+      <SyntheticCallout context="indexing" />
 
       {errorBanner && (
         <div

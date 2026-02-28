@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useConfigField, useModels } from '@/hooks';
 import { useReranker } from '@/hooks/useReranker';
+import { SyntheticCallout } from '@/components/RAG/SyntheticCallout';
 import { TooltipIcon } from '@/components/ui/TooltipIcon';
 import { ApiKeyStatus } from '@/components/ui/ApiKeyStatus';
 import { ModelPicker } from '@/components/RAG/ModelPicker';
@@ -134,6 +135,8 @@ export function RerankerConfigSubtab() {
           Configure reranking for TriBrid retrieval (learning or cloud).
         </div>
       </div>
+
+      <SyntheticCallout context="reranker-config" />
 
       <div
         style={{

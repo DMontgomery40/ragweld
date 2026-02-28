@@ -1,4 +1,5 @@
 import { TrainingStudio } from '@/components/AgentTraining/TrainingStudio';
+import { SyntheticCallout } from '@/components/RAG/SyntheticCallout';
 
 export function LearningAgentSubtab() {
   return (
@@ -10,8 +11,9 @@ export function LearningAgentSubtab() {
         </p>
       </header>
 
+      <SyntheticCallout context="learning-agent" />
+
       <TrainingStudio />
     </section>
   );
 }
-

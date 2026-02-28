@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef, type CSSProperties } from 're
 import { EmbeddingMismatchWarning } from '@/components/ui/EmbeddingMismatchWarning';
 import { LiveTerminal, type LiveTerminalHandle } from '@/components/LiveTerminal/LiveTerminal';
 import { IntentMatrixEditor } from '@/components/RAG/IntentMatrixEditor';
+import { SyntheticCallout } from '@/components/RAG/SyntheticCallout';
 import { ModelAssignments } from '@/components/RAG/ModelAssignments';
 import { ModelPicker } from '@/components/RAG/ModelPicker';
 import { PromptLink } from '@/components/ui/PromptLink';
@@ -425,6 +426,7 @@ export function RetrievalSubtab() {
       </div>
 
       <EmbeddingMismatchWarning variant="inline" showActions />
+      <SyntheticCallout context="retrieval" />
 
       {configError && (
         <div style={{ ...PANEL_STYLE, borderColor: 'var(--err)', marginBottom: 18 }}>

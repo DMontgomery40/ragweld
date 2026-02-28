@@ -110,6 +110,11 @@ def _summarize_chunk(chunk: Chunk, max_symbols: int, purpose_max_length: int, en
         symbols=uniq,
         technical_details=technical_details,
         domain_concepts=domain_concepts,
+        routes=[],
+        dependencies=[],
+        patterns=[],
+        card_source="deterministic",
+        card_score=None,
     )
 
 

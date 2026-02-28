@@ -95,10 +95,12 @@ export const useConfigStore = create<ConfigStore>((set) => {
         set({ saving: false, error: null });
       }
     } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to save configuration';
       set({
         saving: false,
-        error: error instanceof Error ? error.message : 'Failed to save configuration',
+        error: message,
       });
+      throw new Error(message);
     }
   };
 
@@ -113,7 +115,14 @@ export const useConfigStore = create<ConfigStore>((set) => {
     const pending = pendingByCorpus[corpusKey] || {};
     const sections = Object.keys(pending);
     if (sections.length === 0) return;
-    await Promise.all(sections.map((section) => flushSection(corpusKey, section)));
+    const results = await Promise.allSettled(sections.map((section) => flushSection(corpusKey, section)));
+    const failures = results
+      .filter((res): res is PromiseRejectedResult => res.status === 'rejected')
+      .map((res) => String(res.reason instanceof Error ? res.reason.message : res.reason || '').trim())
+      .filter(Boolean);
+    if (failures.length > 0) {
+      throw new Error(Array.from(new Set(failures)).join(' | '));
+    }
   };
 
   const patchSectionDebounced = (section: keyof TriBridConfig, updates: Record<string, unknown>) => {
@@ -138,7 +147,9 @@ export const useConfigStore = create<ConfigStore>((set) => {
     timersByCorpus[corpusKey] = timersByCorpus[corpusKey] || {};
     if (timersByCorpus[corpusKey][sectionKey]) clearTimeout(timersByCorpus[corpusKey][sectionKey]);
     timersByCorpus[corpusKey][sectionKey] = setTimeout(() => {
-      void flushSection(corpusKey, sectionKey);
+      void flushSection(corpusKey, sectionKey).catch(() => {
+        // State is already updated with error in flushSection; avoid unhandled promise noise.
+      });
     }, DEBOUNCE_MS);
   };
 
@@ -161,27 +172,35 @@ export const useConfigStore = create<ConfigStore>((set) => {
       optimisticUpdates[key] = { ...(optimisticUpdates[key] || {}) };
     }
 
-    await flushAllPendingPatches(corpusKey);
+    let flushError: string | null = null;
+    try {
+      await flushAllPendingPatches(corpusKey);
+    } catch (error) {
+      flushError = error instanceof Error ? error.message : 'Failed to save configuration';
+    }
     
-    set({ loading: true, error: null });
+    set({ loading: true, error: flushError });
     try {
       const config = await configApi.load();
       
-      // Merge server config with optimistic updates that were pending before flush
-      // This preserves user changes even if server hasn't processed the flush yet
+      // Merge server config with optimistic updates that were pending before flush,
+      // but only when flush succeeded. If flush failed, show persisted server state.
       const mergedConfig = { ...config } as any;
-      for (const [sectionKey, updates] of Object.entries(optimisticUpdates)) {
-        if (updates && Object.keys(updates).length > 0) {
-          const curSection = mergedConfig[sectionKey] || {};
-          mergedConfig[sectionKey] = { ...curSection, ...updates };
+      if (!flushError) {
+        for (const [sectionKey, updates] of Object.entries(optimisticUpdates)) {
+          if (updates && Object.keys(updates).length > 0) {
+            const curSection = mergedConfig[sectionKey] || {};
+            mergedConfig[sectionKey] = { ...curSection, ...updates };
+          }
         }
       }
       
-      set({ config: mergedConfig as TriBridConfig, loading: false, error: null });
+      set({ config: mergedConfig as TriBridConfig, loading: false, error: flushError });
     } catch (error) {
+      const loadError = error instanceof Error ? error.message : 'Failed to load configuration';
       set({
         loading: false,
-        error: error instanceof Error ? error.message : 'Failed to load configuration',
+        error: flushError ? `${flushError} | ${loadError}` : loadError,
       });
     }
   },

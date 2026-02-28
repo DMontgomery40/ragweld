@@ -266,6 +266,16 @@ export interface ChunkSummary {
   technical_details?: string | null; // default: None
   /** Domain concepts mentioned in this chunk */
   domain_concepts?: string[];
+  /** Detected route/path signals */
+  routes?: string[];
+  /** Key dependencies/imports */
+  dependencies?: string[];
+  /** Implementation patterns */
+  patterns?: string[];
+  /** How this summary was produced */
+  card_source?: "deterministic" | "llm"; // default: "deterministic"
+  /** Optional quality score for llm-enriched summaries */
+  card_score?: number | null; // default: None
 }
 
 /** Chunk summary builder filtering configuration. */
@@ -1535,6 +1545,55 @@ export interface SparseSearchConfig {
   bm25_b?: number; // default: 0.4
 }
 
+export interface SyntheticArtifactRef {
+  kind: "eval_dataset_json" | "semantic_cards_jsonl" | "keywords_json" | "triplets_jsonl" | "config_patch_json" | "quality_eval_json" | "report_md";
+  path: string;
+  bytes?: number | null; // default: None
+  created_at: string;
+}
+
+export interface SyntheticRunMeta {
+  run_id: string;
+  corpus_id: string;
+  status: "queued" | "running" | "completed" | "failed" | "cancelled";
+  started_at: string;
+  completed_at?: string | null; // default: None
+  recipe: "eval_dataset" | "semantic_cards" | "keywords" | "triplets" | "autotune_retrieval" | "full_stack";
+  provider: "internal_ragweld" | "synthetic_data_kit";
+  items_generated?: number | null; // default: None
+}
+
+export interface SyntheticRunStartRequest {
+  corpus_id: string;
+  provider?: "internal_ragweld" | "synthetic_data_kit"; // default: "internal_ragweld"
+  recipe?: "eval_dataset" | "semantic_cards" | "keywords" | "triplets" | "autotune_retrieval" | "full_stack"; // default: "eval_dataset"
+  max_source_chunks?: number | null; // default: 300
+  max_pairs?: number | null; // default: 200
+  pairs_per_source?: number | null; // default: 2
+  curate_enabled?: boolean; // default: True
+  curate_threshold?: number; // default: 7.0
+  include_expected_answer?: boolean; // default: True
+  include_tags?: boolean; // default: True
+  seed?: number | null; // default: 1337
+  generator_model: string;
+  judge_model: string;
+}
+
+export interface SyntheticRunSummary {
+  sources_used?: number; // default: 0
+  items_generated?: number; // default: 0
+  items_curated_in?: number; // default: 0
+  items_curated_out?: number; // default: 0
+  avg_judge_score?: number | null; // default: None
+  quality_top1_accuracy?: number | null; // default: None
+  quality_topk_accuracy?: number | null; // default: None
+  quality_mrr?: number | null; // default: None
+  quality_sample_size?: number | null; // default: None
+  quality_gate_threshold?: number | null; // default: None
+  quality_gate_passed?: boolean | null; // default: None
+  quality_failure_reason?: string | null; // default: None
+}
+
 /** System prompts for LLM interactions - affects RAG pipeline behavior.  These prompts control how LLMs behave during query processing, code analysis, and result generation. Changes here can significantly impact RAG accuracy. */
 export interface SystemPromptsConfig {
   /** Main conversational AI system prompt for answering database questions */
@@ -1551,6 +1610,8 @@ export interface SystemPromptsConfig {
   semantic_kg_extraction?: string; // default: "You are a semantic knowledge graph extractor.\n..."
   /** Analyze eval regressions with skeptical approach - avoid false explanations */
   eval_analysis?: string; // default: "You are an expert RAG (Retrieval-Augmented Gene..."
+  /** Judge prompt for synthetic eval row curation and quality filtering */
+  synthetic_judge?: string; // default: "You are a strict evaluator for synthetic retrie..."
   /** Lightweight chunk_summary generation prompt for faster indexing */
   lightweight_chunk_summaries?: string; // default: "Extract key information from this database: sym..."
 }
@@ -1895,7 +1956,7 @@ export interface AgentTrainStartRequest {
   lr?: number | null;
   warmup_ratio?: number | null;
   max_length?: number | null;
-  /** Optional dataset path override. If empty/omitted, uses training.ragweld_agent_train_dataset_path; if that is empty, uses evaluation.eval_dataset_path. */
+  /** Optional dataset path override. If empty/omitted, uses training.ragweld_agent_train_dataset_path; then evaluation.eval_dataset_path; then corpus eval dataset under data/eval_datasets/<corpus>.json. */
   dataset_path?: string | null;
 }
 
@@ -2892,6 +2953,61 @@ export interface SearchResponse {
   latency_ms: number;
   /** Debug information if requested */
   debug?: Record<string, unknown> | null;
+}
+
+export interface SyntheticArtifactPreviewResponse {
+  ok?: boolean;
+  run_id: string;
+  kind: "eval_dataset_json" | "semantic_cards_jsonl" | "keywords_json" | "triplets_jsonl" | "config_patch_json" | "quality_eval_json" | "report_md";
+  rows?: Record<string, unknown>[];
+}
+
+export interface SyntheticConfigPatchResponse {
+  ok?: boolean;
+  run_id: string;
+  corpus_id: string;
+  patch?: Record<string, unknown>;
+  artifact_path?: string | null;
+}
+
+export interface SyntheticPublishResponse {
+  ok?: boolean;
+  run_id: string;
+  corpus_id: string;
+  kind: "eval_dataset_json" | "semantic_cards_jsonl" | "keywords_json" | "triplets_jsonl" | "config_patch_json" | "quality_eval_json" | "report_md";
+  target_path?: string | null;
+  message?: string | null;
+}
+
+export interface SyntheticRun {
+  run_id: string;
+  corpus_id: string;
+  status?: "queued" | "running" | "completed" | "failed" | "cancelled";
+  started_at: string;
+  completed_at?: string | null;
+  provider: "internal_ragweld" | "synthetic_data_kit";
+  recipe: "eval_dataset" | "semantic_cards" | "keywords" | "triplets" | "autotune_retrieval" | "full_stack";
+  config_snapshot?: Record<string, unknown>;
+  config?: Record<string, unknown>;
+  request: SyntheticRunStartRequest;
+  artifacts?: SyntheticArtifactRef[];
+  summary?: SyntheticRunSummary;
+  error?: string | null;
+}
+
+export interface SyntheticRunEvent {
+  type: "log" | "progress" | "state" | "error" | "complete" | "artifact";
+  ts: string;
+  run_id: string;
+  message?: string | null;
+  percent?: number | null;
+  status?: "queued" | "running" | "completed" | "failed" | "cancelled" | null;
+  artifact?: SyntheticArtifactRef | null;
+}
+
+export interface SyntheticRunsResponse {
+  ok?: boolean;
+  runs?: SyntheticRunMeta[];
 }
 
 /** Response payload for /api/traces/latest. */

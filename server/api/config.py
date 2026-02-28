@@ -113,11 +113,19 @@ def _catalog_capabilities_for_model(
 
     model_core = raw
     scoped_provider = str(provider_hint or "").strip().lower() or None
+    known_providers = {
+        str(row.get("provider") or "").strip().lower()
+        for row in catalog_models
+        if str(row.get("provider") or "").strip()
+    }
     if "/" in raw:
         pfx, model_name = raw.split("/", 1)
         pfx = pfx.strip().lower()
-        model_core = model_name.strip()
-        if pfx:
+        # Treat provider/model only when the prefix is a known provider.
+        # Do not split regular model ids that contain slashes (for example
+        # mlx-community/all-MiniLM-L6-v2-4bit).
+        if pfx and pfx in known_providers:
+            model_core = model_name.strip()
             scoped_provider = pfx
 
     if not model_core:

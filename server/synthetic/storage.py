@@ -1,0 +1,242 @@
+from __future__ import annotations
+
+import json
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
+
+from server.models.tribrid_config_model import (
+    SyntheticArtifactKind,
+    SyntheticArtifactRef,
+    SyntheticRun,
+    SyntheticRunEvent,
+    SyntheticRunMeta,
+)
+
+_ROOT = Path(__file__).resolve().parents[2]
+_RUNS_DIR = _ROOT / "data" / "synthetic_runs"
+
+
+def _normalize_legacy_run_payload(raw: dict[str, Any]) -> dict[str, Any]:
+    """Backfill required request model fields for legacy persisted runs.
+
+    Older synthetic runs may have only `generator_model_override` /
+    `judge_model_override` (or nulls). New schemas require non-empty
+    `generator_model` and `judge_model` strings.
+    """
+    req = raw.get("request")
+    if not isinstance(req, dict):
+        return raw
+
+    gm = req.get("generator_model")
+    if not isinstance(gm, str) or not gm.strip():
+        legacy_gm = req.get("generator_model_override")
+        if isinstance(legacy_gm, str) and legacy_gm.strip():
+            req["generator_model"] = legacy_gm.strip()
+        else:
+            req["generator_model"] = "__legacy_missing_generator_model__"
+
+    jm = req.get("judge_model")
+    if not isinstance(jm, str) or not jm.strip():
+        legacy_jm = req.get("judge_model_override")
+        if isinstance(legacy_jm, str) and legacy_jm.strip():
+            req["judge_model"] = legacy_jm.strip()
+        else:
+            req["judge_model"] = "__legacy_missing_judge_model__"
+
+    raw["request"] = req
+    return raw
+
+
+def runs_dir() -> Path:
+    _RUNS_DIR.mkdir(parents=True, exist_ok=True)
+    return _RUNS_DIR
+
+
+def _normalized_run_id(run_id: str) -> str:
+    rid = str(run_id or "").strip()
+    if not rid:
+        raise ValueError("run_id is required")
+    if "/" in rid or "\\" in rid:
+        raise ValueError(f"Invalid run_id: {run_id!r}")
+    candidate = Path(rid)
+    if candidate.is_absolute() or any(part in {"", ".", ".."} for part in candidate.parts):
+        raise ValueError(f"Invalid run_id: {run_id!r}")
+    return rid
+
+
+def run_dir(run_id: str) -> Path:
+    base = runs_dir().resolve()
+    path = (base / _normalized_run_id(run_id)).resolve()
+    try:
+        path.relative_to(base)
+    except ValueError as e:
+        raise ValueError(f"Invalid run_id: {run_id!r}") from e
+    return path
+
+
+def run_json_path(run_id: str) -> Path:
+    return run_dir(run_id) / "run.json"
+
+
+def events_path(run_id: str) -> Path:
+    return run_dir(run_id) / "events.jsonl"
+
+
+def artifacts_dir(run_id: str) -> Path:
+    d = run_dir(run_id) / "artifacts"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def artifact_filename(kind: SyntheticArtifactKind) -> str:
+    mapping: dict[SyntheticArtifactKind, str] = {
+        "eval_dataset_json": "eval_dataset.json",
+        "semantic_cards_jsonl": "semantic_cards.jsonl",
+        "keywords_json": "keywords.json",
+        "triplets_jsonl": "triplets.jsonl",
+        "config_patch_json": "config_patch.json",
+        "quality_eval_json": "quality_eval.json",
+        "report_md": "report.md",
+    }
+    return mapping[kind]
+
+
+def _to_jsonable(value: Any) -> Any:
+    if hasattr(value, "model_dump"):
+        try:
+            return value.model_dump(mode="json", by_alias=True)
+        except Exception:
+            return value.model_dump()
+    if isinstance(value, list):
+        return [_to_jsonable(v) for v in value]
+    if isinstance(value, dict):
+        return {str(k): _to_jsonable(v) for k, v in value.items()}
+    return value
+
+
+def save_run(run: SyntheticRun) -> None:
+    path = run_json_path(run.run_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = run.model_dump(mode="json", by_alias=True)
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+
+
+def load_run(run_id: str) -> SyntheticRun:
+    path = run_json_path(run_id)
+    if not path.exists():
+        raise FileNotFoundError(f"run_id={run_id} not found")
+    raw = _normalize_legacy_run_payload(json.loads(path.read_text(encoding="utf-8")))
+    return SyntheticRun.model_validate(raw)
+
+
+def append_event(run_id: str, event: SyntheticRunEvent) -> None:
+    path = events_path(run_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = event.model_dump(mode="json", by_alias=True)
+    with path.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(payload) + "\n")
+
+
+def load_events(run_id: str, limit: int | None = None) -> list[SyntheticRunEvent]:
+    path = events_path(run_id)
+    if not path.exists():
+        return []
+    lines = [ln for ln in path.read_text(encoding="utf-8").splitlines() if ln.strip()]
+    if limit is not None and limit > 0:
+        lines = lines[-limit:]
+    out: list[SyntheticRunEvent] = []
+    for line in lines:
+        try:
+            out.append(SyntheticRunEvent.model_validate(json.loads(line)))
+        except Exception:
+            continue
+    return out
+
+
+def list_runs(*, corpus_id: str | None = None, limit: int = 50) -> list[SyntheticRunMeta]:
+    out: list[SyntheticRunMeta] = []
+    for d in sorted(runs_dir().iterdir(), key=lambda p: p.name, reverse=True):
+        if not d.is_dir():
+            continue
+        p = d / "run.json"
+        if not p.exists():
+            continue
+        try:
+            raw = _normalize_legacy_run_payload(json.loads(p.read_text(encoding="utf-8")))
+            run = SyntheticRun.model_validate(raw)
+        except Exception:
+            continue
+        if corpus_id and str(run.repo_id) != str(corpus_id):
+            continue
+        out.append(
+            SyntheticRunMeta(
+                run_id=run.run_id,
+                repo_id=run.repo_id,
+                status=run.status,
+                started_at=run.started_at,
+                completed_at=run.completed_at,
+                recipe=run.recipe,
+                provider=run.provider,
+                items_generated=run.summary.items_generated,
+            )
+        )
+        if len(out) >= max(1, int(limit)):
+            break
+    return out
+
+
+def allocate_run_id(repo_id: str, started_at: datetime) -> str:
+    base = f"{repo_id}__{started_at.strftime('%Y%m%d_%H%M%S')}"
+    run_id = base
+    n = 0
+    while run_dir(run_id).exists():
+        n += 1
+        run_id = f"{base}__{n}"
+    return run_id
+
+
+def active_run_id_for_corpus(corpus_id: str) -> str | None:
+    cid = str(corpus_id or "").strip()
+    if not cid:
+        return None
+    prefix = f"{cid}__"
+    for d in sorted(runs_dir().iterdir(), key=lambda p: p.name, reverse=True):
+        if not d.is_dir() or not d.name.startswith(prefix):
+            continue
+        p = d / "run.json"
+        if not p.exists():
+            continue
+        try:
+            raw = _normalize_legacy_run_payload(json.loads(p.read_text(encoding="utf-8")))
+            run = SyntheticRun.model_validate(raw)
+        except Exception:
+            continue
+        if str(run.status) in {"queued", "running"}:
+            return run.run_id
+    return None
+
+
+def write_artifact(run_id: str, kind: SyntheticArtifactKind, payload: Any) -> SyntheticArtifactRef:
+    path = artifacts_dir(run_id) / artifact_filename(kind)
+    if kind in {"semantic_cards_jsonl", "triplets_jsonl"}:
+        rows = payload if isinstance(payload, list) else []
+        lines = [json.dumps(_to_jsonable(row), ensure_ascii=False) for row in rows]
+        path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+    elif kind in {"eval_dataset_json", "keywords_json", "config_patch_json", "quality_eval_json"}:
+        path.write_text(
+            json.dumps(_to_jsonable(payload), indent=2, sort_keys=True, ensure_ascii=False),
+            encoding="utf-8",
+        )
+    elif kind == "report_md":
+        path.write_text(str(payload or ""), encoding="utf-8")
+    else:
+        raise ValueError(f"Unsupported artifact kind: {kind}")
+
+    ts = datetime.now(UTC)
+    return SyntheticArtifactRef(
+        kind=kind,
+        path=str(path),
+        bytes=int(path.stat().st_size if path.exists() else 0),
+        created_at=ts,
+    )
