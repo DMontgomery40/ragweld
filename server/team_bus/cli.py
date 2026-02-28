@@ -355,8 +355,8 @@ def _wait_for_next_message(
                 _print_json(msg.model_dump(mode="json", by_alias=True))
                 return 0
         if time.monotonic() >= deadline:
-            msg = f"timeout waiting for message for member={member}"
-            raise TimeoutError(msg)
+            err_msg = f"timeout waiting for message for member={member}"
+            raise TimeoutError(err_msg)
         time.sleep(poll_interval)
 
 
@@ -457,8 +457,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         if args.command == "validate":
             errors = store.validate_team(args.team)
-            payload = {"team": args.team, "valid": not errors, "errors": errors}
-            _print_json(payload)
+            validate_result = {"team": args.team, "valid": not errors, "errors": errors}
+            _print_json(validate_result)
             return 0 if not errors else 1
 
         if args.command == "import-claude":

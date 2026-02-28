@@ -490,7 +490,7 @@ def _detect_local_hardware_class() -> str:
     has_cuda = False
     if importlib.util.find_spec("torch") is not None:
         with contextlib.suppress(Exception):
-            import torch  # type: ignore[import-not-found]
+            import torch  # type: ignore[import-not-found,unused-ignore]
 
             has_cuda = bool(torch.cuda.is_available())
 
@@ -2551,7 +2551,7 @@ async def get_dashboard_index_status(scope: CorpusScope = _CORPUS_SCOPE_DEP) -> 
             provider=embedding_provider,
             model=embedding_model,
             total_tokens=total_tokens,
-        )
+        ) or 0.0
 
     semantic_kg_cost: float | None = None
     total_cost: float | None = embedding_cost
