@@ -1,6 +1,6 @@
 {
   "currency": "USD",
-  "last_updated": "2026-02-27",
+  "last_updated": "2026-03-01",
   "sources": [
     "https://openai.com/api/pricing/ (2026-02-07)",
     "https://www.anthropic.com/pricing (2026-02-07)",
@@ -10,65 +10,9 @@
     "https://mistral.ai/pricing (2025-11-29)",
     "https://api-docs.deepseek.com/quick_start/pricing (2025-11-29)",
     "https://jina.ai/embeddings/ (2025-11-29)",
-    "https://openrouter.ai/api/v1/models (2026-02-27)"
+    "https://openrouter.ai/api/v1/models (2026-03-01)"
   ],
   "models": [
-    {
-      "provider": "anthropic",
-      "family": "claude-3-haiku",
-      "model": "claude-3-haiku",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 200000,
-      "input_per_1k": 0.00025,
-      "output_per_1k": 0.00125,
-      "base_url": "https://api.anthropic.com",
-      "notes": "Added automatically from OpenRouter feed."
-    },
-    {
-      "provider": "anthropic",
-      "family": "claude-3.5-haiku",
-      "model": "claude-3.5-haiku",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 200000,
-      "input_per_1k": 0.0008,
-      "output_per_1k": 0.004,
-      "base_url": "https://api.anthropic.com",
-      "notes": "Added automatically from OpenRouter feed."
-    },
-    {
-      "provider": "anthropic",
-      "family": "claude-3.5-sonnet",
-      "model": "claude-3.5-sonnet",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 200000,
-      "input_per_1k": 0.006,
-      "output_per_1k": 0.03,
-      "base_url": "https://api.anthropic.com",
-      "notes": "Added automatically from OpenRouter feed."
-    },
-    {
-      "provider": "anthropic",
-      "family": "claude-3.7-sonnet",
-      "model": "claude-3.7-sonnet",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 200000,
-      "input_per_1k": 0.003,
-      "output_per_1k": 0.015,
-      "base_url": "https://api.anthropic.com",
-      "notes": "Added automatically from OpenRouter feed."
-    },
     {
       "provider": "anthropic",
       "family": "claude-haiku-4.5",
@@ -77,51 +21,9 @@
         "GEN"
       ],
       "unit": "1k_tokens",
+      "context": 200000,
       "input_per_1k": 0.001,
       "output_per_1k": 0.005,
-      "context": 200000,
-      "notes": "Claude Haiku 4.5 (source: per 1M = $1/$5)",
-      "base_url": "https://api.anthropic.com"
-    },
-    {
-      "provider": "anthropic",
-      "family": "claude-opus-4",
-      "model": "claude-opus-4",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 200000,
-      "input_per_1k": 0.015,
-      "output_per_1k": 0.075,
-      "base_url": "https://api.anthropic.com",
-      "notes": "Added automatically from OpenRouter feed."
-    },
-    {
-      "provider": "anthropic",
-      "family": "claude-opus-4.1",
-      "model": "claude-opus-4.1",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 200000,
-      "input_per_1k": 0.015,
-      "output_per_1k": 0.075,
-      "base_url": "https://api.anthropic.com",
-      "notes": "Added automatically from OpenRouter feed."
-    },
-    {
-      "provider": "anthropic",
-      "family": "claude-opus-4.5",
-      "model": "claude-opus-4.5",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 200000,
-      "input_per_1k": 0.005,
-      "output_per_1k": 0.025,
       "base_url": "https://api.anthropic.com",
       "notes": "Added automatically from OpenRouter feed."
     },
@@ -133,39 +35,11 @@
         "GEN"
       ],
       "unit": "1k_tokens",
+      "context": 1000000,
       "input_per_1k": 0.005,
       "output_per_1k": 0.025,
-      "context": 1000000,
-      "notes": "Claude Opus 4.6  (source: per 1M = $5/$10)",
-      "base_url": "https://api.anthropic.com"
-    },
-    {
-      "provider": "anthropic",
-      "family": "claude-sonnet-4",
-      "model": "claude-sonnet-4",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 1000000,
-      "input_per_1k": 0.003,
-      "output_per_1k": 0.015,
       "base_url": "https://api.anthropic.com",
       "notes": "Added automatically from OpenRouter feed."
-    },
-    {
-      "provider": "anthropic",
-      "family": "claude-sonnet-4.5",
-      "model": "claude-sonnet-4.5",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "input_per_1k": 0.003,
-      "output_per_1k": 0.015,
-      "context": 1000000,
-      "notes": "Claude Sonnet 4.5 (sourc`e: per 1M = $3/$15)",
-      "base_url": "https://api.anthropic.com"
     },
     {
       "provider": "anthropic",
@@ -223,43 +97,17 @@
     },
     {
       "provider": "cohere",
-      "family": "command-r",
-      "model": "command-r",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "input_per_1k": 0.0005,
-      "output_per_1k": 0.0015,
-      "context": 128000,
-      "notes": "Command R 03-2024 (source: per 1M = $0.50/$1.50) | [auto-refresh] deprecated_on=2026-02-27"
-    },
-    {
-      "provider": "cohere",
       "family": "command-r-08-2024",
       "model": "command-r-08-2024",
       "components": [
         "GEN"
       ],
       "unit": "1k_tokens",
-      "context": 128000,
       "input_per_1k": 0.00015,
       "output_per_1k": 0.0006,
-      "base_url": "https://api.cohere.ai/v2",
-      "notes": "Added automatically from OpenRouter feed."
-    },
-    {
-      "provider": "cohere",
-      "family": "command-r-plus",
-      "model": "command-r-plus",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "input_per_1k": 0.0025,
-      "output_per_1k": 0.01,
       "context": 128000,
-      "notes": "Command R+ 08-2024 (source: per 1M = $2.50/$10.00) | [auto-refresh] deprecated_on=2026-02-27"
+      "notes": "Command R 03-2024 (source: per 1M = $0.50/$1.50)",
+      "base_url": "https://api.cohere.ai/v2"
     },
     {
       "provider": "cohere",
@@ -269,11 +117,11 @@
         "GEN"
       ],
       "unit": "1k_tokens",
-      "context": 128000,
       "input_per_1k": 0.0025,
       "output_per_1k": 0.01,
-      "base_url": "https://api.cohere.ai/v2",
-      "notes": "Added automatically from OpenRouter feed."
+      "context": 128000,
+      "notes": "Command R+ 08-2024 (source: per 1M = $2.50/$10.00)",
+      "base_url": "https://api.cohere.ai/v2"
     },
     {
       "provider": "cohere",
@@ -374,20 +222,6 @@
     },
     {
       "provider": "deepseek",
-      "family": "deepseek-chat-v3-0324",
-      "model": "deepseek-chat-v3-0324",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 163840,
-      "input_per_1k": 0.00019,
-      "output_per_1k": 0.00087,
-      "base_url": "https://api.deepseek.com/v1",
-      "notes": "Added automatically from OpenRouter feed."
-    },
-    {
-      "provider": "deepseek",
       "family": "deepseek-chat-v3.1",
       "model": "deepseek-chat-v3.1",
       "components": [
@@ -402,20 +236,6 @@
     },
     {
       "provider": "deepseek",
-      "family": "deepseek-r1",
-      "model": "deepseek-r1",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 64000,
-      "input_per_1k": 0.0007,
-      "output_per_1k": 0.0025,
-      "base_url": "https://api.deepseek.com/v1",
-      "notes": "Added automatically from OpenRouter feed."
-    },
-    {
-      "provider": "deepseek",
       "family": "deepseek-r1-0528",
       "model": "deepseek-r1-0528",
       "components": [
@@ -423,8 +243,8 @@
       ],
       "unit": "1k_tokens",
       "context": 163840,
-      "input_per_1k": 0.0004,
-      "output_per_1k": 0.00175,
+      "input_per_1k": 0.00045,
+      "output_per_1k": 0.00215,
       "base_url": "https://api.deepseek.com/v1",
       "notes": "Added automatically from OpenRouter feed."
     },
@@ -527,47 +347,6 @@
     },
     {
       "provider": "google",
-      "family": "gemini-2.0-flash",
-      "model": "gemini-2.0-flash",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "input_per_1k": 0.0001,
-      "output_per_1k": 0.0004,
-      "context": 1000000,
-      "notes": "Gemini 2.0 Flash (source: per 1M = $0.10/$0.40) | [auto-refresh] deprecated_on=2026-02-27"
-    },
-    {
-      "provider": "google",
-      "family": "gemini-2.0-flash-001",
-      "model": "gemini-2.0-flash-001",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 1048576,
-      "input_per_1k": 0.0001,
-      "output_per_1k": 0.0004,
-      "base_url": "https://generativelanguage.googleapis.com",
-      "notes": "Added automatically from OpenRouter feed."
-    },
-    {
-      "provider": "google",
-      "family": "gemini-2.0-flash-lite-001",
-      "model": "gemini-2.0-flash-lite-001",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 1048576,
-      "input_per_1k": 7.5e-05,
-      "output_per_1k": 0.0003,
-      "base_url": "https://generativelanguage.googleapis.com",
-      "notes": "Added automatically from OpenRouter feed."
-    },
-    {
-      "provider": "google",
       "family": "gemini-2.5-flash",
       "model": "gemini-2.5-flash",
       "components": [
@@ -577,7 +356,7 @@
       "input_per_1k": 0.0003,
       "output_per_1k": 0.0025,
       "context": 1048576,
-      "notes": "Gemini 2.5 Flash (source: per 1M = $0.30/$2.50)",
+      "notes": "Gemini 2.0 Flash (source: per 1M = $0.10/$0.40)",
       "base_url": "https://generativelanguage.googleapis.com"
     },
     {
@@ -602,11 +381,11 @@
         "GEN"
       ],
       "unit": "1k_tokens",
+      "context": 1048576,
       "input_per_1k": 0.0001,
       "output_per_1k": 0.0004,
-      "context": 1048576,
-      "notes": "Gemini 2.5 Flash-Lite (source: per 1M = $0.10/$0.40)",
-      "base_url": "https://generativelanguage.googleapis.com"
+      "base_url": "https://generativelanguage.googleapis.com",
+      "notes": "Added automatically from OpenRouter feed."
     },
     {
       "provider": "google",
@@ -638,34 +417,6 @@
     },
     {
       "provider": "google",
-      "family": "gemini-2.5-pro-preview",
-      "model": "gemini-2.5-pro-preview",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 1048576,
-      "input_per_1k": 0.00125,
-      "output_per_1k": 0.01,
-      "base_url": "https://generativelanguage.googleapis.com",
-      "notes": "Added automatically from OpenRouter feed."
-    },
-    {
-      "provider": "google",
-      "family": "gemini-2.5-pro-preview-05-06",
-      "model": "gemini-2.5-pro-preview-05-06",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 1048576,
-      "input_per_1k": 0.00125,
-      "output_per_1k": 0.01,
-      "base_url": "https://generativelanguage.googleapis.com",
-      "notes": "Added automatically from OpenRouter feed."
-    },
-    {
-      "provider": "google",
       "family": "gemini-3-flash-preview",
       "model": "gemini-3-flash-preview",
       "components": [
@@ -691,20 +442,6 @@
       "output_per_1k": 0.012,
       "base_url": "https://generativelanguage.googleapis.com",
       "notes": "Added automatically from OpenRouter feed."
-    },
-    {
-      "provider": "google",
-      "family": "gemini-3-pro-preview",
-      "model": "gemini-3-pro-preview",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "input_per_1k": 0.002,
-      "output_per_1k": 0.012,
-      "context": 1048576,
-      "notes": "Gemini 3 Pro Preview <=200k (source: per 1M = $2.00/$12.00)",
-      "base_url": "https://generativelanguage.googleapis.com"
     },
     {
       "provider": "google",
@@ -759,20 +496,6 @@
       "embed_per_1k": 0.00015,
       "dimensions": 3072,
       "notes": "Gemini embeddings (source: per 1M = $0.15)"
-    },
-    {
-      "provider": "google",
-      "family": "gemma-2-27b-it",
-      "model": "gemma-2-27b-it",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 8192,
-      "input_per_1k": 0.00065,
-      "output_per_1k": 0.00065,
-      "base_url": "https://generativelanguage.googleapis.com",
-      "notes": "Added automatically from OpenRouter feed."
     },
     {
       "provider": "google",
@@ -1058,30 +781,17 @@
     },
     {
       "provider": "mistral",
-      "family": "codestral",
-      "model": "codestral",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "input_per_1k": 0.0003,
-      "output_per_1k": 0.0009,
-      "context": 256000,
-      "notes": "Codestral code generation (source: per 1M = $0.30/$0.90) | [auto-refresh] deprecated_on=2026-02-27"
-    },
-    {
-      "provider": "mistral",
       "family": "codestral-2508",
       "model": "codestral-2508",
       "components": [
         "GEN"
       ],
       "unit": "1k_tokens",
-      "context": 256000,
       "input_per_1k": 0.0003,
       "output_per_1k": 0.0009,
-      "base_url": "https://api.mistral.ai/v1",
-      "notes": "Added automatically from OpenRouter feed."
+      "context": 256000,
+      "notes": "Codestral code generation (source: per 1M = $0.30/$0.90)",
+      "base_url": "https://api.mistral.ai/v1"
     },
     {
       "provider": "mistral",
@@ -1196,20 +906,6 @@
     },
     {
       "provider": "mistral",
-      "family": "mistral-7b-instruct-v0.1",
-      "model": "mistral-7b-instruct-v0.1",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 2824,
-      "input_per_1k": 0.00011,
-      "output_per_1k": 0.00019,
-      "base_url": "https://api.mistral.ai/v1",
-      "notes": "Added automatically from OpenRouter feed."
-    },
-    {
-      "provider": "mistral",
       "family": "mistral-7b-instruct-v0.3",
       "model": "mistral-7b-instruct-v0.3",
       "components": [
@@ -1236,72 +932,16 @@
     },
     {
       "provider": "mistral",
-      "family": "mistral-large",
-      "model": "mistral-large",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "input_per_1k": 0.002,
-      "output_per_1k": 0.006,
-      "context": 128000,
-      "notes": "Mistral Large (source: per 1M = $2.00/$6.00)",
-      "base_url": "https://api.mistral.ai/v1"
-    },
-    {
-      "provider": "mistral",
-      "family": "mistral-large-2407",
-      "model": "mistral-large-2407",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 131072,
-      "input_per_1k": 0.002,
-      "output_per_1k": 0.006,
-      "base_url": "https://api.mistral.ai/v1",
-      "notes": "Added automatically from OpenRouter feed."
-    },
-    {
-      "provider": "mistral",
-      "family": "mistral-large-2411",
-      "model": "mistral-large-2411",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 131072,
-      "input_per_1k": 0.002,
-      "output_per_1k": 0.006,
-      "base_url": "https://api.mistral.ai/v1",
-      "notes": "Added automatically from OpenRouter feed."
-    },
-    {
-      "provider": "mistral",
       "family": "mistral-large-2512",
       "model": "mistral-large-2512",
       "components": [
         "GEN"
       ],
       "unit": "1k_tokens",
-      "context": 262144,
       "input_per_1k": 0.0005,
       "output_per_1k": 0.0015,
-      "base_url": "https://api.mistral.ai/v1",
-      "notes": "Added automatically from OpenRouter feed."
-    },
-    {
-      "provider": "mistral",
-      "family": "mistral-medium-3",
-      "model": "mistral-medium-3",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "input_per_1k": 0.0004,
-      "output_per_1k": 0.002,
-      "context": 131072,
-      "notes": "Mistral Medium 3 (source: per 1M = $0.40/$2.00)",
+      "context": 262144,
+      "notes": "Mistral Large (source: per 1M = $2.00/$6.00)",
       "base_url": "https://api.mistral.ai/v1"
     },
     {
@@ -1312,11 +952,11 @@
         "GEN"
       ],
       "unit": "1k_tokens",
-      "context": 131072,
       "input_per_1k": 0.0004,
       "output_per_1k": 0.002,
-      "base_url": "https://api.mistral.ai/v1",
-      "notes": "Added automatically from OpenRouter feed."
+      "context": 131072,
+      "notes": "Mistral Medium 3 (source: per 1M = $0.40/$2.00)",
+      "base_url": "https://api.mistral.ai/v1"
     },
     {
       "provider": "mistral",
@@ -1358,34 +998,6 @@
       "output_per_1k": 0.0003,
       "context": 128000,
       "notes": "Mistral Small (source: per 1M = $0.10/$0.30) | [auto-refresh] deprecated_on=2026-02-27"
-    },
-    {
-      "provider": "mistral",
-      "family": "mistral-small-24b-instruct-2501",
-      "model": "mistral-small-24b-instruct-2501",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 32768,
-      "input_per_1k": 5e-05,
-      "output_per_1k": 8e-05,
-      "base_url": "https://api.mistral.ai/v1",
-      "notes": "Added automatically from OpenRouter feed."
-    },
-    {
-      "provider": "mistral",
-      "family": "mistral-small-3.1-24b-instruct",
-      "model": "mistral-small-3.1-24b-instruct",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 128000,
-      "input_per_1k": 0.00035,
-      "output_per_1k": 0.00056,
-      "base_url": "https://api.mistral.ai/v1",
-      "notes": "Added automatically from OpenRouter feed."
     },
     {
       "provider": "mistral",
@@ -1588,34 +1200,6 @@
     },
     {
       "provider": "openai",
-      "family": "gpt-3.5-turbo",
-      "model": "gpt-3.5-turbo",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 16385,
-      "input_per_1k": 0.0005,
-      "output_per_1k": 0.0015,
-      "base_url": "https://api.openai.com/v1",
-      "notes": "Added automatically from OpenRouter feed."
-    },
-    {
-      "provider": "openai",
-      "family": "gpt-3.5-turbo-0613",
-      "model": "gpt-3.5-turbo-0613",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 4095,
-      "input_per_1k": 0.001,
-      "output_per_1k": 0.002,
-      "base_url": "https://api.openai.com/v1",
-      "notes": "Added automatically from OpenRouter feed."
-    },
-    {
-      "provider": "openai",
       "family": "gpt-3.5-turbo-16k",
       "model": "gpt-3.5-turbo-16k",
       "components": [
@@ -1639,34 +1223,6 @@
       "context": 4095,
       "input_per_1k": 0.0015,
       "output_per_1k": 0.002,
-      "base_url": "https://api.openai.com/v1",
-      "notes": "Added automatically from OpenRouter feed."
-    },
-    {
-      "provider": "openai",
-      "family": "gpt-4",
-      "model": "gpt-4",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 8191,
-      "input_per_1k": 0.03,
-      "output_per_1k": 0.06,
-      "base_url": "https://api.openai.com/v1",
-      "notes": "Added automatically from OpenRouter feed."
-    },
-    {
-      "provider": "openai",
-      "family": "gpt-4-0314",
-      "model": "gpt-4-0314",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 8191,
-      "input_per_1k": 0.03,
-      "output_per_1k": 0.06,
       "base_url": "https://api.openai.com/v1",
       "notes": "Added automatically from OpenRouter feed."
     },
@@ -1714,90 +1270,6 @@
     },
     {
       "provider": "openai",
-      "family": "gpt-4.1",
-      "model": "gpt-4.1",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "input_per_1k": 0.002,
-      "output_per_1k": 0.008,
-      "context": 1047576,
-      "notes": "GPT-4.1 1M context (source: per 1M = $2.00/$8.00)",
-      "base_url": "https://api.openai.com/v1"
-    },
-    {
-      "provider": "openai",
-      "family": "gpt-4.1-mini",
-      "model": "gpt-4.1-mini",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "input_per_1k": 0.0004,
-      "output_per_1k": 0.0016,
-      "context": 1047576,
-      "notes": "GPT-4.1 mini (source: per 1M = $0.40/$1.60)",
-      "base_url": "https://api.openai.com/v1"
-    },
-    {
-      "provider": "openai",
-      "family": "gpt-4.1-nano",
-      "model": "gpt-4.1-nano",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "input_per_1k": 0.0001,
-      "output_per_1k": 0.0004,
-      "context": 1047576,
-      "notes": "GPT-4.1 nano (source: per 1M = $0.10/$0.40)",
-      "base_url": "https://api.openai.com/v1"
-    },
-    {
-      "provider": "openai",
-      "family": "gpt-4o",
-      "model": "gpt-4o",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 128000,
-      "input_per_1k": 0.0025,
-      "output_per_1k": 0.01,
-      "base_url": "https://api.openai.com/v1",
-      "notes": "Added automatically from OpenRouter feed."
-    },
-    {
-      "provider": "openai",
-      "family": "gpt-4o-2024-05-13",
-      "model": "gpt-4o-2024-05-13",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 128000,
-      "input_per_1k": 0.005,
-      "output_per_1k": 0.015,
-      "base_url": "https://api.openai.com/v1",
-      "notes": "Added automatically from OpenRouter feed."
-    },
-    {
-      "provider": "openai",
-      "family": "gpt-4o-2024-08-06",
-      "model": "gpt-4o-2024-08-06",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 128000,
-      "input_per_1k": 0.0025,
-      "output_per_1k": 0.01,
-      "base_url": "https://api.openai.com/v1",
-      "notes": "Added automatically from OpenRouter feed."
-    },
-    {
-      "provider": "openai",
       "family": "gpt-4o-2024-11-20",
       "model": "gpt-4o-2024-11-20",
       "components": [
@@ -1821,20 +1293,6 @@
       "context": 128000,
       "input_per_1k": 0.0025,
       "output_per_1k": 0.01,
-      "base_url": "https://api.openai.com/v1",
-      "notes": "Added automatically from OpenRouter feed."
-    },
-    {
-      "provider": "openai",
-      "family": "gpt-4o-mini",
-      "model": "gpt-4o-mini",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 128000,
-      "input_per_1k": 0.00015,
-      "output_per_1k": 0.0006,
       "base_url": "https://api.openai.com/v1",
       "notes": "Added automatically from OpenRouter feed."
     },
@@ -1882,48 +1340,6 @@
     },
     {
       "provider": "openai",
-      "family": "gpt-5",
-      "model": "gpt-5",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "input_per_1k": 0.00125,
-      "output_per_1k": 0.01,
-      "context": 400000,
-      "notes": "GPT-5 flagship (source: per 1M = $3.00/$12.00)",
-      "base_url": "https://api.openai.com/v1"
-    },
-    {
-      "provider": "openai",
-      "family": "gpt-5-chat",
-      "model": "gpt-5-chat",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 128000,
-      "input_per_1k": 0.00125,
-      "output_per_1k": 0.01,
-      "base_url": "https://api.openai.com/v1",
-      "notes": "Added automatically from OpenRouter feed."
-    },
-    {
-      "provider": "openai",
-      "family": "gpt-5-codex",
-      "model": "gpt-5-codex",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 400000,
-      "input_per_1k": 0.00125,
-      "output_per_1k": 0.01,
-      "base_url": "https://api.openai.com/v1",
-      "notes": "Added automatically from OpenRouter feed."
-    },
-    {
-      "provider": "openai",
       "family": "gpt-5-image",
       "model": "gpt-5-image",
       "components": [
@@ -1961,7 +1377,7 @@
       "input_per_1k": 0.00025,
       "output_per_1k": 0.002,
       "context": 400000,
-      "notes": "GPT-5 mini (source: per 1M = $0.60/$2.40)",
+      "notes": "GPT-4.1 mini (source: per 1M = $0.40/$1.60)",
       "base_url": "https://api.openai.com/v1"
     },
     {
@@ -1975,64 +1391,8 @@
       "input_per_1k": 5e-05,
       "output_per_1k": 0.0004,
       "context": 400000,
-      "notes": "GPT-5 nano ultra-budget (source: per 1M = $0.12/$0.48)",
+      "notes": "GPT-4.1 nano (source: per 1M = $0.10/$0.40)",
       "base_url": "https://api.openai.com/v1"
-    },
-    {
-      "provider": "openai",
-      "family": "gpt-5-pro",
-      "model": "gpt-5-pro",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 400000,
-      "input_per_1k": 0.015,
-      "output_per_1k": 0.12,
-      "base_url": "https://api.openai.com/v1",
-      "notes": "Added automatically from OpenRouter feed."
-    },
-    {
-      "provider": "openai",
-      "family": "gpt-5.1",
-      "model": "gpt-5.1",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 400000,
-      "input_per_1k": 0.00125,
-      "output_per_1k": 0.01,
-      "base_url": "https://api.openai.com/v1",
-      "notes": "Added automatically from OpenRouter feed."
-    },
-    {
-      "provider": "openai",
-      "family": "gpt-5.1-chat",
-      "model": "gpt-5.1-chat",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 128000,
-      "input_per_1k": 0.00125,
-      "output_per_1k": 0.01,
-      "base_url": "https://api.openai.com/v1",
-      "notes": "Added automatically from OpenRouter feed."
-    },
-    {
-      "provider": "openai",
-      "family": "gpt-5.1-codex",
-      "model": "gpt-5.1-codex",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 400000,
-      "input_per_1k": 0.00125,
-      "output_per_1k": 0.01,
-      "base_url": "https://api.openai.com/v1",
-      "notes": "Added automatically from OpenRouter feed."
     },
     {
       "provider": "openai",
@@ -2064,30 +1424,17 @@
     },
     {
       "provider": "openai",
-      "family": "gpt-5.1-nano",
-      "model": "gpt-5.1-nano",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "input_per_1k": 6e-05,
-      "output_per_1k": 0.0005,
-      "context": 256000,
-      "notes": "GPT-5.1 nano ultra-budget (source: per 1M = $0.06/$0.50) | [auto-refresh] deprecated_on=2026-02-27"
-    },
-    {
-      "provider": "openai",
       "family": "gpt-5.2",
       "model": "gpt-5.2",
       "components": [
         "GEN"
       ],
       "unit": "1k_tokens",
+      "context": 400000,
       "input_per_1k": 0.00175,
       "output_per_1k": 0.014,
-      "context": 400000,
-      "notes": "The best model for coding and agentic tasks across industries",
-      "base_url": "https://api.openai.com/v1"
+      "base_url": "https://api.openai.com/v1",
+      "notes": "Added automatically from OpenRouter feed."
     },
     {
       "provider": "openai",
@@ -2102,33 +1449,6 @@
       "output_per_1k": 0.014,
       "base_url": "https://api.openai.com/v1",
       "notes": "Added automatically from OpenRouter feed."
-    },
-    {
-      "provider": "openai",
-      "family": "gpt-5.2-codex",
-      "model": "gpt-5.2-codex",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 400000,
-      "input_per_1k": 0.00175,
-      "output_per_1k": 0.014,
-      "base_url": "https://api.openai.com/v1",
-      "notes": "Added automatically from OpenRouter feed."
-    },
-    {
-      "provider": "openai",
-      "family": "gpt-5.2",
-      "model": "gpt-5.2-mini",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "input_per_1k": 0.00025,
-      "output_per_1k": 0.002,
-      "context": 200000,
-      "notes": "o4-mini efficient reasoning (source: per 1M = $0.40/$1.60) | [auto-refresh] deprecated_on=2026-02-27"
     },
     {
       "provider": "openai",
@@ -2230,34 +1550,6 @@
     },
     {
       "provider": "openai",
-      "family": "o1",
-      "model": "o1",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 200000,
-      "input_per_1k": 0.015,
-      "output_per_1k": 0.06,
-      "base_url": "https://api.openai.com/v1",
-      "notes": "Added automatically from OpenRouter feed."
-    },
-    {
-      "provider": "openai",
-      "family": "o1-pro",
-      "model": "o1-pro",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 200000,
-      "input_per_1k": 0.15,
-      "output_per_1k": 0.6,
-      "base_url": "https://api.openai.com/v1",
-      "notes": "Added automatically from OpenRouter feed."
-    },
-    {
-      "provider": "openai",
       "family": "o3",
       "model": "o3",
       "components": [
@@ -2281,34 +1573,6 @@
       "context": 200000,
       "input_per_1k": 0.01,
       "output_per_1k": 0.04,
-      "base_url": "https://api.openai.com/v1",
-      "notes": "Added automatically from OpenRouter feed."
-    },
-    {
-      "provider": "openai",
-      "family": "o3-mini",
-      "model": "o3-mini",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 200000,
-      "input_per_1k": 0.0011,
-      "output_per_1k": 0.0044,
-      "base_url": "https://api.openai.com/v1",
-      "notes": "Added automatically from OpenRouter feed."
-    },
-    {
-      "provider": "openai",
-      "family": "o3-mini-high",
-      "model": "o3-mini-high",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 200000,
-      "input_per_1k": 0.0011,
-      "output_per_1k": 0.0044,
       "base_url": "https://api.openai.com/v1",
       "notes": "Added automatically from OpenRouter feed."
     },
@@ -2546,20 +1810,6 @@
     },
     {
       "provider": "xai",
-      "family": "grok-3",
-      "model": "grok-3",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "input_per_1k": 0.003,
-      "output_per_1k": 0.015,
-      "context": 131072,
-      "notes": "Grok 3 base (source: per 1M = $3/$15)",
-      "base_url": "https://api.x.ai/v1"
-    },
-    {
-      "provider": "xai",
       "family": "grok-3-beta",
       "model": "grok-3-beta",
       "components": [
@@ -2611,22 +1861,8 @@
       "input_per_1k": 0.003,
       "output_per_1k": 0.015,
       "context": 256000,
-      "notes": "Grok 4 - 2M context (pricing estimated)",
+      "notes": "Grok 3 base (source: per 1M = $3/$15)",
       "base_url": "https://api.x.ai/v1"
-    },
-    {
-      "provider": "xai",
-      "family": "grok-4-fast",
-      "model": "grok-4-fast",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 2000000,
-      "input_per_1k": 0.0002,
-      "output_per_1k": 0.0005,
-      "base_url": "https://api.x.ai/v1",
-      "notes": "Added automatically from OpenRouter feed."
     },
     {
       "provider": "xai",
