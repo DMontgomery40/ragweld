@@ -7,7 +7,7 @@
 <h1 align="center">ragweld</h1>
 
 <p align="center">
-  <strong>Open-source MLOps Engineering Platform for RAG and agent systems</strong><br />
+  <strong>Open-source MLOps Platform for API-first RAG and agent systems (API / MCP)</strong><br />
   Synthetic data generation, dual training studios, evals, tracing, observability, routing, and tri-brid retrieval in one surface.
 </p>
 
