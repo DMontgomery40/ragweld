@@ -7,6 +7,10 @@ ragweld is an MLOps Engineering Platform built around tri-brid retrieval:
 - Vector search (pgvector in PostgreSQL)
 - Sparse search (PostgreSQL FTS/BM25)
 - Graph search (Neo4j)
+
+Integration stance:
+- API-first in production
+- MCP layered on top for agent clients
 """
 
 from __future__ import annotations

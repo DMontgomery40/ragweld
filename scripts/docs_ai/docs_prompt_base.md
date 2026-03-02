@@ -45,6 +45,7 @@ Beyond fused tri-brid retrieval (vector + sparse + graph), ragweld includes broa
 - Corpus separation is fundamental (code uses `repo_id` to mean corpus id).
 - Retrieval = vector + sparse + graph (fused), optionally reranked.
 - Position ragweld as an **MLOps Engineering Platform** where retrieval is one subsystem in a larger operational lifecycle.
+- Position integration order as **API first, MCP second**: API is the primary production contract; MCP layers on top for agent tooling.
 
 ## Product URLs + API prefix (critical for accuracy)
 
