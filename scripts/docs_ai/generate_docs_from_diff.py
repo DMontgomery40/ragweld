@@ -508,6 +508,10 @@ def _parse_diff_paths(patch_text: str) -> List[Tuple[str, str]]:
 
 
 def _validate_patch_paths(patch_text: str) -> List[str]:
+    text = (patch_text or "").lstrip()
+    if text.startswith("*** Begin Patch"):
+        return _validate_cursor_patch_paths(patch_text)
+
     errors: list[str] = []
     for a_path, b_path in _parse_diff_paths(patch_text):
         for p in (a_path, b_path):
@@ -521,8 +525,78 @@ def _validate_patch_paths(patch_text: str) -> List[str]:
     return errors
 
 
+def _validate_cursor_patch_paths(patch_text: str) -> List[str]:
+    errors: list[str] = []
+    for raw in (patch_text or "").splitlines():
+        line = raw.strip()
+        for prefix in ("*** Add File: ", "*** Update File: ", "*** Delete File: ", "*** Move to: "):
+            if not line.startswith(prefix):
+                continue
+            p = line.removeprefix(prefix).strip().replace("\\", "/")
+            if not p:
+                errors.append("Cursor patch contains an empty path.")
+                continue
+            if p.startswith("/"):
+                errors.append(f"Cursor patch uses absolute path: {p}")
+                continue
+            if p == "mkdocs.yml" or p.startswith("mkdocs/docs/"):
+                continue
+            errors.append(f"Patch modifies disallowed path: {p}")
+    return errors
+
+
+def _cursor_patch_line_stats(patch_text: str) -> dict[str, dict[str, int]]:
+    """Return per-file added/removed line counts from Cursor-style patch format."""
+
+    stats: dict[str, dict[str, int]] = {}
+    current_path: Optional[str] = None
+    current_mode: Optional[str] = None  # add | update
+
+    for raw in (patch_text or "").splitlines():
+        line = raw.rstrip("\n")
+        stripped = line.strip()
+
+        if stripped.startswith("*** Add File: "):
+            current_path = stripped.removeprefix("*** Add File: ").strip().replace("\\", "/")
+            current_mode = "add"
+            stats.setdefault(current_path, {"added": 0, "removed": 0})
+            continue
+        if stripped.startswith("*** Update File: "):
+            current_path = stripped.removeprefix("*** Update File: ").strip().replace("\\", "/")
+            current_mode = "update"
+            stats.setdefault(current_path, {"added": 0, "removed": 0})
+            continue
+        if stripped.startswith("*** Delete File: "):
+            current_path = stripped.removeprefix("*** Delete File: ").strip().replace("\\", "/")
+            current_mode = None
+            stats.setdefault(current_path, {"added": 0, "removed": GENERAL_DELETE_LIMIT + 1})
+            continue
+        if stripped.startswith("*** "):
+            current_path = None
+            current_mode = None
+            continue
+        if current_path is None:
+            continue
+
+        if current_mode == "add":
+            if line.startswith("+"):
+                stats[current_path]["added"] += 1
+            continue
+        if current_mode == "update":
+            if line.startswith("+"):
+                stats[current_path]["added"] += 1
+            elif line.startswith("-"):
+                stats[current_path]["removed"] += 1
+
+    return stats
+
+
 def _patch_line_stats(patch_text: str) -> dict[str, dict[str, int]]:
     """Return per-file added/removed line counts from a unified diff."""
+
+    text = (patch_text or "").lstrip()
+    if text.startswith("*** Begin Patch"):
+        return _cursor_patch_line_stats(patch_text)
 
     stats: dict[str, dict[str, int]] = {}
     current_add_path: Optional[str] = None
