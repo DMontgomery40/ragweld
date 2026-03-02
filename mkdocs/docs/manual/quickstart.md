@@ -24,7 +24,7 @@
 
     ---
 
-    Run tri-brid retrieval (`vector + sparse + graph`) and inspect results.
+    Run tri-brid retrieval (`vector + sparse + graph`) and inspect results before moving into eval/tracing workflows.
 
 </div>
 
@@ -151,4 +151,3 @@ When status becomes `complete`, you’re ready to search.
 - Learn what a **corpus** really means: [Corpus vs repo_id](../guides/corpus.md)
 - Understand the retrieval legs and tuning knobs: [Searching & answering](search.md)
 - Use the UI effectively: [UI tour](ui.md)
-

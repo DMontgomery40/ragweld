@@ -162,7 +162,7 @@ function App() {
         </button>
         <h1>
           <span className="brand">ragweld</span>
-          <span className="tagline">Vector + Sparse + Graph</span>
+          <span className="tagline">MLOps Engineering Platform</span>
         </h1>
         <div className="top-actions">
           <button

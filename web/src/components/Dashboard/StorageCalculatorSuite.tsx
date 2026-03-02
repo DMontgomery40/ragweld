@@ -284,7 +284,7 @@ export function StorageCalculatorSuite() {
     <div className="storage-calc-wrapper">
       <div className="storage-calc-header">
         <h1><span className="brand">TriBrid RAG</span> Storage Calculator Suite</h1>
-        <p className="subtitle">Vector + Sparse + Graph • Enterprise Memory Planning</p>
+        <p className="subtitle">MLOps Engineering Platform • Enterprise Memory Planning</p>
         <div className="info-box">
           <p>
             <strong>Left:</strong> Calculate exact storage needs for your configuration.<br />
