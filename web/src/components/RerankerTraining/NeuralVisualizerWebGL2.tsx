@@ -1,5 +1,5 @@
 import { useLayoutEffect, useMemo, useRef } from 'react';
-import { Canvas, extend, ReactThreeFiber, useThree } from '@react-three/fiber';
+import { Canvas, extend, useThree, type ThreeElement } from '@react-three/fiber';
 import { Bloom, ChromaticAberration, EffectComposer, Noise } from '@react-three/postprocessing';
 import { Environment, Grid, OrbitControls, Stars } from '@react-three/drei';
 import * as THREE from 'three';
@@ -46,11 +46,9 @@ class TrajectoryMaterial extends THREE.ShaderMaterial {
 }
 extend({ TrajectoryMaterial });
 
-declare global {
-  namespace JSX {
-    interface IntrinsicElements {
-      trajectoryMaterial: ReactThreeFiber.Object3DNode<TrajectoryMaterial, typeof TrajectoryMaterial>;
-    }
+declare module '@react-three/fiber' {
+  interface ThreeElements {
+    trajectoryMaterial: ThreeElement<typeof TrajectoryMaterial>;
   }
 }
 

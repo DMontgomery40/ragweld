@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
 import { DockviewReact, type DockviewApi, type DockviewReadyEvent, type IDockviewPanelProps } from 'dockview';
 import { Group, Panel, Separator } from 'react-resizable-panels';
 import { useVirtualizer } from '@tanstack/react-virtual';
@@ -39,10 +39,10 @@ type BottomTab = 'timeline' | 'logs' | 'gradient';
 type LayoutPreset = 'balanced' | 'focus_viz' | 'focus_logs' | 'focus_inspector';
 
 type StudioDockRenderers = {
-  runs: () => JSX.Element;
-  visualizer: () => JSX.Element;
-  inspector: () => JSX.Element;
-  activity: () => JSX.Element;
+  runs: () => ReactElement;
+  visualizer: () => ReactElement;
+  inspector: () => ReactElement;
+  activity: () => ReactElement;
 };
 
 const StudioDockRendererContext = createContext<StudioDockRenderers | null>(null);
@@ -69,7 +69,7 @@ function DockActivityPanel(_: IDockviewPanelProps) {
   return useStudioDockRenderers().activity();
 }
 
-const DOCK_COMPONENTS: Record<string, (props: IDockviewPanelProps) => JSX.Element> = {
+const DOCK_COMPONENTS: Record<string, (props: IDockviewPanelProps) => ReactElement> = {
   'studio-runs': DockRunsPanel,
   'studio-visualizer': DockVisualizerPanel,
   'studio-inspector': DockInspectorPanel,

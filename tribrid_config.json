@@ -288,7 +288,7 @@
     "rerank_input_snippet_chars": 700
   },
   "generation": {
-    "gen_model": "gpt-4o-mini",
+    "gen_model": "gpt-5.3-codex",
     "gen_temperature": 0.0,
     "gen_max_tokens": 2048,
     "gen_top_p": 1.0,

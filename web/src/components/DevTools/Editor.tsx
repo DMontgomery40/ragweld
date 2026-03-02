@@ -2,7 +2,7 @@
 // Embedded Monaco editor with file tree
 // Reference: /assets/dev tools - editor - embedded vscode editor - way cool.png
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, type ReactElement } from 'react';
 import { useAPI } from '@/hooks';
 
 // Monaco Editor types (will be loaded dynamically)
@@ -244,7 +244,7 @@ export function Editor() {
     }
   };
 
-  const renderFileTree = (nodes: FileNode[], depth: number = 0): JSX.Element[] => {
+  const renderFileTree = (nodes: FileNode[], depth: number = 0): ReactElement[] => {
     return nodes.map(node => (
       <div key={node.path}>
         <div

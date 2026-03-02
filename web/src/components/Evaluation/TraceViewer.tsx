@@ -73,7 +73,7 @@ export const TraceViewer: React.FC<TraceViewerProps> = ({ className = '' }) => {
     const gateEvent = events.find(ev => ev.kind === 'gating.outcome');
     const retrieveEvent = events.find(ev => ev.kind === 'retriever.retrieve');
 
-    const parts: JSX.Element[] = [];
+    const parts: React.ReactElement[] = [];
 
     // Header Info
     const headerParts = [
