@@ -525,29 +525,38 @@ def _patch_line_stats(patch_text: str) -> dict[str, dict[str, int]]:
     """Return per-file added/removed line counts from a unified diff."""
 
     stats: dict[str, dict[str, int]] = {}
-    current_path: Optional[str] = None
+    current_add_path: Optional[str] = None
+    current_del_path: Optional[str] = None
 
     for raw in (patch_text or "").splitlines():
         line = raw.rstrip("\n")
         if line.startswith("diff --git "):
             parts = line.split()
             if len(parts) < 4:
-                current_path = None
+                current_add_path = None
+                current_del_path = None
                 continue
             a_path = parts[2].removeprefix("a/").strip()
             b_path = parts[3].removeprefix("b/").strip()
-            current_path = b_path if b_path != "/dev/null" else a_path
-            stats.setdefault(current_path, {"added": 0, "removed": 0})
+            # Track additions on destination path and deletions on source path.
+            # This preserves safety checks for renames (a -> b) where deletions
+            # should still count against the original protected page.
+            current_add_path = b_path if b_path != "/dev/null" else a_path
+            current_del_path = a_path if a_path != "/dev/null" else b_path
+            if current_add_path:
+                stats.setdefault(current_add_path, {"added": 0, "removed": 0})
+            if current_del_path:
+                stats.setdefault(current_del_path, {"added": 0, "removed": 0})
             continue
 
-        if current_path is None:
+        if current_add_path is None and current_del_path is None:
             continue
         if line.startswith("+++ ") or line.startswith("--- "):
             continue
-        if line.startswith("+"):
-            stats[current_path]["added"] += 1
-        elif line.startswith("-"):
-            stats[current_path]["removed"] += 1
+        if line.startswith("+") and current_add_path:
+            stats[current_add_path]["added"] += 1
+        elif line.startswith("-") and current_del_path:
+            stats[current_del_path]["removed"] += 1
 
     return stats
 
