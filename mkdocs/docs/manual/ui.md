@@ -47,6 +47,26 @@ flowchart LR
   BE --> N4J["Neo4j (optional)"]
 ```
 
+## UI snapshots (current surfaces)
+
+### Chat + dataset iteration loop
+
+![Chat with dataset context and source grounding](../assets/images/chat-and-dataset.png)
+
+This is the core operator loop: ask, inspect sources, adjust retrieval settings, and re-run.
+
+### RAG graph inspection
+
+![Graph explorer with entity table and relationships](../assets/images/graph-explorer.png)
+
+The graph view is where you validate entity extraction quality and relationship coverage.
+
+### Recall gating and memory policy controls
+
+![Recall gating controls in chat settings](../assets/images/recall-gating.png)
+
+This panel controls when memory is indexed and when recall is injected per message.
+
 ## Main tabs (what they’re for)
 
 The UI is organized into top-level tabs. Here’s the practical meaning of each:
@@ -90,4 +110,3 @@ If you see “wrong results”, the most common cause is simply that you’re lo
 ??? tip "Where to verify secrets"
     - **Admin → Secrets**
     - `/api/secrets/check?...`
-
