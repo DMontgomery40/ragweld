@@ -12,9 +12,10 @@
 </p>
 
 <p align="center">
-  <a href="https://dmontgomery40.github.io/tribrid-rag/"><img src="https://img.shields.io/badge/docs-mkdocs-blue" alt="Documentation"></a>
+  <a href="https://dmontgomery40.github.io/ragweld/latest/"><img src="https://img.shields.io/badge/docs-mkdocs-blue" alt="Documentation"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0--or--later-blue" alt="License"></a>
   <a href="https://python.org"><img src="https://img.shields.io/badge/python-3.11+-blue" alt="Python"></a>
+  <a href="#api-first-integration"><img src="https://img.shields.io/badge/API-first-1d4ed8" alt="API First"></a>
   <a href="#mcp-integration"><img src="https://img.shields.io/badge/MCP-enabled-purple" alt="MCP Enabled"></a>
 </p>
 
@@ -112,6 +113,11 @@ Each search method compensates for the others' weaknesses. The result: **dramati
 - **Frontend**: React + TypeScript + Zustand, fully typed from Pydantic
 - **Configuration**: 500+ tunable parameters, all via UI or API
 - **Observability**: Prometheus metrics, Grafana dashboards, Loki log aggregation, structured logging
+
+### API-first Integration
+- **Primary contract**: FastAPI endpoints under `/api/*` are the canonical production interface
+- **Channel routing**: independent model/provider routing for API, chat, CLI, and MCP channels
+- **Ops surface**: indexing, retrieval, evals, training, tracing, and observability are all API-addressable
 
 ### MCP Integration (Model Context Protocol)
 - **Embedded MCP Server**: Streamable HTTP transport mounted at `/mcp`

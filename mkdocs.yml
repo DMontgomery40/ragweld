@@ -1,5 +1,5 @@
 site_name: ragweld Docs
-site_description: Tri-brid Retrieval-Augmented Generation (Vector + Sparse + Graph) — product docs for ragweld
+site_description: Open-source API-first MLOps Engineering Platform for retrieval and agent systems
 site_url: https://dmontgomery40.github.io/ragweld/
 repo_url: https://github.com/DMontgomery40/ragweld
 repo_name: DMontgomery40/ragweld
@@ -144,4 +144,3 @@ nav:
       - Frontend: frontend.md
       - Testing: testing.md
       - Observability: observability.md
-

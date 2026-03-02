@@ -485,6 +485,7 @@ def call_openai_unified_diff(prompt: str) -> str:
         "You are generating documentation updates for ragweld based on code changes.\n"
         "Use 'ragweld' (not 'tribrid' or 'TriBridRAG') as the product name in all doc text.\n"
         "Position ragweld as an MLOps Engineering Platform for retrieval and agent systems, not as retrieval-only tooling.\n"
+        "Frame integrations as API first and MCP second: API is the primary contract, MCP is an overlay for agent ecosystems.\n"
         "You may create, move, or delete pages and restructure folders, and you may update mkdocs.yml nav accordingly.\n"
         "Only modify MkDocs sources: mkdocs/docs/** and mkdocs.yml.\n"
         "Output ONLY a standard git unified diff patch suitable for `git apply`.\n"
