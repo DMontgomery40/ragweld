@@ -28,7 +28,7 @@ export function HelpSubtab() {
         </h3>
 
         <p style={{ color: 'var(--fg-muted)', marginBottom: '32px', lineHeight: '1.6', fontSize: '14px' }}>
-          Welcome to TriBrid RAG (Vector + Sparse + Graph). This guide will help you get started and understand key concepts.
+          Welcome to ragweld, an MLOps Engineering Platform for retrieval and agent systems. This guide will help you get started and understand key concepts.
         </p>
 
         {/* Quick Start Guide */}

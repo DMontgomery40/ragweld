@@ -7,7 +7,8 @@
 <h1 align="center">ragweld</h1>
 
 <p align="center">
-  <strong>Production-grade Retrieval-Augmented Generation combining Vector, Sparse, and Graph search</strong>
+  <strong>Open-source MLOps Engineering Platform for RAG and agent systems</strong><br />
+  Synthetic data generation, dual training studios, evals, tracing, observability, routing, and tri-brid retrieval in one surface.
 </p>
 
 <p align="center">
@@ -25,12 +26,12 @@
   <summary>
     <strong>RAG Chat + Eval Dataset Manager</strong> — grounded answers with sources, plus regression evaluation (click to expand)
     <br />
-    <img src="assets/chat-and-dataset.png" alt="TriBridRAG UI showing RAG chat next to the evaluation dataset manager" width="900" />
+    <img src="assets/chat-and-dataset.png" alt="ragweld UI showing RAG chat next to the evaluation dataset manager" width="900" />
   </summary>
   <br />
   <p align="center">
     <a href="assets/chat-and-dataset.png">
-      <img src="assets/chat-and-dataset.png" alt="TriBridRAG UI showing RAG chat next to the evaluation dataset manager" width="1000" />
+      <img src="assets/chat-and-dataset.png" alt="ragweld UI showing RAG chat next to the evaluation dataset manager" width="1000" />
     </a>
   </p>
 </details>
@@ -39,12 +40,12 @@
   <summary>
     <strong>Indexing Settings + Grafana Dashboards</strong> — tune chunking/embedding and watch indexing metrics live (click to expand)
     <br />
-    <img src="assets/indexing-settings-with-grafana-on-side.png" alt="TriBridRAG indexing settings UI alongside Grafana dashboards" width="900" />
+    <img src="assets/indexing-settings-with-grafana-on-side.png" alt="ragweld indexing settings UI alongside Grafana dashboards" width="900" />
   </summary>
   <br />
   <p align="center">
     <a href="assets/indexing-settings-with-grafana-on-side.png">
-      <img src="assets/indexing-settings-with-grafana-on-side.png" alt="TriBridRAG indexing settings UI alongside Grafana dashboards" width="1000" />
+      <img src="assets/indexing-settings-with-grafana-on-side.png" alt="ragweld indexing settings UI alongside Grafana dashboards" width="1000" />
     </a>
   </p>
 </details>
@@ -59,7 +60,7 @@ Single-method RAG systems fail in predictable ways:
 
 ## The Solution
 
-TriBridRAG runs **three retrieval methods in parallel**, fuses their results, and optionally reranks:
+ragweld runs **three retrieval methods in parallel**, fuses their results, and optionally reranks:
 
 ```
                                     ┌─────────────────────┐
@@ -91,6 +92,14 @@ Each search method compensates for the others' weaknesses. The result: **dramati
 
 ## Features
 
+### MLOps Engineering Platform
+- **Synthetic Data Lab**: recipe-based generation for eval datasets, semantic cards, keywords, triplets, and autotune patches
+- **Dual Training Studios**: trainable learning reranker and trainable in-product agent model, with checkpoints, promote/rollback, and run telemetry
+- **Evaluation Workbench**: run management, drilldowns, and diffs across retrieval, indexing, model, and routing changes
+- **Tracing + Observability**: local traces out of the box, optional external tracing mode, plus embedded Grafana/Loki workflows
+- **Semantic Cache + Recall Gates**: token-cost control and smart memory retrieval policy in the chat path
+- **Routing + Model Catalog**: provider/model routing controls, daily catalog refreshes, and custom model registration
+
 ### Tri-Brid Retrieval
 - **Vector Search**: pgvector in PostgreSQL with HNSW indexing
 - **Sparse Search**: PostgreSQL Full-Text Search with BM25-style ranking
@@ -107,7 +116,7 @@ Each search method compensates for the others' weaknesses. The result: **dramati
 ### MCP Integration (Model Context Protocol)
 - **Embedded MCP Server**: Streamable HTTP transport mounted at `/mcp`
 - **Three MCP Tools**: `search`, `answer`, `list_corpora`
-- **Claude Desktop / IDE Ready**: Connect any MCP-compatible client directly to TriBridRAG
+- **Claude Desktop / IDE Ready**: Connect any MCP-compatible client directly to ragweld
 - **Stateless HTTP Mode**: No session management required (recommended for most use cases)
 
 ### Knowledge Graph
@@ -132,7 +141,7 @@ Each search method compensates for the others' weaknesses. The result: **dramati
 
 ## Performance
 
-TriBridRAG measures real pipeline latency and throughput via **Prometheus + Grafana** (see dashboards `tribrid-overview` and `tribrid-rag-metrics`). For reproducible local benchmarking (index + search), use the built-in benchmark runner.
+ragweld measures real pipeline latency and throughput via **Prometheus + Grafana** (see dashboards `tribrid-overview` and `tribrid-rag-metrics`). For reproducible local benchmarking (index + search), use the built-in benchmark runner.
 
 ### Reproducible benchmark (index + search)
 
@@ -298,7 +307,7 @@ curl -X POST "http://localhost:8012/api/search" \
 
 ## MCP Integration
 
-TriBridRAG includes a built-in **Model Context Protocol (MCP)** server, allowing any MCP-compatible client (Claude Desktop, Cursor, VS Code extensions, custom agents) to use tri-brid retrieval directly.
+ragweld includes a built-in **Model Context Protocol (MCP)** server, allowing any MCP-compatible client (Claude Desktop, Cursor, VS Code extensions, custom agents) to use tri-brid retrieval directly.
 
 ### MCP Tools Available
 
@@ -357,7 +366,7 @@ curl http://localhost:8012/api/mcp/status
 
 ## Local Tracing
 
-TriBridRAG captures detailed per-request traces for debugging and development. Traces are stored in an in-memory ring buffer (no external dependencies).
+ragweld captures detailed per-request traces for debugging and development. Traces are stored in an in-memory ring buffer (no external dependencies).
 
 ### Trace Features
 
@@ -392,7 +401,7 @@ TriBridRAG captures detailed per-request traces for debugging and development. T
 
 ## Loki Log Integration
 
-When running with the observability stack, TriBridRAG proxies Loki queries for unified log viewing in the Chat UI.
+When running with the observability stack, ragweld proxies Loki queries for unified log viewing in the Chat UI.
 
 ### Loki Proxy Endpoints
 
@@ -588,7 +597,7 @@ tribrid-rag/
 
 ## Configuration
 
-TriBridRAG is highly configurable. Every parameter is defined in Pydantic with validation, defaults, and descriptions.
+ragweld is highly configurable. Every parameter is defined in Pydantic with validation, defaults, and descriptions.
 
 ### Key Configuration Sections
 

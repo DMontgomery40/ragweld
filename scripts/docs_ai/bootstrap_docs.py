@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Docs Autopilot bootstrap for TriBridRAG.
+Docs Autopilot bootstrap for ragweld.
 
 Reads source files for each documentation page, calls OpenAI API
 to generate MkDocs pages automatically.
@@ -116,7 +116,7 @@ NESTED PAGE LINKING RULES (CRITICAL):
 
 DOC_PAGES = {
     "index": {
-        "title": "TriBridRAG Docs",
+        "title": "ragweld Docs",
         "output_path": "mkdocs/docs/index.md",
         "source_files": [
             "README.md",
@@ -131,7 +131,7 @@ Hard requirements:
 1. Be LONG and substantive. This page should feel like a mini-book chapter, not a README.
 2. Start with a feature grid (<div class="grid chunk_summaries" markdown>).
 3. Include at least 3 Mermaid diagrams:
-   - A tri-brid pipeline flowchart (vector + sparse + graph -> fusion -> rerank -> results)
+   - A retrieval pipeline flowchart (vector + sparse + graph -> fusion -> rerank -> results) and where it fits in the broader MLOps lifecycle
    - A sequence diagram for a typical /search request
    - A state diagram for indexing -> ready -> searching
 4. Include a table that maps “What you want to do” to the correct docs page (architecture/retrieval/config/api/indexing/deploy/glossary).
@@ -608,7 +608,7 @@ def list_pages() -> None:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Generate TriBridRAG documentation using AI",
+        description="Generate ragweld documentation using AI",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:

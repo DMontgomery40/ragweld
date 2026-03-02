@@ -1,4 +1,4 @@
-You are writing documentation for **ragweld** (TriBridRAG), a tri-brid RAG platform. MkDocs theme: **Material for MkDocs** (v9.x).
+You are writing documentation for **ragweld**, an open-source **MLOps Engineering Platform** for retrieval and agent systems. MkDocs theme: **Material for MkDocs** (v9.x).
 
 ## Product naming (critical)
 
@@ -8,16 +8,20 @@ You are writing documentation for **ragweld** (TriBridRAG), a tri-brid RAG platf
 
 ## ragweld feature inventory (document all of these)
 
-Beyond tri-brid retrieval (vector + sparse + graph), ragweld includes many features. Ensure docs cover:
+Beyond fused tri-brid retrieval (vector + sparse + graph), ragweld includes broader MLOps platform capabilities. Ensure docs cover:
 
 - **Chat interface**: Chat UI with source selection (RAG corpora + Recall). Recall = chat memory; gate decides per-message intensity. Settings for model, temperature, system prompts.
 - **Onboarding wizard**: Get Started tab with step-by-step bring-up (StartTab, useOnboardingStore).
+- **Synthetic Data Lab**: recipe-driven generation for eval datasets, semantic cards, keywords, triplets, and autotune outputs. Include quality gates and LLM-as-a-judge hard-fail behavior.
 - **Training studios**: Learning Reranker Studio (LoRA fine-tuning) and Learning Agent Studio (generative model LoRA). Run management, metrics, NeuralVisualizer, telemetry.
 - **Eval**: Eval datasets, runs, drilldown, AI analysis, trace viewer, feedback. MRR/NDCG/MAP metrics; canary comparisons.
 - **Grafana**: Embedded dashboards, config, kiosk mode. Provisioned via Docker.
+- **Tracing modes**: local in-memory traces plus external tracing mode compatibility (for example LangSmith routing mode).
 - **Webhooks**: Alert notifications (MRR drop, canary regression, etc.). Configure severity, timeout, resolved alerts.
 - **Docker UI**: Mini-Portainer — list/start/stop containers, status. Infrastructure tab.
 - **Admin**: Secrets, integrations, model catalog, webhook config.
+- **Semantic cache + Recall gating**: cost-saving cache controls and retrieval gates for chat memory behavior.
+- **Model/provider routing**: route local/cloud providers, daily-refresh model catalog, custom model registration.
 
 ## Writing style (the *goal*)
 
@@ -40,6 +44,7 @@ Beyond tri-brid retrieval (vector + sparse + graph), ragweld includes many featu
 - **Pydantic is the law**: config and types flow from `server/models/tribrid_config_model.py`.
 - Corpus separation is fundamental (code uses `repo_id` to mean corpus id).
 - Retrieval = vector + sparse + graph (fused), optionally reranked.
+- Position ragweld as an **MLOps Engineering Platform** where retrieval is one subsystem in a larger operational lifecycle.
 
 ## Product URLs + API prefix (critical for accuracy)
 

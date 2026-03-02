@@ -8,6 +8,12 @@
 
     Parallel Vector (pgvector), Sparse (PostgreSQL FTS/BM25), and Graph (Neo4j) search fused with configurable strategies.
 
+-   :material-factory:{ .lg .middle } **MLOps Engineering Platform**
+
+    ---
+
+    Synthetic data, training studios, eval drilldowns, tracing, routing, and ops controls built into one workflow.
+
 -   :material-cog:{ .lg .middle } **Pydantic Is The Law**
 
     ---
@@ -49,7 +55,7 @@
     The repo/product is **ragweld**. Many internal names still say **tribrid** (config keys, module names, older docs). Treat `tribrid` as stable internal naming; don’t mass-rename it.
 
 !!! tip "Read This First"
-    TriBridRAG is strictly Pydantic-first. If a field or feature is not in `server/models/tribrid_config_model.py`, it does not exist. Add it there, regenerate TypeScript types, then build the rest.
+    ragweld is strictly Pydantic-first. If a field or feature is not in `server/models/tribrid_config_model.py`, it does not exist. Add it there, regenerate TypeScript types, then build the rest.
 
 !!! note "Terminology — corpus vs repo_id"
     The API still accepts `repo_id` for legacy reasons. Treat it as the corpus identifier. Pydantic models use `AliasChoices("repo_id", "corpus_id")` and serialize as `corpus_id`.
@@ -57,7 +63,7 @@
 !!! warning "Security"
     Keep `.env` out of version control. Restrict database access. Use strong passwords for PostgreSQL and Neo4j. Rotate API keys regularly.
 
-## What TriBridRAG Does
+## What ragweld does as an MLOps Engineering Platform
 
 | Feature | Description | Status |
 |---------|-------------|--------|
@@ -66,6 +72,11 @@
 | Graph Search | Neo4j traversal to follow entities/relations | ✅ Active |
 | Fusion | Weighted/reciprocal-rank fusion of sources | ✅ Active |
 | Reranker | Optional cloud/learning reranking | ✅ Active |
+| Synthetic Data Lab | Recipe-driven generation for eval datasets, semantic cards, and triplets | ✅ Active |
+| Training Studios | LoRA training workbenches for reranker and agent model | ✅ Active |
+| Eval + Drilldown | Run comparisons and per-query diagnostics for regressions | ✅ Active |
+| Tracing + Grafana | Local traces plus embedded observability dashboards | ✅ Active |
+| Routing + Model Catalog | Local/cloud model routing with catalog refresh and custom models | ✅ Active |
 
 ## End-to-End Retrieval Flow
 

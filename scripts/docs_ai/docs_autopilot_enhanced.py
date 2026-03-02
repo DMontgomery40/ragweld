@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Enhanced Docs Autopilot for TriBridRAG
+Enhanced Docs Autopilot for ragweld
 Generates comprehensive documentation using OpenAI GPT-5 (Responses API) with full context awareness
 
-TriBridRAG is a tri-brid RAG engine combining:
+ragweld is an MLOps Engineering Platform built around tri-brid retrieval:
 - Vector search (pgvector in PostgreSQL)
 - Sparse search (PostgreSQL FTS/BM25)
 - Graph search (Neo4j)
@@ -112,7 +112,7 @@ def normalize_mermaid_v11_markdown(markdown: str) -> Tuple[str, int]:
 class DocumentationContext:
     """Comprehensive context for documentation generation
 
-    This dataclass holds all the context gathered from the TriBridRAG codebase
+    This dataclass holds all the context gathered from the ragweld codebase
     that will be fed to the LLM for documentation generation.
     """
 
@@ -148,7 +148,7 @@ class DocumentationContext:
 
 
 class EnhancedDocsAutopilot:
-    """Enhanced documentation automation with LLM integration for TriBridRAG"""
+    """Enhanced documentation automation with LLM integration for ragweld"""
 
     def __init__(self, repo_root: Path = None):
         self.repo_root = Path(repo_root or os.getcwd())
@@ -178,7 +178,7 @@ class EnhancedDocsAutopilot:
             r"brain[-_]?scan",         # Personal health data
         ]
 
-        # Banned terms for TriBridRAG - these should NOT appear in docs
+        # Banned terms for ragweld docs
         self.banned_terms = [
             "qdrant",
             "redis",
@@ -211,7 +211,7 @@ class EnhancedDocsAutopilot:
         ]
 
     def gather_comprehensive_context(self, base_ref: str = None) -> DocumentationContext:
-        """Gather comprehensive context from the entire TriBridRAG codebase"""
+        """Gather comprehensive context from the entire ragweld codebase"""
 
         print("  📖 Reading CLAUDE.md...")
         claude_md = self._read_file(self.repo_root / "CLAUDE.md")
@@ -481,7 +481,7 @@ class EnhancedDocsAutopilot:
             )
 
         return (
-            "You are an expert technical documentation writer for TriBridRAG. "
+            "You are an expert technical documentation writer for ragweld. "
             "Return a JSON object mapping mkdocs/docs-relative paths to full markdown content."
         )
 
@@ -493,7 +493,7 @@ class EnhancedDocsAutopilot:
 
         # Build a comprehensive prompt
         prompt_parts = [
-            "Generate comprehensive documentation for TriBridRAG based on the following context:",
+            "Generate comprehensive documentation for ragweld based on the following context:",
             "",
             "## Project Instructions (from CLAUDE.md)",
             context.claude_md,
@@ -839,14 +839,14 @@ class EnhancedDocsAutopilot:
     def update_mkdocs_config(self, docs_updates: Dict[str, str]) -> dict:
         """Update mkdocs.yml configuration with enhanced features"""
 
-        # Enhanced configuration for TriBridRAG
+        # Enhanced configuration for ragweld
         config = {
-            "site_name": "TriBridRAG Docs",
-            "site_description": "Tri-Brid Retrieval-Augmented Generation combining Vector, Sparse, and Graph search",
-            "site_url": "https://dmontgomery40.github.io/tribrid-rag/",
-            "repo_url": "https://github.com/DMontgomery40/tribrid-rag",
-            "repo_name": "DMontgomery40/tribrid-rag",
-            "copyright": "Copyright &copy; 2025 TriBridRAG",
+            "site_name": "ragweld Docs",
+            "site_description": "Open-source MLOps Engineering Platform for retrieval and agent systems",
+            "site_url": "https://dmontgomery40.github.io/ragweld/",
+            "repo_url": "https://github.com/DMontgomery40/ragweld",
+            "repo_name": "DMontgomery40/ragweld",
+            "copyright": "Copyright &copy; 2025 ragweld",
             "docs_dir": "mkdocs/docs",
 
             "theme": {
@@ -972,7 +972,7 @@ class EnhancedDocsAutopilot:
     def _generate_navigation(self, docs_updates: Dict[str, str]) -> list:
         """Generate navigation structure based on documentation
 
-        This creates a TriBridRAG-specific navigation structure.
+        This creates a ragweld-specific navigation structure.
         """
 
         # If no docs provided, return empty
@@ -1292,7 +1292,7 @@ def main():
     """Main entry point"""
     import argparse
 
-    parser = argparse.ArgumentParser(description="Enhanced Docs Autopilot for TriBridRAG")
+    parser = argparse.ArgumentParser(description="Enhanced Docs Autopilot for ragweld")
     parser.add_argument("--base", default=None, help="Base branch for comparison (default: full scan)")
     parser.add_argument("--dry-run", action="store_true", help="Don't write files, just show what would be done")
     parser.add_argument("--regenerate-all", action="store_true", help="Regenerate all documentation from entire codebase")
@@ -1305,7 +1305,7 @@ def main():
     args = parser.parse_args()
 
     print("=" * 60)
-    print("TriBridRAG Documentation Autopilot")
+    print("ragweld Documentation Autopilot")
     print("=" * 60)
 
     autopilot = EnhancedDocsAutopilot()

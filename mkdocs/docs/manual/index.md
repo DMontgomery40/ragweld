@@ -18,7 +18,7 @@
 
     ---
 
-    Run tri-brid retrieval (`vector + sparse + graph`) and optionally generate answers.
+    Run fused tri-brid retrieval (`vector + sparse + graph`) and optionally generate answers as one step in the broader MLOps workflow.
 
 -   :material-monitor-dashboard:{ .lg .middle } **Use the UI**
 
@@ -44,7 +44,7 @@
 
 ## What ragweld does (in one paragraph)
 
-You point ragweld at a **corpus** (a folder on disk). It **indexes** that corpus into chunks, embeddings, and (optionally) a graph. Then when you ask a question, ragweld runs **three retrieval “legs” in parallel** (vector, sparse, graph), **fuses** the results, can **rerank**, and returns matches (and optionally an answer).
+You point ragweld at a **corpus** (a folder on disk). It **indexes** that corpus into chunks, embeddings, and (optionally) a graph. Then when you ask a question, ragweld runs **three retrieval “legs” in parallel** (vector, sparse, graph), **fuses** the results, can **rerank**, and returns matches (and optionally an answer). Around that retrieval core, the platform adds synthetic data generation, eval drilldowns, training studios, tracing, and routing controls.
 
 ## The mental model
 
@@ -90,4 +90,3 @@ flowchart TB
 - **UI**: `http://127.0.0.1:5173/web/dashboard` (default dev URL)
 - **API base**: `http://127.0.0.1:8012/api` (default dev URL)
 - **Source of truth**: `server/models/tribrid_config_model.py` (Pydantic config + API shapes)
-

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Docs Autopilot for TriBridRAG — diff-driven documentation updates.
+Docs Autopilot for ragweld — diff-driven documentation updates.
 
 This script is modeled after the diff-based "Docs Autopilot" workflows used in other repos:
 - Look at git diff between a base ref and HEAD
@@ -484,6 +484,7 @@ def call_openai_unified_diff(prompt: str) -> str:
     ) + (
         "You are generating documentation updates for ragweld based on code changes.\n"
         "Use 'ragweld' (not 'tribrid' or 'TriBridRAG') as the product name in all doc text.\n"
+        "Position ragweld as an MLOps Engineering Platform for retrieval and agent systems, not as retrieval-only tooling.\n"
         "You may create, move, or delete pages and restructure folders, and you may update mkdocs.yml nav accordingly.\n"
         "Only modify MkDocs sources: mkdocs/docs/** and mkdocs.yml.\n"
         "Output ONLY a standard git unified diff patch suitable for `git apply`.\n"
@@ -684,7 +685,7 @@ def apply_patch(patch_path: Path) -> tuple[bool, str]:
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(prog="docs-autopilot", description="Diff-driven MkDocs autopilot for TriBridRAG")
+    ap = argparse.ArgumentParser(prog="docs-autopilot", description="Diff-driven MkDocs autopilot for ragweld")
     ap.add_argument("--base", default="origin/main", help="Git ref to diff against (base..HEAD)")
     ap.add_argument("--llm", choices=["openai"], default=None, help="LLM provider (currently: openai)")
     ap.add_argument("--apply", action="store_true", help="Apply the returned patch with `git apply --index`")
@@ -738,4 +739,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
