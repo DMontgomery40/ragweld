@@ -78,6 +78,46 @@
 | Tracing + Grafana | Local traces plus embedded observability dashboards | ✅ Active |
 | Routing + Model Catalog | Local/cloud model routing with catalog refresh and custom models | ✅ Active |
 
+## Product Screenshots
+
+These screenshots are taken from recent production UI surfaces and map to the same workflows documented throughout this site.
+
+### API routing first, MCP layered per channel
+
+![API routing and MCP channel overrides](assets/images/routing-api-mcp.png)
+
+- API docs: [API](api.md)
+- MCP docs: [MCP integration](integrations/mcp.md)
+
+### Indexing guardrails and model-mismatch detection
+
+![Indexing guardrails and model mismatch warnings](assets/images/indexing-guardrails.png)
+
+- Indexing guide: [Indexing a corpus](manual/indexing.md)
+- Config reference: [Indexing config](reference/config/indexing.md)
+
+### Learning studios and live training telemetry
+
+![Learning Agent Studio training workspace](assets/images/learning-agent-studio.png)
+![Live training visualizer with gradient telemetry](assets/images/learning-agent-visualizer.png)
+
+- Training reference: [Training config](reference/config/training.md)
+- Workflow guide: [Reranker how-to](howto/reranker.md)
+
+### Graph explorer and retrieval inspection
+
+![Graph explorer entity and relationship view](assets/images/graph-explorer.png)
+
+- Retrieval overview: [Retrieval concepts](retrieval/overview.md)
+- Graph controls: [Graph search config](reference/config/graph_search.md)
+
+### Recall gating and chat memory controls
+
+![Chat recall gating controls](assets/images/recall-gating.png)
+
+- Chat reference: [Chat config](reference/config/chat.md)
+- Caching reference: [Semantic cache config](reference/config/semantic_cache.md)
+
 ## End-to-End Retrieval Flow
 
 ```mermaid

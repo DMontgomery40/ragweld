@@ -39,6 +39,16 @@
     - `graph-visualization.png`
     - `model-selector.png`
 
+## Current bundled screenshots
+
+- `routing-api-mcp.png`
+- `indexing-guardrails.png`
+- `learning-agent-studio.png`
+- `learning-agent-visualizer.png`
+- `graph-explorer.png`
+- `recall-gating.png`
+- `chat-and-dataset.png`
+
 !!! warning "Privacy"
     Ensure screenshots do not contain secrets or PII.
 
