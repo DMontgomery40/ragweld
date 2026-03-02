@@ -11,6 +11,7 @@ import type {
   HealthStatus,
   LokiStatus,
   MCPStatusResponse,
+  RerankerLogsResponse,
   TriBridConfig,
   TracesLatestResponse,
 } from '@/types/generated';
@@ -70,13 +71,53 @@ export interface Trace {
 }
 
 export async function getTraces(limit: number = 50): Promise<Trace[]> {
-  const { data } = await apiClient.get<Trace[]>(api(`/traces?limit=${encodeURIComponent(String(limit))}`));
-  return data;
+  const limitNum = Number(limit);
+  const safeLimit = Number.isFinite(limitNum) ? Math.max(1, Math.min(500, Math.trunc(limitNum))) : 50;
+  const fetchLimit = Math.max(200, Math.min(2000, safeLimit * 5));
+  try {
+    const path = withCorpusScope(api(`/reranker/logs?limit=${encodeURIComponent(String(fetchLimit))}`));
+    const { data } = await apiClient.get<RerankerLogsResponse>(path);
+    const logs = Array.isArray((data as any)?.logs) ? ((data as any).logs as Array<Record<string, any>>) : [];
+    return logs
+      .filter((row) => {
+        const kind = String(row?.kind || row?.type || '').trim().toLowerCase();
+        return kind === 'chat' || kind === 'search' || kind === 'query';
+      })
+      .map((row) => {
+        const startedAtMs = typeof row?.started_at_ms === 'number' ? row.started_at_ms : undefined;
+        const endedAtMs = typeof row?.ended_at_ms === 'number' ? row.ended_at_ms : undefined;
+        const durationMs =
+          typeof startedAtMs === 'number' && typeof endedAtMs === 'number'
+            ? Math.max(0, endedAtMs - startedAtMs)
+            : undefined;
+        const timestamp =
+          (typeof row?.ts === 'string' && row.ts) ||
+          (typeof row?.timestamp === 'string' && row.timestamp) ||
+          (typeof startedAtMs === 'number' ? new Date(startedAtMs).toISOString() : new Date().toISOString());
+        const query =
+          (typeof row?.query === 'string' && row.query) ||
+          (typeof row?.query_raw === 'string' && row.query_raw) ||
+          '';
+        const repo =
+          (typeof row?.corpus_id === 'string' && row.corpus_id) ||
+          (Array.isArray(row?.corpus_ids) && typeof row.corpus_ids[0] === 'string' ? row.corpus_ids[0] : undefined);
+        return {
+          timestamp,
+          query,
+          repo,
+          duration_ms: durationMs,
+          ...row,
+        } as Trace;
+      })
+      .slice(-safeLimit);
+  } catch {
+    return [];
+  }
 }
 
 export async function getLatestTrace(): Promise<TracesLatestResponse | null> {
   try {
-    const { data } = await apiClient.get<TracesLatestResponse>(api('/traces/latest'));
+    const { data } = await apiClient.get<TracesLatestResponse>(withCorpusScope(api('/traces/latest')));
     return data;
   } catch {
     return null;
@@ -271,4 +312,3 @@ export async function getTopQueries(limit: number = 20): Promise<TopQueriesRespo
     return { total_queries: 0, top: [] };
   }
 }
-
