@@ -101,6 +101,22 @@ Use Material buttons (adjust relative paths correctly for nested pages):
 - After your changes, **every** relative link must resolve and `mkdocs build --strict` must pass.
 - Do not create relative links to repository source files; reference code paths as inline code (`` `path/to/file.py` ``) or use absolute GitHub URLs when a clickable link is required.
 
+## Change discipline (critical for incremental runs)
+
+- Prefer **surgical, additive edits** over rewrites.
+- Do **not** remove large existing sections unless the code diff clearly invalidates them.
+- Preserve established page structure on high-traffic docs pages (`index.md`, `manual/ui.md`, `manual/indexing.md`) and update only the relevant blocks.
+- Keep existing headings/anchors stable where possible to avoid breaking inbound links.
+
+## Screenshots policy
+
+- When screenshot assets exist under `mkdocs/docs/assets/images/`, keep docs screenshot references current.
+- Prefer updating/expanding existing screenshot sections instead of replacing unrelated prose.
+- For screenshot captions, explain:
+  - what the operator is seeing
+  - what decision the control enables
+  - where to read the corresponding reference/how-to page
+
 ## Navigation + audience (do not regress)
 
 - The docs MUST include a real, human-first **User Manual** (task-focused, step-by-step, practical).

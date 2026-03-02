@@ -45,6 +45,15 @@ ALLOWED_PATH_PREFIXES = (
     "mkdocs.yml",
 )
 
+# Guardrails for incremental autopilot runs. We allow broad rewrites in bootstrap
+# mode, but reject suspiciously destructive patches in normal push-mode runs.
+PROTECTED_DOC_DELETE_LIMITS = {
+    "mkdocs/docs/index.md": 120,
+    "mkdocs/docs/manual/ui.md": 100,
+    "mkdocs/docs/manual/indexing.md": 100,
+}
+GENERAL_DELETE_LIMIT = 260
+
 # Heuristic: exclude obvious non-code / high-churn / generated artifacts from the change context.
 EXCLUDE_SUBSTRINGS = (
     ".git/",
@@ -202,6 +211,35 @@ def scan_docs_tree() -> List[str]:
     return entries
 
 
+def scan_screenshot_assets(*, limit: int = 80) -> List[str]:
+    """List current screenshot assets that docs pages may reference."""
+
+    roots = [
+        ROOT / "mkdocs" / "docs" / "assets" / "images",
+        ROOT / "web" / "public" / "screenshots",
+    ]
+    out: list[str] = []
+    seen: set[str] = set()
+    exts = {".png", ".jpg", ".jpeg", ".webp"}
+
+    for root in roots:
+        if not root.exists():
+            continue
+        for f in sorted(root.rglob("*")):
+            if not f.is_file():
+                continue
+            if f.suffix.lower() not in exts:
+                continue
+            rel = f.relative_to(ROOT).as_posix()
+            if rel in seen:
+                continue
+            seen.add(rel)
+            out.append(f"- {rel}")
+            if len(out) >= limit:
+                return out
+    return out
+
+
 def _select_context_files(changed: List[str], *, limit: int) -> List[str]:
     """Pick a high-signal subset of files to include diffs for."""
 
@@ -314,7 +352,7 @@ def _select_context_files(changed: List[str], *, limit: int) -> List[str]:
     return selected[:limit]
 
 
-def _selected_docs_context(*, max_chars_per_file: int = 7000) -> List[str]:
+def _selected_docs_context(*, rel_paths: Optional[List[str]] = None, max_chars_per_file: int = 7000) -> List[str]:
     """Return a small set of existing docs content so patches can apply reliably.
 
     Only included for bootstrap runs to avoid ballooning per-commit costs.
@@ -324,27 +362,28 @@ def _selected_docs_context(*, max_chars_per_file: int = 7000) -> List[str]:
     if not docs_dir.exists():
         return []
 
-    rel_paths = [
-        "index.md",
-        "manual/index.md",
-        "manual/quickstart.md",
-        "manual/indexing.md",
-        "manual/search.md",
-        "manual/ui.md",
-        "manual/troubleshooting.md",
-        "architecture.md",
-        "retrieval/overview.md",
-        "indexing.md",
-        "configuration.md",
-        "api.md",
-        "operations.md",
-        "deployment.md",
-        "security.md",
-        "troubleshooting.md",
-        "eval_guide.md",
-        "howto/reranker.md",
-        "observability.md",
-    ]
+    if rel_paths is None:
+        rel_paths = [
+            "index.md",
+            "manual/index.md",
+            "manual/quickstart.md",
+            "manual/indexing.md",
+            "manual/search.md",
+            "manual/ui.md",
+            "manual/troubleshooting.md",
+            "architecture.md",
+            "retrieval/overview.md",
+            "indexing.md",
+            "configuration.md",
+            "api.md",
+            "operations.md",
+            "deployment.md",
+            "security.md",
+            "troubleshooting.md",
+            "eval_guide.md",
+            "howto/reranker.md",
+            "observability.md",
+        ]
 
     blocks: list[str] = []
     for rel in rel_paths:
@@ -393,6 +432,18 @@ def build_plan(base_ref: str) -> str:
         ]
         docs_context = _selected_docs_context(max_chars_per_file=5000)
 
+    # Always include short excerpts from high-traffic docs so the model preserves
+    # structure and edits in place instead of rewriting wholesale.
+    preserve_context = _selected_docs_context(
+        rel_paths=[
+            "index.md",
+            "manual/ui.md",
+            "manual/indexing.md",
+        ],
+        max_chars_per_file=3500,
+    )
+    screenshot_assets = scan_screenshot_assets(limit=120)
+
     sections: list[str] = [
         "# Docs Autopilot Plan (diff-driven)",
         f"Base: {base_ref}" + (f" (resolved: {base_norm})" if base_norm != base_ref else ""),
@@ -407,6 +458,12 @@ def build_plan(base_ref: str) -> str:
         "",
         "## Current docs tree (mkdocs/docs)",
         *(scan_docs_tree() or ["- (mkdocs/docs not found)"]),
+        "",
+        "## Screenshot assets (docs + web)",
+        *(screenshot_assets or ["- (no screenshot assets found)"]),
+        "",
+        "## Existing high-traffic docs excerpts (preserve structure; edit minimally)",
+        *(preserve_context or ["- (no preserve context pages found)"]),
         "",
         *(["## Selected docs content (bootstrap-only)", *docs_context, ""] if docs_context else []),
         "## Prompt base (docs_prompt_base.md)",
@@ -451,6 +508,10 @@ def _parse_diff_paths(patch_text: str) -> List[Tuple[str, str]]:
 
 
 def _validate_patch_paths(patch_text: str) -> List[str]:
+    text = (patch_text or "").lstrip()
+    if text.startswith("*** Begin Patch"):
+        return _validate_cursor_patch_paths(patch_text)
+
     errors: list[str] = []
     for a_path, b_path in _parse_diff_paths(patch_text):
         for p in (a_path, b_path):
@@ -461,6 +522,151 @@ def _validate_patch_paths(patch_text: str) -> List[str]:
             if p.startswith("mkdocs/docs/"):
                 continue
             errors.append(f"Patch modifies disallowed path: {p}")
+    return errors
+
+
+def _validate_cursor_patch_paths(patch_text: str) -> List[str]:
+    errors: list[str] = []
+    for raw in (patch_text or "").splitlines():
+        line = raw.strip()
+        for prefix in ("*** Add File: ", "*** Update File: ", "*** Delete File: ", "*** Move to: "):
+            if not line.startswith(prefix):
+                continue
+            p = line.removeprefix(prefix).strip().replace("\\", "/")
+            if not p:
+                errors.append("Cursor patch contains an empty path.")
+                continue
+            if p.startswith("/"):
+                errors.append(f"Cursor patch uses absolute path: {p}")
+                continue
+            if p == "mkdocs.yml" or p.startswith("mkdocs/docs/"):
+                continue
+            errors.append(f"Patch modifies disallowed path: {p}")
+    return errors
+
+
+def _cursor_patch_line_stats(patch_text: str) -> dict[str, dict[str, int]]:
+    """Return per-file added/removed line counts from Cursor-style patch format."""
+
+    stats: dict[str, dict[str, int]] = {}
+    current_path: Optional[str] = None
+    current_mode: Optional[str] = None  # add | update
+
+    for raw in (patch_text or "").splitlines():
+        line = raw.rstrip("\n")
+        stripped = line.strip()
+
+        if stripped.startswith("*** Add File: "):
+            current_path = stripped.removeprefix("*** Add File: ").strip().replace("\\", "/")
+            current_mode = "add"
+            stats.setdefault(current_path, {"added": 0, "removed": 0})
+            continue
+        if stripped.startswith("*** Update File: "):
+            current_path = stripped.removeprefix("*** Update File: ").strip().replace("\\", "/")
+            current_mode = "update"
+            stats.setdefault(current_path, {"added": 0, "removed": 0})
+            continue
+        if stripped.startswith("*** Delete File: "):
+            current_path = stripped.removeprefix("*** Delete File: ").strip().replace("\\", "/")
+            current_mode = None
+            existing = _read_text(ROOT / current_path)
+            removed_lines = len(existing.splitlines()) if existing else 1
+            stats.setdefault(current_path, {"added": 0, "removed": removed_lines})
+            continue
+        if stripped.startswith("*** "):
+            current_path = None
+            current_mode = None
+            continue
+        if current_path is None:
+            continue
+
+        if current_mode == "add":
+            if line.startswith("+"):
+                stats[current_path]["added"] += 1
+            continue
+        if current_mode == "update":
+            if line.startswith("+"):
+                stats[current_path]["added"] += 1
+            elif line.startswith("-"):
+                stats[current_path]["removed"] += 1
+
+    return stats
+
+
+def _patch_line_stats(patch_text: str) -> dict[str, dict[str, int]]:
+    """Return per-file added/removed line counts from a unified diff."""
+
+    text = (patch_text or "").lstrip()
+    if text.startswith("*** Begin Patch"):
+        return _cursor_patch_line_stats(patch_text)
+
+    stats: dict[str, dict[str, int]] = {}
+    current_add_path: Optional[str] = None
+    current_del_path: Optional[str] = None
+
+    for raw in (patch_text or "").splitlines():
+        line = raw.rstrip("\n")
+        if line.startswith("diff --git "):
+            parts = line.split()
+            if len(parts) < 4:
+                current_add_path = None
+                current_del_path = None
+                continue
+            a_path = parts[2].removeprefix("a/").strip()
+            b_path = parts[3].removeprefix("b/").strip()
+            # Track additions on destination path and deletions on source path.
+            # This preserves safety checks for renames (a -> b) where deletions
+            # should still count against the original protected page.
+            current_add_path = b_path if b_path != "/dev/null" else a_path
+            current_del_path = a_path if a_path != "/dev/null" else b_path
+            if current_add_path:
+                stats.setdefault(current_add_path, {"added": 0, "removed": 0})
+            if current_del_path:
+                stats.setdefault(current_del_path, {"added": 0, "removed": 0})
+            continue
+
+        if current_add_path is None and current_del_path is None:
+            continue
+        if line.startswith("+++ ") or line.startswith("--- "):
+            continue
+        if line.startswith("+") and current_add_path:
+            stats[current_add_path]["added"] += 1
+        elif line.startswith("-") and current_del_path:
+            stats[current_del_path]["removed"] += 1
+
+    return stats
+
+
+def _validate_patch_safety(patch_text: str, *, allow_large_deletes: bool) -> List[str]:
+    """Reject suspiciously destructive docs rewrites in normal incremental mode."""
+
+    if allow_large_deletes:
+        return []
+
+    errors: list[str] = []
+    stats = _patch_line_stats(patch_text)
+
+    for path, counts in stats.items():
+        removed = counts.get("removed", 0)
+        added = counts.get("added", 0)
+        if removed == 0:
+            continue
+
+        protected_limit = PROTECTED_DOC_DELETE_LIMITS.get(path)
+        if protected_limit is not None and removed > protected_limit:
+            errors.append(
+                f"Patch removes {removed} lines from protected page {path} (limit {protected_limit}). "
+                "Prefer additive, targeted edits."
+            )
+
+        # Global guard: very large removals with tiny additions usually signal an
+        # accidental full-page rewrite in incremental mode.
+        if removed > GENERAL_DELETE_LIMIT and added < max(30, int(removed * 0.4)):
+            errors.append(
+                f"Patch appears overly destructive for {path} (removed={removed}, added={added}). "
+                "Refusing likely rewrite."
+            )
+
     return errors
 
 
@@ -486,6 +692,9 @@ def call_openai_unified_diff(prompt: str) -> str:
         "Use 'ragweld' (not 'tribrid' or 'TriBridRAG') as the product name in all doc text.\n"
         "Position ragweld as an MLOps Engineering Platform for retrieval and agent systems, not as retrieval-only tooling.\n"
         "Frame integrations as API first and MCP second: API is the primary contract, MCP is an overlay for agent ecosystems.\n"
+        "Prefer targeted, additive edits; do not rewrite entire pages unless bootstrap mode explicitly requires it.\n"
+        "Preserve structure on high-traffic pages (index.md, manual/ui.md, manual/indexing.md) and edit only relevant sections.\n"
+        "When screenshot assets are present under mkdocs/docs/assets/images/, keep screenshot references/captions aligned with docs.\n"
         "You may create, move, or delete pages and restructure folders, and you may update mkdocs.yml nav accordingly.\n"
         "Only modify MkDocs sources: mkdocs/docs/** and mkdocs.yml.\n"
         "Output ONLY a standard git unified diff patch suitable for `git apply`.\n"
@@ -725,6 +934,15 @@ def main() -> None:
     path_errors = _validate_patch_paths(patch_text)
     if path_errors:
         raise RuntimeError("Refusing patch that touches non-doc paths:\n" + "\n".join(f"- {e}" for e in path_errors))
+
+    safety_errors = _validate_patch_safety(
+        patch_text,
+        allow_large_deletes=is_bootstrap_base(args.base),
+    )
+    if safety_errors:
+        raise RuntimeError(
+            "Refusing suspiciously destructive docs patch:\n" + "\n".join(f"- {e}" for e in safety_errors)
+        )
 
     PATCH_FILE.write_text(patch_text, encoding="utf-8")
     print(f"LLM patch saved: {PATCH_FILE.relative_to(ROOT)}")
