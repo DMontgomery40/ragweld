@@ -59,154 +59,156 @@
 ??? info "`embedding.embedding_batch_size` (`EMBEDDING_BATCH_SIZE`) — Embedding Batch Size"
     **Category**: `embedding`
 
-    Number of text chunks to embed in a single API call or local batch during indexing. Higher values (50-200) speed up indexing by reducing API round trips but may hit rate limits or memory constraints. Lower values (10-30) are safer but slower. For OpenAI/Voyage APIs, batching significantly reduces total indexing time. For local models, larger batches improve GPU utilization but require more VRAM. If indexing fails with rate limit or OOM errors, reduce this value.
-
-    Recommended: 100-150 for API providers, 16-32 for local models (GPU), 4-8 for CPU-only.
+    Controls how many chunks are embedded in each request or inference pass. Larger batches usually improve throughput by reducing per-request overhead and increasing accelerator utilization, but they raise peak memory pressure and can hit rate or timeout limits. Smaller batches are safer on constrained hosts and unstable networks but increase total indexing time. Tune this setting from observed throughput and error rates, not fixed defaults.
 
     **Badges**:
-    - Performance tuning
-    - Watch rate limits
+    - Throughput tuning
 
     **Links**:
-    - [OpenAI Batch Embedding](https://platform.openai.com/docs/guides/embeddings/use-cases)
-    - [Rate Limits](https://platform.openai.com/docs/guides/rate-limits)
-    - [GPU Memory Management](https://huggingface.co/docs/transformers/en/perf_train_gpu_one)
+    - [Hugging Face Text Embeddings Inference](https://huggingface.co/docs/text-embeddings-inference/index)
+    - [Voyage embeddings docs](https://docs.voyageai.com/docs/embeddings)
+    - [Qdrant points and upserts](https://qdrant.tech/documentation/concepts/points/)
+    - [Dynamic batching for LLM throughput (2025)](https://arxiv.org/abs/2503.05248)
 
 ??? info "`embedding.embedding_cache_enabled` (`EMBEDDING_CACHE_ENABLED`) — Embedding Cache"
     **Category**: `embedding`
 
-    Cache embedding API results to disk to avoid re-computing vectors for identical text. Reduces API costs and speeds up reindexing. Disable only for debugging or when embeddings change frequently.
+    Enables reuse of previously computed embeddings for identical normalized text, reducing repeated compute and API spend during reindex cycles. Cache hits are most beneficial when rerunning ingestion on mostly stable corpora or during iterative chunking tests. Cache keys should include model identifier, model revision, and preprocessing policy to prevent stale vectors from contaminating retrieval quality comparisons. Disable cache only when validating backend or model changes end-to-end.
+
+    **Badges**:
+    - Cost control
 
     **Links**:
-    - [Caching Strategies](https://en.wikipedia.org/wiki/Cache_(computing))
-    - [Embedding Best Practices](https://platform.openai.com/docs/guides/embeddings/use-cases)
+    - [Redis client-side caching](https://redis.io/docs/latest/develop/use/client-side-caching/)
+    - [Qdrant points and upserts](https://qdrant.tech/documentation/concepts/points/)
+    - [Pinecone semantic search guide](https://docs.pinecone.io/guides/search/semantic-search)
+    - [ContextPilot context reuse (2025)](https://arxiv.org/abs/2511.03475)
 
 ??? info "`embedding.embedding_dim` (`EMBEDDING_DIM`) — Embedding Dimension"
     **Category**: `embedding`
 
-    Vector dimensionality for MXBAI/local embedding models. Common sizes: 384 (fast, lower quality), 768 (balanced, recommended), 1024 (best quality, slower). Larger dimensions capture more semantic nuance but increase Qdrant storage requirements and query latency. Must match your embedding model's output size. Changing this requires full reindexing - vectors of different dimensions are incompatible.
+    Defines vector dimensionality in the index and must match model output exactly. Larger dimensions can preserve more semantic detail and improve hard-case recall, but they increase memory, storage, and approximate-nearest-neighbor compute cost. Smaller dimensions reduce cost and can speed search, especially when using embeddings designed for compression. Treat this as a quality-versus-efficiency control and rebenchmark whenever dimension changes.
 
     **Badges**:
-    - Requires reindex
-    - Affects storage
+    - Vector schema
 
     **Links**:
-    - [Vector Embeddings](https://en.wikipedia.org/wiki/Word_embedding)
-    - [Dimensionality Tradeoffs](https://www.sbert.net/docs/pretrained_models.html#model-overview)
-    - [Qdrant Vector Config](https://qdrant.tech/documentation/concepts/collections/#create-a-collection)
+    - [Qdrant collections and vector size](https://qdrant.tech/documentation/concepts/collections/)
+    - [Weaviate vector search concepts](https://weaviate.io/developers/weaviate/concepts/search/vector-search)
+    - [SentenceTransformer API](https://www.sbert.net/docs/package_reference/sentence_transformer/SentenceTransformer.html)
+    - [Dimensionality reduction impact study (2025)](https://arxiv.org/abs/2508.17744)
 
 ??? info "`embedding.embedding_max_tokens` (`EMBEDDING_MAX_TOKENS`) — Embedding Max Tokens"
     **Category**: `embedding`
 
-    Maximum token length for text chunks sent to embedding models during indexing. Text exceeding this length is truncated by the tokenizer. Most embedding models support 512-8192 tokens. Longer limits preserve more context per chunk but increase embedding cost and processing time. Shorter limits are faster and cheaper but may lose semantic context for large functions/classes. Balance based on your average code chunk size and model capabilities.
-
-    Recommended: 512 for most code (functions/methods), 1024 for documentation-heavy repos, 256 for ultra-fast indexing.
+    This sets the maximum token count sent to the embedding model for each chunk. Content beyond the limit is truncated, so the value directly controls how much semantic evidence is preserved in each vector. Higher limits can improve recall for long code blocks and docs, but they increase indexing cost, latency, and the chance of mixing multiple topics into one embedding. Lower limits are cheaper and often cleaner semantically, but can drop critical tail context. Tune this against your chunk size distribution and monitor truncation rate so most chunks fit without clipping.
 
     **Badges**:
     - Affects cost
-    - Context preservation
 
     **Links**:
-    - [Tokenization Basics](https://huggingface.co/docs/transformers/main/en/tokenizer_summary)
-    - [OpenAI Token Limits](https://platform.openai.com/docs/guides/embeddings/embedding-models)
-    - [Voyage Limits](https://docs.voyageai.com/docs/embeddings#input-text)
+    - [HiChunk (arXiv 2025)](https://arxiv.org/abs/2509.11552)
+    - [OpenAI Cookbook: Embedding Long Inputs](https://github.com/openai/openai-cookbook/blob/main/examples/Embedding_long_inputs.ipynb)
+    - [tiktoken README](https://github.com/openai/tiktoken/blob/main/README.md)
+    - [Voyage Embeddings Docs](https://docs.voyageai.com/docs/embeddings)
 
 ??? info "`embedding.embedding_model` (`EMBEDDING_MODEL`) — Embedding Model (OpenAI)"
     **Category**: `embedding`
 
-    OpenAI embedding model name when EMBEDDING_TYPE=openai. Current options: "text-embedding-3-small" (512-3072 dims, $0.02/1M tokens, fast), "text-embedding-3-large" (256-3072 dims, $0.13/1M tokens, highest quality), "text-embedding-ada-002" (legacy, 1536 dims, $0.10/1M tokens). Larger models improve semantic search quality but cost more and require more storage. Changing this requires full reindexing as embeddings are incompatible across models.
-
-    Recommended: text-embedding-3-small for most use cases, text-embedding-3-large for production systems demanding highest quality.
+    This names the OpenAI embedding model used for indexing and query encoding when the OpenAI provider is selected. Model choice sets the quality, speed, vector shape options, and cost profile that downstream retrieval depends on. Because embedding spaces are model-specific, changing this value after indexing requires a full rebuild to keep similarity search valid. Treat model upgrades as versioned infrastructure changes: pin model ids, benchmark on your query set, and roll forward only with measured quality and latency impact. Avoid ad hoc switching between runs.
 
     **Badges**:
     - Requires reindex
-    - Costs API calls
 
     **Links**:
-    - [OpenAI Embeddings Guide](https://platform.openai.com/docs/guides/embeddings)
-    - [Embedding Models](https://platform.openai.com/docs/models/embeddings)
-    - [Pricing Calculator](https://openai.com/api/pricing/)
+    - [jina-embeddings-v5-text (arXiv 2026)](https://arxiv.org/abs/2602.15547)
+    - [OpenAI Cookbook: Get Embeddings](https://github.com/openai/openai-cookbook/blob/main/examples/Get_embeddings_from_dataset.ipynb)
+    - [openai-python API Reference](https://github.com/openai/openai-python/blob/main/api.md)
+    - [MTEB Leaderboard](https://huggingface.co/spaces/mteb/leaderboard)
 
 ??? info "`embedding.embedding_model_local` (`EMBEDDING_MODEL_LOCAL`) — Local Embedding Model"
     **Category**: `embedding`
 
-    HuggingFace model name or local path when EMBEDDING_TYPE=local or mxbai. Popular options: "mixedbread-ai/mxbai-embed-large-v1" (1024 dims, excellent quality), "BAAI/bge-small-en-v1.5" (384 dims, fast), "sentence-transformers/all-MiniLM-L6-v2" (384 dims, lightweight). Local embeddings are free but slower than API-based options. Model is downloaded on first use and cached locally. Choose larger models (768-1024 dims) for quality or smaller (384 dims) for speed.
-
-    Recommended: mxbai-embed-large-v1 for best free quality, all-MiniLM-L6-v2 for resource-constrained environments.
+    This specifies the local embedding model (usually SentenceTransformers or Hugging Face) used when running without hosted embedding APIs. It is a core quality and performance lever: larger models often improve semantic recall but consume more memory and index slower. Different local models also use different dimensions and training objectives, so changing models requires reindexing. Pin exact model revisions to avoid drift across machines and CI jobs. Use your own benchmark queries to choose a model, since leaderboard rank alone may not match your codebase or domain vocabulary.
 
     **Badges**:
-    - Free (no API)
-    - Requires download
+    - Local inference
 
     **Links**:
-    - [Sentence Transformers Models](https://www.sbert.net/docs/sentence_transformer/pretrained_models.html)
-    - [HuggingFace Model Hub](https://huggingface.co/models?pipeline_tag=feature-extraction&sort=downloads)
-    - [MTEB Leaderboard](https://huggingface.co/spaces/mteb/leaderboard)
+    - [jina-embeddings-v5-text (arXiv 2026)](https://arxiv.org/abs/2602.15547)
+    - [mxbai-embed-large-v1 Model Card](https://huggingface.co/mixedbread-ai/mxbai-embed-large-v1)
+    - [BGE Small v1.5 Model Card](https://huggingface.co/BAAI/bge-small-en-v1.5)
+    - [SentenceTransformers Pretrained Models](https://www.sbert.net/docs/sentence_transformer/pretrained_models.html)
 
 ??? info "`embedding.embedding_model_mlx` (`EMBEDDING_MODEL_MLX`) — MLX Embedding Model"
     **Category**: `embedding`
 
-    MLX model identifier when EMBEDDING_TYPE=mlx. Runs locally on Apple Silicon via MLX/Metal for very fast embedding inference. Default: "mlx-community/all-MiniLM-L6-v2-4bit". The model is downloaded on first use and cached locally. Changing this requires a full reindex (embeddings are not comparable across models).
+    This sets the MLX-compatible embedding model used on Apple Silicon. MLX uses Metal-optimized kernels, so it can provide strong local throughput for private or offline indexing pipelines. As with every embedding backend, the model id and dimension define the vector space; changing either requires full reindexing to keep search comparable. Quantized variants can reduce memory and speed up inference, but you should validate recall on representative queries before adopting them broadly. Record model id and quantization in index metadata for reproducible builds.
 
     **Badges**:
-    - Metal GPU
-    - Free (no API)
-    - Requires reindex
+    - Apple Silicon
+
+    **Links**:
+    - [jina-embeddings-v5-text (arXiv 2026)](https://arxiv.org/abs/2602.15547)
+    - [MLX Repository](https://github.com/ml-explore/mlx)
+    - [MLX Examples Repository](https://github.com/ml-explore/mlx-examples)
+    - [mlx-community all-MiniLM-L6-v2-4bit](https://huggingface.co/mlx-community/all-MiniLM-L6-v2-4bit)
 
 ??? info "`embedding.embedding_retry_max` (`EMBEDDING_RETRY_MAX`) — Embedding Max Retries"
     **Category**: `embedding`
 
-    Retry attempts for failed embedding API calls during indexing. Higher values ensure indexing completes despite transient errors but slow down failure recovery. Typical: 2-3 retries.
+    This controls how many times the system retries a failed embedding call before marking the operation failed. It protects indexing from transient failures such as short network interruptions, temporary overload, and bursty rate-limit responses. Too few retries makes jobs brittle; too many retries can mask persistent faults and dramatically increase end-to-end indexing time. Pair this setting with exponential backoff and jitter so workers do not retry in synchronized waves. Track retry exhaustion in telemetry and fix root causes rather than continually raising the retry ceiling.
+
+    **Badges**:
+    - Reliability
 
     **Links**:
-    - [Error Handling](https://platform.openai.com/docs/guides/error-codes)
-    - [Retry Patterns](https://en.wikipedia.org/wiki/Retry_pattern)
+    - [MINES: Web API Invariant Anomaly Detection (arXiv 2025)](https://arxiv.org/abs/2512.06906)
+    - [AWS Builders Library: Timeouts, Retries, Backoff with Jitter](https://aws.amazon.com/builders-library/timeouts-retries-and-backoff-with-jitter/)
+    - [Google Cloud Retry Strategy](https://cloud.google.com/storage/docs/retry-strategy)
+    - [openai-python API Reference](https://github.com/openai/openai-python/blob/main/api.md)
 
 ??? info "`embedding.embedding_timeout` (`EMBEDDING_TIMEOUT`) — Embedding Timeout"
     **Category**: `embedding`
 
-    Maximum seconds to wait for embedding API response. Similar to GEN_TIMEOUT but for embedding calls during indexing. Increase for large batches or slow networks. Typical: 30-60 seconds.
+    This is the maximum wait time for an embedding request before the call is treated as failed. It defines how long indexing workers can block on slow upstream responses and strongly affects throughput under load. If timeout is too low, valid requests fail and trigger unnecessary retries; if too high, stuck calls reduce parallelism and delay incident detection. Tune this with retry count, concurrency, and observed p95 and p99 latency, not mean latency alone. Separate timeout profiles for interactive queries versus bulk indexing jobs when possible.
+
+    **Badges**:
+    - Latency control
 
     **Links**:
-    - [API Timeouts](https://platform.openai.com/docs/guides/rate-limits)
-    - [Embedding API](https://platform.openai.com/docs/api-reference/embeddings)
+    - [LO2: Microservice API Anomaly Dataset (arXiv 2025)](https://arxiv.org/abs/2504.12067)
+    - [AWS Builders Library: Timeouts, Retries, Backoff with Jitter](https://aws.amazon.com/builders-library/timeouts-retries-and-backoff-with-jitter/)
+    - [Google Cloud Retry Strategy](https://cloud.google.com/storage/docs/retry-strategy)
+    - [openai-python API Reference](https://github.com/openai/openai-python/blob/main/api.md)
 
 ??? info "`embedding.embedding_type` (`EMBEDDING_TYPE`) — Embedding Provider"
     **Category**: `embedding`
 
-    Selects the embedding provider for dense vector search. Also determines the token counter used during code chunking, which affects chunk boundaries and splitting behavior.
-
-    • openai — strong quality, paid (cl100k tokenizer)
-    • voyage — strong retrieval, paid (voyage tokenizer)
-    • mlx — Apple Silicon local embeddings via MLX/Metal (fast)
-    • mxbai — OSS via SentenceTransformers
-    • local — any HuggingFace SentenceTransformer model
-    • gemini — Google Gemini embeddings
-
-    Note: Changing this setting affects both retrieval quality AND how code is split into chunks during indexing. A reindex is required after changing.
+    This selects the embedding backend family and therefore the core operating mode of retrieval: hosted API providers versus local inference runtimes. The choice drives quality, cost, privacy boundaries, tokenizer behavior, dimensionality, and operational dependencies such as network availability or local model files. Switching type usually changes vector space and requires reindexing to preserve ranking validity. Decide type at architecture level by balancing security and compliance constraints against latency and budget. Record provider and model together in index metadata so deployments remain reproducible.
 
     **Badges**:
     - Requires reindex
-    - Affects chunking
 
     **Links**:
-    - [OpenAI Embeddings](https://platform.openai.com/docs/guides/embeddings)
-    - [Voyage AI Embeddings](https://docs.voyageai.com/docs/embeddings)
-    - [Google Gemini Embeddings](https://ai.google.dev/gemini-api/docs/embeddings)
-    - [SentenceTransformers Docs](https://www.sbert.net/)
+    - [jina-embeddings-v5-text (arXiv 2026)](https://arxiv.org/abs/2602.15547)
+    - [OpenAI Cookbook: Get Embeddings](https://github.com/openai/openai-cookbook/blob/main/examples/Get_embeddings_from_dataset.ipynb)
+    - [Voyage Embeddings Docs](https://docs.voyageai.com/docs/embeddings)
+    - [Gemini Embeddings Docs](https://ai.google.dev/gemini-api/docs/embeddings)
 
 ??? info "`embedding.voyage_model` (`VOYAGE_MODEL`) — Voyage Embedding Model"
     **Category**: `generation`
 
-    Voyage AI embedding model when EMBEDDING_TYPE=voyage. Options: "voyage-code-2" (1536 dims, optimized for code, recommended), "voyage-3" (1024 dims, general-purpose, fast), "voyage-3-lite" (512 dims, budget option). Voyage models are specialized for code retrieval and often outperform OpenAI on technical queries. Code-specific models understand programming constructs, API patterns, and documentation better than general embeddings.
+    Selects which Voyage embedding model generates vectors for indexing and retrieval. The model choice determines embedding behavior (for example code bias vs. general text behavior), output dimensionality, and operational cost/latency characteristics, so it directly affects both relevance quality and infra footprint.
 
-    Recommended: voyage-code-2 for code-heavy repos, voyage-3 for mixed content (code + docs).
+    Change this deliberately and evaluate with a fixed benchmark query set. Because model changes alter vector semantics, switching models should be treated as a reindex event: regenerate vectors, rebuild the index, and compare recall@k, reranked precision, and p95 latency before promoting to production.
 
     **Badges**:
     - Requires reindex
     - Code-optimized
 
     **Links**:
-    - [Voyage Embeddings API](https://docs.voyageai.com/docs/embeddings)
-    - [voyage-code-2 Details](https://docs.voyageai.com/docs/voyage-code-2)
-    - [Model Comparison](https://docs.voyageai.com/docs/model-comparison)
+    - [Llama-Embed-Nemotron-8B (arXiv 2025)](https://arxiv.org/abs/2511.07025)
+    - [Voyage AI Embeddings API](https://docs.voyageai.com/docs/embeddings)
+    - [Voyage Contextualized Chunk Embeddings](https://docs.voyageai.com/docs/contextualized-chunk-embeddings)
+    - [Voyage AI FAQ](https://docs.voyageai.com/docs/faq)

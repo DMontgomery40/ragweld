@@ -52,83 +52,97 @@
 ??? info "`docker.docker_container_action_timeout` (`DOCKER_CONTAINER_ACTION_TIMEOUT`) — Container Action Timeout"
     **Category**: `infrastructure`
 
-    Maximum seconds to wait for container start/stop/restart operations. Containers with complex startup sequences or cleanup hooks may need higher values. If container actions timeout, increase this. Range: 5-120 seconds.
+    Maximum wait time for start, stop, or restart operations before the control layer marks the action as timed out. This setting protects UI/API responsiveness when containers hang during bootstrap, health checks, or shutdown hooks. If set too low, normal slow starts appear as failures; if set too high, real faults surface too late and block automation. Choose a value slightly above observed p95 action latency for your heaviest service profile and revisit after infrastructure changes.
 
     **Badges**:
-    - Container operations
+    - Timeout control
 
     **Links**:
-    - [Container Lifecycle](https://docs.docker.com/config/containers/start-containers-automatically/)
-    - [Stop Containers](https://docs.docker.com/engine/reference/commandline/stop/)
+    - [Docker startup performance study (arXiv 2026)](https://arxiv.org/abs/2602.15214)
+    - [docker container start](https://docs.docker.com/reference/cli/docker/container/start/)
+    - [docker container stop](https://docs.docker.com/reference/cli/docker/container/stop/)
+    - [docker container wait](https://docs.docker.com/reference/cli/docker/container/wait/)
 
 ??? info "`docker.docker_container_list_timeout` (`DOCKER_CONTAINER_LIST_TIMEOUT`) — Container List Timeout"
     **Category**: `infrastructure`
 
-    Maximum seconds to wait when listing all Docker containers. Increase if you have many containers (100+) or slow Docker API response. Range: 1-60 seconds.
+    Upper bound for how long the system waits when requesting container listings from the Docker API. This mainly protects control-plane responsiveness in environments with many containers, remote contexts, or overloaded Docker daemons. Higher values reduce false timeout errors during heavy load, while lower values fail fast and keep UIs responsive when the daemon is unhealthy. Tune it from observed list latency, not guesswork, and monitor for growth as your service count increases.
 
     **Badges**:
-    - Performance
+    - API latency
 
     **Links**:
-    - [Docker ps command](https://docs.docker.com/engine/reference/commandline/ps/)
-    - [Container Management](https://docs.docker.com/config/containers/)
+    - [CrossTrace distributed tracing for microservices (arXiv 2025)](https://arxiv.org/abs/2508.11342)
+    - [docker container ls](https://docs.docker.com/reference/cli/docker/container/ls/)
+    - [docker ps](https://docs.docker.com/reference/cli/docker/ps/)
+    - [Docker contexts](https://docs.docker.com/engine/context/working-with-contexts/)
 
 ??? info "`docker.docker_infra_down_timeout` (`DOCKER_INFRA_DOWN_TIMEOUT`) — Infrastructure Down Timeout"
     **Category**: `infrastructure`
 
-    Maximum seconds to wait when stopping TriBridRAG infrastructure services. Containers with data persistence may need time to flush to disk. If infra down fails, increase this value. Range: 10-120 seconds.
+    Controls how long the orchestrator waits for compose shutdown to complete before treating stop as failed. In RAG stacks this protects stateful services such as Postgres and vector stores, which need time to flush write-ahead logs and close files cleanly. If set too low, forced termination can leave partial writes, slower recovery, or integrity checks on restart; if set too high, rollback and local iteration become sluggish. Tune this from measured shutdown duration under heavy ingest and keep headroom for worst-case disk latency.
 
     **Badges**:
     - Infrastructure shutdown
 
     **Links**:
-    - [Docker Compose Down](https://docs.docker.com/compose/reference/down/)
-    - [Graceful Shutdown](https://docs.docker.com/engine/reference/commandline/stop/#extended-description)
+    - [Docker Compose down](https://docs.docker.com/reference/cli/docker/compose/down/)
+    - [Compose stop_grace_period](https://docs.docker.com/reference/compose-file/services/#stop_grace_period)
+    - [Docker daemon reference](https://docs.docker.com/engine/daemon/)
+    - [Decomposing Docker Container Startup Performance (2026)](https://arxiv.org/abs/2602.15214)
 
 ??? info "`docker.docker_infra_up_timeout` (`DOCKER_INFRA_UP_TIMEOUT`) — Infrastructure Up Timeout"
     **Category**: `infrastructure`
 
-    Maximum seconds to wait when starting TriBridRAG infrastructure services (Postgres, Neo4j, Grafana, Loki, etc.) via docker-compose. First-time startup may pull images and take longer. If infra up fails with timeout, increase this value. Range: 30-300 seconds.
+    Defines the maximum wait for infrastructure startup readiness. During first boot or after image updates, pulls, migrations, and service warm-up can dominate startup time in a RAG environment. If the timeout is too short, healthy services may be marked failed before they pass health checks; if too long, real boot failures surface late and slow feedback loops. Set this from observed cold-start timings and revisit it when adding heavy dependencies such as observability or graph services.
 
     **Badges**:
     - Infrastructure startup
-    - May pull images
 
     **Links**:
-    - [Docker Compose](https://docs.docker.com/compose/)
+    - [Docker Compose up](https://docs.docker.com/reference/cli/docker/compose/up/)
+    - [Compose healthcheck](https://docs.docker.com/reference/compose-file/services/#healthcheck)
+    - [Docker daemon reference](https://docs.docker.com/engine/daemon/)
+    - [Decomposing Docker Container Startup Performance (2026)](https://arxiv.org/abs/2602.15214)
 
 ??? info "`docker.docker_logs_tail` (`DOCKER_LOGS_TAIL`) — Log Lines to Tail"
     **Category**: `infrastructure`
 
-    Number of log lines to display when viewing container logs. Higher values show more history but may slow down log retrieval. Use 50-100 for quick checks, 500-1000 for debugging. Range: 10-1000 lines.
+    Sets how many trailing log lines are fetched per container when debugging retrieval workflows. Smaller tails keep UI and CLI feedback fast for routine checks, while larger tails help reconstruct multi-step failures across chunking, embedding, indexing, and query handling. Extremely large tails increase I/O and can bury the newest signal in historical noise. Use a conservative default and temporarily raise the value during incident analysis.
 
     **Badges**:
     - Log visibility
 
     **Links**:
-    - [Docker Logs](https://docs.docker.com/engine/reference/commandline/logs/)
-    - [Log Management](https://docs.docker.com/config/containers/logging/)
+    - [docker container logs](https://docs.docker.com/reference/cli/docker/container/logs/)
+    - [Docker logging drivers](https://docs.docker.com/engine/logging/configure/)
+    - [Grafana Loki docs](https://grafana.com/docs/loki/latest/)
+    - [Sharpening Kubernetes Audit Logs with Context Awareness (2025)](https://arxiv.org/abs/2506.16328)
 
 ??? info "`docker.docker_logs_timestamps` (`DOCKER_LOGS_TIMESTAMPS`) — Include Log Timestamps"
     **Category**: `infrastructure`
 
-    Whether to include timestamps in Docker log output. Timestamps help correlate events across containers but add visual noise. Set to 1 to show timestamps, 0 to hide them.
+    Adds timestamps to container output so events can be correlated across services in a single RAG request path. This is critical when tracing latency between ingestion, embedding calls, vector writes, and generation. Without timestamps, parallel service events are easy to misorder and root-cause analysis takes longer. Keep timestamps enabled for shared and production-like environments, and normalize timezone handling in downstream log tools.
 
     **Badges**:
-    - Log format
+    - Correlation ready
 
     **Links**:
-    - [Docker Logs Timestamps](https://docs.docker.com/engine/reference/commandline/logs/#options)
-    - [Log Analysis](https://grafana.com/docs/loki/latest/)
+    - [docker container logs](https://docs.docker.com/reference/cli/docker/container/logs/)
+    - [Docker logging drivers](https://docs.docker.com/engine/logging/configure/)
+    - [Grafana Loki docs](https://grafana.com/docs/loki/latest/)
+    - [Sharpening Kubernetes Audit Logs with Context Awareness (2025)](https://arxiv.org/abs/2506.16328)
 
 ??? info "`docker.docker_status_timeout` (`DOCKER_STATUS_TIMEOUT`) — Docker Status Timeout"
     **Category**: `infrastructure`
 
-    Maximum seconds to wait when checking Docker daemon status. Increase if your Docker host is slow to respond or under heavy load. If health checks timeout frequently, raise this value. Range: 1-30 seconds.
+    Sets the maximum time allowed for each Docker status probe. Low values surface daemon failures quickly but can create false negatives under CPU, disk, or socket contention; high values reduce noise but delay detection of real outages. In retrieval pipelines this directly affects whether preflight checks pass before ingestion and evaluation tasks begin. Choose a value slightly above observed probe latency at peak local load.
 
     **Badges**:
-    - Performance
+    - Probe tuning
 
     **Links**:
-    - [Docker Health Checks](https://docs.docker.com/engine/reference/commandline/inspect/)
-    - [Docker Daemon](https://docs.docker.com/config/daemon/)
+    - [docker system info](https://docs.docker.com/reference/cli/docker/system/info/)
+    - [Compose healthcheck](https://docs.docker.com/reference/compose-file/services/#healthcheck)
+    - [Docker Compose up](https://docs.docker.com/reference/cli/docker/compose/up/)
+    - [Decomposing Docker Container Startup Performance (2026)](https://arxiv.org/abs/2602.15214)

@@ -55,71 +55,52 @@
 ??? info "`graph_storage.graph_search_top_k` (`GRAPH_SEARCH_TOP_K`) — Graph Search Top-K"
     **Category**: `general`
 
-    Number of candidate results to retrieve from Neo4j graph search before fusion. Higher values (40-100) improve recall for graph-based relationships but increase query latency. Lower values (15-30) are faster but may miss relevant connections. Must be >= FINAL_K. Recommended: 30 for balanced performance.
-
-    Sweet spot: 30 for production systems. Use 40-50 when graph relationships are critical (e.g., finding code that calls or imports specific functions). Use 15-20 for cost-sensitive scenarios or when graph indexing is sparse.
-
-    • Range: 5-100 (typical: 20-50)
-    • Balanced: 30 (recommended)
-    • High recall: 40-50 (relationship-heavy queries)
-    • Cost-sensitive: 15-20 (faster, lower cost)
-    • Effect: Higher = more graph candidates, better recall, higher latency
-    • Symptom too low: Relevant graph connections missed
-    • Symptom too high: Slower queries, diminishing returns
+    GRAPH_SEARCH_TOP_K controls how many graph candidates are kept before downstream fusion and reranking. Increasing top-k usually improves recall because more potentially useful graph evidence survives early pruning, but it also raises latency and can inflate reranker and generation token costs. If top-k is too small, graph retrieval appears weak even when the graph is high quality because relevant nodes are dropped prematurely. If it is too large, weaker graph neighbors can crowd the context budget and reduce final answer precision. Tune this setting with both retrieval metrics and end-to-end answer quality, and keep it aligned with final context assembly limits.
 
     **Badges**:
-    - Affects latency
-    - Graph relationships
+    - Top-K Control
 
     **Links**:
-    - [Neo4j GraphRAG](https://neo4j.com/docs/neo4j-graphrag-python/current/user_guide_rag.html)
-    - [Graph Traversal](https://neo4j.com/blog/developer/graph-traversal-graphrag-python-package)
-    - [Top-K Retrieval](https://en.wikipedia.org/wiki/Nearest_neighbor_search#k-nearest_neighbors)
+    - [Neo4j GraphRAG Python User Guide](https://neo4j.com/docs/neo4j-graphrag-python/current/user_guide_rag.html)
+    - [Neo4j Vector Indexes](https://neo4j.com/docs/cypher-manual/current/indexes/semantic-indexes/vector-indexes/)
+    - [Elasticsearch Similarity and Ranking](https://www.elastic.co/guide/en/elasticsearch/reference/current/index-modules-similarity.html)
+    - [LightRetriever (2025): Faster Query Inference](https://arxiv.org/abs/2505.12260)
 
 ??? info "`graph_storage.include_communities` (`GRAPH_INCLUDE_COMMUNITIES`) — Include Communities"
     **Category**: `general`
 
-    Enable community-based expansion in graph search. When enabled, the system uses community detection algorithms (e.g., Louvain) to identify clusters of related nodes and expands search to include entire communities. This improves recall for related concepts but may introduce noise. Recommended: enabled for entity mode, optional for chunk mode.
-
-    Sweet spot: enabled for entity mode, disabled for chunk mode. Community expansion works best with entity-based graphs where structural clusters are meaningful. For chunk mode, neighbor expansion is usually sufficient.
-
-    • Enabled: Community-based expansion, better recall, may introduce noise
-    • Disabled: Direct neighbor expansion only, more focused results
-    • Effect: Controls whether community detection influences traversal
-    • Symptom if disabled: Related concepts in same community may be missed
+    GRAPH_INCLUDE_COMMUNITIES enables expansion across precomputed graph communities instead of only direct neighbors. This can surface related components that belong to the same subsystem even when explicit edges between the exact seed nodes are weak or missing. It is most useful for architecture, ownership, and impact-analysis questions where thematic grouping matters. The tradeoff is broader recall with higher risk of topic drift, so community expansion should usually be combined with conservative hop limits and robust reranking. Community quality depends heavily on graph construction and algorithm settings, so treat this as a quality-dependent feature flag rather than always-on behavior.
 
     **Badges**:
-    - Advanced
+    - Advanced Graph
 
     **Links**:
-    - [Louvain Algorithm](https://neo4j.com/docs/graph-data-science/current/algorithms/louvain)
-    - [Community Detection](https://neo4j.com/docs/graph-data-science/current/algorithms/community/)
-    - [Community Detection Algorithms](https://en.wikipedia.org/wiki/Community_structure)
+    - [Neo4j Louvain Algorithm](https://neo4j.com/docs/graph-data-science/current/algorithms/louvain/)
+    - [Neo4j Leiden Algorithm](https://neo4j.com/docs/graph-data-science/current/algorithms/leiden/)
+    - [Neo4j GraphRAG Python User Guide](https://neo4j.com/docs/neo4j-graphrag-python/current/user_guide_rag.html)
+    - [TagRAG (2026): Tag-Guided Hierarchical GraphRAG](https://arxiv.org/abs/2601.05254)
 
 ??? info "`graph_storage.max_hops` (`GRAPH_MAX_HOPS`) — Graph Max Hops"
     **Category**: `general`
 
-    Maximum number of graph traversal hops from seed nodes. Each hop expands the search to connected nodes (chunks, entities, relationships). Higher values (3-5) find more distant relationships but increase query latency and may introduce noise. Lower values (1-2) are faster and more focused. Recommended: 2 for balanced performance.
-
-    Sweet spot: 2 for production systems. Use 1 for fast, focused traversal (immediate neighbors only). Use 3-4 when you need to find distant relationships or explore deep code structures. Use 5 only for exploratory queries where completeness matters more than speed.
-
-    • Range: 1-5 (typical: 1-3)
-    • Focused: 1 (immediate neighbors only)
-    • Balanced: 2 (recommended)
-    • Deep exploration: 3-4 (distant relationships)
-    • Effect: Higher = more relationships explored, better recall, higher latency
-    • Symptom too low: Relevant connections missed
-    • Symptom too high: Slower queries, noise introduced
+    GRAPH_MAX_HOPS caps traversal depth from each seed node in graph retrieval. One hop focuses on direct relationships, two hops often captures practical cross-file links, and larger values rapidly increase branching factor and latency. Higher hops can help for dependency-chain and architecture questions, but they also raise the chance of pulling weakly related evidence into the fusion stage. In most RAG/search deployments, this is one of the highest-impact latency controls because frontier size grows nonlinearly with graph degree. Tune with p95 latency and grounded answer metrics together, since deeper traversal can improve recall while reducing precision.
 
     **Badges**:
-    - Performance
+    - Latency-Recall
 
     **Links**:
-    - [Neo4j Graph Traversal](https://neo4j.com/docs/neo4j-graphrag-python/current/user_guide_rag.html)
-    - [Graph Traversal Depth](https://neo4j.com/blog/developer/graph-traversal-graphrag-python-package)
-    - [Graph Algorithms](https://en.wikipedia.org/wiki/Graph_traversal)
+    - [Cypher Variable-Length Patterns](https://neo4j.com/docs/cypher-manual/current/patterns/variable-length-patterns/)
+    - [Neo4j GraphRAG Python User Guide](https://neo4j.com/docs/neo4j-graphrag-python/current/user_guide_rag.html)
+    - [Neo4j Cypher Query Tuning](https://neo4j.com/docs/cypher-manual/current/query-tuning/)
+    - [TagRAG (2026): Tag-Guided Hierarchical GraphRAG](https://arxiv.org/abs/2601.05254)
 
 ??? info "`graph_storage.neo4j_uri` (`NEO4J_URI`) — Neo4j Connection URI"
     **Category**: `infrastructure`
 
-    Connection URI for Neo4j graph database. Used for entity relationships, graph traversal, and community detection in tri-brid search. Format: bolt://host:7687 or neo4j://host:7687. Enables graph-based retrieval for code navigation.
+    Neo4j URI config determines how clients connect, route, and secure graph queries in retrieval workflows. Use `neo4j://` for routed cluster-aware connections and `bolt://` for direct connections when routing is not needed. Misconfigured schemes can produce subtle behavior differences in failover, read routing, and TLS handling that only appear under load. Treat this value as infrastructure configuration: validate connectivity at startup, enforce encrypted transport in shared environments, and keep URI/auth settings externalized from source code.
+
+    **Links**:
+    - [SCOUT-RAG: Dynamic Graph Retrieval-Augmented Generation (arXiv 2026)](https://arxiv.org/abs/2602.08400)
+    - [Neo4j Browser DBMS Connection](https://neo4j.com/docs/browser-manual/current/operations/dbms-connection/)
+    - [Neo4j Python Driver Advanced Connection](https://neo4j.com/docs/python-manual/current/connect-advanced/)
+    - [Neo4j GraphRAG](https://neo4j.com/labs/genai-ecosystem/graphrag/)

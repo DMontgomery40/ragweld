@@ -61,231 +61,265 @@
 ??? info "`generation.enrich_backend` (`ENRICH_BACKEND`) — Enrichment Backend"
     **Category**: `general`
 
-    Backend service for generating code summaries and enrichment metadata during indexing. Options: "openai" (GPT models, highest quality), "ollama" (local models, free), "mlx" (Apple Silicon optimized). Enrichment adds per-chunk summaries and keywords used by features like cards and improved reranking. Disable to speed up indexing or reduce costs.
+    This chooses the runtime that generates enrichment metadata during indexing, such as chunk summaries, tags, and semantic hints. Backend choice changes quality, latency, cost, privacy posture, and operational complexity, so it can materially alter downstream retrieval and reranking behavior. Hosted backends generally reduce ops burden and may provide stronger quality, while local backends can improve data control and predictable marginal cost. Treat backend changes like model migrations: version prompts and settings, then rerun evaluation before production rollout. Do not assume enrichment outputs are interchangeable across backends.
 
     **Badges**:
-    - Optional feature
-    - Increases index time
+    - Index pipeline
 
     **Links**:
-    - [MLX on Apple Silicon](https://github.com/ml-explore/mlx)
-    - [Ollama Local Models](https://ollama.com/library)
+    - [Meta-RAG on Large Codebases Using Code Summarization (arXiv 2025)](https://arxiv.org/abs/2508.02611)
+    - [openai-python API Reference](https://github.com/openai/openai-python/blob/main/api.md)
+    - [Ollama API Docs](https://github.com/ollama/ollama/blob/main/docs/api.md)
+    - [MLX Repository](https://github.com/ml-explore/mlx)
 
 ??? info "`generation.enrich_disabled` (`ENRICH_DISABLED`) — Disable Enrichment"
     **Category**: `general`
 
-    Completely disable code enrichment (summaries, keywords, cards) during indexing (1=disable, 0=enable). When disabled, indexing is much faster and cheaper (no LLM API calls) but you lose card search, enriched metadata, and semantic boosting. Use this for quick re-indexing during development, CI/CD pipelines, or when working with non-code content. Re-enable for production to get full retrieval quality benefits.
-
-    Recommended: 0 (enrichment ON) for production, 1 (enrichment OFF) for fast iteration and testing.
+    This switch disables enrichment generation entirely during indexing. It is useful for fast iteration, low-cost development cycles, and emergency backfills where raw embedding retrieval is acceptable. The cost of disabling is reduced semantic metadata for reranking, cards, and explanatory UX features, which can lower answer quality on abstract or architecture-level questions. Use it intentionally and record when it is active so benchmark comparisons remain meaningful. A common pattern is enrichment disabled for local loops and enabled for production-grade index builds.
 
     **Badges**:
-    - Much faster indexing
-    - Loses card search
+    - Faster indexing
+
+    **Links**:
+    - [Not All Tokens Matter: Efficient Code Summarization (arXiv 2026)](https://arxiv.org/abs/2601.20147)
+    - [Ollama README](https://github.com/ollama/ollama/blob/main/README.md)
+    - [openai-python API Reference](https://github.com/openai/openai-python/blob/main/api.md)
+    - [MLX Repository](https://github.com/ml-explore/mlx)
 
 ??? info "`generation.enrich_model` (`ENRICH_MODEL`) — Enrichment Model"
     **Category**: `generation`
 
-    Specific model name for code enrichment when ENRICH_BACKEND is set. For OpenAI: "gpt-4o-mini" (recommended, cheap), "gpt-4o" (higher quality, costly). For Ollama: specify via ENRICH_MODEL_OLLAMA instead. Smaller models (gpt-4o-mini, qwen2.5-coder:7b) balance cost and quality for summaries. Enrichment happens during indexing, not at query time.
+    This selects the exact model used by the configured enrichment backend. It is the main lever on the quality versus cost versus throughput tradeoff for generated summaries and keywords. Higher-capability models can improve semantic signals for reranking and explanation quality, while lighter models reduce expense and indexing time. Even without changing embeddings, enrichment model swaps can shift retrieval outcomes, so they should be benchmarked and version-controlled. Pin model ids and evaluate outputs on representative repositories before adopting changes in production pipelines.
 
     **Badges**:
-    - Affects index cost
+    - Affects quality/cost
 
     **Links**:
-    - [OpenAI Models](https://platform.openai.com/docs/models)
-    - [Cost Comparison](https://openai.com/api/pricing/)
+    - [Code vs Serialized AST Inputs for Code Summarization (arXiv 2026)](https://arxiv.org/abs/2602.06671)
+    - [EyeLayer: Human Attention for Code Summarization (arXiv 2026)](https://arxiv.org/abs/2602.22368)
+    - [openai-python API Reference](https://github.com/openai/openai-python/blob/main/api.md)
+    - [Ollama API Docs](https://github.com/ollama/ollama/blob/main/docs/api.md)
 
 ??? info "`generation.enrich_model_ollama` (`ENRICH_MODEL_OLLAMA`) — Enrichment Model (Ollama)"
     **Category**: `generation`
 
-    Ollama model name for code enrichment when ENRICH_BACKEND=ollama. Recommended: "qwen2.5-coder:7b" (fast, code-focused), "deepseek-coder:6.7b" (excellent code understanding), "codellama:13b" (high quality, slower). Model must be pulled via "ollama pull <model>" before use. Local enrichment is free but slower than cloud APIs.
+    Selects the local Ollama model used for enrichment steps such as code-card expansion, metadata extraction, and structure-aware summaries before retrieval. This choice is a quality versus latency tradeoff: larger coder models usually produce richer symbols and relationships, while smaller models reduce indexing time and hardware pressure. Keep the selected model pinned to an explicit tag so enrichment output stays reproducible across rebuilds. In production, validate the model on a fixed enrichment sample set and monitor drift in extracted fields after model upgrades.
 
     **Badges**:
-    - Free (local)
-    - Requires model download
+    - Local model tuning
 
     **Links**:
-    - [Ollama Models](https://ollama.com/library)
-    - [Pull Models](https://github.com/ollama/ollama#quickstart)
-    - [Code-Focused Models](https://ollama.com/search?c=tools)
+    - [rStar-Coder (arXiv)](https://arxiv.org/abs/2505.21297)
+    - [Ollama Documentation](https://docs.ollama.com/)
+    - [Ollama Model Library](https://ollama.com/library)
+    - [Ollama Quickstart](https://github.com/ollama/ollama#quickstart)
 
 ??? info "`generation.gen_backend` (`GEN_BACKEND`) — Generation Backend"
     **Category**: `generation`
 
-    Provider backend for the primary generation model (gen_model) and channel overrides (gen_model_cli, gen_model_http, gen_model_mcp). Options: "openai" (GPT models), "anthropic" (Claude models), "ollama" (local models), "mlx" (Apple Silicon optimized), "openrouter" (multi-provider gateway). This controls which API the generation model is routed to. Ollama-specific model overrides (gen_model_ollama, enrich_model_ollama) always use the Ollama backend regardless of this setting. Enrichment uses its own enrich_backend setting.
+    Generation backend selects the provider stack that executes model calls, which affects auth, parameter semantics, rate limits, timeouts, and tool-calling behavior. Treat backend choice as an operational contract, not a cosmetic model switch. In RAG systems, keep backend-specific defaults normalized so output length, safety behavior, and citation style stay predictable across providers. If you support multiple backends, define a deterministic fallback order and record backend metadata in logs for incident triage. Backend heterogeneity without observability is a common source of inconsistent answer quality.
+
+    **Badges**:
+    - Provider routing
 
     **Links**:
-    - [OpenAI Models](https://platform.openai.com/docs/models)
-    - [Anthropic Claude](https://docs.anthropic.com/en/docs/about-claude/models)
-    - [OpenRouter](https://openrouter.ai/docs)
+    - [Universal Model Routing for Efficient LLM Inference (arXiv 2025)](https://arxiv.org/abs/2502.08773)
+    - [OpenAI Python SDK](https://github.com/openai/openai-python)
+    - [Anthropic Claude Models](https://docs.anthropic.com/en/docs/about-claude/models)
+    - [Ollama API Reference](https://github.com/ollama/ollama/blob/main/docs/api.md)
 
 ??? info "`generation.gen_max_tokens` (`GEN_MAX_TOKENS`) — Max Tokens"
     **Category**: `generation`
 
-    Maximum number of tokens the LLM can generate in a single response. Higher values allow longer answers but increase cost and latency. Typical: 512-1024 for concise answers, 2048-4096 for detailed explanations.
+    This is the upper bound on generated output length per request. In RAG, it directly controls cost and latency, but also determines whether answers can include full reasoning, citations, and edge-case handling without truncation. Set defaults by task class instead of one global value, then enforce stricter caps on interactive channels to protect tail latency. Pair this with context packing and answer format constraints so tokens are spent on grounded content rather than repetition. Monitor both truncation frequency and response quality, because either metric alone can hide a bad token budget.
+
+    **Badges**:
+    - Cost and latency
 
     **Links**:
-    - [OpenAI Token Limits](https://platform.openai.com/docs/guides/text-generation)
-    - [Token Counting](https://platform.openai.com/tokenizer)
+    - [TimeBill: Time-Budgeted Inference for LLMs (arXiv 2025)](https://arxiv.org/abs/2512.21859)
+    - [Anthropic Messages API](https://docs.anthropic.com/en/api/messages)
+    - [Gemini Token Counting](https://ai.google.dev/gemini-api/docs/tokens)
+    - [OpenAI Cookbook: Count Tokens with tiktoken](https://github.com/openai/openai-cookbook/blob/main/examples/How_to_count_tokens_with_tiktoken.ipynb)
 
 ??? info "`generation.gen_model` (`GEN_MODEL`) — Generation Model"
     **Category**: `generation`
 
-    Primary generation model used for answer synthesis in the retrieval pipeline. This model receives retrieved context and is responsible for final response quality, style, and latency profile.
-
-    Choose the model based on your target balance of correctness, speed, and cost. Keep this aligned with provider credentials and endpoint overrides so fallback behavior is predictable.
-
-    - Affects: answer quality, latency, token cost, tool-call behavior
-    - Re-evaluate when switching corpus/domain or SLA target
+    This is the primary model used to synthesize answers from retrieved context, and it dominates quality, latency, and cost behavior. Choose it with workload-specific evaluation sets, not leaderboard intuition, because retrieval quality and prompt structure can change model rankings. Version model IDs explicitly so experiments are reproducible and regressions can be traced. Re-evaluate whenever provider releases shift default behavior, even if API names stay stable. Good retrieval can still underperform if the generation model is misaligned with your task style and response requirements.
 
     **Badges**:
-    - Affects latency
+    - Primary quality lever
 
     **Links**:
-    - [OpenAI Models](https://platform.openai.com/docs/models)
-    - [Ollama API (GitHub)](https://github.com/ollama/ollama/blob/main/docs/api.md)
+    - [Lookahead Routing for Large Language Models (arXiv 2025)](https://arxiv.org/abs/2510.19506)
+    - [OpenAI Python SDK](https://github.com/openai/openai-python)
+    - [Anthropic Claude Models](https://docs.anthropic.com/en/docs/about-claude/models)
+    - [OpenRouter Provider Selection](https://openrouter.ai/docs/guides/routing/provider-selection)
 
 ??? info "`generation.gen_model_cli` (`GEN_MODEL_CLI`) — CLI Channel Model"
     **Category**: `generation`
 
-    Override GEN_MODEL for CLI chat sessions only. Allows using different models for terminal vs web interface - e.g., faster models for CLI iteration, higher quality for production GUI. Useful for developer workflows where CLI is for quick testing and HTTP is for end users. If not set, uses GEN_MODEL.
+    This override selects a model specifically for CLI sessions, which are usually iterative and speed-sensitive. Using a smaller or local model here can improve developer feedback loops while keeping production channels on a higher-capability model. Keep retrieval stack and system prompts aligned across channels so CLI debugging reflects real behavior. Log the active CLI model in run metadata to make test results reproducible. Use this for workflow optimization, not as an untracked fork of application behavior.
 
     **Badges**:
-    - Channel-specific
+    - Developer workflow
+
+    **Links**:
+    - [Universal Model Routing for Efficient LLM Inference (arXiv 2025)](https://arxiv.org/abs/2502.08773)
+    - [Ollama Quickstart](https://github.com/ollama/ollama#quickstart)
+    - [LiteLLM Router](https://docs.litellm.ai/docs/routing)
+    - [OpenAI Python SDK](https://github.com/openai/openai-python)
 
 ??? info "`generation.gen_model_http` (`GEN_MODEL_HTTP`) — HTTP Channel Model"
     **Category**: `generation`
 
-    Override GEN_MODEL specifically for HTTP API requests (GUI, external API calls). Useful for serving different models to different channels - e.g., use gpt-4o for production HTTP but qwen-coder locally. If not set, falls back to GEN_MODEL. Example use case: cheaper models for public API, expensive models for internal tools.
+    This override controls model selection for HTTP/API traffic, where SLOs, concurrency, and cost controls are usually stricter than interactive internal use. It enables channel-specific governance, such as serving public endpoints with stable low-variance models while reserving premium models for internal workflows. Treat changes here as API behavior changes and validate with canary rollouts. Align timeout and retry policies to the chosen model because latency profile varies significantly by provider and model class. Clear fallback order prevents unpredictable responses during upstream incidents.
 
     **Badges**:
-    - Channel-specific
+    - API channel
 
     **Links**:
-    - [Model Selection](https://platform.openai.com/docs/models)
+    - [Lookahead Routing for Large Language Models (arXiv 2025)](https://arxiv.org/abs/2510.19506)
+    - [Anthropic Messages API](https://docs.anthropic.com/en/api/messages)
+    - [LiteLLM Router](https://docs.litellm.ai/docs/routing)
+    - [OpenRouter Provider Selection](https://openrouter.ai/docs/guides/routing/provider-selection)
 
 ??? info "`generation.gen_model_mcp` (`GEN_MODEL_MCP`) — MCP Channel Model"
     **Category**: `generation`
 
-    Override GEN_MODEL for MCP tool invocations only. Use a lighter/cheaper model for MCP tools since tool calls are typically simpler than complex reasoning. Example: gpt-4o-mini for MCP, gpt-4o for main chat. Reduces costs when tools are called frequently (search, file operations, etc.). If not set, uses GEN_MODEL.
+    This override applies to MCP tool-invocation paths, where requests are structured and often latency-sensitive. A lighter model can be sufficient for tool selection and argument construction, reducing spend without degrading end-to-end quality. Prioritize schema adherence and tool-call reliability over open-ended generation fluency in this channel. Validate with tool-call success rate, argument validity, and recovery behavior after tool errors. If tool use regresses while chat quality remains stable, this override is the first place to inspect.
 
     **Badges**:
-    - Cost savings
-    - Channel-specific
+    - Tool channel
 
     **Links**:
-    - [Model Pricing](https://openai.com/api/pricing/)
+    - [INFERENCEDYNAMICS: Efficient Routing Across LLMs (arXiv 2025)](https://arxiv.org/abs/2505.16303)
+    - [Model Context Protocol Introduction](https://modelcontextprotocol.io/introduction)
+    - [Model Context Protocol Specification (2025-06-18)](https://modelcontextprotocol.io/specification/2025-06-18)
+    - [MCP Transport Specification](https://modelcontextprotocol.io/specification/2025-06-18/basic/transports)
 
 ??? info "`generation.gen_model_ollama` (`GEN_MODEL_OLLAMA`) — Generation Model (Ollama)"
     **Category**: `generation`
 
-    Local Ollama model override used when generation is routed through Ollama. This allows a local model choice that differs from the cloud/default generation model while keeping the same retrieval flow.
+    `GEN_MODEL_OLLAMA` selects the concrete local model tag used when generation is routed through Ollama instead of a hosted provider. In this configuration family, the default is `qwen3-coder:30b`, and changing it directly affects response quality, latency, memory pressure, and token-context behavior for all generation calls that use the Ollama path. Use explicit model tags and keep them consistent across environments so evaluation runs remain reproducible and regressions can be traced to model changes rather than retrieval or prompt drift. When updating this value, validate compatibility with your configured context and timeout settings before promoting to shared environments.
 
-    Use explicit model tags (including version/size) so behavior is reproducible across machines. Confirm the model is pulled and compatible with your configured context window/timeouts.
-
-    - Example: qwen3-coder:30b
-    - Pair with: OLLAMA_NUM_CTX, OLLAMA_REQUEST_TIMEOUT, OLLAMA_STREAM_IDLE_TIMEOUT
+    **Links**:
+    - [Production-Grade Local LLM Inference on Apple Silicon: A Comparative Study of MLX, MLC-LLM, Ollama, llama.cpp, and PyTorch (arXiv)](https://arxiv.org/abs/2511.05502)
+    - [Ollama API Reference (repo docs)](https://github.com/ollama/ollama/blob/main/docs/api.md)
+    - [Ollama Modelfile Reference](https://github.com/ollama/ollama/blob/main/docs/modelfile.mdx)
+    - [Ollama Context Length Guide](https://github.com/ollama/ollama/blob/main/docs/context-length.mdx)
 
 ??? info "`generation.gen_retry_max` (`GEN_RETRY_MAX`) — Generation Max Retries"
     **Category**: `generation`
 
-    Number of retry attempts for failed LLM API calls due to rate limits, network errors, or transient failures. Higher values improve reliability but increase latency on failures. Typical: 2-3 retries.
+    This sets how many times generation requests are retried after transient failures such as rate limits or temporary backend faults. Higher values can improve success rate but also increase latency and amplify traffic during outages if backoff is weak. Use bounded retries with exponential backoff and jitter, and track request IDs to avoid accidental duplicate side effects. Interactive channels usually need fewer retries than background jobs. If retries are frequent but final success stays low, reduce retries and fix timeout, routing, or provider health first.
+
+    **Badges**:
+    - Resilience
 
     **Links**:
-    - [Retry Strategies](https://platform.openai.com/docs/guides/error-codes)
-    - [Exponential Backoff](https://en.wikipedia.org/wiki/Exponential_backoff)
+    - [KevlarFlow: Resiliency in LLM Serving (arXiv 2026)](https://arxiv.org/abs/2601.22438)
+    - [OpenAI Cookbook: Handle Rate Limits](https://github.com/openai/openai-cookbook/blob/main/examples/How_to_handle_rate_limits.ipynb)
+    - [Anthropic API Errors](https://docs.anthropic.com/en/api/errors)
+    - [LiteLLM Reliability and Fallbacks](https://docs.litellm.ai/docs/proxy/reliability)
 
 ??? info "`generation.gen_temperature` (`GEN_TEMPERATURE`) — Default Response Creativity"
     **Category**: `generation`
 
-    Default sampling temperature for generation. Lower values produce more deterministic answers; higher values increase variability and creative paraphrasing.
+    Temperature controls sampling randomness. In retrieval-grounded QA, lower values usually improve consistency and factual stability, while higher values increase stylistic variation and drift risk. Keep defaults low for technical explanations, debugging steps, and config guidance where repeatability matters. Raise it only for explicitly creative tasks and monitor variance across repeated runs of the same query. If answer facts change across retries with identical context, temperature is likely set too high for your use case.
 
-    For technical retrieval QA, start near 0.0-0.3 to reduce hallucinated variation. Increase only when you explicitly want brainstorming-style or stylistically varied outputs.
-
-    - 0.0-0.3: stable, factual, repeatable
-    - 0.4-0.8: more diverse phrasing, higher drift risk
-    - >0.8: rarely ideal for grounded code retrieval
+    **Badges**:
+    - Sampling control
 
     **Links**:
-    - [Sampling Controls](https://platform.openai.com/docs/guides/text-generation)
-    - [Nucleus/Top‑p](https://en.wikipedia.org/wiki/Nucleus_sampling)
+    - [Learning Temperature Policy from LLM Internal States (arXiv 2026)](https://arxiv.org/abs/2602.13035)
+    - [Anthropic Prompt Engineering: Use Temperature](https://docs.anthropic.com/en/docs/build-with-claude/prompt-engineering/use-temperature)
+    - [Hugging Face Text Generation Parameters](https://huggingface.co/docs/transformers/main_classes/text_generation)
+    - [OpenAI Cookbook: Formatting Chat Inputs](https://github.com/openai/openai-cookbook/blob/main/examples/How_to_format_inputs_to_ChatGPT_models.ipynb)
 
 ??? info "`generation.gen_timeout` (`GEN_TIMEOUT`) — Generation Timeout"
     **Category**: `generation`
 
-    Maximum seconds to wait for LLM response before timing out. Prevents hanging on slow models or network issues. Increase for large models or slow connections. Typical: 30-120 seconds.
+    Timeout sets the maximum wait for generation before the request is aborted. This is a reliability boundary that protects workers and users during provider slowdowns; too low causes false failures, too high causes queue buildup and cascading retries. Tune it by model class and expected output length, then enforce stricter limits for interactive paths. Combine timeout with retry policy so slow requests do not create retry storms. Rising timeout rates usually indicate context bloat, backend saturation, or routing misconfiguration rather than a need for unlimited timeout.
+
+    **Badges**:
+    - SLO guardrail
 
     **Links**:
-    - [Timeout Best Practices](https://platform.openai.com/docs/guides/rate-limits)
-    - [HTTP Timeouts](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Timeout)
+    - [KevlarFlow: Resiliency in LLM Serving (arXiv 2026)](https://arxiv.org/abs/2601.22438)
+    - [LiteLLM Timeout Controls](https://docs.litellm.ai/docs/proxy/timeout)
+    - [LiteLLM Reliability and Fallbacks](https://docs.litellm.ai/docs/proxy/reliability)
+    - [Anthropic API Errors](https://docs.anthropic.com/en/api/errors)
 
 ??? info "`generation.gen_top_p` (`GEN_TOP_P`) — Top-P (Nucleus Sampling)"
     **Category**: `generation`
 
-    Controls randomness via nucleus sampling (0.0-1.0). Lower values (0.1-0.5) make output more focused and deterministic. Higher values (0.9-1.0) increase creativity and diversity. Recommended: 0.9 for general use.
+    Top-p applies nucleus sampling by limiting choices to the smallest token set whose cumulative probability reaches p. Lower values narrow the candidate set and improve determinism, while higher values increase lexical diversity. In RAG answers, top-p is usually tuned with temperature; high values for both can increase hallucination risk even with good retrieval context. Keep top-p conservative for technical and policy-sensitive responses. When troubleshooting unstable outputs, reduce top-p before redesigning prompts so you isolate sampling entropy effects first.
+
+    **Badges**:
+    - Sampling control
 
     **Links**:
-    - [Nucleus Sampling](https://platform.openai.com/docs/guides/text-generation/parameter-details)
-    - [Top-P Explanation](https://en.wikipedia.org/wiki/Top-p_sampling)
+    - [Top-H Decoding: Bounded Entropy Text Generation (arXiv 2025)](https://arxiv.org/abs/2509.02510)
+    - [Hugging Face Text Generation Parameters](https://huggingface.co/docs/transformers/main_classes/text_generation)
+    - [Anthropic Messages API](https://docs.anthropic.com/en/api/messages)
+    - [OpenAI Cookbook: Formatting Chat Inputs](https://github.com/openai/openai-cookbook/blob/main/examples/How_to_format_inputs_to_ChatGPT_models.ipynb)
 
 ??? info "`generation.ollama_num_ctx` (`OLLAMA_NUM_CTX`) — Ollama Context Window"
     **Category**: `generation`
 
-    Context window size requested from Ollama for generation calls. This defines how many tokens of prompt + retrieved context + response budget the model can handle in one request.
+    Ollama `num_ctx` sets the maximum context tokens used per generation request, directly affecting both quality headroom and memory footprint. Higher values let you include more retrieved evidence and longer instructions, but they increase KV-cache pressure and can reduce throughput on constrained hardware. Tune this parameter from measured prompt composition (system + query + retrieved chunks + expected answer) rather than guessing. If requests regularly approach the ceiling, improve chunk selection and compression before simply raising `num_ctx`, because blindly increasing window size can destabilize latency.
 
-    Set high enough to fit your retrieval payload and answer target, but avoid unnecessary inflation because larger contexts increase memory usage and can degrade latency.
-
-    - Too low: truncation, missing context, weaker answers
-    - Too high: slower inference, higher local resource pressure
+    **Links**:
+    - [ParisKV: KV-Cache Compression for Long-Context LLMs (arXiv 2026)](https://arxiv.org/abs/2602.07721)
+    - [Ollama Context Length](https://docs.ollama.com/context-length)
+    - [Ollama Modelfile Reference](https://docs.ollama.com/modelfile)
+    - [Ollama FAQ](https://docs.ollama.com/faq)
 
 ??? info "`generation.ollama_request_timeout` (`OLLAMA_REQUEST_TIMEOUT`) — Local Request Timeout (seconds)"
     **Category**: `generation`
 
-    Maximum end-to-end request timeout (seconds) for Ollama generation calls. This is the hard upper bound for waiting on local model inference before failing the request.
-
-    Choose based on model size and hardware capability. Large local models can require higher values, but extremely high timeouts hide operational problems and increase user wait time.
-
-    - Lower values: faster failure detection
-    - Higher values: tolerate heavy local inference
+    Ollama request timeout is the hard client-side budget for a full generation call, including model warmup, first-token delay, and decode time. Set it too low and valid long-context responses fail prematurely; set it too high and stalled calls tie up worker capacity and degrade system responsiveness. Calibrate timeout from observed p95/p99 latency per model and hardware profile, and revisit after model swaps or context-window changes. Use streaming plus clear retry/abort policy so timeout behavior remains predictable during spikes.
 
     **Links**:
-    - [Ollama API: Generate](https://github.com/ollama/ollama/blob/main/docs/api.md#generate-a-completion)
-    - [HTTP Timeouts](https://developer.mozilla.org/en-US/docs/Web/HTTP/Timeouts)
+    - [Efficient Multi-Adapter LLM Serving via Cross-Model KV-Cache Reuse (arXiv 2025)](https://arxiv.org/abs/2512.17910)
+    - [Ollama Generate API](https://docs.ollama.com/api/generate)
+    - [Ollama Streaming API](https://docs.ollama.com/api/streaming)
+    - [vLLM Multi-LoRA Serving and Latency Metrics (2026)](https://blog.vllm.ai/2026/02/26/multi-lora.html)
 
 ??? info "`generation.ollama_stream_idle_timeout` (`OLLAMA_STREAM_IDLE_TIMEOUT`) — Local Stream Idle Timeout (seconds)"
     **Category**: `generation`
 
-    Maximum idle time (seconds) allowed between streamed tokens/chunks from Ollama before considering the stream stalled. This protects clients from hanging connections when generation stops mid-response.
-
-    Increase only if models legitimately pause for long intervals on your hardware. If idle timeouts trigger often, inspect model load, GPU/CPU saturation, and prompt size.
-
-    - Too low: premature stream cancellation
-    - Too high: slower detection of stuck streams
+    Maximum allowed silent gap (in seconds) between streamed tokens/chunks from the local Ollama endpoint before Crucible treats the response as stalled and aborts the request. This protects the UI from hanging indefinitely when a socket is half-open or a backend worker dies mid-generation. Set it too low and you will cut off valid long-prefill responses on larger context windows; set it too high and users wait too long on dead streams. Tune this together with network proxy timeouts and model size so cancellation behavior is fast but not trigger-happy.
 
     **Links**:
-    - [Streaming Basics](https://developer.mozilla.org/en-US/docs/Web/API/ReadableStream)
-    - [Ollama Streaming](https://github.com/ollama/ollama/blob/main/docs/api.md#streaming)
+    - [Rethinking Latency DoS in KV Cache Systems (arXiv 2026)](https://arxiv.org/abs/2602.07878)
+    - [Ollama Streaming API](https://docs.ollama.com/api/streaming)
+    - [Nginx proxy_read_timeout](https://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_read_timeout)
+    - [Node.js AbortSignal.timeout()](https://nodejs.org/api/globals.html#abortsignaltimeoutdelay)
 
 ??? info "`generation.ollama_url` (`OLLAMA_URL`) — Ollama URL"
     **Category**: `generation`
 
-    Local inference endpoint for Ollama running on your machine (e.g., http://127.0.0.1:11434/api). Used when GEN_MODEL targets a local model like llama2, mistral, qwen, or neural-chat. Requires Ollama installed and running: ollama serve
+    Base URL Crucible uses to reach Ollama over HTTP for local-model inference (for example, endpoints such as `/api/chat`, `/api/generate`, and `/api/tags`). This value controls where requests are sent from the app backend, so incorrect hostnames, ports, or path prefixes cause immediate model-routing failures. For remote or containerized setups, use a reachable address from the process that runs Crucible, not just from your browser. When multiple OpenAI-compatible backends are in play, keep this endpoint explicit so provider routing and debugging stay deterministic.
 
     **Links**:
-    - [Ollama REST API](https://github.com/ollama/ollama/blob/main/docs/api.md)
-    - [Ollama Docker Setup](https://ollama.com/blog/ollama-is-now-available-as-an-official-docker-image)
-    - [Ollama Model Library](https://ollama.com/library)
+    - [FlyingServing: Scalable and Fault-Tolerant LLM Serving (arXiv 2026)](https://arxiv.org/abs/2602.22593)
+    - [Ollama API Reference](https://docs.ollama.com/api)
+    - [Ollama Model Tags Endpoint](https://docs.ollama.com/api/tags)
+    - [vLLM OpenAI-Compatible Server](https://docs.vllm.ai/en/latest/serving/openai_compatible_server/)
 
 ??? info "`generation.openai_base_url` (`OPENAI_BASE_URL`) — OpenAI Base URL"
     **Category**: `generation`
 
-    ADVANCED: Override the OpenAI API base URL for OpenAI-compatible endpoints. Use cases: local inference servers (LM Studio, vLLM, text-generation-webui), Azure OpenAI (https://YOUR_RESOURCE.openai.azure.com/), proxy services. Default: https://api.openai.com/v1. Useful for development, air-gapped environments, or cost optimization via self-hosted models.
+    Advanced endpoint override for OpenAI-compatible APIs. Use this when routing Crucible through alternative backends such as Azure-hosted deployments, vLLM, or internal gateway proxies that implement OpenAI-style request/response contracts. Base URL mismatches are a common root cause of 404/401 errors because SDK path composition, versioning, and auth headers differ across providers. Keep this setting paired with explicit model/provider assignments so you can trace which endpoint handled each request during failures.
 
     **Badges**:
     - Advanced
     - For compatible endpoints only
 
     **Links**:
-    - [OpenAI API Reference](https://platform.openai.com/docs/api-reference)
-    - [Azure OpenAI](https://learn.microsoft.com/en-us/azure/ai-services/openai/)
-    - [LM Studio Setup](https://lmstudio.ai/docs/local-server)
-    - [vLLM Compatibility](https://docs.vllm.ai/en/latest/serving/openai_compatible_server.html)
+    - [LMCache: Optimizing LLM Caching and Routing (arXiv 2025)](https://arxiv.org/abs/2510.09665)
+    - [OpenAI Node SDK](https://github.com/openai/openai-node)
+    - [vLLM OpenAI-Compatible Server](https://docs.vllm.ai/en/latest/serving/openai_compatible_server/)
+    - [Azure OpenAI API Version and Endpoint Guidance](https://learn.microsoft.com/en-us/azure/ai-services/openai/api-version-deprecation)

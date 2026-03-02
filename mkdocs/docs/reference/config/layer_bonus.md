@@ -47,130 +47,83 @@
 ??? info "`layer_bonus.freshness_bonus` (`FRESHNESS_BONUS`) — Freshness Bonus"
     **Category**: `general`
 
-    Score boost applied to recently modified files during reranking, prioritizing newer code over stale code. Based on file modification time (mtime). Files modified in the last N days receive the full bonus, with linear decay over time. Useful for prioritizing recent work, active features, and current implementation patterns. Typical range: 0.0 (disabled) to 0.10 (strong recency bias).
-
-    Sweet spot: 0.03-0.06 for subtle freshness preference. Use 0.06-0.10 for strong recency bias when your codebase changes rapidly and recent code is more likely relevant. Use 0.0 to disable entirely for stable codebases where age doesn't correlate with relevance. The bonus decays linearly from full value (files modified <7 days ago) to zero (files modified >90 days ago).
-
-    Example: With 0.05 bonus, a file modified yesterday gets +0.05, a file modified 30 days ago gets +0.025, a file modified 90+ days ago gets 0. Freshness helps when users ask "how do we currently handle X?" - emphasizes recent implementations over legacy code. Trade-off: May deprioritize well-tested stable code in favor of recent changes.
-
-    • Range: 0.0-0.10 (typical)
-    • Disabled: 0.0 (age-agnostic ranking)
-    • Subtle: 0.03-0.05
-    • Balanced: 0.05-0.06 (recommended for active repos)
-    • Strong recency: 0.08-0.10
-    • Decay window: Full bonus at 0-7 days, linear decay to 90 days
-    • Trade-off: Recent code vs battle-tested stable code
+    Adds a recency-based score bonus so newer files are favored during reranking. This is valuable in fast-moving repositories where recent commits are more likely to reflect current behavior, APIs, and incident fixes. The bonus should decay with file age to avoid suppressing stable but authoritative modules. Tune both the bonus magnitude and decay window against real query logs so freshness improves relevance without turning into naive newest-first ranking.
 
     **Badges**:
-    - Advanced RAG tuning
-    - Time-based ranking
+    - Temporal reranking
 
     **Links**:
-    - [Freshness in Ranking](https://en.wikipedia.org/wiki/Freshness_(search_engine))
-    - [Temporal Relevance](https://en.wikipedia.org/wiki/Temporal_information_retrieval)
-    - [Recency Bias](https://en.wikipedia.org/wiki/Recency_bias)
+    - [TempRetriever Temporal DPR (arXiv)](https://arxiv.org/abs/2502.21024)
+    - [Elasticsearch Function Score](https://www.elastic.co/guide/en/elasticsearch/reference/current/query-dsl-function-score-query.html)
+    - [Azure Scoring Profiles](https://learn.microsoft.com/en-us/azure/search/index-add-scoring-profiles)
+    - [OpenSearch Function Score](https://docs.opensearch.org/latest/query-dsl/compound/function-score/)
 
 ??? info "`layer_bonus.gui` (`LAYER_BONUS_GUI`) — Layer Bonus (GUI)"
     **Category**: `ui`
 
-    Score boost applied to chunks from GUI/frontend layers when query intent is classified as UI-related. Part of the multi-layer architecture routing system. When users ask "how does the settings page work?" or "where is the login button?", chunks from directories like frontend/, components/, views/ receive this additive bonus during reranking. Higher values (0.08-0.15) strongly bias toward frontend code. Lower values (0.03-0.06) provide subtle guidance.
-
-    Sweet spot: 0.06-0.10 for production systems with clear frontend/backend separation. Use 0.10-0.15 for strict layer routing when your architecture is well-organized and layer detection is accurate. Use 0.03-0.06 for loose guidance when layer boundaries are fuzzy. This bonus is only applied when intent classification detects UI/frontend intent from the query.
-
-    Works with repos.json layer_bonuses configuration, which maps intent types to directory patterns. Example: "ui" intent boosts frontend/, components/, views/. Combine with LAYER_BONUS_RETRIEVAL for multi-tier architectures (API, service, data layers). Intent detection uses keyword matching and optional LLM classification.
-
-    • Range: 0.03-0.15 (typical)
-    • Subtle guidance: 0.03-0.06
-    • Balanced: 0.06-0.10 (recommended)
-    • Strong routing: 0.10-0.15
-    • Applied: Only when query intent = UI/frontend
-    • Requires: repos.json layer_bonuses configuration
+    Score bias applied to chunks from frontend-oriented layers when query intent indicates UI behavior, navigation, or interaction logic. This helps a codebase RAG system rank components, views, and client-side state flows above backend internals when users ask interface-centric questions. Keep the bonus strong enough to overcome weak lexical overlap but not so strong that it suppresses semantically better backend evidence for mixed queries. The right setting is usually measured by evaluating intent-segmented query sets and checking whether UI questions improve without degrading cross-layer tasks.
 
     **Badges**:
-    - Advanced RAG tuning
-    - Multi-layer architectures
+    - Intent-layer routing
 
     **Links**:
-    - [Architecture-Aware Retrieval](https://arxiv.org/abs/2312.10997)
+    - [Meta-RAG for Large Codebases (arXiv)](https://arxiv.org/abs/2508.02611)
+    - [Elasticsearch Function Score Query](https://www.elastic.co/guide/en/elasticsearch/reference/current/query-dsl-function-score-query.html)
+    - [Azure Vector Weighting](https://learn.microsoft.com/en-us/azure/search/vector-search-how-to-query#vector-weighting)
+    - [OpenSearch Normalization Processor](https://docs.opensearch.org/latest/search-plugins/search-pipelines/normalization-processor/)
 
 ??? info "`layer_bonus.indexer` (`LAYER_BONUS_INDEXER`) — Layer Bonus (Indexer)"
     **Category**: `retrieval`
 
-    Base layer bonus multiplier applied to content associated with indexing-layer paths/modules. This static bias is added before intent-matrix overrides, helping prioritize indexing-related files for mixed-intent queries.
+    `LAYER_BONUS_INDEXER` is a structural ranking bias that boosts retrieval scores for artifacts mapped to indexing/ingestion layers before finer intent-matrix adjustments are applied. With the default `0.15` (range `0.0`-`0.5`), it helps prevent indexer-relevant files from being outscored by semantically similar but architecturally unrelated modules. Raising it increases recall for index pipeline troubleshooting and ingestion-change questions, but excessive values can over-prioritize indexer paths and reduce precision on mixed-intent queries. Tune this value together with other layer bonuses and evaluate with labeled queries that intentionally cross subsystem boundaries.
 
-    Increase when retrieval under-ranks indexer code despite relevant matches. Reduce when indexer modules appear too often for unrelated intents.
-
-    - Works with: LAYER_BONUS_GUI, LAYER_BONUS_RETRIEVAL, LAYER_INTENT_MATRIX
-    - Goal: coarse structural bias before fine intent tuning
+    **Links**:
+    - [Single-Turn LLM Reformulation Powered Multi-Stage Hybrid Re-Ranking for Tip-of-the-Tongue Known-Item Retrieval (arXiv)](https://arxiv.org/abs/2602.10321)
+    - [Elasticsearch Reciprocal Rank Fusion (RRF)](https://www.elastic.co/guide/en/elasticsearch/reference/current/rrf.html)
+    - [Elasticsearch Function Score Query](https://www.elastic.co/guide/en/elasticsearch/reference/current/query-dsl-function-score-query.html)
+    - [Weaviate Hybrid Search](https://docs.weaviate.io/weaviate/search/hybrid)
 
 ??? info "`layer_bonus.intent_matrix` (`LAYER_INTENT_MATRIX`) — Intent Matrix (Advanced)"
     **Category**: `general`
 
-    Advanced JSON map that biases results toward specific architectural layers based on the detected intent of the query.
-
-    Structure: { intent: { layer: multiplier } }
-
-    When a query is classified as an intent (e.g., gui, retrieval, indexer), the corresponding row multiplies layer bonuses for matching files/directories. Values > 1.0 boost that layer for the intent; values < 1.0 penalize. This is “soft routing” for monorepos: UI questions should drift toward web/gui, indexing questions toward indexer, etc.
-
-    Start conservative. Large multipliers can overpower actual relevance and produce confidently-wrong results.
-
-    • Format: JSON object of objects (numbers only)
-    • Multipliers: 1.0 = neutral, > 1.0 boost, < 1.0 penalize
-    • Typical range: 0.6–1.3
-    • Debugging: if results feel “stuck” in one layer, reduce the highest multipliers
-    • Related knobs: Layer Bonus (GUI/Retrieval), Vendor Penalty, Freshness Bonus
+    Advanced mapping that applies different layer weights per detected intent, effectively creating a policy table for architectural routing in retrieval. Instead of one global bonus, you can express rules like boosting frontend for UI intents, boosting services for API intents, and damping unrelated layers to reduce noise. This matrix is powerful but easy to overfit, so values should be tuned with offline eval sets that represent your real question mix and reviewed whenever repository structure changes. Treat it as a ranking policy artifact: version it, test it, and roll it out with the same discipline as model or index updates.
 
     **Badges**:
-    - Advanced RAG tuning
-    - Multi-layer architectures
+    - Intent policy
 
     **Links**:
-    - [Architecture-Aware Retrieval](https://arxiv.org/abs/2312.10997)
-    - [Multitier Architecture](https://en.wikipedia.org/wiki/Multitier_architecture)
+    - [R3A: Query-Intent-Aware Relevance (arXiv)](https://arxiv.org/abs/2508.02506)
+    - [Azure Scoring Profiles](https://learn.microsoft.com/en-us/azure/search/index-add-scoring-profiles)
+    - [Elasticsearch Function Score Query](https://www.elastic.co/guide/en/elasticsearch/reference/current/query-dsl-function-score-query.html)
+    - [OpenSearch Normalization Processor](https://docs.opensearch.org/latest/search-plugins/search-pipelines/normalization-processor/)
 
 ??? info "`layer_bonus.retrieval` (`LAYER_BONUS_RETRIEVAL`) — Layer Bonus (Retrieval)"
     **Category**: `evaluation`
 
-    Score boost applied to chunks from backend/API/service layers when query intent is classified as retrieval or data-related. Complements LAYER_BONUS_GUI for multi-tier architecture routing. When users ask "how do we fetch user data?" or "where is the search API?", chunks from api/, services/, models/, controllers/ receive this bonus during reranking. Helps route queries to the right architectural layer.
-
-    Sweet spot: 0.06-0.10 for production systems. Use 0.10-0.15 for strong backend routing when API layer is clearly separated. Use 0.03-0.06 for subtle hints when boundaries are less clear. This bonus applies when intent detection identifies backend/API/data queries via keywords like "fetch", "query", "API", "endpoint", "database".
-
-    Configure layer patterns in repos.json layer_bonuses: map "retrieval" intent to api/, routes/, controllers/, services/, etc. The intent classifier examines query terms and (optionally) uses an LLM to categorize intent. Multiple bonuses can apply simultaneously - a query about "user profile API" might trigger both LAYER_BONUS_GUI and LAYER_BONUS_RETRIEVAL.
-
-    • Range: 0.03-0.15 (typical)
-    • Subtle guidance: 0.03-0.06
-    • Balanced: 0.06-0.10 (recommended)
-    • Strong routing: 0.10-0.15
-    • Applied: When query intent = API/backend/retrieval/data
-    • Requires: repos.json layer_bonuses with retrieval intent mapping
+    Score bias applied to backend and data-access layers when intent classification indicates retrieval, API, indexing, or storage questions. It improves ranking for service, route, and data pipeline code when users ask how the system fetches or transforms information. Because this weight can overpower semantic relevance, tune it with side-by-side evaluations on UI and backend query slices to avoid over-routing everything to server code. In well-structured repos, this parameter is a high-leverage control for making architectural answers faster and more precise.
 
     **Badges**:
-    - Advanced RAG tuning
-    - Multi-layer architectures
+    - Intent-layer routing
 
     **Links**:
-    - [Multi-Tier Architectures](https://en.wikipedia.org/wiki/Multitier_architecture)
+    - [Repository-level Code Search with LLMs (arXiv)](https://arxiv.org/abs/2502.07067)
+    - [Elasticsearch Function Score Query](https://www.elastic.co/guide/en/elasticsearch/reference/current/query-dsl-function-score-query.html)
+    - [Azure Scoring Profiles](https://learn.microsoft.com/en-us/azure/search/index-add-scoring-profiles)
+    - [OpenSearch Normalization Processor](https://docs.opensearch.org/latest/search-plugins/search-pipelines/normalization-processor/)
 
 ??? info "`layer_bonus.vendor_penalty` (`VENDOR_PENALTY`) — Vendor Penalty"
     **Category**: `general`
 
-    Score penalty (negative bonus) applied to third-party library code (node_modules, vendor/, site-packages/, etc.) during reranking when VENDOR_MODE is set to prefer_first_party. Helps prioritize your application code over external dependencies. Typical range: -0.05 to -0.12. Higher penalties (more negative) push library code down the rankings more aggressively.
+    Negative score adjustment applied during reranking to chunks detected as third-party or vendored code (for example dependencies under vendor/, node_modules, generated SDKs, or mirrored upstream trees). The parameter is most useful when VENDOR_MODE prefers first-party sources and you want your application logic to outrank framework internals for ambiguous queries.
 
-    Sweet spot: -0.08 to -0.10 for production systems. Use -0.10 to -0.12 for strong first-party preference when you want library code only as fallback. Use -0.05 to -0.08 for moderate preference when library examples are sometimes helpful. Set to 0.0 to disable vendor detection entirely (all code ranked equally).
-
-    Vendor detection matches common patterns: node_modules/, vendor/, .venv/, site-packages/, bower_components/, Pods/, third_party/. The penalty is applied during final reranking after hybrid fusion. Pair with path boosts in repos.json to further prioritize your core application directories. Most users want to understand THEIR code first, then library internals.
-
-    • Range: -0.12 to 0.0 (negative = penalty)
-    • No penalty: 0.0 (rank libraries equally)
-    • Moderate preference: -0.05 to -0.08
-    • Balanced: -0.08 to -0.10 (recommended)
-    • Strong first-party: -0.10 to -0.12
-    • Opposite mode: Set VENDOR_MODE=prefer_vendor to boost libraries instead
+    Treat this as a ranking-bias control, not a hard filter: if the penalty is too large, relevant dependency docs can disappear from top results; if too small, repeated library boilerplate can crowd out business logic. Tune with side-by-side eval sets that include both product-code questions and dependency troubleshooting questions so recall and precision stay balanced.
 
     **Badges**:
     - Advanced RAG tuning
     - Code priority control
 
     **Links**:
-    - [Path Patterns](https://github.com/github/gitignore)
-    - [First-Party vs Third-Party](https://en.wikipedia.org/wiki/First-party_and_third-party_sources)
+    - [MICE: In-Context Retrieval and Reranking (arXiv 2026)](https://arxiv.org/abs/2602.16299)
+    - [Elasticsearch Function Score Query](https://www.elastic.co/guide/en/elasticsearch/reference/current/query-dsl-function-score-query.html)
+    - [Elasticsearch Reciprocal Rank Fusion (RRF)](https://www.elastic.co/guide/en/elasticsearch/reference/current/rrf.html)
+    - [GitHub Linguist: How vendor/generated files are classified](https://github.com/github/linguist/blob/main/docs/how-linguist-works.md)

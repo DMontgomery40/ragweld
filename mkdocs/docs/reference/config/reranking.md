@@ -53,149 +53,157 @@
 ??? info "`reranking.rerank_input_snippet_chars` (`RERANK_INPUT_SNIPPET_CHARS`) — Rerank Snippet Length"
     **Category**: `reranking`
 
-    Maximum characters from each candidate chunk sent to the reranker. Keeps payloads within provider limits and focuses scoring on the most relevant prefix. Typical range: 400-1200 chars. Use 400-600 when providers reject long inputs or latency is critical; 800-1200 when answers depend on longer doc/context blocks. If set too low, quality drops from missing context; too high increases latency and rerank cost per request.
+    `RERANK_INPUT_SNIPPET_CHARS` caps how many characters from each retrieved chunk are forwarded into reranker scoring. In implementation terms, this is a throughput and quality guardrail: smaller snippets reduce request size and latency, but risk truncating decisive evidence; larger snippets preserve context at the cost of higher tokenization load, longer inference, and potentially provider-side input-limit errors. The right value should be based on corpus structure and query style, then validated with offline ranking metrics plus p95 latency and cost tracking so you can find the smallest snippet size that preserves relevance quality.
 
     **Badges**:
     - Affects latency/cost
     - Context guardrail
 
     **Links**:
-    - [Voyage reranker token limits](https://docs.voyageai.com/docs/reranker)
-    - [Cohere rerank context length](https://docs.cohere.com/docs/rerank)
+    - [BAR-RAG: Boundary-Aware Adaptive Retrieval for Better Reranking (arXiv)](https://arxiv.org/abs/2602.03689)
+    - [Cohere Rerank Overview](https://docs.cohere.com/docs/rerank-overview)
+    - [Voyage AI Reranker Docs](https://docs.voyageai.com/docs/reranker)
+    - [Hugging Face Padding and Truncation](https://huggingface.co/docs/transformers/main/pad_truncation)
 
 ??? info "`reranking.reranker_cloud_model` (`RERANKER_CLOUD_MODEL`) — Cloud Model"
     **Category**: `reranking`
 
-    Provider-scoped rerank model id from models.json. Examples: rerank-3.5 (cohere), rerank-2 (voyage), or any custom id you add. Model list comes from models.json; add entries there to surface more options in this picker.
+    Specifies the provider model ID used for cloud reranking, such as a Cohere, Voyage, or Jina reranker family variant. This parameter directly controls tradeoffs between multilingual support, context length handling, pricing, and latency. Model IDs are provider-scoped, so the same string is not portable across providers; keep explicit provider-model pairing in configuration and tests. When changing models, re-baseline ranking metrics and failure behavior because score distributions and calibration can shift materially even when APIs look identical.
 
     **Badges**:
     - Provider-scoped
 
+    **Links**:
+    - [InsertRank: Bias Mitigation in Rerankers (arXiv 2025)](https://arxiv.org/abs/2506.14086)
+    - [Cohere Models Documentation](https://docs.cohere.com/docs/models)
+    - [Voyage AI Reranker Docs](https://docs.voyageai.com/docs/reranker)
+    - [Jina Reranker v2 Model Card](https://huggingface.co/jinaai/jina-reranker-v2-base-multilingual)
+
 ??? info "`reranking.reranker_cloud_provider` (`RERANKER_CLOUD_PROVIDER`) — Cloud Rerank Provider"
     **Category**: `reranking`
 
-    When RERANKER_MODE=cloud, specifies which API provider to use for reranking. Options: cohere, voyage, jina. Each provider has different pricing and model options—see models.json for available models. Requires the corresponding API key (COHERE_API_KEY, VOYAGE_API_KEY, etc.).
+    Determines which external vendor handles reranking when cloud mode is enabled. Provider choice affects auth, rate limits, billing units, token limits, and model availability, so swapping providers is a behavior change, not just a credential change. Keep provider-specific defaults explicit (timeouts, top-N caps, retry policy) and validate with provider-specific regression queries. For production stability, monitor provider error classes separately so fallback rules can distinguish auth/config issues from transient throttling.
 
     **Badges**:
     - Requires API key
 
     **Links**:
-    - [Cohere Rerank](https://docs.cohere.com/reference/rerank)
-    - [Voyage Rerank](https://docs.voyageai.com/docs/reranker)
-    - [Jina Rerank](https://jina.ai/reranker/)
+    - [HyperRAG: Hybrid Retrieval-Augmented Generation (arXiv 2025)](https://arxiv.org/abs/2504.02921)
+    - [Cohere Reranking Guide](https://docs.cohere.com/docs/reranking-with-cohere)
+    - [Voyage AI Reranker Docs](https://docs.voyageai.com/docs/reranker)
+    - [Jina Rerank Models via Elastic Open Inference API](https://www.elastic.co/search-labs/blog/jina-ai-embeddings-rerank-model-open-inference-api)
 
 ??? info "`reranking.reranker_cloud_top_n` (`RERANKER_CLOUD_TOP_N`) — Cloud Reranker Top-N"
     **Category**: `reranking`
 
-    Maximum number of candidates to send to cloud reranking APIs (Cohere, Voyage, Jina). Cloud rerankers have rate limits and per-request pricing, so this setting is separate from the learning reranker top-N. Lower values reduce API costs and stay within rate limits. Higher values improve recall but increase costs per query.
-
-    • Typical range: 20-100 candidates
-    • Cost-conscious: 20-30 for budget limits
-    • Balanced default: 50 for most workloads
-    • High recall: 80-100 for exploratory queries
-    • Note: Cloud reranking is billed per candidate, so monitor costs
+    Limits how many first-pass candidates are sent into the cloud reranker. This is the main quality-cost control for API reranking: higher Top-N usually improves final precision/recall at the expense of latency and request cost. Tune it jointly with first-stage retrieval depth; a small Top-N can hide relevant documents before reranking ever sees them, while an oversized Top-N can waste budget on obvious non-matches. Start from an empirically measured knee point (quality gain flattening vs latency growth) rather than a fixed default.
 
     **Badges**:
     - Cloud API costs
     - Rate limits apply
 
     **Links**:
-    - [Cohere Rerank API](https://docs.cohere.com/reference/rerank)
-    - [Voyage Rerank](https://docs.voyageai.com/docs/reranker)
+    - [RankFlow: Reranking Pipeline Optimization (arXiv 2025)](https://arxiv.org/abs/2502.00709)
+    - [Cohere Rerank API (top_n parameter)](https://docs.cohere.com/reference/rerank)
+    - [OpenSearch Rerank Processor](https://docs.opensearch.org/latest/search-plugins/search-pipelines/rerank-processor/)
+    - [LangChain Contextual Compression Retriever](https://api.python.langchain.com/en/latest/retrievers/langchain.retrievers.contextual_compression.ContextualCompressionRetriever.html)
 
 ??? info "`reranking.reranker_mode` (`RERANKER_MODE`) — Reranker Mode"
     **Category**: `reranking`
 
-    Controls which reranking approach is used.
-
-    • none: Disabled—BM25 + vector fusion only (no reranker scoring).
-    • learning: Trainable learning reranker (MLX Qwen3 LoRA).
-    • cloud: External API reranking (Cohere, Voyage, Jina).
-
-    Legacy values:
-    • local / hf: normalized to "learning" for backward compatibility.
-
-    Recommended: Start with "learning" if you want the system to adapt over time; use "cloud" for managed quality if you have an API budget.
+    Global switch for reranking behavior, typically `none`, `learning`, or `cloud`. Use `none` for lowest latency baselines, `learning` for locally trainable behavior, and `cloud` for managed cross-encoder quality with external dependencies. Because this mode changes the scoring path after retrieval, it can change user-visible answers even when retrieval is identical. Lock this setting per environment and benchmark each mode against shared evaluation sets before promoting to production.
 
     **Badges**:
     - Controls reranking behavior
 
+    **Links**:
+    - [MICE: Retrieval + Reranking Improvements (arXiv 2026)](https://arxiv.org/abs/2602.16299)
+    - [Cohere Reranking Guide](https://docs.cohere.com/docs/reranking-with-cohere)
+    - [Jina MLX Retrieval (Local Reranker Training/Serving)](https://github.com/jina-ai/mlx-retrieval)
+    - [OpenSearch Rerank Processor](https://docs.opensearch.org/latest/search-plugins/search-pipelines/rerank-processor/)
+
 ??? info "`reranking.reranker_timeout` (`RERANKER_TIMEOUT`) — Reranker Timeout"
     **Category**: `reranking`
 
-    Timeout (seconds) for cloud reranker HTTP calls. Larger timeouts reduce false failures on slow providers; smaller timeouts fail fast when endpoints are slow or unreachable. Applies only to cloud backends.
+    Maximum wait time for cloud reranker requests before failing fast. This parameter protects end-to-end request latency and prevents queue pileups during provider slowdowns, but setting it too low can create false negatives under transient network variance. Tune timeout with retry policy and user-facing SLA in mind; timeout alone is not enough without fallback strategy (for example, use first-stage ranking when reranker times out). Track timeout rate by provider/model so you can distinguish systemic misconfiguration from temporary upstream degradation.
 
     **Badges**:
     - Reliability
 
+    **Links**:
+    - [MICE: Retrieval Pipeline Robustness (arXiv 2026)](https://arxiv.org/abs/2602.16299)
+    - [HTTPX Timeouts Guide](https://www.python-httpx.org/advanced/timeouts/)
+    - [Cohere Rerank API Reference](https://docs.cohere.com/reference/rerank)
+    - [Voyage AI Reranker Docs](https://docs.voyageai.com/docs/reranker)
+
 ??? info "`reranking.tribrid_reranker_alpha` (`TRIBRID_RERANKER_ALPHA`) — Reranker Blend Alpha"
     **Category**: `general`
 
-    Weight of the learning reranker score during final fusion. Higher alpha prioritizes pairwise reranker scoring; lower alpha relies more on initial hybrid retrieval (BM25 + dense). Typical range 0.6–0.8. Increasing alpha can improve ordering for nuanced queries but may surface false positives if your reranker is undertrained.
+    Interpolation weight used when combining the reranker score with upstream hybrid retrieval score. In practical terms, this is the control for how much the final ranking trusts pairwise relevance modeling versus the broader BM25+dense candidate order. Raising alpha usually improves precision for well-formed queries, but if it is set too high the system can overfit to reranker biases and underweight lexical exact-match evidence. Tune it with fixed query sets and report both quality metrics (nDCG, MRR, grounded answer rate) and latency to avoid hidden regressions.
 
     **Badges**:
     - Affects ranking
 
     **Links**:
-    - [Reciprocal Rank Fusion (RRF)](https://plg.uwaterloo.ca/~gvcormac/cormacksigir09-rrf.pdf)
-    - [Hybrid Retrieval Concepts](https://qdrant.tech/articles/hybrid-search/)
+    - [Rethinking the Reranker: Boundary-Aware Evidence Selection (arXiv 2026)](https://arxiv.org/abs/2602.03689)
+    - [AcuRank: Uncertainty-Aware Adaptive Computation for Listwise Reranking (arXiv 2025)](https://arxiv.org/abs/2505.18512)
+    - [Elasticsearch Reciprocal Rank Fusion (RRF)](https://www.elastic.co/guide/en/elasticsearch/reference/current/rrf.html)
+    - [SentenceTransformers Cross-Encoder Reranker Training](https://www.sbert.net/examples/cross_encoder/training/rerankers/README.html)
 
 ??? info "`reranking.tribrid_reranker_batch` (`TRIBRID_RERANKER_BATCH`) — Reranker Batch Size (Inference)"
     **Category**: `general`
 
-    Batch size used when scoring candidates during rerank. Higher values reduce latency but increase memory. If you see OOM or throttling, lower this value.
+    Inference micro-batch size for reranker scoring over candidate documents. Larger batches can increase throughput and reduce per-item overhead on GPU, but memory pressure grows quickly with longer inputs and higher top-N. If this value is too aggressive you will see OOMs, allocator fragmentation, or latency spikes from retries and paging. Production tuning should sweep batch size jointly with max sequence length and candidate count, because these three parameters multiply into total token compute.
 
     **Badges**:
     - Tune for memory
 
     **Links**:
-    - [Batching Techniques](https://huggingface.co/docs/transformers/v4.44.2/en/perf_train_gpu_one#use-mixed-precision)
-    - [Latency vs Throughput](https://en.wikipedia.org/wiki/Batch_processing)
+    - [AcuRank: Uncertainty-Aware Adaptive Computation for Listwise Reranking (arXiv 2025)](https://arxiv.org/abs/2505.18512)
+    - [PyTorch DataLoader Reference](https://pytorch.org/docs/stable/data.html#torch.utils.data.DataLoader)
+    - [SentenceTransformers Cross-Encoder Applications](https://www.sbert.net/examples/cross_encoder/applications/README.html)
+    - [Hugging Face Transformers Padding and Truncation](https://huggingface.co/docs/transformers/main/pad_truncation)
 
 ??? info "`reranking.tribrid_reranker_maxlen` (`TRIBRID_RERANKER_MAXLEN`) — Reranker Max Sequence Length (Inference)"
     **Category**: `general`
 
-    Maximum token length for each (query, text) pair during live reranking. Larger values increase memory/cost and may not improve quality beyond ~256–384 tokens for code. Use higher values for long comments/docs; lower for tight compute budgets.
+    Maximum token budget for each query-document pair at rerank time. This parameter directly controls truncation behavior: small values improve speed and memory, while large values preserve long-context evidence at higher cost. For code and technical retrieval, quality gains usually plateau after a certain length unless queries depend on long-range context. Evaluate max length using long-tail queries, because overly short truncation tends to hide failures that only appear on long files and verbose documentation.
 
     **Badges**:
     - Performance sensitive
 
     **Links**:
-    - [Transformers Tokenization](https://huggingface.co/docs/transformers/main/en/tokenizer_summary)
-    - [Sequence Length vs Memory](https://huggingface.co/docs/transformers/perf_train_gpu_one)
+    - [Query-focused and Memory-aware Reranker for Long Context Processing (arXiv 2026)](https://arxiv.org/abs/2602.12192)
+    - [DeAR: Dual-Stage Document Reranking with Reasoning Agents (arXiv 2025)](https://arxiv.org/abs/2508.16998)
+    - [Hugging Face Transformers Padding and Truncation](https://huggingface.co/docs/transformers/main/pad_truncation)
+    - [SentenceTransformers Cross-Encoder Applications](https://www.sbert.net/examples/cross_encoder/applications/README.html)
 
 ??? info "`reranking.tribrid_reranker_reload_on_change` (`TRIBRID_RERANKER_RELOAD_ON_CHANGE`) — Reranker Auto-Reload"
     **Category**: `general`
 
-    Automatically reload the learning reranker artifact when `training.tribrid_reranker_model_path` changes during runtime (1=yes, 0=no). When enabled, the system detects adapter directory changes and hot-reloads the new weights without a server restart. Useful during development and in Training Studio workflows when promoting or swapping artifacts.
-
-    Recommended: 1 for development/testing, 0 for production deployments.
+    Toggles hot-reload behavior when the reranker model path changes at runtime. In development this shortens iteration loops because newly trained adapters can be activated without restarting the service. In production, uncontrolled auto-reload can introduce jitter, temporary cache invalidation, and model consistency issues across replicas. If enabled, pair it with health checks and staged rollout logic so reload events do not degrade retrieval latency or answer stability.
 
     **Badges**:
     - Development feature
     - Disable in production
 
     **Links**:
-    - [Hot Reload Patterns](https://en.wikipedia.org/wiki/Hot_swapping)
+    - [AcuRank: Uncertainty-Aware Adaptive Computation for Listwise Reranking (arXiv 2025)](https://arxiv.org/abs/2505.18512)
+    - [watchfiles Documentation (file change monitoring)](https://watchfiles.helpmanual.io/)
+    - [PEFT Checkpoint Format and Loading](https://huggingface.co/docs/peft/developer_guides/checkpoint)
+    - [Transformers from_pretrained() Model Loading](https://huggingface.co/docs/transformers/main_classes/model#transformers.PreTrainedModel.from_pretrained)
 
 ??? info "`reranking.tribrid_reranker_topn` (`TRIBRID_RERANKER_TOPN`) — Reranker Top-N"
     **Category**: `general`
 
-    Maximum number of candidates to pass through the reranker stage during retrieval. After hybrid fusion (BM25 + dense), the top-N candidates are reranked using pairwise scoring before final selection. Higher values (50-100) can improve quality by considering more candidates but increase reranking latency and compute cost. Lower values (20-30) are faster but may miss items that scored poorly in initial retrieval but would rank highly after reranking.
-
-    Sweet spot: 40-60 for most use cases. Use 60-80 for complex queries where initial ranking may be noisy. Use 20-40 for tight latency budgets or when initial hybrid retrieval is already high-quality.
-
-    Note: MLX Qwen3 reranking can be significantly slower per candidate than smaller rerankers. If you care about interactive latency, start with 20–30 and measure.
-
-    • Typical range: 20-80 candidates
-    • Balanced default: 40-50 for most workloads
-    • High recall: 60-80 for exploratory queries
-    • Low latency: 20-30 for speed-critical apps
+    Upper bound on how many retrieved candidates are passed into the reranker stage. Higher Top-N usually improves recall headroom because more borderline candidates are reconsidered, but reranker cost grows roughly linearly with this value. If set too low, relevant documents never reach reranking; if set too high, latency and GPU utilization can explode for little quality gain. Choose Top-N by plotting quality-latency curves and selecting the smallest value that keeps recall stable on hard queries.
 
     **Badges**:
     - Advanced RAG tuning
     - Affects latency
 
     **Links**:
-    - [Reranking in RAG](https://arxiv.org/abs/2407.21059)
-    - [Hybrid Search + Rerank](https://qdrant.tech/articles/hybrid-search/)
+    - [Rethinking the Reranker: Boundary-Aware Evidence Selection (arXiv 2026)](https://arxiv.org/abs/2602.03689)
+    - [DeAR: Dual-Stage Document Reranking with Reasoning Agents (arXiv 2025)](https://arxiv.org/abs/2508.16998)
+    - [Qdrant Reranking and Hybrid Search](https://qdrant.tech/documentation/search-precision/reranking-hybrid-search/)
+    - [SentenceTransformers Cross-Encoder Reranker Training](https://www.sbert.net/examples/cross_encoder/training/rerankers/README.html)

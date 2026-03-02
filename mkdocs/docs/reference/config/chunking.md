@@ -59,97 +59,72 @@
 ??? info "`chunking.ast_overlap_lines` (`AST_OVERLAP_LINES`) — AST Overlap Lines"
     **Category**: `chunking`
 
-    Number of overlapping lines between consecutive AST-based code chunks. Overlap ensures context continuity across chunk boundaries, preventing loss of meaning when functions or classes are split. Higher overlap (5-15 lines) improves retrieval quality by providing more context but increases index size and duplicate content. Lower overlap (0-5 lines) reduces redundancy but risks fragmenting logical units.
-
-    Sweet spot: 3-5 lines for balanced context preservation. Use 5-10 lines for codebases with large functions or complex nested structures where context matters heavily. Use 0-2 lines for memory-constrained environments or when chunk boundaries align well with natural code structure (e.g., clean function boundaries). AST-aware chunking (cAST method) respects syntax boundaries, so overlap supplements structural chunking.
-
-    Example: With 5-line overlap, if chunk 1 ends at line 100, chunk 2 starts at line 96, creating a 5-line bridge. This helps when a query matches content near chunk boundaries - the overlapping region appears in both chunks, improving recall. The cAST paper (EMNLP 2025) shows overlap significantly improves code retrieval accuracy.
-
-    • Range: 0-15 lines (typical)
-    • Minimal: 0-2 lines (tight memory, clean boundaries)
-    • Balanced: 3-5 lines (recommended for most codebases)
-    • High context: 5-10 lines (complex nested code)
-    • Very high: 10-15 lines (maximum context, high redundancy)
-    • Trade-off: More overlap = better recall, larger index
+    AST_OVERLAP_LINES sets how many source lines are repeated between adjacent syntax-aware chunks when code is segmented by AST boundaries. Overlap preserves boundary context such as imports, signatures, decorators, and class state that might otherwise be split and become harder to retrieve. Too little overlap reduces recall on cross-boundary queries; too much overlap bloats the index, increases near-duplicates, and can bias scoring toward repeated context. Start with a small overlap and tune using real code-search prompts that depend on boundary continuity, then track recall improvement versus index growth and latency.
 
     **Badges**:
-    - Advanced chunking
-    - Requires reindex
+    - Chunking
 
     **Links**:
-    - [cAST Chunking Paper (EMNLP 2025)](https://arxiv.org/abs/2506.15655)
-    - [AST Chunking Toolkit](https://github.com/yilinjz/astchunk)
-    - [Context Window in RAG](https://arxiv.org/abs/2312.10997)
+    - [cAST: AST-Based Structural Chunking for Code RAG (arXiv)](https://arxiv.org/abs/2506.15655)
+    - [Tree-sitter Documentation](https://tree-sitter.github.io/tree-sitter/)
+    - [LangChain Text Splitters](https://python.langchain.com/docs/concepts/text_splitters/)
+    - [Cohere Chunking Strategies](https://docs.cohere.com/page/chunking-strategies)
 
 ??? info "`chunking.chunk_overlap` (`CHUNK_OVERLAP`) — Chunk Overlap"
     **Category**: `chunking`
 
-    Number of characters overlapped between adjacent chunks. Overlap reduces boundary effects and improves recall at the cost of a larger index and slower indexing.
+    Specifies how much content is repeated between adjacent chunks. Overlap reduces boundary loss by ensuring entities, arguments, or code flow that cross a split still appear in at least one retrievable unit. Too little overlap hurts recall near chunk edges; too much overlap bloats the index, increases embedding cost, and can bias retrieval toward duplicated text. The right value depends on document structure and query style, so measure retrieval hit quality and index growth together rather than tuning overlap in isolation.
+
+    **Badges**:
+    - Boundary recall
 
     **Links**:
-    - [LangChain: Text Splitters](https://python.langchain.com/docs/modules/data_connection/document_transformers/text_splitters/)
+    - [Breaking It Down (2025)](https://arxiv.org/abs/2512.00367)
+    - [LangChain Text Splitters](https://python.langchain.com/docs/concepts/text_splitters/)
+    - [LlamaIndex Node Parsers](https://docs.llamaindex.ai/en/stable/module_guides/loading/node_parsers/)
+    - [Weaviate Search Concepts](https://weaviate.io/developers/weaviate/concepts/search)
 
 ??? info "`chunking.chunk_size` (`CHUNK_SIZE`) — Chunk Size"
     **Category**: `chunking`
 
-    Target size (in characters) for each indexed chunk. For AST chunking this acts as a guardrail when nodes are large. Larger chunks preserve more context but reduce recall; smaller chunks improve recall but may fragment semantics.
+    Sets the target size of each chunk before embedding. Larger chunks preserve more local context and can help complex synthesis, but they reduce granularity and may retrieve irrelevant text; smaller chunks improve precision and reranking flexibility but risk fragmenting meaning. In code and technical corpora, chunk size should be tuned with overlap, tokenizer behavior, and model context limits as a single budget problem. The best value is empirical: run retrieval evaluations on your actual question set and choose the smallest size that preserves answer completeness.
 
     **Badges**:
-    - Affects recall/precision
+    - Recall/precision
 
     **Links**:
-    - [LangChain: Text Splitters](https://python.langchain.com/docs/modules/data_connection/document_transformers/text_splitters/)
-    - [Okapi BM25 (context windows)](https://en.wikipedia.org/wiki/Okapi_BM25)
+    - [Breaking It Down (2025)](https://arxiv.org/abs/2512.00367)
+    - [LangChain Text Splitters](https://python.langchain.com/docs/concepts/text_splitters/)
+    - [LlamaIndex Node Parsers](https://docs.llamaindex.ai/en/stable/module_guides/loading/node_parsers/)
+    - [HF Tokenizer Docs](https://huggingface.co/docs/transformers/main_classes/tokenizer)
 
 ??? info "`chunking.chunking_strategy` (`CHUNKING_STRATEGY`) — Chunking Strategy"
     **Category**: `chunking`
 
-    Primary strategy for splitting code into chunks during indexing. Options: "ast" (AST-aware, syntax-respecting, recommended for code), "greedy" (line-based splitting, simpler), "hybrid" (AST with greedy fallback). AST chunking uses the cAST method (EMNLP 2025) to respect function/class boundaries, preserving semantic units. Greedy chunking splits at line breaks to hit target size, ignoring syntax. Hybrid uses AST primarily with greedy fallback for unparseable files.
-
-    "ast" (recommended for code): Parses syntax tree and chunks at natural boundaries (functions, classes, methods). Produces semantically coherent chunks. Best for code retrieval. Requires parseable syntax - fails gracefully on malformed code.
-
-    "greedy": Simple line-based splitting at target character count. Fast, always works, but may split mid-function or mid-class, fragmenting semantic units. Use for non-code (markdown, text) or when AST parsing is too slow.
-
-    "hybrid": Tries AST first, falls back to greedy on parse errors. Balanced approach - gets AST benefits for well-formed code, handles edge cases gracefully. Recommended for mixed codebases (code + docs + config).
-
-    • ast: Syntax-aware, best retrieval quality, code-only, requires parseable syntax (recommended for code)
-    • greedy: Fast, always works, ignores syntax, lower quality chunks, good for non-code
-    • hybrid: AST + greedy fallback, balanced, handles all files (recommended for mixed repos)
-    • Effect: Fundamental impact on chunk quality, retrieval precision, index structure
-    • Requires reindex: Changes take effect after full rebuild
+    Defines how source content is segmented before embedding and indexing, which is one of the highest-impact choices in a RAG pipeline. Syntax-aware strategies preserve logical units like functions or classes and usually improve precision for code queries, while simpler fixed or greedy splits are faster and more robust for mixed or noisy inputs. Hybrid strategies often perform best operationally because they retain structure when parsing succeeds and fall back gracefully when it does not. Any strategy change should trigger reindexing and evaluation because embeddings, recall patterns, and reranker behavior all shift together.
 
     **Badges**:
-    - Core indexing choice
-    - Requires reindex
+    - Index quality
 
     **Links**:
-    - [cAST Chunking Paper (EMNLP 2025)](https://arxiv.org/abs/2506.15655)
-    - [AST Chunking Toolkit](https://github.com/yilinjz/astchunk)
-    - [RAG Chunking Best Practices](https://weaviate.io/blog/chunking-strategies-for-rag)
+    - [cAST (2025)](https://arxiv.org/abs/2506.15655)
+    - [Tree-sitter](https://tree-sitter.github.io/tree-sitter/)
+    - [ASTChunk Repository](https://github.com/yilinjz/astchunk)
+    - [LangChain Text Splitters](https://python.langchain.com/docs/concepts/text_splitters/)
 
 ??? info "`chunking.greedy_fallback_target` (`GREEDY_FALLBACK_TARGET`) — Greedy Fallback Target (Chars)"
     **Category**: `general`
 
-    Target chunk size (in characters) for greedy fallback chunking when AST-based chunking fails or encounters oversized logical units. Greedy chunking splits text at line boundaries to hit this approximate size. Used as a safety mechanism when: (1) file syntax is unparseable, (2) a single function/class exceeds MAX_CHUNK_SIZE, (3) non-code files (markdown, text) are indexed.
-
-    Sweet spot: 500-800 characters for fallback chunks. This roughly corresponds to 100-150 tokens, providing reasonable context when AST chunking isn't possible. Use 800-1200 for larger fallback chunks (more context but less precise boundaries). Use 300-500 for smaller fallback chunks (tighter boundaries, less context). Greedy chunking is less semantic than AST chunking - it splits at line breaks regardless of code structure.
-
-    Example: If a 3000-char function exceeds MAX_CHUNK_SIZE and can't be split structurally, greedy fallback divides it into ~4 chunks of ~750 chars each (based on GREEDY_FALLBACK_TARGET=800). This preserves some of the function in each chunk. Greedy fallback is rare in well-formed code but essential for robustness.
-
-    • Range: 300-1500 characters (typical)
-    • Small: 300-500 chars (tight boundaries, less context)
-    • Balanced: 500-800 chars (recommended, ~100-150 tokens)
-    • Large: 800-1200 chars (more context per fallback chunk)
-    • Very large: 1200-1500 chars (maximum context, rare use)
-    • When used: Syntax errors, oversized units, non-code files
+    GREEDY_FALLBACK_TARGET defines the approximate character size for fallback chunks when structured chunking fails, such as parse errors, malformed files, or oversized units that cannot be split semantically. It is a resilience control that keeps indexing and retrieval operational when ideal AST-aware segmentation is not possible. Smaller targets improve precision but can fragment meaning; larger targets preserve context but reduce retrieval granularity and increase prompt cost. Choose a value that aligns with your embedding model and downstream context budget, then validate on real failure cases instead of clean files only. Any change should be followed by reindexing so fallback boundaries are rebuilt consistently.
 
     **Badges**:
-    - Fallback mechanism
-    - Requires reindex
+    - Chunking Fallback
 
     **Links**:
-    - [Chunking Robustness](https://github.com/yilinjz/astchunk#fallback-modes)
-    - [Greedy Chunking](https://en.wikipedia.org/wiki/Chunking_(psychology))
+    - [LangChain Text Splitters Concepts](https://python.langchain.com/docs/concepts/text_splitters/)
+    - [LlamaIndex Node Parsers](https://docs.llamaindex.ai/en/stable/module_guides/loading/node_parsers/)
+    - [Cohere Chunking Strategies](https://docs.cohere.com/page/chunking-strategies)
+    - [FreeChunker (2025): Cross-Granularity Chunking](https://arxiv.org/abs/2510.20356)
 
 ??? info "`chunking.max_chunk_tokens` (`MAX_CHUNK_TOKENS`) — Max Chunk Tokens"
     **Category**: `chunking`
@@ -180,45 +155,44 @@
 ??? info "`chunking.max_indexable_file_size` (`MAX_INDEXABLE_FILE_SIZE`) — Max Indexable File Size"
     **Category**: `infrastructure`
 
-    Maximum file size in bytes that will be indexed. Files larger than this limit are skipped during indexing to prevent memory issues and avoid indexing large binary or generated files. Default is 2MB (2,000,000 bytes). Increase for codebases with legitimately large source files; decrease to speed up indexing and reduce memory usage.
-
-    Sweet spot: 1-2 MB for most codebases. Use 500KB-1MB for memory-constrained environments or when you want to exclude large auto-generated files. Use 2-5MB for codebases with large source files (e.g., bundled assets, data files that should be searchable). Files exceeding this limit are logged as skipped.
-
-    Example: A 5MB SQL dump file would be skipped with MAX_INDEXABLE_FILE_SIZE=2000000. To include it, increase to 6000000 (6MB). Large files that are indexed will be chunked normally, but may take longer to process and consume more embedding API tokens.
-
-    • Range: 100KB - 10MB (typical)
-    • Tight: 100KB - 500KB (skip most large files, fast indexing)
-    • Balanced: 1MB - 2MB (recommended, handles normal source files)
-    • Large: 2MB - 5MB (include larger source files)
-    • Very large: 5MB - 10MB (include data files, maximum coverage)
-    • Trade-off: Higher limit = more coverage, slower indexing, more memory
+    Defines the byte-size cutoff above which files are excluded from indexing. This protects index jobs from pathological memory and token consumption on massive generated assets, archives, or dumps, and keeps indexing latency predictable. If this value is too low, important large source artifacts (for example long SQL, generated API clients, or monolithic configs) may never become retrievable. If too high, indexing throughput can collapse and storage cost can spike. Set this using observed file-size distribution, then reindex so the new threshold is applied consistently.
 
     **Badges**:
     - File filtering
     - Requires reindex
 
+    **Links**:
+    - [A New Chunking Strategy for Long-Document Retrieval (arXiv 2025)](https://arxiv.org/abs/2505.21700)
+    - [Sourcegraph Indexed Search Administration](https://sourcegraph.com/docs/admin/search#indexed-search)
+    - [GitLab Instance Limits (Indexed File Size Settings)](https://docs.gitlab.com/ee/administration/instance_limits.html)
+    - [Azure AI Search Limits, Quotas, and Capacity](https://learn.microsoft.com/en-us/azure/search/search-limits-quotas-capacity)
+
 ??? info "`chunking.min_chunk_chars` (`MIN_CHUNK_CHARS`) — Min Chunk Chars"
     **Category**: `chunking`
 
-    Minimum characters required for a chunk to be kept. Very small fragments below this are dropped or merged to reduce indexing noise. Default: 50. Range: 10-500. Raise it for a cleaner index; lower it if you need tiny helpers and stubs searchable. Changing this requires reindexing.
+    Lower bound on chunk length kept during indexing. Chunks smaller than this threshold are typically merged or discarded to reduce retrieval noise from trivial fragments (isolated braces, tiny comments, short tokens). Setting it too low increases index clutter and false positives; setting it too high can remove short but meaningful facts (config flags, function signatures, one-line constraints). Tune this jointly with chunk size and overlap using real queries: track recall impact on terse lookups while watching precision and index growth.
 
     **Badges**:
     - Index quality control
     - Requires reindex
 
     **Links**:
-    - [Code Chunking Best Practices](https://weaviate.io/blog/chunking-strategies-for-rag)
-    - [cAST Filtering](https://github.com/yilinjz/astchunk#filtering)
+    - [cAST: Structural Chunking for Code RAG (arXiv 2025)](https://arxiv.org/abs/2506.15655)
+    - [LangChain Text Splitter Concepts](https://python.langchain.com/docs/concepts/text_splitters/)
+    - [Weaviate Chunking Strategies for RAG](https://weaviate.io/blog/chunking-strategies-for-rag)
+    - [LlamaIndex Node Parser Guide](https://docs.llamaindex.ai/en/stable/module_guides/loading/node_parsers/)
 
 ??? info "`chunking.preserve_imports` (`PRESERVE_IMPORTS`) — Preserve Imports"
     **Category**: `infrastructure`
 
-    Include import and require blocks even when they are below MIN_CHUNK_CHARS (0/1). Improves dependency discovery queries like "where is X imported". Default: 1. Range: 0-1. Changing this requires reindexing.
+    Forces the indexer to retain import/require/use statements even when chunks are otherwise below minimum size thresholds. This improves dependency-oriented retrieval, such as 'where is X imported' or 'which modules depend on Y', because import edges often encode architecture intent that function bodies alone miss. The tradeoff is slightly larger index size and potential noise if import blocks are highly repetitive across generated files. Keep it enabled when dependency tracing is a core use case, and pair it with deduplication or path-level weighting to avoid over-indexing boilerplate.
 
     **Badges**:
     - Dependency tracking
     - Requires reindex
 
     **Links**:
-    - [Code Structure Analysis](https://en.wikipedia.org/wiki/Dependency_analysis)
-    - [Module Systems](https://en.wikipedia.org/wiki/Modular_programming)
+    - [GRACE: Graph-Retrieval Augmentation for Code Repositories (arXiv 2025)](https://arxiv.org/abs/2509.05980)
+    - [Python Import System Reference](https://docs.python.org/3/reference/import.html)
+    - [Node.js Modules Documentation](https://nodejs.org/api/modules.html)
+    - [Java Language Specification: Packages and Modules](https://docs.oracle.com/javase/specs/jls/se22/html/jls-7.html)

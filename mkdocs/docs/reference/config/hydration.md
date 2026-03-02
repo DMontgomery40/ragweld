@@ -43,21 +43,27 @@
 ??? info "`hydration.hydration_max_chars` (`HYDRATION_MAX_CHARS`) — Hydration Max Chars"
     **Category**: `general`
 
-    Maximum characters to load per chunk when hydrating results with code content. Prevents huge chunks from bloating responses and consuming excessive memory. 0 = no limit (may cause memory issues with large files). Recommended: 2000 for general use, 1000 for memory-constrained environments, 5000 for detailed code review. Chunks larger than this limit are truncated.
+    HYDRATION_MAX_CHARS limits how much raw chunk text is loaded when turning retrieval hits into generation-ready context. This protects latency, memory, and prompt budgets from oversized chunks or unusually large files. A value that is too low can cut away critical lines and reduce answer grounding, while a value that is too high can bloat prompts and increase cost without better relevance. Tune this alongside chunk size, rerank depth, and model context window so each stage has a clear budget. Track truncation rate and citation failures to detect when the cap is suppressing necessary evidence.
 
     **Badges**:
-    - Performance
+    - Prompt Budget
 
     **Links**:
-    - [Text Truncation](https://en.wikipedia.org/wiki/Truncation)
+    - [LangChain Contextual Compression](https://python.langchain.com/docs/how_to/contextual_compression/)
+    - [LangChain Text Splitters Concepts](https://python.langchain.com/docs/concepts/text_splitters/)
+    - [OpenAI Cookbook: Count Tokens with tiktoken](https://cookbook.openai.com/examples/how_to_count_tokens_with_tiktoken)
+    - [MoC (2025): Mixtures of Chunking Learners for RAG](https://arxiv.org/abs/2503.09600)
 
 ??? info "`hydration.hydration_mode` (`HYDRATION_MODE`) — Hydration Mode"
     **Category**: `general`
 
-    Controls when full code is loaded from chunks.jsonl. "Lazy" (recommended) loads code after retrieval, providing full context with minimal memory overhead. "None" returns only metadata (file path, line numbers) - fastest but no code content. Use "none" for testing retrieval quality or when you only need file locations, not actual code.
+    HYDRATION_MODE controls when full chunk content is loaded into the retrieval pipeline. A lazy mode usually gives the best production balance because ranking can run on lightweight metadata first, and full text is fetched only for shortlisted results. A none mode is useful for retrieval diagnostics, fast metadata-only workflows, or systems where generation occurs in a separate step. Choosing the mode changes both latency profile and memory behavior, so it should be treated as an architectural runtime option rather than a cosmetic toggle. Align this setting with your reranker strategy and context assembly stage to avoid unnecessary data loading.
 
     **Badges**:
-    - Lazy Recommended
+    - Runtime Loading
 
     **Links**:
-    - [Lazy Loading](https://en.wikipedia.org/wiki/Lazy_loading)
+    - [LangChain Contextual Compression](https://python.langchain.com/docs/how_to/contextual_compression/)
+    - [LlamaIndex Node Parsers](https://docs.llamaindex.ai/en/stable/module_guides/loading/node_parsers/)
+    - [OpenAI Cookbook: Count Tokens with tiktoken](https://cookbook.openai.com/examples/how_to_count_tokens_with_tiktoken)
+    - [TeleRAG (2025): Lookahead Retrieval for Efficient Inference](https://arxiv.org/abs/2502.20969)

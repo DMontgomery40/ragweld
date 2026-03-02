@@ -73,47 +73,30 @@
 ??? info "`retrieval.bm25_b` (`BM25_B`) — BM25 b (Length Normalization)"
     **Category**: `retrieval`
 
-    BM25 length-normalization parameter. Controls how strongly sparse (keyword) scoring penalizes long chunks compared to short chunks.
-
-    b = 0.0 means no length penalty (a long chunk can score highly simply because it contains more terms). b = 1.0 means full length normalization (long chunks are penalized relative to the average chunk length). For code corpora, moderate values typically work best because chunk lengths are already partially normalized by chunking.
-
-    Tune b when sparse results feel “too long” or “too short”: if long boilerplate chunks dominate, increase b; if large files should remain competitive, decrease b.
-
-    • Range: 0.0–1.0
-    • Code sweet spot: 0.3–0.5 (recommended)
-    • Lower b: favors longer chunks (higher recall, more noise)
-    • Higher b: favors shorter chunks (higher precision, may miss context)
-    • Interacts with: BM25_K1 and chunking (CHUNK_SIZE / CHUNK_OVERLAP)
+    BM25_B is the length-normalization parameter in BM25 and controls how strongly long chunks are penalized compared with short chunks. Higher values increase normalization, which helps when long documents accumulate incidental term matches; lower values reduce that penalty and can help when key evidence naturally lives in larger files. In hybrid retrieval this parameter shapes sparse scores before fusion with dense vectors, so it directly affects which lexical results survive into reranking. Tune b with mixed query types, including exact identifiers and natural-language requests, to avoid overfitting one retrieval mode.
 
     **Badges**:
-    - Advanced RAG tuning
-    - Affects keyword search
+    - Sparse Retrieval
 
     **Links**:
-    - [Okapi BM25](https://en.wikipedia.org/wiki/Okapi_BM25)
+    - [SPLADE at Billion Scale (arXiv)](https://arxiv.org/abs/2511.22263)
+    - [Practical BM25 Variables](https://www.elastic.co/blog/practical-bm25-part-2-the-bm25-algorithm-and-its-variables)
+    - [Elasticsearch Similarity Settings](https://www.elastic.co/guide/en/elasticsearch/reference/current/index-modules-similarity.html)
+    - [Lucene BM25Similarity API](https://lucene.apache.org/core/10_3_1/core/org/apache/lucene/search/similarities/BM25Similarity.html)
 
 ??? info "`retrieval.bm25_k1` (`BM25_K1`) — BM25 k1 (Term Saturation)"
     **Category**: `retrieval`
 
-    BM25 term-frequency saturation parameter. Controls how much repeated occurrences of a query term within the same chunk increase the sparse score.
-
-    Low k1 makes BM25 behave closer to “binary” matching (term present vs. absent). High k1 keeps rewarding repeats, which can overweight boilerplate or very repetitive identifiers.
-
-    For code search, moderate k1 (around 1.0–1.5) usually works well: it rewards chunks that are clearly about the query term without letting repetition dominate.
-
-    • Range: 0.5–3.0
-    • Typical: 1.2 (default)
-    • Lower k1: repeats matter less (more binary)
-    • Higher k1: repeats matter more (can favor verbose/repetitive chunks)
-    • Interacts with: BM25_B (length normalization)
+    BM25_K1 controls term-frequency saturation, meaning how much repeated occurrences of a term continue to increase sparse relevance. Lower values make scoring closer to binary presence and reduce repetition bias; higher values reward repetition more strongly, which can help when repetition is genuinely informative. In code search, overly high k1 can over-rank boilerplate-heavy files, while very low k1 can under-rank dense implementation chunks. Tune k1 jointly with b and tokenizer configuration, then validate on both exact-match and intent-style queries.
 
     **Badges**:
-    - Advanced RAG tuning
-    - Affects keyword search
+    - Sparse Retrieval
 
     **Links**:
-    - [Okapi BM25](https://en.wikipedia.org/wiki/Okapi_BM25)
-    - [Term Frequency](https://en.wikipedia.org/wiki/Term_frequency)
+    - [Rational Retrieval Acts for Sparse Retrieval (arXiv)](https://arxiv.org/abs/2505.03676)
+    - [Practical BM25 Variables](https://www.elastic.co/blog/practical-bm25-part-2-the-bm25-algorithm-and-its-variables)
+    - [Elasticsearch Similarity Settings](https://www.elastic.co/guide/en/elasticsearch/reference/current/index-modules-similarity.html)
+    - [Lucene BM25Similarity API](https://lucene.apache.org/core/10_3_1/core/org/apache/lucene/search/similarities/BM25Similarity.html)
 
 ??? info "`retrieval.bm25_weight` (`BM25_WEIGHT`) — BM25 Weight (Hybrid Fusion)"
     **Category**: `retrieval`
@@ -144,176 +127,157 @@
 ??? info "`retrieval.chunk_summary_search_enabled` (`CHUNK_SUMMARY_SEARCH_ENABLED`) — Chunk Summary Search"
     **Category**: `retrieval`
 
-    Enable an additional retrieval pass that searches over each chunk’s chunk_summary (LLM-generated metadata such as purpose, key symbols, and keywords) instead of only raw chunk text. This can improve recall for conceptual questions where the exact identifier isn’t in the query.
-
-    If a corpus hasn’t generated chunk summaries yet, enabling this won’t add signal until you (re)index with chunk summaries enabled.
-
-    • Disabled: only raw code/doc text participates in retrieval
-    • Enabled: chunk summaries can produce candidate hits (often better for “what does this do?” queries)
-    • Cost/latency: can add an extra retrieval step (usually small compared to LLM calls)
-    • Interacts with: CHUNK_SUMMARY_BONUS and chunk summary indexing limits
+    Enables a separate retrieval path over generated chunk summaries, so the system can match intent-level language even when the query does not contain exact identifiers. This usually improves recall for architectural or behavioral questions, but only if summaries were generated during indexing and kept in sync with source updates. Turning it on adds another retrieval pass, so latency and token/compute cost can rise slightly depending on your backend. Best practice is to enable it with careful score balancing so summary matches expand candidate recall without replacing strong exact matches.
 
     **Badges**:
-    - Improves intent
+    - Recall feature
 
     **Links**:
-    - [Automatic Summarization](https://en.wikipedia.org/wiki/Automatic_summarization)
+    - [cAST: Structural chunking for code RAG (arXiv 2025)](https://arxiv.org/abs/2506.15655)
+    - [LangChain MultiVector Retriever](https://python.langchain.com/docs/how_to/multi_vector/)
+    - [Qdrant hybrid query concepts](https://qdrant.tech/documentation/concepts/hybrid-queries/)
+    - [LangChain retriever concepts](https://python.langchain.com/docs/concepts/retrievers/)
 
 ??? info "`retrieval.conf_any` (`CONF_ANY`) — Confidence Any"
     **Category**: `general`
 
-    Fallback threshold - proceed with retrieval if ANY single result exceeds this score, even if top-1 or avg-5 thresholds aren't met. This prevents the system from giving up when there's at least one decent match. Lower values (0.30-0.40) are more permissive, returning results even with weak confidence. Higher values (0.45-0.50) maintain quality standards. Recommended: 0.35-0.45 as a safety net.
+    Safety-net confidence gate: proceed when at least one candidate clears this threshold, even if aggregate gates fail. It is designed to reduce false abstentions when retrieval returns one strong hit plus several weak ones, which is common in sparse or highly specific technical queries. Setting it too low increases hallucination risk by allowing weak singleton matches; setting it too high cancels its rescue value and causes unnecessary rewrites or no-answer outcomes. Tune it using failure analysis that separates true misses from ranking noise.
 
     **Badges**:
-    - Safety net
+    - Safety gate
 
     **Links**:
-    - [Fallback Strategies](https://en.wikipedia.org/wiki/Fault_tolerance)
-    - [Decision Boundaries](https://en.wikipedia.org/wiki/Decision_boundary)
+    - [QuCo-RAG uncertainty-aware retrieval (arXiv 2025)](https://arxiv.org/abs/2512.19134)
+    - [Elasticsearch min_score parameter](https://www.elastic.co/guide/en/elasticsearch/reference/current/search-search.html#search-api-min-score)
+    - [LangChain multi-query retrieval](https://python.langchain.com/docs/how_to/multi_query/)
+    - [Scikit-learn threshold tuning](https://scikit-learn.org/stable/modules/classification_threshold.html)
 
 ??? info "`retrieval.conf_avg5` (`CONF_AVG5`) — Confidence Avg-5"
     **Category**: `general`
 
-    Average confidence score of the top-5 results, used as a gate for query rewriting iterations. If avg(top-5) is below this threshold, the system may rewrite the query and try again. Lower values (0.50-0.53) reduce retries, accepting more borderline results. Higher values (0.56-0.60) force more rewrites for higher quality. Recommended: 0.52-0.58 for balanced behavior.
-
-    Sweet spot: 0.52-0.55 for production systems. Use 0.55-0.58 when quality is paramount and you have budget for extra LLM calls (query rewriting). Use 0.50-0.52 for cost-sensitive scenarios or when initial retrieval is already high-quality. This threshold examines the top-5 results as a group - even if top-1 is strong, weak supporting results might trigger a rewrite.
-
-    AVG5 complements TOP1: TOP1 checks the best result, AVG5 checks overall result quality. A query might pass TOP1 (strong top result) but fail AVG5 (weak supporting results), triggering refinement. Conversely, borderline TOP1 with strong AVG5 might proceed. Tune both thresholds together for optimal precision/recall trade-offs.
-
-    • Range: 0.48-0.60 (typical)
-    • Cost-sensitive: 0.50-0.52 (fewer retries)
-    • Balanced: 0.52-0.55 (recommended)
-    • Quality-focused: 0.55-0.58 (more retries)
-    • Effect: Higher = more query rewrites, better quality, higher cost
-    • Interacts with: CONF_TOP1 (top result threshold), MQ_REWRITES (rewrite budget)
+    Average confidence over the top five candidates, used as a stability gate before accepting retrieval or triggering rewrite loops. Compared with top-1 thresholds, this metric is less sensitive to one lucky match and better reflects whether the candidate set is broadly usable for grounded generation. Raising it improves answer reliability but increases rewrite frequency and cost; lowering it reduces retries but can pass low-coherence sets into generation. Use it as your main control for balancing relevance quality against latency and token spend.
 
     **Badges**:
-    - Advanced RAG tuning
-    - Controls retries
+    - Retry controller
 
     **Links**:
-    - [Iterative Refinement](https://en.wikipedia.org/wiki/Iterative_refinement)
-    - [Query Reformulation](https://en.wikipedia.org/wiki/Query_reformulation)
-    - [Multi-Query RAG](https://arxiv.org/abs/2305.14283)
+    - [SAGE adaptive query rewriting (arXiv 2025)](https://arxiv.org/abs/2506.19783)
+    - [LangChain multi-query retrieval](https://python.langchain.com/docs/how_to/multi_query/)
+    - [Elasticsearch min_score parameter](https://www.elastic.co/guide/en/elasticsearch/reference/current/search-search.html#search-api-min-score)
+    - [Weaviate hybrid retrieval](https://docs.weaviate.io/weaviate/search/hybrid)
 
 ??? info "`retrieval.conf_top1` (`CONF_TOP1`) — Confidence Top-1"
     **Category**: `general`
 
-    Minimum confidence score (0.0-1.0) required to accept the top-1 result without further processing. If the best result scores above this threshold, it's returned immediately. Lower values (0.55-0.60) produce more answers but risk lower quality. Higher values (0.65-0.70) ensure precision but may trigger unnecessary query rewrites. Recommended: 0.60-0.65 for balanced precision/recall.
-
-    Sweet spot: 0.60-0.65 for production systems. Use 0.65-0.70 when precision is critical and false positives are costly (e.g., production debugging, compliance queries). Use 0.55-0.60 for exploratory search where recall matters more. This threshold gates whether the system accepts the top result or attempts query rewriting for better candidates.
-
-    Confidence is computed from hybrid fusion scores, reranking scores, and score boosting. A score of 0.65 means high confidence that the result is relevant. Below the threshold, the system may rewrite the query (if MQ_REWRITES > 1) and try again. Tune this alongside CONF_AVG5 and CONF_ANY for optimal answer rate vs quality.
-
-    • Range: 0.55-0.75 (typical)
-    • Exploratory: 0.55-0.60 (favor recall)
-    • Balanced: 0.60-0.65 (recommended)
-    • Precision-critical: 0.65-0.70 (favor precision)
-    • Effect: Lower = more answers, higher risk; Higher = fewer answers, higher quality
-    • Triggers: Query rewriting when below threshold
+    Primary acceptance gate for the best-ranked candidate. If the top result exceeds this threshold, the system can short-circuit additional rewrite or expansion steps, reducing latency and cost. Lower values increase answer rate but make the system more likely to trust brittle single hits; higher values enforce stricter precision and can over-trigger retries. The best operating point depends on your tolerance for false positives versus abstentions, so tune with labeled evals rather than intuition.
 
     **Badges**:
-    - Advanced RAG tuning
-    - Affects answer rate
+    - Precision gate
 
     **Links**:
-    - [Confidence Thresholds](https://en.wikipedia.org/wiki/Confidence_interval)
-    - [Precision-Recall Tradeoff](https://developers.google.com/machine-learning/crash-course/classification/precision-and-recall)
-    - [Decision Boundaries](https://en.wikipedia.org/wiki/Decision_boundary)
+    - [LLM confidence calibration via perturbation stability (arXiv 2025)](https://arxiv.org/abs/2505.21772)
+    - [Elasticsearch min_score parameter](https://www.elastic.co/guide/en/elasticsearch/reference/current/search-search.html#search-api-min-score)
+    - [LangChain retriever concepts](https://python.langchain.com/docs/concepts/retrievers/)
+    - [Scikit-learn threshold tuning](https://scikit-learn.org/stable/modules/classification_threshold.html)
 
 ??? info "`retrieval.eval_final_k` (`EVAL_FINAL_K`) — Eval Final‑K"
     **Category**: `evaluation`
 
-    Number of top results to consider when evaluating Hit@K metrics. If set to 10, eval checks if the expected answer appears in the top 10 results. Lower values (5) test precision, higher values (20) test recall. Should match your production FINAL_K setting for realistic evaluation. Common: 5 (strict), 10 (balanced), 20 (lenient).
+    Defines how many top retrieved items count toward success during evaluation metrics like Hit@K. Lower values enforce strict precision and expose ranking weaknesses, while higher values emphasize recall and can hide poor ordering if the answer appears late. Keep this aligned with your production retrieval depth so offline metrics predict real behavior. When tuning, inspect both aggregate Hit@K and position-sensitive metrics so you do not optimize for lenient success criteria alone.
+
+    **Badges**:
+    - Metric sensitivity
 
     **Links**:
-    - [Hit@K Metric](https://en.wikipedia.org/wiki/Evaluation_measures_(information_retrieval)#Precision_at_K)
+    - [What to Retrieve for RAG Code Gen (arXiv)](https://arxiv.org/abs/2503.20589)
+    - [ir-measures Metrics](https://ir-measur.es/en/latest/measures.html)
+    - [pytrec_eval](https://github.com/cvangysel/pytrec_eval)
+    - [TREC](https://trec.nist.gov/)
 
 ??? info "`retrieval.eval_multi` (`EVAL_MULTI`) — Eval Multi‑Query"
     **Category**: `evaluation`
 
-    Enable multi-query expansion during evaluation runs (1=yes, 0=no). When enabled, each golden question is rewritten multiple times (per MQ_REWRITES setting) to test recall under query variation. Turning this on makes eval results match production behavior if you use multi-query in prod, but increases eval runtime. Use 1 to measure realistic performance, 0 for faster eval iterations.
+    Controls whether evaluation uses multi-query expansion, where one prompt is rewritten into several retrieval queries to improve recall under wording variation. Enable this when production also uses multi-query, otherwise eval results can be overly optimistic or pessimistic compared with real traffic. The gain usually comes from broader evidence discovery, but cost and latency scale with rewrite count and dedup work. Measure marginal benefit per extra rewrite and stop when added queries no longer improve quality.
 
     **Badges**:
-    - Affects eval time
+    - Recall expansion
 
     **Links**:
-    - [Multi-Query RAG](https://arxiv.org/abs/2305.14283)
+    - [MA-RAG Multi-Agent Retrieval (arXiv)](https://arxiv.org/abs/2505.20096)
+    - [LangChain MultiQueryRetriever](https://python.langchain.com/docs/how_to/MultiQueryRetriever/)
+    - [LangChain Retrieval Concepts](https://python.langchain.com/docs/concepts/retrieval/)
+    - [LlamaIndex Retriever Guide](https://docs.llamaindex.ai/en/stable/module_guides/querying/retriever/)
 
 ??? info "`retrieval.fallback_confidence` (`FALLBACK_CONFIDENCE`) — Fallback Confidence"
     **Category**: `retrieval`
 
-    Confidence threshold that decides when to escalate to fallback retrieval strategies (e.g., rewrite the query, broaden candidate pools, or lean on alternative sources) instead of trusting the initial result set.
-
-    Think of it as “how bad is too bad”: if the system’s confidence in the current retrieval is below this, it tries something else; if it’s above, it proceeds without extra work.
-
-    Higher values trigger fallbacks more often (usually better quality, higher latency/cost). Lower values accept more first-pass results (faster, riskier). Tune alongside CONF_TOP1 and CONF_AVG5 so you don’t over-trigger rewrites.
-
-    • Range: 0.0–1.0
-    • Typical: 0.50–0.60
-    • Default: 0.55
-    • Higher: more retries/fallbacks (slower, higher precision)
-    • Lower: fewer retries (faster, may answer with weaker evidence)
-    • Interacts with: Confidence Top-1, Confidence Avg-5, Multi‑Query Rewrites
+    Sets the confidence cutoff that decides when first-pass retrieval is accepted versus when fallback strategies are triggered. Typical fallbacks include query rewrites, broader candidate pools, alternate retrievers, or graph traversal expansion. Higher thresholds increase recovery attempts and usually quality, but also increase cost and latency; lower thresholds preserve speed but tolerate weaker evidence. Calibrate this value on held-out failures and monitor how often fallbacks improve answers versus creating unnecessary retries.
 
     **Badges**:
-    - Advanced RAG tuning
-    - Controls retries
+    - Fallback policy
 
     **Links**:
-    - [Query Reformulation](https://en.wikipedia.org/wiki/Query_reformulation)
-    - [Precision and Recall](https://developers.google.com/machine-learning/crash-course/classification/precision-and-recall)
+    - [Agentic RAG Survey (arXiv)](https://arxiv.org/abs/2507.09477)
+    - [TruLens Evaluation](https://www.trulens.org/component_guides/evaluation/)
+    - [Ragas Metrics](https://docs.ragas.io/en/latest/concepts/metrics/available_metrics/)
+    - [LangChain Retrieval Concepts](https://python.langchain.com/docs/concepts/retrieval/)
 
 ??? info "`retrieval.final_k` (`FINAL_K`) — Final Top‑K"
     **Category**: `general`
 
-    Number of top results to return after hybrid fusion, reranking, and scoring boosts. This is what you get back from search. Higher values (15-30) provide more context but may include noise. Lower values (5-10) are faster and more precise. Default: 10. Recommended: 10 for chat, 20-30 for browsing/exploration.
+    Sets how many results survive final fusion and reranking before response generation or UI display. Larger values increase recall and diversity but can dilute evidence quality and consume more context budget; smaller values improve focus and latency but risk dropping key context. Tune this together with reranker quality and chunk size so returned sets remain both relevant and compact. In practice, this parameter strongly influences answer stability because it controls the evidence frontier given to the model.
 
     **Badges**:
-    - Core Setting
+    - Returned context depth
 
     **Links**:
-    - [Precision vs Recall](https://en.wikipedia.org/wiki/Precision_and_recall)
-    - [Top-K Selection](https://en.wikipedia.org/wiki/Tf%E2%80%93idf#Top-K_retrieval)
+    - [What to Retrieve for RAG Code Gen (arXiv)](https://arxiv.org/abs/2503.20589)
+    - [ir-measures Metrics](https://ir-measur.es/en/latest/measures.html)
+    - [Elasticsearch Search size](https://www.elastic.co/guide/en/elasticsearch/reference/current/search-search.html#search-api-param-size)
+    - [Azure Search Result Count](https://learn.microsoft.com/en-us/azure/search/search-pagination-page-layout#number-of-results-in-the-response)
 
 ??? info "`retrieval.langgraph_final_k` (`LANGGRAPH_FINAL_K`) — LangGraph Final K"
     **Category**: `general`
 
-    Compatibility control for LangGraph-style retrieval flows: target number of candidates passed forward after retrieval/fusion stages. This can differ from primary retrieval final_k when running alternate orchestration paths.
+    Sets how many retrieved candidates are retained after fusion or reranking before final answer synthesis in a LangGraph-style workflow. This parameter directly balances recall against context noise and token cost: larger values preserve more potentially useful evidence, while smaller values reduce latency and hallucination surface from marginal passages. Effective tuning depends on corpus redundancy and reranker quality, so evaluate with answer-level metrics rather than retrieval-only metrics. Keep this aligned with model context limits and downstream prompt design to avoid passing excess low-value text. In multi-stage graphs, final_k should be considered with earlier retrieval breadth settings.
 
-    Tune this to keep evaluation and runtime behavior aligned. If this diverges too far from main retrieval settings, debugging cross-path discrepancies becomes difficult.
-
-    - Higher values: more recall, more downstream latency/cost
-    - Lower values: tighter precision, less context diversity
+    **Badges**:
+    - Candidate depth
 
     **Links**:
-    - [LangGraph](https://langchain-ai.github.io/langgraph/)
+    - [ImpRAG: Importance-Aware Retrieval-Augmented Generation](https://arxiv.org/abs/2506.02279)
+    - [LangGraph Documentation](https://docs.langchain.com/langgraph)
+    - [LangGraph Low-Level Concepts](https://langchain-ai.github.io/langgraph/concepts/low_level/)
+    - [Cohere Rerank Overview](https://docs.cohere.com/docs/rerank-overview)
 
 ??? info "`retrieval.langgraph_max_query_rewrites` (`LANGGRAPH_MAX_QUERY_REWRITES`) — LangGraph Max Query Rewrites"
     **Category**: `general`
 
-    Number of query rewrites used inside the LangGraph answer pipeline (/answer). Separate from MAX_QUERY_REWRITES used by general multi-query retrieval. Higher values improve recall but increase latency and LLM cost. Typical: 2-4.
+    Limits how many alternate query rewrites are generated inside the LangGraph answer path. Additional rewrites can significantly improve recall on ambiguous or underspecified user questions by exploring lexical variants and sub-intents, but each rewrite adds model calls, retrieval fan-out, and dedup work. Set this based on latency budget and observed marginal gain per rewrite, not on a fixed preference for larger numbers. Practical deployments combine a moderate cap with early-stop heuristics when rewrites become near-duplicates. This keeps retrieval expansion useful instead of turning into cost-heavy redundancy.
 
     **Badges**:
-    - LangGraph only
-    - Higher cost
+    - Latency vs recall
 
     **Links**:
-    - [LangGraph](https://langchain-ai.github.io/langgraph/)
-    - [Multi‑Query RAG (paper)](https://arxiv.org/abs/2305.14283)
+    - [RL-QR: Reinforcement Learning for Query Rewriting in RAG](https://arxiv.org/abs/2507.23242)
+    - [LangGraph Documentation](https://docs.langchain.com/langgraph)
+    - [LangGraph Low-Level Concepts](https://langchain-ai.github.io/langgraph/concepts/low_level/)
+    - [Cohere Rerank Overview](https://docs.cohere.com/docs/rerank-overview)
 
 ??? info "`retrieval.max_query_rewrites` (`MAX_QUERY_REWRITES`) — Multi‑Query Rewrites"
     **Category**: `general`
 
-    Number of LLM‑generated query variations. Each variation runs hybrid retrieval; results are merged and reranked. Higher improves recall but increases latency and API cost. Typical: 2–4.
+    Sets how many alternative query phrasings are generated before retrieval. Each rewrite typically executes the full retrieval stack (sparse/vector/graph + fusion), so increasing this value can recover documents missed by the original wording but grows latency and token cost almost linearly. In practice, treat it as a recall budget: start low, measure unique-relevant-document gain per extra rewrite, and stop when marginal gain flattens. Keep the original query in the candidate set to prevent rewrite drift, and pair this with reranking so noisy rewrites do not dominate final context selection.
 
     **Badges**:
     - Better recall
     - Higher cost
 
     **Links**:
-    - [Multi‑Query Retriever](https://python.langchain.com/docs/how_to/MultiQueryRetriever/)
-    - [Multi‑Query RAG (paper)](https://arxiv.org/abs/2305.14283)
+    - [Annotation-Free RL Query Rewriting via Verifiable Search Reward (arXiv 2025)](https://arxiv.org/abs/2507.23242)
+    - [LangChain MultiQuery Retriever](https://python.langchain.com/docs/how_to/MultiQueryRetriever/)
+    - [Haystack Query Expansion Cookbook](https://haystack.deepset.ai/cookbook/query-expansion)
+    - [Elasticsearch Reciprocal Rank Fusion](https://www.elastic.co/guide/en/elasticsearch/reference/current/rrf.html)
 
 ??? info "`retrieval.multi_query_m` (`MULTI_QUERY_M`) — Multi-Query M (RRF Constant)"
     **Category**: `general`
@@ -344,94 +308,91 @@
 ??? info "`retrieval.query_expansion_enabled` (`QUERY_EXPANSION_ENABLED`) — Query Expansion Enabled"
     **Category**: `retrieval`
 
-    Controls whether additional rewritten/expanded query variants are generated and used during retrieval. Expansion can improve recall for underspecified prompts but may add latency and noise.
+    Enables generation of additional query variants (rewrites, paraphrases, or decomposition prompts) before retrieval. This can significantly improve recall on underspecified or ambiguous user questions by increasing lexical and semantic coverage, especially in heterogeneous code-and-doc corpora. The tradeoff is extra latency, more candidate noise, and higher token or API cost if expansions are not constrained. Production tuning usually combines expansion with caps on variant count, deduplication, and reranker gating so recall gains do not overwhelm precision.
 
-    Enable when users ask vague natural-language questions and miss relevant identifiers. Disable when exact-query behavior and deterministic latency are more important than recall breadth.
-
-    - Enabled: broader retrieval coverage
-    - Disabled: stricter, faster lexical/semantic matching
+    **Links**:
+    - [Query Suggestion for Retrieval-Augmented Generation (arXiv 2026)](https://arxiv.org/abs/2601.08105)
+    - [SAGE: Learning Query Rewriting for LLM-based Search (arXiv 2025)](https://arxiv.org/abs/2506.19783)
+    - [LangChain MultiQueryRetriever](https://python.langchain.com/docs/how_to/MultiQueryRetriever/)
+    - [Elasticsearch Synonyms and Query Expansion](https://www.elastic.co/guide/en/elasticsearch/reference/current/search-with-synonyms.html)
 
 ??? info "`retrieval.rrf_k_div` (`RRF_K_DIV`) — Reciprocal Rank Fusion (K)"
     **Category**: `retrieval`
 
-    RRF smoothing constant used in retrieval fusion: score += 1/(K + rank). Lower K makes top-ranked hits dominate more; higher K flattens rank differences. Default: 60. Allowed range: 1-200 (practical minimum validated as 10). Typical: 30-100.
+    `RRF_K_DIV` is the Reciprocal Rank Fusion smoothing constant in the fusion formula `score += 1 / (k + rank)`, and it governs how aggressively top-ranked items dominate the merged ranking. Lower values make the fusion more top-heavy and sensitive to rank-1/2 positions from individual retrievers, while higher values flatten contributions so deeper-ranked hits still influence final order. In implementation, this is a calibration parameter for hybrid retrieval behavior: tune it with representative queries and compare recall, top-k precision, and downstream answer grounding, because an overly small k can overfit to one retriever and an overly large k can dilute strong top signals.
 
     **Links**:
-    - [RRF Paper](https://www.cs.cmu.edu/~jgc/publication/The_Influence_of_Random_Sampling_on_the_Performance_of_Ensembles.pdf)
+    - [Exp4Fuse: Online Learning for Robust Search Result Fusion with Modified RRF (arXiv)](https://arxiv.org/abs/2506.04760)
+    - [Elasticsearch Reciprocal Rank Fusion (RRF)](https://www.elastic.co/guide/en/elasticsearch/reference/current/rrf.html)
+    - [Azure AI Search Hybrid Search Ranking (RRF)](https://learn.microsoft.com/en-us/azure/search/hybrid-search-ranking)
+    - [Weaviate Hybrid Search Concepts](https://docs.weaviate.io/weaviate/concepts/search/hybrid-search)
 
 ??? info "`retrieval.topk_dense` (`TOPK_DENSE`) — Top‑K Dense"
     **Category**: `retrieval`
 
-    Number of candidate results to retrieve from Qdrant vector (semantic) search before hybrid fusion. Higher values (100-150) improve recall for semantic matches but increase query latency and memory usage. Lower values (40-60) are faster but may miss relevant results. Must be >= FINAL_K. Recommended: 75 for balanced performance, 100-120 for high recall scenarios.
+    TOPK_DENSE sets how many semantic candidates are pulled from the dense index before fusion. In practice, this controls the recall ceiling for meaning-based matches: if it is too low, relevant chunks can be dropped before reranking ever sees them; if it is too high, latency and downstream rerank cost grow quickly. Tune it against your corpus distribution and query mix by tracking recall@k, answer grounding rate, and p95 latency together, not in isolation. A common pattern is to increase TOPK_DENSE when user questions are abstract or paraphrased, then counterbalance compute by tightening reranker depth or pruning thresholds later in the pipeline.
 
     **Badges**:
     - Affects latency
     - Semantic matches
 
     **Links**:
-    - [Vector Similarity Search](https://qdrant.tech/documentation/concepts/search/)
-    - [Semantic Search](https://en.wikipedia.org/wiki/Semantic_search)
-    - [Top-K Retrieval](https://en.wikipedia.org/wiki/Nearest_neighbor_search#k-nearest_neighbors)
+    - [Topo-RAG: Retrieval-Augmented Generation with Topology-Aware Retrieval (arXiv 2026)](https://arxiv.org/abs/2601.10215)
+    - [Qdrant Hybrid Queries](https://qdrant.tech/documentation/concepts/hybrid-queries/)
+    - [Qdrant Query Points API (limit and retrieval controls)](https://api.qdrant.tech/master/api-reference/search/query-points)
+    - [Elasticsearch Reciprocal Rank Fusion (RRF)](https://www.elastic.co/guide/en/elasticsearch/reference/current/rrf.html)
 
 ??? info "`retrieval.topk_sparse` (`TOPK_SPARSE`) — Top‑K Sparse"
     **Category**: `retrieval`
 
-    Number of candidate results to retrieve from BM25 keyword (lexical) search before hybrid fusion. Higher values (100-150) improve recall for exact keyword matches (variable names, function names, error codes) but increase latency. Lower values (40-60) are faster but may miss exact matches. Must be >= FINAL_K. Recommended: 75 for balanced performance, 100-120 for keyword-heavy queries.
+    TOPK_SPARSE sets how many lexical candidates are retrieved from sparse scoring (BM25-style) before hybrid fusion. This value is critical for exact-match behavior such as identifiers, SKU-like tokens, config names, and error strings that dense embeddings can blur. If TOPK_SPARSE is too low, precision may look good while recall silently collapses on keyword-heavy workloads; if too high, you can over-admit noisy boilerplate and increase rerank pressure. Evaluate it jointly with tokenizer configuration and fusion weights so sparse evidence remains a strong but not dominant signal.
 
     **Badges**:
     - Affects latency
     - Keyword matches
 
     **Links**:
-    - [BM25 Algorithm](https://en.wikipedia.org/wiki/Okapi_BM25)
-    - [BM25S Library (GitHub)](https://github.com/xhluca/bm25s)
+    - [Hybrid Retrieval for Multilingual RAG Systems (arXiv 2025)](https://arxiv.org/abs/2512.12694)
+    - [Elasticsearch BM25 Similarity](https://www.elastic.co/guide/en/elasticsearch/reference/current/index-modules-similarity.html)
+    - [OpenSearch Hybrid Query DSL](https://docs.opensearch.org/latest/query-dsl/compound/hybrid/)
+    - [Elasticsearch Reciprocal Rank Fusion (RRF)](https://www.elastic.co/guide/en/elasticsearch/reference/current/rrf.html)
 
 ??? info "`retrieval.tribrid_synonyms_path` (`TRIBRID_SYNONYMS_PATH`) — Synonyms File Path"
     **Category**: `general`
 
-    Custom path to the semantic synonyms JSON file. Defaults to data/semantic_synonyms.json if empty. Use this to point to a repository-specific or custom synonym dictionary. The file should contain a JSON object mapping terms to arrays of synonyms (e.g., {"auth": ["authentication", "oauth", "jwt"]}).
-
-    • Default: data/semantic_synonyms.json
-    • Example: /path/to/custom_synonyms.json
-    • Format: {"term": ["synonym1", "synonym2", ...]}
-    • Works with: USE_SEMANTIC_SYNONYMS toggle
+    Path to the synonyms dictionary used for controlled query expansion and lexical normalization. This file can materially change retrieval behavior, especially for domain acronyms, aliases, and product-specific terminology that embeddings may underrepresent. Keep the synonym set versioned and scoped: broad global replacements can hurt precision by over-expanding ambiguous terms. Treat updates as relevance experiments, not static configuration, and validate with representative query buckets before rollout.
 
     **Badges**:
     - Optional override
 
+    **Links**:
+    - [Generative Query Expansion with Multilingual LLMs (arXiv 2025)](https://arxiv.org/abs/2511.19325)
+    - [Elasticsearch Synonym Token Filter](https://www.elastic.co/docs/reference/text-analysis/analysis-synonym-tokenfilter)
+    - [OpenSearch Synonym Token Filter](https://docs.opensearch.org/latest/analyzers/token-filters/synonym/)
+    - [PostgreSQL Text Search Dictionaries and Synonym Support](https://www.postgresql.org/docs/current/textsearch-features.html)
+
 ??? info "`retrieval.use_semantic_synonyms` (`USE_SEMANTIC_SYNONYMS`) — Semantic Synonyms Expansion"
     **Category**: `general`
 
-    Enables semantic synonym expansion before retrieval so queries can match related concepts, aliases, or variant terminology beyond exact user wording.
+    Enables semantic synonym expansion before retrieval so user queries can match equivalent terminology, abbreviations, and team-specific phrasing beyond exact token overlap. This typically improves recall on natural-language prompts and cross-team vocabulary mismatches, especially when users ask with informal wording while documents use canonical terms. The tradeoff is expansion noise: broad or poorly curated synonym sets can pull in marginally related chunks and lower precision. Enable this with a controlled synonym dictionary, monitor zero-hit reduction and false-positive rates, and pair with reranking so expanded candidates are rescored instead of accepted blindly.
 
-    This improves recall for natural-language and cross-team vocabulary differences, but can introduce off-topic drift if synonym lists are too broad. Keep synonym sources curated and domain-specific.
-
-    - Enabled: better conceptual recall
-    - Disabled: stricter literal query behavior
-    - Pair with: TRIBRID_SYNONYMS_PATH
+    **Links**:
+    - [TCDE: Textual Conceptual Drift Estimation for Query Expansion (arXiv 2025)](https://arxiv.org/abs/2512.17164)
+    - [Elasticsearch Search with Synonyms](https://www.elastic.co/guide/en/elasticsearch/reference/current/search-with-synonyms.html)
+    - [OpenSearch Synonyms](https://docs.opensearch.org/latest/search-plugins/searching-data/synonyms/)
+    - [Lucene SynonymGraphFilter](https://lucene.apache.org/core/9_11_1/analysis/common/org/apache/lucene/analysis/synonym/SynonymGraphFilter.html)
 
 ??? info "`retrieval.vector_weight` (`VECTOR_WEIGHT`) — Vector Weight (Hybrid Fusion)"
     **Category**: `retrieval`
 
-    Weight assigned to dense vector (semantic embedding) scores during hybrid search fusion. Dense embeddings capture semantic meaning and conceptual similarity, excelling at natural language queries and synonym matching. Higher weights (0.5-0.7) prioritize semantic relevance over exact keywords. Lower weights (0.2-0.4) defer to BM25 lexical matching. The fusion formula: final_score = (BM25_WEIGHT × bm25_score) + (VECTOR_WEIGHT × dense_score).
-
-    Sweet spot: 0.5-0.6 for balanced hybrid retrieval. Use 0.6-0.7 when users ask conceptual questions ("how does X work?", "what handles Y?") where synonyms and paraphrasing matter. Use 0.4-0.5 when exact term matching is important alongside semantics. The two weights should sum to approximately 1.0 for normalized scoring.
-
-    Symptom of too high: Exact keyword matches (function names, specific terms) rank below semantic near-matches. Symptom of too low: Conceptually relevant results are buried despite being semantically similar. Most production RAG systems balance 0.5 BM25 with 0.5 vector, then fine-tune based on user feedback and eval metrics.
-
-    • Range: 0.3-0.7 (typical)
-    • Semantic-heavy: 0.6-0.7 (conceptual queries, natural language)
-    • Balanced: 0.5-0.6 (recommended for mixed queries)
-    • Keyword-heavy: 0.3-0.4 (when precision matters)
-    • Should sum with BM25_WEIGHT to ~1.0
-    • Affects: Hybrid fusion ranking, semantic vs keyword balance
+    Relative influence of dense semantic scores during hybrid fusion. Raising vector weight helps when user wording differs from document wording (paraphrases, alias-heavy language, conceptual queries), while lowering it helps when exact identifiers and lexical precision matter more (error codes, symbol names, strict API strings). This is not an isolated knob: optimal weight depends on BM25 configuration, candidate pool sizes, and reranker behavior. Tune weight on a fixed benchmark set and inspect failure cases; if dense-heavy tuning introduces topical but non-specific hits, reduce vector weight or increase lexical/reranker influence.
 
     **Badges**:
     - Advanced RAG tuning
     - Pairs with BM25_WEIGHT
 
     **Links**:
-    - [Dense Embeddings](https://www.sbert.net/docs/pretrained_models.html)
-    - [Hybrid Search Explained](https://qdrant.tech/articles/hybrid-search/)
-    - [Semantic Search](https://en.wikipedia.org/wiki/Semantic_search)
-    - [Embedding Models](https://weaviate.io/blog/how-to-choose-an-embedding-model)
+    - [BAR-RAG: Adaptive Hybrid Retrieval Weighting (arXiv 2026)](https://arxiv.org/abs/2602.03689)
+    - [Weaviate Hybrid Search (alpha weighting)](https://weaviate.io/developers/weaviate/search/hybrid)
+    - [OpenSearch Hybrid Search](https://docs.opensearch.org/latest/search-plugins/hybrid-search/)
+    - [Elasticsearch Reciprocal Rank Fusion (RRF)](https://www.elastic.co/guide/en/elasticsearch/reference/current/rrf.html)

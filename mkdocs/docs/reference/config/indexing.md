@@ -26,7 +26,7 @@
 [Config API & workflow](../../configuration.md){ .md-button }
 [Glossary](../../glossary.md){ .md-button }
 
-**Total parameters**: 15
+**Total parameters**: 16
 
 ??? info "Group index"
     - `(root)`
@@ -37,6 +37,7 @@
 |---------|------------|------|---------|-------------|---------|
 | `indexing.bm25_stemmer_lang` | `BM25_STEMMER_LANG` | `str` | `"english"` | — | Stemmer language |
 | `indexing.bm25_tokenizer` | `BM25_TOKENIZER` | `str` | `"stemmer"` | pattern=^(stemmer\|lowercase\|whitespace)$ | BM25 tokenizer type |
+| `indexing.estimated_tokens_per_second_local` | `ESTIMATED_TOKENS_PER_SECOND_LOCAL` | `int \| None` | `null` | ≥ 100, ≤ 500000 | Optional local embedding throughput override for index-time estimates (tokens/sec). |
 | `indexing.index_excluded_exts` | `INDEX_EXCLUDED_EXTS` | `str` | `".png,.jpg,.gif,.ico,.svg,.woff,.ttf"` | — | Excluded file extensions (comma-separated) |
 | `indexing.index_max_file_size_mb` | `INDEX_MAX_FILE_SIZE_MB` | `int` | `250` | ≥ 1, ≤ 1024 | Max file size to index (MB) |
 | `indexing.indexing_batch_size` | `INDEXING_BATCH_SIZE` | `int` | `100` | ≥ 10, ≤ 1000 | Batch size for indexing |
@@ -56,126 +57,157 @@
 ??? info "`indexing.bm25_stemmer_lang` (`BM25_STEMMER_LANG`) — BM25 Stemmer Language"
     **Category**: `retrieval`
 
-    Language for stemming/normalization in BM25 sparse indexing. Common values: "en" (English - default), "multilingual" (multiple languages), "none" (disable stemming). Stemming reduces words to root forms (e.g., "running" -> "run") to improve keyword matching. English stemming works well for code comments, docs, and variable names. Use "none" for non-English repos or when exact keyword matching is critical (e.g., API names, error codes).
-
-    Recommended: "en" for English codebases, "multilingual" for international teams, "none" for strict keyword matching.
+    BM25_STEMMER_LANG chooses the stemming or morphological normalization profile applied before sparse indexing. Correct language normalization improves recall by unifying inflected word forms, while incorrect stemming can collapse distinct technical terms and reduce precision. Multilingual corpora often need language-aware analyzers by field rather than one global stemmer, especially when prose and code identifiers coexist. Any change here requires reindexing and targeted multilingual relevance checks because token statistics and BM25 behavior shift across the entire corpus.
 
     **Badges**:
-    - Affects keyword search
+    - Linguistics
 
     **Links**:
-    - [BM25 Algorithm](https://en.wikipedia.org/wiki/Okapi_BM25)
-    - [Stemming Explained](https://en.wikipedia.org/wiki/Stemming)
-    - [BM25S Library](https://github.com/xhluca/bm25s#supported-stemmers)
+    - [Milco: Multilingual Sparse Retrieval via Connector (arXiv)](https://arxiv.org/abs/2510.00671)
+    - [Elasticsearch Language Analyzers](https://www.elastic.co/guide/en/elasticsearch/reference/current/analysis-lang-analyzer.html)
+    - [Snowball Stemming Algorithms](https://snowballstem.org/)
+    - [Lucene Analysis Common Module](https://lucene.apache.org/core/10_3_1/analysis/common/index.html)
 
 ??? info "`indexing.bm25_tokenizer` (`BM25_TOKENIZER`) — BM25 Tokenizer"
     **Category**: `retrieval`
 
-    Tokenization strategy for BM25 sparse index. Controls how code text is split into searchable terms. Options: "stemmer" (Porter stemming, normalizes word forms like "running" → "run"), "whitespace" (split on spaces only, preserves exact forms), "standard" (lowercase + split on punctuation). For code search, preserving exact forms is usually better than stemming.
-
-    Sweet spot: "whitespace" or "standard" for code search. Stemming helps with natural language (README files, comments) but can hurt code search by conflating different identifiers. For example, stemming might merge "user" and "users" (good for prose) but also "handler" and "handle" (bad for code). Most code-focused RAG systems avoid stemming.
-
-    "whitespace": Splits on whitespace only, preserves case and punctuation. Good for camelCase and snake_case. Example: "getUserData" → ["getUserData"].
-
-    "standard": Lowercase + split on punctuation. Better for cross-case matching. Example: "getUserData" → ["getuserdata"] (matches "getuserdata", "getUserData", "GETUSERDATA").
-
-    "stemmer": Applies Porter stemmer. Best for natural language, risky for code. Example: "getUserData" → stems individual tokens.
-
-    • whitespace: Preserve exact forms, case-sensitive, best for strict code search
-    • standard: Lowercase + punctuation split, case-insensitive, balanced (recommended)
-    • stemmer: Normalize word forms, best for natural language, risky for code
-    • Effect: Changes how BM25 matches query terms to code
-    • Requires reindex: Changes take effect after rebuilding BM25 index
+    BM25_TOKENIZER determines how text is split into sparse terms, and this often has a larger impact than small parameter tweaks. Conservative tokenization preserves exact symbols and identifier fragments useful for code retrieval, while aggressive normalization helps natural-language matching. The right choice depends on corpus composition: APIs and filenames benefit from symbol-aware token boundaries, whereas narrative documents benefit from linguistic normalization. Because tokenizer behavior changes term frequencies and document lengths, retune BM25 parameters after tokenizer changes instead of carrying old values forward.
 
     **Badges**:
-    - Advanced indexing
-    - Requires reindex
+    - Tokenization
 
     **Links**:
-    - [BM25 Algorithm](https://en.wikipedia.org/wiki/Okapi_BM25)
-    - [Porter Stemmer](https://en.wikipedia.org/wiki/Stemming#Porter_stemmer)
-    - [Tokenization](https://en.wikipedia.org/wiki/Lexical_analysis#Tokenization)
-    - [BM25S Tokenizers](https://github.com/xhluca/bm25s#tokenization)
+    - [Multilingual Generative Retrieval via Semantic Compression (arXiv)](https://arxiv.org/abs/2510.07812)
+    - [Elasticsearch Tokenizers](https://www.elastic.co/guide/en/elasticsearch/reference/current/analysis-tokenizers.html)
+    - [Hugging Face Tokenizers](https://huggingface.co/docs/tokenizers/index)
+    - [Lucene WhitespaceTokenizer](https://lucene.apache.org/core/10_3_1/analysis/common/org/apache/lucene/analysis/core/WhitespaceTokenizer.html)
 
 ??? info "`indexing.index_excluded_exts` (`INDEX_EXCLUDED_EXTS`) — Excluded Extensions"
     **Category**: `infrastructure`
 
-    Comma-separated file extensions to skip during indexing (e.g., ".png,.jpg,.pdf,.zip"). Prevents indexing binary files, images, or non-code assets. Reduces index size and improves relevance.
+    Defines a denylist of file extensions that should be skipped before ingestion so the index is not polluted by binaries, build artifacts, media blobs, and other low-signal assets. In code and docs RAG, good exclusion rules improve both precision and indexing cost by avoiding irrelevant tokens and expensive parsing failures. Keep this list aligned with your repository layout and parser capabilities, because extension-only filtering can miss mislabeled files unless combined with MIME or content checks. Review exclusions after major stack changes, especially when adding documentation generators or notebook-heavy workflows. Overly broad exclusions can silently remove valuable domain knowledge from retrieval.
+
+    **Badges**:
+    - Corpus hygiene
 
     **Links**:
-    - [Gitignore Patterns](https://git-scm.com/docs/gitignore)
-    - [File Extensions](https://en.wikipedia.org/wiki/Filename_extension)
+    - [Vision-Guided Chunking Improves RAG in Multimodal Long Context Scenarios](https://arxiv.org/abs/2506.16035)
+    - [gitignore Pattern Format](https://git-scm.com/docs/gitignore)
+    - [Unstructured Open Source Overview](https://docs.unstructured.io/open-source/introduction/overview)
+    - [Azure AI Search: Chunk Large Documents](https://learn.microsoft.com/en-us/azure/search/vector-search-how-to-chunk-documents)
 
 ??? info "`indexing.index_max_file_size_mb` (`INDEX_MAX_FILE_SIZE_MB`) — Index max file size (MB)"
     **Category**: `chunking`
 
-    Hard cap for indexing: files larger than this (in MB) are skipped before reading. For very large text dumps, raise this above the file size and enable streaming ingestion.
+    Sets a hard upper bound on file size for indexing to prevent memory spikes and long-tail ingestion delays caused by extremely large documents. In RAG pipelines this value protects indexing stability, but if set too low it can remove high-value sources such as architecture guides, policy manuals, or API bundles. Use corpus stats to choose a threshold, typically around the P95 or P99 file size, then special-case known large files with streaming or sectioned ingestion. This setting interacts with chunking strategy, parser behavior, and total token budget, so tune it alongside chunk size and overlap rather than in isolation. Periodic audits of skipped-file lists help avoid accidental knowledge gaps.
+
+    **Badges**:
+    - Stability guardrail
+
+    **Links**:
+    - [HiFi-RAG: Enhancing Retrieval-Augmented Generation through High-Fidelity Contextual Chunking and Reasoning](https://arxiv.org/abs/2512.22442)
+    - [Azure AI Search: Chunk Large Documents](https://learn.microsoft.com/en-us/azure/search/vector-search-how-to-chunk-documents)
+    - [Unstructured Open Source Overview](https://docs.unstructured.io/open-source/introduction/overview)
+    - [Weaviate Data Import](https://docs.weaviate.io/weaviate/manage-objects/import)
 
 ??? info "`indexing.indexing_batch_size` (`INDEXING_BATCH_SIZE`) — Indexing Batch Size"
     **Category**: `embedding`
 
-    Number of chunks to process in parallel during the indexing pipeline (chunking, enrichment, embedding, Qdrant upload). Higher values (100-500) maximize throughput on fast networks and powerful machines but increase memory usage and risk batch failures. Lower values (20-50) are more stable and provide better progress visibility. If indexing crashes with OOM or connection errors, reduce this. For large repos (100k+ files), use higher values for efficiency.
-
-    Recommended: 100-200 for normal repos, 50-100 for large repos or slow connections, 500+ for small repos on powerful hardware.
+    INDEXING_BATCH_SIZE sets how many chunks or records are processed together per indexing step, affecting throughput, memory pressure, and failure blast radius. Larger batches generally improve GPU and network utilization for embeddings and vector upserts, but they also increase peak memory and make retries more expensive. Smaller batches are slower but more resilient when providers rate-limit, vector stores throttle writes, or occasional malformed records appear. The best value depends on embedding latency, vector DB ingest speed, and available RAM, so it should be tuned with real pipeline telemetry. Start conservatively, then increase until throughput gains flatten or error rates begin rising.
 
     **Badges**:
-    - Performance tuning
-    - Memory sensitive
+    - Throughput
 
     **Links**:
-    - [Batch Processing](https://en.wikipedia.org/wiki/Batch_processing)
-    - [Qdrant Upload Performance](https://qdrant.tech/documentation/guides/bulk-upload/)
+    - [Qdrant Bulk Upload Tutorial](https://qdrant.tech/documentation/database-tutorials/bulk-upload/)
+    - [pgvector Repository](https://github.com/pgvector/pgvector)
+    - [PostgreSQL COPY Command](https://www.postgresql.org/docs/current/sql-copy.html)
+    - [LightRetriever (2025): Faster Query Inference](https://arxiv.org/abs/2505.12260)
 
 ??? info "`indexing.indexing_workers` (`INDEXING_WORKERS`) — Indexing Workers"
     **Category**: `infrastructure`
 
-    Number of parallel worker threads for CPU-intensive indexing tasks (file parsing, chunking, BM25 indexing). Higher values (4-16) utilize multi-core CPUs better and speed up indexing significantly. Lower values (1-2) reduce CPU load but increase indexing time. Set based on available CPU cores - typically use cores-1 or cores-2 to leave headroom for OS/other processes. For Docker/containers, ensure resource limits allow multiple workers.
-
-    Recommended: 4-8 for most systems, 1-2 for low-power machines or containers with CPU limits, 12-16 for powerful servers.
+    Controls how many parallel workers execute indexing stages such as parsing, chunking, sparse indexing, and embedding preparation. In RAG systems this is a throughput lever, but only up to the point where CPU cores, memory bandwidth, disk I/O, or embedding-provider rate limits become the bottleneck. A practical baseline is physical cores minus one or two so interactive tasks and background services still have headroom. If this value is set too high, context switching, queue contention, and retry pressure can increase total wall-clock time rather than reduce it. Tune with real run metrics, especially files-per-second, average chunk latency, and failed-task retries.
 
     **Badges**:
-    - CPU utilization
-    - Faster indexing
+    - Throughput tuning
 
     **Links**:
-    - [Parallel Processing](https://en.wikipedia.org/wiki/Parallel_computing)
-    - [Python ThreadPoolExecutor](https://docs.python.org/3/library/concurrent.futures.html#threadpoolexecutor)
-    - [Docker CPU Limits](https://docs.docker.com/engine/containers/resource_constraints/#cpu)
+    - [GraphAnchor: Graph-Enhanced and Attention-Driven Retrieval for RAG](https://arxiv.org/abs/2601.16462)
+    - [Python concurrent.futures](https://docs.python.org/3/library/concurrent.futures.html)
+    - [Docker CPU Resource Constraints](https://docs.docker.com/engine/containers/resource_constraints/)
+    - [FAISS Documentation](https://faiss.ai/)
 
 ??? info "`indexing.parquet_extract_include_column_names` (`PARQUET_EXTRACT_INCLUDE_COLUMN_NAMES`) — Parquet Include Column Names"
     **Category**: `indexing`
 
-    Include Parquet column headers in extracted text (0/1). Keeping headers improves context for field-specific queries and schema-aware retrieval. Default: 1. Range: 0-1.
+    When enabled, column headers are injected into extracted Parquet text so retrieval can align values with field semantics (for example, distinguishing `price` from `discount_price`). This generally improves schema-aware search and downstream answer grounding, especially for wide analytical tables. The downside is extra tokens and potentially noisier chunks if column names are verbose or system-generated. Keep this on by default for mixed tabular + natural-language corpora, then validate index size impact on large datasets.
+
+    **Links**:
+    - [TGR: Table Graph Reasoner for Dense Tables (arXiv 2026)](https://arxiv.org/abs/2601.08444)
+    - [Apache Parquet Documentation](https://parquet.apache.org/docs/)
+    - [DuckDB Parquet Overview](https://duckdb.org/docs/stable/data/parquet/overview)
+    - [Polars scan_parquet API](https://docs.pola.rs/api/python/stable/reference/api/polars.scan_parquet.html)
 
 ??? info "`indexing.parquet_extract_max_cell_chars` (`PARQUET_EXTRACT_MAX_CELL_CHARS`) — Parquet Extract Max Cell Chars"
     **Category**: `indexing`
 
-    Maximum characters per Parquet cell when converting to text (best-effort). Long cells are truncated to keep output bounded.
+    Upper bound for characters extracted from any single Parquet cell before truncation. This prevents rare long values (JSON blobs, stack traces, raw HTML, encoded payloads) from dominating chunk budgets and crowding out other rows. A low cap improves throughput and keeps chunks balanced, but may clip high-value context in long descriptive fields. Choose a cap that protects indexing stability while preserving enough per-cell signal for your query patterns.
+
+    **Links**:
+    - [Efficient Table Retrieval from Massive Data Lakes (arXiv 2026)](https://arxiv.org/abs/2602.07642)
+    - [Apache Parquet Format Repository](https://github.com/apache/parquet-format)
+    - [DuckDB Parquet Performance Tips](https://duckdb.org/docs/stable/data/parquet/tips)
+    - [pandas.read_parquet Reference](https://pandas.pydata.org/docs/reference/api/pandas.read_parquet.html)
 
 ??? info "`indexing.parquet_extract_max_chars` (`PARQUET_EXTRACT_MAX_CHARS`) — Parquet Extract Max Chars"
     **Category**: `indexing`
 
-    Maximum total characters to extract from a single Parquet file during indexing (best-effort). Extraction stops once this limit is reached.
+    Global character budget for text extracted from one Parquet file during indexing. Once this threshold is reached, extraction stops (best effort), giving predictable upper bounds on memory, ingestion time, and index growth. This setting is critical for very large tables where full-file extraction is unnecessary or too expensive. Pair it with row limits and cell caps so your truncation strategy is intentional rather than accidental.
+
+    **Links**:
+    - [Scalable Tabular In-Context Learning (arXiv 2025)](https://arxiv.org/abs/2502.03147)
+    - [Parquet Implementation Status](https://parquet.apache.org/docs/file-format/implementationstatus/)
+    - [DuckDB Querying Parquet Files](https://duckdb.org/docs/stable/guides/file_formats/query_parquet)
+    - [pyarrow.parquet.read_table Reference](https://arrow.apache.org/docs/python/generated/pyarrow.parquet.read_table.html)
 
 ??? info "`indexing.parquet_extract_max_rows` (`PARQUET_EXTRACT_MAX_ROWS`) — Parquet Extract Max Rows"
     **Category**: `indexing`
 
-    Best-effort cap on rows read from a single Parquet file during indexing. Prevents huge datasets from consuming excessive memory and time. Default: 5000. Range: 1-200000. Increase for deeper coverage; lower for faster and cheaper indexing.
+    Best-effort cap on the number of rows read from a Parquet file during extraction. It is a coarse but effective control for ingestion cost when a dataset is too large to fully materialize into text. Higher values improve coverage and long-tail recall, while lower values reduce indexing time and memory pressure. If row order is meaningful (for example, temporal logs), this cap also determines which slice of data becomes searchable first.
+
+    **Links**:
+    - [Scalable Tabular In-Context Learning (arXiv 2025)](https://arxiv.org/abs/2502.03147)
+    - [Polars scan_parquet API (row limiting)](https://docs.pola.rs/api/python/stable/reference/api/polars.scan_parquet.html)
+    - [DuckDB Parquet Overview](https://duckdb.org/docs/stable/data/parquet/overview)
+    - [pyarrow.parquet.read_table Reference](https://arrow.apache.org/docs/python/generated/pyarrow.parquet.read_table.html)
 
 ??? info "`indexing.parquet_extract_text_columns_only` (`PARQUET_EXTRACT_TEXT_COLUMNS_ONLY`) — Parquet Text Columns Only"
     **Category**: `indexing`
 
-    Extract only text-like Parquet columns when possible (0/1). Default: 1 to avoid noisy numeric or structured fields. Set to 0 if numeric columns are important to search.
+    Controls whether the Parquet ingestion path indexes only text-like columns (strings, long text blobs, comments, descriptions) instead of every column in the table. Keeping this enabled usually improves retrieval quality because numeric IDs, sparse codes, and high-cardinality counters often add noise without helping semantic recall. For mixed analytics datasets, this setting is a cost and relevance lever: you reduce token volume, embedding spend, and index size while preserving the fields that actually answer natural-language questions. Disable it only when numeric or categorical columns are first-class search targets and you have evaluation evidence that broader indexing improves recall more than it harms precision.
+
+    **Links**:
+    - [Text-to-SQL in the Wild: Benchmarking LLMs on Semi-structured Tables (arXiv 2025)](https://arxiv.org/abs/2511.16134)
+    - [Apache Parquet Documentation](https://parquet.apache.org/docs/)
+    - [DuckDB Parquet Integration Overview](https://duckdb.org/docs/stable/data/parquet/overview)
+    - [pandas read_parquet Reference](https://pandas.pydata.org/docs/reference/api/pandas.read_parquet.html)
 
 ??? info "`indexing.postgres_url` (`POSTGRES_URL`) — PostgreSQL pgvector URL"
     **Category**: `infrastructure`
 
-    PostgreSQL DSN used for pgvector and FTS storage. Format: postgresql://user:pass@host:port/db. Default: postgresql://postgres:postgres@localhost:5432/tribrid_rag. Ensure pgvector is installed in the target database.
+    Connection DSN used to reach PostgreSQL for relational storage and pgvector-backed similarity retrieval. This single string determines host, port, database, credentials, SSL behavior, and optional connection parameters, so parsing mistakes or stale credentials can break indexing and retrieval simultaneously. Keep secrets out of committed config and inject this value at runtime via environment management; then validate connectivity and extension availability (`pgvector`) during startup checks. If you operate multiple environments, treat DSN changes as deploy-time infrastructure changes with explicit migration and rollback plans.
+
+    **Links**:
+    - [Text2VectorSQL: Bridging SQL and Vector Retrieval (arXiv 2025)](https://arxiv.org/abs/2506.23071)
+    - [PostgreSQL libpq Connection Strings](https://www.postgresql.org/docs/current/libpq-connect.html#LIBPQ-CONNSTRING)
+    - [PostgreSQL Connection Settings](https://www.postgresql.org/docs/current/runtime-config-connection.html)
+    - [pgvector Extension (GitHub)](https://github.com/pgvector/pgvector)
 
 ??? info "`indexing.skip_dense` (`SKIP_DENSE`) — Skip Dense Embeddings"
     **Category**: `retrieval`
 
-    Skip vector embeddings and Qdrant during indexing to create a fast BM25-only (keyword-only) index. Useful for quick testing, CI/CD pipelines, or when Qdrant is unavailable. BM25-only mode is faster and uses less resources but loses semantic search capability - only exact keyword matches work. Not recommended for production use unless you have a purely keyword-based use case.
+    When enabled, indexing skips dense embedding generation and vector-store writes, leaving retrieval fully lexical (BM25/FTS). This is useful for fast local iteration, constrained CI environments, or deployments where vector infrastructure is unavailable. The tradeoff is predictable: lower indexing cost and simpler ops, but weaker semantic recall for paraphrases and concept-level matches. Use this mode when exact term matching dominates your workload (file names, identifiers, error strings), and disable it for natural-language-heavy corpora where semantic expansion materially improves first-pass recall.
 
     **Badges**:
     - Much faster
@@ -183,4 +215,7 @@
     - No semantic search
 
     **Links**:
-    - [Hybrid Search Benefits](https://www.pinecone.io/learn/hybrid-search-intro/)
+    - [Mixture of Retrieval (MoR): Integrating Sparse and Dense Retrieval for RAG (arXiv 2025)](https://arxiv.org/abs/2506.15862)
+    - [PostgreSQL Full Text Search](https://www.postgresql.org/docs/current/textsearch.html)
+    - [Elasticsearch Reciprocal Rank Fusion (RRF)](https://www.elastic.co/guide/en/elasticsearch/reference/current/rrf.html)
+    - [Search in PostgreSQL: Full Text Search (ParadeDB)](https://www.paradedb.com/learn/search-in-postgresql/full-text-search)

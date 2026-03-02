@@ -47,54 +47,41 @@
 ??? info "`enrichment.chunk_summaries_enrich_default` (`CHUNK_SUMMARIES_ENRICH_DEFAULT`) — Chunk Summaries Enrich Default"
     **Category**: `general`
 
-    Enable chunk summary enrichment by default when building summaries. When enabled, summaries include enriched metadata (detailed purpose, technical details, domain concepts) using LLM analysis. When disabled, summaries use lightweight extraction only. Enrichment improves quality but increases indexing time and cost.
-
-    Sweet spot: enabled for production systems. Enriched summaries provide better retrieval quality and more detailed metadata. Disable only if indexing speed or cost is a concern, or if lightweight summaries are sufficient.
-
-    • Enabled: Full enrichment with LLM analysis (recommended)
-    • Disabled: Lightweight extraction only (faster, lower cost)
-    • Effect: Controls whether summaries are enriched with detailed metadata
-    • Symptom if disabled: Less detailed summaries, potentially lower retrieval quality
+    Controls whether chunk summaries are generated with richer, model-assisted metadata by default. Enriched summaries can add intent, entities, API surface hints, and semantic cues that improve retrieval and reranking beyond raw embeddings alone. The trade-off is higher indexing cost and longer build times, especially on large repositories. Enable enrichment when search quality and explainability matter more than ingestion speed, and disable it for rapid iteration pipelines where you need frequent low-cost reindexing.
 
     **Badges**:
-    - Enrichment
+    - Metadata quality
 
     **Links**:
-    - [Code Enrichment](https://cookbook.openai.com/examples/summarizing_long_documents)
-    - [Chunk Summarization](https://vectify.ai/blog/LargeDocumentSummarization)
+    - [Code-Craft Summarization (2025)](https://arxiv.org/abs/2504.08975)
+    - [OpenAI Summarization Cookbook](https://cookbook.openai.com/examples/summarizing_long_documents)
+    - [LlamaIndex Vector Store Index](https://docs.llamaindex.ai/en/stable/module_guides/indexing/vector_store_index/)
+    - [LangChain Retrieval Concepts](https://python.langchain.com/docs/concepts/retrieval/)
 
 ??? info "`enrichment.chunk_summaries_max` (`CHUNK_SUMMARIES_MAX`) — Max Chunk Summaries"
     **Category**: `general`
 
-    Maximum number of chunk summaries to generate per corpus. Chunk summaries provide structured metadata (purpose, symbols, keywords) for each code chunk, improving retrieval quality. Higher values (200-500) provide more comprehensive coverage but increase indexing time and storage. Lower values (50-100) are faster but may miss important chunks.
-
-    Sweet spot: 100 for balanced coverage. Use 50-75 for large codebases where indexing speed matters. Use 200-300 when comprehensive coverage is critical. Use 500+ only for small, critical codebases.
-
-    • Range: 10-1000 (typical: 50-300)
-    • Fast indexing: 50-75 (lower coverage)
-    • Balanced: 100 (recommended)
-    • Comprehensive: 200-300 (higher coverage)
-    • Effect: Higher = more summaries, better coverage, longer indexing
-    • Symptom too low: Important chunks missing summaries
-    • Symptom too high: Slow indexing, storage overhead
+    Caps how many chunk summaries are produced for a corpus. This is a budget control over indexing cost, storage footprint, and retrieval metadata coverage. A low cap is fast but can miss important modules, while a high cap improves coverage and long-tail recall at the cost of longer ingestion and larger indexes. Choose this value based on corpus size and criticality, then validate with retrieval benchmarks so the limit reflects actual answer quality rather than arbitrary round numbers.
 
     **Badges**:
-    - Indexing
+    - Coverage budget
 
     **Links**:
-    - [Chunk Summarization](https://vectify.ai/blog/LargeDocumentSummarization)
-    - [Code Analysis](https://llamaindex.ai/blog/evaluating-the-ideal-chunk-size-for-a-rag-system-using-llamaindex-6207e5d3fec5)
-    - [Document Summarization](https://cookbook.openai.com/examples/summarizing_long_documents)
+    - [MIRAGE Benchmark (2025)](https://arxiv.org/abs/2504.17137)
+    - [T2-RAGBench (2025)](https://arxiv.org/abs/2506.12071)
+    - [OpenAI Summarization Cookbook](https://cookbook.openai.com/examples/summarizing_long_documents)
+    - [LlamaIndex Vector Store Index](https://docs.llamaindex.ai/en/stable/module_guides/indexing/vector_store_index/)
 
 ??? info "`enrichment.enrich_code_chunks` (`ENRICH_CODE_CHUNKS`) — Enrich Code Chunks"
     **Category**: `chunking`
 
-    Enable per-chunk code summarization during indexing. When on, each code chunk gets an AI-generated summary and keywords stored alongside the code. Powers the Cards feature (high-level code summaries) and improves reranking by providing semantic context. Increases indexing time and cost (API calls) but significantly improves retrieval quality for conceptual queries like "where is auth handled?"
+    When enabled, each code chunk is augmented with model-generated summaries or semantic descriptors during indexing. This often improves conceptual retrieval because rerankers can match intent signals beyond literal token overlap. The tradeoff is extra indexing time, compute cost, and the risk of noisy metadata if prompts or models are weak. Chunk size and model selection both matter: oversized chunks produce vague summaries, while tiny chunks lose architectural context. Evaluate this feature with task-based retrieval metrics to confirm the added metadata improves real query outcomes.
 
     **Badges**:
-    - Better retrieval
     - Slower indexing
-    - Costs API calls
 
     **Links**:
-    - [Code Summarization](https://en.wikipedia.org/wiki/Automatic_summarization)
+    - [EyeLayer: Human Attention for Code Summarization (arXiv 2026)](https://arxiv.org/abs/2602.22368)
+    - [Meta-RAG on Large Codebases Using Code Summarization (arXiv 2025)](https://arxiv.org/abs/2508.02611)
+    - [LlamaIndex Repository](https://github.com/run-llama/llama_index)
+    - [LangChain Repository](https://github.com/langchain-ai/langchain)

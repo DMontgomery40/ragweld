@@ -51,9 +51,10 @@
 ??? info "`mcp.mount_path` (`MCP_HTTP_PATH`) — MCP HTTP Path"
     **Category**: `general`
 
-    URL path for the HTTP MCP endpoint (default /mcp). Example: http://localhost:8013/mcp. Customize for reverse proxies or routing needs. Must match client configuration if changed.
+    Path segment for the MCP HTTP endpoint (for example `/mcp`). Clients, gateways, and reverse proxies must agree on this route exactly; mismatches are a common cause of silent connection failures where the server is up but tools are never discovered. Use a stable, version-aware path when multiple environments or gateway rules coexist (for example `/v1/mcp`). If you rewrite paths at the proxy layer, test both health checks and tool invocation end-to-end to ensure the canonical route still maps correctly.
 
     **Links**:
-    - [URL Structure](https://developer.mozilla.org/en-US/docs/Learn/Common_questions/Web_mechanics/What_is_a_URL)
-    - [URI Standard](https://en.wikipedia.org/wiki/Uniform_Resource_Identifier)
-    - [MCP Specification](https://github.com/modelcontextprotocol/specification)
+    - [HumanMCP: Evaluating MCP Tool Retrieval Performance (arXiv 2026)](https://arxiv.org/abs/2602.23367)
+    - [Model Context Protocol Docs](https://modelcontextprotocol.io/docs)
+    - [Model Context Protocol: Transports](https://modelcontextprotocol.io/docs/concepts/transports)
+    - [MDN What is a URL?](https://developer.mozilla.org/en-US/docs/Learn/Common_questions/Web_mechanics/What_is_a_URL)

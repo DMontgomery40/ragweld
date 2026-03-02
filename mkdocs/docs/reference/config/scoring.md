@@ -46,54 +46,66 @@
 ??? info "`scoring.chunk_summary_bonus` (`CHUNK_SUMMARY_BONUS`) — Chunk Summary Bonus"
     **Category**: `retrieval`
 
-    Additive score bonus applied to results that come from chunk_summary-based retrieval. Chunk summaries are short, structured descriptions of code chunks (purpose, key symbols, keywords) and can match conceptual queries better than raw code.
-
-    This bonus helps chunk_summary hits compete with dense and sparse matches in fusion/reranking. Increase it if summary-based hits are good but rank too low; decrease it if they crowd out precise code hits.
-
-    • Range: 0.0–1.0 (typical: 0.03–0.15)
-    • Default: 0.08
-    • Higher: stronger intent routing via summaries (risk: generic matches)
-    • Lower: rely more on raw chunk text (risk: miss conceptual queries)
-    • Interacts with: CHUNK_SUMMARY_SEARCH_ENABLED
+    Additive weight applied after score fusion when a hit came from chunk-summary retrieval instead of raw chunk text. In practice this controls whether conceptual matches such as intent, behavior, or API purpose can compete with exact-token matches from code. Raise it when summaries are high quality but consistently rank below noisy lexical matches; lower it when vague summaries outrank precise chunks and hurt answer grounding. Tune this together with your fusion method and evaluation set, because the same numeric bonus has very different effects depending on score normalization and corpus size.
 
     **Badges**:
-    - Advanced RAG tuning
+    - Advanced tuning
 
     **Links**:
-    - [Document Summarization](https://en.wikipedia.org/wiki/Automatic_summarization)
+    - [cAST: Structural chunking for code RAG (arXiv 2025)](https://arxiv.org/abs/2506.15655)
+    - [LangChain MultiVector Retriever](https://python.langchain.com/docs/how_to/multi_vector/)
+    - [Elasticsearch Reciprocal Rank Fusion](https://www.elastic.co/guide/en/elasticsearch/reference/current/rrf.html)
+    - [Weaviate hybrid retrieval](https://docs.weaviate.io/weaviate/search/hybrid)
 
 ??? info "`scoring.filename_boost_exact` (`FILENAME_BOOST_EXACT`) — Filename Exact Match Multiplier"
     **Category**: `general`
 
-    Score multiplier applied when query terms exactly match a filename or key path segment. This is a deterministic lexical boost layered on top of retrieval/fusion scoring, useful for identifier-heavy code search where exact file names are strong intent signals.
+    Applies a multiplier when query tokens exactly match a filename or full path component, which is especially effective for identifier-driven code search. Exact filename intent often indicates the user already knows the artifact, so this feature can sharply improve rank quality for navigational queries. Set the multiplier high enough to surface true exact hits, but not so high that semantic relevance is overridden for exploratory questions. Validate with a mixed benchmark containing both known-file and concept-search tasks.
 
-    Increase this when users frequently search by known file names (for example: auth_service.py, package-lock.json). Reduce it if path matches overpower semantically better chunks.
+    **Badges**:
+    - Lexical precision boost
 
-    - High values: prioritize exact path hits
-    - Lower values: keep semantic and content relevance dominant
+    **Links**:
+    - [Exp4Fuse Rank Fusion (arXiv)](https://arxiv.org/abs/2506.04760)
+    - [Elasticsearch Term Query](https://www.elastic.co/guide/en/elasticsearch/reference/current/query-dsl-term-query.html)
+    - [Elasticsearch Multi Match Query](https://www.elastic.co/guide/en/elasticsearch/reference/current/query-dsl-multi-match-query.html)
+    - [Lucene BM25Similarity](https://lucene.apache.org/core/9_12_0/core/org/apache/lucene/search/similarities/BM25Similarity.html)
 
 ??? info "`scoring.filename_boost_partial` (`FILENAME_BOOST_PARTIAL`) — Path Component Partial Match Multiplier"
     **Category**: `general`
 
-    Score multiplier when any path component partially matches query terms (directory or filename fragment). Helps queries like "auth" prioritize auth-related files. Default: 1.2. Range: 1.0-3.0. Keep this lower than FILENAME_BOOST_EXACT.
+    Applies a weaker multiplier for partial path or filename matches, helping fragment queries like auth or billing surface relevant areas of the codebase. Because substring matches are noisier than exact matches, this value should stay below exact filename boost and be tested against false-positive-heavy queries. Token boundary handling and minimum match length are important to avoid boosting accidental overlaps. This parameter is most effective when combined with semantic and sparse retrieval rather than used alone.
+
+    **Badges**:
+    - Lexical recall boost
+
+    **Links**:
+    - [Exp4Fuse Rank Fusion (arXiv)](https://arxiv.org/abs/2506.04760)
+    - [Elasticsearch Bool Query](https://www.elastic.co/guide/en/elasticsearch/reference/current/query-dsl-bool-query.html)
+    - [Elasticsearch Dis Max Query](https://www.elastic.co/guide/en/elasticsearch/reference/current/query-dsl-dis-max-query.html)
+    - [PostgreSQL Text Search Controls](https://www.postgresql.org/docs/current/textsearch-controls.html)
 
 ??? info "`scoring.path_boosts` (`PATH_BOOSTS`) — Path Boosts"
     **Category**: `retrieval`
 
-    Comma-separated path prefixes that receive additional scoring preference during ranking (for example: /gui,/server,/indexer,/retrieval). This is a deterministic bias layer for emphasizing known important code areas.
+    Adds deterministic ranking bonuses for files whose paths match configured prefixes (for example `/api`, `/retrieval`, or `/infra`). This is not a filter; candidates outside boosted paths can still win, but matching paths start with an intentional prior that reflects project structure and ownership patterns. In practice, path boosts are most useful when repositories contain large amounts of generated code, vendor trees, or historical directories that are semantically similar but operationally lower value. Tune this with offline evaluation and query logs: too much boost can hide genuinely relevant files, while too little leaves high-signal code regions under-ranked.
 
-    Use this when organizational structure is meaningful to query intent. Keep boosts narrow and intentional; overly broad prefixes can distort relevance and hide better matches outside favored paths.
-
-    - Good for: domain-priority routing, mono-repo subarea focus
-    - Revisit after major repo restructuring
+    **Links**:
+    - [RANGER: Repository-Level Retrieval-Augmented Generation for Code Completion (arXiv 2025)](https://arxiv.org/abs/2509.25257)
+    - [Elasticsearch Boosting Query](https://www.elastic.co/guide/en/elasticsearch/reference/current/query-dsl-boosting-query.html)
+    - [Elasticsearch Function Score Query](https://www.elastic.co/guide/en/elasticsearch/reference/current/query-dsl-function-score-query.html)
+    - [Vespa Ranking Framework](https://docs.vespa.ai/en/ranking.html)
 
 ??? info "`scoring.vendor_mode` (`VENDOR_MODE`) — Vendor Mode"
     **Category**: `general`
 
-    Controls scoring preference for your code vs third-party library code during reranking. "prefer_first_party" (recommended) boosts your app code (+0.06) and penalizes node_modules/vendor libs (-0.08) - best for understanding YOUR codebase. "prefer_vendor" does the opposite - useful when debugging library internals or learning from open-source code. Most users want prefer_first_party.
+    Controls whether ranking heuristics prioritize first-party project code or third-party/vendor dependencies when scores are close. In large repos, vendor and framework code can dominate candidate lists simply because it is abundant; this setting counterbalances that effect for tasks where users primarily want answers about their own application logic. Prefer first-party mode for product debugging, architecture discovery, and onboarding into your codebase. Prefer vendor mode only when your query intent is explicitly about dependency internals. Evaluate with intent-labeled queries to confirm the mode aligns with expected navigation behavior.
 
     **Badges**:
     - Code priority
 
     **Links**:
-    - [First-Party vs Third-Party](https://en.wikipedia.org/wiki/First-party_and_third-party_sources)
+    - [SaraCoder: Repository-Aware Code Retrieval at Scale (arXiv 2025)](https://arxiv.org/abs/2508.10068)
+    - [Sourcegraph Code Search Documentation](https://sourcegraph.com/docs/code_search)
+    - [GitHub Code Search Overview](https://docs.github.com/en/search-github/github-code-search/about-github-code-search)
+    - [gitignore Patterns (vendor/exclusion hygiene)](https://git-scm.com/docs/gitignore)

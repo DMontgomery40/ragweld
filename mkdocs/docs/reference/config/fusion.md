@@ -47,121 +47,83 @@
 ??? info "`fusion.graph_weight` (`FUSION_GRAPH_WEIGHT`) — Graph Weight"
     **Category**: `general`
 
-    Weight assigned to graph (Neo4j) search results in weighted fusion mode. Higher values (0.4-0.6) favor structural relationships, lower values (0.2-0.3) reduce graph influence. Weights must sum to ~1.0 with vector and sparse weights. Recommended: 0.3 for balanced tri-brid retrieval.
-
-    Sweet spot: 0.3 for balanced systems. Use 0.4-0.5 when graph relationships are critical (e.g., finding code that calls or imports specific functions). Use 0.2 when vector and sparse search are more important.
-
-    • Range: 0.0-1.0 (must sum with vector + sparse ≈ 1.0)
-    • Vector/sparse-focused: 0.2 (lower graph weight)
-    • Balanced: 0.3 (recommended)
-    • Graph-focused: 0.4-0.5 (higher graph weight)
-    • Effect: Higher = more weight to graph search results
-    • Symptom too high: Graph matches dominate, other modalities buried
-    • Symptom too low: Graph relationships undervalued
+    Sets the contribution of graph retrieval in weighted fusion relative to sparse and vector signals. Increase it when structural relationships such as calls, imports, and dependencies are essential to user tasks; decrease it when lexical or semantic similarity should dominate. Because weighted fusion blends heterogeneous score sources, calibration and normalization matter as much as the raw weight values. Track performance by query type to ensure graph-heavy tuning improves structural questions without hurting broad semantic retrieval.
 
     **Badges**:
-    - Weighted Mode
+    - Fusion weighting
 
     **Links**:
-    - [Neo4j GraphRAG](https://neo4j.com/docs/neo4j-graphrag-python/current/user_guide_rag.html)
-    - [Graph Traversal](https://neo4j.com/blog/developer/graph-traversal-graphrag-python-package)
-    - [Weighted Fusion](https://en.wikipedia.org/wiki/Data_fusion)
+    - [RGL Graph-Centric RAG (arXiv)](https://arxiv.org/abs/2503.19314)
+    - [Neo4j GraphRAG User Guide](https://neo4j.com/docs/neo4j-graphrag-python/current/user_guide_rag.html)
+    - [Azure Vector Weighting](https://learn.microsoft.com/en-us/azure/search/vector-search-how-to-query#vector-weighting)
+    - [Neo4j PageRank](https://neo4j.com/docs/graph-data-science/current/algorithms/page-rank/)
 
 ??? info "`fusion.method` (`FUSION_METHOD`) — Fusion Method"
     **Category**: `general`
 
-    Method for combining results from vector, sparse, and graph search: "rrf" (Reciprocal Rank Fusion) or "weighted" (score-based weighted sum). RRF combines ranking positions without score normalization, making it robust to different score scales. Weighted fusion requires normalized scores and allows fine-grained control over modality weights.
-
-    Sweet spot: "rrf" for most use cases. RRF is simpler, more robust, and doesn't require score normalization. Use "weighted" when you need precise control over modality weights or when score distributions are well-calibrated.
-
-    • RRF: Position-based fusion, robust to score scales, simpler
-    • Weighted: Score-based fusion, requires normalization, more control
-    • Effect: Determines how tri-brid results are combined
-    • Symptom wrong method: Suboptimal result ranking
+    Chooses how result lists from different retrievers are combined. Reciprocal Rank Fusion is usually robust when score scales are incomparable, while weighted score fusion is better when each modality is well normalized and intentionally calibrated. The method you choose affects both stability and interpretability of ranking behavior across query types. Keep evaluation and production on the same fusion method so offline gains translate reliably at runtime.
 
     **Badges**:
-    - Core Setting
+    - Core fusion strategy
 
     **Links**:
-    - [Reciprocal Rank Fusion](https://cormack.uwaterloo.ca/cormacksigir09-rrf.pdf)
-    - [RRF Paper](https://research.google/pubs/reciprocal-rank-fusion-outperforms-condorcet-and-individual-rank-learning-methods/)
-    - [Data Fusion](https://en.wikipedia.org/wiki/Data_fusion)
+    - [Exp4Fuse Rank Fusion (arXiv)](https://arxiv.org/abs/2506.04760)
+    - [Elasticsearch RRF](https://www.elastic.co/guide/en/elasticsearch/reference/current/rrf.html)
+    - [Azure Hybrid Ranking](https://learn.microsoft.com/en-us/azure/search/hybrid-search-ranking)
+    - [OpenSearch Normalization Processor](https://docs.opensearch.org/latest/search-plugins/search-pipelines/normalization-processor/)
 
 ??? info "`fusion.normalize_scores` (`FUSION_NORMALIZE_SCORES`) — Normalize Scores"
     **Category**: `general`
 
-    Normalize scores from vector, sparse, and graph search to [0,1] range before fusion. This ensures scores from different modalities are comparable when using weighted fusion. When disabled, raw scores are used directly (may cause one modality to dominate). Recommended: enabled for weighted fusion, not needed for RRF.
-
-    Sweet spot: enabled for weighted fusion mode. Normalization prevents one modality from dominating due to different score scales. For RRF mode, normalization is unnecessary since RRF uses ranking positions, not scores.
-
-    • Enabled: Scores normalized to [0,1], comparable across modalities
-    • Disabled: Raw scores used, may cause modality imbalance
-    • Effect: Controls score normalization before weighted fusion
-    • Symptom if disabled: One modality may dominate due to score scale differences
+    In weighted fusion, vector similarity, BM25 relevance, and graph traversal scores usually exist on different numeric scales. This setting rescales them before combination so each retriever contributes based on relevance rather than raw magnitude. Keep normalization enabled when using weighted fusion, because otherwise one modality can dominate final ranking even with balanced weights. For rank-only fusion like RRF, normalization is usually unnecessary because only positions matter. If tuning weights does not change top results much, inspect score distributions first; poor normalization is often the real issue.
 
     **Badges**:
-    - Weighted Mode
+    - Fusion tuning
 
     **Links**:
-    - [Score Normalization](https://link.springer.com/chapter/10.1007/11880592_57)
-    - [Normalization Methods](https://codecademy.com/article/min-max-zscore-normalization)
-    - [Data Fusion](https://en.wikipedia.org/wiki/Data_fusion)
+    - [DAT: Dynamic Alpha Tuning for Hybrid Retrieval in RAG (arXiv 2025)](https://arxiv.org/abs/2503.23013)
+    - [OpenSearch Normalization Processor](https://docs.opensearch.org/latest/search-plugins/search-pipelines/normalization-processor/)
+    - [Weaviate Hybrid Search](https://docs.weaviate.io/weaviate/search/hybrid)
+    - [Elasticsearch Reciprocal Rank Fusion API](https://www.elastic.co/docs/reference/elasticsearch/rest-apis/reciprocal-rank-fusion)
 
 ??? info "`fusion.rrf_k` (`FUSION_RRF_K`) — RRF k Parameter"
     **Category**: `general`
 
-    RRF constant for tri-brid fusion when method is rrf. Formula: sum(1/(k+rank)). Lower k emphasizes top ranks more; higher k distributes weight more evenly. Default: 60. Range: 1-200.
+    RRF combines result lists with the formula 1 divided by k plus rank, so k controls how quickly importance decays with lower-ranked items. Smaller k values strongly favor top hits from each retriever, while larger values preserve more mid-ranked candidates and improve diversity. In tri-brid retrieval, k interacts with each retriever depth and chunk granularity, so tune it with offline metrics instead of intuition. Start near 60, then lower it if results feel noisy and raise it if relevant alternatives disappear too quickly. Changing k is often safer than hand-tuning many modality weights.
 
     **Badges**:
-    - RRF Mode
+    - RRF control
 
     **Links**:
-    - [RRF Original Paper](https://cormack.uwaterloo.ca/cormacksigir09-rrf.pdf)
-    - [RRF Research](https://research.google/pubs/reciprocal-rank-fusion-outperforms-condorcet-and-individual-rank-learning-methods/)
-    - [Reciprocal Rank Fusion](https://en.wikipedia.org/wiki/Reciprocal_rank_fusion)
+    - [Hybrid RAG for Multilingual QA with RRF (arXiv 2025)](https://arxiv.org/abs/2512.12694)
+    - [Reciprocal Rank Fusion Original Paper](https://cormack.uwaterloo.ca/cormacksigir09-rrf.pdf)
+    - [Elasticsearch Reciprocal Rank Fusion API](https://www.elastic.co/docs/reference/elasticsearch/rest-apis/reciprocal-rank-fusion)
+    - [Unified Learning-to-Rank for Multi-Channel Retrieval (arXiv 2026)](https://arxiv.org/abs/2602.23530)
 
 ??? info "`fusion.sparse_weight` (`FUSION_SPARSE_WEIGHT`) — Sparse Weight"
     **Category**: `general`
 
-    Weight assigned to sparse (BM25) search results in weighted fusion mode. Higher values (0.4-0.6) favor keyword matches, lower values (0.2-0.3) reduce keyword influence. Weights must sum to ~1.0 with vector and graph weights. Recommended: 0.3 for balanced tri-brid retrieval.
-
-    Sweet spot: 0.3 for balanced systems. Use 0.4-0.5 when exact keyword matching is critical (e.g., finding specific function names or error codes). Use 0.2 when semantic and graph search are more important.
-
-    • Range: 0.0-1.0 (must sum with vector + graph ≈ 1.0)
-    • Semantic-focused: 0.2 (lower keyword weight)
-    • Balanced: 0.3 (recommended)
-    • Keyword-focused: 0.4-0.5 (higher keyword weight)
-    • Effect: Higher = more weight to sparse search results
-    • Symptom too high: Keyword matches dominate, semantic matches buried
-    • Symptom too low: Keyword matches undervalued
+    This weight controls how much lexical evidence from sparse retrieval influences the final fused ranking. Raising it improves exact-term tasks such as API names, error messages, file paths, and identifiers, but can reduce semantic recall when user wording differs from source text. Sparse weight should be tuned together with tokenizer and BM25 settings, because score behavior changes when stemming or chunk length changes. Use an evaluation set that includes both literal and conceptual queries so one class does not overfit the setting. If results become too keyword-literal, reduce this value before changing retriever architecture.
 
     **Badges**:
-    - Weighted Mode
+    - Keyword bias
 
     **Links**:
-    - [BM25 Algorithm](https://en.wikipedia.org/wiki/Okapi_BM25)
-    - [Hybrid Search](https://www.elastic.co/search-labs/blog/improving-information-retrieval-elastic-stack-hybrid)
-    - [Weighted Fusion](https://en.wikipedia.org/wiki/Data_fusion)
+    - [DAT: Dynamic Alpha Tuning for Hybrid Retrieval in RAG (arXiv 2025)](https://arxiv.org/abs/2503.23013)
+    - [Pinecone Hybrid Search Guide](https://docs.pinecone.io/guides/search/hybrid-search)
+    - [Weaviate Hybrid Search](https://docs.weaviate.io/weaviate/search/hybrid)
+    - [Elasticsearch Similarity and BM25 Settings](https://www.elastic.co/docs/reference/elasticsearch/index-settings/similarity)
 
 ??? info "`fusion.vector_weight` (`FUSION_VECTOR_WEIGHT`) — Vector Weight"
     **Category**: `general`
 
-    Weight assigned to vector (pgvector) search results in weighted fusion mode. Higher values (0.5-0.7) favor semantic matches, lower values (0.2-0.4) reduce semantic influence. Weights must sum to ~1.0 with sparse and graph weights. Recommended: 0.4 for balanced tri-brid retrieval.
-
-    Sweet spot: 0.4 for balanced systems. Use 0.5-0.6 when semantic matching is critical (e.g., finding conceptually similar code). Use 0.2-0.3 when keyword matching is more important than semantics.
-
-    • Range: 0.0-1.0 (must sum with sparse + graph ≈ 1.0)
-    • Keyword-focused: 0.2-0.3 (lower semantic weight)
-    • Balanced: 0.4 (recommended)
-    • Semantic-focused: 0.5-0.6 (higher semantic weight)
-    • Effect: Higher = more weight to vector search results
-    • Symptom too high: Semantic matches dominate, keyword matches buried
-    • Symptom too low: Semantic matches undervalued
+    This weight determines how strongly semantic nearest-neighbor matches influence fused ranking. Higher values help when users ask conceptual questions using synonyms not present in source text, while lower values protect exact-match intent such as identifiers and versioned commands. Re-tune this after embedding-model changes, chunking changes, or reranker changes because score calibration shifts quickly across those updates. Evaluate with mixed query types and inspect which retriever wins per query, not just aggregate averages. If answers feel topically related but miss required literals, vector weight is likely too high.
 
     **Badges**:
-    - Weighted Mode
+    - Semantic bias
 
     **Links**:
-    - [Hybrid Search](https://www.pinecone.io/learn/hybrid-search-intro/)
-    - [Weighted Fusion](https://en.wikipedia.org/wiki/Data_fusion)
-    - [Fusion Strategies](https://arxiv.org/abs/2402.14734)
+    - [DAT: Dynamic Alpha Tuning for Hybrid Retrieval in RAG (arXiv 2025)](https://arxiv.org/abs/2503.23013)
+    - [pgvector Extension](https://github.com/pgvector/pgvector)
+    - [Pinecone Hybrid Search Guide](https://docs.pinecone.io/guides/search/hybrid-search)
+    - [Weaviate Hybrid Search](https://docs.weaviate.io/weaviate/search/hybrid)

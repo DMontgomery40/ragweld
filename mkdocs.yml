@@ -135,6 +135,7 @@ nav:
   - Operations:
       - Deployment: deployment.md
       - Operations & metrics: operations.md
+      - Alert webhooks: operations/webhooks.md
       - Security: security.md
       - Troubleshooting: troubleshooting.md
   - Developer:

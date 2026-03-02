@@ -49,7 +49,13 @@
 ??? info "`evaluation.baseline_path` (`BASELINE_PATH`) — Baseline Path"
     **Category**: `general`
 
-    Directory where evaluation loop saves baseline results for regression testing and A/B comparison. Each eval run's metrics (Hit@K, MRR, latency) are stored here with timestamps. Use this to ensure retrieval quality doesn't regress after configuration changes, reindexing, or model upgrades. Compare current run against baseline to detect improvements or degradations.
+    BASELINE_PATH is where evaluation baselines are stored so retrieval and generation changes can be compared to a stable reference over time. A strong baseline captures both quality metrics and operational behavior, including ranking quality, grounding rate, latency, and abstention behavior. Store immutable run identifiers with dataset version and config hash so regressions can be traced to exact parameter changes. Without baseline discipline, tuning often produces short-term wins on narrow queries while silently degrading difficult slices that matter in production.
+
+    **Badges**:
+    - Evaluation
 
     **Links**:
-    - [Regression Prevention](https://en.wikipedia.org/wiki/Software_regression)
+    - [GaRAGe: Grounded RAG Evaluation Benchmark (arXiv)](https://arxiv.org/abs/2506.07671)
+    - [LangSmith Evaluation](https://docs.smith.langchain.com/evaluation)
+    - [MLflow Tracking](https://mlflow.org/docs/latest/ml/tracking/)
+    - [Weights and Biases Experiment Tracking](https://docs.wandb.ai/guides/track/)
