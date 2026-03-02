@@ -28,22 +28,65 @@ interface EmbeddingMismatchWarningProps {
   onNavigateToIndex?: () => void;
 }
 
+const APP_ROUTE_SEGMENTS = new Set<string>([
+  '/start',
+  '/dashboard',
+  '/chat',
+  '/grafana',
+  '/benchmark',
+  '/rag',
+  '/eval',
+  '/infrastructure',
+  '/admin',
+  '/docker',
+  '/d',
+]);
+
+function resolveRouterBasePath(): string {
+  const pathname = String(window.location.pathname || '/');
+  const normalized = pathname.replace(/\/+$/, '') || '/';
+  const segments = normalized.split('/').filter(Boolean);
+  if (segments.length === 0) return '';
+
+  // BrowserRouter basename can be multi-segment (e.g. /tools/ragweld/web).
+  // Find the first known app route segment and keep everything before it.
+  const routeIndex = segments.findIndex((segment) => APP_ROUTE_SEGMENTS.has(`/${segment}`));
+  if (routeIndex === 0) return '';
+  if (routeIndex > 0) return `/${segments.slice(0, routeIndex).join('/')}`;
+
+  // If we're on the basename root itself (no known route segment yet), use the full path.
+  return normalized === '/' ? '' : normalized;
+}
+
+function navigateToRag(params: URLSearchParams): void {
+  const base = resolveRouterBasePath();
+  const query = params.toString();
+  const href = `${base}/rag${query ? `?${query}` : ''}`;
+  window.location.assign(href);
+}
+
 /**
  * Navigate to indexing page with current embedding config pre-filled
  */
 const navigateToReindex = () => {
-  window.location.href = '/#/rag?subtab=indexing&action=reindex';
+  const params = new URLSearchParams(window.location.search || '');
+  params.set('subtab', 'indexing');
+  params.set('action', 'reindex');
+  navigateToRag(params);
 };
 
 /**
  * Navigate to retrieval config to change embedding type
  */
 const navigateToConfig = (indexType: string | null) => {
+  const params = new URLSearchParams(window.location.search || '');
+  params.set('subtab', 'retrieval');
   if (indexType) {
-    window.location.href = `/#/rag?subtab=retrieval&restore_embedding=${indexType}`;
+    params.set('restore_embedding', indexType);
   } else {
-    window.location.href = '/#/rag?subtab=retrieval';
+    params.delete('restore_embedding');
   }
+  navigateToRag(params);
 };
 
 // Compact version for sidepanel/headers

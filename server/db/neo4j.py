@@ -54,6 +54,7 @@ SEMANTIC_RELATION_TYPES: set[str] = {
 ALL_RELATION_TYPES: set[str] = CODE_RELATION_TYPES | SEMANTIC_RELATION_TYPES
 
 _BATCH_SIZE_DEFAULT = 500
+_DEFAULT_REPO_SCOPED_NODE_LABELS: tuple[str, ...] = ("Document", "Chunk", "Entity", "Community")
 
 
 class Neo4jClient:
@@ -1390,16 +1391,38 @@ class Neo4jClient:
         """Delete all graph data (entities, rels, communities) for a corpus."""
         driver = self._require_driver()
         async with driver.session(database=self.database) as session:
+            batch_size = int(_BATCH_SIZE_DEFAULT * 10)
+            labels = await self._resolve_repo_scoped_labels(session)
+            for label in labels:
+                while True:
+                    res = await session.run(
+                        f"""
+                        MATCH (n:{label} {{repo_id: $repo_id}})
+                        WITH n LIMIT $batch_size
+                        DETACH DELETE n
+                        RETURN count(*) AS n;
+                        """,
+                        repo_id=repo_id,
+                        batch_size=batch_size,
+                    )
+                    rec = await res.single()
+                    deleted = int(rec.get("n") or 0) if rec else 0
+                    if deleted <= 0:
+                        break
+
+            # Safety sweep for legacy/unlabeled nodes that still carry repo_id.
             while True:
                 res = await session.run(
                     """
                     MATCH (n {repo_id: $repo_id})
+                    WHERE none(lbl IN labels(n) WHERE lbl IN $known_labels)
                     WITH n LIMIT $batch_size
                     DETACH DELETE n
                     RETURN count(*) AS n;
                     """,
                     repo_id=repo_id,
-                    batch_size=int(_BATCH_SIZE_DEFAULT * 10),
+                    known_labels=labels,
+                    batch_size=batch_size,
                 )
                 rec = await res.single()
                 deleted = int(rec.get("n") or 0) if rec else 0
@@ -1407,24 +1430,87 @@ class Neo4jClient:
                     break
 
     async def promote_repo_graph(self, *, active_repo_id: str, staging_repo_id: str) -> None:
-        """Atomically promote a staged graph to active by repo_id swap."""
+        """Promote a staged graph to active by repo_id swap using bounded batches.
+
+        Large corpora can exceed Neo4j transaction memory limits when deleting or
+        updating all nodes in one statement. Run bounded batches to keep memory
+        usage predictable during promotion.
+        """
         driver = self._require_driver()
         async with driver.session(database=self.database) as session:
-            tx = await session.begin_transaction()
-            try:
-                await tx.run(
-                    "MATCH (n {repo_id: $active_repo_id}) DETACH DELETE n;",
+            batch_size = int(_BATCH_SIZE_DEFAULT * 10)
+            labels = await self._resolve_repo_scoped_labels(session)
+            for label in labels:
+                while True:
+                    res = await session.run(
+                        f"""
+                        MATCH (n:{label} {{repo_id: $active_repo_id}})
+                        WITH n LIMIT $batch_size
+                        DETACH DELETE n
+                        RETURN count(*) AS n;
+                        """,
+                        active_repo_id=active_repo_id,
+                        batch_size=batch_size,
+                    )
+                    rec = await res.single()
+                    deleted = int(rec.get("n") or 0) if rec else 0
+                    if deleted <= 0:
+                        break
+
+                while True:
+                    res = await session.run(
+                        f"""
+                        MATCH (n:{label} {{repo_id: $staging_repo_id}})
+                        WITH n LIMIT $batch_size
+                        SET n.repo_id = $active_repo_id
+                        RETURN count(*) AS n;
+                        """,
+                        staging_repo_id=staging_repo_id,
+                        active_repo_id=active_repo_id,
+                        batch_size=batch_size,
+                    )
+                    rec = await res.single()
+                    moved = int(rec.get("n") or 0) if rec else 0
+                    if moved <= 0:
+                        break
+
+            # Safety sweep for legacy/unlabeled nodes.
+            while True:
+                res = await session.run(
+                    """
+                    MATCH (n {repo_id: $active_repo_id})
+                    WHERE none(lbl IN labels(n) WHERE lbl IN $known_labels)
+                    WITH n LIMIT $batch_size
+                    DETACH DELETE n
+                    RETURN count(*) AS n;
+                    """,
                     active_repo_id=active_repo_id,
+                    known_labels=labels,
+                    batch_size=batch_size,
                 )
-                await tx.run(
-                    "MATCH (n {repo_id: $staging_repo_id}) SET n.repo_id = $active_repo_id;",
+                rec = await res.single()
+                deleted = int(rec.get("n") or 0) if rec else 0
+                if deleted <= 0:
+                    break
+
+            while True:
+                res = await session.run(
+                    """
+                    MATCH (n {repo_id: $staging_repo_id})
+                    WHERE none(lbl IN labels(n) WHERE lbl IN $known_labels)
+                    WITH n LIMIT $batch_size
+                    SET n.repo_id = $active_repo_id
+                    RETURN count(*) AS n;
+                    """,
                     staging_repo_id=staging_repo_id,
                     active_repo_id=active_repo_id,
+                    known_labels=labels,
+                    batch_size=batch_size,
                 )
-                await tx.commit()
-            except Exception:
-                await tx.rollback()
-                raise
+                rec = await res.single()
+                moved = int(rec.get("n") or 0) if rec else 0
+                if moved <= 0:
+                    break
 
     # ------------------------------------------------------------------
     # Internals
@@ -1434,6 +1520,36 @@ class Neo4jClient:
         if self._driver is None:
             raise RuntimeError("Neo4j driver is not connected. Call connect() first.")
         return self._driver
+
+    async def _resolve_repo_scoped_labels(self, session: Any) -> list[str]:
+        """Resolve node labels that carry repo_id from schema constraints.
+
+        Defaults ensure stable behavior even when schema introspection is
+        unavailable (permissions/older server versions).
+        """
+        labels: set[str] = set(_DEFAULT_REPO_SCOPED_NODE_LABELS)
+        try:
+            res = await session.run(
+                """
+                SHOW CONSTRAINTS YIELD entityType, labelsOrTypes, properties
+                WHERE entityType = 'NODE'
+                RETURN labelsOrTypes, properties;
+                """
+            )
+            rows = await res.data()
+            for row in rows:
+                props = row.get("properties")
+                if not isinstance(props, list) or "repo_id" not in {str(p) for p in props}:
+                    continue
+                labels_or_types = row.get("labelsOrTypes")
+                if isinstance(labels_or_types, list):
+                    for label in labels_or_types:
+                        lbl = str(label or "").strip()
+                        if lbl:
+                            labels.add(lbl)
+        except Exception:
+            pass
+        return sorted(labels)
 
     async def _store_communities(self, repo_id: str, communities: Iterable[Community]) -> None:
         driver = self._require_driver()

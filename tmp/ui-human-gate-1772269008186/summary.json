@@ -1,0 +1,12 @@
+{
+  "outDir": "/Users/davidmontgomery/ragweld/tmp/ui-human-gate-1772269008186",
+  "gate": {
+    "blockedBannerVisible": true,
+    "blockedReasonVisible": true,
+    "blockedReasonText": "blocked: Quality gate failed: top1=0.120 < threshold=0.400 (sample=50)"
+  },
+  "errors": [
+    "locator.isDisabled: Timeout 20000ms exceeded.\nCall log:\n\u001b[2m  - waiting for getByRole('button', { name: 'Publish Eval Dataset' })\u001b[22m\n"
+  ],
+  "errorShot": "/Users/davidmontgomery/ragweld/tmp/ui-human-gate-1772269008186/error.png"
+}

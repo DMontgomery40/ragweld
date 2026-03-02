@@ -212,10 +212,12 @@ export const useConfigStore = create<ConfigStore>((set) => {
       cancelPendingPatches(String(getActiveCorpusId() || ''));
       set({ config: saved, saving: false, error: null });
     } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to save configuration';
       set({
         saving: false,
-        error: error instanceof Error ? error.message : 'Failed to save configuration',
+        error: message,
       });
+      throw new Error(message);
     }
   },
 

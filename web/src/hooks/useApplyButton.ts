@@ -138,6 +138,10 @@ export function useApplyButton() {
 
       // Save via Pydantic/Zustand pipeline (TriBridConfig is the law)
       await useConfigStore.getState().saveConfig(currentConfig);
+      const postSaveError = useConfigStore.getState().error;
+      if (postSaveError) {
+        throw new Error(String(postSaveError));
+      }
 
       // Refresh snapshot after save
       const savedConfig = useConfigStore.getState().config || currentConfig;
@@ -164,8 +168,6 @@ export function useApplyButton() {
       const w = window as any;
       if (w.showStatus) {
         w.showStatus(`Failed to save: ${message}`, 'error');
-      } else {
-        alert(`Failed to save settings: ${message}`);
       }
 
       throw err;

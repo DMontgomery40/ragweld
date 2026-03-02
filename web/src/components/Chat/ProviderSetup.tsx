@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useAPI, useConfig, useConfigField } from '@/hooks';
 import { ApiKeyStatus } from '@/components/ui/ApiKeyStatus';
 import { useRepoStore } from '@/stores/useRepoStore';
+import type { ChatModelInfo, ChatModelsResponse } from '@/types/generated';
 import type { LocalModelConfig, OpenRouterConfig } from '@/types/generated';
 import type { ProvidersHealthResponse, ProviderHealth } from '@/types/generated';
 
@@ -29,6 +30,7 @@ export function ProviderSetup() {
   const [health, setHealth] = useState<ProvidersHealthResponse | null>(null);
   const [healthLoading, setHealthLoading] = useState(false);
   const [healthError, setHealthError] = useState<string | null>(null);
+  const [catalogModels, setCatalogModels] = useState<ChatModelInfo[]>([]);
 
   const healthByProvider = useMemo(() => {
     const items = (health?.providers || []) as ProviderHealth[];
@@ -39,6 +41,10 @@ export function ProviderSetup() {
     }
     return byName;
   }, [health]);
+
+  const openrouterModelCount = useMemo(() => {
+    return catalogModels.filter((m) => String(m.source || '').trim().toLowerCase() === 'openrouter').length;
+  }, [catalogModels]);
 
   useEffect(() => {
     if (!config) return;
@@ -56,6 +62,24 @@ export function ProviderSetup() {
       .then((d) => setHealth(d as ProvidersHealthResponse))
       .catch((e) => setHealthError(e instanceof Error ? e.message : String(e)))
       .finally(() => setHealthLoading(false));
+  }, [activeRepo, api, config, openrouter?.enabled, providers]);
+
+  useEffect(() => {
+    if (!config) return;
+    const scope = String(activeRepo || '').trim();
+    const qs = scope ? `?corpus_id=${encodeURIComponent(scope)}` : '';
+    fetch(api(`chat/models${qs}`))
+      .then((r) => {
+        if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
+        return r.json();
+      })
+      .then((d) => {
+        const models = Array.isArray((d as ChatModelsResponse)?.models)
+          ? ((d as ChatModelsResponse).models as ChatModelInfo[])
+          : [];
+        setCatalogModels(models);
+      })
+      .catch(() => setCatalogModels([]));
   }, [activeRepo, api, config, openrouter?.enabled, providers]);
 
   return (
@@ -113,7 +137,20 @@ export function ProviderSetup() {
             (() => {
               const h = healthByProvider.get('openrouter:OpenRouter');
               if (!h) return <span>Provider status: unknown</span>;
-              if (h.reachable) return <span style={{ color: 'var(--ok)' }}>Provider status: reachable</span>;
+              if (h.reachable) {
+                if (openrouterModelCount <= 0) {
+                  return (
+                    <span style={{ color: 'var(--warn)' }}>
+                      Provider status: key valid, but no OpenRouter models are currently available
+                    </span>
+                  );
+                }
+                return (
+                  <span style={{ color: 'var(--ok)' }}>
+                    Provider status: reachable ({openrouterModelCount} model{openrouterModelCount === 1 ? '' : 's'})
+                  </span>
+                );
+              }
               return (
                 <span style={{ color: 'var(--warn)' }}>
                   Provider status: unreachable{h.detail ? ` — ${h.detail}` : ''}
