@@ -569,7 +569,9 @@ def _cursor_patch_line_stats(patch_text: str) -> dict[str, dict[str, int]]:
         if stripped.startswith("*** Delete File: "):
             current_path = stripped.removeprefix("*** Delete File: ").strip().replace("\\", "/")
             current_mode = None
-            stats.setdefault(current_path, {"added": 0, "removed": GENERAL_DELETE_LIMIT + 1})
+            existing = _read_text(ROOT / current_path)
+            removed_lines = len(existing.splitlines()) if existing else 1
+            stats.setdefault(current_path, {"added": 0, "removed": removed_lines})
             continue
         if stripped.startswith("*** "):
             current_path = None
