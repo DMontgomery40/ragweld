@@ -28,6 +28,8 @@ Optional (Actions variables or secrets):
   Diff-driven doc updates. It builds a context bundle from `git diff` + current docs tree and asks the LLM to output a **unified diff patch** that only edits:
   - `mkdocs/docs/**`
   - `mkdocs.yml`
+  - Includes guardrails against destructive page rewrites in normal incremental runs.
+  - Includes screenshot asset inventory context (`mkdocs/docs/assets/images/**`, `web/public/screenshots/**`) so screenshot sections can be kept current.
 
 - `../generate_config_reference_docs.py` (**authoritative for config docs**)  
   Deterministic generator that builds a full **configuration reference** (1000+ parameters) from:
@@ -37,6 +39,7 @@ Optional (Actions variables or secrets):
 
 - `docs_prompt_base.md` (**authoritative**)  
   The shared style + accuracy constraints used by the autopilot.
+  - If you want autopilot behavior to change consistently (for example, preserve high-traffic page structure or enforce screenshot-section rules), update this file first.
 
 - `docs_autopilot_enhanced.py` (legacy/manual)  
   Full-regeneration tool (model can rewrite many pages). Not used by the push autopilot.
@@ -77,4 +80,3 @@ mkdocs build --strict
 ```
 
 In GitHub Actions, manually run `Docs Autopilot (push)` with `base_ref=EMPTY`.
-
