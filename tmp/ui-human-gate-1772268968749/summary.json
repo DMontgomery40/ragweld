@@ -1,0 +1,8 @@
+{
+  "outDir": "/Users/davidmontgomery/ragweld/tmp/ui-human-gate-1772268968749",
+  "gate": {},
+  "errors": [
+    "locator.waitFor: Timeout 20000ms exceeded.\nCall log:\n\u001b[2m  - waiting for getByText('ui_failed_gate').first() to be visible\u001b[22m\n\u001b[2m    44 × locator resolved to hidden <span class=\"studio-mono\">run=epstein-files-1__ui_failed_gate_20260228_0155…</span>\u001b[22m\n"
+  ],
+  "errorShot": "/Users/davidmontgomery/ragweld/tmp/ui-human-gate-1772268968749/error.png"
+}

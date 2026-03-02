@@ -31,12 +31,14 @@ export function ModelPicker({ value, onChange, models }: ModelPickerProps) {
     label: SOURCE_LABELS[source],
     items: models.filter((m) => m.source === source),
   })).filter((g) => g.items.length > 0);
+  const hasModels = grouped.length > 0;
 
   return (
     <select
       data-testid="model-picker"
-      value={value}
+      value={hasModels ? value : ''}
       onChange={(e) => onChange(e.target.value)}
+      disabled={!hasModels}
       style={{
         width: '100%',
         padding: '10px 12px',
@@ -47,6 +49,7 @@ export function ModelPicker({ value, onChange, models }: ModelPickerProps) {
         fontSize: '13px',
       }}
     >
+      {!hasModels ? <option value="">No models available</option> : null}
       {grouped.map((group) => (
         <optgroup key={group.source} label={group.label}>
           {group.items.map((model) => {

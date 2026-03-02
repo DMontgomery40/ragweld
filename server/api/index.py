@@ -786,6 +786,44 @@ def _extract_semantic_concepts(text: str, *, min_len: int, max_terms: int) -> li
     return [k for k, _v in items[:max_terms]]
 
 
+def _iter_exception_chain(exc: BaseException) -> list[BaseException]:
+    out: list[BaseException] = []
+    seen: set[int] = set()
+    cur: BaseException | None = exc
+    while cur is not None and id(cur) not in seen:
+        out.append(cur)
+        seen.add(id(cur))
+        nxt = cur.__cause__ if cur.__cause__ is not None else cur.__context__
+        cur = nxt if isinstance(nxt, BaseException) else None
+    return out
+
+
+def _is_provider_auth_error(exc: BaseException) -> bool:
+    for err in _iter_exception_chain(exc):
+        status_code = getattr(err, "status_code", None)
+        if isinstance(status_code, int) and status_code in {401, 403}:
+            return True
+        msg = str(err).strip().lower()
+        if not msg:
+            continue
+        if "401" in msg or "403" in msg:
+            if any(tok in msg for tok in ("unauthorized", "forbidden", "auth", "api key")):
+                return True
+        if any(
+            tok in msg
+            for tok in (
+                "invalid api key",
+                "incorrect api key",
+                "authentication",
+                "unauthorized",
+                "forbidden",
+                "api key not set",
+            )
+        ):
+            return True
+    return False
+
+
 async def _extract_semantic_kg_llm(
     text: str,
     *,
@@ -796,6 +834,7 @@ async def _extract_semantic_kg_llm(
     reasoning_effort: str,
     typed_entities_enabled: bool,
     allowed_entity_types: set[str],
+    auth_failure_cache: set[str] | None = None,
     require_success: bool = False,
 ) -> tuple[list[dict[str, str]], list[dict[str, Any]]]:
     """LLM-assisted semantic KG extraction (best-effort).
@@ -859,10 +898,28 @@ async def _extract_semantic_kg_llm(
         out = re.sub(r"\s+", " ", str(value or "").replace("_", " ").strip())
         return out
 
+    route = select_provider_route(config=cfg, model_override=str(model or "").strip())
+    provider_name = str(getattr(route, "provider_name", "") or "").strip().lower()
+    route_fingerprint = "|".join(
+        [
+            str(route.kind or "").strip().lower(),
+            provider_name,
+            str(route.base_url or "").strip().lower(),
+            str(route.model or "").strip(),
+            "key" if bool(getattr(route, "api_key", None)) else "nokey",
+        ]
+    )
+
+    if auth_failure_cache is not None and route_fingerprint in auth_failure_cache:
+        if require_success:
+            raise RuntimeError(
+                f"Semantic KG LLM route skipped due to cached auth failure ({route.kind}/{provider_name or 'unknown'})"
+            )
+        return ([], [])
+
     llm_attempts = 3
     for attempt in range(llm_attempts):
         try:
-            route = select_provider_route(config=cfg, model_override=str(model or "").strip())
             data: dict[str, Any] | None = None
 
             is_openai_responses = (
@@ -914,7 +971,21 @@ async def _extract_semantic_kg_llm(
                     raise RuntimeError("Semantic KG LLM returned non-JSON or empty JSON output")
                 return ([], [])
             break
-        except Exception:
+        except Exception as exc:
+            if _is_provider_auth_error(exc):
+                already_cached = auth_failure_cache is not None and route_fingerprint in auth_failure_cache
+                if auth_failure_cache is not None:
+                    auth_failure_cache.add(route_fingerprint)
+                if not already_cached:
+                    logger.warning(
+                        "Semantic KG LLM auth failure for route=%s/%s model=%s; enabling heuristic fallback for remaining chunks in this run.",
+                        route.kind,
+                        provider_name or "unknown",
+                        str(route.model or ""),
+                    )
+                if require_success:
+                    raise
+                return ([], [])
             if attempt < (llm_attempts - 1):
                 await asyncio.sleep(0.5 * (attempt + 1))
                 continue
@@ -1276,6 +1347,8 @@ async def _run_index_body(
     semantic_relations_total = 0
     semantic_empty_chunks = 0
     semantic_llm_errors = 0
+    semantic_llm_auth_failures: set[str] = set()
+    semantic_llm_fallback_chunks = 0
     contextual_mode = str(getattr(cfg.embedding, "contextual_chunk_embeddings", "off") or "off").strip().lower()
     indexing_workers = max(1, int(getattr(cfg.indexing, "indexing_workers", 1) or 1))
 
@@ -1631,6 +1704,7 @@ async def _run_index_body(
                 batch_relations_added = 0
                 batch_empty_chunks = 0
                 batch_llm_errors = 0
+                batch_llm_fallback_chunks = 0
 
                 # Respect indexing_workers for semantic KG LLM extraction so
                 # this setting has a measurable indexing-time effect.
@@ -1662,6 +1736,7 @@ async def _run_index_body(
                                 reasoning_effort=_reasoning_effort,
                                 typed_entities_enabled=_typed_entities_enabled,
                                 allowed_entity_types=_allowed_entity_types,
+                                auth_failure_cache=semantic_llm_auth_failures,
                                 require_success=_require_llm_success,
                             )
                         except Exception as exc:
@@ -1694,8 +1769,16 @@ async def _run_index_body(
 
                     entities_raw: list[dict[str, str]]
                     relations_raw: list[dict[str, Any]]
+                    chunk_mode = "llm" if mode == "llm" else "heuristic"
                     if mode == "llm" and llm_prompt:
                         entities_raw, relations_raw = llm_extract_by_chunk.get(ch.chunk_id, ([], []))
+                        if not entities_raw and semantic_llm_auth_failures:
+                            concepts = _extract_semantic_concepts(ch.content, min_len=min_len, max_terms=max_terms)
+                            entities_raw = [{"name": c, "entity_type": "concept"} for c in concepts]
+                            relations_raw = []
+                            chunk_mode = "heuristic"
+                            semantic_llm_fallback_chunks += 1
+                            batch_llm_fallback_chunks += 1
                         if not entities_raw:
                             semantic_empty_chunks += 1
                             batch_empty_chunks += 1
@@ -1704,6 +1787,7 @@ async def _run_index_body(
                         concepts = _extract_semantic_concepts(ch.content, min_len=min_len, max_terms=max_terms)
                         entities_raw = [{"name": c, "entity_type": "concept"} for c in concepts]
                         relations_raw = []
+                        chunk_mode = "heuristic"
 
                     chunk_entity_ids: list[str] = []
                     chunk_name_to_ids: dict[str, list[str]] = defaultdict(list)
@@ -1734,7 +1818,7 @@ async def _run_index_body(
                                 description=None,
                                 properties={
                                     "source": "semantic",
-                                    "mode": "llm" if mode == "llm" else "heuristic",
+                                    "mode": chunk_mode,
                                     "run_id": run_id,
                                 },
                             )
@@ -1757,7 +1841,7 @@ async def _run_index_body(
 
                     if max_rels_per_chunk > 0:
                         rels_added = 0
-                        if mode == "llm" and relations_raw:
+                        if chunk_mode == "llm" and relations_raw:
                             for r in relations_raw:
                                 if rels_added >= max_rels_per_chunk:
                                     break
@@ -1805,7 +1889,7 @@ async def _run_index_body(
                                 rels_added += 1
                                 batch_relations_added += 1
                                 semantic_relations_total += 1
-                        if mode != "llm" and rels_added == 0 and len(chunk_entity_ids) >= 2:
+                        if chunk_mode == "heuristic" and rels_added == 0 and len(chunk_entity_ids) >= 2:
                             root = chunk_entity_ids[0]
                             for tgt in chunk_entity_ids[1:]:
                                 rels.append(
@@ -1853,7 +1937,8 @@ async def _run_index_body(
                                 f"entities={batch_entities_added} "
                                 f"relations={batch_relations_added} "
                                 f"empty_chunks={batch_empty_chunks} "
-                                f"parse_api_errors={batch_llm_errors}"
+                                f"parse_api_errors={batch_llm_errors} "
+                                f"heuristic_fallback_chunks={batch_llm_fallback_chunks}"
                             ),
                         },
                         drop_oldest=True,
@@ -1939,7 +2024,8 @@ async def _run_index_body(
                     f"entities={semantic_entities_total} "
                     f"relations={semantic_relations_total} "
                     f"empty_chunks={semantic_empty_chunks} "
-                    f"parse_api_errors={semantic_llm_errors}"
+                    f"parse_api_errors={semantic_llm_errors} "
+                    f"heuristic_fallback_chunks={semantic_llm_fallback_chunks}"
                 ),
             },
             drop_oldest=True,

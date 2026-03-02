@@ -1,0 +1,143 @@
+{
+  "timestamp_utc": "2026-02-28T09:44:00Z",
+  "corpus_id": "epstein-files-1",
+  "ui_session": {
+    "base_url": "http://127.0.0.1:5173/web/",
+    "single_persistent_context": true,
+    "about_blank_loop_observed": false
+  },
+  "checkpoints": {
+    "start_disabled_before_model_selection": {
+      "pass": true,
+      "observed": {
+        "startDisabled": true,
+        "startFullStackDisabled": true,
+        "helperVisible": true
+      },
+      "screenshot": "/Users/davidmontgomery/ragweld/tmp/ui_acceptance_20260228/01_synthetic_lab_disabled_before_models.png"
+    },
+    "explicit_model_selection": {
+      "pass": true,
+      "observed": {
+        "generator_model": "gpt-4o-mini",
+        "judge_model": "gpt-4o-mini",
+        "startDisabledAfterSelection": false
+      },
+      "screenshot": "/Users/davidmontgomery/ragweld/tmp/ui_acceptance_20260228/02_models_selected_before_start.png"
+    },
+    "synthetic_run_medium_budget": {
+      "pass": true,
+      "request": {
+        "max_source_chunks": 50,
+        "max_pairs": 50,
+        "pairs_per_source": 1,
+        "recipe": "eval_dataset"
+      },
+      "run_id": "epstein-files-1__20260228_093536",
+      "status": "failed",
+      "summary": {
+        "quality_sample_size": 50,
+        "quality_top1_accuracy": 0.0,
+        "quality_topk_accuracy": 0.0,
+        "quality_mrr": 0.0,
+        "quality_gate_threshold": 0.4,
+        "quality_gate_passed": false,
+        "quality_failure_reason": "Quality gate failed: top1=0.000 < threshold=0.400 (sample=50)"
+      },
+      "artifacts": {
+        "quality_eval_json": "/Users/davidmontgomery/ragweld/data/synthetic_runs/epstein-files-1__20260228_093536/artifacts/quality_eval.json"
+      },
+      "screenshot": "/Users/davidmontgomery/ragweld/tmp/ui_acceptance_20260228/04_failed_gate_blocked_publish.png"
+    },
+    "publish_blocking": {
+      "pass": true,
+      "run_id": "epstein-files-1__20260228_093536",
+      "eval_dataset": {
+        "status_code": 409,
+        "detail": "QUALITY_GATE_FAILED: cannot publish eval_dataset_json: top1=0.000 < threshold=0.400"
+      },
+      "triplets": {
+        "status_code": 409,
+        "detail": "QUALITY_GATE_FAILED: cannot publish triplets_jsonl: top1=0.000 < threshold=0.400"
+      },
+      "ui": {
+        "blockedLabelVisible": true,
+        "buttonStates": [
+          "Blocked",
+          "Publish"
+        ]
+      }
+    },
+    "quick_actions_route_prefill_no_autorun": {
+      "pass": true,
+      "retrieval": {
+        "url": "http://127.0.0.1:5173/web/rag?subtab=synthetic&synthetic_context=retrieval&synthetic_recipe=eval_dataset&synthetic_autorun=0",
+        "latestRunBefore": "epstein-files-1__20260228_093536",
+        "latestRunAfter": "epstein-files-1__20260228_093536",
+        "screenshot": "/Users/davidmontgomery/ragweld/tmp/ui_acceptance_20260228/05_quick_action_retrieval_to_synthetic.png"
+      },
+      "learning_agent": {
+        "url": "http://127.0.0.1:5173/web/rag?subtab=synthetic&synthetic_context=learning-agent&synthetic_recipe=eval_dataset&synthetic_autorun=0",
+        "latestRunBefore": "epstein-files-1__20260228_093536",
+        "latestRunAfter": "epstein-files-1__20260228_093536",
+        "screenshot": "/Users/davidmontgomery/ragweld/tmp/ui_acceptance_20260228/06_quick_action_learning_agent_to_synthetic.png"
+      },
+      "learning_ranker": {
+        "url": "http://127.0.0.1:5173/web/rag?subtab=synthetic&synthetic_context=learning-ranker&synthetic_recipe=triplets&synthetic_autorun=0",
+        "latestRunBefore": "epstein-files-1__20260228_093536",
+        "latestRunAfter": "epstein-files-1__20260228_093536",
+        "screenshot": "/Users/davidmontgomery/ragweld/tmp/ui_acceptance_20260228/07_quick_action_learning_ranker_to_synthetic.png"
+      }
+    },
+    "system_prompts_synthetic_judge": {
+      "pass": true,
+      "url": "http://127.0.0.1:5173/web/eval?subtab=prompts&corpus=epstein-files-1",
+      "hasCard": true,
+      "hasEditButton": true,
+      "screenshot": "/Users/davidmontgomery/ragweld/tmp/ui_acceptance_20260228/08_system_prompts_synthetic_judge.png"
+    },
+    "eval_comparison_evidence": {
+      "pass": true,
+      "ui": {
+        "url": "http://127.0.0.1:5173/web/eval?subtab=analysis&corpus=epstein-files-1",
+        "primary_run_id": "epstein-files-1__20260228_073956",
+        "compare_run_id": "epstein-files-1__20260228_063239",
+        "screenshot": "/Users/davidmontgomery/ragweld/tmp/ui_acceptance_20260228/09_eval_compare_evidence.png"
+      },
+      "metrics": {
+        "epstein-files-1__20260228_073956": {
+          "total": 50,
+          "top1": 0.0,
+          "topk": 0.0,
+          "mrr": 0.0
+        },
+        "epstein-files-1__20260228_063239": {
+          "total": 24,
+          "top1": 0.125,
+          "topk": 0.3333333333333333,
+          "mrr": 0.1923611111111111
+        }
+      }
+    },
+    "api_validation_missing_models": {
+      "pass": true,
+      "missing_generator_status": 422,
+      "missing_judge_status": 422
+    }
+  },
+  "cleanup": {
+    "seeded_fake_run_removed": true,
+    "removed_path": "/Users/davidmontgomery/ragweld/data/synthetic_runs/epstein-files-1__ui_failed_gate_20260228_015555"
+  },
+  "screenshots": [
+    "/Users/davidmontgomery/ragweld/tmp/ui_acceptance_20260228/01_synthetic_lab_disabled_before_models.png",
+    "/Users/davidmontgomery/ragweld/tmp/ui_acceptance_20260228/02_models_selected_before_start.png",
+    "/Users/davidmontgomery/ragweld/tmp/ui_acceptance_20260228/03_ready_to_start_medium_budget.png",
+    "/Users/davidmontgomery/ragweld/tmp/ui_acceptance_20260228/04_failed_gate_blocked_publish.png",
+    "/Users/davidmontgomery/ragweld/tmp/ui_acceptance_20260228/05_quick_action_retrieval_to_synthetic.png",
+    "/Users/davidmontgomery/ragweld/tmp/ui_acceptance_20260228/06_quick_action_learning_agent_to_synthetic.png",
+    "/Users/davidmontgomery/ragweld/tmp/ui_acceptance_20260228/07_quick_action_learning_ranker_to_synthetic.png",
+    "/Users/davidmontgomery/ragweld/tmp/ui_acceptance_20260228/08_system_prompts_synthetic_judge.png",
+    "/Users/davidmontgomery/ragweld/tmp/ui_acceptance_20260228/09_eval_compare_evidence.png"
+  ]
+}

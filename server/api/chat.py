@@ -145,6 +145,46 @@ def _validate_chat_images(images: list[ImageAttachment], cfg: ChatMultimodalConf
                 )
 
 
+async def _append_chat_query_log_entry(
+    *,
+    config: TriBridConfig,
+    fusion: FusionProtocol,
+    event_id: str,
+    conversation_id: str,
+    corpus_ids: list[str],
+    query: str,
+    top_paths: list[str],
+) -> None:
+    """Best-effort query log append for triplet mining correlation."""
+    if int(getattr(config.tracing, "tracing_enabled", 1) or 0) != 1:
+        return
+
+    from server.observability.query_log import append_query_log
+
+    fusion_debug = getattr(fusion, "last_debug", None) or {}
+    rag_debug = fusion_debug.get("chat_rag_fusion") if isinstance(fusion_debug, dict) else None
+    if not isinstance(rag_debug, dict):
+        rag_debug = fusion_debug if isinstance(fusion_debug, dict) else {}
+
+    await append_query_log(
+        config,
+        entry={
+            "event_id": event_id,
+            "kind": "chat",
+            "conversation_id": conversation_id,
+            "corpus_ids": corpus_ids,
+            "query": query,
+            "reranker_mode": str(rag_debug.get("rerank_mode") or str(config.reranking.reranker_mode or "")),
+            "rerank_ok": bool(rag_debug.get("rerank_ok", True)),
+            "rerank_applied": bool(rag_debug.get("rerank_applied", False)),
+            "rerank_skipped_reason": rag_debug.get("rerank_skipped_reason"),
+            "rerank_error": rag_debug.get("rerank_error"),
+            "rerank_candidates_reranked": int(rag_debug.get("rerank_candidates_reranked") or 0),
+            "top_paths": list(top_paths[:5]),
+        },
+    )
+
+
 @router.get("/traces/latest", response_model=TracesLatestResponse)
 async def get_latest_trace(
     repo: str | None = Query(default=None, description="Optional corpus_id to filter by"),
@@ -286,34 +326,16 @@ async def chat(request: ChatRequest) -> ChatResponse:
             )
             await trace_store.end(run_id, ended_at_ms=ended_at_ms)
 
-        # Best-effort query log append for triplet mining.
-        # Gate on tracing_enabled (observability switch), not reranker mode.
         try:
-            if int(getattr(config.tracing, "tracing_enabled", 1) or 0) == 1:
-                from server.observability.query_log import append_query_log
-
-                fusion_debug = getattr(fusion, "last_debug", None) or {}
-                rag_debug = fusion_debug.get("chat_rag_fusion") if isinstance(fusion_debug, dict) else None
-                if not isinstance(rag_debug, dict):
-                    rag_debug = fusion_debug if isinstance(fusion_debug, dict) else {}
-
-                await append_query_log(
-                    config,
-                    entry={
-                        "event_id": run_id,
-                        "kind": "chat",
-                        "conversation_id": conv.id,
-                        "corpus_ids": resolve_sources(request.sources),
-                        "query": request.message,
-                        "reranker_mode": str(rag_debug.get("rerank_mode") or str(config.reranking.reranker_mode or "")),
-                        "rerank_ok": bool(rag_debug.get("rerank_ok", True)),
-                        "rerank_applied": bool(rag_debug.get("rerank_applied", False)),
-                        "rerank_skipped_reason": rag_debug.get("rerank_skipped_reason"),
-                        "rerank_error": rag_debug.get("rerank_error"),
-                        "rerank_candidates_reranked": int(rag_debug.get("rerank_candidates_reranked") or 0),
-                        "top_paths": [s.file_path for s in sources[:5]],
-                    },
-                )
+            await _append_chat_query_log_entry(
+                config=config,
+                fusion=fusion,
+                event_id=run_id,
+                conversation_id=conv.id,
+                corpus_ids=resolve_sources(request.sources),
+                query=request.message,
+                top_paths=[s.file_path for s in sources[:5]],
+            )
         except Exception:
             pass
 
@@ -428,6 +450,7 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
     async def wrapped_stream() -> Any:
         ended_at_ms: int | None = None
         accumulated = ""
+        query_log_appended = False
         try:
             async for sse in chat_stream_handler(
                 request=request,
@@ -541,6 +564,21 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
                         llm_error = llm_error_raw.strip()
                     debug = debug.model_copy(update={"llm_used": llm_used, "llm_error": llm_error})
                     payload["debug"] = debug.model_dump(mode="serialization", by_alias=True)
+
+                    if not query_log_appended:
+                        try:
+                            await _append_chat_query_log_entry(
+                                config=config,
+                                fusion=fusion,
+                                event_id=run_id,
+                                conversation_id=conv.id,
+                                corpus_ids=resolve_sources(request.sources),
+                                query=request.message,
+                                top_paths=[s.file_path for s in src_objs[:5]],
+                            )
+                            query_log_appended = True
+                        except Exception:
+                            pass
 
                     if trace_enabled:
                         await trace_store.add_event(
