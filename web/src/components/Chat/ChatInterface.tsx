@@ -1465,10 +1465,6 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
           if (abortReason) {
             throw new ChatRequestAbortedError(abortReason);
           }
-          const message = err instanceof Error ? err.message : '';
-          const canFallback =
-            message.startsWith('Failed to start streaming') || message === 'Response body is not readable';
-          if (!canFallback) throw err;
           streamingSupportedRef.current = false;
           await handleRegularResponse(
             userMessage,

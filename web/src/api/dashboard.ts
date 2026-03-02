@@ -109,7 +109,7 @@ export async function getTraces(limit: number = 50): Promise<Trace[]> {
           ...row,
         } as Trace;
       })
-      .slice(0, safeLimit);
+      .slice(-safeLimit);
   } catch {
     return [];
   }
