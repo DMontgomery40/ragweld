@@ -1,6 +1,6 @@
 {
   "currency": "USD",
-  "last_updated": "2026-03-01",
+  "last_updated": "2026-03-03",
   "sources": [
     "https://openai.com/api/pricing/ (2026-02-07)",
     "https://www.anthropic.com/pricing (2026-02-07)",
@@ -10,7 +10,7 @@
     "https://mistral.ai/pricing (2025-11-29)",
     "https://api-docs.deepseek.com/quick_start/pricing (2025-11-29)",
     "https://jina.ai/embeddings/ (2025-11-29)",
-    "https://openrouter.ai/api/v1/models (2026-03-01)"
+    "https://openrouter.ai/api/v1/models (2026-03-03)"
   ],
   "models": [
     {
@@ -389,20 +389,6 @@
     },
     {
       "provider": "google",
-      "family": "gemini-2.5-flash-lite-preview-09-2025",
-      "model": "gemini-2.5-flash-lite-preview-09-2025",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 1048576,
-      "input_per_1k": 0.0001,
-      "output_per_1k": 0.0004,
-      "base_url": "https://generativelanguage.googleapis.com",
-      "notes": "Added automatically from OpenRouter feed."
-    },
-    {
-      "provider": "google",
       "family": "gemini-2.5-pro",
       "model": "gemini-2.5-pro",
       "components": [
@@ -452,6 +438,20 @@
       ],
       "unit": "1k_tokens",
       "context": 65536,
+      "input_per_1k": 0.0005,
+      "output_per_1k": 0.003,
+      "base_url": "https://generativelanguage.googleapis.com",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "google",
+      "family": "gemini-3.1-flash-lite-preview",
+      "model": "gemini-3.1-flash-lite-preview",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 1048576,
       "input_per_1k": 0.00025,
       "output_per_1k": 0.0015,
       "base_url": "https://generativelanguage.googleapis.com",
@@ -902,19 +902,19 @@
       "input_per_1k": 0.0002,
       "output_per_1k": 0.0002,
       "base_url": "https://api.mistral.ai/v1",
-      "notes": "Added automatically from OpenRouter feed."
+      "notes": "Added automatically from OpenRouter feed. | [auto-refresh] deprecated_on=2026-03-03"
     },
     {
       "provider": "mistral",
-      "family": "mistral-7b-instruct-v0.3",
-      "model": "mistral-7b-instruct-v0.3",
+      "family": "mistral-7b-instruct-v0.1",
+      "model": "mistral-7b-instruct-v0.1",
       "components": [
         "GEN"
       ],
       "unit": "1k_tokens",
-      "context": 32768,
-      "input_per_1k": 0.0002,
-      "output_per_1k": 0.0002,
+      "context": 2824,
+      "input_per_1k": 0.00011,
+      "output_per_1k": 0.00019,
       "base_url": "https://api.mistral.ai/v1",
       "notes": "Added automatically from OpenRouter feed."
     },
@@ -1438,20 +1438,6 @@
     },
     {
       "provider": "openai",
-      "family": "gpt-5.2-chat",
-      "model": "gpt-5.2-chat",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 128000,
-      "input_per_1k": 0.00175,
-      "output_per_1k": 0.014,
-      "base_url": "https://api.openai.com/v1",
-      "notes": "Added automatically from OpenRouter feed."
-    },
-    {
-      "provider": "openai",
       "family": "gpt-5.2-pro",
       "model": "gpt-5.2-pro",
       "components": [
@@ -1461,6 +1447,20 @@
       "context": 400000,
       "input_per_1k": 0.021,
       "output_per_1k": 0.168,
+      "base_url": "https://api.openai.com/v1",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "openai",
+      "family": "gpt-5.3-chat",
+      "model": "gpt-5.3-chat",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 128000,
+      "input_per_1k": 0.00175,
+      "output_per_1k": 0.014,
       "base_url": "https://api.openai.com/v1",
       "notes": "Added automatically from OpenRouter feed."
     },
