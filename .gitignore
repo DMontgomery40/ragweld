@@ -130,3 +130,7 @@ Thumbs.db
 *.tmp
 *.temp
 .cache/
+
+# Local scratch files
+cua.sh
+-
