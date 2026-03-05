@@ -1,6 +1,6 @@
 {
   "currency": "USD",
-  "last_updated": "2026-03-04",
+  "last_updated": "2026-03-05",
   "sources": [
     "https://openai.com/api/pricing/ (2026-02-07)",
     "https://www.anthropic.com/pricing (2026-02-07)",
@@ -10,7 +10,7 @@
     "https://mistral.ai/pricing (2025-11-29)",
     "https://api-docs.deepseek.com/quick_start/pricing (2025-11-29)",
     "https://jina.ai/embeddings/ (2025-11-29)",
-    "https://openrouter.ai/api/v1/models (2026-03-04)"
+    "https://openrouter.ai/api/v1/models (2026-03-05)"
   ],
   "models": [
     {
@@ -1515,8 +1515,8 @@
       ],
       "unit": "1k_tokens",
       "context": 131072,
-      "input_per_1k": 2e-05,
-      "output_per_1k": 0.0001,
+      "input_per_1k": 3.9e-05,
+      "output_per_1k": 0.00019,
       "base_url": "https://api.openai.com/v1",
       "notes": "Added automatically from OpenRouter feed."
     },
