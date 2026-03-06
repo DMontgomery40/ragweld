@@ -105,7 +105,7 @@ async def test_concurrent_section_patches_do_not_lose_updates(client: AsyncClien
         tokenization_patch = client.patch(
             "/api/config/tokenization",
             params={"corpus_id": corpus_id},
-            json={"strategy": "whitespace"},
+            json={"normalize_unicode": False},
         )
         indexing_patch = client.patch(
             "/api/config/indexing",
@@ -120,7 +120,7 @@ async def test_concurrent_section_patches_do_not_lose_updates(client: AsyncClien
         final = await client.get("/api/config", params={"corpus_id": corpus_id})
         assert final.status_code == 200
         cfg = final.json()
-        assert str(cfg["tokenization"]["strategy"]).lower() == "whitespace"
+        assert bool(cfg["tokenization"]["normalize_unicode"]) is False
         assert str(cfg["indexing"]["large_file_mode"]).lower() == "read_all"
     finally:
         await client.delete(f"/api/corpora/{corpus_id}")
