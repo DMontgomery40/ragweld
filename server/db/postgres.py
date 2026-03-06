@@ -28,8 +28,8 @@ from server.models.tribrid_config_model import (
 # expensive (connect handshake + schema init). We keep one pool per DSN and reuse
 # it across all PostgresClient instances.
 # -----------------------------------------------------------------------------
-_POOLS_BY_DSN: dict[str, asyncpg.Pool] = {}
-_POOL_LOCKS_BY_DSN: dict[str, asyncio.Lock] = {}
+_POOLS_BY_DSN: dict[tuple[str, str], asyncpg.Pool] = {}
+_POOL_LOCKS_BY_DSN: dict[tuple[str, str], asyncio.Lock] = {}
 
 
 _RELAXED_FTS_TERM_RE = re.compile(r"[A-Za-z0-9_]{3,64}")
@@ -136,8 +136,9 @@ class PostgresClient:
     NOTE: This is intentionally "real" storage: the source of truth is Postgres.
     """
 
-    def __init__(self, connection_string: str):
+    def __init__(self, connection_string: str, *, schema_mode: str = "full"):
         self.connection_string = connection_string
+        self._schema_mode = "control" if str(schema_mode).strip().lower() == "control" else "full"
         self._pool: asyncpg.Pool | None = None
         self._resolved_dsn: str | None = None
         self._pg_search_available: bool | None = None
@@ -152,33 +153,37 @@ class PostgresClient:
 
         dsn = self._resolve_dsn(self.connection_string)
         self._resolved_dsn = dsn
+        pool_key = (dsn, self._schema_mode)
 
         # Fast path: pool already exists for this DSN (no locking needed).
-        existing = _POOLS_BY_DSN.get(dsn)
+        existing = _POOLS_BY_DSN.get(pool_key)
         if existing is not None:
             self._pool = existing
             return
 
         # Lazily create a lock per DSN (locks bind to the running loop).
-        lock = _POOL_LOCKS_BY_DSN.get(dsn)
+        lock = _POOL_LOCKS_BY_DSN.get(pool_key)
         if lock is None:
             lock = asyncio.Lock()
-            _POOL_LOCKS_BY_DSN[dsn] = lock
+            _POOL_LOCKS_BY_DSN[pool_key] = lock
 
         async with lock:
-            pool = _POOLS_BY_DSN.get(dsn)
+            pool = _POOLS_BY_DSN.get(pool_key)
             if pool is None:
                 pool = await asyncpg.create_pool(dsn=dsn, min_size=1, max_size=10)
                 try:
                     async with pool.acquire() as conn:
-                        # Ensure extension exists before registering pgvector codecs.
-                        await self._ensure_schema(conn)
-                        await register_vector(conn)
+                        # Control-plane routes (corpora/config) do not require pgvector.
+                        # Keep their bootstrap independent so they remain available
+                        # even when vector extensions are not installed.
+                        await self._ensure_schema(conn, include_vector=(self._schema_mode == "full"))
+                        if self._schema_mode == "full":
+                            await register_vector(conn)
                 except Exception:
                     # Ensure we don't leave a half-initialized pool around.
                     await pool.close()
                     raise
-                _POOLS_BY_DSN[dsn] = pool
+                _POOLS_BY_DSN[pool_key] = pool
 
             self._pool = pool
 
@@ -204,7 +209,7 @@ class PostgresClient:
         Intended for tests/shutdown hooks. Production request paths should not
         call this.
         """
-        for _dsn, pool in list(_POOLS_BY_DSN.items()):
+        for _pool_key, pool in list(_POOLS_BY_DSN.items()):
             try:
                 await pool.close()
             except Exception:
@@ -229,9 +234,10 @@ class PostgresClient:
 
         return connection_string
 
-    async def _ensure_schema(self, conn: asyncpg.Connection) -> None:
-        # Ensure pgvector extension
-        await conn.execute("CREATE EXTENSION IF NOT EXISTS vector;")
+    async def _ensure_schema(self, conn: asyncpg.Connection, *, include_vector: bool) -> None:
+        if include_vector:
+            # Ensure pgvector extension.
+            await conn.execute("CREATE EXTENSION IF NOT EXISTS vector;")
         # Best-effort: ParadeDB pg_search extension (BM25). If unavailable, we fall back to built-in FTS.
         try:
             await conn.execute("CREATE EXTENSION IF NOT EXISTS pg_search;")
@@ -273,6 +279,9 @@ class PostgresClient:
             );
             """
         )
+
+        if not include_vector:
+            return
 
         # Semantic cache store (search/answer/chat payload cache).
         # Keep parity with chunks.embedding compatibility: prefer undimensioned vector,

@@ -31,7 +31,7 @@ def _slugify(value: str) -> str:
 
 async def _get_postgres() -> PostgresClient:
     cfg = load_config()
-    pg = PostgresClient(cfg.indexing.postgres_url)
+    pg = PostgresClient(cfg.indexing.postgres_url, schema_mode="control")
     await pg.connect()
     return pg
 

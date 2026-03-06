@@ -109,7 +109,7 @@ class ConfigStore:
     """Load/save TriBridConfig for global and per-corpus scopes."""
 
     def __init__(self, postgres_dsn: str):
-        self._postgres = PostgresClient(postgres_dsn)
+        self._postgres = PostgresClient(postgres_dsn, schema_mode="control")
         self._cache: dict[str | None, TriBridConfig] = {}
 
     async def get(self, repo_id: str | None = None) -> TriBridConfig:
