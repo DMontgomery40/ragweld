@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -69,7 +69,7 @@ if _global_cfg.mcp.enabled:
 
 
 @asynccontextmanager
-async def lifespan(_: FastAPI):
+async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     mcp_session_cm = None
     if _global_cfg.mcp.enabled:
         mcp_session_cm = _mcp.session_manager.run()
