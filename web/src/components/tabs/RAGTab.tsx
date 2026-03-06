@@ -1,7 +1,7 @@
 // TriBridRAG - RAG Tab Component (React)
 // Main RAG configuration tab with subtab navigation
 
-import { useSubtab } from '@/hooks';
+import { useSubtab } from '@/hooks/useSubtab';
 import { RAGSubtabs } from '@/components/RAG/RAGSubtabs';
 import { DataQualitySubtab } from '@/components/RAG/DataQualitySubtab';
 import { RetrievalSubtab } from '@/components/RAG/RetrievalSubtab';

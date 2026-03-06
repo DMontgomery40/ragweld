@@ -1,19 +1,28 @@
 // TriBridRAG - React Router Configuration
 // Converted from legacy navigation.js TAB_REGISTRY and NEW_TABS
 
-import { ReactNode, ComponentType } from 'react';
+import { ReactNode, ComponentType, Suspense, createElement, lazy } from 'react';
 import { Dashboard } from '../pages/Dashboard';
 import Docker from '../pages/Docker';
 // Tab components (all TypeScript)
 import ChatTab from '../components/tabs/ChatTab';
 import GrafanaTab from '../components/tabs/GrafanaTab';
-import RAGTab from '../components/tabs/RAGTab';
 import EvalAnalysisTab from '../components/tabs/EvalAnalysisTab';
 import BenchmarkTab from '../components/Benchmark/BenchmarkTab';
 // ProfilesTab removed - banned feature per CLAUDE.md
 import InfrastructureTab from '../components/tabs/InfrastructureTab';
 import AdminTab from '../components/tabs/AdminTab';
 import StartTab from '../components/tabs/StartTab';
+
+const RAGTab = lazy(() => import('../components/tabs/RAGTab'));
+const LazyRAGTabRoute: ComponentType = () =>
+  createElement(
+    Suspense,
+    {
+      fallback: createElement('div', { className: 'p-4 text-sm text-slate-400' }, 'Loading RAG workspace...')
+    },
+    createElement(RAGTab)
+  );
 
 export interface Subtab {
   id: string;
@@ -98,7 +107,7 @@ export const routes: RouteConfig[] = [
   },
   {
     path: '/rag',
-    element: RAGTab,
+    element: LazyRAGTabRoute,
     label: 'RAG',
     icon: '🧠',
     order: 6,
