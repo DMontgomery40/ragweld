@@ -115,7 +115,7 @@ class ConfigStore:
     async def get(self, repo_id: str | None = None) -> TriBridConfig:
         """Get config for a corpus (repo_id) or global when repo_id is None."""
         if repo_id in self._cache:
-            return self._cache[repo_id]
+            return self._cache[repo_id].model_copy(deep=True)
 
         if repo_id is None:
             cfg: TriBridConfig
@@ -137,8 +137,8 @@ class ConfigStore:
                 save_global_config(cfg)
                 if migrated:
                     logger.info("Auto-migrated global config keys: %s", ", ".join(migrated))
-            self._cache[None] = cfg
-            return cfg
+            self._cache[None] = cfg.model_copy(deep=True)
+            return self._cache[None].model_copy(deep=True)
 
         # Per-corpus config lives in Postgres
         base = (await self.get(repo_id=None)).model_copy(deep=True)
@@ -160,24 +160,24 @@ class ConfigStore:
                 await self._postgres.upsert_corpus_config_json(repo_id, cfg.model_dump())
                 if migrated:
                     logger.info("Auto-migrated corpus config keys repo_id=%s: %s", repo_id, ", ".join(migrated))
-        self._cache[repo_id] = cfg
-        return cfg
+        self._cache[repo_id] = cfg.model_copy(deep=True)
+        return self._cache[repo_id].model_copy(deep=True)
 
     async def save(self, config: TriBridConfig, repo_id: str | None = None) -> TriBridConfig:
         """Persist config for a corpus (repo_id) or global when repo_id is None."""
         _migrate_config_in_place(config)
         if repo_id is None:
             save_global_config(config)
-            self._cache[None] = config
-            return config
+            self._cache[None] = config.model_copy(deep=True)
+            return self._cache[None].model_copy(deep=True)
 
         await self._postgres.connect()
         corpus = await self._postgres.get_corpus(repo_id)
         if corpus is None:
             raise CorpusNotFoundError(f"Corpus not found: {repo_id}")
         await self._postgres.upsert_corpus_config_json(repo_id, config.model_dump())
-        self._cache[repo_id] = config
-        return config
+        self._cache[repo_id] = config.model_copy(deep=True)
+        return self._cache[repo_id].model_copy(deep=True)
 
     async def reset(self, repo_id: str | None = None) -> TriBridConfig:
         """Reset config to LAW defaults for the selected scope."""
