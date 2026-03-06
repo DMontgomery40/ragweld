@@ -1,6 +1,6 @@
 {
   "currency": "USD",
-  "last_updated": "2026-03-05",
+  "last_updated": "2026-03-06",
   "sources": [
     "https://openai.com/api/pricing/ (2026-02-07)",
     "https://www.anthropic.com/pricing (2026-02-07)",
@@ -10,7 +10,7 @@
     "https://mistral.ai/pricing (2025-11-29)",
     "https://api-docs.deepseek.com/quick_start/pricing (2025-11-29)",
     "https://jina.ai/embeddings/ (2025-11-29)",
-    "https://openrouter.ai/api/v1/models (2026-03-05)"
+    "https://openrouter.ai/api/v1/models (2026-03-06)"
   ],
   "models": [
     {
@@ -1424,34 +1424,6 @@
     },
     {
       "provider": "openai",
-      "family": "gpt-5.2",
-      "model": "gpt-5.2",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 400000,
-      "input_per_1k": 0.00175,
-      "output_per_1k": 0.014,
-      "base_url": "https://api.openai.com/v1",
-      "notes": "Added automatically from OpenRouter feed."
-    },
-    {
-      "provider": "openai",
-      "family": "gpt-5.2-pro",
-      "model": "gpt-5.2-pro",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 400000,
-      "input_per_1k": 0.021,
-      "output_per_1k": 0.168,
-      "base_url": "https://api.openai.com/v1",
-      "notes": "Added automatically from OpenRouter feed."
-    },
-    {
-      "provider": "openai",
       "family": "gpt-5.3-chat",
       "model": "gpt-5.3-chat",
       "components": [
@@ -1475,6 +1447,34 @@
       "context": 400000,
       "input_per_1k": 0.00175,
       "output_per_1k": 0.014,
+      "base_url": "https://api.openai.com/v1",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "openai",
+      "family": "gpt-5.4",
+      "model": "gpt-5.4",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 1050000,
+      "input_per_1k": 0.0025,
+      "output_per_1k": 0.015,
+      "base_url": "https://api.openai.com/v1",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "openai",
+      "family": "gpt-5.4-pro",
+      "model": "gpt-5.4-pro",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 1050000,
+      "input_per_1k": 0.03,
+      "output_per_1k": 0.18,
       "base_url": "https://api.openai.com/v1",
       "notes": "Added automatically from OpenRouter feed."
     },
