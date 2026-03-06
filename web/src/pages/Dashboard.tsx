@@ -39,7 +39,7 @@ export function Dashboard() {
 
       {/* Monitoring Subtab */}
       <div style={{ display: activeSubtab === 'monitoring' ? 'block' : 'none' }}>
-        <MonitoringSubtab />
+        {activeSubtab === 'monitoring' ? <MonitoringSubtab /> : null}
       </div>
 
       {/* Storage Subtab */}
