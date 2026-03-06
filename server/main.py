@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -68,12 +69,25 @@ if _global_cfg.mcp.enabled:
     _mcp = get_mcp_server()
 
 
+async def _enter_lifecycle_cm(cm: Any) -> None:
+    """Enter async context manager and best-effort unwind on enter failure."""
+    try:
+        await cm.__aenter__()
+    except Exception as e:
+        try:
+            await cm.__aexit__(type(e), e, e.__traceback__)
+        except Exception:
+            # Keep original startup error.
+            pass
+        raise
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     mcp_session_cm = None
     if _global_cfg.mcp.enabled:
         mcp_session_cm = _mcp.session_manager.run()
-        await mcp_session_cm.__aenter__()
+        await _enter_lifecycle_cm(mcp_session_cm)
     try:
         yield
     finally:
