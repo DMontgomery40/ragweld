@@ -30,6 +30,7 @@ from server.models.tribrid_config_model import (
 # -----------------------------------------------------------------------------
 _POOLS_BY_DSN: dict[tuple[str, str], asyncpg.Pool] = {}
 _POOL_LOCKS_BY_DSN: dict[tuple[str, str], asyncio.Lock] = {}
+_VECTOR_AVAILABLE_BY_DSN: dict[tuple[str, str], bool] = {}
 
 
 _RELAXED_FTS_TERM_RE = re.compile(r"[A-Za-z0-9_]{3,64}")
@@ -142,6 +143,7 @@ class PostgresClient:
         self._pool: asyncpg.Pool | None = None
         self._resolved_dsn: str | None = None
         self._pg_search_available: bool | None = None
+        self._vector_available: bool | None = None
 
     # ---------------------------------------------------------------------
     # Connection + schema
@@ -159,6 +161,7 @@ class PostgresClient:
         existing = _POOLS_BY_DSN.get(pool_key)
         if existing is not None:
             self._pool = existing
+            self._vector_available = _VECTOR_AVAILABLE_BY_DSN.get(pool_key, True)
             return
 
         # Lazily create a lock per DSN (locks bind to the running loop).
@@ -176,14 +179,16 @@ class PostgresClient:
                         # Control-plane routes (corpora/config) do not require pgvector.
                         # Keep their bootstrap independent so they remain available
                         # even when vector extensions are not installed.
-                        await self._ensure_schema(conn, include_vector=(self._schema_mode == "full"))
-                        if self._schema_mode == "full":
+                        include_vector = self._schema_mode == "full"
+                        self._vector_available = await self._ensure_schema(conn, include_vector=include_vector)
+                        if include_vector and self._vector_available:
                             await register_vector(conn)
                 except Exception:
                     # Ensure we don't leave a half-initialized pool around.
                     await pool.close()
                     raise
                 _POOLS_BY_DSN[pool_key] = pool
+                _VECTOR_AVAILABLE_BY_DSN[pool_key] = bool(self._vector_available)
 
             self._pool = pool
 
@@ -216,6 +221,7 @@ class PostgresClient:
                 pass
         _POOLS_BY_DSN.clear()
         _POOL_LOCKS_BY_DSN.clear()
+        _VECTOR_AVAILABLE_BY_DSN.clear()
 
     @staticmethod
     def _resolve_dsn(connection_string: str) -> str:
@@ -234,10 +240,15 @@ class PostgresClient:
 
         return connection_string
 
-    async def _ensure_schema(self, conn: asyncpg.Connection, *, include_vector: bool) -> None:
+    async def _ensure_schema(self, conn: asyncpg.Connection, *, include_vector: bool) -> bool:
+        vector_available = False
         if include_vector:
-            # Ensure pgvector extension.
-            await conn.execute("CREATE EXTENSION IF NOT EXISTS vector;")
+            # Ensure pgvector extension (best-effort).
+            try:
+                await conn.execute("CREATE EXTENSION IF NOT EXISTS vector;")
+                vector_available = True
+            except Exception:
+                vector_available = False
         # Best-effort: ParadeDB pg_search extension (BM25). If unavailable, we fall back to built-in FTS.
         try:
             await conn.execute("CREATE EXTENSION IF NOT EXISTS pg_search;")
@@ -281,12 +292,12 @@ class PostgresClient:
         )
 
         if not include_vector:
-            return
+            return vector_available
 
         # Semantic cache store (search/answer/chat payload cache).
         # Keep parity with chunks.embedding compatibility: prefer undimensioned vector,
         # but fall back to vector(<dim>) on older pgvector installs.
-        try:
+        if not vector_available:
             await conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS semantic_cache_entries (
@@ -294,7 +305,7 @@ class PostgresClient:
                   endpoint TEXT NOT NULL,
                   exact_key TEXT NOT NULL,
                   query_text TEXT NOT NULL,
-                  query_embedding vector,
+                  query_embedding DOUBLE PRECISION[],
                   request_fingerprint TEXT NOT NULL DEFAULT '',
                   payload JSONB NOT NULL,
                   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -305,33 +316,53 @@ class PostgresClient:
                 );
                 """
             )
-        except Exception:
+        else:
             try:
-                from server.config import load_config as _load_global_config
-
-                dim = int(_load_global_config().embedding.embedding_dim)
+                await conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS semantic_cache_entries (
+                      scope_key TEXT NOT NULL,
+                      endpoint TEXT NOT NULL,
+                      exact_key TEXT NOT NULL,
+                      query_text TEXT NOT NULL,
+                      query_embedding vector,
+                      request_fingerprint TEXT NOT NULL DEFAULT '',
+                      payload JSONB NOT NULL,
+                      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                      expires_at TIMESTAMPTZ NOT NULL,
+                      last_hit_at TIMESTAMPTZ,
+                      hit_count BIGINT NOT NULL DEFAULT 0,
+                      PRIMARY KEY (scope_key, endpoint, exact_key)
+                    );
+                    """
+                )
             except Exception:
-                from server.models.tribrid_config_model import TriBridConfig
+                try:
+                    from server.config import load_config as _load_global_config
 
-                dim = int(TriBridConfig().embedding.embedding_dim)
-            await conn.execute(
-                f"""
-                CREATE TABLE IF NOT EXISTS semantic_cache_entries (
-                  scope_key TEXT NOT NULL,
-                  endpoint TEXT NOT NULL,
-                  exact_key TEXT NOT NULL,
-                  query_text TEXT NOT NULL,
-                  query_embedding vector({dim}),
-                  request_fingerprint TEXT NOT NULL DEFAULT '',
-                  payload JSONB NOT NULL,
-                  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-                  expires_at TIMESTAMPTZ NOT NULL,
-                  last_hit_at TIMESTAMPTZ,
-                  hit_count BIGINT NOT NULL DEFAULT 0,
-                  PRIMARY KEY (scope_key, endpoint, exact_key)
-                );
-                """
-            )
+                    dim = int(_load_global_config().embedding.embedding_dim)
+                except Exception:
+                    from server.models.tribrid_config_model import TriBridConfig
+
+                    dim = int(TriBridConfig().embedding.embedding_dim)
+                await conn.execute(
+                    f"""
+                    CREATE TABLE IF NOT EXISTS semantic_cache_entries (
+                      scope_key TEXT NOT NULL,
+                      endpoint TEXT NOT NULL,
+                      exact_key TEXT NOT NULL,
+                      query_text TEXT NOT NULL,
+                      query_embedding vector({dim}),
+                      request_fingerprint TEXT NOT NULL DEFAULT '',
+                      payload JSONB NOT NULL,
+                      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                      expires_at TIMESTAMPTZ NOT NULL,
+                      last_hit_at TIMESTAMPTZ,
+                      hit_count BIGINT NOT NULL DEFAULT 0,
+                      PRIMARY KEY (scope_key, endpoint, exact_key)
+                    );
+                    """
+                )
         await conn.execute(
             """
             CREATE INDEX IF NOT EXISTS idx_semantic_cache_scope_endpoint_expiry
@@ -348,7 +379,7 @@ class PostgresClient:
         # Embedding cache store (indexing-time embedding reuse).
         # Keyed by provider/model/dim/input hash so changing embedding model or
         # dimensions never reuses stale vectors.
-        try:
+        if not vector_available:
             await conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS embedding_cache_entries (
@@ -357,35 +388,51 @@ class PostgresClient:
                   dimensions INT NOT NULL,
                   input_hash TEXT NOT NULL,
                   input_text TEXT NOT NULL DEFAULT '',
-                  embedding vector,
+                  embedding DOUBLE PRECISION[],
                   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
                   PRIMARY KEY (provider, model, dimensions, input_hash)
                 );
                 """
             )
-        except Exception:
+        else:
             try:
-                from server.config import load_config as _load_global_config
-
-                dim = int(_load_global_config().embedding.embedding_dim)
+                await conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS embedding_cache_entries (
+                      provider TEXT NOT NULL,
+                      model TEXT NOT NULL,
+                      dimensions INT NOT NULL,
+                      input_hash TEXT NOT NULL,
+                      input_text TEXT NOT NULL DEFAULT '',
+                      embedding vector,
+                      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                      PRIMARY KEY (provider, model, dimensions, input_hash)
+                    );
+                    """
+                )
             except Exception:
-                from server.models.tribrid_config_model import TriBridConfig
+                try:
+                    from server.config import load_config as _load_global_config
 
-                dim = int(TriBridConfig().embedding.embedding_dim)
-            await conn.execute(
-                f"""
-                CREATE TABLE IF NOT EXISTS embedding_cache_entries (
-                  provider TEXT NOT NULL,
-                  model TEXT NOT NULL,
-                  dimensions INT NOT NULL,
-                  input_hash TEXT NOT NULL,
-                  input_text TEXT NOT NULL DEFAULT '',
-                  embedding vector({dim}),
-                  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-                  PRIMARY KEY (provider, model, dimensions, input_hash)
-                );
-                """
-            )
+                    dim = int(_load_global_config().embedding.embedding_dim)
+                except Exception:
+                    from server.models.tribrid_config_model import TriBridConfig
+
+                    dim = int(TriBridConfig().embedding.embedding_dim)
+                await conn.execute(
+                    f"""
+                    CREATE TABLE IF NOT EXISTS embedding_cache_entries (
+                      provider TEXT NOT NULL,
+                      model TEXT NOT NULL,
+                      dimensions INT NOT NULL,
+                      input_hash TEXT NOT NULL,
+                      input_text TEXT NOT NULL DEFAULT '',
+                      embedding vector({dim}),
+                      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                      PRIMARY KEY (provider, model, dimensions, input_hash)
+                    );
+                    """
+                )
         await conn.execute(
             """
             CREATE INDEX IF NOT EXISTS idx_embedding_cache_created_at
@@ -398,7 +445,7 @@ class PostgresClient:
         # pgvector supports both dimensioned and (in newer versions) undimensioned vector columns.
         # Prefer undimensioned to support per-corpus embedding dims; fall back to a fixed dim when
         # running against older pgvector versions that require an explicit dimension.
-        try:
+        if not vector_available:
             await conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS chunks (
@@ -411,42 +458,62 @@ class PostgresClient:
                   content TEXT NOT NULL,
                   token_count INT NOT NULL DEFAULT 0,
                   metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
-                  embedding vector,
+                  embedding DOUBLE PRECISION[],
                   tsv tsvector,
                   PRIMARY KEY (repo_id, chunk_id)
                 );
                 """
             )
-        except Exception:
+        else:
             # Fallback: fixed dimension (matches THE LAW embedding.embedding_dim).
             # NOTE: This fallback is only needed on older pgvector versions that require
             # an explicit vector dimension in the schema.
             try:
-                from server.config import load_config as _load_global_config
-
-                dim = int(_load_global_config().embedding.embedding_dim)
+                await conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS chunks (
+                      repo_id TEXT NOT NULL REFERENCES corpora(repo_id) ON DELETE CASCADE,
+                      chunk_id TEXT NOT NULL,
+                      file_path TEXT NOT NULL,
+                      start_line INT NOT NULL,
+                      end_line INT NOT NULL,
+                      language TEXT,
+                      content TEXT NOT NULL,
+                      token_count INT NOT NULL DEFAULT 0,
+                      metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+                      embedding vector,
+                      tsv tsvector,
+                      PRIMARY KEY (repo_id, chunk_id)
+                    );
+                    """
+                )
             except Exception:
-                from server.models.tribrid_config_model import TriBridConfig
+                try:
+                    from server.config import load_config as _load_global_config
 
-                dim = int(TriBridConfig().embedding.embedding_dim)
-            await conn.execute(
-                f"""
-                CREATE TABLE IF NOT EXISTS chunks (
-                  repo_id TEXT NOT NULL REFERENCES corpora(repo_id) ON DELETE CASCADE,
-                  chunk_id TEXT NOT NULL,
-                  file_path TEXT NOT NULL,
-                  start_line INT NOT NULL,
-                  end_line INT NOT NULL,
-                  language TEXT,
-                  content TEXT NOT NULL,
-                  token_count INT NOT NULL DEFAULT 0,
-                  metadata JSONB NOT NULL DEFAULT '{{}}'::jsonb,
-                  embedding vector({dim}),
-                  tsv tsvector,
-                  PRIMARY KEY (repo_id, chunk_id)
-                );
-                """
-            )
+                    dim = int(_load_global_config().embedding.embedding_dim)
+                except Exception:
+                    from server.models.tribrid_config_model import TriBridConfig
+
+                    dim = int(TriBridConfig().embedding.embedding_dim)
+                await conn.execute(
+                    f"""
+                    CREATE TABLE IF NOT EXISTS chunks (
+                      repo_id TEXT NOT NULL REFERENCES corpora(repo_id) ON DELETE CASCADE,
+                      chunk_id TEXT NOT NULL,
+                      file_path TEXT NOT NULL,
+                      start_line INT NOT NULL,
+                      end_line INT NOT NULL,
+                      language TEXT,
+                      content TEXT NOT NULL,
+                      token_count INT NOT NULL DEFAULT 0,
+                      metadata JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                      embedding vector({dim}),
+                      tsv tsvector,
+                      PRIMARY KEY (repo_id, chunk_id)
+                    );
+                    """
+                )
 
         # Schema upgrade: chat requires arbitrary chunk metadata (JSONB).
         # Must run every boot; idempotent for existing installs.
@@ -461,17 +528,18 @@ class PostgresClient:
 
         # Optional recall-only HNSW index for low-latency Recall vector search.
         # Best-effort: do not block startup if the pgvector build lacks HNSW support.
-        try:
-            await conn.execute(
-                """
-                CREATE INDEX IF NOT EXISTS idx_chunks_recall_embedding_hnsw
-                  ON chunks USING hnsw (embedding vector_cosine_ops)
-                  WITH (m = 16, ef_construction = 64)
-                  WHERE repo_id = 'recall_default' AND embedding IS NOT NULL;
-                """
-            )
-        except Exception:
-            pass
+        if vector_available:
+            try:
+                await conn.execute(
+                    """
+                    CREATE INDEX IF NOT EXISTS idx_chunks_recall_embedding_hnsw
+                      ON chunks USING hnsw (embedding vector_cosine_ops)
+                      WITH (m = 16, ef_construction = 64)
+                      WHERE repo_id = 'recall_default' AND embedding IS NOT NULL;
+                    """
+                )
+            except Exception:
+                pass
 
         # Optional BM25 index via ParadeDB pg_search.
         #
@@ -547,6 +615,7 @@ class PostgresClient:
             );
             """
         )
+        return vector_available
 
     async def _detect_pg_search(self) -> bool:
         await self._require_pool()
@@ -646,6 +715,8 @@ class PostgresClient:
     async def upsert_embeddings(self, repo_id: str, chunks: list[Chunk]) -> int:
         if not chunks:
             return 0
+        if self._vector_available is False:
+            return 0
         await self._require_pool()
         assert self._pool is not None
 
@@ -698,6 +769,8 @@ class PostgresClient:
         self, repo_id: str, embedding: list[float], top_k: int, *, expected_dimensions: int = 0
     ) -> list[ChunkMatch]:
         if top_k <= 0:
+            return []
+        if self._vector_available is False:
             return []
         if expected_dimensions > 0 and len(embedding) != expected_dimensions:
             raise ValueError(
@@ -1616,6 +1689,8 @@ class PostgresClient:
         min_similarity: float,
     ) -> dict[str, Any] | None:
         if not query_embedding:
+            return None
+        if self._vector_available is False:
             return None
         await self._require_pool()
         assert self._pool is not None
