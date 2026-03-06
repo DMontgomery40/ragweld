@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -62,7 +63,25 @@ def _load_dotenv_file(dotenv_path: Path) -> bool:
 # Best-effort convenience only; never block API startup.
 _load_dotenv_file(Path(__file__).resolve().parents[1] / ".env")
 
-app = FastAPI(title="TriBridRAG", version="0.1.0")
+_global_cfg = load_config()
+if _global_cfg.mcp.enabled:
+    _mcp = get_mcp_server()
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    mcp_session_cm = None
+    if _global_cfg.mcp.enabled:
+        mcp_session_cm = _mcp.session_manager.run()
+        await mcp_session_cm.__aenter__()
+    try:
+        yield
+    finally:
+        if mcp_session_cm is not None:
+            await mcp_session_cm.__aexit__(None, None, None)
+
+
+app = FastAPI(title="TriBridRAG", version="0.1.0", lifespan=lifespan)
 
 # Allow local dev UIs (Vite, etc.) to call the API without CORS issues.
 # In production, the UI is typically served from the same origin (/web), so this is harmless.
@@ -76,32 +95,8 @@ app.add_middleware(
     expose_headers=["Mcp-Session-Id"],
 )
 
-_mcp_session_cm = None
-_global_cfg = load_config()
 if _global_cfg.mcp.enabled:
-    _mcp = get_mcp_server()
     app.mount(_global_cfg.mcp.mount_path, _mcp.streamable_http_app())
-
-
-@app.on_event("startup")
-async def _mcp_startup() -> None:
-    global _mcp_session_cm
-    if not _global_cfg.mcp.enabled:
-        return
-    if _mcp_session_cm is not None:
-        return
-    _mcp_session_cm = _mcp.session_manager.run()
-    await _mcp_session_cm.__aenter__()
-
-
-@app.on_event("shutdown")
-async def _mcp_shutdown() -> None:
-    global _mcp_session_cm
-    cm = _mcp_session_cm
-    _mcp_session_cm = None
-    if cm is None:
-        return
-    await cm.__aexit__(None, None, None)
 
 
 @app.get("/metrics")
