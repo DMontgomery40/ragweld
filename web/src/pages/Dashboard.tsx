@@ -44,7 +44,7 @@ export function Dashboard() {
 
       {/* Storage Subtab */}
       <div style={{ display: activeSubtab === 'storage' ? 'block' : 'none' }}>
-        <StorageSubtab />
+        {activeSubtab === 'storage' ? <StorageSubtab /> : null}
       </div>
 
       {/* Help Subtab */}
