@@ -24,49 +24,49 @@ export default function RAGTab() {
       {/* All subtabs rendered with visibility controlled by className */}
       <div id="tab-rag-data-quality" className={`rag-subtab-content ${activeSubtab === 'data-quality' ? 'active' : ''}`}>
         <ErrorBoundary context="DataQualitySubtab">
-          <DataQualitySubtab />
+          {activeSubtab === 'data-quality' ? <DataQualitySubtab /> : null}
         </ErrorBoundary>
       </div>
 
       <div id="tab-rag-retrieval" className={`rag-subtab-content ${activeSubtab === 'retrieval' ? 'active' : ''}`}>
         <ErrorBoundary context="RetrievalSubtab">
-          <RetrievalSubtab />
+          {activeSubtab === 'retrieval' ? <RetrievalSubtab /> : null}
         </ErrorBoundary>
       </div>
 
       <div id="tab-rag-graph" className={`rag-subtab-content ${activeSubtab === 'graph' ? 'active' : ''}`}>
         <ErrorBoundary context="GraphSubtab">
-          <GraphSubtab />
+          {activeSubtab === 'graph' ? <GraphSubtab /> : null}
         </ErrorBoundary>
       </div>
 
       <div id="tab-rag-reranker-config" className={`rag-subtab-content ${activeSubtab === 'reranker-config' ? 'active' : ''}`}>
         <ErrorBoundary context="RerankerConfigSubtab">
-          <RerankerConfigSubtab />
+          {activeSubtab === 'reranker-config' ? <RerankerConfigSubtab /> : null}
         </ErrorBoundary>
       </div>
 
       <div id="tab-rag-learning-ranker" className={`rag-subtab-content ${activeSubtab === 'learning-ranker' ? 'active' : ''}`}>
         <ErrorBoundary context="LearningRankerSubtab">
-          <LearningRankerSubtab />
+          {activeSubtab === 'learning-ranker' ? <LearningRankerSubtab /> : null}
         </ErrorBoundary>
       </div>
 
       <div id="tab-rag-learning-agent" className={`rag-subtab-content ${activeSubtab === 'learning-agent' ? 'active' : ''}`}>
         <ErrorBoundary context="LearningAgentSubtab">
-          <LearningAgentSubtab />
+          {activeSubtab === 'learning-agent' ? <LearningAgentSubtab /> : null}
         </ErrorBoundary>
       </div>
 
       <div id="tab-rag-indexing" className={`rag-subtab-content ${activeSubtab === 'indexing' ? 'active' : ''}`}>
         <ErrorBoundary context="IndexingSubtab">
-          <IndexingSubtab />
+          {activeSubtab === 'indexing' ? <IndexingSubtab /> : null}
         </ErrorBoundary>
       </div>
 
       <div id="tab-rag-synthetic" className={`rag-subtab-content ${activeSubtab === 'synthetic' ? 'active' : ''}`}>
         <ErrorBoundary context="SyntheticLabSubtab">
-          <SyntheticLabSubtab />
+          {activeSubtab === 'synthetic' ? <SyntheticLabSubtab /> : null}
         </ErrorBoundary>
       </div>
     </div>
