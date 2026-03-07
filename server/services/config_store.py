@@ -10,10 +10,10 @@ This module provides a small API to load/save either global or per-corpus config
 
 from __future__ import annotations
 
+import asyncio
 import copy
 import json
 import logging
-import asyncio
 from typing import Any
 
 from server.config import DEFAULT_CONFIG_PATH
