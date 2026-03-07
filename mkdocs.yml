@@ -137,6 +137,7 @@ nav:
       - Operations & metrics: operations.md
       - Startup & lifecycle: operations/lifecycle.md
       - Postgres schema modes: operations/postgres.md
+      - MLX chat model lifecycle: operations/mlx.md
       - Alert webhooks: operations/webhooks.md
       - Security: security.md
       - Troubleshooting: troubleshooting.md
