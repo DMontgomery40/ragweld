@@ -14,6 +14,18 @@
 
     System status, monitoring links, storage, help, and glossary.
 
+-   :material-rocket-launch:{ .lg .middle } **Get Started**
+
+    ---
+
+    The fastest way to bring the stack up and learn the “happy path”.
+
+-   :material-monitor-dashboard:{ .lg .middle } **Dashboard**
+
+    ---
+
+    System status, monitoring links, storage, help, and glossary.
+
 -   :material-brain:{ .lg .middle } **RAG**
 
     ---
@@ -82,6 +94,19 @@ The UI is organized into top-level tabs. Here’s the practical meaning of each:
 | Eval Analysis | Analyze eval runs and datasets | `/web/eval?subtab=analysis` |
 | Infrastructure | Docker status, MCP servers, paths/stores | `/web/infrastructure?subtab=services` |
 | Admin | Secrets and integrations | `/web/admin?subtab=secrets` |
+
+!!! note "Startup load: Dashboard → Storage is lazy-loaded"
+    To keep first paint cheap and avoid unnecessary database IO, ragweld does not fetch storage/indexing metrics until you open the Storage subtab.
+    
+    - On initial load of `/web/dashboard?subtab=system`, the UI makes zero calls to `/api/index/stats`.
+    - Open Dashboard → Storage to trigger the fetch and render per-corpus storage and indexing stats.
+    - If you expected to see numbers but the panel looks empty, you are probably still on the System subtab. Click Storage (or use the panel’s Refresh control) to populate it.
+
+??? tip "Verify in your browser’s Network panel"
+    - Go to `/web/dashboard` (the System subtab).
+    - Open DevTools → Network and filter for `/api/index/stats`.
+    - You should see no requests until you click the Storage subtab.
+    - This behavior is by design to reduce background load on Postgres at startup.
 
 !!! warning "If something looks empty"
     Most RAG panels depend on a **selected corpus** and a **completed index**. If you haven’t indexed yet, start at [Indexing](indexing.md).
