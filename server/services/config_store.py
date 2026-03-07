@@ -10,6 +10,7 @@ This module provides a small API to load/save either global or per-corpus config
 
 from __future__ import annotations
 
+import asyncio
 import copy
 import json
 import logging
@@ -111,73 +112,87 @@ class ConfigStore:
     def __init__(self, postgres_dsn: str):
         self._postgres = PostgresClient(postgres_dsn, schema_mode="control")
         self._cache: dict[str | None, TriBridConfig] = {}
+        self._locks: dict[str | None, asyncio.Lock] = {}
+        self._locks_guard = asyncio.Lock()
+
+    async def _get_lock(self, repo_id: str | None) -> asyncio.Lock:
+        async with self._locks_guard:
+            lock = self._locks.get(repo_id)
+            if lock is None:
+                lock = asyncio.Lock()
+                self._locks[repo_id] = lock
+            return lock
 
     async def get(self, repo_id: str | None = None) -> TriBridConfig:
         """Get config for a corpus (repo_id) or global when repo_id is None."""
-        if repo_id in self._cache:
-            return self._cache[repo_id].model_copy(deep=True)
+        lock = await self._get_lock(repo_id)
+        async with lock:
+            if repo_id in self._cache:
+                return self._cache[repo_id].model_copy(deep=True)
 
-        if repo_id is None:
-            cfg: TriBridConfig
-            changed = False
-            migrated: list[str] = []
-            if DEFAULT_CONFIG_PATH.exists():
-                try:
-                    raw = json.loads(DEFAULT_CONFIG_PATH.read_text())
-                except Exception:
-                    raw = None
-                if isinstance(raw, dict):
-                    cfg, changed, migrated = _upgrade_raw_config(raw)
+            if repo_id is None:
+                cfg: TriBridConfig
+                changed = False
+                migrated: list[str] = []
+                if DEFAULT_CONFIG_PATH.exists():
+                    try:
+                        raw = json.loads(DEFAULT_CONFIG_PATH.read_text())
+                    except Exception:
+                        raw = None
+                    if isinstance(raw, dict):
+                        cfg, changed, migrated = _upgrade_raw_config(raw)
+                    else:
+                        cfg = load_global_config()
                 else:
                     cfg = load_global_config()
+
+                if changed:
+                    save_global_config(cfg)
+                    if migrated:
+                        logger.info("Auto-migrated global config keys: %s", ", ".join(migrated))
+                self._cache[None] = cfg.model_copy(deep=True)
+                return self._cache[None].model_copy(deep=True)
+
+            # Per-corpus config lives in Postgres
+            base = (await self.get(repo_id=None)).model_copy(deep=True)
+            await self._postgres.connect()
+
+            # Ensure corpus row exists (do NOT auto-create on read)
+            corpus = await self._postgres.get_corpus(repo_id)
+            if corpus is None:
+                raise CorpusNotFoundError(f"Corpus not found: {repo_id}")
+
+            raw = await self._postgres.get_corpus_config_json(repo_id)
+            if raw is None:
+                # Seed new corpus config from the global template
+                await self._postgres.upsert_corpus_config_json(repo_id, base.model_dump())
+                cfg = base
             else:
-                cfg = load_global_config()
-
-            if changed:
-                save_global_config(cfg)
-                if migrated:
-                    logger.info("Auto-migrated global config keys: %s", ", ".join(migrated))
-            self._cache[None] = cfg.model_copy(deep=True)
-            return self._cache[None].model_copy(deep=True)
-
-        # Per-corpus config lives in Postgres
-        base = (await self.get(repo_id=None)).model_copy(deep=True)
-        await self._postgres.connect()
-
-        # Ensure corpus row exists (do NOT auto-create on read)
-        corpus = await self._postgres.get_corpus(repo_id)
-        if corpus is None:
-            raise CorpusNotFoundError(f"Corpus not found: {repo_id}")
-
-        raw = await self._postgres.get_corpus_config_json(repo_id)
-        if raw is None:
-            # Seed new corpus config from the global template
-            await self._postgres.upsert_corpus_config_json(repo_id, base.model_dump())
-            cfg = base
-        else:
-            cfg, changed, migrated = _upgrade_raw_config(raw)
-            if changed:
-                await self._postgres.upsert_corpus_config_json(repo_id, cfg.model_dump())
-                if migrated:
-                    logger.info("Auto-migrated corpus config keys repo_id=%s: %s", repo_id, ", ".join(migrated))
-        self._cache[repo_id] = cfg.model_copy(deep=True)
-        return self._cache[repo_id].model_copy(deep=True)
+                cfg, changed, migrated = _upgrade_raw_config(raw)
+                if changed:
+                    await self._postgres.upsert_corpus_config_json(repo_id, cfg.model_dump())
+                    if migrated:
+                        logger.info("Auto-migrated corpus config keys repo_id=%s: %s", repo_id, ", ".join(migrated))
+            self._cache[repo_id] = cfg.model_copy(deep=True)
+            return self._cache[repo_id].model_copy(deep=True)
 
     async def save(self, config: TriBridConfig, repo_id: str | None = None) -> TriBridConfig:
         """Persist config for a corpus (repo_id) or global when repo_id is None."""
-        _migrate_config_in_place(config)
-        if repo_id is None:
-            save_global_config(config)
-            self._cache[None] = config.model_copy(deep=True)
-            return self._cache[None].model_copy(deep=True)
+        lock = await self._get_lock(repo_id)
+        async with lock:
+            _migrate_config_in_place(config)
+            if repo_id is None:
+                save_global_config(config)
+                self._cache[None] = config.model_copy(deep=True)
+                return self._cache[None].model_copy(deep=True)
 
-        await self._postgres.connect()
-        corpus = await self._postgres.get_corpus(repo_id)
-        if corpus is None:
-            raise CorpusNotFoundError(f"Corpus not found: {repo_id}")
-        await self._postgres.upsert_corpus_config_json(repo_id, config.model_dump())
-        self._cache[repo_id] = config.model_copy(deep=True)
-        return self._cache[repo_id].model_copy(deep=True)
+            await self._postgres.connect()
+            corpus = await self._postgres.get_corpus(repo_id)
+            if corpus is None:
+                raise CorpusNotFoundError(f"Corpus not found: {repo_id}")
+            await self._postgres.upsert_corpus_config_json(repo_id, config.model_dump())
+            self._cache[repo_id] = config.model_copy(deep=True)
+            return self._cache[repo_id].model_copy(deep=True)
 
     async def reset(self, repo_id: str | None = None) -> TriBridConfig:
         """Reset config to LAW defaults for the selected scope."""
