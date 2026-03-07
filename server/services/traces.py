@@ -132,7 +132,10 @@ class TraceStore:
 
     async def get_trace(self, run_id: str) -> Trace | None:
         async with self._lock:
-            return self._traces.get(run_id)
+            trace = self._traces.get(run_id)
+            if trace is None:
+                return None
+            return trace.model_copy(deep=True)
 
     async def latest(self, *, repo: str | None = None, run_id: str | None = None) -> TracesLatestResponse:
         """Return the latest trace (optionally for a repo or specific run_id)."""
@@ -146,13 +149,22 @@ class TraceStore:
                 if not dq:
                     return TracesLatestResponse(repo=repo, run_id=None, trace=None)
                 rid = dq[-1]
-                return TracesLatestResponse(repo=repo, run_id=rid, trace=self._traces.get(rid))
+                trace = self._traces.get(rid)
+                return TracesLatestResponse(
+                    repo=repo,
+                    run_id=rid,
+                    trace=(trace.model_copy(deep=True) if trace is not None else None),
+                )
 
             if not self._order:
                 return TracesLatestResponse(repo=None, run_id=None, trace=None)
             rid = self._order[-1]
             tr = self._traces.get(rid)
-            return TracesLatestResponse(repo=(tr.repo_id if tr else None), run_id=rid, trace=tr)
+            return TracesLatestResponse(
+                repo=(tr.repo_id if tr else None),
+                run_id=rid,
+                trace=(tr.model_copy(deep=True) if tr is not None else None),
+            )
 
     async def _enforce_retention_locked(self, *, repo_id: str, config: TriBridConfig) -> None:
         """Evict old traces for repo_id to satisfy config.tracing.trace_retention."""
@@ -181,4 +193,3 @@ _TRACE_STORE = TraceStore()
 
 def get_trace_store() -> TraceStore:
     return _TRACE_STORE
-
