@@ -185,6 +185,7 @@ class RagweldMLXChatModel:
         self._loaded: _Loaded | None = None
         self._in_use: int = 0
         self._last_used_mono: float = 0.0
+        self._idle_unload_task: asyncio.Task[None] | None = None
 
     async def generate(
         self,
@@ -406,6 +407,10 @@ class RagweldMLXChatModel:
         if sec <= 0:
             return
 
+        prev = self._idle_unload_task
+        if prev is not None and not prev.done():
+            prev.cancel()
+
         async def _task() -> None:
             await asyncio.sleep(sec)
             async with self._lock:
@@ -420,7 +425,7 @@ class RagweldMLXChatModel:
                     return
                 self._loaded = None
 
-        asyncio.create_task(_task())
+        self._idle_unload_task = asyncio.create_task(_task())
 
 
 _CACHE_LOCK = asyncio.Lock()
