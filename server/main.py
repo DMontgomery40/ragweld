@@ -73,7 +73,7 @@ async def _enter_lifecycle_cm(cm: Any) -> None:
     """Enter async context manager and best-effort unwind on enter failure."""
     try:
         await cm.__aenter__()
-    except Exception as e:
+    except BaseException as e:
         try:
             await cm.__aexit__(type(e), e, e.__traceback__)
         except Exception:
