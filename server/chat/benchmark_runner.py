@@ -80,7 +80,11 @@ async def run_benchmark(*, prompt: str, models: list[str], config: TriBridConfig
     run_id = uuid.uuid4().hex
     started_at_ms = _now_ms()
 
-    max_concurrent = int(getattr(config.chat.benchmark, "max_concurrent_models", 1) or 1)
+    try:
+        max_concurrent = int(getattr(config.chat.benchmark, "max_concurrent_models", 1) or 1)
+    except Exception:
+        max_concurrent = 1
+    max_concurrent = max(1, max_concurrent)
     sem = asyncio.Semaphore(max_concurrent)
 
     tasks = [asyncio.create_task(_run_one(prompt=prompt, model=m, config=config, sem=sem)) for m in models]
