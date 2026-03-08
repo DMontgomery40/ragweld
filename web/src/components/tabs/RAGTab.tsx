@@ -1,17 +1,22 @@
 // TriBridRAG - RAG Tab Component (React)
 // Main RAG configuration tab with subtab navigation
 
+import { lazy, Suspense } from 'react';
 import { useSubtab } from '@/hooks/useSubtab';
 import { RAGSubtabs } from '@/components/RAG/RAGSubtabs';
 import { DataQualitySubtab } from '@/components/RAG/DataQualitySubtab';
 import { RetrievalSubtab } from '@/components/RAG/RetrievalSubtab';
-import { GraphSubtab } from '@/components/RAG/GraphSubtab';
 import { RerankerConfigSubtab } from '@/components/RAG/RerankerConfigSubtab';
 import { LearningRankerSubtab } from '@/components/RAG/LearningRankerSubtab';
 import { LearningAgentSubtab } from '@/components/RAG/LearningAgentSubtab';
 import { IndexingSubtab } from '@/components/RAG/IndexingSubtab';
 import { SyntheticLabSubtab } from '@/components/RAG/SyntheticLabSubtab';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
+
+const GraphSubtab = lazy(async () => {
+  const module = await import('@/components/RAG/GraphSubtab');
+  return { default: module.GraphSubtab };
+});
 
 export default function RAGTab() {
   const { activeSubtab, setSubtab } = useSubtab<string>({ routePath: '/rag', defaultSubtab: 'data-quality' });
@@ -36,7 +41,11 @@ export default function RAGTab() {
 
       <div id="tab-rag-graph" className={`rag-subtab-content ${activeSubtab === 'graph' ? 'active' : ''}`}>
         <ErrorBoundary context="GraphSubtab">
-          {activeSubtab === 'graph' ? <GraphSubtab /> : null}
+          {activeSubtab === 'graph' ? (
+            <Suspense fallback={<div className="loading">Loading graph view…</div>}>
+              <GraphSubtab />
+            </Suspense>
+          ) : null}
         </ErrorBoundary>
       </div>
 
