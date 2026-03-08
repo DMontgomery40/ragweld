@@ -721,13 +721,15 @@ class PostgresClient:
     async def upsert_embeddings(self, repo_id: str, chunks: list[Chunk]) -> int:
         if not chunks:
             return 0
-        if self._vector_available is False:
-            return 0
         await self._require_pool()
         assert self._pool is not None
 
         async with self._pool.acquire() as conn:
-            await register_vector(conn)
+            if self._vector_available is not False:
+                try:
+                    await register_vector(conn)
+                except Exception:
+                    pass
             await self._ensure_corpus_row(conn, repo_id, name=repo_id, root_path=".")
 
             stmt = """
@@ -776,8 +778,6 @@ class PostgresClient:
     ) -> list[ChunkMatch]:
         if top_k <= 0:
             return []
-        if self._vector_available is False:
-            return []
         if expected_dimensions > 0 and len(embedding) != expected_dimensions:
             raise ValueError(
                 f"Query embedding dimension ({len(embedding)}) does not match "
@@ -788,20 +788,57 @@ class PostgresClient:
         assert self._pool is not None
 
         async with self._pool.acquire() as conn:
-            await register_vector(conn)
-            rows = await conn.fetch(
-                """
-                SELECT chunk_id, content, file_path, start_line, end_line, language, metadata,
-                       (1 - (embedding <=> $1))::float8 AS score
-                FROM chunks
-                WHERE repo_id = $2 AND embedding IS NOT NULL
-                ORDER BY embedding <=> $1
-                LIMIT $3;
-                """,
-                embedding,
-                repo_id,
-                int(top_k),
-            )
+            if self._vector_available is False:
+                rows = await conn.fetch(
+                    """
+                    WITH q AS (
+                      SELECT $1::double precision[] AS qv
+                    ),
+                    candidates AS (
+                      SELECT chunk_id, content, file_path, start_line, end_line, language, metadata, embedding
+                      FROM chunks
+                      WHERE repo_id = $2
+                        AND embedding IS NOT NULL
+                        AND array_length(embedding, 1) = $4
+                    )
+                    SELECT c.chunk_id, c.content, c.file_path, c.start_line, c.end_line, c.language, c.metadata,
+                           CASE
+                             WHEN v.q_norm = 0 OR v.e_norm = 0 THEN 0::float8
+                             ELSE (v.dot / (v.q_norm * v.e_norm))::float8
+                           END AS score
+                    FROM candidates c
+                    CROSS JOIN LATERAL (
+                      SELECT
+                        COALESCE(SUM(qe.q_val * ee.e_val), 0::float8) AS dot,
+                        SQRT(COALESCE(SUM(qe.q_val * qe.q_val), 0::float8)) AS q_norm,
+                        SQRT(COALESCE(SUM(ee.e_val * ee.e_val), 0::float8)) AS e_norm
+                      FROM unnest((SELECT qv FROM q)) WITH ORDINALITY AS qe(q_val, idx)
+                      JOIN unnest(c.embedding) WITH ORDINALITY AS ee(e_val, idx)
+                        ON qe.idx = ee.idx
+                    ) AS v
+                    ORDER BY score DESC
+                    LIMIT $3;
+                    """,
+                    [float(x) for x in embedding],
+                    repo_id,
+                    int(top_k),
+                    int(len(embedding)),
+                )
+            else:
+                await register_vector(conn)
+                rows = await conn.fetch(
+                    """
+                    SELECT chunk_id, content, file_path, start_line, end_line, language, metadata,
+                           (1 - (embedding <=> $1))::float8 AS score
+                    FROM chunks
+                    WHERE repo_id = $2 AND embedding IS NOT NULL
+                    ORDER BY embedding <=> $1
+                    LIMIT $3;
+                    """,
+                    embedding,
+                    repo_id,
+                    int(top_k),
+                )
 
         return [
             ChunkMatch(
@@ -1696,41 +1733,86 @@ class PostgresClient:
     ) -> dict[str, Any] | None:
         if not query_embedding:
             return None
-        if self._vector_available is False:
-            return None
         await self._require_pool()
         assert self._pool is not None
         async with self._pool.acquire() as conn:
-            try:
-                await register_vector(conn)
-            except Exception:
-                pass
-            row = await conn.fetchrow(
-                """
-                WITH candidates AS (
-                    SELECT scope_key, endpoint, exact_key, request_fingerprint, payload, query_embedding
-                    FROM semantic_cache_entries
-                    WHERE scope_key = $1
-                      AND endpoint = $2
-                      AND request_fingerprint = $4
-                      AND expires_at > now()
-                      AND query_embedding IS NOT NULL
-                      AND vector_dims(query_embedding) = $6
+            if self._vector_available is False:
+                row = await conn.fetchrow(
+                    """
+                    WITH q AS (
+                      SELECT $3::double precision[] AS qv
+                    ),
+                    candidates AS (
+                      SELECT scope_key, endpoint, exact_key, request_fingerprint, payload, query_embedding
+                      FROM semantic_cache_entries
+                      WHERE scope_key = $1
+                        AND endpoint = $2
+                        AND request_fingerprint = $4
+                        AND expires_at > now()
+                        AND query_embedding IS NOT NULL
+                        AND array_length(query_embedding, 1) = $6
+                    ),
+                    scored AS (
+                      SELECT c.scope_key, c.endpoint, c.exact_key, c.request_fingerprint, c.payload,
+                             CASE
+                               WHEN v.q_norm = 0 OR v.e_norm = 0 THEN 0::float8
+                               ELSE (v.dot / (v.q_norm * v.e_norm))::float8
+                             END AS similarity
+                      FROM candidates c
+                      CROSS JOIN LATERAL (
+                        SELECT
+                          COALESCE(SUM(qe.q_val * ee.e_val), 0::float8) AS dot,
+                          SQRT(COALESCE(SUM(qe.q_val * qe.q_val), 0::float8)) AS q_norm,
+                          SQRT(COALESCE(SUM(ee.e_val * ee.e_val), 0::float8)) AS e_norm
+                        FROM unnest((SELECT qv FROM q)) WITH ORDINALITY AS qe(q_val, idx)
+                        JOIN unnest(c.query_embedding) WITH ORDINALITY AS ee(e_val, idx)
+                          ON qe.idx = ee.idx
+                      ) AS v
+                    )
+                    SELECT scope_key, endpoint, exact_key, request_fingerprint, payload, similarity
+                    FROM scored
+                    WHERE similarity >= $5
+                    ORDER BY similarity DESC
+                    LIMIT 1;
+                    """,
+                    str(scope_key),
+                    str(endpoint),
+                    [float(x) for x in query_embedding],
+                    str(request_fingerprint or ""),
+                    float(min_similarity),
+                    int(len(query_embedding)),
                 )
-                SELECT scope_key, endpoint, exact_key, request_fingerprint, payload,
-                       (1 - (query_embedding <=> $3))::float8 AS similarity
-                FROM candidates
-                WHERE (1 - (query_embedding <=> $3)) >= $5
-                ORDER BY query_embedding <=> $3
-                LIMIT 1;
-                """,
-                str(scope_key),
-                str(endpoint),
-                [float(x) for x in query_embedding],
-                str(request_fingerprint or ""),
-                float(min_similarity),
-                int(len(query_embedding)),
-            )
+            else:
+                try:
+                    await register_vector(conn)
+                except Exception:
+                    pass
+                row = await conn.fetchrow(
+                    """
+                    WITH candidates AS (
+                        SELECT scope_key, endpoint, exact_key, request_fingerprint, payload, query_embedding
+                        FROM semantic_cache_entries
+                        WHERE scope_key = $1
+                          AND endpoint = $2
+                          AND request_fingerprint = $4
+                          AND expires_at > now()
+                          AND query_embedding IS NOT NULL
+                          AND vector_dims(query_embedding) = $6
+                    )
+                    SELECT scope_key, endpoint, exact_key, request_fingerprint, payload,
+                           (1 - (query_embedding <=> $3))::float8 AS similarity
+                    FROM candidates
+                    WHERE (1 - (query_embedding <=> $3)) >= $5
+                    ORDER BY query_embedding <=> $3
+                    LIMIT 1;
+                    """,
+                    str(scope_key),
+                    str(endpoint),
+                    [float(x) for x in query_embedding],
+                    str(request_fingerprint or ""),
+                    float(min_similarity),
+                    int(len(query_embedding)),
+                )
         if row is None:
             return None
         return {
