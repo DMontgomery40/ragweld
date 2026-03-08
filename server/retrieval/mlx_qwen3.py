@@ -322,6 +322,7 @@ class MLXQwen3Reranker:
         self._last_used_mono: float = 0.0
         self._unload_after_sec: int = 0
         self._unload_generation: int = 0
+        self._idle_unload_task: asyncio.Task[None] | None = None
 
     async def score_pairs_batched(
         self,
@@ -464,6 +465,10 @@ class MLXQwen3Reranker:
         if sec <= 0:
             return
 
+        prev = self._idle_unload_task
+        if prev is not None and not prev.done():
+            prev.cancel()
+
         async def _task() -> None:
             await asyncio.sleep(sec)
             async with self._lock:
@@ -478,7 +483,7 @@ class MLXQwen3Reranker:
                 self._token_ids = None
                 self._adapter_fp = None
 
-        asyncio.create_task(_task())
+        self._idle_unload_task = asyncio.create_task(_task())
 
 
 _MLX_CACHE_LOCK = asyncio.Lock()
