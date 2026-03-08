@@ -83,6 +83,20 @@ class TraceStore:
         self._order: deque[str] = deque()
         self._order_by_repo: dict[str, deque[str]] = {}
 
+    def _drop_run_id_indexes_locked(self, run_id: str) -> None:
+        """Remove all index references to run_id before replacing its trace entry."""
+        while True:
+            try:
+                self._order.remove(run_id)
+            except ValueError:
+                break
+        for dq in self._order_by_repo.values():
+            while True:
+                try:
+                    dq.remove(run_id)
+                except ValueError:
+                    break
+
     async def start(
         self,
         *,
@@ -98,6 +112,10 @@ class TraceStore:
             return False
 
         async with self._lock:
+            # If a caller reuses run_id (for retries/restarts), purge stale index
+            # entries so retention cannot evict the newly started trace.
+            if run_id in self._traces:
+                self._drop_run_id_indexes_locked(run_id)
             trace = Trace(run_id=run_id, repo_id=repo_id, started_at_ms=int(started_at_ms), ended_at_ms=None, events=[])
             self._traces[run_id] = trace
             self._order.append(run_id)
