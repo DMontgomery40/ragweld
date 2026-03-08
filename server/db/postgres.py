@@ -170,27 +170,33 @@ class PostgresClient:
             lock = asyncio.Lock()
             _POOL_LOCKS_BY_DSN[pool_key] = lock
 
-        async with lock:
-            pool = _POOLS_BY_DSN.get(pool_key)
-            if pool is None:
-                pool = await asyncpg.create_pool(dsn=dsn, min_size=1, max_size=10)
-                try:
-                    async with pool.acquire() as conn:
-                        # Control-plane routes (corpora/config) do not require pgvector.
-                        # Keep their bootstrap independent so they remain available
-                        # even when vector extensions are not installed.
-                        include_vector = self._schema_mode == "full"
-                        self._vector_available = await self._ensure_schema(conn, include_vector=include_vector)
-                        if include_vector and self._vector_available:
-                            await register_vector(conn)
-                except Exception:
-                    # Ensure we don't leave a half-initialized pool around.
-                    await pool.close()
-                    raise
-                _POOLS_BY_DSN[pool_key] = pool
-                _VECTOR_AVAILABLE_BY_DSN[pool_key] = bool(self._vector_available)
+        try:
+            async with lock:
+                pool = _POOLS_BY_DSN.get(pool_key)
+                if pool is None:
+                    pool = await asyncpg.create_pool(dsn=dsn, min_size=1, max_size=10)
+                    try:
+                        async with pool.acquire() as conn:
+                            # Control-plane routes (corpora/config) do not require pgvector.
+                            # Keep their bootstrap independent so they remain available
+                            # even when vector extensions are not installed.
+                            include_vector = self._schema_mode == "full"
+                            self._vector_available = await self._ensure_schema(conn, include_vector=include_vector)
+                            if include_vector and self._vector_available:
+                                await register_vector(conn)
+                    except Exception:
+                        # Ensure we don't leave a half-initialized pool around.
+                        await pool.close()
+                        raise
+                    _POOLS_BY_DSN[pool_key] = pool
+                    _VECTOR_AVAILABLE_BY_DSN[pool_key] = bool(self._vector_available)
 
-            self._pool = pool
+                self._pool = pool
+        except Exception:
+            # Failed initializations for unique DSNs should not accumulate lock objects.
+            if _POOLS_BY_DSN.get(pool_key) is None:
+                _POOL_LOCKS_BY_DSN.pop(pool_key, None)
+            raise
 
         # Cache extension presence for this client instance (best-effort).
         try:
