@@ -75,6 +75,7 @@ def _build_prompts_payload(cfg: TriBridConfig) -> PromptsResponse:
 
     # Chat-level prompts (read-only here; edited in Chat Settings)
     chat = cfg.chat
+    chat_fields = type(chat).model_fields
     chat_prompts: list[tuple[str, str]] = [
         ("system_prompt_base", "Base prompt (legacy)"),
         ("system_prompt_rag_suffix", "RAG suffix (legacy)"),
@@ -87,7 +88,7 @@ def _build_prompts_payload(cfg: TriBridConfig) -> PromptsResponse:
     for field, label in chat_prompts:
         key = f"chat.{field}"
         prompts[key] = str(getattr(chat, field, "") or "")
-        desc = str(getattr(chat.model_fields.get(field), "description", "") or "").strip()
+        desc = str(getattr(chat_fields.get(field), "description", "") or "").strip()
         if not desc:
             desc = f"Chat prompt: {field}"
         meta[key] = PromptMetadata(
@@ -106,12 +107,12 @@ def _set_prompt_value(cfg: TriBridConfig, prompt_key: str, value: str) -> TriBri
     """Mutate cfg in-place for a supported prompt key."""
     if prompt_key.startswith("chat."):
         field = prompt_key.split(".", 1)[1].strip()
-        if field not in cfg.chat.model_fields:
+        if field not in type(cfg.chat).model_fields:
             raise KeyError(prompt_key)
         setattr(cfg.chat, field, value)
         return cfg
 
-    if prompt_key in cfg.system_prompts.model_fields:
+    if prompt_key in type(cfg.system_prompts).model_fields:
         setattr(cfg.system_prompts, prompt_key, value)
         return cfg
 
