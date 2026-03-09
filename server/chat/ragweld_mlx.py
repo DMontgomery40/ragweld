@@ -445,13 +445,26 @@ async def get_ragweld_chat_model(*, base_model: str, adapter_dir: str) -> Ragwel
 
 async def clear_cache(adapter_dir: str | None = None) -> None:
     target = str(adapter_dir or "").strip()
+    removed_models: list[RagweldMLXChatModel] = []
     async with _CACHE_LOCK:
         if not target:
+            removed_models = list(_CACHE.values())
             _CACHE.clear()
-            return
-        keys = [k for k in _CACHE.keys() if str(k[1]) == target]
-        for k in keys:
-            _CACHE.pop(k, None)
+        else:
+            keys = [k for k in _CACHE.keys() if str(k[1]) == target]
+            for k in keys:
+                removed = _CACHE.pop(k, None)
+                if removed is not None:
+                    removed_models.append(removed)
+
+    for model in removed_models:
+        task: asyncio.Task[None] | None = None
+        async with model._lock:
+            task = model._idle_unload_task
+            model._idle_unload_task = None
+        if task is not None and not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
 
 
 async def generate(
