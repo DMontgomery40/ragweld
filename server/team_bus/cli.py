@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import sys
 import time
 from collections.abc import Sequence
@@ -170,6 +171,15 @@ def _mailbox_signatures(messages: list[TeamMessage], box: str, member: str) -> s
 def _dump_json_line(payload: dict[str, Any]) -> None:
     print(json.dumps(payload, ensure_ascii=True))
     sys.stdout.flush()
+
+
+def _validate_positive_finite(name: str, value: float | None, *, allow_none: bool = False) -> None:
+    if value is None:
+        if allow_none:
+            return
+        raise ValueError(f"{name} must be a finite number > 0")
+    if not math.isfinite(value) or value <= 0:
+        raise ValueError(f"{name} must be a finite number > 0")
 
 
 def _watch_journal(
@@ -471,9 +481,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 0
 
         if args.command == "watch":
-            if args.poll_interval <= 0:
-                msg = "--poll-interval must be > 0"
-                raise ValueError(msg)
+            _validate_positive_finite("--poll-interval", float(args.poll_interval))
+            _validate_positive_finite(
+                "--timeout-seconds",
+                (None if args.timeout_seconds is None else float(args.timeout_seconds)),
+                allow_none=True,
+            )
             if args.box == "journal":
                 return _watch_journal(
                     store=store,
@@ -507,12 +520,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
 
         if args.command == "wait":
-            if args.poll_interval <= 0:
-                msg = "--poll-interval must be > 0"
-                raise ValueError(msg)
-            if args.timeout_seconds <= 0:
-                msg = "--timeout-seconds must be > 0"
-                raise ValueError(msg)
+            _validate_positive_finite("--poll-interval", float(args.poll_interval))
+            _validate_positive_finite("--timeout-seconds", float(args.timeout_seconds))
             return _wait_for_next_message(
                 store=store,
                 team=args.team,
