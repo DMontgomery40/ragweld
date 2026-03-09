@@ -70,3 +70,14 @@ async def test_get_does_not_overwrite_newer_concurrent_repo_save() -> None:
 
     final_cfg = await store.get(repo_id="repo-1")
     assert final_cfg.generation.gen_model == "concurrency-new-model"
+
+
+@pytest.mark.asyncio
+async def test_clear_cache_releases_repo_lock() -> None:
+    store = ConfigStore("postgresql://unused")
+
+    lock = await store._get_lock("repo-ephemeral")
+    assert lock is store._locks["repo-ephemeral"]
+
+    store.clear_cache(repo_id="repo-ephemeral")
+    assert "repo-ephemeral" not in store._locks

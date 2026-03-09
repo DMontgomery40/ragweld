@@ -202,8 +202,10 @@ class ConfigStore:
     def clear_cache(self, repo_id: str | None = None) -> None:
         if repo_id is None:
             self._cache.clear()
+            self._locks.clear()
             return
         self._cache.pop(repo_id, None)
+        self._locks.pop(repo_id, None)
 
 
 _store: ConfigStore | None = None
