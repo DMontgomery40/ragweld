@@ -200,12 +200,22 @@ class ConfigStore:
         return await self.save(cfg, repo_id=repo_id)
 
     def clear_cache(self, repo_id: str | None = None) -> None:
+        def _drop_lock_if_idle(key: str | None) -> None:
+            lock = self._locks.get(key)
+            if lock is None:
+                return
+            # Preserve held locks so in-flight callers cannot split synchronization.
+            if lock.locked():
+                return
+            self._locks.pop(key, None)
+
         if repo_id is None:
             self._cache.clear()
-            self._locks.clear()
+            for key in list(self._locks.keys()):
+                _drop_lock_if_idle(key)
             return
         self._cache.pop(repo_id, None)
-        self._locks.pop(repo_id, None)
+        _drop_lock_if_idle(repo_id)
 
 
 _store: ConfigStore | None = None

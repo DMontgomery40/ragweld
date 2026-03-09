@@ -81,3 +81,18 @@ async def test_clear_cache_releases_repo_lock() -> None:
 
     store.clear_cache(repo_id="repo-ephemeral")
     assert "repo-ephemeral" not in store._locks
+
+
+@pytest.mark.asyncio
+async def test_clear_cache_does_not_replace_lock_while_held() -> None:
+    store = ConfigStore("postgresql://unused")
+
+    first_lock = await store._get_lock("repo-race")
+    await first_lock.acquire()
+    try:
+        store.clear_cache(repo_id="repo-race")
+        second_lock = await store._get_lock("repo-race")
+    finally:
+        first_lock.release()
+
+    assert second_lock is first_lock
