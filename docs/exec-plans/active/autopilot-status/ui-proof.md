@@ -32,7 +32,7 @@ Keep this file updated with the latest acceptance result, the first failing chec
 - Failure evidence: `Unable to resolve model route for 'gpt-4o-mini-2024-07-18' ... neither OpenAI nor OpenRouter is configured`
 - Bootstrap artifact: `/Users/davidmontgomery/.codex/exec-worktrees/ragweld-ui-proof-loop/output/automation/bootstrap/latest.json`
 - Acceptance artifact: `/Users/davidmontgomery/.codex/exec-worktrees/ragweld-ui-proof-loop/output/automation/acceptance/latest.json`
-- Acceptance summary: `/Users/davidmontgomery/.codex/exec-worktrees/ragweld-ui-proof-loop/tmp/synthetic_acceptance_2026-03-10_1108/summary.json`
+- Acceptance summary: `/Users/davidmontgomery/.codex/exec-worktrees/ragweld-ui-proof-loop/tmp/synthetic_acceptance_2026-03-10_1113/summary.json`
 
 ## Next Smallest Honest Fix Target
 
