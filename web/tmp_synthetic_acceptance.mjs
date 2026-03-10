@@ -15,6 +15,7 @@ const summary = {
   corpus_id: corpusId,
   ui_base: uiBase,
   api_base: apiBase,
+  indexing: {},
   synthetic: {},
   quick_actions: {},
   system_prompts: {},
@@ -70,6 +71,31 @@ async function listSyntheticRuns(api) {
   return Array.isArray(body?.runs) ? body.runs : [];
 }
 
+async function getIndexStatus(api, retries = 6) {
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    try {
+      const { status, body } = await apiCall(api, 'GET', `/index/${encodeURIComponent(corpusId)}/status`);
+      if (status !== 200) throw new Error(`getIndexStatus failed: ${status}`);
+      return body;
+    } catch (error) {
+      const message = String(error?.message || error);
+      const transient = /ECONNRESET|ECONNREFUSED|socket hang up|fetch failed/i.test(message);
+      if (!transient || attempt >= retries) {
+        throw error;
+      }
+      await page.waitForTimeout(1000 * (attempt + 1));
+    }
+  }
+  throw new Error(`getIndexStatus failed after retries for ${corpusId}`);
+}
+
+async function getIndexStats(api) {
+  const { status, body } = await apiCall(api, 'GET', `/index/${encodeURIComponent(corpusId)}/stats`);
+  if (status === 404) return null;
+  if (status !== 200) throw new Error(`getIndexStats failed: ${status}`);
+  return body;
+}
+
 async function getSyntheticRun(api, runId) {
   const { status, body } = await apiCall(api, 'GET', `/synthetic/run/${encodeURIComponent(runId)}`);
   if (status !== 200) throw new Error(`getSyntheticRun failed: ${runId} status=${status}`);
@@ -107,6 +133,23 @@ async function waitForSyntheticCompletion(api, runId, timeoutMs = 20 * 60 * 1000
     await page.waitForTimeout(5000);
   }
   throw new Error(`Timed out waiting for synthetic completion: ${runId}`);
+}
+
+async function waitForIndexCompletion(api, beforeStatus, timeoutMs = 45 * 60 * 1000) {
+  const started = Date.now();
+  const previousStartedAt = String(beforeStatus?.started_at || '');
+  while (Date.now() - started < timeoutMs) {
+    const status = await getIndexStatus(api);
+    const startedAt = String(status?.started_at || '');
+    const hasNewRun = !previousStartedAt || (startedAt && startedAt !== previousStartedAt);
+    if (!hasNewRun) {
+      await page.waitForTimeout(1000);
+      continue;
+    }
+    if (['complete', 'error', 'cancelled'].includes(String(status.status))) return status;
+    await page.waitForTimeout(5000);
+  }
+  throw new Error(`Timed out waiting for indexing completion: ${corpusId}`);
 }
 
 async function waitForNewEvalRun(api, beforeIds, timeoutMs = 20 * 60 * 1000) {
@@ -206,6 +249,45 @@ await context.addInitScript(
 page = await context.newPage();
 
 try {
+  checkpoint('open_indexing_start');
+  await page.goto(`${uiBase}/rag?subtab=indexing&corpus=${encodeURIComponent(corpusId)}`, {
+    waitUntil: 'domcontentloaded',
+  });
+  const indexNowButton = page.getByTestId('index-now-button');
+  await indexNowButton.waitFor({ state: 'visible', timeout: 60000 });
+  await page.waitForTimeout(1500);
+
+  const forceReindex = page.locator('label').filter({ hasText: 'Force reindex' }).locator('input[type="checkbox"]').first();
+  if ((await forceReindex.count()) > 0 && !(await forceReindex.isChecked())) {
+    await forceReindex.check();
+  }
+  const indexStatusBefore = await getIndexStatus(api);
+  summary.indexing.before = {
+    status: indexStatusBefore,
+    stats: await getIndexStats(api),
+  };
+  checkpoint('indexing_ready', summary.indexing.before);
+  await screenshot('indexing_before_start');
+
+  page.once('dialog', (dialog) => dialog.accept());
+  await indexNowButton.click();
+  checkpoint('indexing_start_clicked');
+
+  const completedIndexStatus = await waitForIndexCompletion(api, indexStatusBefore);
+  const completedIndexStats = await getIndexStats(api);
+  summary.indexing.after = {
+    status: completedIndexStatus,
+    stats: completedIndexStats,
+  };
+  checkpoint('indexing_completed', summary.indexing.after);
+  if (String(completedIndexStatus.status) !== 'complete') {
+    throw new Error(`Indexing failed before synthetic run: ${completedIndexStatus.error || completedIndexStatus.status}`);
+  }
+  if (!completedIndexStats || Number(completedIndexStats.total_chunks || 0) <= 0) {
+    throw new Error('Indexing completed without any chunks for epstein-files-1');
+  }
+  await screenshot('indexing_completed');
+
   checkpoint('open_synthetic_lab_start');
   await page.goto(`${uiBase}/rag?subtab=synthetic&corpus=${encodeURIComponent(corpusId)}`, {
     waitUntil: 'domcontentloaded',

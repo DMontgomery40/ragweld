@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import logging
 import math
 import platform
 import re
@@ -15,6 +16,8 @@ from server.models.index import Chunk
 from server.models.tribrid_config_model import EmbeddingConfig, TokenizationConfig
 
 _TOKEN_RE = re.compile(r"[a-zA-Z_][a-zA-Z0-9_]{1,63}")
+logger = logging.getLogger(__name__)
+_MLX_FALLBACK_WARNED: set[tuple[str, str]] = set()
 
 
 class Embedder:
@@ -152,15 +155,32 @@ class Embedder:
         if provider == "openai":
             return await self._embed_openai(prepared)
         if provider == "mlx":
-            return await self._embed_mlx_embeddings(prepared)
+            try:
+                return await self._embed_mlx_embeddings(prepared)
+            except Exception as mlx_err:
+                mlx_model = str(getattr(self.config, "embedding_model_mlx", "") or "").strip()
+                fallback_model = str(getattr(self.config, "embedding_model_local", "") or "").strip()
+                if not fallback_model:
+                    raise
+                fallback_key = (mlx_model, fallback_model)
+                if fallback_key not in _MLX_FALLBACK_WARNED:
+                    _MLX_FALLBACK_WARNED.add(fallback_key)
+                    logger.warning(
+                        "MLX embeddings unavailable for '%s'; falling back to local embeddings model '%s': %s",
+                        mlx_model,
+                        fallback_model,
+                        mlx_err,
+                    )
+                try:
+                    return await self._embed_local_backend(prepared)
+                except Exception as local_err:
+                    raise RuntimeError(
+                        "MLX embeddings failed and local fallback also failed "
+                        f"(mlx_model='{mlx_model}', "
+                        f"local_model='{fallback_model}'): {local_err}"
+                    ) from mlx_err
         if provider in {"local", "huggingface"}:
-            mode = str(getattr(self.config, "contextual_chunk_embeddings", "off") or "off").strip().lower()
-            if mode == "late_chunking_local_only":
-                return await self._embed_local_hf_mean_pool(prepared)
-            mlx_vecs = await self._try_embed_local_mlx_embeddings(prepared)
-            if mlx_vecs is not None:
-                return mlx_vecs
-            return await self._embed_local_sentence_transformers(prepared)
+            return await self._embed_local_backend(prepared)
         raise RuntimeError(f"Unsupported embedding provider: {provider}")
 
     async def embed_chunks(self, chunks: list[Chunk], *, embed_texts: list[str] | None = None) -> list[Chunk]:
@@ -434,6 +454,15 @@ class Embedder:
                 continue
 
         raise RuntimeError(f"MLX embeddings failed to load/embed for '{model_name}': {last_err}")
+
+    async def _embed_local_backend(self, texts: list[str]) -> list[list[float]]:
+        mode = str(getattr(self.config, "contextual_chunk_embeddings", "off") or "off").strip().lower()
+        if mode == "late_chunking_local_only":
+            return await self._embed_local_hf_mean_pool(texts)
+        mlx_vecs = await self._try_embed_local_mlx_embeddings(texts)
+        if mlx_vecs is not None:
+            return mlx_vecs
+        return await self._embed_local_sentence_transformers(texts)
 
     async def _embed_local_sentence_transformers(self, texts: list[str]) -> list[list[float]]:
         model_name = str(getattr(self.config, "embedding_model_local", "") or "").strip()
