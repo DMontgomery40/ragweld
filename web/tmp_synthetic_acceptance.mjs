@@ -269,6 +269,10 @@ try {
     artifact_kinds: artifacts.map((a) => a.kind),
   };
   checkpoint('synthetic_run_completed', summary.synthetic.final);
+  if (String(completedRun.status) !== 'completed') {
+    const detail = String(completedRun.error || completedRun.status || 'synthetic run failed');
+    throw new Error(`Synthetic run failed before publish/eval: ${detail}`);
+  }
 
   await page.goto(`${uiBase}/rag?subtab=synthetic&corpus=${encodeURIComponent(corpusId)}`, {
     waitUntil: 'domcontentloaded',
