@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useRepoStore } from '@/stores/useRepoStore';
 import { useConfigStore } from '@/stores/useConfigStore';
-import { useHealthStore } from '@/stores/useHealthStore';
 import { modelsApi } from '@/api';
 import { UiHelpers } from '@/utils/uiHelpers';
 
@@ -15,7 +14,6 @@ export function useAppInit() {
   const [initError, setInitError] = useState<string | null>(null);
   const { loadRepos } = useRepoStore();
   const loadConfig = useConfigStore((s) => s.loadConfig);
-  const { checkHealth } = useHealthStore();
 
   useEffect(() => {
     const init = async () => {
@@ -35,11 +33,6 @@ export function useAppInit() {
             .then(() => {})
             .catch((err: unknown) => console.warn('Failed to load models:', err)),
         ]);
-
-        // Trigger initial health check via Zustand store
-        await checkHealth().catch((err: Error) =>
-          console.warn('Initial health check failed:', err)
-        );
 
         UiHelpers.wireDayConverters();
 
@@ -62,7 +55,7 @@ export function useAppInit() {
       // Give a moment for initial render
       setTimeout(init, 50);
     }
-  }, [loadConfig, loadRepos, checkHealth]);
+  }, [loadConfig, loadRepos]);
 
   return { isInitialized, initError };
 }
