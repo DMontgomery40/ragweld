@@ -150,6 +150,7 @@ nav:
       - Pydantic: dev/pydantic.md
       - Config store & caching: dev/config_store.md
       - Config cache & locks: dev/config_cache_locks.md
+      - Acceptance smoke test: dev/acceptance_epstein.md
       - Frontend: frontend.md
       - Testing: testing.md
       - Observability: observability.md
