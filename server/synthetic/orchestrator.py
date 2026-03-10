@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import random
 import re
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 from server.api.eval import evaluate_dataset_entries
 from server.models.tribrid_config_model import (
@@ -32,6 +36,10 @@ _run_cancel_events: dict[str, asyncio.Event] = {}
 _QUALITY_GATE_TOP1_MIN = 0.40
 _QUALITY_GATE_SAMPLE_SIZE = 50
 _CORPUS_ID_RE = re.compile(r"^[A-Za-z0-9._-]+$")
+_ROOT = Path(__file__).resolve().parents[2]
+_DATASET_DIR = _ROOT / "data" / "eval_datasets"
+_LEGACY_DATASET_DIR = _ROOT / "data" / "eval_dataset"
+_RECIPES_REQUIRING_EVAL_DATASET = frozenset({"eval_dataset", "triplets", "autotune_retrieval", "full_stack"})
 
 
 def _append_log(run_id: str, message: str) -> None:
@@ -116,6 +124,99 @@ def _validate_repo_id(repo_id: str) -> str:
     if rid in {".", ".."} or ".." in rid:
         raise ValueError("Invalid corpus_id: path traversal segments are not allowed")
     return rid
+
+
+def _safe_corpus_id(corpus_id: str) -> str:
+    safe = quote(str(corpus_id or "").strip(), safe="._-")
+    if not safe:
+        raise ValueError("Invalid corpus_id")
+    return safe
+
+
+def _legacy_safe_corpus_id(corpus_id: str) -> str:
+    safe = re.sub(r"[^A-Za-z0-9._-]+", "_", str(corpus_id or "").strip()).strip("._-")
+    if not safe:
+        raise ValueError("Invalid corpus_id")
+    return safe
+
+
+def _load_seed_eval_items(repo_id: str) -> tuple[list[EvalDatasetItem], Path | None]:
+    canonical = _DATASET_DIR / f"{_safe_corpus_id(repo_id)}.json"
+    path = canonical
+    if not canonical.exists():
+        legacy = _LEGACY_DATASET_DIR / f"{_legacy_safe_corpus_id(repo_id)}.json"
+        if legacy.exists():
+            try:
+                canonical.parent.mkdir(parents=True, exist_ok=True)
+                canonical.write_text(legacy.read_text(encoding="utf-8"), encoding="utf-8")
+                path = canonical
+            except Exception:
+                path = legacy
+
+    if not path.exists():
+        return [], None
+
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return [], path
+    if not isinstance(raw, list):
+        return [], path
+
+    out: list[EvalDatasetItem] = []
+    for row in raw:
+        try:
+            out.append(EvalDatasetItem.model_validate(row))
+        except Exception:
+            continue
+    return out, path
+
+
+def _hydrate_eval_dataset_from_seed(
+    *,
+    run_id: str,
+    repo_id: str,
+    request: SyntheticRunStartRequest,
+    artifacts_payloads: dict[Any, Any],
+    summary: SyntheticRunSummary,
+) -> int:
+    if request.recipe not in _RECIPES_REQUIRING_EVAL_DATASET:
+        return 0
+    if _coerce_eval_items(artifacts_payloads.get("eval_dataset_json")):
+        return 0
+
+    seed_items, source_path = _load_seed_eval_items(repo_id)
+    if not seed_items:
+        return 0
+
+    max_items = len(seed_items)
+    if request.max_pairs is not None:
+        max_items = max(1, min(max_items, int(request.max_pairs)))
+
+    if len(seed_items) > max_items:
+        if request.seed is not None:
+            chosen = random.Random(int(request.seed)).sample(seed_items, k=max_items)
+        else:
+            chosen = seed_items[:max_items]
+    else:
+        chosen = seed_items
+
+    artifacts_payloads["eval_dataset_json"] = [row.model_dump(mode="json") for row in chosen]
+    summary.items_generated = int(summary.items_generated) + len(chosen)
+
+    dataset_label = str(source_path) if source_path is not None else "seed dataset"
+    _append_log(
+        run_id,
+        f"Hydrated eval_dataset_json from {dataset_label} with {len(chosen)} seed rows "
+        f"(recipe={request.recipe}, max_pairs={request.max_pairs}).",
+    )
+    report = str(artifacts_payloads.get("report_md") or "").rstrip()
+    if report:
+        report += "\n"
+    artifacts_payloads["report_md"] = (
+        f"{report}Seed fallback hydrated {len(chosen)} eval rows from corpus dataset."
+    )
+    return len(chosen)
 
 
 async def _evaluate_quality_gate(
@@ -285,6 +386,14 @@ async def _run_job(*, run_id: str, request: SyntheticRunStartRequest, cancel_eve
 
         if cancel_event.is_set():
             raise asyncio.CancelledError()
+
+        _hydrate_eval_dataset_from_seed(
+            run_id=run_id,
+            repo_id=repo_id,
+            request=request,
+            artifacts_payloads=artifacts_payloads,
+            summary=summary,
+        )
 
         gate_passed, gate_reason = await _evaluate_quality_gate(
             run_id=run_id,
