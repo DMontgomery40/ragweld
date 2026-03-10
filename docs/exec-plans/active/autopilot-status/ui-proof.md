@@ -22,20 +22,24 @@ Continuously prove the real user journey for `epstein-files-1` from the actual b
 
 Keep this file updated with the latest acceptance result, the first failing checkpoint, and the next smallest honest fix.
 
-## Latest Run (2026-03-09 MDT)
+## Latest Run (2026-03-10 MDT)
 
-- Branch: `codex/ui-proof-epstein-first-failure-20260310`
+- Branch: `codex/ui-proof-20260310`
+- Bootstrap command: `./scripts/automation_bootstrap.sh`
 - Acceptance command: `./scripts/acceptance_epstein.sh`
 - Result: `failed`
 - First failing checkpoint: `open_synthetic_lab_start`
-- Failure evidence: `page.goto: net::ERR_CONNECTION_REFUSED` at `http://127.0.0.1:5173/web/rag?subtab=synthetic&corpus=epstein-files-1`
-- Acceptance summary: `/Users/davidmontgomery/.codex/worktrees/6514/ragweld/tmp/synthetic_acceptance_2026-03-10_0524/summary.json`
+- Failure evidence: `page.waitForSelector('[data-testid="synthetic-lab-subtab"]')` timeout from `web/tmp_synthetic_acceptance.mjs:213`
+- Bootstrap artifact: `/Users/davidmontgomery/.codex/worktrees/6de9/ragweld/output/automation/bootstrap/latest.json`
+- Acceptance artifact: `/Users/davidmontgomery/.codex/worktrees/6de9/ragweld/output/automation/acceptance/latest.json`
+- Acceptance summary: `/Users/davidmontgomery/.codex/worktrees/6de9/ragweld/tmp/synthetic_acceptance_2026-03-10_0930/summary.json`
 
 ## Next Smallest Honest Fix Target
 
-Bring up the real local stack (`web` on `127.0.0.1:5173`, `api` on `127.0.0.1:8012`) before rerunning acceptance so checkpoint 1 can proceed and expose the first product defect.
+Ensure port `5173` serves this worktree's Ragweld UI, not another worktree's Vite process that currently returns `404` for both `/web/rag?...` and `/rag?...`; then rerun acceptance to expose the first product-level defect.
 
 ## Lane Notes
 
-- `scripts/acceptance_epstein.sh` was missing on this branch and has now been added as a thin wrapper over the existing real UI runner (`web/tmp_synthetic_acceptance.mjs`).
-- `./scripts/ci_local_full.sh` is still missing on this branch and blocks the full local gate.
+- Added `scripts/automation_bootstrap.sh` with artifact output at `output/automation/bootstrap/latest.json`.
+- Hardened `scripts/acceptance_epstein.sh` to emit `output/automation/acceptance/latest.json` on every run and auto-probe `/web` vs root UI base before launching Playwright.
+- Added `scripts/automation_stop_gate.py` and `scripts/ci_local_full.sh` to restore the lane's required local gate commands.
