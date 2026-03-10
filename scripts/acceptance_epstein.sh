@@ -10,9 +10,32 @@ latest_path="$ROOT_DIR/output/automation/acceptance/latest.json"
 mkdir -p "$artifact_dir"
 
 export CORPUS_ID="${CORPUS_ID:-epstein-files-1}"
-export API_BASE="${API_BASE:-http://127.0.0.1:8012/api}"
 default_ui_base="http://127.0.0.1:5173/web"
-export UI_BASE="${UI_BASE:-$default_ui_base}"
+default_api_base="http://127.0.0.1:8012/api"
+bootstrap_latest="$ROOT_DIR/output/automation/bootstrap/latest.json"
+
+if [ -f "$bootstrap_latest" ]; then
+  bootstrap_defaults="$(
+    python3 - "$bootstrap_latest" <<'PY'
+import json
+import sys
+
+data = json.load(open(sys.argv[1], "r", encoding="utf-8"))
+ui = str(data.get("ui_base") or "").strip()
+api = str(data.get("api_base") or "").strip()
+print(ui)
+print(api)
+PY
+  )"
+  bootstrap_ui_base="$(printf '%s\n' "$bootstrap_defaults" | sed -n '1p')"
+  bootstrap_api_base="$(printf '%s\n' "$bootstrap_defaults" | sed -n '2p')"
+else
+  bootstrap_ui_base=""
+  bootstrap_api_base=""
+fi
+
+export API_BASE="${API_BASE:-${bootstrap_api_base:-$default_api_base}}"
+export UI_BASE="${UI_BASE:-${bootstrap_ui_base:-$default_ui_base}}"
 
 probe_synthetic_route() {
   local base="$1"
@@ -56,6 +79,9 @@ except Exception:
 PY
 )"
   acceptance_status="${parsed_status:-failed}"
+fi
+if [ "$acceptance_status" = "completed" ]; then
+  acceptance_status="passed"
 fi
 if [ "$runner_exit" -ne 0 ]; then
   acceptance_status="failed"
