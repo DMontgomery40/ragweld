@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { useNotification } from '@/hooks';
+import { api, apiClient, withCorpusScope } from '@/api/client';
 import { useActiveRepo } from '@/stores';
 import { configApi } from '@/api/config';
-import { ModelPicker } from '@/components/RAG/ModelPicker';
 import { syntheticService } from '@/services/SyntheticService';
 import type {
+  ChatModelInfo,
+  ChatModelsResponse,
   SyntheticArtifactRef,
   SyntheticConfigPatchResponse,
   SyntheticRun,
@@ -27,6 +29,93 @@ const RECIPES: SyntheticRecipeKind[] = [
   'autotune_retrieval',
   'full_stack',
 ];
+
+const MODEL_SOURCE_LABELS = {
+  local: 'Local',
+  ragweld: 'Ragweld',
+  openrouter: 'OpenRouter',
+  cloud_direct: 'Cloud Direct',
+} as const;
+
+const MODEL_SOURCE_ORDER = ['local', 'ragweld', 'openrouter', 'cloud_direct'] as const;
+
+function toModelValue(model: ChatModelInfo): string {
+  return String(model.override || model.id || '').trim();
+}
+
+function toModelLabel(model: ChatModelInfo): string {
+  const name = String(model.catalog_model || model.id || '').trim();
+  return `${model.provider} · ${name}`;
+}
+
+function SyntheticModelPicker({
+  label,
+  value,
+  onChange,
+  models,
+  loading,
+  error,
+}: {
+  label: string;
+  value: string;
+  onChange: (model: string) => void;
+  models: ChatModelInfo[];
+  loading: boolean;
+  error: string | null;
+}) {
+  const groupedModels = useMemo(() => {
+    const normalized = models.filter((model) => Boolean(toModelValue(model)));
+    const ordered = MODEL_SOURCE_ORDER.map((source) => ({
+      source,
+      label: MODEL_SOURCE_LABELS[source],
+      items: normalized.filter((model) => model.source === source),
+    })).filter((group) => group.items.length > 0);
+
+    const knownSources = new Set(MODEL_SOURCE_ORDER);
+    const extras = Array.from(
+      new Set(
+        normalized
+          .map((model) => String(model.source || '').trim())
+          .filter((source) => source && !knownSources.has(source as (typeof MODEL_SOURCE_ORDER)[number]))
+      )
+    )
+      .sort((a, b) => a.localeCompare(b))
+      .map((source) => ({
+        source,
+        label: source,
+        items: normalized.filter((model) => String(model.source || '').trim() === source),
+      }));
+
+    return [...ordered, ...extras];
+  }, [models]);
+
+  return (
+    <div className="setting-row">
+      <label>{label}</label>
+      {loading ? (
+        <span style={{ color: 'var(--fg-muted)', fontSize: '13px' }}>Loading runnable models...</span>
+      ) : error ? (
+        <span style={{ color: 'var(--err)', fontSize: '13px' }}>{error}</span>
+      ) : (
+        <select value={value} onChange={(e) => onChange(e.target.value)} disabled={groupedModels.length === 0}>
+          <option value="">Select a model</option>
+          {groupedModels.map((group) => (
+            <optgroup key={group.source} label={group.label}>
+              {group.items.map((model) => {
+                const optionValue = toModelValue(model);
+                return (
+                  <option key={optionValue} value={optionValue}>
+                    {toModelLabel(model)}
+                  </option>
+                );
+              })}
+            </optgroup>
+          ))}
+        </select>
+      )}
+    </div>
+  );
+}
 
 function labelForKind(kind: SyntheticArtifactKind): string {
   if (kind === 'eval_dataset_json') return 'Eval Dataset';
@@ -70,6 +159,9 @@ export function SyntheticLabSubtab() {
   const [pairsPerSource, setPairsPerSource] = useState(1);
   const [curateThreshold, setCurateThreshold] = useState(7.0);
   const [starting, setStarting] = useState(false);
+  const [availableModels, setAvailableModels] = useState<ChatModelInfo[]>([]);
+  const [loadingAvailableModels, setLoadingAvailableModels] = useState(false);
+  const [availableModelsError, setAvailableModelsError] = useState<string | null>(null);
 
   const [runs, setRuns] = useState<SyntheticRunMeta[]>([]);
   const [loadingRuns, setLoadingRuns] = useState(false);
@@ -95,6 +187,58 @@ export function SyntheticLabSubtab() {
     if (gm) setGeneratorModel(gm);
     if (jm) setJudgeModel(jm);
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const corpusId = String(activeRepo || '').trim();
+
+    setLoadingAvailableModels(true);
+    setAvailableModelsError(null);
+
+    apiClient
+      .get<ChatModelsResponse>(withCorpusScope(api('/chat/models'), corpusId || undefined))
+      .then(({ data }) => {
+        if (cancelled) return;
+        const models = Array.isArray(data?.models)
+          ? data.models.filter((model) => Array.isArray(model.components) && model.components.includes('GEN'))
+          : [];
+        setAvailableModels(models);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setAvailableModels([]);
+        setAvailableModelsError(err instanceof Error ? err.message : 'Failed to load runnable models');
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingAvailableModels(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeRepo]);
+
+  const availableModelValues = useMemo(() => {
+    return new Set(availableModels.map((model) => toModelValue(model)).filter(Boolean));
+  }, [availableModels]);
+
+  useEffect(() => {
+    if (loadingAvailableModels) return;
+
+    const gm = String(generatorModel || '').trim();
+    const jm = String(judgeModel || '').trim();
+    const generatorStillAvailable = !gm || availableModelValues.has(gm);
+    const judgeStillAvailable = !jm || availableModelValues.has(jm);
+
+    if (!generatorStillAvailable) {
+      setGeneratorModel('');
+      localStorage.removeItem('synthetic.generator_model');
+    }
+    if (!judgeStillAvailable) {
+      setJudgeModel('');
+      localStorage.removeItem('synthetic.judge_model');
+    }
+  }, [availableModelValues, generatorModel, judgeModel, loadingAvailableModels]);
 
   const loadRuns = useCallback(async () => {
     const corpusId = String(activeRepo || '').trim();
@@ -174,6 +318,10 @@ export function SyntheticLabSubtab() {
         notifyError('Select both generator and judge models.');
         return;
       }
+      if (!availableModelValues.has(gm) || !availableModelValues.has(jm)) {
+        notifyError('Selected generator and judge models must be currently available.');
+        return;
+      }
 
       setStarting(true);
       try {
@@ -217,6 +365,7 @@ export function SyntheticLabSubtab() {
       pairsPerSource,
       provider,
       recipe,
+      availableModelValues,
     ]
   );
 
@@ -271,14 +420,20 @@ export function SyntheticLabSubtab() {
     }
   }, [activeRepo, notifyError, patchPreview, success]);
 
-  const modelSelectionMissing =
-    !String(generatorModel || '').trim() ||
-    !String(judgeModel || '').trim();
+  const generatorModelSelected = String(generatorModel || '').trim();
+  const judgeModelSelected = String(judgeModel || '').trim();
+  const modelSelectionMissing = !generatorModelSelected || !judgeModelSelected;
+  const selectionUnavailable =
+    Boolean(generatorModelSelected) && !availableModelValues.has(generatorModelSelected) ||
+    Boolean(judgeModelSelected) && !availableModelValues.has(judgeModelSelected);
 
   const startDisabled =
     starting ||
     !String(activeRepo || '').trim() ||
-    modelSelectionMissing;
+    loadingAvailableModels ||
+    availableModels.length === 0 ||
+    modelSelectionMissing ||
+    selectionUnavailable;
 
   return (
     <div className="subtab-panel" style={{ padding: '24px' }} data-testid="synthetic-lab-subtab">
@@ -316,21 +471,23 @@ export function SyntheticLabSubtab() {
 
         <div className="input-row">
           <div style={{ flex: 1 }}>
-            <ModelPicker
-              componentType="GEN"
+            <SyntheticModelPicker
               value={generatorModel}
               onChange={setGeneratorModel}
               label="Generator Model"
-              allowCustom
+              models={availableModels}
+              loading={loadingAvailableModels}
+              error={availableModelsError}
             />
           </div>
           <div style={{ flex: 1 }}>
-            <ModelPicker
-              componentType="GEN"
+            <SyntheticModelPicker
               value={judgeModel}
               onChange={setJudgeModel}
               label="Judge Model"
-              allowCustom
+              models={availableModels}
+              loading={loadingAvailableModels}
+              error={availableModelsError}
             />
           </div>
         </div>
@@ -380,7 +537,19 @@ export function SyntheticLabSubtab() {
             {starting ? 'Starting...' : 'Start Full Stack'}
           </button>
         </div>
-        {modelSelectionMissing ? (
+        {availableModelsError ? (
+          <div style={{ fontSize: 12, color: 'var(--err)', marginTop: 8 }}>
+            Unable to load runnable models right now. Check provider readiness and try again.
+          </div>
+        ) : availableModels.length === 0 && !loadingAvailableModels ? (
+          <div style={{ fontSize: 12, color: 'var(--fg-muted)', marginTop: 8 }}>
+            No runnable generation models are available for this corpus. Configure a provider in Chat settings or use the Ragweld in-process model.
+          </div>
+        ) : selectionUnavailable ? (
+          <div style={{ fontSize: 12, color: 'var(--fg-muted)', marginTop: 8 }}>
+            The previously selected model is no longer routable. Pick a currently available model to continue.
+          </div>
+        ) : modelSelectionMissing ? (
           <div style={{ fontSize: 12, color: 'var(--fg-muted)', marginTop: 8 }}>
             Select both generator and judge models to enable start actions.
           </div>
