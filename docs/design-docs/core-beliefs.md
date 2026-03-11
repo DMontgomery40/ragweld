@@ -14,5 +14,5 @@ These are the taste and architecture invariants we want to compound over time. W
 - **Make failure modes inspectable**: when something can fail, add logs/metrics/traces that explain why.
 - **Tests are real**: avoid fake-green tests; exercise real integrations where possible.
 - **Small PRs, fast loops**: throughput comes from tight feedback loops, not heroic refactors.
+- **Automation git must fail closed**: lane branches need sane upstreams, stale worktrees get pruned, and automation stops instead of creating more branch drift.
 - **Document after learning**: if a bug or review uncovers a rule, write it down (and consider enforcing it).
-
