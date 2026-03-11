@@ -13,10 +13,21 @@ function normalizeBuildBase(input: string | undefined): string {
   return normalized
 }
 
-function devStackLauncher(frontendBase: string): Plugin {
+function normalizeApiProxyTarget(input: string | undefined): string {
+  const raw = String(input || '').trim() || 'http://127.0.0.1:8012'
+  return raw.replace(/\/+$/, '')
+}
+
+function devStackLauncher(frontendBase: string, apiProxyTarget: string): Plugin {
   const repoRoot = path.resolve(__dirname, '..')
-  const backendHost = '127.0.0.1'
-  const backendPort = 8012
+  const backendUrl = new URL(apiProxyTarget)
+  const backendHost = backendUrl.hostname || '127.0.0.1'
+  const backendPort =
+    backendUrl.port && Number.isFinite(Number(backendUrl.port))
+      ? Number(backendUrl.port)
+      : backendUrl.protocol === 'https:'
+        ? 443
+        : 80
   const frontendPort = 5173
 
   let backendProc: ChildProcess | null = null
@@ -106,7 +117,7 @@ function devStackLauncher(frontendBase: string): Plugin {
             frontend_port: frontendPort,
             backend_port: backendPort,
             frontend_url: `http://127.0.0.1:${frontendPort}${frontendBase}`,
-            backend_url: `http://${backendHost}:${backendPort}/api`,
+            backend_url: `${apiProxyTarget}/api`,
             details: backend_running ? [] : ['Backend not reachable; use the Dev Stack buttons to start it.'],
           })
         }
@@ -133,11 +144,12 @@ function devStackLauncher(frontendBase: string): Plugin {
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
   const buildBase = normalizeBuildBase(env.VITE_BUILD_BASE)
+  const apiProxyTarget = normalizeApiProxyTarget(env.VITE_API_PROXY_TARGET)
 
   return {
     // Ensure built assets resolve under the configured mount path (defaults to /web/).
     base: buildBase,
-    plugins: [devStackLauncher(buildBase), react()],
+    plugins: [devStackLauncher(buildBase, apiProxyTarget), react()],
     resolve: {
       alias: {
         '@': path.resolve(__dirname, './src'),
@@ -158,7 +170,7 @@ export default defineConfig(({ mode }) => {
         '/api': {
           // Use IPv4 loopback explicitly to avoid localhost->::1 resolution issues
           // when backend binds only 127.0.0.1 (which causes Axios "Network Error").
-          target: 'http://127.0.0.1:8012',
+          target: apiProxyTarget,
           changeOrigin: true
         }
       }

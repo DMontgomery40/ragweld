@@ -24,15 +24,15 @@ Keep this file updated with the latest acceptance result, the first failing chec
 
 ## Latest Result
 
-- Bootstrap: passed via `output/automation/bootstrap/latest.json` on 2026-03-10, serving UI at `http://127.0.0.1:4173/web` and API at `http://127.0.0.1:8012/api`.
-- Acceptance: failed via `output/automation/acceptance/latest.json` with summary at `tmp/synthetic_acceptance_2026-03-10_1432/summary.json`.
+- Bootstrap: passed via `output/automation/bootstrap/latest.json` on 2026-03-11, serving the current-worktree UI at `http://127.0.0.1:4173/web` and API at `http://127.0.0.1:8014/api`.
+- Acceptance: failed via `output/automation/acceptance/latest.json` with summary at `tmp/synthetic_acceptance_2026-03-11_1443/summary.json`.
 - First failing checkpoint: `synthetic_run_completed`.
-- Root cause: Synthetic Lab now uses `/api/chat/models`, so it only offers routable models and correctly starts with the `ragweld:` option; the next real blocker is that the synthetic run immediately fails its quality gate because no eval items are generated for `epstein-files-1`.
-- Next smallest honest fix: inspect synthetic recipe output for `epstein-files-1` and the prepared corpus/index state to determine why eval dataset generation yields zero quality samples.
+- Root cause: UI proof now reaches the real Synthetic Lab on the current worktree stack, but the synthetic run still fails immediately because it generates zero eval rows (`sources_used=0`) and the corpus-scoped seed fallback has no `data/eval_datasets/epstein-files-1.json` to hydrate from.
+- Next smallest honest fix: restore/materialize `data/eval_datasets/epstein-files-1.json` for `epstein-files-1` and reconnect bootstrap to the prepared-slice seed path so empty synthetic generation falls back to real eval rows.
 
-## Latest Run (2026-03-10 MDT)
+## Latest Run (2026-03-11 MDT)
 
-- Branch: `codex/ui-proof-20260310-epstein-bootstrap`
+- Branch: `codex/ui-proof-20260311-bootstrap-port-fallback`
 - Bootstrap command: `./scripts/automation_bootstrap.sh`
 - Acceptance command: `./scripts/acceptance_epstein.sh`
 - Result: `failed`
@@ -40,11 +40,11 @@ Keep this file updated with the latest acceptance result, the first failing chec
 - Failure evidence: `Quality gate evaluation failed: no eval items generated`
 - Bootstrap artifact: `/Users/davidmontgomery/.codex/exec-worktrees/ragweld-ui-proof-loop/output/automation/bootstrap/latest.json`
 - Acceptance artifact: `/Users/davidmontgomery/.codex/exec-worktrees/ragweld-ui-proof-loop/output/automation/acceptance/latest.json`
-- Acceptance summary: `/Users/davidmontgomery/.codex/exec-worktrees/ragweld-ui-proof-loop/tmp/synthetic_acceptance_2026-03-10_1432/summary.json`
+- Acceptance summary: `/Users/davidmontgomery/.codex/exec-worktrees/ragweld-ui-proof-loop/tmp/synthetic_acceptance_2026-03-11_1443/summary.json`
 
 ## Next Smallest Honest Fix Target
 
-Make Synthetic Lab generate real eval items for `epstein-files-1` after model selection succeeds. The lane now auto-starts this worktree's UI/backend, auto-seeds `epstein-files-1`, and selects only routable models, so the next blocker is truthful synthetic/data generation rather than stack setup or provider routing.
+Make Synthetic Lab generate real eval items for `epstein-files-1` after model selection succeeds. The lane now boots a truthful current-worktree UI/API pair and the browser starts a real synthetic run, so the next blocker is restoring the missing eval-seed/prepared-corpus input rather than stack setup or provider routing.
 
 ## Lane Notes
 
@@ -53,3 +53,6 @@ Make Synthetic Lab generate real eval items for `epstein-files-1` after model se
 - `scripts/acceptance_epstein.sh` now consumes the resolved UI/API bases from `output/automation/bootstrap/latest.json` before launching Playwright.
 - `web/tmp_synthetic_acceptance.mjs` now stops at the first failed synthetic run instead of drifting into a later eval timeout.
 - Added `scripts/automation_stop_gate.py` and `scripts/ci_local_full.sh` to restore the lane's required local gate commands.
+- `scripts/automation_bootstrap.sh` now falls back off a foreign `8012` listener, restarts stale current-worktree Vite listeners whose proxy still points at the wrong backend, and records the honest `4173/8014` stack in the bootstrap artifact.
+- `scripts/acceptance_epstein.sh` now fails closed when bootstrap did not resolve a current-worktree stack instead of silently probing default foreign listeners.
+- `web/vite.config.ts` now respects `VITE_API_PROXY_TARGET`, so browser actions in the UI hit the same backend base that bootstrap resolved instead of hardcoding `8012`.
