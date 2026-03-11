@@ -13,9 +13,11 @@ mkdir -p "$artifact_dir" "$runtime_dir"
 CORPUS_ID="${CORPUS_ID:-epstein-files-1}"
 FRONTEND_HOST="${FRONTEND_HOST:-127.0.0.1}"
 BACKEND_HOST="${BACKEND_HOST:-127.0.0.1}"
-BACKEND_PORT="${BACKEND_PORT:-8012}"
+PREFERRED_BACKEND_PORT="${BACKEND_PORT:-8012}"
+BACKEND_PORT_CANDIDATE_TEXT="${BACKEND_PORT_CANDIDATES:-8013 8014 8015}"
 PREFERRED_UI_PORT="${UI_PORT:-5173}"
 UI_PORT_CANDIDATE_TEXT="${UI_PORT_CANDIDATES:-4173 4174 4175 5174}"
+IFS=' ' read -r -a BACKEND_PORT_CANDIDATES <<<"$BACKEND_PORT_CANDIDATE_TEXT"
 IFS=' ' read -r -a UI_PORT_CANDIDATES <<<"$UI_PORT_CANDIDATE_TEXT"
 
 status="passed"
@@ -69,6 +71,39 @@ listener_command() {
     return 0
   fi
   ps -p "$pid" -o command= 2>/dev/null || true
+}
+
+stop_listener() {
+  local port="$1"
+  local pid
+  pid="$(listener_pid "$port")"
+  if [ -n "$pid" ]; then
+    kill "$pid" 2>/dev/null || true
+    local deadline=$((SECONDS + 10))
+    while [ "$SECONDS" -lt "$deadline" ]; do
+      if port_free "$port"; then
+        return 0
+      fi
+      sleep 1
+    done
+  fi
+  port_free "$port"
+}
+
+port_from_url() {
+  local url="$1"
+  python3 - "$url" <<'PY'
+from urllib.parse import urlparse
+import sys
+
+parsed = urlparse(sys.argv[1])
+print(parsed.port or "")
+PY
+}
+
+api_root_from_base() {
+  local api_base="$1"
+  printf '%s\n' "${api_base%/api}"
 }
 
 port_free() {
@@ -148,6 +183,7 @@ wait_for_api() {
 
 start_frontend_on_port() {
   local port="$1"
+  local api_root="$2"
   local log_path="$runtime_dir/frontend-${port}.log"
   local session_name="ragweld-ui-proof-ui-${port}"
   if [ ! -d "$ROOT_DIR/web/node_modules" ]; then
@@ -158,14 +194,48 @@ start_frontend_on_port() {
   if command -v tmux >/dev/null 2>&1; then
     tmux kill-session -t "$session_name" 2>/dev/null || true
     tmux new-session -d -s "$session_name" \
-      "cd '$ROOT_DIR' && npm --prefix web run dev -- --host '$FRONTEND_HOST' --port '$port' > '$log_path' 2>&1"
+      "cd '$ROOT_DIR' && env VITE_API_PROXY_TARGET='$api_root' npm --prefix web run dev -- --host '$FRONTEND_HOST' --port '$port' > '$log_path' 2>&1"
   else
-    nohup npm --prefix web run dev -- --host "$FRONTEND_HOST" --port "$port" >"$log_path" 2>&1 &
+    nohup env VITE_API_PROXY_TARGET="$api_root" npm --prefix web run dev -- --host "$FRONTEND_HOST" --port "$port" >"$log_path" 2>&1 &
   fi
   wait_for_ui_root "http://${FRONTEND_HOST}:${port}" "$artifact_dir/ui_probe_started_${port}"
 }
 
+dev_status_backend_url() {
+  local root="$1"
+  local status_path="$artifact_dir/dev_status_$(printf '%s' "$root" | tr ':/' '__').json"
+  local code
+  code="$(curl -sS -o "$status_path" -w "%{http_code}" "${root}/__dev__/dev/status" 2>/dev/null || echo "000")"
+  if [ "$code" != "200" ]; then
+    return 1
+  fi
+  python3 - "$status_path" <<'PY'
+import json
+import sys
+
+data = json.load(open(sys.argv[1], "r", encoding="utf-8"))
+print(str(data.get("backend_url") or "").strip())
+PY
+}
+
+ui_matches_resolved_api() {
+  local root="$1"
+  if [ -z "${resolved_api_base:-}" ]; then
+    return 0
+  fi
+  local expected
+  local actual
+  expected="$(printf '%s\n' "$resolved_api_base")"
+  actual="$(dev_status_backend_url "$root" || true)"
+  [ -n "$actual" ] && [ "$actual" = "$expected" ]
+}
+
 ensure_ui_root() {
+  local expected_api_root=""
+  if [ -n "${resolved_api_base:-}" ]; then
+    expected_api_root="$(api_root_from_base "$resolved_api_base")"
+  fi
+
   if [ -n "${UI_BASE:-}" ]; then
     local explicit="${UI_BASE%/}"
     explicit="${explicit%/web}"
@@ -177,27 +247,35 @@ ensure_ui_root() {
   fi
 
   if is_current_worktree_listener "$PREFERRED_UI_PORT" && wait_for_ui_root "http://${FRONTEND_HOST}:${PREFERRED_UI_PORT}" "$artifact_dir/ui_probe_port_${PREFERRED_UI_PORT}"; then
-    printf '%s\n' "http://${FRONTEND_HOST}:${PREFERRED_UI_PORT}"
-    return 0
+    local root="http://${FRONTEND_HOST}:${PREFERRED_UI_PORT}"
+    if ui_matches_resolved_api "$root"; then
+      printf '%s\n' "$root"
+      return 0
+    fi
+    stop_listener "$PREFERRED_UI_PORT" >/dev/null || true
   fi
 
   local port
   for port in "${UI_PORT_CANDIDATES[@]}"; do
     if is_current_worktree_listener "$port" && wait_for_ui_root "http://${FRONTEND_HOST}:${port}" "$artifact_dir/ui_probe_port_${port}"; then
-      printf '%s\n' "http://${FRONTEND_HOST}:${port}"
-      return 0
+      local root="http://${FRONTEND_HOST}:${port}"
+      if ui_matches_resolved_api "$root"; then
+        printf '%s\n' "$root"
+        return 0
+      fi
+      stop_listener "$port" >/dev/null || true
     fi
   done
 
   if port_free "$PREFERRED_UI_PORT"; then
-    if start_frontend_on_port "$PREFERRED_UI_PORT"; then
+    if start_frontend_on_port "$PREFERRED_UI_PORT" "$expected_api_root"; then
       printf '%s\n' "http://${FRONTEND_HOST}:${PREFERRED_UI_PORT}"
       return 0
     fi
   fi
 
   for port in "${UI_PORT_CANDIDATES[@]}"; do
-    if port_free "$port" && start_frontend_on_port "$port"; then
+    if port_free "$port" && start_frontend_on_port "$port" "$expected_api_root"; then
       printf '%s\n' "http://${FRONTEND_HOST}:${port}"
       return 0
     fi
@@ -207,14 +285,15 @@ ensure_ui_root() {
 }
 
 start_backend() {
-  local api_base="http://${BACKEND_HOST}:${BACKEND_PORT}/api"
-  local log_path="$runtime_dir/backend-${BACKEND_PORT}.log"
-  local session_name="ragweld-ui-proof-api-${BACKEND_PORT}"
-  log "Starting backend on ${BACKEND_HOST}:${BACKEND_PORT}"
+  local port="$1"
+  local api_base="http://${BACKEND_HOST}:${port}/api"
+  local log_path="$runtime_dir/backend-${port}.log"
+  local session_name="ragweld-ui-proof-api-${port}"
+  log "Starting backend on ${BACKEND_HOST}:${port}"
   if command -v tmux >/dev/null 2>&1; then
     tmux kill-session -t "$session_name" 2>/dev/null || true
     tmux new-session -d -s "$session_name" \
-      "cd '$ROOT_DIR' && env POSTGRES_HOST='${POSTGRES_HOST:-127.0.0.1}' POSTGRES_PORT='${POSTGRES_PORT:-5432}' POSTGRES_DB='${POSTGRES_DB:-tribrid_rag}' POSTGRES_USER='${POSTGRES_USER:-postgres}' POSTGRES_PASSWORD='${POSTGRES_PASSWORD:-postgres}' NEO4J_URI='${NEO4J_URI:-bolt://127.0.0.1:7687}' NEO4J_USER='${NEO4J_USER:-neo4j}' NEO4J_PASSWORD='${NEO4J_PASSWORD:-password}' uv run uvicorn server.main:app --host '$BACKEND_HOST' --port '$BACKEND_PORT' --reload --log-level warning > '$log_path' 2>&1"
+      "cd '$ROOT_DIR' && env POSTGRES_HOST='${POSTGRES_HOST:-127.0.0.1}' POSTGRES_PORT='${POSTGRES_PORT:-5432}' POSTGRES_DB='${POSTGRES_DB:-tribrid_rag}' POSTGRES_USER='${POSTGRES_USER:-postgres}' POSTGRES_PASSWORD='${POSTGRES_PASSWORD:-postgres}' NEO4J_URI='${NEO4J_URI:-bolt://127.0.0.1:7687}' NEO4J_USER='${NEO4J_USER:-neo4j}' NEO4J_PASSWORD='${NEO4J_PASSWORD:-password}' uv run uvicorn server.main:app --host '$BACKEND_HOST' --port '$port' --reload --log-level warning > '$log_path' 2>&1"
   else
     nohup env \
       POSTGRES_HOST="${POSTGRES_HOST:-127.0.0.1}" \
@@ -225,7 +304,7 @@ start_backend() {
       NEO4J_URI="${NEO4J_URI:-bolt://127.0.0.1:7687}" \
       NEO4J_USER="${NEO4J_USER:-neo4j}" \
       NEO4J_PASSWORD="${NEO4J_PASSWORD:-password}" \
-      uv run uvicorn server.main:app --host "$BACKEND_HOST" --port "$BACKEND_PORT" --reload --log-level warning >"$log_path" 2>&1 &
+      uv run uvicorn server.main:app --host "$BACKEND_HOST" --port "$port" --reload --log-level warning >"$log_path" 2>&1 &
   fi
   wait_for_api "$api_base"
 }
@@ -239,21 +318,37 @@ ensure_api_base() {
     return 1
   fi
 
-  local default_api="http://${BACKEND_HOST}:${BACKEND_PORT}/api"
+  local default_api="http://${BACKEND_HOST}:${PREFERRED_BACKEND_PORT}/api"
   local pid
-  pid="$(listener_pid "$BACKEND_PORT")"
+  pid="$(listener_pid "$PREFERRED_BACKEND_PORT")"
   if [ -n "$pid" ]; then
-    if is_current_worktree_listener "$BACKEND_PORT" && wait_for_api "$default_api"; then
+    if is_current_worktree_listener "$PREFERRED_BACKEND_PORT" && wait_for_api "$default_api"; then
       printf '%s\n' "$default_api"
       return 0
     fi
-    return 1
+  else
+    if start_backend "$PREFERRED_BACKEND_PORT"; then
+      printf '%s\n' "$default_api"
+      return 0
+    fi
   fi
 
-  if start_backend; then
-    printf '%s\n' "$default_api"
-    return 0
-  fi
+  local port
+  for port in "${BACKEND_PORT_CANDIDATES[@]}"; do
+    local api_base="http://${BACKEND_HOST}:${port}/api"
+    if is_current_worktree_listener "$port" && wait_for_api "$api_base"; then
+      printf '%s\n' "$api_base"
+      return 0
+    fi
+  done
+
+  for port in "${BACKEND_PORT_CANDIDATES[@]}"; do
+    local api_base="http://${BACKEND_HOST}:${port}/api"
+    if port_free "$port" && start_backend "$port"; then
+      printf '%s\n' "$api_base"
+      return 0
+    fi
+  done
 
   return 1
 }
@@ -364,8 +459,9 @@ if [ -n "$resolved_ui_root" ]; then
   ui_listener_command="$(listener_command "${resolved_ui_root##*:}")"
 fi
 if [ -n "$resolved_api_base" ]; then
-  api_listener_pid="$(listener_pid "$BACKEND_PORT")"
-  api_listener_command="$(listener_command "$BACKEND_PORT")"
+  resolved_api_port="$(port_from_url "$resolved_api_base")"
+  api_listener_pid="$(listener_pid "$resolved_api_port")"
+  api_listener_command="$(listener_command "$resolved_api_port")"
 fi
 
 ui_url_web=""
