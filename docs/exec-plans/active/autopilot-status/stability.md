@@ -22,6 +22,12 @@ Keep ragweld booting, serving, and rendering while reducing obvious regression r
 - `./scripts/ci_local_fast.sh` (currently missing on `origin/main`; used equivalent repo checks this run)
 - `./scripts/ci_local_full.sh` (currently missing on `origin/main`; used equivalent repo checks this run)
 
+## Automation Infra
+
+- Host `crontab` is the authoritative scheduler for `ragweld-stability-loop`, `ragweld-ui-proof-loop`, and `ragweld-eval-data-loop`.
+- The matching desktop automation entries remain `PAUSED` on purpose; that disables the desktop scheduler, not the host cron lanes.
+- Install or repair the worker-lane cron block with `python3 /Users/davidmontgomery/ragweld/scripts/install_codex_exec_crons.py --apply`.
+
 ## Current Priority
 
 Keep this file updated with the top 3 highest-confidence defects and the latest landed fix.
