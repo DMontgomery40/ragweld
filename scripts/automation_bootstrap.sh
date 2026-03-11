@@ -30,9 +30,27 @@ ui_listener_pid=""
 ui_listener_command=""
 api_listener_pid=""
 api_listener_command=""
+git_health_error=""
+GIT_HEALTH_SCRIPT="$ROOT_DIR/scripts/git_worktree_health.py"
 
 log() {
   echo "[automation_bootstrap] $*" >&2
+}
+
+check_git_health() {
+  local output=""
+  if [ ! -f "$GIT_HEALTH_SCRIPT" ]; then
+    git_health_error="missing git health script: $GIT_HEALTH_SCRIPT"
+    return 1
+  fi
+
+  if ! output="$(python3 "$GIT_HEALTH_SCRIPT" --strict --current-branch-only --allow-missing-upstream 2>&1)"; then
+    git_health_error="$output"
+    return 1
+  fi
+
+  git_health_error=""
+  return 0
 }
 
 listener_pid() {
@@ -309,12 +327,17 @@ PY
   return 0
 }
 
-if ! resolved_api_base="$(ensure_api_base)"; then
+if ! check_git_health; then
+  status="failed"
+  failure_reason="git_worktree_health_failed"
+fi
+
+if [ "$status" = "passed" ] && ! resolved_api_base="$(ensure_api_base)"; then
   status="failed"
   failure_reason="api_unavailable_or_foreign_listener"
 fi
 
-if ! resolved_ui_root="$(ensure_ui_root)"; then
+if [ "$status" = "passed" ] && ! resolved_ui_root="$(ensure_ui_root)"; then
   status="failed"
   if [ -z "$failure_reason" ]; then
     failure_reason="ui_unavailable_or_foreign_listener"
@@ -325,7 +348,7 @@ if [ -n "$resolved_ui_root" ]; then
   resolved_ui_base="${resolved_ui_root}/web"
 fi
 
-if [ -n "$resolved_api_base" ]; then
+if [ "$status" = "passed" ] && [ -n "$resolved_api_base" ]; then
   if ensure_corpus_exists "$resolved_api_base"; then
     corpus_ready=1
   else
@@ -385,6 +408,7 @@ fi
 export artifact_ts status failure_reason CORPUS_ID resolved_ui_base resolved_ui_root resolved_api_base
 export ui_url_web ui_url_root ui_web_http_code ui_root_http_code api_url api_http_code
 export corpus_ready corpus_action corpus_path ui_listener_pid ui_listener_command api_listener_pid api_listener_command
+export git_health_error
 
 python3 - "$artifact_dir/summary.json" <<'PY'
 import json
@@ -397,6 +421,7 @@ payload = {
     "completed_at": datetime.now(timezone.utc).isoformat(),
     "status": os.environ["status"],
     "failure_reason": os.environ.get("failure_reason") or None,
+    "git_health_error": os.environ.get("git_health_error") or None,
     "corpus_id": os.environ["CORPUS_ID"],
     "ui_base": os.environ.get("resolved_ui_base") or None,
     "ui_root": os.environ.get("resolved_ui_root") or None,
