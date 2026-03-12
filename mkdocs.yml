@@ -149,6 +149,7 @@ nav:
       - Dev workflow: dev_workflow.md
       - Docs Autopilot: dev/docs-autopilot.md
       - Docs Autopilot workflow: dev/docs-autopilot-workflow.md
+      - Docs Autopilot (CI soft-fail updates): dev/docs-autopilot-ci.md
       - Pydantic: dev/pydantic.md
       - Config store & caching: dev/config_store.md
       - Config cache & locks: dev/config_cache_locks.md
