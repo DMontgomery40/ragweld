@@ -83,7 +83,11 @@ export function useApplyButton() {
   useEffect(() => {
     if (!configSnapshot || !baselineRef.current) return;
     const snapshot = JSON.stringify(configSnapshot);
-    setIsDirty(snapshot !== baselineRef.current);
+    const dirty = snapshot !== baselineRef.current;
+    setIsDirty(dirty);
+    if (dirty) {
+      setSaveError(null);
+    }
   }, [configSnapshot]);
 
   // Ensure config is loaded on mount
