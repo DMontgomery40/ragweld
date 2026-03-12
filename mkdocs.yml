@@ -148,6 +148,7 @@ nav:
   - Developer:
       - Dev workflow: dev_workflow.md
       - Docs Autopilot: dev/docs-autopilot.md
+      - Docs Autopilot workflow: dev/docs-autopilot-workflow.md
       - Pydantic: dev/pydantic.md
       - Config store & caching: dev/config_store.md
       - Config cache & locks: dev/config_cache_locks.md
