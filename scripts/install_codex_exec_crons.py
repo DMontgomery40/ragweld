@@ -29,6 +29,11 @@ _DAY_NAME_TO_CRON = {
     "SA": "6",
     "SU": "0",
 }
+_SUPPORTED_HOURLY_INTERVALS = frozenset({1, 2, 3, 4, 6, 8, 12})
+_ALLOWED_RRULE_FIELDS_BY_FREQ = {
+    "HOURLY": frozenset({"FREQ", "INTERVAL", "BYMINUTE", "BYDAY"}),
+    "WEEKLY": frozenset({"FREQ", "BYDAY", "BYHOUR", "BYMINUTE"}),
+}
 
 
 @dataclass(frozen=True)
@@ -83,7 +88,13 @@ def _quote_shell_arg(value: str | Path) -> str:
 
 def _parse_int_field(*, value: str | None, field: str, minimum: int, maximum: int, default: int) -> int:
     raw = str(value).strip() if value is not None else ""
-    parsed = default if not raw else int(raw)
+    if not raw:
+        parsed = default
+    else:
+        try:
+            parsed = int(raw)
+        except ValueError as exc:
+            raise ValueError(f"{field} must be an integer, got {raw!r}") from exc
     if parsed < minimum or parsed > maximum:
         raise ValueError(f"{field} must be between {minimum} and {maximum}, got {parsed}")
     return parsed
@@ -104,6 +115,27 @@ def _parse_byday(value: str | None) -> str:
     return ",".join(days)
 
 
+def _assert_supported_rrule_fields(*, freq: str | None, fields: dict[str, str]) -> None:
+    allowed_fields = _ALLOWED_RRULE_FIELDS_BY_FREQ.get(freq or "")
+    if allowed_fields is None:
+        raise ValueError(f"unsupported RRULE frequency: {freq!r}")
+
+    unsupported = sorted(set(fields) - allowed_fields)
+    if unsupported:
+        joined = ", ".join(unsupported)
+        raise ValueError(f"{freq} RRULE has unsupported fields for cron translation: {joined}")
+
+
+def _hour_field_for_hourly_interval(interval: int) -> str:
+    if interval not in _SUPPORTED_HOURLY_INTERVALS:
+        supported = ", ".join(str(value) for value in sorted(_SUPPORTED_HOURLY_INTERVALS))
+        raise ValueError(
+            "HOURLY INTERVAL cannot be represented faithfully in cron; "
+            f"supported values are {supported}, got {interval}"
+        )
+    return "*" if interval == 1 else f"*/{interval}"
+
+
 def _parse_rrule(rrule: str) -> CronSchedule:
     fields: dict[str, str] = {}
     for part in str(rrule).split(";"):
@@ -116,12 +148,13 @@ def _parse_rrule(rrule: str) -> CronSchedule:
         fields[key.strip().upper()] = value.strip().upper()
 
     freq = fields.get("FREQ")
+    _assert_supported_rrule_fields(freq=freq, fields=fields)
     if freq == "HOURLY":
         interval = _parse_int_field(
             value=fields.get("INTERVAL"),
             field="INTERVAL",
             minimum=1,
-            maximum=24,
+            maximum=24 * 365,
             default=1,
         )
         minute = _parse_int_field(
@@ -131,9 +164,7 @@ def _parse_rrule(rrule: str) -> CronSchedule:
             maximum=59,
             default=0,
         )
-        if "BYHOUR" in fields:
-            raise ValueError("HOURLY RRULE must not set BYHOUR")
-        hour = "*" if interval == 1 else f"*/{interval}"
+        hour = _hour_field_for_hourly_interval(interval)
         return CronSchedule(
             minute=str(minute),
             hour=hour,
@@ -160,7 +191,7 @@ def _parse_rrule(rrule: str) -> CronSchedule:
             raise ValueError("WEEKLY RRULE must provide BYDAY")
         return CronSchedule(minute=str(minute), hour=str(hour), day_of_week=day_of_week)
 
-    raise ValueError(f"unsupported RRULE frequency: {freq!r}")
+    raise AssertionError(f"unreachable frequency branch: {freq!r}")
 
 
 def _load_automation_doc(*, automation_root: Path, automation_id: str) -> dict[str, object]:

@@ -18,7 +18,7 @@
 
     ---
 
-    `codex_exec_automation.py --dry-run` prints JSON and creates nothing. Use it to validate configuration before running.
+    `codex_exec_automation.py --dry-run` prints JSON, creates nothing, and performs read-only repo/worktree validation before you schedule a lane.
 
 -   :material-source-branch:{ .lg .middle } **Worktree hygiene**
 
@@ -59,7 +59,7 @@ Long-running or periodic operator tasks (stability loops, UI proofs, eval data r
 - Declarative lane schedules in TOML, under your control
 - Merged crontab installs that won’t clobber unrelated entries
 - Automatic cleanup when past runs left non-worktree directories behind
-- Dry-run validation so you can audit what would happen before it does
+- Dry-run validation so you can audit what would happen before it does, without creating worktrees or run artifacts
 
 ```mermaid
 flowchart LR
@@ -87,7 +87,7 @@ flowchart LR
     If you’re not sure:
     
     - Put automation TOMLs under `~/.codex/automations/<id>/automation.toml`
-    - Use HOURLY RRULEs with a 4–6 hour interval (gentle on machines)
+    - Use HOURLY RRULEs with a 1, 2, 3, 4, 6, 8, or 12 hour interval (those map cleanly to cron)
     - Validate with `--dry-run` before installing cron
 
 ## Authoring automation.toml
@@ -113,9 +113,9 @@ id
 
 rrule
 : Schedule in iCalendar RRULE form. Supported today:
-  - HOURLY with INTERVAL and optional BYMINUTE
-  - WEEKLY with BYDAY, BYHOUR, and optional BYMINUTE
-  The installer converts these to crontab fields.
+  - HOURLY with `INTERVAL` in `1, 2, 3, 4, 6, 8, 12`, plus optional `BYMINUTE` and `BYDAY`
+  - WEEKLY with `BYDAY`, `BYHOUR`, and optional `BYMINUTE`
+  Unsupported RRULE fields fail closed before any crontab changes are applied.
 
 cwds
 : One or more repo roots where runs occur. The executor picks a root for worktree setup and artifact placement.
@@ -132,6 +132,7 @@ status
   - INTERVAL=4 → `hour="*/4"`
   - BYMINUTE=20 → `minute="20"` (default `0` if omitted)
   - Optional BYDAY (e.g., `MO,WE,FR`) limits day-of-week; if omitted, runs every day
+  - Intervals that do not map cleanly to cron (for example `5`, `24`, or `72`) are rejected instead of being approximated
 - WEEKLY
   - BYDAY is required (e.g., `MO,WE,FR`)
   - BYHOUR and BYMINUTE set daily time
@@ -149,7 +150,7 @@ Day-of-week tokens map to crontab as:
 | SA    | 6                |
 
 !!! warning "Validation"
-    The installer validates numeric ranges (minutes 0–59, hours 0–23) and RRULE shapes. Invalid RRULEs will raise clear errors before any crontab changes are applied.
+    The installer validates numeric ranges (minutes 0–59, hours 0–23), rejects unsupported RRULE fields, and refuses hourly intervals that cannot be translated faithfully to cron. Invalid RRULEs raise clear errors before any crontab changes are applied.
 
 ## Install or update managed cron entries
 
@@ -182,7 +183,7 @@ install_managed_crontab()'
 
 ## Validate a lane with dry-run
 
-Before scheduling a lane, confirm paths and derived metadata look right. Dry-run creates nothing; it prints JSON to stdout.
+Before scheduling a lane, confirm paths and derived metadata look right. Dry-run creates nothing, runs read-only repo/worktree checks, and prints JSON to stdout.
 
 ```bash
 python scripts/codex_exec_automation.py --dry-run ragweld-ui-proof-loop
@@ -197,7 +198,8 @@ Output fields (excerpt):
   "automation_id": "ragweld-ui-proof-loop",
   "repo_root": "/absolute/path/to/your/ragweld/repo",
   "worktree_root": "/Users/you/.codex/exec-worktrees/ragweld-ui-proof-loop",
-  "run_dir": "/absolute/path/to/your/ragweld/repo/output/automation/codex-exec/ragweld-ui-proof-loop/20260101T000000Z",
+  "worktree_state": "missing",
+  "ready_to_execute": true,
   "events_path": ".../events.jsonl",
   "stderr_path": ".../stderr.log",
   "last_message_path": ".../last_message.txt",
@@ -208,8 +210,12 @@ Output fields (excerpt):
 !!! tip "What to check"
     - repo_root points at the right checkout
     - worktree_root is under `~/.codex/exec-worktrees/<id>`
-    - run_dir is under your repo’s `output/automation/codex-exec/<id>/<timestamp>`
-    - command shows the expected executor binary (see below)
+    - worktree_state is `missing`, `ready`, or `stale-non-worktree`
+    - ready_to_execute is `true` before you rely on the lane to run unattended
+    - command shows the expected executor binary when one is available (see below)
+
+!!! note "Missing executor binary"
+    If dry-run cannot resolve a Codex binary yet, it still prints metadata so you can validate the lane safely. In that case, `codex_bin` is `null`, `ready_to_execute` is `false`, and `command` is `null`.
 
 ## Execution environment and logs
 
@@ -263,4 +269,3 @@ You still control the actual schedules via each lane’s `automation.toml` RRULE
 
 ??? info "No crontab for user"
     Cron might report “no crontab for <user>”. This is normal if you’ve never installed one. The installer handles this case and creates a new crontab when writing.
-
