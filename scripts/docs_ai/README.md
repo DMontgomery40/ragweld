@@ -24,12 +24,22 @@ Optional (Actions variables or secrets):
 
 ## Scripts
 
+- `run_ci_autopilot.py` (**authoritative for CI orchestration**)  
+  The canonical GitHub Actions entrypoint for docs automation.
+  - Resolves the base ref
+  - Generates the docs plan artifact
+  - Runs the LLM patch flow in a disposable git worktree
+  - Regenerates deterministic config reference docs
+  - Runs `mkdocs build --strict`
+  - Commits and pushes only when the transactional worktree succeeds
+
 - `generate_docs_from_diff.py` (**authoritative**)  
   Diff-driven doc updates. It builds a context bundle from `git diff` + current docs tree and asks the LLM to output a **unified diff patch** that only edits:
   - `mkdocs/docs/**`
   - `mkdocs.yml`
   - Includes guardrails against destructive page rewrites in normal incremental runs.
   - Includes screenshot asset inventory context (`mkdocs/docs/assets/images/**`, `web/public/screenshots/**`) so screenshot sections can be kept current.
+  - Acts as the docs-autopilot engine; CI orchestration lives in `run_ci_autopilot.py`.
 
 - `../generate_config_reference_docs.py` (**authoritative for config docs**)  
   Deterministic generator that builds a full **configuration reference** (1000+ parameters) from:
@@ -47,6 +57,17 @@ Optional (Actions variables or secrets):
 - `bootstrap_docs.py` (legacy/manual)  
   Deterministic “bootstrap a fixed set of pages” generator. Not used by CI.
 
+## Ownership model
+
+- `mkdocs/**` and `mkdocs.yml` are docs-autopilot output. Do not hand-edit them during normal feature work.
+- Human/agent changes should target:
+  - code and API/config source files
+  - `data/models.json`
+  - `data/glossary.json`
+  - `scripts/docs_ai/docs_prompt_base.md`
+  - this README and repo-local docs under `docs/`
+- The deterministic config reference under `mkdocs/docs/reference/config/**` is still generated from Pydantic + glossary and should never be hand-edited.
+
 ## Local usage
 
 Plan only (no network):
@@ -62,6 +83,13 @@ export OPENAI_API_KEY=...
 python scripts/docs_ai/generate_docs_from_diff.py --base origin/main --llm openai --apply
 uv run python scripts/generate_config_reference_docs.py --clean
 mkdocs build --strict
+```
+
+To reproduce the full CI orchestration locally from a clean checkout:
+
+```bash
+export OPENAI_API_KEY=...
+python scripts/docs_ai/run_ci_autopilot.py --base origin/main
 ```
 
 ## Bootstrap / catch-up (one time)

@@ -19,6 +19,7 @@ Important:
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass
 import os
 import re
 import shlex
@@ -31,7 +32,6 @@ ROOT = Path(__file__).resolve().parents[2]
 PROMPT_BASE_PATH = ROOT / "scripts" / "docs_ai" / "docs_prompt_base.md"
 
 PATCH_FILE = ROOT / "mkdocs-docs-llm.patch"
-PATCH_APPLY_FAILURE_FILE = ROOT / "mkdocs-docs-llm.apply-failed.txt"
 PLAN_FILE = ROOT / "mkdocs-docs-plan.md"
 
 # Git's well-known empty tree object. Use as a "base ref" to treat the entire
@@ -124,13 +124,6 @@ def _gh_error(msg: str) -> None:
     # GitHub truncates long annotations; keep first line concise
     first = msg.split("\n")[0][:200]
     print(f"::error::docs-autopilot: {first}", flush=True)
-    if len(msg) > len(first):
-        print(msg, flush=True)
-
-
-def _gh_warning(msg: str) -> None:
-    first = msg.split("\n")[0][:200]
-    print(f"::warning::docs-autopilot: {first}", flush=True)
     if len(msg) > len(first):
         print(msg, flush=True)
 
@@ -753,19 +746,23 @@ def _is_allowed_patch_path(path: str) -> bool:
     return path == "mkdocs.yml" or path.startswith("mkdocs/docs/")
 
 
-def _apply_cursor_style_patch(patch_text: str) -> List[str]:
-    """Apply Cursor-style patch format (*** Begin Patch) by writing files.
+@dataclass(frozen=True)
+class _CursorPatchOperation:
+    kind: str
+    path: str
+    content: Optional[str] = None
+    move_to: Optional[str] = None
 
-    This format is sometimes returned by LLMs even when asked for `git apply`
-    patches. We support it as a fallback for robustness.
-    """
+
+def _parse_cursor_style_patch(patch_text: str) -> list[_CursorPatchOperation]:
+    """Parse a Cursor-style patch into validated in-memory operations."""
 
     raw_lines = (patch_text or "").splitlines()
     if not raw_lines or raw_lines[0].strip() != "*** Begin Patch":
         raise RuntimeError("Not a Cursor-style patch (missing '*** Begin Patch').")
 
     i = 1
-    touched: list[str] = []
+    operations: list[_CursorPatchOperation] = []
 
     def _validate_rel_path(p: str) -> str:
         p = (p or "").strip().replace("\\", "/")
@@ -784,6 +781,9 @@ def _apply_cursor_style_patch(patch_text: str) -> List[str]:
         line = raw_lines[i].strip("\n")
         if line.strip() == "*** End Patch":
             break
+        if line.strip() == "":
+            i += 1
+            continue
 
         def _find_subsequence(haystack: list[str], needle: list[str]) -> Optional[int]:
             if not needle:
@@ -806,10 +806,13 @@ def _apply_cursor_style_patch(patch_text: str) -> List[str]:
                 content_lines.append(nxt[1:])
                 i += 1
 
-            full_path = ROOT / rel_path
-            full_path.parent.mkdir(parents=True, exist_ok=True)
-            full_path.write_text("\n".join(content_lines) + "\n", encoding="utf-8")
-            touched.append(rel_path)
+            operations.append(
+                _CursorPatchOperation(
+                    kind="add",
+                    path=rel_path,
+                    content="\n".join(content_lines) + "\n",
+                )
+            )
             continue
 
         if line.startswith("*** Update File: "):
@@ -820,6 +823,10 @@ def _apply_cursor_style_patch(patch_text: str) -> List[str]:
 
             file_lines = _read_text(full_path).splitlines()
             i += 1
+            move_to: Optional[str] = None
+            if i < len(raw_lines) and raw_lines[i].startswith("*** Move to: "):
+                move_to = _validate_rel_path(raw_lines[i].removeprefix("*** Move to: ").strip())
+                i += 1
 
             while i < len(raw_lines):
                 if raw_lines[i].startswith("*** "):
@@ -864,15 +871,76 @@ def _apply_cursor_style_patch(patch_text: str) -> List[str]:
 
                 file_lines = file_lines[:pos] + new_seq + file_lines[pos + len(old_seq) :]
 
-            full_path.write_text("\n".join(file_lines) + "\n", encoding="utf-8")
-            touched.append(rel_path)
+            operations.append(
+                _CursorPatchOperation(
+                    kind="move" if move_to else "update",
+                    path=rel_path,
+                    content="\n".join(file_lines) + "\n",
+                    move_to=move_to,
+                )
+            )
+            continue
+
+        if line.startswith("*** Delete File: "):
+            rel_path = _validate_rel_path(line.removeprefix("*** Delete File: ").strip())
+            full_path = ROOT / rel_path
+            if not full_path.exists():
+                raise RuntimeError(f"Delete File refers to missing path: {rel_path}")
+            operations.append(_CursorPatchOperation(kind="delete", path=rel_path))
+            i += 1
             continue
 
         raise RuntimeError(f"Unrecognized patch directive: {line[:120]}")
 
-    # Stage touched files
-    for rel in touched:
-        run(f"git add -- {shlex.quote(rel)}")
+    return operations
+
+
+def _apply_cursor_style_patch(patch_text: str) -> List[str]:
+    """Apply Cursor-style patch format transactionally.
+
+    This format is sometimes returned by LLMs even when asked for `git apply`
+    patches. We validate the entire patch in memory first so failures cannot
+    leave partially written docs behind.
+    """
+
+    operations = _parse_cursor_style_patch(patch_text)
+    touched: list[str] = []
+
+    for operation in operations:
+        full_path = ROOT / operation.path
+
+        if operation.kind == "add":
+            full_path.parent.mkdir(parents=True, exist_ok=True)
+            full_path.write_text(operation.content or "", encoding="utf-8")
+            touched.append(operation.path)
+            continue
+
+        if operation.kind == "update":
+            full_path.write_text(operation.content or "", encoding="utf-8")
+            touched.append(operation.path)
+            continue
+
+        if operation.kind == "delete":
+            full_path.unlink()
+            touched.append(operation.path)
+            continue
+
+        if operation.kind == "move":
+            move_to = operation.move_to
+            if not move_to:
+                raise RuntimeError(f"Move operation missing destination for {operation.path}")
+            target_path = ROOT / move_to
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            target_path.write_text(operation.content or "", encoding="utf-8")
+            full_path.unlink()
+            touched.extend([operation.path, move_to])
+            continue
+
+        raise RuntimeError(f"Unsupported Cursor patch operation: {operation.kind}")
+
+    # Stage touched files, including deletions/moves.
+    for rel in dict.fromkeys(touched):
+        run(f"git add -A -- {shlex.quote(rel)}")
 
     return touched
 
@@ -907,19 +975,9 @@ def main() -> None:
     ap.add_argument("--base", default="origin/main", help="Git ref to diff against (base..HEAD)")
     ap.add_argument("--llm", choices=["openai"], default=None, help="LLM provider (currently: openai)")
     ap.add_argument("--apply", action="store_true", help="Apply the returned patch with `git apply --index`")
-    ap.add_argument(
-        "--soft-fail-apply-errors",
-        action="store_true",
-        help="Treat patch apply failures as best-effort and write a marker file instead of exiting non-zero.",
-    )
     ap.add_argument("--apply-patch", default="", help="Apply an existing patch file and exit (no LLM call)")
     ap.add_argument("--output", default=str(PLAN_FILE.name), help="Plan output file (plan mode)")
     args = ap.parse_args()
-
-    try:
-        PATCH_APPLY_FAILURE_FILE.unlink(missing_ok=True)
-    except Exception:
-        pass
 
     if args.apply_patch:
         patch_path = Path(args.apply_patch)
@@ -968,11 +1026,6 @@ def main() -> None:
     if args.apply:
         ok, err = apply_patch(PATCH_FILE)
         if not ok:
-            if args.soft_fail_apply_errors:
-                PATCH_APPLY_FAILURE_FILE.write_text((err or "").strip() + "\n", encoding="utf-8")
-                _gh_warning("Docs autopilot: LLM patch could not be applied; continuing in best-effort mode.")
-                _gh_warning(f"Details: {err}")
-                return
             _gh_error("Docs autopilot: LLM patch could not be applied (corrupt or incompatible).")
             _gh_error(f"Details: {err}")
             raise SystemExit(1)

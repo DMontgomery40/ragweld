@@ -2,6 +2,16 @@ name: Docs Autopilot (push)
 on:
   push:
     branches: ["main", "development"]
+    paths:
+      - "server/**"
+      - "web/**"
+      - "scripts/docs_ai/**"
+      - "scripts/generate_config_reference_docs.py"
+      - "data/models.json"
+      - "data/glossary.json"
+      - "docker-compose.yml"
+      - "pyproject.toml"
+      - "start.sh"
   workflow_dispatch:
     inputs:
       base_ref:
@@ -49,79 +59,17 @@ jobs:
           pip install mike==2.1.0 mkdocs-git-revision-date-localized-plugin==1.2.6 mkdocs-minify-plugin==0.8.0
           pip install mkdocs-glightbox
 
-      - name: Generate docs plan (artifact)
+      - name: Run docs autopilot
         run: |
-          BASE="${{ github.event.inputs.base_ref }}"
-          if [ -z "$BASE" ]; then
-            BASE="${{ github.event.before }}"
-          fi
-          if [ -z "$BASE" ] || [ "$BASE" = "0000000000000000000000000000000000000000" ]; then
-            BASE="origin/${{ github.ref_name }}"
-          fi
-          echo "Using base ref: $BASE"
-          python scripts/docs_ai/generate_docs_from_diff.py --base "$BASE" --output mkdocs-docs-plan.md
+          python scripts/docs_ai/run_ci_autopilot.py --base "${{ github.event.inputs.base_ref }}"
 
-      - name: Upload plan
-        uses: actions/upload-artifact@v4
-        with:
-          name: mkdocs-docs-plan
-          path: mkdocs-docs-plan.md
-
-      - name: Require OPENAI_API_KEY
-        run: |
-          if [ -z "${OPENAI_API_KEY}" ]; then
-            echo "ERROR: OPENAI_API_KEY is not set."
-            echo "Add it in GitHub → Settings → Secrets and variables → Actions → New repository secret."
-            exit 1
-          fi
-
-      - name: Generate docs patch (apply)
-        run: |
-          BASE="${{ github.event.inputs.base_ref }}"
-          if [ -z "$BASE" ]; then
-            BASE="${{ github.event.before }}"
-          fi
-          if [ -z "$BASE" ] || [ "$BASE" = "0000000000000000000000000000000000000000" ]; then
-            BASE="origin/${{ github.ref_name }}"
-          fi
-          echo "Using base ref: $BASE"
-          python scripts/docs_ai/generate_docs_from_diff.py --base "$BASE" --llm openai --apply --soft-fail-apply-errors
-
-      - name: Docs autopilot failed
-        if: hashFiles('mkdocs-docs-llm.apply-failed.txt') != ''
-        run: |
-          echo "## Docs Autopilot Failed" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "The LLM-generated patch could not be applied (often due to corrupt or incompatible patch format)." >> $GITHUB_STEP_SUMMARY
-          echo "Check the **Generate docs patch (apply)** step log for \`::error::\` annotations and full details." >> $GITHUB_STEP_SUMMARY
-          echo "The patch artifact (mkdocs-docs-llm-patch) may be downloaded for inspection." >> $GITHUB_STEP_SUMMARY
-          echo "The workflow will continue with config reference generation and docs build so this best-effort failure does not block main." >> $GITHUB_STEP_SUMMARY
-
-      - name: Generate config reference docs (Pydantic + glossary)
-        run: |
-          uv run python scripts/generate_config_reference_docs.py --clean
-          git add mkdocs/docs/reference/config
-
-      - name: Upload patch (best-effort)
+      - name: Upload docs autopilot artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: mkdocs-docs-llm-patch
+          name: mkdocs-docs-autopilot
           path: |
+            mkdocs-docs-plan.md
             mkdocs-docs-llm.patch
-            mkdocs-docs-llm.apply-failed.txt
+            output/docs-autopilot/**
           if-no-files-found: ignore
-
-      - name: Build documentation
-        run: mkdocs build --strict
-
-      - name: Commit and push docs updates
-        run: |
-          if git diff --cached --quiet; then
-            echo "No docs changes to commit."
-            exit 0
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git commit -m "docs(ai): autopilot update"
-          git push origin HEAD:${{ github.ref_name }}

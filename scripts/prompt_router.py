@@ -30,6 +30,17 @@ def _contains_any(haystack: str, needles: tuple[str, ...]) -> bool:
 def route_prompt(prompt: str) -> Route:
     p = (prompt or "").lower()
 
+    is_docs = _contains_any(
+        p,
+        (
+            "docs",
+            "documentation",
+            "mkdocs",
+            "docs-autopilot",
+            "docs autopilot",
+            "autodoc",
+        ),
+    )
     is_gui = _contains_any(
         p,
         (
@@ -78,32 +89,36 @@ def route_prompt(prompt: str) -> Route:
     ]
     required: list[str] = []
 
-    if is_gui:
+    if is_docs:
         references.extend(
             [
-                "/Users/davidmontgomery/ragweld/mkdocs/docs/testing.md",
-                "/Users/davidmontgomery/ragweld/mkdocs/docs/dev_workflow.md",
+                "/Users/davidmontgomery/ragweld/scripts/docs_ai/README.md",
+                "/Users/davidmontgomery/ragweld/docs/references/index.md",
             ]
         )
         required.extend(
             [
+                "Docs prompts must treat mkdocs/** and mkdocs.yml as docs-autopilot output, not hand-edited source files.",
+                "When docs behavior changes, update AGENTS/docs KB/scripts/docs_ai inputs instead of published MkDocs pages.",
+            ]
+        )
+
+    if is_gui:
+        required.extend(
+            [
                 "GUI changes require real Playwright E2E (no request interception).",
                 "Start stack: ./start.sh --with-observability",
+                "Run: uv run python scripts/check_docs_ownership.py",
                 "Run: npm --prefix web run lint && npm --prefix web run build",
                 "Run: npm --prefix web exec playwright test --config ../playwright.config.ts --project web",
             ]
         )
 
     if is_backend or is_guardrails:
-        references.extend(
-            [
-                "/Users/davidmontgomery/ragweld/mkdocs/docs/testing.md",
-                "/Users/davidmontgomery/ragweld/mkdocs/docs/dev_workflow.md",
-            ]
-        )
         required.extend(
             [
                 "Backend/API/retrieval changes require real pytest (no mocked green).",
+                "Run: uv run python scripts/check_docs_ownership.py",
                 "Run: uv run scripts/check_banned.py",
                 "Run: uv run scripts/validate_types.py",
                 "Run: uv run pytest -q",
@@ -155,6 +170,7 @@ def main() -> int:
     lines.append("Mandatory constraints:")
     lines.append("- Pydantic is the law (define shapes in Pydantic first; TS types from generated.ts).")
     lines.append("- No fake-green tests: no Playwright request interception; no Python mocking in new/edited tests.")
+    lines.append("- `mkdocs/**` and `mkdocs.yml` are docs-autopilot output; do not hand-edit them during feature work.")
     lines.append("")
     lines.append("Required verification before completion (Stop hook will block until green):")
     for item in r.required_checks:
