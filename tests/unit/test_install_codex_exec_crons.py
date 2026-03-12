@@ -3,9 +3,12 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+import pytest
+
 from scripts.install_codex_exec_crons import (
     DEFAULT_CRON_PATH,
     _load_current_crontab,
+    _parse_rrule,
     install_managed_crontab,
     merge_crontab,
     render_cron_lines,
@@ -177,6 +180,28 @@ def test_render_cron_lines_tracks_schedule_changes_from_automation_tomls(tmp_pat
     assert lines[0].startswith("5 */6 * * * ")
     assert lines[1].startswith("33 */4 * * * ")
     assert lines[2].startswith("40 */8 * * * ")
+
+
+def test_parse_rrule_supports_weekly_schedule() -> None:
+    schedule = _parse_rrule("FREQ=WEEKLY;BYDAY=MO,WE,FR;BYHOUR=9;BYMINUTE=30")
+
+    assert schedule.expression == "30 9 * * 1,3,5"
+
+
+def test_parse_rrule_rejects_hourly_intervals_cron_cannot_represent() -> None:
+    with pytest.raises(ValueError, match="supported values are 1, 2, 3, 4, 6, 8, 12, got 5"):
+        _parse_rrule("FREQ=HOURLY;INTERVAL=5;BYMINUTE=0")
+
+    with pytest.raises(ValueError, match="supported values are 1, 2, 3, 4, 6, 8, 12, got 72"):
+        _parse_rrule("FREQ=HOURLY;INTERVAL=72;BYMINUTE=0")
+
+
+def test_parse_rrule_rejects_unsupported_fields() -> None:
+    with pytest.raises(ValueError, match="unsupported fields"):
+        _parse_rrule("FREQ=WEEKLY;BYDAY=MO;BYHOUR=9;BYMINUTE=30;INTERVAL=2")
+
+    with pytest.raises(ValueError, match="unsupported fields"):
+        _parse_rrule("FREQ=HOURLY;INTERVAL=4;BYMINUTE=20;COUNT=3")
 
 
 def test_load_current_crontab_handles_missing_crontab(tmp_path: Path) -> None:

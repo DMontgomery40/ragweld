@@ -77,6 +77,12 @@ def _assert_repo_git_health(repo_root: Path) -> None:
     _run(sys.executable, str(script_path), "--strict", cwd=repo_root)
 
 
+def _assert_repo_git_prereqs(repo_root: Path) -> None:
+    _run("git", "-C", str(repo_root), "rev-parse", "--show-toplevel")
+    script_path = _git_health_script(repo_root)
+    _run(sys.executable, str(script_path), "--strict", cwd=repo_root)
+
+
 def _planned_worktree_root(automation_id: str) -> Path:
     return HOME / ".codex" / "exec-worktrees" / automation_id
 
@@ -95,6 +101,19 @@ def _move_stale_worktree_root(worktree_root: Path) -> Path:
         candidate = worktree_root.with_name(f"{backup_root.name}-{suffix}")
     worktree_root.rename(candidate)
     return candidate
+
+
+def _worktree_state_for_dry_run(worktree_root: Path) -> str:
+    if not worktree_root.exists():
+        return "missing"
+    if not (worktree_root / ".git").exists():
+        return "stale-non-worktree"
+    status = _run("git", "-C", str(worktree_root), "status", "--porcelain")
+    if status.strip():
+        raise RuntimeError(
+            f"automation exec worktree is dirty and cannot be safely reused: {worktree_root}"
+        )
+    return "ready"
 
 
 def _ensure_worktree(repo_root: Path, automation_id: str) -> Path:
@@ -133,31 +152,15 @@ def _prepare_run_dir(repo_root: Path, automation_id: str) -> tuple[Path, str]:
     return run_dir, ts
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("automation_id")
-    parser.add_argument("--dry-run", action="store_true")
-    args = parser.parse_args()
-
-    automation = _load_automation(args.automation_id)
-    prompt = automation.get("prompt")
-    if not isinstance(prompt, str) or not prompt.strip():
-        raise ValueError("automation is missing prompt text")
-
-    repo_root = _repo_root(automation)
-    codex_bin = _resolve_codex_bin()
-    ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    worktree_root = _planned_worktree_root(args.automation_id)
-    planned_run_dir = _planned_run_dir(repo_root, args.automation_id, timestamp_utc=ts)
-    events_path = planned_run_dir / "events.jsonl"
-    stderr_path = planned_run_dir / "stderr.log"
-    last_message_path = planned_run_dir / "last_message.txt"
-    meta_path = planned_run_dir / "meta.json"
-
-    env = os.environ.copy()
-    env["CODEX_INTERNAL_ORIGINATOR_OVERRIDE"] = "Codex Desktop"
-
-    command = [
+def _build_command(
+    *,
+    codex_bin: Path | None,
+    worktree_root: Path,
+    last_message_path: Path,
+) -> list[str] | None:
+    if codex_bin is None:
+        return None
+    return [
         str(codex_bin),
         "exec",
         "--dangerously-bypass-approvals-and-sandbox",
@@ -173,26 +176,68 @@ def main() -> int:
         "-",
     ]
 
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("automation_id")
+    parser.add_argument("--dry-run", action="store_true")
+    args = parser.parse_args()
+
+    automation = _load_automation(args.automation_id)
+    prompt = automation.get("prompt")
+    if not isinstance(prompt, str) or not prompt.strip():
+        raise ValueError("automation is missing prompt text")
+
+    repo_root = _repo_root(automation)
+    ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    worktree_root = _planned_worktree_root(args.automation_id)
+    planned_run_dir = _planned_run_dir(repo_root, args.automation_id, timestamp_utc=ts)
+    events_path = planned_run_dir / "events.jsonl"
+    stderr_path = planned_run_dir / "stderr.log"
+    last_message_path = planned_run_dir / "last_message.txt"
+    meta_path = planned_run_dir / "meta.json"
+    worktree_state = _worktree_state_for_dry_run(worktree_root)
+
     if args.dry_run:
+        _assert_repo_git_prereqs(repo_root)
+        codex_bin: Path | None
+        try:
+            codex_bin = _resolve_codex_bin()
+        except FileNotFoundError:
+            codex_bin = None
+
         meta = {
             "timestamp_utc": ts,
             "dry_run": True,
             "automation_id": args.automation_id,
             "repo_root": str(repo_root),
             "worktree_root": str(worktree_root),
-            "codex_bin": str(codex_bin),
+            "worktree_state": worktree_state,
+            "codex_bin": str(codex_bin) if codex_bin is not None else None,
+            "ready_to_execute": codex_bin is not None,
             "events_path": str(events_path),
             "stderr_path": str(stderr_path),
             "last_message_path": str(last_message_path),
-            "command": command,
+            "command": _build_command(
+                codex_bin=codex_bin,
+                worktree_root=worktree_root,
+                last_message_path=last_message_path,
+            ),
         }
         print(json.dumps(meta))
         return 0
 
+    codex_bin = _resolve_codex_bin()
     _assert_repo_git_health(repo_root)
     worktree_root = _ensure_worktree(repo_root, args.automation_id)
     run_dir = planned_run_dir
     run_dir.mkdir(parents=True, exist_ok=True)
+    command = _build_command(
+        codex_bin=codex_bin,
+        worktree_root=worktree_root,
+        last_message_path=last_message_path,
+    )
+    assert command is not None
 
     prompt_path = run_dir / "prompt.txt"
     prompt_path.write_text(prompt, encoding="utf-8")
@@ -200,6 +245,8 @@ def main() -> int:
     with events_path.open("w", encoding="utf-8") as stdout_handle, stderr_path.open(
         "w", encoding="utf-8"
     ) as stderr_handle:
+        env = os.environ.copy()
+        env["CODEX_INTERNAL_ORIGINATOR_OVERRIDE"] = "Codex Desktop"
         proc = subprocess.run(
             command,
             input=prompt,
