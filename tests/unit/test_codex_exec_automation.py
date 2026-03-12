@@ -8,6 +8,8 @@ from pathlib import Path
 
 from scripts.codex_exec_automation import _move_stale_worktree_root
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
 
 def test_move_stale_worktree_root_preserves_existing_contents(tmp_path: Path) -> None:
     stale_root = tmp_path / "ragweld-ui-proof-loop"
@@ -55,7 +57,7 @@ def test_dry_run_does_not_create_worktree_or_output(tmp_path: Path) -> None:
     proc = subprocess.run(
         [
             sys.executable,
-            "/Users/davidmontgomery/ragweld/scripts/codex_exec_automation.py",
+            str(REPO_ROOT / "scripts" / "codex_exec_automation.py"),
             "--dry-run",
             "test-lane",
         ],
