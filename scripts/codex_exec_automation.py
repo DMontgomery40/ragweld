@@ -70,17 +70,19 @@ def _git_health_script(repo_root: Path) -> Path:
     return path
 
 
+def _assert_origin_main_exists(repo_root: Path) -> None:
+    try:
+        _run("git", "-C", str(repo_root), "rev-parse", "--verify", "origin/main^{commit}")
+    except RuntimeError as exc:
+        raise RuntimeError(f"repo is missing origin/main and cannot prepare an exec worktree: {repo_root}") from exc
+
+
 def _assert_repo_git_health(repo_root: Path) -> None:
     _run("git", "-C", str(repo_root), "fetch", "--all", "--prune")
     _run("git", "-C", str(repo_root), "worktree", "prune")
     script_path = _git_health_script(repo_root)
     _run(sys.executable, str(script_path), "--strict", cwd=repo_root)
-
-
-def _assert_repo_git_prereqs(repo_root: Path) -> None:
-    _run("git", "-C", str(repo_root), "rev-parse", "--show-toplevel")
-    script_path = _git_health_script(repo_root)
-    _run(sys.executable, str(script_path), "--strict", cwd=repo_root)
+    _assert_origin_main_exists(repo_root)
 
 
 def _planned_worktree_root(automation_id: str) -> Path:
@@ -103,10 +105,21 @@ def _move_stale_worktree_root(worktree_root: Path) -> Path:
     return candidate
 
 
-def _worktree_state_for_dry_run(worktree_root: Path) -> str:
+def _is_repo_managed_worktree(repo_root: Path, worktree_root: Path) -> bool:
+    output = _run("git", "-C", str(repo_root), "worktree", "list", "--porcelain")
+    resolved_worktree_root = worktree_root.resolve()
+    for raw_line in output.splitlines():
+        if raw_line.startswith("worktree "):
+            listed_path = Path(raw_line[len("worktree ") :]).resolve()
+            if listed_path == resolved_worktree_root:
+                return True
+    return False
+
+
+def _worktree_state_for_dry_run(repo_root: Path, worktree_root: Path) -> str:
     if not worktree_root.exists():
         return "missing"
-    if not (worktree_root / ".git").exists():
+    if not _is_repo_managed_worktree(repo_root, worktree_root):
         return "stale-non-worktree"
     status = _run("git", "-C", str(worktree_root), "status", "--porcelain")
     if status.strip():
@@ -121,17 +134,17 @@ def _ensure_worktree(repo_root: Path, automation_id: str) -> Path:
     repo_root.mkdir(parents=True, exist_ok=True)
     _run("git", "-C", str(repo_root), "fetch", "--all", "--prune")
     _run("git", "-C", str(repo_root), "worktree", "prune")
-    if worktree_root.exists() and not (worktree_root / ".git").exists():
+    if worktree_root.exists() and not _is_repo_managed_worktree(repo_root, worktree_root):
         backup_path = _move_stale_worktree_root(worktree_root)
         _run("git", "-C", str(repo_root), "worktree", "prune")
         print(
             (
-                "[codex_exec_automation] moved stale non-worktree exec directory "
+                "[codex_exec_automation] moved stale unmanaged exec directory "
                 f"{worktree_root} -> {backup_path}"
             ),
             file=sys.stderr,
         )
-    if (worktree_root / ".git").exists():
+    if worktree_root.exists():
         status = _run("git", "-C", str(worktree_root), "status", "--porcelain")
         if status.strip():
             raise RuntimeError(
@@ -196,10 +209,10 @@ def main() -> int:
     stderr_path = planned_run_dir / "stderr.log"
     last_message_path = planned_run_dir / "last_message.txt"
     meta_path = planned_run_dir / "meta.json"
-    worktree_state = _worktree_state_for_dry_run(worktree_root)
 
     if args.dry_run:
-        _assert_repo_git_prereqs(repo_root)
+        _assert_repo_git_health(repo_root)
+        worktree_state = _worktree_state_for_dry_run(repo_root, worktree_root)
         codex_bin: Path | None
         try:
             codex_bin = _resolve_codex_bin()
