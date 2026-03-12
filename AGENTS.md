@@ -25,11 +25,7 @@ Generated types chain (do not hand-write API types):
 
 Knowledge base (repo-local, versioned):
 - `/Users/davidmontgomery/ragweld/docs/index.md` (entrypoint)
-
-Existing docs site (published via MkDocs):
-- `/Users/davidmontgomery/ragweld/mkdocs/docs/index.md`
-- `/Users/davidmontgomery/ragweld/mkdocs/docs/dev_workflow.md`
-- `/Users/davidmontgomery/ragweld/mkdocs/docs/testing.md`
+- `/Users/davidmontgomery/ragweld/scripts/docs_ai/README.md` (docs-autopilot ownership + CI contract)
 
 Executable specs (structured, machine-checkable intent):
 - `/Users/davidmontgomery/ragweld/spec/README.md`
@@ -47,16 +43,29 @@ Executable specs (structured, machine-checkable intent):
 - Pydantic-first: define shapes and config in `/Users/davidmontgomery/ragweld/server/models/tribrid_config_model.py` first.
 - No hand-written API payload types in the frontend: import from `generated.ts`.
 - No adapters/transformers/mappers to reshape API payloads: fix the Pydantic model.
+- `mkdocs/**` and `mkdocs.yml` are docs-autopilot output. Do not hand-edit them in normal feature work.
 - Tests must be real (no fake-green):
   - No Playwright request interception stubs for new/edited E2E tests.
   - No Python mocking (`unittest.mock`, `monkeypatch`) in new/edited tests.
+
+## Docs Ownership
+
+- Docs-autopilot is essential infrastructure in this repo. Published MkDocs output must track the literal code and config that exist.
+- Treat `mkdocs/**` and `mkdocs.yml` as generated/published output, not as source-of-truth engineering docs.
+- If docs behavior/content needs to change, edit the real sources instead:
+  - code and API/config sources
+  - `/Users/davidmontgomery/ragweld/data/models.json`
+  - `/Users/davidmontgomery/ragweld/data/glossary.json`
+  - `/Users/davidmontgomery/ragweld/scripts/docs_ai/docs_prompt_base.md`
+  - `/Users/davidmontgomery/ragweld/scripts/docs_ai/README.md`
+  - repo-local KB pages under `/Users/davidmontgomery/ragweld/docs/`
 
 ## Workflow Checklist (Any Change)
 
 1. Locate the source of truth (Pydantic model, models.json, glossary.json, spec/).
 2. Make the minimal change in the source of truth first.
 3. Regenerate derived artifacts when required (e.g. `generate_types.py`).
-4. Update the closest docs entry (mkdocs page or `docs/` KB page) if behaviour changed.
+4. Update the closest agent-facing docs entry (`docs/` KB page or `scripts/docs_ai/README.md`) if behaviour changed. Do not hand-edit `mkdocs/**` or `mkdocs.yml`.
 5. Run verification commands (below) until green.
 6. Only then consider the work done.
 
@@ -65,6 +74,7 @@ Executable specs (structured, machine-checkable intent):
 ```bash
 cd /Users/davidmontgomery/ragweld
 
+uv run python scripts/check_docs_ownership.py
 uv run scripts/check_banned.py
 uv run scripts/validate_types.py
 uv run pytest -q
@@ -83,4 +93,3 @@ npm --prefix web run build
 - Larger work plans: `/Users/davidmontgomery/ragweld/docs/exec-plans/active/`
 - Tech debt backlog: `/Users/davidmontgomery/ragweld/docs/exec-plans/tech-debt-tracker.md`
 - References (links, snippets, external context you want in-repo): `/Users/davidmontgomery/ragweld/docs/references/index.md`
-
