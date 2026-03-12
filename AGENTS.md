@@ -48,6 +48,22 @@ Executable specs (structured, machine-checkable intent):
   - No Playwright request interception stubs for new/edited E2E tests.
   - No Python mocking (`unittest.mock`, `monkeypatch`) in new/edited tests.
 
+## Product Positioning
+
+- Do not market ragweld as fully DSV-compliant today.
+- Safe selling points:
+  - versioned source-of-truth config
+  - versioned prompts/config behavior
+  - executable specs
+  - manifest-backed training artifacts
+  - repo-local system-of-record docs
+  - provenance-minded eval and training workflows
+- Do not claim:
+  - full end-to-end lineage across prompts, datasets, evals, and runs
+  - complete dataset/eval artifact governance
+  - fully realized DSV-style tracking across the whole loop
+- If positioning changes, update `/Users/davidmontgomery/ragweld/README.md`, landing/onboarding copy in `web/src`, docs-autopilot guidance, repo-local docs, project memory, and tests together.
+
 ## Docs Ownership
 
 - Docs-autopilot is essential infrastructure in this repo. Published MkDocs output must track the literal code and config that exist.

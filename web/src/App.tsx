@@ -162,7 +162,7 @@ function App() {
         </button>
         <h1>
           <span className="brand">ragweld</span>
-          <span className="tagline">MLOps Platform · API / MCP</span>
+          <span className="tagline">Versioned Config · API / MCP</span>
         </h1>
         <div className="top-actions">
           <button

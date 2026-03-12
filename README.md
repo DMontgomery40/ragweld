@@ -8,7 +8,7 @@
 
 <p align="center">
   <strong>Open-source MLOps Platform for API-first RAG and agent systems (API / MCP)</strong><br />
-  Synthetic data generation, dual training studios, evals, tracing, observability, routing, and tri-brid retrieval in one surface.
+  Versioned config, prompts, and specs; manifest-backed training artifacts; provenance-minded eval and training workflows.
 </p>
 
 <p align="center">
@@ -92,6 +92,14 @@ Each search method compensates for the others' weaknesses. The result: **dramati
 ---
 
 ## Features
+
+### Positioning, Honestly
+- **Versioned source-of-truth config**: Pydantic-backed config is the law, with generated types and UI/API surfaces derived from it
+- **Versioned prompt behavior**: system prompts and config-driven runtime behavior are explicit, reviewable repo artifacts
+- **Executable specs**: machine-checkable intent lives in `spec/` and is meant to be updated with product behavior
+- **Manifest-backed training artifacts**: training and promotion flows are anchored in explicit artifacts and manifests, not hand-waved state
+- **Repo-local system of record**: agent/operator knowledge stays versioned in-repo under `docs/`
+- **Provenance-minded workflows**: eval, training, tracing, and synthetic flows are designed for traceability, without claiming full end-to-end DSV governance
 
 ### MLOps Engineering Platform
 - **Synthetic Data Lab**: recipe-based generation for eval datasets, semantic cards, keywords, triplets, and autotune patches
