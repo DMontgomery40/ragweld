@@ -18,13 +18,13 @@
 
     ---
 
-    `codex_exec_automation.py --dry-run` prints JSON, creates nothing, and performs read-only repo/worktree validation before you schedule a lane.
+    `codex_exec_automation.py --dry-run` prints JSON, creates no worktrees or run artifacts, and runs the same git/worktree preflight a real lane uses.
 
 -   :material-source-branch:{ .lg .middle } **Worktree hygiene**
 
     ---
 
-    If a previous exec directory exists but is not a real git worktree, it’s renamed to a timestamped `.stale-*` backup automatically.
+    If a previous exec path exists but is not the managed git worktree for this repo, it’s renamed to a timestamped `.stale-*` backup automatically.
 
 -   :material-file-cog:{ .lg .middle } **Quoting and paths**
 
@@ -183,7 +183,7 @@ install_managed_crontab()'
 
 ## Validate a lane with dry-run
 
-Before scheduling a lane, confirm paths and derived metadata look right. Dry-run creates nothing, runs read-only repo/worktree checks, and prints JSON to stdout.
+Before scheduling a lane, confirm paths and derived metadata look right. Dry-run creates no worktrees or run artifacts, runs the same git/worktree preflight as a real lane, and prints JSON to stdout.
 
 ```bash
 python scripts/codex_exec_automation.py --dry-run ragweld-ui-proof-loop
@@ -203,14 +203,14 @@ Output fields (excerpt):
   "events_path": ".../events.jsonl",
   "stderr_path": ".../stderr.log",
   "last_message_path": ".../last_message.txt",
-  "command": ["<CODEX_EXEC_BIN>", "--jsonl", "..."]
+  "command": ["<CODEX_EXEC_BIN>", "exec", "--json", "..."]
 }
 ```
 
 !!! tip "What to check"
     - repo_root points at the right checkout
     - worktree_root is under `~/.codex/exec-worktrees/<id>`
-    - worktree_state is `missing`, `ready`, or `stale-non-worktree`
+    - worktree_state is `missing`, `ready`, or `stale-non-worktree` when the path is not the managed exec worktree for this repo
     - ready_to_execute is `true` before you rely on the lane to run unattended
     - command shows the expected executor binary when one is available (see below)
 
@@ -237,7 +237,7 @@ When cron runs a lane:
     - `prompt.txt` — the resolved prompt (non-dry-run only)
 
 !!! note "Worktree hygiene: stale directories"
-    If `~/.codex/exec-worktrees/<id>` exists but isn’t a real git worktree, the executor will:
+    If `~/.codex/exec-worktrees/<id>` exists but isn’t the managed git worktree for this repo, the executor will:
     
     - Rename it to `~/.codex/exec-worktrees/<id>.stale-<timestamp>[{-N}]`
     - Re-run `git worktree prune`

@@ -126,6 +126,13 @@ def _assert_supported_rrule_fields(*, freq: str | None, fields: dict[str, str]) 
         raise ValueError(f"{freq} RRULE has unsupported fields for cron translation: {joined}")
 
 
+def _require_rrule_field(*, fields: dict[str, str], freq: str, field: str) -> str:
+    value = fields.get(field)
+    if value is None or not value.strip():
+        raise ValueError(f"{freq} RRULE must provide {field}")
+    return value
+
+
 def _hour_field_for_hourly_interval(interval: int) -> str:
     if interval not in _SUPPORTED_HOURLY_INTERVALS:
         supported = ", ".join(str(value) for value in sorted(_SUPPORTED_HOURLY_INTERVALS))
@@ -151,11 +158,11 @@ def _parse_rrule(rrule: str) -> CronSchedule:
     _assert_supported_rrule_fields(freq=freq, fields=fields)
     if freq == "HOURLY":
         interval = _parse_int_field(
-            value=fields.get("INTERVAL"),
+            value=_require_rrule_field(fields=fields, freq="HOURLY", field="INTERVAL"),
             field="INTERVAL",
             minimum=1,
             maximum=24 * 365,
-            default=1,
+            default=0,
         )
         minute = _parse_int_field(
             value=fields.get("BYMINUTE"),
@@ -173,11 +180,11 @@ def _parse_rrule(rrule: str) -> CronSchedule:
 
     if freq == "WEEKLY":
         hour = _parse_int_field(
-            value=fields.get("BYHOUR"),
+            value=_require_rrule_field(fields=fields, freq="WEEKLY", field="BYHOUR"),
             field="BYHOUR",
             minimum=0,
             maximum=23,
-            default=0,
+            default=-1,
         )
         minute = _parse_int_field(
             value=fields.get("BYMINUTE"),

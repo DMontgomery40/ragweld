@@ -204,6 +204,14 @@ def test_parse_rrule_rejects_unsupported_fields() -> None:
         _parse_rrule("FREQ=HOURLY;INTERVAL=4;BYMINUTE=20;COUNT=3")
 
 
+def test_parse_rrule_rejects_missing_required_fields() -> None:
+    with pytest.raises(ValueError, match="HOURLY RRULE must provide INTERVAL"):
+        _parse_rrule("FREQ=HOURLY;BYMINUTE=5")
+
+    with pytest.raises(ValueError, match="WEEKLY RRULE must provide BYHOUR"):
+        _parse_rrule("FREQ=WEEKLY;BYDAY=MO")
+
+
 def test_load_current_crontab_handles_missing_crontab(tmp_path: Path) -> None:
     fake_crontab, state_path = _write_fake_crontab(tmp_path)
     previous = os.environ.get("FAKE_CRONTAB_STATE")
