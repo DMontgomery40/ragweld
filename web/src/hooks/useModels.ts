@@ -19,36 +19,69 @@ interface UseModelsResult {
 }
 
 // Cache /api/models globally to avoid refetching.
-let modelsCache: ModelCatalogResponse | null = null;
-let modelsFetchPromise: Promise<ModelCatalogResponse> | null = null;
+const modelsCache = new Map<string, ModelCatalogResponse>();
+const modelsFetchPromises = new Map<string, Promise<ModelCatalogResponse>>();
 
-async function fetchModels(): Promise<ModelCatalogResponse> {
-  if (modelsCache) return modelsCache;
-  if (modelsFetchPromise) return modelsFetchPromise;
+function getActiveCorpusKey(): string {
+  try {
+    const u = new URL(window.location.href);
+    return (
+      u.searchParams.get('corpus') ||
+      u.searchParams.get('repo') ||
+      localStorage.getItem('tribrid_active_corpus') ||
+      localStorage.getItem('tribrid_active_repo') ||
+      ''
+    ).trim();
+  } catch {
+    return (
+      localStorage.getItem('tribrid_active_corpus') ||
+      localStorage.getItem('tribrid_active_repo') ||
+      ''
+    ).trim();
+  }
+}
 
-  modelsFetchPromise = modelsApi
+async function fetchModels(corpusKey: string): Promise<ModelCatalogResponse> {
+  if (modelsCache.has(corpusKey)) return modelsCache.get(corpusKey)!;
+  if (modelsFetchPromises.has(corpusKey)) return modelsFetchPromises.get(corpusKey)!;
+
+  const request = modelsApi
     .listAll()
     .then((data) => {
-      modelsCache = data;
+      modelsCache.set(corpusKey, data);
       return data;
     })
     .catch((err) => {
-      modelsFetchPromise = null;
+      modelsFetchPromises.delete(corpusKey);
       throw err;
     });
 
-  return modelsFetchPromise;
+  modelsFetchPromises.set(corpusKey, request);
+  return request;
 }
 
 export function useModels(component: ComponentType): UseModelsResult {
   const [allModels, setAllModels] = useState<Model[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [corpusKey, setCorpusKey] = useState<string>(() => getActiveCorpusKey());
+
+  useEffect(() => {
+    const syncCorpusKey = () => setCorpusKey(getActiveCorpusKey());
+    window.addEventListener('tribrid-corpus-changed', syncCorpusKey as EventListener);
+    window.addEventListener('tribrid-corpus-loaded', syncCorpusKey as EventListener);
+    return () => {
+      window.removeEventListener('tribrid-corpus-changed', syncCorpusKey as EventListener);
+      window.removeEventListener('tribrid-corpus-loaded', syncCorpusKey as EventListener);
+    };
+  }, []);
 
   useEffect(() => {
     let mounted = true;
+    setLoading(true);
+    setError(null);
 
-    fetchModels()
+    fetchModels(corpusKey)
       .then((data) => {
         if (!mounted) return;
         const rows = Array.isArray(data?.models) ? data.models : [];
@@ -62,7 +95,7 @@ export function useModels(component: ComponentType): UseModelsResult {
       });
 
     return () => { mounted = false; };
-  }, []);
+  }, [corpusKey]);
 
   // Filter models by component type
   const models = useMemo(() => {

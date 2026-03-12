@@ -4,7 +4,7 @@ import axios, { AxiosInstance, AxiosError } from 'axios';
  * Resolve API base URL - same logic as useAPI hook
  * Ensures consistency across axios and fetch-based API calls
  */
-function resolveAPIBase(): string {
+export function resolveAPIBase(): string {
   try {
     const u = new URL(window.location.href);
     const q = new URLSearchParams(u.search);

@@ -451,6 +451,7 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
         ended_at_ms: int | None = None
         accumulated = ""
         query_log_appended = False
+        assistant_persisted = False
         try:
             async for sse in chat_stream_handler(
                 request=request,
@@ -487,6 +488,7 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
                     if isinstance(raw_provider_id, str) and raw_provider_id.strip():
                         provider_id = raw_provider_id.strip()
                     store.add_message(conv.id, assistant_msg, provider_id)
+                    assistant_persisted = True
 
                     # Best-effort Recall indexing (only when recall_default is selected).
                     corpus_ids = resolve_sources(request.sources)
@@ -604,6 +606,22 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
                 await trace_store.add_event(run_id, kind="chat.error", msg=str(e), data={})
             raise
         finally:
+            if not assistant_persisted:
+                if accumulated.strip():
+                    try:
+                        store.add_message(conv.id, Message(role="assistant", content=accumulated), None)
+                        assistant_persisted = True
+                    except Exception:
+                        pass
+                else:
+                    try:
+                        store.remove_last_message(
+                            conv.id,
+                            role="user",
+                            content=request.message,
+                        )
+                    except Exception:
+                        pass
             if trace_enabled:
                 await trace_store.end(run_id, ended_at_ms=ended_at_ms)
 

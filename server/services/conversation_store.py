@@ -98,6 +98,28 @@ class ConversationStore:
             return True
         return False
 
+    def remove_last_message(
+        self,
+        conversation_id: str,
+        *,
+        role: str | None = None,
+        content: str | None = None,
+    ) -> bool:
+        """Remove the last message when it matches the expected shape."""
+        conv = self._conversations.get(conversation_id)
+        if conv is None or not conv.messages:
+            return False
+
+        last = conv.messages[-1]
+        if role is not None and last.role != role:
+            return False
+        if content is not None and (last.content or "") != content:
+            return False
+
+        conv.messages.pop()
+        conv.updated_at = datetime.now(UTC)
+        return True
+
     def list_conversations(self) -> list[str]:
         """List all conversation IDs."""
         return list(self._conversations.keys())

@@ -45,6 +45,25 @@ export function useGlobalSearch() {
   const [cursor, setCursor] = useState(0);
   const abortControllerRef = useRef<AbortController | null>(null);
 
+  const getActiveCorpusId = useCallback((): string => {
+    try {
+      const u = new URL(window.location.href);
+      return (
+        u.searchParams.get('corpus') ||
+        u.searchParams.get('repo') ||
+        localStorage.getItem('tribrid_active_corpus') ||
+        localStorage.getItem('tribrid_active_repo') ||
+        ''
+      ).trim();
+    } catch {
+      return (
+        localStorage.getItem('tribrid_active_corpus') ||
+        localStorage.getItem('tribrid_active_repo') ||
+        ''
+      ).trim();
+    }
+  }, []);
+
   // Build index of all settings in the GUI
   const buildSettingsIndex = useCallback(() => {
     const index: SettingSearchItem[] = [];
@@ -168,6 +187,9 @@ export function useGlobalSearch() {
   const searchBackend = useCallback(async (q: string): Promise<SearchResult[]> => {
     if (!q.trim()) return [];
 
+    const corpusId = getActiveCorpusId();
+    if (!corpusId) return [];
+
     try {
       // Cancel previous request
       if (abortControllerRef.current) {
@@ -177,8 +199,17 @@ export function useGlobalSearch() {
       abortControllerRef.current = new AbortController();
 
       const response = await fetch(
-        api(`/search?q=${encodeURIComponent(q)}&top_k=15`),
-        { signal: abortControllerRef.current.signal }
+        api('/search'),
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            corpus_id: corpusId,
+            query: q,
+            top_k: 15,
+          }),
+          signal: abortControllerRef.current.signal,
+        }
       );
 
       if (!response.ok) {
@@ -186,7 +217,14 @@ export function useGlobalSearch() {
       }
 
       const data = await response.json();
-      return data.results || [];
+      const matches = Array.isArray(data?.matches) ? data.matches : [];
+      return matches.map((match: any) => ({
+        file_path: String(match?.file_path || ''),
+        start_line: Number(match?.start_line || 0),
+        end_line: Number(match?.end_line || 0),
+        language: String(match?.language || ''),
+        rerank_score: Number(match?.score || 0),
+      }));
     } catch (error) {
       if ((error as Error).name === 'AbortError') {
         return [];
@@ -194,7 +232,7 @@ export function useGlobalSearch() {
       console.error('[useGlobalSearch] Backend search error:', error);
       return [];
     }
-  }, [api]);
+  }, [api, getActiveCorpusId]);
 
   // Combined search (settings + backend)
   const search = useCallback(async (q: string) => {

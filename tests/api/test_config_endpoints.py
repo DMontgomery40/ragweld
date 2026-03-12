@@ -44,6 +44,30 @@ async def test_update_config_section(client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
+async def test_update_nested_config_section_preserves_siblings(client: AsyncClient) -> None:
+    """Nested PATCH payloads must not reset sibling keys back to defaults."""
+    baseline = await client.get("/api/config")
+    assert baseline.status_code == 200
+    cfg = baseline.json()
+
+    cfg["chat"]["multimodal"]["image_detail"] = "high"
+    cfg["chat"]["multimodal"]["max_images_per_message"] = 7
+    saved = await client.put("/api/config", json=cfg)
+    assert saved.status_code == 200
+
+    response = await client.patch(
+        "/api/config/chat",
+        json={"multimodal": {"vision_enabled": False}},
+    )
+    assert response.status_code == 200
+
+    multimodal = response.json()["chat"]["multimodal"]
+    assert multimodal["vision_enabled"] is False
+    assert multimodal["image_detail"] == "high"
+    assert multimodal["max_images_per_message"] == 7
+
+
+@pytest.mark.asyncio
 async def test_reset_config(client: AsyncClient) -> None:
     """Test POST /api/config/reset endpoint."""
     response = await client.post("/api/config/reset")
