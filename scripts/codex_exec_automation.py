@@ -77,13 +77,41 @@ def _assert_repo_git_health(repo_root: Path) -> None:
     _run(sys.executable, str(script_path), "--strict", cwd=repo_root)
 
 
+def _planned_worktree_root(automation_id: str) -> Path:
+    return HOME / ".codex" / "exec-worktrees" / automation_id
+
+
+def _planned_run_dir(repo_root: Path, automation_id: str, *, timestamp_utc: str) -> Path:
+    return repo_root / "output" / "automation" / "codex-exec" / automation_id / timestamp_utc
+
+
+def _move_stale_worktree_root(worktree_root: Path) -> Path:
+    timestamp_utc = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    backup_root = worktree_root.with_name(f"{worktree_root.name}.stale-{timestamp_utc}")
+    suffix = 0
+    candidate = backup_root
+    while candidate.exists():
+        suffix += 1
+        candidate = worktree_root.with_name(f"{backup_root.name}-{suffix}")
+    worktree_root.rename(candidate)
+    return candidate
+
+
 def _ensure_worktree(repo_root: Path, automation_id: str) -> Path:
-    worktree_root = HOME / ".codex" / "exec-worktrees" / automation_id
+    worktree_root = _planned_worktree_root(automation_id)
     repo_root.mkdir(parents=True, exist_ok=True)
     _run("git", "-C", str(repo_root), "fetch", "--all", "--prune")
     _run("git", "-C", str(repo_root), "worktree", "prune")
     if worktree_root.exists() and not (worktree_root / ".git").exists():
-        raise RuntimeError(f"automation exec worktree path exists but is not a git worktree: {worktree_root}")
+        backup_path = _move_stale_worktree_root(worktree_root)
+        _run("git", "-C", str(repo_root), "worktree", "prune")
+        print(
+            (
+                "[codex_exec_automation] moved stale non-worktree exec directory "
+                f"{worktree_root} -> {backup_path}"
+            ),
+            file=sys.stderr,
+        )
     if (worktree_root / ".git").exists():
         status = _run("git", "-C", str(worktree_root), "status", "--porcelain")
         if status.strip():
@@ -100,7 +128,7 @@ def _ensure_worktree(repo_root: Path, automation_id: str) -> Path:
 
 def _prepare_run_dir(repo_root: Path, automation_id: str) -> tuple[Path, str]:
     ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    run_dir = repo_root / "output" / "automation" / "codex-exec" / automation_id / ts
+    run_dir = _planned_run_dir(repo_root, automation_id, timestamp_utc=ts)
     run_dir.mkdir(parents=True, exist_ok=True)
     return run_dir, ts
 
@@ -117,17 +145,14 @@ def main() -> int:
         raise ValueError("automation is missing prompt text")
 
     repo_root = _repo_root(automation)
-    _assert_repo_git_health(repo_root)
-    worktree_root = _ensure_worktree(repo_root, args.automation_id)
     codex_bin = _resolve_codex_bin()
-    run_dir, ts = _prepare_run_dir(repo_root, args.automation_id)
-
-    prompt_path = run_dir / "prompt.txt"
-    prompt_path.write_text(prompt, encoding="utf-8")
-    events_path = run_dir / "events.jsonl"
-    stderr_path = run_dir / "stderr.log"
-    last_message_path = run_dir / "last_message.txt"
-    meta_path = run_dir / "meta.json"
+    ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    worktree_root = _planned_worktree_root(args.automation_id)
+    planned_run_dir = _planned_run_dir(repo_root, args.automation_id, timestamp_utc=ts)
+    events_path = planned_run_dir / "events.jsonl"
+    stderr_path = planned_run_dir / "stderr.log"
+    last_message_path = planned_run_dir / "last_message.txt"
+    meta_path = planned_run_dir / "meta.json"
 
     env = os.environ.copy()
     env["CODEX_INTERNAL_ORIGINATOR_OVERRIDE"] = "Codex Desktop"
@@ -151,6 +176,7 @@ def main() -> int:
     if args.dry_run:
         meta = {
             "timestamp_utc": ts,
+            "dry_run": True,
             "automation_id": args.automation_id,
             "repo_root": str(repo_root),
             "worktree_root": str(worktree_root),
@@ -160,9 +186,16 @@ def main() -> int:
             "last_message_path": str(last_message_path),
             "command": command,
         }
-        meta_path.write_text(json.dumps(meta, indent=2) + "\n", encoding="utf-8")
         print(json.dumps(meta))
         return 0
+
+    _assert_repo_git_health(repo_root)
+    worktree_root = _ensure_worktree(repo_root, args.automation_id)
+    run_dir = planned_run_dir
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    prompt_path = run_dir / "prompt.txt"
+    prompt_path.write_text(prompt, encoding="utf-8")
 
     with events_path.open("w", encoding="utf-8") as stdout_handle, stderr_path.open(
         "w", encoding="utf-8"

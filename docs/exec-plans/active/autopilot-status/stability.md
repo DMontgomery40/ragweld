@@ -27,6 +27,7 @@ Keep ragweld booting, serving, and rendering while reducing obvious regression r
 - Host `crontab` is the authoritative scheduler for `ragweld-stability-loop`, `ragweld-ui-proof-loop`, and `ragweld-eval-data-loop`.
 - The matching desktop automation entries remain `PAUSED` on purpose; that disables the desktop scheduler, not the host cron lanes.
 - Install or repair the worker-lane cron block with `python3 /Users/davidmontgomery/ragweld/scripts/install_codex_exec_crons.py --apply`.
+- The installer derives each lane cadence from `~/.codex/automations/*/automation.toml` and pins the current interpreter path into the cron command.
 
 ## Current Priority
 
