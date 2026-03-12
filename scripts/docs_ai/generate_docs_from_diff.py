@@ -31,6 +31,7 @@ ROOT = Path(__file__).resolve().parents[2]
 PROMPT_BASE_PATH = ROOT / "scripts" / "docs_ai" / "docs_prompt_base.md"
 
 PATCH_FILE = ROOT / "mkdocs-docs-llm.patch"
+PATCH_APPLY_FAILURE_FILE = ROOT / "mkdocs-docs-llm.apply-failed.txt"
 PLAN_FILE = ROOT / "mkdocs-docs-plan.md"
 
 # Git's well-known empty tree object. Use as a "base ref" to treat the entire
@@ -123,6 +124,13 @@ def _gh_error(msg: str) -> None:
     # GitHub truncates long annotations; keep first line concise
     first = msg.split("\n")[0][:200]
     print(f"::error::docs-autopilot: {first}", flush=True)
+    if len(msg) > len(first):
+        print(msg, flush=True)
+
+
+def _gh_warning(msg: str) -> None:
+    first = msg.split("\n")[0][:200]
+    print(f"::warning::docs-autopilot: {first}", flush=True)
     if len(msg) > len(first):
         print(msg, flush=True)
 
@@ -899,9 +907,19 @@ def main() -> None:
     ap.add_argument("--base", default="origin/main", help="Git ref to diff against (base..HEAD)")
     ap.add_argument("--llm", choices=["openai"], default=None, help="LLM provider (currently: openai)")
     ap.add_argument("--apply", action="store_true", help="Apply the returned patch with `git apply --index`")
+    ap.add_argument(
+        "--soft-fail-apply-errors",
+        action="store_true",
+        help="Treat patch apply failures as best-effort and write a marker file instead of exiting non-zero.",
+    )
     ap.add_argument("--apply-patch", default="", help="Apply an existing patch file and exit (no LLM call)")
     ap.add_argument("--output", default=str(PLAN_FILE.name), help="Plan output file (plan mode)")
     args = ap.parse_args()
+
+    try:
+        PATCH_APPLY_FAILURE_FILE.unlink(missing_ok=True)
+    except Exception:
+        pass
 
     if args.apply_patch:
         patch_path = Path(args.apply_patch)
@@ -950,6 +968,11 @@ def main() -> None:
     if args.apply:
         ok, err = apply_patch(PATCH_FILE)
         if not ok:
+            if args.soft_fail_apply_errors:
+                PATCH_APPLY_FAILURE_FILE.write_text((err or "").strip() + "\n", encoding="utf-8")
+                _gh_warning("Docs autopilot: LLM patch could not be applied; continuing in best-effort mode.")
+                _gh_warning(f"Details: {err}")
+                return
             _gh_error("Docs autopilot: LLM patch could not be applied (corrupt or incompatible).")
             _gh_error(f"Details: {err}")
             raise SystemExit(1)

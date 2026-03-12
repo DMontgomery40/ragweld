@@ -76,8 +76,6 @@ jobs:
           fi
 
       - name: Generate docs patch (apply)
-        id: docs_patch
-        continue-on-error: true
         run: |
           BASE="${{ github.event.inputs.base_ref }}"
           if [ -z "$BASE" ]; then
@@ -87,10 +85,10 @@ jobs:
             BASE="origin/${{ github.ref_name }}"
           fi
           echo "Using base ref: $BASE"
-          python scripts/docs_ai/generate_docs_from_diff.py --base "$BASE" --llm openai --apply
+          python scripts/docs_ai/generate_docs_from_diff.py --base "$BASE" --llm openai --apply --soft-fail-apply-errors
 
       - name: Docs autopilot failed
-        if: steps.docs_patch.outcome == 'failure'
+        if: hashFiles('mkdocs-docs-llm.apply-failed.txt') != ''
         run: |
           echo "## Docs Autopilot Failed" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
@@ -109,7 +107,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: mkdocs-docs-llm-patch
-          path: mkdocs-docs-llm.patch
+          path: |
+            mkdocs-docs-llm.patch
+            mkdocs-docs-llm.apply-failed.txt
           if-no-files-found: ignore
 
       - name: Build documentation
