@@ -46,6 +46,14 @@ Beyond fused tri-brid retrieval (vector + sparse + graph), ragweld includes broa
 - Retrieval = vector + sparse + graph (fused), optionally reranked.
 - Position ragweld as an **MLOps Engineering Platform** where retrieval is one subsystem in a larger operational lifecycle.
 - Position integration order as **API first, MCP second**: API is the primary production contract; MCP layers on top for agent tooling.
+- Do **not** claim full DSV compliance or complete end-to-end lineage across prompts, datasets, evals, and runs.
+- Safe positioning language:
+  - versioned source-of-truth config
+  - versioned prompts/config behavior
+  - executable specs
+  - manifest-backed training artifacts
+  - repo-local system-of-record docs
+  - provenance-minded eval and training workflows
 
 ## Product URLs + API prefix (critical for accuracy)
 

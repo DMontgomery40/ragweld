@@ -68,6 +68,25 @@ Optional (Actions variables or secrets):
   - this README and repo-local docs under `docs/`
 - The deterministic config reference under `mkdocs/docs/reference/config/**` is still generated from Pydantic + glossary and should never be hand-edited.
 
+## Positioning guardrail
+
+Docs autopilot must not market ragweld as fully DSV-compliant today.
+
+Safe public claims:
+
+- versioned source-of-truth config
+- versioned prompts/config behavior
+- executable specs
+- manifest-backed training artifacts
+- repo-local system-of-record docs
+- provenance-minded eval and training workflows
+
+Do not generate claims about:
+
+- full end-to-end lineage across prompts, datasets, evals, and runs
+- complete dataset/eval artifact governance
+- fully realized DSV-style tracking across the whole loop
+
 ## Local usage
 
 Plan only (no network):
