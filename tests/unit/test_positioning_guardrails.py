@@ -15,7 +15,7 @@ def test_readme_uses_safe_positioning_claims() -> None:
     assert "Versioned config, prompts, and specs" in readme
     assert "Manifest-backed training artifacts" in readme
     assert "provenance-minded eval and training workflows" in readme.lower()
-    assert "full DSV compliance" not in readme.lower()
+    assert "full dsv compliance" not in readme.lower()
 
 
 def test_agents_and_docs_prompt_base_block_full_dsv_claims() -> None:
