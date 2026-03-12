@@ -68,6 +68,18 @@ def _get_config_write_lock(repo_id: str | None) -> asyncio.Lock:
     return lock
 
 
+def _deep_merge_dicts(base: dict[str, Any], updates: dict[str, Any]) -> dict[str, Any]:
+    """Recursively merge nested PATCH payloads into a config section."""
+    merged: dict[str, Any] = dict(base)
+    for key, value in updates.items():
+        current = merged.get(key)
+        if isinstance(current, dict) and isinstance(value, dict):
+            merged[key] = _deep_merge_dicts(current, value)
+        else:
+            merged[key] = value
+    return merged
+
+
 def _norm_components(raw: Any) -> set[str]:
     if not isinstance(raw, list):
         return set()
@@ -536,7 +548,7 @@ async def update_config_section(
         if not isinstance(updates, dict):
             raise HTTPException(status_code=422, detail="PATCH body must be a JSON object")
 
-        merged = {**current_section, **updates}
+        merged = _deep_merge_dicts(current_section, updates)
         base[section] = merged
 
         try:

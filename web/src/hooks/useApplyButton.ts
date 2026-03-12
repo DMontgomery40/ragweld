@@ -40,44 +40,17 @@ export function useApplyButton() {
     useConfigStore.getState().error ? String(useConfigStore.getState().error) : null
   );
 
-  // Track form changes to enable/disable Apply button
+  // Allow explicit dirty signals from modules that update config outside the store helpers.
   useEffect(() => {
-    /**
-     * ---agentspec
-     * what: |
-     *   Handles form state changes by setting a dirty flag and clearing any previous save errors.
-     *   Takes no parameters; triggered by 'input' and 'change' events on the document.
-     *   Sets isDirty to true (indicating unsaved changes) and clears setSaveError to null.
-     *   Attaches global event listeners to document that fire on any input or change event anywhere in the DOM.
-     *   Edge case: Listeners are never removed, causing memory leaks if component unmounts; listeners will fire even after component is destroyed.
-     *
-     * why: |
-     *   Tracks whether the form has unsaved changes and clears stale error messages when the user modifies any field.
-     *   Global document listeners were chosen for simplicity to catch all form changes without wiring individual field handlers.
-     *   This approach avoids prop drilling and per-field onChange handlers, but sacrifices cleanup and specificity.
-     *
-     * guardrails:
-     *   - DO NOT attach event listeners without cleanup; these listeners will persist after component unmount and cause memory leaks
-     *   - ALWAYS remove event listeners in a useEffect cleanup function to prevent duplicate listeners and memory accumulation
-     *   - NOTE: Global document listeners fire on ANY input/change event, including unrelated form fields or third-party components
-     *   - ASK USER: Confirm whether listeners should be scoped to a specific form element (e.g., formRef) instead of the entire document before refactoring
-     * ---/agentspec
-     */
     const handleFormChange = () => {
       setIsDirty(true);
       setSaveError(null);
     };
 
-    // Listen for input and change events on the document
-    document.addEventListener('input', handleFormChange);
-    document.addEventListener('change', handleFormChange);
-
     // Listen for custom dirty events from modules
     window.addEventListener('tribrid-form-dirty', handleFormChange);
 
     return () => {
-      document.removeEventListener('input', handleFormChange);
-      document.removeEventListener('change', handleFormChange);
       window.removeEventListener('tribrid-form-dirty', handleFormChange);
     };
   }, []);

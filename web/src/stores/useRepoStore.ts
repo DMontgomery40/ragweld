@@ -11,6 +11,7 @@
 
 import { create } from 'zustand';
 import type { Corpus, CorpusCreateRequest, CorpusUpdateRequest } from '@/types/generated';
+import { resolveAPIBase } from '@/api/client';
 
 // Re-export for backward compatibility with existing components
 export type Repository = Corpus;
@@ -62,10 +63,7 @@ interface RepoStore {
  */
 const getApiBase = (): string => {
   try {
-    const u = new URL(window.location.href);
-    // On Vite dev ports, keep requests same-origin so the dev proxy handles routing.
-    if (u.port && /^517[0-9]$/.test(u.port)) return u.origin + '/api';
-    return u.origin + '/api';
+    return resolveAPIBase();
   } catch {
     return '/api';
   }
@@ -246,7 +244,7 @@ export const useRepoStore = create<RepoStore>((set, get) => ({
 
   deleteCorpus: async (corpusId: string) => {
     const apiBase = getApiBase();
-    const { activeRepo } = get();
+    const beforeActive = String(get().activeRepo || '').trim();
     const response = await fetch(`${apiBase}/corpora/${encodeURIComponent(corpusId)}`, {
       method: 'DELETE',
     });
@@ -257,21 +255,24 @@ export const useRepoStore = create<RepoStore>((set, get) => ({
 
     // Refresh list after deletion
     await get().loadRepos();
+    const afterActive = String(get().activeRepo || '').trim();
 
-    // If we deleted the active corpus, explicitly switch to a remaining corpus (emits events).
-    if (activeRepo === corpusId) {
-      const next = get().repos[0]?.corpus_id || '';
-      if (next) {
-        await get().setActiveRepo(next);
-      } else {
-        // No corpora left
-        set({ activeRepo: '' });
-        try {
-          localStorage.removeItem('tribrid_active_corpus');
-          localStorage.removeItem('tribrid_active_repo');
-        } catch {
-          // ignore
-        }
+    // If the active corpus changed under us, notify listeners that depend on
+    // `tribrid-corpus-changed` rather than `tribrid-corpus-loaded`.
+    if (beforeActive && beforeActive !== afterActive) {
+      window.dispatchEvent(
+        new CustomEvent('tribrid-corpus-changed', {
+          detail: { corpus: afterActive, repo: afterActive, previous: beforeActive },
+        })
+      );
+    }
+
+    if (!afterActive) {
+      try {
+        localStorage.removeItem('tribrid_active_corpus');
+        localStorage.removeItem('tribrid_active_repo');
+      } catch {
+        // ignore
       }
     }
   },
