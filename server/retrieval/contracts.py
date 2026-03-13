@@ -10,6 +10,15 @@ from server.runtime_capabilities import (
     provider_requires_tokenizer,
 )
 
+__all__ = [
+    "SUPPORTED_PROVIDER_BACKEND_EMBEDDING_PROVIDERS",
+    "provider_requires_tokenizer",
+    "canonical_contract_json",
+    "contract_hash",
+    "dense_contract_from_config",
+    "sparse_contract_from_config",
+]
+
 
 def _stable(obj: Any) -> Any:
     if isinstance(obj, dict):

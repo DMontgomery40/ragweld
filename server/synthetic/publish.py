@@ -6,7 +6,11 @@ from pathlib import Path
 
 from server.api.dataset import _save_dataset
 from server.db.postgres import PostgresClient
-from server.lineage import attach_refs_to_current_bundle, capture_published_artifact_version, make_ref
+from server.lineage import (
+    attach_refs_to_current_bundle,
+    capture_published_artifact_version,
+    make_ref,
+)
 from server.models.tribrid_config_model import (
     ChunkSummariesLastBuild,
     ChunkSummary,

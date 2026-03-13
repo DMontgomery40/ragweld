@@ -11,10 +11,18 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from starlette.responses import StreamingResponse
 
-from server.api.dataset import _dataset_path_for_corpus, _load_dataset  # shared file-backed persistence
+from server.api.dataset import (  # shared file-backed persistence
+    _dataset_path_for_corpus,
+    _load_dataset,
+)
 from server.chat.generation import generate_chat_text
 from server.chat.provider_router import select_provider_route
-from server.lineage import attach_refs_to_current_bundle, capture_eval_run_version, ensure_current_bundle, make_ref
+from server.lineage import (
+    attach_refs_to_current_bundle,
+    capture_eval_run_version,
+    ensure_current_bundle,
+    make_ref,
+)
 from server.models.eval import (
     EvalAnalyzeComparisonResponse,
     EvalDatasetItem,

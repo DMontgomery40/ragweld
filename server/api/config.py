@@ -26,8 +26,8 @@ from server.retrieval.contracts import (
     provider_requires_tokenizer,
     sparse_contract_from_config,
 )
-from server.runtime_capabilities import SUPPORTED_RERANKER_CLOUD_PROVIDERS
 from server.retrieval.fusion import TriBridFusion
+from server.runtime_capabilities import SUPPORTED_RERANKER_CLOUD_PROVIDERS
 from server.services.config_store import CorpusNotFoundError
 from server.services.config_store import get_config as load_scoped_config
 from server.services.config_store import reset_config as reset_scoped_config
