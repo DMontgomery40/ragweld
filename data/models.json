@@ -1,6 +1,6 @@
 {
   "currency": "USD",
-  "last_updated": "2026-03-12",
+  "last_updated": "2026-03-13",
   "sources": [
     "https://openai.com/api/pricing/ (2026-02-07)",
     "https://www.anthropic.com/pricing (2026-02-07)",
@@ -10,7 +10,7 @@
     "https://mistral.ai/pricing (2025-11-29)",
     "https://api-docs.deepseek.com/quick_start/pricing (2025-11-29)",
     "https://jina.ai/embeddings/ (2025-11-29)",
-    "https://openrouter.ai/api/v1/models (2026-03-12)"
+    "https://openrouter.ai/api/v1/models (2026-03-13)"
   ],
   "models": [
     {
@@ -2436,25 +2436,6 @@
     },
     {
       "provider": "xai",
-      "family": "grok-3-beta",
-      "model": "grok-3-beta",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 131072,
-      "input_per_1k": 0.003,
-      "output_per_1k": 0.015,
-      "base_url": "https://api.x.ai/v1",
-      "notes": "Added automatically from OpenRouter feed.",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
-    },
-    {
-      "provider": "xai",
       "family": "grok-3-mini",
       "model": "grok-3-mini",
       "components": [
@@ -2528,6 +2509,39 @@
       ],
       "selection_status": "runtime_selectable",
       "selection_reason": null
+    },
+    {
+      "provider": "xai",
+      "family": "grok-4.20-beta",
+      "model": "grok-4.20-beta",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 2000000,
+      "input_per_1k": 0.002,
+      "output_per_1k": 0.006,
+      "base_url": "https://api.x.ai/v1",
+      "notes": "Added automatically from OpenRouter feed.",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
+    },
+    {
+      "provider": "xai",
+      "family": "grok-4.20-multi-agent-beta",
+      "model": "grok-4.20-multi-agent-beta",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 2000000,
+      "input_per_1k": 0.002,
+      "output_per_1k": 0.006,
+      "base_url": "https://api.x.ai/v1",
+      "notes": "Added automatically from OpenRouter feed."
     },
     {
       "provider": "xai",
