@@ -36,8 +36,8 @@
 | JSON key | Env key(s) | Type | Default | Constraints | Summary |
 |---------|------------|------|---------|-------------|---------|
 | `reranking.rerank_input_snippet_chars` | `RERANK_INPUT_SNIPPET_CHARS` | `int` | `700` | ≥ 200, ≤ 2000 | Snippet chars for reranking input |
-| `reranking.reranker_cloud_model` | `RERANKER_CLOUD_MODEL` | `str` | `"rerank-v3.5"` | — | Cloud reranker model name when mode=cloud (Cohere: rerank-v3.5) |
-| `reranking.reranker_cloud_provider` | `RERANKER_CLOUD_PROVIDER` | `str` | `"cohere"` | — | Cloud reranker provider when mode=cloud (cohere, voyage, jina) |
+| `reranking.reranker_cloud_model` | `RERANKER_CLOUD_MODEL` | `str` | `"rerank-v3.5"` | — | Cloud reranker model name when mode=cloud (runtime-selectable today: Cohere models). |
+| `reranking.reranker_cloud_provider` | `RERANKER_CLOUD_PROVIDER` | `str` | `"cohere"` | — | Cloud reranker provider when mode=cloud. Runtime-selectable today: cohere. |
 | `reranking.reranker_cloud_top_n` | `RERANKER_CLOUD_TOP_N` | `int` | `50` | ≥ 1, ≤ 200 | Number of candidates to rerank (cloud mode) |
 | `reranking.reranker_mode` | `RERANKER_MODE` | `str` | `"none"` | pattern=^(cloud\|local\|learning\|none)$ | Reranker mode: 'cloud' (Cohere/Voyage/Jina API), 'learning' (MLX Qwen3 LoRA learning reranker), 'none' (disabled). Legacy values 'local'/'hf' normalize to 'learning'. |
 | `reranking.reranker_timeout` | `RERANKER_TIMEOUT` | `int` | `10` | ≥ 5, ≤ 60 | Reranker API timeout (seconds) |

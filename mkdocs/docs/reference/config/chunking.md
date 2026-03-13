@@ -38,7 +38,7 @@
 | `chunking.ast_overlap_lines` | `AST_OVERLAP_LINES` | `int` | `20` | ≥ 0, ≤ 100 | Overlap lines for AST chunking |
 | `chunking.chunk_overlap` | `CHUNK_OVERLAP` | `int` | `200` | ≥ 0, ≤ 1000 | Overlap between chunks |
 | `chunking.chunk_size` | `CHUNK_SIZE` | `int` | `1000` | ≥ 200, ≤ 5000 | Target chunk size (non-whitespace chars) |
-| `chunking.chunking_strategy` | `CHUNKING_STRATEGY` | `str` | `"ast"` | pattern=^(ast\|hybrid\|greedy\|fixed_chars\|fixed_tokens\|recursive\|markdown\|sentence\|qa_blocks\|semantic)$ | Chunking strategy (document + code) |
+| `chunking.chunking_strategy` | `CHUNKING_STRATEGY` | `str` | `"ast"` | pattern=^(ast\|hybrid\|greedy\|fixed_chars\|fixed_tokens\|recursive\|markdown\|sentence\|qa_blocks)$ | Chunking strategy (document + code) |
 | `chunking.emit_chunk_ordinal` | — | `bool` | `true` | — | Emit chunk ordinal metadata for neighbor-window retrieval. |
 | `chunking.emit_parent_doc_id` | — | `bool` | `true` | — | Emit parent document id metadata for neighbor-window retrieval. |
 | `chunking.greedy_fallback_target` | `GREEDY_FALLBACK_TARGET` | `int` | `800` | ≥ 200, ≤ 2000 | Target size for greedy chunking |
