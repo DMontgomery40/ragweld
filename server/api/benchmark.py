@@ -13,7 +13,12 @@ from server.lineage import (
     ensure_current_bundle,
     make_ref,
 )
-from server.models.tribrid_config_model import BenchmarkRun, BenchmarkRunRequest, BenchmarkRunsResponse, CorpusScope
+from server.models.tribrid_config_model import (
+    BenchmarkRun,
+    BenchmarkRunRequest,
+    BenchmarkRunsResponse,
+    CorpusScope,
+)
 from server.services.config_store import CorpusNotFoundError
 from server.services.config_store import get_config as load_scoped_config
 

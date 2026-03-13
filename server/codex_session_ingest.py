@@ -25,15 +25,17 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 import torch
-import yaml
+import yaml  # type: ignore[import-untyped]
 from prometheus_client import (
     CollectorRegistry,
-    Counter as PromCounter,
     Gauge,
     Histogram,
-    ProcessCollector,
     PlatformCollector,
+    ProcessCollector,
     generate_latest,
+)
+from prometheus_client import (
+    Counter as PromCounter,
 )
 from sentence_transformers import SentenceTransformer
 
@@ -41,7 +43,6 @@ from server.db.postgres import PostgresClient
 from server.indexing.tokenizer import TextTokenizer
 from server.models.index import Chunk
 from server.models.tribrid_config_model import TokenizationConfig
-
 
 DEFAULT_POSTGRES_DSN = "postgresql://postgres:postgres@127.0.0.1:5432/tribrid_rag"
 DEFAULT_REMOTE_HOST = "192.168.68.173"
@@ -1789,7 +1790,7 @@ def upsert_prometheus_job(config_text: str, job_name: str, target_host: str, tar
     if not replaced:
         scrape_configs.append(new_job)
     parsed["scrape_configs"] = scrape_configs
-    return yaml.safe_dump(parsed, sort_keys=False)
+    return str(yaml.safe_dump(parsed, sort_keys=False))
 
 
 def extract_prometheus_config_text(raw_text: str) -> str:
@@ -1915,7 +1916,7 @@ def grafana_api_json(
 ) -> Any:
     url = base_url.rstrip("/") + path
     headers = {
-        "Authorization": "Basic " + base64.b64encode(f"{user}:{password}".encode("utf-8")).decode("ascii"),
+        "Authorization": "Basic " + base64.b64encode(f"{user}:{password}".encode()).decode("ascii"),
         "Accept": "application/json",
     }
     data: bytes | None = None

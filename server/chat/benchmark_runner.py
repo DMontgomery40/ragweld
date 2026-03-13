@@ -6,10 +6,9 @@ import time
 import uuid
 from pathlib import Path
 
-from server.models.tribrid_config_model import BenchmarkResult, BenchmarkRun
 from server.chat.generation import generate_chat_text
 from server.chat.provider_router import select_provider_route
-from server.models.tribrid_config_model import TriBridConfig
+from server.models.tribrid_config_model import BenchmarkResult, BenchmarkRun, TriBridConfig
 
 _ROOT = Path(__file__).resolve().parents[2]
 

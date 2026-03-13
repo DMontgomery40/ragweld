@@ -23,6 +23,13 @@ router = APIRouter(tags=["prompts"])
 _CORPUS_SCOPE_DEP = Depends()
 
 
+def _require_repo_id(scope: CorpusScope) -> str:
+    repo_id = scope.resolved_repo_id
+    if not repo_id:
+        raise HTTPException(status_code=422, detail="Missing corpus_id (or legacy repo_id)")
+    return repo_id
+
+
 def _title(s: str) -> str:
     return " ".join([p.capitalize() for p in s.replace("_", " ").split()])
 
@@ -146,6 +153,7 @@ async def update_prompt(
     body: PromptUpdateRequest,
     scope: CorpusScope = _CORPUS_SCOPE_DEP,
 ) -> PromptUpdateResponse:
+    repo_id = _require_repo_id(scope)
     key = (prompt_key or "").strip()
     if key.startswith("chat."):
         raise HTTPException(
@@ -155,11 +163,11 @@ async def update_prompt(
     if not (body.value or "").strip():
         raise HTTPException(status_code=400, detail="Prompt value cannot be empty")
     try:
-        cfg = await load_scoped_config(repo_id=scope.resolved_repo_id)
+        cfg = await load_scoped_config(repo_id=repo_id)
         _set_prompt_value(cfg, key, body.value)
-        saved_cfg = await save_scoped_config(cfg, repo_id=scope.resolved_repo_id)
-        prompt_version = capture_prompt_set_version(repo_id=scope.resolved_repo_id, cfg=saved_cfg)
-        bundle = ensure_current_bundle(repo_id=scope.resolved_repo_id, cfg=saved_cfg)
+        saved_cfg = await save_scoped_config(cfg, repo_id=repo_id)
+        prompt_version = capture_prompt_set_version(repo_id=repo_id, cfg=saved_cfg)
+        bundle = ensure_current_bundle(repo_id=repo_id, cfg=saved_cfg)
         return PromptUpdateResponse(
             ok=True,
             prompt_key=key,
@@ -180,6 +188,7 @@ async def reset_prompt(
     prompt_key: str,
     scope: CorpusScope = _CORPUS_SCOPE_DEP,
 ) -> PromptUpdateResponse:
+    repo_id = _require_repo_id(scope)
     key = (prompt_key or "").strip()
     if key.startswith("chat."):
         raise HTTPException(
@@ -187,11 +196,11 @@ async def reset_prompt(
             detail="Chat prompts are read-only in Eval → System Prompts. Edit them in Chat → Settings.",
         )
     try:
-        cfg = await load_scoped_config(repo_id=scope.resolved_repo_id)
+        cfg = await load_scoped_config(repo_id=repo_id)
         _set_prompt_value(cfg, key, _default_value_for(key))
-        saved_cfg = await save_scoped_config(cfg, repo_id=scope.resolved_repo_id)
-        prompt_version = capture_prompt_set_version(repo_id=scope.resolved_repo_id, cfg=saved_cfg)
-        bundle = ensure_current_bundle(repo_id=scope.resolved_repo_id, cfg=saved_cfg)
+        saved_cfg = await save_scoped_config(cfg, repo_id=repo_id)
+        prompt_version = capture_prompt_set_version(repo_id=repo_id, cfg=saved_cfg)
+        bundle = ensure_current_bundle(repo_id=repo_id, cfg=saved_cfg)
         return PromptUpdateResponse(
             ok=True,
             prompt_key=key,

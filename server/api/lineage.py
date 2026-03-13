@@ -3,12 +3,19 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from server.api.dataset import _dataset_path_for_corpus, _load_dataset
-from server.lineage import current_bundle, ensure_current_bundle, list_aliases, list_bundles, load_bundle, set_alias
+from server.lineage import (
+    current_bundle,
+    ensure_current_bundle,
+    list_aliases,
+    list_bundles,
+    load_bundle,
+    set_alias,
+)
 from server.models.tribrid_config_model import (
     CorpusScope,
+    LineageAliasesResponse,
     LineageAliasName,
     LineageAliasUpdateRequest,
-    LineageAliasesResponse,
     LineageBundle,
     LineageBundleListResponse,
     LineageBundleSnapshotRequest,

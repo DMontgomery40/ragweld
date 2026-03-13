@@ -401,7 +401,7 @@ def capture_prompt_set_version(*, repo_id: str, cfg: TriBridConfig, root: Path |
 def capture_config_snapshot_version(*, repo_id: str, cfg: TriBridConfig, root: Path | None = None) -> LineageAssetVersion:
     return capture_asset_version(
         kind="config_snapshot",
-        payload=cast(dict[str, Any], cfg.model_dump(mode="json")),
+        payload=cfg.model_dump(mode="json"),
         repo_id=repo_id,
         source="runtime",
         root=root,
@@ -512,7 +512,7 @@ def load_alias(repo_id: str, alias: LineageAliasName, *, root: Path | None = Non
 def list_aliases(*, repo_id: str, root: Path | None = None) -> list[LineageAlias]:
     out: list[LineageAlias] = []
     for name in ("baseline", "canary", "current", "promoted"):
-        alias = load_alias(repo_id, cast(LineageAliasName, name), root=root)
+        alias = load_alias(repo_id, name, root=root)
         if alias is not None:
             out.append(alias)
     return out
@@ -825,7 +825,7 @@ def attach_refs_to_current_bundle(
 def capture_benchmark_run_version(*, run: BenchmarkRun, root: Path | None = None) -> LineageAssetVersion:
     return capture_asset_version(
         kind="benchmark_run",
-        payload=cast(dict[str, Any], run.model_dump(mode="json", by_alias=True)),
+        payload=run.model_dump(mode="json", by_alias=True),
         repo_id=run.repo_id,
         source="generated",
         metadata={"run_id": run.run_id, "models": len(run.results)},
