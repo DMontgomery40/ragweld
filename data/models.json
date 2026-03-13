@@ -2541,7 +2541,12 @@
       "input_per_1k": 0.002,
       "output_per_1k": 0.006,
       "base_url": "https://api.x.ai/v1",
-      "notes": "Added automatically from OpenRouter feed."
+      "notes": "Added automatically from OpenRouter feed.",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "xai",
