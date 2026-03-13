@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useAPI } from '@/hooks';
+import { withCorpusScope } from '@/api/client';
 import { Button } from '@/components/ui/Button';
+import { LineageMeta } from '@/components/ui/LineageMeta';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { PipelineProfile } from '@/components/Benchmark/PipelineProfile';
 import { ResultsTable } from '@/components/Benchmark/ResultsTable';
 import { SplitScreen } from '@/components/Benchmark/SplitScreen';
-import type { ChatModelInfo, ChatModelsResponse } from '@/types/generated';
+import type { ChatModelInfo, ChatModelsResponse, LineageRef } from '@/types/generated';
 
 type BenchmarkRunRequest = {
   prompt: string;
@@ -23,6 +25,10 @@ type BenchmarkRunResult = {
 };
 
 type BenchmarkRunResponse = {
+  run_id?: string;
+  input_bundle_id?: string;
+  bundle_id?: string;
+  lineage_ref?: LineageRef | null;
   results: BenchmarkRunResult[];
 };
 
@@ -57,7 +63,8 @@ function isNumberRecord(value: unknown): value is Record<string, number> {
 }
 
 function normalizeBenchmarkRunResponse(payload: unknown): BenchmarkRunResponse {
-  const resultsRaw = isRecord(payload) ? payload.results : payload;
+  const record = isRecord(payload) ? payload : null;
+  const resultsRaw = record ? record.results : payload;
   if (!Array.isArray(resultsRaw)) return { results: [] };
 
   const results: BenchmarkRunResult[] = [];
@@ -109,7 +116,19 @@ function normalizeBenchmarkRunResponse(payload: unknown): BenchmarkRunResponse {
     });
   }
 
-  return { results };
+  return {
+    run_id: typeof record?.run_id === 'string' ? record.run_id : undefined,
+    input_bundle_id: typeof record?.input_bundle_id === 'string' ? record.input_bundle_id : undefined,
+    bundle_id: typeof record?.bundle_id === 'string' ? record.bundle_id : undefined,
+    lineage_ref: isRecord(record?.lineage_ref)
+      ? ({
+          kind: String(record?.lineage_ref.kind || ''),
+          version_id: String(record?.lineage_ref.version_id || ''),
+          label: typeof record?.lineage_ref.label === 'string' ? record.lineage_ref.label : undefined,
+        } as LineageRef)
+      : undefined,
+    results,
+  };
 }
 
 export default function BenchmarkTab() {
@@ -217,16 +236,17 @@ export default function BenchmarkTab() {
     };
 
     try {
-      const r = await fetch(api('benchmark/run'), {
+      const scopedUrl = withCorpusScope(api('benchmark/run'));
+      const scopedResponse = await fetch(scopedUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
 
-      const contentType = r.headers.get('content-type') || '';
-      const payload: unknown = contentType.includes('application/json') ? await r.json() : await r.text();
-      if (!r.ok) {
-        throw new Error(typeof payload === 'string' ? payload : `${r.status} ${r.statusText}`);
+      const contentType = scopedResponse.headers.get('content-type') || '';
+      const payload: unknown = contentType.includes('application/json') ? await scopedResponse.json() : await scopedResponse.text();
+      if (!scopedResponse.ok) {
+        throw new Error(typeof payload === 'string' ? payload : `${scopedResponse.status} ${scopedResponse.statusText}`);
       }
 
       setRunResult(normalizeBenchmarkRunResponse(payload));
@@ -402,6 +422,16 @@ export default function BenchmarkTab() {
             </div>
             <div style={{ fontSize: 12, color: 'var(--fg-muted)' }}>{promptOk ? `${prompt.trim().length} chars` : ''}</div>
           </div>
+
+          {runResult ? (
+            <div style={{ marginTop: 12 }}>
+              <LineageMeta
+                bundleId={runResult.bundle_id}
+                inputBundleId={runResult.input_bundle_id}
+                lineageRef={runResult.lineage_ref}
+              />
+            </div>
+          ) : null}
 
           {runError ? (
             <div

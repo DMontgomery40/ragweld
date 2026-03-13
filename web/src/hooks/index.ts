@@ -39,6 +39,7 @@ export { useEmbeddingModel } from './useEmbeddingModel';
 export { useIndexing } from './useIndexing';
 export { useModels, getRecommendedChunkSize } from './useModels';
 export type { Model } from './useModels';
+export { useRuntimeCapabilities } from './useRuntimeCapabilities';
 export { useReranker } from './useReranker';
 export { useKeywords } from './useKeywords';
 export { useMCPRag } from './useMCPRag';

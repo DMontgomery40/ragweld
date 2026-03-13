@@ -6,6 +6,7 @@ from pathlib import Path
 
 from server.api.dataset import _save_dataset
 from server.db.postgres import PostgresClient
+from server.lineage import attach_refs_to_current_bundle, capture_published_artifact_version, make_ref
 from server.models.tribrid_config_model import (
     ChunkSummariesLastBuild,
     ChunkSummary,
@@ -63,6 +64,20 @@ async def publish_eval_dataset(run: SyntheticRun) -> SyntheticPublishResponse:
     entries = [EvalDatasetItem.model_validate(x) for x in raw]
     _save_dataset(entries, corpus_id=run.repo_id)
     target = _ROOT / "data" / "eval_datasets" / f"{run.repo_id}.json"
+    cfg = await load_scoped_config(repo_id=run.repo_id)
+    version = capture_published_artifact_version(
+        repo_id=run.repo_id,
+        artifact_kind="eval_dataset_json",
+        source_path=str(path),
+        target_path=str(target),
+    )
+    bundle, _aliases = attach_refs_to_current_bundle(
+        repo_id=run.repo_id,
+        cfg=cfg,
+        dataset_rows=[entry.model_dump(mode="json", by_alias=True) for entry in entries],
+        dataset_path=str(target),
+        published_artifacts=[make_ref("published_artifact", version.version_id)],
+    )
     return SyntheticPublishResponse(
         ok=True,
         run_id=run.run_id,
@@ -70,6 +85,8 @@ async def publish_eval_dataset(run: SyntheticRun) -> SyntheticPublishResponse:
         kind="eval_dataset_json",
         target_path=str(target),
         message=f"Published {len(entries)} eval items.",
+        bundle_id=bundle.bundle_id,
+        lineage_ref=make_ref("published_artifact", version.version_id),
     )
 
 
@@ -92,6 +109,18 @@ async def publish_semantic_cards(run: SyntheticRun) -> SyntheticPublishResponse:
     finally:
         await pg.disconnect()
 
+    version = capture_published_artifact_version(
+        repo_id=run.repo_id,
+        artifact_kind="semantic_cards_jsonl",
+        source_path=str(path),
+        target_path="postgres:chunk_summaries",
+    )
+    bundle, _aliases = attach_refs_to_current_bundle(
+        repo_id=run.repo_id,
+        cfg=cfg,
+        published_artifacts=[make_ref("published_artifact", version.version_id)],
+    )
+
     return SyntheticPublishResponse(
         ok=True,
         run_id=run.run_id,
@@ -99,6 +128,8 @@ async def publish_semantic_cards(run: SyntheticRun) -> SyntheticPublishResponse:
         kind="semantic_cards_jsonl",
         target_path="postgres:chunk_summaries",
         message=f"Published {len(summaries)} semantic summaries.",
+        bundle_id=bundle.bundle_id,
+        lineage_ref=make_ref("published_artifact", version.version_id),
     )
 
 
@@ -117,6 +148,18 @@ async def publish_keywords(run: SyntheticRun) -> SyntheticPublishResponse:
     finally:
         await pg.disconnect()
 
+    version = capture_published_artifact_version(
+        repo_id=run.repo_id,
+        artifact_kind="keywords_json",
+        source_path=str(path),
+        target_path="postgres:corpora.meta.keywords",
+    )
+    bundle, _aliases = attach_refs_to_current_bundle(
+        repo_id=run.repo_id,
+        cfg=cfg,
+        published_artifacts=[make_ref("published_artifact", version.version_id)],
+    )
+
     return SyntheticPublishResponse(
         ok=True,
         run_id=run.run_id,
@@ -124,6 +167,8 @@ async def publish_keywords(run: SyntheticRun) -> SyntheticPublishResponse:
         kind="keywords_json",
         target_path="postgres:corpora.meta.keywords",
         message=f"Published {len(keywords)} keywords.",
+        bundle_id=bundle.bundle_id,
+        lineage_ref=make_ref("published_artifact", version.version_id),
     )
 
 
@@ -134,6 +179,17 @@ async def publish_triplets(run: SyntheticRun) -> SyntheticPublishResponse:
     target = _resolve_path(str(cfg.training.tribrid_triplets_path or "data/training/triplets.jsonl"))
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(path.read_text(encoding="utf-8"), encoding="utf-8")
+    version = capture_published_artifact_version(
+        repo_id=run.repo_id,
+        artifact_kind="triplets_jsonl",
+        source_path=str(path),
+        target_path=str(target),
+    )
+    bundle, _aliases = attach_refs_to_current_bundle(
+        repo_id=run.repo_id,
+        cfg=cfg,
+        published_artifacts=[make_ref("published_artifact", version.version_id)],
+    )
     return SyntheticPublishResponse(
         ok=True,
         run_id=run.run_id,
@@ -141,6 +197,8 @@ async def publish_triplets(run: SyntheticRun) -> SyntheticPublishResponse:
         kind="triplets_jsonl",
         target_path=str(target),
         message="Published triplets artifact.",
+        bundle_id=bundle.bundle_id,
+        lineage_ref=make_ref("published_artifact", version.version_id),
     )
 
 
@@ -149,10 +207,24 @@ async def publish_config_patch(run: SyntheticRun) -> SyntheticConfigPatchRespons
     patch = _read_json(path)
     if not isinstance(patch, dict):
         raise RuntimeError("config_patch artifact must be a JSON object")
+    cfg = await load_scoped_config(repo_id=run.repo_id)
+    version = capture_published_artifact_version(
+        repo_id=run.repo_id,
+        artifact_kind="config_patch_json",
+        source_path=str(path),
+        target_path=None,
+    )
+    bundle, _aliases = attach_refs_to_current_bundle(
+        repo_id=run.repo_id,
+        cfg=cfg,
+        published_artifacts=[make_ref("published_artifact", version.version_id)],
+    )
     return SyntheticConfigPatchResponse(
         ok=True,
         run_id=run.run_id,
         repo_id=run.repo_id,
         patch={str(k): v for k, v in patch.items()},
         artifact_path=str(path),
+        bundle_id=bundle.bundle_id,
+        lineage_ref=make_ref("published_artifact", version.version_id),
     )

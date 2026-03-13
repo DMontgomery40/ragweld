@@ -25,7 +25,12 @@
       "input_per_1k": 0.001,
       "output_per_1k": 0.005,
       "base_url": "https://api.anthropic.com",
-      "notes": "Added automatically from OpenRouter feed."
+      "notes": "Added automatically from OpenRouter feed.",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "anthropic",
@@ -39,7 +44,12 @@
       "input_per_1k": 0.005,
       "output_per_1k": 0.025,
       "base_url": "https://api.anthropic.com",
-      "notes": "Added automatically from OpenRouter feed."
+      "notes": "Added automatically from OpenRouter feed.",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "anthropic",
@@ -53,7 +63,12 @@
       "input_per_1k": 0.003,
       "output_per_1k": 0.015,
       "base_url": "https://api.anthropic.com",
-      "notes": "Added automatically from OpenRouter feed."
+      "notes": "Added automatically from OpenRouter feed.",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "cohere",
@@ -66,7 +81,12 @@
       "input_per_1k": 0.001,
       "output_per_1k": 0.002,
       "context": 128000,
-      "notes": "Command legacy (source: per 1M = $1.00/$2.00) | [auto-refresh] deprecated_on=2026-02-27"
+      "notes": "Command legacy (source: per 1M = $1.00/$2.00) | [auto-refresh] deprecated_on=2026-02-27",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "cohere",
@@ -80,7 +100,12 @@
       "output_per_1k": 0.01,
       "context": 256000,
       "notes": "Command A (source: per 1M = $2.50/$10.00)",
-      "base_url": "https://api.cohere.ai/v2"
+      "base_url": "https://api.cohere.ai/v2",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "cohere",
@@ -93,7 +118,12 @@
       "input_per_1k": 0.0003,
       "output_per_1k": 0.0006,
       "context": 128000,
-      "notes": "Command Light (source: per 1M = $0.30/$0.60) | [auto-refresh] deprecated_on=2026-02-27"
+      "notes": "Command Light (source: per 1M = $0.30/$0.60) | [auto-refresh] deprecated_on=2026-02-27",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "cohere",
@@ -107,7 +137,12 @@
       "output_per_1k": 0.0006,
       "context": 128000,
       "notes": "Command R 03-2024 (source: per 1M = $0.50/$1.50)",
-      "base_url": "https://api.cohere.ai/v2"
+      "base_url": "https://api.cohere.ai/v2",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "cohere",
@@ -121,7 +156,12 @@
       "output_per_1k": 0.01,
       "context": 128000,
       "notes": "Command R+ 08-2024 (source: per 1M = $2.50/$10.00)",
-      "base_url": "https://api.cohere.ai/v2"
+      "base_url": "https://api.cohere.ai/v2",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "cohere",
@@ -135,7 +175,12 @@
       "input_per_1k": 3.75e-05,
       "output_per_1k": 0.00015,
       "base_url": "https://api.cohere.ai/v2",
-      "notes": "Added automatically from OpenRouter feed."
+      "notes": "Added automatically from OpenRouter feed.",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "cohere",
@@ -147,7 +192,10 @@
       "unit": "1k_tokens",
       "embed_per_1k": 0.00012,
       "dimensions": 1024,
-      "notes": "Embed 4 (source: per 1M = $0.12)"
+      "notes": "Embed 4 (source: per 1M = $0.12)",
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Catalog entry only. Provider-backed embeddings currently execute only via openai, mlx, local, or huggingface."
     },
     {
       "provider": "cohere",
@@ -159,7 +207,10 @@
       "unit": "1k_tokens",
       "embed_per_1k": 0.0001,
       "dimensions": 1024,
-      "notes": "English embeddings v3.0 (source: per 1M = $0.10)"
+      "notes": "English embeddings v3.0 (source: per 1M = $0.10)",
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Catalog entry only. Provider-backed embeddings currently execute only via openai, mlx, local, or huggingface."
     },
     {
       "provider": "cohere",
@@ -171,7 +222,10 @@
       "unit": "1k_tokens",
       "embed_per_1k": 0.0001,
       "dimensions": 1024,
-      "notes": "Multilingual embeddings v3.0 (source: per 1M = $0.10)"
+      "notes": "Multilingual embeddings v3.0 (source: per 1M = $0.10)",
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Catalog entry only. Provider-backed embeddings currently execute only via openai, mlx, local, or huggingface."
     },
     {
       "provider": "cohere",
@@ -182,7 +236,12 @@
       ],
       "unit": "request",
       "per_request": 0.002,
-      "notes": "Rerank 3.5 - $2.00 per 1k searches (1 search = 1 query + up to 100 docs)"
+      "notes": "Rerank 3.5 - $2.00 per 1k searches (1 search = 1 query + up to 100 docs)",
+      "selection_roles": [
+        "reranker_cloud"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "cohere",
@@ -193,7 +252,12 @@
       ],
       "unit": "request",
       "per_request": 0.002,
-      "notes": "English reranker v3.0 - $2.00 per 1k searches"
+      "notes": "English reranker v3.0 - $2.00 per 1k searches",
+      "selection_roles": [
+        "reranker_cloud"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "cohere",
@@ -204,7 +268,12 @@
       ],
       "unit": "request",
       "per_request": 0.002,
-      "notes": "Multilingual reranker v3.0 - $2.00 per 1k searches"
+      "notes": "Multilingual reranker v3.0 - $2.00 per 1k searches",
+      "selection_roles": [
+        "reranker_cloud"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "deepseek",
@@ -218,7 +287,12 @@
       "output_per_1k": 0.00089,
       "context": 163840,
       "notes": "DeepSeek V3.2-Exp non-thinking (source: per 1M = $0.28/$0.42, cache hit $0.028)",
-      "base_url": "https://api.deepseek.com/v1"
+      "base_url": "https://api.deepseek.com/v1",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "deepseek",
@@ -232,7 +306,12 @@
       "input_per_1k": 0.00015,
       "output_per_1k": 0.00075,
       "base_url": "https://api.deepseek.com/v1",
-      "notes": "Added automatically from OpenRouter feed."
+      "notes": "Added automatically from OpenRouter feed.",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "deepseek",
@@ -246,7 +325,12 @@
       "input_per_1k": 0.00045,
       "output_per_1k": 0.00215,
       "base_url": "https://api.deepseek.com/v1",
-      "notes": "Added automatically from OpenRouter feed."
+      "notes": "Added automatically from OpenRouter feed.",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "deepseek",
@@ -260,7 +344,12 @@
       "input_per_1k": 0.0007,
       "output_per_1k": 0.0008,
       "base_url": "https://api.deepseek.com/v1",
-      "notes": "Added automatically from OpenRouter feed."
+      "notes": "Added automatically from OpenRouter feed.",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "deepseek",
@@ -274,7 +363,12 @@
       "input_per_1k": 0.00029,
       "output_per_1k": 0.00029,
       "base_url": "https://api.deepseek.com/v1",
-      "notes": "Added automatically from OpenRouter feed."
+      "notes": "Added automatically from OpenRouter feed.",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "deepseek",
@@ -287,7 +381,12 @@
       "input_per_1k": 0.00028,
       "output_per_1k": 0.00042,
       "context": 128000,
-      "notes": "DeepSeek V3.2-Exp thinking mode (source: per 1M = $0.28/$0.42, cache hit $0.028) | [auto-refresh] deprecated_on=2026-02-27"
+      "notes": "DeepSeek V3.2-Exp thinking mode (source: per 1M = $0.28/$0.42, cache hit $0.028) | [auto-refresh] deprecated_on=2026-02-27",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "deepseek",
@@ -301,7 +400,12 @@
       "input_per_1k": 0.00021,
       "output_per_1k": 0.00079,
       "base_url": "https://api.deepseek.com/v1",
-      "notes": "Added automatically from OpenRouter feed."
+      "notes": "Added automatically from OpenRouter feed.",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "deepseek",
@@ -315,7 +419,12 @@
       "input_per_1k": 0.00026,
       "output_per_1k": 0.00038,
       "base_url": "https://api.deepseek.com/v1",
-      "notes": "Added automatically from OpenRouter feed."
+      "notes": "Added automatically from OpenRouter feed.",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "deepseek",
@@ -329,7 +438,12 @@
       "input_per_1k": 0.00027,
       "output_per_1k": 0.00041,
       "base_url": "https://api.deepseek.com/v1",
-      "notes": "Added automatically from OpenRouter feed."
+      "notes": "Added automatically from OpenRouter feed.",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "deepseek",
@@ -343,7 +457,12 @@
       "input_per_1k": 0.0004,
       "output_per_1k": 0.0012,
       "base_url": "https://api.deepseek.com/v1",
-      "notes": "Added automatically from OpenRouter feed."
+      "notes": "Added automatically from OpenRouter feed.",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "google",
@@ -357,7 +476,12 @@
       "output_per_1k": 0.0025,
       "context": 1048576,
       "notes": "Gemini 2.0 Flash (source: per 1M = $0.10/$0.40)",
-      "base_url": "https://generativelanguage.googleapis.com"
+      "base_url": "https://generativelanguage.googleapis.com",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "google",
@@ -371,7 +495,12 @@
       "input_per_1k": 0.0003,
       "output_per_1k": 0.0025,
       "base_url": "https://generativelanguage.googleapis.com",
-      "notes": "Added automatically from OpenRouter feed."
+      "notes": "Added automatically from OpenRouter feed.",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "google",
@@ -385,7 +514,12 @@
       "input_per_1k": 0.0001,
       "output_per_1k": 0.0004,
       "base_url": "https://generativelanguage.googleapis.com",
-      "notes": "Added automatically from OpenRouter feed."
+      "notes": "Added automatically from OpenRouter feed.",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "google",
@@ -399,7 +533,12 @@
       "output_per_1k": 0.01,
       "context": 1048576,
       "notes": "Gemini 2.5 Pro <=200k (source: per 1M = $1.25/$10.00)",
-      "base_url": "https://generativelanguage.googleapis.com"
+      "base_url": "https://generativelanguage.googleapis.com",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "google",
@@ -413,7 +552,12 @@
       "input_per_1k": 0.0005,
       "output_per_1k": 0.003,
       "base_url": "https://generativelanguage.googleapis.com",
-      "notes": "Added automatically from OpenRouter feed."
+      "notes": "Added automatically from OpenRouter feed.",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "google",
@@ -427,7 +571,12 @@
       "input_per_1k": 0.002,
       "output_per_1k": 0.012,
       "base_url": "https://generativelanguage.googleapis.com",
-      "notes": "Added automatically from OpenRouter feed."
+      "notes": "Added automatically from OpenRouter feed.",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "google",
@@ -441,7 +590,12 @@
       "input_per_1k": 0.0005,
       "output_per_1k": 0.003,
       "base_url": "https://generativelanguage.googleapis.com",
-      "notes": "Added automatically from OpenRouter feed."
+      "notes": "Added automatically from OpenRouter feed.",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "google",
@@ -455,7 +609,12 @@
       "input_per_1k": 0.00025,
       "output_per_1k": 0.0015,
       "base_url": "https://generativelanguage.googleapis.com",
-      "notes": "Added automatically from OpenRouter feed."
+      "notes": "Added automatically from OpenRouter feed.",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "google",
@@ -469,7 +628,12 @@
       "input_per_1k": 0.002,
       "output_per_1k": 0.012,
       "base_url": "https://generativelanguage.googleapis.com",
-      "notes": "Added automatically from OpenRouter feed."
+      "notes": "Added automatically from OpenRouter feed.",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "google",
@@ -483,7 +647,12 @@
       "input_per_1k": 0.002,
       "output_per_1k": 0.012,
       "base_url": "https://generativelanguage.googleapis.com",
-      "notes": "Added automatically from OpenRouter feed."
+      "notes": "Added automatically from OpenRouter feed.",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "google",
@@ -495,7 +664,10 @@
       "unit": "1k_tokens",
       "embed_per_1k": 0.00015,
       "dimensions": 3072,
-      "notes": "Gemini embeddings (source: per 1M = $0.15)"
+      "notes": "Gemini embeddings (source: per 1M = $0.15)",
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Catalog entry only. Provider-backed embeddings currently execute only via openai, mlx, local, or huggingface."
     },
     {
       "provider": "google",
@@ -509,7 +681,12 @@
       "input_per_1k": 3e-05,
       "output_per_1k": 9e-05,
       "base_url": "https://generativelanguage.googleapis.com",
-      "notes": "Added automatically from OpenRouter feed."
+      "notes": "Added automatically from OpenRouter feed.",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "google",
@@ -523,7 +700,12 @@
       "input_per_1k": 4e-05,
       "output_per_1k": 0.00013,
       "base_url": "https://generativelanguage.googleapis.com",
-      "notes": "Added automatically from OpenRouter feed."
+      "notes": "Added automatically from OpenRouter feed.",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "google",
@@ -537,7 +719,12 @@
       "input_per_1k": 3e-05,
       "output_per_1k": 0.00011,
       "base_url": "https://generativelanguage.googleapis.com",
-      "notes": "Added automatically from OpenRouter feed."
+      "notes": "Added automatically from OpenRouter feed.",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "google",
@@ -551,7 +738,12 @@
       "input_per_1k": 4e-05,
       "output_per_1k": 8e-05,
       "base_url": "https://generativelanguage.googleapis.com",
-      "notes": "Added automatically from OpenRouter feed."
+      "notes": "Added automatically from OpenRouter feed.",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "google",
@@ -565,7 +757,12 @@
       "input_per_1k": 2e-05,
       "output_per_1k": 4e-05,
       "base_url": "https://generativelanguage.googleapis.com",
-      "notes": "Added automatically from OpenRouter feed."
+      "notes": "Added automatically from OpenRouter feed.",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "huggingface",
@@ -577,7 +774,12 @@
       "unit": "1k_tokens",
       "embed_per_1k": 0.0,
       "dimensions": 1024,
-      "notes": "BGE-M3 local"
+      "notes": "BGE-M3 local",
+      "selection_roles": [
+        "embedding_provider"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "huggingface",
@@ -588,7 +790,10 @@
       ],
       "unit": "1k_tokens",
       "rerank_per_1k": 0.0,
-      "notes": "BGE-reranker-v2-m3 local"
+      "notes": "BGE-reranker-v2-m3 local",
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Catalog entry only. Current cloud reranker runtime supports cohere only; the learning reranker is selected via training.* config rather than catalog rows."
     },
     {
       "provider": "huggingface",
@@ -600,7 +805,12 @@
       "unit": "1k_tokens",
       "embed_per_1k": 0.0,
       "dimensions": 384,
-      "notes": "BGE-small-en local"
+      "notes": "BGE-small-en local",
+      "selection_roles": [
+        "embedding_provider"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "huggingface",
@@ -612,7 +822,12 @@
       "unit": "1k_tokens",
       "embed_per_1k": 0.0,
       "dimensions": 1024,
-      "notes": "E5-large-v2 local"
+      "notes": "E5-large-v2 local",
+      "selection_roles": [
+        "embedding_provider"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "huggingface",
@@ -623,7 +838,10 @@
       ],
       "unit": "1k_tokens",
       "rerank_per_1k": 0.0,
-      "notes": "Jina-reranker-v3 local"
+      "notes": "Jina-reranker-v3 local",
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Catalog entry only. Current cloud reranker runtime supports cohere only; the learning reranker is selected via training.* config rather than catalog rows."
     },
     {
       "provider": "huggingface",
@@ -635,7 +853,12 @@
       "unit": "1k_tokens",
       "embed_per_1k": 0.0,
       "dimensions": 768,
-      "notes": "MXBAI-embed-large local"
+      "notes": "MXBAI-embed-large local",
+      "selection_roles": [
+        "embedding_provider"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "huggingface",
@@ -646,7 +869,10 @@
       ],
       "unit": "1k_tokens",
       "rerank_per_1k": 0.0,
-      "notes": "MXBAI-rerank-v2-large local"
+      "notes": "MXBAI-rerank-v2-large local",
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Catalog entry only. Current cloud reranker runtime supports cohere only; the learning reranker is selected via training.* config rather than catalog rows."
     },
     {
       "provider": "huggingface",
@@ -658,7 +884,12 @@
       "unit": "1k_tokens",
       "embed_per_1k": 0.0,
       "dimensions": 768,
-      "notes": "Nomic Embed v1 local"
+      "notes": "Nomic Embed v1 local",
+      "selection_roles": [
+        "embedding_provider"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "huggingface",
@@ -670,7 +901,12 @@
       "unit": "1k_tokens",
       "embed_per_1k": 0.0,
       "dimensions": 768,
-      "notes": "Nomic Embed v1.5 8192 context local"
+      "notes": "Nomic Embed v1.5 8192 context local",
+      "selection_roles": [
+        "embedding_provider"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "jina",
@@ -682,7 +918,10 @@
       "unit": "1k_tokens",
       "embed_per_1k": 2e-05,
       "dimensions": 768,
-      "notes": "Jina CLIP v2 multimodal (source: ~$0.02 per 1M)"
+      "notes": "Jina CLIP v2 multimodal (source: ~$0.02 per 1M)",
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Catalog entry only. Provider-backed embeddings currently execute only via openai, mlx, local, or huggingface."
     },
     {
       "provider": "jina",
@@ -694,7 +933,10 @@
       "unit": "1k_tokens",
       "embed_per_1k": 2e-05,
       "dimensions": 1024,
-      "notes": "Jina Embeddings v3 8192 tokens (source: ~$0.02 per 1M)"
+      "notes": "Jina Embeddings v3 8192 tokens (source: ~$0.02 per 1M)",
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Catalog entry only. Provider-backed embeddings currently execute only via openai, mlx, local, or huggingface."
     },
     {
       "provider": "jina",
@@ -705,7 +947,10 @@
       ],
       "unit": "1k_tokens",
       "rerank_per_1k": 2e-05,
-      "notes": "Jina Reranker v3 (source: ~$0.02 per 1M)"
+      "notes": "Jina Reranker v3 (source: ~$0.02 per 1M)",
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Catalog entry only. Current cloud reranker runtime supports cohere only; the learning reranker is selected via training.* config rather than catalog rows."
     },
     {
       "provider": "local",
@@ -717,7 +962,12 @@
       "unit": "1k_tokens",
       "embed_per_1k": 0.0,
       "dimensions": 1024,
-      "notes": "NV Embed v2 local"
+      "notes": "NV Embed v2 local",
+      "selection_roles": [
+        "embedding_provider"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "local",
@@ -730,7 +980,12 @@
       "input_per_1k": 0.0,
       "output_per_1k": 0.0,
       "context": 128000,
-      "notes": "DeepSeek Coder v3 16B local"
+      "notes": "DeepSeek Coder v3 16B local",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "local",
@@ -743,7 +998,12 @@
       "input_per_1k": 0.0,
       "output_per_1k": 0.0,
       "context": 128000,
-      "notes": "DeepSeek Coder v3 236B local"
+      "notes": "DeepSeek Coder v3 236B local",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "local",
@@ -754,7 +1014,10 @@
       ],
       "unit": "request",
       "per_request": 0.0,
-      "notes": "TriBrid Qwen3 LoRA learning reranker artifact (local)"
+      "notes": "TriBrid Qwen3 LoRA learning reranker artifact (local)",
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Catalog entry only. Current cloud reranker runtime supports cohere only; the learning reranker is selected via training.* config rather than catalog rows."
     },
     {
       "provider": "local",
@@ -766,7 +1029,12 @@
       "unit": "1k_tokens",
       "embed_per_1k": 0.0,
       "dimensions": 1024,
-      "notes": "NVIDIA NeMo Retriever Llama 3.2 embedding local"
+      "notes": "NVIDIA NeMo Retriever Llama 3.2 embedding local",
+      "selection_roles": [
+        "embedding_provider"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "local",
@@ -777,7 +1045,10 @@
       ],
       "unit": "1k_tokens",
       "rerank_per_1k": 0.0,
-      "notes": "NVIDIA NeMo Retriever Llama 3.2 reranking local"
+      "notes": "NVIDIA NeMo Retriever Llama 3.2 reranking local",
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Catalog entry only. Current cloud reranker runtime supports cohere only; the learning reranker is selected via training.* config rather than catalog rows."
     },
     {
       "provider": "mistral",
@@ -791,7 +1062,12 @@
       "output_per_1k": 0.0009,
       "context": 256000,
       "notes": "Codestral code generation (source: per 1M = $0.30/$0.90)",
-      "base_url": "https://api.mistral.ai/v1"
+      "base_url": "https://api.mistral.ai/v1",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "mistral",
@@ -805,7 +1081,12 @@
       "input_per_1k": 0.0004,
       "output_per_1k": 0.002,
       "base_url": "https://api.mistral.ai/v1",
-      "notes": "Added automatically from OpenRouter feed."
+      "notes": "Added automatically from OpenRouter feed.",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "mistral",
@@ -819,7 +1100,12 @@
       "input_per_1k": 0.0004,
       "output_per_1k": 0.002,
       "base_url": "https://api.mistral.ai/v1",
-      "notes": "Added automatically from OpenRouter feed."
+      "notes": "Added automatically from OpenRouter feed.",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "mistral",
@@ -833,7 +1119,12 @@
       "input_per_1k": 0.0001,
       "output_per_1k": 0.0003,
       "base_url": "https://api.mistral.ai/v1",
-      "notes": "Added automatically from OpenRouter feed."
+      "notes": "Added automatically from OpenRouter feed.",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "mistral",
@@ -847,7 +1138,12 @@
       "input_per_1k": 0.0002,
       "output_per_1k": 0.0002,
       "base_url": "https://api.mistral.ai/v1",
-      "notes": "Added automatically from OpenRouter feed."
+      "notes": "Added automatically from OpenRouter feed.",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "mistral",
@@ -861,7 +1157,12 @@
       "input_per_1k": 0.0001,
       "output_per_1k": 0.0001,
       "base_url": "https://api.mistral.ai/v1",
-      "notes": "Added automatically from OpenRouter feed."
+      "notes": "Added automatically from OpenRouter feed.",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "mistral",
@@ -875,7 +1176,12 @@
       "input_per_1k": 0.00015,
       "output_per_1k": 0.00015,
       "base_url": "https://api.mistral.ai/v1",
-      "notes": "Added automatically from OpenRouter feed."
+      "notes": "Added automatically from OpenRouter feed.",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "mistral",
@@ -888,7 +1194,12 @@
       "input_per_1k": 0.00025,
       "output_per_1k": 0.00025,
       "context": 32768,
-      "notes": "Mistral 7B open (source: per 1M = $0.25/$0.25) | [auto-refresh] deprecated_on=2026-02-27"
+      "notes": "Mistral 7B open (source: per 1M = $0.25/$0.25) | [auto-refresh] deprecated_on=2026-02-27",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "mistral",
@@ -902,7 +1213,12 @@
       "input_per_1k": 0.0002,
       "output_per_1k": 0.0002,
       "base_url": "https://api.mistral.ai/v1",
-      "notes": "Added automatically from OpenRouter feed. | [auto-refresh] deprecated_on=2026-03-03"
+      "notes": "Added automatically from OpenRouter feed. | [auto-refresh] deprecated_on=2026-03-03",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "mistral",
@@ -916,7 +1232,12 @@
       "input_per_1k": 0.00011,
       "output_per_1k": 0.00019,
       "base_url": "https://api.mistral.ai/v1",
-      "notes": "Added automatically from OpenRouter feed."
+      "notes": "Added automatically from OpenRouter feed.",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "mistral",
@@ -928,7 +1249,10 @@
       "unit": "1k_tokens",
       "embed_per_1k": 1e-05,
       "dimensions": 1024,
-      "notes": "Mistral Embed (source: per 1M = $0.01)"
+      "notes": "Mistral Embed (source: per 1M = $0.01)",
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Catalog entry only. Provider-backed embeddings currently execute only via openai, mlx, local, or huggingface."
     },
     {
       "provider": "mistral",
@@ -942,7 +1266,12 @@
       "output_per_1k": 0.0015,
       "context": 262144,
       "notes": "Mistral Large (source: per 1M = $2.00/$6.00)",
-      "base_url": "https://api.mistral.ai/v1"
+      "base_url": "https://api.mistral.ai/v1",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "mistral",
@@ -956,7 +1285,12 @@
       "output_per_1k": 0.002,
       "context": 131072,
       "notes": "Mistral Medium 3 (source: per 1M = $0.40/$2.00)",
-      "base_url": "https://api.mistral.ai/v1"
+      "base_url": "https://api.mistral.ai/v1",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "mistral",
@@ -970,7 +1304,12 @@
       "input_per_1k": 2e-05,
       "output_per_1k": 4e-05,
       "base_url": "https://api.mistral.ai/v1",
-      "notes": "Added automatically from OpenRouter feed."
+      "notes": "Added automatically from OpenRouter feed.",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "mistral",
@@ -984,7 +1323,12 @@
       "input_per_1k": 0.0002,
       "output_per_1k": 0.0006,
       "base_url": "https://api.mistral.ai/v1",
-      "notes": "Added automatically from OpenRouter feed."
+      "notes": "Added automatically from OpenRouter feed.",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "mistral",
@@ -997,7 +1341,12 @@
       "input_per_1k": 0.0001,
       "output_per_1k": 0.0003,
       "context": 128000,
-      "notes": "Mistral Small (source: per 1M = $0.10/$0.30) | [auto-refresh] deprecated_on=2026-02-27"
+      "notes": "Mistral Small (source: per 1M = $0.10/$0.30) | [auto-refresh] deprecated_on=2026-02-27",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "mistral",
@@ -1011,7 +1360,12 @@
       "input_per_1k": 6e-05,
       "output_per_1k": 0.00018,
       "base_url": "https://api.mistral.ai/v1",
-      "notes": "Added automatically from OpenRouter feed."
+      "notes": "Added automatically from OpenRouter feed.",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "mistral",
@@ -1025,7 +1379,12 @@
       "input_per_1k": 0.0001,
       "output_per_1k": 0.0003,
       "base_url": "https://api.mistral.ai/v1",
-      "notes": "Added automatically from OpenRouter feed."
+      "notes": "Added automatically from OpenRouter feed.",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "mistral",
@@ -1038,7 +1397,12 @@
       "input_per_1k": 0.002,
       "output_per_1k": 0.006,
       "context": 64000,
-      "notes": "Mixtral 8x22B MOE (source: per 1M = $2.00/$6.00) | [auto-refresh] deprecated_on=2026-02-27"
+      "notes": "Mixtral 8x22B MOE (source: per 1M = $2.00/$6.00) | [auto-refresh] deprecated_on=2026-02-27",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "mistral",
@@ -1052,7 +1416,12 @@
       "input_per_1k": 0.002,
       "output_per_1k": 0.006,
       "base_url": "https://api.mistral.ai/v1",
-      "notes": "Added automatically from OpenRouter feed."
+      "notes": "Added automatically from OpenRouter feed.",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "mistral",
@@ -1065,7 +1434,12 @@
       "input_per_1k": 0.0007,
       "output_per_1k": 0.0007,
       "context": 32768,
-      "notes": "Mixtral 8x7B (source: per 1M = $0.70/$0.70) | [auto-refresh] deprecated_on=2026-02-27"
+      "notes": "Mixtral 8x7B (source: per 1M = $0.70/$0.70) | [auto-refresh] deprecated_on=2026-02-27",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "mistral",
@@ -1079,7 +1453,12 @@
       "input_per_1k": 0.00054,
       "output_per_1k": 0.00054,
       "base_url": "https://api.mistral.ai/v1",
-      "notes": "Added automatically from OpenRouter feed."
+      "notes": "Added automatically from OpenRouter feed.",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "mistral",
@@ -1093,7 +1472,12 @@
       "input_per_1k": 0.002,
       "output_per_1k": 0.006,
       "base_url": "https://api.mistral.ai/v1",
-      "notes": "Added automatically from OpenRouter feed."
+      "notes": "Added automatically from OpenRouter feed.",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "mistral",
@@ -1107,7 +1491,12 @@
       "input_per_1k": 0.0001,
       "output_per_1k": 0.0003,
       "base_url": "https://api.mistral.ai/v1",
-      "notes": "Added automatically from OpenRouter feed."
+      "notes": "Added automatically from OpenRouter feed.",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "mlx",
@@ -1119,7 +1508,12 @@
       "unit": "1k_tokens",
       "embed_per_1k": 0.0,
       "dimensions": 384,
-      "notes": "MLX MiniLM embeddings (Metal GPU)"
+      "notes": "MLX MiniLM embeddings (Metal GPU)",
+      "selection_roles": [
+        "embedding_provider"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "ollama",
@@ -1132,7 +1526,12 @@
       "input_per_1k": 0.0,
       "output_per_1k": 0.0,
       "context": 128000,
-      "notes": "Llama 3.2 1B local"
+      "notes": "Llama 3.2 1B local",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "ollama",
@@ -1145,7 +1544,12 @@
       "input_per_1k": 0.0,
       "output_per_1k": 0.0,
       "context": 128000,
-      "notes": "Llama 3.2 3B local"
+      "notes": "Llama 3.2 3B local",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "ollama",
@@ -1157,7 +1561,10 @@
       "unit": "1k_tokens",
       "embed_per_1k": 0.0,
       "dimensions": 768,
-      "notes": "Nomic embed text local"
+      "notes": "Nomic embed text local",
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Catalog entry only. Provider-backed embeddings currently execute only via openai, mlx, local, or huggingface."
     },
     {
       "provider": "ollama",
@@ -1170,7 +1577,12 @@
       "input_per_1k": 0.0,
       "output_per_1k": 0.0,
       "context": 256000,
-      "notes": "Qwen3 Coder 14B local"
+      "notes": "Qwen3 Coder 14B local",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "ollama",
@@ -1183,7 +1595,12 @@
       "input_per_1k": 0.0,
       "output_per_1k": 0.0,
       "context": 256000,
-      "notes": "Qwen3 Coder 30B local"
+      "notes": "Qwen3 Coder 30B local",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "ollama",
@@ -1196,7 +1613,12 @@
       "input_per_1k": 0.0,
       "output_per_1k": 0.0,
       "context": 256000,
-      "notes": "Qwen3 Coder 7B local"
+      "notes": "Qwen3 Coder 7B local",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "openai",
@@ -1210,7 +1632,12 @@
       "input_per_1k": 0.003,
       "output_per_1k": 0.004,
       "base_url": "https://api.openai.com/v1",
-      "notes": "Added automatically from OpenRouter feed."
+      "notes": "Added automatically from OpenRouter feed.",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "openai",
@@ -1224,7 +1651,12 @@
       "input_per_1k": 0.0015,
       "output_per_1k": 0.002,
       "base_url": "https://api.openai.com/v1",
-      "notes": "Added automatically from OpenRouter feed."
+      "notes": "Added automatically from OpenRouter feed.",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "openai",
@@ -1238,7 +1670,12 @@
       "input_per_1k": 0.01,
       "output_per_1k": 0.03,
       "base_url": "https://api.openai.com/v1",
-      "notes": "Added automatically from OpenRouter feed."
+      "notes": "Added automatically from OpenRouter feed.",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "openai",
@@ -1252,7 +1689,12 @@
       "input_per_1k": 0.01,
       "output_per_1k": 0.03,
       "base_url": "https://api.openai.com/v1",
-      "notes": "Added automatically from OpenRouter feed."
+      "notes": "Added automatically from OpenRouter feed.",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "openai",
@@ -1266,7 +1708,12 @@
       "input_per_1k": 0.01,
       "output_per_1k": 0.03,
       "base_url": "https://api.openai.com/v1",
-      "notes": "Added automatically from OpenRouter feed."
+      "notes": "Added automatically from OpenRouter feed.",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "openai",
@@ -1280,7 +1727,12 @@
       "input_per_1k": 0.0025,
       "output_per_1k": 0.01,
       "base_url": "https://api.openai.com/v1",
-      "notes": "Added automatically from OpenRouter feed."
+      "notes": "Added automatically from OpenRouter feed.",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "openai",
@@ -1294,7 +1746,12 @@
       "input_per_1k": 0.0025,
       "output_per_1k": 0.01,
       "base_url": "https://api.openai.com/v1",
-      "notes": "Added automatically from OpenRouter feed."
+      "notes": "Added automatically from OpenRouter feed.",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "openai",
@@ -1308,7 +1765,12 @@
       "input_per_1k": 0.00015,
       "output_per_1k": 0.0006,
       "base_url": "https://api.openai.com/v1",
-      "notes": "Added automatically from OpenRouter feed."
+      "notes": "Added automatically from OpenRouter feed.",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "openai",
@@ -1322,7 +1784,12 @@
       "input_per_1k": 0.00015,
       "output_per_1k": 0.0006,
       "base_url": "https://api.openai.com/v1",
-      "notes": "Added automatically from OpenRouter feed."
+      "notes": "Added automatically from OpenRouter feed.",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "openai",
@@ -1336,7 +1803,12 @@
       "input_per_1k": 0.0025,
       "output_per_1k": 0.01,
       "base_url": "https://api.openai.com/v1",
-      "notes": "Added automatically from OpenRouter feed."
+      "notes": "Added automatically from OpenRouter feed.",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "openai",
@@ -1350,7 +1822,12 @@
       "input_per_1k": 0.01,
       "output_per_1k": 0.01,
       "base_url": "https://api.openai.com/v1",
-      "notes": "Added automatically from OpenRouter feed."
+      "notes": "Added automatically from OpenRouter feed.",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "openai",
@@ -1364,7 +1841,12 @@
       "input_per_1k": 0.0025,
       "output_per_1k": 0.002,
       "base_url": "https://api.openai.com/v1",
-      "notes": "Added automatically from OpenRouter feed."
+      "notes": "Added automatically from OpenRouter feed.",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "openai",
@@ -1378,7 +1860,12 @@
       "output_per_1k": 0.002,
       "context": 400000,
       "notes": "GPT-4.1 mini (source: per 1M = $0.40/$1.60)",
-      "base_url": "https://api.openai.com/v1"
+      "base_url": "https://api.openai.com/v1",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "openai",
@@ -1392,7 +1879,12 @@
       "output_per_1k": 0.0004,
       "context": 400000,
       "notes": "GPT-4.1 nano (source: per 1M = $0.10/$0.40)",
-      "base_url": "https://api.openai.com/v1"
+      "base_url": "https://api.openai.com/v1",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "openai",
@@ -1406,7 +1898,12 @@
       "input_per_1k": 0.00125,
       "output_per_1k": 0.01,
       "base_url": "https://api.openai.com/v1",
-      "notes": "Added automatically from OpenRouter feed."
+      "notes": "Added automatically from OpenRouter feed.",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "openai",
@@ -1420,7 +1917,12 @@
       "input_per_1k": 0.00025,
       "output_per_1k": 0.002,
       "base_url": "https://api.openai.com/v1",
-      "notes": "Added automatically from OpenRouter feed."
+      "notes": "Added automatically from OpenRouter feed.",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "openai",
@@ -1434,7 +1936,12 @@
       "input_per_1k": 0.00175,
       "output_per_1k": 0.014,
       "base_url": "https://api.openai.com/v1",
-      "notes": "Added automatically from OpenRouter feed."
+      "notes": "Added automatically from OpenRouter feed.",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "openai",
@@ -1448,7 +1955,12 @@
       "input_per_1k": 0.00175,
       "output_per_1k": 0.014,
       "base_url": "https://api.openai.com/v1",
-      "notes": "Added automatically from OpenRouter feed."
+      "notes": "Added automatically from OpenRouter feed.",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "openai",
@@ -1462,7 +1974,12 @@
       "input_per_1k": 0.0025,
       "output_per_1k": 0.015,
       "base_url": "https://api.openai.com/v1",
-      "notes": "Added automatically from OpenRouter feed."
+      "notes": "Added automatically from OpenRouter feed.",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "openai",
@@ -1476,7 +1993,12 @@
       "input_per_1k": 0.03,
       "output_per_1k": 0.18,
       "base_url": "https://api.openai.com/v1",
-      "notes": "Added automatically from OpenRouter feed."
+      "notes": "Added automatically from OpenRouter feed.",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "openai",
@@ -1490,7 +2012,12 @@
       "input_per_1k": 0.0025,
       "output_per_1k": 0.01,
       "base_url": "https://api.openai.com/v1",
-      "notes": "Added automatically from OpenRouter feed."
+      "notes": "Added automatically from OpenRouter feed.",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "openai",
@@ -1504,7 +2031,12 @@
       "input_per_1k": 0.0006,
       "output_per_1k": 0.0024,
       "base_url": "https://api.openai.com/v1",
-      "notes": "Added automatically from OpenRouter feed."
+      "notes": "Added automatically from OpenRouter feed.",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "openai",
@@ -1518,7 +2050,12 @@
       "input_per_1k": 3.9e-05,
       "output_per_1k": 0.00019,
       "base_url": "https://api.openai.com/v1",
-      "notes": "Added automatically from OpenRouter feed."
+      "notes": "Added automatically from OpenRouter feed.",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "openai",
@@ -1532,7 +2069,12 @@
       "input_per_1k": 3e-05,
       "output_per_1k": 0.00014,
       "base_url": "https://api.openai.com/v1",
-      "notes": "Added automatically from OpenRouter feed."
+      "notes": "Added automatically from OpenRouter feed.",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "openai",
@@ -1546,7 +2088,12 @@
       "input_per_1k": 7.5e-05,
       "output_per_1k": 0.0003,
       "base_url": "https://api.openai.com/v1",
-      "notes": "Added automatically from OpenRouter feed."
+      "notes": "Added automatically from OpenRouter feed.",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "openai",
@@ -1560,7 +2107,12 @@
       "input_per_1k": 0.002,
       "output_per_1k": 0.008,
       "base_url": "https://api.openai.com/v1",
-      "notes": "Added automatically from OpenRouter feed."
+      "notes": "Added automatically from OpenRouter feed.",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "openai",
@@ -1574,7 +2126,12 @@
       "input_per_1k": 0.01,
       "output_per_1k": 0.04,
       "base_url": "https://api.openai.com/v1",
-      "notes": "Added automatically from OpenRouter feed."
+      "notes": "Added automatically from OpenRouter feed.",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "openai",
@@ -1588,7 +2145,12 @@
       "input_per_1k": 0.02,
       "output_per_1k": 0.08,
       "base_url": "https://api.openai.com/v1",
-      "notes": "Added automatically from OpenRouter feed."
+      "notes": "Added automatically from OpenRouter feed.",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "openai",
@@ -1602,7 +2164,12 @@
       "input_per_1k": 0.0011,
       "output_per_1k": 0.0044,
       "base_url": "https://api.openai.com/v1",
-      "notes": "Added automatically from OpenRouter feed."
+      "notes": "Added automatically from OpenRouter feed.",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "openai",
@@ -1616,7 +2183,12 @@
       "input_per_1k": 0.002,
       "output_per_1k": 0.008,
       "base_url": "https://api.openai.com/v1",
-      "notes": "Added automatically from OpenRouter feed."
+      "notes": "Added automatically from OpenRouter feed.",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "openai",
@@ -1630,7 +2202,12 @@
       "input_per_1k": 0.0011,
       "output_per_1k": 0.0044,
       "base_url": "https://api.openai.com/v1",
-      "notes": "Added automatically from OpenRouter feed."
+      "notes": "Added automatically from OpenRouter feed.",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "openai",
@@ -1642,7 +2219,12 @@
       "unit": "1k_tokens",
       "embed_per_1k": 0.00013,
       "dimensions": 3072,
-      "notes": "Large embeddings (source: per 1M = $0.13)"
+      "notes": "Large embeddings (source: per 1M = $0.13)",
+      "selection_roles": [
+        "embedding_provider"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "openai",
@@ -1654,7 +2236,12 @@
       "unit": "1k_tokens",
       "embed_per_1k": 2e-05,
       "dimensions": 1536,
-      "notes": "Small embeddings (source: per 1M = $0.02)"
+      "notes": "Small embeddings (source: per 1M = $0.02)",
+      "selection_roles": [
+        "embedding_provider"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "voyage",
@@ -1665,7 +2252,10 @@
       ],
       "unit": "1k_tokens",
       "rerank_per_1k": 5e-05,
-      "notes": "Voyage Rerank 2 (source: per 1M = $0.05)"
+      "notes": "Voyage Rerank 2 (source: per 1M = $0.05)",
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Catalog entry only. Current cloud reranker runtime supports cohere only; the learning reranker is selected via training.* config rather than catalog rows."
     },
     {
       "provider": "voyage",
@@ -1676,7 +2266,10 @@
       ],
       "unit": "1k_tokens",
       "rerank_per_1k": 2e-05,
-      "notes": "Voyage Rerank 2 Lite (source: per 1M = $0.02)"
+      "notes": "Voyage Rerank 2 Lite (source: per 1M = $0.02)",
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Catalog entry only. Current cloud reranker runtime supports cohere only; the learning reranker is selected via training.* config rather than catalog rows."
     },
     {
       "provider": "voyage",
@@ -1687,7 +2280,10 @@
       ],
       "unit": "1k_tokens",
       "rerank_per_1k": 5e-05,
-      "notes": "Voyage Rerank 2.5 (source: per 1M = $0.05)"
+      "notes": "Voyage Rerank 2.5 (source: per 1M = $0.05)",
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Catalog entry only. Current cloud reranker runtime supports cohere only; the learning reranker is selected via training.* config rather than catalog rows."
     },
     {
       "provider": "voyage",
@@ -1698,7 +2294,10 @@
       ],
       "unit": "1k_tokens",
       "rerank_per_1k": 2e-05,
-      "notes": "Voyage Rerank 2.5 Lite (source: per 1M = $0.02)"
+      "notes": "Voyage Rerank 2.5 Lite (source: per 1M = $0.02)",
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Catalog entry only. Current cloud reranker runtime supports cohere only; the learning reranker is selected via training.* config rather than catalog rows."
     },
     {
       "provider": "voyage",
@@ -1710,7 +2309,10 @@
       "unit": "1k_tokens",
       "embed_per_1k": 0.00018,
       "dimensions": 1024,
-      "notes": "Voyage 3 Large (source: per 1M = $0.18)"
+      "notes": "Voyage 3 Large (source: per 1M = $0.18)",
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Catalog entry only. Provider-backed embeddings currently execute only via openai, mlx, local, or huggingface."
     },
     {
       "provider": "voyage",
@@ -1722,7 +2324,10 @@
       "unit": "1k_tokens",
       "embed_per_1k": 6e-05,
       "dimensions": 1024,
-      "notes": "Voyage 3.5 balanced (source: per 1M = $0.06)"
+      "notes": "Voyage 3.5 balanced (source: per 1M = $0.06)",
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Catalog entry only. Provider-backed embeddings currently execute only via openai, mlx, local, or huggingface."
     },
     {
       "provider": "voyage",
@@ -1734,7 +2339,10 @@
       "unit": "1k_tokens",
       "embed_per_1k": 2e-05,
       "dimensions": 1024,
-      "notes": "Voyage 3.5 Lite fastest (source: per 1M = $0.02)"
+      "notes": "Voyage 3.5 Lite fastest (source: per 1M = $0.02)",
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Catalog entry only. Provider-backed embeddings currently execute only via openai, mlx, local, or huggingface."
     },
     {
       "provider": "voyage",
@@ -1746,7 +2354,10 @@
       "unit": "1k_tokens",
       "embed_per_1k": 0.00012,
       "dimensions": 1024,
-      "notes": "Voyage Code 2 (source: per 1M = $0.12)"
+      "notes": "Voyage Code 2 (source: per 1M = $0.12)",
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Catalog entry only. Provider-backed embeddings currently execute only via openai, mlx, local, or huggingface."
     },
     {
       "provider": "voyage",
@@ -1758,7 +2369,10 @@
       "unit": "1k_tokens",
       "embed_per_1k": 0.00018,
       "dimensions": 1024,
-      "notes": "Voyage Code 3 (source: per 1M = $0.18)"
+      "notes": "Voyage Code 3 (source: per 1M = $0.18)",
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Catalog entry only. Provider-backed embeddings currently execute only via openai, mlx, local, or huggingface."
     },
     {
       "provider": "voyage",
@@ -1770,7 +2384,10 @@
       "unit": "1k_tokens",
       "embed_per_1k": 0.00018,
       "dimensions": 1024,
-      "notes": "Voyage Context 3 (source: per 1M = $0.18)"
+      "notes": "Voyage Context 3 (source: per 1M = $0.18)",
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Catalog entry only. Provider-backed embeddings currently execute only via openai, mlx, local, or huggingface."
     },
     {
       "provider": "voyage",
@@ -1782,7 +2399,10 @@
       "unit": "1k_tokens",
       "embed_per_1k": 0.00012,
       "dimensions": 1024,
-      "notes": "Voyage Finance 2 (source: per 1M = $0.12)"
+      "notes": "Voyage Finance 2 (source: per 1M = $0.12)",
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Catalog entry only. Provider-backed embeddings currently execute only via openai, mlx, local, or huggingface."
     },
     {
       "provider": "voyage",
@@ -1794,7 +2414,10 @@
       "unit": "1k_tokens",
       "embed_per_1k": 0.00012,
       "dimensions": 1024,
-      "notes": "Voyage Law 2 (source: per 1M = $0.12)"
+      "notes": "Voyage Law 2 (source: per 1M = $0.12)",
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Catalog entry only. Provider-backed embeddings currently execute only via openai, mlx, local, or huggingface."
     },
     {
       "provider": "voyage",
@@ -1806,7 +2429,10 @@
       "unit": "1k_tokens",
       "embed_per_1k": 0.00012,
       "dimensions": 1024,
-      "notes": "Voyage Multilingual 2 (source: per 1M = $0.12)"
+      "notes": "Voyage Multilingual 2 (source: per 1M = $0.12)",
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Catalog entry only. Provider-backed embeddings currently execute only via openai, mlx, local, or huggingface."
     },
     {
       "provider": "xai",
@@ -1820,7 +2446,12 @@
       "input_per_1k": 0.003,
       "output_per_1k": 0.015,
       "base_url": "https://api.x.ai/v1",
-      "notes": "Added automatically from OpenRouter feed."
+      "notes": "Added automatically from OpenRouter feed.",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "xai",
@@ -1834,7 +2465,12 @@
       "input_per_1k": 0.0003,
       "output_per_1k": 0.0005,
       "base_url": "https://api.x.ai/v1",
-      "notes": "Added automatically from OpenRouter feed."
+      "notes": "Added automatically from OpenRouter feed.",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "xai",
@@ -1848,7 +2484,12 @@
       "input_per_1k": 0.0003,
       "output_per_1k": 0.0005,
       "base_url": "https://api.x.ai/v1",
-      "notes": "Added automatically from OpenRouter feed."
+      "notes": "Added automatically from OpenRouter feed.",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "xai",
@@ -1862,7 +2503,12 @@
       "output_per_1k": 0.015,
       "context": 256000,
       "notes": "Grok 3 base (source: per 1M = $3/$15)",
-      "base_url": "https://api.x.ai/v1"
+      "base_url": "https://api.x.ai/v1",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "xai",
@@ -1876,7 +2522,12 @@
       "input_per_1k": 0.0002,
       "output_per_1k": 0.0005,
       "base_url": "https://api.x.ai/v1",
-      "notes": "Added automatically from OpenRouter feed."
+      "notes": "Added automatically from OpenRouter feed.",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     },
     {
       "provider": "xai",
@@ -1890,7 +2541,12 @@
       "input_per_1k": 0.0002,
       "output_per_1k": 0.0015,
       "base_url": "https://api.x.ai/v1",
-      "notes": "Added automatically from OpenRouter feed."
+      "notes": "Added automatically from OpenRouter feed.",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     }
   ]
 }

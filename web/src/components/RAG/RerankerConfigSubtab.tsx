@@ -62,10 +62,10 @@ export function RerankerConfigSubtab() {
     getModelsForProvider: getRerankModelsForProvider,
     loading: modelsLoading,
     error: modelsError,
-  } = useModels('RERANK');
+  } = useModels('RERANK', { selectionRole: 'reranker_cloud' });
 
   const cloudProviders = useMemo(() => {
-    return allRerankProviders.filter((p) => !['huggingface', 'local'].includes(p.toLowerCase()));
+    return allRerankProviders;
   }, [allRerankProviders]);
 
   // Keep config values sane when switching modes / providers
@@ -215,6 +215,7 @@ export function RerankerConfigSubtab() {
             <div className="input-group">
               <ModelPicker
                 componentType="RERANK"
+                selectionRole="reranker_cloud"
                 provider={cloudProvider}
                 value={cloudModel}
                 onChange={setCloudModel}
@@ -283,13 +284,14 @@ export function RerankerConfigSubtab() {
               </select>
             </div>
             <div className="input-group">
-              <ModelPicker
-                componentType="RERANK"
+              <label>
+                Base model <TooltipIcon name="LEARNING_RERANKER_BASE_MODEL" />
+              </label>
+              <input
+                type="text"
                 value={learningBaseModel}
-                onChange={setLearningBaseModel}
-                label="Base model"
-                tooltipKey="LEARNING_RERANKER_BASE_MODEL"
-                allowCustom
+                onChange={(e) => setLearningBaseModel(e.target.value)}
+                placeholder="Qwen/Qwen3-Reranker-0.6B"
               />
             </div>
           </div>

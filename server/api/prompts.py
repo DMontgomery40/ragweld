@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
 
+from server.lineage import capture_prompt_set_version, ensure_current_bundle, make_ref
 from server.models.tribrid_config_model import (
     CorpusScope,
     PromptCategory,
@@ -156,8 +157,16 @@ async def update_prompt(
     try:
         cfg = await load_scoped_config(repo_id=scope.resolved_repo_id)
         _set_prompt_value(cfg, key, body.value)
-        await save_scoped_config(cfg, repo_id=scope.resolved_repo_id)
-        return PromptUpdateResponse(ok=True, prompt_key=key, message="Prompt updated")
+        saved_cfg = await save_scoped_config(cfg, repo_id=scope.resolved_repo_id)
+        prompt_version = capture_prompt_set_version(repo_id=scope.resolved_repo_id, cfg=saved_cfg)
+        bundle = ensure_current_bundle(repo_id=scope.resolved_repo_id, cfg=saved_cfg)
+        return PromptUpdateResponse(
+            ok=True,
+            prompt_key=key,
+            message="Prompt updated",
+            prompt_set_ref=make_ref("prompt_set", prompt_version.version_id),
+            bundle_id=bundle.bundle_id,
+        )
     except KeyError as e:
         raise HTTPException(status_code=404, detail=f"Unknown prompt key: {key}") from e
     except CorpusNotFoundError as e:
@@ -180,8 +189,16 @@ async def reset_prompt(
     try:
         cfg = await load_scoped_config(repo_id=scope.resolved_repo_id)
         _set_prompt_value(cfg, key, _default_value_for(key))
-        await save_scoped_config(cfg, repo_id=scope.resolved_repo_id)
-        return PromptUpdateResponse(ok=True, prompt_key=key, message="Prompt reset")
+        saved_cfg = await save_scoped_config(cfg, repo_id=scope.resolved_repo_id)
+        prompt_version = capture_prompt_set_version(repo_id=scope.resolved_repo_id, cfg=saved_cfg)
+        bundle = ensure_current_bundle(repo_id=scope.resolved_repo_id, cfg=saved_cfg)
+        return PromptUpdateResponse(
+            ok=True,
+            prompt_key=key,
+            message="Prompt reset",
+            prompt_set_ref=make_ref("prompt_set", prompt_version.version_id),
+            bundle_id=bundle.bundle_id,
+        )
     except KeyError as e:
         raise HTTPException(status_code=404, detail=f"Unknown prompt key: {key}") from e
     except CorpusNotFoundError as e:

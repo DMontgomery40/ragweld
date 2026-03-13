@@ -1,6 +1,9 @@
 """Pytest fixtures for TriBridRAG tests."""
 
 import asyncio
+import os
+import shutil
+import tempfile
 from pathlib import Path
 from typing import AsyncGenerator, Generator
 
@@ -97,3 +100,19 @@ def isolate_tracked_config_file() -> Generator[None, None, None]:
                 config_path.unlink()
             except Exception:
                 pass
+
+
+@pytest.fixture(autouse=True)
+def isolate_lineage_root() -> Generator[None, None, None]:
+    """Keep lineage output out of the repo worktree during tests."""
+    old = os.environ.get("RAGWELD_LINEAGE_ROOT")
+    tmp_dir = tempfile.mkdtemp(prefix="ragweld-lineage-tests-")
+    os.environ["RAGWELD_LINEAGE_ROOT"] = tmp_dir
+    try:
+        yield
+    finally:
+        if old is None:
+            os.environ.pop("RAGWELD_LINEAGE_ROOT", None)
+        else:
+            os.environ["RAGWELD_LINEAGE_ROOT"] = old
+        shutil.rmtree(tmp_dir, ignore_errors=True)

@@ -32,7 +32,6 @@ export function Reranker() {
 
   const availableRerankers = [
     { id: 'cohere', name: 'Cohere Rerank', description: 'Cohere rerank-english-v2.0' },
-    { id: 'voyage', name: 'Voyage AI', description: 'Voyage reranker-lite-1' },
     { id: 'learning-ranker', name: 'Learning Ranker', description: 'Qwen3 LoRA learning reranker' },
   ];
 

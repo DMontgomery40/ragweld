@@ -6,6 +6,7 @@ Use this page as the repo-local source of truth for public-facing positioning.
 
 - Versioned source-of-truth config
 - Versioned prompts and config-driven behavior
+- Quality-loop lineage bundles across prompt/config/dataset/run/publish/promote flows
 - Executable specs
 - Manifest-backed training artifacts
 - Repo-local system-of-record docs
@@ -31,6 +32,7 @@ The current repo state does not support those stronger claims end to end:
 Prefer wording like:
 
 - Versioned config, prompts, and specs
+- Quality-loop lineage bundles across prompt/config/dataset/run/publish/promote flows
 - Manifest-backed training artifacts
 - Provenance-minded eval and training workflows
 - Repo-local system of record for agents and operators

@@ -1328,6 +1328,18 @@ class ModelCatalogEntry(BaseModel):
     per_request: float | None = Field(default=None, ge=0.0, description="Cost per request")
     base_url: str | None = Field(default=None, description="Optional provider base URL")
     notes: str | None = Field(default=None, description="Freeform notes")
+    selection_roles: list[Literal["generation", "embedding_provider", "reranker_cloud"]] = Field(
+        default_factory=list,
+        description="Runtime selection surfaces that should expose this row.",
+    )
+    selection_status: Literal["runtime_selectable", "catalog_only"] = Field(
+        default="catalog_only",
+        description="Whether this row is currently selectable in the runtime product surface.",
+    )
+    selection_reason: str | None = Field(
+        default=None,
+        description="Why the row is catalog-only when not runtime selectable.",
+    )
 
 
 class ModelCatalogResponse(BaseModel):
@@ -1363,6 +1375,89 @@ class ModelCatalogUpsertResponse(BaseModel):
     ok: bool = Field(default=True)
     action: Literal["created", "updated"] = Field(description="Whether an entry was created or updated")
     model: ModelCatalogEntry = Field(description="Upserted catalog model entry")
+
+
+class RuntimeOption(BaseModel):
+    """Generic runtime capability option."""
+
+    id: str = Field(description="Stable identifier for the capability")
+    label: str = Field(description="Human-readable label")
+    description: str = Field(description="Short explanation of what the runtime supports")
+
+
+class EmbeddingRuntimeProviderCapability(BaseModel):
+    """Embedding provider capability exposed by the runtime."""
+
+    provider: str = Field(description="Embedding provider identifier")
+    label: str = Field(description="Human-readable provider label")
+    description: str = Field(description="Short explanation of the provider runtime path")
+    badge: Literal["local", "cloud"] = Field(description="UI badge hint for the provider")
+    model_config_field: str = Field(description="Config field that stores the effective model id for this provider")
+    tokenizer_strategies: list[str] = Field(
+        default_factory=list,
+        description="Tokenizer strategies required or supported for this provider runtime path.",
+    )
+
+
+class EmbeddingRuntimeCapabilities(BaseModel):
+    """Runtime capability matrix for embeddings."""
+
+    backends: list[RuntimeOption] = Field(default_factory=list, description="Dense embedding backends supported today.")
+    providers: list[EmbeddingRuntimeProviderCapability] = Field(
+        default_factory=list,
+        description="Embedding providers supported for embedding_backend='provider'.",
+    )
+
+
+class RerankerRuntimeCapabilities(BaseModel):
+    """Runtime capability matrix for reranking."""
+
+    modes: list[RuntimeOption] = Field(default_factory=list, description="Reranker modes exposed by the product.")
+    cloud_providers: list[RuntimeOption] = Field(
+        default_factory=list,
+        description="Cloud reranker providers that execute in the current runtime.",
+    )
+    learning_backends: list[RuntimeOption] = Field(
+        default_factory=list,
+        description="Learning reranker backends supported by the runtime.",
+    )
+
+
+class ChunkingRuntimeCapabilities(BaseModel):
+    """Runtime capability matrix for chunking."""
+
+    strategies: list[RuntimeOption] = Field(default_factory=list, description="Chunking strategies implemented today.")
+
+
+class IndexingRuntimeCapabilities(BaseModel):
+    """Runtime capability matrix for indexing backends."""
+
+    dense_backends: list[RuntimeOption] = Field(
+        default_factory=list,
+        description="Dense indexing execution paths used during indexing.",
+    )
+    storage_backends: list[RuntimeOption] = Field(
+        default_factory=list,
+        description="Storage/index backends populated during indexing.",
+    )
+
+
+class SearchRuntimeCapabilities(BaseModel):
+    """Runtime capability matrix for retrieval/search backends."""
+
+    vector_backends: list[RuntimeOption] = Field(default_factory=list, description="Vector search backends.")
+    sparse_backends: list[RuntimeOption] = Field(default_factory=list, description="Sparse search backends.")
+    graph_backends: list[RuntimeOption] = Field(default_factory=list, description="Graph search backends.")
+
+
+class RuntimeCapabilitiesResponse(BaseModel):
+    """Response payload for GET /api/runtime-capabilities."""
+
+    embedding: EmbeddingRuntimeCapabilities = Field(default_factory=EmbeddingRuntimeCapabilities)
+    reranker: RerankerRuntimeCapabilities = Field(default_factory=RerankerRuntimeCapabilities)
+    chunking: ChunkingRuntimeCapabilities = Field(default_factory=ChunkingRuntimeCapabilities)
+    indexing: IndexingRuntimeCapabilities = Field(default_factory=IndexingRuntimeCapabilities)
+    search: SearchRuntimeCapabilities = Field(default_factory=SearchRuntimeCapabilities)
 
 
 def _default_chat_model_components() -> list[Literal["GEN", "EMB", "RERANK"]]:
@@ -1536,6 +1631,218 @@ class OkResponse(BaseModel):
     """Generic ok response used by several endpoints."""
 
     ok: bool = Field(description="Whether the operation succeeded")
+
+
+LineageAliasName = Literal["current", "promoted", "baseline", "canary"]
+LineageAssetKind = Literal[
+    "prompt_set",
+    "config_snapshot",
+    "spec_snapshot",
+    "model_catalog_snapshot",
+    "runtime_model_set",
+    "eval_dataset",
+    "benchmark_run",
+    "eval_run",
+    "synthetic_run",
+    "synthetic_artifact",
+    "published_artifact",
+    "reranker_train_run",
+    "reranker_model_artifact",
+    "agent_train_run",
+    "agent_model_artifact",
+]
+LineageCaptureSource = Literal["runtime", "git", "generated", "published"]
+
+
+class GitTrackedFile(BaseModel):
+    """Digest snapshot for a dirty tracked or untracked worktree file."""
+
+    path: str = Field(description="Repo-relative path when known.")
+    status: str = Field(description="Git porcelain status code or synthetic status label.")
+    exists: bool = Field(default=True, description="Whether the path existed when the snapshot was taken.")
+    sha256: str | None = Field(default=None, description="Best-effort SHA-256 digest of file bytes.")
+    bytes: int | None = Field(default=None, ge=0, description="Best-effort file size in bytes.")
+
+
+class GitSnapshot(BaseModel):
+    """Best-effort git context captured when minting lineage versions."""
+
+    commit_sha: str | None = Field(default=None, description="Resolved HEAD commit SHA when available.")
+    dirty: bool = Field(default=False, description="Whether the worktree had tracked or untracked changes.")
+    dirty_paths: list[str] = Field(default_factory=list, description="Dirty file paths from git status --porcelain.")
+    tracked_files: list[GitTrackedFile] = Field(
+        default_factory=list,
+        description="Per-file digests for dirty paths so dirty worktrees remain reproducible.",
+    )
+
+
+class LineageRef(BaseModel):
+    """Compact immutable reference to a lineage version."""
+
+    kind: LineageAssetKind = Field(description="Kind of immutable version being referenced.")
+    version_id: str = Field(description="Immutable version identifier.")
+    label: str | None = Field(default=None, description="Optional human-readable label for UI display.")
+
+
+class LineageAssetVersion(BaseModel):
+    """Immutable version record for one quality-loop asset."""
+
+    version_id: str = Field(description="Immutable version identifier.")
+    kind: LineageAssetKind = Field(description="Asset kind.")
+    repo_id: str | None = Field(
+        default=None,
+        description="Optional corpus identifier when the version is corpus-scoped.",
+        validation_alias=AliasChoices("repo_id", "corpus_id"),
+        serialization_alias="corpus_id",
+    )
+    created_at: datetime = Field(description="When this version record was created.")
+    digest: str = Field(description="Canonical SHA-256 digest used to dedupe identical content.")
+    source: LineageCaptureSource = Field(description="How this version was captured.")
+    source_paths: list[str] = Field(default_factory=list, description="Underlying file or directory paths.")
+    git: GitSnapshot | None = Field(default=None, description="Git context captured when the version was minted.")
+    metadata: dict[str, Any] = Field(default_factory=dict, description="Small searchable metadata for lists and UI.")
+    payload: dict[str, Any] = Field(default_factory=dict, description="Canonical asset payload snapshot.")
+    upstream_refs: list[LineageRef] = Field(
+        default_factory=list,
+        description="Other immutable versions this asset was derived from.",
+    )
+
+
+class LineageBundle(BaseModel):
+    """Top-level immutable bundle pinning the exact versions used together."""
+
+    bundle_id: str = Field(description="Immutable bundle identifier.")
+    repo_id: str = Field(
+        description="Corpus identifier for this quality-loop bundle.",
+        validation_alias=AliasChoices("repo_id", "corpus_id"),
+        serialization_alias="corpus_id",
+    )
+    created_at: datetime = Field(description="When this bundle was created.")
+    prompt_set: LineageRef | None = Field(default=None, description="Pinned prompt-set version.")
+    config_snapshot: LineageRef | None = Field(default=None, description="Pinned config snapshot version.")
+    spec_snapshot: LineageRef | None = Field(default=None, description="Pinned spec snapshot version.")
+    model_catalog_snapshot: LineageRef | None = Field(default=None, description="Pinned model catalog snapshot version.")
+    runtime_model_set: LineageRef | None = Field(default=None, description="Pinned resolved runtime model-set version.")
+    eval_dataset: LineageRef | None = Field(default=None, description="Pinned eval dataset version when available.")
+    benchmark_runs: list[LineageRef] = Field(default_factory=list, description="Attached benchmark run versions.")
+    eval_runs: list[LineageRef] = Field(default_factory=list, description="Attached eval run versions.")
+    synthetic_runs: list[LineageRef] = Field(default_factory=list, description="Attached synthetic run versions.")
+    synthetic_artifacts: list[LineageRef] = Field(default_factory=list, description="Attached synthetic artifact versions.")
+    published_artifacts: list[LineageRef] = Field(default_factory=list, description="Attached published artifact versions.")
+    reranker_train_runs: list[LineageRef] = Field(default_factory=list, description="Attached reranker training run versions.")
+    reranker_model_artifacts: list[LineageRef] = Field(
+        default_factory=list,
+        description="Attached reranker model artifact versions.",
+    )
+    agent_train_runs: list[LineageRef] = Field(default_factory=list, description="Attached agent training run versions.")
+    agent_model_artifacts: list[LineageRef] = Field(
+        default_factory=list,
+        description="Attached agent model artifact versions.",
+    )
+    metadata: dict[str, Any] = Field(default_factory=dict, description="Bundle metadata for UI and audit notes.")
+
+
+class LineageAlias(BaseModel):
+    """Mutable operator alias that points to an immutable bundle."""
+
+    alias: LineageAliasName = Field(description="Operator alias name.")
+    repo_id: str = Field(
+        description="Corpus identifier for the alias.",
+        validation_alias=AliasChoices("repo_id", "corpus_id"),
+        serialization_alias="corpus_id",
+    )
+    bundle_id: str = Field(description="Target immutable bundle identifier.")
+    updated_at: datetime = Field(description="When the alias was last updated.")
+
+
+class LineageAssetListResponse(BaseModel):
+    """List response for immutable asset versions."""
+
+    ok: bool = Field(default=True, description="Whether the request succeeded.")
+    assets: list[LineageAssetVersion] = Field(default_factory=list, description="Immutable asset versions.")
+
+
+class LineageBundleListResponse(BaseModel):
+    """List response for immutable bundles."""
+
+    ok: bool = Field(default=True, description="Whether the request succeeded.")
+    bundles: list[LineageBundle] = Field(default_factory=list, description="Immutable lineage bundles.")
+
+
+class LineageAliasesResponse(BaseModel):
+    """List response for corpus-scoped lineage aliases."""
+
+    ok: bool = Field(default=True, description="Whether the request succeeded.")
+    aliases: list[LineageAlias] = Field(default_factory=list, description="Mutable alias pointers for this corpus.")
+
+
+class LineageAliasUpdateRequest(BaseModel):
+    """Request payload for setting a bundle alias."""
+
+    bundle_id: str = Field(description="Existing immutable bundle identifier to target.")
+
+
+class LineageBundleSnapshotRequest(BaseModel):
+    """Request payload for explicitly snapshotting the current quality-loop state."""
+
+    set_aliases: list[LineageAliasName] = Field(
+        default_factory=list,
+        description="Optional aliases to move to the new bundle after the snapshot is created.",
+    )
+
+
+class LineageBundleSnapshotResponse(BaseModel):
+    """Response payload for creating or fetching a current-state bundle snapshot."""
+
+    ok: bool = Field(default=True, description="Whether the request succeeded.")
+    bundle: LineageBundle = Field(description="Created or reused immutable bundle.")
+    aliases: list[LineageAlias] = Field(default_factory=list, description="Aliases updated by this request.")
+
+
+class BenchmarkRunRequest(BaseModel):
+    """Request payload for POST /api/benchmark/run."""
+
+    prompt: str = Field(min_length=1, description="Prompt to run against multiple models.")
+    models: list[str] = Field(min_length=2, description="Two to four model overrides to compare.")
+
+
+class BenchmarkResult(BaseModel):
+    """Per-model result from a benchmark run."""
+
+    model: str = Field(description="Model override used for this result row.")
+    response: str = Field(default="", description="Best-effort generated response.")
+    latency_ms: float = Field(default=0.0, ge=0.0, description="End-to-end latency for this model in milliseconds.")
+    breakdown_ms: dict[str, float] = Field(default_factory=dict, description="Timing breakdown by phase.")
+    error: str | None = Field(default=None, description="Error string when the model call failed.")
+    model_id: str | None = Field(default=None, description="Optional resolved model id.")
+    model_name: str | None = Field(default=None, description="Optional human-readable model name.")
+
+
+class BenchmarkRun(BaseModel):
+    """Persisted benchmark run record."""
+
+    run_id: str = Field(description="Unique benchmark run identifier.")
+    repo_id: str | None = Field(
+        default=None,
+        description="Optional corpus identifier when benchmarking within a corpus scope.",
+        validation_alias=AliasChoices("repo_id", "corpus_id"),
+        serialization_alias="corpus_id",
+    )
+    prompt: str = Field(description="Prompt benchmarked across models.")
+    models: list[str] = Field(default_factory=list, description="Requested model overrides.")
+    started_at_ms: int = Field(default=0, ge=0, description="Run start timestamp in milliseconds since epoch.")
+    ended_at_ms: int = Field(default=0, ge=0, description="Run completion timestamp in milliseconds since epoch.")
+    results: list[BenchmarkResult] = Field(default_factory=list, description="Per-model benchmark results.")
+    input_bundle_id: str | None = Field(default=None, description="Current bundle id captured before the run started.")
+    bundle_id: str | None = Field(default=None, description="Bundle id after attaching this run to lineage.")
+    lineage_ref: LineageRef | None = Field(default=None, description="Immutable benchmark run version reference.")
+
+
+class BenchmarkRunsResponse(BaseModel):
+    """Response payload for listing benchmark runs."""
+
+    ok: bool = Field(default=True, description="Whether the request succeeded.")
+    runs: list[BenchmarkRun] = Field(default_factory=list, description="Recent benchmark run records.")
 
 
 class ModelValidationWarning(BaseModel):
@@ -1849,6 +2156,10 @@ class EvalRun(BaseModel):
     results: list[EvalResult] = Field(description="Per-entry results")
     started_at: datetime = Field(description="When evaluation started")
     completed_at: datetime = Field(description="When evaluation completed")
+    dataset_version_ref: LineageRef | None = Field(default=None, description="Immutable eval dataset version used for this run.")
+    input_bundle_id: str | None = Field(default=None, description="Current bundle id captured before evaluation started.")
+    bundle_id: str | None = Field(default=None, description="Bundle id after this run was attached to lineage.")
+    lineage_ref: LineageRef | None = Field(default=None, description="Immutable eval run version reference.")
 
 
 class EvalRunMeta(BaseModel):
@@ -1861,6 +2172,8 @@ class EvalRunMeta(BaseModel):
     total: int = Field(ge=0, description="Total questions evaluated")
     duration_secs: float = Field(ge=0.0, description="Total run duration (seconds)")
     has_config: bool = Field(default=True, description="Whether config snapshot is present")
+    bundle_id: str | None = Field(default=None, description="Bundle id associated with this eval run.")
+    lineage_ref: LineageRef | None = Field(default=None, description="Immutable eval run version reference.")
 
 
 class EvalRunsResponse(BaseModel):
@@ -2014,6 +2327,14 @@ class RerankerTrainRun(BaseModel):
     max_length: int = Field(ge=32, le=2048)
 
     summary: RerankerTrainRunSummary = Field(default_factory=RerankerTrainRunSummary)
+    input_bundle_id: str | None = Field(default=None, description="Current bundle id captured before training started.")
+    bundle_id: str | None = Field(default=None, description="Bundle id after this run was attached to lineage.")
+    promoted_bundle_id: str | None = Field(default=None, description="Bundle id created when this run was promoted.")
+    lineage_ref: LineageRef | None = Field(default=None, description="Immutable reranker training run version reference.")
+    model_artifact_ref: LineageRef | None = Field(
+        default=None,
+        description="Immutable reranker model artifact version produced by this run.",
+    )
 
 
 class RerankerTrainRunMeta(BaseModel):
@@ -2029,6 +2350,8 @@ class RerankerTrainRunMeta(BaseModel):
     primary_k: int
     primary_metric_best: float | None = None
     primary_metric_final: float | None = None
+    bundle_id: str | None = None
+    lineage_ref: LineageRef | None = None
 
 
 class RerankerTrainRunsResponse(BaseModel):
@@ -2167,6 +2490,14 @@ class AgentTrainRun(BaseModel):
     max_length: int = Field(ge=32, le=8192)
 
     summary: AgentTrainRunSummary = Field(default_factory=AgentTrainRunSummary)
+    input_bundle_id: str | None = Field(default=None, description="Current bundle id captured before training started.")
+    bundle_id: str | None = Field(default=None, description="Bundle id after this run was attached to lineage.")
+    promoted_bundle_id: str | None = Field(default=None, description="Bundle id created when this run was promoted.")
+    lineage_ref: LineageRef | None = Field(default=None, description="Immutable agent training run version reference.")
+    model_artifact_ref: LineageRef | None = Field(
+        default=None,
+        description="Immutable agent model artifact version produced by this run.",
+    )
 
 
 class AgentTrainRunMeta(BaseModel):
@@ -2180,6 +2511,8 @@ class AgentTrainRunMeta(BaseModel):
     completed_at: datetime | None = None
     primary_metric_best: float | None = None
     primary_metric_final: float | None = None
+    bundle_id: str | None = None
+    lineage_ref: LineageRef | None = None
 
 
 class AgentTrainRunsResponse(BaseModel):
@@ -2377,6 +2710,13 @@ class SyntheticRun(BaseModel):
     artifacts: list[SyntheticArtifactRef] = Field(default_factory=list)
     summary: SyntheticRunSummary = Field(default_factory=SyntheticRunSummary)
     error: str | None = Field(default=None)
+    input_bundle_id: str | None = Field(default=None, description="Current bundle id captured before the run started.")
+    bundle_id: str | None = Field(default=None, description="Bundle id after this run was attached to lineage.")
+    lineage_ref: LineageRef | None = Field(default=None, description="Immutable synthetic run version reference.")
+    artifact_lineage_refs: dict[str, LineageRef] = Field(
+        default_factory=dict,
+        description="Synthetic artifact kind -> immutable version reference.",
+    )
 
 
 class SyntheticRunMeta(BaseModel):
@@ -2391,6 +2731,8 @@ class SyntheticRunMeta(BaseModel):
     recipe: SyntheticRecipeKind
     provider: SyntheticProvider
     items_generated: int | None = Field(default=None)
+    bundle_id: str | None = Field(default=None)
+    lineage_ref: LineageRef | None = Field(default=None)
 
 
 class SyntheticRunsResponse(BaseModel):
@@ -2421,6 +2763,8 @@ class SyntheticPublishResponse(BaseModel):
     kind: SyntheticArtifactKind
     target_path: str | None = Field(default=None)
     message: str | None = Field(default=None)
+    bundle_id: str | None = Field(default=None, description="Bundle id after attaching the published artifact.")
+    lineage_ref: LineageRef | None = Field(default=None, description="Immutable published artifact version reference.")
 
 
 class SyntheticConfigPatchResponse(BaseModel):
@@ -2432,6 +2776,8 @@ class SyntheticConfigPatchResponse(BaseModel):
     )
     patch: dict[str, Any] = Field(default_factory=dict)
     artifact_path: str | None = Field(default=None)
+    bundle_id: str | None = Field(default=None, description="Bundle id after attaching the config patch artifact.")
+    lineage_ref: LineageRef | None = Field(default=None, description="Immutable published artifact version reference.")
 
 
 class SyntheticArtifactPreviewResponse(BaseModel):
@@ -3105,7 +3451,7 @@ class ChunkingConfig(BaseModel):
     )
     chunking_strategy: str = Field(
         default="ast",
-        pattern="^(ast|hybrid|greedy|fixed_chars|fixed_tokens|recursive|markdown|sentence|qa_blocks|semantic)$",
+        pattern="^(ast|hybrid|greedy|fixed_chars|fixed_tokens|recursive|markdown|sentence|qa_blocks)$",
         description="Chunking strategy (document + code)"
     )
     preserve_imports: int = Field(
@@ -3158,6 +3504,18 @@ class ChunkingConfig(BaseModel):
         default=True,
         description="Emit parent document id metadata for neighbor-window retrieval.",
     )
+
+    @field_validator("chunking_strategy", mode="before")
+    @classmethod
+    def normalize_chunking_strategy(cls, v: str) -> str:
+        if isinstance(v, str):
+            val = v.strip().lower()
+            if val == "semantic":
+                raise ValueError(
+                    "chunking_strategy='semantic' is no longer supported; use fixed_chars, fixed_tokens, recursive, markdown, sentence, qa_blocks, ast, or hybrid."
+                )
+            return val
+        return v
 
     @model_validator(mode='after')
     def validate_overlap_less_than_size(self) -> Self:
@@ -3780,12 +4138,12 @@ class RerankingConfig(BaseModel):
 
     reranker_cloud_provider: str = Field(
         default="cohere",
-        description="Cloud reranker provider when mode=cloud (cohere, voyage, jina)"
+        description="Cloud reranker provider when mode=cloud. Runtime-selectable today: cohere."
     )
 
     reranker_cloud_model: str = Field(
         default="rerank-v3.5",
-        description="Cloud reranker model name when mode=cloud (Cohere: rerank-v3.5)"
+        description="Cloud reranker model name when mode=cloud (runtime-selectable today: Cohere models)."
     )
 
     tribrid_reranker_alpha: float = Field(
@@ -4958,6 +5316,8 @@ class PromptUpdateResponse(BaseModel):
     ok: bool = Field(default=True, description="Whether the update succeeded")
     prompt_key: str = Field(description="Prompt key that was updated")
     message: str = Field(description="Human-readable status message")
+    prompt_set_ref: LineageRef | None = Field(default=None, description="Immutable prompt-set version after this edit.")
+    bundle_id: str | None = Field(default=None, description="Current bundle id after the prompt edit was captured.")
 
 
 class SystemPromptsConfig(BaseModel):

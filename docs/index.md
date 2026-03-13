@@ -13,4 +13,7 @@ This repo/product is named **ragweld**. Many internal identifiers still say **tr
 - [Design docs](design-docs/index.md)
 - [Execution plans](exec-plans/index.md)
 - [References](references/index.md)
+- [Runtime capabilities reference](references/runtime-capabilities.md)
 - [Product positioning](references/product-positioning.md)
+- [Quality-loop lineage](references/quality-loop-lineage.md)
+- [Codex session ingest](references/codex-session-ingest.md)

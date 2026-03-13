@@ -8,7 +8,16 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useAPI, useConfig, useConfigField, useEmbeddingModel, useEmbeddingStatus, useIndexing, useModels } from '@/hooks';
+import {
+  useAPI,
+  useConfig,
+  useConfigField,
+  useEmbeddingModel,
+  useEmbeddingStatus,
+  useIndexing,
+  useModels,
+  useRuntimeCapabilities,
+} from '@/hooks';
 import { useRepoStore } from '@/stores/useRepoStore';
 import { LiveTerminal, type LiveTerminalHandle } from '@/components/LiveTerminal/LiveTerminal';
 import { RepositoryConfig } from '@/components/RAG/RepositoryConfig';
@@ -45,22 +54,22 @@ const COMPONENT_CARDS: Array<{
   { id: 'enrichment', icon: '🧠', label: 'Graph & Options', description: 'Graph build + dense skip mode' },
 ];
 
-const CHUNKING_STRATEGIES = [
+const FALLBACK_CHUNKING_STRATEGIES = [
   { id: 'fixed_tokens', label: 'Fixed tokens', description: 'Token-window chunking (best default for text corpora)' },
   { id: 'recursive', label: 'Recursive', description: 'Separator-based chunking packed by token target (docs/transcripts)' },
   { id: 'markdown', label: 'Markdown', description: 'Split by headings then pack by tokens (docs/notes)' },
   { id: 'sentence', label: 'Sentence', description: 'Sentence boundaries packed by tokens (prose)' },
   { id: 'qa_blocks', label: 'Q/A blocks', description: 'Detect Q:/A: blocks then pack by tokens (interviews/dumps)' },
+  { id: 'greedy', label: 'Greedy', description: 'Legacy fixed-char fallback using the greedy target size' },
   { id: 'fixed_chars', label: 'Fixed chars', description: 'Character windowing with overlap (fallback, legacy)' },
   { id: 'ast', label: 'AST-aware', description: 'Preserve functions/blocks (best for code)' },
   { id: 'hybrid', label: 'Hybrid', description: 'AST with fallback behavior' },
 ];
 
-const RUNTIME_SUPPORTED_PROVIDER_EMBEDDERS = ['openai', 'mlx', 'local', 'huggingface'];
-
 export function IndexingSubtab() {
   const { api } = useAPI();
   const { config, flushPendingPatches } = useConfig();
+  const { capabilities: runtimeCapabilities } = useRuntimeCapabilities();
   const { activeRepo, repos, loadRepos, setActiveRepo } = useRepoStore();
   const {
     fetchStatus: fetchIndexStatus,
@@ -260,27 +269,47 @@ export function IndexingSubtab() {
     loading: modelsLoading,
     error: modelsError,
     findModel: findEmbedModel,
-  } = useModels('EMB');
+  } = useModels('EMB', { selectionRole: 'embedding_provider' });
   const { status: embeddingStatus } = useEmbeddingStatus();
+  const runtimeEmbeddingProviders = useMemo(
+    () =>
+      (runtimeCapabilities?.embedding?.providers || [])
+        .map((provider) => String(provider.provider || '').trim().toLowerCase())
+        .filter(Boolean),
+    [runtimeCapabilities]
+  );
+  const chunkingStrategies = useMemo(
+    () =>
+      runtimeCapabilities?.chunking?.strategies?.length
+        ? runtimeCapabilities.chunking.strategies
+        : FALLBACK_CHUNKING_STRATEGIES,
+    [runtimeCapabilities]
+  );
 
   const normalizedEmbeddingType = useMemo(
     () => String(embeddingType || '').trim().toLowerCase(),
     [embeddingType]
   );
   const supportedRuntimeProvider = useMemo(
-    () => RUNTIME_SUPPORTED_PROVIDER_EMBEDDERS.includes(normalizedEmbeddingType),
-    [normalizedEmbeddingType]
+    () => {
+      const knownProviders = runtimeEmbeddingProviders.length
+        ? runtimeEmbeddingProviders
+        : (embedProviders || []).map((provider) => String(provider || '').trim().toLowerCase()).filter(Boolean);
+      return knownProviders.includes(normalizedEmbeddingType);
+    },
+    [embedProviders, normalizedEmbeddingType, runtimeEmbeddingProviders]
   );
   const visibleEmbedProviders = useMemo(() => {
+    if (!runtimeEmbeddingProviders.length) return embedProviders;
     const filtered = (embedProviders || []).filter((p) =>
-      RUNTIME_SUPPORTED_PROVIDER_EMBEDDERS.includes(String(p || '').trim().toLowerCase())
+      runtimeEmbeddingProviders.includes(String(p || '').trim().toLowerCase())
     );
     if (!filtered.length) return embedProviders;
     if (normalizedEmbeddingType && !filtered.some((p) => String(p).toLowerCase() === normalizedEmbeddingType)) {
       return [normalizedEmbeddingType, ...filtered];
     }
     return filtered;
-  }, [embedProviders, normalizedEmbeddingType]);
+  }, [embedProviders, normalizedEmbeddingType, runtimeEmbeddingProviders]);
   const hasIndexedCorpus = useMemo(() => {
     if (!embeddingStatus) return false;
     return Boolean(embeddingStatus.hasIndex && Number(embeddingStatus.totalChunks || 0) > 0);
@@ -354,20 +383,17 @@ export function IndexingSubtab() {
     if (String(embeddingBackend || '').toLowerCase() !== 'provider') return { ok: true as const, message: '' };
     const provider = normalizedEmbeddingType;
     const strategy = String(tokenizationStrategy || '').trim().toLowerCase();
-    const requiredByProvider: Record<string, string[]> = {
-      openai: ['tiktoken'],
-      mlx: ['huggingface'],
-      local: ['huggingface'],
-      huggingface: ['huggingface'],
-    };
-    const required = requiredByProvider[provider];
-    if (!required) return { ok: true as const, message: '' };
+    const required =
+      (runtimeCapabilities?.embedding?.providers || [])
+        .find((item) => String(item.provider || '').trim().toLowerCase() === provider)
+        ?.tokenizer_strategies || [];
+    if (!required.length) return { ok: true as const, message: '' };
     if (required.includes(strategy)) return { ok: true as const, message: '' };
     return {
       ok: false as const,
       message: `embedding_type=${provider} requires tokenization.strategy=${required.join(' or ')}`,
     };
-  }, [embeddingBackend, normalizedEmbeddingType, skipDense, tokenizationStrategy]);
+  }, [embeddingBackend, normalizedEmbeddingType, runtimeCapabilities, skipDense, tokenizationStrategy]);
 
   const indexBlockingReason = useMemo(() => {
     if (skipDense !== 1 && String(embeddingBackend || '').toLowerCase() === 'provider' && !supportedRuntimeProvider) {
@@ -1092,7 +1118,7 @@ export function IndexingSubtab() {
                   Unsupported embedding provider for runtime backend
                 </div>
                 <div style={{ color: 'var(--fg-muted)', fontSize: '12px', marginTop: '4px' }}>
-                  Select one of: {RUNTIME_SUPPORTED_PROVIDER_EMBEDDERS.join(', ')}
+                  Select one of: {(runtimeEmbeddingProviders.length ? runtimeEmbeddingProviders : visibleEmbedProviders).join(', ')}
                 </div>
               </div>
             )}
@@ -1132,7 +1158,7 @@ export function IndexingSubtab() {
                     }}
                   >
                     {(() => {
-                      const s = describeEmbeddingProviderStrategy(String(provider));
+                      const s = describeEmbeddingProviderStrategy(String(provider), runtimeCapabilities || undefined);
                       return (
                         <>
                     <div
@@ -1200,8 +1226,9 @@ export function IndexingSubtab() {
             {/* Model + dimensions */}
             <div className="input-row" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '20px' }}>
               <div className="input-group">
-                <ModelPicker
+                  <ModelPicker
                   componentType="EMB"
+                  selectionRole="embedding_provider"
                   provider={embeddingType}
                   value={currentModel}
                   onChange={setCurrentModel}
@@ -1492,7 +1519,7 @@ export function IndexingSubtab() {
             </h4>
 
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px', marginBottom: '20px' }}>
-              {CHUNKING_STRATEGIES.map((strat) => (
+              {chunkingStrategies.map((strat) => (
                 <button
                   key={strat.id}
                   onClick={() => setChunkingStrategy(strat.id)}

@@ -2,30 +2,81 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from server.chat.benchmark_runner import run_benchmark
 from server.config import load_config
+from server.lineage import (
+    attach_refs_to_current_bundle,
+    capture_benchmark_run_version,
+    ensure_current_bundle,
+    make_ref,
+)
+from server.models.tribrid_config_model import BenchmarkRun, BenchmarkRunRequest, BenchmarkRunsResponse, CorpusScope
+from server.services.config_store import CorpusNotFoundError
+from server.services.config_store import get_config as load_scoped_config
 
 router = APIRouter(tags=["benchmark"])
 
+# Ruff B008: avoid function calls in argument defaults (FastAPI Depends()).
+_CORPUS_SCOPE_DEP = Depends()
 
-@router.post("/benchmark/run")
-async def benchmark_run(payload: dict[str, Any]) -> dict[str, Any]:
+
+def _results_dir(path_str: str) -> Path:
+    path = Path(str(path_str or "data/benchmarks/"))
+    if not path.is_absolute():
+        path = Path(__file__).resolve().parents[2] / path
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _run_path(results_path: str, run_id: str) -> Path:
+    return _results_dir(results_path) / f"{run_id}.json"
+
+
+def _load_benchmark_run(path: Path) -> BenchmarkRun | None:
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    if not isinstance(raw, dict):
+        return None
+    raw.setdefault("prompt", "")
+    raw.setdefault("models", [str(item.get("model") or "") for item in raw.get("results", []) if isinstance(item, dict)])
+    raw.setdefault("corpus_id", raw.get("repo_id"))
+    raw.setdefault("input_bundle_id", None)
+    raw.setdefault("bundle_id", None)
+    raw.setdefault("lineage_ref", None)
+    try:
+        return BenchmarkRun.model_validate(raw)
+    except Exception:
+        return None
+
+
+@router.post("/benchmark/run", response_model=BenchmarkRun)
+async def benchmark_run(
+    payload: BenchmarkRunRequest,
+    scope: CorpusScope = _CORPUS_SCOPE_DEP,
+) -> BenchmarkRun:
     """Run the same prompt against multiple models (best-effort).
 
     This endpoint is intended for local benchmarking and may require provider
     credentials (e.g., OPENROUTER_API_KEY) or local inference servers.
     """
-    cfg = load_config()
+    repo_id = scope.resolved_repo_id
+    if repo_id:
+        try:
+            cfg = await load_scoped_config(repo_id=repo_id)
+        except CorpusNotFoundError as e:
+            raise HTTPException(status_code=404, detail=str(e)) from e
+    else:
+        cfg = load_config()
     if not bool(getattr(cfg.chat.benchmark, "enabled", False)):
         raise HTTPException(status_code=400, detail="Benchmarking is disabled")
 
-    prompt = str(payload.get("prompt") or "").strip()
-    models_raw = payload.get("models")
-    models = [str(m).strip() for m in (models_raw or []) if str(m).strip()] if isinstance(models_raw, list) else []
+    prompt = str(payload.prompt or "").strip()
+    models = [str(m).strip() for m in (payload.models or []) if str(m).strip()]
 
     if not prompt:
         raise HTTPException(status_code=400, detail="Missing prompt")
@@ -34,23 +85,55 @@ async def benchmark_run(payload: dict[str, Any]) -> dict[str, Any]:
     if len(models) > int(getattr(cfg.chat.benchmark, "max_concurrent_models", 4) or 4):
         raise HTTPException(status_code=400, detail="Too many models selected")
 
-    return await run_benchmark(prompt=prompt, models=models, config=cfg)
+    input_bundle_id: str | None = None
+    if repo_id:
+        input_bundle_id = ensure_current_bundle(repo_id=repo_id, cfg=cfg).bundle_id
+
+    run = await run_benchmark(prompt=prompt, models=models, config=cfg, repo_id=repo_id)
+    run.input_bundle_id = input_bundle_id
+
+    if repo_id:
+        version = capture_benchmark_run_version(run=run)
+        bundle, _aliases = attach_refs_to_current_bundle(
+            repo_id=repo_id,
+            cfg=cfg,
+            benchmark_runs=[make_ref("benchmark_run", version.version_id)],
+            preserve_attached_refs=True,
+        )
+        run.lineage_ref = make_ref("benchmark_run", version.version_id)
+        run.bundle_id = bundle.bundle_id
+        out_file = _run_path(str(getattr(cfg.chat.benchmark, "results_path", "data/benchmarks/") or "data/benchmarks/"), run.run_id)
+        if out_file.exists():
+            out_file.write_text(json.dumps(run.model_dump(mode="json", by_alias=True), ensure_ascii=False, indent=2), encoding="utf-8")
+
+    return run
 
 
-@router.get("/benchmark/results")
-async def benchmark_results(limit: int = Query(default=20, ge=1, le=200)) -> dict[str, Any]:
+@router.get("/benchmark/results", response_model=BenchmarkRunsResponse)
+async def benchmark_results(
+    scope: CorpusScope = _CORPUS_SCOPE_DEP,
+    limit: int = Query(default=20, ge=1, le=200),
+) -> BenchmarkRunsResponse:
     """Return recent benchmark runs (best-effort)."""
-    cfg = load_config()
-    path = Path(str(getattr(cfg.chat.benchmark, "results_path", "data/benchmarks/") or "data/benchmarks/"))
+    repo_id = scope.resolved_repo_id
+    if repo_id:
+        try:
+            cfg = await load_scoped_config(repo_id=repo_id)
+        except CorpusNotFoundError as e:
+            raise HTTPException(status_code=404, detail=str(e)) from e
+    else:
+        cfg = load_config()
+    path = _results_dir(str(getattr(cfg.chat.benchmark, "results_path", "data/benchmarks/") or "data/benchmarks/"))
     if not path.exists():
-        return {"runs": []}
+        return BenchmarkRunsResponse(ok=True, runs=[])
 
-    runs: list[dict[str, Any]] = []
+    runs: list[BenchmarkRun] = []
     files = sorted(path.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
     for f in files[: int(limit)]:
-        try:
-            runs.append(json.loads(f.read_text(encoding="utf-8")))
-        except Exception:
+        run = _load_benchmark_run(f)
+        if run is None:
             continue
-    return {"runs": runs}
-
+        if repo_id and str(run.repo_id or "").strip() != str(repo_id).strip():
+            continue
+        runs.append(run)
+    return BenchmarkRunsResponse(ok=True, runs=runs)

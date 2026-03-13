@@ -1,0 +1,17 @@
+name: Runtime Capabilities API
+description: Executable runtime capability matrix for truthful selection/documentation surfaces
+version: "1.0"
+
+endpoints:
+  - path: /api/runtime-capabilities
+    method: GET
+    response: RuntimeCapabilitiesResponse
+    description: Return the backend-supported embedding, reranker, chunking, indexing, and search capability matrix
+
+models:
+  RuntimeCapabilitiesResponse:
+    embedding: EmbeddingRuntimeCapabilities
+    reranker: RerankerRuntimeCapabilities
+    chunking: ChunkingRuntimeCapabilities
+    indexing: IndexingRuntimeCapabilities
+    search: SearchRuntimeCapabilities

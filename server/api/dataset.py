@@ -9,8 +9,10 @@ from urllib.parse import quote
 from fastapi import APIRouter, Depends, HTTPException, UploadFile
 from starlette.responses import FileResponse
 
+from server.lineage import ensure_current_bundle
 from server.models.eval import DatasetEntry
 from server.models.tribrid_config_model import CorpusScope
+from server.services.config_store import get_config as load_scoped_config
 
 router = APIRouter(tags=["dataset"])
 
@@ -127,6 +129,19 @@ def _require_repo_id(scope: CorpusScope) -> str:
     return repo_id
 
 
+async def _refresh_lineage_bundle(repo_id: str, entries: list[DatasetEntry]) -> None:
+    try:
+        cfg = await load_scoped_config(repo_id=repo_id)
+    except Exception:
+        return
+    ensure_current_bundle(
+        repo_id=repo_id,
+        cfg=cfg,
+        dataset_rows=[entry.model_dump(mode="json", by_alias=True) for entry in entries],
+        dataset_path=str(_dataset_path_for_corpus(repo_id)),
+    )
+
+
 @router.get("/dataset", response_model=list[DatasetEntry])
 async def list_dataset(scope: CorpusScope = _CORPUS_SCOPE_DEP) -> list[DatasetEntry]:
     repo_id = _require_repo_id(scope)
@@ -144,6 +159,7 @@ async def add_dataset_entry(
         raise HTTPException(status_code=409, detail=f"entry_id={entry.entry_id} already exists")
     entries.append(entry)
     _save_dataset(entries, corpus_id=repo_id)
+    await _refresh_lineage_bundle(repo_id, entries)
     return entry
 
 
@@ -164,6 +180,7 @@ async def update_dataset_entry(
     updated = entry.model_copy(update={"entry_id": entry_id, "created_at": existing.created_at})
     entries[idx] = updated
     _save_dataset(entries, corpus_id=repo_id)
+    await _refresh_lineage_bundle(repo_id, entries)
     return updated
 
 
@@ -180,6 +197,7 @@ async def delete_dataset_entry(
     if before == after:
         raise HTTPException(status_code=404, detail=f"entry_id={entry_id} not found")
     _save_dataset(entries, corpus_id=repo_id)
+    await _refresh_lineage_bundle(repo_id, entries)
     return {"ok": True, "deleted": before - after}
 
 
@@ -202,6 +220,7 @@ async def import_dataset(
         entries.append(DatasetEntry.model_validate(item))
 
     _save_dataset(entries, corpus_id=repo_id)
+    await _refresh_lineage_bundle(repo_id, entries)
     return entries
 
 

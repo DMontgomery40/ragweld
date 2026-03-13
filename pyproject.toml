@@ -31,6 +31,7 @@ dependencies = [
     "sentence-transformers>=2.3.0",
     "transformers>=4.37.0",
     "torch>=2.1.0",
+    "einops>=0.8.0",
     "tiktoken>=0.6.0",
 
     # Data Processing

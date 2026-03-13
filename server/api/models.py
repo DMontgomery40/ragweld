@@ -1,7 +1,8 @@
 """API endpoints for model definitions.
 
-This module serves models.json - THE source of truth for all model selection
-in the UI. Every dropdown (embedding, generation, reranker) MUST use this endpoint.
+This module serves the broad model catalog from ``data/models.json``. The catalog is
+the source of truth for pricing and known candidates; runtime selection truth comes
+from the catalog's ``selection_*`` metadata plus ``/api/runtime-capabilities``.
 """
 
 from __future__ import annotations
@@ -20,6 +21,10 @@ from server.models.tribrid_config_model import (
     ModelCatalogResponse,
     ModelCatalogUpsertRequest,
     ModelCatalogUpsertResponse,
+)
+from server.runtime_capabilities import (
+    apply_selection_metadata_to_catalog,
+    apply_selection_metadata_to_row,
 )
 from server.services.config_store import CorpusNotFoundError
 from server.services.config_store import get_config as load_scoped_config
@@ -238,10 +243,10 @@ def _load_catalog() -> dict[str, Any]:
     if isinstance(data, dict):
         if not isinstance(data.get("models"), list):
             data["models"] = []
-        return data
+        return apply_selection_metadata_to_catalog(data)
     if isinstance(data, list):
-        return {"models": data}
-    return {"models": []}
+        return apply_selection_metadata_to_catalog({"models": data})
+    return apply_selection_metadata_to_catalog({"models": []})
 
 
 def _catalog_models(catalog: dict[str, Any]) -> list[dict[str, Any]]:
@@ -254,7 +259,7 @@ def _catalog_models(catalog: dict[str, Any]) -> list[dict[str, Any]]:
 async def _augmented_catalog(scope: CorpusScope | None) -> dict[str, Any]:
     catalog = _load_catalog()
     base = await _resolve_ragweld_base_model(scope)
-    return _augment_catalog_with_ragweld(catalog, base)
+    return apply_selection_metadata_to_catalog(_augment_catalog_with_ragweld(catalog, base))
 
 
 @router.get("", response_model=ModelCatalogResponse)
@@ -262,8 +267,9 @@ async def get_all_models(scope: CorpusScope = _CORPUS_SCOPE_DEP) -> ModelCatalog
     """
     Return the full models.json catalog (metadata + models list).
 
-    This is THE source of truth for all model selection in the UI.
-    Every dropdown (embedding, generation, reranker) MUST use this endpoint.
+    The catalog is the pricing/candidate source of truth. Runtime-selectable rows
+    are identified by ``selection_roles`` / ``selection_status`` metadata and the
+    backend runtime capabilities endpoint.
     """
     catalog = await _augmented_catalog(scope)
     return ModelCatalogResponse.model_validate(catalog)
@@ -359,7 +365,7 @@ async def upsert_model(payload: ModelCatalogUpsertRequest) -> ModelCatalogUpsert
         # Drop nulls so the serialized catalog remains compact and consistent.
         merged = {k: v for k, v in merged.items() if v is not None}
 
-        validated = ModelCatalogEntry.model_validate(merged)
+        validated = ModelCatalogEntry.model_validate(apply_selection_metadata_to_row(merged))
         action: Literal["created", "updated"] = "updated" if existing_idx is not None else "created"
         if existing_idx is not None:
             models[existing_idx] = validated.model_dump(mode="json")

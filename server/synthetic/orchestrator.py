@@ -10,6 +10,13 @@ from typing import Any
 from urllib.parse import quote
 
 from server.api.eval import evaluate_dataset_entries
+from server.lineage import (
+    attach_refs_to_current_bundle,
+    capture_synthetic_artifact_version,
+    capture_synthetic_run_version,
+    ensure_current_bundle,
+    make_ref,
+)
 from server.models.tribrid_config_model import (
     EvalDatasetItem,
     SyntheticArtifactRef,
@@ -172,6 +179,46 @@ def _load_seed_eval_items(repo_id: str) -> tuple[list[EvalDatasetItem], Path | N
     return out, path
 
 
+def _artifact_lineage_ref_map(
+    *,
+    repo_id: str,
+    run_id: str,
+    artifacts: list[SyntheticArtifactRef],
+) -> dict[str, Any]:
+    refs: dict[str, Any] = {}
+    for artifact in artifacts:
+        version = capture_synthetic_artifact_version(
+            repo_id=repo_id,
+            artifact_kind=str(artifact.kind),
+            path=str(artifact.path),
+            run_id=run_id,
+        )
+        refs[str(artifact.kind)] = make_ref("synthetic_artifact", version.version_id)
+    return refs
+
+
+def _attach_lineage(run: SyntheticRun, cfg: Any) -> SyntheticRun:
+    run_version = capture_synthetic_run_version(
+        run_payload=run.model_dump(mode="json", by_alias=True),
+        repo_id=str(run.repo_id),
+    )
+    artifact_refs = [
+        ref
+        for ref in (run.artifact_lineage_refs or {}).values()
+        if hasattr(ref, "kind") and hasattr(ref, "version_id")
+    ]
+    bundle, _aliases = attach_refs_to_current_bundle(
+        repo_id=str(run.repo_id),
+        cfg=cfg,
+        synthetic_runs=[make_ref("synthetic_run", run_version.version_id)],
+        synthetic_artifacts=list(artifact_refs),
+        preserve_attached_refs=True,
+    )
+    run.lineage_ref = make_ref("synthetic_run", run_version.version_id)
+    run.bundle_id = bundle.bundle_id
+    return run
+
+
 def _hydrate_eval_dataset_from_seed(
     *,
     run_id: str,
@@ -328,6 +375,7 @@ async def start_run(request: SyntheticRunStartRequest) -> SyntheticRun:
         artifacts=[],
         summary=SyntheticRunSummary(),
         error=None,
+        input_bundle_id=ensure_current_bundle(repo_id=repo_id, cfg=cfg).bundle_id,
     )
     save_run(run)
     _append_state(run_id, "running", "Synthetic run started.")
@@ -358,6 +406,7 @@ async def cancel_run(run_id: str) -> bool:
 async def _run_job(*, run_id: str, request: SyntheticRunStartRequest, cancel_event: asyncio.Event) -> None:
     run = load_run(run_id)
     repo_id = str(run.repo_id)
+    cfg: Any | None = None
     try:
         try:
             cfg = await load_scoped_config(repo_id=repo_id)
@@ -411,10 +460,12 @@ async def _run_job(*, run_id: str, request: SyntheticRunStartRequest, cancel_eve
         run = load_run(run_id)
         run.summary = summary
         run.artifacts = artifacts
+        run.artifact_lineage_refs = _artifact_lineage_ref_map(repo_id=repo_id, run_id=run_id, artifacts=artifacts)
         if gate_passed is False:
             run.status = "failed"
             run.error = gate_reason or "Quality gate failed."
             run.completed_at = datetime.now(UTC)
+            run = _attach_lineage(run, cfg)
             save_run(run)
             append_event(
                 run_id,
@@ -432,12 +483,15 @@ async def _run_job(*, run_id: str, request: SyntheticRunStartRequest, cancel_eve
         run.status = "completed"
         run.completed_at = datetime.now(UTC)
         run.error = None
+        run = _attach_lineage(run, cfg)
         save_run(run)
         _append_complete(run_id, "completed")
     except asyncio.CancelledError:
         run = load_run(run_id)
         run.status = "cancelled"
         run.completed_at = datetime.now(UTC)
+        if cfg is not None:
+            run = _attach_lineage(run, cfg)
         save_run(run)
         _append_complete(run_id, "cancelled", "Cancelled.")
     except Exception as e:
@@ -445,6 +499,8 @@ async def _run_job(*, run_id: str, request: SyntheticRunStartRequest, cancel_eve
         run.status = "failed"
         run.completed_at = datetime.now(UTC)
         run.error = str(e)
+        if cfg is not None:
+            run = _attach_lineage(run, cfg)
         save_run(run)
         append_event(
             run_id,

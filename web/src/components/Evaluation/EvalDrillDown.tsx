@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { evalApi } from '@/api';
+import { LineageMeta } from '@/components/ui/LineageMeta';
 import type { EvalResult, EvalRun } from '@/types/generated';
 
 interface EvalDrillDownProps {
@@ -501,6 +502,14 @@ export const EvalDrillDown: React.FC<EvalDrillDownProps> = ({ runId, compareWith
             </div>
           </>
         )}
+      </div>
+
+      <div style={{ marginBottom: '24px' }}>
+        <LineageMeta
+          bundleId={evalRun.bundle_id}
+          inputBundleId={evalRun.input_bundle_id}
+          lineageRef={evalRun.lineage_ref}
+        />
       </div>
 
       {/* Run Configuration - Collapsible */}

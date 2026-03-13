@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { useNotification } from '@/hooks';
 import { api, apiClient, withCorpusScope } from '@/api/client';
+import { LineageMeta } from '@/components/ui/LineageMeta';
 import { useActiveRepo } from '@/stores';
 import { configApi } from '@/api/config';
 import { syntheticService } from '@/services/SyntheticService';
@@ -601,6 +602,15 @@ export function SyntheticLabSubtab() {
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 10 }}>
               <span className="studio-mono">run={selectedRun.run_id}</span>
               <span className="studio-mono">status={selectedRun.status}</span>
+            </div>
+
+            <div style={{ marginBottom: 10 }}>
+              <LineageMeta
+                bundleId={selectedRun.bundle_id}
+                inputBundleId={selectedRun.input_bundle_id}
+                lineageRef={selectedRun.lineage_ref}
+                corpusId={String(activeRepo || '')}
+              />
             </div>
 
             <div className="studio-callout" style={{ marginBottom: 10 }}>
