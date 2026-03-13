@@ -1,0 +1,59 @@
+name: Lineage API
+description: Quality-loop lineage bundles, aliases, and current-state snapshots
+version: "1.0"
+
+endpoints:
+  - path: /api/lineage/current
+    method: GET
+    response: LineageBundle
+    description: Return the current corpus-scoped lineage bundle, creating it if missing.
+
+  - path: /api/lineage/bundles
+    method: GET
+    response: LineageBundleListResponse
+    description: List immutable lineage bundles for the active corpus.
+
+  - path: /api/lineage/bundle/{bundle_id}
+    method: GET
+    response: LineageBundle
+    description: Return one immutable lineage bundle by id.
+
+  - path: /api/lineage/aliases
+    method: GET
+    response: LineageAliasesResponse
+    description: List corpus-scoped lineage aliases.
+
+  - path: /api/lineage/aliases/{alias}
+    method: POST
+    request: LineageAliasUpdateRequest
+    response: LineageAliasesResponse
+    description: Move one alias to an existing immutable bundle.
+
+  - path: /api/lineage/bundle/snapshot
+    method: POST
+    request: LineageBundleSnapshotRequest
+    response: LineageBundleSnapshotResponse
+    description: Snapshot the current quality-loop state and optionally move aliases to it.
+
+models:
+  LineageRef:
+    kind: LineageAssetKind
+    version_id: str
+    label: str | None
+
+  LineageBundle:
+    bundle_id: str
+    repo_id: str
+    created_at: datetime
+    prompt_set: LineageRef | None
+    config_snapshot: LineageRef | None
+    spec_snapshot: LineageRef | None
+    model_catalog_snapshot: LineageRef | None
+    runtime_model_set: LineageRef | None
+    eval_dataset: LineageRef | None
+
+  LineageAlias:
+    alias: LineageAliasName
+    repo_id: str
+    bundle_id: str
+    updated_at: datetime

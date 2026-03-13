@@ -1,0 +1,250 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from server.codex_session_ingest import (
+    CorpusWriter,
+    MetricsRegistry,
+    SessionFileContext,
+    SessionNormalizer,
+    JsonLogger,
+    RunConfig,
+    current_dead_letter_count,
+    extract_prometheus_config_text,
+    extract_exit_code,
+    sanitize_chunk_for_storage,
+    split_text_windows,
+    upsert_prometheus_job,
+)
+from server.indexing.tokenizer import TextTokenizer
+from server.models.index import Chunk
+from server.models.tribrid_config_model import TokenizationConfig
+
+
+def _tokenizer() -> TextTokenizer:
+    return TextTokenizer(
+        TokenizationConfig(
+            strategy="huggingface",
+            hf_tokenizer_name="sentence-transformers/all-MiniLM-L6-v2",
+            normalize_unicode=True,
+            lowercase=False,
+            max_tokens_per_chunk_hard=2048,
+            estimate_only=False,
+        )
+    )
+
+
+def test_upsert_prometheus_job_adds_and_replaces_target() -> None:
+    original = """
+global:
+  scrape_interval: 15s
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: [localhost:9090]
+""".strip()
+
+    first = upsert_prometheus_job(original, "codex-session-ingest", "192.168.68.123", 9487)
+    assert "job_name: codex-session-ingest" in first
+    assert "192.168.68.123:9487" in first
+
+    second = upsert_prometheus_job(first, "codex-session-ingest", "192.168.68.124", 9490)
+    assert second.count("job_name: codex-session-ingest") == 1
+    assert "192.168.68.124:9490" in second
+    assert "192.168.68.123:9487" not in second
+
+
+def test_extract_prometheus_config_text_skips_banner() -> None:
+    raw = "\x1b[1mGrafana LXC Container\x1b[0m\nrandom banner\nglobal:\n  scrape_interval: 15s\n"
+    cleaned = extract_prometheus_config_text(raw)
+    assert cleaned.startswith("global:")
+
+
+def test_message_pairing_emits_user_assistant_and_pair_chunks(tmp_path: Path) -> None:
+    tokenizer = _tokenizer()
+    logger = JsonLogger(tmp_path / "ingest.jsonl")
+    metrics = MetricsRegistry()
+    normalizer = SessionNormalizer(tokenizer, logger, metrics)
+    ctx = SessionFileContext(
+        file_path=tmp_path / "rollout-1.jsonl",
+        root_path=tmp_path,
+        tokenizer=tokenizer,
+        max_semantic_tokens=256,
+        max_artifact_tokens=384,
+        overlap_tokens=32,
+        max_output_chars=3000,
+        max_summary_paths=10,
+    )
+
+    user_chunks = normalizer.process_record(
+        ctx,
+        {
+            "type": "response_item",
+            "payload": {
+                "type": "message",
+                "role": "user",
+                "content": [{"type": "output_text", "text": "Why did the validation workflow fail?"}],
+            },
+        },
+        line_no=1,
+    )
+    assistant_chunks = normalizer.process_record(
+        ctx,
+        {
+            "type": "response_item",
+            "payload": {
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "The run failed because the API returned 401."}],
+            },
+        },
+        line_no=2,
+    )
+
+    assert len(user_chunks) == 1
+    assert len(assistant_chunks) == 2
+    assert any(chunk.chunk.metadata["role"] == "assistant" for chunk in assistant_chunks)
+    assert any(chunk.chunk.metadata["role"] == "qa_pair" for chunk in assistant_chunks)
+
+
+def test_function_output_error_generates_artifact_and_error_summary(tmp_path: Path) -> None:
+    tokenizer = _tokenizer()
+    logger = JsonLogger(tmp_path / "ingest.jsonl")
+    metrics = MetricsRegistry()
+    normalizer = SessionNormalizer(tokenizer, logger, metrics)
+    ctx = SessionFileContext(
+        file_path=tmp_path / "rollout-2.jsonl",
+        root_path=tmp_path,
+        tokenizer=tokenizer,
+        max_semantic_tokens=256,
+        max_artifact_tokens=384,
+        overlap_tokens=32,
+        max_output_chars=3000,
+        max_summary_paths=10,
+    )
+
+    chunks = normalizer.process_record(
+        ctx,
+        {
+            "type": "response_item",
+            "payload": {
+                "type": "function_call_output",
+                "output": "Process exited with code 1\nTraceback (most recent call last):\nValueError: boom",
+            },
+        },
+        line_no=7,
+    )
+
+    assert any(chunk.stream == "artifact" for chunk in chunks)
+    assert any(chunk.stream == "semantic" for chunk in chunks)
+    artifact = next(chunk for chunk in chunks if chunk.stream == "artifact")
+    assert extract_exit_code(artifact.chunk.content) == 1
+    assert artifact.chunk.metadata["important"] is True
+
+
+def test_split_text_windows_makes_progress() -> None:
+    tokenizer = _tokenizer()
+    text = " ".join(f"token{i}" for i in range(0, 400))
+    windows = split_text_windows(text=text, tokenizer=tokenizer, target_tokens=64, overlap_tokens=8)
+    assert len(windows) >= 4
+    assert all(window.strip() for window in windows)
+    assert windows[0] != windows[1]
+
+
+def test_sanitize_chunk_for_storage_replaces_nul_in_content_and_metadata() -> None:
+    chunk = Chunk(
+        chunk_id="c1",
+        content="hello\x00world",
+        file_path="/tmp/a\x00b.jsonl",
+        start_line=1,
+        end_line=1,
+        language="text\x00plain",
+        token_count=2,
+        metadata={"bad\x00key": "value\x00x", "nested": ["a\x00b"]},
+    )
+
+    sanitized = sanitize_chunk_for_storage(chunk)
+
+    assert "\x00" not in sanitized.content
+    assert "\x00" not in sanitized.file_path
+    assert sanitized.language is not None and "\x00" not in sanitized.language
+    assert all("\x00" not in key for key in sanitized.metadata.keys())
+    assert "\x00" not in str(sanitized.metadata)
+
+
+def test_current_dead_letter_count_counts_lines(tmp_path: Path) -> None:
+    path = tmp_path / "dead_letters.jsonl"
+    path.write_text('{"a":1}\n{"b":2}\n', encoding="utf-8")
+    assert current_dead_letter_count(path) == 2
+
+
+class _FakeArtifactPg:
+    def __init__(self) -> None:
+        self.successful_writes: list[list[str]] = []
+
+    async def upsert_fts(self, _repo_id: str, chunks: list[Chunk], *, ts_config: str) -> None:
+        _ = ts_config
+        if any(bool(chunk.metadata.get("poison")) for chunk in chunks):
+            raise RuntimeError("poison chunk")
+        self.successful_writes.append([chunk.chunk_id for chunk in chunks])
+
+
+class _UnusedEmbedder:
+    async def encode(self, texts: list[str]) -> list[list[float]]:  # pragma: no cover - artifact path should not call this
+        raise AssertionError(f"embedder should not be used for artifact-only flushes: {texts!r}")
+
+
+@pytest.mark.asyncio
+async def test_artifact_flush_isolates_bad_chunk_and_dead_letters_it(tmp_path: Path) -> None:
+    pg = _FakeArtifactPg()
+    config = RunConfig(
+        session_root=tmp_path,
+        state_dir=tmp_path / "state",
+        postgres_dsn="postgresql://postgres:postgres@127.0.0.1:5432/tribrid_rag",
+        year_filter="2026",
+        semantic_repo_id="semantic",
+        artifact_repo_id="artifact",
+        metrics_bind="127.0.0.1",
+        metrics_port=9487,
+        log_path=tmp_path / "ingest.jsonl",
+        status_path=tmp_path / "status.json",
+        state_db_path=tmp_path / "state.sqlite3",
+        dead_letter_path=tmp_path / "dead_letters.jsonl",
+    )
+    writer = CorpusWriter(
+        pg=pg,  # type: ignore[arg-type]
+        config=config,
+        embedder=_UnusedEmbedder(),  # type: ignore[arg-type]
+        logger=JsonLogger(tmp_path / "events.jsonl"),
+        metrics=MetricsRegistry(),
+    )
+
+    good = Chunk(
+        chunk_id="good",
+        content="safe artifact chunk",
+        file_path=str(tmp_path / "good.jsonl"),
+        start_line=1,
+        end_line=1,
+        token_count=3,
+        metadata={},
+    )
+    bad = Chunk(
+        chunk_id="bad",
+        content="poison artifact chunk",
+        file_path=str(tmp_path / "bad.jsonl"),
+        start_line=2,
+        end_line=2,
+        token_count=3,
+        metadata={"poison": True},
+    )
+
+    written = await writer.flush_artifact([good, bad])
+
+    assert written == 1
+    assert pg.successful_writes == [["good"]]
+    assert current_dead_letter_count(config.dead_letter_path) == 1
+    dead_letter = config.dead_letter_path.read_text(encoding="utf-8")
+    assert "bad" in dead_letter
+    assert "poison chunk" in dead_letter

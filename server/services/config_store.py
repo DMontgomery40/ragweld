@@ -100,6 +100,13 @@ def _upgrade_raw_config(raw: dict[str, Any]) -> tuple[TriBridConfig, bool, list[
         if _remove_nested_key(working, dotted):
             migrated_keys.append(dotted)
 
+    chunking = working.get("chunking")
+    if isinstance(chunking, dict):
+        strategy = str(chunking.get("chunking_strategy") or "").strip().lower()
+        if strategy == "semantic":
+            chunking["chunking_strategy"] = "fixed_chars"
+            migrated_keys.append("chunking.chunking_strategy")
+
     cfg = TriBridConfig.model_validate(working)
     migrated_keys.extend(_migrate_config_in_place(cfg))
     changed = bool(migrated_keys)

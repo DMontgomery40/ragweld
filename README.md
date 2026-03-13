@@ -96,6 +96,7 @@ Each search method compensates for the others' weaknesses. The result: **dramati
 ### Positioning, Honestly
 - **Versioned source-of-truth config**: Pydantic-backed config is the law, with generated types and UI/API surfaces derived from it
 - **Versioned prompt behavior**: system prompts and config-driven runtime behavior are explicit, reviewable repo artifacts
+- **Quality-loop lineage bundles**: benchmark, eval, synthetic, training, and promotion flows attach immutable versions into corpus-scoped bundles with operator aliases
 - **Executable specs**: machine-checkable intent lives in `spec/` and is meant to be updated with product behavior
 - **Manifest-backed training artifacts**: training and promotion flows are anchored in explicit artifacts and manifests, not hand-waved state
 - **Repo-local system of record**: agent/operator knowledge stays versioned in-repo under `docs/`

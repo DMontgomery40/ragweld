@@ -54,6 +54,7 @@ Executable specs (structured, machine-checkable intent):
 - Safe selling points:
   - versioned source-of-truth config
   - versioned prompts/config behavior
+  - quality-loop lineage bundles across prompt/config/dataset/run/publish/promote flows
   - executable specs
   - manifest-backed training artifacts
   - repo-local system-of-record docs

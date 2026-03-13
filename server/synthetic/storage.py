@@ -179,6 +179,8 @@ def list_runs(*, corpus_id: str | None = None, limit: int = 50) -> list[Syntheti
                 recipe=run.recipe,
                 provider=run.provider,
                 items_generated=run.summary.items_generated,
+                bundle_id=run.bundle_id,
+                lineage_ref=run.lineage_ref,
             )
         )
         if len(out) >= max(1, int(limit)):

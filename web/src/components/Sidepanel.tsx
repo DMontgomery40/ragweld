@@ -14,13 +14,13 @@ export function Sidepanel() {
     getModelsForProvider: getEmbeddingModelsForProvider,
     loading: embeddingModelsLoading,
     error: embeddingModelsError,
-  } = useModels('EMB');
+  } = useModels('EMB', { selectionRole: 'embedding_provider' });
   const {
     providers: rerankProviders,
     getModelsForProvider: getRerankModelsForProvider,
     loading: rerankModelsLoading,
     error: rerankModelsError,
-  } = useModels('RERANK');
+  } = useModels('RERANK', { selectionRole: 'reranker_cloud' });
 
   // Embedding model (derived from config via shared hook)
   const { embeddingType: configEmbeddingType, currentModel: configEmbeddingModel } = useEmbeddingModel();
@@ -99,11 +99,14 @@ export function Sidepanel() {
       // Embedding provider + model
       if (embeddingProvider) {
         const p = embeddingProvider.toLowerCase();
-        if (p === 'voyage') {
+        if (p === 'mlx') {
+          embeddingUpdates.embedding_type = 'mlx';
+          if (embeddingModel) embeddingUpdates.embedding_model_mlx = embeddingModel;
+        } else if (p === 'voyage') {
           embeddingUpdates.embedding_type = 'voyage';
           if (embeddingModel) embeddingUpdates.voyage_model = embeddingModel;
         } else if (p === 'local' || p === 'ollama' || p === 'huggingface') {
-          embeddingUpdates.embedding_type = 'local';
+          embeddingUpdates.embedding_type = p;
           if (embeddingModel) embeddingUpdates.embedding_model_local = embeddingModel;
         } else {
           embeddingUpdates.embedding_type = p;

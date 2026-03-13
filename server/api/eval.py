@@ -11,9 +11,10 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from starlette.responses import StreamingResponse
 
-from server.api.dataset import _load_dataset  # shared file-backed persistence
+from server.api.dataset import _dataset_path_for_corpus, _load_dataset  # shared file-backed persistence
 from server.chat.generation import generate_chat_text
 from server.chat.provider_router import select_provider_route
+from server.lineage import attach_refs_to_current_bundle, capture_eval_run_version, ensure_current_bundle, make_ref
 from server.models.eval import (
     EvalAnalyzeComparisonResponse,
     EvalDatasetItem,
@@ -173,6 +174,18 @@ async def evaluate_dataset_entries(
     entries = dataset[: int(sample_size)] if sample_size else dataset
 
     cfg = await load_scoped_config(repo_id=repo_id)
+    dataset_rows = [entry.model_dump(mode="json", by_alias=True) for entry in dataset]
+    dataset_path = str(_dataset_path_for_corpus(repo_id))
+    current_bundle = (
+        ensure_current_bundle(
+            repo_id=repo_id,
+            cfg=cfg,
+            dataset_rows=dataset_rows,
+            dataset_path=dataset_path,
+        )
+        if persist_run
+        else None
+    )
     fusion = TriBridFusion(vector=None, sparse=None, graph=None)
 
     final_k = int(cfg.retrieval.eval_final_k)
@@ -304,8 +317,25 @@ async def evaluate_dataset_entries(
         results=results,
         started_at=started_at,
         completed_at=completed_at,
+        dataset_version_ref=current_bundle.eval_dataset if current_bundle is not None else None,
+        input_bundle_id=current_bundle.bundle_id if current_bundle is not None else None,
     )
     if persist_run:
+        _save_run(run)
+        version = capture_eval_run_version(
+            run_payload=run.model_dump(mode="json", by_alias=True),
+            repo_id=repo_id,
+        )
+        bundle, _aliases = attach_refs_to_current_bundle(
+            repo_id=repo_id,
+            cfg=cfg,
+            dataset_rows=dataset_rows,
+            dataset_path=dataset_path,
+            eval_runs=[make_ref("eval_run", version.version_id)],
+            preserve_attached_refs=True,
+        )
+        run.lineage_ref = make_ref("eval_run", version.version_id)
+        run.bundle_id = bundle.bundle_id
         _save_run(run)
     return run
 
@@ -420,6 +450,8 @@ async def list_eval_runs(
                     total=total,
                     duration_secs=float(run.duration_secs),
                     has_config=bool(run.config),
+                    bundle_id=run.bundle_id,
+                    lineage_ref=run.lineage_ref,
                 )
             )
         except Exception:
@@ -477,6 +509,14 @@ async def eval_run_stream(
             entries = dataset[: int(sample_limit)] if sample_limit else dataset
             total = len(entries)
             _EVAL_STATUS["total"] = total
+            dataset_rows = [entry.model_dump(mode="json", by_alias=True) for entry in dataset]
+            dataset_path = str(_dataset_path_for_corpus(repo_id))
+            current_bundle = ensure_current_bundle(
+                repo_id=repo_id,
+                cfg=cfg,
+                dataset_rows=dataset_rows,
+                dataset_path=dataset_path,
+            )
 
             yield (
                 "data: "
@@ -640,8 +680,25 @@ async def eval_run_stream(
                 results=results,
                 started_at=started_at,
                 completed_at=completed_at,
+                dataset_version_ref=current_bundle.eval_dataset,
+                input_bundle_id=current_bundle.bundle_id,
             )
 
+            _save_run(run)
+            version = capture_eval_run_version(
+                run_payload=run.model_dump(mode="json", by_alias=True),
+                repo_id=repo_id,
+            )
+            bundle, _aliases = attach_refs_to_current_bundle(
+                repo_id=repo_id,
+                cfg=cfg,
+                dataset_rows=dataset_rows,
+                dataset_path=dataset_path,
+                eval_runs=[make_ref("eval_run", version.version_id)],
+                preserve_attached_refs=True,
+            )
+            run.lineage_ref = make_ref("eval_run", version.version_id)
+            run.bundle_id = bundle.bundle_id
             _save_run(run)
             _EVAL_STATUS["latest_run_id"] = run_id
 

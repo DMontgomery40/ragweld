@@ -4,6 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 from server.models.tribrid_config_model import (
+    ChunkingConfig,
     EmbeddingConfig,
     FusionConfig,
     GraphIndexingConfig,
@@ -92,6 +93,11 @@ def test_graph_indexing_config_weight_validation() -> None:
         GraphIndexingConfig(ast_contains_weight=-0.01)
     with pytest.raises(ValidationError):
         GraphIndexingConfig(ast_inherits_weight=1.01)
+
+
+def test_chunking_config_rejects_semantic_strategy() -> None:
+    with pytest.raises(ValidationError):
+        ChunkingConfig(chunking_strategy="semantic")
 
 
 def test_evaluation_config_metric_k_defaults() -> None:

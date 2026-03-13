@@ -42,6 +42,7 @@ Beyond fused tri-brid retrieval (vector + sparse + graph), ragweld includes broa
 ## Non-negotiable project truths
 
 - **Pydantic is the law**: config and types flow from `server/models/tribrid_config_model.py`.
+- `data/models.json` is the broad catalog for pricing/candidates; runtime-selectable truth comes from catalog `selection_*` metadata plus `server/runtime_capabilities.py` / `/api/runtime-capabilities`.
 - Corpus separation is fundamental (code uses `repo_id` to mean corpus id).
 - Retrieval = vector + sparse + graph (fused), optionally reranked.
 - Position ragweld as an **MLOps Engineering Platform** where retrieval is one subsystem in a larger operational lifecycle.
@@ -138,6 +139,15 @@ Use Material buttons (adjust relative paths correctly for nested pages):
   - `data/glossary.json` (long-form tooltip guidance, keyed by env-style names)
 - Do not propose manual edits to those pages. If a parameter description is wrong/missing, fix it in Pydantic and/or the glossary, then re-run:
   - `uv run python scripts/generate_config_reference_docs.py --clean`
+
+## Runtime truthfulness guardrail
+
+- Do not describe a model/provider/strategy as supported merely because it appears in `data/models.json`.
+- For model selection surfaces, distinguish:
+  - broad catalog candidate
+  - runtime-selectable today
+  - catalog-only / not currently wired
+- For chunking/indexing/reranking support, prefer `server/runtime_capabilities.py` over stale prose or UI assumptions.
 
 ## Suggested doc structure (create pages if missing)
 

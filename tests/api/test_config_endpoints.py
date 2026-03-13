@@ -1,6 +1,7 @@
 """API tests for config endpoints."""
 
 import asyncio
+import json
 
 import pytest
 from httpx import AsyncClient
@@ -183,6 +184,22 @@ async def test_put_config_rejects_unsupported_embedding_provider_runtime(client:
 
 
 @pytest.mark.asyncio
+async def test_put_config_rejects_unsupported_reranker_cloud_provider_runtime(client: AsyncClient) -> None:
+    baseline = await client.get("/api/config")
+    assert baseline.status_code == 200
+    cfg = baseline.json()
+
+    cfg["reranking"]["reranker_mode"] = "cloud"
+    cfg["reranking"]["reranker_cloud_provider"] = "voyage"
+    cfg["reranking"]["reranker_cloud_model"] = "rerank-2"
+
+    response = await client.put("/api/config", json=cfg)
+    assert response.status_code == 422
+    detail = str(response.json().get("detail") or "")
+    assert "Unsupported reranker cloud provider" in detail
+
+
+@pytest.mark.asyncio
 async def test_put_config_rejects_embedding_tokenizer_mismatch(client: AsyncClient) -> None:
     baseline = await client.get("/api/config")
     assert baseline.status_code == 200
@@ -236,3 +253,18 @@ async def test_put_config_accepts_mlx_model_id_with_slash(client: AsyncClient) -
     body = response.json()
     assert str(body["embedding"]["embedding_type"]).lower() == "mlx"
     assert str(body["embedding"]["embedding_model_mlx"]) == "mlx-community/all-MiniLM-L6-v2-4bit"
+
+
+@pytest.mark.asyncio
+async def test_put_config_rejects_legacy_semantic_chunking_strategy(client: AsyncClient) -> None:
+    baseline = await client.get("/api/config")
+    assert baseline.status_code == 200
+    cfg = baseline.json()
+
+    cfg["chunking"]["chunking_strategy"] = "semantic"
+
+    response = await client.put("/api/config", json=cfg)
+    assert response.status_code == 422
+    detail = json.dumps(response.json())
+    assert "chunking_strategy" in detail
+    assert "semantic" in detail

@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from server.config import load_config as load_global_config
 from server.db.postgres import PostgresClient
+from server.lineage import ensure_current_bundle
 from server.models.tribrid_config_model import (
     CorpusScope,
     MCPHTTPTransportStatus,
@@ -25,6 +26,7 @@ from server.retrieval.contracts import (
     provider_requires_tokenizer,
     sparse_contract_from_config,
 )
+from server.runtime_capabilities import SUPPORTED_RERANKER_CLOUD_PROVIDERS
 from server.retrieval.fusion import TriBridFusion
 from server.services.config_store import CorpusNotFoundError
 from server.services.config_store import get_config as load_scoped_config
@@ -216,6 +218,7 @@ def _validate_capability(
 def _validate_model_capabilities(config: TriBridConfig) -> None:
     _validate_embedding_runtime_support(config)
     _validate_embedding_tokenization_compat(config)
+    _validate_reranker_runtime_support(config)
 
     catalog_models = _load_catalog_models_for_validation()
     if not catalog_models:
@@ -343,6 +346,25 @@ def _validate_embedding_tokenization_compat(config: TriBridConfig) -> None:
             ) from e
 
 
+def _validate_reranker_runtime_support(config: TriBridConfig) -> None:
+    mode = str(config.reranking.reranker_mode or "").strip().lower()
+    if mode != "cloud":
+        return
+
+    provider = str(config.reranking.reranker_cloud_provider or "").strip().lower()
+    if provider in SUPPORTED_RERANKER_CLOUD_PROVIDERS:
+        return
+
+    allowed = ", ".join(sorted(SUPPORTED_RERANKER_CLOUD_PROVIDERS))
+    raise HTTPException(
+        status_code=422,
+        detail=(
+            "Unsupported reranker cloud provider for reranker_mode='cloud': "
+            f"'{provider}'. Allowed providers: [{allowed}]."
+        ),
+    )
+
+
 async def _enforce_index_contract_lock(
     *,
     repo_id: str | None,
@@ -464,6 +486,29 @@ def _collect_model_warnings(config: TriBridConfig) -> list[ModelValidationWarnin
         "GEN",
     )
 
+    if (
+        str(config.embedding.embedding_backend or "").strip().lower() == "provider"
+        and int(getattr(config.indexing, "skip_dense", 0) or 0) != 1
+    ):
+        emb_provider = str(config.embedding.embedding_type or "").strip().lower()
+        if emb_provider and emb_provider not in SUPPORTED_PROVIDER_BACKEND_EMBEDDING_PROVIDERS:
+            allowed = ", ".join(sorted(SUPPORTED_PROVIDER_BACKEND_EMBEDDING_PROVIDERS))
+            warnings.append(ModelValidationWarning(
+                field="embedding.embedding_type",
+                model_value=emb_provider,
+                message=f"Embedding provider '{emb_provider}' is not runtime-selectable today. Allowed providers: [{allowed}].",
+            ))
+
+    if str(config.reranking.reranker_mode or "").strip().lower() == "cloud":
+        rr_provider = str(config.reranking.reranker_cloud_provider or "").strip().lower()
+        if rr_provider and rr_provider not in SUPPORTED_RERANKER_CLOUD_PROVIDERS:
+            allowed = ", ".join(sorted(SUPPORTED_RERANKER_CLOUD_PROVIDERS))
+            warnings.append(ModelValidationWarning(
+                field="reranking.reranker_cloud_provider",
+                model_value=rr_provider,
+                message=f"Reranker cloud provider '{rr_provider}' is not runtime-selectable today. Allowed providers: [{allowed}].",
+            ))
+
     return warnings
 
 
@@ -512,7 +557,10 @@ async def update_config(
                 existing_config=existing_config,
                 new_config=config,
             )
-            return await save_scoped_config(config, repo_id=repo_id)
+            saved = await save_scoped_config(config, repo_id=repo_id)
+            if repo_id:
+                ensure_current_bundle(repo_id=repo_id, cfg=saved)
+            return saved
     except HTTPException:
         raise
     except CorpusNotFoundError as e:
@@ -564,7 +612,10 @@ async def update_config_section(
         )
 
         try:
-            return await save_scoped_config(new_config, repo_id=repo_id)
+            saved = await save_scoped_config(new_config, repo_id=repo_id)
+            if repo_id:
+                ensure_current_bundle(repo_id=repo_id, cfg=saved)
+            return saved
         except CorpusNotFoundError as e:
             raise HTTPException(status_code=404, detail=str(e)) from e
         except Exception as e:
@@ -576,7 +627,10 @@ async def reset_config(scope: CorpusScope = _CORPUS_SCOPE_DEP) -> TriBridConfig:
     repo_id = scope.resolved_repo_id
     try:
         async with _get_config_write_lock(repo_id):
-            return await reset_scoped_config(repo_id=repo_id)
+            reset = await reset_scoped_config(repo_id=repo_id)
+            if repo_id:
+                ensure_current_bundle(repo_id=repo_id, cfg=reset)
+            return reset
     except CorpusNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
     except Exception as e:

@@ -28,3 +28,10 @@ def test_generation_config_has_gen_backend() -> None:
 def test_model_validation_result_has_warnings_typed() -> None:
     content = GENERATED_TS.read_text()
     assert "ModelValidationWarning[]" in content
+
+
+def test_lineage_and_benchmark_models_exist_in_generated_ts() -> None:
+    content = GENERATED_TS.read_text()
+    assert "export interface LineageBundle" in content
+    assert "export interface LineageRef" in content
+    assert "export interface BenchmarkRun" in content

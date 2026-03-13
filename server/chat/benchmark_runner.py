@@ -5,11 +5,13 @@ import json
 import time
 import uuid
 from pathlib import Path
-from typing import Any
 
+from server.models.tribrid_config_model import BenchmarkResult, BenchmarkRun
 from server.chat.generation import generate_chat_text
 from server.chat.provider_router import select_provider_route
 from server.models.tribrid_config_model import TriBridConfig
+
+_ROOT = Path(__file__).resolve().parents[2]
 
 
 def _now_ms() -> int:
@@ -23,13 +25,21 @@ def _format_error(e: Exception) -> str:
     return type(e).__name__
 
 
+def _results_dir(path_str: str) -> Path:
+    path = Path(str(path_str or "data/benchmarks/")).expanduser()
+    if not path.is_absolute():
+        path = _ROOT / path
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
 async def _run_one(
     *,
     prompt: str,
     model: str,
     config: TriBridConfig,
     sem: asyncio.Semaphore,
-) -> dict[str, Any]:
+) -> BenchmarkResult:
     async with sem:
         try:
             route = select_provider_route(
@@ -37,13 +47,13 @@ async def _run_one(
                 model_override=model,
             )
         except Exception as e:
-            return {
-                "model": model,
-                "response": "",
-                "latency_ms": 0.0,
-                "breakdown_ms": {"generate": 0.0},
-                "error": _format_error(e),
-            }
+            return BenchmarkResult(
+                model=model,
+                response="",
+                latency_ms=0.0,
+                breakdown_ms={"generate": 0.0},
+                error=_format_error(e),
+            )
 
         t0 = time.perf_counter()
         try:
@@ -58,25 +68,31 @@ async def _run_one(
                 context_chunks=[],
             )
             gen_ms = float((time.perf_counter() - t0) * 1000.0)
-            return {
-                "model": model,
-                "response": str(text or ""),
-                "latency_ms": gen_ms,
-                "breakdown_ms": {"generate": gen_ms},
-                "error": None,
-            }
+            return BenchmarkResult(
+                model=model,
+                response=str(text or ""),
+                latency_ms=gen_ms,
+                breakdown_ms={"generate": gen_ms},
+                error=None,
+            )
         except Exception as e:
             gen_ms = float((time.perf_counter() - t0) * 1000.0)
-            return {
-                "model": model,
-                "response": "",
-                "latency_ms": gen_ms,
-                "breakdown_ms": {"generate": gen_ms},
-                "error": _format_error(e),
-            }
+            return BenchmarkResult(
+                model=model,
+                response="",
+                latency_ms=gen_ms,
+                breakdown_ms={"generate": gen_ms},
+                error=_format_error(e),
+            )
 
 
-async def run_benchmark(*, prompt: str, models: list[str], config: TriBridConfig) -> dict[str, Any]:
+async def run_benchmark(
+    *,
+    prompt: str,
+    models: list[str],
+    config: TriBridConfig,
+    repo_id: str | None = None,
+) -> BenchmarkRun:
     run_id = uuid.uuid4().hex
     started_at_ms = _now_ms()
 
@@ -91,17 +107,19 @@ async def run_benchmark(*, prompt: str, models: list[str], config: TriBridConfig
     results = await asyncio.gather(*tasks) if tasks else []
 
     ended_at_ms = _now_ms()
-    payload: dict[str, Any] = {
-        "run_id": run_id,
-        "started_at_ms": int(started_at_ms),
-        "ended_at_ms": int(ended_at_ms),
-        "results": list(results),
-    }
+    payload = BenchmarkRun(
+        run_id=run_id,
+        repo_id=repo_id,
+        prompt=prompt,
+        models=list(models),
+        started_at_ms=int(started_at_ms),
+        ended_at_ms=int(ended_at_ms),
+        results=list(results),
+    )
 
     if bool(getattr(config.chat.benchmark, "save_results", False)):
-        out_dir = Path(str(config.chat.benchmark.results_path))
-        out_dir.mkdir(parents=True, exist_ok=True)
+        out_dir = _results_dir(str(config.chat.benchmark.results_path))
         out_file = out_dir / f"{run_id}.json"
-        out_file.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        out_file.write_text(json.dumps(payload.model_dump(mode="json", by_alias=True), ensure_ascii=False, indent=2), encoding="utf-8")
 
     return payload

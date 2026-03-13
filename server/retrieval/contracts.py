@@ -5,24 +5,10 @@ import json
 from typing import Any
 
 from server.models.tribrid_config_model import TriBridConfig
-
-# Current runtime support in server/indexing/embedder.py when embedding_backend='provider'.
-SUPPORTED_PROVIDER_BACKEND_EMBEDDING_PROVIDERS: set[str] = {
-    "openai",
-    "mlx",
-    "local",
-    "huggingface",
-}
-
-
-# Tokenizer strategies that are considered compatible for each embedding provider.
-# This is intentionally strict to prevent hidden truncation/token budget drift.
-_PROVIDER_TOKENIZER_STRATEGIES: dict[str, set[str]] = {
-    "openai": {"tiktoken"},
-    "mlx": {"huggingface"},
-    "local": {"huggingface"},
-    "huggingface": {"huggingface"},
-}
+from server.runtime_capabilities import (
+    SUPPORTED_PROVIDER_BACKEND_EMBEDDING_PROVIDERS,
+    provider_requires_tokenizer,
+)
 
 
 def _stable(obj: Any) -> Any:
@@ -74,11 +60,3 @@ def sparse_contract_from_config(config: TriBridConfig) -> dict[str, Any]:
         "bm25_tokenizer": str(idx.bm25_tokenizer or "").strip().lower(),
         "bm25_stemmer_lang": str(idx.bm25_stemmer_lang or "").strip().lower(),
     }
-
-
-def provider_requires_tokenizer(provider: str) -> set[str] | None:
-    p = str(provider or "").strip().lower()
-    req = _PROVIDER_TOKENIZER_STRATEGIES.get(p)
-    if req is None:
-        return None
-    return set(req)

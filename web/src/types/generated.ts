@@ -50,6 +50,8 @@ export interface AgentTrainRunMeta {
   completed_at?: string | null; // default: None
   primary_metric_best?: number | null; // default: None
   primary_metric_final?: number | null; // default: None
+  bundle_id?: string | null; // default: None
+  lineage_ref?: LineageRef | null; // default: None
 }
 
 export interface AgentTrainRunSummary {
@@ -70,6 +72,48 @@ export interface BenchmarkConfig {
   results_path?: string; // default: "data/benchmarks/"
   include_cost_tracking?: boolean; // default: True
   include_timing_breakdown?: boolean; // default: True
+}
+
+/** Per-model result from a benchmark run. */
+export interface BenchmarkResult {
+  /** Model override used for this result row. */
+  model: string;
+  /** Best-effort generated response. */
+  response?: string; // default: ""
+  /** End-to-end latency for this model in milliseconds. */
+  latency_ms?: number; // default: 0.0
+  /** Timing breakdown by phase. */
+  breakdown_ms?: Record<string, number>;
+  /** Error string when the model call failed. */
+  error?: string | null; // default: None
+  /** Optional resolved model id. */
+  model_id?: string | null; // default: None
+  /** Optional human-readable model name. */
+  model_name?: string | null; // default: None
+}
+
+/** Persisted benchmark run record. */
+export interface BenchmarkRun {
+  /** Unique benchmark run identifier. */
+  run_id: string;
+  /** Optional corpus identifier when benchmarking within a corpus scope. */
+  corpus_id?: string | null; // default: None
+  /** Prompt benchmarked across models. */
+  prompt: string;
+  /** Requested model overrides. */
+  models?: string[];
+  /** Run start timestamp in milliseconds since epoch. */
+  started_at_ms?: number; // default: 0
+  /** Run completion timestamp in milliseconds since epoch. */
+  ended_at_ms?: number; // default: 0
+  /** Per-model benchmark results. */
+  results?: BenchmarkResult[];
+  /** Current bundle id captured before the run started. */
+  input_bundle_id?: string | null; // default: None
+  /** Bundle id after attaching this run to lineage. */
+  bundle_id?: string | null; // default: None
+  /** Immutable benchmark run version reference. */
+  lineage_ref?: LineageRef | null; // default: None
 }
 
 /** Top-level chat configuration. Lives at TriBridConfig.chat.  KEY CONCEPT: There are no modes. The user checks/unchecks data sources. Recall is always available and ON by default. Corpora are available when indexed. Everything composes freely. */
@@ -338,6 +382,12 @@ export interface ChunkingConfig {
   emit_parent_doc_id?: boolean; // default: True
 }
 
+/** Runtime capability matrix for chunking. */
+export interface ChunkingRuntimeCapabilities {
+  /** Chunking strategies implemented today. */
+  strategies?: RuntimeOption[];
+}
+
 export interface CorpusEvalProfile {
   /** Corpus identifier */
   corpus_id: string;
@@ -509,6 +559,30 @@ export interface EmbeddingConfig {
   embedding_retry_max?: number; // default: 3
 }
 
+/** Runtime capability matrix for embeddings. */
+export interface EmbeddingRuntimeCapabilities {
+  /** Dense embedding backends supported today. */
+  backends?: RuntimeOption[];
+  /** Embedding providers supported for embedding_backend='provider'. */
+  providers?: EmbeddingRuntimeProviderCapability[];
+}
+
+/** Embedding provider capability exposed by the runtime. */
+export interface EmbeddingRuntimeProviderCapability {
+  /** Embedding provider identifier */
+  provider: string;
+  /** Human-readable provider label */
+  label: string;
+  /** Short explanation of the provider runtime path */
+  description: string;
+  /** UI badge hint for the provider */
+  badge: "local" | "cloud";
+  /** Config field that stores the effective model id for this provider */
+  model_config_field: string;
+  /** Tokenizer strategies required or supported for this provider runtime path. */
+  tokenizer_strategies?: string[];
+}
+
 /** Code enrichment and chunk_summary generation configuration. */
 export interface EnrichmentConfig {
   /** Enable chunk_summary enrichment by default */
@@ -640,6 +714,10 @@ export interface EvalRunMeta {
   duration_secs: number;
   /** Whether config snapshot is present */
   has_config?: boolean; // default: True
+  /** Bundle id associated with this eval run. */
+  bundle_id?: string | null; // default: None
+  /** Immutable eval run version reference. */
+  lineage_ref?: LineageRef | null; // default: None
 }
 
 /** Evaluation dataset configuration. */
@@ -720,6 +798,32 @@ export interface GenerationConfig {
   ollama_request_timeout?: number; // default: 300
   /** Maximum idle time allowed between streamed chunks from local (Ollama) during generation (seconds) */
   ollama_stream_idle_timeout?: number; // default: 60
+}
+
+/** Best-effort git context captured when minting lineage versions. */
+export interface GitSnapshot {
+  /** Resolved HEAD commit SHA when available. */
+  commit_sha?: string | null; // default: None
+  /** Whether the worktree had tracked or untracked changes. */
+  dirty?: boolean; // default: False
+  /** Dirty file paths from git status --porcelain. */
+  dirty_paths?: string[];
+  /** Per-file digests for dirty paths so dirty worktrees remain reproducible. */
+  tracked_files?: GitTrackedFile[];
+}
+
+/** Digest snapshot for a dirty tracked or untracked worktree file. */
+export interface GitTrackedFile {
+  /** Repo-relative path when known. */
+  path: string;
+  /** Git porcelain status code or synthetic status label. */
+  status: string;
+  /** Whether the path existed when the snapshot was taken. */
+  exists?: boolean; // default: True
+  /** Best-effort SHA-256 digest of file bytes. */
+  sha256?: string | null; // default: None
+  /** Best-effort file size in bytes. */
+  bytes?: number | null; // default: None
 }
 
 /** Configuration for building/persisting graph data during indexing. */
@@ -950,6 +1054,14 @@ export interface IndexingConfig {
   estimated_tokens_per_second_local?: number | null; // default: None
 }
 
+/** Runtime capability matrix for indexing backends. */
+export interface IndexingRuntimeCapabilities {
+  /** Dense indexing execution paths used during indexing. */
+  dense_backends?: RuntimeOption[];
+  /** Storage/index backends populated during indexing. */
+  storage_backends?: RuntimeOption[];
+}
+
 /** Discriminative keywords configuration. */
 export interface KeywordsConfig {
   /** Max discriminative keywords per repo */
@@ -978,6 +1090,96 @@ export interface LayerBonusConfig {
   freshness_bonus?: number; // default: 0.05
   /** Intent-to-layer bonus matrix. Keys are query intents, values are layer->multiplier maps. */
   intent_matrix?: Record<string, Record<string, number>>;
+}
+
+/** Mutable operator alias that points to an immutable bundle. */
+export interface LineageAlias {
+  /** Operator alias name. */
+  alias: "current" | "promoted" | "baseline" | "canary";
+  /** Corpus identifier for the alias. */
+  corpus_id: string;
+  /** Target immutable bundle identifier. */
+  bundle_id: string;
+  /** When the alias was last updated. */
+  updated_at: string;
+}
+
+/** Immutable version record for one quality-loop asset. */
+export interface LineageAssetVersion {
+  /** Immutable version identifier. */
+  version_id: string;
+  /** Asset kind. */
+  kind: "prompt_set" | "config_snapshot" | "spec_snapshot" | "model_catalog_snapshot" | "runtime_model_set" | "eval_dataset" | "benchmark_run" | "eval_run" | "synthetic_run" | "synthetic_artifact" | "published_artifact" | "reranker_train_run" | "reranker_model_artifact" | "agent_train_run" | "agent_model_artifact";
+  /** Optional corpus identifier when the version is corpus-scoped. */
+  corpus_id?: string | null; // default: None
+  /** When this version record was created. */
+  created_at: string;
+  /** Canonical SHA-256 digest used to dedupe identical content. */
+  digest: string;
+  /** How this version was captured. */
+  source: "runtime" | "git" | "generated" | "published";
+  /** Underlying file or directory paths. */
+  source_paths?: string[];
+  /** Git context captured when the version was minted. */
+  git?: GitSnapshot | null; // default: None
+  /** Small searchable metadata for lists and UI. */
+  metadata?: Record<string, unknown>;
+  /** Canonical asset payload snapshot. */
+  payload?: Record<string, unknown>;
+  /** Other immutable versions this asset was derived from. */
+  upstream_refs?: LineageRef[];
+}
+
+/** Top-level immutable bundle pinning the exact versions used together. */
+export interface LineageBundle {
+  /** Immutable bundle identifier. */
+  bundle_id: string;
+  /** Corpus identifier for this quality-loop bundle. */
+  corpus_id: string;
+  /** When this bundle was created. */
+  created_at: string;
+  /** Pinned prompt-set version. */
+  prompt_set?: LineageRef | null; // default: None
+  /** Pinned config snapshot version. */
+  config_snapshot?: LineageRef | null; // default: None
+  /** Pinned spec snapshot version. */
+  spec_snapshot?: LineageRef | null; // default: None
+  /** Pinned model catalog snapshot version. */
+  model_catalog_snapshot?: LineageRef | null; // default: None
+  /** Pinned resolved runtime model-set version. */
+  runtime_model_set?: LineageRef | null; // default: None
+  /** Pinned eval dataset version when available. */
+  eval_dataset?: LineageRef | null; // default: None
+  /** Attached benchmark run versions. */
+  benchmark_runs?: LineageRef[];
+  /** Attached eval run versions. */
+  eval_runs?: LineageRef[];
+  /** Attached synthetic run versions. */
+  synthetic_runs?: LineageRef[];
+  /** Attached synthetic artifact versions. */
+  synthetic_artifacts?: LineageRef[];
+  /** Attached published artifact versions. */
+  published_artifacts?: LineageRef[];
+  /** Attached reranker training run versions. */
+  reranker_train_runs?: LineageRef[];
+  /** Attached reranker model artifact versions. */
+  reranker_model_artifacts?: LineageRef[];
+  /** Attached agent training run versions. */
+  agent_train_runs?: LineageRef[];
+  /** Attached agent model artifact versions. */
+  agent_model_artifacts?: LineageRef[];
+  /** Bundle metadata for UI and audit notes. */
+  metadata?: Record<string, unknown>;
+}
+
+/** Compact immutable reference to a lineage version. */
+export interface LineageRef {
+  /** Kind of immutable version being referenced. */
+  kind: "prompt_set" | "config_snapshot" | "spec_snapshot" | "model_catalog_snapshot" | "runtime_model_set" | "eval_dataset" | "benchmark_run" | "eval_run" | "synthetic_run" | "synthetic_artifact" | "published_artifact" | "reranker_train_run" | "reranker_model_artifact" | "agent_train_run" | "agent_model_artifact";
+  /** Immutable version identifier. */
+  version_id: string;
+  /** Optional human-readable label for UI display. */
+  label?: string | null; // default: None
 }
 
 /** Supports MULTIPLE simultaneous local providers.  P0: Ollama + llama.cpp. All use OpenAI-compatible API. */
@@ -1092,6 +1294,12 @@ export interface ModelCatalogEntry {
   base_url?: string | null; // default: None
   /** Freeform notes */
   notes?: string | null; // default: None
+  /** Runtime selection surfaces that should expose this row. */
+  selection_roles?: ("generation" | "embedding_provider" | "reranker_cloud")[];
+  /** Whether this row is currently selectable in the runtime product surface. */
+  selection_status?: "runtime_selectable" | "catalog_only"; // default: "catalog_only"
+  /** Why the row is catalog-only when not runtime selectable. */
+  selection_reason?: string | null; // default: None
 }
 
 /** A single soft warning about a model assignment in the config. */
@@ -1308,6 +1516,16 @@ export interface RerankerLegacyTaskResult {
   run_id?: string | null; // default: None
 }
 
+/** Runtime capability matrix for reranking. */
+export interface RerankerRuntimeCapabilities {
+  /** Reranker modes exposed by the product. */
+  modes?: RuntimeOption[];
+  /** Cloud reranker providers that execute in the current runtime. */
+  cloud_providers?: RuntimeOption[];
+  /** Learning reranker backends supported by the runtime. */
+  learning_backends?: RuntimeOption[];
+}
+
 export interface RerankerTrainMetricEvent {
   type: "log" | "progress" | "metrics" | "state" | "error" | "complete" | "telemetry";
   /** UTC timestamp */
@@ -1356,6 +1574,16 @@ export interface RerankerTrainRun {
   warmup_ratio: number;
   max_length: number;
   summary?: RerankerTrainRunSummary;
+  /** Current bundle id captured before training started. */
+  input_bundle_id?: string | null; // default: None
+  /** Bundle id after this run was attached to lineage. */
+  bundle_id?: string | null; // default: None
+  /** Bundle id created when this run was promoted. */
+  promoted_bundle_id?: string | null; // default: None
+  /** Immutable reranker training run version reference. */
+  lineage_ref?: LineageRef | null; // default: None
+  /** Immutable reranker model artifact version produced by this run. */
+  model_artifact_ref?: LineageRef | null; // default: None
 }
 
 export interface RerankerTrainRunMeta {
@@ -1368,6 +1596,8 @@ export interface RerankerTrainRunMeta {
   primary_k: number;
   primary_metric_best?: number | null; // default: None
   primary_metric_final?: number | null; // default: None
+  bundle_id?: string | null; // default: None
+  lineage_ref?: LineageRef | null; // default: None
 }
 
 export interface RerankerTrainRunSummary {
@@ -1383,9 +1613,9 @@ export interface RerankerTrainRunSummary {
 export interface RerankingConfig {
   /** Reranker mode: 'cloud' (Cohere/Voyage/Jina API), 'learning' (MLX Qwen3 LoRA learning reranker), 'none' (disabled). Legacy values 'local'/'hf' normalize to 'learning'. */
   reranker_mode?: string; // default: "none"
-  /** Cloud reranker provider when mode=cloud (cohere, voyage, jina) */
+  /** Cloud reranker provider when mode=cloud. Runtime-selectable today: cohere. */
   reranker_cloud_provider?: string; // default: "cohere"
-  /** Cloud reranker model name when mode=cloud (Cohere: rerank-v3.5) */
+  /** Cloud reranker model name when mode=cloud (runtime-selectable today: Cohere models). */
   reranker_cloud_model?: string; // default: "rerank-v3.5"
   /** Blend weight for reranker scores */
   tribrid_reranker_alpha?: number; // default: 0.7
@@ -1475,6 +1705,16 @@ export interface RetrievalConfig {
   hydration_max_chars?: number; // default: 2000
 }
 
+/** Generic runtime capability option. */
+export interface RuntimeOption {
+  /** Stable identifier for the capability */
+  id: string;
+  /** Human-readable label */
+  label: string;
+  /** Short explanation of what the runtime supports */
+  description: string;
+}
+
 /** Configuration for result scoring and boosting. */
 export interface ScoringConfig {
   /** Bonus score for chunks matched via chunk_summary-based retrieval */
@@ -1487,6 +1727,16 @@ export interface ScoringConfig {
   vendor_mode?: string; // default: "prefer_first_party"
   /** Comma-separated path prefixes to boost */
   path_boosts?: string; // default: "/gui,/server,/indexer,/retrieval"
+}
+
+/** Runtime capability matrix for retrieval/search backends. */
+export interface SearchRuntimeCapabilities {
+  /** Vector search backends. */
+  vector_backends?: RuntimeOption[];
+  /** Sparse search backends. */
+  sparse_backends?: RuntimeOption[];
+  /** Graph search backends. */
+  graph_backends?: RuntimeOption[];
 }
 
 /** Configuration for semantic caching across search/answer/chat endpoints. */
@@ -1561,6 +1811,8 @@ export interface SyntheticRunMeta {
   recipe: "eval_dataset" | "semantic_cards" | "keywords" | "triplets" | "autotune_retrieval" | "full_stack";
   provider: "internal_ragweld" | "synthetic_data_kit";
   items_generated?: number | null; // default: None
+  bundle_id?: string | null; // default: None
+  lineage_ref?: LineageRef | null; // default: None
 }
 
 export interface SyntheticRunStartRequest {
@@ -1941,6 +2193,16 @@ export interface AgentTrainRun {
   warmup_ratio: number;
   max_length: number;
   summary?: AgentTrainRunSummary;
+  /** Current bundle id captured before training started. */
+  input_bundle_id?: string | null;
+  /** Bundle id after this run was attached to lineage. */
+  bundle_id?: string | null;
+  /** Bundle id created when this run was promoted. */
+  promoted_bundle_id?: string | null;
+  /** Immutable agent training run version reference. */
+  lineage_ref?: LineageRef | null;
+  /** Immutable agent model artifact version produced by this run. */
+  model_artifact_ref?: LineageRef | null;
 }
 
 export interface AgentTrainRunsResponse {
@@ -2005,6 +2267,22 @@ export interface AnswerResponse {
   latency_ms: number;
   /** Developer debug metadata (best-effort) */
   debug?: ChatDebugInfo | null;
+}
+
+/** Request payload for POST /api/benchmark/run. */
+export interface BenchmarkRunRequest {
+  /** Prompt to run against multiple models. */
+  prompt: string;
+  /** Two to four model overrides to compare. */
+  models: string[];
+}
+
+/** Response payload for listing benchmark runs. */
+export interface BenchmarkRunsResponse {
+  /** Whether the request succeeded. */
+  ok?: boolean;
+  /** Recent benchmark run records. */
+  runs?: BenchmarkRun[];
 }
 
 /** Response payload for GET /api/chat/models. */
@@ -2388,6 +2666,14 @@ export interface EvalRun {
   started_at: string;
   /** When evaluation completed */
   completed_at: string;
+  /** Immutable eval dataset version used for this run. */
+  dataset_version_ref?: LineageRef | null;
+  /** Current bundle id captured before evaluation started. */
+  input_bundle_id?: string | null;
+  /** Bundle id after this run was attached to lineage. */
+  bundle_id?: string | null;
+  /** Immutable eval run version reference. */
+  lineage_ref?: LineageRef | null;
 }
 
 /** Response for listing eval runs. */
@@ -2590,6 +2876,52 @@ export interface KeywordsGenerateResponse {
   count: number;
 }
 
+/** Request payload for setting a bundle alias. */
+export interface LineageAliasUpdateRequest {
+  /** Existing immutable bundle identifier to target. */
+  bundle_id: string;
+}
+
+/** List response for corpus-scoped lineage aliases. */
+export interface LineageAliasesResponse {
+  /** Whether the request succeeded. */
+  ok?: boolean;
+  /** Mutable alias pointers for this corpus. */
+  aliases?: LineageAlias[];
+}
+
+/** List response for immutable asset versions. */
+export interface LineageAssetListResponse {
+  /** Whether the request succeeded. */
+  ok?: boolean;
+  /** Immutable asset versions. */
+  assets?: LineageAssetVersion[];
+}
+
+/** List response for immutable bundles. */
+export interface LineageBundleListResponse {
+  /** Whether the request succeeded. */
+  ok?: boolean;
+  /** Immutable lineage bundles. */
+  bundles?: LineageBundle[];
+}
+
+/** Request payload for explicitly snapshotting the current quality-loop state. */
+export interface LineageBundleSnapshotRequest {
+  /** Optional aliases to move to the new bundle after the snapshot is created. */
+  set_aliases?: ("current" | "promoted" | "baseline" | "canary")[];
+}
+
+/** Response payload for creating or fetching a current-state bundle snapshot. */
+export interface LineageBundleSnapshotResponse {
+  /** Whether the request succeeded. */
+  ok?: boolean;
+  /** Created or reused immutable bundle. */
+  bundle: LineageBundle;
+  /** Aliases updated by this request. */
+  aliases?: LineageAlias[];
+}
+
 /** Response payload for /api/loki/status. */
 export interface LokiStatus {
   /** Whether Loki is reachable. */
@@ -2683,6 +3015,10 @@ export interface PromptUpdateResponse {
   prompt_key: string;
   /** Human-readable status message */
   message: string;
+  /** Immutable prompt-set version after this edit. */
+  prompt_set_ref?: LineageRef | null;
+  /** Current bundle id after the prompt edit was captured. */
+  bundle_id?: string | null;
 }
 
 /** Response containing prompt text and UI metadata. */
@@ -2921,6 +3257,15 @@ export interface RerankerTrainStartResponse {
   run: RerankerTrainRun;
 }
 
+/** Response payload for GET /api/runtime-capabilities. */
+export interface RuntimeCapabilitiesResponse {
+  embedding?: EmbeddingRuntimeCapabilities;
+  reranker?: RerankerRuntimeCapabilities;
+  chunking?: ChunkingRuntimeCapabilities;
+  indexing?: IndexingRuntimeCapabilities;
+  search?: SearchRuntimeCapabilities;
+}
+
 /** Request payload for tri-brid search. */
 export interface SearchRequest {
   /** The search query */
@@ -2968,6 +3313,10 @@ export interface SyntheticConfigPatchResponse {
   corpus_id: string;
   patch?: Record<string, unknown>;
   artifact_path?: string | null;
+  /** Bundle id after attaching the config patch artifact. */
+  bundle_id?: string | null;
+  /** Immutable published artifact version reference. */
+  lineage_ref?: LineageRef | null;
 }
 
 export interface SyntheticPublishResponse {
@@ -2977,6 +3326,10 @@ export interface SyntheticPublishResponse {
   kind: "eval_dataset_json" | "semantic_cards_jsonl" | "keywords_json" | "triplets_jsonl" | "config_patch_json" | "quality_eval_json" | "report_md";
   target_path?: string | null;
   message?: string | null;
+  /** Bundle id after attaching the published artifact. */
+  bundle_id?: string | null;
+  /** Immutable published artifact version reference. */
+  lineage_ref?: LineageRef | null;
 }
 
 export interface SyntheticRun {
@@ -2993,6 +3346,14 @@ export interface SyntheticRun {
   artifacts?: SyntheticArtifactRef[];
   summary?: SyntheticRunSummary;
   error?: string | null;
+  /** Current bundle id captured before the run started. */
+  input_bundle_id?: string | null;
+  /** Bundle id after this run was attached to lineage. */
+  bundle_id?: string | null;
+  /** Immutable synthetic run version reference. */
+  lineage_ref?: LineageRef | null;
+  /** Synthetic artifact kind -> immutable version reference. */
+  artifact_lineage_refs?: Record<string, LineageRef>;
 }
 
 export interface SyntheticRunEvent {

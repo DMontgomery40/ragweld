@@ -13,6 +13,9 @@ This folder is for pointers and short notes that make external context discovera
 - `/Users/davidmontgomery/ragweld/AGENTS.md`
 - `/Users/davidmontgomery/ragweld/docs/index.md`
 - `/Users/davidmontgomery/ragweld/docs/references/product-positioning.md`
+- `/Users/davidmontgomery/ragweld/docs/references/quality-loop-lineage.md`
+- `/Users/davidmontgomery/ragweld/docs/references/runtime-capabilities.md`
+- `/Users/davidmontgomery/ragweld/docs/references/codex-session-ingest.md`
 - `/Users/davidmontgomery/ragweld/scripts/docs_ai/README.md`
 - Published docs output lives under `/Users/davidmontgomery/ragweld/mkdocs/`, but those files are docs-autopilot output and not the engineering source of truth.
 

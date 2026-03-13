@@ -16,9 +16,16 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 from starlette.responses import StreamingResponse
 
-from server.api.dataset import _load_dataset
+from server.api.dataset import _dataset_path_for_corpus, _load_dataset
 from server.config import load_config
 from server.db.postgres import PostgresClient
+from server.lineage import (
+    attach_refs_to_current_bundle,
+    capture_path_version,
+    capture_training_run_version,
+    ensure_current_bundle,
+    make_ref,
+)
 from server.models.training_eval import (
     CorpusEvalProfile,
     RerankerTrainMetricEvent,
@@ -254,6 +261,55 @@ def _run_json_path(run_id: str) -> Path:
 
 def _metrics_path(run_id: str) -> Path:
     return _run_dir(run_id) / "metrics.jsonl"
+
+
+def _capture_model_artifact_ref(run_id: str, repo_id: str) -> Any | None:
+    path = _run_dir(run_id) / "model"
+    if not path.exists():
+        return None
+    version = capture_path_version(
+        kind="reranker_model_artifact",
+        path=path,
+        repo_id=repo_id,
+        source="generated",
+        metadata={"run_id": run_id},
+    )
+    return make_ref("reranker_model_artifact", version.version_id)
+
+
+def _attach_lineage(run: RerankerTrainRun, cfg: Any, *, promoted: bool = False) -> RerankerTrainRun:
+    repo_id = str(run.repo_id)
+    model_ref = _capture_model_artifact_ref(run.run_id, repo_id)
+    if model_ref is not None:
+        run.model_artifact_ref = model_ref
+    try:
+        dataset_rows = [row.model_dump(mode="json", by_alias=True) for row in _load_dataset(corpus_id=repo_id)]
+    except Exception:
+        dataset_rows = []
+    run_version = capture_training_run_version(
+        kind="reranker_train_run",
+        run_payload=run.model_dump(mode="json", by_alias=True),
+        repo_id=repo_id,
+        payload_extras={
+            "model_artifact_ref": model_ref.model_dump(mode="json", by_alias=True) if model_ref is not None else None,
+            "promotion": {"promoted": bool(promoted)},
+        },
+    )
+    bundle, _aliases = attach_refs_to_current_bundle(
+        repo_id=repo_id,
+        cfg=cfg,
+        dataset_rows=dataset_rows,
+        dataset_path=str(_dataset_path_for_corpus(repo_id)),
+        reranker_train_runs=[make_ref("reranker_train_run", run_version.version_id)],
+        reranker_model_artifacts=[model_ref] if model_ref is not None else [],
+        extra_aliases=("promoted",) if promoted else (),
+        preserve_attached_refs=True,
+    )
+    run.lineage_ref = make_ref("reranker_train_run", run_version.version_id)
+    run.bundle_id = bundle.bundle_id
+    if promoted:
+        run.promoted_bundle_id = bundle.bundle_id
+    return run
 
 def _tail_lines(path: Path, *, max_bytes: int = 65536, max_lines: int = 50) -> list[str]:
     """Read up to the last N lines from a potentially large text file."""
@@ -532,6 +588,7 @@ async def _run_train_job(*, run_id: str, corpus_id: str, cancel_event: asyncio.E
         if _is_cancel_requested():
             raise TrainingCancelledError(message)
 
+    cfg: Any | None = None
     try:
         cfg = await load_scoped_config(repo_id=corpus_id)
         _raise_if_cancelled()
@@ -870,6 +927,7 @@ async def _run_train_job(*, run_id: str, corpus_id: str, cancel_event: asyncio.E
 
         run.status = "completed"
         run.completed_at = datetime.now(UTC)
+        run = _attach_lineage(run, cfg, promoted=bool(should_promote))
         _save_run(run)
         _append_event(
             run_id,
@@ -888,6 +946,8 @@ async def _run_train_job(*, run_id: str, corpus_id: str, cancel_event: asyncio.E
             run = _load_run(run_id)
             run.status = "cancelled"
             run.completed_at = datetime.now(UTC)
+            if cfg is not None:
+                run = _attach_lineage(run, cfg)
             _save_run(run)
         except Exception:
             pass
@@ -918,6 +978,8 @@ async def _run_train_job(*, run_id: str, corpus_id: str, cancel_event: asyncio.E
                 run = _load_run(run_id)
                 run.status = "cancelled"
                 run.completed_at = datetime.now(UTC)
+                if cfg is not None:
+                    run = _attach_lineage(run, cfg)
                 _save_run(run)
             except Exception:
                 pass
@@ -947,6 +1009,8 @@ async def _run_train_job(*, run_id: str, corpus_id: str, cancel_event: asyncio.E
                 run = _load_run(run_id)
                 run.status = "failed"
                 run.completed_at = datetime.now(UTC)
+                if cfg is not None:
+                    run = _attach_lineage(run, cfg)
                 _save_run(run)
             except Exception:
                 pass
@@ -1713,6 +1777,8 @@ async def list_train_runs(
                 primary_k=run.primary_k,
                 primary_metric_best=run.summary.primary_metric_best,
                 primary_metric_final=run.summary.primary_metric_final,
+                bundle_id=run.bundle_id,
+                lineage_ref=run.lineage_ref,
             )
         )
 
@@ -1765,6 +1831,12 @@ async def start_train_run(request: RerankerTrainStartRequest) -> RerankerTrainSt
     started_at = datetime.now(UTC)
     run_id = _allocate_run_id(corpus_id, started_at)
     _train_start_guard[str(corpus_id or "").strip()] = (run_id, started_at)
+    current_bundle = ensure_current_bundle(
+        repo_id=corpus_id,
+        cfg=cfg,
+        dataset_rows=[row.model_dump(mode="json", by_alias=True) for row in dataset],
+        dataset_path=str(_dataset_path_for_corpus(corpus_id)),
+    )
 
     run = RerankerTrainRun(
         run_id=run_id,
@@ -1789,6 +1861,7 @@ async def start_train_run(request: RerankerTrainStartRequest) -> RerankerTrainSt
         max_length=int(request.max_length)
         if request.max_length is not None
         else int(cfg.reranking.tribrid_reranker_maxlen),
+        input_bundle_id=current_bundle.bundle_id,
     )
 
     # Persist immediately
@@ -2065,6 +2138,8 @@ async def promote_train_run(run_id: str) -> OkResponse:
             no_token_id=int(no_token_id),
         )
     await clear_mlx_qwen3_cache(str(cfg.training.tribrid_reranker_model_path))
+    run = _attach_lineage(run, cfg, promoted=True)
+    _save_run(run)
     return OkResponse(ok=True)
 
 

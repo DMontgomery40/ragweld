@@ -64,9 +64,17 @@ Optional (Actions variables or secrets):
   - code and API/config source files
   - `data/models.json`
   - `data/glossary.json`
+  - `server/runtime_capabilities.py`
   - `scripts/docs_ai/docs_prompt_base.md`
   - this README and repo-local docs under `docs/`
 - The deterministic config reference under `mkdocs/docs/reference/config/**` is still generated from Pydantic + glossary and should never be hand-edited.
+
+## Model catalog truthfulness
+
+- Treat `data/models.json` as the broad pricing/catalog source, not the sole runtime-selection contract.
+- Runtime-selectable catalog rows are identified by `selection_roles`, `selection_status`, and `selection_reason`.
+- Non-model runtime truth (embedding providers/backends, reranker providers/backends, chunking strategies, indexing/search backends) comes from `server/runtime_capabilities.py` and `/api/runtime-capabilities`.
+- Docs autopilot must not describe a catalog-only row as if it were currently runnable/selectable in the product.
 
 ## Positioning guardrail
 

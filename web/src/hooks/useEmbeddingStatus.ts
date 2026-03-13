@@ -9,6 +9,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useAPI } from '@/hooks/useAPI';
 import { useConfig } from '@/hooks/useConfig';
+import { useRuntimeCapabilities } from '@/hooks/useRuntimeCapabilities';
 import { useRepoStore } from '@/stores/useRepoStore';
 import type { IndexStats } from '@/types/generated';
 import { describeEmbeddingProviderStrategy } from '@/utils/embeddingStrategy';
@@ -71,6 +72,7 @@ interface UseEmbeddingStatusResult {
 export function useEmbeddingStatus(): UseEmbeddingStatusResult {
   const { api } = useAPI();
   const { config } = useConfig();
+  const { capabilities } = useRuntimeCapabilities();
   const { activeRepo } = useRepoStore();
 
   const [status, setStatus] = useState<EmbeddingStatus | null>(null);
@@ -92,7 +94,7 @@ export function useEmbeddingStatus(): UseEmbeddingStatusResult {
       const emb = config.embedding;
       const provider = String(emb?.embedding_type || '').toLowerCase();
       const configType = provider || 'openai';
-      const configStrategy = describeEmbeddingProviderStrategy(configType).detail;
+      const configStrategy = describeEmbeddingProviderStrategy(configType, capabilities || undefined).detail;
       const configDim = Number(emb?.embedding_dim || 0);
       let configModel = String(emb?.embedding_model || '');
       if (provider === 'voyage') configModel = String(emb?.voyage_model || '');
@@ -137,7 +139,9 @@ export function useEmbeddingStatus(): UseEmbeddingStatusResult {
       const indexType = indexModelRaw ? indexModelRaw : null;
       const indexDim = indexDimRaw > 0 ? indexDimRaw : null;
       const indexProvider = indexProviderRaw ? indexProviderRaw : null;
-      const indexStrategy = indexProvider ? describeEmbeddingProviderStrategy(indexProvider).detail : null;
+      const indexStrategy = indexProvider
+        ? describeEmbeddingProviderStrategy(indexProvider, capabilities || undefined).detail
+        : null;
       const hasIndex = Boolean(indexType && indexDim && totalChunks > 0);
 
       const dimMatch = hasIndex ? configDim === indexDim : true;
@@ -168,7 +172,7 @@ export function useEmbeddingStatus(): UseEmbeddingStatusResult {
     } finally {
       setLoading(false);
     }
-  }, [activeRepo, api, config]);
+  }, [activeRepo, api, capabilities, config]);
 
   // Initial check on mount
   useEffect(() => {

@@ -13,6 +13,8 @@ import { TooltipIcon } from '@/components/ui/TooltipIcon';
 interface ModelPickerProps {
   /** Component type filter */
   componentType: 'EMB' | 'GEN' | 'RERANK';
+  /** Optional runtime selection role filter */
+  selectionRole?: 'generation' | 'embedding_provider' | 'reranker_cloud';
   /** Provider to filter models by. When omitted, all providers shown grouped. */
   provider?: string;
   /** Current selected model name */
@@ -31,6 +33,7 @@ interface ModelPickerProps {
 
 export function ModelPicker({
   componentType,
+  selectionRole,
   provider,
   value,
   onChange,
@@ -39,7 +42,7 @@ export function ModelPicker({
   allowCustom = false,
   disabled = false,
 }: ModelPickerProps) {
-  const { models, loading, error, providers, getModelsForProvider } = useModels(componentType);
+  const { models, loading, error, providers, getModelsForProvider } = useModels(componentType, { selectionRole });
   const [customMode, setCustomMode] = useState(false);
   const [customValue, setCustomValue] = useState('');
 

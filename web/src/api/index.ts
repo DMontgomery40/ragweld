@@ -11,3 +11,4 @@ export { promptsApi } from './prompts';
 export { tracesApi } from './traces';
 export { evalApi } from './eval';
 export { syntheticApi } from './synthetic';
+export { runtimeCapabilitiesApi } from './runtimeCapabilities';

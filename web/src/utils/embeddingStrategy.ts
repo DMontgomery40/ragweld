@@ -1,20 +1,22 @@
-export function describeEmbeddingProviderStrategy(provider: string): { badge: string; detail: string } {
+import type { RuntimeCapabilitiesResponse } from '@/types/generated';
+
+export function describeEmbeddingProviderStrategy(
+  provider: string,
+  capabilities?: RuntimeCapabilitiesResponse
+): { badge: string; detail: string } {
   const p = String(provider || '').trim().toLowerCase();
   if (!p) return { badge: 'unknown', detail: 'Unknown strategy' };
+  if (!capabilities) return { badge: 'unknown', detail: 'Loading runtime capabilities…' };
 
-  // Local / on-device execution.
-  if (p === 'local' || p === 'huggingface') return { badge: 'local', detail: 'Local (Python runtime)' };
-  if (p === 'mlx') return { badge: 'local', detail: 'Local (MLX / Metal GPU)' };
-  if (p === 'ollama') return { badge: 'local', detail: 'Local (Ollama server)' };
+  const match = (capabilities?.embedding?.providers || []).find(
+    (item) => String(item.provider || '').trim().toLowerCase() === p
+  );
+  if (match) {
+    return {
+      badge: String(match.badge || 'unknown'),
+      detail: String(match.description || match.label || 'Unknown strategy'),
+    };
+  }
 
-  // Cloud APIs.
-  if (p === 'openai') return { badge: 'cloud', detail: 'Cloud API (OpenAI)' };
-  if (p === 'voyage') return { badge: 'cloud', detail: 'Cloud API (Voyage)' };
-  if (p === 'cohere') return { badge: 'cloud', detail: 'Cloud API (Cohere)' };
-  if (p === 'jina') return { badge: 'cloud', detail: 'Cloud API (Jina)' };
-  if (p === 'google') return { badge: 'cloud', detail: 'Cloud API (Google)' };
-  if (p === 'mistral') return { badge: 'cloud', detail: 'Cloud API (Mistral)' };
-
-  return { badge: 'unknown', detail: 'Unknown strategy' };
+  return { badge: 'catalog', detail: 'Catalog only / not runtime-selectable today' };
 }
-

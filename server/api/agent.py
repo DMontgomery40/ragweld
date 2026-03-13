@@ -14,11 +14,18 @@ from typing import Any, Literal
 from fastapi import APIRouter, HTTPException, Query, Request
 from starlette.responses import StreamingResponse
 
-from server.api.dataset import _dataset_path_for_corpus
+from server.api.dataset import _dataset_path_for_corpus, _load_dataset
 from server.chat.context_formatter import format_context_for_llm
 from server.chat.prompt_builder import get_system_prompt
 from server.chat.ragweld_mlx import clear_cache as clear_ragweld_cache
 from server.db.postgres import PostgresClient
+from server.lineage import (
+    attach_refs_to_current_bundle,
+    capture_path_version,
+    capture_training_run_version,
+    ensure_current_bundle,
+    make_ref,
+)
 from server.models.tribrid_config_model import (
     AgentTrainDiffRequest,
     AgentTrainDiffResponse,
@@ -130,6 +137,55 @@ def _run_json_path(run_id: str) -> Path:
 
 def _metrics_path(run_id: str) -> Path:
     return _run_dir(run_id) / "metrics.jsonl"
+
+
+def _capture_model_artifact_ref(run_id: str, repo_id: str) -> Any | None:
+    path = _run_dir(run_id) / "model"
+    if not path.exists():
+        return None
+    version = capture_path_version(
+        kind="agent_model_artifact",
+        path=path,
+        repo_id=repo_id,
+        source="generated",
+        metadata={"run_id": run_id},
+    )
+    return make_ref("agent_model_artifact", version.version_id)
+
+
+def _attach_lineage(run: AgentTrainRun, cfg: Any, *, promoted: bool = False) -> AgentTrainRun:
+    repo_id = str(run.repo_id)
+    model_ref = _capture_model_artifact_ref(run.run_id, repo_id)
+    if model_ref is not None:
+        run.model_artifact_ref = model_ref
+    try:
+        dataset_rows = [row.model_dump(mode="json", by_alias=True) for row in _load_dataset(corpus_id=repo_id)]
+    except Exception:
+        dataset_rows = []
+    run_version = capture_training_run_version(
+        kind="agent_train_run",
+        run_payload=run.model_dump(mode="json", by_alias=True),
+        repo_id=repo_id,
+        payload_extras={
+            "model_artifact_ref": model_ref.model_dump(mode="json", by_alias=True) if model_ref is not None else None,
+            "promotion": {"promoted": bool(promoted)},
+        },
+    )
+    bundle, _aliases = attach_refs_to_current_bundle(
+        repo_id=repo_id,
+        cfg=cfg,
+        dataset_rows=dataset_rows,
+        dataset_path=str(_dataset_path_for_corpus(repo_id)),
+        agent_train_runs=[make_ref("agent_train_run", run_version.version_id)],
+        agent_model_artifacts=[model_ref] if model_ref is not None else [],
+        extra_aliases=("promoted",) if promoted else (),
+        preserve_attached_refs=True,
+    )
+    run.lineage_ref = make_ref("agent_train_run", run_version.version_id)
+    run.bundle_id = bundle.bundle_id
+    if promoted:
+        run.promoted_bundle_id = bundle.bundle_id
+    return run
 
 
 def _tail_lines(path: Path, *, max_bytes: int = 65536, max_lines: int = 50) -> list[str]:
@@ -553,6 +609,7 @@ async def _run_train_job(*, run_id: str, corpus_id: str, cancel_event: asyncio.E
     primary_series: list[float] = []
     final_primary: float | None = None
 
+    cfg: Any | None = None
     try:
         cfg = await load_scoped_config(repo_id=corpus_id)
         _raise_if_cancelled()
@@ -796,6 +853,7 @@ async def _run_train_job(*, run_id: str, corpus_id: str, cancel_event: asyncio.E
 
         run.status = "completed"
         run.completed_at = datetime.now(UTC)
+        run = _attach_lineage(run, cfg, promoted=bool(active_dir is not None and should_promote))
         _save_run(run)
         _append_event(run_id, AgentTrainMetricEvent(type="complete", ts=datetime.now(UTC), run_id=run_id, status=run.status))
     except TrainingCancelledError:
@@ -803,6 +861,8 @@ async def _run_train_job(*, run_id: str, corpus_id: str, cancel_event: asyncio.E
             run = _load_run(run_id)
             run.status = "cancelled"
             run.completed_at = datetime.now(UTC)
+            if cfg is not None:
+                run = _attach_lineage(run, cfg)
             _save_run(run)
         except Exception:
             pass
@@ -822,6 +882,8 @@ async def _run_train_job(*, run_id: str, corpus_id: str, cancel_event: asyncio.E
             run = _load_run(run_id)
             run.status = "failed"
             run.completed_at = datetime.now(UTC)
+            if cfg is not None:
+                run = _attach_lineage(run, cfg)
             _save_run(run)
         except Exception:
             pass
@@ -883,6 +945,8 @@ async def list_train_runs(
                 completed_at=run.completed_at,
                 primary_metric_best=run.summary.primary_metric_best,
                 primary_metric_final=run.summary.primary_metric_final,
+                bundle_id=run.bundle_id,
+                lineage_ref=run.lineage_ref,
             )
         )
 
@@ -904,6 +968,12 @@ async def start_train_run(request: AgentTrainStartRequest) -> AgentTrainStartRes
         )
 
     cfg = await load_scoped_config(repo_id=corpus_id)
+    current_bundle = ensure_current_bundle(
+        repo_id=corpus_id,
+        cfg=cfg,
+        dataset_rows=[row.model_dump(mode="json", by_alias=True) for row in _load_dataset(corpus_id=corpus_id)],
+        dataset_path=str(_dataset_path_for_corpus(corpus_id)),
+    )
 
     started_at = datetime.now(UTC)
     run_id = _allocate_run_id(corpus_id, started_at)
@@ -926,6 +996,7 @@ async def start_train_run(request: AgentTrainStartRequest) -> AgentTrainStartRes
         lr=float(request.lr) if request.lr is not None else float(cfg.training.reranker_train_lr),
         warmup_ratio=float(request.warmup_ratio) if request.warmup_ratio is not None else float(cfg.training.reranker_warmup_ratio),
         max_length=int(request.max_length) if request.max_length is not None else int(getattr(cfg.reranking, "tribrid_reranker_maxlen", 512) or 512),
+        input_bundle_id=current_bundle.bundle_id,
     )
 
     # Persist request-level dataset override into the run snapshot so the background
@@ -1089,6 +1160,8 @@ async def promote_train_run(run_id: str) -> OkResponse:
 
     _atomic_copy_dir(src, dst)
     await clear_ragweld_cache(adapter_dir=str(dst_cfg))
+    run = _attach_lineage(run, cfg, promoted=True)
+    _save_run(run)
     return OkResponse(ok=True)
 
 

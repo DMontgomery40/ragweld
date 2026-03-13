@@ -5,6 +5,7 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import { useNavigate } from 'react-router-dom';
 import 'dockview/dist/styles/dockview.css';
 import { TooltipIcon } from '@/components/ui/TooltipIcon';
+import { LineageMeta } from '@/components/ui/LineageMeta';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useActiveRepo } from '@/stores/useRepoStore';
 import { useConfigField, useNotification, useReranker } from '@/hooks';
@@ -1178,31 +1179,42 @@ export function TrainingStudio() {
                 <h3 className="studio-panel-title">Run HUD</h3>
               </header>
               {selectedRun ? (
-                <div className="studio-keyvals">
-                  <div>
-                    <span>status</span>
-                    <span
-                      className="studio-run-status-pill studio-mono"
-                      data-status={hud?.status || 'unknown'}
-                      data-testid="studio-run-hud-status"
-                    >
-                      {hud?.status || 'unknown'}
-                    </span>
-                  </div>
-                  <div><span>backend</span><span className="studio-mono">{hud?.backend || '—'}</span></div>
-                  <div><span>base_model</span><span className="studio-mono studio-truncate" title={hud?.baseModel || ''}>{hud?.baseModel || '—'}</span></div>
-                  <div><span>active_path</span><span className="studio-mono studio-truncate" title={hud?.activePath || ''}>{hud?.activePath || '—'}</span></div>
-                  <div><span>duration</span><span className="studio-mono">{hud?.durationSec == null ? '—' : `${hud.durationSec.toFixed(1)}s`}</span></div>
-                  <div><span>step</span><span className="studio-mono">{hud?.last?.step ?? '—'}</span></div>
-                  <div><span>epoch</span><span className="studio-mono">{hud?.last?.epoch ?? '—'}</span></div>
-                  <div><span>progress</span><span className="studio-mono" data-testid="studio-run-hud-progress">{hud?.progressLabel || '—'}</span></div>
-                  {hud?.terminalMessage ? (
+                <>
+                  <div className="studio-keyvals">
                     <div>
-                      <span>{hud.status === 'cancelled' ? 'cancel_reason' : 'failure_reason'}</span>
-                      <span className="studio-mono studio-truncate" title={hud.terminalMessage}>{hud.terminalMessage}</span>
+                      <span>status</span>
+                      <span
+                        className="studio-run-status-pill studio-mono"
+                        data-status={hud?.status || 'unknown'}
+                        data-testid="studio-run-hud-status"
+                      >
+                        {hud?.status || 'unknown'}
+                      </span>
                     </div>
-                  ) : null}
-                </div>
+                    <div><span>backend</span><span className="studio-mono">{hud?.backend || '—'}</span></div>
+                    <div><span>base_model</span><span className="studio-mono studio-truncate" title={hud?.baseModel || ''}>{hud?.baseModel || '—'}</span></div>
+                    <div><span>active_path</span><span className="studio-mono studio-truncate" title={hud?.activePath || ''}>{hud?.activePath || '—'}</span></div>
+                    <div><span>duration</span><span className="studio-mono">{hud?.durationSec == null ? '—' : `${hud.durationSec.toFixed(1)}s`}</span></div>
+                    <div><span>step</span><span className="studio-mono">{hud?.last?.step ?? '—'}</span></div>
+                    <div><span>epoch</span><span className="studio-mono">{hud?.last?.epoch ?? '—'}</span></div>
+                    <div><span>progress</span><span className="studio-mono" data-testid="studio-run-hud-progress">{hud?.progressLabel || '—'}</span></div>
+                    {hud?.terminalMessage ? (
+                      <div>
+                        <span>{hud.status === 'cancelled' ? 'cancel_reason' : 'failure_reason'}</span>
+                        <span className="studio-mono studio-truncate" title={hud.terminalMessage}>{hud.terminalMessage}</span>
+                      </div>
+                    ) : null}
+                  </div>
+                  <div>
+                    <LineageMeta
+                      bundleId={selectedRun.bundle_id}
+                      inputBundleId={selectedRun.input_bundle_id}
+                      lineageRef={selectedRun.lineage_ref}
+                      modelArtifactRef={selectedRun.model_artifact_ref}
+                      corpusId={activeCorpus}
+                    />
+                  </div>
+                </>
               ) : (
                 <p className="studio-empty">Select a run.</p>
               )}

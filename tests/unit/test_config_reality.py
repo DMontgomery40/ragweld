@@ -50,3 +50,17 @@ def test_upgrade_raw_config_removes_legacy_indexing_keys() -> None:
     assert "COLLECTION_NAME" in migrated_set
     assert "REPOS_FILE" in migrated_set
     assert "BM25_STOPWORDS_LANG" in migrated_set
+
+
+def test_upgrade_raw_config_normalizes_legacy_semantic_chunking() -> None:
+    raw = {
+        "chunking": {
+            "chunking_strategy": "semantic",
+        }
+    }
+
+    cfg, changed, migrated = _upgrade_raw_config(raw)
+
+    assert changed is True
+    assert cfg.chunking.chunking_strategy == "fixed_chars"
+    assert "chunking.chunking_strategy" in set(migrated)

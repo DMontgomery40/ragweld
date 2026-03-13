@@ -55,6 +55,9 @@ async def test_models_have_required_fields(client: AsyncClient) -> None:
         assert "model" in model, f"Model missing 'model': {model}"
         assert "components" in model, f"Model missing 'components': {model}"
         assert isinstance(model["components"], list), f"'components' should be list: {model}"
+        assert "selection_roles" in model, f"Model missing 'selection_roles': {model}"
+        assert isinstance(model["selection_roles"], list), f"'selection_roles' should be list: {model}"
+        assert "selection_status" in model, f"Model missing 'selection_status': {model}"
         # context is required for GEN models but not embedding-only models
         if "GEN" in model["components"]:
             assert "context" in model, f"GEN model missing 'context': {model}"
@@ -154,6 +157,44 @@ async def test_models_by_type_matches_catalog_for_ragweld_gen_entries(client: As
 
 
 @pytest.mark.asyncio
+async def test_models_expose_truthful_selection_metadata(client: AsyncClient) -> None:
+    response = await client.get("/api/models")
+    assert response.status_code == 200
+    models = response.json()["models"]
+
+    openai_embed = next(
+        m for m in models
+        if str(m.get("provider", "")).strip().lower() == "openai" and "EMB" in m.get("components", [])
+    )
+    assert openai_embed["selection_status"] == "runtime_selectable"
+    assert "embedding_provider" in openai_embed["selection_roles"]
+
+    cohere_rerank = next(
+        m for m in models
+        if str(m.get("provider", "")).strip().lower() == "cohere" and "RERANK" in m.get("components", [])
+    )
+    assert cohere_rerank["selection_status"] == "runtime_selectable"
+    assert "reranker_cloud" in cohere_rerank["selection_roles"]
+
+    catalog_only_embed = next(
+        m for m in models
+        if str(m.get("provider", "")).strip().lower() in {"cohere", "voyage", "jina", "google", "mistral"}
+        and "EMB" in m.get("components", [])
+    )
+    assert catalog_only_embed["selection_status"] == "catalog_only"
+    assert "embedding_provider" not in catalog_only_embed["selection_roles"]
+    assert "Catalog entry only" in str(catalog_only_embed.get("selection_reason") or "")
+
+    catalog_only_rerank = next(
+        m for m in models
+        if str(m.get("provider", "")).strip().lower() != "cohere" and "RERANK" in m.get("components", [])
+    )
+    assert catalog_only_rerank["selection_status"] == "catalog_only"
+    assert "reranker_cloud" not in catalog_only_rerank["selection_roles"]
+    assert "Catalog entry only" in str(catalog_only_rerank.get("selection_reason") or "")
+
+
+@pytest.mark.asyncio
 async def test_models_upsert_creates_entry_and_autofills_provider_base_url(
     client: AsyncClient, tmp_path: Path
 ) -> None:
@@ -199,6 +240,8 @@ async def test_models_upsert_creates_entry_and_autofills_provider_base_url(
         assert body["model"]["model"] == "gpt-upserted"
         assert body["model"]["base_url"] == "https://proxy.example/v1"
         assert "GEN" in body["model"]["components"]
+        assert body["model"]["selection_status"] == "runtime_selectable"
+        assert body["model"]["selection_roles"] == ["generation"]
 
         data_catalog = json.loads(data_path.read_text(encoding="utf-8"))
         web_catalog = json.loads(web_path.read_text(encoding="utf-8"))
