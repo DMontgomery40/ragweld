@@ -26,7 +26,7 @@
 [Config API & workflow](../../configuration.md){ .md-button }
 [Glossary](../../glossary.md){ .md-button }
 
-**Total parameters**: 16
+**Total parameters**: 17
 
 ??? info "Group index"
     - `(root)`
@@ -35,6 +35,7 @@
 
 | JSON key | Env key(s) | Type | Default | Constraints | Summary |
 |---------|------------|------|---------|-------------|---------|
+| `indexing.auto_prepare_dense_retrieval` | `AUTO_PREPARE_DENSE_RETRIEVAL` | `bool` | `true` | — | After a dense indexing run completes, automatically build the per-corpus pgvector HNSW index and warm representative query embeddings so first retrievals are not cold. |
 | `indexing.bm25_stemmer_lang` | `BM25_STEMMER_LANG` | `str` | `"english"` | — | Stemmer language |
 | `indexing.bm25_tokenizer` | `BM25_TOKENIZER` | `str` | `"stemmer"` | pattern=^(stemmer\|lowercase\|whitespace)$ | BM25 tokenizer type |
 | `indexing.estimated_tokens_per_second_local` | `ESTIMATED_TOKENS_PER_SECOND_LOCAL` | `int \| None` | `null` | ≥ 100, ≤ 500000 | Optional local embedding throughput override for index-time estimates (tokens/sec). |
