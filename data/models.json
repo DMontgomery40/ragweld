@@ -1,6 +1,6 @@
 {
   "currency": "USD",
-  "last_updated": "2026-03-13",
+  "last_updated": "2026-03-17",
   "sources": [
     "https://openai.com/api/pricing/ (2026-02-07)",
     "https://www.anthropic.com/pricing (2026-02-07)",
@@ -10,7 +10,7 @@
     "https://mistral.ai/pricing (2025-11-29)",
     "https://api-docs.deepseek.com/quick_start/pricing (2025-11-29)",
     "https://jina.ai/embeddings/ (2025-11-29)",
-    "https://openrouter.ai/api/v1/models (2026-03-13)"
+    "https://openrouter.ai/api/v1/models (2026-03-17)"
   ],
   "models": [
     {
@@ -1332,21 +1332,22 @@
     },
     {
       "provider": "mistral",
-      "family": "mistral-small",
-      "model": "mistral-small",
+      "family": "mistral-small-2603",
+      "model": "mistral-small-2603",
       "components": [
         "GEN"
       ],
       "unit": "1k_tokens",
-      "input_per_1k": 0.0001,
-      "output_per_1k": 0.0003,
-      "context": 128000,
-      "notes": "Mistral Small (source: per 1M = $0.10/$0.30) | [auto-refresh] deprecated_on=2026-02-27",
+      "input_per_1k": 0.00015,
+      "output_per_1k": 0.0006,
+      "context": 262144,
+      "notes": "Mistral Small (source: per 1M = $0.10/$0.30)",
       "selection_roles": [
         "generation"
       ],
       "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_reason": null,
+      "base_url": "https://api.mistral.ai/v1"
     },
     {
       "provider": "mistral",
