@@ -57,6 +57,15 @@ DEFAULT_TOKENIZER_NAME = "sentence-transformers/all-MiniLM-L6-v2"
 DEFAULT_TS_CONFIG = "english"
 DEFAULT_JOB_NAME = "codex-session-ingest"
 DEFAULT_DASHBOARD_UID = "codex-session-ingest"
+TERMINAL_PHASES = {"complete", "error", "cancelled"}
+DEFAULT_VERIFY_QUERIES: tuple[tuple[str, str], ...] = (
+    ("semantic", "why did the github action fail"),
+    ("semantic", "set up grafana dashboard for codex session ingest"),
+    ("semantic", "build a local RAG from codex session logs"),
+    ("artifact", "invalid byte sequence UTF8 0x00"),
+    ("artifact", "grafana dashboard prometheus scrape job"),
+    ("artifact", "tmux attach -t codex-2026-ingest"),
+)
 
 ENCRYPTED_BLOB_RE = re.compile(r"\bgAAAAA[A-Za-z0-9_-]{32,}\b")
 ABSOLUTE_PATH_RE = re.compile(r"(/Users/[^\s\"']+)")
@@ -192,6 +201,36 @@ class StatusState:
         }
 
 
+@dataclass(frozen=True)
+class VerifyQuery:
+    stream: str
+    text: str
+
+
+@dataclass
+class VerifyConfig:
+    state_dir: Path
+    postgres_dsn: str
+    semantic_repo_id: str
+    artifact_repo_id: str
+    embedding_model: str
+    embedding_dimensions: int
+    tokenizer_name: str
+    ts_config: str
+    top_k: int
+    queries: list[VerifyQuery]
+    output_path: Path
+    log_path: Path
+
+
+@dataclass
+class StatusExportConfig:
+    state_dir: Path
+    metrics_bind: str
+    metrics_port: int
+    refresh_seconds: float
+
+
 class JsonLogger:
     def __init__(self, path: Path):
         self.path = path
@@ -221,6 +260,11 @@ class MetricsRegistry:
         self.service_up = Gauge(
             "codex_session_ingest_service_up",
             "Process health for the Codex session ingest worker.",
+            registry=self.registry,
+        )
+        self.status_exporter_up = Gauge(
+            "codex_session_ingest_status_exporter_up",
+            "Sidecar exporter health for persisted status after the worker exits.",
             registry=self.registry,
         )
         self.files_discovered_total = PromCounter(
@@ -350,11 +394,198 @@ class MetricsRegistry:
             ["stream", "reason"],
             registry=self.registry,
         )
+        self.run_phase = Gauge(
+            "codex_session_ingest_run_phase",
+            "Current or terminal phase for the most recent run.",
+            ["phase"],
+            registry=self.registry,
+        )
+        self.run_files = Gauge(
+            "codex_session_ingest_run_files",
+            "Most recent run file counts.",
+            ["kind"],
+            registry=self.registry,
+        )
+        self.run_chunks = Gauge(
+            "codex_session_ingest_run_chunks",
+            "Most recent run chunk counts.",
+            ["stream"],
+            registry=self.registry,
+        )
+        self.run_events_seen = Gauge(
+            "codex_session_ingest_run_events_seen",
+            "Most recent run raw event count.",
+            registry=self.registry,
+        )
+        self.run_errors = Gauge(
+            "codex_session_ingest_run_errors",
+            "Most recent run total error count.",
+            registry=self.registry,
+        )
+        self.run_dead_letters = Gauge(
+            "codex_session_ingest_run_dead_letters",
+            "Most recent run dead-letter chunk count.",
+            registry=self.registry,
+        )
+        self.run_completion_ratio = Gauge(
+            "codex_session_ingest_run_completion_ratio",
+            "Completed plus skipped files divided by discovered files for the most recent run.",
+            registry=self.registry,
+        )
+        self.run_started_at_seconds = Gauge(
+            "codex_session_ingest_run_started_at_seconds",
+            "Unix timestamp for when the most recent run started.",
+            registry=self.registry,
+        )
+        self.run_last_updated_at_seconds = Gauge(
+            "codex_session_ingest_run_last_updated_at_seconds",
+            "Unix timestamp for the last status update from the most recent run.",
+            registry=self.registry,
+        )
+        self.run_duration_seconds = Gauge(
+            "codex_session_ingest_run_duration_seconds",
+            "Elapsed seconds covered by the most recent run status.",
+            registry=self.registry,
+        )
+        self.status_age_seconds = Gauge(
+            "codex_session_ingest_status_age_seconds",
+            "Seconds since the latest persisted status update was written.",
+            registry=self.registry,
+        )
+        self.verification_overall_pass = Gauge(
+            "codex_session_ingest_verification_overall_pass",
+            "Whether the latest retrieval verification run passed.",
+            registry=self.registry,
+        )
+        self.verification_total_queries = Gauge(
+            "codex_session_ingest_verification_total_queries",
+            "How many retrieval verification queries were executed in the latest report.",
+            registry=self.registry,
+        )
+        self.verification_passed_queries = Gauge(
+            "codex_session_ingest_verification_passed_queries",
+            "How many retrieval verification queries passed in the latest report.",
+            registry=self.registry,
+        )
+        self.verification_last_run_at_seconds = Gauge(
+            "codex_session_ingest_verification_last_run_at_seconds",
+            "Unix timestamp for when the latest retrieval verification report was written.",
+            registry=self.registry,
+        )
+        self.verification_corpus_persist_ratio = Gauge(
+            "codex_session_ingest_verification_corpus_persist_ratio",
+            "Persisted row ratio versus write-count totals for each corpus in the latest verification report.",
+            ["corpus"],
+            registry=self.registry,
+        )
+        self.verification_query_hits = Gauge(
+            "codex_session_ingest_verification_query_hits",
+            "Merged retrieval hits returned for a verification query in the latest report.",
+            ["stream", "query"],
+            registry=self.registry,
+        )
+        self.verification_query_best_score = Gauge(
+            "codex_session_ingest_verification_query_best_score",
+            "Best merged retrieval score for a verification query in the latest report.",
+            ["stream", "query"],
+            registry=self.registry,
+        )
+        self.verification_query_latency_ms = Gauge(
+            "codex_session_ingest_verification_query_latency_ms",
+            "Per-leg retrieval latency for a verification query in the latest report.",
+            ["stream", "query", "leg"],
+            registry=self.registry,
+        )
+
+    def update_from_status(self, payload: dict[str, Any]) -> None:
+        phase = str(payload.get("phase") or "").strip() or "unknown"
+        self.run_phase.clear()
+        self.run_phase.labels(phase).set(1)
+
+        discovered = int(payload.get("discovered_files") or 0)
+        completed = int(payload.get("completed_files") or 0)
+        skipped = int(payload.get("skipped_files") or 0)
+        pending = max(0, discovered - completed - skipped)
+        semantic = int(payload.get("semantic_chunks_written") or 0)
+        summary = int(payload.get("summary_chunks_written") or 0)
+        artifact = int(payload.get("artifact_chunks_written") or 0)
+        errors = int(payload.get("errors") or 0)
+        dead_letters = int(payload.get("dead_letter_chunks") or 0)
+        events_seen = int(payload.get("events_seen") or 0)
+
+        self.run_files.labels("discovered").set(discovered)
+        self.run_files.labels("completed").set(completed)
+        self.run_files.labels("skipped").set(skipped)
+        self.run_files.labels("pending").set(pending)
+        self.run_chunks.labels("semantic").set(semantic)
+        self.run_chunks.labels("summary").set(summary)
+        self.run_chunks.labels("semantic_total").set(semantic + summary)
+        self.run_chunks.labels("artifact").set(artifact)
+        self.run_events_seen.set(events_seen)
+        self.run_errors.set(errors)
+        self.run_dead_letters.set(dead_letters)
+        self.run_completion_ratio.set(
+            float(completed + skipped) / float(discovered) if discovered > 0 else 0.0
+        )
+
+        started_at = parse_iso_timestamp(str(payload.get("started_at") or ""))
+        updated_at = parse_iso_timestamp(str(payload.get("last_updated_at") or ""))
+        self.run_started_at_seconds.set(started_at)
+        self.run_last_updated_at_seconds.set(updated_at)
+        duration = max(0.0, updated_at - started_at) if started_at > 0 and updated_at > 0 else 0.0
+        self.run_duration_seconds.set(duration)
+        self.status_age_seconds.set(
+            max(0.0, time.time() - updated_at) if updated_at > 0 else 0.0
+        )
+
+        self.pending_files.set(pending)
+        self.current_file_size_bytes.set(int(payload.get("current_file_size_bytes") or 0))
+        self.current_file_bytes_read.set(int(payload.get("current_file_bytes_read") or 0))
+        self.current_file_line.set(int(payload.get("current_line") or 0))
+        if "current_file_progress_ratio" in payload:
+            try:
+                self.current_file_progress_ratio.set(float(payload.get("current_file_progress_ratio") or 0.0))
+            except Exception:
+                self.current_file_progress_ratio.set(0.0)
+
+    def update_from_verification(self, report: dict[str, Any]) -> None:
+        verified_at = parse_iso_timestamp(str(report.get("verified_at") or ""))
+        self.verification_last_run_at_seconds.set(verified_at)
+        self.verification_overall_pass.set(1 if bool(report.get("overall_passed")) else 0)
+        self.verification_total_queries.set(int(report.get("total_queries") or 0))
+        self.verification_passed_queries.set(int(report.get("passed_queries") or 0))
+        self.verification_corpus_persist_ratio.clear()
+        for corpus_name, corpus_payload in (report.get("corpora") or {}).items():
+            if not isinstance(corpus_payload, dict):
+                continue
+            ratio = float(corpus_payload.get("persist_ratio") or 0.0)
+            self.verification_corpus_persist_ratio.labels(str(corpus_name)).set(ratio)
+        self.verification_query_hits.clear()
+        self.verification_query_best_score.clear()
+        self.verification_query_latency_ms.clear()
+        for item in report.get("queries") or []:
+            if not isinstance(item, dict):
+                continue
+            stream = str(item.get("stream") or "unknown")
+            query = str(item.get("text") or "").strip() or "(empty)"
+            merged_hits = item.get("merged_hits") or []
+            best_score = 0.0
+            if merged_hits and isinstance(merged_hits, list):
+                first = merged_hits[0]
+                if isinstance(first, dict):
+                    best_score = float(first.get("score") or 0.0)
+            self.verification_query_hits.labels(stream, query).set(len(merged_hits))
+            self.verification_query_best_score.labels(stream, query).set(best_score)
+            for leg_name, leg_payload in (item.get("legs") or {}).items():
+                if not isinstance(leg_payload, dict):
+                    continue
+                latency_ms = float(leg_payload.get("latency_ms") or 0.0)
+                self.verification_query_latency_ms.labels(stream, query, str(leg_name)).set(latency_ms)
 
 
 class StatusHandler(http.server.BaseHTTPRequestHandler):
     registry: MetricsRegistry
-    status_ref: StatusState
+    status_ref: Any
     status_lock: threading.Lock
 
     def log_message(self, format: str, *args: Any) -> None:  # noqa: A003
@@ -372,7 +603,7 @@ class StatusHandler(http.server.BaseHTTPRequestHandler):
 
         if self.path in {"/healthz", "/status"}:
             with self.status_lock:
-                payload = self.status_ref.to_json()
+                payload = status_payload(self.status_ref)
             body = json.dumps(payload, ensure_ascii=True, sort_keys=True).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
@@ -386,7 +617,7 @@ class StatusHandler(http.server.BaseHTTPRequestHandler):
 
 
 class MetricsHttpServer:
-    def __init__(self, bind: str, port: int, registry: MetricsRegistry, status_ref: StatusState):
+    def __init__(self, bind: str, port: int, registry: MetricsRegistry, status_ref: Any):
         self.status_lock = threading.Lock()
         self._server = http.server.ThreadingHTTPServer((bind, port), StatusHandler)
         StatusHandler.registry = registry
@@ -1242,6 +1473,7 @@ class IngestRunner:
     async def run(self) -> None:
         self._apply_process_tuning()
         self.metrics.service_up.set(1)
+        self.metrics.status_exporter_up.set(0)
         self.metrics_server.start()
         self.checkpoints.start_run(self.run_id, "ingest", self._config_snapshot())
         self._install_signal_handlers()
@@ -1472,9 +1704,11 @@ class IngestRunner:
     def _write_status(self) -> None:
         with self.status_lock:
             self.status.last_updated_at = datetime.now(UTC).isoformat()
-            payload = json.dumps(self.status.to_json(), ensure_ascii=True, indent=2, sort_keys=True)
+            status_json = self.status.to_json()
+            payload = json.dumps(status_json, ensure_ascii=True, indent=2, sort_keys=True)
         self.config.status_path.parent.mkdir(parents=True, exist_ok=True)
         self.config.status_path.write_text(payload, encoding="utf-8")
+        self.metrics.update_from_status(status_json)
 
     def _install_signal_handlers(self) -> None:
         loop = asyncio.get_running_loop()
@@ -1506,6 +1740,72 @@ class IngestRunner:
                 )
 
 
+class PersistedStatusExporter:
+    def __init__(self, config: StatusExportConfig):
+        self.config = config
+        self.logger = JsonLogger(config.state_dir / "status_exporter.jsonl")
+        self.metrics = MetricsRegistry()
+        self.status_ref: dict[str, Any] = {}
+        self.metrics_server = MetricsHttpServer(config.metrics_bind, config.metrics_port, self.metrics, self.status_ref)
+        self.shutdown = threading.Event()
+
+    def run(self) -> None:
+        self._reload(initial=True)
+        self.metrics.service_up.set(0)
+        self.metrics.status_exporter_up.set(1)
+        self.metrics_server.start()
+        self._install_signal_handlers()
+        self.logger.log(
+            "info",
+            "status_exporter_started",
+            state_dir=str(self.config.state_dir),
+            metrics_bind=self.config.metrics_bind,
+            metrics_port=int(self.config.metrics_port),
+            operatorHint="The status exporter serves terminal-state telemetry after the ingest worker exits; stop it before starting a new live worker on the same port.",
+        )
+        try:
+            while not self.shutdown.wait(self.config.refresh_seconds):
+                self._reload(initial=False)
+        finally:
+            self.metrics.status_exporter_up.set(0)
+            self.metrics_server.stop()
+
+    def _reload(self, *, initial: bool) -> None:
+        payload = read_status_file(self.config.state_dir / "status.json")
+        if not payload:
+            if initial:
+                raise IngestFatalError(
+                    f"Status file not found under {self.config.state_dir}",
+                    operator_hint="The status exporter needs an existing output/codex_session_ingest/status.json from a completed or in-progress run.",
+                    phase="serve_status",
+                )
+            return
+        with self.metrics_server.status_lock:
+            self.status_ref.clear()
+            self.status_ref.update(payload)
+        self.metrics.update_from_status(payload)
+        self.metrics.service_up.set(0)
+        self.metrics.status_exporter_up.set(1)
+        verification = read_verification_file(self.config.state_dir / "verification.json")
+        if verification:
+            self.metrics.update_from_verification(verification)
+
+    def _install_signal_handlers(self) -> None:
+        def _stop(*_args: Any) -> None:
+            self.shutdown.set()
+            self.logger.log(
+                "warning",
+                "status_exporter_stopping",
+                operatorHint="The status exporter received a stop signal and is shutting down cleanly.",
+            )
+
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            try:
+                signal.signal(sig, _stop)
+            except Exception:
+                continue
+
+
 def discover_session_files(root: Path, year_filter: str) -> list[Path]:
     if year_filter and root.name != year_filter and (root / year_filter).exists():
         scan_root = root / year_filter
@@ -1524,6 +1824,18 @@ def clean_text(text: str) -> str:
     stripped = sanitize_pg_text(text).replace("\r\n", "\n").replace("\r", "\n")
     lines = [WHITESPACE_RE.sub(" ", line).rstrip() for line in stripped.split("\n")]
     return "\n".join(line for line in lines if line or len(lines) == 1).strip()
+
+
+def status_payload(value: Any) -> dict[str, Any]:
+    if hasattr(value, "to_json"):
+        try:
+            payload = value.to_json()
+            return dict(payload) if isinstance(payload, dict) else {}
+        except Exception:
+            return {}
+    if isinstance(value, dict):
+        return dict(value)
+    return {}
 
 
 def sanitize_pg_text(text: str) -> str:
@@ -1684,6 +1996,31 @@ def parse_json_line(line: str) -> dict[str, Any] | None:
     except json.JSONDecodeError:
         return None
     return parsed if isinstance(parsed, dict) else None
+
+
+def parse_iso_timestamp(value: str) -> float:
+    raw = str(value or "").strip()
+    if not raw:
+        return 0.0
+    try:
+        return datetime.fromisoformat(raw).timestamp()
+    except Exception:
+        return 0.0
+
+
+def read_status_file(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {}
+    try:
+        raw = path.read_text(encoding="utf-8")
+        parsed = json.loads(raw)
+    except Exception:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def read_verification_file(path: Path) -> dict[str, Any]:
+    return read_status_file(path)
 
 
 def current_rss_bytes() -> int:
@@ -1944,66 +2281,191 @@ def grafana_api_json(
 
 
 def build_dashboard(prometheus_uid: str, job_name: str, dashboard_uid: str, title: str) -> dict[str, Any]:
-    def panel(panel_id: int, title_text: str, expr: str, *, x: int, y: int, w: int, h: int, panel_type: str = "timeseries") -> dict[str, Any]:
+    def base_panel(panel_id: int, title_text: str, expr: str, *, x: int, y: int, w: int, h: int, panel_type: str) -> dict[str, Any]:
         return {
             "id": panel_id,
             "type": panel_type,
             "title": title_text,
+            "transparent": True,
             "datasource": {"type": "prometheus", "uid": prometheus_uid},
             "targets": [{"expr": expr, "legendFormat": "__auto"}],
             "gridPos": {"x": x, "y": y, "w": w, "h": h},
-            "fieldConfig": {"defaults": {}, "overrides": []},
-            "options": {"legend": {"displayMode": "list", "placement": "bottom"}},
         }
 
+    def stat_panel(
+        panel_id: int,
+        title_text: str,
+        expr: str,
+        *,
+        x: int,
+        y: int,
+        w: int,
+        h: int,
+        color: str,
+        unit: str = "none",
+    ) -> dict[str, Any]:
+        panel = base_panel(panel_id, title_text, expr, x=x, y=y, w=w, h=h, panel_type="stat")
+        panel["fieldConfig"] = {
+            "defaults": {
+                "unit": unit,
+                "color": {"mode": "fixed", "fixedColor": color},
+                "thresholds": {"mode": "absolute", "steps": [{"color": "rgba(15,23,42,0.2)", "value": None}, {"color": color, "value": 0}]},
+            },
+            "overrides": [],
+        }
+        panel["options"] = {
+            "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": False},
+            "orientation": "auto",
+            "textMode": "value_and_name",
+            "colorMode": "background_gradient",
+            "graphMode": "area",
+            "justifyMode": "center",
+        }
+        return panel
+
+    def timeseries_panel(
+        panel_id: int,
+        title_text: str,
+        expr: str,
+        *,
+        x: int,
+        y: int,
+        w: int,
+        h: int,
+        unit: str = "none",
+    ) -> dict[str, Any]:
+        panel = base_panel(panel_id, title_text, expr, x=x, y=y, w=w, h=h, panel_type="timeseries")
+        panel["fieldConfig"] = {
+            "defaults": {
+                "unit": unit,
+                "color": {"mode": "palette-classic"},
+                "custom": {
+                    "axisBorderShow": False,
+                    "axisCenteredZero": False,
+                    "axisColorMode": "text",
+                    "axisPlacement": "auto",
+                    "barAlignment": 0,
+                    "drawStyle": "line",
+                    "fillOpacity": 24,
+                    "gradientMode": "opacity",
+                    "lineInterpolation": "smooth",
+                    "lineWidth": 2,
+                    "pointSize": 3,
+                    "showPoints": "never",
+                    "spanNulls": True,
+                    "stacking": {"group": "A", "mode": "none"},
+                },
+            },
+            "overrides": [],
+        }
+        panel["options"] = {
+            "legend": {"displayMode": "table", "placement": "bottom", "showLegend": True},
+            "tooltip": {"mode": "multi", "sort": "desc"},
+        }
+        return panel
+
+    def barchart_panel(
+        panel_id: int,
+        title_text: str,
+        expr: str,
+        *,
+        x: int,
+        y: int,
+        w: int,
+        h: int,
+        unit: str = "none",
+    ) -> dict[str, Any]:
+        panel = base_panel(panel_id, title_text, expr, x=x, y=y, w=w, h=h, panel_type="barchart")
+        panel["fieldConfig"] = {
+            "defaults": {
+                "unit": unit,
+                "color": {"mode": "palette-classic"},
+                "custom": {
+                    "fillOpacity": 75,
+                    "gradientMode": "opacity",
+                    "lineWidth": 1,
+                },
+            },
+            "overrides": [],
+        }
+        panel["options"] = {
+            "legend": {"displayMode": "table", "placement": "bottom", "showLegend": True},
+            "tooltip": {"mode": "single"},
+            "xField": "Time",
+            "barRadius": 0.3,
+        }
+        return panel
+
     panels = [
-        panel(1, "Service Up", f'codex_session_ingest_service_up{{job="{job_name}"}}', x=0, y=0, w=4, h=4, panel_type="stat"),
-        panel(2, "Pending Files", f'codex_session_ingest_pending_files{{job="{job_name}"}}', x=4, y=0, w=4, h=4, panel_type="stat"),
-        panel(3, "Current File Progress", f'codex_session_ingest_current_file_progress_ratio{{job="{job_name}"}}', x=8, y=0, w=4, h=4, panel_type="stat"),
-        panel(4, "RSS Bytes", f'codex_session_ingest_process_rss_bytes{{job="{job_name}"}}', x=12, y=0, w=4, h=4, panel_type="stat"),
-        panel(5, "Files / Minute", f'sum(rate(codex_session_ingest_files_completed_total{{job="{job_name}"}}[5m])) * 60', x=0, y=4, w=8, h=7),
-        panel(6, "Chunks / Minute", f'sum by (stream) (rate(codex_session_ingest_chunks_written_total{{job="{job_name}"}}[5m])) * 60', x=8, y=4, w=8, h=7),
-        panel(7, "Embedding Throughput", f'rate(codex_session_ingest_embedding_texts_total{{job="{job_name}"}}[5m])', x=0, y=11, w=8, h=7),
-        panel(
-            8,
+        stat_panel(1, "Completion Ratio", f'last_over_time(codex_session_ingest_run_completion_ratio{{job="{job_name}"}}[24h])', x=0, y=0, w=4, h=4, color="#f59e0b", unit="percentunit"),
+        stat_panel(2, "Pending Files", f'last_over_time(codex_session_ingest_run_files{{job="{job_name}",kind="pending"}}[24h])', x=4, y=0, w=4, h=4, color="#38bdf8"),
+        stat_panel(3, "Indexed Chunks", f'sum(last_over_time(codex_session_ingest_run_chunks{{job="{job_name}",stream=~"semantic_total|artifact"}}[24h]))', x=8, y=0, w=4, h=4, color="#a78bfa"),
+        stat_panel(4, "Verify Pass", f'last_over_time(codex_session_ingest_verification_overall_pass{{job="{job_name}"}}[24h])', x=12, y=0, w=4, h=4, color="#2dd4bf"),
+        stat_panel(5, "Completed Files", f'last_over_time(codex_session_ingest_run_files{{job="{job_name}",kind="completed"}}[24h])', x=0, y=4, w=4, h=4, color="#86efac"),
+        stat_panel(6, "Dead Letters", f'last_over_time(codex_session_ingest_run_dead_letters{{job="{job_name}"}}[24h])', x=4, y=4, w=4, h=4, color="#fb7185"),
+        stat_panel(7, "Verify Queries", f'last_over_time(codex_session_ingest_verification_passed_queries{{job="{job_name}"}}[24h])', x=8, y=4, w=4, h=4, color="#67e8f9"),
+        stat_panel(8, "Run Duration", f'last_over_time(codex_session_ingest_run_duration_seconds{{job="{job_name}"}}[24h])', x=12, y=4, w=4, h=4, color="#f97316", unit="s"),
+        timeseries_panel(9, "Files / Minute", f'sum(rate(codex_session_ingest_files_completed_total{{job="{job_name}"}}[5m])) * 60', x=0, y=8, w=8, h=7),
+        timeseries_panel(10, "Chunks / Minute", f'sum by (stream) (rate(codex_session_ingest_chunks_written_total{{job="{job_name}"}}[5m])) * 60', x=8, y=8, w=8, h=7),
+        timeseries_panel(11, "Embedding Throughput", f'rate(codex_session_ingest_embedding_texts_total{{job="{job_name}"}}[5m])', x=0, y=15, w=8, h=7),
+        timeseries_panel(
+            12,
             "Phase Latency P95",
-            f'histogram_quantile(0.95, sum by (le, phase) (rate(codex_session_ingest_phase_seconds_bucket{{job="{job_name}"}}[5m])))',
+            f'histogram_quantile(0.95, sum by (le, phase) (rate(codex_session_ingest_phase_seconds_bucket{{job="{job_name}"}}[5m]))) * 1000',
             x=8,
-            y=11,
+            y=15,
+            w=8,
+            h=7,
+            unit="ms",
+        ),
+        barchart_panel(
+            13,
+            "Retrieval Hits",
+            f'max by (stream, query) (last_over_time(codex_session_ingest_verification_query_hits{{job="{job_name}"}}[24h]))',
+            x=0,
+            y=22,
             w=8,
             h=7,
         ),
-        panel(
-            9,
+        barchart_panel(
+            14,
+            "Retrieval Latency (ms)",
+            f'max by (stream, query, leg) (last_over_time(codex_session_ingest_verification_query_latency_ms{{job="{job_name}"}}[24h]))',
+            x=8,
+            y=22,
+            w=8,
+            h=7,
+            unit="ms",
+        ),
+        barchart_panel(
+            15,
             "Skipped Events (1h)",
             f'sum by (reason) (increase(codex_session_ingest_events_skipped_total{{job="{job_name}"}}[1h]))',
             x=0,
-            y=18,
+            y=29,
             w=8,
             h=7,
-            panel_type="barchart",
         ),
-        panel(
-            10,
-            "Errors (1h)",
-            f'sum by (phase, kind) (increase(codex_session_ingest_errors_total{{job="{job_name}"}}[1h]))',
+        barchart_panel(
+            16,
+            "Persist Ratio",
+            f'max by (corpus) (last_over_time(codex_session_ingest_verification_corpus_persist_ratio{{job="{job_name}"}}[24h]))',
             x=8,
-            y=18,
+            y=29,
             w=8,
             h=7,
-            panel_type="barchart",
+            unit="percentunit",
         ),
-        panel(
-            11,
+        barchart_panel(
+            17,
             "Event Mix (1h)",
             f'sum by (kind) (increase(codex_session_ingest_events_seen_total{{job="{job_name}"}}[1h]))',
             x=0,
-            y=25,
+            y=36,
             w=8,
             h=7,
-            panel_type="barchart",
         ),
-        panel(12, "DB Writes", f'sum by (phase) (rate(codex_session_ingest_db_writes_total{{job="{job_name}"}}[5m]))', x=8, y=25, w=8, h=7),
+        timeseries_panel(18, "DB Writes", f'sum by (phase) (rate(codex_session_ingest_db_writes_total{{job="{job_name}"}}[5m]))', x=8, y=36, w=8, h=7),
     ]
     return {
         "uid": dashboard_uid,
@@ -2013,8 +2475,286 @@ def build_dashboard(prometheus_uid: str, job_name: str, dashboard_uid: str, titl
         "schemaVersion": 39,
         "version": 1,
         "refresh": "10s",
+        "style": "dark",
         "panels": panels,
     }
+
+
+def parse_verify_query(value: str) -> VerifyQuery:
+    raw = str(value or "").strip()
+    if ":" not in raw:
+        raise argparse.ArgumentTypeError("Verification queries must be in the form semantic:... or artifact:...")
+    stream, text = raw.split(":", 1)
+    stream = stream.strip().lower()
+    text = text.strip()
+    if stream not in {"semantic", "artifact"}:
+        raise argparse.ArgumentTypeError(f"Unsupported verification stream '{stream}'")
+    if not text:
+        raise argparse.ArgumentTypeError("Verification query text cannot be empty")
+    return VerifyQuery(stream=stream, text=text)
+
+
+def serialize_match(match: Any) -> dict[str, Any]:
+    metadata = getattr(match, "metadata", None)
+    meta_dict = dict(metadata) if isinstance(metadata, dict) else {}
+    return {
+        "chunk_id": str(getattr(match, "chunk_id", "")),
+        "score": round(float(getattr(match, "score", 0.0) or 0.0), 6),
+        "source": str(getattr(match, "source", "")),
+        "file_path": str(getattr(match, "file_path", "")),
+        "start_line": int(getattr(match, "start_line", 0) or 0),
+        "end_line": int(getattr(match, "end_line", 0) or 0),
+        "session_id": str(meta_dict.get("session_id") or ""),
+        "variant": str(meta_dict.get("variant") or meta_dict.get("role") or meta_dict.get("kind") or ""),
+        "snippet": truncate_chars(clean_text(str(getattr(match, "content", ""))), 240),
+    }
+
+
+def dedupe_matches(*legs: list[Any], top_k: int) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    limit = max(1, int(top_k))
+    for leg in legs:
+        for match in leg:
+            chunk_id = str(getattr(match, "chunk_id", ""))
+            if not chunk_id or chunk_id in seen:
+                continue
+            seen.add(chunk_id)
+            out.append(serialize_match(match))
+            if len(out) >= limit:
+                return out
+    return out
+
+
+async def semantic_query_report(
+    pg: PostgresClient,
+    embedder: SentenceTransformerEmbedder,
+    cfg: VerifyConfig,
+    query: VerifyQuery,
+) -> dict[str, Any]:
+    embed_started = time.perf_counter()
+    embedding = (await embedder.encode([query.text]))[0]
+    embed_ms = (time.perf_counter() - embed_started) * 1000.0
+
+    vector_started = time.perf_counter()
+    vector_hits = await pg.vector_search(
+        cfg.semantic_repo_id,
+        embedding,
+        cfg.top_k,
+        expected_dimensions=cfg.embedding_dimensions,
+    )
+    vector_search_ms = (time.perf_counter() - vector_started) * 1000.0
+
+    sparse_started = time.perf_counter()
+    sparse_hits = await pg.sparse_search(cfg.semantic_repo_id, query.text, cfg.top_k, ts_config=cfg.ts_config)
+    sparse_ms = (time.perf_counter() - sparse_started) * 1000.0
+
+    merged = dedupe_matches(vector_hits, sparse_hits, top_k=cfg.top_k)
+    return {
+        "stream": query.stream,
+        "text": query.text,
+        "passed": bool(merged),
+        "merged_hits": merged,
+        "legs": {
+            "embed": {
+                "latency_ms": round(embed_ms, 3),
+                "hit_count": 1,
+                "hits": [],
+            },
+            "vector_search": {
+                "latency_ms": round(vector_search_ms, 3),
+                "hit_count": len(vector_hits),
+                "hits": [serialize_match(hit) for hit in vector_hits[: cfg.top_k]],
+            },
+            "sparse": {
+                "latency_ms": round(sparse_ms, 3),
+                "hit_count": len(sparse_hits),
+                "hits": [serialize_match(hit) for hit in sparse_hits[: cfg.top_k]],
+            },
+        },
+    }
+
+
+async def artifact_query_report(
+    pg: PostgresClient,
+    cfg: VerifyConfig,
+    query: VerifyQuery,
+) -> dict[str, Any]:
+    fts_started = time.perf_counter()
+    fts_hits = await pg.fts_search(cfg.artifact_repo_id, query.text, cfg.top_k, ts_config=cfg.ts_config, query_mode="plain")
+    fts_ms = (time.perf_counter() - fts_started) * 1000.0
+
+    relaxed_started = time.perf_counter()
+    relaxed_hits = await pg.fts_search_relaxed_or(
+        cfg.artifact_repo_id,
+        query.text,
+        cfg.top_k,
+        ts_config=cfg.ts_config,
+        max_terms=8,
+    )
+    relaxed_ms = (time.perf_counter() - relaxed_started) * 1000.0
+
+    path_started = time.perf_counter()
+    path_hits = await pg.file_path_search(cfg.artifact_repo_id, query.text, cfg.top_k, max_terms=8)
+    path_ms = (time.perf_counter() - path_started) * 1000.0
+
+    merged = dedupe_matches(fts_hits, relaxed_hits, path_hits, top_k=cfg.top_k)
+    return {
+        "stream": query.stream,
+        "text": query.text,
+        "passed": bool(merged),
+        "merged_hits": merged,
+        "legs": {
+            "fts": {
+                "latency_ms": round(fts_ms, 3),
+                "hit_count": len(fts_hits),
+                "hits": [serialize_match(hit) for hit in fts_hits[: cfg.top_k]],
+            },
+            "relaxed_or": {
+                "latency_ms": round(relaxed_ms, 3),
+                "hit_count": len(relaxed_hits),
+                "hits": [serialize_match(hit) for hit in relaxed_hits[: cfg.top_k]],
+            },
+            "file_path": {
+                "latency_ms": round(path_ms, 3),
+                "hit_count": len(path_hits),
+                "hits": [serialize_match(hit) for hit in path_hits[: cfg.top_k]],
+            },
+        },
+    }
+
+
+async def run_verification(cfg: VerifyConfig) -> dict[str, Any]:
+    logger = JsonLogger(cfg.log_path)
+    pg = PostgresClient(cfg.postgres_dsn)
+    metrics = MetricsRegistry()
+    status = read_status_file(cfg.state_dir / "status.json")
+    embedder = SentenceTransformerEmbedder(
+        model_name=cfg.embedding_model,
+        dimensions=cfg.embedding_dimensions,
+        batch_size=min(4, max(1, cfg.top_k)),
+        max_tokens=256,
+        logger=logger,
+        metrics=metrics,
+        mps_batch_cooldown_ms=25,
+        torch_threads=2,
+    )
+
+    logger.log(
+        "info",
+        "verification_started",
+        semantic_repo_id=cfg.semantic_repo_id,
+        artifact_repo_id=cfg.artifact_repo_id,
+        query_count=len(cfg.queries),
+        operatorHint="Retrieval verification can run against a partial corpus; re-run it during long ingests to watch recall improve as more files land.",
+    )
+
+    await pg.connect()
+    try:
+        semantic_stats = await pg.get_index_stats(cfg.semantic_repo_id)
+        artifact_stats = await pg.get_index_stats(cfg.artifact_repo_id)
+        semantic_storage = await pg.get_dashboard_storage_breakdown(cfg.semantic_repo_id)
+        artifact_storage = await pg.get_dashboard_storage_breakdown(cfg.artifact_repo_id)
+
+        semantic_written = int(status.get("semantic_chunks_written") or 0) + int(status.get("summary_chunks_written") or 0)
+        artifact_written = int(status.get("artifact_chunks_written") or 0)
+        semantic_ratio = (
+            float(semantic_stats.total_chunks) / float(semantic_written) if semantic_written > 0 else 0.0
+        )
+        artifact_ratio = (
+            float(artifact_stats.total_chunks) / float(artifact_written) if artifact_written > 0 else 0.0
+        )
+
+        query_reports: list[dict[str, Any]] = []
+        for query in cfg.queries:
+            if query.stream == "semantic":
+                query_reports.append(await semantic_query_report(pg, embedder, cfg, query))
+            else:
+                query_reports.append(await artifact_query_report(pg, cfg, query))
+
+        passed_queries = sum(1 for item in query_reports if bool(item.get("passed")))
+        overall_passed = (
+            semantic_stats.total_chunks > 0
+            and artifact_stats.total_chunks > 0
+            and passed_queries == len(query_reports)
+        )
+
+        report = {
+            "verified_at": datetime.now(UTC).isoformat(),
+            "overall_passed": overall_passed,
+            "total_queries": len(query_reports),
+            "passed_queries": passed_queries,
+            "status": {
+                "phase": str(status.get("phase") or ""),
+                "errors": int(status.get("errors") or 0),
+                "dead_letter_chunks": int(status.get("dead_letter_chunks") or 0),
+                "completed_files": int(status.get("completed_files") or 0),
+                "discovered_files": int(status.get("discovered_files") or 0),
+                "last_updated_at": str(status.get("last_updated_at") or ""),
+            },
+            "corpora": {
+                "semantic": {
+                    "repo_id": cfg.semantic_repo_id,
+                    "total_files": int(semantic_stats.total_files),
+                    "total_chunks": int(semantic_stats.total_chunks),
+                    "total_tokens": int(semantic_stats.total_tokens),
+                    "persist_ratio": round(semantic_ratio, 6),
+                    "storage_bytes": semantic_storage,
+                },
+                "artifact": {
+                    "repo_id": cfg.artifact_repo_id,
+                    "total_files": int(artifact_stats.total_files),
+                    "total_chunks": int(artifact_stats.total_chunks),
+                    "total_tokens": int(artifact_stats.total_tokens),
+                    "persist_ratio": round(artifact_ratio, 6),
+                    "storage_bytes": artifact_storage,
+                },
+            },
+            "queries": query_reports,
+        }
+        cfg.output_path.parent.mkdir(parents=True, exist_ok=True)
+        cfg.output_path.write_text(json.dumps(report, ensure_ascii=True, indent=2, sort_keys=True), encoding="utf-8")
+        logger.log(
+            "info",
+            "verification_complete",
+            overall_passed=overall_passed,
+            passed_queries=passed_queries,
+            total_queries=len(query_reports),
+            output_path=str(cfg.output_path),
+            operatorHint="Use the verification report to spot weak query classes early; if artifact queries pass but semantic queries miss, inspect the paired user/assistant chunking before changing the model.",
+        )
+        return report
+    finally:
+        await pg.disconnect()
+
+
+async def build_vector_index(postgres_dsn: str, repo_id: str, log_path: Path) -> dict[str, Any]:
+    logger = JsonLogger(log_path)
+    pg = PostgresClient(postgres_dsn)
+    await pg.connect()
+    try:
+        logger.log(
+            "info",
+            "vector_index_build_started",
+            repo_id=repo_id,
+            operatorHint="Vector index builds are worth doing after a major ingest completes; avoid building them mid-run unless retrieval speed matters more than write throughput.",
+        )
+        index_name = await pg.ensure_vector_index(repo_id)
+        storage = await pg.get_dashboard_storage_breakdown(repo_id)
+        result = {
+            "repo_id": repo_id,
+            "index_name": index_name,
+            "pgvector_index_bytes": int(storage.get("pgvector_index_bytes") or 0),
+        }
+        logger.log(
+            "info",
+            "vector_index_build_complete",
+            **result,
+            operatorHint="If vector probe latency is still high after the index builds, split embedding time from database time before changing the storage backend.",
+        )
+        return result
+    finally:
+        await pg.disconnect()
 
 
 def make_run_config(args: argparse.Namespace) -> RunConfig:
@@ -2069,6 +2809,40 @@ def make_remote_config(args: argparse.Namespace) -> RemoteTelemetryConfig:
     )
 
 
+def make_verify_config(args: argparse.Namespace) -> VerifyConfig:
+    state_dir = Path(args.state_dir or DEFAULT_STATE_DIR)
+    year_filter = str(args.year or "2026")
+    semantic_repo_id = args.semantic_repo_id or f"codex-sessions-{year_filter}-semantic"
+    artifact_repo_id = args.artifact_repo_id or f"codex-sessions-{year_filter}-artifacts"
+    queries = list(args.query or [])
+    if not queries:
+        queries = [VerifyQuery(stream=stream, text=text) for stream, text in DEFAULT_VERIFY_QUERIES]
+    return VerifyConfig(
+        state_dir=state_dir,
+        postgres_dsn=str(args.postgres_dsn),
+        semantic_repo_id=str(semantic_repo_id),
+        artifact_repo_id=str(artifact_repo_id),
+        embedding_model=str(args.embedding_model),
+        embedding_dimensions=int(args.embedding_dimensions),
+        tokenizer_name=str(args.tokenizer_name),
+        ts_config=str(args.ts_config),
+        top_k=int(args.top_k),
+        queries=queries,
+        output_path=Path(args.output_path or (state_dir / "verification.json")),
+        log_path=state_dir / "verification.jsonl",
+    )
+
+
+def make_status_export_config(args: argparse.Namespace) -> StatusExportConfig:
+    state_dir = Path(args.state_dir or DEFAULT_STATE_DIR)
+    return StatusExportConfig(
+        state_dir=state_dir,
+        metrics_bind=str(args.metrics_bind),
+        metrics_port=int(args.metrics_port),
+        refresh_seconds=float(args.refresh_seconds),
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Codex session ingest + telemetry bootstrap")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -2112,6 +2886,32 @@ def build_parser() -> argparse.ArgumentParser:
     bootstrap.add_argument("--dashboard-title", default="Codex Session Ingest")
     bootstrap.add_argument("--state-dir", default=str(DEFAULT_STATE_DIR))
 
+    verify = sub.add_parser("verify", help="Run retrieval verification against the current indexed corpus state")
+    verify.add_argument("--state-dir", default=str(DEFAULT_STATE_DIR))
+    verify.add_argument("--postgres-dsn", default=DEFAULT_POSTGRES_DSN)
+    verify.add_argument("--year", default="2026")
+    verify.add_argument("--semantic-repo-id", default="")
+    verify.add_argument("--artifact-repo-id", default="")
+    verify.add_argument("--embedding-model", default=DEFAULT_MODEL)
+    verify.add_argument("--embedding-dimensions", type=int, default=DEFAULT_DIMENSIONS)
+    verify.add_argument("--tokenizer-name", default=DEFAULT_TOKENIZER_NAME)
+    verify.add_argument("--ts-config", default=DEFAULT_TS_CONFIG)
+    verify.add_argument("--top-k", type=int, default=5)
+    verify.add_argument("--query", action="append", type=parse_verify_query, default=[])
+    verify.add_argument("--output-path", default="")
+
+    vector_index = sub.add_parser("build-vector-index", help="Build a pgvector HNSW index for a semantic corpus")
+    vector_index.add_argument("--state-dir", default=str(DEFAULT_STATE_DIR))
+    vector_index.add_argument("--postgres-dsn", default=DEFAULT_POSTGRES_DSN)
+    vector_index.add_argument("--year", default="2026")
+    vector_index.add_argument("--repo-id", default="")
+
+    serve_status = sub.add_parser("serve-status", help="Serve persisted run status and verification metrics after the worker exits")
+    serve_status.add_argument("--state-dir", default=str(DEFAULT_STATE_DIR))
+    serve_status.add_argument("--metrics-bind", default=DEFAULT_METRICS_BIND)
+    serve_status.add_argument("--metrics-port", type=int, default=DEFAULT_METRICS_PORT)
+    serve_status.add_argument("--refresh-seconds", type=float, default=10.0)
+
     e2e = sub.add_parser("e2e", help="Bootstrap telemetry then run ingest")
     for action in ingest._actions[1:]:
         if action.dest in {"command"}:
@@ -2133,6 +2933,25 @@ async def main_async(argv: list[str] | None = None) -> int:
         state_dir = Path(args.state_dir or DEFAULT_STATE_DIR)
         logger = JsonLogger(state_dir / "bootstrap.jsonl")
         bootstrap_remote_observability(make_remote_config(args), logger)
+        return 0
+
+    if args.command == "verify":
+        report = await run_verification(make_verify_config(args))
+        return 0 if bool(report.get("overall_passed")) else 1
+
+    if args.command == "build-vector-index":
+        state_dir = Path(args.state_dir or DEFAULT_STATE_DIR)
+        year_filter = str(args.year or "2026")
+        repo_id = str(args.repo_id or f"codex-sessions-{year_filter}-semantic")
+        await build_vector_index(
+            str(args.postgres_dsn),
+            repo_id,
+            state_dir / "vector-index.jsonl",
+        )
+        return 0
+
+    if args.command == "serve-status":
+        PersistedStatusExporter(make_status_export_config(args)).run()
         return 0
 
     if args.command == "e2e":

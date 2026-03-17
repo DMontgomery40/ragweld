@@ -3,18 +3,27 @@
 
 import { useMemo, useState } from 'react';
 import { useConfigField } from '@/hooks/useConfig';
+import { GRAFANA_DASHBOARD_PRESETS, findGrafanaPreset } from './dashboardPresets';
 
 export function GrafanaDashboard() {
   // Pydantic-derived config (renders immediately using defaults while config loads)
   const [baseUrl] = useConfigField<string>('ui.grafana_base_url', 'http://127.0.0.1:3001');
-  const [dashboardUid] = useConfigField<string>('ui.grafana_dashboard_uid', 'tribrid-overview');
-  const [dashboardSlug] = useConfigField<string>('ui.grafana_dashboard_slug', 'tribrid-overview');
+  const [dashboardUid, setDashboardUid] = useConfigField<string>('ui.grafana_dashboard_uid', 'tribrid-overview');
+  const [dashboardSlug, setDashboardSlug] = useConfigField<string>('ui.grafana_dashboard_slug', 'tribrid-overview');
   const [kiosk] = useConfigField<string>('ui.grafana_kiosk', 'tv');
   const [orgId] = useConfigField<number>('ui.grafana_org_id', 1);
   const [refresh] = useConfigField<string>('ui.grafana_refresh', '10s');
   const [embedEnabledRaw] = useConfigField<number>('ui.grafana_embed_enabled', 1);
 
   const embedEnabled = Boolean(embedEnabledRaw);
+  const activePreset = findGrafanaPreset(String(dashboardUid || ''), String(dashboardSlug || ''));
+
+  function applyPreset(presetId: string) {
+    const preset = GRAFANA_DASHBOARD_PRESETS.find((item) => item.id === presetId);
+    if (!preset) return;
+    setDashboardUid(preset.uid);
+    setDashboardSlug(preset.slug);
+  }
 
   // Local view controls (not persisted)
   const [timeRange, setTimeRange] = useState('1h');
@@ -95,7 +104,31 @@ export function GrafanaDashboard() {
         flexShrink: 0
       }}>
         <div style={{ flex: 1, fontSize: '13px', fontWeight: 700, color: 'var(--fg)' }}>
-          Grafana
+          {activePreset?.label || 'Grafana'}
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <label style={{ fontSize: '12px', color: 'var(--fg-muted)', fontWeight: 600 }}>
+            Dashboard
+          </label>
+          <select
+            value={activePreset?.id || ''}
+            onChange={(e) => applyPreset(e.target.value)}
+            style={{
+              background: 'var(--input-bg)',
+              border: '1px solid var(--line)',
+              color: 'var(--fg)',
+              padding: '6px 8px',
+              borderRadius: '6px',
+              fontSize: '12px'
+            }}
+            aria-label="Grafana dashboard preset"
+          >
+            <option value="">Custom</option>
+            {GRAFANA_DASHBOARD_PRESETS.map((preset) => (
+              <option key={preset.id} value={preset.id}>{preset.label}</option>
+            ))}
+          </select>
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>

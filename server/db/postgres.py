@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
 import re
@@ -124,6 +125,59 @@ def _coerce_jsonb_dict(value: Any) -> dict[str, Any]:
         return dict(value)
     except Exception:
         return {}
+
+
+def _vector_index_name(repo_id: str) -> str:
+    digest = hashlib.sha1(str(repo_id or "").encode("utf-8")).hexdigest()[:12]
+    return f"idx_chunks_{digest}_embedding_hnsw"
+
+
+def _sql_literal_text(value: str) -> str:
+    return str(value or "").replace("'", "''")
+
+
+def _sanitize_pg_text(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value.replace("\x00", " ")
+    return str(value).replace("\x00", " ")
+
+
+def _sanitize_optional_text(value: Any) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value.replace("\x00", " ")
+    return str(value).replace("\x00", " ")
+
+
+def _sanitize_json_value(value: Any) -> Any:
+    if isinstance(value, str):
+        return _sanitize_pg_text(value)
+    if isinstance(value, list):
+        return [_sanitize_json_value(item) for item in value]
+    if isinstance(value, dict):
+        return {
+            _sanitize_pg_text(key): _sanitize_json_value(item)
+            for key, item in value.items()
+        }
+    return value
+
+
+def _json_dumps_sanitized(value: Any) -> str:
+    return json.dumps(_sanitize_json_value(value))
+
+
+def _sanitize_chunk_for_storage(chunk: Chunk) -> Chunk:
+    return chunk.model_copy(
+        update={
+            "content": _sanitize_pg_text(chunk.content),
+            "file_path": _sanitize_pg_text(chunk.file_path),
+            "language": _sanitize_optional_text(chunk.language),
+            "metadata": _sanitize_json_value(chunk.metadata or {}),
+        }
+    )
 
 
 class PostgresClient:
@@ -721,6 +775,7 @@ class PostgresClient:
     async def upsert_embeddings(self, repo_id: str, chunks: list[Chunk]) -> int:
         if not chunks:
             return 0
+        chunks = [_sanitize_chunk_for_storage(ch) for ch in chunks]
         await self._require_pool()
         assert self._pool is not None
 
@@ -760,7 +815,7 @@ class PostgresClient:
                         ch.language,
                         ch.content,
                         int(ch.token_count or 0),
-                        json.dumps(ch.metadata or {}),
+                        _json_dumps_sanitized(ch.metadata or {}),
                         ch.embedding,
                     )
                     for ch in chunks
@@ -826,19 +881,35 @@ class PostgresClient:
                 )
             else:
                 await register_vector(conn)
-                rows = await conn.fetch(
-                    """
-                    SELECT chunk_id, content, file_path, start_line, end_line, language, metadata,
-                           (1 - (embedding <=> $1))::float8 AS score
-                    FROM chunks
-                    WHERE repo_id = $2 AND embedding IS NOT NULL
-                    ORDER BY embedding <=> $1
-                    LIMIT $3;
-                    """,
-                    embedding,
-                    repo_id,
-                    int(top_k),
-                )
+                query_dim = int(expected_dimensions or len(embedding))
+                if query_dim > 0:
+                    rows = await conn.fetch(
+                        f"""
+                        SELECT chunk_id, content, file_path, start_line, end_line, language, metadata,
+                               (1 - ((embedding::vector({query_dim})) <=> ($1::vector({query_dim}))))::float8 AS score
+                        FROM chunks
+                        WHERE repo_id = $2 AND embedding IS NOT NULL
+                        ORDER BY (embedding::vector({query_dim})) <=> ($1::vector({query_dim}))
+                        LIMIT $3;
+                        """,
+                        embedding,
+                        repo_id,
+                        int(top_k),
+                    )
+                else:
+                    rows = await conn.fetch(
+                        """
+                        SELECT chunk_id, content, file_path, start_line, end_line, language, metadata,
+                               (1 - (embedding <=> $1))::float8 AS score
+                        FROM chunks
+                        WHERE repo_id = $2 AND embedding IS NOT NULL
+                        ORDER BY embedding <=> $1
+                        LIMIT $3;
+                        """,
+                        embedding,
+                        repo_id,
+                        int(top_k),
+                    )
 
         return [
             ChunkMatch(
@@ -854,6 +925,43 @@ class PostgresClient:
             )
             for r in rows
         ]
+
+    async def ensure_vector_index(self, repo_id: str) -> str:
+        repo_id = str(repo_id or "").strip()
+        if not repo_id:
+            raise ValueError("repo_id is required")
+        await self._require_pool()
+        assert self._pool is not None
+        if self._vector_available is False:
+            raise RuntimeError("pgvector extension not available")
+
+        index_name = _vector_index_name(repo_id)
+        repo_literal = _sql_literal_text(repo_id)
+        async with self._pool.acquire() as conn:
+            try:
+                await register_vector(conn)
+            except Exception:
+                pass
+            row = await conn.fetchrow(
+                """
+                SELECT embedding_dimensions
+                FROM corpora
+                WHERE repo_id = $1
+                """,
+                repo_id,
+            )
+            dims = int(row["embedding_dimensions"] or 0) if row is not None else 0
+            if dims <= 0:
+                raise RuntimeError(f"Corpus '{repo_id}' does not have embedding_dimensions metadata")
+            await conn.execute(
+                f"""
+                CREATE INDEX IF NOT EXISTS {index_name}
+                  ON chunks USING hnsw ((embedding::vector({dims})) vector_cosine_ops)
+                  WHERE repo_id = '{repo_literal}' AND embedding IS NOT NULL;
+                """
+            )
+            await conn.execute("ANALYZE chunks;")
+        return index_name
 
     async def delete_embeddings(self, repo_id: str) -> int:
         await self._require_pool()
@@ -885,6 +993,7 @@ class PostgresClient:
     async def upsert_fts(self, repo_id: str, chunks: list[Chunk], *, ts_config: str) -> int:
         if not chunks:
             return 0
+        chunks = [_sanitize_chunk_for_storage(ch) for ch in chunks]
         await self._require_pool()
         assert self._pool is not None
 
@@ -918,7 +1027,7 @@ class PostgresClient:
                         ch.language,
                         ch.content,
                         int(ch.token_count or 0),
-                        json.dumps(ch.metadata or {}),
+                        _json_dumps_sanitized(ch.metadata or {}),
                         ts_config,
                     )
                     for ch in chunks
@@ -1680,7 +1789,7 @@ class PostgresClient:
                   updated_at = now();
                 """,
                 repo_id,
-                json.dumps(config),
+                _json_dumps_sanitized(config),
             )
 
     # ---------------------------------------------------------------------
@@ -1877,10 +1986,10 @@ class PostgresClient:
                 str(scope_key),
                 str(endpoint),
                 str(exact_key),
-                str(query_text or ""),
+                _sanitize_pg_text(query_text or ""),
                 ([float(x) for x in query_embedding] if query_embedding else None),
-                str(request_fingerprint or ""),
-                json.dumps(payload or {}),
+                _sanitize_pg_text(request_fingerprint or ""),
+                _json_dumps_sanitized(payload or {}),
                 str(ttl),
             )
 
@@ -2136,11 +2245,11 @@ class PostgresClient:
                 WHERE repo_id = $1;
                 """,
                 repo_id,
-                str(backend or ""),
-                str(provider or ""),
-                model,
+                _sanitize_pg_text(backend or ""),
+                _sanitize_pg_text(provider or ""),
+                _sanitize_pg_text(model),
                 int(dimensions),
-                str(ts_config or ""),
+                _sanitize_pg_text(ts_config or ""),
             )
 
     async def get_chunks_for_file_span(
@@ -2356,18 +2465,18 @@ class PostgresClient:
                         [
                             (
                                 repo_id,
-                                s.chunk_id,
-                                s.file_path,
+                                _sanitize_pg_text(s.chunk_id),
+                                _sanitize_pg_text(s.file_path),
                                 int(s.start_line) if s.start_line is not None else None,
                                 int(s.end_line) if s.end_line is not None else None,
-                                s.purpose,
-                                json.dumps(list(s.symbols or [])),
-                                s.technical_details,
-                                json.dumps(list(s.domain_concepts or [])),
-                                json.dumps(list(s.routes or [])),
-                                json.dumps(list(s.dependencies or [])),
-                                json.dumps(list(s.patterns or [])),
-                                str(getattr(s, "card_source", "deterministic") or "deterministic"),
+                                _sanitize_optional_text(s.purpose),
+                                _json_dumps_sanitized(list(s.symbols or [])),
+                                _sanitize_optional_text(s.technical_details),
+                                _json_dumps_sanitized(list(s.domain_concepts or [])),
+                                _json_dumps_sanitized(list(s.routes or [])),
+                                _json_dumps_sanitized(list(s.dependencies or [])),
+                                _json_dumps_sanitized(list(s.patterns or [])),
+                                _sanitize_pg_text(getattr(s, "card_source", "deterministic") or "deterministic"),
                                 (
                                     float(s.card_score)
                                     if s.card_score is not None
@@ -2410,7 +2519,7 @@ class PostgresClient:
     async def update_corpus_meta(self, repo_id: str, meta: dict[str, Any]) -> None:
         await self._require_pool()
         assert self._pool is not None
-        meta_json = json.dumps(meta or {})
+        meta_json = _json_dumps_sanitized(meta or {})
         async with self._pool.acquire() as conn:
             await conn.execute(
                 """
@@ -2442,17 +2551,17 @@ class PostgresClient:
 
             if name is not None:
                 updates.append(f"name = ${idx}")
-                args.append(name)
+                args.append(_sanitize_pg_text(name))
                 idx += 1
 
             if path is not None:
                 updates.append(f"root_path = ${idx}")
-                args.append(path)
+                args.append(_sanitize_pg_text(path))
                 idx += 1
 
             if meta_updates:
                 updates.append(f"meta = corpora.meta || ${idx}::jsonb")
-                args.append(json.dumps(meta_updates))
+                args.append(_json_dumps_sanitized(meta_updates))
                 idx += 1
 
             if not updates:
@@ -2584,20 +2693,20 @@ class PostgresClient:
                     WHERE repo_id = $1;
                     """,
                     active_repo_id,
-                    str((active["name"] if active is not None else None) or active_name or staging["name"] or active_repo_id),
-                    str((active["root_path"] if active is not None else None) or active_root_path or staging["root_path"] or "."),
+                    _sanitize_pg_text((active["name"] if active is not None else None) or active_name or staging["name"] or active_repo_id),
+                    _sanitize_pg_text((active["root_path"] if active is not None else None) or active_root_path or staging["root_path"] or "."),
                     (
-                        str(active["description"])
+                        _sanitize_pg_text(active["description"])
                         if (active is not None and active["description"] is not None)
-                        else (active_description if active_description is not None else staging["description"])
+                        else _sanitize_optional_text(active_description if active_description is not None else staging["description"])
                     ),
-                    json.dumps(merged_meta),
+                    _json_dumps_sanitized(merged_meta),
                     staging["last_indexed"],
-                    str(staging["embedding_backend"] or ""),
-                    str(staging["embedding_provider"] or ""),
-                    str(staging["embedding_model"] or ""),
+                    _sanitize_pg_text(staging["embedding_backend"] or ""),
+                    _sanitize_pg_text(staging["embedding_provider"] or ""),
+                    _sanitize_pg_text(staging["embedding_model"] or ""),
                     int(staging["embedding_dimensions"] or 0),
-                    str(staging["ts_config"] or ""),
+                    _sanitize_pg_text(staging["ts_config"] or ""),
                 )
 
                 await conn.execute("DELETE FROM corpus_configs WHERE repo_id = $1;", staging_repo_id)
@@ -2613,7 +2722,7 @@ class PostgresClient:
         description: str | None = None,
         meta: dict[str, Any] | None = None,
     ) -> None:
-        meta_json = json.dumps(meta or {})
+        meta_json = _json_dumps_sanitized(meta or {})
         await conn.execute(
             """
             INSERT INTO corpora (repo_id, name, root_path, description, meta)
@@ -2628,10 +2737,10 @@ class PostgresClient:
               description = EXCLUDED.description,
               meta = corpora.meta || EXCLUDED.meta;
             """,
-            repo_id,
-            name,
-            root_path,
-            description,
+            _sanitize_pg_text(repo_id),
+            _sanitize_pg_text(name),
+            _sanitize_pg_text(root_path),
+            _sanitize_optional_text(description),
             meta_json,
         )
 

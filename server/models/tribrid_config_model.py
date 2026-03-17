@@ -1569,6 +1569,7 @@ class RerankerLegacyTaskResult(BaseModel):
     ok: bool = Field(description="Whether the task succeeded")
     output: str | None = Field(default=None, description="Human-readable output (if any)")
     error: str | None = Field(default=None, description="Error message (if any)")
+    operator_hint: str | None = Field(default=None, description="High-signal implementation hint for the next debugger.")
     metrics: dict[str, float] | None = Field(default=None, description="Evaluation metrics (if any)")
     run_id: str | None = Field(default=None, description="Training run id (if applicable)")
 
@@ -1591,6 +1592,7 @@ class RerankerMineResponse(BaseModel):
     ok: bool = Field(description="Whether mining succeeded")
     output: str | None = Field(default=None, description="Human-readable output")
     error: str | None = Field(default=None, description="Error message (if any)")
+    operator_hint: str | None = Field(default=None, description="High-signal implementation hint for the next debugger.")
 
 
 class RerankerTrainLegacyRequest(BaseModel):
@@ -1609,6 +1611,7 @@ class RerankerTrainLegacyResponse(BaseModel):
     ok: bool = Field(description="Whether training was started")
     output: str | None = Field(default=None, description="Human-readable output")
     error: str | None = Field(default=None, description="Error message (if any)")
+    operator_hint: str | None = Field(default=None, description="High-signal implementation hint for the next debugger.")
     run_id: str | None = Field(default=None, description="Training run id")
 
 
@@ -1618,6 +1621,7 @@ class RerankerEvaluateResponse(BaseModel):
     ok: bool = Field(description="Whether evaluation succeeded")
     output: str | None = Field(default=None, description="Human-readable output")
     error: str | None = Field(default=None, description="Error message (if any)")
+    operator_hint: str | None = Field(default=None, description="High-signal implementation hint for the next debugger.")
     metrics: dict[str, float] | None = Field(default=None, description="Proxy metrics dict (if ok)")
 
 
@@ -1938,6 +1942,7 @@ class RerankerScoreResponse(BaseModel):
     yes_logit: float | None = Field(default=None, description="Raw yes logit (if include_logits and supported)")
     no_logit: float | None = Field(default=None, description="Raw no logit (if include_logits and supported)")
     error: str | None = Field(default=None, description="Error message (if any)")
+    operator_hint: str | None = Field(default=None, description="High-signal implementation hint for the next debugger.")
 
 
 class RecallIndexRequest(BaseModel):
@@ -2372,6 +2377,7 @@ class RerankerTrainMetricEvent(BaseModel):
     epoch: float | None = Field(default=None, ge=0.0)
 
     message: str | None = None  # for log/error
+    operator_hint: str | None = Field(default=None, description="High-signal implementation hint for the next debugger.")
     percent: float | None = Field(default=None, ge=0.0, le=100.0)  # for progress
     metrics: dict[str, float] | None = None  # for metrics: {'mrr@10':0.33,'ndcg@10':0.41,'map':0.22}
     status: RerankerTrainRunStatus | None = None  # for state/complete
@@ -2382,6 +2388,24 @@ class RerankerTrainMetricEvent(BaseModel):
     grad_norm: float | None = None
     step_time_ms: float | None = None
     sample_count: int | None = Field(default=None, ge=0)
+
+
+RerankerDiagnosticLevel = Literal["debug", "info", "warning", "error"]
+
+
+class RerankerTrainDiagnosticRecord(BaseModel):
+    ts: datetime = Field(description="UTC timestamp")
+    run_id: str = Field(description="Training run identifier")
+    level: RerankerDiagnosticLevel = Field(description="Structured diagnostic level")
+    event: str = Field(description="Stable low-cardinality diagnostic event name")
+    message: str = Field(description="Human-readable summary")
+    operator_hint: str | None = Field(default=None, description="High-signal implementation hint for the next debugger.")
+    fields: dict[str, Any] = Field(default_factory=dict, description="Additional low-cardinality diagnostic fields")
+
+
+class RerankerTrainDiagnosticsResponse(BaseModel):
+    ok: bool = Field(default=True)
+    records: list[RerankerTrainDiagnosticRecord] = Field(default_factory=list)
 
 
 class RerankerTrainStartResponse(BaseModel):
@@ -3610,6 +3634,13 @@ class IndexingConfig(BaseModel):
         ge=0,
         le=1,
         description="Skip dense vector indexing"
+    )
+    auto_prepare_dense_retrieval: bool = Field(
+        default=True,
+        description=(
+            "After a dense indexing run completes, automatically build the per-corpus pgvector HNSW index "
+            "and warm representative query embeddings so first retrievals are not cold."
+        ),
     )
     estimated_tokens_per_second_local: int | None = Field(
         default=None,
@@ -5995,6 +6026,7 @@ class TriBridConfig(BaseModel):
             'PARQUET_EXTRACT_TEXT_COLUMNS_ONLY': self.indexing.parquet_extract_text_columns_only,
             'PARQUET_EXTRACT_INCLUDE_COLUMN_NAMES': self.indexing.parquet_extract_include_column_names,
             'SKIP_DENSE': self.indexing.skip_dense,
+            'AUTO_PREPARE_DENSE_RETRIEVAL': self.indexing.auto_prepare_dense_retrieval,
             'ESTIMATED_TOKENS_PER_SECOND_LOCAL': self.indexing.estimated_tokens_per_second_local,
             # Graph storage params (Neo4j)
             'NEO4J_URI': self.graph_storage.neo4j_uri,
@@ -6339,6 +6371,7 @@ class TriBridConfig(BaseModel):
                 parquet_extract_text_columns_only=data.get('PARQUET_EXTRACT_TEXT_COLUMNS_ONLY', 1),
                 parquet_extract_include_column_names=data.get('PARQUET_EXTRACT_INCLUDE_COLUMN_NAMES', 1),
                 skip_dense=data.get('SKIP_DENSE', 0),
+                auto_prepare_dense_retrieval=data.get('AUTO_PREPARE_DENSE_RETRIEVAL', True),
                 estimated_tokens_per_second_local=data.get('ESTIMATED_TOKENS_PER_SECOND_LOCAL', None),
             ),
             graph_storage=GraphStorageConfig(

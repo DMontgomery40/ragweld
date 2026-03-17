@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 from server.db.neo4j import Neo4jClient
 from server.db.postgres import PostgresClient
-from server.indexing.embedder import Embedder
+from server.indexing.embedder import Embedder, configure_postgres_embedding_cache_backend
 from server.models.retrieval import ChunkMatch
 from server.models.tribrid_config_model import (
     FusionConfig,
@@ -411,6 +411,7 @@ class TriBridFusion:
                 )
 
             embedder = Embedder(cfg.embedding, cfg.tokenization)
+            configure_postgres_embedding_cache_backend(embedder, postgres)
 
             # ---- Query-time retrieval contract guards ----
             # Detect dense/sparse configuration drift against what the corpus

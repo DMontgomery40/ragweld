@@ -5,6 +5,7 @@
 // - We do NOT store Grafana API keys/tokens in the frontend.
 
 import { useConfigField } from '@/hooks/useConfig';
+import { GRAFANA_DASHBOARD_PRESETS, findGrafanaPreset } from './dashboardPresets';
 
 export function GrafanaConfig() {
   const [embedEnabledRaw, setEmbedEnabled, embedMeta] = useConfigField<number>('ui.grafana_embed_enabled', 1);
@@ -19,12 +20,20 @@ export function GrafanaConfig() {
   const normalizedBase = String(baseUrl || '').replace(/\/$/, '');
   const normalizedUid = String(dashboardUid || '').trim();
   const normalizedSlug = String(dashboardSlug || normalizedUid).trim() || normalizedUid;
+  const activePreset = findGrafanaPreset(normalizedUid, normalizedSlug);
   const dashboardHref =
     normalizedBase && normalizedUid
       ? `${normalizedBase}/d/${encodeURIComponent(normalizedUid)}/${encodeURIComponent(normalizedSlug)}${
           normalizedBase.startsWith('/') ? '?embed=1' : ''
         }`
       : '';
+
+  function applyPreset(presetId: string) {
+    const preset = GRAFANA_DASHBOARD_PRESETS.find((item) => item.id === presetId);
+    if (!preset) return;
+    setDashboardUid(preset.uid);
+    setDashboardSlug(preset.slug);
+  }
 
   return (
     <div style={{ maxWidth: '980px', margin: '0 auto', padding: '24px' }}>
@@ -59,6 +68,35 @@ export function GrafanaConfig() {
         gridTemplateColumns: '1fr 1fr',
         gap: '16px'
       }}>
+        <div style={{ gridColumn: '1 / 3' }}>
+          <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: 'var(--fg)', marginBottom: '8px' }}>
+            Dashboard Preset
+          </label>
+          <select
+            value={activePreset?.id || ''}
+            onChange={(e) => applyPreset(e.target.value)}
+            style={{
+              width: '100%',
+              background: 'var(--input-bg)',
+              border: '1px solid var(--line)',
+              color: 'var(--fg)',
+              padding: '10px 12px',
+              borderRadius: '8px',
+              fontSize: '13px'
+            }}
+          >
+            <option value="">Custom</option>
+            {GRAFANA_DASHBOARD_PRESETS.map((preset) => (
+              <option key={preset.id} value={preset.id}>{preset.label}</option>
+            ))}
+          </select>
+          <div style={{ marginTop: '6px', fontSize: '12px', color: 'var(--fg-muted)' }}>
+            {activePreset
+              ? activePreset.description
+              : 'Use presets to expose provisioned backend dashboards in the UI without copying UIDs by hand.'}
+          </div>
+        </div>
+
         <div style={{ gridColumn: '1 / 3' }}>
           <label style={{ display: 'flex', gap: '10px', alignItems: 'center', fontSize: '13px', fontWeight: 700, color: 'var(--fg)' }}>
             <input

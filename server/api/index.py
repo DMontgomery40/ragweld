@@ -25,7 +25,7 @@ from server.chat.provider_router import select_provider_route
 from server.db.neo4j import Neo4jClient
 from server.db.postgres import PostgresClient
 from server.indexing.chunker import Chunker
-from server.indexing.embedder import Embedder
+from server.indexing.embedder import Embedder, configure_postgres_embedding_cache_backend
 from server.indexing.graph_builder import GraphBuilder
 from server.indexing.loader import FileLoader
 from server.indexing.text_extractors import extract_text_for_path
@@ -719,6 +719,197 @@ async def _compute_dashboard_storage_breakdown(*, repo_id: str) -> DashboardInde
     )
 
 
+def _normalize_index_probe_text(value: str, *, max_chars: int) -> str:
+    text = re.sub(r"\s+", " ", str(value or "")).strip()
+    if len(text) <= max_chars:
+        return text
+    clipped = text[:max_chars].rstrip()
+    if " " in clipped:
+        clipped = clipped.rsplit(" ", 1)[0].rstrip()
+    return clipped.rstrip(" ,;:.")
+
+
+def _derive_post_index_dense_retrieval_queries(
+    *,
+    repo_id: str,
+    repo_path: str,
+    corpus_name: str,
+    corpus_description: str | None,
+    corpus_meta: dict[str, Any] | None,
+    sample_chunks: list[Chunk],
+    max_queries: int = 4,
+) -> list[str]:
+    queries: list[str] = []
+    seen: set[str] = set()
+
+    def _add(raw: str, *, max_chars: int = 220) -> None:
+        text = _normalize_index_probe_text(raw, max_chars=max_chars)
+        if not text:
+            return
+        key = text.lower()
+        if key in seen:
+            return
+        seen.add(key)
+        queries.append(text)
+
+    for chunk in sample_chunks:
+        _add(chunk.content, max_chars=220)
+        if len(queries) >= max_queries:
+            return queries[:max_queries]
+
+    keywords = (corpus_meta or {}).get("keywords") if isinstance(corpus_meta, dict) else None
+    if isinstance(keywords, list):
+        for item in keywords:
+            kw = str(item or "").strip()
+            if not kw:
+                continue
+            _add(kw, max_chars=120)
+            if len(queries) >= max_queries:
+                return queries[:max_queries]
+
+    _add(str(corpus_description or ""), max_chars=160)
+    if len(queries) >= max_queries:
+        return queries[:max_queries]
+
+    repo_tail = Path(repo_path).name.strip()
+    for candidate in (corpus_name, repo_id, repo_tail):
+        _add(str(candidate or ""), max_chars=96)
+        if len(queries) >= max_queries:
+            break
+
+    return queries[:max_queries]
+
+
+async def _prepare_dense_retrieval_after_indexing(
+    *,
+    repo_id: str,
+    repo_path: str,
+    cfg: TriBridConfig,
+    stats: IndexStats,
+    queue: asyncio.Queue[dict[str, Any]] | None,
+) -> dict[str, Any]:
+    if not bool(getattr(cfg.indexing, "auto_prepare_dense_retrieval", True)):
+        return {"status": "disabled"}
+    if bool(int(getattr(cfg.indexing, "skip_dense", 0) or 0) == 1):
+        return {"status": "skip_dense"}
+    if int(getattr(stats, "embedding_dimensions", 0) or 0) <= 0:
+        return {"status": "no_dense_vectors"}
+
+    postgres = PostgresClient(cfg.indexing.postgres_url)
+    await postgres.connect()
+    try:
+        embedded_chunks = await postgres.count_chunks_with_embeddings(repo_id)
+        if embedded_chunks <= 0:
+            return {"status": "no_embedded_chunks"}
+
+        corpus = await postgres.get_corpus(repo_id)
+        corpus_name = str((corpus or {}).get("name") or repo_id)
+        corpus_description = (corpus or {}).get("description")
+        corpus_meta = (corpus.get("meta") or {}) if corpus else {}
+
+        _emit_event(
+            queue,
+            {
+                "type": "progress",
+                "percent": 99,
+                "message": "Preparing dense retrieval",
+                "current_file": None,
+            },
+            drop_oldest=True,
+        )
+        _emit_event(
+            queue,
+            {
+                "type": "log",
+                "message": "⚙️ Post-index dense retrieval prep: building pgvector index and warming query embeddings",
+            },
+            drop_oldest=True,
+        )
+
+        with INDEX_STAGE_LATENCY_SECONDS.labels(stage="postgres_ensure_vector_index").time():
+            index_name = await postgres.ensure_vector_index(repo_id)
+
+        sample_chunks = await postgres.list_chunks_for_repo(repo_id, limit=3)
+        queries = _derive_post_index_dense_retrieval_queries(
+            repo_id=repo_id,
+            repo_path=repo_path,
+            corpus_name=corpus_name,
+            corpus_description=str(corpus_description) if corpus_description is not None else None,
+            corpus_meta=corpus_meta if isinstance(corpus_meta, dict) else {},
+            sample_chunks=sample_chunks,
+        )
+
+        embedder = Embedder(cfg.embedding, cfg.tokenization)
+        configure_postgres_embedding_cache_backend(embedder, postgres)
+        query_vectors: list[list[float]] = []
+        if queries:
+            with INDEX_STAGE_LATENCY_SECONDS.labels(stage="warm_query_embedding_cache").time():
+                query_vectors = await embedder.embed_batch(queries)
+
+        smoke_hits = 0
+        smoke_queries = min(len(queries), len(query_vectors), 3)
+        best_score = 0.0
+        if smoke_queries > 0:
+            with INDEX_STAGE_LATENCY_SECONDS.labels(stage="post_index_vector_smoke").time():
+                for query, vector in zip(queries[:smoke_queries], query_vectors[:smoke_queries], strict=True):
+                    results = await postgres.vector_search(
+                        repo_id,
+                        vector,
+                        1,
+                        expected_dimensions=int(embedder.dim),
+                    )
+                    if results:
+                        smoke_hits += 1
+                        best_score = max(best_score, float(results[0].score or 0.0))
+                    else:
+                        logger.warning("Dense retrieval smoke query returned no hits for corpus '%s': %s", repo_id, query)
+
+        _emit_event(
+            queue,
+            {
+                "type": "log",
+                "message": (
+                    "⚡ Dense retrieval prep complete: "
+                    f"index={index_name} "
+                    f"warmed_queries={len(queries)} "
+                    f"smoke_hits={smoke_hits}/{smoke_queries} "
+                    f"best_score={best_score:.3f}"
+                ),
+                "meta": {
+                    "stage": "post_index_dense_retrieval",
+                    "index_name": index_name,
+                    "warmed_queries": int(len(queries)),
+                    "smoke_hits": int(smoke_hits),
+                    "smoke_queries": int(smoke_queries),
+                    "best_score": float(best_score),
+                },
+            },
+            drop_oldest=True,
+        )
+        return {
+            "status": "ok",
+            "index_name": index_name,
+            "warmed_queries": int(len(queries)),
+            "smoke_hits": int(smoke_hits),
+            "smoke_queries": int(smoke_queries),
+            "best_score": float(best_score),
+        }
+    except Exception as exc:
+        logger.warning("Post-index dense retrieval prep failed for corpus '%s': %s", repo_id, exc, exc_info=True)
+        _emit_event(
+            queue,
+            {
+                "type": "warning",
+                "message": f"Dense retrieval prep incomplete: {exc}",
+            },
+            drop_oldest=True,
+        )
+        return {"status": "error", "error": str(exc)}
+    finally:
+        with contextlib.suppress(Exception):
+            await postgres.disconnect()
+
+
 def _emit_event(
     queue: asyncio.Queue[dict[str, Any]] | None,
     event: dict[str, Any],
@@ -1099,32 +1290,8 @@ async def _run_index(
         description=str(active_description) if active_description is not None else None,
         meta={**active_meta, "internal_staging": target_repo_id != repo_id},
     )
-    if embedder is not None and bool(int(getattr(cfg.embedding, "embedding_cache_enabled", 0) or 0) == 1):
-        cache_backend = str(getattr(cfg.embedding, "embedding_backend", "") or "").strip().lower() or "deterministic"
-        cache_provider = str(getattr(cfg.embedding, "embedding_type", "") or "").strip().lower() or "deterministic"
-        cache_provider_key = f"{cache_backend}:{cache_provider}"
-        cache_model = str(getattr(cfg.embedding, "effective_model", "") or "").strip() or "deterministic"
-        cache_dim = int(embedder.dim)
-
-        async def _cache_lookup(input_hashes: list[str]) -> dict[str, list[float]]:
-            return await postgres.embedding_cache_lookup_batch(
-                provider=cache_provider_key,
-                model=cache_model,
-                dimensions=cache_dim,
-                input_hashes=input_hashes,
-            )
-
-        async def _cache_upsert(entries: dict[str, tuple[str, list[float]]]) -> int:
-            return await postgres.embedding_cache_upsert_batch(
-                provider=cache_provider_key,
-                model=cache_model,
-                dimensions=cache_dim,
-                entries=entries,
-            )
-
-        embedder.configure_cache_backend(lookup_batch=_cache_lookup, upsert_batch=_cache_upsert)
-    elif embedder is not None:
-        embedder.clear_cache_backend()
+    if embedder is not None:
+        configure_postgres_embedding_cache_backend(embedder, postgres)
 
     # Corpus-level exclude paths (stored in Postgres corpora.meta.exclude_paths)
     extra_gitignore_patterns: list[str] = []
@@ -2122,6 +2289,13 @@ async def _background_index_job(request: IndexRequest, queue: asyncio.Queue[dict
                 await neo4j.promote_repo_graph(active_repo_id=repo_id, staging_repo_id=staging_repo_id)
             finally:
                 await neo4j.disconnect()
+        await _prepare_dense_retrieval_after_indexing(
+            repo_id=repo_id,
+            repo_path=request.repo_path,
+            cfg=cfg,
+            stats=stats,
+            queue=queue,
+        )
         # Update process-level “size” gauges (best-effort; no per-corpus labels).
         try:
             CHUNKS_INDEXED_CURRENT.set(int(getattr(stats, "total_chunks", 0) or 0))

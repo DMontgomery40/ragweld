@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from typing import Any, Literal
 
 from server.db.postgres import PostgresClient
-from server.indexing.embedder import Embedder
+from server.indexing.embedder import Embedder, configure_postgres_embedding_cache_backend
 from server.models.tribrid_config_model import SemanticCacheConfig, TriBridConfig
 from server.observability.metrics import (
     SEMANTIC_CACHE_LOOKUP_LATENCY_SECONDS,
@@ -53,6 +53,7 @@ class SemanticCacheService:
         self._cache_cfg: SemanticCacheConfig = config.semantic_cache
         self._pg = PostgresClient(config.indexing.postgres_url)
         self._embedder = Embedder(config.embedding, config.tokenization)
+        configure_postgres_embedding_cache_backend(self._embedder, self._pg)
 
     @property
     def cfg(self) -> SemanticCacheConfig:
@@ -227,4 +228,3 @@ class SemanticCacheService:
         except Exception:
             SEMANTIC_CACHE_WRITES_TOTAL.labels(endpoint=endpoint, outcome="error").inc()
             return False
-

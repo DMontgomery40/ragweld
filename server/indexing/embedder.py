@@ -10,6 +10,7 @@ from collections.abc import Awaitable, Callable
 from functools import lru_cache
 from typing import Any
 
+from server.db.postgres import PostgresClient
 from server.indexing.tokenizer import TextTokenizer
 from server.models.index import Chunk
 from server.models.tribrid_config_model import EmbeddingConfig, TokenizationConfig
@@ -532,3 +533,43 @@ class Embedder:
             if len(v) != self.dim:
                 raise RuntimeError(f"Embedding dimension mismatch ({len(v)} != {self.dim}). Reindex after updating embedding_dim.")
         return vecs
+
+
+def configure_postgres_embedding_cache_backend(embedder: Embedder, postgres: PostgresClient) -> None:
+    """Attach the shared Postgres embedding cache to an embedder when enabled."""
+    if not hasattr(embedder, "config"):
+        return
+    if not hasattr(postgres, "embedding_cache_lookup_batch") or not hasattr(postgres, "embedding_cache_upsert_batch"):
+        try:
+            embedder.clear_cache_backend()
+        except Exception:
+            pass
+        return
+    cfg = embedder.config
+    if bool(int(getattr(cfg, "embedding_cache_enabled", 0) or 0) != 1):
+        embedder.clear_cache_backend()
+        return
+
+    cache_backend = str(getattr(cfg, "embedding_backend", "") or "").strip().lower() or "deterministic"
+    cache_provider = str(getattr(cfg, "embedding_type", "") or "").strip().lower() or "deterministic"
+    cache_provider_key = f"{cache_backend}:{cache_provider}"
+    cache_model = str(getattr(cfg, "effective_model", "") or "").strip() or "deterministic"
+    cache_dim = int(embedder.dim)
+
+    async def _cache_lookup(input_hashes: list[str]) -> dict[str, list[float]]:
+        return await postgres.embedding_cache_lookup_batch(
+            provider=cache_provider_key,
+            model=cache_model,
+            dimensions=cache_dim,
+            input_hashes=input_hashes,
+        )
+
+    async def _cache_upsert(entries: dict[str, tuple[str, list[float]]]) -> int:
+        return await postgres.embedding_cache_upsert_batch(
+            provider=cache_provider_key,
+            model=cache_model,
+            dimensions=cache_dim,
+            entries=entries,
+        )
+
+    embedder.configure_cache_backend(lookup_batch=_cache_lookup, upsert_batch=_cache_upsert)

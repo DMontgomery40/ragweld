@@ -9,6 +9,7 @@ import type {
   CorpusEvalProfile,
   OkResponse,
   RerankerTrainDiffRequest,
+  RerankerTrainDiagnosticsResponse,
   RerankerTrainDiffResponse,
   RerankerTrainMetricEvent,
   RerankerTrainMetricsResponse,
@@ -72,6 +73,16 @@ export class RerankerTrainingService {
     return data;
   }
 
+  async getDiagnostics(runId: string, limit = 500): Promise<RerankerTrainDiagnosticsResponse> {
+    const { data } = await apiClient.get<RerankerTrainDiagnosticsResponse>(
+      api(
+        `/reranker/train/run/${encodeURIComponent(runId)}/diagnostics?limit=${encodeURIComponent(String(limit))}`
+      ),
+      { headers: { 'Cache-Control': 'no-store' } }
+    );
+    return data;
+  }
+
   async diffRuns(baselineRunId: string, currentRunId: string): Promise<RerankerTrainDiffResponse> {
     const payload: RerankerTrainDiffRequest = {
       baseline_run_id: baselineRunId,
@@ -87,6 +98,10 @@ export class RerankerTrainingService {
       {}
     );
     return data;
+  }
+
+  downloadDiagnostics(runId: string): void {
+    window.open(apiUrl(`/api/reranker/train/run/${encodeURIComponent(runId)}/diagnostics/download`), '_blank');
   }
 
   async scorePair(payload: RerankerScoreRequest): Promise<RerankerScoreResponse> {

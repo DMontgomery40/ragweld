@@ -193,6 +193,10 @@ export function IndexingSubtab() {
   );
 
   const [skipDense, setSkipDense] = useConfigField<number>('indexing.skip_dense', 0);
+  const [autoPrepareDenseRetrieval, setAutoPrepareDenseRetrieval] = useConfigField<boolean>(
+    'indexing.auto_prepare_dense_retrieval',
+    true
+  );
   const [graphIndexingEnabled, setGraphIndexingEnabled] = useConfigField<boolean>('graph_indexing.enabled', true);
   const [lexicalGraphEnabled, setLexicalGraphEnabled] = useConfigField<boolean>('graph_indexing.build_lexical_graph', true);
   const [storeChunkEmbeddings, setStoreChunkEmbeddings] = useConfigField<boolean>('graph_indexing.store_chunk_embeddings', true);
@@ -617,6 +621,7 @@ export function IndexingSubtab() {
           `Embedding: ${String(estimate.embedding_provider || '—')}/${String(estimate.embedding_model || '—')} (${
             estimate.embedding_backend
           }, skip_dense=${estimate.skip_dense ? 'yes' : 'no'})`,
+          `Post-index dense prep: ${estimate.skip_dense ? 'ignored (skip dense)' : autoPrepareDenseRetrieval ? 'enabled' : 'disabled'}`,
           `Cost (est): ${cost} • Time (est): ${time}`,
           ...(costBreakdown ? [`Cost breakdown: ${costBreakdown}`] : []),
           ...(semanticKgSeconds != null
@@ -644,6 +649,9 @@ export function IndexingSubtab() {
       terminalRef.current?.appendLine(`   Provider: ${String(embeddingType || '')}, Model: ${String(currentModel || '')}`);
       terminalRef.current?.appendLine(`   Chunk Size: ${chunkSize}, Strategy: ${chunkingStrategy}`);
       terminalRef.current?.appendLine(`   Graph indexing: ${graphIndexingEnabled ? 'enabled' : 'disabled'} • Skip dense: ${skipDense ? 'yes' : 'no'}`);
+      terminalRef.current?.appendLine(
+        `   Post-index dense prep: ${skipDense ? 'ignored (skip dense)' : autoPrepareDenseRetrieval ? 'enabled' : 'disabled'}`
+      );
 
       const st = await startAndStream(body, {
         terminalId: 'indexing_terminal',
@@ -691,6 +699,7 @@ export function IndexingSubtab() {
     currentModel,
     effectivePath,
     embeddingType,
+    autoPrepareDenseRetrieval,
     flushPendingPatches,
     forceReindex,
     graphIndexingEnabled,
@@ -2446,6 +2455,45 @@ export function IndexingSubtab() {
                     skip_dense=1 disables embeddings. Re-index with dense enabled to populate Neo4j vectors.
                   </div>
                 )}
+              </div>
+
+              <div
+                style={{
+                  padding: '16px',
+                  background: 'var(--bg-elev2)',
+                  borderRadius: '8px',
+                  border: autoPrepareDenseRetrieval ? '2px solid rgba(var(--accent-rgb), 0.35)' : '1px solid var(--line)',
+                }}
+              >
+                <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={autoPrepareDenseRetrieval}
+                    onChange={(e) => setAutoPrepareDenseRetrieval(e.target.checked)}
+                    style={{ width: '18px', height: '18px' }}
+                  />
+                  <div>
+                    <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--fg)' }}>Auto-prepare dense retrieval</div>
+                    <div style={{ fontSize: '11px', color: 'var(--fg-muted)', marginTop: '2px' }}>
+                      After dense indexing, build the corpus pgvector HNSW index and warm representative query embeddings
+                      so the first retrievals are not cold.
+                    </div>
+                  </div>
+                </label>
+                <div
+                  style={{
+                    marginTop: '10px',
+                    padding: '8px 12px',
+                    background: skipDense === 1 ? 'rgba(var(--warn-rgb), 0.1)' : 'rgba(var(--accent-rgb), 0.08)',
+                    borderRadius: '6px',
+                    color: skipDense === 1 ? 'var(--warn)' : 'var(--fg-muted)',
+                    fontSize: '11px',
+                  }}
+                >
+                  {skipDense === 1
+                    ? 'Ignored while Skip dense is enabled.'
+                    : 'Runs inside the normal index job, so you do not need a separate post-index step.'}
+                </div>
               </div>
 
               <div

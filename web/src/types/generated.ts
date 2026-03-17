@@ -1050,6 +1050,8 @@ export interface IndexingConfig {
   parquet_extract_include_column_names?: number; // default: 1
   /** Skip dense vector indexing */
   skip_dense?: number; // default: 0
+  /** After a dense indexing run completes, automatically build the per-corpus pgvector HNSW index and warm representative query embeddings so first retrievals are not cold. */
+  auto_prepare_dense_retrieval?: boolean; // default: True
   /** Optional local embedding throughput override for index-time estimates (tokens/sec). */
   estimated_tokens_per_second_local?: number | null; // default: None
 }
@@ -1510,6 +1512,8 @@ export interface RerankerLegacyTaskResult {
   output?: string | null; // default: None
   /** Error message (if any) */
   error?: string | null; // default: None
+  /** High-signal implementation hint for the next debugger. */
+  operator_hint?: string | null; // default: None
   /** Evaluation metrics (if any) */
   metrics?: Record<string, number> | null; // default: None
   /** Training run id (if applicable) */
@@ -1526,6 +1530,23 @@ export interface RerankerRuntimeCapabilities {
   learning_backends?: RuntimeOption[];
 }
 
+export interface RerankerTrainDiagnosticRecord {
+  /** UTC timestamp */
+  ts: string;
+  /** Training run identifier */
+  run_id: string;
+  /** Structured diagnostic level */
+  level: "debug" | "info" | "warning" | "error";
+  /** Stable low-cardinality diagnostic event name */
+  event: string;
+  /** Human-readable summary */
+  message: string;
+  /** High-signal implementation hint for the next debugger. */
+  operator_hint?: string | null; // default: None
+  /** Additional low-cardinality diagnostic fields */
+  fields?: Record<string, unknown>;
+}
+
 export interface RerankerTrainMetricEvent {
   type: "log" | "progress" | "metrics" | "state" | "error" | "complete" | "telemetry";
   /** UTC timestamp */
@@ -1534,6 +1555,8 @@ export interface RerankerTrainMetricEvent {
   step?: number | null; // default: None
   epoch?: number | null; // default: None
   message?: string | null; // default: None
+  /** High-signal implementation hint for the next debugger. */
+  operator_hint?: string | null; // default: None
   percent?: number | null; // default: None
   metrics?: Record<string, number> | null; // default: None
   status?: "queued" | "running" | "completed" | "failed" | "cancelled" | null; // default: None
@@ -3084,6 +3107,8 @@ export interface RerankerEvaluateResponse {
   output?: string | null;
   /** Error message (if any) */
   error?: string | null;
+  /** High-signal implementation hint for the next debugger. */
+  operator_hint?: string | null;
   /** Proxy metrics dict (if ok) */
   metrics?: Record<string, number> | null;
 }
@@ -3145,6 +3170,8 @@ export interface RerankerMineResponse {
   output?: string | null;
   /** Error message (if any) */
   error?: string | null;
+  /** High-signal implementation hint for the next debugger. */
+  operator_hint?: string | null;
 }
 
 /** Response payload for GET /api/reranker/nohits. */
@@ -3181,6 +3208,13 @@ export interface RerankerScoreResponse {
   no_logit?: number | null;
   /** Error message (if any) */
   error?: string | null;
+  /** High-signal implementation hint for the next debugger. */
+  operator_hint?: string | null;
+}
+
+export interface RerankerTrainDiagnosticsResponse {
+  ok?: boolean;
+  records?: RerankerTrainDiagnosticRecord[];
 }
 
 export interface RerankerTrainDiffRequest {
@@ -3223,6 +3257,8 @@ export interface RerankerTrainLegacyResponse {
   output?: string | null;
   /** Error message (if any) */
   error?: string | null;
+  /** High-signal implementation hint for the next debugger. */
+  operator_hint?: string | null;
   /** Training run id */
   run_id?: string | null;
 }
