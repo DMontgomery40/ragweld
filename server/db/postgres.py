@@ -776,6 +776,17 @@ class PostgresClient:
         if not chunks:
             return 0
         chunks = [_sanitize_chunk_for_storage(ch) for ch in chunks]
+        inferred_dimensions = 0
+        for chunk in chunks:
+            if not chunk.embedding:
+                continue
+            dims = len(chunk.embedding)
+            if dims <= 0:
+                continue
+            if inferred_dimensions == 0:
+                inferred_dimensions = dims
+            elif inferred_dimensions != dims:
+                raise ValueError("All embeddings in a batch must have the same dimensions")
         await self._require_pool()
         assert self._pool is not None
 
@@ -821,11 +832,28 @@ class PostgresClient:
                     for ch in chunks
                 ],
             )
-            await conn.execute(
-                "UPDATE corpora SET last_indexed = $2 WHERE repo_id = $1;",
-                repo_id,
-                datetime.now(UTC),
-            )
+            indexed_at = datetime.now(UTC)
+            if inferred_dimensions > 0:
+                await conn.execute(
+                    """
+                    UPDATE corpora
+                    SET last_indexed = $2,
+                        embedding_dimensions = CASE
+                            WHEN COALESCE(embedding_dimensions, 0) <= 0 THEN $3::int
+                            ELSE embedding_dimensions
+                        END
+                    WHERE repo_id = $1;
+                    """,
+                    repo_id,
+                    indexed_at,
+                    inferred_dimensions,
+                )
+            else:
+                await conn.execute(
+                    "UPDATE corpora SET last_indexed = $2 WHERE repo_id = $1;",
+                    repo_id,
+                    indexed_at,
+                )
         return len(chunks)
 
     async def vector_search(
