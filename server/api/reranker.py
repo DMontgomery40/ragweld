@@ -7,6 +7,7 @@ import math
 import os
 import shutil
 import tempfile
+import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -69,8 +70,8 @@ from server.observability.metrics import (
     RERANKER_PROMOTIONS_TOTAL,
     RERANKER_TRAIN_ACTIVE_RUNS,
     RERANKER_TRAIN_EVENTS_TOTAL,
-    RERANKER_TRAIN_LAST_EPOCH,
     RERANKER_TRAIN_GRAD_NORM,
+    RERANKER_TRAIN_LAST_EPOCH,
     RERANKER_TRAIN_LAST_METRIC,
     RERANKER_TRAIN_LAST_STEP,
     RERANKER_TRAIN_LOSS,
@@ -80,8 +81,8 @@ from server.observability.metrics import (
     RERANKER_TRAIN_STAGE_ERRORS_TOTAL,
     RERANKER_TRAIN_STAGE_LATENCY_SECONDS,
     RERANKER_TRAIN_STEP_TIME_SECONDS,
-    RERANKER_TRIPLETS_TOTAL,
     RERANKER_TRIPLET_SKIPS_TOTAL,
+    RERANKER_TRIPLETS_TOTAL,
 )
 from server.retrieval.mlx_qwen3 import (
     clear_mlx_qwen3_cache,
