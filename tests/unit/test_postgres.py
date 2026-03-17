@@ -11,9 +11,18 @@ from contextlib import suppress
 
 import pytest
 
-from server.db.postgres import PostgresClient, _json_dumps_sanitized, _sanitize_chunk_for_storage, _vector_index_name
+from server.db.postgres import (
+    PostgresClient,
+    _json_dumps_sanitized,
+    _sanitize_chunk_for_storage,
+    _vector_index_name,
+)
 from server.models.index import Chunk
-from server.models.tribrid_config_model import ChunkSummariesLastBuild, ChunkSummary, RecallIntensity
+from server.models.tribrid_config_model import (
+    ChunkSummariesLastBuild,
+    ChunkSummary,
+    RecallIntensity,
+)
 
 
 def _postgres_available() -> bool:
@@ -279,10 +288,22 @@ async def test_ensure_vector_index_creates_partial_hnsw_index() -> None:
         except Exception as exc:  # pragma: no cover
             pytest.skip(f"vector insert failed (pgvector dims?): {exc}")
 
-        created = await pg.ensure_vector_index(repo_id)
-        assert created == index_name
         await pg._require_pool()
         assert pg._pool is not None
+        async with pg._pool.acquire() as conn:
+            corpus = await conn.fetchrow(
+                """
+                SELECT embedding_dimensions
+                FROM corpora
+                WHERE repo_id = $1
+                """,
+                repo_id,
+            )
+        assert corpus is not None
+        assert int(corpus["embedding_dimensions"] or 0) == 3
+
+        created = await pg.ensure_vector_index(repo_id)
+        assert created == index_name
         async with pg._pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
