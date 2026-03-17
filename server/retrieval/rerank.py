@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import logging
 import os
 import platform
 import time
@@ -17,6 +19,8 @@ from server.observability.metrics import (
 )
 from server.reranker.artifacts import resolve_project_path
 from server.retrieval.mlx_qwen3 import get_mlx_qwen3_reranker, mlx_is_available
+
+logger = logging.getLogger(__name__)
 
 
 def _stable_chunk_key(chunk: ChunkMatch) -> str:
@@ -223,6 +227,23 @@ class Reranker:
         except Exception as e:
             if mode in {"learning", "cloud"}:
                 RERANKER_ERRORS_TOTAL.labels(mode=mode).inc()
+            logger.warning(
+                json.dumps(
+                    {
+                        "event": "reranker_inference_failed",
+                        "message": str(e),
+                        "operatorHint": (
+                            "Reranker inference failed after candidate retrieval; inspect the active adapter path, backend prerequisites, and model-cache state."
+                        ),
+                        "fields": {
+                            "mode": mode,
+                            "trained_model_path": str(self.trained_model_path or ""),
+                            "candidates": int(len(chunks)),
+                        },
+                    },
+                    sort_keys=True,
+                )
+            )
             _RUNTIME.last_ok = False
             _RUNTIME.last_applied = False
             _RUNTIME.last_candidates_reranked = 0

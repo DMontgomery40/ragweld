@@ -9,6 +9,7 @@ type Props = {
   loading: boolean;
   onDownload: () => void;
   onClear: () => void;
+  clearDisabled?: boolean;
 };
 
 function logsToText(logs: any[]): string {
@@ -25,7 +26,7 @@ function logsToText(logs: any[]): string {
     .join('\n');
 }
 
-export function StudioLogTerminal({ logs, loading, onDownload, onClear }: Props) {
+export function StudioLogTerminal({ logs, loading, onDownload, onClear, clearDisabled = false }: Props) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
@@ -150,7 +151,7 @@ export function StudioLogTerminal({ logs, loading, onDownload, onClear }: Props)
         <button className="small-button" onClick={onSearchNext}>Next</button>
         <button className="small-button" onClick={onCopy}>{copied ? 'Copied' : 'Copy'}</button>
         <button className="small-button" onClick={onDownload}>Export</button>
-        <button className="small-button" onClick={onClear}>Clear</button>
+        <button className="small-button" onClick={onClear} disabled={clearDisabled}>Clear</button>
       </div>
       <div ref={hostRef} className="studio-log-terminal-host" />
     </div>

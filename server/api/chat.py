@@ -16,7 +16,7 @@ from server.chat.model_discovery import discover_models
 from server.chat.recall_indexer import index_recall_conversation
 from server.chat.source_router import resolve_sources
 from server.db.postgres import PostgresClient
-from server.indexing.embedder import Embedder
+from server.indexing.embedder import Embedder, configure_postgres_embedding_cache_backend
 from server.models.chat import ChatRequest, ChatResponse, Message
 from server.models.tribrid_config_model import (
     ChatModelInfo,
@@ -359,6 +359,7 @@ async def chat(request: ChatRequest) -> ChatResponse:
                 pg = PostgresClient(config.indexing.postgres_url)
                 await pg.connect()
                 embedder = Embedder(config.embedding)
+                configure_postgres_embedding_cache_backend(embedder, pg)
                 await index_recall_conversation(
                     pg,
                     conversation_id=conv.id,
@@ -504,6 +505,7 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
                             pg = PostgresClient(config.indexing.postgres_url)
                             await pg.connect()
                             embedder = Embedder(config.embedding)
+                            configure_postgres_embedding_cache_backend(embedder, pg)
                             await index_recall_conversation(
                                 pg,
                                 conversation_id=conv.id,
@@ -1038,6 +1040,7 @@ async def recall_index(request: RecallIndexRequest) -> RecallIndexResponse:
     pg = PostgresClient(cfg.indexing.postgres_url)
     await pg.connect()
     embedder = Embedder(cfg.embedding)
+    configure_postgres_embedding_cache_backend(embedder, pg)
     n = await index_recall_conversation(
         pg,
         conversation_id=request.conversation_id,

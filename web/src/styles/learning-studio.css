@@ -623,6 +623,10 @@
   line-height: 1.35;
 }
 
+.studio-event-operator-hint {
+  color: var(--studio-warn);
+}
+
 .studio-mini-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(108px, 1fr));

@@ -3,17 +3,20 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from prometheus_client import generate_latest
 
 from server.codex_session_ingest import (
     CorpusWriter,
+    JsonLogger,
     MetricsRegistry,
     SessionFileContext,
     SessionNormalizer,
-    JsonLogger,
     RunConfig,
+    build_dashboard,
     current_dead_letter_count,
     extract_prometheus_config_text,
     extract_exit_code,
+    parse_verify_query,
     sanitize_chunk_for_storage,
     split_text_windows,
     upsert_prometheus_job,
@@ -178,6 +181,77 @@ def test_current_dead_letter_count_counts_lines(tmp_path: Path) -> None:
     path = tmp_path / "dead_letters.jsonl"
     path.write_text('{"a":1}\n{"b":2}\n', encoding="utf-8")
     assert current_dead_letter_count(path) == 2
+
+
+def test_parse_verify_query_accepts_known_streams_and_rejects_bad_input() -> None:
+    parsed = parse_verify_query("semantic:why did the github action fail")
+    assert parsed.stream == "semantic"
+    assert parsed.text == "why did the github action fail"
+
+    with pytest.raises(Exception):
+        parse_verify_query("wrongprefix:hello")
+
+    with pytest.raises(Exception):
+        parse_verify_query("missing separator")
+
+
+def test_metrics_registry_summary_and_verification_metrics_render() -> None:
+    registry = MetricsRegistry()
+    registry.update_from_status(
+        {
+            "phase": "complete",
+            "discovered_files": 100,
+            "completed_files": 92,
+            "skipped_files": 8,
+            "semantic_chunks_written": 250,
+            "summary_chunks_written": 5,
+            "artifact_chunks_written": 400,
+            "events_seen": 1234,
+            "errors": 0,
+            "dead_letter_chunks": 1,
+            "started_at": "2026-03-13T12:00:00+00:00",
+            "last_updated_at": "2026-03-13T13:00:00+00:00",
+            "current_file_size_bytes": 10,
+            "current_file_bytes_read": 10,
+            "current_line": 4,
+            "current_file_progress_ratio": 1.0,
+        }
+    )
+    registry.update_from_verification(
+        {
+            "verified_at": "2026-03-13T13:05:00+00:00",
+            "overall_passed": True,
+            "total_queries": 3,
+            "passed_queries": 3,
+            "corpora": {
+                "semantic": {"persist_ratio": 0.97},
+                "artifact": {"persist_ratio": 0.96},
+            },
+            "queries": [
+                {
+                    "stream": "semantic",
+                    "text": "why did the github action fail",
+                    "merged_hits": [{"score": 0.81}],
+                    "legs": {"vector": {"latency_ms": 12.3}, "sparse": {"latency_ms": 6.4}},
+                }
+            ],
+        }
+    )
+
+    rendered = generate_latest(registry.registry).decode("utf-8")
+    assert 'codex_session_ingest_run_files{kind="completed"} 92.0' in rendered
+    assert 'codex_session_ingest_run_chunks{stream="semantic_total"} 255.0' in rendered
+    assert "codex_session_ingest_verification_overall_pass 1.0" in rendered
+    assert 'codex_session_ingest_verification_query_hits{query="why did the github action fail",stream="semantic"} 1.0' in rendered
+
+
+def test_build_dashboard_includes_summary_and_retrieval_panels() -> None:
+    dashboard = build_dashboard("prom", "codex-session-ingest", "codex-session-ingest", "Codex Session Ingest")
+    titles = {panel["title"] for panel in dashboard["panels"]}
+    assert "Completion Ratio" in titles
+    assert "Verify Pass" in titles
+    assert "Retrieval Hits" in titles
+    assert dashboard["style"] == "dark"
 
 
 class _FakeArtifactPg:

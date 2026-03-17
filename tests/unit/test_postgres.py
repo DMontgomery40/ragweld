@@ -7,16 +7,54 @@ from __future__ import annotations
 
 import os
 import uuid
+from contextlib import suppress
 
 import pytest
 
-from server.db.postgres import PostgresClient
+from server.db.postgres import PostgresClient, _json_dumps_sanitized, _sanitize_chunk_for_storage, _vector_index_name
 from server.models.index import Chunk
-from server.models.tribrid_config_model import ChunkSummariesLastBuild, ChunkSummary
+from server.models.tribrid_config_model import ChunkSummariesLastBuild, ChunkSummary, RecallIntensity
 
 
 def _postgres_available() -> bool:
     return bool(os.getenv("POSTGRES_DSN") or os.getenv("POSTGRES_HOST"))
+
+
+def test_vector_index_name_is_stable_and_bounded() -> None:
+    repo_id = "codex-sessions-2026-semantic"
+    first = _vector_index_name(repo_id)
+    second = _vector_index_name(repo_id)
+    assert first == second
+    assert first.startswith("idx_chunks_")
+    assert first.endswith("_embedding_hnsw")
+    assert len(first) < 63
+
+
+def test_sanitize_chunk_for_storage_strips_nul_bytes() -> None:
+    chunk = Chunk(
+        chunk_id="c1",
+        content="bad\x00content",
+        file_path="file\x00path.txt",
+        start_line=1,
+        end_line=1,
+        language="text\x00plain",
+        token_count=2,
+        embedding=[0.0, 0.1, 0.2],
+        summary=None,
+        metadata={"bad\x00key": "bad\x00value"},
+    )
+    sanitized = _sanitize_chunk_for_storage(chunk)
+    assert "\x00" not in sanitized.content
+    assert "\x00" not in sanitized.file_path
+    assert sanitized.language is not None and "\x00" not in sanitized.language
+    assert "\x00" not in str(sanitized.metadata)
+
+
+def test_json_dumps_sanitized_preserves_str_enum_values() -> None:
+    payload = {"default_intensity": RecallIntensity.standard}
+    dumped = _json_dumps_sanitized(payload)
+    assert '"standard"' in dumped
+    assert "RecallIntensity.standard" not in dumped
 
 
 @pytest.mark.asyncio
@@ -211,3 +249,56 @@ async def test_chunk_summaries_roundtrip_extended_fields() -> None:
             await pg.delete_corpus(repo_id)
         except Exception:
             pass
+
+
+@pytest.mark.asyncio
+async def test_ensure_vector_index_creates_partial_hnsw_index() -> None:
+    if not _postgres_available():
+        pytest.skip("POSTGRES_DSN/POSTGRES_HOST not set")
+
+    repo_id = f"test_vecidx_{uuid.uuid4().hex[:10]}"
+    pg = PostgresClient("postgresql://ignored")
+    await pg.connect()
+    index_name = _vector_index_name(repo_id)
+    try:
+        await pg.upsert_corpus(repo_id, name=repo_id, root_path=".")
+        chunk = Chunk(
+            chunk_id="c1",
+            content="hello vector world",
+            file_path="a.txt",
+            start_line=1,
+            end_line=1,
+            language=None,
+            token_count=3,
+            embedding=[0.0, 0.1, 0.2],
+            summary=None,
+            metadata={"kind": "unit_test"},
+        )
+        try:
+            await pg.upsert_embeddings(repo_id, [chunk])
+        except Exception as exc:  # pragma: no cover
+            pytest.skip(f"vector insert failed (pgvector dims?): {exc}")
+
+        created = await pg.ensure_vector_index(repo_id)
+        assert created == index_name
+        await pg._require_pool()
+        assert pg._pool is not None
+        async with pg._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT indexdef
+                FROM pg_indexes
+                WHERE schemaname = 'public' AND indexname = $1
+                """,
+                index_name,
+            )
+        assert row is not None
+        assert "USING hnsw" in str(row["indexdef"])
+        assert repo_id in str(row["indexdef"])
+    finally:
+        with suppress(Exception):
+            assert pg._pool is not None
+            async with pg._pool.acquire() as conn:
+                await conn.execute(f"DROP INDEX IF EXISTS {index_name};")
+        with suppress(Exception):
+            await pg.delete_corpus(repo_id)

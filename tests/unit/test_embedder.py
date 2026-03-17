@@ -3,7 +3,7 @@
 import pytest
 from unittest.mock import AsyncMock, patch
 
-from server.indexing.embedder import Embedder
+from server.indexing.embedder import Embedder, configure_postgres_embedding_cache_backend
 from server.models.index import Chunk
 from server.models.tribrid_config_model import EmbeddingConfig
 
@@ -131,3 +131,36 @@ async def test_embed_chunks_accepts_contextual_override_texts() -> None:
     with_context = await embedder.embed_chunks([chunk], embed_texts=["[file=a.py] [line_range=1-3]\nsame content"])
 
     assert plain[0].embedding != with_context[0].embedding
+
+
+def test_embedder_provider_methods_live_on_class() -> None:
+    assert callable(getattr(Embedder, "_embed_openai"))
+    assert callable(getattr(Embedder, "_embed_mlx_embeddings"))
+    assert callable(getattr(Embedder, "_embed_local_sentence_transformers"))
+
+
+def test_configure_postgres_embedding_cache_backend_clears_stale_backend_when_postgres_lacks_cache_api() -> None:
+    embedder = Embedder(
+        EmbeddingConfig(
+            embedding_backend="provider",
+            embedding_type="local",
+            embedding_model_local="all-MiniLM-L6-v2",
+            embedding_dim=384,
+            embedding_cache_enabled=1,
+        )
+    )
+
+    async def _lookup(_input_hashes: list[str]) -> dict[str, list[float]]:
+        return {}
+
+    async def _upsert(_entries: dict[str, tuple[str, list[float]]]) -> int:
+        return 0
+
+    embedder.configure_cache_backend(lookup_batch=_lookup, upsert_batch=_upsert)
+    assert embedder._cache_lookup_batch is not None
+    assert embedder._cache_upsert_batch is not None
+
+    configure_postgres_embedding_cache_backend(embedder, object())  # type: ignore[arg-type]
+
+    assert embedder._cache_lookup_batch is None
+    assert embedder._cache_upsert_batch is None

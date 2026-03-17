@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import math
 import os
 import shutil
@@ -49,12 +50,38 @@ from server.models.tribrid_config_model import (
     RerankerNoHitsResponse,
     RerankerScoreRequest,
     RerankerScoreResponse,
+    RerankerTrainDiagnosticRecord,
+    RerankerTrainDiagnosticsResponse,
     RerankerTrainDiffRequest,
     RerankerTrainDiffResponse,
     RerankerTrainLegacyRequest,
     RerankerTrainLegacyResponse,
     RerankerTrainMetricsResponse,
     RerankerTrainStartResponse,
+)
+from server.observability.metrics import (
+    RERANKER_DIAGNOSTIC_EVENTS_TOTAL,
+    RERANKER_EVAL_LATENCY_SECONDS,
+    RERANKER_EVAL_RUNS_TOTAL,
+    RERANKER_MINE_LATENCY_SECONDS,
+    RERANKER_MINE_RUNS_TOTAL,
+    RERANKER_PROMOTION_LATENCY_SECONDS,
+    RERANKER_PROMOTIONS_TOTAL,
+    RERANKER_TRAIN_ACTIVE_RUNS,
+    RERANKER_TRAIN_EVENTS_TOTAL,
+    RERANKER_TRAIN_LAST_EPOCH,
+    RERANKER_TRAIN_GRAD_NORM,
+    RERANKER_TRAIN_LAST_METRIC,
+    RERANKER_TRAIN_LAST_STEP,
+    RERANKER_TRAIN_LOSS,
+    RERANKER_TRAIN_PROGRESS_PERCENT,
+    RERANKER_TRAIN_RUNS_TOTAL,
+    RERANKER_TRAIN_SAMPLES_TOTAL,
+    RERANKER_TRAIN_STAGE_ERRORS_TOTAL,
+    RERANKER_TRAIN_STAGE_LATENCY_SECONDS,
+    RERANKER_TRAIN_STEP_TIME_SECONDS,
+    RERANKER_TRIPLETS_TOTAL,
+    RERANKER_TRIPLET_SKIPS_TOTAL,
 )
 from server.retrieval.mlx_qwen3 import (
     clear_mlx_qwen3_cache,
@@ -80,6 +107,7 @@ from server.training.reranker_trainer import (
 from server.training.triplet_miner import mine_triplets_from_query_log
 
 router = APIRouter(tags=["reranker"])
+logger = logging.getLogger(__name__)
 
 _ROOT = Path(__file__).resolve().parents[2]
 _RUNS_DIR = _ROOT / "data" / "reranker_train_runs"
@@ -261,6 +289,139 @@ def _run_json_path(run_id: str) -> Path:
 
 def _metrics_path(run_id: str) -> Path:
     return _run_dir(run_id) / "metrics.jsonl"
+
+
+def _diagnostics_path(run_id: str) -> Path:
+    return _run_dir(run_id) / "diagnostics.jsonl"
+
+
+def _json_safe(value: Any) -> Any:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, datetime):
+        return value.astimezone(UTC).isoformat()
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, dict):
+        return {str(k): _json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(v) for v in value]
+    return str(value)
+
+
+def _operator_hint_for_stage(stage: str) -> str | None:
+    hints = {
+        "load_triplets": "Mine triplets into training.tribrid_triplets_path before starting training or evaluation.",
+        "materialize_triplets": "Triplet doc_ids did not resolve under the active corpus root; inspect mined positives and negatives against the current corpus path.",
+        "resolve_backend": "The learning reranker path expects MLX on Apple Silicon plus a valid training.learning_reranker_base_model.",
+        "baseline_eval": "Baseline evaluation reads the active adapter under training.tribrid_reranker_model_path; verify the adapter manifest matches the configured base model.",
+        "train_loop": "Failure happened inside the MLX Qwen3 training loop; inspect MLX dependencies, memory pressure, and LoRA target module compatibility.",
+        "final_eval": "Post-train evaluation reads the newly written adapter artifact; verify adapter.npz and adapter_config.json were written cleanly.",
+        "promote": "Promotion copies the run artifact into training.tribrid_reranker_model_path and clears the MLX cache; inspect filesystem write access and adapter completeness.",
+        "mine_triplets": "Triplet mining depends on tracing.tribrid_log_path containing correlated query and feedback events with matching event_id values.",
+        "evaluate_active": "Evaluation uses the active adapter at training.tribrid_reranker_model_path; verify manifest and base-model compatibility plus available triplets.",
+        "score_pair": "Debug scoring uses the active MLX adapter; verify the adapter directory exists and matches training.learning_reranker_base_model.",
+    }
+    return hints.get(str(stage or "").strip())
+
+
+def _log_reranker_event(
+    *,
+    level: Literal["debug", "info", "warning", "error"],
+    event: str,
+    message: str,
+    operator_hint: str | None = None,
+    fields: dict[str, Any] | None = None,
+) -> None:
+    payload: dict[str, Any] = {
+        "event": str(event or "").strip() or "unknown",
+        "message": str(message or "").strip(),
+        "fields": dict(_json_safe(fields or {})),
+    }
+    if operator_hint:
+        payload["operatorHint"] = str(operator_hint).strip()
+    line = json.dumps(payload, sort_keys=True)
+    if level == "debug":
+        logger.debug(line)
+    elif level == "warning":
+        logger.warning(line)
+    elif level == "error":
+        logger.error(line)
+    else:
+        logger.info(line)
+
+
+def _append_diagnostic(
+    run_id: str,
+    *,
+    level: Literal["debug", "info", "warning", "error"],
+    event: str,
+    message: str,
+    operator_hint: str | None = None,
+    fields: dict[str, Any] | None = None,
+) -> None:
+    record = RerankerTrainDiagnosticRecord(
+        ts=datetime.now(UTC),
+        run_id=run_id,
+        level=level,
+        event=str(event or "").strip() or "unknown",
+        message=str(message or "").strip(),
+        operator_hint=str(operator_hint or "").strip() or None,
+        fields=dict(_json_safe(fields or {})),
+    )
+    path = _diagnostics_path(run_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = record.model_dump(mode="json", by_alias=True)
+    with path.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(payload) + "\n")
+    RERANKER_DIAGNOSTIC_EVENTS_TOTAL.labels(level=record.level, event=record.event).inc()
+    _log_reranker_event(
+        level=level,
+        event=record.event,
+        message=record.message,
+        operator_hint=record.operator_hint,
+        fields={"run_id": run_id, **dict(payload.get("fields") or {})},
+    )
+
+
+def _load_diagnostics(run_id: str, limit: int | None = None) -> list[RerankerTrainDiagnosticRecord]:
+    path = _diagnostics_path(run_id)
+    if not path.exists():
+        return []
+    try:
+        lines = [ln for ln in path.read_text(encoding="utf-8").splitlines() if ln.strip()]
+    except Exception:
+        return []
+    if limit is not None and limit > 0:
+        lines = lines[-limit:]
+    out: list[RerankerTrainDiagnosticRecord] = []
+    for line in lines:
+        try:
+            out.append(RerankerTrainDiagnosticRecord.model_validate(json.loads(line)))
+        except Exception:
+            continue
+    return out
+
+
+def _sync_train_active_runs_gauge() -> None:
+    try:
+        RERANKER_TRAIN_ACTIVE_RUNS.set(float(len(_train_tasks)))
+    except Exception:
+        pass
+
+
+def _set_last_metric_values(metrics: dict[str, float] | None, *, phase: str) -> None:
+    if not isinstance(metrics, dict):
+        return
+    for key, raw in metrics.items():
+        try:
+            value = float(raw)
+        except Exception:
+            continue
+        metric_name = str(key or "").split("@", 1)[0].strip().lower()
+        if metric_name not in {"mrr", "ndcg", "map", "train_loss", "lr", "grad_norm"}:
+            continue
+        RERANKER_TRAIN_LAST_METRIC.labels(metric=metric_name, phase=str(phase or "stream")).set(value)
 
 
 def _capture_model_artifact_ref(run_id: str, repo_id: str) -> Any | None:
@@ -453,6 +614,44 @@ def _append_event(run_id: str, event: RerankerTrainMetricEvent) -> None:
     payload = event.model_dump(mode="json", by_alias=True)
     with path.open("a", encoding="utf-8") as f:
         f.write(json.dumps(payload) + "\n")
+    try:
+        RERANKER_TRAIN_EVENTS_TOTAL.labels(type=str(event.type)).inc()
+        if event.step is not None:
+            RERANKER_TRAIN_LAST_STEP.set(float(event.step))
+        if event.epoch is not None:
+            RERANKER_TRAIN_LAST_EPOCH.set(float(event.epoch))
+        if event.percent is not None:
+            RERANKER_TRAIN_PROGRESS_PERCENT.set(float(event.percent))
+        _set_last_metric_values(event.metrics, phase="stream")
+
+        if isinstance(event.metrics, dict):
+            train_loss = event.metrics.get("train_loss")
+            if train_loss is not None:
+                try:
+                    RERANKER_TRAIN_LOSS.observe(float(train_loss))
+                except Exception:
+                    pass
+            grad_norm = event.metrics.get("grad_norm")
+            if grad_norm is not None:
+                try:
+                    RERANKER_TRAIN_GRAD_NORM.observe(float(grad_norm))
+                except Exception:
+                    pass
+
+        if event.loss is not None:
+            RERANKER_TRAIN_LOSS.observe(float(event.loss))
+            RERANKER_TRAIN_LAST_METRIC.labels(metric="train_loss", phase="stream").set(float(event.loss))
+        if event.lr is not None:
+            RERANKER_TRAIN_LAST_METRIC.labels(metric="lr", phase="stream").set(float(event.lr))
+        if event.grad_norm is not None:
+            RERANKER_TRAIN_GRAD_NORM.observe(float(event.grad_norm))
+            RERANKER_TRAIN_LAST_METRIC.labels(metric="grad_norm", phase="stream").set(float(event.grad_norm))
+        if event.step_time_ms is not None:
+            RERANKER_TRAIN_STEP_TIME_SECONDS.observe(float(event.step_time_ms) / 1000.0)
+        if event.sample_count is not None and event.sample_count > 0:
+            RERANKER_TRAIN_SAMPLES_TOTAL.inc(int(event.sample_count))
+    except Exception:
+        pass
 
 
 def _load_events(run_id: str, limit: int | None = None) -> list[RerankerTrainMetricEvent]:
@@ -589,12 +788,24 @@ async def _run_train_job(*, run_id: str, corpus_id: str, cancel_event: asyncio.E
             raise TrainingCancelledError(message)
 
     cfg: Any | None = None
+    current_stage = "load_scoped_config"
     try:
-        cfg = await load_scoped_config(repo_id=corpus_id)
+        _append_diagnostic(
+            run_id,
+            level="info",
+            event="train_run_started",
+            message="Starting reranker training run.",
+            fields={"corpus_id": corpus_id},
+        )
+        with RERANKER_TRAIN_STAGE_LATENCY_SECONDS.labels(stage="load_scoped_config").time():
+            cfg = await load_scoped_config(repo_id=corpus_id)
         _raise_if_cancelled()
 
+        current_stage = "load_triplets"
         triplets_path = _resolve_path(cfg.training.tribrid_triplets_path)
-        triplets = load_triplets(triplets_path)
+        with RERANKER_TRAIN_STAGE_LATENCY_SECONDS.labels(stage=current_stage).time():
+            triplets = load_triplets(triplets_path)
+        RERANKER_TRIPLETS_TOTAL.labels(kind="loaded").inc(len(triplets))
         if not triplets:
             raise RuntimeError(f"No triplets found at {cfg.training.tribrid_triplets_path}. Run /api/reranker/mine first.")
 
@@ -605,6 +816,7 @@ async def _run_train_job(*, run_id: str, corpus_id: str, cancel_event: asyncio.E
                 "Mine more (or lower training.triplets_min_count)."
             )
 
+        current_stage = "resolve_backend"
         backend = resolve_learning_backend(
             cfg.training,
             artifact_path=str(getattr(cfg.training, "tribrid_reranker_model_path", "") or ""),
@@ -619,6 +831,7 @@ async def _run_train_job(*, run_id: str, corpus_id: str, cancel_event: asyncio.E
             raise RuntimeError("Missing base model for MLX learning reranker (training.learning_reranker_base_model).")
 
         # Resolve corpus root path (for reading triplet doc_ids as files).
+        current_stage = "resolve_corpus"
         pg = PostgresClient(cfg.indexing.postgres_url)
         await pg.connect()
         try:
@@ -632,11 +845,18 @@ async def _run_train_job(*, run_id: str, corpus_id: str, cancel_event: asyncio.E
             corpus_root = PROJECT_ROOT / corpus_root
 
         snippet_chars = int(getattr(cfg.reranking, "rerank_input_snippet_chars", 2000) or 2000)
-        mats, mat_stats = materialize_triplets(
-            triplets,
-            corpus_root=corpus_root,
-            snippet_chars=snippet_chars,
-        )
+        current_stage = "materialize_triplets"
+        with RERANKER_TRAIN_STAGE_LATENCY_SECONDS.labels(stage=current_stage).time():
+            mats, mat_stats = materialize_triplets(
+                triplets,
+                corpus_root=corpus_root,
+                snippet_chars=snippet_chars,
+            )
+        RERANKER_TRIPLETS_TOTAL.labels(kind="materialized").inc(int(mat_stats.get("triplets_out", 0) or 0))
+        RERANKER_TRIPLET_SKIPS_TOTAL.labels(reason="missing_positive").inc(int(mat_stats.get("missing_positive", 0) or 0))
+        RERANKER_TRIPLET_SKIPS_TOTAL.labels(reason="missing_negative").inc(int(mat_stats.get("missing_negative", 0) or 0))
+        RERANKER_TRIPLET_SKIPS_TOTAL.labels(reason="empty_positive").inc(int(mat_stats.get("empty_positive", 0) or 0))
+        RERANKER_TRIPLET_SKIPS_TOTAL.labels(reason="empty_negative").inc(int(mat_stats.get("empty_negative", 0) or 0))
         if not mats:
             raise RuntimeError(
                 "No usable triplets after materialization. "
@@ -644,6 +864,21 @@ async def _run_train_job(*, run_id: str, corpus_id: str, cancel_event: asyncio.E
             )
         _raise_if_cancelled()
 
+        _append_diagnostic(
+            run_id,
+            level="info",
+            event="materialization_summary",
+            message="Materialized reranker triplets for training.",
+            fields={
+                "triplets_in": int(mat_stats.get("triplets_in", 0) or 0),
+                "triplets_out": int(mat_stats.get("triplets_out", 0) or 0),
+                "missing_positive": int(mat_stats.get("missing_positive", 0) or 0),
+                "missing_negative": int(mat_stats.get("missing_negative", 0) or 0),
+                "empty_positive": int(mat_stats.get("empty_positive", 0) or 0),
+                "empty_negative": int(mat_stats.get("empty_negative", 0) or 0),
+                "corpus_root": str(corpus_root),
+            },
+        )
         _emit_log(
             f"Training on {mat_stats.get('triplets_out', 0)} materialized triplets "
             f"(skipped_missing_pos={mat_stats.get('missing_positive', 0)}, skipped_missing_neg={mat_stats.get('missing_negative', 0)})."
@@ -653,6 +888,8 @@ async def _run_train_job(*, run_id: str, corpus_id: str, cancel_event: asyncio.E
         model_artifact_dir.parent.mkdir(parents=True, exist_ok=True)
 
         train_triplets, dev_triplets = deterministic_split(mats, dev_split=0.1, seed=0)
+        RERANKER_TRIPLETS_TOTAL.labels(kind="train_split").inc(len(train_triplets))
+        RERANKER_TRIPLETS_TOTAL.labels(kind="dev_split").inc(len(dev_triplets))
         active_dir = _resolve_path(cfg.training.tribrid_reranker_model_path)
         train_batch_size = int(run.batch_size)
         train_grad_accum_steps = int(cfg.training.learning_reranker_grad_accum_steps)
@@ -675,6 +912,21 @@ async def _run_train_job(*, run_id: str, corpus_id: str, cancel_event: asyncio.E
                 or train_grad_accum_steps != orig_grad
                 or train_max_length != orig_maxlen
             ):
+                _append_diagnostic(
+                    run_id,
+                    level="warning",
+                    event="mlx_safety_caps_applied",
+                    message="Applied MLX safety caps to keep reranker training stable on Apple Silicon.",
+                    operator_hint="Training is using capped batch, grad accumulation, or sequence length to reduce unified-memory pressure; inspect these caps before raising throughput aggressively.",
+                    fields={
+                        "batch_size_before": int(orig_batch),
+                        "batch_size_after": int(train_batch_size),
+                        "grad_accum_before": int(orig_grad),
+                        "grad_accum_after": int(train_grad_accum_steps),
+                        "max_length_before": int(orig_maxlen),
+                        "max_length_after": int(train_max_length),
+                    },
+                )
                 _emit_log(
                     "Applied MLX safety caps "
                     f"(batch_size {orig_batch}->{train_batch_size}, "
@@ -698,6 +950,8 @@ async def _run_train_job(*, run_id: str, corpus_id: str, cancel_event: asyncio.E
                     _emit_log("Baseline eval skipped (active artifact is missing or incompatible with mlx_qwen3).")
                 else:
                     try:
+                        current_stage = "baseline_eval"
+                        baseline_t0 = time.perf_counter()
                         raw_baseline = await asyncio.to_thread(
                             evaluate_mlx_qwen3_reranker,
                             base_model=str(base_model),
@@ -710,10 +964,35 @@ async def _run_train_job(*, run_id: str, corpus_id: str, cancel_event: asyncio.E
                             lora_target_modules=list(cfg.training.learning_reranker_lora_target_modules),
                             should_stop=_is_cancel_requested,
                         )
+                        RERANKER_EVAL_LATENCY_SECONDS.labels(phase="baseline").observe(time.perf_counter() - baseline_t0)
                         baseline_metrics = _format_metrics_for_run(run, raw_baseline)
                         baseline_primary = _primary_value(run, baseline_metrics)
+                        _set_last_metric_values(baseline_metrics, phase="baseline")
+                        RERANKER_EVAL_RUNS_TOTAL.labels(phase="baseline", outcome="ok").inc()
+                        _append_diagnostic(
+                            run_id,
+                            level="info",
+                            event="baseline_eval_complete",
+                            message="Completed baseline evaluation against the active reranker artifact.",
+                            fields={
+                                "baseline_primary": float(baseline_primary),
+                                "dev_triplets": int(len(dev_triplets)),
+                                "backend": str(backend),
+                                "metrics": baseline_metrics,
+                            },
+                        )
                         _emit_log(f"Baseline primary={baseline_primary:.6f} ({backend}) on held-out dev split.")
                     except Exception as e:
+                        RERANKER_EVAL_RUNS_TOTAL.labels(phase="baseline", outcome="error").inc()
+                        RERANKER_TRAIN_STAGE_ERRORS_TOTAL.labels(stage="baseline_eval").inc()
+                        _append_diagnostic(
+                            run_id,
+                            level="warning",
+                            event="baseline_eval_failed",
+                            message=f"Baseline evaluation failed: {e}",
+                            operator_hint=_operator_hint_for_stage("baseline_eval"),
+                            fields={"backend": str(backend), "error": str(e)},
+                        )
                         _emit_log(f"Baseline eval failed ({backend}); treating baseline as unknown. error={e}")
                         baseline_primary = None
         best_primary: float | None = None
@@ -842,35 +1121,54 @@ async def _run_train_job(*, run_id: str, corpus_id: str, cancel_event: asyncio.E
 
         # Train (runs in thread; emits progress/metrics into metrics.jsonl).
         _raise_if_cancelled()
-        await asyncio.to_thread(
-            train_qwen3_lora_reranker,
-            run_id=run_id,
-            base_model=base_model,
-            output_dir=model_artifact_dir,
-            train_triplets=train_triplets,
-            dev_triplets=dev_triplets,
-            epochs=int(run.epochs),
-            batch_size=int(train_batch_size),
-            gradient_accumulation_steps=int(train_grad_accum_steps),
-            lr=float(run.lr),
-            warmup_ratio=float(run.warmup_ratio),
-            max_length=int(train_max_length),
-            negative_ratio=int(cfg.training.learning_reranker_negative_ratio),
-            seed=0,
-            lora_rank=int(cfg.training.learning_reranker_lora_rank),
-            lora_alpha=float(cfg.training.learning_reranker_lora_alpha),
-            lora_dropout=float(cfg.training.learning_reranker_lora_dropout),
-            lora_target_modules=list(cfg.training.learning_reranker_lora_target_modules),
-            telemetry_interval_steps=int(cfg.training.learning_reranker_telemetry_interval_steps),
-            emit=_emit,
-            should_stop=_is_cancel_requested,
+        current_stage = "train_loop"
+        _append_diagnostic(
+            run_id,
+            level="info",
+            event="train_loop_started",
+            message="Starting MLX Qwen3 reranker training loop.",
+            fields={
+                "train_triplets": int(len(train_triplets)),
+                "dev_triplets": int(len(dev_triplets)),
+                "epochs": int(run.epochs),
+                "batch_size": int(train_batch_size),
+                "grad_accum_steps": int(train_grad_accum_steps),
+                "max_length": int(train_max_length),
+                "negative_ratio": int(cfg.training.learning_reranker_negative_ratio),
+            },
         )
+        with RERANKER_TRAIN_STAGE_LATENCY_SECONDS.labels(stage=current_stage).time():
+            await asyncio.to_thread(
+                train_qwen3_lora_reranker,
+                run_id=run_id,
+                base_model=base_model,
+                output_dir=model_artifact_dir,
+                train_triplets=train_triplets,
+                dev_triplets=dev_triplets,
+                epochs=int(run.epochs),
+                batch_size=int(train_batch_size),
+                gradient_accumulation_steps=int(train_grad_accum_steps),
+                lr=float(run.lr),
+                warmup_ratio=float(run.warmup_ratio),
+                max_length=int(train_max_length),
+                negative_ratio=int(cfg.training.learning_reranker_negative_ratio),
+                seed=0,
+                lora_rank=int(cfg.training.learning_reranker_lora_rank),
+                lora_alpha=float(cfg.training.learning_reranker_lora_alpha),
+                lora_dropout=float(cfg.training.learning_reranker_lora_dropout),
+                lora_target_modules=list(cfg.training.learning_reranker_lora_target_modules),
+                telemetry_interval_steps=int(cfg.training.learning_reranker_telemetry_interval_steps),
+                emit=_emit,
+                should_stop=_is_cancel_requested,
+            )
 
         _raise_if_cancelled()
         # Evaluate trained artifact on the same held-out dev split used for baseline gating.
         if not dev_triplets:
             proxy = {"mrr": 0.0, "ndcg": 0.0, "map": 0.0}
         else:
+            current_stage = "final_eval"
+            final_eval_t0 = time.perf_counter()
             proxy = await asyncio.to_thread(
                 evaluate_mlx_qwen3_reranker,
                 base_model=str(base_model),
@@ -883,14 +1181,29 @@ async def _run_train_job(*, run_id: str, corpus_id: str, cancel_event: asyncio.E
                 lora_target_modules=list(cfg.training.learning_reranker_lora_target_modules),
                 should_stop=_is_cancel_requested,
             )
+            RERANKER_EVAL_LATENCY_SECONDS.labels(phase="final").observe(time.perf_counter() - final_eval_t0)
+            RERANKER_EVAL_RUNS_TOTAL.labels(phase="final", outcome="ok").inc()
 
         metrics = _format_metrics_for_run(run, proxy)
+        _set_last_metric_values(metrics, phase="final")
         _append_event(
             run_id,
             RerankerTrainMetricEvent(type="metrics", ts=datetime.now(UTC), run_id=run_id, metrics=metrics),
         )
         pv = _primary_value(run, metrics)
         primary_series.append(float(pv))
+        _append_diagnostic(
+            run_id,
+            level="info",
+            event="final_eval_complete",
+            message="Evaluated the newly trained reranker artifact on the held-out dev split.",
+            fields={
+                "backend": str(backend),
+                "dev_triplets": int(len(dev_triplets)),
+                "primary_value": float(pv),
+                "metrics": metrics,
+            },
+        )
 
         # Promote trained artifact to the active path (atomic), gated on improvement when configured.
         promote_if_improves = int(cfg.training.learning_reranker_promote_if_improves or 0) == 1
@@ -901,13 +1214,41 @@ async def _run_train_job(*, run_id: str, corpus_id: str, cancel_event: asyncio.E
 
         _raise_if_cancelled()
         if should_promote:
-            _atomic_copy_dir(model_artifact_dir, active_dir)
-            await clear_mlx_qwen3_cache(str(active_dir))
+            current_stage = "promote"
+            with RERANKER_PROMOTION_LATENCY_SECONDS.time():
+                _atomic_copy_dir(model_artifact_dir, active_dir)
+                await clear_mlx_qwen3_cache(str(active_dir))
+            RERANKER_PROMOTIONS_TOTAL.labels(outcome="promoted").inc()
+            _append_diagnostic(
+                run_id,
+                level="info",
+                event="promotion_complete",
+                message="Promoted the trained reranker artifact to the active path.",
+                fields={
+                    "active_path": str(active_dir),
+                    "artifact_path": str(model_artifact_dir),
+                    "backend": str(backend),
+                    "primary_value": float(pv),
+                },
+            )
             _emit_log(
                 f"Promoted trained artifact to {cfg.training.tribrid_reranker_model_path} (backend={backend}). "
                 f"Run artifact preserved at {model_artifact_dir}."
             )
         else:
+            RERANKER_PROMOTIONS_TOTAL.labels(outcome="skipped").inc()
+            _append_diagnostic(
+                run_id,
+                level="info",
+                event="promotion_skipped",
+                message="Skipped promotion because the trained artifact did not beat the baseline gate.",
+                fields={
+                    "backend": str(backend),
+                    "primary_value": float(pv),
+                    "baseline_primary": float(baseline_primary) if baseline_primary is not None else None,
+                    "epsilon": float(eps),
+                },
+            )
             _emit_log(
                 f"Did not promote: primary={pv:.6f} baseline={baseline_primary:.6f} eps={eps:.6f} (backend={backend}). "
                 f"Run artifact preserved at {model_artifact_dir}."
@@ -929,9 +1270,23 @@ async def _run_train_job(*, run_id: str, corpus_id: str, cancel_event: asyncio.E
         run.completed_at = datetime.now(UTC)
         run = _attach_lineage(run, cfg, promoted=bool(should_promote))
         _save_run(run)
+        RERANKER_TRAIN_RUNS_TOTAL.labels(outcome="completed").inc()
         _append_event(
             run_id,
             RerankerTrainMetricEvent(type="complete", ts=datetime.now(UTC), run_id=run_id, status=run.status),
+        )
+        _append_diagnostic(
+            run_id,
+            level="info",
+            event="train_run_completed",
+            message="Reranker training run completed successfully.",
+            fields={
+                "primary_metric_best": float(run.summary.primary_metric_best or pv),
+                "primary_metric_final": float(run.summary.primary_metric_final or pv),
+                "best_step": int(run.summary.best_step or 0) or None,
+                "stability_stddev": float(run.summary.stability_stddev or 0.0),
+                "promoted": bool(should_promote),
+            },
         )
 
         async with _legacy_lock:
@@ -959,8 +1314,18 @@ async def _run_train_job(*, run_id: str, corpus_id: str, cancel_event: asyncio.E
                 ts=datetime.now(UTC),
                 run_id=run_id,
                 message=str(e),
+                operator_hint=_operator_hint_for_stage(current_stage),
                 status="cancelled",
             ),
+        )
+        RERANKER_TRAIN_RUNS_TOTAL.labels(outcome="cancelled").inc()
+        _append_diagnostic(
+            run_id,
+            level="warning",
+            event="train_run_cancelled",
+            message=str(e),
+            operator_hint=_operator_hint_for_stage(current_stage),
+            fields={"stage": str(current_stage)},
         )
         _append_event(
             run_id,
@@ -971,7 +1336,12 @@ async def _run_train_job(*, run_id: str, corpus_id: str, cancel_event: asyncio.E
                 _legacy_status.running = False
                 _legacy_status.progress = 0
                 _legacy_status.message = "Training cancelled"
-                _legacy_status.result = RerankerLegacyTaskResult(ok=False, run_id=run_id, error="cancelled")
+                _legacy_status.result = RerankerLegacyTaskResult(
+                    ok=False,
+                    run_id=run_id,
+                    error="cancelled",
+                    operator_hint=_operator_hint_for_stage(current_stage),
+                )
     except Exception as e:
         if _is_cancel_requested():
             try:
@@ -991,8 +1361,18 @@ async def _run_train_job(*, run_id: str, corpus_id: str, cancel_event: asyncio.E
                     ts=datetime.now(UTC),
                     run_id=run_id,
                     message=str(e) or "Training cancelled by user.",
+                    operator_hint=_operator_hint_for_stage(current_stage),
                     status="cancelled",
                 ),
+            )
+            RERANKER_TRAIN_RUNS_TOTAL.labels(outcome="cancelled").inc()
+            _append_diagnostic(
+                run_id,
+                level="warning",
+                event="train_run_cancelled",
+                message=str(e) or "Training cancelled by user.",
+                operator_hint=_operator_hint_for_stage(current_stage),
+                fields={"stage": str(current_stage)},
             )
             _append_event(
                 run_id,
@@ -1003,7 +1383,12 @@ async def _run_train_job(*, run_id: str, corpus_id: str, cancel_event: asyncio.E
                     _legacy_status.running = False
                     _legacy_status.progress = 0
                     _legacy_status.message = "Training cancelled"
-                    _legacy_status.result = RerankerLegacyTaskResult(ok=False, run_id=run_id, error="cancelled")
+                    _legacy_status.result = RerankerLegacyTaskResult(
+                        ok=False,
+                        run_id=run_id,
+                        error="cancelled",
+                        operator_hint=_operator_hint_for_stage(current_stage),
+                    )
         else:
             try:
                 run = _load_run(run_id)
@@ -1014,12 +1399,27 @@ async def _run_train_job(*, run_id: str, corpus_id: str, cancel_event: asyncio.E
                 _save_run(run)
             except Exception:
                 pass
+            RERANKER_TRAIN_RUNS_TOTAL.labels(outcome="failed").inc()
+            RERANKER_TRAIN_STAGE_ERRORS_TOTAL.labels(stage=str(current_stage)).inc()
 
             _append_event(
                 run_id,
                 RerankerTrainMetricEvent(
-                    type="error", ts=datetime.now(UTC), run_id=run_id, message=str(e), status="failed"
+                    type="error",
+                    ts=datetime.now(UTC),
+                    run_id=run_id,
+                    message=str(e),
+                    operator_hint=_operator_hint_for_stage(current_stage),
+                    status="failed",
                 ),
+            )
+            _append_diagnostic(
+                run_id,
+                level="error",
+                event="train_run_failed",
+                message=f"Reranker training run failed during stage={current_stage}: {e}",
+                operator_hint=_operator_hint_for_stage(current_stage),
+                fields={"stage": str(current_stage), "error": str(e)},
             )
             _append_event(
                 run_id,
@@ -1030,10 +1430,16 @@ async def _run_train_job(*, run_id: str, corpus_id: str, cancel_event: asyncio.E
                     _legacy_status.running = False
                     _legacy_status.progress = 0
                     _legacy_status.message = "Training failed"
-                    _legacy_status.result = RerankerLegacyTaskResult(ok=False, run_id=run_id, error=str(e))
+                    _legacy_status.result = RerankerLegacyTaskResult(
+                        ok=False,
+                        run_id=run_id,
+                        error=str(e),
+                        operator_hint=_operator_hint_for_stage(current_stage),
+                    )
     finally:
         _train_tasks.pop(run_id, None)
         _train_cancel_events.pop(run_id, None)
+        _sync_train_active_runs_gauge()
 
 
 async def _run_mine_job(*, corpus_id: str) -> None:
@@ -1286,6 +1692,7 @@ def _status_from_persisted_run(*, corpus_id: str) -> RerankerLegacyStatus | None
     elif status == "failed":
         message = "Training failed"
         err = None
+        operator_hint = None
         try:
             # Find the last error event for a useful message.
             mp = _metrics_path(run_id)
@@ -1298,10 +1705,11 @@ def _status_from_persisted_run(*, corpus_id: str) -> RerankerLegacyStatus | None
                         continue
                     if isinstance(obj, dict) and str(obj.get("type") or "") == "error":
                         err = str(obj.get("message") or "") or None
+                        operator_hint = str(obj.get("operator_hint") or "") or None
                         break
         except Exception:
             err = None
-        result = RerankerLegacyTaskResult(ok=False, run_id=run_id, error=err)
+        result = RerankerLegacyTaskResult(ok=False, run_id=run_id, error=err, operator_hint=operator_hint)
         progress = 0
     elif status == "cancelled":
         message = "Training cancelled"
@@ -1373,7 +1781,11 @@ async def get_reranker_status(
 
     result: RerankerLegacyTaskResult | None = None
     if ts:
-        result = RerankerLegacyTaskResult(ok=ok, error=str(err) if err else None)
+        result = RerankerLegacyTaskResult(
+            ok=ok,
+            error=str(err) if err else None,
+            operator_hint=_operator_hint_for_stage("score_pair") if err else None,
+        )
 
     return RerankerLegacyStatus(
         running=False,
@@ -1421,7 +1833,12 @@ async def score_reranker(payload: RerankerScoreRequest) -> RerankerScoreResponse
     """Score one (query, document) pair for debug/proof workflows."""
     cid = str(payload.repo_id or "").strip()
     if not cid:
-        return RerankerScoreResponse(ok=False, error="missing corpus_id", score=0.0)
+        return RerankerScoreResponse(
+            ok=False,
+            error="missing corpus_id",
+            operator_hint="Pass corpus_id so debug scoring can resolve the active reranker config and adapter.",
+            score=0.0,
+        )
 
     try:
         cfg = await load_scoped_config(repo_id=cid)
@@ -1430,6 +1847,7 @@ async def score_reranker(payload: RerankerScoreRequest) -> RerankerScoreResponse
         cfg = load_config()
     include_logits = bool(payload.include_logits)
     max_length = int(cfg.reranking.tribrid_reranker_maxlen)
+    current_stage = "resolve_backend"
 
     try:
         backend = resolve_learning_backend(
@@ -1437,12 +1855,35 @@ async def score_reranker(payload: RerankerScoreRequest) -> RerankerScoreResponse
             artifact_path=str(getattr(cfg.training, "tribrid_reranker_model_path", "") or ""),
         )
     except Exception as e:
-        return RerankerScoreResponse(ok=False, backend="learning", error=str(e), score=0.0)
+        operator_hint = _operator_hint_for_stage("score_pair")
+        _log_reranker_event(
+            level="warning",
+            event="reranker_score_failed",
+            message=f"Debug reranker scoring failed during stage={current_stage}: {e}",
+            operator_hint=operator_hint,
+            fields={"corpus_id": cid, "stage": current_stage},
+        )
+        RERANKER_TRAIN_STAGE_ERRORS_TOTAL.labels(stage="score_pair").inc()
+        return RerankerScoreResponse(ok=False, backend="learning", error=str(e), operator_hint=operator_hint, score=0.0)
 
     if backend != "mlx_qwen3":
-        return RerankerScoreResponse(ok=False, backend=str(backend), error=f"unsupported backend: {backend}", score=0.0)
+        operator_hint = _operator_hint_for_stage("score_pair")
+        return RerankerScoreResponse(
+            ok=False,
+            backend=str(backend),
+            error=f"unsupported backend: {backend}",
+            operator_hint=operator_hint,
+            score=0.0,
+        )
     if not mlx_is_available():
-        return RerankerScoreResponse(ok=False, backend="mlx_qwen3", error="mlx not available", score=0.0)
+        operator_hint = _operator_hint_for_stage("score_pair")
+        return RerankerScoreResponse(
+            ok=False,
+            backend="mlx_qwen3",
+            error="mlx not available",
+            operator_hint=operator_hint,
+            score=0.0,
+        )
 
     from server.retrieval.mlx_qwen3 import (
         get_mlx_qwen3_reranker,
@@ -1456,6 +1897,7 @@ async def score_reranker(payload: RerankerScoreRequest) -> RerankerScoreResponse
             ok=False,
             backend="mlx_qwen3",
             error=f"active adapter dir not found: {cfg.training.tribrid_reranker_model_path}",
+            operator_hint=_operator_hint_for_stage("score_pair"),
             score=0.0,
         )
 
@@ -1471,22 +1913,42 @@ async def score_reranker(payload: RerankerScoreRequest) -> RerankerScoreResponse
     if not isinstance(target_modules, list) or not target_modules:
         target_modules = list(cfg.training.learning_reranker_lora_target_modules)
 
-    rr = await get_mlx_qwen3_reranker(
-        base_model=str(base_model),
-        adapter_dir=str(adapter_dir),
-        lora_rank=int(lora_rank),
-        lora_alpha=float(lora_alpha),
-        lora_dropout=float(lora_dropout),
-        lora_target_modules=[str(x) for x in list(target_modules)],
-    )
-    scores, yes_logits, no_logits = await rr.score_pairs_batched(
-        [(str(payload.query), str(payload.document))],
-        max_length=max_length,
-        include_logits=include_logits,
-        reload_on_change=bool(cfg.reranking.tribrid_reranker_reload_on_change),
-        reload_period_sec=int(cfg.reranking.tribrid_reranker_reload_period_sec),
-        unload_after_sec=int(cfg.training.learning_reranker_unload_after_sec),
-    )
+    current_stage = "score_pair"
+    try:
+        with RERANKER_TRAIN_STAGE_LATENCY_SECONDS.labels(stage=current_stage).time():
+            rr = await get_mlx_qwen3_reranker(
+                base_model=str(base_model),
+                adapter_dir=str(adapter_dir),
+                lora_rank=int(lora_rank),
+                lora_alpha=float(lora_alpha),
+                lora_dropout=float(lora_dropout),
+                lora_target_modules=[str(x) for x in list(target_modules)],
+            )
+            scores, yes_logits, no_logits = await rr.score_pairs_batched(
+                [(str(payload.query), str(payload.document))],
+                max_length=max_length,
+                include_logits=include_logits,
+                reload_on_change=bool(cfg.reranking.tribrid_reranker_reload_on_change),
+                reload_period_sec=int(cfg.reranking.tribrid_reranker_reload_period_sec),
+                unload_after_sec=int(cfg.training.learning_reranker_unload_after_sec),
+            )
+    except Exception as e:
+        operator_hint = _operator_hint_for_stage("score_pair")
+        RERANKER_TRAIN_STAGE_ERRORS_TOTAL.labels(stage="score_pair").inc()
+        _log_reranker_event(
+            level="error",
+            event="reranker_score_failed",
+            message=f"Debug reranker scoring failed during stage={current_stage}: {e}",
+            operator_hint=operator_hint,
+            fields={"corpus_id": cid, "adapter_dir": str(adapter_dir)},
+        )
+        return RerankerScoreResponse(
+            ok=False,
+            backend="mlx_qwen3",
+            error=str(e),
+            operator_hint=operator_hint,
+            score=0.0,
+        )
     score = float(scores[0]) if scores else 0.0
     yes_logit = float(yes_logits[0]) if include_logits and yes_logits and yes_logits[0] is not None else None
     no_logit = float(no_logits[0]) if include_logits and no_logits and no_logits[0] is not None else None
@@ -1499,6 +1961,7 @@ async def mine_triplets(
 ) -> RerankerMineResponse:
     """Mine triplets from query logs + feedback into training.tribrid_triplets_path."""
     cid = (corpus_id or "").strip() or None
+    current_stage = "mine_triplets"
     async with _legacy_lock:
         _legacy_status.running = True
         _legacy_status.progress = 0
@@ -1513,57 +1976,99 @@ async def mine_triplets(
     else:
         # Back-compat: allow mining without a corpus scope (writes to global paths).
         cfg = load_config()
-    log_path = _resolve_path(cfg.tracing.tribrid_log_path)
-    triplets_path = _resolve_path(cfg.training.tribrid_triplets_path)
-    triplets_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        log_path = _resolve_path(cfg.tracing.tribrid_log_path)
+        triplets_path = _resolve_path(cfg.training.tribrid_triplets_path)
+        triplets_path.parent.mkdir(parents=True, exist_ok=True)
 
-    if not log_path.exists():
-        msg = f"No log file found at {cfg.tracing.tribrid_log_path} (0 triplets mined)."
+        if not log_path.exists():
+            msg = f"No log file found at {cfg.tracing.tribrid_log_path} (0 triplets mined)."
+            async with _legacy_lock:
+                _legacy_status.running = False
+                _legacy_status.progress = 100
+                _legacy_status.message = msg
+                _legacy_status.result = RerankerLegacyTaskResult(ok=True, output=msg)
+            RERANKER_MINE_RUNS_TOTAL.labels(outcome="ok").inc()
+            _log_reranker_event(
+                level="info",
+                event="triplet_mine_skipped_no_log",
+                message=msg,
+                operator_hint=_operator_hint_for_stage("mine_triplets"),
+                fields={"corpus_id": cid},
+            )
+            return RerankerMineResponse(ok=True, output=msg, error=None, operator_hint=_operator_hint_for_stage("mine_triplets"))
+
+        mine_mode = str(cfg.training.triplets_mine_mode or "replace").strip().lower()
+        mine_reset = int(cfg.training.tribrid_reranker_mine_reset or 0) == 1
+        if mine_reset:
+            mine_mode = "replace"
+        if mine_mode not in {"replace", "append"}:
+            mine_mode = "replace"
+
+        with RERANKER_MINE_LATENCY_SECONDS.time():
+            with RERANKER_TRAIN_STAGE_LATENCY_SECONDS.labels(stage=current_stage).time():
+                result = await asyncio.to_thread(
+                    mine_triplets_from_query_log,
+                    log_path=log_path,
+                    triplets_path=triplets_path,
+                    mine_mode=mine_mode,  # type: ignore[arg-type]
+                    corpus_id=cid,
+                    preserve_existing_on_empty=not mine_reset,
+                )
+        created = int(result.get("triplets_mined") or 0)
+        RERANKER_TRIPLETS_TOTAL.labels(kind="mined").inc(created)
+        preserved_existing = bool(result.get("preserved_existing"))
+        if preserved_existing and created == 0:
+            current_count = _count_lines(triplets_path)
+            msg = (
+                f"Mined 0 new triplets from {result.get('feedback_with_event_id', 0)} feedback events "
+                f"({result.get('query_events', 0)} query events); kept existing {current_count} triplets in "
+                f"{cfg.training.tribrid_triplets_path} (mode={mine_mode})."
+            )
+        else:
+            msg = (
+                f"Mined {created} triplets from {result.get('feedback_with_event_id', 0)} feedback events "
+                f"({result.get('query_events', 0)} query events) into {cfg.training.tribrid_triplets_path} "
+                f"(mode={mine_mode})."
+            )
+
         async with _legacy_lock:
             _legacy_status.running = False
             _legacy_status.progress = 100
-            _legacy_status.message = msg
+            _legacy_status.message = "Mining complete"
             _legacy_status.result = RerankerLegacyTaskResult(ok=True, output=msg)
+        RERANKER_MINE_RUNS_TOTAL.labels(outcome="ok").inc()
+        _log_reranker_event(
+            level="info",
+            event="triplet_mine_complete",
+            message=msg,
+            fields={
+                "corpus_id": cid,
+                "triplets_mined": created,
+                "query_events": int(result.get("query_events") or 0),
+                "feedback_events": int(result.get("feedback_with_event_id") or 0),
+                "mode": mine_mode,
+            },
+        )
+
         return RerankerMineResponse(ok=True, output=msg, error=None)
-
-    mine_mode = str(cfg.training.triplets_mine_mode or "replace").strip().lower()
-    mine_reset = int(cfg.training.tribrid_reranker_mine_reset or 0) == 1
-    if mine_reset:
-        mine_mode = "replace"
-    if mine_mode not in {"replace", "append"}:
-        mine_mode = "replace"
-
-    result = await asyncio.to_thread(
-        mine_triplets_from_query_log,
-        log_path=log_path,
-        triplets_path=triplets_path,
-        mine_mode=mine_mode,  # type: ignore[arg-type]
-        corpus_id=cid,
-        preserve_existing_on_empty=not mine_reset,
-    )
-    created = int(result.get("triplets_mined") or 0)
-    preserved_existing = bool(result.get("preserved_existing"))
-    if preserved_existing and created == 0:
-        current_count = _count_lines(triplets_path)
-        msg = (
-            f"Mined 0 new triplets from {result.get('feedback_with_event_id', 0)} feedback events "
-            f"({result.get('query_events', 0)} query events); kept existing {current_count} triplets in "
-            f"{cfg.training.tribrid_triplets_path} (mode={mine_mode})."
+    except Exception as e:
+        operator_hint = _operator_hint_for_stage(current_stage)
+        RERANKER_MINE_RUNS_TOTAL.labels(outcome="error").inc()
+        RERANKER_TRAIN_STAGE_ERRORS_TOTAL.labels(stage=current_stage).inc()
+        _log_reranker_event(
+            level="error",
+            event="triplet_mine_failed",
+            message=f"Triplet mining failed during stage={current_stage}: {e}",
+            operator_hint=operator_hint,
+            fields={"corpus_id": cid, "stage": current_stage},
         )
-    else:
-        msg = (
-            f"Mined {created} triplets from {result.get('feedback_with_event_id', 0)} feedback events "
-            f"({result.get('query_events', 0)} query events) into {cfg.training.tribrid_triplets_path} "
-            f"(mode={mine_mode})."
-        )
-
-    async with _legacy_lock:
-        _legacy_status.running = False
-        _legacy_status.progress = 100
-        _legacy_status.message = "Mining complete"
-        _legacy_status.result = RerankerLegacyTaskResult(ok=True, output=msg)
-
-    return RerankerMineResponse(ok=True, output=msg, error=None)
+        async with _legacy_lock:
+            _legacy_status.running = False
+            _legacy_status.progress = 0
+            _legacy_status.message = "Mining failed"
+            _legacy_status.result = RerankerLegacyTaskResult(ok=False, error=str(e), operator_hint=operator_hint)
+        return RerankerMineResponse(ok=False, output=None, error=str(e), operator_hint=operator_hint)
 
 
 @router.post("/reranker/train", response_model=RerankerTrainLegacyResponse)
@@ -1615,6 +2120,7 @@ async def train_reranker(
     try:
         res = await start_train_run(req)
     except HTTPException as e:
+        operator_hint = "Training start failed before the background job was queued; inspect the scoped config, active-run guard, and requested training parameters."
         async with _legacy_lock:
             _legacy_status.running = False
             _legacy_status.progress = 0
@@ -1624,8 +2130,16 @@ async def train_reranker(
                 ok=False,
                 run_id=None,
                 error=str(e.detail),
+                operator_hint=operator_hint,
             )
             _legacy_status.run_id = None
+        _log_reranker_event(
+            level="warning",
+            event="train_run_start_failed",
+            message=f"Failed to queue reranker training run: {e.detail}",
+            operator_hint=operator_hint,
+            fields={"corpus_id": cid},
+        )
         raise
 
     async with _legacy_lock:
@@ -1642,6 +2156,7 @@ async def evaluate_reranker(
 ) -> RerankerEvaluateResponse:
     """Evaluate the current learning reranker model (proxy metrics)."""
     cid = await _resolve_corpus_id(corpus_id)
+    current_stage = "evaluate_active"
     async with _legacy_lock:
         _legacy_status.running = True
         _legacy_status.progress = 0
@@ -1654,7 +2169,9 @@ async def evaluate_reranker(
     try:
         cfg = await load_scoped_config(repo_id=cid)
         triplets_path = _resolve_path(cfg.training.tribrid_triplets_path)
-        triplets = load_triplets(triplets_path)
+        with RERANKER_TRAIN_STAGE_LATENCY_SECONDS.labels(stage="load_triplets").time():
+            triplets = load_triplets(triplets_path)
+        RERANKER_TRIPLETS_TOTAL.labels(kind="loaded").inc(len(triplets))
         if not triplets:
             raise RuntimeError(f"No triplets found at {cfg.training.tribrid_triplets_path}. Run /api/reranker/mine first.")
 
@@ -1671,7 +2188,9 @@ async def evaluate_reranker(
             corpus_root = PROJECT_ROOT / corpus_root
 
         snippet_chars = int(getattr(cfg.reranking, "rerank_input_snippet_chars", 2000) or 2000)
-        mats, _ = materialize_triplets(triplets, corpus_root=corpus_root, snippet_chars=snippet_chars)
+        with RERANKER_TRAIN_STAGE_LATENCY_SECONDS.labels(stage="materialize_triplets").time():
+            mats, mat_stats = materialize_triplets(triplets, corpus_root=corpus_root, snippet_chars=snippet_chars)
+        RERANKER_TRIPLETS_TOTAL.labels(kind="materialized").inc(int(mat_stats.get("triplets_out", 0) or 0))
         if not mats:
             raise RuntimeError("No usable triplets after materialization (missing/empty docs).")
 
@@ -1688,16 +2207,28 @@ async def evaluate_reranker(
             artifact_dir=model_dir, base_model=str(cfg.training.learning_reranker_base_model)
         ):
             raise RuntimeError("Active artifact is not a compatible MLX Qwen3 adapter (manifest mismatch).")
-        metrics = await asyncio.to_thread(
-            evaluate_mlx_qwen3_reranker,
-            base_model=str(cfg.training.learning_reranker_base_model),
-            adapter_dir=model_dir,
-            triplets=mats,
-            max_length=int(cfg.reranking.tribrid_reranker_maxlen),
-            lora_rank=int(cfg.training.learning_reranker_lora_rank),
-            lora_alpha=float(cfg.training.learning_reranker_lora_alpha),
-            lora_dropout=float(cfg.training.learning_reranker_lora_dropout),
-            lora_target_modules=list(cfg.training.learning_reranker_lora_target_modules),
+        eval_t0 = time.perf_counter()
+        with RERANKER_TRAIN_STAGE_LATENCY_SECONDS.labels(stage=current_stage).time():
+            metrics = await asyncio.to_thread(
+                evaluate_mlx_qwen3_reranker,
+                base_model=str(cfg.training.learning_reranker_base_model),
+                adapter_dir=model_dir,
+                triplets=mats,
+                max_length=int(cfg.reranking.tribrid_reranker_maxlen),
+                lora_rank=int(cfg.training.learning_reranker_lora_rank),
+                lora_alpha=float(cfg.training.learning_reranker_lora_alpha),
+                lora_dropout=float(cfg.training.learning_reranker_lora_dropout),
+                lora_target_modules=list(cfg.training.learning_reranker_lora_target_modules),
+            )
+        RERANKER_EVAL_LATENCY_SECONDS.labels(phase="active").observe(time.perf_counter() - eval_t0)
+        RERANKER_EVAL_RUNS_TOTAL.labels(phase="active", outcome="ok").inc()
+        _set_last_metric_values(
+            {
+                "mrr": float(metrics.get("mrr") or 0.0),
+                "ndcg": float(metrics.get("ndcg") or 0.0),
+                "map": float(metrics.get("map") or 0.0),
+            },
+            phase="evaluate",
         )
         output = (
             f"Proxy metrics: backend={backend}\n"
@@ -1712,14 +2243,30 @@ async def evaluate_reranker(
             _legacy_status.progress = 100
             _legacy_status.message = "Evaluation complete"
             _legacy_status.result = RerankerLegacyTaskResult(ok=True, output=output, metrics=metrics)
+        _log_reranker_event(
+            level="info",
+            event="reranker_eval_complete",
+            message="Evaluated the active reranker artifact.",
+            fields={"corpus_id": cid, "backend": backend, "triplets": len(mats), "metrics": metrics},
+        )
         return RerankerEvaluateResponse(ok=True, output=output, metrics=metrics, error=None)
     except Exception as e:
+        operator_hint = _operator_hint_for_stage(current_stage)
+        RERANKER_EVAL_RUNS_TOTAL.labels(phase="active", outcome="error").inc()
+        RERANKER_TRAIN_STAGE_ERRORS_TOTAL.labels(stage=str(current_stage)).inc()
+        _log_reranker_event(
+            level="error",
+            event="reranker_eval_failed",
+            message=f"Active reranker evaluation failed during stage={current_stage}: {e}",
+            operator_hint=operator_hint,
+            fields={"corpus_id": cid, "stage": current_stage},
+        )
         async with _legacy_lock:
             _legacy_status.running = False
             _legacy_status.progress = 0
             _legacy_status.message = "Evaluation failed"
-            _legacy_status.result = RerankerLegacyTaskResult(ok=False, error=str(e))
-        return RerankerEvaluateResponse(ok=False, output=None, metrics=None, error=str(e))
+            _legacy_status.result = RerankerLegacyTaskResult(ok=False, error=str(e), operator_hint=operator_hint)
+        return RerankerEvaluateResponse(ok=False, output=None, metrics=None, error=str(e), operator_hint=operator_hint)
 
 
 @router.get("/reranker/train/profile", response_model=CorpusEvalProfile)
@@ -1872,6 +2419,10 @@ async def start_train_run(request: RerankerTrainStartRequest) -> RerankerTrainSt
     metrics_path.parent.mkdir(parents=True, exist_ok=True)
     if not metrics_path.exists():
         metrics_path.write_text("", encoding="utf-8")
+    diagnostics_path = _diagnostics_path(run_id)
+    diagnostics_path.parent.mkdir(parents=True, exist_ok=True)
+    if not diagnostics_path.exists():
+        diagnostics_path.write_text("", encoding="utf-8")
 
     # First event: record chosen metric/k (stable North Star)
     _append_event(
@@ -1894,6 +2445,21 @@ async def start_train_run(request: RerankerTrainStartRequest) -> RerankerTrainSt
             message="Queued background training job.",
         ),
     )
+    _append_diagnostic(
+        run_id,
+        level="info",
+        event="train_run_queued",
+        message="Queued reranker training run.",
+        fields={
+            "corpus_id": corpus_id,
+            "primary_metric": str(primary_metric),
+            "primary_k": int(primary_k),
+            "epochs": int(run.epochs),
+            "batch_size": int(run.batch_size),
+            "lr": float(run.lr),
+            "max_length": int(run.max_length),
+        },
+    )
 
     # Start background training (best-effort).
     if run_id not in _train_tasks:
@@ -1902,6 +2468,8 @@ async def start_train_run(request: RerankerTrainStartRequest) -> RerankerTrainSt
         _train_tasks[run_id] = asyncio.create_task(
             _run_train_job(run_id=run_id, corpus_id=corpus_id, cancel_event=cancel_event)
         )
+        RERANKER_TRAIN_RUNS_TOTAL.labels(outcome="started").inc()
+        _sync_train_active_runs_gauge()
 
     return RerankerTrainStartResponse(ok=True, run_id=run_id, run=run)
 
@@ -2100,6 +2668,28 @@ async def get_train_run_metrics(run_id: str, limit: int = Query(default=500, ge=
     return RerankerTrainMetricsResponse(ok=True, events=events)
 
 
+@router.get("/reranker/train/run/{run_id}/diagnostics", response_model=RerankerTrainDiagnosticsResponse)
+async def get_train_run_diagnostics(
+    run_id: str,
+    limit: int = Query(default=500, ge=1, le=5000),
+) -> RerankerTrainDiagnosticsResponse:
+    _load_run(run_id)
+    return RerankerTrainDiagnosticsResponse(ok=True, records=_load_diagnostics(run_id, limit=int(limit)))
+
+
+@router.get("/reranker/train/run/{run_id}/diagnostics/download")
+async def download_train_run_diagnostics(run_id: str) -> FileResponse:
+    _load_run(run_id)
+    path = _diagnostics_path(run_id)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="No diagnostics file found")
+    return FileResponse(
+        str(path),
+        media_type="application/jsonl",
+        filename=path.name,
+    )
+
+
 @router.get("/reranker/train/run/{run_id}", response_model=RerankerTrainRun)
 async def get_train_run(run_id: str) -> RerankerTrainRun:
     return _load_run(run_id)
@@ -2126,21 +2716,43 @@ async def promote_train_run(run_id: str) -> OkResponse:
             detail=f"Unsupported reranker artifact backend for promotion: {backend or 'unknown'} (expected mlx_qwen3).",
         )
 
-    _atomic_copy_dir(src, dst)
-    yes_token_id = src_manifest.get("yes_token_id")
-    no_token_id = src_manifest.get("no_token_id")
-    if isinstance(yes_token_id, int) and isinstance(no_token_id, int):
-        write_mlx_manifest(
-            out_dir=dst,
-            base_model=str(src_manifest.get("base_model") or cfg.training.learning_reranker_base_model),
-            run_id=run_id,
-            yes_token_id=int(yes_token_id),
-            no_token_id=int(no_token_id),
+    try:
+        with RERANKER_PROMOTION_LATENCY_SECONDS.time():
+            _atomic_copy_dir(src, dst)
+            yes_token_id = src_manifest.get("yes_token_id")
+            no_token_id = src_manifest.get("no_token_id")
+            if isinstance(yes_token_id, int) and isinstance(no_token_id, int):
+                write_mlx_manifest(
+                    out_dir=dst,
+                    base_model=str(src_manifest.get("base_model") or cfg.training.learning_reranker_base_model),
+                    run_id=run_id,
+                    yes_token_id=int(yes_token_id),
+                    no_token_id=int(no_token_id),
+                )
+            await clear_mlx_qwen3_cache(str(cfg.training.tribrid_reranker_model_path))
+        run = _attach_lineage(run, cfg, promoted=True)
+        _save_run(run)
+        RERANKER_PROMOTIONS_TOTAL.labels(outcome="ok").inc()
+        _append_diagnostic(
+            run_id,
+            level="info",
+            event="manual_promotion_complete",
+            message="Promoted reranker run artifact from the training API.",
+            fields={"active_path": str(dst), "artifact_path": str(src), "backend": backend},
         )
-    await clear_mlx_qwen3_cache(str(cfg.training.tribrid_reranker_model_path))
-    run = _attach_lineage(run, cfg, promoted=True)
-    _save_run(run)
-    return OkResponse(ok=True)
+        return OkResponse(ok=True)
+    except Exception as e:
+        RERANKER_PROMOTIONS_TOTAL.labels(outcome="error").inc()
+        RERANKER_TRAIN_STAGE_ERRORS_TOTAL.labels(stage="promote").inc()
+        _append_diagnostic(
+            run_id,
+            level="error",
+            event="manual_promotion_failed",
+            message=f"Manual reranker promotion failed: {e}",
+            operator_hint=_operator_hint_for_stage("promote"),
+            fields={"active_path": str(dst), "artifact_path": str(src), "backend": backend},
+        )
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.post("/reranker/train/diff", response_model=RerankerTrainDiffResponse)

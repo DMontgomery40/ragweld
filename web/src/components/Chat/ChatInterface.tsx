@@ -10,16 +10,32 @@ import { withCorpusScope } from '@/api/client';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { EmbeddingMismatchWarning } from '@/components/ui/EmbeddingMismatchWarning';
 import { useRepoStore } from '@/stores/useRepoStore';
+import { ChatHistorySidebar } from '@/components/Chat/ChatHistorySidebar';
 import { SourceDropdown } from '@/components/Chat/SourceDropdown';
 import { ModelPicker } from '@/components/Chat/ModelPicker';
 import { StatusBar } from '@/components/Chat/StatusBar';
+import { ChatMessageThread } from '@/components/Chat/ChatMessageThread';
+import {
+  clampChatHistory,
+  createChatSession,
+  createConversationId,
+  defaultChatSources,
+  LEGACY_CHAT_HISTORY_STORAGE_KEY,
+  loadChatSessionsFromStorage,
+  persistChatSessions as persistChatSessionsToStorage,
+  upsertChatSession,
+} from '@/components/Chat/chatSessions';
+import {
+  sendChatTransport,
+  toAbortReason,
+} from '@/components/Chat/chatTransport';
+import type { ChatSession, Message } from '@/components/Chat/chatSessions';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import type {
   ActiveSources,
-  ChatDebugInfo,
   ChatModelInfo,
   ChatModelsResponse,
   ChatMultimodalConfig,
@@ -148,88 +164,6 @@ const CATEGORY_ICONS: Record<string, string> = {
 
 const CHAT_REQUEST_ABORT_TIMEOUT = 'timeout';
 const DEFAULT_CHAT_REQUEST_TIMEOUT_MS = 120_000;
-
-class ChatRequestAbortedError extends Error {
-  reason: string;
-
-  constructor(reason: string) {
-    super('Chat request aborted');
-    this.name = 'ChatRequestAbortedError';
-    this.reason = String(reason || 'aborted');
-  }
-}
-
-function toAbortReason(error: unknown, signal?: AbortSignal): string | null {
-  if (error instanceof ChatRequestAbortedError) {
-    return String(error.reason || 'aborted');
-  }
-  if (error instanceof DOMException && error.name === 'AbortError') {
-    const reason = signal?.reason;
-    return typeof reason === 'string' && reason.trim() ? reason.trim() : 'aborted';
-  }
-  return null;
-}
-
-interface Message {
-  id: string;
-  role: 'user' | 'assistant';
-  content: string;
-  timestamp: number;
-  images?: ImageAttachment[];
-  citations?: string[];
-  confidence?: number;
-  runId?: string;
-  startedAtMs?: number;
-  endedAtMs?: number;
-  debug?: ChatDebugInfo | null;
-  traceData?: any;
-  meta?: any; // provider/backend/failover transparency
-  eventId?: string; // For feedback correlation
-}
-
-type ChatSession = {
-  conversation_id: string;
-  created_at: number;
-  updated_at: number;
-  title: string;
-  messages: Message[];
-  model_override: string;
-  sources: ActiveSources;
-};
-
-type ChatSessionsState = {
-  version: 1;
-  active_conversation_id: string;
-  sessions: ChatSession[];
-};
-
-const CHAT_SESSIONS_STORAGE_KEY = 'tribrid-chat-sessions:v1:global';
-
-function createConversationId(): string {
-  try {
-    const c: any = (globalThis as any).crypto;
-    if (c && typeof c.randomUUID === 'function') return String(c.randomUUID());
-  } catch {
-    // ignore
-  }
-  return `chat-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-}
-
-function deriveSessionTitle(messages: Message[]): string {
-  const first = messages.find((m) => m && m.role === 'user' && String(m.content || '').trim().length > 0);
-  const t = String(first?.content || '').trim();
-  if (!t) return 'New chat';
-  return t.length > 60 ? `${t.slice(0, 57)}…` : t;
-}
-
-function coerceChatSessionsState(raw: unknown): ChatSessionsState | null {
-  if (!raw || typeof raw !== 'object') return null;
-  const o = raw as any;
-  if (o.version !== 1) return null;
-  if (typeof o.active_conversation_id !== 'string' || !o.active_conversation_id.trim()) return null;
-  if (!Array.isArray(o.sessions)) return null;
-  return o as ChatSessionsState;
-}
 
 export interface TraceStep {
   step: string;
@@ -777,8 +711,8 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
 
   // Chat 2.0: composable sources + model picker
   const sourcesInitRef = useRef(false);
-  const activeSourcesRef = useRef<ActiveSources>({ corpus_ids: ['recall_default'] });
-  const [activeSources, setActiveSources] = useState<ActiveSources>({ corpus_ids: ['recall_default'] });
+  const activeSourcesRef = useRef<ActiveSources>(defaultChatSources());
+  const [activeSources, setActiveSources] = useState<ActiveSources>(defaultChatSources());
   const handleSourcesChange = useCallback(
     (next: ActiveSources) => {
       activeSourcesRef.current = next;
@@ -1142,19 +1076,7 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
 
   const persistSessions = useCallback((sessions: ChatSession[], activeId: string) => {
     try {
-      // LocalStorage can be tight (~5MB). Image attachments are large, so strip them for persistence.
-      const compactSessions: ChatSession[] = (sessions || []).map((s) => {
-        const msgs = Array.isArray(s?.messages) ? s.messages : [];
-        const compactMsgs: Message[] = msgs.map((m) => {
-          if (!Array.isArray(m?.images) || m.images.length === 0) return m;
-          const nextMeta = { ...(m.meta || {}), image_count: m.images.length, images_stripped: true };
-          return { ...m, images: [], meta: nextMeta };
-        });
-        return { ...s, messages: compactMsgs };
-      });
-
-      const state: ChatSessionsState = { version: 1, active_conversation_id: activeId, sessions: compactSessions };
-      localStorage.setItem(CHAT_SESSIONS_STORAGE_KEY, JSON.stringify(state));
+      persistChatSessionsToStorage(localStorage, sessions, activeId);
     } catch (error) {
       console.error('[ChatInterface] Failed to persist chat sessions:', error);
     }
@@ -1165,9 +1087,9 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
       resetTransientChatState('session_change');
       const id = String(session?.conversation_id || '').trim() || createConversationId();
       setConversationId(id);
-      setMessages(clampChatHistory(Array.isArray(session?.messages) ? session.messages : []));
+      setMessages(clampChatHistory(Array.isArray(session?.messages) ? session.messages : [], chatHistoryMax));
       setModelOverride(String(session?.model_override || '').trim());
-      const sessionSources = (session?.sources || { corpus_ids: ['recall_default'] }) as ActiveSources;
+      const sessionSources = (session?.sources || defaultChatSources()) as ActiveSources;
       activeSourcesRef.current = sessionSources;
       setActiveSources(sessionSources);
       setLastMatches([]);
@@ -1177,7 +1099,7 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
       // Prevent config defaults from clobbering per-session selection.
       sourcesInitRef.current = true;
     },
-    [notifyTrace, resetTransientChatState]
+    [chatHistoryMax, notifyTrace, resetTransientChatState]
   );
 
   const chatHistoryInitRef = useRef(false);
@@ -1219,63 +1141,18 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
     messagesEndRef.current?.scrollIntoView({ behavior: streaming ? 'auto' : 'smooth' });
   }, [messages.length, streaming]);
 
-  const clampChatHistory = (msgs: Message[]): Message[] => {
-    if (!Array.isArray(msgs)) return [];
-    if (msgs.length <= chatHistoryMax) return msgs;
-    return msgs.slice(-chatHistoryMax);
-  };
-
   const loadChatHistory = () => {
     try {
-      const raw = localStorage.getItem(CHAT_SESSIONS_STORAGE_KEY);
-      if (raw) {
-        const parsed = coerceChatSessionsState(JSON.parse(raw));
-        if (parsed) {
-          const sessions = Array.isArray(parsed.sessions) ? (parsed.sessions as ChatSession[]) : [];
-          const activeId = String(parsed.active_conversation_id || '').trim();
-          const active =
-            sessions.find((s) => String(s.conversation_id || '').trim() === activeId) || sessions[0] || null;
-
-          setChatSessions(sessions);
-          sessionsLoadedRef.current = true;
-
-          if (active) {
-            activateSession(active);
-            return;
-          }
-        }
-      }
-
-      // Migration: legacy single-session transcript.
-      let legacy: Message[] = [];
-      try {
-        const saved = localStorage.getItem('tribrid-chat-history');
-        if (saved) {
-          const parsed = JSON.parse(saved);
-          legacy = Array.isArray(parsed) ? (parsed as Message[]) : [];
-        }
-      } catch {
-        legacy = [];
-      }
-
-      const now = Date.now();
-      const convId = createConversationId();
-      const session: ChatSession = {
-        conversation_id: convId,
-        created_at: now,
-        updated_at: now,
-        title: deriveSessionTitle(legacy),
-        messages: clampChatHistory(legacy),
-        model_override: '',
-        sources: { corpus_ids: ['recall_default'] },
-      };
-      setChatSessions([session]);
+      const { sessions, activeSession, removeLegacyHistory } = loadChatSessionsFromStorage(localStorage, chatHistoryMax);
+      setChatSessions(sessions);
       sessionsLoadedRef.current = true;
-      persistSessions([session], convId);
-      activateSession(session);
+      persistSessions(sessions, String(activeSession.conversation_id || '').trim());
+      activateSession(activeSession);
 
       try {
-        localStorage.removeItem('tribrid-chat-history');
+        if (removeLegacyHistory) {
+          localStorage.removeItem(LEGACY_CHAT_HISTORY_STORAGE_KEY);
+        }
       } catch {}
     } catch (error) {
       console.error('[ChatInterface] Failed to load chat history:', error);
@@ -1284,40 +1161,19 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
 
   const saveChatHistory = (msgs: Message[]) => {
     try {
-      const trimmed = clampChatHistory(msgs);
       const now = Date.now();
       const activeId = String(conversationId || '').trim() || createConversationId();
 
       setChatSessions((prev) => {
-        let next = Array.isArray(prev) ? prev.slice() : [];
-        const idx = next.findIndex((s) => String(s.conversation_id || '').trim() === activeId);
-        if (idx >= 0) {
-          const cur = next[idx];
-          const title = cur.title && cur.title !== 'New chat' ? cur.title : deriveSessionTitle(trimmed);
-          next[idx] = {
-            ...cur,
-            updated_at: now,
-            title,
-            messages: trimmed,
-            model_override: String(modelOverride || cur.model_override || '').trim(),
-            sources: (activeSources || cur.sources || { corpus_ids: ['recall_default'] }) as ActiveSources,
-          };
-        } else {
-          next = [
-            {
-              conversation_id: activeId,
-              created_at: now,
-              updated_at: now,
-              title: deriveSessionTitle(trimmed),
-              messages: trimmed,
-              model_override: String(modelOverride || '').trim(),
-              sources: (activeSources || { corpus_ids: ['recall_default'] }) as ActiveSources,
-            },
-            ...next,
-          ];
-        }
-        next.sort((a, b) => Number(b.updated_at || 0) - Number(a.updated_at || 0));
-        if (next.length > 50) next = next.slice(0, 50);
+        const next = upsertChatSession({
+          sessions: prev,
+          activeId,
+          messages: msgs,
+          modelOverride,
+          sources: activeSources || defaultChatSources(),
+          now,
+          chatHistoryMax,
+        });
         persistSessions(next, activeId);
         sessionsLoadedRef.current = true;
         return next;
@@ -1358,10 +1214,10 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
       const idx = next.findIndex((s) => String(s.conversation_id || '').trim() === activeId);
       if (idx === -1) return prev;
       const cur = next[idx];
-      const curSig = JSON.stringify(cur.sources || { corpus_ids: ['recall_default'] });
-      const nextSig = JSON.stringify(activeSources || { corpus_ids: ['recall_default'] });
+      const curSig = JSON.stringify(cur.sources || defaultChatSources());
+      const nextSig = JSON.stringify(activeSources || defaultChatSources());
       if (curSig === nextSig) return prev;
-      next[idx] = { ...cur, sources: (activeSources || { corpus_ids: ['recall_default'] }) as ActiveSources, updated_at: Date.now() };
+      next[idx] = { ...cur, sources: (activeSources || defaultChatSources()) as ActiveSources, updated_at: Date.now() };
       persistSessions(next, activeId);
       return next;
     });
@@ -1391,20 +1247,6 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
     }, remaining);
   };
 
-  const formatConfidence = (value?: number | null) => {
-    if (value === undefined || value === null || Number.isNaN(value)) return null;
-    const pct = value <= 1 ? value * 100 : value;
-    return `${pct.toFixed(1)}%`;
-  };
-
-  const citationToVscodeHref = (citation: string): string => {
-    const m = citation.match(/^(.*?):(\d+)(?:-(\d+))?$/);
-    if (!m) return `vscode://file/${citation}`;
-    const filePath = m[1];
-    const startLine = m[2];
-    return `vscode://file/${filePath}:${startLine}`;
-  };
-
   const handleSend = async (text: string, images: ImageAttachment[]) => {
     if (!text.trim() || sending) return;
     if (chatBlockedReason) {
@@ -1419,7 +1261,7 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
     resetTransientChatState('superseded');
     const requestToken = activeRequestTokenRef.current + 1;
     activeRequestTokenRef.current = requestToken;
-    const requestSources = (activeSourcesRef.current || activeSources || { corpus_ids: ['recall_default'] }) as ActiveSources;
+    const requestSources = (activeSourcesRef.current || activeSources || defaultChatSources()) as ActiveSources;
 
     const userMessage: Message = {
       id: `user-${Date.now()}`,
@@ -1429,7 +1271,7 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
       timestamp: Date.now(),
     };
 
-    const newMessages = clampChatHistory([...messages, userMessage]);
+    const newMessages = clampChatHistory([...messages, userMessage], chatHistoryMax);
     setMessages(newMessages);
     saveChatHistory(newMessages);
     setSending(true);
@@ -1447,42 +1289,46 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
     }, chatRequestTimeoutMs);
 
     try {
-      const streamingEnabled = streamPref && streamingSupportedRef.current !== false;
-      if (streamingEnabled) {
-        try {
-          await handleStreamingResponse(
-            userMessage,
-            recallIntensityOverride,
-            requestToken,
-            abortController.signal,
-            requestSources
-          );
-          if (isRequestTokenActive(requestToken)) {
-            streamingSupportedRef.current = true;
-          }
-        } catch (err) {
-          const abortReason = toAbortReason(err, abortController.signal);
-          if (abortReason) {
-            throw new ChatRequestAbortedError(abortReason);
-          }
-          streamingSupportedRef.current = false;
-          await handleRegularResponse(
-            userMessage,
-            recallIntensityOverride,
-            requestToken,
-            abortController.signal,
-            requestSources
-          );
-        }
-      } else {
-        await handleRegularResponse(
+      await sendChatTransport(
+        {
+          api,
+          conversationId,
+          modelOverride,
+          includeVector,
+          includeSparse,
+          includeGraph,
+          fastMode,
+          chatHistoryMax,
+          messagesContainerRef,
+          messagesEndRef,
+          isRequestTokenActive,
+          setStreaming,
+          setConversationId,
+          setMessages,
+          setLastMatches,
+          setLastLatencyMs,
+          setLastRecallPlan,
+          maybeToastRerankOutcome,
+          showToast,
+          saveChatHistory,
+        },
+        {
           userMessage,
           recallIntensityOverride,
           requestToken,
-          abortController.signal,
-          requestSources
-        );
-      }
+          signal: abortController.signal,
+          requestSources,
+          streamPreferred: streamPref && streamingSupportedRef.current !== false,
+          markStreamingSupported: () => {
+            if (isRequestTokenActive(requestToken)) {
+              streamingSupportedRef.current = true;
+            }
+          },
+          markStreamingUnsupported: () => {
+            streamingSupportedRef.current = false;
+          },
+        }
+      );
     } catch (error) {
       const abortReason = toAbortReason(error, abortController.signal);
       if (abortReason) {
@@ -1499,7 +1345,7 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
         content: `Error: ${error instanceof Error ? error.message : 'Failed to get response'}`,
         timestamp: Date.now(),
       };
-      const updatedMessages = clampChatHistory([...newMessages, errorMessage]);
+      const updatedMessages = clampChatHistory([...newMessages, errorMessage], chatHistoryMax);
       setMessages(updatedMessages);
       saveChatHistory(updatedMessages);
     } finally {
@@ -1514,490 +1360,15 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
     }
   };
 
-  const handleStreamingResponse = async (
-    userMessage: Message,
-    recallIntensityOverride: RecallIntensity | null,
-    requestToken: number,
-    signal: AbortSignal,
-    requestSources: ActiveSources
-  ) => {
-    if (!isRequestTokenActive(requestToken)) {
-      throw new ChatRequestAbortedError('stale');
-    }
-    setStreaming(true);
-
-    const readErrorDetail = async (resp: Response): Promise<string> => {
-      try {
-        const ct = resp.headers.get('content-type') || '';
-        if (ct.includes('application/json')) {
-          const j: any = await resp.json();
-          const d = j?.detail ?? j?.message ?? j?.error ?? null;
-          if (typeof d === 'string' && d.trim()) return d.trim();
-          return JSON.stringify(j).slice(0, 500);
-        }
-        const t = await resp.text();
-        return (t || '').trim().slice(0, 500);
-      } catch {
-        return '';
-      }
-    };
-
-    let response: Response;
-    try {
-      response = await fetch(api('chat/stream'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        signal,
-        body: JSON.stringify({
-          message: userMessage.content,
-          sources: requestSources,
-          conversation_id: conversationId,
-          stream: true,
-          images: Array.isArray(userMessage.images) ? userMessage.images : [],
-          model_override: modelOverride,
-          include_vector: includeVector,
-          include_sparse: includeSparse,
-          include_graph: includeGraph,
-          recall_intensity: recallIntensityOverride,
-        }),
-      });
-    } catch (error) {
-      const abortReason = toAbortReason(error, signal);
-      if (abortReason) throw new ChatRequestAbortedError(abortReason);
-      throw error;
-    }
-
-    if (!response.ok) {
-      const detail = await readErrorDetail(response);
-      throw new Error(detail ? `Failed to start streaming: ${detail}` : 'Failed to start streaming');
-    }
-
-    const reader = response.body?.getReader();
-    const decoder = new TextDecoder();
-    let streamBuffer = '';
-    let accumulatedContent = '';
-    let sawTerminalChunk = false;
-    let sawChunk = false;
-    const assistantMessageId = `assistant-${Date.now()}`;
-    const assistantTimestamp = Date.now();
-    let citations: string[] = [];
-    let runId: string | undefined;
-    let startedAtMs: number | undefined;
-    let endedAtMs: number | undefined;
-    let debug: ChatDebugInfo | null = null;
-    let confidence: number | undefined;
-    let rafPending = false;
-    let persistAfterNextRender = false;
-
-    if (!reader) {
-      throw new Error('Response body is not readable');
-    }
-
-    const scheduleAssistantRender = (persist: boolean = false) => {
-      if (!isRequestTokenActive(requestToken)) return;
-      if (persist) persistAfterNextRender = true;
-      if (rafPending) return;
-      const container = messagesContainerRef.current;
-      const shouldAutoscroll =
-        !!container && container.scrollHeight - container.scrollTop - container.clientHeight < 160;
-      rafPending = true;
-
-      requestAnimationFrame(() => {
-        rafPending = false;
-        if (!isRequestTokenActive(requestToken)) return;
-        const providerMeta = (() => {
-          const p = (debug as any)?.provider;
-          if (!p || typeof p !== 'object') return undefined;
-          const backend = String((p as any).provider_name || '').trim();
-          const model = String((p as any).model || '').trim();
-          const kind = String((p as any).kind || '').trim();
-          const base_url = String((p as any).base_url || '').trim();
-          const meta: any = {};
-          if (backend) meta.backend = backend;
-          if (model) meta.model = model;
-          if (kind) meta.kind = kind;
-          if (base_url) meta.base_url = base_url;
-          return Object.keys(meta).length ? meta : undefined;
-        })();
-        const assistantMessage: Message = {
-          id: assistantMessageId,
-          role: 'assistant',
-          content: accumulatedContent,
-          timestamp: assistantTimestamp,
-          citations,
-          runId,
-          eventId: runId,
-          startedAtMs,
-          endedAtMs,
-          debug,
-          confidence,
-          meta: providerMeta,
-        };
-
-        setMessages((prev) => {
-          if (!isRequestTokenActive(requestToken)) return prev;
-          const last = prev[prev.length - 1];
-          let next: Message[];
-          if (last && last.id === assistantMessageId) {
-            next = prev.slice();
-            next[next.length - 1] = assistantMessage;
-          } else {
-            next = [...prev, assistantMessage];
-          }
-
-          next = clampChatHistory(next);
-
-          if (persistAfterNextRender) {
-            persistAfterNextRender = false;
-            saveChatHistory(next);
-          }
-
-          return next;
-        });
-
-        if (shouldAutoscroll) {
-          requestAnimationFrame(() => {
-            if (!isRequestTokenActive(requestToken)) return;
-            messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
-          });
-        }
-      });
-    };
-
-    const processDataLine = (line: string) => {
-      if (!isRequestTokenActive(requestToken)) return;
-      const trimmed = line.trim();
-      if (!trimmed.startsWith('data:')) return;
-      const data = trimmed.slice(5).trim();
-      if (!data || data === '[DONE]') return;
-
-      try {
-        const parsed = JSON.parse(data);
-        const chunkType = parsed.type;
-        sawChunk = true;
-
-        switch (chunkType) {
-          case 'text':
-            if (typeof parsed.content === 'string') {
-              accumulatedContent += parsed.content;
-            }
-            break;
-
-          case 'done':
-            sawTerminalChunk = true;
-            if (typeof parsed.conversation_id === 'string' && isRequestTokenActive(requestToken)) {
-              setConversationId(parsed.conversation_id);
-            }
-            if (Array.isArray(parsed.sources) && isRequestTokenActive(requestToken)) {
-              setLastMatches(parsed.sources as ChunkMatch[]);
-              citations = parsed.sources
-                .map((s: any) => {
-                  const fp = s?.file_path;
-                  const sl = s?.start_line;
-                  const el = s?.end_line;
-                  if (!fp) return null;
-                  return `${fp}:${sl ?? 0}-${el ?? sl ?? 0}`;
-                })
-                .filter(Boolean) as string[];
-            }
-            if (typeof parsed.run_id === 'string') {
-              runId = parsed.run_id;
-            }
-            if (typeof parsed.started_at_ms === 'number') {
-              startedAtMs = parsed.started_at_ms;
-            }
-            if (typeof parsed.ended_at_ms === 'number') {
-              const ended = parsed.ended_at_ms;
-              endedAtMs = ended;
-              if (typeof startedAtMs === 'number' && isRequestTokenActive(requestToken)) {
-                setLastLatencyMs(Math.max(0, ended - startedAtMs));
-              }
-            }
-            debug = parsed && typeof parsed.debug === 'object' ? (parsed.debug as ChatDebugInfo) : null;
-            confidence = typeof parsed?.debug?.confidence === 'number' ? parsed.debug.confidence : undefined;
-            if (isRequestTokenActive(requestToken)) {
-              setLastRecallPlan((debug as any)?.recall_plan ?? null);
-              maybeToastRerankOutcome(debug?.rerank);
-            }
-            if (!accumulatedContent.trim()) {
-              accumulatedContent = 'Error: Empty response from model (stream finished without content)';
-              if (isRequestTokenActive(requestToken)) {
-                showToast('Chat failed: empty model response.', 'error');
-              }
-            }
-
-            try {
-              window.dispatchEvent(
-                new CustomEvent('tribrid:chat:run-complete', {
-                  detail: {
-                    run_id: runId,
-                    started_at_ms: startedAtMs,
-                    ended_at_ms: endedAtMs,
-                  },
-                })
-              );
-            } catch {}
-            break;
-
-          case 'error':
-            sawTerminalChunk = true;
-            console.error('[ChatInterface] Stream error:', parsed.message);
-            accumulatedContent = `Error: ${parsed.message || 'Unknown error'}`;
-            if (isRequestTokenActive(requestToken)) {
-              showToast(`Chat error: ${parsed.message || 'Unknown error'}`, 'error');
-            }
-            break;
-
-          default:
-            if (typeof parsed.content === 'string') {
-              accumulatedContent += parsed.content;
-            }
-        }
-        scheduleAssistantRender(chunkType === 'done' || chunkType === 'error');
-      } catch (error) {
-        console.error('[ChatInterface] Failed to parse SSE data:', error, data);
-      }
-    };
-
-    const readNextChunk = async (): Promise<ReadableStreamReadResult<Uint8Array>> => {
-      let onAbort: (() => void) | null = null;
-      try {
-        return await Promise.race([
-          reader.read(),
-          new Promise<never>((_, reject) => {
-            onAbort = () => {
-              const reason =
-                typeof signal.reason === 'string' && signal.reason.trim() ? signal.reason.trim() : 'aborted';
-              reject(new ChatRequestAbortedError(reason));
-            };
-            signal.addEventListener('abort', onAbort, { once: true });
-          }),
-        ]);
-      } finally {
-        if (onAbort) {
-          signal.removeEventListener('abort', onAbort);
-        }
-      }
-    };
-
-    while (true) {
-      if (!isRequestTokenActive(requestToken)) {
-        throw new ChatRequestAbortedError('stale');
-      }
-      let read;
-      try {
-        read = await readNextChunk();
-      } catch (error) {
-        const abortReason = toAbortReason(error, signal);
-        if (abortReason) throw new ChatRequestAbortedError(abortReason);
-        if (sawChunk || accumulatedContent.trim()) {
-          sawTerminalChunk = true;
-          if (!accumulatedContent.trim()) {
-            accumulatedContent = 'Error: Chat stream interrupted before completion';
-          }
-          if (isRequestTokenActive(requestToken)) {
-            showToast('Chat stream interrupted before completion.', 'error');
-            scheduleAssistantRender(true);
-          }
-          return;
-        }
-        throw error;
-      }
-      const { done, value } = read;
-      if (done) break;
-
-      streamBuffer += decoder.decode(value, { stream: true });
-      const lines = streamBuffer.split('\n');
-      streamBuffer = lines.pop() || '';
-
-      for (const line of lines) {
-        processDataLine(line);
-      }
-    }
-
-    const remaining = decoder.decode();
-    if (remaining) {
-      streamBuffer += remaining;
-    }
-    if (streamBuffer.trim()) {
-      processDataLine(streamBuffer);
-    }
-
-    if (!isRequestTokenActive(requestToken)) {
-      throw new ChatRequestAbortedError('stale');
-    }
-    if (!sawTerminalChunk && !accumulatedContent.trim()) {
-      accumulatedContent = 'Error: Chat stream ended without a response (no SSE events received)';
-      showToast('Chat failed: stream ended without response.', 'error');
-    }
-
-    scheduleAssistantRender(true);
-  };
-
-  const handleRegularResponse = async (
-    userMessage: Message,
-    recallIntensityOverride: RecallIntensity | null,
-    requestToken: number,
-    signal: AbortSignal,
-    requestSources: ActiveSources
-  ) => {
-    if (!isRequestTokenActive(requestToken)) {
-      throw new ChatRequestAbortedError('stale');
-    }
-    const params = new URLSearchParams(window.location.search || '');
-    const fast = fastMode || params.get('fast') === '1' || params.get('smoke') === '1';
-
-    // NOTE: `fast` is currently a UI-only toggle. The backend chat API does not accept fast_mode yet.
-    void fast;
-
-    const readErrorDetail = async (resp: Response): Promise<string> => {
-      try {
-        const ct = resp.headers.get('content-type') || '';
-        if (ct.includes('application/json')) {
-          const j: any = await resp.json();
-          const d = j?.detail ?? j?.message ?? j?.error ?? null;
-          if (typeof d === 'string' && d.trim()) return d.trim();
-          return JSON.stringify(j).slice(0, 500);
-        }
-        const t = await resp.text();
-        return (t || '').trim().slice(0, 500);
-      } catch {
-        return '';
-      }
-    };
-
-    let response: Response;
-    try {
-      response = await fetch(api('chat'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        signal,
-        body: JSON.stringify({
-          message: userMessage.content,
-          sources: requestSources,
-          conversation_id: conversationId,
-          stream: false,
-          images: Array.isArray(userMessage.images) ? userMessage.images : [],
-          model_override: modelOverride,
-          include_vector: includeVector,
-          include_sparse: includeSparse,
-          include_graph: includeGraph,
-          recall_intensity: recallIntensityOverride,
-        }),
-      });
-    } catch (error) {
-      const abortReason = toAbortReason(error, signal);
-      if (abortReason) throw new ChatRequestAbortedError(abortReason);
-      throw error;
-    }
-
-    if (!response.ok) {
-      const detail = await readErrorDetail(response);
-      throw new Error(detail || 'Failed to get response');
-    }
-
-    const data = await response.json();
-    if (!isRequestTokenActive(requestToken)) {
-      throw new ChatRequestAbortedError('stale');
-    }
-
-    // New Pydantic ChatResponse: { run_id, started_at_ms, ended_at_ms, debug, conversation_id, message, sources, tokens_used }
-    const nextConversationId: string | null =
-      data && typeof data.conversation_id === 'string' ? data.conversation_id : null;
-    if (nextConversationId && isRequestTokenActive(requestToken)) setConversationId(nextConversationId);
-
-    const sources: ChunkMatch[] = Array.isArray(data?.sources) ? (data.sources as ChunkMatch[]) : [];
-    setLastMatches(sources);
-    const citations: string[] = sources
-      .map((s: any) => {
-        const fp = s?.file_path;
-        const sl = s?.start_line;
-        const el = s?.end_line;
-        if (!fp) return null;
-        return `${fp}:${sl ?? 0}-${el ?? sl ?? 0}`;
-      })
-      .filter(Boolean) as string[];
-
-    let assistantText: string = String(data?.message?.content || '');
-    if (!assistantText.trim()) {
-      const provider = data?.debug?.provider?.provider_name ? String(data.debug.provider.provider_name) : '';
-      const model = data?.debug?.provider?.model ? String(data.debug.provider.model) : '';
-      assistantText = `Error: Empty response from model${provider || model ? ` (${[provider, model].filter(Boolean).join(' ')})` : ''}`;
-      showToast('Chat failed: empty model response.', 'error');
-    }
-    const runId: string | undefined = typeof data?.run_id === 'string' ? data.run_id : undefined;
-    const startedAtMs: number | undefined = typeof data?.started_at_ms === 'number' ? data.started_at_ms : undefined;
-    const endedAtMs: number | undefined = typeof data?.ended_at_ms === 'number' ? data.ended_at_ms : undefined;
-    if (typeof startedAtMs === 'number' && typeof endedAtMs === 'number') {
-      setLastLatencyMs(Math.max(0, endedAtMs - startedAtMs));
-    }
-    const debug: ChatDebugInfo | null = data && typeof data?.debug === 'object' ? (data.debug as ChatDebugInfo) : null;
-    if (isRequestTokenActive(requestToken)) {
-      setLastRecallPlan((debug as any)?.recall_plan ?? null);
-      maybeToastRerankOutcome(debug?.rerank);
-    }
-    const confidence: number | undefined = typeof data?.debug?.confidence === 'number' ? data.debug.confidence : undefined;
-    const providerMeta = (() => {
-      const p = (debug as any)?.provider;
-      if (!p || typeof p !== 'object') return undefined;
-      const backend = String((p as any).provider_name || '').trim();
-      const model = String((p as any).model || '').trim();
-      const kind = String((p as any).kind || '').trim();
-      const base_url = String((p as any).base_url || '').trim();
-      const meta: any = {};
-      if (backend) meta.backend = backend;
-      if (model) meta.model = model;
-      if (kind) meta.kind = kind;
-      if (base_url) meta.base_url = base_url;
-      return Object.keys(meta).length ? meta : undefined;
-    })();
-    const assistantMessage: Message = {
-      id: `assistant-${Date.now()}`,
-      role: 'assistant',
-      content: assistantText,
-      timestamp: Date.now(),
-      citations,
-      runId,
-      eventId: runId,
-      startedAtMs,
-      endedAtMs,
-      debug,
-      confidence,
-      meta: providerMeta,
-    };
-
-    try {
-      window.dispatchEvent(
-        new CustomEvent('tribrid:chat:run-complete', {
-          detail: {
-            run_id: runId,
-            started_at_ms: startedAtMs,
-            ended_at_ms: endedAtMs,
-          },
-        })
-      );
-    } catch {}
-
-    setMessages((prev) => {
-      if (!isRequestTokenActive(requestToken)) return prev;
-      const updated = clampChatHistory([...prev, assistantMessage]);
-      saveChatHistory(updated);
-      return updated;
-    });
-  };
-
   const handleNewChat = useCallback(() => {
-    const now = Date.now();
-    const id = createConversationId();
-    const session: ChatSession = {
-      conversation_id: id,
-      created_at: now,
-      updated_at: now,
+    const session = createChatSession({
       title: 'New chat',
       messages: [],
-      model_override: String(modelOverride || '').trim(),
-      sources: (activeSources || { corpus_ids: ['recall_default'] }) as ActiveSources,
-    };
+      modelOverride,
+      sources: activeSources || defaultChatSources(),
+      chatHistoryMax,
+    });
+    const id = String(session.conversation_id || '').trim();
 
     setChatSessions((prev) => {
       let next = Array.isArray(prev) ? prev.slice() : [];
@@ -2009,7 +1380,7 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
     });
     sessionsLoadedRef.current = true;
     activateSession(session);
-  }, [activeSources, activateSession, modelOverride, persistSessions]);
+  }, [activeSources, activateSession, chatHistoryMax, modelOverride, persistSessions]);
 
   const handleClear = useCallback(() => {
     const activeId = String(conversationId || '').trim();
@@ -2025,18 +1396,15 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
 
     if (remaining.length === 0) {
       // Always keep at least one empty chat.
-      const now = Date.now();
-      const id = createConversationId();
-      const session: ChatSession = {
-        conversation_id: id,
-        created_at: now,
-        updated_at: now,
-        title: 'New chat',
-        messages: [],
-        model_override: String(modelOverride || '').trim(),
-        sources: (activeSources || { corpus_ids: ['recall_default'] }) as ActiveSources,
-      };
-      remaining = [session];
+      remaining = [
+        createChatSession({
+          title: 'New chat',
+          messages: [],
+          modelOverride,
+          sources: activeSources || defaultChatSources(),
+          chatHistoryMax,
+        }),
+      ];
     }
 
     const nextActive = remaining[0];
@@ -2044,7 +1412,7 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
     sessionsLoadedRef.current = true;
     persistSessions(remaining, String(nextActive.conversation_id || '').trim());
     activateSession(nextActive);
-  }, [activeSources, activateSession, chatSessions, conversationId, modelOverride, persistSessions]);
+  }, [activeSources, activateSession, chatHistoryMax, chatSessions, conversationId, modelOverride, persistSessions]);
 
   const handleExport = () => {
     const exportData = {
@@ -2089,6 +1457,16 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
       el.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
   }, []);
+
+  const handleSelectSession = useCallback(
+    (session: ChatSession) => {
+      const id = String(session.conversation_id || '').trim();
+      const nextActive = id || createConversationId();
+      persistSessions(chatSessions, nextActive);
+      activateSession(session);
+    },
+    [activateSession, chatSessions, persistSessions]
+  );
 
   return (
     <div
@@ -2295,89 +1673,13 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
       {/* Main content area with messages and optional sidebars */}
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
         {showHistory && (
-          <div style={{ width: '260px', borderRight: '1px solid var(--line)', background: 'var(--bg-elev1)', display: 'flex', flexDirection: 'column' }}>
-            <div style={{ padding: '12px', borderBottom: '1px solid var(--line)', fontSize: '12px', fontWeight: 700, color: 'var(--fg)' }}>
-              Chats
-              <span style={{ color: 'var(--fg-muted)', fontWeight: 600 }}> ({chatSessions.length})</span>
-            </div>
-            <div style={{ flex: 1, overflowY: 'auto', padding: '8px' }}>
-              {chatSessions.map((s, i) => {
-                const id = String(s.conversation_id || '').trim();
-                const isActive = id && id === String(conversationId || '').trim();
-                const updated = Number(s.updated_at || 0);
-                const title = String(s.title || '').trim() || 'New chat';
-                const msgCount = Array.isArray(s.messages) ? s.messages.length : 0;
-                return (
-                  <button
-                    key={`${id || i}`}
-                    type="button"
-                    onClick={() => {
-                      const nextActive = id || createConversationId();
-                      persistSessions(chatSessions, nextActive);
-                      activateSession(s);
-                    }}
-                    style={{
-                      width: '100%',
-                      textAlign: 'left',
-                      padding: '10px',
-                      borderRadius: '8px',
-                      border: `1px solid ${isActive ? 'var(--accent)' : 'var(--line)'}`,
-                      background: isActive ? 'rgba(0, 255, 136, 0.08)' : 'var(--card-bg)',
-                      color: 'var(--fg)',
-                      cursor: 'pointer',
-                      marginBottom: '8px',
-                    }}
-                    title={id ? `conversation_id: ${id}` : undefined}
-                  >
-                    <div
-                      style={{
-                        fontSize: '12px',
-                        fontWeight: 700,
-                        whiteSpace: 'nowrap',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                      }}
-                    >
-                      {title}
-                    </div>
-                    <div
-                      style={{
-                        fontSize: '11px',
-                        color: 'var(--fg-muted)',
-                        marginTop: 4,
-                        display: 'flex',
-                        gap: 8,
-                        flexWrap: 'wrap',
-                      }}
-                    >
-                      <span>{updated ? new Date(updated).toLocaleString() : '—'}</span>
-                      <span>msgs: {msgCount}</span>
-                      {isActive ? <span style={{ color: 'var(--accent)', fontWeight: 800 }}>active</span> : null}
-                    </div>
-                  </button>
-                );
-              })}
-              {chatSessions.length === 0 && (
-                <div style={{ fontSize: '12px', color: 'var(--fg-muted)', padding: '12px' }}>No chats yet</div>
-              )}
-            </div>
-            <div style={{ padding: '8px', borderTop: '1px solid var(--line)', display: 'grid', gap: '8px' }}>
-              <button
-                type="button"
-                onClick={handleNewChat}
-                style={{ width: '100%', background: 'var(--bg-elev2)', color: 'var(--accent)', border: '1px solid var(--accent)', padding: '8px', borderRadius: '6px', fontSize: '12px', fontWeight: 700, cursor: 'pointer' }}
-              >
-                New chat
-              </button>
-              <button
-                type="button"
-                onClick={handleClear}
-                style={{ width: '100%', background: 'var(--bg-elev2)', color: 'var(--err)', border: '1px solid var(--err)', padding: '8px', borderRadius: '6px', fontSize: '12px', fontWeight: 700, cursor: 'pointer' }}
-              >
-                Delete chat
-              </button>
-            </div>
-          </div>
+          <ChatHistorySidebar
+            sessions={chatSessions}
+            activeConversationId={String(conversationId || '').trim()}
+            onSelectSession={handleSelectSession}
+            onNewChat={handleNewChat}
+            onDeleteChat={handleClear}
+          />
         )}
         {/* Messages area */}
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
@@ -2387,417 +1689,20 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
             overflowY: 'auto',
             padding: '16px'
           }}>
-            {messages.length === 0 ? (
-              <div style={{
-                textAlign: 'center',
-                color: 'var(--fg-muted)',
-                padding: '40px 20px'
-              }}>
-                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"
-                     style={{ opacity: 0.3, marginBottom: '12px' }}>
-                  <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-                </svg>
-                <div style={{ fontSize: '14px' }}>Start a conversation with your codebase</div>
-                <div style={{ fontSize: '11px', marginTop: '8px' }}>
-                  Try: "Where is OAuth token validated?" or "How do we handle API errors?"
-                </div>
-              </div>
-            ) : (
-              messages.map(message => (
-                <div
-                  key={message.id}
-                  data-role={message.role}
-                  style={{
-                    marginBottom: '16px',
-                    display: 'flex',
-                    justifyContent: message.role === 'user' ? 'flex-end' : 'flex-start'
-                  }}
-                >
-                  <div style={{
-                    maxWidth: message.role === 'user' ? '70%' : '85%',
-                    background: message.role === 'user' 
-                      ? 'linear-gradient(135deg, var(--accent) 0%, var(--link) 100%)' 
-                      : 'linear-gradient(135deg, var(--bg-elev1) 0%, var(--bg-elev2) 100%)',
-                    color: message.role === 'user' ? 'var(--accent-contrast)' : 'var(--fg)',
-                    padding: message.role === 'user' ? '12px 16px' : '16px 20px',
-                    borderRadius: message.role === 'user' ? '16px 16px 4px 16px' : '16px 16px 16px 4px',
-                    position: 'relative',
-                    boxShadow: message.role === 'user' 
-                      ? '0 2px 8px rgba(0,0,0,0.2)' 
-                      : '0 2px 12px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.05)',
-                    border: message.role === 'assistant' ? '1px solid var(--line)' : 'none'
-                  }}>
-                    <div style={{ 
-                      fontSize: '11px', 
-                      opacity: 0.7, 
-                      marginBottom: '8px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '6px'
-                    }}>
-                      {message.role === 'assistant' && <span style={{ fontSize: '14px' }}>🤖</span>}
-                      {message.role === 'user' ? 'You' : 'Assistant'} · {new Date(message.timestamp).toLocaleTimeString()}
-                      {message.role === 'assistant' && message.meta?.repo && (
-                        <span style={{ 
-                          background: 'var(--accent)', 
-                          color: 'var(--accent-contrast)', 
-                          padding: '1px 6px', 
-                          borderRadius: '4px', 
-                          fontSize: '10px',
-                          fontWeight: 500
-                        }}>
-                          repo: {message.meta.repo}
-                        </span>
-                      )}
-                    </div>
-                    
-                    {/* Confidence badge for assistant */}
-                    {message.role === 'assistant' && showConfidence && message.confidence !== undefined && (
-                      <div style={{
-                        display: 'inline-block',
-                        background: message.confidence > 0.7 ? 'var(--success)' : message.confidence > 0.4 ? 'var(--warn)' : 'var(--error)',
-                        color: '#000',
-                        padding: '2px 8px',
-                        borderRadius: '4px',
-                        fontSize: '10px',
-                        fontWeight: 600,
-                        marginBottom: '10px'
-                      }}>
-                        Confidence: {formatConfidence(message.confidence)}
-                      </div>
-                    )}
-                    
-                    {/* Message content - markdown for assistant, plain for user */}
-                    {message.role === 'user' ? (
-                      <div>
-                        <div
-                          style={{
-                            fontSize: '13px',
-                            lineHeight: '1.6',
-                            whiteSpace: 'pre-wrap',
-                            wordBreak: 'break-word',
-                          }}
-                        >
-                          {message.content}
-                        </div>
-                        {Array.isArray(message.images) && message.images.length > 0 && (
-                          <div
-                            data-testid="chat-message-images"
-                            style={{
-                              marginTop: '8px',
-                              display: 'flex',
-                              gap: '8px',
-                              flexWrap: 'wrap',
-                            }}
-                          >
-                            {message.images.map((att, idx) => (
-                              <img
-                                key={idx}
-                                src={`data:${att.mime_type};base64,${att.base64}`}
-                                alt={`Sent image ${idx + 1}`}
-                                style={{
-                                  width: '88px',
-                                  height: '88px',
-                                  objectFit: 'cover',
-                                  borderRadius: '8px',
-                                  border: '1px solid rgba(255,255,255,0.25)',
-                                }}
-                              />
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    ) : (
-                      <AssistantMarkdown content={message.content} />
-                    )}
-
-                    {showCitations && message.citations && message.citations.length > 0 && (
-                      <div style={{
-                        marginTop: '8px',
-                        paddingTop: '8px',
-                        borderTop: '1px solid var(--line)',
-                        fontSize: '11px',
-                        opacity: 0.8
-                      }}>
-                        <strong>Citations:</strong>
-                        {message.citations.map((citation, idx) => (
-                          <div key={idx} style={{ marginTop: '4px' }}>
-                            <a
-                              href={citationToVscodeHref(citation)}
-                              style={{
-                                color: 'var(--link)',
-                                textDecoration: 'none',
-                                borderBottom: '1px solid var(--link)',
-                                fontFamily: 'var(--font-mono)',
-                                fontSize: '11px',
-                                cursor: 'pointer',
-                              }}
-                              title="Open in editor"
-                              data-testid="chat-citation-link"
-                            >
-                              {citation}
-                            </a>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-
-                    {/* Message footer with copy and feedback */}
-                    <div style={{
-                      marginTop: '8px',
-                      fontSize: '10px',
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center',
-                      gap: '8px',
-                      opacity: 0.75
-                    }}>
-                      <button
-                        onClick={() => handleCopy(message.content)}
-                        style={{
-                          background: 'none',
-                          border: 'none',
-                          color: 'inherit',
-                          cursor: 'pointer',
-                          padding: '2px 6px',
-                          fontSize: '10px',
-                          borderRadius: '4px',
-                          transition: 'background 0.15s'
-                        }}
-                        aria-label="Copy message"
-                        title="Copy to clipboard"
-                      >
-                        📋
-                      </button>
-                      
-                      {/* Feedback controls for assistant messages */}
-                      {message.role === 'assistant' && (
-                        <div style={{ 
-                          display: 'flex', 
-                          alignItems: 'center', 
-                          gap: '4px',
-                          marginLeft: 'auto'
-                        }}>
-                          {/* Show submitted feedback state OR the feedback buttons */}
-                          {messageFeedback[message.id] ? (
-                            <span style={{ 
-                              fontSize: '10px', 
-                              color: messageFeedback[message.id].type === 'thumbsup' ? 'var(--success)' : 
-                                     messageFeedback[message.id].type === 'thumbsdown' ? 'var(--warn)' : 'var(--accent)',
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: '3px'
-                            }}>
-                              {messageFeedback[message.id].type === 'thumbsup' && '👍'}
-                              {messageFeedback[message.id].type === 'thumbsdown' && '👎'}
-                              {messageFeedback[message.id].rating && '⭐'.repeat(messageFeedback[message.id].rating!)}
-                              <span style={{ opacity: 0.7, marginLeft: '2px' }}>Thanks!</span>
-                            </span>
-                          ) : (
-                            <>
-                              {/* Thumbs up/down */}
-                              <button
-                                onClick={() => sendFeedback(message.eventId ?? message.runId, message.id, 'thumbsup')}
-                                style={{
-                                  background: 'none',
-                                  border: 'none',
-                                  cursor: 'pointer',
-                                  padding: '2px 4px',
-                                  fontSize: '12px',
-                                  borderRadius: '4px',
-                                  transition: 'all 0.15s',
-                                  opacity: 0.6
-                                }}
-                                aria-label="Helpful"
-                                title="This was helpful - trains the reranker"
-                              >
-                                👍
-                              </button>
-                              <button
-                                onClick={() => sendFeedback(message.eventId ?? message.runId, message.id, 'thumbsdown')}
-                                style={{
-                                  background: 'none',
-                                  border: 'none',
-                                  cursor: 'pointer',
-                                  padding: '2px 4px',
-                                  fontSize: '12px',
-                                  borderRadius: '4px',
-                                  transition: 'all 0.15s',
-                                  opacity: 0.6
-                                }}
-                                aria-label="Not helpful"
-                                title="Not helpful - trains the reranker"
-                              >
-                                👎
-                              </button>
-                              
-                              {/* Star rating - compact row */}
-                              <span style={{ 
-                                borderLeft: '1px solid var(--line)', 
-                                paddingLeft: '6px', 
-                                marginLeft: '2px',
-                                display: 'flex',
-                                gap: '1px'
-                              }}>
-                                {[1, 2, 3, 4, 5].map((star) => (
-                                  <button
-                                    key={star}
-                                    onClick={() => sendFeedback(message.eventId ?? message.runId, message.id, `star${star}`)}
-                                    style={{
-                                      background: 'none',
-                                      border: 'none',
-                                      cursor: 'pointer',
-                                      padding: '1px 2px',
-                                      fontSize: '11px',
-                                      borderRadius: '2px',
-                                      transition: 'all 0.15s',
-                                      opacity: 0.4,
-                                      lineHeight: 1
-                                    }}
-                                    aria-label={`Rate ${star} star${star > 1 ? 's' : ''}`}
-                                    title={`Rate ${star}/5 - trains the reranker`}
-                                  >
-                                    ⭐
-                                  </button>
-                                ))}
-                              </span>
-                            </>
-                          )}
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Dev footer (per-answer debug metadata) */}
-                    {message.role === 'assistant' && showDebugFooter && (() => {
-                      const dbg = message.debug;
-                      if (!dbg && !message.runId) return null;
-
-                      const conf =
-                        typeof dbg?.confidence === 'number'
-                          ? dbg.confidence
-                          : typeof message.confidence === 'number'
-                            ? message.confidence
-                            : undefined;
-
-                      const legs: string[] = [];
-                      if (dbg?.include_vector && dbg.vector_enabled !== false) legs.push('vector');
-                      if (dbg?.include_sparse && dbg.sparse_enabled !== false) legs.push('sparse');
-                      if (dbg?.include_graph && dbg.graph_enabled !== false) legs.push('graph');
-                      const legsText = legs.length ? legs.join(' + ') : '—';
-
-                      let fusionText = '—';
-                      if (dbg?.fusion_method === 'rrf') {
-                        fusionText = `rrf(k=${dbg.rrf_k ?? '—'})`;
-                      } else if (dbg?.fusion_method === 'weighted') {
-                        const vw = typeof dbg.vector_weight === 'number' ? dbg.vector_weight.toFixed(2) : '—';
-                        const sw = typeof dbg.sparse_weight === 'number' ? dbg.sparse_weight.toFixed(2) : '—';
-                        const gw = typeof dbg.graph_weight === 'number' ? dbg.graph_weight.toFixed(2) : '—';
-                        fusionText = `weighted(v=${vw}, s=${sw}, g=${gw}${dbg.normalize_scores ? ', norm' : ''})`;
-                      }
-
-                      const kText = dbg?.final_k_used ?? '—';
-                      const countsText = dbg
-                        ? `v:${dbg.vector_results ?? '—'} s:${dbg.sparse_results ?? '—'} g:${dbg.graph_hydrated_chunks ?? '—'} final:${dbg.final_results ?? '—'}`
-                        : '—';
-                      const runShort = message.runId ? message.runId.slice(0, 8) : '—';
-                      const recallPlan = (dbg as any)?.recall_plan;
-                      const recallIntensity =
-                        typeof recallPlan?.intensity === 'string' ? (recallPlan.intensity as string) : null;
-                      const recallReason = typeof recallPlan?.reason === 'string' ? (recallPlan.reason as string) : null;
-
-                      return (
-                        <div
-                          data-testid="chat-debug-footer"
-                          style={{
-                            marginTop: '8px',
-                            paddingTop: '8px',
-                            borderTop: '1px solid var(--line)',
-                            fontSize: '11px',
-                            color: 'var(--fg-muted)',
-                            opacity: 0.9,
-                            display: 'flex',
-                            flexWrap: 'wrap',
-                            gap: '10px',
-                            alignItems: 'center',
-                          }}
-                        >
-                          <span>conf {typeof conf === 'number' ? formatConfidence(conf) : '—'}</span>
-                          <span>legs {legsText}</span>
-                          <span>fusion {fusionText}</span>
-                          <span>k {kText}</span>
-                          <span>{countsText}</span>
-                          {recallIntensity ? <span>recall {recallIntensity}</span> : null}
-                          {recallReason ? (
-                            <span title={recallReason} style={{ maxWidth: 420, overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                              gate {recallReason}
-                            </span>
-                          ) : null}
-                          <span>run {runShort}</span>
-                          {recallGateShowSignals && recallPlan ? (
-                            <details>
-                              <summary style={{ cursor: 'pointer', color: 'var(--link)' }}>signals</summary>
-                              <pre
-                                style={{
-                                  marginTop: 6,
-                                  background: 'var(--bg-elev2)',
-                                  border: '1px solid var(--line)',
-                                  padding: 10,
-                                  borderRadius: 8,
-                                  maxWidth: 680,
-                                  overflow: 'auto',
-                                  whiteSpace: 'pre-wrap',
-                                }}
-                              >
-                                {JSON.stringify(recallPlan, null, 2)}
-                              </pre>
-                            </details>
-                          ) : null}
-                          <button
-                            type="button"
-                            data-testid="chat-debug-view-trace"
-                            onClick={() => handleViewTraceAndLogs(message)}
-                            style={{
-                              background: 'none',
-                              border: 'none',
-                              padding: 0,
-                              color: 'var(--link)',
-                              cursor: 'pointer',
-                              textDecoration: 'underline',
-                              fontSize: '11px',
-                            }}
-                            title="Jump to trace & logs for this run"
-                          >
-                            View trace &amp; logs
-                          </button>
-                        </div>
-                      );
-                    })()}
-                  </div>
-                </div>
-              ))
-            )}
-
-            {/* Provider transparency indicator (accessibility) */}
-            {messages.length > 0 && (
-              <div style={{
-                marginTop: '8px',
-                fontSize: '11px',
-                color: 'var(--fg-muted)'
-              }}>
-                {(() => {
-                  const last = messages[messages.length - 1];
-                  const m = last && last.meta ? last.meta : null;
-                  if (!m) return null;
-                  const parts: string[] = [];
-                  const backend = m.backend || m.provider;
-                  if (backend) parts.push(`backend: ${backend}`);
-                  if (m.model) parts.push(`model: ${m.model}`);
-                  if (m.failover && m.failover.from && m.failover.to) parts.push(`failover: ${m.failover.from} → ${m.failover.to}`);
-                  if (!parts.length) return null;
-                  return (<span>— [{parts.join(' • ')}]</span>);
-                })()}
-              </div>
-            )}
+            <ChatMessageThread
+              messages={messages}
+              showConfidence={showConfidence}
+              showCitations={showCitations}
+              showDebugFooter={showDebugFooter}
+              showRecallGateSignals={recallGateShowSignals}
+              messageFeedback={messageFeedback}
+              onCopy={handleCopy}
+              onSendFeedback={(message, signal) => {
+                sendFeedback(message.eventId ?? message.runId, message.id, signal);
+              }}
+              onViewTraceAndLogs={handleViewTraceAndLogs}
+              renderAssistantContent={(content) => <AssistantMarkdown content={content} />}
+            />
 
             {streaming && (
               <div style={{
