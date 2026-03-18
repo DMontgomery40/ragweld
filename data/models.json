@@ -1,6 +1,6 @@
 {
   "currency": "USD",
-  "last_updated": "2026-03-17",
+  "last_updated": "2026-03-18",
   "sources": [
     "https://openai.com/api/pricing/ (2026-02-07)",
     "https://www.anthropic.com/pricing (2026-02-07)",
@@ -10,7 +10,7 @@
     "https://mistral.ai/pricing (2025-11-29)",
     "https://api-docs.deepseek.com/quick_start/pricing (2025-11-29)",
     "https://jina.ai/embeddings/ (2025-11-29)",
-    "https://openrouter.ai/api/v1/models (2026-03-17)"
+    "https://openrouter.ai/api/v1/models (2026-03-18)"
   ],
   "models": [
     {
@@ -416,8 +416,8 @@
       ],
       "unit": "1k_tokens",
       "context": 163840,
-      "input_per_1k": 0.00026,
-      "output_per_1k": 0.00038,
+      "input_per_1k": 0.000255,
+      "output_per_1k": 0.0004,
       "base_url": "https://api.deepseek.com/v1",
       "notes": "Added automatically from OpenRouter feed.",
       "selection_roles": [
@@ -1851,44 +1851,6 @@
     },
     {
       "provider": "openai",
-      "family": "gpt-5-mini",
-      "model": "gpt-5-mini",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "input_per_1k": 0.00025,
-      "output_per_1k": 0.002,
-      "context": 400000,
-      "notes": "GPT-4.1 mini (source: per 1M = $0.40/$1.60)",
-      "base_url": "https://api.openai.com/v1",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
-    },
-    {
-      "provider": "openai",
-      "family": "gpt-5-nano",
-      "model": "gpt-5-nano",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "input_per_1k": 5e-05,
-      "output_per_1k": 0.0004,
-      "context": 400000,
-      "notes": "GPT-4.1 nano (source: per 1M = $0.10/$0.40)",
-      "base_url": "https://api.openai.com/v1",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
-    },
-    {
-      "provider": "openai",
       "family": "gpt-5.1-codex-max",
       "model": "gpt-5.1-codex-max",
       "components": [
@@ -1976,6 +1938,44 @@
       "output_per_1k": 0.015,
       "base_url": "https://api.openai.com/v1",
       "notes": "Added automatically from OpenRouter feed.",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
+    },
+    {
+      "provider": "openai",
+      "family": "gpt-5.4-mini",
+      "model": "gpt-5.4-mini",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "input_per_1k": 0.00075,
+      "output_per_1k": 0.0045,
+      "context": 400000,
+      "notes": "GPT-4.1 mini (source: per 1M = $0.40/$1.60)",
+      "base_url": "https://api.openai.com/v1",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
+    },
+    {
+      "provider": "openai",
+      "family": "gpt-5.4-nano",
+      "model": "gpt-5.4-nano",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "input_per_1k": 0.0002,
+      "output_per_1k": 0.00125,
+      "context": 400000,
+      "notes": "GPT-4.1 nano (source: per 1M = $0.10/$0.40)",
+      "base_url": "https://api.openai.com/v1",
       "selection_roles": [
         "generation"
       ],
