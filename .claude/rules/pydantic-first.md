@@ -5,6 +5,8 @@ paths:
 
 # Pydantic-First Rules (Python/Server)
 
+> Branch canon for `feat/oss-composition-kickoff`: replacement-only. No legacy fallbacks, no compatibility shims, no transition-period dual paths.
+
 ## Rule 1: Pydantic First
 Before adding ANY feature:
 1. Add the field to `tribrid_config_model.py` with proper `Field()` constraints
@@ -42,17 +44,17 @@ rrf_k: int = Field(default=60, ge=1, le=200, description="RRF smoothing")
 ## Banned Python Imports
 ```python
 # BANNED - we don't use these
-from qdrant_client import ...     # Use pgvector
-import qdrant_client             # Use pgvector
 from redis import ...            # Removed
 import redis                     # Removed
 from langchain import ...        # Banned (use langgraph directly)
 import langchain                 # Banned (use langgraph directly)
 ```
 LangGraph IS allowed — use it directly, not through LangChain wrappers.
+Qdrant/Haystack/Docling are allowed on this branch.
 
 ## Architecture Smells (BANNED)
 - `class *Adapter` -> Fix the Pydantic model instead
 - `class *Transformer` -> Fix the Pydantic model instead
 - `class *Mapper` -> Fix the Pydantic model instead
 - `function transform*` -> Fix the Pydantic model instead
+- `fallback_*` / `legacy_*` / compatibility dual-path helpers -> replace the subsystem instead

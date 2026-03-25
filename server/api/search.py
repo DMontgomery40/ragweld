@@ -1,17 +1,26 @@
 from __future__ import annotations
 
+import json
 import time
 import uuid
 from typing import cast
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Response
 from starlette.responses import StreamingResponse
 
 from server.config import load_config
 from server.db.postgres import PostgresClient
 from server.models.retrieval import AnswerRequest, AnswerResponse, SearchRequest, SearchResponse
-from server.models.tribrid_config_model import TriBridConfig
+from server.models.tribrid_config_model import ChatDebugInfo, ChatProviderInfo, TriBridConfig
 from server.observability.metrics import SEARCH_REQUESTS_TOTAL
+from server.observability.runtime import (
+    apply_default_links,
+    current_header_values,
+    current_trace_payload_fields,
+    set_provider_route,
+    start_request_observation,
+    update_route_summary,
+)
 from server.retrieval.cache import CacheMode
 from server.retrieval.errors import RetrievalContractMismatchError
 from server.retrieval.fusion import TriBridFusion
@@ -23,6 +32,7 @@ from server.services.answer_service import (
 from server.services.config_store import CorpusNotFoundError
 from server.services.config_store import get_config as load_scoped_config
 from server.services.conversation_store import get_conversation_store
+from server.services.traces import get_trace_store
 
 router = APIRouter(tags=["search"])
 
@@ -35,13 +45,12 @@ def _normalize_cache_mode(cache_mode: str | None) -> CacheMode:
 
 
 @router.post("/search", response_model=SearchResponse)
-async def search(request: SearchRequest) -> SearchResponse:
+async def search(request: SearchRequest, response: Response) -> SearchResponse:
     if not request.query.strip():
         raise HTTPException(status_code=400, detail="Query must not be empty")
 
     SEARCH_REQUESTS_TOTAL.inc()
 
-    # Validate corpus exists (prevents auto-creating configs on search)
     global_cfg = load_config()
     pg = PostgresClient(global_cfg.indexing.postgres_url)
     corpus_validation_error: str | None = None
@@ -50,8 +59,6 @@ async def search(request: SearchRequest) -> SearchResponse:
         await pg.connect()
         corpus = await pg.get_corpus(request.repo_id)
     except Exception as e:
-        # Fail open: we can't validate corpus existence if Postgres is down, but we still return a 200
-        # with best-effort retrieval debug.
         corpus_validation_error = str(e)
 
     if corpus_validation_error is None and corpus is None:
@@ -62,70 +69,134 @@ async def search(request: SearchRequest) -> SearchResponse:
     except CorpusNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
     except Exception:
-        # Fail open: fall back to LAW defaults (fusion will also fail open if config load fails downstream).
         cfg = TriBridConfig()
     fusion = TriBridFusion(vector=None, sparse=None, graph=None)
     request_cache_mode = _normalize_cache_mode(request.cache_mode)
+    run_id = str(uuid.uuid4())
+    started_at_ms = int(time.time() * 1000)
+    trace_store = get_trace_store()
 
-    t0 = time.perf_counter()
-    try:
-        matches = await fusion.search(
-            [request.repo_id],
-            request.query,
-            cfg.fusion,
+    with start_request_observation(
+        config=cfg,
+        route_name="search",
+        path="/api/search",
+        method="POST",
+        run_id=run_id,
+        repo_id=request.repo_id,
+    ):
+        apply_default_links(cfg)
+        for key, value in current_header_values().items():
+            response.headers[key] = value
+        trace_enabled = await trace_store.start(
+            run_id=run_id,
+            repo_id=request.repo_id,
+            started_at_ms=started_at_ms,
+            config=cfg,
+        )
+        if trace_enabled:
+            await trace_store.annotate(run_id, **current_trace_payload_fields())
+            await trace_store.add_event(
+                run_id,
+                kind="search.request",
+                data={
+                    "repo_id": request.repo_id,
+                    "query": request.query,
+                    "include_vector": bool(request.include_vector),
+                    "include_sparse": bool(request.include_sparse),
+                    "include_graph": bool(request.include_graph),
+                    "top_k": int(request.top_k),
+                },
+            )
+
+        t0 = time.perf_counter()
+        try:
+            matches = await fusion.search(
+                [request.repo_id],
+                request.query,
+                cfg.fusion,
+                include_vector=bool(request.include_vector),
+                include_sparse=bool(request.include_sparse),
+                include_graph=bool(request.include_graph),
+                top_k=int(request.top_k),
+                cache_mode=request_cache_mode,
+                cache_namespace="search",
+            )
+        except RetrievalContractMismatchError as e:
+            if trace_enabled:
+                await trace_store.add_event(run_id, kind="search.error", msg=str(e), data={"code": e.code})
+                await trace_store.annotate(run_id, **current_trace_payload_fields())
+                await trace_store.end(run_id)
+            raise HTTPException(status_code=409, detail=e.to_detail()) from e
+        dt_ms = (time.perf_counter() - t0) * 1000.0
+
+        update_route_summary(
+            corpus_ids=[request.repo_id],
             include_vector=bool(request.include_vector),
             include_sparse=bool(request.include_sparse),
             include_graph=bool(request.include_graph),
-            top_k=int(request.top_k),
-            cache_mode=request_cache_mode,
-            cache_namespace="search",
+            vector_results=int((fusion.last_debug or {}).get("fusion_vector_results") or 0),
+            sparse_results=int((fusion.last_debug or {}).get("fusion_sparse_results") or 0),
+            graph_results=int((fusion.last_debug or {}).get("fusion_graph_hydrated_chunks") or 0),
+            final_results=len(matches),
+            llm_used=False,
+            llm_error=None,
         )
-    except RetrievalContractMismatchError as e:
-        raise HTTPException(status_code=409, detail=e.to_detail()) from e
-    dt_ms = (time.perf_counter() - t0) * 1000.0
 
-    # Best-effort query log append for triplet mining.
-    try:
-        if int(getattr(cfg.tracing, "tracing_enabled", 1) or 0) == 1:
-            from server.observability.query_log import append_query_log
-
-            await append_query_log(
-                cfg,
-                entry={
-                    "event_id": str(uuid.uuid4()),
-                    "kind": "search",
-                    "corpus_id": request.repo_id,
-                    "query": request.query,
-                    "reranker_mode": str(cfg.reranking.reranker_mode or ""),
-                    "rerank_ok": bool((fusion.last_debug or {}).get("rerank_ok", True)),
-                    "rerank_applied": bool((fusion.last_debug or {}).get("rerank_applied", False)),
-                    "rerank_skipped_reason": (fusion.last_debug or {}).get("rerank_skipped_reason"),
-                    "rerank_error": (fusion.last_debug or {}).get("rerank_error"),
-                    "rerank_candidates_reranked": int((fusion.last_debug or {}).get("rerank_candidates_reranked") or 0),
-                    "top_paths": [m.file_path for m in matches[:5]],
-                },
-            )
-    except Exception:
-        pass
-
-    return SearchResponse(
-        query=request.query,
-        matches=matches,
-        fusion_method=cfg.fusion.method,
-        reranker_mode=cfg.reranking.reranker_mode,
-        latency_ms=dt_ms,
-        debug={
+        debug = {
             "vector_enabled": bool(request.include_vector),
             "sparse_enabled": bool(request.include_sparse),
             "graph_enabled": bool(request.include_graph),
             "corpus_validation_error": corpus_validation_error,
+            "observability_run_id": run_id,
+            "observability_trace_id": current_trace_payload_fields().get("trace_id"),
+            "observability_correlation_id": current_trace_payload_fields().get("correlation_id"),
             **(fusion.last_debug or {}),
-        },
-    )
+        }
+
+        try:
+            if int(getattr(cfg.tracing, "tracing_enabled", 1) or 0) == 1:
+                from server.observability.query_log import append_query_log
+
+                await append_query_log(
+                    cfg,
+                    entry={
+                        "event_id": str(uuid.uuid4()),
+                        "kind": "search",
+                        "corpus_id": request.repo_id,
+                        "query": request.query,
+                        "reranker_mode": str(cfg.reranking.reranker_mode or ""),
+                        "rerank_ok": bool((fusion.last_debug or {}).get("rerank_ok", True)),
+                        "rerank_applied": bool((fusion.last_debug or {}).get("rerank_applied", False)),
+                        "rerank_skipped_reason": (fusion.last_debug or {}).get("rerank_skipped_reason"),
+                        "rerank_error": (fusion.last_debug or {}).get("rerank_error"),
+                        "rerank_candidates_reranked": int((fusion.last_debug or {}).get("rerank_candidates_reranked") or 0),
+                        "top_paths": [m.file_path for m in matches[:5]],
+                    },
+                )
+        except Exception:
+            pass
+
+        if trace_enabled:
+            await trace_store.add_event(
+                run_id,
+                kind="search.response",
+                data={"matches_count": len(matches), "latency_ms": float(dt_ms)},
+            )
+            await trace_store.annotate(run_id, **current_trace_payload_fields())
+            await trace_store.end(run_id, ended_at_ms=int(time.time() * 1000))
+
+        return SearchResponse(
+            query=request.query,
+            matches=matches,
+            fusion_method=cfg.fusion.method,
+            reranker_mode=cfg.reranking.reranker_mode,
+            latency_ms=dt_ms,
+            debug=debug,
+        )
 
 
 @router.post("/answer", response_model=AnswerResponse)
-async def answer(request: AnswerRequest) -> AnswerResponse:
+async def answer(request: AnswerRequest, response: Response) -> AnswerResponse:
     if not request.query.strip():
         raise HTTPException(status_code=400, detail="Query must not be empty")
 
@@ -151,44 +222,118 @@ async def answer(request: AnswerRequest) -> AnswerResponse:
         cfg = TriBridConfig()
     fusion = TriBridFusion(vector=None, sparse=None, graph=None)
     request_cache_mode = _normalize_cache_mode(request.cache_mode)
+    run_id = str(uuid.uuid4())
+    started_at_ms = int(time.time() * 1000)
+    trace_store = get_trace_store()
 
-    t0 = time.perf_counter()
-    try:
-        text, sources, provider_info, debug = await answer_best_effort(
-            query=request.query,
-            corpus_id=request.repo_id,
+    with start_request_observation(
+        config=cfg,
+        route_name="answer",
+        path="/api/answer",
+        method="POST",
+        run_id=run_id,
+        repo_id=request.repo_id,
+    ):
+        apply_default_links(cfg)
+        for key, value in current_header_values().items():
+            response.headers[key] = value
+        trace_enabled = await trace_store.start(
+            run_id=run_id,
+            repo_id=request.repo_id,
+            started_at_ms=started_at_ms,
             config=cfg,
-            fusion=fusion,
+        )
+        if trace_enabled:
+            await trace_store.annotate(run_id, **current_trace_payload_fields())
+            await trace_store.add_event(
+                run_id,
+                kind="answer.request",
+                data={
+                    "repo_id": request.repo_id,
+                    "query": request.query,
+                    "include_vector": bool(request.include_vector),
+                    "include_sparse": bool(request.include_sparse),
+                    "include_graph": bool(request.include_graph),
+                    "top_k": int(request.top_k),
+                    "stream": False,
+                },
+            )
+
+        t0 = time.perf_counter()
+        try:
+            text, sources, provider_info, debug = await answer_best_effort(
+                query=request.query,
+                corpus_id=request.repo_id,
+                config=cfg,
+                fusion=fusion,
+                include_vector=bool(request.include_vector),
+                include_sparse=bool(request.include_sparse),
+                include_graph=bool(request.include_graph),
+                top_k=int(request.top_k),
+                system_prompt_override=request.system_prompt,
+                model_override=str(request.model_override or ""),
+                cache_mode=request_cache_mode,
+            )
+        except RetrievalContractMismatchError as e:
+            if trace_enabled:
+                await trace_store.add_event(run_id, kind="answer.error", msg=str(e), data={"code": e.code})
+                await trace_store.annotate(run_id, **current_trace_payload_fields())
+                await trace_store.end(run_id)
+            raise HTTPException(status_code=409, detail=e.to_detail()) from e
+        except Exception as e:
+            if trace_enabled:
+                await trace_store.add_event(run_id, kind="answer.error", msg=str(e), data={})
+                await trace_store.annotate(run_id, **current_trace_payload_fields())
+                await trace_store.end(run_id)
+            raise HTTPException(status_code=500, detail=str(e)) from e
+
+        dt_ms = (time.perf_counter() - t0) * 1000.0
+
+        if corpus_validation_error:
+            debug = debug.model_copy(
+                update={
+                    "fusion_debug": {**(debug.fusion_debug or {}), "corpus_validation_error": corpus_validation_error}
+                }
+            )
+
+        set_provider_route(provider_info)
+        update_route_summary(
+            corpus_ids=[request.repo_id],
             include_vector=bool(request.include_vector),
             include_sparse=bool(request.include_sparse),
             include_graph=bool(request.include_graph),
-            top_k=int(request.top_k),
-            system_prompt_override=request.system_prompt,
-            model_override=str(request.model_override or ""),
-            cache_mode=request_cache_mode,
-        )
-    except RetrievalContractMismatchError as e:
-        raise HTTPException(status_code=409, detail=e.to_detail()) from e
-    dt_ms = (time.perf_counter() - t0) * 1000.0
-
-    if corpus_validation_error:
-        debug = debug.model_copy(
-            update={
-                "fusion_debug": {**(debug.fusion_debug or {}), "corpus_validation_error": corpus_validation_error}
-            }
+            vector_results=int(debug.vector_results or 0),
+            sparse_results=int(debug.sparse_results or 0),
+            graph_results=int(debug.graph_hydrated_chunks or 0),
+            final_results=len(sources),
+            llm_used=bool(debug.llm_used),
+            llm_error=debug.llm_error,
         )
 
-    model = provider_info.model if (provider_info is not None and debug.llm_used) else "retrieval-only"
+        if trace_enabled:
+            await trace_store.add_event(
+                run_id,
+                kind="answer.response",
+                data={
+                    "sources_count": len(sources),
+                    "latency_ms": float(dt_ms),
+                    "model": str(provider_info.model) if provider_info is not None else "retrieval-only",
+                },
+            )
+            await trace_store.annotate(run_id, **current_trace_payload_fields())
+            await trace_store.end(run_id, ended_at_ms=int(time.time() * 1000))
 
-    return AnswerResponse(
-        query=request.query,
-        answer=text,
-        sources=sources,
-        model=model,
-        tokens_used=0,
-        latency_ms=float(dt_ms),
-        debug=debug,
-    )
+        model = provider_info.model if (provider_info is not None and debug.llm_used) else "retrieval-only"
+
+        return AnswerResponse(
+            query=request.query,
+            answer=text,
+            sources=sources,
+            model=model,
+            tokens_used=0,
+            latency_ms=float(dt_ms),
+            debug=debug,
+        )
 
 
 @router.post("/answer/stream")
@@ -218,6 +363,41 @@ async def answer_stream(request: AnswerRequest) -> StreamingResponse:
         cfg = TriBridConfig()
     fusion = TriBridFusion(vector=None, sparse=None, graph=None)
     request_cache_mode = _normalize_cache_mode(request.cache_mode)
+    run_id = str(uuid.uuid4())
+    started_at_ms = int(time.time() * 1000)
+    trace_store = get_trace_store()
+
+    obs_cm = start_request_observation(
+        config=cfg,
+        route_name="answer_stream",
+        path="/api/answer/stream",
+        method="POST",
+        run_id=run_id,
+        repo_id=request.repo_id,
+    )
+    obs_cm.__enter__()
+    apply_default_links(cfg)
+    trace_enabled = await trace_store.start(
+        run_id=run_id,
+        repo_id=request.repo_id,
+        started_at_ms=started_at_ms,
+        config=cfg,
+    )
+    if trace_enabled:
+        await trace_store.annotate(run_id, **current_trace_payload_fields())
+        await trace_store.add_event(
+            run_id,
+            kind="answer.request",
+            data={
+                "repo_id": request.repo_id,
+                "query": request.query,
+                "include_vector": bool(request.include_vector),
+                "include_sparse": bool(request.include_sparse),
+                "include_graph": bool(request.include_graph),
+                "top_k": int(request.top_k),
+                "stream": True,
+            },
+        )
 
     store = get_conversation_store()
     conv = store.get_or_create(None)
@@ -234,29 +414,116 @@ async def answer_stream(request: AnswerRequest) -> StreamingResponse:
             cache_mode=request_cache_mode,
         )
     except RetrievalContractMismatchError as e:
+        if trace_enabled:
+            await trace_store.add_event(run_id, kind="answer.error", msg=str(e), data={"code": e.code})
+            await trace_store.annotate(run_id, **current_trace_payload_fields())
+            await trace_store.end(run_id)
+        obs_cm.__exit__(type(e), e, e.__traceback__)
         raise HTTPException(status_code=409, detail=e.to_detail()) from e
+    except Exception as e:
+        if trace_enabled:
+            await trace_store.add_event(run_id, kind="answer.error", msg=str(e), data={})
+            await trace_store.annotate(run_id, **current_trace_payload_fields())
+            await trace_store.end(run_id)
+        obs_cm.__exit__(type(e), e, e.__traceback__)
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+    async def wrapped_stream() -> object:
+        ended_at_ms: int | None = None
+        caught_exc: tuple[type[BaseException] | None, BaseException | None, object | None] = (None, None, None)
+        try:
+            async for sse in stream_answer_best_effort(
+                query=request.query,
+                corpus_id=request.repo_id,
+                config=cfg,
+                fusion=fusion,
+                include_vector=bool(request.include_vector),
+                include_sparse=bool(request.include_sparse),
+                include_graph=bool(request.include_graph),
+                top_k=int(request.top_k),
+                system_prompt_override=request.system_prompt,
+                model_override=str(request.model_override or ""),
+                cache_mode=request_cache_mode,
+                prefetched_chunks=prefetched_chunks,
+                conversation_id=conv.id,
+                run_id=run_id,
+                started_at_ms=started_at_ms,
+            ):
+                if not sse.startswith("data: "):
+                    yield sse
+                    continue
+                try:
+                    payload = json.loads(sse.replace("data: ", "").strip())
+                except Exception:
+                    yield sse
+                    continue
+                if payload.get("type") != "done":
+                    yield sse
+                    continue
+
+                ended_at_ms = int(time.time() * 1000)
+
+                provider_obj: ChatProviderInfo | None = None
+                raw_provider = payload.get("provider")
+                if isinstance(raw_provider, dict):
+                    try:
+                        provider_obj = ChatProviderInfo.model_validate(raw_provider)
+                    except Exception:
+                        provider_obj = None
+                set_provider_route(provider_obj)
+
+                debug_obj: ChatDebugInfo | None = None
+                raw_debug = payload.get("debug")
+                if isinstance(raw_debug, dict):
+                    try:
+                        debug_obj = ChatDebugInfo.model_validate(raw_debug)
+                    except Exception:
+                        debug_obj = None
+
+                update_route_summary(
+                    corpus_ids=[request.repo_id],
+                    include_vector=bool(request.include_vector),
+                    include_sparse=bool(request.include_sparse),
+                    include_graph=bool(request.include_graph),
+                    vector_results=int(getattr(debug_obj, "vector_results", 0) or 0),
+                    sparse_results=int(getattr(debug_obj, "sparse_results", 0) or 0),
+                    graph_results=int(getattr(debug_obj, "graph_hydrated_chunks", 0) or 0),
+                    final_results=len(payload.get("sources") or []),
+                    llm_used=bool(getattr(debug_obj, "llm_used", True)),
+                    llm_error=getattr(debug_obj, "llm_error", None),
+                )
+
+                if trace_enabled:
+                    await trace_store.add_event(
+                        run_id,
+                        kind="answer.response",
+                        data={
+                            "sources_count": len(payload.get("sources") or []),
+                            "latency_ms": float(max(0, ended_at_ms - started_at_ms)),
+                            "model": str(provider_obj.model) if provider_obj is not None else "retrieval-only",
+                        },
+                    )
+                    await trace_store.annotate(run_id, **current_trace_payload_fields())
+
+                yield sse
+        except Exception as e:
+            caught_exc = (type(e), e, e.__traceback__)
+            if trace_enabled:
+                await trace_store.add_event(run_id, kind="answer.error", msg=str(e), data={})
+            raise
+        finally:
+            if trace_enabled:
+                await trace_store.annotate(run_id, **current_trace_payload_fields())
+                await trace_store.end(run_id, ended_at_ms=ended_at_ms)
+            obs_cm.__exit__(*caught_exc)
 
     return StreamingResponse(
-        stream_answer_best_effort(
-            query=request.query,
-            corpus_id=request.repo_id,
-            config=cfg,
-            fusion=fusion,
-            include_vector=bool(request.include_vector),
-            include_sparse=bool(request.include_sparse),
-            include_graph=bool(request.include_graph),
-            top_k=int(request.top_k),
-            system_prompt_override=request.system_prompt,
-            model_override=str(request.model_override or ""),
-            cache_mode=request_cache_mode,
-            prefetched_chunks=prefetched_chunks,
-            conversation_id=conv.id,
-            started_at_ms=int(time.time() * 1000),
-        ),
+        wrapped_stream(),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
             "X-Accel-Buffering": "no",
+            **current_header_values(),
         },
     )

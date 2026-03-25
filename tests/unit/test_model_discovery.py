@@ -2,8 +2,13 @@ import os
 
 import pytest
 
-from server.chat.model_discovery import discover_local_models, discover_models, discover_openrouter_models
-from server.models.chat_config import LocalModelConfig, LocalProviderEntry, OpenRouterConfig
+from server.chat.model_discovery import (
+    discover_litellm_models,
+    discover_local_models,
+    discover_models,
+    discover_openrouter_models,
+)
+from server.models.chat_config import LiteLLMConfig, LocalModelConfig, LocalProviderEntry, OpenRouterConfig
 
 
 @pytest.mark.asyncio
@@ -35,6 +40,12 @@ async def test_discover_openrouter_models_disabled_or_missing_env_returns_empty(
 
 
 @pytest.mark.asyncio
+async def test_discover_litellm_models_disabled_returns_empty() -> None:
+    disabled = LiteLLMConfig(enabled=False)
+    assert await discover_litellm_models(disabled) == []
+
+
+@pytest.mark.asyncio
 async def test_discover_models_combines_lists_without_raising() -> None:
     local_cfg = LocalModelConfig(
         providers=[
@@ -47,6 +58,5 @@ async def test_discover_models_combines_lists_without_raising() -> None:
         ]
     )
     openrouter_cfg = OpenRouterConfig(enabled=False)
-    models = await discover_models(local_cfg, openrouter_cfg)
+    models = await discover_models(local_cfg, openrouter_cfg, LiteLLMConfig(enabled=False))
     assert models == []
-

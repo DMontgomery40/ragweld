@@ -41,6 +41,7 @@ _CORPUS_SCOPE_DEP = Depends()
 _SECRETS_CHECK_ALLOWLIST = {
     # Provider secrets
     "OPENAI_API_KEY",
+    "LITELLM_API_KEY",
     "OPENROUTER_API_KEY",
     "ANTHROPIC_API_KEY",
     "GOOGLE_API_KEY",
@@ -48,9 +49,8 @@ _SECRETS_CHECK_ALLOWLIST = {
     "VOYAGE_API_KEY",
     "JINA_API_KEY",
     # Integrations (UI surfaces these; backend does not expose values)
-    "LANGTRACE_API_KEY",
-    "LANGCHAIN_API_KEY",
-    "LANGSMITH_API_KEY",
+    "LANGFUSE_PUBLIC_KEY",
+    "LANGFUSE_SECRET_KEY",
     "NETLIFY_API_KEY",
     "GRAFANA_API_KEY",
     "SLACK_WEBHOOK_URL",
@@ -116,13 +116,13 @@ def _catalog_capabilities_for_model(
     if raw.lower().startswith("ragweld:"):
         return {"GEN"}
 
-    # Prefix-based route override format (local:/openrouter:).
+    # Prefix-based route override format (local:/litellm:/openrouter:).
     if ":" in raw:
         prefix, rest = raw.split(":", 1)
         p = prefix.strip().lower()
         if p == "ragweld":
             return {"GEN"}
-        if p in {"local", "openrouter"}:
+        if p in {"local", "openrouter", "litellm"}:
             raw = rest.strip()
 
     model_core = raw
@@ -654,15 +654,15 @@ async def check_secrets(keys: str = Query(..., description="Comma-separated env 
     # Use explicit getenv calls (no dynamic env lookups) to keep env usage auditable/"LAW"-compliant.
     status = {
         "OPENAI_API_KEY": bool(os.getenv("OPENAI_API_KEY")),
+        "LITELLM_API_KEY": bool(os.getenv("LITELLM_API_KEY")),
         "OPENROUTER_API_KEY": bool(os.getenv("OPENROUTER_API_KEY")),
         "ANTHROPIC_API_KEY": bool(os.getenv("ANTHROPIC_API_KEY")),
         "GOOGLE_API_KEY": bool(os.getenv("GOOGLE_API_KEY")),
         "COHERE_API_KEY": bool(os.getenv("COHERE_API_KEY")),
         "VOYAGE_API_KEY": bool(os.getenv("VOYAGE_API_KEY")),
         "JINA_API_KEY": bool(os.getenv("JINA_API_KEY")),
-        "LANGTRACE_API_KEY": bool(os.getenv("LANGTRACE_API_KEY")),
-        "LANGCHAIN_API_KEY": bool(os.getenv("LANGCHAIN_API_KEY")),
-        "LANGSMITH_API_KEY": bool(os.getenv("LANGSMITH_API_KEY")),
+        "LANGFUSE_PUBLIC_KEY": bool(os.getenv("LANGFUSE_PUBLIC_KEY")),
+        "LANGFUSE_SECRET_KEY": bool(os.getenv("LANGFUSE_SECRET_KEY")),
         "NETLIFY_API_KEY": bool(os.getenv("NETLIFY_API_KEY")),
         "GRAFANA_API_KEY": bool(os.getenv("GRAFANA_API_KEY")),
         "SLACK_WEBHOOK_URL": bool(os.getenv("SLACK_WEBHOOK_URL")),

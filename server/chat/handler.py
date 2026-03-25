@@ -9,7 +9,7 @@ from datetime import datetime
 from typing import Any, cast
 
 from server.chat.context_formatter import format_context_for_llm
-from server.chat.generation import generate_chat_text, stream_chat_text
+from server.chat.generation import GenerationResult, generate_chat_text, stream_chat_text
 from server.chat.prompt_builder import get_system_prompt
 from server.chat.provider_router import select_provider_route
 from server.chat.retrieval_gate import classify_for_recall
@@ -41,6 +41,26 @@ def _normalize_cache_mode(cache_mode: str | CacheMode | None) -> CacheMode:
     return "default"
 
 
+def _coerce_generation_result(result: Any) -> GenerationResult:
+    if isinstance(result, GenerationResult):
+        return result
+    if isinstance(result, tuple):
+        text = result[0] if len(result) > 0 else ""
+        provider_response_id = result[1] if len(result) > 1 else None
+        return GenerationResult(
+            text=str(text or ""),
+            provider_response_id=(str(provider_response_id).strip() if isinstance(provider_response_id, str) else None),
+        )
+    return GenerationResult(
+        text=str(getattr(result, "text", "") or ""),
+        provider_response_id=(
+            str(getattr(result, "provider_response_id", "")).strip()
+            if isinstance(getattr(result, "provider_response_id", None), str)
+            else None
+        ),
+    )
+
+
 def _format_retrieval_only_chat_answer(*, message: str, corpus_ids: list[str], sources: list[ChunkMatch]) -> str:
     if not sources:
         corpora = ", ".join([cid for cid in corpus_ids if cid]) or "(none)"
@@ -48,7 +68,7 @@ def _format_retrieval_only_chat_answer(*, message: str, corpus_ids: list[str], s
             "No chat provider is available and retrieval returned no matches.\n\n"
             f"Message: {message}\n"
             f"Sources: {corpora}\n"
-            "Tip: start a local provider (Ollama/llama.cpp) or configure OpenRouter/OpenAI."
+            "Tip: enable LiteLLM, start a local provider (Ollama/llama.cpp/vLLM), or configure OpenRouter/OpenAI."
         )
 
     corpora = ", ".join([cid for cid in corpus_ids if cid]) or "(none)"
@@ -473,7 +493,8 @@ async def chat_once(
             base_url=str(route.base_url) if getattr(route, "base_url", None) else None,
         )
 
-        text, provider_id = await generate_chat_text(
+        generation = _coerce_generation_result(
+            await generate_chat_text(
             route=route,
             openrouter_cfg=config.chat.openrouter,
             system_prompt=system_prompt,
@@ -485,7 +506,10 @@ async def chat_once(
             context_text=context_text,
             context_chunks=sources,
             timeout_s=float(getattr(config.ui, "chat_stream_timeout", 120) or 120),
+            )
         )
+        text = generation.text
+        provider_id = generation.provider_response_id
         if not str(text or "").strip():
             raise RuntimeError("LLM returned an empty response")
     except Exception as e:

@@ -7,7 +7,7 @@ import uuid
 from typing import Any, Literal, cast
 
 import httpx
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Response
 from starlette.responses import StreamingResponse
 
 from server.chat.handler import chat_once
@@ -30,6 +30,14 @@ from server.models.tribrid_config_model import (
     RecallStatusResponse,
     TracesLatestResponse,
     TriBridConfig,
+)
+from server.observability.runtime import (
+    apply_default_links,
+    current_header_values,
+    current_trace_payload_fields,
+    set_provider_route,
+    start_request_observation,
+    update_route_summary,
 )
 from server.retrieval.errors import RetrievalContractMismatchError
 from server.retrieval.fusion import TriBridFusion
@@ -198,7 +206,7 @@ async def get_latest_trace(
 
 
 @router.post("/chat", response_model=ChatResponse)
-async def chat(request: ChatRequest) -> ChatResponse:
+async def chat(request: ChatRequest, response: Response) -> ChatResponse:
     """Process a chat message and return a response (Chat 2.0)."""
     store = get_conversation_store()
     conv = store.get_or_create(request.conversation_id)
@@ -220,178 +228,205 @@ async def chat(request: ChatRequest) -> ChatResponse:
     started_at_ms = int(time.time() * 1000)
     trace_store = get_trace_store()
     trace_repo_id = primary or (resolve_sources(request.sources)[0] if resolve_sources(request.sources) else "")
-    trace_enabled = await trace_store.start(
+    with start_request_observation(
+        config=config,
+        route_name="chat",
+        path="/api/chat",
+        method="POST",
         run_id=run_id,
         repo_id=trace_repo_id,
-        started_at_ms=started_at_ms,
-        config=config,
-    )
-    if trace_enabled:
-        await trace_store.add_event(
-            run_id,
-            kind="chat.request",
-            data={
-                "conversation_id": request.conversation_id,
-                "corpus_ids": resolve_sources(request.sources),
-                "include_vector": bool(request.include_vector),
-                "include_sparse": bool(request.include_sparse),
-                "include_graph": bool(request.include_graph),
-                "top_k_override": request.top_k,
-                "stream": False,
-                "images_count": len(list(request.images or [])),
-            },
-        )
+    ):
+        apply_default_links(config)
+        for key, value in current_header_values().items():
+            response.headers[key] = value
 
-    try:
-        response_text, sources, provider_id, recall_plan, provider_info, llm_used, llm_error = await chat_once(
-            request=request,
+        trace_enabled = await trace_store.start(
+            run_id=run_id,
+            repo_id=trace_repo_id,
+            started_at_ms=started_at_ms,
             config=config,
-            fusion=fusion,
-            conversation=conv,
         )
-        ended_at_ms = int(time.time() * 1000)
-        debug = build_chat_debug_info(
-            config=config,
-            fusion=fusion,
-            include_vector=bool(request.include_vector),
-            include_sparse=bool(request.include_sparse),
-            include_graph=bool(request.include_graph),
-            top_k=request.top_k,
-            sources=sources,
-            recall_plan=recall_plan,
-            provider=provider_info,
-        ).model_copy(update={"llm_used": bool(llm_used), "llm_error": llm_error})
         if trace_enabled:
-            # Back-compat for the UI TraceViewer: emit a dedicated reranker event, even if
-            # the rest of the router/gating trace is not yet implemented.
-            try:
-                fusion_debug = getattr(fusion, "last_debug", None) or {}
-                rag_debug = fusion_debug.get("chat_rag_fusion") if isinstance(fusion_debug, dict) else None
-                if not isinstance(rag_debug, dict):
-                    rag_debug = fusion_debug if isinstance(fusion_debug, dict) else {}
+            await trace_store.annotate(run_id, **current_trace_payload_fields())
+            await trace_store.add_event(
+                run_id,
+                kind="chat.request",
+                data={
+                    "conversation_id": request.conversation_id,
+                    "corpus_ids": resolve_sources(request.sources),
+                    "include_vector": bool(request.include_vector),
+                    "include_sparse": bool(request.include_sparse),
+                    "include_graph": bool(request.include_graph),
+                    "top_k_override": request.top_k,
+                    "stream": False,
+                    "images_count": len(list(request.images or [])),
+                },
+            )
 
-                recall_id = str(config.chat.recall.default_corpus_id or "recall_default")
-                rag_sources = [
-                    s
-                    for s in sources
-                    if str((s.metadata or {}).get("corpus_id") or "").strip() != recall_id
-                ]
+        try:
+            response_text, sources, provider_id, recall_plan, provider_info, llm_used, llm_error = await chat_once(
+                request=request,
+                config=config,
+                fusion=fusion,
+                conversation=conv,
+            )
+            ended_at_ms = int(time.time() * 1000)
+            debug = build_chat_debug_info(
+                config=config,
+                fusion=fusion,
+                include_vector=bool(request.include_vector),
+                include_sparse=bool(request.include_sparse),
+                include_graph=bool(request.include_graph),
+                top_k=request.top_k,
+                sources=sources,
+                recall_plan=recall_plan,
+                provider=provider_info,
+            ).model_copy(update={"llm_used": bool(llm_used), "llm_error": llm_error})
+
+            set_provider_route(provider_info)
+            update_route_summary(
+                corpus_ids=resolve_sources(request.sources),
+                include_vector=bool(request.include_vector),
+                include_sparse=bool(request.include_sparse),
+                include_graph=bool(request.include_graph),
+                vector_results=debug.vector_results,
+                sparse_results=debug.sparse_results,
+                graph_results=debug.graph_hydrated_chunks,
+                final_results=len(sources),
+                llm_used=bool(llm_used),
+                llm_error=llm_error,
+            )
+
+            if trace_enabled:
+                try:
+                    fusion_debug = getattr(fusion, "last_debug", None) or {}
+                    rag_debug = fusion_debug.get("chat_rag_fusion") if isinstance(fusion_debug, dict) else None
+                    if not isinstance(rag_debug, dict):
+                        rag_debug = fusion_debug if isinstance(fusion_debug, dict) else {}
+
+                    recall_id = str(config.chat.recall.default_corpus_id or "recall_default")
+                    rag_sources = [
+                        s
+                        for s in sources
+                        if str((s.metadata or {}).get("corpus_id") or "").strip() != recall_id
+                    ]
+
+                    await trace_store.add_event(
+                        run_id,
+                        kind="reranker.rank",
+                        data={
+                            "enabled": bool(rag_debug.get("rerank_enabled")),
+                            "mode": str(rag_debug.get("rerank_mode") or config.reranking.reranker_mode or "none"),
+                            "ok": bool(rag_debug.get("rerank_ok", True)),
+                            "applied": bool(rag_debug.get("rerank_applied", False)),
+                            "skipped_reason": rag_debug.get("rerank_skipped_reason"),
+                            "error": rag_debug.get("rerank_error"),
+                            "candidates_reranked": int(rag_debug.get("rerank_candidates_reranked") or 0),
+                            "output_topK": len(rag_sources),
+                            "scores": [
+                                {"path": s.file_path, "score": float(s.score)}
+                                for s in (rag_sources[: min(len(rag_sources), 50)])
+                            ],
+                        },
+                    )
+                except Exception:
+                    pass
 
                 await trace_store.add_event(
                     run_id,
-                    kind="reranker.rank",
+                    kind="retrieval.fusion",
                     data={
-                        "enabled": bool(rag_debug.get("rerank_enabled")),
-                        "mode": str(rag_debug.get("rerank_mode") or config.reranking.reranker_mode or "none"),
-                        "ok": bool(rag_debug.get("rerank_ok", True)),
-                        "applied": bool(rag_debug.get("rerank_applied", False)),
-                        "skipped_reason": rag_debug.get("rerank_skipped_reason"),
-                        "error": rag_debug.get("rerank_error"),
-                        "candidates_reranked": int(rag_debug.get("rerank_candidates_reranked") or 0),
-                        "output_topK": len(rag_sources),
-                        "scores": [
-                            {"path": s.file_path, "score": float(s.score)}
-                            for s in (rag_sources[: min(len(rag_sources), 50)])
+                        "fusion_debug": getattr(fusion, "last_debug", None) or {},
+                        "chat_debug": debug.model_dump(mode="serialization", by_alias=True),
+                        "sources": [
+                            {
+                                "file_path": s.file_path,
+                                "start_line": int(s.start_line),
+                                "end_line": int(s.end_line),
+                                "score": float(s.score),
+                                "source": str(s.source),
+                            }
+                            for s in sources
                         ],
                     },
+                )
+                await trace_store.add_event(
+                    run_id,
+                    kind="chat.response",
+                    data={
+                        "sources_count": len(sources),
+                        "tokens_used": 0,
+                    },
+                )
+                await trace_store.annotate(run_id, **current_trace_payload_fields())
+                await trace_store.end(run_id, ended_at_ms=ended_at_ms)
+
+            try:
+                await _append_chat_query_log_entry(
+                    config=config,
+                    fusion=fusion,
+                    event_id=run_id,
+                    conversation_id=conv.id,
+                    corpus_ids=resolve_sources(request.sources),
+                    query=request.message,
+                    top_paths=[s.file_path for s in sources[:5]],
                 )
             except Exception:
                 pass
 
-            await trace_store.add_event(
-                run_id,
-                kind="retrieval.fusion",
-                data={
-                    "fusion_debug": getattr(fusion, "last_debug", None) or {},
-                    "chat_debug": debug.model_dump(mode="serialization", by_alias=True),
-                    "sources": [
-                        {
-                            "file_path": s.file_path,
-                            "start_line": int(s.start_line),
-                            "end_line": int(s.end_line),
-                            "score": float(s.score),
-                            "source": str(s.source),
-                        }
-                        for s in sources
-                    ],
-                },
-            )
-            await trace_store.add_event(
-                run_id,
-                kind="chat.response",
-                data={
-                    "sources_count": len(sources),
-                    "tokens_used": 0,
-                },
-            )
-            await trace_store.end(run_id, ended_at_ms=ended_at_ms)
+            user_msg = Message(role="user", content=request.message)
+            assistant_msg = Message(role="assistant", content=response_text)
+            store.add_message(conv.id, user_msg, None)
+            store.add_message(conv.id, assistant_msg, provider_id)
 
-        try:
-            await _append_chat_query_log_entry(
-                config=config,
-                fusion=fusion,
-                event_id=run_id,
+            corpus_ids = resolve_sources(request.sources)
+            if (
+                config.chat.recall.enabled
+                and config.chat.recall.auto_index
+                and (config.chat.recall.default_corpus_id in set(corpus_ids))
+            ):
+                async def _do_index() -> None:
+                    delay = int(config.chat.recall.index_delay_seconds or 0)
+                    if delay > 0:
+                        await asyncio.sleep(delay)
+                    pg = PostgresClient(config.indexing.postgres_url)
+                    await pg.connect()
+                    embedder = Embedder(config.embedding)
+                    configure_postgres_embedding_cache_backend(embedder, pg)
+                    await index_recall_conversation(
+                        pg,
+                        conversation_id=conv.id,
+                        messages=store.get_messages(conv.id),
+                        config=config.chat.recall,
+                        embedder=embedder,
+                        ts_config="english",
+                    )
+
+                asyncio.create_task(_do_index())
+
+            return ChatResponse(
+                run_id=run_id,
+                started_at_ms=started_at_ms,
+                ended_at_ms=ended_at_ms,
+                debug=debug,
                 conversation_id=conv.id,
-                corpus_ids=resolve_sources(request.sources),
-                query=request.message,
-                top_paths=[s.file_path for s in sources[:5]],
+                message=assistant_msg,
+                sources=sources,
+                tokens_used=0,
             )
-        except Exception:
-            pass
 
-        # Store the exchange
-        user_msg = Message(role="user", content=request.message)
-        assistant_msg = Message(role="assistant", content=response_text)
-        store.add_message(conv.id, user_msg, None)
-        store.add_message(conv.id, assistant_msg, provider_id)
-
-        # Best-effort Recall indexing (only when recall_default is selected).
-        corpus_ids = resolve_sources(request.sources)
-        if (
-            config.chat.recall.enabled
-            and config.chat.recall.auto_index
-            and (config.chat.recall.default_corpus_id in set(corpus_ids))
-        ):
-            async def _do_index() -> None:
-                delay = int(config.chat.recall.index_delay_seconds or 0)
-                if delay > 0:
-                    await asyncio.sleep(delay)
-                pg = PostgresClient(config.indexing.postgres_url)
-                await pg.connect()
-                embedder = Embedder(config.embedding)
-                configure_postgres_embedding_cache_backend(embedder, pg)
-                await index_recall_conversation(
-                    pg,
-                    conversation_id=conv.id,
-                    messages=store.get_messages(conv.id),
-                    config=config.chat.recall,
-                    embedder=embedder,
-                    ts_config="english",
-                )
-
-            asyncio.create_task(_do_index())
-
-        return ChatResponse(
-            run_id=run_id,
-            started_at_ms=started_at_ms,
-            ended_at_ms=ended_at_ms,
-            debug=debug,
-            conversation_id=conv.id,
-            message=assistant_msg,
-            sources=sources,
-            tokens_used=0,  # TODO: extract from result.usage() when available
-        )
-
-    except RetrievalContractMismatchError as e:
-        if trace_enabled:
-            await trace_store.add_event(run_id, kind="chat.error", msg=str(e), data={"code": e.code})
-            await trace_store.end(run_id)
-        raise HTTPException(status_code=409, detail=e.to_detail()) from e
-    except Exception as e:
-        if trace_enabled:
-            await trace_store.add_event(run_id, kind="chat.error", msg=str(e), data={})
-            await trace_store.end(run_id)
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        except RetrievalContractMismatchError as e:
+            if trace_enabled:
+                await trace_store.add_event(run_id, kind="chat.error", msg=str(e), data={"code": e.code})
+                await trace_store.annotate(run_id, **current_trace_payload_fields())
+                await trace_store.end(run_id)
+            raise HTTPException(status_code=409, detail=e.to_detail()) from e
+        except Exception as e:
+            if trace_enabled:
+                await trace_store.add_event(run_id, kind="chat.error", msg=str(e), data={})
+                await trace_store.annotate(run_id, **current_trace_payload_fields())
+                await trace_store.end(run_id)
+            raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.post("/chat/stream")
@@ -422,6 +457,16 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
     started_at_ms = int(time.time() * 1000)
     trace_store = get_trace_store()
     trace_repo_id = primary or (resolve_sources(request.sources)[0] if resolve_sources(request.sources) else "")
+    obs_cm = start_request_observation(
+        config=config,
+        route_name="chat_stream",
+        path="/api/chat/stream",
+        method="POST",
+        run_id=run_id,
+        repo_id=trace_repo_id,
+    )
+    obs_cm.__enter__()
+    apply_default_links(config)
     trace_enabled = await trace_store.start(
         run_id=run_id,
         repo_id=trace_repo_id,
@@ -429,6 +474,7 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
         config=config,
     )
     if trace_enabled:
+        await trace_store.annotate(run_id, **current_trace_payload_fields())
         await trace_store.add_event(
             run_id,
             kind="chat.request",
@@ -453,6 +499,7 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
         accumulated = ""
         query_log_appended = False
         assistant_persisted = False
+        caught_exc: tuple[type[BaseException] | None, BaseException | None, Any] = (None, None, None)
         try:
             async for sse in chat_stream_handler(
                 request=request,
@@ -548,6 +595,7 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
                             provider_obj = ChatProviderInfoModel.model_validate(raw_provider)
                         except Exception:
                             provider_obj = None
+                    set_provider_route(provider_obj)
 
                     debug = build_chat_debug_info(
                         config=config,
@@ -567,6 +615,18 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
                     if isinstance(llm_error_raw, str) and llm_error_raw.strip():
                         llm_error = llm_error_raw.strip()
                     debug = debug.model_copy(update={"llm_used": llm_used, "llm_error": llm_error})
+                    update_route_summary(
+                        corpus_ids=resolve_sources(request.sources),
+                        include_vector=bool(request.include_vector),
+                        include_sparse=bool(request.include_sparse),
+                        include_graph=bool(request.include_graph),
+                        vector_results=debug.vector_results,
+                        sparse_results=debug.sparse_results,
+                        graph_results=debug.graph_hydrated_chunks,
+                        final_results=len(src_objs),
+                        llm_used=llm_used,
+                        llm_error=llm_error,
+                    )
                     payload["debug"] = debug.model_dump(mode="serialization", by_alias=True)
 
                     if not query_log_appended:
@@ -598,12 +658,14 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
                             kind="chat.response",
                             data={"sources_count": len(payload.get("sources") or [])},
                         )
+                        await trace_store.annotate(run_id, **current_trace_payload_fields())
 
                     yield f"data: {json.dumps(payload)}\n\n"
                     continue
 
                 yield sse
         except Exception as e:
+            caught_exc = (type(e), e, e.__traceback__)
             if trace_enabled:
                 await trace_store.add_event(run_id, kind="chat.error", msg=str(e), data={})
             raise
@@ -625,7 +687,9 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
                     except Exception:
                         pass
             if trace_enabled:
+                await trace_store.annotate(run_id, **current_trace_payload_fields())
                 await trace_store.end(run_id, ended_at_ms=ended_at_ms)
+            obs_cm.__exit__(*caught_exc)
 
     return StreamingResponse(
         wrapped_stream(),
@@ -634,6 +698,7 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
             "X-Accel-Buffering": "no",
+            **current_header_values(),
         },
     )
 
@@ -660,6 +725,8 @@ async def list_chat_models(
             return "OpenAI"
         if p == "openrouter":
             return "OpenRouter"
+        if p == "litellm":
+            return "LiteLLM"
         if p == "ragweld":
             return "Ragweld"
         if p == "anthropic":
@@ -752,6 +819,7 @@ async def list_chat_models(
     cloud_direct_ready: set[str] = set()
     openai_api_key = (os.getenv("OPENAI_API_KEY") or "").strip()
     openrouter_api_key = (os.getenv("OPENROUTER_API_KEY") or "").strip()
+    litellm_api_key = (os.getenv("LITELLM_API_KEY") or "").strip() or str(getattr(cfg.chat.litellm, "api_key", "") or "").strip()
     openai_base_url = (str(cfg.generation.openai_base_url or "").strip() or "https://api.openai.com/v1")
 
     # Validate cloud provider credentials best-effort so the UI doesn't advertise unusable providers.
@@ -769,6 +837,17 @@ async def list_chat_models(
 
     if openai_valid:
         cloud_direct_ready.add("openai")
+
+    litellm_valid = False
+    if bool(cfg.chat.litellm.enabled):
+        try:
+            async with httpx.AsyncClient(timeout=2.0) as client:
+                headers = {"Authorization": f"Bearer {litellm_api_key}"} if litellm_api_key else {}
+                base = str(cfg.chat.litellm.base_url or "").rstrip("/")
+                r = await client.get(f"{base}/models", headers=headers)
+                litellm_valid = r.status_code == 200
+        except Exception:
+            litellm_valid = False
 
     # OpenRouter key probe is still used to decide whether OpenRouter discovery is viable.
     openrouter_valid = False
@@ -809,12 +888,15 @@ async def list_chat_models(
     discovered = await discover_models(
         cfg.chat.local_models,
         cfg.chat.openrouter if openrouter_valid else cfg.chat.openrouter.model_copy(update={"enabled": False}),
+        cfg.chat.litellm if litellm_valid else cfg.chat.litellm.model_copy(update={"enabled": False}),
     )
     for d in discovered:
         try:
             source_raw = str(d.get("source") or "").strip().lower()
             if source_raw == "openrouter":
-                source_kind: Literal["openrouter", "local"] = "openrouter"
+                source_kind: Literal["openrouter", "local", "litellm"] = "openrouter"
+            elif source_raw == "litellm":
+                source_kind = "litellm"
             elif source_raw == "local":
                 source_kind = "local"
             else:
@@ -846,6 +928,8 @@ async def list_chat_models(
             provider_name = (
                 "OpenRouter"
                 if source_kind == "openrouter"
+                else "LiteLLM"
+                if source_kind == "litellm"
                 else (str(d.get("provider") or "").strip() or _provider_label(discovered_provider_key or "local"))
             )
 
@@ -890,6 +974,7 @@ async def chat_health(
         except CorpusNotFoundError:
             cfg = TriBridConfig()
     out: list[ProviderHealth] = []
+    litellm_api_key = (os.getenv("LITELLM_API_KEY") or "").strip() or str(getattr(cfg.chat.litellm, "api_key", "") or "").strip()
 
     # OpenRouter
     if cfg.chat.openrouter.enabled:
@@ -943,6 +1028,34 @@ async def chat_health(
                         detail=str(e),
                     )
                 )
+
+    # LiteLLM
+    if cfg.chat.litellm.enabled:
+        base = str(cfg.chat.litellm.base_url or "").rstrip("/")
+        headers = {"Authorization": f"Bearer {litellm_api_key}"} if litellm_api_key else {}
+        try:
+            async with httpx.AsyncClient(timeout=2.0) as client:
+                r = await client.get(f"{base}/models", headers=headers)
+                ok = r.status_code == 200
+            out.append(
+                ProviderHealth(
+                    provider="LiteLLM",
+                    kind="litellm",
+                    base_url=base or cfg.chat.litellm.base_url,
+                    reachable=bool(ok),
+                    detail=None if ok else f"HTTP {r.status_code}",
+                )
+            )
+        except Exception as e:
+            out.append(
+                ProviderHealth(
+                    provider="LiteLLM",
+                    kind="litellm",
+                    base_url=base or cfg.chat.litellm.base_url,
+                    reachable=False,
+                    detail=str(e),
+                )
+            )
 
     # Local providers
     for p in cfg.chat.local_models.providers:

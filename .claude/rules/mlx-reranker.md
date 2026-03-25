@@ -6,6 +6,8 @@ paths:
 
 # MLX Learning Reranker
 
+> Branch canon for `feat/oss-composition-kickoff`: no legacy fallback backends or transition-period dual paths in touched slices.
+
 Fine-tunable Qwen3 LoRA learning reranker running locally via MLX on Apple Silicon.
 
 ## Architecture

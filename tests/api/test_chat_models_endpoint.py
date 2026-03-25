@@ -30,5 +30,5 @@ async def test_chat_models_return_canonical_override_contract(client: AsyncClien
             assert override.startswith("ragweld:")
         elif source == "cloud_direct":
             assert "/" in override
-        elif source in {"openrouter", "local"}:
+        elif source in {"openrouter", "local", "litellm"}:
             assert ":" in override

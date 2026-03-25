@@ -1,5 +1,7 @@
 # Terminology & Naming Conventions
 
+> Branch canon for `feat/oss-composition-kickoff`: do not preserve legacy naming or copy in operator-facing surfaces when the branch has already replaced that subsystem.
+
 ## Naming (ragweld vs tribrid)
 - Repo = `ragweld`, internal identifiers = `tribrid`. This is expected.
 - Do NOT attempt mass-renames of `tribrid` -> `ragweld`.

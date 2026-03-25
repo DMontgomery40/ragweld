@@ -60,7 +60,7 @@ export const TraceViewer: React.FC<TraceViewerProps> = ({ className = '' }) => {
           padding: '40px',
           color: 'var(--fg-muted)'
         }}>
-          No traces yet. Set Tracing Mode to Local/LangSmith (not Off) and run a query.
+          No traces yet. Set tracing mode to local, OTel, or OTel + Langfuse and run a query.
         </div>
       );
     }
@@ -95,6 +95,66 @@ export const TraceViewer: React.FC<TraceViewerProps> = ({ className = '' }) => {
         {headerParts.join('  •  ')}
       </div>
     );
+
+    parts.push(
+      <div
+        key="observability"
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+          gap: '12px',
+          marginBottom: '16px',
+        }}
+      >
+        <div style={{ background: 'var(--bg-elev2)', borderRadius: '4px', padding: '12px' }}>
+          <div style={{ fontSize: '11px', color: 'var(--fg-muted)', marginBottom: '4px' }}>Canonical Trace</div>
+          <div style={{ fontSize: '11px', fontFamily: "'SF Mono', monospace", color: 'var(--fg)' }}>
+            {trace.trace_id || 'n/a'}
+          </div>
+          <div style={{ fontSize: '11px', color: 'var(--fg-muted)', marginTop: '6px' }}>
+            Correlation: {trace.correlation_id || 'n/a'}
+          </div>
+        </div>
+        <div style={{ background: 'var(--bg-elev2)', borderRadius: '4px', padding: '12px' }}>
+          <div style={{ fontSize: '11px', color: 'var(--fg-muted)', marginBottom: '4px' }}>Request Cost</div>
+          <div style={{ fontSize: '12px', color: 'var(--fg)' }}>
+            {trace.cost_summary?.estimated_cost_usd != null
+              ? `$${Number(trace.cost_summary.estimated_cost_usd).toFixed(6)}`
+              : 'Unavailable'}
+          </div>
+          <div style={{ fontSize: '11px', color: 'var(--fg-muted)', marginTop: '6px' }}>
+            {trace.cost_summary?.cost_source || 'unavailable'}
+            {trace.cost_summary?.total_tokens != null ? ` · ${trace.cost_summary.total_tokens} tokens` : ''}
+          </div>
+        </div>
+      </div>
+    );
+
+    if (Array.isArray(trace.external_links) && trace.external_links.length > 0) {
+      parts.push(
+        <div key="links" style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '16px' }}>
+          {trace.external_links.map((link, idx) => (
+            <a
+              key={`${link.url}-${idx}`}
+              href={link.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{
+                fontSize: '11px',
+                color: 'var(--accent)',
+                textDecoration: 'none',
+                border: '1px solid var(--line)',
+                borderRadius: '999px',
+                padding: '4px 8px',
+                background: 'var(--bg)',
+              }}
+            >
+              {link.label}
+            </a>
+          ))}
+        </div>
+      );
+    }
 
     // Pre-rerank candidates
     if (retrieveEvent && Array.isArray(retrieveEvent.data?.candidates)) {

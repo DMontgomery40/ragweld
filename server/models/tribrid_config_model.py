@@ -27,6 +27,34 @@ except ImportError:
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from server.models.runtime_gateway import BenchmarkConfig as BenchmarkConfig
+from server.models.runtime_gateway import ChatModelInfo as ChatModelInfo
+from server.models.runtime_gateway import ChatModelsResponse as ChatModelsResponse
+from server.models.runtime_gateway import ChatProviderInfo as ChatProviderInfo
+from server.models.runtime_gateway import GenerationConfig as GenerationConfig
+from server.models.runtime_gateway import LiteLLMConfig as LiteLLMConfig
+from server.models.runtime_gateway import LocalModelConfig as LocalModelConfig
+from server.models.runtime_gateway import LocalProviderEntry as LocalProviderEntry
+from server.models.runtime_gateway import OpenRouterConfig as OpenRouterConfig
+from server.models.runtime_gateway import ProviderHealth as ProviderHealth
+from server.models.runtime_gateway import ProvidersHealthResponse as ProvidersHealthResponse
+from server.models.runtime_gateway import VLLMConfig as VLLMConfig
+
+_RUNTIME_GATEWAY_REEXPORTS = (
+    BenchmarkConfig,
+    ChatModelInfo,
+    ChatModelsResponse,
+    ChatProviderInfo,
+    GenerationConfig,
+    LiteLLMConfig,
+    LocalModelConfig,
+    LocalProviderEntry,
+    OpenRouterConfig,
+    ProviderHealth,
+    ProvidersHealthResponse,
+    VLLMConfig,
+)
+
 # =============================================================================
 # DOMAIN MODELS - Core data types for the tribrid RAG system
 # =============================================================================
@@ -181,6 +209,197 @@ class IndexEstimate(BaseModel):
         description="Estimated semantic KG phase time (seconds) when semantic_kg_mode='llm'.",
     )
     assumptions: list[str] = Field(default_factory=list, description="Human-readable assumptions used for the estimate")
+
+
+class RetrievalPilotPackageStatus(BaseModel):
+    """Availability status for one OSS retrieval pilot dependency."""
+
+    package: str = Field(description="Import/package name checked by the pilot.")
+    label: str = Field(description="Human-readable dependency label.")
+    available: bool = Field(description="Whether the package is importable in the current environment.")
+    detail: str | None = Field(default=None, description="Short operator-facing note about the dependency state.")
+
+
+class RetrievalPilotStatusResponse(BaseModel):
+    """Operator status for the OSS retrieval/indexing sidecar pilot."""
+
+    ok: bool = Field(default=True)
+    repo_id: str = Field(
+        description="Corpus identifier",
+        validation_alias=AliasChoices("repo_id", "corpus_id"),
+        serialization_alias="corpus_id",
+    )
+    repo_path: str = Field(description="Resolved corpus path used by the pilot.")
+    backend: Literal["haystack_qdrant_sidecar"] = Field(
+        default="haystack_qdrant_sidecar",
+        description="Current pilot backend target.",
+    )
+    export_dir: str = Field(description="Directory where pilot export artifacts are stored.")
+    documents_path: str = Field(description="JSONL export path for pilot-ready chunk documents.")
+    manifest_path: str = Field(description="Manifest JSON path for the most recent pilot export.")
+    export_exists: bool = Field(description="Whether a pilot export already exists on disk.")
+    exported_file_count: int = Field(default=0, ge=0, description="Files exported into the pilot sidecar.")
+    exported_chunk_count: int = Field(default=0, ge=0, description="Chunks exported into the pilot sidecar.")
+    skipped_large_files: int = Field(default=0, ge=0, description="Files skipped because they exceeded indexing size limits.")
+    skipped_unreadable_files: int = Field(
+        default=0,
+        ge=0,
+        description="Files seen by the loader but skipped because text extraction produced no usable content.",
+    )
+    last_exported_at: datetime | None = Field(default=None, description="When the current pilot export was generated.")
+    provenance_fields: list[str] = Field(
+        default_factory=list,
+        description="Metadata fields preserved for provenance-correct pilot chunks.",
+    )
+    package_status: list[RetrievalPilotPackageStatus] = Field(
+        default_factory=list,
+        description="Availability of Docling, Haystack, and Qdrant dependencies for the pilot.",
+    )
+    execution_backend: Literal["haystack_qdrant_local"] = Field(
+        default="haystack_qdrant_local",
+        description="Execution backend used by the real pilot ingest/search lane.",
+    )
+    execution_ready: bool = Field(
+        default=False,
+        description="Whether the real Haystack/Qdrant execution lane is hydrated and ready to search.",
+    )
+    qdrant_path: str = Field(description="Filesystem path for the local Qdrant store used by the pilot.")
+    collection_name: str = Field(description="Qdrant collection/index name for this pilot corpus.")
+    indexed_document_count: int = Field(
+        default=0,
+        ge=0,
+        description="Number of documents currently ingested into the real pilot execution lane.",
+    )
+    last_indexed_at: datetime | None = Field(
+        default=None,
+        description="When the Haystack/Qdrant execution lane was last hydrated from the sidecar export.",
+    )
+    search_preview_ready: bool = Field(
+        default=False,
+        description="Whether preview search can run against the exported pilot sidecar.",
+    )
+    operator_hint: str | None = Field(default=None, description="High-signal next-step guidance for the operator.")
+
+
+class RetrievalPilotExportRequest(BaseModel):
+    """Request to generate the OSS retrieval pilot sidecar export."""
+
+    repo_id: str = Field(
+        description="Corpus identifier",
+        validation_alias=AliasChoices("repo_id", "corpus_id"),
+        serialization_alias="corpus_id",
+    )
+    repo_path: str = Field(description="Path to the corpus root on disk.")
+    force_rebuild: bool = Field(default=False, description="Rebuild the pilot export even if it already exists.")
+
+
+class RetrievalPilotExportResponse(BaseModel):
+    """Response for a retrieval pilot export request."""
+
+    ok: bool = Field(default=True)
+    status: RetrievalPilotStatusResponse = Field(description="Current pilot status after export.")
+    warnings: list[str] = Field(default_factory=list, description="Non-fatal export warnings.")
+
+
+class RetrievalPilotSearchPreviewRequest(BaseModel):
+    """Request to search over the exported retrieval pilot sidecar."""
+
+    repo_id: str = Field(
+        description="Corpus identifier",
+        validation_alias=AliasChoices("repo_id", "corpus_id"),
+        serialization_alias="corpus_id",
+    )
+    query: str = Field(description="Search query to run against the exported pilot documents.")
+    top_k: int = Field(default=5, ge=1, le=20, description="Maximum results to return.")
+
+
+class RetrievalPilotSearchPreviewResult(BaseModel):
+    """One preview-search hit from the retrieval pilot sidecar."""
+
+    chunk_id: str = Field(description="Exported chunk identifier.")
+    file_path: str = Field(description="Corpus-relative path for the matched chunk.")
+    source_path: str = Field(description="Absolute source path for the matched chunk.")
+    start_line: int = Field(ge=1, description="Start line of the matched chunk.")
+    end_line: int = Field(ge=1, description="End line of the matched chunk.")
+    language: str | None = Field(default=None, description="Detected language for the chunk.")
+    score: float = Field(ge=0.0, description="Preview relevance score.")
+    excerpt: str = Field(description="Short excerpt centered on the first match when possible.")
+
+
+class RetrievalPilotSearchPreviewResponse(BaseModel):
+    """Response for retrieval pilot preview search."""
+
+    ok: bool = Field(default=True)
+    repo_id: str = Field(
+        description="Corpus identifier",
+        validation_alias=AliasChoices("repo_id", "corpus_id"),
+        serialization_alias="corpus_id",
+    )
+    query: str = Field(description="Query executed against the pilot export.")
+    results: list[RetrievalPilotSearchPreviewResult] = Field(default_factory=list)
+    status: RetrievalPilotStatusResponse = Field(description="Pilot status snapshot used for the preview search.")
+
+
+class RetrievalPilotIngestRequest(BaseModel):
+    """Request to hydrate the real Haystack/Qdrant execution lane from the sidecar export."""
+
+    repo_id: str = Field(
+        description="Corpus identifier",
+        validation_alias=AliasChoices("repo_id", "corpus_id"),
+        serialization_alias="corpus_id",
+    )
+    force_rebuild: bool = Field(default=False, description="Rebuild the local Qdrant collection from scratch.")
+
+
+class RetrievalPilotIngestResponse(BaseModel):
+    """Response for retrieval pilot ingest."""
+
+    ok: bool = Field(default=True)
+    status: RetrievalPilotStatusResponse = Field(description="Pilot status snapshot after ingest.")
+    warnings: list[str] = Field(default_factory=list, description="Non-fatal ingest warnings.")
+
+
+class RetrievalPilotSearchRequest(BaseModel):
+    """Request to search the real Haystack/Qdrant execution lane."""
+
+    repo_id: str = Field(
+        description="Corpus identifier",
+        validation_alias=AliasChoices("repo_id", "corpus_id"),
+        serialization_alias="corpus_id",
+    )
+    query: str = Field(description="Search query to execute against the real pilot lane.")
+    top_k: int = Field(default=5, ge=1, le=20, description="Maximum hits to return.")
+
+
+class RetrievalPilotSearchResult(BaseModel):
+    """One result from the real Haystack/Qdrant pilot lane."""
+
+    chunk_id: str = Field(description="Exported chunk identifier.")
+    file_path: str = Field(description="Corpus-relative path for the matched chunk.")
+    source_path: str = Field(description="Absolute source path for the matched chunk.")
+    start_line: int = Field(ge=1, description="Start line of the matched chunk.")
+    end_line: int = Field(ge=1, description="End line of the matched chunk.")
+    language: str | None = Field(default=None, description="Detected language for the chunk.")
+    score: float = Field(ge=0.0, description="Haystack/Qdrant relevance score.")
+    excerpt: str = Field(description="Short excerpt centered on the first match when possible.")
+
+
+class RetrievalPilotSearchResponse(BaseModel):
+    """Response for real Haystack/Qdrant pilot search."""
+
+    ok: bool = Field(default=True)
+    repo_id: str = Field(
+        description="Corpus identifier",
+        validation_alias=AliasChoices("repo_id", "corpus_id"),
+        serialization_alias="corpus_id",
+    )
+    backend: Literal["haystack_qdrant_local"] = Field(
+        default="haystack_qdrant_local",
+        description="Search backend used for this response.",
+    )
+    query: str = Field(description="Query executed against the real pilot lane.")
+    results: list[RetrievalPilotSearchResult] = Field(default_factory=list)
+    status: RetrievalPilotStatusResponse = Field(description="Pilot status snapshot used for the real search.")
 
 
 # =============================================================================
@@ -1148,15 +1367,6 @@ class ChatRequest(BaseModel):
     )
 
 
-class ChatProviderInfo(BaseModel):
-    """Selected provider route for a chat answer."""
-
-    kind: Literal["cloud_direct", "openrouter", "local", "ragweld"] = Field(description="Provider kind (router selection)")
-    provider_name: str = Field(description="Provider display name (e.g., OpenAI, OpenRouter, Ollama)")
-    model: str = Field(description="Model identifier sent to provider")
-    base_url: str | None = Field(default=None, description="Provider base URL (when applicable)")
-
-
 class RerankDebugInfo(BaseModel):
     """Reranker status for a single retrieval run (best-effort)."""
 
@@ -1262,6 +1472,62 @@ class ChatDebugInfo(BaseModel):
     )
 
 
+class TraceExternalLink(BaseModel):
+    """External observability link associated with a trace."""
+
+    label: str = Field(description="Human-readable link label.")
+    kind: Literal["grafana", "tempo", "langfuse", "custom"] = Field(
+        default="custom",
+        description="Link target type.",
+    )
+    url: str = Field(description="Absolute URL for the external observability surface.")
+    detail: str | None = Field(default=None, description="Short operator-facing note about the link.")
+
+
+class TraceCostSummary(BaseModel):
+    """Cost attribution summary for one online request."""
+
+    provider: str | None = Field(default=None, description="Provider/gateway used for the generation call.")
+    model: str | None = Field(default=None, description="Model identifier used for the generation call.")
+    currency: str = Field(default="USD", description="Currency for the attributed cost.")
+    input_tokens: int | None = Field(default=None, ge=0, description="Prompt/input tokens when available.")
+    output_tokens: int | None = Field(default=None, ge=0, description="Completion/output tokens when available.")
+    total_tokens: int | None = Field(default=None, ge=0, description="Total tokens when available.")
+    estimated_cost_usd: float | None = Field(
+        default=None,
+        ge=0.0,
+        description="Best-effort USD cost for this request when available.",
+    )
+    cost_source: Literal["provider", "catalog", "unavailable"] = Field(
+        default="unavailable",
+        description="Whether cost came from provider/gateway truth, catalog fallback, or was unavailable.",
+    )
+    authoritative: bool = Field(
+        default=False,
+        description="Whether the cost value came directly from provider/gateway response data.",
+    )
+    detail: str | None = Field(default=None, description="Short note about how the cost was derived.")
+
+
+class TraceRouteSummary(BaseModel):
+    """Operator-facing route summary for one online request."""
+
+    route_name: str = Field(description="Logical route name, such as chat or search.")
+    path: str = Field(description="HTTP path for the request.")
+    method: str = Field(description="HTTP method for the request.")
+    provider: ChatProviderInfo | None = Field(default=None, description="Selected provider route when applicable.")
+    corpus_ids: list[str] = Field(default_factory=list, description="Corpus ids involved in the request.")
+    include_vector: bool | None = Field(default=None, description="Whether vector retrieval was requested.")
+    include_sparse: bool | None = Field(default=None, description="Whether sparse retrieval was requested.")
+    include_graph: bool | None = Field(default=None, description="Whether graph retrieval was requested.")
+    vector_results: int | None = Field(default=None, ge=0, description="Vector leg results returned.")
+    sparse_results: int | None = Field(default=None, ge=0, description="Sparse leg results returned.")
+    graph_results: int | None = Field(default=None, ge=0, description="Graph leg hydrated chunks returned.")
+    final_results: int | None = Field(default=None, ge=0, description="Final results returned to the caller.")
+    llm_used: bool | None = Field(default=None, description="Whether an LLM/provider response was used.")
+    llm_error: str | None = Field(default=None, description="Short reason for retrieval-only fallback, if any.")
+
+
 class TraceEvent(BaseModel):
     """Single trace event (local tracing)."""
 
@@ -1282,6 +1548,21 @@ class Trace(BaseModel):
     )
     started_at_ms: int = Field(ge=0, description="Run start time (epoch milliseconds)")
     ended_at_ms: int | None = Field(default=None, ge=0, description="Run end time (epoch milliseconds)")
+    trace_id: str | None = Field(default=None, description="Canonical trace id for the request when available.")
+    root_span_id: str | None = Field(default=None, description="Root span id for the request when available.")
+    correlation_id: str | None = Field(default=None, description="Stable correlation id propagated across the request.")
+    route_summary: TraceRouteSummary | None = Field(
+        default=None,
+        description="Operator-facing route summary for the request.",
+    )
+    external_links: list[TraceExternalLink] = Field(
+        default_factory=list,
+        description="External observability links associated with this trace.",
+    )
+    cost_summary: TraceCostSummary | None = Field(
+        default=None,
+        description="Best-effort cost attribution for the request.",
+    )
     events: list[TraceEvent] = Field(default_factory=list, description="Ordered trace events")
 
 
@@ -1291,6 +1572,37 @@ class TracesLatestResponse(BaseModel):
     repo: str | None = Field(default=None, description="Corpus identifier for the returned trace (if any)")
     run_id: str | None = Field(default=None, description="Run identifier for the returned trace (if any)")
     trace: Trace | None = Field(default=None, description="Trace payload (null if none available)")
+
+
+class ObservabilityComponentStatus(BaseModel):
+    """Status for one observability component or backend."""
+
+    id: str = Field(description="Stable component identifier.")
+    label: str = Field(description="Human-readable component label.")
+    enabled: bool = Field(description="Whether the component is enabled by config.")
+    configured: bool = Field(description="Whether the component has the minimum config required to operate.")
+    reachable: bool | None = Field(default=None, description="Whether the component endpoint was reachable, when checked.")
+    detail: str | None = Field(default=None, description="Short operator-facing detail or error message.")
+    url: str | None = Field(default=None, description="Configured URL for the component when applicable.")
+
+
+class ObservabilityStatusResponse(BaseModel):
+    """Operator-facing readiness summary for the observability stack."""
+
+    ok: bool = Field(default=True)
+    mode: Literal["local", "otel", "otel_langfuse", "off"] = Field(
+        default="local",
+        description="Normalized observability mode for the current config.",
+    )
+    components: list[ObservabilityComponentStatus] = Field(
+        default_factory=list,
+        description="Observability components/backends and their readiness state.",
+    )
+    links: list[TraceExternalLink] = Field(
+        default_factory=list,
+        description="Useful external links for the current observability config.",
+    )
+    operator_hint: str | None = Field(default=None, description="High-signal next-step guidance for operators.")
 
 
 class ChatResponse(BaseModel):
@@ -1450,60 +1762,32 @@ class SearchRuntimeCapabilities(BaseModel):
     graph_backends: list[RuntimeOption] = Field(default_factory=list, description="Graph search backends.")
 
 
+class GenerationRuntimeCapabilities(BaseModel):
+    """Runtime capability matrix for generation routing and serving."""
+
+    routing_backends: list[RuntimeOption] = Field(
+        default_factory=list,
+        description="Gateway/routing backends that can dispatch generation requests.",
+    )
+    serving_backends: list[RuntimeOption] = Field(
+        default_factory=list,
+        description="Serving runtimes that can execute generation models today.",
+    )
+    default_route: ChatProviderInfo | None = Field(
+        default=None,
+        description="Provider route selected by the current config/env for a default chat request.",
+    )
+
+
 class RuntimeCapabilitiesResponse(BaseModel):
     """Response payload for GET /api/runtime-capabilities."""
 
+    generation: GenerationRuntimeCapabilities = Field(default_factory=GenerationRuntimeCapabilities)
     embedding: EmbeddingRuntimeCapabilities = Field(default_factory=EmbeddingRuntimeCapabilities)
     reranker: RerankerRuntimeCapabilities = Field(default_factory=RerankerRuntimeCapabilities)
     chunking: ChunkingRuntimeCapabilities = Field(default_factory=ChunkingRuntimeCapabilities)
     indexing: IndexingRuntimeCapabilities = Field(default_factory=IndexingRuntimeCapabilities)
     search: SearchRuntimeCapabilities = Field(default_factory=SearchRuntimeCapabilities)
-
-
-def _default_chat_model_components() -> list[Literal["GEN", "EMB", "RERANK"]]:
-    return ["GEN"]
-
-
-class ChatModelInfo(BaseModel):
-    """Single chat model option resolved from providers."""
-
-    id: str = Field(description="Model identifier")
-    override: str = Field(description="Canonical model_override value to send in chat requests")
-    provider: str = Field(description="Provider display name (e.g., OpenRouter, Ollama)")
-    provider_key: str | None = Field(default=None, description="Provider key used in the model catalog")
-    catalog_model: str | None = Field(default=None, description="Catalog model identifier when sourced from /api/models")
-    components: list[Literal["GEN", "EMB", "RERANK"]] = Field(
-        default_factory=_default_chat_model_components,
-        description="Capabilities for this model option",
-    )
-    source: Literal["cloud_direct", "openrouter", "local", "ragweld"] = Field(
-        description="Model source group for UI grouping."
-    )
-    provider_type: str | None = Field(default=None, description="Provider type (ollama, llamacpp, openrouter, etc)")
-    base_url: str | None = Field(default=None, description="Provider base URL (local/openrouter)")
-    supports_vision: bool = Field(default=False, description="Whether this model is expected to support vision inputs")
-
-
-class ChatModelsResponse(BaseModel):
-    """Response payload for GET /api/chat/models."""
-
-    models: list[ChatModelInfo] = Field(default_factory=list)
-
-
-class ProviderHealth(BaseModel):
-    """Health status for a configured provider endpoint."""
-
-    provider: str = Field(description="Provider display name")
-    kind: Literal["openrouter", "local", "ragweld"] = Field(description="Provider kind")
-    base_url: str = Field(description="Provider base URL")
-    reachable: bool = Field(description="Whether the provider endpoint is reachable")
-    detail: str | None = Field(default=None, description="Optional detail/error message")
-
-
-class ProvidersHealthResponse(BaseModel):
-    """Response payload for GET /api/chat/health."""
-
-    providers: list[ProviderHealth] = Field(default_factory=list)
 
 
 class FeedbackRequest(BaseModel):
@@ -4270,137 +4554,6 @@ class RerankingConfig(BaseModel):
         return v
 
 
-class GenerationConfig(BaseModel):
-    """LLM generation configuration."""
-
-    gen_model: str = Field(
-        default="gpt-4o-mini",
-        description="Primary generation model"
-    )
-
-    gen_temperature: float = Field(
-        default=0.0,
-        ge=0.0,
-        le=2.0,
-        description="Generation temperature"
-    )
-
-    gen_max_tokens: int = Field(
-        default=2048,
-        ge=100,
-        le=8192,
-        description="Max tokens for generation"
-    )
-
-    gen_top_p: float = Field(
-        default=1.0,
-        ge=0.0,
-        le=1.0,
-        description="Nucleus sampling threshold"
-    )
-
-    gen_timeout: int = Field(
-        default=60,
-        ge=10,
-        le=300,
-        description="Generation timeout (seconds)"
-    )
-
-    gen_retry_max: int = Field(
-        default=2,
-        ge=1,
-        le=5,
-        description="Max retries for generation"
-    )
-
-    enrich_model: str = Field(
-        default="gpt-4o-mini",
-        description="Model for code enrichment"
-    )
-
-    # --- Backend resolution rules ---
-    # 1. gen_model uses gen_backend as provider
-    # 2. gen_model_ollama / enrich_model_ollama — provider is always "ollama"
-    # 3. enrich_model uses enrich_backend (below)
-    # 4. semantic_kg_llm_model — inherits gen_backend when non-empty;
-    #    falls back to enrich_model with enrich_backend
-    # 5. Channel overrides (gen_model_cli/http/mcp) inherit gen_backend
-    gen_backend: str = Field(
-        default="openai",
-        pattern="^(openai|anthropic|ollama|mlx|openrouter)$",
-        description="Provider backend for gen_model and channel overrides"
-    )
-
-    enrich_backend: str = Field(
-        default="openai",
-        pattern="^(openai|ollama|mlx)$",
-        description="Enrichment backend"
-    )
-
-    enrich_disabled: int = Field(
-        default=0,
-        ge=0,
-        le=1,
-        description="Disable code enrichment"
-    )
-
-    ollama_num_ctx: int = Field(
-        default=8192,
-        ge=2048,
-        le=32768,
-        description="Context window for Ollama"
-    )
-
-    gen_model_cli: str = Field(
-        default="qwen3-coder:14b",
-        description="CLI generation model"
-    )
-
-    gen_model_ollama: str = Field(
-        default="qwen3-coder:30b",
-        description="Ollama generation model"
-    )
-
-    gen_model_http: str = Field(
-        default="",
-        description="HTTP transport generation model override"
-    )
-
-    gen_model_mcp: str = Field(
-        default="",
-        description="MCP transport generation model override"
-    )
-
-    enrich_model_ollama: str = Field(
-        default="",
-        description="Ollama enrichment model"
-    )
-
-    ollama_url: str = Field(
-        default="http://127.0.0.1:11434/api",
-        description="Ollama API URL"
-    )
-
-    openai_base_url: str = Field(
-        default="",
-        description="OpenAI API base URL override (for proxies)"
-    )
-
-    # Local (Ollama) HTTP timeouts — clear, user-friendly naming
-    ollama_request_timeout: int = Field(
-        default=300,
-        ge=30,
-        le=1200,
-        description="Maximum total time to wait for a local (Ollama) generation request to complete (seconds)"
-    )
-    ollama_stream_idle_timeout: int = Field(
-        default=60,
-        ge=5,
-        le=300,
-        description="Maximum idle time allowed between streamed chunks from local (Ollama) during generation (seconds)"
-    )
-
-
 class EnrichmentConfig(BaseModel):
     """Code enrichment and chunk_summary generation configuration."""
 
@@ -4614,16 +4767,9 @@ class TracingConfig(BaseModel):
     )
 
     tracing_mode: str = Field(
-        default="langsmith",
-        pattern="^(langsmith|local|none|off)$",
-        description="Tracing backend mode"
-    )
-
-    trace_auto_ls: int = Field(
-        default=1,
-        ge=0,
-        le=1,
-        description="Auto-enable LangSmith tracing"
+        default="local",
+        pattern="^(local|otel|otel_langfuse|off)$",
+        description="Observability mode"
     )
 
     trace_retention: int = Field(
@@ -4643,31 +4789,60 @@ class TracingConfig(BaseModel):
         description="Alert severities to notify"
     )
 
-    langchain_endpoint: str = Field(
-        default="https://api.smith.langchain.com",
-        description="LangChain/LangSmith API endpoint"
+    otel_export_enabled: int = Field(
+        default=1,
+        ge=0,
+        le=1,
+        description="Enable OTLP export for traces"
     )
 
-    langchain_project: str = Field(
-        default="tribrid",
-        description="LangChain project name"
+    otlp_endpoint: str = Field(
+        default="",
+        description="OTLP HTTP endpoint for trace export"
     )
 
-    langchain_tracing_v2: int = Field(
+    otlp_headers: str = Field(
+        default="",
+        description="Comma-separated OTLP headers (k=v) for the exporter"
+    )
+
+    otel_service_name: str = Field(
+        default="ragweld-api",
+        description="Service name used for emitted OTel spans"
+    )
+
+    langfuse_enabled: int = Field(
         default=0,
         ge=0,
         le=1,
-        description="Enable LangChain v2 tracing"
+        description="Enable Langfuse generation observations"
     )
 
-    langtrace_api_host: str = Field(
+    langfuse_base_url: str = Field(
         default="",
-        description="LangTrace API host"
+        description="Langfuse base URL"
     )
 
-    langtrace_project_id: str = Field(
+    langfuse_project: str = Field(
+        default="ragweld",
+        description="Langfuse project label for traces and generations"
+    )
+
+    tempo_base_url: str = Field(
         default="",
-        description="LangTrace project ID"
+        description="Tempo or Grafana explore base URL used for trace deep links"
+    )
+
+    alloy_base_url: str = Field(
+        default="",
+        description="Grafana Alloy base URL used for collector status checks"
+    )
+
+    cost_tracking_enabled: int = Field(
+        default=1,
+        ge=0,
+        le=1,
+        description="Enable online request cost attribution in traces"
     )
 
     @field_validator('tracing_mode', mode='before')
@@ -4678,6 +4853,8 @@ class TracingConfig(BaseModel):
             val = v.strip().lower()
             if val == 'none':
                 return 'off'
+            if val in {'otel+langfuse', 'langfuse'}:
+                return 'otel_langfuse'
             return val
         return v
 
@@ -5692,77 +5869,6 @@ class ImageGenConfig(BaseModel):
     default_resolution: str = Field(default="1024x1024")
 
 
-class OpenRouterConfig(BaseModel):
-    """Unified gateway to 400+ cloud models. OpenAI-compatible.
-
-    MANDATORY P0 provider.
-    """
-
-    enabled: bool = Field(default=False)
-    api_key: str = Field(default="")
-    base_url: str = Field(default="https://openrouter.ai/api/v1")
-    # NOTE: Must be a valid OpenRouter model id (provider/model).
-    default_model: str = Field(default="anthropic/claude-sonnet-4")
-    site_name: str = Field(default="TriBridRAG")
-    fallback_models: list[str] = Field(default=["openai/gpt-4o", "google/gemini-2.0-flash"])
-
-
-class LocalProviderEntry(BaseModel):
-    """A single local inference provider endpoint."""
-
-    name: str = Field(description="Display name")
-    provider_type: str = Field(pattern="^(ollama|llamacpp|lmstudio|vllm|custom)$")
-    base_url: str = Field(description="Provider API endpoint")
-    enabled: bool = Field(default=True)
-    priority: int = Field(
-        default=0,
-        ge=0,
-        description="Lower = higher priority when multiple have same model.",
-    )
-
-
-class LocalModelConfig(BaseModel):
-    """Supports MULTIPLE simultaneous local providers.
-
-    P0: Ollama + llama.cpp. All use OpenAI-compatible API.
-    """
-
-    providers: list[LocalProviderEntry] = Field(
-        default=[
-            LocalProviderEntry(
-                name="Ollama",
-                provider_type="ollama",
-                base_url="http://127.0.0.1:11434",
-                priority=0,
-            ),
-            LocalProviderEntry(
-                name="llama.cpp",
-                provider_type="llamacpp",
-                base_url="http://127.0.0.1:8080",
-                priority=1,
-            ),
-        ]
-    )
-    auto_detect: bool = Field(default=True)
-    health_check_interval: int = Field(default=30, ge=10, le=300)
-    fallback_to_cloud: bool = Field(default=True)
-    gpu_memory_limit_gb: float = Field(default=0, ge=0)
-    default_chat_model: str = Field(default="qwen3:8b")
-    default_vision_model: str = Field(default="qwen3-vl:8b")
-    default_embedding_model: str = Field(default="nomic-embed-text")
-
-
-class BenchmarkConfig(BaseModel):
-    """Split-screen model comparison + pipeline profiling."""
-
-    enabled: bool = Field(default=True)
-    max_concurrent_models: int = Field(default=4, ge=2, le=8)
-    save_results: bool = Field(default=True)
-    results_path: str = Field(default="data/benchmarks/")
-    include_cost_tracking: bool = Field(default=True)
-    include_timing_breakdown: bool = Field(default=True)
-
-
 class ChatConfig(BaseModel):
     """Top-level chat configuration. Lives at TriBridConfig.chat.
 
@@ -5855,6 +5961,8 @@ Be helpful, friendly, and engaging, and base your answers on the actual database
     recall_gate: RecallGateConfig = Field(default_factory=RecallGateConfig)
     multimodal: ChatMultimodalConfig = Field(default_factory=ChatMultimodalConfig)
     image_gen: ImageGenConfig = Field(default_factory=ImageGenConfig)
+    vllm: VLLMConfig = Field(default_factory=VLLMConfig)
+    litellm: LiteLLMConfig = Field(default_factory=LiteLLMConfig)
     local_models: LocalModelConfig = Field(default_factory=LocalModelConfig)
     openrouter: OpenRouterConfig = Field(default_factory=OpenRouterConfig)
     benchmark: BenchmarkConfig = Field(default_factory=BenchmarkConfig)
@@ -6103,7 +6211,7 @@ class TriBridConfig(BaseModel):
             'KEYWORDS_BOOST': self.keywords.keywords_boost,
             'KEYWORDS_AUTO_GENERATE': self.keywords.keywords_auto_generate,
             'KEYWORDS_REFRESH_HOURS': self.keywords.keywords_refresh_hours,
-    # Tracing params (12)
+    # Tracing params
             'TRACING_ENABLED': self.tracing.tracing_enabled,
             'TRACE_SAMPLING_RATE': self.tracing.trace_sampling_rate,
             'PROMETHEUS_PORT': self.tracing.prometheus_port,
@@ -6112,15 +6220,19 @@ class TriBridConfig(BaseModel):
             'ALERT_WEBHOOK_TIMEOUT': self.tracing.alert_webhook_timeout,
             'LOG_LEVEL': self.tracing.log_level,
             'TRACING_MODE': self.tracing.tracing_mode,
-            'TRACE_AUTO_LS': self.tracing.trace_auto_ls,
             'TRACE_RETENTION': self.tracing.trace_retention,
             'TRIBRID_LOG_PATH': self.tracing.tribrid_log_path,
             'ALERT_NOTIFY_SEVERITIES': self.tracing.alert_notify_severities,
-            'LANGCHAIN_ENDPOINT': self.tracing.langchain_endpoint,
-            'LANGCHAIN_PROJECT': self.tracing.langchain_project,
-            'LANGCHAIN_TRACING_V2': self.tracing.langchain_tracing_v2,
-            'LANGTRACE_API_HOST': self.tracing.langtrace_api_host,
-            'LANGTRACE_PROJECT_ID': self.tracing.langtrace_project_id,
+            'OTEL_EXPORT_ENABLED': self.tracing.otel_export_enabled,
+            'OTLP_ENDPOINT': self.tracing.otlp_endpoint,
+            'OTLP_HEADERS': self.tracing.otlp_headers,
+            'OTEL_SERVICE_NAME': self.tracing.otel_service_name,
+            'LANGFUSE_ENABLED': self.tracing.langfuse_enabled,
+            'LANGFUSE_BASE_URL': self.tracing.langfuse_base_url,
+            'LANGFUSE_PROJECT': self.tracing.langfuse_project,
+            'TEMPO_BASE_URL': self.tracing.tempo_base_url,
+            'ALLOY_BASE_URL': self.tracing.alloy_base_url,
+            'COST_TRACKING_ENABLED': self.tracing.cost_tracking_enabled,
     # Training params (22)
             'RERANKER_TRAIN_EPOCHS': self.training.reranker_train_epochs,
             'RERANKER_TRAIN_BATCH': self.training.reranker_train_batch,
@@ -6465,16 +6577,20 @@ class TriBridConfig(BaseModel):
                 alert_include_resolved=data.get('ALERT_INCLUDE_RESOLVED', 1),
                 alert_webhook_timeout=data.get('ALERT_WEBHOOK_TIMEOUT', 5),
                 log_level=data.get('LOG_LEVEL', 'INFO'),
-                tracing_mode=data.get('TRACING_MODE', 'langsmith'),
-                trace_auto_ls=data.get('TRACE_AUTO_LS', 1),
+                tracing_mode=data.get('TRACING_MODE', 'local'),
                 trace_retention=data.get('TRACE_RETENTION', 50),
                 tribrid_log_path=data.get('TRIBRID_LOG_PATH', 'data/logs/queries.jsonl'),
                 alert_notify_severities=data.get('ALERT_NOTIFY_SEVERITIES', 'critical,warning'),
-                langchain_endpoint=data.get('LANGCHAIN_ENDPOINT', 'https://api.smith.langchain.com'),
-                langchain_project=data.get('LANGCHAIN_PROJECT', 'tribrid'),
-                langchain_tracing_v2=data.get('LANGCHAIN_TRACING_V2', 0),
-                langtrace_api_host=data.get('LANGTRACE_API_HOST', ''),
-                langtrace_project_id=data.get('LANGTRACE_PROJECT_ID', ''),
+                otel_export_enabled=data.get('OTEL_EXPORT_ENABLED', 1),
+                otlp_endpoint=data.get('OTLP_ENDPOINT', ''),
+                otlp_headers=data.get('OTLP_HEADERS', ''),
+                otel_service_name=data.get('OTEL_SERVICE_NAME', 'ragweld-api'),
+                langfuse_enabled=data.get('LANGFUSE_ENABLED', 0),
+                langfuse_base_url=data.get('LANGFUSE_BASE_URL', ''),
+                langfuse_project=data.get('LANGFUSE_PROJECT', 'ragweld'),
+                tempo_base_url=data.get('TEMPO_BASE_URL', ''),
+                alloy_base_url=data.get('ALLOY_BASE_URL', ''),
+                cost_tracking_enabled=data.get('COST_TRACKING_ENABLED', 1),
             ),
             training=TrainingConfig(
                 reranker_train_epochs=data.get('RERANKER_TRAIN_EPOCHS', 2),
@@ -6782,7 +6898,7 @@ TRIBRID_CONFIG_KEYS = {
     'KEYWORDS_BOOST',
     'KEYWORDS_AUTO_GENERATE',
     'KEYWORDS_REFRESH_HOURS',
-    # Tracing params (18)
+    # Tracing params
     'TRACING_ENABLED',
     'TRACE_SAMPLING_RATE',
     'PROMETHEUS_PORT',
@@ -6791,15 +6907,19 @@ TRIBRID_CONFIG_KEYS = {
     'ALERT_WEBHOOK_TIMEOUT',
     'LOG_LEVEL',
     'TRACING_MODE',
-    'TRACE_AUTO_LS',
     'TRACE_RETENTION',
     'TRIBRID_LOG_PATH',
     'ALERT_NOTIFY_SEVERITIES',
-    'LANGCHAIN_ENDPOINT',
-    'LANGCHAIN_PROJECT',
-    'LANGCHAIN_TRACING_V2',
-    'LANGTRACE_API_HOST',
-    'LANGTRACE_PROJECT_ID',
+    'OTEL_EXPORT_ENABLED',
+    'OTLP_ENDPOINT',
+    'OTLP_HEADERS',
+    'OTEL_SERVICE_NAME',
+    'LANGFUSE_ENABLED',
+    'LANGFUSE_BASE_URL',
+    'LANGFUSE_PROJECT',
+    'TEMPO_BASE_URL',
+    'ALLOY_BASE_URL',
+    'COST_TRACKING_ENABLED',
     # Training params (36)
     'RERANKER_TRAIN_EPOCHS',
     'RERANKER_TRAIN_BATCH',

@@ -15,25 +15,31 @@ from server.main import _load_dotenv_file
 async def test_secrets_check_reflects_process_env(client: AsyncClient) -> None:
     """GET /api/secrets/check returns booleans based on os.environ."""
     # Use allowlisted keys (the endpoint should not accept arbitrary env keys).
-    key_present = "NETLIFY_API_KEY"
-    key_absent = "GRAFANA_API_KEY"
+    key_present = "LANGFUSE_PUBLIC_KEY"
+    second_present = "LITELLM_API_KEY"
+    key_absent = "LANGFUSE_SECRET_KEY"
 
     old_present = os.environ.get(key_present)
+    old_second_present = os.environ.get(second_present)
     old_absent = os.environ.get(key_absent)
 
     try:
         # Ensure a clean slate for this process.
         os.environ.pop(key_present, None)
+        os.environ.pop(second_present, None)
         os.environ.pop(key_absent, None)
         os.environ[key_present] = "non-empty"
+        os.environ[second_present] = "non-empty"
 
-        resp = await client.get(f"/api/secrets/check?keys={key_present},{key_absent}")
+        resp = await client.get(f"/api/secrets/check?keys={key_present},{second_present},{key_absent}")
         assert resp.status_code == 200
         data = resp.json()
 
         assert data[key_present] is True
+        assert data[second_present] is True
         assert data[key_absent] is False
         assert isinstance(data[key_present], bool)
+        assert isinstance(data[second_present], bool)
         assert isinstance(data[key_absent], bool)
 
         # Unknown keys are rejected (prevents env-driven configuration creep).
@@ -44,6 +50,10 @@ async def test_secrets_check_reflects_process_env(client: AsyncClient) -> None:
             os.environ.pop(key_present, None)
         else:
             os.environ[key_present] = old_present
+        if old_second_present is None:
+            os.environ.pop(second_present, None)
+        else:
+            os.environ[second_present] = old_second_present
         if old_absent is None:
             os.environ.pop(key_absent, None)
         else:

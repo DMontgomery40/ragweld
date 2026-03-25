@@ -33,12 +33,13 @@ const RECIPES: SyntheticRecipeKind[] = [
 
 const MODEL_SOURCE_LABELS = {
   local: 'Local',
+  litellm: 'LiteLLM',
   ragweld: 'Ragweld',
   openrouter: 'OpenRouter',
   cloud_direct: 'Cloud Direct',
 } as const;
 
-const MODEL_SOURCE_ORDER = ['local', 'ragweld', 'openrouter', 'cloud_direct'] as const;
+const MODEL_SOURCE_ORDER = ['local', 'litellm', 'ragweld', 'openrouter', 'cloud_direct'] as const;
 
 function toModelValue(model: ChatModelInfo): string {
   return String(model.override || model.id || '').trim();

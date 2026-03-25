@@ -203,6 +203,17 @@ _train_start_guard: dict[str, tuple[str, datetime]] = {}
 _TRAIN_START_GRACE = timedelta(seconds=2)
 
 
+def _mark_train_start_guard(corpus_id: str, run_id: str, *, at: datetime | None = None) -> None:
+    """Remember a just-started run long enough to block rapid duplicate starts.
+
+    We set the guard before the run is fully persisted to prevent true
+    concurrent requests from racing during startup, then refresh it again once
+    the background task is actually queued so fast-failing jobs still block
+    accidental double-submits from the caller that just received `200 OK`.
+    """
+    _train_start_guard[str(corpus_id or "").strip()] = (run_id, at or datetime.now(UTC))
+
+
 async def _resolve_corpus_id(corpus_id: str | None) -> str:
     """Resolve corpus scope for legacy endpoints.
 
@@ -2378,7 +2389,7 @@ async def start_train_run(request: RerankerTrainStartRequest) -> RerankerTrainSt
 
     started_at = datetime.now(UTC)
     run_id = _allocate_run_id(corpus_id, started_at)
-    _train_start_guard[str(corpus_id or "").strip()] = (run_id, started_at)
+    _mark_train_start_guard(corpus_id, run_id, at=started_at)
     current_bundle = ensure_current_bundle(
         repo_id=corpus_id,
         cfg=cfg,
@@ -2471,6 +2482,11 @@ async def start_train_run(request: RerankerTrainStartRequest) -> RerankerTrainSt
         )
         RERANKER_TRAIN_RUNS_TOTAL.labels(outcome="started").inc()
         _sync_train_active_runs_gauge()
+
+    # Refresh the guard at queue time so callers cannot double-submit a corpus
+    # immediately after receiving a successful start response, even if the job
+    # fails almost instantly in the background.
+    _mark_train_start_guard(corpus_id, run_id)
 
     return RerankerTrainStartResponse(ok=True, run_id=run_id, run=run)
 

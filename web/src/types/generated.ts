@@ -135,6 +135,8 @@ export interface ChatConfig {
   recall_gate?: RecallGateConfig;
   multimodal?: ChatMultimodalConfig;
   image_gen?: ImageGenConfig;
+  vllm?: VLLMConfig;
+  litellm?: LiteLLMConfig;
   local_models?: LocalModelConfig;
   openrouter?: OpenRouterConfig;
   benchmark?: BenchmarkConfig;
@@ -216,7 +218,7 @@ export interface ChatModelInfo {
   id: string;
   /** Canonical model_override value to send in chat requests */
   override: string;
-  /** Provider display name (e.g., OpenRouter, Ollama) */
+  /** Provider display name (e.g., OpenRouter, LiteLLM, Ollama) */
   provider: string;
   /** Provider key used in the model catalog */
   provider_key?: string | null; // default: None
@@ -225,10 +227,10 @@ export interface ChatModelInfo {
   /** Capabilities for this model option */
   components?: ("GEN" | "EMB" | "RERANK")[];
   /** Model source group for UI grouping. */
-  source: "cloud_direct" | "openrouter" | "local" | "ragweld";
-  /** Provider type (ollama, llamacpp, openrouter, etc) */
+  source: "cloud_direct" | "openrouter" | "local" | "ragweld" | "litellm";
+  /** Provider type (ollama, llamacpp, openrouter, litellm, etc) */
   provider_type?: string | null; // default: None
-  /** Provider base URL (local/openrouter) */
+  /** Provider base URL (local/openrouter/litellm) */
   base_url?: string | null; // default: None
   /** Whether this model is expected to support vision inputs */
   supports_vision?: boolean; // default: False
@@ -249,8 +251,8 @@ export interface ChatMultimodalConfig {
 /** Selected provider route for a chat answer. */
 export interface ChatProviderInfo {
   /** Provider kind (router selection) */
-  kind: "cloud_direct" | "openrouter" | "local" | "ragweld";
-  /** Provider display name (e.g., OpenAI, OpenRouter, Ollama) */
+  kind: "cloud_direct" | "openrouter" | "local" | "ragweld" | "litellm";
+  /** Provider display name (e.g., OpenAI, OpenRouter, LiteLLM) */
   provider_name: string;
   /** Model identifier sent to provider */
   model: string;
@@ -770,10 +772,10 @@ export interface GenerationConfig {
   gen_timeout?: number; // default: 60
   /** Max retries for generation */
   gen_retry_max?: number; // default: 2
-  /** Model for code enrichment */
-  enrich_model?: string; // default: "gpt-4o-mini"
   /** Provider backend for gen_model and channel overrides */
   gen_backend?: string; // default: "openai"
+  /** Model for code enrichment */
+  enrich_model?: string; // default: "gpt-4o-mini"
   /** Enrichment backend */
   enrich_backend?: string; // default: "openai"
   /** Disable code enrichment */
@@ -798,6 +800,16 @@ export interface GenerationConfig {
   ollama_request_timeout?: number; // default: 300
   /** Maximum idle time allowed between streamed chunks from local (Ollama) during generation (seconds) */
   ollama_stream_idle_timeout?: number; // default: 60
+}
+
+/** Runtime capability matrix for generation routing and serving. */
+export interface GenerationRuntimeCapabilities {
+  /** Gateway/routing backends that can dispatch generation requests. */
+  routing_backends?: RuntimeOption[];
+  /** Serving runtimes that can execute generation models today. */
+  serving_backends?: RuntimeOption[];
+  /** Provider route selected by the current config/env for a default chat request. */
+  default_route?: ChatProviderInfo | null; // default: None
 }
 
 /** Best-effort git context captured when minting lineage versions. */
@@ -1184,7 +1196,16 @@ export interface LineageRef {
   label?: string | null; // default: None
 }
 
-/** Supports MULTIPLE simultaneous local providers.  P0: Ollama + llama.cpp. All use OpenAI-compatible API. */
+/** Gateway configuration for an OpenAI-compatible LiteLLM proxy. */
+export interface LiteLLMConfig {
+  enabled?: boolean; // default: False
+  api_key?: string; // default: ""
+  base_url?: string; // default: "http://127.0.0.1:4000/v1"
+  default_model?: string; // default: "openai/gpt-4o-mini"
+  fallback_models?: string[];
+}
+
+/** Supports multiple simultaneous local inference providers. */
 export interface LocalModelConfig {
   providers?: LocalProviderEntry[]; // default: [{"name": "Ollama", "provider_type": "ollama", ...
   auto_detect?: boolean; // default: True
@@ -1314,7 +1335,25 @@ export interface ModelValidationWarning {
   message: string;
 }
 
-/** Unified gateway to 400+ cloud models. OpenAI-compatible.  MANDATORY P0 provider. */
+/** Status for one observability component or backend. */
+export interface ObservabilityComponentStatus {
+  /** Stable component identifier. */
+  id: string;
+  /** Human-readable component label. */
+  label: string;
+  /** Whether the component is enabled by config. */
+  enabled: boolean;
+  /** Whether the component has the minimum config required to operate. */
+  configured: boolean;
+  /** Whether the component endpoint was reachable, when checked. */
+  reachable?: boolean | null; // default: None
+  /** Short operator-facing detail or error message. */
+  detail?: string | null; // default: None
+  /** Configured URL for the component when applicable. */
+  url?: string | null; // default: None
+}
+
+/** Unified gateway to many cloud models via OpenAI-compatible routing. */
 export interface OpenRouterConfig {
   enabled?: boolean; // default: False
   api_key?: string; // default: ""
@@ -1345,7 +1384,7 @@ export interface ProviderHealth {
   /** Provider display name */
   provider: string;
   /** Provider kind */
-  kind: "openrouter" | "local" | "ragweld";
+  kind: "openrouter" | "local" | "ragweld" | "litellm";
   /** Provider base URL */
   base_url: string;
   /** Whether the provider endpoint is reachable */
@@ -1728,6 +1767,107 @@ export interface RetrievalConfig {
   hydration_max_chars?: number; // default: 2000
 }
 
+/** Availability status for one OSS retrieval pilot dependency. */
+export interface RetrievalPilotPackageStatus {
+  /** Import/package name checked by the pilot. */
+  package: string;
+  /** Human-readable dependency label. */
+  label: string;
+  /** Whether the package is importable in the current environment. */
+  available: boolean;
+  /** Short operator-facing note about the dependency state. */
+  detail?: string | null; // default: None
+}
+
+/** One preview-search hit from the retrieval pilot sidecar. */
+export interface RetrievalPilotSearchPreviewResult {
+  /** Exported chunk identifier. */
+  chunk_id: string;
+  /** Corpus-relative path for the matched chunk. */
+  file_path: string;
+  /** Absolute source path for the matched chunk. */
+  source_path: string;
+  /** Start line of the matched chunk. */
+  start_line: number;
+  /** End line of the matched chunk. */
+  end_line: number;
+  /** Detected language for the chunk. */
+  language?: string | null; // default: None
+  /** Preview relevance score. */
+  score: number;
+  /** Short excerpt centered on the first match when possible. */
+  excerpt: string;
+}
+
+/** One result from the real Haystack/Qdrant pilot lane. */
+export interface RetrievalPilotSearchResult {
+  /** Exported chunk identifier. */
+  chunk_id: string;
+  /** Corpus-relative path for the matched chunk. */
+  file_path: string;
+  /** Absolute source path for the matched chunk. */
+  source_path: string;
+  /** Start line of the matched chunk. */
+  start_line: number;
+  /** End line of the matched chunk. */
+  end_line: number;
+  /** Detected language for the chunk. */
+  language?: string | null; // default: None
+  /** Haystack/Qdrant relevance score. */
+  score: number;
+  /** Short excerpt centered on the first match when possible. */
+  excerpt: string;
+}
+
+/** Operator status for the OSS retrieval/indexing sidecar pilot. */
+export interface RetrievalPilotStatusResponse {
+  ok?: boolean; // default: True
+  /** Corpus identifier */
+  corpus_id: string;
+  /** Resolved corpus path used by the pilot. */
+  repo_path: string;
+  /** Current pilot backend target. */
+  backend?: "haystack_qdrant_sidecar"; // default: "haystack_qdrant_sidecar"
+  /** Directory where pilot export artifacts are stored. */
+  export_dir: string;
+  /** JSONL export path for pilot-ready chunk documents. */
+  documents_path: string;
+  /** Manifest JSON path for the most recent pilot export. */
+  manifest_path: string;
+  /** Whether a pilot export already exists on disk. */
+  export_exists: boolean;
+  /** Files exported into the pilot sidecar. */
+  exported_file_count?: number; // default: 0
+  /** Chunks exported into the pilot sidecar. */
+  exported_chunk_count?: number; // default: 0
+  /** Files skipped because they exceeded indexing size limits. */
+  skipped_large_files?: number; // default: 0
+  /** Files seen by the loader but skipped because text extraction produced no usable content. */
+  skipped_unreadable_files?: number; // default: 0
+  /** When the current pilot export was generated. */
+  last_exported_at?: string | null; // default: None
+  /** Metadata fields preserved for provenance-correct pilot chunks. */
+  provenance_fields?: string[];
+  /** Availability of Docling, Haystack, and Qdrant dependencies for the pilot. */
+  package_status?: RetrievalPilotPackageStatus[];
+  /** Execution backend used by the real pilot ingest/search lane. */
+  execution_backend?: "haystack_qdrant_local"; // default: "haystack_qdrant_local"
+  /** Whether the real Haystack/Qdrant execution lane is hydrated and ready to search. */
+  execution_ready?: boolean; // default: False
+  /** Filesystem path for the local Qdrant store used by the pilot. */
+  qdrant_path: string;
+  /** Qdrant collection/index name for this pilot corpus. */
+  collection_name: string;
+  /** Number of documents currently ingested into the real pilot execution lane. */
+  indexed_document_count?: number; // default: 0
+  /** When the Haystack/Qdrant execution lane was last hydrated from the sidecar export. */
+  last_indexed_at?: string | null; // default: None
+  /** Whether preview search can run against the exported pilot sidecar. */
+  search_preview_ready?: boolean; // default: False
+  /** High-signal next-step guidance for the operator. */
+  operator_hint?: string | null; // default: None
+}
+
 /** Generic runtime capability option. */
 export interface RuntimeOption {
   /** Stable identifier for the capability */
@@ -1919,8 +2059,44 @@ export interface Trace {
   started_at_ms: number;
   /** Run end time (epoch milliseconds) */
   ended_at_ms?: number | null; // default: None
+  /** Canonical trace id for the request when available. */
+  trace_id?: string | null; // default: None
+  /** Root span id for the request when available. */
+  root_span_id?: string | null; // default: None
+  /** Stable correlation id propagated across the request. */
+  correlation_id?: string | null; // default: None
+  /** Operator-facing route summary for the request. */
+  route_summary?: TraceRouteSummary | null; // default: None
+  /** External observability links associated with this trace. */
+  external_links?: TraceExternalLink[];
+  /** Best-effort cost attribution for the request. */
+  cost_summary?: TraceCostSummary | null; // default: None
   /** Ordered trace events */
   events?: TraceEvent[];
+}
+
+/** Cost attribution summary for one online request. */
+export interface TraceCostSummary {
+  /** Provider/gateway used for the generation call. */
+  provider?: string | null; // default: None
+  /** Model identifier used for the generation call. */
+  model?: string | null; // default: None
+  /** Currency for the attributed cost. */
+  currency?: string; // default: "USD"
+  /** Prompt/input tokens when available. */
+  input_tokens?: number | null; // default: None
+  /** Completion/output tokens when available. */
+  output_tokens?: number | null; // default: None
+  /** Total tokens when available. */
+  total_tokens?: number | null; // default: None
+  /** Best-effort USD cost for this request when available. */
+  estimated_cost_usd?: number | null; // default: None
+  /** Whether cost came from provider/gateway truth, catalog fallback, or was unavailable. */
+  cost_source?: "provider" | "catalog" | "unavailable"; // default: "unavailable"
+  /** Whether the cost value came directly from provider/gateway response data. */
+  authoritative?: boolean; // default: False
+  /** Short note about how the cost was derived. */
+  detail?: string | null; // default: None
 }
 
 /** Single trace event (local tracing). */
@@ -1933,6 +2109,50 @@ export interface TraceEvent {
   msg?: string | null; // default: None
   /** Structured event payload */
   data?: Record<string, unknown>;
+}
+
+/** External observability link associated with a trace. */
+export interface TraceExternalLink {
+  /** Human-readable link label. */
+  label: string;
+  /** Link target type. */
+  kind?: "grafana" | "tempo" | "langfuse" | "custom"; // default: "custom"
+  /** Absolute URL for the external observability surface. */
+  url: string;
+  /** Short operator-facing note about the link. */
+  detail?: string | null; // default: None
+}
+
+/** Operator-facing route summary for one online request. */
+export interface TraceRouteSummary {
+  /** Logical route name, such as chat or search. */
+  route_name: string;
+  /** HTTP path for the request. */
+  path: string;
+  /** HTTP method for the request. */
+  method: string;
+  /** Selected provider route when applicable. */
+  provider?: ChatProviderInfo | null; // default: None
+  /** Corpus ids involved in the request. */
+  corpus_ids?: string[];
+  /** Whether vector retrieval was requested. */
+  include_vector?: boolean | null; // default: None
+  /** Whether sparse retrieval was requested. */
+  include_sparse?: boolean | null; // default: None
+  /** Whether graph retrieval was requested. */
+  include_graph?: boolean | null; // default: None
+  /** Vector leg results returned. */
+  vector_results?: number | null; // default: None
+  /** Sparse leg results returned. */
+  sparse_results?: number | null; // default: None
+  /** Graph leg hydrated chunks returned. */
+  graph_results?: number | null; // default: None
+  /** Final results returned to the caller. */
+  final_results?: number | null; // default: None
+  /** Whether an LLM/provider response was used. */
+  llm_used?: boolean | null; // default: None
+  /** Short reason for retrieval-only fallback, if any. */
+  llm_error?: string | null; // default: None
 }
 
 /** Observability and tracing configuration. */
@@ -1951,26 +2171,34 @@ export interface TracingConfig {
   alert_webhook_timeout?: number; // default: 5
   /** Logging level */
   log_level?: string; // default: "INFO"
-  /** Tracing backend mode */
-  tracing_mode?: string; // default: "langsmith"
-  /** Auto-enable LangSmith tracing */
-  trace_auto_ls?: number; // default: 1
+  /** Observability mode */
+  tracing_mode?: string; // default: "local"
   /** Number of traces to retain */
   trace_retention?: number; // default: 50
   /** Query log file path */
   tribrid_log_path?: string; // default: "data/logs/queries.jsonl"
   /** Alert severities to notify */
   alert_notify_severities?: string; // default: "critical,warning"
-  /** LangChain/LangSmith API endpoint */
-  langchain_endpoint?: string; // default: "https://api.smith.langchain.com"
-  /** LangChain project name */
-  langchain_project?: string; // default: "tribrid"
-  /** Enable LangChain v2 tracing */
-  langchain_tracing_v2?: number; // default: 0
-  /** LangTrace API host */
-  langtrace_api_host?: string; // default: ""
-  /** LangTrace project ID */
-  langtrace_project_id?: string; // default: ""
+  /** Enable OTLP export for traces */
+  otel_export_enabled?: number; // default: 1
+  /** OTLP HTTP endpoint for trace export */
+  otlp_endpoint?: string; // default: ""
+  /** Comma-separated OTLP headers (k=v) for the exporter */
+  otlp_headers?: string; // default: ""
+  /** Service name used for emitted OTel spans */
+  otel_service_name?: string; // default: "ragweld-api"
+  /** Enable Langfuse generation observations */
+  langfuse_enabled?: number; // default: 0
+  /** Langfuse base URL */
+  langfuse_base_url?: string; // default: ""
+  /** Langfuse project label for traces and generations */
+  langfuse_project?: string; // default: "ragweld"
+  /** Tempo or Grafana explore base URL used for trace deep links */
+  tempo_base_url?: string; // default: ""
+  /** Grafana Alloy base URL used for collector status checks */
+  alloy_base_url?: string; // default: ""
+  /** Enable online request cost attribution in traces */
+  cost_tracking_enabled?: number; // default: 1
 }
 
 /** Reranker training configuration. */
@@ -2141,6 +2369,13 @@ export interface UIConfig {
   learning_reranker_visualizer_show_vector_field?: number; // default: 1
   /** Reduce Neural Visualizer motion for accessibility/performance */
   learning_reranker_visualizer_reduce_motion?: number; // default: 0
+}
+
+/** Reference configuration for the self-hosted vLLM serving layer. */
+export interface VLLMConfig {
+  enabled?: boolean; // default: False
+  base_url?: string; // default: "http://127.0.0.1:8000/v1"
+  default_model?: string; // default: "Qwen/Qwen2.5-7B-Instruct"
 }
 
 /** Configuration for vector (dense) search using pgvector. */
@@ -3020,6 +3255,19 @@ export interface ModelValidationResult {
   warnings?: ModelValidationWarning[];
 }
 
+/** Operator-facing readiness summary for the observability stack. */
+export interface ObservabilityStatusResponse {
+  ok?: boolean;
+  /** Normalized observability mode for the current config. */
+  mode?: "local" | "otel" | "otel_langfuse" | "off";
+  /** Observability components/backends and their readiness state. */
+  components?: ObservabilityComponentStatus[];
+  /** Useful external links for the current observability config. */
+  links?: TraceExternalLink[];
+  /** High-signal next-step guidance for operators. */
+  operator_hint?: string | null;
+}
+
 /** Generic ok response used by several endpoints. */
 export interface OkResponse {
   /** Whether the operation succeeded */
@@ -3293,8 +3541,91 @@ export interface RerankerTrainStartResponse {
   run: RerankerTrainRun;
 }
 
+/** Request to generate the OSS retrieval pilot sidecar export. */
+export interface RetrievalPilotExportRequest {
+  /** Corpus identifier */
+  corpus_id: string;
+  /** Path to the corpus root on disk. */
+  repo_path: string;
+  /** Rebuild the pilot export even if it already exists. */
+  force_rebuild?: boolean;
+}
+
+/** Response for a retrieval pilot export request. */
+export interface RetrievalPilotExportResponse {
+  ok?: boolean;
+  /** Current pilot status after export. */
+  status: RetrievalPilotStatusResponse;
+  /** Non-fatal export warnings. */
+  warnings?: string[];
+}
+
+/** Request to hydrate the real Haystack/Qdrant execution lane from the sidecar export. */
+export interface RetrievalPilotIngestRequest {
+  /** Corpus identifier */
+  corpus_id: string;
+  /** Rebuild the local Qdrant collection from scratch. */
+  force_rebuild?: boolean;
+}
+
+/** Response for retrieval pilot ingest. */
+export interface RetrievalPilotIngestResponse {
+  ok?: boolean;
+  /** Pilot status snapshot after ingest. */
+  status: RetrievalPilotStatusResponse;
+  /** Non-fatal ingest warnings. */
+  warnings?: string[];
+}
+
+/** Request to search over the exported retrieval pilot sidecar. */
+export interface RetrievalPilotSearchPreviewRequest {
+  /** Corpus identifier */
+  corpus_id: string;
+  /** Search query to run against the exported pilot documents. */
+  query: string;
+  /** Maximum results to return. */
+  top_k?: number;
+}
+
+/** Response for retrieval pilot preview search. */
+export interface RetrievalPilotSearchPreviewResponse {
+  ok?: boolean;
+  /** Corpus identifier */
+  corpus_id: string;
+  /** Query executed against the pilot export. */
+  query: string;
+  results?: RetrievalPilotSearchPreviewResult[];
+  /** Pilot status snapshot used for the preview search. */
+  status: RetrievalPilotStatusResponse;
+}
+
+/** Request to search the real Haystack/Qdrant execution lane. */
+export interface RetrievalPilotSearchRequest {
+  /** Corpus identifier */
+  corpus_id: string;
+  /** Search query to execute against the real pilot lane. */
+  query: string;
+  /** Maximum hits to return. */
+  top_k?: number;
+}
+
+/** Response for real Haystack/Qdrant pilot search. */
+export interface RetrievalPilotSearchResponse {
+  ok?: boolean;
+  /** Corpus identifier */
+  corpus_id: string;
+  /** Search backend used for this response. */
+  backend?: "haystack_qdrant_local";
+  /** Query executed against the real pilot lane. */
+  query: string;
+  results?: RetrievalPilotSearchResult[];
+  /** Pilot status snapshot used for the real search. */
+  status: RetrievalPilotStatusResponse;
+}
+
 /** Response payload for GET /api/runtime-capabilities. */
 export interface RuntimeCapabilitiesResponse {
+  generation?: GenerationRuntimeCapabilities;
   embedding?: EmbeddingRuntimeCapabilities;
   reranker?: RerankerRuntimeCapabilities;
   chunking?: ChunkingRuntimeCapabilities;

@@ -28,6 +28,13 @@ from server.indexing.chunker import Chunker
 from server.indexing.embedder import Embedder, configure_postgres_embedding_cache_backend
 from server.indexing.graph_builder import GraphBuilder
 from server.indexing.loader import FileLoader
+from server.indexing.oss_retrieval_pilot import (
+    build_retrieval_pilot_status,
+    export_retrieval_pilot,
+    ingest_retrieval_pilot_execution,
+    search_retrieval_pilot_execution,
+    search_retrieval_pilot_preview,
+)
 from server.indexing.text_extractors import extract_text_for_path
 from server.models.graph import Entity, Relationship
 from server.models.index import (
@@ -47,6 +54,15 @@ from server.models.tribrid_config_model import (
     DashboardIndexStatusResponse,
     DashboardIndexStorageBreakdown,
     IndexEstimate,
+    RetrievalPilotExportRequest,
+    RetrievalPilotExportResponse,
+    RetrievalPilotIngestRequest,
+    RetrievalPilotIngestResponse,
+    RetrievalPilotSearchRequest,
+    RetrievalPilotSearchResponse,
+    RetrievalPilotSearchPreviewRequest,
+    RetrievalPilotSearchPreviewResponse,
+    RetrievalPilotStatusResponse,
     TriBridConfig,
     VocabPreviewResponse,
 )
@@ -206,6 +222,24 @@ def _run_summary_path(repo_id: str, run_id: str) -> Path:
 
 def _run_events_path(repo_id: str, run_id: str) -> Path:
     return _run_dir(repo_id, run_id) / "events.jsonl"
+
+
+async def _resolve_repo_path_from_request(repo_id: str, repo_path: str | None) -> str:
+    resolved = str(repo_path or "").strip()
+    if resolved:
+        return resolved
+
+    cfg_global = await load_scoped_config(repo_id=None)
+    pg = PostgresClient(cfg_global.indexing.postgres_url)
+    await pg.connect()
+    try:
+        corpus = await pg.get_corpus(repo_id)
+        if corpus is not None:
+            resolved = str(corpus.get("path") or "").strip()
+    finally:
+        await pg.disconnect()
+
+    return resolved
 
 
 def _persist_run_summary(summary: IndexRunSummary) -> None:
@@ -2669,6 +2703,107 @@ async def estimate_index(request: IndexRequest) -> IndexEstimate:
         estimated_seconds_semantic_kg=estimated_seconds_semantic_kg,
         assumptions=assumptions,
     )
+
+
+@router.get("/index/{corpus_id}/pilot/status", response_model=RetrievalPilotStatusResponse)
+async def get_retrieval_pilot_status(
+    corpus_id: str,
+    repo_path: str | None = Query(default=None, description="Optional corpus path override for the pilot."),
+) -> RetrievalPilotStatusResponse:
+    resolved_repo_path = await _resolve_repo_path_from_request(corpus_id, repo_path)
+    return await build_retrieval_pilot_status(corpus_id=corpus_id, repo_path=resolved_repo_path)
+
+
+@router.post("/index/{corpus_id}/pilot/export", response_model=RetrievalPilotExportResponse)
+async def run_retrieval_pilot_export(
+    corpus_id: str,
+    request: RetrievalPilotExportRequest,
+) -> RetrievalPilotExportResponse:
+    if str(request.repo_id or "").strip() != str(corpus_id or "").strip():
+        raise HTTPException(status_code=422, detail="corpus_id path and payload must match")
+
+    resolved_repo_path = await _resolve_repo_path_from_request(corpus_id, request.repo_path)
+    if not resolved_repo_path:
+        raise HTTPException(status_code=422, detail="repo_path is required (or create corpus first)")
+
+    try:
+        return await export_retrieval_pilot(
+            corpus_id=corpus_id,
+            repo_path=resolved_repo_path,
+            force_rebuild=bool(request.force_rebuild),
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post("/index/{corpus_id}/pilot/search-preview", response_model=RetrievalPilotSearchPreviewResponse)
+async def search_retrieval_pilot(
+    corpus_id: str,
+    request: RetrievalPilotSearchPreviewRequest,
+    repo_path: str | None = Query(default=None, description="Optional corpus path override for status context."),
+) -> RetrievalPilotSearchPreviewResponse:
+    if str(request.repo_id or "").strip() != str(corpus_id or "").strip():
+        raise HTTPException(status_code=422, detail="corpus_id path and payload must match")
+
+    resolved_repo_path = await _resolve_repo_path_from_request(corpus_id, repo_path)
+    try:
+        return await search_retrieval_pilot_preview(
+            corpus_id=corpus_id,
+            repo_path=resolved_repo_path,
+            query=str(request.query or ""),
+            top_k=int(request.top_k),
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post("/index/{corpus_id}/pilot/ingest", response_model=RetrievalPilotIngestResponse)
+async def ingest_retrieval_pilot(
+    corpus_id: str,
+    request: RetrievalPilotIngestRequest,
+    repo_path: str | None = Query(default=None, description="Optional corpus path override for status context."),
+) -> RetrievalPilotIngestResponse:
+    if str(request.repo_id or "").strip() != str(corpus_id or "").strip():
+        raise HTTPException(status_code=422, detail="corpus_id path and payload must match")
+
+    resolved_repo_path = await _resolve_repo_path_from_request(corpus_id, repo_path)
+    try:
+        return await ingest_retrieval_pilot_execution(
+            corpus_id=corpus_id,
+            repo_path=resolved_repo_path,
+            force_rebuild=bool(request.force_rebuild),
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post("/index/{corpus_id}/pilot/search", response_model=RetrievalPilotSearchResponse)
+async def search_retrieval_pilot_execution_route(
+    corpus_id: str,
+    request: RetrievalPilotSearchRequest,
+    repo_path: str | None = Query(default=None, description="Optional corpus path override for status context."),
+) -> RetrievalPilotSearchResponse:
+    if str(request.repo_id or "").strip() != str(corpus_id or "").strip():
+        raise HTTPException(status_code=422, detail="corpus_id path and payload must match")
+
+    resolved_repo_path = await _resolve_repo_path_from_request(corpus_id, repo_path)
+    try:
+        return await search_retrieval_pilot_execution(
+            corpus_id=corpus_id,
+            repo_path=resolved_repo_path,
+            query=str(request.query or ""),
+            top_k=int(request.top_k),
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.post("/index", response_model=IndexStatus)

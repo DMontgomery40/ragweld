@@ -30,10 +30,12 @@ _IMPORT_RE = re.compile(r"^\s*(?:from|import)\s+([A-Za-z0-9_\.]+)", re.MULTILINE
 _ROUTE_RE = re.compile(r"(?:/api/[A-Za-z0-9_./-]+)")
 
 
-def synthetic_model_category(model: str) -> str:
+def synthetic_generation_model_category(model: str) -> str:
     raw = str(model or "").strip().lower()
     if not raw:
         return "unknown"
+    if raw.startswith("litellm:"):
+        return "litellm"
     if raw.startswith("openrouter:"):
         return "openrouter"
     if raw.startswith("local:"):
@@ -56,15 +58,20 @@ def resolve_synthetic_route(*, cfg: TriBridConfig, model: str) -> ProviderRoute:
     try:
         return select_provider_route(config=cfg, model_override=model_name)
     except Exception as e:
-        category = synthetic_model_category(model_name)
+        category = synthetic_generation_model_category(model_name)
         raise RuntimeError(f"Unable to resolve model route for {model_name!r} (category={category}): {e}") from e
 
 
-def resolve_available_synthetic_model(cfg: TriBridConfig) -> str | None:
+def resolve_available_synthetic_generation_model(cfg: TriBridConfig) -> str | None:
     candidates: list[str] = []
 
     if os.getenv("OPENAI_API_KEY", "").strip():
         candidates.append("openai/gpt-4o-mini")
+    litellm_default = str(getattr(cfg.chat.litellm, "default_model", "") or "").strip()
+    litellm_enabled = bool(getattr(cfg.chat.litellm, "enabled", False))
+    litellm_base = str(getattr(cfg.chat.litellm, "base_url", "") or "").strip()
+    if litellm_enabled and litellm_base and litellm_default:
+        candidates.append(f"litellm:{litellm_default}")
     if os.getenv("OPENROUTER_API_KEY", "").strip():
         candidates.append("openrouter:openai/gpt-4o-mini")
 

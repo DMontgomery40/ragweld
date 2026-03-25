@@ -6,7 +6,7 @@ import type { ChatMultimodalConfig, RecallConfig, RecallGateConfig, RecallIntens
 
 const TABS = ['Model', 'Sources', 'Recall', 'Multimodal', 'Local', 'OpenRouter', 'Benchmark', 'UI'];
 
-export function ChatSettings2() {
+export function ChatSettings() {
   const { config, loading, error, saving } = useConfig();
   const [activeTab, setActiveTab] = useState(TABS[0]);
   const [pendingScrollPrompt, setPendingScrollPrompt] = useState<string | null>(null);
@@ -625,9 +625,9 @@ export function ChatSettings2() {
       case 'OpenRouter':
         return (
           <div className="subtab-panel" style={{ padding: 24 }}>
-            <h3 style={{ marginTop: 0 }}>OpenRouter</h3>
+            <h3 style={{ marginTop: 0 }}>Providers</h3>
             <div style={{ color: 'var(--fg-muted)', fontSize: 13, marginBottom: 14 }}>
-              Configure OpenRouter and verify your API key status.
+              Configure LiteLLM, OpenRouter, vLLM, and local provider routing from one place.
             </div>
             <ProviderSetup />
           </div>
@@ -719,4 +719,4 @@ export function ChatSettings2() {
   );
 }
 
-export default ChatSettings2;
+export default ChatSettings;

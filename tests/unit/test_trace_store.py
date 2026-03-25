@@ -1,6 +1,12 @@
 import pytest
 
-from server.models.tribrid_config_model import TraceEvent, TriBridConfig
+from server.models.tribrid_config_model import (
+    TraceCostSummary,
+    TraceEvent,
+    TraceExternalLink,
+    TraceRouteSummary,
+    TriBridConfig,
+)
 from server.services.traces import TraceStore
 
 
@@ -38,3 +44,59 @@ async def test_start_reused_run_id_keeps_latest_trace_after_retention() -> None:
     assert latest.run_id == "dup-run"
     assert latest.trace is not None
     assert latest.trace.started_at_ms == 10
+
+
+@pytest.mark.asyncio
+async def test_trace_annotations_round_trip_full_observability_payload() -> None:
+    cfg = TriBridConfig()
+    cfg.tracing.tracing_mode = "otel_langfuse"
+    store = TraceStore()
+
+    started = await store.start(run_id="run-annotated", repo_id="repo-1", started_at_ms=1, config=cfg)
+    assert started is True
+    await store.annotate(
+        "run-annotated",
+        trace_id="trace-123",
+        root_span_id="span-456",
+        correlation_id="corr-789",
+        route_summary=TraceRouteSummary(
+            route_name="chat",
+            path="/api/chat",
+            method="POST",
+            corpus_ids=["repo-1"],
+            include_vector=True,
+            include_sparse=False,
+            include_graph=True,
+            final_results=3,
+            llm_used=True,
+        ),
+        external_links=[
+            TraceExternalLink(
+                label="Tempo trace",
+                kind="tempo",
+                url="http://tempo.local/trace/trace-123",
+                detail="Trace deep link",
+            )
+        ],
+        cost_summary=TraceCostSummary(
+            provider="litellm",
+            model="openai/gpt-4.1-mini",
+            total_tokens=42,
+            estimated_cost_usd=0.0123,
+            cost_source="catalog",
+            authoritative=False,
+        ),
+    )
+
+    latest = await store.latest(run_id="run-annotated")
+    assert latest.trace is not None
+    assert latest.trace.trace_id == "trace-123"
+    assert latest.trace.root_span_id == "span-456"
+    assert latest.trace.correlation_id == "corr-789"
+    assert latest.trace.route_summary is not None
+    assert latest.trace.route_summary.route_name == "chat"
+    assert latest.trace.route_summary.final_results == 3
+    assert latest.trace.external_links[0].kind == "tempo"
+    assert latest.trace.cost_summary is not None
+    assert latest.trace.cost_summary.total_tokens == 42
+    assert latest.trace.cost_summary.cost_source == "catalog"

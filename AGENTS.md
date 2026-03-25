@@ -12,6 +12,31 @@ expected and not a bug.
 - Do not attempt mass-renames of `tribrid` -> `ragweld`.
 - Treat `tribrid` as stable internal naming; treat `ragweld` as the product/repo name.
 
+## Branch Canon (feat/oss-composition-kickoff)
+
+This branch is the OSS-composition fork branch. It is **replacement-only**.
+
+- Do not add legacy fallbacks, compatibility shims, transition periods, dual-write paths, or "temporary" old/new coexistence logic.
+- If a slice is being replaced on this branch, the touched backend, UI, docs, tests, and agent instructions must move to the new path together.
+- If the replacement is not ready, do not land a half-migrated cutover that routes back into the legacy subsystem.
+- If older docs, memories, prompts, or rules conflict with this branch canon, this section wins.
+
+Locked target stack for this branch:
+- Inference: `vLLM`
+- Gateway/routing: `LiteLLM`
+- Orchestration: `Flyte`
+- Retrieval/indexing: `Haystack + Docling + Qdrant`
+- Graph parity: `Neo4j`
+- Training execution: `Unsloth`
+- Runs/evals/regressions: `MLflow + Ragas + Promptfoo`
+- Eval drilldown substrate: `Langfuse`
+- Observability fabric: `OpenTelemetry + Grafana Alloy + Tempo + Loki + Mimir + Pyroscope + Faro`
+- Frontend shell/workbench target: `Dockview + react-resizable-panels + TanStack Query + assistant-ui + shadcn/ui + Radix + xterm + Monaco`
+
+Active branch references:
+- `/Users/davidmontgomery/ragweld/docs/references/observability-online-slice.md`
+- `/Users/davidmontgomery/ragweld/docs/exec-plans/active/oss-composition-kickoff-handoff-2026-03-25.md`
+
 ## Start Here (Repo Map)
 
 Source of truth files (if it is not here, it does not exist):
@@ -43,6 +68,15 @@ Executable specs (structured, machine-checkable intent):
 - Pydantic-first: define shapes and config in `/Users/davidmontgomery/ragweld/server/models/tribrid_config_model.py` first.
 - No hand-written API payload types in the frontend: import from `generated.ts`.
 - No adapters/transformers/mappers to reshape API payloads: fix the Pydantic model.
+- OSS-composition fork rule: on this branch, replacement means replacement.
+  - Do not keep old behavior alive by silently routing back into the legacy subsystem once a replacement slice exists.
+  - Do not introduce migration seams, compatibility adapters, legacy toggles, or transition periods on this branch.
+  - If the new path is broken, fix the new path before landing the slice; do not add fallback spaghetti.
+- OSS-composition fork UI rule: protected operator-facing surfaces are mandatory in every slice.
+  - Do not land backend-only fork work that leaves the workbench UI stale, misleading, or missing the new control/visibility surface.
+  - Every material migration slice must either preserve or explicitly advance the in-product UI for the affected surface in the same branch.
+  - Training Center, eval drilldown, retrieval/indexing controls, graph parity surfaces, Grafana embeds, and the dock/workbench shell are first-class acceptance targets, not cleanup work for later.
+- Qdrant/Haystack/Docling are allowed and expected on this branch. Old instructions that ban Qdrant are stale here.
 - `mkdocs/**` and `mkdocs.yml` are docs-autopilot output. Do not hand-edit them in normal feature work.
 - Tests must be real (no fake-green):
   - No Playwright request interception stubs for new/edited E2E tests.
@@ -110,3 +144,4 @@ npm --prefix web run build
 - Larger work plans: `/Users/davidmontgomery/ragweld/docs/exec-plans/active/`
 - Tech debt backlog: `/Users/davidmontgomery/ragweld/docs/exec-plans/tech-debt-tracker.md`
 - References (links, snippets, external context you want in-repo): `/Users/davidmontgomery/ragweld/docs/references/index.md`
+- Current branch handoff: `/Users/davidmontgomery/ragweld/docs/exec-plans/active/oss-composition-kickoff-handoff-2026-03-25.md`

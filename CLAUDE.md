@@ -6,6 +6,29 @@
 
 **Pydantic is the law. Everything else derives from it. You cannot add features that don't exist in Pydantic first.**
 
+## FEATURE BRANCH CANON (feat/oss-composition-kickoff)
+
+This branch is replacement-only.
+
+- No fallbacks.
+- No legacy compatibility shims.
+- No transition-period dual paths.
+- No keeping broken old subsystems alive "just in case."
+- If a slice is replaced in backend code, the UI/docs/tests/instructions for that slice must move with it in the same branch.
+
+Locked branch target:
+- `vLLM` + `LiteLLM`
+- `Flyte`
+- `Haystack + Docling + Qdrant`
+- `Neo4j` for graph parity
+- `Unsloth`
+- `MLflow + Ragas + Promptfoo`
+- `Langfuse`
+- `OpenTelemetry + Grafana Alloy + Tempo + Loki + Mimir + Pyroscope + Faro`
+- `assistant-ui` inside the ragweld shell for the future chat rebuild
+
+If older repo notes conflict with this branch canon, this section and `AGENTS.md` win.
+
 ## Naming (ragweld vs tribrid)
 
 This project was renamed to **ragweld**. The codebase and API still use **tribrid**
@@ -53,7 +76,7 @@ web/src/components/**/*.tsx (REACT COMPONENTS)
 
 ## BANNED PATTERNS (brief — see `.claude/rules/pydantic-first.md` for full list)
 
-- Imports: qdrant_client, redis, langchain (LangGraph IS allowed)
+- Imports: redis, langchain wrappers (LangGraph IS allowed; Qdrant/Haystack/Docling are allowed on this branch)
 - Terms: card/cards -> chunk_summary, golden questions -> eval_dataset, ranker -> reranker
 - Smells: `class *Adapter`, `class *Transformer`, `class *Mapper`, `interface` in .tsx
 
@@ -177,4 +200,4 @@ This ensures institutional knowledge accumulates across sessions.
 1. **Can I add this field?** → Is it in tribrid_config_model.py? No → Add it there first.
 2. **Can I use this type?** → Is it in generated.ts? No → Add to Pydantic first.
 3. **Can I hardcode this value?** → Should it be configurable? Yes → Add to config.
-4. **Can I write an adapter?** → No. Fix the Pydantic model.
+4. **Can I write an adapter or fallback?** → No. Fix or replace the real path.

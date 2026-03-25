@@ -13,6 +13,7 @@ from .tribrid_config_model import (  # noqa: F401
     ChatMultimodalConfig,
     ImageAttachment,
     ImageGenConfig,
+    LiteLLMConfig,
     LocalModelConfig,
     LocalProviderEntry,
     OpenRouterConfig,
@@ -22,6 +23,7 @@ from .tribrid_config_model import (  # noqa: F401
     RecallIntensity,
     RecallPlan,
     RecallSignals,
+    VLLMConfig,
 )
 
 __all__ = [
@@ -35,9 +37,11 @@ __all__ = [
     "RecallGateConfig",
     "ChatMultimodalConfig",
     "ImageGenConfig",
+    "LiteLLMConfig",
     "OpenRouterConfig",
     "LocalProviderEntry",
     "LocalModelConfig",
+    "VLLMConfig",
     "BenchmarkConfig",
     "ChatConfig",
 ]

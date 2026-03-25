@@ -11,18 +11,26 @@ import { useConfig, useConfigField } from '@/hooks';
 export function IntegrationsSubtab() {
   const { config, saveConfig } = useConfig();
 
-  // LangSmith settings (non-secret config only)
-  const [langsmithEndpoint, setLangsmithEndpoint] = useConfigField<string>(
-    'tracing.langchain_endpoint',
-    'https://api.smith.langchain.com'
+  // Observability settings (non-secret config only)
+  const [langfuseBaseUrl, setLangfuseBaseUrl] = useConfigField<string>(
+    'tracing.langfuse_base_url',
+    ''
   );
-  const [langsmithProject, setLangsmithProject] = useConfigField<string>(
-    'tracing.langchain_project',
-    'tribrid'
+  const [langfuseProject, setLangfuseProject] = useConfigField<string>(
+    'tracing.langfuse_project',
+    'ragweld'
   );
-  const [langchainTracingV2, setLangchainTracingV2] = useConfigField<number>(
-    'tracing.langchain_tracing_v2',
+  const [langfuseEnabled, setLangfuseEnabled] = useConfigField<number>(
+    'tracing.langfuse_enabled',
     0
+  );
+  const [tempoBaseUrl, setTempoBaseUrl] = useConfigField<string>(
+    'tracing.tempo_base_url',
+    ''
+  );
+  const [alloyBaseUrl, setAlloyBaseUrl] = useConfigField<string>(
+    'tracing.alloy_base_url',
+    ''
   );
 
   // Grafana settings (non-secret config only)
@@ -244,7 +252,7 @@ export function IntegrationsSubtab() {
         </div>
       </div>
 
-      {/* LangSmith Integration */}
+      {/* Observability Integration */}
       <div
         style={{
           background: 'var(--bg-elev2)',
@@ -254,16 +262,16 @@ export function IntegrationsSubtab() {
           marginBottom: '20px'
         }}
       >
-        <h3 style={{ marginTop: 0 }}>LangSmith Integration</h3>
+        <h3 style={{ marginTop: 0 }}>Observability Integration</h3>
 
         <div className="input-row">
           <div className="input-group">
-            <label>LangSmith Endpoint</label>
+            <label>Langfuse Base URL</label>
             <input
               type="text"
-              value={langsmithEndpoint}
-              onChange={(e) => setLangsmithEndpoint(e.target.value)}
-              placeholder="https://api.smith.langchain.com"
+              value={langfuseBaseUrl}
+              onChange={(e) => setLangfuseBaseUrl(e.target.value)}
+              placeholder="https://cloud.langfuse.com"
               style={{
                 width: '100%',
                 padding: '8px',
@@ -275,12 +283,12 @@ export function IntegrationsSubtab() {
             />
           </div>
           <div className="input-group">
-            <label>LangSmith Project</label>
+            <label>Langfuse Project</label>
             <input
               type="text"
-              value={langsmithProject}
-              onChange={(e) => setLangsmithProject(e.target.value)}
-              placeholder="tribrid"
+              value={langfuseProject}
+              onChange={(e) => setLangfuseProject(e.target.value)}
+              placeholder="ragweld"
               style={{
                 width: '100%',
                 padding: '8px',
@@ -296,10 +304,10 @@ export function IntegrationsSubtab() {
         {/* API Keys - configured in .env only, never entered in GUI */}
         <div className="input-row">
           <div className="input-group">
-            <ApiKeyStatus keyName="LANGSMITH_API_KEY" label="LangSmith API Key" />
+            <ApiKeyStatus keyName="LANGFUSE_PUBLIC_KEY" label="Langfuse Public Key" />
           </div>
           <div className="input-group">
-            <ApiKeyStatus keyName="LANGCHAIN_API_KEY" label="LangChain API Key" />
+            <ApiKeyStatus keyName="LANGFUSE_SECRET_KEY" label="Langfuse Secret Key" />
           </div>
         </div>
 
@@ -308,16 +316,50 @@ export function IntegrationsSubtab() {
             <label style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <input
                 type="checkbox"
-                checked={langchainTracingV2 === 1}
-                onChange={(e) => setLangchainTracingV2(e.target.checked ? 1 : 0)}
+                checked={langfuseEnabled === 1}
+                onChange={(e) => setLangfuseEnabled(e.target.checked ? 1 : 0)}
               />
-              <span>Enable LangSmith tracing v2 (reserved)</span>
+              <span>Enable Langfuse generation tracing</span>
             </label>
+          </div>
+          <div className="input-group">
+            <label>Tempo Base URL</label>
+            <input
+              type="text"
+              value={tempoBaseUrl}
+              onChange={(e) => setTempoBaseUrl(e.target.value)}
+              placeholder="http://127.0.0.1:3200"
+              style={{
+                width: '100%',
+                padding: '8px',
+                background: 'var(--input-bg)',
+                border: '1px solid var(--line)',
+                borderRadius: '4px',
+                color: 'var(--fg)'
+              }}
+            />
+          </div>
+          <div className="input-group">
+            <label>Alloy Base URL</label>
+            <input
+              type="text"
+              value={alloyBaseUrl}
+              onChange={(e) => setAlloyBaseUrl(e.target.value)}
+              placeholder="http://127.0.0.1:12345"
+              style={{
+                width: '100%',
+                padding: '8px',
+                background: 'var(--input-bg)',
+                border: '1px solid var(--line)',
+                borderRadius: '4px',
+                color: 'var(--fg)'
+              }}
+            />
           </div>
         </div>
 
         <div className="small" style={{ color: 'var(--fg-muted)', marginTop: '12px' }}>
-          LangSmith export / deep-linking is not implemented yet. TriBridRAG currently provides local, in-memory traces.
+          The workbench now treats OTel as the canonical request trace path, with Langfuse for generation spans and Tempo/Grafana deep links when configured.
         </div>
       </div>
 

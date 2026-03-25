@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef, type CSSProperties } from 're
 import { EmbeddingMismatchWarning } from '@/components/ui/EmbeddingMismatchWarning';
 import { LiveTerminal, type LiveTerminalHandle } from '@/components/LiveTerminal/LiveTerminal';
 import { IntentMatrixEditor } from '@/components/RAG/IntentMatrixEditor';
+import { RetrievalPilotPanel } from '@/components/RAG/RetrievalPilotPanel';
 import { SyntheticCallout } from '@/components/RAG/SyntheticCallout';
 import { ModelAssignments } from '@/components/RAG/ModelAssignments';
 import { ModelPicker } from '@/components/RAG/ModelPicker';
@@ -110,6 +111,8 @@ export function RetrievalSubtab() {
   const traceTerminalRef = useRef<LiveTerminalHandle>(null);
 
   const { repos, activeRepo, setActiveRepo, loadRepos } = useRepoStore();
+  const activeCorpus = repos.find((repo) => repo.corpus_id === activeRepo || repo.slug === activeRepo || repo.name === activeRepo);
+  const activeRepoPath = String(activeCorpus?.path || '');
 
   // --- Generation ---------------------------------------------------------
   const [genModel, setGenModel] = useConfigField<string>('generation.gen_model', '');
@@ -245,19 +248,20 @@ export function RetrievalSubtab() {
   const [alertIncludeResolved, setAlertIncludeResolved] = useConfigField<number>('tracing.alert_include_resolved', 1);
   const [alertWebhookTimeout, setAlertWebhookTimeout] = useConfigField<number>('tracing.alert_webhook_timeout', 5);
   const [logLevel, setLogLevel] = useConfigField<string>('tracing.log_level', 'INFO');
-  const [tracingMode, setTracingMode] = useConfigField<string>('tracing.tracing_mode', 'langsmith');
-  const [traceAutoLs, setTraceAutoLs] = useConfigField<number>('tracing.trace_auto_ls', 1);
+  const [tracingMode, setTracingMode] = useConfigField<string>('tracing.tracing_mode', 'local');
   const [traceRetention, setTraceRetention] = useConfigField<number>('tracing.trace_retention', 50);
   const [tribridLogPath, setTribridLogPath] = useConfigField<string>('tracing.tribrid_log_path', 'data/logs/queries.jsonl');
   const [alertNotifySeverities, setAlertNotifySeverities] = useConfigField<string>('tracing.alert_notify_severities', 'critical,warning');
-  const [langchainEndpoint, setLangchainEndpoint] = useConfigField<string>(
-    'tracing.langchain_endpoint',
-    'https://api.smith.langchain.com',
-  );
-  const [langchainProject, setLangchainProject] = useConfigField<string>('tracing.langchain_project', 'tribrid');
-  const [langchainTracingV2, setLangchainTracingV2] = useConfigField<number>('tracing.langchain_tracing_v2', 0);
-  const [langtraceApiHost, setLangtraceApiHost] = useConfigField<string>('tracing.langtrace_api_host', '');
-  const [langtraceProjectId, setLangtraceProjectId] = useConfigField<string>('tracing.langtrace_project_id', '');
+  const [otelExportEnabled, setOtelExportEnabled] = useConfigField<number>('tracing.otel_export_enabled', 1);
+  const [otlpEndpoint, setOtlpEndpoint] = useConfigField<string>('tracing.otlp_endpoint', '');
+  const [otlpHeaders, setOtlpHeaders] = useConfigField<string>('tracing.otlp_headers', '');
+  const [otelServiceName, setOtelServiceName] = useConfigField<string>('tracing.otel_service_name', 'ragweld-api');
+  const [langfuseEnabled, setLangfuseEnabled] = useConfigField<number>('tracing.langfuse_enabled', 0);
+  const [langfuseBaseUrl, setLangfuseBaseUrl] = useConfigField<string>('tracing.langfuse_base_url', '');
+  const [langfuseProject, setLangfuseProject] = useConfigField<string>('tracing.langfuse_project', 'ragweld');
+  const [tempoBaseUrl, setTempoBaseUrl] = useConfigField<string>('tracing.tempo_base_url', '');
+  const [alloyBaseUrl, setAlloyBaseUrl] = useConfigField<string>('tracing.alloy_base_url', '');
+  const [costTrackingEnabled, setCostTrackingEnabled] = useConfigField<number>('tracing.cost_tracking_enabled', 1);
 
   // --- Hydration ----------------------------------------------------------
   const [hydrationMode, setHydrationMode] = useConfigField<string>('hydration.hydration_mode', 'lazy');
@@ -427,6 +431,7 @@ export function RetrievalSubtab() {
 
       <EmbeddingMismatchWarning variant="inline" showActions />
       <SyntheticCallout context="retrieval" />
+      <RetrievalPilotPanel corpusId={String(activeRepo || '').trim()} repoPath={activeRepoPath.trim()} />
 
       {configError && (
         <div style={{ ...PANEL_STYLE, borderColor: 'var(--err)', marginBottom: 18 }}>
@@ -2133,7 +2138,7 @@ export function RetrievalSubtab() {
                 <div style={{ ...SECTION_STYLE, marginBottom: 14 }} data-testid="retrieval-section-ops-tracing-core">
                   <div style={SECTION_TITLE_STYLE}>2) Tracing Core</div>
                   <div style={SECTION_DESC_STYLE}>
-                    Configure trace mode, enablement, retention, and sampling before downstream metrics/alerts.
+                    Configure local buffering, canonical OTel mode, and request-level retention before downstream export and cost attribution.
                   </div>
 
                   <div className="input-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 16 }}>
@@ -2144,7 +2149,8 @@ export function RetrievalSubtab() {
                       <select value={tracingMode} onChange={(e) => setTracingMode(e.target.value)}>
                         <option value="off">off</option>
                         <option value="local">local</option>
-                        <option value="langsmith">langsmith</option>
+                        <option value="otel">otel</option>
+                        <option value="otel_langfuse">otel_langfuse</option>
                       </select>
                     </div>
                     <div className="input-group">
@@ -2186,9 +2192,9 @@ export function RetrievalSubtab() {
                   <div className="input-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 16 }}>
                     <div className="input-group">
                       <label>
-                        Auto-open LangSmith <TooltipIcon name="TRACE_AUTO_LS" />
+                        OTel Export
                       </label>
-                      <select value={traceAutoLs} onChange={(e) => setTraceAutoLs(parseInt(e.target.value, 10))}>
+                      <select value={otelExportEnabled} onChange={(e) => setOtelExportEnabled(parseInt(e.target.value, 10))}>
                         <option value={1}>Enabled</option>
                         <option value={0}>Disabled</option>
                       </select>
@@ -2231,7 +2237,7 @@ export function RetrievalSubtab() {
                 <div style={{ ...SECTION_STYLE, marginBottom: 14 }} data-testid="retrieval-section-ops-alerting">
                   <div style={SECTION_TITLE_STYLE}>3) Alerting & Export</div>
                   <div style={SECTION_DESC_STYLE}>
-                    Define alert notification semantics and local trace persistence path for audit/replay workflows.
+                    Define alert semantics plus OTLP export, service identity, and collector endpoints for the online request path.
                   </div>
 
                   <div className="input-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 16 }}>
@@ -2272,7 +2278,7 @@ export function RetrievalSubtab() {
                     </div>
                   </div>
 
-                  <div className="input-row" style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 16 }}>
+                  <div className="input-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 16 }}>
                     <div className="input-group">
                       <label>
                         Tribrid Log Path <TooltipIcon name="TRIBRID_LOG_PATH" />
@@ -2284,104 +2290,108 @@ export function RetrievalSubtab() {
                         placeholder="data/logs/queries.jsonl"
                       />
                     </div>
-                    <div className="input-group" />
+                    <div className="input-group">
+                      <label>OTLP Endpoint</label>
+                      <input
+                        type="text"
+                        value={otlpEndpoint}
+                        onChange={(e) => setOtlpEndpoint(e.target.value)}
+                        placeholder="http://127.0.0.1:4318/v1/traces"
+                      />
+                    </div>
+                    <div className="input-group">
+                      <label>OTel Service Name</label>
+                      <input
+                        type="text"
+                        value={otelServiceName}
+                        onChange={(e) => setOtelServiceName(e.target.value)}
+                        placeholder="ragweld-api"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="input-row" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                    <div className="input-group">
+                      <label>OTLP Headers</label>
+                      <input
+                        type="text"
+                        value={otlpHeaders}
+                        onChange={(e) => setOtlpHeaders(e.target.value)}
+                        placeholder="Authorization=Bearer ...,X-Scope-OrgID=1"
+                      />
+                    </div>
+                    <div className="input-group">
+                      <label>
+                        Cost Tracking
+                      </label>
+                      <select value={costTrackingEnabled} onChange={(e) => setCostTrackingEnabled(parseInt(e.target.value, 10))}>
+                        <option value={1}>Enabled</option>
+                        <option value={0}>Disabled</option>
+                      </select>
+                    </div>
                   </div>
                 </div>
 
                 <div style={SECTION_STYLE} data-testid="retrieval-section-ops-integrations">
                   <div style={SECTION_TITLE_STYLE}>4) Integrations</div>
                   <div style={SECTION_DESC_STYLE}>
-                    Configure LangSmith/LangTrace endpoints and credentials used for external trace ingestion and analysis.
+                    Configure Langfuse, Tempo, and Alloy endpoints used for live request tracing and operator drilldown.
                   </div>
 
-                  <div className="input-row" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                  <div className="input-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 16 }}>
                     <div className="input-group">
-                      <label>
-                        LangSmith Endpoint <TooltipIcon name="LANGCHAIN_ENDPOINT" />
-                      </label>
-                      <input
-                        type="text"
-                        value={langchainEndpoint}
-                        onChange={(e) => setLangchainEndpoint(e.target.value)}
-                        placeholder="https://api.smith.langchain.com"
-                      />
-                    </div>
-                    <div className="input-group">
-                      <label>
-                        LangSmith Project <TooltipIcon name="LANGCHAIN_PROJECT" />
-                      </label>
-                      <input
-                        type="text"
-                        value={langchainProject}
-                        onChange={(e) => setLangchainProject(e.target.value)}
-                        placeholder="tribrid"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="input-row" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-                    <div className="input-group">
-                      <label>
-                        LangChain Tracing V2 <TooltipIcon name="LANGCHAIN_TRACING_V2" />
-                      </label>
-                      <select
-                        value={langchainTracingV2}
-                        onChange={(e) => setLangchainTracingV2(parseInt(e.target.value, 10))}
-                      >
+                      <label>Langfuse Enabled</label>
+                      <select value={langfuseEnabled} onChange={(e) => setLangfuseEnabled(parseInt(e.target.value, 10))}>
                         <option value={1}>Enabled</option>
                         <option value={0}>Disabled</option>
                       </select>
                     </div>
                     <div className="input-group">
-                      <label>
-                        LangChain API Key <TooltipIcon name="LANGCHAIN_API_KEY" />
-                      </label>
-                      <ApiKeyStatus keyName="LANGCHAIN_API_KEY" label="LangChain API Key" />
-                    </div>
-                  </div>
-
-                  <div className="input-row" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-                    <div className="input-group">
-                      <label>
-                        LangSmith User Key <TooltipIcon name="LANGSMITH_API_KEY" />
-                      </label>
-                      <ApiKeyStatus keyName="LANGSMITH_API_KEY" label="LangSmith API Key" />
-                    </div>
-                    <div className="input-group" />
-                  </div>
-
-                  <div className="input-row" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-                    <div className="input-group">
-                      <label>
-                        LangTrace API Host <TooltipIcon name="LANGTRACE_API_HOST" />
-                      </label>
+                      <label>Langfuse Base URL</label>
                       <input
                         type="text"
-                        value={langtraceApiHost}
-                        onChange={(e) => setLangtraceApiHost(e.target.value)}
-                        placeholder="https://api.langtrace.dev"
+                        value={langfuseBaseUrl}
+                        onChange={(e) => setLangfuseBaseUrl(e.target.value)}
+                        placeholder="https://cloud.langfuse.com"
                       />
                     </div>
                     <div className="input-group">
-                      <label>
-                        LangTrace Project ID <TooltipIcon name="LANGTRACE_PROJECT_ID" />
-                      </label>
+                      <label>Langfuse Project</label>
                       <input
                         type="text"
-                        value={langtraceProjectId}
-                        onChange={(e) => setLangtraceProjectId(e.target.value)}
+                        value={langfuseProject}
+                        onChange={(e) => setLangfuseProject(e.target.value)}
+                        placeholder="ragweld"
                       />
                     </div>
                   </div>
 
-                  <div className="input-row" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                  <div className="input-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 16 }}>
                     <div className="input-group">
-                      <label>
-                        LangTrace API Key <TooltipIcon name="LANGTRACE_API_KEY" />
-                      </label>
-                      <ApiKeyStatus keyName="LANGTRACE_API_KEY" label="LangTrace API Key" />
+                      <label>Tempo Base URL</label>
+                      <input
+                        type="text"
+                        value={tempoBaseUrl}
+                        onChange={(e) => setTempoBaseUrl(e.target.value)}
+                        placeholder="http://127.0.0.1:3200"
+                      />
                     </div>
-                    <div className="input-group" />
+                    <div className="input-group">
+                      <label>Alloy Base URL</label>
+                      <input
+                        type="text"
+                        value={alloyBaseUrl}
+                        onChange={(e) => setAlloyBaseUrl(e.target.value)}
+                        placeholder="http://127.0.0.1:12345"
+                      />
+                    </div>
+                    <div className="input-group">
+                      <label>Langfuse Keys</label>
+                      <div style={{ display: 'grid', gap: 8 }}>
+                        <ApiKeyStatus keyName="LANGFUSE_PUBLIC_KEY" label="Langfuse Public Key" />
+                        <ApiKeyStatus keyName="LANGFUSE_SECRET_KEY" label="Langfuse Secret Key" />
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -2401,7 +2411,7 @@ function snapNumber(value: string, fallback: number) {
 
 function formatTracePayload(payload: TracesLatestResponse, vectorBackend: string): string {
   if (!payload?.trace) {
-    return 'No traces yet. Set Tracing Mode to Local/LangSmith (not Off) and run a query.';
+    return 'No traces yet. Set tracing mode to local, OTel, or OTel + Langfuse and run a query.';
   }
   const events = Array.isArray(payload.trace.events) ? payload.trace.events : [];
   const parts: string[] = [];

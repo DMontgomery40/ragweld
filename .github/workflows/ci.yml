@@ -63,6 +63,9 @@ jobs:
       - name: Config Reality Check
         run: uv run scripts/check_config_reality.py
 
+      - name: Contract Bundle Check
+        run: uv run scripts/validate_contract_bundle.py
+
       - name: Run tests
         env:
           POSTGRES_HOST: localhost

@@ -16,7 +16,7 @@ Beyond fused tri-brid retrieval (vector + sparse + graph), ragweld includes broa
 - **Training studios**: Learning Reranker Studio (LoRA fine-tuning) and Learning Agent Studio (generative model LoRA). Run management, metrics, NeuralVisualizer, telemetry.
 - **Eval**: Eval datasets, runs, drilldown, AI analysis, trace viewer, feedback. MRR/NDCG/MAP metrics; canary comparisons.
 - **Grafana**: Embedded dashboards, config, kiosk mode. Provisioned via Docker.
-- **Tracing modes**: local in-memory traces plus external tracing mode compatibility (for example LangSmith routing mode).
+- **Tracing modes**: local trace buffering plus canonical OTel/Langfuse observability modes when configured.
 - **Webhooks**: Alert notifications (MRR drop, canary regression, etc.). Configure severity, timeout, resolved alerts.
 - **Docker UI**: Mini-Portainer — list/start/stop containers, status. Infrastructure tab.
 - **Admin**: Secrets, integrations, model catalog, webhook config.

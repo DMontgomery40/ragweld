@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChatSubtabs } from '@/components/Chat/ChatSubtabs';
 import { ChatInterface } from '@/components/Chat/ChatInterface';
-import { ChatSettings2 } from '@/components/Chat/ChatSettings2';
+import { ChatSettings } from '@/components/Chat/ChatSettings';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { useAPI, useConfig, useSubtab } from '@/hooks';
 import { LiveTerminal, type LiveTerminalHandle } from '@/components/LiveTerminal/LiveTerminal';
@@ -215,6 +215,59 @@ export default function ChatTab() {
             <summary style={{ cursor: 'pointer', fontWeight: 600, color: 'var(--accent)', fontSize: '13px' }}>
               Routing Trace {trace?.events?.length ? `(${trace.events.length} events)` : ''}
             </summary>
+            {trace && (
+              <div
+                style={{
+                  marginTop: '10px',
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+                  gap: '10px',
+                }}
+              >
+                <div style={{ border: '1px solid var(--line)', borderRadius: '4px', padding: '10px', background: 'var(--bg)' }}>
+                  <div style={{ fontSize: '11px', color: 'var(--fg-muted)', marginBottom: '4px' }}>Canonical Trace</div>
+                  <div style={{ fontFamily: 'monospace', fontSize: '11px', color: 'var(--fg)' }}>{trace.trace_id || 'n/a'}</div>
+                  <div style={{ fontSize: '11px', color: 'var(--fg-muted)', marginTop: '6px' }}>
+                    Correlation: {trace.correlation_id || 'n/a'}
+                  </div>
+                </div>
+                <div style={{ border: '1px solid var(--line)', borderRadius: '4px', padding: '10px', background: 'var(--bg)' }}>
+                  <div style={{ fontSize: '11px', color: 'var(--fg-muted)', marginBottom: '4px' }}>Cost</div>
+                  <div style={{ fontSize: '12px', color: 'var(--fg)' }}>
+                    {trace.cost_summary?.estimated_cost_usd != null
+                      ? `$${Number(trace.cost_summary.estimated_cost_usd).toFixed(6)}`
+                      : 'Unavailable'}
+                  </div>
+                  <div style={{ fontSize: '11px', color: 'var(--fg-muted)', marginTop: '6px' }}>
+                    {trace.cost_summary?.cost_source || 'unavailable'}
+                    {trace.cost_summary?.total_tokens != null ? ` · ${trace.cost_summary.total_tokens} tokens` : ''}
+                  </div>
+                </div>
+              </div>
+            )}
+            {trace?.external_links?.length ? (
+              <div style={{ marginTop: '10px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                {trace.external_links.map((link, index) => (
+                  <a
+                    key={`${link.url}-${index}`}
+                    href={link.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{
+                      fontSize: '11px',
+                      color: 'var(--accent)',
+                      textDecoration: 'none',
+                      border: '1px solid var(--line)',
+                      borderRadius: '999px',
+                      padding: '4px 8px',
+                      background: 'var(--bg)',
+                    }}
+                  >
+                    {link.label}
+                  </a>
+                ))}
+              </div>
+            ) : null}
             <div
               id="chat-trace-output"
               aria-live="polite"
@@ -309,7 +362,7 @@ export default function ChatTab() {
         >
           <div className="settings-section" style={{ borderLeft: '3px solid var(--warn)', marginTop: '16px' }}>
             <ErrorBoundary>
-              <ChatSettings2 />
+              <ChatSettings />
             </ErrorBoundary>
           </div>
         </div>

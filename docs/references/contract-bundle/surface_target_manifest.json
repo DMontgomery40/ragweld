@@ -1,0 +1,124 @@
+{
+  "program": "oss-composition-fork",
+  "status": "kickoff",
+  "surfaces": {
+    "chat_surface": {
+      "current": [
+        "hand-rolled chat feature tree"
+      ],
+      "target": [
+        "assistant-ui"
+      ]
+    },
+    "eval_drilldown": {
+      "current": [
+        "ragweld-owned drilldown ui and diff logic"
+      ],
+      "retain_custom": true,
+      "target": [
+        "langfuse",
+        "mlflow",
+        "ragas",
+        "promptfoo"
+      ]
+    },
+    "frontend_shell": {
+      "current": [
+        "custom dock shell",
+        "custom app orchestration"
+      ],
+      "target": [
+        "dockview",
+        "react-resizable-panels",
+        "tanstack-query"
+      ]
+    },
+    "gateway_routing": {
+      "current": [
+        "openrouter",
+        "provider_router"
+      ],
+      "target": [
+        "litellm"
+      ]
+    },
+    "graph_parity": {
+      "current": [
+        "custom neo4j graph builder and traversal"
+      ],
+      "target": [
+        "neo4j"
+      ]
+    },
+    "inference": {
+      "current": [
+        "openrouter",
+        "provider_router",
+        "ragweld_mlx",
+        "mlx_qwen3"
+      ],
+      "target": [
+        "vllm"
+      ]
+    },
+    "observability": {
+      "current": [
+        "prometheus",
+        "custom traces",
+        "custom logs"
+      ],
+      "target": [
+        "opentelemetry",
+        "grafana-alloy",
+        "prometheus",
+        "mimir",
+        "tempo",
+        "loki",
+        "pyroscope",
+        "faro",
+        "opencost",
+        "langfuse"
+      ]
+    },
+    "orchestration": {
+      "current": [
+        "router-owned tasks",
+        "jsonl streams",
+        "filesystem run state"
+      ],
+      "target": [
+        "flyte"
+      ]
+    },
+    "retrieval_indexing": {
+      "current": [
+        "custom indexing",
+        "custom fusion",
+        "custom postgres retrieval"
+      ],
+      "target": [
+        "haystack",
+        "docling",
+        "qdrant"
+      ]
+    },
+    "runs_evals_regressions": {
+      "current": [
+        "file-backed eval and training runs"
+      ],
+      "target": [
+        "mlflow",
+        "ragas",
+        "promptfoo"
+      ]
+    },
+    "training_execution": {
+      "current": [
+        "mlx qwen3 trainers"
+      ],
+      "target": [
+        "unsloth"
+      ]
+    }
+  }
+}
