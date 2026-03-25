@@ -9,6 +9,8 @@ const API_KEYS = [
   { keyName: 'COHERE_API_KEY', label: 'Cohere API Key' },
   { keyName: 'VOYAGE_API_KEY', label: 'Voyage API Key' },
   { keyName: 'JINA_API_KEY', label: 'Jina API Key' },
+  { keyName: 'LANGFUSE_PUBLIC_KEY', label: 'Langfuse Public Key' },
+  { keyName: 'LANGFUSE_SECRET_KEY', label: 'Langfuse Secret Key' },
 ];
 
 export function SecretsSubtab() {
@@ -42,7 +44,7 @@ export function SecretsSubtab() {
         </div>
 
         <div className="input-row">
-          {API_KEYS.slice(2, 4).map(({ keyName, label }) => (
+          {API_KEYS.slice(2, 5).map(({ keyName, label }) => (
             <div className="input-group" key={keyName}>
               <ApiKeyStatus keyName={keyName} label={label} />
             </div>
@@ -50,10 +52,11 @@ export function SecretsSubtab() {
         </div>
 
         <div className="input-row">
-          <div className="input-group">
-            <ApiKeyStatus keyName={API_KEYS[4].keyName} label={API_KEYS[4].label} />
-          </div>
-          <div className="input-group" />
+          {API_KEYS.slice(5).map(({ keyName, label }) => (
+            <div className="input-group" key={keyName}>
+              <ApiKeyStatus keyName={keyName} label={label} />
+            </div>
+          ))}
         </div>
       </div>
     </div>

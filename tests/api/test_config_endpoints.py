@@ -69,6 +69,41 @@ async def test_update_nested_config_section_preserves_siblings(client: AsyncClie
 
 
 @pytest.mark.asyncio
+async def test_put_config_persists_hard_cut_observability_fields(client: AsyncClient) -> None:
+    baseline = await client.get("/api/config")
+    assert baseline.status_code == 200
+    cfg = baseline.json()
+
+    cfg["tracing"]["tracing_mode"] = "otel_langfuse"
+    cfg["tracing"]["otel_export_enabled"] = 1
+    cfg["tracing"]["otlp_endpoint"] = "http://localhost:4318/v1/traces"
+    cfg["tracing"]["otlp_headers"] = "Authorization=Bearer test"
+    cfg["tracing"]["otel_service_name"] = "ragweld-api-test"
+    cfg["tracing"]["langfuse_enabled"] = 1
+    cfg["tracing"]["langfuse_base_url"] = "http://localhost:3005"
+    cfg["tracing"]["langfuse_project"] = "ragweld-test"
+    cfg["tracing"]["tempo_base_url"] = "http://localhost:3200"
+    cfg["tracing"]["alloy_base_url"] = "http://localhost:12345"
+    cfg["tracing"]["cost_tracking_enabled"] = 1
+
+    response = await client.put("/api/config", json=cfg)
+    assert response.status_code == 200
+
+    tracing = response.json()["tracing"]
+    assert tracing["tracing_mode"] == "otel_langfuse"
+    assert tracing["otel_export_enabled"] == 1
+    assert tracing["otlp_endpoint"] == "http://localhost:4318/v1/traces"
+    assert tracing["otlp_headers"] == "Authorization=Bearer test"
+    assert tracing["otel_service_name"] == "ragweld-api-test"
+    assert tracing["langfuse_enabled"] == 1
+    assert tracing["langfuse_base_url"] == "http://localhost:3005"
+    assert tracing["langfuse_project"] == "ragweld-test"
+    assert tracing["tempo_base_url"] == "http://localhost:3200"
+    assert tracing["alloy_base_url"] == "http://localhost:12345"
+    assert tracing["cost_tracking_enabled"] == 1
+
+
+@pytest.mark.asyncio
 async def test_reset_config(client: AsyncClient) -> None:
     """Test POST /api/config/reset endpoint."""
     response = await client.post("/api/config/reset")
@@ -159,6 +194,22 @@ async def test_put_config_rejects_reranker_model_for_generation_override(client:
     cfg = baseline.json()
 
     cfg["generation"]["gen_model_mcp"] = "cohere/rerank-3.5"
+    response = await client.put("/api/config", json=cfg)
+    assert response.status_code == 422
+
+    detail = str(response.json().get("detail") or "")
+    assert "generation.gen_model_mcp" in detail
+    assert "requires [GEN]" in detail
+
+
+@pytest.mark.asyncio
+async def test_put_config_rejects_reranker_model_for_litellm_generation_override(client: AsyncClient) -> None:
+    """Known non-GEN models must still fail when wrapped in a litellm route override."""
+    baseline = await client.get("/api/config")
+    assert baseline.status_code == 200
+    cfg = baseline.json()
+
+    cfg["generation"]["gen_model_mcp"] = "litellm:cohere/rerank-3.5"
     response = await client.put("/api/config", json=cfg)
     assert response.status_code == 422
 

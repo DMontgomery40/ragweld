@@ -9,12 +9,13 @@ type ModelPickerProps = {
 const SOURCE_LABELS = {
   cloud_direct: 'Cloud Direct',
   openrouter: 'OpenRouter',
+  litellm: 'LiteLLM',
   local: 'Local',
   ragweld: 'Ragweld',
 } as const;
 
 // Put Local first so it's easy to find even when OpenRouter lists hundreds of models.
-const SOURCE_ORDER = ['local', 'ragweld', 'openrouter', 'cloud_direct'] as const;
+const SOURCE_ORDER = ['local', 'litellm', 'ragweld', 'openrouter', 'cloud_direct'] as const;
 
 function toOptionValue(model: ChatModelInfo): string {
   return String(model.override || model.id || '');

@@ -10,6 +10,29 @@ async def test_runtime_capabilities_endpoint_exposes_current_runtime_surface(cli
     assert response.status_code == 200
     body = response.json()
 
+    generation_routing = {str(item.get("id") or "") for item in body["generation"]["routing_backends"]}
+    assert generation_routing == {
+        "litellm",
+        "openrouter",
+        "local_openai_compatible",
+        "openai_cloud_direct",
+        "ragweld_mlx",
+    }
+
+    generation_serving = {str(item.get("id") or "") for item in body["generation"]["serving_backends"]}
+    assert generation_serving == {
+        "vllm",
+        "ollama",
+        "llamacpp",
+        "mlx_ragweld",
+        "openai_cloud",
+    }
+
+    default_route = body["generation"]["default_route"]
+    assert default_route is not None
+    assert default_route["kind"] == "local"
+    assert default_route["provider_name"] == "Ollama"
+
     embedding_providers = {str(item.get("provider") or "") for item in body["embedding"]["providers"]}
     assert embedding_providers == {"openai", "mlx", "local", "huggingface"}
 
@@ -32,3 +55,20 @@ async def test_runtime_capabilities_endpoint_exposes_current_runtime_surface(cli
         "sentence",
         "qa_blocks",
     }.issubset(chunking_ids)
+
+    indexing_storage = {str(item.get("id") or "") for item in body["indexing"]["storage_backends"]}
+    assert {
+        "haystack_qdrant_local",
+        "postgres_pgvector",
+        "postgres_fts",
+        "neo4j_lexical_graph",
+        "neo4j_chunk_vector",
+        "neo4j_semantic_kg",
+    } == indexing_storage
+
+    search_vector = {str(item.get("id") or "") for item in body["search"]["vector_backends"]}
+    assert search_vector == {
+        "haystack_qdrant_local",
+        "postgres_pgvector",
+        "neo4j_chunk_vector",
+    }

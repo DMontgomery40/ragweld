@@ -27,6 +27,7 @@ from server.observability.metrics import (
     SPARSE_LEG_LATENCY_SECONDS,
     VECTOR_LEG_LATENCY_SECONDS,
 )
+from server.observability.runtime import stage_span
 from server.retrieval.cache import CacheEndpoint, CacheMode, SemanticCacheService
 from server.retrieval.errors import EmbeddingContractMismatchError, SparseContractMismatchError
 from server.retrieval.rerank import Reranker
@@ -514,7 +515,7 @@ class TriBridFusion:
 
             # Run legs (request toggles + config.*.enabled)
             if include_vector and cfg.vector_search.enabled and not vector_contract_mismatch:
-                with VECTOR_LEG_LATENCY_SECONDS.time():
+                with stage_span("retrieval.vector", ragweld_corpus_id=cid), VECTOR_LEG_LATENCY_SECONDS.time():
                     try:
                         if q_emb is None:
                             with SEARCH_STAGE_LATENCY_SECONDS.labels(stage="embed_query").time():
@@ -575,7 +576,7 @@ class TriBridFusion:
                     debug["fusion_degraded_reasons"] = reasons
 
             if include_sparse and cfg.sparse_search.enabled and not skip_sparse_due_contract_mismatch:
-                with SPARSE_LEG_LATENCY_SECONDS.time():
+                with stage_span("retrieval.sparse", ragweld_corpus_id=cid), SPARSE_LEG_LATENCY_SECONDS.time():
                     try:
                         with SEARCH_STAGE_LATENCY_SECONDS.labels(stage="postgres_sparse_search").time():
                             sparse_results = await postgres.sparse_search_engine(
@@ -631,7 +632,7 @@ class TriBridFusion:
                 db_name = cfg.graph_storage.resolve_database(cid)
                 neo4j: Neo4jClient | None = None
                 try:
-                    with GRAPH_LEG_LATENCY_SECONDS.time():
+                    with stage_span("retrieval.graph", ragweld_corpus_id=cid), GRAPH_LEG_LATENCY_SECONDS.time():
                         neo4j = Neo4jClient(
                             cfg.graph_storage.neo4j_uri,
                             cfg.graph_storage.neo4j_user,

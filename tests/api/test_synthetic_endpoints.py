@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import shutil
 import uuid
 from datetime import UTC, datetime
@@ -16,7 +17,7 @@ from server.models.tribrid_config_model import (
     SyntheticRunSummary,
     TriBridConfig,
 )
-from server.synthetic.recipes import resolve_available_synthetic_model
+from server.synthetic.recipes import resolve_available_synthetic_generation_model
 
 
 async def _wait_terminal(client, run_id: str, timeout_s: float = 20.0) -> dict:
@@ -33,7 +34,28 @@ async def _wait_terminal(client, run_id: str, timeout_s: float = 20.0) -> dict:
 
 def _provider_model_for_env() -> str | None:
     cfg = TriBridConfig()
-    return resolve_available_synthetic_model(cfg)
+    return resolve_available_synthetic_generation_model(cfg)
+
+
+def test_resolve_available_synthetic_generation_model_prefers_litellm_gateway_when_configured() -> None:
+    old_openai = os.environ.pop("OPENAI_API_KEY", None)
+    old_openrouter = os.environ.pop("OPENROUTER_API_KEY", None)
+    try:
+        cfg = TriBridConfig()
+        cfg.chat.litellm.enabled = True
+        cfg.chat.litellm.base_url = "http://127.0.0.1:4000/v1"
+        cfg.chat.litellm.default_model = "openai/gpt-4o-mini"
+        cfg.chat.local_models.default_chat_model = "qwen3:8b"
+        assert resolve_available_synthetic_generation_model(cfg) == "litellm:openai/gpt-4o-mini"
+    finally:
+        if old_openai is None:
+            os.environ.pop("OPENAI_API_KEY", None)
+        else:
+            os.environ["OPENAI_API_KEY"] = old_openai
+        if old_openrouter is None:
+            os.environ.pop("OPENROUTER_API_KEY", None)
+        else:
+            os.environ["OPENROUTER_API_KEY"] = old_openrouter
 
 
 def _write_gate_failed_run(*, root: Path, corpus_id: str, run_id: str) -> Path:

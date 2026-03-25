@@ -234,6 +234,11 @@ _train_start_guard: dict[str, tuple[str, datetime]] = {}
 _TRAIN_START_GRACE = timedelta(seconds=2)
 
 
+def _mark_train_start_guard(corpus_id: str, run_id: str, *, at: datetime | None = None) -> None:
+    """Remember a just-started run long enough to block rapid duplicate starts."""
+    _train_start_guard[str(corpus_id or "").strip()] = (run_id, at or datetime.now(UTC))
+
+
 def _allocate_run_id(repo_id: str, started_at: datetime) -> str:
     base = f"{repo_id}__{started_at.strftime('%Y%m%d_%H%M%S')}"
     run_id = base
@@ -977,7 +982,7 @@ async def start_train_run(request: AgentTrainStartRequest) -> AgentTrainStartRes
 
     started_at = datetime.now(UTC)
     run_id = _allocate_run_id(corpus_id, started_at)
-    _train_start_guard[str(corpus_id or "").strip()] = (run_id, started_at)
+    _mark_train_start_guard(corpus_id, run_id, at=started_at)
 
     # Resolved defaults mirror the reranker Studio knobs (epochs/batch/lr/warmup/max_length).
     run = AgentTrainRun(
@@ -1039,6 +1044,10 @@ async def start_train_run(request: AgentTrainStartRequest) -> AgentTrainStartRes
         cancel_event = asyncio.Event()
         _train_cancel_events[run_id] = cancel_event
         _train_tasks[run_id] = asyncio.create_task(_run_train_job(run_id=run_id, corpus_id=corpus_id, cancel_event=cancel_event))
+
+    # Refresh the guard at queue time so rapid follow-up requests still see an
+    # active run even when the background task fails immediately after start.
+    _mark_train_start_guard(corpus_id, run_id)
 
     return AgentTrainStartResponse(ok=True, run_id=run_id)
 

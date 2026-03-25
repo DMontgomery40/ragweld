@@ -5,6 +5,8 @@ paths:
 
 # TypeScript Type Rules (Frontend)
 
+> Branch canon for `feat/oss-composition-kickoff`: no frontend adapters, fallback rendering for removed contracts, or dual old/new payload support.
+
 ## Rule 2: No Hand-Written API Types
 All TypeScript interfaces for API data MUST come from `generated.ts`.
 

@@ -25,6 +25,7 @@ from server.api.index import router as index_router
 from server.api.keywords import router as keywords_router
 from server.api.lineage import router as lineage_router
 from server.api.models import router as models_router
+from server.api.observability import router as observability_router
 from server.api.prompts import router as prompts_router
 from server.api.repos import router as repos_router
 from server.api.reranker import router as reranker_router
@@ -158,6 +159,7 @@ app.include_router(cost_router, prefix="/api")
 app.include_router(docker_router, prefix="/api")
 app.include_router(models_router)  # Already has /api/models prefix
 app.include_router(runtime_capabilities_router)
+app.include_router(observability_router)
 app.include_router(lineage_router)
 app.include_router(reranker_router, prefix="/api")
 app.include_router(agent_router, prefix="/api")

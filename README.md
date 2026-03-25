@@ -21,6 +21,54 @@
 
 ---
 
+## Branch Status: OSS-Composition Fork v3
+
+This branch, `feat/oss-composition-kickoff`, is the active fork branch. It is not "main with a few experiments." It is the formal replacement program for the broken bespoke platform layers.
+
+### Replacement-Only Rule
+
+- No fallbacks
+- No legacy compatibility shims
+- No transition-period dual paths
+- No backend-only swaps that leave operator UI stale
+- If a subsystem is replaced in this branch, the touched backend/UI/docs/tests/instructions must move to the new path together
+
+### Locked Target Stack For This Branch
+
+- Inference: `vLLM`
+- Gateway/routing: `LiteLLM`
+- Orchestration: `Flyte`
+- Retrieval/indexing: `Haystack + Docling + Qdrant`
+- Graph parity: `Neo4j`
+- Training execution: `Unsloth`
+- Runs/evals/regressions: `MLflow + Ragas + Promptfoo`
+- Eval drilldown substrate: `Langfuse`
+- Observability: `OpenTelemetry + Grafana Alloy + Tempo + Loki + Mimir + Pyroscope + Faro`
+- Frontend shell/workbench target: `Dockview + react-resizable-panels + TanStack Query + assistant-ui + shadcn/ui + Radix + xterm + Monaco`
+
+### Protected Product Surfaces
+
+- Workspace shell and dock/splits experience
+- Embedded Grafana and operator-console feel
+- Training Center as a first-class in-product surface
+- Eval analysis and drilldown as a first-class in-product surface
+- Graph parity surfaces during the migration
+
+Chat is explicitly **not** protected as an implementation. It should be rebuilt inside the ragweld shell on stronger OSS foundations.
+
+### What This Branch Already Replaced
+
+- Runtime/gateway truth is formalized around `LiteLLM` / `vLLM`-aware capability and provider routing surfaces.
+- Retrieval/indexing has a real OSS pilot seam for `Docling + Haystack + Qdrant`, with in-product UI parity.
+- Online observability now has a hard-cut `OTel + Langfuse + Tempo + Alloy` control surface, canonical trace metadata, cost attribution, and workbench visibility.
+
+### What Is Still Legacy And Still Needs Replacement
+
+- Training execution and operator flows are still dominated by the old custom / MLX-native stack instead of `Flyte + Unsloth + MLflow`.
+- Eval analysis/drilldown still needs its full `Langfuse + MLflow + Ragas/Promptfoo` substrate.
+- Chat is still hand-rolled and has not yet been rebuilt on `assistant-ui`.
+- Large parts of the repo still describe the mainline implementation below; treat the sections in this README as current-state context unless the fork status above says otherwise.
+
 ## Screenshots
 
 ### 1) API routing + MCP channel overrides
@@ -106,9 +154,9 @@ Each search method compensates for the others' weaknesses. The result: **dramati
 - **Synthetic Data Lab**: recipe-based generation for eval datasets, semantic cards, keywords, triplets, and autotune patches
 - **Dual Training Studios**: trainable learning reranker and trainable in-product agent model, with checkpoints, promote/rollback, and run telemetry
 - **Evaluation Workbench**: run management, drilldowns, and diffs across retrieval, indexing, model, and routing changes
-- **Tracing + Observability**: local traces out of the box, optional external tracing mode, plus embedded Grafana/Loki workflows
+- **Tracing + Observability**: branch target is `OTel + Langfuse + Tempo + Alloy + Grafana`; the online request slice is already wired end-to-end with in-product status, trace deep links, and cost attribution
 - **Semantic Cache + Recall Gates**: token-cost control and smart memory retrieval policy in the chat path
-- **Routing + Model Catalog**: provider/model routing controls, daily catalog refreshes, and custom model registration
+- **Routing + Model Catalog**: `LiteLLM` / `vLLM` aware provider-model routing controls, daily catalog refreshes, and custom model registration
 
 ### Tri-Brid Retrieval
 - **Vector Search**: pgvector in PostgreSQL with HNSW indexing
@@ -121,7 +169,7 @@ Each search method compensates for the others' weaknesses. The result: **dramati
 - **Backend**: FastAPI with async support, comprehensive API
 - **Frontend**: React + TypeScript + Zustand, fully typed from Pydantic
 - **Configuration**: 500+ tunable parameters, all via UI or API
-- **Observability**: Prometheus metrics, Grafana dashboards, Loki log aggregation, structured logging
+- **Observability**: canonical request tracing now centers on OpenTelemetry, Langfuse, Tempo, Alloy, Grafana, and the workbench trace cache bridge
 
 ### API-first Integration
 - **Primary contract**: FastAPI endpoints under `/api/*` are the canonical production interface
@@ -141,10 +189,11 @@ Each search method compensates for the others' weaknesses. The result: **dramati
 - Graph inspection via **RAG → Graph** (UI), Neo4j Browser, and `/api/graph/*` endpoints
 
 ### Local Tracing & Debugging
-- **Per-Request Traces**: Full trace capture for every chat/search request
+- **Per-Request Traces**: Full request metadata for chat/search/answer, including canonical trace ids, correlation ids, route summaries, external links, and cost summaries
 - **Debug Footer**: Inline debug metadata showing confidence, fusion method, retrieval leg counts
+- **Langfuse + Tempo Deep Links**: Workbench traces can link directly into external drilldown tools when configured
 - **Loki Integration**: Stream logs directly in the Chat UI via Loki proxy endpoints
-- **Ring Buffer Storage**: Configurable retention, no external dependencies for dev tracing
+- **Trace Cache Bridge**: Configurable local retention while the workbench migrates toward fully canonical observability APIs
 
 ### Evaluation & Cost Tracking
 - Built-in evaluation framework with eval datasets
@@ -171,7 +220,7 @@ export NEO4J_PASSWORD=password
 Run:
 
 ```bash
-uv run scripts/benchmark_perf.py --corpus-id tribrid-rag --corpus-path . --force-reindex --iterations 5 --warmup 1
+uv run scripts/benchmark_perf.py --corpus-id ragweld --corpus-path . --force-reindex --iterations 5 --warmup 1
 ```
 
 This prints **Markdown + JSON** summary you can paste into docs/PRs.
@@ -199,6 +248,10 @@ Per-query (ms):
 
 ## Quick Start
 
+### Branch-Specific Note
+
+If you are working on `feat/oss-composition-kickoff`, treat the branch status section above as the architecture truth for fork decisions. Mainline implementation details below may still describe older subsystems that have not been fully replaced yet.
+
 ### Prerequisites
 
 - Docker & Docker Compose
@@ -209,8 +262,8 @@ Per-query (ms):
 ### 1. Clone and Configure
 
 ```bash
-git clone https://github.com/DMontgomery40/tribrid-rag.git
-cd tribrid-rag
+git clone https://github.com/DMontgomery40/ragweld.git
+cd ragweld
 cp .env.example .env
 ```
 
@@ -232,13 +285,35 @@ set `TRIBRID_DB_DIR` (wired in `docker-compose.yml`):
 
 ```bash
 # Example (macOS)
-export TRIBRID_DB_DIR="/Users/davidmontgomery/tribrid-rag-db"
+export TRIBRID_DB_DIR="/Users/davidmontgomery/ragweld-db"
 docker compose up -d postgres neo4j
 ```
 
 This starts:
 - **PostgreSQL** with pgvector extension (port 5432)
 - **Neo4j** graph database (ports 7474, 7687)
+
+### 2a. Start The Observability Overlay For This Branch
+
+```bash
+docker compose -f docker-compose.yml -f infra/docker-compose.observability.yml up -d grafana tempo alloy
+```
+
+Recommended matching config values on this branch:
+
+```text
+tracing.tracing_mode=otel or otel_langfuse
+tracing.otlp_endpoint=http://localhost:4320/v1/traces
+tracing.alloy_base_url=http://localhost:12345
+tracing.tempo_base_url=http://localhost:3200
+ui.grafana_base_url=http://localhost:3001
+```
+
+Reference:
+- `infra/docker-compose.observability.yml`
+- `infra/alloy/config.alloy`
+- `infra/tempo.yaml`
+- `docs/references/observability-online-slice.md`
 
 ### 3. Start Backend
 
@@ -407,7 +482,17 @@ ragweld captures detailed per-request traces for debugging and development. Trac
 | Setting | Default | Description |
 |---------|---------|-------------|
 | `tracing.tracing_enabled` | `1` | Enable trace capture |
-| `tracing.tracing_mode` | `local` | Trace mode (`local`, `langsmith`, `off`) |
+| `tracing.tracing_mode` | `local` | Trace mode (`local`, `otel`, `otel_langfuse`, `off`) |
+| `tracing.otel_export_enabled` | `1` | Enable canonical OTLP trace export |
+| `tracing.otlp_endpoint` | `""` | OTLP HTTP endpoint for OTel export |
+| `tracing.otlp_headers` | `""` | Comma-separated OTLP headers (`k=v`) |
+| `tracing.otel_service_name` | `ragweld-api` | Service identity attached to emitted spans |
+| `tracing.langfuse_enabled` | `0` | Enable Langfuse generation observations |
+| `tracing.langfuse_base_url` | `""` | Langfuse deployment base URL |
+| `tracing.langfuse_project` | `ragweld` | Langfuse project label |
+| `tracing.tempo_base_url` | `""` | Tempo or Grafana Explore base URL for trace deep links |
+| `tracing.alloy_base_url` | `""` | Grafana Alloy collector base URL for readiness/status checks |
+| `tracing.cost_tracking_enabled` | `1` | Enable online request cost attribution in traces |
 | `tracing.trace_retention` | `50` | Max traces per corpus (ring buffer) |
 | `tracing.trace_sampling_rate` | `1.0` | Sampling rate (1.0 = capture all) |
 | `ui.chat_show_debug_footer` | `1` | Show debug footer under chat answers |
@@ -443,7 +528,7 @@ This section is optimized for running a **real on-disk corpus** end-to-end (Post
 
 ```bash
 # (Optional) store DB volumes outside repo
-export TRIBRID_DB_DIR="/Users/davidmontgomery/tribrid-rag-db"
+export TRIBRID_DB_DIR="/Users/davidmontgomery/ragweld-db"
 
 # Neo4j memory tuning (recommended for large corpora on ~24GB VM)
 export NEO4J_HEAP_INIT=4G NEO4J_HEAP_MAX=12G NEO4J_PAGECACHE=8G
@@ -548,7 +633,7 @@ tribrid_config_model.py  ──►  generate_types.py  ──►  web/src/types/
 ### Directory Structure
 
 ```
-tribrid-rag/
+ragweld/
 ├── server/                     # Python FastAPI backend
 │   ├── api/                    # REST endpoints
 │   │   ├── search.py           # /api/search - tri-brid retrieval

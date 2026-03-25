@@ -7,7 +7,16 @@ This page defines the truth boundary between the broad model catalog and the run
 - `data/models.json` is the broad catalog for pricing, context windows, and known model candidates.
 - `server/runtime_capabilities.py` is the executable capability registry for what ragweld can actually run/select today.
 - `/api/models` exposes both truths together by attaching `selection_roles`, `selection_status`, and `selection_reason` to catalog rows.
-- `/api/runtime-capabilities` exposes the non-model runtime matrix: embedding providers/backends, reranker providers/backends, chunking strategies, and indexing/search backends.
+- `/api/runtime-capabilities` exposes the executable runtime matrix:
+  - generation routing backends
+  - generation serving backends
+  - the default provider route selected by the current config/env
+  - embedding providers/backends
+  - reranker providers/backends
+  - chunking strategies
+  - indexing/search backends
+  - including the current `haystack_qdrant_local` pilot lane alongside the
+    primary Postgres/Neo4j backends
 
 ## Selection metadata contract
 

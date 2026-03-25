@@ -7,6 +7,7 @@ import os
 from server.chat.provider_router import select_provider_route
 from server.models.chat_config import (
     ChatConfig,
+    LiteLLMConfig,
     LocalModelConfig,
     LocalProviderEntry,
     OpenRouterConfig,
@@ -46,6 +47,22 @@ def _restore_openai_api_key(old: str | None) -> None:
         os.environ.pop("OPENAI_API_KEY", None)
     else:
         os.environ["OPENAI_API_KEY"] = old
+
+
+def _set_litellm_api_key(value: str | None) -> str | None:
+    old = os.environ.get("LITELLM_API_KEY")
+    if value is None:
+        os.environ.pop("LITELLM_API_KEY", None)
+    else:
+        os.environ["LITELLM_API_KEY"] = value
+    return old
+
+
+def _restore_litellm_api_key(old: str | None) -> None:
+    if old is None:
+        os.environ.pop("LITELLM_API_KEY", None)
+    else:
+        os.environ["LITELLM_API_KEY"] = old
 
 
 def test_select_provider_route_prefers_openrouter_when_enabled_and_key_present() -> None:
@@ -205,6 +222,85 @@ def test_select_provider_route_uses_openrouter_for_default_openai_backend_withou
     finally:
         _restore_openai_api_key(old_openai)
         _restore_openrouter_api_key(old_openrouter)
+
+
+def test_select_provider_route_explicit_litellm_prefix_routes_gateway() -> None:
+    old_openai = _set_openai_api_key(None)
+    old_openrouter = _set_openrouter_api_key(None)
+    old_litellm = _set_litellm_api_key("test-litellm-key")
+    try:
+        cfg = TriBridConfig(
+            chat=ChatConfig(
+                litellm=LiteLLMConfig(
+                    enabled=True,
+                    base_url="http://127.0.0.1:4000/v1",
+                    default_model="openai/gpt-4o-mini",
+                ),
+                openrouter=OpenRouterConfig(enabled=False),
+            ),
+        )
+        route = select_provider_route(config=cfg, model_override="litellm:openai/gpt-4o-mini")
+        assert route.kind == "litellm"
+        assert route.provider_name == "LiteLLM"
+        assert route.base_url == "http://127.0.0.1:4000/v1"
+        assert route.model == "openai/gpt-4o-mini"
+        assert route.api_key == "test-litellm-key"
+    finally:
+        _restore_litellm_api_key(old_litellm)
+        _restore_openrouter_api_key(old_openrouter)
+        _restore_openai_api_key(old_openai)
+
+
+def test_select_provider_route_prefers_litellm_for_cloud_models_when_openai_missing() -> None:
+    old_openai = _set_openai_api_key(None)
+    old_openrouter = _set_openrouter_api_key(None)
+    old_litellm = _set_litellm_api_key(None)
+    try:
+        cfg = TriBridConfig(
+            chat=ChatConfig(
+                litellm=LiteLLMConfig(
+                    enabled=True,
+                    base_url="http://127.0.0.1:4000/v1",
+                    default_model="openai/gpt-4o-mini",
+                ),
+                openrouter=OpenRouterConfig(enabled=False),
+            ),
+        )
+        route = select_provider_route(config=cfg, model_override="openai/gpt-4o-mini")
+        assert route.kind == "litellm"
+        assert route.provider_name == "LiteLLM"
+        assert route.model == "openai/gpt-4o-mini"
+    finally:
+        _restore_litellm_api_key(old_litellm)
+        _restore_openrouter_api_key(old_openrouter)
+        _restore_openai_api_key(old_openai)
+
+
+def test_select_provider_route_honors_litellm_generation_backend() -> None:
+    old_openai = _set_openai_api_key(None)
+    old_openrouter = _set_openrouter_api_key(None)
+    old_litellm = _set_litellm_api_key(None)
+    try:
+        cfg = TriBridConfig(
+            chat=ChatConfig(
+                litellm=LiteLLMConfig(
+                    enabled=True,
+                    base_url="http://127.0.0.1:4000/v1",
+                    default_model="anthropic/claude-sonnet-4",
+                ),
+                openrouter=OpenRouterConfig(enabled=False),
+            ),
+        )
+        cfg.generation.gen_backend = "litellm"
+        cfg.generation.gen_model = "anthropic/claude-sonnet-4"
+        route = select_provider_route(config=cfg)
+        assert route.kind == "litellm"
+        assert route.provider_name == "LiteLLM"
+        assert route.model == "anthropic/claude-sonnet-4"
+    finally:
+        _restore_litellm_api_key(old_litellm)
+        _restore_openrouter_api_key(old_openrouter)
+        _restore_openai_api_key(old_openai)
 
 
 def test_select_provider_route_honors_non_default_openai_generation_model() -> None:

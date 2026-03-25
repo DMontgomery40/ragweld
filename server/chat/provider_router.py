@@ -61,7 +61,7 @@ class ProviderRoute:
     OpenAI-compatible client.
     """
 
-    kind: str  # one of: 'openrouter' | 'local' | 'cloud_direct' | 'ragweld'
+    kind: str  # one of: 'openrouter' | 'local' | 'cloud_direct' | 'ragweld' | 'litellm'
     provider_name: str
     base_url: str
     model: str
@@ -82,7 +82,7 @@ def select_provider_route(
     """Select the provider route for a chat request.
 
     Selection order (high-level):
-    1) Explicit prefixes: `local:<id>` or `openrouter:<id>` or `ragweld:<id>`
+    1) Explicit prefixes: `local:<id>` or `openrouter:<id>` or `ragweld:<id>` or `litellm:<id>`
     2) Provider/model ids (`openai/<model>`, `anthropic/<model>`, ...):
        - Prefer cloud-direct OpenAI when OPENAI_API_KEY is set
        - Otherwise, require OpenRouter for non-OpenAI providers (and for OpenAI if no OpenAI key)
@@ -116,6 +116,8 @@ def select_provider_route(
                 if "/" not in route_model and ":" not in route_model:
                     route_model = f"openai/{route_model}"
                 override = f"openrouter:{route_model}"
+            elif gen_backend == "litellm":
+                override = f"litellm:{gen_model}"
             elif gen_backend == "anthropic":
                 if "/" in gen_model or ":" in gen_model:
                     override = gen_model
@@ -124,6 +126,7 @@ def select_provider_route(
             else:
                 override = gen_model
     openrouter_api_key = os.getenv("OPENROUTER_API_KEY", "").strip()
+    litellm_api_key = (os.getenv("LITELLM_API_KEY", "").strip() or str(getattr(chat_config.litellm, "api_key", "") or "").strip())
     openai_api_key = os.getenv("OPENAI_API_KEY", "").strip()
     openai_base_url = (str(getattr(config.generation, "openai_base_url", "") or "").strip() or _OPENAI_DEFAULT_BASE_URL)
     openai_protocol_policy = str(getattr(config.chat, "openai_protocol", "auto") or "auto").strip().lower()
@@ -134,19 +137,20 @@ def select_provider_route(
     if ":" in override:
         prefix, rest = override.split(":", 1)
         p = prefix.strip().lower()
-        if p in {"local", "openrouter", "ragweld"}:
+        if p in {"local", "openrouter", "ragweld", "litellm"}:
             override_kind = p
             override_model = rest.strip()
 
     enabled_local = [p for p in chat_config.local_models.providers if p.enabled]
     openrouter_ready = bool(chat_config.openrouter.enabled and openrouter_api_key)
+    litellm_ready = bool(getattr(chat_config.litellm, "enabled", False) and str(getattr(chat_config.litellm, "base_url", "") or "").strip())
     openai_ready = bool(openai_api_key)
 
     # Force ragweld when requested (in-process MLX model).
     if override_kind == "ragweld":
         if not mlx_is_available():
             # Fall back to the normal provider selection order if possible.
-            if openrouter_ready or enabled_local or openai_ready:
+            if litellm_ready or openrouter_ready or enabled_local or openai_ready:
                 _LOG.warning("ragweld requested but MLX is unavailable; falling back to configured chat providers")
                 override_kind = ""
                 override_model = ""
@@ -170,6 +174,21 @@ def select_provider_route(
                 ragweld_reload_period_sec=int(getattr(config.training, "ragweld_agent_reload_period_sec", 60) or 60),
                 ragweld_unload_after_sec=int(getattr(config.training, "ragweld_agent_unload_after_sec", 0) or 0),
             )
+
+    # Force LiteLLM when requested.
+    if override_kind == "litellm":
+        if not litellm_ready:
+            raise RuntimeError("LiteLLM not ready (enable config.chat.litellm.enabled and set chat.litellm.base_url)")
+        model = override_model or str(getattr(chat_config.litellm, "default_model", "") or "").strip()
+        if not model:
+            raise RuntimeError("LiteLLM enabled but chat.litellm.default_model is empty")
+        return ProviderRoute(
+            kind="litellm",
+            provider_name="LiteLLM",
+            base_url=str(chat_config.litellm.base_url).rstrip("/"),
+            model=model,
+            api_key=litellm_api_key or None,
+        )
 
     # Force local when requested.
     if override_kind == "local":
@@ -221,6 +240,14 @@ def select_provider_route(
                     api_key=openai_api_key,
                     openai_protocol=_resolve_openai_protocol(openai_protocol_policy, model_name),
                 )
+            if litellm_ready:
+                return ProviderRoute(
+                    kind="litellm",
+                    provider_name="LiteLLM",
+                    base_url=str(chat_config.litellm.base_url).rstrip("/"),
+                    model=override_model,
+                    api_key=litellm_api_key or None,
+                )
             if openrouter_ready:
                 # OpenRouter can proxy OpenAI models using the openai/<model> id.
                 return ProviderRoute(
@@ -232,6 +259,15 @@ def select_provider_route(
                 )
             raise RuntimeError("OpenAI not configured (set OPENAI_API_KEY)")
 
+        if litellm_ready:
+            return ProviderRoute(
+                kind="litellm",
+                provider_name="LiteLLM",
+                base_url=str(chat_config.litellm.base_url).rstrip("/"),
+                model=override_model,
+                api_key=litellm_api_key or None,
+            )
+
         if openrouter_ready:
             return ProviderRoute(
                 kind="openrouter",
@@ -242,8 +278,9 @@ def select_provider_route(
             )
 
         raise RuntimeError(
-            f"Cloud model '{override_model}' requires OpenRouter. "
-            "Enable config.chat.openrouter.enabled and set OPENROUTER_API_KEY."
+            f"Cloud model '{override_model}' requires a configured gateway route. "
+            "Enable LiteLLM (config.chat.litellm.enabled + chat.litellm.base_url), "
+            "or enable OpenRouter (config.chat.openrouter.enabled + OPENROUTER_API_KEY)."
         )
 
     # Unqualified model ids:
@@ -258,13 +295,24 @@ def select_provider_route(
             api_key=openai_api_key,
             openai_protocol=_resolve_openai_protocol(openai_protocol_policy, override_model),
         )
-    if override_model and _looks_like_openai_model_name(override_model) and (not openai_ready) and (not openrouter_ready):
+    if override_model and _looks_like_openai_model_name(override_model) and (not openai_ready) and (not openrouter_ready) and (not litellm_ready):
         raise RuntimeError(
-            f"Selected model '{override_model}' looks like an OpenAI cloud model, but neither OpenAI nor OpenRouter is configured. "
-            "Set OPENAI_API_KEY, or enable config.chat.openrouter.enabled and set OPENROUTER_API_KEY."
+            f"Selected model '{override_model}' looks like an OpenAI cloud model, but neither OpenAI nor a gateway route is configured. "
+            "Set OPENAI_API_KEY, or enable LiteLLM (config.chat.litellm.enabled + chat.litellm.base_url), "
+            "or enable OpenRouter (config.chat.openrouter.enabled + OPENROUTER_API_KEY)."
         )
 
     # Default selection order.
+    if litellm_ready:
+        model = override_model or str(getattr(chat_config.litellm, "default_model", "") or "").strip()
+        return ProviderRoute(
+            kind="litellm",
+            provider_name="LiteLLM",
+            base_url=str(chat_config.litellm.base_url).rstrip("/"),
+            model=model,
+            api_key=litellm_api_key or None,
+        )
+
     if openrouter_ready:
         model = override_model or chat_config.openrouter.default_model
         return ProviderRoute(
@@ -300,7 +348,8 @@ def select_provider_route(
         )
 
     raise RuntimeError(
-        "No chat provider configured. Start a local provider (Ollama/llama.cpp), "
+        "No chat provider configured. Enable LiteLLM (config.chat.litellm.enabled + chat.litellm.base_url), "
+        "or start a local provider (Ollama/llama.cpp/vLLM), "
         "or enable OpenRouter (config.chat.openrouter.enabled + OPENROUTER_API_KEY), "
         "or set OPENAI_API_KEY."
     )

@@ -87,7 +87,7 @@ const TRIBRID_TIPS = [
   { tip: "Enable the Routing Trace to see exactly how Tri-Brid RAG found and ranked your results.", category: "debug" },
   { tip: "Trace steps show timing for each stage: retrieval, reranking, and generation.", category: "debug" },
   { tip: "The provider failover trace shows when Tri-Brid RAG switched between local and cloud models.", category: "debug" },
-  { tip: "Use LangSmith integration for detailed traces of the full RAG pipeline.", category: "debug" },
+  { tip: "Use OTel + Langfuse + Tempo integration for detailed traces of the live RAG pipeline.", category: "debug" },
   
   // Keyboard & UX
   { tip: "Press Ctrl+Enter to send messages without clicking the button.", category: "ux" },
@@ -773,12 +773,15 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
     }
     // Pick a sensible default model_override based on what's actually available.
     //
-    // Important: This should prefer OpenRouter only when it's enabled, and prefer local only
-    // when local models are actually discoverable. Otherwise, fall back to a configured
+    // Important: This should prefer LiteLLM/OpenRouter only when they are enabled, and
+    // prefer local only when local models are actually discoverable. Otherwise, fall back to a configured
     // cloud default (ui.chat_default_model) when present in the model list.
+    const litellmEnabled = Boolean(config.chat?.litellm?.enabled);
+    const litellmDefault = config.chat?.litellm?.default_model;
     const openrouterEnabled = Boolean(config.chat?.openrouter?.enabled);
     const openrouterDefault = config.chat?.openrouter?.default_model;
     const localDefault = config.chat?.local_models?.default_chat_model;
+    const litellmDefaultTrimmed = typeof litellmDefault === 'string' ? litellmDefault.trim() : '';
     const openrouterDefaultTrimmed = typeof openrouterDefault === 'string' ? openrouterDefault.trim() : '';
 
     const toOverrideValue = (m: ChatModelInfo): string => {
@@ -790,6 +793,16 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
     if (modelOverride && optionValues.includes(modelOverride)) {
       return;
     }
+
+    const litellmModels = chatModels.filter((m) => m.source === 'litellm');
+    const litellmDefaultOption =
+      litellmEnabled && litellmDefaultTrimmed
+        ? litellmModels.find(
+            (m) =>
+              String(m.id || '').trim() === litellmDefaultTrimmed ||
+              String(m.catalog_model || '').trim() === litellmDefaultTrimmed
+          )
+        : undefined;
 
     const localModels = chatModels.filter((m) => m.source === 'local');
     const localDefaultTrimmed = typeof localDefault === 'string' ? localDefault.trim() : '';
@@ -829,6 +842,8 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
       : undefined;
 
     const preferred =
+      (litellmDefaultOption ? toOverrideValue(litellmDefaultOption) : '') ||
+      (litellmEnabled && litellmModels.length ? toOverrideValue(litellmModels[0]) : '') ||
       (openrouterDefaultOption ? toOverrideValue(openrouterDefaultOption) : '') ||
       (localModels.length ? (localDefaultOption ? toOverrideValue(localDefaultOption) : toOverrideValue(localModels[0])) : '') ||
       (cloudDefaultOption ? toOverrideValue(cloudDefaultOption) : '');
@@ -1002,9 +1017,12 @@ export function ChatInterface({ traceOpen, onTraceUpdate }: ChatInterfaceProps) 
   }, [
     api,
     activeRepo,
+    Boolean(config?.chat?.litellm?.enabled),
+    String(config?.chat?.litellm?.base_url || '').trim(),
+    String(config?.chat?.litellm?.default_model || '').trim(),
     Boolean(config?.chat?.openrouter?.enabled),
     Array.isArray(config?.chat?.local_models?.providers)
-      ? config!.chat!.local_models!.providers!.map((p) => `${p.enabled !== false}:${p.base_url}`).join('|')
+      ? config!.chat!.local_models!.providers!.map((p) => `${p.enabled !== false}:${p.provider_type}:${p.base_url}`).join('|')
       : '',
   ]);
 

@@ -7,7 +7,7 @@ from collections.abc import AsyncIterator
 from typing import Any, cast
 
 from server.chat.context_formatter import format_context_for_llm
-from server.chat.generation import generate_chat_text, stream_chat_text
+from server.chat.generation import GenerationResult, generate_chat_text, stream_chat_text
 from server.chat.prompt_builder import get_system_prompt
 from server.chat.provider_router import select_provider_route
 from server.models.retrieval import ChunkMatch
@@ -62,6 +62,26 @@ def _normalize_cache_mode(cache_mode: str | CacheMode | None) -> CacheMode:
     if mode == "refresh":
         return "refresh"
     return "default"
+
+
+def _coerce_generation_result(result: Any) -> GenerationResult:
+    if isinstance(result, GenerationResult):
+        return result
+    if isinstance(result, tuple):
+        text = result[0] if len(result) > 0 else ""
+        provider_response_id = result[1] if len(result) > 1 else None
+        return GenerationResult(
+            text=str(text or ""),
+            provider_response_id=(str(provider_response_id).strip() if isinstance(provider_response_id, str) else None),
+        )
+    return GenerationResult(
+        text=str(getattr(result, "text", "") or ""),
+        provider_response_id=(
+            str(getattr(result, "provider_response_id", "")).strip()
+            if isinstance(getattr(result, "provider_response_id", None), str)
+            else None
+        ),
+    )
 
 
 async def _fusion_search_with_cache(
@@ -280,7 +300,8 @@ async def answer_best_effort(
             base_url=str(route.base_url) if getattr(route, "base_url", None) else None,
         )
 
-        answer_text, _provider_id = await generate_chat_text(
+        generation = _coerce_generation_result(
+            await generate_chat_text(
             route=route,
             openrouter_cfg=config.chat.openrouter,
             system_prompt=system_prompt,
@@ -292,8 +313,9 @@ async def answer_best_effort(
             context_text=context_text,
             context_chunks=chunks,
             timeout_s=float(getattr(config.ui, "chat_stream_timeout", 120) or 120),
+            )
         )
-        answer_text = (answer_text or "").strip()
+        answer_text = (generation.text or "").strip()
         if not answer_text:
             raise RuntimeError("LLM returned an empty response")
     except Exception as e:

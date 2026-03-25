@@ -1,8 +1,8 @@
-"""Local trace collection service (dev tooling).
+"""Local trace collection service (workbench trace cache).
 
-This module intentionally implements **local** tracing independent of external
-providers (LangSmith/LangTrace). It is used by the UI to render a full
-per-request trace and to correlate to Loki logs.
+This module stores the workbench-facing trace payload used by the UI. It is now
+fed by the canonical observability metadata when available, while still keeping
+an in-memory event list for fast local drilldown and fallback rendering.
 
 Design goals:
 - Cheap to record (in-memory ring buffer)
@@ -18,12 +18,7 @@ import time
 from collections import deque
 from typing import Any
 
-from server.models.tribrid_config_model import (
-    Trace,
-    TraceEvent,
-    TracesLatestResponse,
-    TriBridConfig,
-)
+from server.models.tribrid_config_model import Trace, TraceCostSummary, TraceEvent, TraceExternalLink, TraceRouteSummary, TracesLatestResponse, TriBridConfig
 
 
 def _now_ms() -> int:
@@ -42,22 +37,8 @@ def _should_capture_local(config: TriBridConfig) -> bool:
     if mode == "off":
         return False
 
-    # Local trace default rule:
-    # If external tracing is not enabled/configured, fall back to local even
-    # when tracing_mode is set to langsmith.
-    langchain_v2 = int(getattr(config.tracing, "langchain_tracing_v2", 0) or 0)
-    langtrace_host = str(getattr(config.tracing, "langtrace_api_host", "") or "").strip()
-    langtrace_project = str(getattr(config.tracing, "langtrace_project_id", "") or "").strip()
-    external_off = (langchain_v2 == 0) and (not langtrace_host) and (not langtrace_project)
-
     if mode in {"local"}:
         return True
-
-    if external_off:
-        return True
-
-    # If the user explicitly configured an external mode, we still keep local
-    # traces for dev UX unless they set tracing_mode=off.
     return True
 
 
@@ -140,6 +121,37 @@ class TraceStore:
                 return
             ev = TraceEvent(kind=str(kind), ts=int(ts_ms or _now_ms()), msg=msg, data=data or {})
             trace.events.append(ev)
+
+    async def annotate(
+        self,
+        run_id: str,
+        *,
+        trace_id: str | None = None,
+        root_span_id: str | None = None,
+        correlation_id: str | None = None,
+        route_summary: TraceRouteSummary | None = None,
+        external_links: list[TraceExternalLink] | None = None,
+        cost_summary: TraceCostSummary | None = None,
+    ) -> None:
+        async with self._lock:
+            trace = self._traces.get(run_id)
+            if trace is None:
+                return
+            update: dict[str, Any] = {}
+            if trace_id is not None:
+                update["trace_id"] = trace_id
+            if root_span_id is not None:
+                update["root_span_id"] = root_span_id
+            if correlation_id is not None:
+                update["correlation_id"] = correlation_id
+            if route_summary is not None:
+                update["route_summary"] = route_summary
+            if external_links is not None:
+                update["external_links"] = external_links
+            if cost_summary is not None:
+                update["cost_summary"] = cost_summary
+            if update:
+                self._traces[run_id] = trace.model_copy(update=update)
 
     async def end(self, run_id: str, *, ended_at_ms: int | None = None) -> None:
         async with self._lock:

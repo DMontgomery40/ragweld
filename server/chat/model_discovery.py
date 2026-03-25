@@ -5,7 +5,12 @@ from typing import Any
 
 import httpx
 
-from server.models.chat_config import LocalModelConfig, LocalProviderEntry, OpenRouterConfig
+from server.models.chat_config import (
+    LiteLLMConfig,
+    LocalModelConfig,
+    LocalProviderEntry,
+    OpenRouterConfig,
+)
 
 
 def _norm_base_url(url: str) -> str:
@@ -182,12 +187,64 @@ async def discover_openrouter_models(cfg: OpenRouterConfig) -> list[dict[str, An
         return []
 
 
-async def discover_models(local_cfg: LocalModelConfig, openrouter_cfg: OpenRouterConfig) -> list[dict[str, Any]]:
-    """Combine local + OpenRouter model discovery (best-effort)."""
+async def discover_litellm_models(cfg: LiteLLMConfig) -> list[dict[str, Any]]:
+    """Best-effort discovery of models from a LiteLLM gateway."""
+
+    if not getattr(cfg, "enabled", False):
+        return []
+
+    base_url = _norm_base_url(getattr(cfg, "base_url", ""))
+    if not base_url:
+        return []
+
+    api_key = (os.getenv("LITELLM_API_KEY") or "").strip() or str(getattr(cfg, "api_key", "") or "").strip()
+    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(f"{base_url}/models", headers=headers)
+            resp.raise_for_status()
+            payload: Any = resp.json()
+            data = payload.get("data") if isinstance(payload, dict) else None
+            if not isinstance(data, list):
+                return []
+
+            out: list[dict[str, Any]] = []
+            seen: set[str] = set()
+            for item in data:
+                if not isinstance(item, dict):
+                    continue
+                model_id = item.get("id")
+                if not isinstance(model_id, str) or not model_id.strip():
+                    continue
+                if model_id in seen:
+                    continue
+                seen.add(model_id)
+                out.append(
+                    {
+                        "id": model_id,
+                        "provider": "LiteLLM",
+                        "provider_type": "litellm",
+                        "base_url": base_url,
+                        "source": "litellm",
+                    }
+                )
+            return out
+    except Exception:
+        return []
+
+
+async def discover_models(
+    local_cfg: LocalModelConfig,
+    openrouter_cfg: OpenRouterConfig,
+    litellm_cfg: LiteLLMConfig | None = None,
+) -> list[dict[str, Any]]:
+    """Combine local + OpenRouter + LiteLLM model discovery (best-effort)."""
 
     openrouter_models = await discover_openrouter_models(openrouter_cfg)
+    litellm_models = await discover_litellm_models(litellm_cfg or LiteLLMConfig(enabled=False))
 
     providers = getattr(local_cfg, "providers", []) if local_cfg is not None else []
     local_models = await discover_local_models(list(providers or []))
 
-    return [*openrouter_models, *local_models]
+    return [*litellm_models, *openrouter_models, *local_models]

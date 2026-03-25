@@ -4,6 +4,8 @@
 import { useState, useEffect } from 'react';
 import { useAlertThresholdsStore, useAlertThresholdField } from '@/stores/useAlertThresholdsStore';
 import { TooltipIcon } from '@/components/ui/TooltipIcon';
+import { useAPI } from '@/hooks';
+import type { ObservabilityStatusResponse } from '@/types/generated';
 
 /**
  * ---agentspec
@@ -29,8 +31,11 @@ import { TooltipIcon } from '@/components/ui/TooltipIcon';
  * ---/agentspec
  */
 export function MonitoringSubtab() {
+  const { api } = useAPI();
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [observability, setObservability] = useState<ObservabilityStatusResponse | null>(null);
+  const [observabilityError, setObservabilityError] = useState<string | null>(null);
   const loadThresholds = useAlertThresholdsStore((state) => state.load);
   const thresholdsLoaded = useAlertThresholdsStore((state) => state.loaded);
   const thresholdsLoading = useAlertThresholdsStore((state) => state.loading && !state.loaded);
@@ -48,6 +53,30 @@ export function MonitoringSubtab() {
       loadThresholds();
     }
   }, [thresholdsLoaded, loadThresholds]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadObservability = async () => {
+      try {
+        const response = await fetch(api('/observability/status'));
+        if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+        const data = (await response.json()) as ObservabilityStatusResponse;
+        if (!cancelled) {
+          setObservability(data);
+          setObservabilityError(null);
+        }
+      } catch (error: any) {
+        if (!cancelled) {
+          setObservability(null);
+          setObservabilityError(error?.message || 'Failed to load observability status');
+        }
+      }
+    };
+    loadObservability();
+    return () => {
+      cancelled = true;
+    };
+  }, [api]);
 
   async function saveAlertConfig() {
     setSaving(true);
@@ -99,6 +128,64 @@ export function MonitoringSubtab() {
           {actionMessage}
         </div>
       )}
+
+      <div
+        style={{
+          background: 'var(--bg-elev2)',
+          border: '1px solid var(--line)',
+          borderRadius: '6px',
+          padding: '20px',
+          marginBottom: '20px'
+        }}
+      >
+        <h3 style={{ marginTop: 0 }}>Observability Readiness</h3>
+        <p className="small" style={{ marginBottom: '16px' }}>
+          Live request tracing now uses the observability status API as the operator-facing truth for local buffering, OTel export, Langfuse, Tempo, Alloy, and Grafana.
+        </p>
+
+        {observabilityError ? (
+          <div style={{ color: 'var(--err)', fontSize: '12px' }}>{observabilityError}</div>
+        ) : observability ? (
+          <>
+            <div style={{ fontSize: '12px', color: 'var(--fg-muted)', marginBottom: '12px' }}>
+              Mode: <strong style={{ color: 'var(--fg)' }}>{observability.mode}</strong>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px', marginBottom: '12px' }}>
+              {(observability.components || []).map((component) => (
+                <div
+                  key={component.id}
+                  style={{
+                    border: '1px solid var(--line)',
+                    borderRadius: '6px',
+                    padding: '12px',
+                    background: 'var(--bg)'
+                  }}
+                >
+                  <div style={{ fontSize: '12px', fontWeight: 700, color: 'var(--fg)', marginBottom: '6px' }}>
+                    {component.label}
+                  </div>
+                  <div style={{ fontSize: '11px', color: component.reachable === false ? 'var(--err)' : 'var(--fg-muted)' }}>
+                    {component.enabled ? 'enabled' : 'disabled'}
+                    {' · '}
+                    {component.configured ? 'configured' : 'not configured'}
+                    {component.reachable === null ? '' : ` · ${component.reachable ? 'reachable' : 'unreachable'}`}
+                  </div>
+                  {component.detail && (
+                    <div style={{ fontSize: '11px', color: 'var(--fg-muted)', marginTop: '6px' }}>
+                      {component.detail}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+            {observability.operator_hint && (
+              <div style={{ fontSize: '12px', color: 'var(--fg)' }}>{observability.operator_hint}</div>
+            )}
+          </>
+        ) : (
+          <div style={{ fontSize: '12px', color: 'var(--fg-muted)' }}>Loading observability status...</div>
+        )}
+      </div>
 
       <h2>Performance & Reliability Alerts</h2>
       <p className="small" style={{ marginBottom: '24px' }}>

@@ -67,7 +67,8 @@ async def benchmark_run(
     """Run the same prompt against multiple models (best-effort).
 
     This endpoint is intended for local benchmarking and may require provider
-    credentials (e.g., OPENROUTER_API_KEY) or local inference servers.
+    credentials (for example `OPENAI_API_KEY`, `LITELLM_API_KEY`, or
+    `OPENROUTER_API_KEY`) plus any required local inference servers.
     """
     repo_id = scope.resolved_repo_id
     if repo_id:

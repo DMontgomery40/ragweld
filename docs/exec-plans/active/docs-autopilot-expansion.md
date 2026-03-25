@@ -52,7 +52,7 @@ In `generate_docs_from_diff.py`, `_select_context_files` uses a `preferred` list
 - Frontend API client layer only (no UI components)
 
 **Missing from preferred list** (so they rarely get diff context):
-- Chat UI (ChatInterface, ChatSettings2, SourceDropdown, Recall)
+- Chat UI (ChatInterface, ChatSettings, SourceDropdown, Recall)
 - Onboarding (StartTab, useOnboardingStore)
 - Training studios (RerankerTraining/TrainingStudio, AgentTraining/TrainingStudio)
 - Eval UI (EvalDrillDown, EvalAnalysisTab, HistoryViewer, TraceViewer)
@@ -89,7 +89,7 @@ Add to `_select_context_files` in `generate_docs_from_diff.py`:
 ```python
 # Chat UI + Recall
 "web/src/components/Chat/ChatInterface.tsx",
-"web/src/components/Chat/ChatSettings2.tsx",
+"web/src/components/Chat/ChatSettings.tsx",
 "web/src/components/Chat/SourceDropdown.tsx",
 # Onboarding
 "web/src/components/tabs/StartTab.tsx",

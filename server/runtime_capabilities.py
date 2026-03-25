@@ -6,11 +6,14 @@ from server.models.tribrid_config_model import (
     ChunkingRuntimeCapabilities,
     EmbeddingRuntimeCapabilities,
     EmbeddingRuntimeProviderCapability,
+    GenerationRuntimeCapabilities,
     IndexingRuntimeCapabilities,
     RerankerRuntimeCapabilities,
     RuntimeCapabilitiesResponse,
+    TriBridConfig,
     RuntimeOption,
     SearchRuntimeCapabilities,
+    ChatProviderInfo,
 )
 
 EMBEDDING_BACKEND_OPTIONS: tuple[RuntimeOption, ...] = (
@@ -117,6 +120,62 @@ CHUNKING_STRATEGY_OPTIONS: tuple[RuntimeOption, ...] = (
 
 SUPPORTED_CHUNKING_STRATEGIES: set[str] = {item.id for item in CHUNKING_STRATEGY_OPTIONS}
 
+GENERATION_ROUTING_BACKEND_OPTIONS: tuple[RuntimeOption, ...] = (
+    RuntimeOption(
+        id="litellm",
+        label="LiteLLM gateway",
+        description="Unified OpenAI-compatible gateway and router for self-hosted and cloud generation backends.",
+    ),
+    RuntimeOption(
+        id="openrouter",
+        label="OpenRouter gateway",
+        description="OpenAI-compatible cloud routing path used for compatible external providers.",
+    ),
+    RuntimeOption(
+        id="local_openai_compatible",
+        label="Local OpenAI-compatible",
+        description="Direct routing to configured local OpenAI-compatible providers such as Ollama, llama.cpp, LM Studio, or vLLM.",
+    ),
+    RuntimeOption(
+        id="openai_cloud_direct",
+        label="OpenAI direct",
+        description="Direct cloud routing to OpenAI-compatible APIs without an intermediate gateway.",
+    ),
+    RuntimeOption(
+        id="ragweld_mlx",
+        label="Ragweld MLX",
+        description="In-process Apple Silicon MLX path for the ragweld agent model.",
+    ),
+)
+
+GENERATION_SERVING_BACKEND_OPTIONS: tuple[RuntimeOption, ...] = (
+    RuntimeOption(
+        id="vllm",
+        label="vLLM",
+        description="OpenAI-compatible self-hosted serving runtime for owned generation models.",
+    ),
+    RuntimeOption(
+        id="ollama",
+        label="Ollama",
+        description="OpenAI-compatible local serving runtime commonly used for workstation-hosted models.",
+    ),
+    RuntimeOption(
+        id="llamacpp",
+        label="llama.cpp",
+        description="OpenAI-compatible local serving runtime backed by llama.cpp.",
+    ),
+    RuntimeOption(
+        id="mlx_ragweld",
+        label="MLX Ragweld",
+        description="In-process Apple Silicon MLX serving path for ragweld-owned models.",
+    ),
+    RuntimeOption(
+        id="openai_cloud",
+        label="OpenAI cloud",
+        description="Cloud-hosted generation runtime reached directly or through a compatible gateway.",
+    ),
+)
+
 INDEXING_DENSE_BACKEND_OPTIONS: tuple[RuntimeOption, ...] = (
     RuntimeOption(
         id="deterministic",
@@ -131,6 +190,11 @@ INDEXING_DENSE_BACKEND_OPTIONS: tuple[RuntimeOption, ...] = (
 )
 
 INDEXING_STORAGE_BACKEND_OPTIONS: tuple[RuntimeOption, ...] = (
+    RuntimeOption(
+        id="haystack_qdrant_local",
+        label="Haystack/Qdrant local pilot",
+        description="Local Qdrant-backed OSS pilot lane hydrated from the sidecar export contract.",
+    ),
     RuntimeOption(
         id="postgres_pgvector",
         label="Postgres pgvector",
@@ -159,6 +223,11 @@ INDEXING_STORAGE_BACKEND_OPTIONS: tuple[RuntimeOption, ...] = (
 )
 
 SEARCH_VECTOR_BACKEND_OPTIONS: tuple[RuntimeOption, ...] = (
+    RuntimeOption(
+        id="haystack_qdrant_local",
+        label="Haystack/Qdrant local pilot",
+        description="Local Qdrant vector retrieval driven through the Haystack pilot lane.",
+    ),
     RuntimeOption(
         id="postgres_pgvector",
         label="Postgres pgvector",
@@ -201,7 +270,16 @@ _RERANKER_CATALOG_ONLY_REASON = (
 
 
 def build_runtime_capabilities_response() -> RuntimeCapabilitiesResponse:
+    return build_runtime_capabilities_response_for_config(TriBridConfig())
+
+
+def build_runtime_capabilities_response_for_config(config: TriBridConfig) -> RuntimeCapabilitiesResponse:
     return RuntimeCapabilitiesResponse(
+        generation=GenerationRuntimeCapabilities(
+            routing_backends=list(GENERATION_ROUTING_BACKEND_OPTIONS),
+            serving_backends=list(GENERATION_SERVING_BACKEND_OPTIONS),
+            default_route=_default_generation_route(config),
+        ),
         embedding=EmbeddingRuntimeCapabilities(
             backends=list(EMBEDDING_BACKEND_OPTIONS),
             providers=list(EMBEDDING_PROVIDER_OPTIONS),
@@ -221,6 +299,22 @@ def build_runtime_capabilities_response() -> RuntimeCapabilitiesResponse:
             sparse_backends=list(SEARCH_SPARSE_BACKEND_OPTIONS),
             graph_backends=list(SEARCH_GRAPH_BACKEND_OPTIONS),
         ),
+    )
+
+
+def _default_generation_route(config: TriBridConfig) -> ChatProviderInfo | None:
+    from server.chat.provider_router import select_provider_route
+
+    try:
+        route = select_provider_route(config=config)
+    except Exception:
+        return None
+
+    return ChatProviderInfo(
+        kind=route.kind,
+        provider_name=route.provider_name,
+        model=route.model,
+        base_url=route.base_url,
     )
 
 

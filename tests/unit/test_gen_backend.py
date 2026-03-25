@@ -12,7 +12,7 @@ def test_gen_backend_default_is_openai() -> None:
 
 
 def test_gen_backend_accepts_valid_patterns() -> None:
-    for backend in ("openai", "anthropic", "ollama", "mlx", "openrouter"):
+    for backend in ("openai", "anthropic", "ollama", "mlx", "openrouter", "litellm"):
         config = GenerationConfig(gen_backend=backend)
         assert config.gen_backend == backend
 

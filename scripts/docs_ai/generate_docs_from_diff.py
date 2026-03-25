@@ -293,7 +293,7 @@ def _select_context_files(changed: List[str], *, limit: int) -> List[str]:
         "web/src/api/webhooks.ts",
         # Chat UI + Recall
         "web/src/components/Chat/ChatInterface.tsx",
-        "web/src/components/Chat/ChatSettings2.tsx",
+        "web/src/components/Chat/ChatSettings.tsx",
         "web/src/components/Chat/SourceDropdown.tsx",
         # Onboarding
         "web/src/components/tabs/StartTab.tsx",

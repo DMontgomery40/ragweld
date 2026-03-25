@@ -5,9 +5,13 @@
 // - We do NOT store Grafana API keys/tokens in the frontend.
 
 import { useConfigField } from '@/hooks/useConfig';
+import { useAPI } from '@/hooks';
+import { useEffect, useState } from 'react';
 import { GRAFANA_DASHBOARD_PRESETS, findGrafanaPreset } from './dashboardPresets';
+import type { ObservabilityStatusResponse } from '@/types/generated';
 
 export function GrafanaConfig() {
+  const { api } = useAPI();
   const [embedEnabledRaw, setEmbedEnabled, embedMeta] = useConfigField<number>('ui.grafana_embed_enabled', 1);
   const [baseUrl, setBaseUrl] = useConfigField<string>('ui.grafana_base_url', 'http://127.0.0.1:3001');
   const [dashboardUid, setDashboardUid] = useConfigField<string>('ui.grafana_dashboard_uid', 'tribrid-overview');
@@ -15,6 +19,25 @@ export function GrafanaConfig() {
   const [kiosk, setKiosk] = useConfigField<string>('ui.grafana_kiosk', 'tv');
   const [orgId, setOrgId] = useConfigField<number>('ui.grafana_org_id', 1);
   const [refresh, setRefresh] = useConfigField<string>('ui.grafana_refresh', '10s');
+  const [observability, setObservability] = useState<ObservabilityStatusResponse | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadStatus = async () => {
+      try {
+        const response = await fetch(api('/observability/status'));
+        if (!response.ok) return;
+        const data = (await response.json()) as ObservabilityStatusResponse;
+        if (!cancelled) setObservability(data);
+      } catch {
+        if (!cancelled) setObservability(null);
+      }
+    };
+    loadStatus();
+    return () => {
+      cancelled = true;
+    };
+  }, [api]);
 
   const embedEnabled = Boolean(embedEnabledRaw);
   const normalizedBase = String(baseUrl || '').replace(/\/$/, '');
@@ -56,6 +79,23 @@ export function GrafanaConfig() {
           marginBottom: '16px'
         }}>
           {embedMeta.error}
+        </div>
+      )}
+
+      {observability && (
+        <div
+          style={{
+            padding: '12px 16px',
+            background: 'var(--bg-elev2)',
+            border: '1px solid var(--line)',
+            borderRadius: '8px',
+            color: 'var(--fg)',
+            fontSize: '12px',
+            marginBottom: '16px'
+          }}
+        >
+          <strong>Observability mode:</strong> {observability.mode}
+          {observability.operator_hint ? ` · ${observability.operator_hint}` : ''}
         </div>
       )}
 

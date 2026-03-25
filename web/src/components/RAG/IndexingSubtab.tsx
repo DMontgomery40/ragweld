@@ -20,6 +20,7 @@ import {
 } from '@/hooks';
 import { useRepoStore } from '@/stores/useRepoStore';
 import { LiveTerminal, type LiveTerminalHandle } from '@/components/LiveTerminal/LiveTerminal';
+import { IndexingPilotPanel } from '@/components/RAG/IndexingPilotPanel';
 import { RepositoryConfig } from '@/components/RAG/RepositoryConfig';
 import { SyntheticCallout } from '@/components/RAG/SyntheticCallout';
 import { ModelPicker } from '@/components/RAG/ModelPicker';
@@ -803,6 +804,11 @@ export function IndexingSubtab() {
       </div>
 
       <SyntheticCallout context="indexing" />
+
+      <IndexingPilotPanel
+        corpusId={String(activeRepo || '').trim()}
+        repoPath={String(effectivePath || '').trim()}
+      />
 
       {errorBanner && (
         <div

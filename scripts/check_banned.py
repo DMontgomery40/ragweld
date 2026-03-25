@@ -3,7 +3,6 @@
 Check for banned imports and terms in the codebase.
 
 This script prevents accidental use of:
-- Qdrant (we use pgvector)
 - Redis (removed)
 - LangChain (use LangGraph directly)
 - Wrong terminology (cards vs chunk_summaries, etc.)
@@ -64,8 +63,6 @@ ZERO_MOCK_ALLOWLIST = {
 
 # Banned import patterns (regex)
 BANNED_IMPORTS: List[Tuple[str, str]] = [
-    (r'from\s+qdrant_client\s+import', 'Use pgvector instead of Qdrant'),
-    (r'import\s+qdrant_client', 'Use pgvector instead of Qdrant'),
     (r'from\s+redis\s+import', 'Redis has been removed from this project'),
     (r'import\s+redis\b', 'Redis has been removed from this project'),
     (r'from\s+langchain\s+import', 'Use langgraph directly, not langchain wrappers'),
@@ -107,15 +104,15 @@ SERVER_ENV_GETENV_ALLOWLIST = {
     # Provider secrets
     "OPENAI_API_KEY",
     "OPENROUTER_API_KEY",
+    "LITELLM_API_KEY",
     "COHERE_API_KEY",
     "ANTHROPIC_API_KEY",
     "GOOGLE_API_KEY",
     "VOYAGE_API_KEY",
     "JINA_API_KEY",
     # Integrations (UI-only presence checks; values are never returned)
-    "LANGTRACE_API_KEY",
-    "LANGCHAIN_API_KEY",
-    "LANGSMITH_API_KEY",
+    "LANGFUSE_PUBLIC_KEY",
+    "LANGFUSE_SECRET_KEY",
     "NETLIFY_API_KEY",
     "GRAFANA_API_KEY",
     "SLACK_WEBHOOK_URL",
