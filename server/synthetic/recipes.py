@@ -5,6 +5,7 @@ import os
 import random
 import re
 from collections import Counter, defaultdict
+from dataclasses import dataclass
 from fnmatch import fnmatch
 from pathlib import Path
 from typing import Any
@@ -23,11 +24,27 @@ from server.models.tribrid_config_model import (
     TriBridConfig,
 )
 from server.synthetic.layering import infer_layer_from_path
+from server.synthetic.materialized_corpus import (
+    MaterializedCorpusRow,
+    build_materialized_candidate_paths,
+    build_materialized_eval_items,
+    load_materialized_corpus_rows,
+)
 
 _TOKEN_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]{2,63}")
 _DEF_RE = re.compile(r"^\s*(def|class)\s+([A-Za-z_][A-Za-z0-9_]*)", re.MULTILINE)
 _IMPORT_RE = re.compile(r"^\s*(?:from|import)\s+([A-Za-z0-9_\.]+)", re.MULTILINE)
 _ROUTE_RE = re.compile(r"(?:/api/[A-Za-z0-9_./-]+)")
+_RECIPES_REQUIRING_EVAL_DATASET = frozenset({"eval_dataset", "triplets", "autotune_retrieval", "full_stack"})
+_RECIPES_MANIFEST_ONLY_SAFE = frozenset({"eval_dataset", "triplets", "autotune_retrieval"})
+
+
+@dataclass(frozen=True)
+class MaterializedCorpusEvalAdapter:
+    rows: list[MaterializedCorpusRow]
+    eval_items: list[EvalDatasetItem]
+    candidate_paths: list[str]
+    repo_path: str
 
 
 def synthetic_model_category(model: str) -> str:
@@ -173,6 +190,64 @@ async def select_source_chunks(
 
     rng = random.Random(int(request.seed or 1337))
     return _round_robin_chunks(filtered, max_source_chunks, rng)
+
+
+def recipe_supports_materialized_manifest(recipe: SyntheticRecipeKind) -> bool:
+    return str(recipe) in _RECIPES_REQUIRING_EVAL_DATASET
+
+
+def recipe_can_skip_source_chunks_for_manifest(recipe: SyntheticRecipeKind) -> bool:
+    return str(recipe) in _RECIPES_MANIFEST_ONLY_SAFE
+
+
+async def load_materialized_corpus_eval_adapter(
+    *,
+    repo_id: str,
+    cfg: TriBridConfig,
+    request: SyntheticRunStartRequest,
+) -> MaterializedCorpusEvalAdapter | None:
+    if not recipe_supports_materialized_manifest(request.recipe):
+        return None
+
+    pg = PostgresClient(cfg.indexing.postgres_url, schema_mode="control")
+    corpus_path = ""
+    try:
+        await pg.connect()
+        corpus = await pg.get_corpus(repo_id)
+        corpus_path = str((corpus or {}).get("path") or "").strip()
+    except Exception:
+        corpus_path = ""
+    finally:
+        try:
+            await pg.disconnect()
+        except Exception:
+            pass
+
+    if not corpus_path:
+        return None
+
+    rows = load_materialized_corpus_rows(corpus_path)
+    if not rows:
+        return None
+
+    eval_items = build_materialized_eval_items(
+        rows=rows,
+        max_pairs=int(request.max_pairs or 150),
+        pairs_per_source=int(request.pairs_per_source or 1),
+        include_expected_answer=bool(request.include_expected_answer),
+        include_tags=bool(request.include_tags),
+    )
+    if not eval_items:
+        raise RuntimeError(
+            f"Materialized corpus manifest at {corpus_path} produced zero eval rows for repo_id={repo_id}"
+        )
+
+    return MaterializedCorpusEvalAdapter(
+        rows=rows,
+        eval_items=eval_items,
+        candidate_paths=build_materialized_candidate_paths(rows),
+        repo_path=corpus_path,
+    )
 
 
 def _chunk_to_summary(chunk: Chunk, *, card_source: str = "deterministic") -> ChunkSummary:
@@ -660,23 +735,33 @@ def _autotune_patch(
 
 async def generate_recipe_payloads(
     *,
+    repo_id: str,
     recipe: SyntheticRecipeKind,
     cfg: TriBridConfig,
     request: SyntheticRunStartRequest,
     chunks: list[Chunk],
+    materialized_manifest: MaterializedCorpusEvalAdapter | None = None,
 ) -> tuple[dict[SyntheticArtifactKind, Any], SyntheticRunSummary]:
-    generator_route = resolve_synthetic_route(cfg=cfg, model=str(request.generator_model or ""))
-    judge_route = resolve_synthetic_route(cfg=cfg, model=str(request.judge_model or ""))
-    _ = (generator_route, judge_route)
-
     summaries = [_chunk_to_summary(ch, card_source="deterministic") for ch in chunks]
 
     eval_items: list[EvalDatasetItem] = []
     curated_in = 0
     curated_out = 0
     avg_judge_score: float | None = None
+    manifest_paths: list[str] = []
+    manifest_report_line: str | None = None
 
-    if recipe in {"eval_dataset", "triplets", "autotune_retrieval", "full_stack"}:
+    if materialized_manifest is not None and recipe in _RECIPES_REQUIRING_EVAL_DATASET:
+        eval_items = list(materialized_manifest.eval_items)
+        curated_in = len(eval_items)
+        manifest_paths = list(materialized_manifest.candidate_paths)
+        manifest_report_line = (
+            "Eval dataset materialized from corpus manifest "
+            f"({len(materialized_manifest.rows)} manifest rows, path={materialized_manifest.repo_path})."
+        )
+    elif recipe in _RECIPES_REQUIRING_EVAL_DATASET:
+        generator_route = resolve_synthetic_route(cfg=cfg, model=str(request.generator_model or ""))
+        judge_route = resolve_synthetic_route(cfg=cfg, model=str(request.judge_model or ""))
         eval_items, curated_in, curated_out, avg_judge_score = await _make_eval_items_with_llm(
             cfg=cfg,
             generator_route=generator_route,
@@ -691,7 +776,7 @@ async def generate_recipe_payloads(
         )
 
     keywords = _derive_keywords(summaries, max_keywords=int(cfg.keywords.keywords_max_per_repo or 80))
-    all_paths = [str(ch.file_path or "") for ch in chunks if str(ch.file_path or "").strip()]
+    all_paths = list(manifest_paths) if manifest_paths else [str(ch.file_path or "") for ch in chunks if str(ch.file_path or "").strip()]
     triplets = _build_triplets(
         eval_items=eval_items,
         candidate_paths=all_paths,
@@ -723,10 +808,12 @@ async def generate_recipe_payloads(
             f"Curated in: {curated_in}\n"
             f"Curated out: {curated_out}\n"
         )
+    if manifest_report_line:
+        report += f"{manifest_report_line}\n"
     artifacts["report_md"] = report
 
     summary = SyntheticRunSummary(
-        sources_used=len(chunks),
+        sources_used=max(len(chunks), len({path for path in all_paths if path})),
         items_generated=sum(
             [
                 len(eval_items),

@@ -26,19 +26,23 @@ New generation/eval paths must continue to emit artifacts the current product ca
 
 Keep this file updated with the replacement milestone, current blocker, and whether the new path is already default.
 
-## Active Milestone (2026-03-10)
+## Active Milestone (2026-03-26)
 
-Seed-dataset compatibility fallback for eval-oriented synthetic recipes:
-when generated `eval_dataset_json` is empty, hydrate from the corpus seed dataset
-(`data/eval_datasets/<corpus>.json`) so the quality gate and downstream eval UI
-run on non-empty, product-compatible artifacts.
+Manifest-backed eval/triplet materialization for corpora that already ship a
+structured `manifest.json` plus materialized files. This lane now prefers the
+corpus manifest adapter over the brittle LLM-only synthetic path for
+`eval_dataset`, `triplets`, and `autotune_retrieval`, while preserving the
+existing product artifact shapes.
 
 ## Current Blocker
 
-`synthetic_data_kit` still stages inputs but does not execute an OSS-backed
-generator/evaluator pipeline end-to-end; this lane still needs a true Distilabel/Ragas/Promptfoo-backed default path.
+This is still a compatibility adapter, not the final OSS generation/eval stack.
+`synthetic_data_kit` and the internal provider still need a true
+Distilabel/Ragas/Promptfoo-backed end-to-end default once that toolchain is
+available in-repo.
 
 ## Replacement Path Default?
 
-No. The fallback is active as a stabilizer, but internal synthetic generation
-is still the default producer when it yields rows.
+Partially. Materialized corpora with a usable manifest now bypass the old
+LLM-generated eval row path for eval-oriented recipes, but corpora without that
+manifest still fall back to the legacy synthetic generator.
