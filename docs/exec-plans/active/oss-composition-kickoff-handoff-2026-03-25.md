@@ -342,6 +342,23 @@ currently cluster in:
 Do **not** treat those remaining failures as permission to reintroduce
 fallbacks in the fork slices that are already moving.
 
+## March 26 Failure Addendum
+
+Read this before continuing any graph/indexing/synthetic work:
+
+- `/Users/davidmontgomery/.codex/projects/-Users-davidmontgomery-ragweld/memory/graph-replacement-failure-handoff-2026-03-26.md`
+
+The short version is:
+
+- the replacement HF corpus really was swapped in
+- the promoted graph now exists but is still bad
+- the touched graph lane is broken in multiple independent ways, not one
+- the next agent must not stop at the first obvious smoking gun
+- the branch still requires replacement-only behavior, not more wrappers
+
+If you are touching the graph/index/synthetic lane, read the addendum first and
+follow it literally.
+
 Additional GraphRAG guardrail:
 
 - The checked-in `tribrid_config.json` graph defaults must stay aligned with
