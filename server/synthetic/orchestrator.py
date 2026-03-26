@@ -27,7 +27,6 @@ from server.models.tribrid_config_model import (
     TriBridConfig,
 )
 from server.services.config_store import get_config as load_scoped_config
-from server.synthetic.providers.internal_provider import run_internal_provider
 from server.synthetic.providers.sdkit_provider import run_sdkit_provider
 from server.synthetic.storage import (
     active_run_id_for_corpus,
@@ -46,6 +45,36 @@ _ROOT = Path(__file__).resolve().parents[2]
 _DATASET_DIR = _ROOT / "data" / "eval_datasets"
 _LEGACY_DATASET_DIR = _ROOT / "data" / "eval_dataset"
 _RECIPES_REQUIRING_EVAL_DATASET = frozenset({"eval_dataset", "triplets", "autotune_retrieval", "full_stack"})
+
+
+def _is_openai_gpt5_synthetic_model(model: str) -> bool:
+    raw = str(model or "").strip().lower()
+    if not raw:
+        return False
+    for prefix in ("openrouter:", "litellm:"):
+        if raw.startswith(prefix):
+            raw = raw[len(prefix) :]
+            break
+    if raw.startswith("openai/"):
+        raw = raw.split("/", 1)[1]
+    return raw.startswith("gpt-5")
+
+
+def _reject_removed_or_banned_synthetic_inputs(request: SyntheticRunStartRequest) -> None:
+    if str(request.provider or "").strip() != "synthetic_data_kit":
+        raise RuntimeError(
+            "internal_ragweld has been removed from this branch's live Synthetic Lab path. "
+            "Use synthetic_data_kit while the Unsloth Data Recipes replacement is wired in."
+        )
+
+    for field_name in ("generator_model", "judge_model"):
+        model = str(getattr(request, field_name, "") or "").strip()
+        lower = model.lower()
+        if "openai/" in lower or lower.startswith(("gpt-", "o1", "o3", "o4", "openrouter:openai/", "litellm:openai/")):
+            if not _is_openai_gpt5_synthetic_model(model):
+                raise RuntimeError(
+                    f"{field_name} must use an OpenAI GPT-5 model on this branch. Got {model!r}."
+                )
 
 
 def _append_log(run_id: str, message: str) -> None:
@@ -358,6 +387,7 @@ async def _evaluate_quality_gate(
 
 async def start_run(request: SyntheticRunStartRequest) -> SyntheticRun:
     repo_id = _validate_repo_id(request.repo_id)
+    _reject_removed_or_banned_synthetic_inputs(request)
 
     active = active_run_id_for_corpus(repo_id)
     if active:
@@ -428,13 +458,7 @@ async def _run_job(*, run_id: str, request: SyntheticRunStartRequest, cancel_eve
         if cancel_event.is_set():
             raise asyncio.CancelledError()
 
-        if request.provider == "internal_ragweld":
-            artifacts_payloads, summary = await run_internal_provider(
-                repo_id=repo_id,
-                cfg=cfg,
-                request=request,
-            )
-        elif request.provider == "synthetic_data_kit":
+        if request.provider == "synthetic_data_kit":
             artifacts_payloads, summary = await run_sdkit_provider(
                 run_id=run_id,
                 repo_id=repo_id,

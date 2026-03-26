@@ -939,7 +939,7 @@ async def analyze_eval_comparison(
         )
 
     try:
-        text, _provider_response_id = await generate_chat_text(
+        result = await generate_chat_text(
             route=route,
             openrouter_cfg=cfg.chat.openrouter,
             system_prompt=cfg.system_prompts.eval_analysis,
@@ -966,7 +966,7 @@ async def analyze_eval_comparison(
 
     return EvalAnalyzeComparisonResponse(
         ok=True,
-        analysis=str(text or "").strip(),
+        analysis=str(result.text or "").strip(),
         model_used=str(route.model),
         error=None,
     )

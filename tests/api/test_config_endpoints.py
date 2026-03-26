@@ -23,6 +23,66 @@ async def test_get_config(client: AsyncClient) -> None:
     assert "chunking" in data   # LAW uses 'chunking' not 'chunker'
     assert "retrieval" in data
     assert "scoring" in data
+    assert data["graph_indexing"]["semantic_kg_mode"] == "llm"
+    assert data["graph_indexing"]["semantic_kg_typed_entities_enabled"] is True
+    assert data["graph_indexing"]["semantic_kg_allowed_entity_types"] == [
+        "person",
+        "org",
+        "location",
+        "event",
+        "concept",
+    ]
+    assert data["graph_indexing"]["semantic_kg_allowed_relation_types"] == [
+        "associated_with",
+        "met_with",
+        "communicated_with",
+        "works_for",
+        "member_of",
+        "founded",
+        "owns",
+        "funded",
+        "participated_in",
+        "located_in",
+        "references",
+        "related_to",
+    ]
+    assert data["graph_indexing"]["semantic_kg_max_chunks"] == 40000
+
+
+@pytest.mark.asyncio
+async def test_patch_graph_indexing_preserves_semantic_kg_max_chunks_default(client: AsyncClient) -> None:
+    response = await client.patch(
+        "/api/config/graph_indexing",
+        json={"semantic_kg_enabled": True},
+    )
+    assert response.status_code == 200
+
+    graph_indexing = response.json()["graph_indexing"]
+    assert graph_indexing["semantic_kg_enabled"] is True
+    assert graph_indexing["semantic_kg_mode"] == "llm"
+    assert graph_indexing["semantic_kg_typed_entities_enabled"] is True
+    assert graph_indexing["semantic_kg_allowed_entity_types"] == [
+        "person",
+        "org",
+        "location",
+        "event",
+        "concept",
+    ]
+    assert graph_indexing["semantic_kg_allowed_relation_types"] == [
+        "associated_with",
+        "met_with",
+        "communicated_with",
+        "works_for",
+        "member_of",
+        "founded",
+        "owns",
+        "funded",
+        "participated_in",
+        "located_in",
+        "references",
+        "related_to",
+    ]
+    assert graph_indexing["semantic_kg_max_chunks"] == 40000
 
 
 @pytest.mark.asyncio

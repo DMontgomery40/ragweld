@@ -56,7 +56,7 @@ async def _run_one(
 
         t0 = time.perf_counter()
         try:
-            text, _provider_id = await generate_chat_text(
+            result = await generate_chat_text(
                 route=route,
                 openrouter_cfg=config.chat.openrouter,
                 system_prompt=config.chat.system_prompt_base,
@@ -69,7 +69,7 @@ async def _run_one(
             gen_ms = float((time.perf_counter() - t0) * 1000.0)
             return BenchmarkResult(
                 model=model,
-                response=str(text or ""),
+                response=str(result.text or ""),
                 latency_ms=gen_ms,
                 breakdown_ms={"generate": gen_ms},
                 error=None,

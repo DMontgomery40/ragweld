@@ -20,14 +20,14 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 from starlette.responses import StreamingResponse
 
-from server.chat.generation import generate_chat_text
-from server.chat.provider_router import select_provider_route
+from server.chat.provider_router import ProviderRoute, select_provider_route
 from server.db.neo4j import Neo4jClient
 from server.db.postgres import PostgresClient
 from server.indexing.chunker import Chunker
 from server.indexing.embedder import Embedder, configure_postgres_embedding_cache_backend
 from server.indexing.graph_builder import GraphBuilder
 from server.indexing.loader import FileLoader
+from server.indexing.official_graphrag import extract_semantic_kg_with_graphrag
 from server.indexing.oss_retrieval_pilot import (
     build_retrieval_pilot_status,
     export_retrieval_pilot,
@@ -94,49 +94,9 @@ _TASKS: dict[str, asyncio.Task[None]] = {}
 _EVENT_QUEUES: dict[str, asyncio.Queue[dict[str, Any]]] = {}
 _LAST_STARTED_REPO: str | None = None
 
-_SEM_TOKEN_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]{2,63}")
-_SEM_STOPWORDS: set[str] = {
-    "the",
-    "and",
-    "for",
-    "with",
-    "from",
-    "this",
-    "that",
-    "return",
-    "true",
-    "false",
-    "none",
-    "null",
-    "import",
-    "export",
-    "class",
-    "function",
-    "const",
-    "let",
-    "var",
-    "async",
-    "await",
-}
-
 _MODELS_JSON_PATH = Path(__file__).parent.parent.parent / "data" / "models.json"
 _INDEX_RUNS_DIR = Path(__file__).parent.parent.parent / "data" / "index_runs"
 _STAGING_REPO_PREFIX = "__staging__"
-
-SEMANTIC_RELATION_TYPES: set[str] = {
-    "associated_with",
-    "met_with",
-    "communicated_with",
-    "works_for",
-    "member_of",
-    "founded",
-    "owns",
-    "funded",
-    "participated_in",
-    "located_in",
-    "references",
-    "related_to",
-}
 
 _ACTIVE_RUNS: dict[str, str] = {}
 _QUEUE_RUN_CONTEXT: dict[int, tuple[str, str]] = {}
@@ -534,6 +494,91 @@ def _find_model_spec(
     return None
 
 
+def _strip_route_prefix(model: str | None) -> str:
+    raw = str(model or "").strip()
+    if ":" not in raw:
+        return raw
+    prefix, rest = raw.split(":", 1)
+    if prefix.strip().lower() in {"openrouter", "litellm", "local", "ragweld"}:
+        return rest.strip()
+    return raw
+
+
+def _semantic_kg_catalog_rows() -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for row in _load_models_json():
+        if not _model_has_component(row, "GEN"):
+            continue
+        status = str(row.get("selection_status") or "").strip().lower()
+        if status and status != "runtime_selectable":
+            continue
+        provider = _norm_key(row.get("provider"))
+        model_name = str(row.get("model") or "").strip()
+        if provider == "openai" and model_name == "gpt-5":
+            continue
+        rows.append(row)
+    return rows
+
+
+def _semantic_kg_row_matches_override(row: dict[str, Any], override: str) -> bool:
+    candidate = _strip_route_prefix(override)
+    provider = str(row.get("provider") or "").strip()
+    model_name = str(row.get("model") or "").strip()
+    if not provider or not model_name:
+        return False
+    return candidate == model_name or candidate == f"{provider}/{model_name}"
+
+
+def _semantic_kg_default_row() -> dict[str, Any]:
+    rows = _semantic_kg_catalog_rows()
+    if not rows:
+        raise ValueError("No runtime-selectable GEN catalog models are available for GraphRAG semantic extraction.")
+
+    for row in rows:
+        if _norm_key(row.get("provider")) == "openai" and str(row.get("model") or "").strip() == "gpt-5.4":
+            return row
+
+    for row in rows:
+        if _norm_key(row.get("provider")) == "openai" and str(row.get("model") or "").strip().startswith("gpt-5.4"):
+            return row
+
+    return rows[0]
+
+
+def _semantic_kg_catalog_row(cfg: TriBridConfig) -> dict[str, Any]:
+    explicit = str(cfg.graph_indexing.semantic_kg_llm_model or "").strip()
+    if explicit:
+        for row in _semantic_kg_catalog_rows():
+            if _semantic_kg_row_matches_override(row, explicit):
+                return row
+        raise ValueError(
+            "GraphRAG semantic model must be a runtime-selectable GEN catalog entry; plain openai/gpt-5 is intentionally excluded."
+        )
+    return _semantic_kg_default_row()
+
+
+def _semantic_kg_model_override(cfg: TriBridConfig) -> str:
+    explicit = str(cfg.graph_indexing.semantic_kg_llm_model or "").strip()
+    if explicit:
+        _semantic_kg_catalog_row(cfg)
+        return explicit
+    row = _semantic_kg_default_row()
+    return f"{str(row.get('provider') or '').strip()}/{str(row.get('model') or '').strip()}"
+
+
+def _resolve_semantic_kg_route(cfg: TriBridConfig) -> ProviderRoute:
+    route = select_provider_route(config=cfg, model_override=_semantic_kg_model_override(cfg))
+    if route.kind not in {"cloud_direct", "openrouter", "litellm"}:
+        raise ValueError(
+            f"GraphRAG semantic model must resolve to an OpenAI-compatible route, got {route.kind}."
+        )
+    if not str(route.base_url or "").strip():
+        raise ValueError("GraphRAG semantic model resolved without a base URL.")
+    if not str(route.model or "").strip():
+        raise ValueError("GraphRAG semantic model resolved without a model id.")
+    return route
+
+
 def _detect_local_hardware_class() -> str:
     machine = str(platform.machine() or "").strip().lower()
     is_apple_silicon = sys.platform == "darwin" and machine in {"arm64", "aarch64"}
@@ -577,13 +622,8 @@ def _estimate_local_tokens_per_second(*, cfg: TriBridConfig, provider: str) -> i
 
 
 def _resolve_semantic_kg_model_and_provider(cfg: TriBridConfig) -> tuple[str, str]:
-    explicit_semantic_model = str(cfg.graph_indexing.semantic_kg_llm_model or "").strip()
-    if explicit_semantic_model:
-        provider = str(cfg.generation.gen_backend or "").strip().lower()
-        return explicit_semantic_model, provider
-    fallback_model = str(cfg.generation.enrich_model or "").strip()
-    provider = str(cfg.generation.enrich_backend or "").strip().lower()
-    return fallback_model, provider
+    row = _semantic_kg_catalog_row(cfg)
+    return str(row.get("model") or "").strip(), str(row.get("provider") or "").strip().lower()
 
 
 def _estimate_semantic_kg_cost_usd(
@@ -1014,286 +1054,6 @@ def _emit_event(
             return
 
 
-def _extract_semantic_concepts(text: str, *, min_len: int, max_terms: int) -> list[str]:
-    """Deterministic concept extraction (fallback for tests/offline)."""
-    if max_terms <= 0:
-        return []
-    toks = [t.lower() for t in _SEM_TOKEN_RE.findall(text or "")]
-    freq: dict[str, int] = defaultdict(int)
-    for t in toks:
-        if len(t) < min_len:
-            continue
-        if t in _SEM_STOPWORDS:
-            continue
-        freq[t] += 1
-    # Stable ordering: by frequency desc, then token asc.
-    items = sorted(freq.items(), key=lambda kv: (-kv[1], kv[0]))
-    return [k for k, _v in items[:max_terms]]
-
-
-def _iter_exception_chain(exc: BaseException) -> list[BaseException]:
-    out: list[BaseException] = []
-    seen: set[int] = set()
-    cur: BaseException | None = exc
-    while cur is not None and id(cur) not in seen:
-        out.append(cur)
-        seen.add(id(cur))
-        nxt = cur.__cause__ if cur.__cause__ is not None else cur.__context__
-        cur = nxt if isinstance(nxt, BaseException) else None
-    return out
-
-
-def _is_provider_auth_error(exc: BaseException) -> bool:
-    for err in _iter_exception_chain(exc):
-        status_code = getattr(err, "status_code", None)
-        if isinstance(status_code, int) and status_code in {401, 403}:
-            return True
-        msg = str(err).strip().lower()
-        if not msg:
-            continue
-        if "401" in msg or "403" in msg:
-            if any(tok in msg for tok in ("unauthorized", "forbidden", "auth", "api key")):
-                return True
-        if any(
-            tok in msg
-            for tok in (
-                "invalid api key",
-                "incorrect api key",
-                "authentication",
-                "unauthorized",
-                "forbidden",
-                "api key not set",
-            )
-        ):
-            return True
-    return False
-
-
-async def _extract_semantic_kg_llm(
-    text: str,
-    *,
-    cfg: TriBridConfig,
-    prompt: str,
-    model: str,
-    timeout_s: float,
-    reasoning_effort: str,
-    typed_entities_enabled: bool,
-    allowed_entity_types: set[str],
-    auth_failure_cache: set[str] | None = None,
-    require_success: bool = False,
-) -> tuple[list[dict[str, str]], list[dict[str, Any]]]:
-    """LLM-assisted semantic KG extraction (best-effort).
-
-    Returns:
-    - entities: list[dict] with keys: name, entity_type
-    - relations: list[dict] with keys: source, target, relation_type
-    """
-    # Route via Chat 2.0 providers so semantic KG extraction can use ragweld/local/openrouter
-    # as well as cloud_direct.
-    safe_text = (text or "").strip()
-    if "json" not in safe_text.lower():
-        safe_text = f"{safe_text}\n\nReturn JSON.".strip()
-
-    def _try_parse_json_object(raw: str) -> dict[str, Any] | None:
-        s = (raw or "").strip()
-        if not s:
-            return None
-        try:
-            obj = json.loads(s)
-            if isinstance(obj, dict):
-                return obj
-        except Exception:
-            pass
-
-        # Common case: model wraps JSON in a fenced block.
-        m = re.search(r"```(?:json)?\\s*(\\{.*?\\})\\s*```", s, flags=re.DOTALL | re.IGNORECASE)
-        if m:
-            try:
-                obj = json.loads(m.group(1))
-                if isinstance(obj, dict):
-                    return obj
-            except Exception:
-                pass
-
-        # Last resort: take the outermost braces.
-        i0 = s.find("{")
-        i1 = s.rfind("}")
-        if i0 != -1 and i1 != -1 and i1 > i0:
-            try:
-                obj = json.loads(s[i0 : i1 + 1])
-                if isinstance(obj, dict):
-                    return obj
-            except Exception:
-                pass
-        return None
-
-    def _normalize_entity_type(value: str) -> str | None:
-        v = (value or "").strip().lower()
-        aliases = {"organization": "org", "organisation": "org"}
-        v = aliases.get(v, v)
-        if not typed_entities_enabled:
-            v = "concept"
-        if v not in {"person", "org", "location", "event", "concept"}:
-            return None
-        if allowed_entity_types and v not in allowed_entity_types:
-            return None
-        return v
-
-    def _clean_entity_name(value: str) -> str:
-        out = re.sub(r"\s+", " ", str(value or "").replace("_", " ").strip())
-        return out
-
-    route = select_provider_route(config=cfg, model_override=str(model or "").strip())
-    provider_name = str(getattr(route, "provider_name", "") or "").strip().lower()
-    route_fingerprint = "|".join(
-        [
-            str(route.kind or "").strip().lower(),
-            provider_name,
-            str(route.base_url or "").strip().lower(),
-            str(route.model or "").strip(),
-            "key" if bool(getattr(route, "api_key", None)) else "nokey",
-        ]
-    )
-
-    if auth_failure_cache is not None and route_fingerprint in auth_failure_cache:
-        if require_success:
-            raise RuntimeError(
-                f"Semantic KG LLM route skipped due to cached auth failure ({route.kind}/{provider_name or 'unknown'})"
-            )
-        return ([], [])
-
-    llm_attempts = 3
-    for attempt in range(llm_attempts):
-        try:
-            data: dict[str, Any] | None = None
-
-            is_openai_responses = (
-                route.kind == "cloud_direct"
-                and str(getattr(route, "provider_name", "") or "").strip().lower() == "openai"
-                and str(getattr(route, "openai_protocol", "") or "").strip().lower() == "responses"
-            )
-
-            if is_openai_responses:
-                try:
-                    import openai as _openai
-                except Exception:
-                    _openai = None  # type: ignore[assignment]
-
-                openai_client_cls = getattr(_openai, "AsyncOpenAI", None) if _openai is not None else None
-                if openai_client_cls is not None and getattr(route, "api_key", None):
-                    client = openai_client_cls(api_key=str(route.api_key), base_url=str(route.base_url or "") or None)
-                    req: dict[str, Any] = {
-                        "model": str(route.model),
-                        "instructions": str(prompt or "").strip(),
-                        "input": safe_text,
-                        "text": {"format": {"type": "json_object"}},
-                        "timeout": float(timeout_s),
-                    }
-                    effort = (reasoning_effort or "").strip().lower()
-                    if effort in {"minimal", "low", "medium", "high", "xhigh"}:
-                        req["reasoning"] = {"effort": effort}
-                    resp = await client.responses.create(**req)
-                    raw = str(getattr(resp, "output_text", "") or "").strip()
-                    data = _try_parse_json_object(raw)
-
-            if data is None:
-                raw, _provider_id = await generate_chat_text(
-                    route=route,
-                    openrouter_cfg=cfg.chat.openrouter,
-                    system_prompt=str(prompt or "").strip(),
-                    user_message=safe_text,
-                    images=[],
-                    temperature=0.0,
-                    max_tokens=512,
-                    context_text="",
-                    context_chunks=[],
-                    timeout_s=float(timeout_s),
-                )
-                data = _try_parse_json_object(str(raw or ""))
-
-            if not data:
-                if require_success:
-                    raise RuntimeError("Semantic KG LLM returned non-JSON or empty JSON output")
-                return ([], [])
-            break
-        except Exception as exc:
-            if _is_provider_auth_error(exc):
-                already_cached = auth_failure_cache is not None and route_fingerprint in auth_failure_cache
-                if auth_failure_cache is not None:
-                    auth_failure_cache.add(route_fingerprint)
-                if not already_cached:
-                    logger.warning(
-                        "Semantic KG LLM auth failure for route=%s/%s model=%s; enabling heuristic fallback for remaining chunks in this run.",
-                        route.kind,
-                        provider_name or "unknown",
-                        str(route.model or ""),
-                    )
-                if require_success:
-                    raise
-                return ([], [])
-            if attempt < (llm_attempts - 1):
-                await asyncio.sleep(0.5 * (attempt + 1))
-                continue
-            if require_success:
-                raise
-            return ([], [])
-
-    entities_raw = data.get("entities") if isinstance(data, dict) else None
-    concepts_raw = data.get("concepts") if isinstance(data, dict) else None
-    relations_raw = data.get("relations") if isinstance(data, dict) else None
-
-    entities: list[dict[str, str]] = []
-    seen_entities: set[tuple[str, str]] = set()
-
-    if isinstance(entities_raw, list):
-        for item in entities_raw:
-            if not isinstance(item, dict):
-                continue
-            name = _clean_entity_name(str(item.get("name") or ""))
-            et = _normalize_entity_type(str(item.get("entity_type") or "concept"))
-            if not name or not et:
-                continue
-            key = (et, name.lower())
-            if key in seen_entities:
-                continue
-            seen_entities.add(key)
-            entities.append({"name": name, "entity_type": et})
-
-    if not entities and isinstance(concepts_raw, list):
-        for c in concepts_raw:
-            name = _clean_entity_name(str(c or ""))
-            et = _normalize_entity_type("concept")
-            if not name or not et:
-                continue
-            key = (et, name.lower())
-            if key in seen_entities:
-                continue
-            seen_entities.add(key)
-            entities.append({"name": name, "entity_type": et})
-
-    relations: list[dict[str, Any]] = []
-    if isinstance(relations_raw, list):
-        for r in relations_raw:
-            if not isinstance(r, dict):
-                continue
-            src = _clean_entity_name(str(r.get("source") or ""))
-            tgt = _clean_entity_name(str(r.get("target") or ""))
-            rel_type = str(r.get("relation_type") or "related_to").strip().lower()
-            if not src or not tgt or src == tgt:
-                continue
-            if rel_type not in SEMANTIC_RELATION_TYPES:
-                continue
-            relation_item: dict[str, Any] = {"source": src, "target": tgt, "relation_type": rel_type}
-            if r.get("evidence_text") is not None:
-                relation_item["evidence_text"] = str(r.get("evidence_text") or "")
-            confidence_val = _to_optional_float(r.get("confidence"))
-            if confidence_val is not None:
-                relation_item["confidence"] = confidence_val
-            relations.append(relation_item)
-
-    return (entities, relations)
-
-
 async def _run_index(
     repo_id: str,
     repo_path: str,
@@ -1567,9 +1327,6 @@ async def _run_index_body(
     semantic_entities_total = 0
     semantic_relations_total = 0
     semantic_empty_chunks = 0
-    semantic_llm_errors = 0
-    semantic_llm_auth_failures: set[str] = set()
-    semantic_llm_fallback_chunks = 0
     contextual_mode = str(getattr(cfg.embedding, "contextual_chunk_embeddings", "off") or "off").strip().lower()
     indexing_workers = max(1, int(getattr(cfg.indexing, "indexing_workers", 1) or 1))
     has_graph_upserts = bool(neo4j is not None and cfg.graph_indexing.build_lexical_graph)
@@ -1889,317 +1646,70 @@ async def _run_index_body(
             and semantic_processed < semantic_budget
         ):
             try:
-                mode = str(cfg.graph_indexing.semantic_kg_mode or "heuristic").strip().lower()
-                max_terms = int(cfg.graph_indexing.semantic_kg_max_concepts_per_chunk)
-                min_len = int(cfg.graph_indexing.semantic_kg_min_concept_len)
-                max_rels_per_chunk = int(cfg.graph_indexing.semantic_kg_max_relations_per_chunk)
-                llm_model = str(cfg.graph_indexing.semantic_kg_llm_model or "").strip() or str(cfg.generation.enrich_model)
-                llm_prompt = str(cfg.system_prompts.semantic_kg_extraction or "").strip()
-                llm_timeout_s = float(cfg.graph_indexing.semantic_kg_llm_timeout_s)
-                llm_max_chars = int(cfg.enrichment.enrich_max_chars)
-                typed_entities_enabled = bool(cfg.graph_indexing.semantic_kg_typed_entities_enabled)
-                require_llm_success = bool(cfg.graph_indexing.semantic_kg_require_llm_success)
-                reasoning_effort = str(cfg.graph_indexing.semantic_kg_reasoning_effort or "medium").strip().lower()
-
-                allowed_entity_types = {
-                    str(t).strip().lower() for t in (cfg.graph_indexing.semantic_kg_allowed_entity_types or [])
-                }
-                if not allowed_entity_types:
-                    allowed_entity_types = {"concept"}
-
-                def _normalize_semantic_entity(
-                    name: str,
-                    entity_type: str,
-                    *,
-                    _min_len: int = min_len,
-                ) -> tuple[str, str] | None:
-                    et = str(entity_type or "").strip().lower()
-                    raw = str(name or "").strip()
-                    if not raw:
-                        return None
-                    if et == "concept":
-                        v = raw.lower()
-                        v = re.sub(r"[^a-z0-9_]+", "_", v).strip("_")
-                        if len(v) < _min_len:
-                            return None
-                        if v in _SEM_STOPWORDS:
-                            return None
-                        if not _SEM_TOKEN_RE.fullmatch(v):
-                            return None
-                        return (v, v)
-                    v = re.sub(r"[_-]+", " ", raw)
-                    v = re.sub(r"\s+", " ", v).strip()
-                    if len(v) < 2:
-                        return None
-                    key = v.lower()
-                    return (v, key)
-
-                def _relation_lookup_keys(value: str) -> list[str]:
-                    raw = str(value or "").strip()
-                    if not raw:
-                        return []
-                    cleaned = re.sub(r"[_-]+", " ", raw)
-                    cleaned = re.sub(r"\s+", " ", cleaned).strip().lower()
-                    out: list[str] = []
-                    if cleaned:
-                        out.append(cleaned)
-                    concept_key = re.sub(r"[^a-z0-9_]+", "_", cleaned).strip("_")
-                    if concept_key and concept_key not in out:
-                        out.append(concept_key)
-                    return out
-
-                semantic_entities: dict[str, Entity] = {}
-                rels: list[Relationship] = []
-                link_set: set[tuple[str, str]] = set()
-                batch_entities_added = 0
-                batch_relations_added = 0
-                batch_empty_chunks = 0
-                batch_llm_errors = 0
-                batch_llm_fallback_chunks = 0
-
-                # Respect indexing_workers for semantic KG LLM extraction so
-                # this setting has a measurable indexing-time effect.
-                semantic_workers = max(1, int(getattr(cfg.indexing, "indexing_workers", 1) or 1))
                 remaining_budget = max(0, semantic_budget - semantic_processed)
                 chunks_for_semantic = semantic_pending_chunks[:remaining_budget]
-                llm_extract_by_chunk: dict[str, tuple[list[dict[str, str]], list[dict[str, Any]]]] = {}
-
-                if mode == "llm" and llm_prompt and chunks_for_semantic:
-                    async def _extract_for_chunk(
-                        ch: Chunk,
-                        *,
-                        _llm_max_chars: int = llm_max_chars,
-                        _llm_prompt: str = llm_prompt,
-                        _llm_model: str = llm_model,
-                        _llm_timeout_s: float = llm_timeout_s,
-                        _reasoning_effort: str = reasoning_effort,
-                        _typed_entities_enabled: bool = typed_entities_enabled,
-                        _allowed_entity_types: set[str] = allowed_entity_types,
-                        _require_llm_success: bool = require_llm_success,
-                    ) -> tuple[str, list[dict[str, str]], list[dict[str, Any]]]:
-                        try:
-                            entities_raw, relations_raw = await _extract_semantic_kg_llm(
-                                (ch.content or "")[: max(0, _llm_max_chars)],
-                                cfg=cfg,
-                                prompt=_llm_prompt,
-                                model=_llm_model,
-                                timeout_s=_llm_timeout_s,
-                                reasoning_effort=_reasoning_effort,
-                                typed_entities_enabled=_typed_entities_enabled,
-                                allowed_entity_types=_allowed_entity_types,
-                                auth_failure_cache=semantic_llm_auth_failures,
-                                require_success=_require_llm_success,
-                            )
-                        except Exception as exc:
-                            raise RuntimeError(
-                                f"Semantic KG extraction failed for file={ch.file_path} chunk_id={ch.chunk_id}: {exc}"
-                            ) from exc
-                        return ch.chunk_id, entities_raw, relations_raw
-
-                    for i0 in range(0, len(chunks_for_semantic), semantic_workers):
-                        batch = chunks_for_semantic[i0 : i0 + semantic_workers]
-                        coros = [_extract_for_chunk(ch) for ch in batch]
-                        if require_llm_success:
-                            batch_results = await asyncio.gather(*coros)
-                            for chunk_id, entities_raw_one, relations_raw_one in batch_results:
-                                llm_extract_by_chunk[chunk_id] = (entities_raw_one, relations_raw_one)
-                        else:
-                            batch_results_with_errors = await asyncio.gather(*coros, return_exceptions=True)
-                            for item in batch_results_with_errors:
-                                if isinstance(item, BaseException):
-                                    batch_llm_errors += 1
-                                    semantic_llm_errors += 1
-                                    continue
-                                chunk_id, entities_raw_one, relations_raw_one = item
-                                llm_extract_by_chunk[chunk_id] = (entities_raw_one, relations_raw_one)
-
-                for ch in chunks_for_semantic:
-                    if semantic_processed >= semantic_budget:
-                        break
-                    semantic_processed += 1
-
-                    entities_raw: list[dict[str, str]]
-                    relations_raw: list[dict[str, Any]]
-                    chunk_mode = "llm" if mode == "llm" else "heuristic"
-                    if mode == "llm" and llm_prompt:
-                        entities_raw, relations_raw = llm_extract_by_chunk.get(ch.chunk_id, ([], []))
-                        if not entities_raw and semantic_llm_auth_failures:
-                            concepts = _extract_semantic_concepts(ch.content, min_len=min_len, max_terms=max_terms)
-                            entities_raw = [{"name": c, "entity_type": "concept"} for c in concepts]
-                            relations_raw = []
-                            chunk_mode = "heuristic"
-                            semantic_llm_fallback_chunks += 1
-                            batch_llm_fallback_chunks += 1
-                        if not entities_raw:
-                            semantic_empty_chunks += 1
-                            batch_empty_chunks += 1
-                            continue
-                    else:
-                        concepts = _extract_semantic_concepts(ch.content, min_len=min_len, max_terms=max_terms)
-                        entities_raw = [{"name": c, "entity_type": "concept"} for c in concepts]
-                        relations_raw = []
-                        chunk_mode = "heuristic"
-
-                    chunk_entity_ids: list[str] = []
-                    chunk_name_to_ids: dict[str, list[str]] = defaultdict(list)
-                    seen_entities: set[tuple[str, str]] = set()
-                    for entry in entities_raw:
-                        if not isinstance(entry, dict):
-                            continue
-                        et = str(entry.get("entity_type") or "concept").strip().lower()
-                        if et not in {"person", "org", "location", "event", "concept"}:
-                            continue
-                        if et not in allowed_entity_types:
-                            continue
-                        normalized = _normalize_semantic_entity(str(entry.get("name") or ""), et)
-                        if not normalized:
-                            continue
-                        display_name, stable_name = normalized
-                        entity_key = (et, stable_name)
-                        if entity_key in seen_entities:
-                            continue
-                        seen_entities.add(entity_key)
-                        ent_id = GraphBuilder._stable_id(write_repo_id, "", et, stable_name)
-                        if ent_id not in semantic_entities:
-                            semantic_entities[ent_id] = Entity(
-                                entity_id=ent_id,
-                                name=display_name,
-                                entity_type=et,  # type: ignore[arg-type]
-                                file_path=None,
-                                description=None,
-                                properties={
-                                    "source": "semantic",
-                                    "mode": chunk_mode,
-                                    "run_id": run_id,
-                                },
-                            )
-                            semantic_entities_total += 1
-                            batch_entities_added += 1
-                        chunk_entity_ids.append(ent_id)
-                        keys = _relation_lookup_keys(display_name)
-                        if stable_name not in keys:
-                            keys.append(stable_name)
-                        for key in keys:
-                            bucket = chunk_name_to_ids.setdefault(key, [])
-                            if ent_id not in bucket:
-                                bucket.append(ent_id)
-                        link_set.add((ent_id, ch.chunk_id))
-                        if len(chunk_entity_ids) >= max_terms and et == "concept":
-                            break
-
-                    if not chunk_entity_ids:
-                        continue
-
-                    if max_rels_per_chunk > 0:
-                        rels_added = 0
-                        if chunk_mode == "llm" and relations_raw:
-                            for r in relations_raw:
-                                if rels_added >= max_rels_per_chunk:
-                                    break
-                                src_raw = str(r.get("source") or "")
-                                tgt_raw = str(r.get("target") or "")
-                                rel_type = str(r.get("relation_type") or "related_to").strip().lower()
-                                if rel_type not in SEMANTIC_RELATION_TYPES:
-                                    continue
-                                src_id: str | None = None
-                                tgt_id: str | None = None
-                                for key in _relation_lookup_keys(src_raw):
-                                    ids = chunk_name_to_ids.get(key) or []
-                                    if ids:
-                                        src_id = ids[0]
-                                        break
-                                for key in _relation_lookup_keys(tgt_raw):
-                                    ids = chunk_name_to_ids.get(key) or []
-                                    if ids:
-                                        tgt_id = ids[0]
-                                        break
-                                if not src_id or not tgt_id or src_id == tgt_id:
-                                    continue
-                                rel_props: dict[str, Any] = {
-                                    "source": "semantic",
-                                    "mode": "llm",
-                                    "chunk_id": ch.chunk_id,
-                                    "file_path": ch.file_path,
-                                    "run_id": run_id,
-                                    "model": llm_model,
-                                }
-                                if r.get("evidence_text") is not None:
-                                    rel_props["evidence_text"] = str(r.get("evidence_text") or "")
-                                confidence_val = _to_optional_float(r.get("confidence"))
-                                if confidence_val is not None:
-                                    rel_props["confidence"] = confidence_val
-                                rels.append(
-                                    Relationship(
-                                        source_id=src_id,
-                                        target_id=tgt_id,
-                                        relation_type=rel_type,  # type: ignore[arg-type]
-                                        weight=float(cfg.graph_indexing.semantic_kg_relation_weight_llm),
-                                        properties=rel_props,
-                                    )
-                                )
-                                rels_added += 1
-                                batch_relations_added += 1
-                                semantic_relations_total += 1
-                        if chunk_mode == "heuristic" and rels_added == 0 and len(chunk_entity_ids) >= 2:
-                            root = chunk_entity_ids[0]
-                            for tgt in chunk_entity_ids[1:]:
-                                rels.append(
-                                    Relationship(
-                                        source_id=root,
-                                        target_id=tgt,
-                                        relation_type="related_to",
-                                        weight=float(cfg.graph_indexing.semantic_kg_relation_weight_heuristic),
-                                        properties={
-                                            "source": "semantic",
-                                            "mode": "heuristic",
-                                            "chunk_id": ch.chunk_id,
-                                            "file_path": ch.file_path,
-                                            "run_id": run_id,
-                                            "model": "",
-                                        },
-                                    )
-                                )
-                                rels_added += 1
-                                batch_relations_added += 1
-                                semantic_relations_total += 1
-                                if rels_added >= max_rels_per_chunk:
-                                    break
-
-                if semantic_entities:
-                    with INDEX_STAGE_LATENCY_SECONDS.labels(stage="neo4j_upsert_semantic_entities").time():
-                        await neo4j.upsert_entities(write_repo_id, list(semantic_entities.values()))
-                if rels:
-                    with INDEX_STAGE_LATENCY_SECONDS.labels(stage="neo4j_upsert_semantic_relationships").time():
-                        await neo4j.upsert_relationships(write_repo_id, rels)
-                if link_set:
-                    with INDEX_STAGE_LATENCY_SECONDS.labels(stage="neo4j_link_entities_to_chunks").time():
-                        await neo4j.link_entities_to_chunks(
-                            write_repo_id,
-                            links=[{"entity_id": eid, "chunk_id": cid} for (eid, cid) in sorted(link_set)],
-                        )
-                if event_queue is not None and chunks_for_semantic:
-                    _emit_event(
-                        event_queue,
-                        {
-                            "type": "log",
-                            "message": (
-                                "🧠 Semantic KG batch: "
-                                f"chunks={len(chunks_for_semantic)} "
-                                f"entities={batch_entities_added} "
-                                f"relations={batch_relations_added} "
-                                f"empty_chunks={batch_empty_chunks} "
-                                f"parse_api_errors={batch_llm_errors} "
-                                f"heuristic_fallback_chunks={batch_llm_fallback_chunks}"
-                            ),
-                        },
-                        drop_oldest=True,
+                if chunks_for_semantic:
+                    semantic_processed += len(chunks_for_semantic)
+                    semantic_route = _resolve_semantic_kg_route(cfg)
+                    graphrag_result = await extract_semantic_kg_with_graphrag(
+                        repo_id=write_repo_id,
+                        run_id=run_id,
+                        cfg=cfg,
+                        chunks=chunks_for_semantic,
+                        route_model=str(semantic_route.model or "").strip(),
+                        route_base_url=str(semantic_route.base_url or "").strip(),
+                        route_api_key=str(semantic_route.api_key or "").strip() or None,
                     )
-            except Exception:
+
+                    if graphrag_result.entities:
+                        with INDEX_STAGE_LATENCY_SECONDS.labels(stage="neo4j_upsert_semantic_entities").time():
+                            await neo4j.upsert_entities(write_repo_id, graphrag_result.entities)
+                    if graphrag_result.relationships:
+                        with INDEX_STAGE_LATENCY_SECONDS.labels(stage="neo4j_upsert_semantic_relationships").time():
+                            await neo4j.upsert_relationships(write_repo_id, graphrag_result.relationships)
+                    if graphrag_result.chunk_links:
+                        with INDEX_STAGE_LATENCY_SECONDS.labels(stage="neo4j_link_entities_to_chunks").time():
+                            await neo4j.link_entities_to_chunks(write_repo_id, graphrag_result.chunk_links)
+
+                    semantic_entities_total += len(graphrag_result.entities)
+                    semantic_relations_total += len(graphrag_result.relationships)
+                    semantic_empty_chunks += graphrag_result.empty_chunks
+
+                    if event_queue is not None:
+                        _emit_event(
+                            event_queue,
+                            {
+                                "type": "log",
+                                "message": (
+                                    "🧠 GraphRAG semantic batch: "
+                                    f"chunks={graphrag_result.processed_chunks} "
+                                    f"entities={len(graphrag_result.entities)} "
+                                    f"relations={len(graphrag_result.relationships)} "
+                                    f"empty_chunks={graphrag_result.empty_chunks}"
+                                ),
+                            },
+                            drop_oldest=True,
+                        )
+            except Exception as exc:
                 INDEX_STAGE_ERRORS_TOTAL.labels(stage="semantic_kg").inc()
                 if bool(cfg.graph_indexing.semantic_kg_require_llm_success):
                     raise
-                # Semantic KG is optional unless strict mode is enabled.
-                pass
+                logger.warning(
+                    "GraphRAG semantic extraction failed for repo_id=%s run_id=%s: %s",
+                    repo_id,
+                    run_id,
+                    exc,
+                    exc_info=True,
+                )
+                if event_queue is not None:
+                    _emit_event(
+                        event_queue,
+                        {
+                            "type": "warning",
+                            "message": f"GraphRAG semantic extraction failed: {exc}",
+                        },
+                        drop_oldest=True,
+                    )
             finally:
                 # Important: only process each queued chunk once.
                 semantic_pending_chunks.clear()
@@ -2272,13 +1782,11 @@ async def _run_index_body(
             {
                 "type": "log",
                 "message": (
-                    "🧠 Semantic KG summary: "
+                    "🧠 GraphRAG summary: "
                     f"processed_chunks={semantic_processed} "
                     f"entities={semantic_entities_total} "
                     f"relations={semantic_relations_total} "
-                    f"empty_chunks={semantic_empty_chunks} "
-                    f"parse_api_errors={semantic_llm_errors} "
-                    f"heuristic_fallback_chunks={semantic_llm_fallback_chunks}"
+                    f"empty_chunks={semantic_empty_chunks}"
                 ),
             },
             drop_oldest=True,
@@ -2649,9 +2157,7 @@ async def estimate_index(request: IndexRequest) -> IndexEstimate:
     embedding_model = str(getattr(cfg.embedding, "effective_model", "") or "").strip()
 
     semantic_kg_enabled = bool(cfg.graph_indexing.semantic_kg_enabled)
-    semantic_kg_mode = str(cfg.graph_indexing.semantic_kg_mode or "heuristic").strip().lower()
-    semantic_kg_llm_enabled = semantic_kg_enabled and semantic_kg_mode == "llm"
-    semantic_kg_chunks = min(est_chunks, max(0, int(cfg.graph_indexing.semantic_kg_max_chunks or 0))) if semantic_kg_llm_enabled else 0
+    semantic_kg_chunks = min(est_chunks, max(0, int(cfg.graph_indexing.semantic_kg_max_chunks or 0))) if semantic_kg_enabled else 0
     semantic_model, semantic_provider_hint = _resolve_semantic_kg_model_and_provider(cfg)
 
     # Pricing (models.json): deterministic backend and skip_dense imply $0 external embedding cost.
@@ -2666,7 +2172,7 @@ async def estimate_index(request: IndexRequest) -> IndexEstimate:
         )
 
     semantic_kg_cost: float | None = None
-    if semantic_kg_llm_enabled:
+    if semantic_kg_enabled:
         semantic_kg_cost = _estimate_semantic_kg_cost_usd(
             provider_hint=semantic_provider_hint,
             model=semantic_model,
@@ -2675,7 +2181,7 @@ async def estimate_index(request: IndexRequest) -> IndexEstimate:
         )
 
     total_cost: float | None
-    if semantic_kg_llm_enabled:
+    if semantic_kg_enabled:
         total_cost = None if embedding_cost is None or semantic_kg_cost is None else float(embedding_cost) + float(semantic_kg_cost)
     else:
         total_cost = embedding_cost
@@ -2714,7 +2220,7 @@ async def estimate_index(request: IndexRequest) -> IndexEstimate:
     if est_tokens > 0 and tps > 0:
         base_embedding_seconds = float(est_tokens) / float(tps)
         base_total_seconds = base_embedding_seconds
-        if semantic_kg_llm_enabled and semantic_kg_chunks > 0:
+        if semantic_kg_enabled and semantic_kg_chunks > 0:
             semantic_provider_for_time = semantic_provider_hint
             resolved_semantic_spec = _find_model_spec(
                 _load_models_json(),
@@ -2730,7 +2236,7 @@ async def estimate_index(request: IndexRequest) -> IndexEstimate:
             )
             base_total_seconds += float(estimated_seconds_semantic_kg)
             assumptions.append(
-                f"semantic_kg_llm≈{semantic_kg_chunks:,} chunks using {semantic_provider_for_time or 'unknown'}"
+                f"semantic_graphrag≈{semantic_kg_chunks:,} chunks using {semantic_provider_for_time or 'unknown'}"
             )
         est_low = max(0.0, (base_total_seconds * _EST_RANGE_LOW_MULT) + float(_EST_OVERHEAD_SECONDS))
         est_high = max(est_low, (base_total_seconds * _EST_RANGE_HIGH_MULT) + float(_EST_OVERHEAD_SECONDS) * 2.0)
@@ -3002,8 +2508,7 @@ async def get_dashboard_index_status(scope: CorpusScope = _CORPUS_SCOPE_DEP) -> 
     semantic_kg_cost: float | None = None
     total_cost: float | None = embedding_cost
     semantic_kg_enabled = bool(cfg.graph_indexing.semantic_kg_enabled)
-    semantic_kg_mode = str(cfg.graph_indexing.semantic_kg_mode or "heuristic").strip().lower()
-    if semantic_kg_enabled and semantic_kg_mode == "llm":
+    if semantic_kg_enabled:
         semantic_model, semantic_provider_hint = _resolve_semantic_kg_model_and_provider(cfg)
         semantic_chunks = min(total_chunks, max(0, int(cfg.graph_indexing.semantic_kg_max_chunks or 0)))
         semantic_kg_cost = _estimate_semantic_kg_cost_usd(

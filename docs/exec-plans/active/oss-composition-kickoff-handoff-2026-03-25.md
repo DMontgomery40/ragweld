@@ -342,6 +342,16 @@ currently cluster in:
 Do **not** treat those remaining failures as permission to reintroduce
 fallbacks in the fork slices that are already moving.
 
+Additional GraphRAG guardrail:
+
+- The checked-in `tribrid_config.json` graph defaults must stay aligned with
+  `server/models/tribrid_config_model.py` for this branch.
+- Official Neo4j GraphRAG schema guidance must be config-driven, not
+  hardcoded to concept-only or to a baked-in relation/entity subset.
+- If `semantic_kg_allowed_entity_types` or relation-type controls drift from
+  the Pydantic truth, fix the config/template/tests together before trusting
+  the corpus run.
+
 ## Exact Prompt For The Next Agent
 
 Use this literally or with minimal adaptation:

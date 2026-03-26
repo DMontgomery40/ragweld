@@ -21,7 +21,7 @@ type SyntheticArtifactKind = SyntheticArtifactRef['kind'];
 type SyntheticProvider = NonNullable<SyntheticRunStartRequest['provider']>;
 type SyntheticRecipeKind = NonNullable<SyntheticRunStartRequest['recipe']>;
 
-const PROVIDERS: SyntheticProvider[] = ['internal_ragweld', 'synthetic_data_kit'];
+const PROVIDERS: SyntheticProvider[] = ['synthetic_data_kit'];
 const RECIPES: SyntheticRecipeKind[] = [
   'eval_dataset',
   'semantic_cards',
@@ -48,6 +48,16 @@ function toModelValue(model: ChatModelInfo): string {
 function toModelLabel(model: ChatModelInfo): string {
   const name = String(model.catalog_model || model.id || '').trim();
   return `${model.provider} · ${name}`;
+}
+
+function isAllowedSyntheticModel(model: ChatModelInfo): boolean {
+  const provider = String(model.provider || '').trim().toLowerCase();
+  const catalog = String(model.catalog_model || model.id || '').trim().toLowerCase();
+  const override = String(model.override || '').trim().toLowerCase();
+  const candidate = override.startsWith('openai/') ? override.slice('openai/'.length) : catalog;
+
+  if (provider !== 'openai') return true;
+  return candidate.startsWith('gpt-5');
 }
 
 function SyntheticModelPicker({
@@ -152,7 +162,7 @@ export function SyntheticLabSubtab() {
   const location = useLocation();
   const { success, error: notifyError, info } = useNotification();
 
-  const [provider, setProvider] = useState<SyntheticProvider>('internal_ragweld');
+  const [provider, setProvider] = useState<SyntheticProvider>('synthetic_data_kit');
   const [recipe, setRecipe] = useState<SyntheticRecipeKind>('eval_dataset');
   const [generatorModel, setGeneratorModel] = useState('');
   const [judgeModel, setJudgeModel] = useState('');
@@ -202,7 +212,12 @@ export function SyntheticLabSubtab() {
       .then(({ data }) => {
         if (cancelled) return;
         const models = Array.isArray(data?.models)
-          ? data.models.filter((model) => Array.isArray(model.components) && model.components.includes('GEN'))
+          ? data.models.filter(
+              (model) =>
+                Array.isArray(model.components) &&
+                model.components.includes('GEN') &&
+                isAllowedSyntheticModel(model)
+            )
           : [];
         setAvailableModels(models);
       })

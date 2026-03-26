@@ -3,6 +3,7 @@
 import pytest
 from pydantic import ValidationError
 
+from server.config import DEFAULT_CONFIG_PATH, load_config
 from server.models.tribrid_config_model import (
     ChunkingConfig,
     EmbeddingConfig,
@@ -85,8 +86,48 @@ def test_graph_indexing_config_weight_defaults() -> None:
     assert cfg.ast_inherits_weight == 1.0
     assert cfg.ast_imports_weight == 1.0
     assert cfg.ast_calls_weight == 1.0
+    assert cfg.semantic_kg_mode == "llm"
+    assert cfg.semantic_kg_typed_entities_enabled is True
+    assert cfg.semantic_kg_allowed_entity_types == ["person", "org", "location", "event", "concept"]
+    assert cfg.semantic_kg_allowed_relation_types == [
+        "associated_with",
+        "met_with",
+        "communicated_with",
+        "works_for",
+        "member_of",
+        "founded",
+        "owns",
+        "funded",
+        "participated_in",
+        "located_in",
+        "references",
+        "related_to",
+    ]
+    assert cfg.semantic_kg_max_chunks == 40000
     assert cfg.semantic_kg_relation_weight_llm == 0.7
     assert cfg.semantic_kg_relation_weight_heuristic == 0.5
+
+
+def test_checked_in_global_config_matches_graph_branch_defaults() -> None:
+    cfg = load_config(DEFAULT_CONFIG_PATH).graph_indexing
+    assert cfg.semantic_kg_mode == "llm"
+    assert cfg.semantic_kg_typed_entities_enabled is True
+    assert cfg.semantic_kg_allowed_entity_types == ["person", "org", "location", "event", "concept"]
+    assert cfg.semantic_kg_allowed_relation_types == [
+        "associated_with",
+        "met_with",
+        "communicated_with",
+        "works_for",
+        "member_of",
+        "founded",
+        "owns",
+        "funded",
+        "participated_in",
+        "located_in",
+        "references",
+        "related_to",
+    ]
+    assert cfg.semantic_kg_max_chunks == 40000
 
 
 def test_graph_indexing_config_weight_validation() -> None:

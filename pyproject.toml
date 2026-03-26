@@ -14,15 +14,12 @@ dependencies = [
     "fastapi>=0.110.0",
     "uvicorn[standard]>=0.27.0",
     "python-multipart>=0.0.9",
-
     # MCP (Model Context Protocol) - official Python SDK
     "mcp>=1.26.0",
-
     # Database
     "asyncpg>=0.29.0",
     "pgvector>=0.2.4",
     "neo4j>=5.15.0",
-
     # AI/ML
     "pydantic-ai>=0.0.24",
     "openai>=1.12.0",
@@ -33,13 +30,11 @@ dependencies = [
     "torch>=2.1.0",
     "einops>=0.8.0",
     "tiktoken>=0.6.0",
-
     # Data Processing
     "pydantic>=2.5.0",
     "pydantic-settings>=2.1.0",
     "tree-sitter>=0.21.0",
     "tree-sitter-languages>=1.10.0",
-
     # Observability
     "prometheus-client>=0.19.0",
     "opentelemetry-api>=1.22.0",
@@ -47,24 +42,22 @@ dependencies = [
     "opentelemetry-exporter-otlp>=1.22.0",
     "opentelemetry-instrumentation-fastapi>=0.43b0",
     "langfuse>=3.10.1",
-
     # Utilities
     "httpx>=0.26.0",
     "aiofiles>=23.2.1",
     "python-dotenv>=1.0.0",
     "structlog>=24.1.0",
-
     # Document extraction (PDF/XLSX/Parquet ingestion)
     "pypdf>=4.3.1",
     "openpyxl>=3.1.5",
     "pandas>=2.2.0",
     "pyarrow>=15.0.0",
-
     # OSS retrieval/indexing pilot
     "haystack-ai>=2.26.0",
     "qdrant-client>=1.17.0",
     "qdrant-haystack>=10.3.0",
     "docling>=2.81.0",
+    "neo4j-graphrag[openai]==1.14.1",
 ]
 
 [project.optional-dependencies]

@@ -51,6 +51,21 @@ def synthetic_generation_model_category(model: str) -> str:
     return "auto"
 
 
+def _is_allowed_branch_synthetic_model(model: str) -> bool:
+    raw = str(model or "").strip().lower()
+    if not raw:
+        return False
+    for prefix in ("openrouter:", "litellm:"):
+        if raw.startswith(prefix):
+            raw = raw[len(prefix) :]
+            break
+    if raw.startswith("openai/"):
+        raw = raw.split("/", 1)[1]
+    if raw.startswith(("gpt-", "o1", "o3", "o4")):
+        return raw.startswith("gpt-5")
+    return True
+
+
 def resolve_synthetic_route(*, cfg: TriBridConfig, model: str) -> ProviderRoute:
     model_name = str(model or "").strip()
     if not model_name:
@@ -66,14 +81,14 @@ def resolve_available_synthetic_generation_model(cfg: TriBridConfig) -> str | No
     candidates: list[str] = []
 
     if os.getenv("OPENAI_API_KEY", "").strip():
-        candidates.append("openai/gpt-4o-mini")
+        candidates.append("openai/gpt-5.4-mini")
     litellm_default = str(getattr(cfg.chat.litellm, "default_model", "") or "").strip()
     litellm_enabled = bool(getattr(cfg.chat.litellm, "enabled", False))
     litellm_base = str(getattr(cfg.chat.litellm, "base_url", "") or "").strip()
-    if litellm_enabled and litellm_base and litellm_default:
+    if litellm_enabled and litellm_base and litellm_default and _is_allowed_branch_synthetic_model(litellm_default):
         candidates.append(f"litellm:{litellm_default}")
     if os.getenv("OPENROUTER_API_KEY", "").strip():
-        candidates.append("openrouter:openai/gpt-4o-mini")
+        candidates.append("openrouter:openai/gpt-5.4-mini")
 
     local_default = str(cfg.chat.local_models.default_chat_model or "").strip()
     if local_default:
@@ -84,6 +99,8 @@ def resolve_available_synthetic_generation_model(cfg: TriBridConfig) -> str | No
         candidates.append(f"ragweld:{ragweld_base}")
 
     for model in candidates:
+        if not _is_allowed_branch_synthetic_model(model):
+            continue
         try:
             _ = resolve_synthetic_route(cfg=cfg, model=model)
             return model
@@ -367,7 +384,7 @@ async def _generate_eval_candidates_for_chunk(
         f"SOURCE_EXCERPT:\\n{source_excerpt}"
     )
 
-    response_text, _resp_id = await generate_chat_text(
+    response = await generate_chat_text(
         route=route,
         openrouter_cfg=cfg.chat.openrouter,
         system_prompt=system_prompt,
@@ -381,7 +398,7 @@ async def _generate_eval_candidates_for_chunk(
         timeout_s=float(cfg.generation.gen_timeout or 60),
     )
 
-    payload = _clean_llm_json_payload(response_text)
+    payload = _clean_llm_json_payload(response.text)
     parsed = json.loads(payload)
     rows: list[dict[str, str]] = []
     for item in _normalize_eval_candidate_payload(parsed):
@@ -445,7 +462,7 @@ async def _judge_eval_item(
     user_message = json.dumps(payload, ensure_ascii=False)
 
     judge_cfg = cfg.synthetic.judge
-    response_text, _resp_id = await generate_chat_text(
+    response = await generate_chat_text(
         route=route,
         openrouter_cfg=cfg.chat.openrouter,
         system_prompt=system_prompt,
@@ -459,7 +476,7 @@ async def _judge_eval_item(
         timeout_s=float(cfg.generation.gen_timeout or 60),
     )
 
-    parsed = json.loads(_clean_llm_json_payload(response_text))
+    parsed = json.loads(_clean_llm_json_payload(response.text))
     if not isinstance(parsed, dict):
         return 0.0, False, "judge returned non-object"
 

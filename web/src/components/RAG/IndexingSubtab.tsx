@@ -67,6 +67,15 @@ const FALLBACK_CHUNKING_STRATEGIES = [
   { id: 'hybrid', label: 'Hybrid', description: 'AST with fallback behavior' },
 ];
 
+function isSemanticKgCatalogModelAllowed(provider: string, modelName: string): boolean {
+  const providerKey = String(provider || '').trim().toLowerCase();
+  const normalizedModel = String(modelName || '').trim().toLowerCase();
+  if (providerKey === 'openai' && normalizedModel === 'gpt-5') {
+    return false;
+  }
+  return true;
+}
+
 export function IndexingSubtab() {
   const { api } = useAPI();
   const { config, flushPendingPatches } = useConfig();
@@ -202,13 +211,9 @@ export function IndexingSubtab() {
   const [lexicalGraphEnabled, setLexicalGraphEnabled] = useConfigField<boolean>('graph_indexing.build_lexical_graph', true);
   const [storeChunkEmbeddings, setStoreChunkEmbeddings] = useConfigField<boolean>('graph_indexing.store_chunk_embeddings', true);
   const [semanticKgEnabled, setSemanticKgEnabled] = useConfigField<boolean>('graph_indexing.semantic_kg_enabled', false);
-  const [semanticKgMode, setSemanticKgMode] = useConfigField<'heuristic' | 'llm'>('graph_indexing.semantic_kg_mode', 'heuristic');
-  const [semanticKgMaxChunks, setSemanticKgMaxChunks] = useConfigField<number>('graph_indexing.semantic_kg_max_chunks', 200);
+  const [semanticKgMode, setSemanticKgMode] = useConfigField<'heuristic' | 'llm'>('graph_indexing.semantic_kg_mode', 'llm');
+  const [semanticKgMaxChunks, setSemanticKgMaxChunks] = useConfigField<number>('graph_indexing.semantic_kg_max_chunks', 40000);
   const [semanticKgLlmModel, setSemanticKgLlmModel] = useConfigField<string>('graph_indexing.semantic_kg_llm_model', '');
-  const [semanticKgMaxConcepts, setSemanticKgMaxConcepts] = useConfigField<number>(
-    'graph_indexing.semantic_kg_max_concepts_per_chunk',
-    8
-  );
 
   // (Models loaded via useModels hook below — no manual state needed)
 
@@ -252,6 +257,12 @@ export function IndexingSubtab() {
   useEffect(() => {
     setIndexEstimate(null);
   }, [activeRepo, effectivePath]);
+
+  useEffect(() => {
+    if (semanticKgEnabled && semanticKgMode !== 'llm') {
+      setSemanticKgMode('llm');
+    }
+  }, [semanticKgEnabled, semanticKgMode, setSemanticKgMode]);
 
   useEffect(() => {
     activeRepoRef.current = String(activeRepo || '').trim();
@@ -2521,26 +2532,26 @@ export function IndexingSubtab() {
                     style={{ width: '18px', height: '18px' }}
                   />
                   <div>
-                    <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--fg)' }}>Semantic KG (concepts + relations)</div>
+                    <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--fg)' }}>Official GraphRAG semantic graph</div>
                     <div style={{ fontSize: '11px', color: 'var(--fg-muted)', marginTop: '2px' }}>
-                      Extracts concept entities + related_to edges and links them to chunk_ids for graph expansion.
+                      Uses Neo4j GraphRAG to extract typed entities and relationships, then links them to Chunk nodes for graph expansion.
                     </div>
                   </div>
                 </label>
 
                 {semanticKgEnabled && (
                   <div style={{ marginTop: '12px' }}>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '12px' }}>
                       <div className="input-group">
-                        <label style={{ fontSize: '11px', color: 'var(--fg-muted)', marginBottom: '6px' }}>Mode</label>
+                        <label style={{ fontSize: '11px', color: 'var(--fg-muted)', marginBottom: '6px' }}>Engine</label>
                         <select
                           data-testid="semantic-kg-mode"
                           value={semanticKgMode}
                           onChange={(e) => setSemanticKgMode(e.target.value as any)}
+                          disabled
                           style={{ width: '100%' }}
                         >
-                          <option value="heuristic">Heuristic</option>
-                          <option value="llm">LLM</option>
+                          <option value="llm">Official GraphRAG (OpenAI)</option>
                         </select>
                       </div>
                       <div className="input-group">
@@ -2555,36 +2566,26 @@ export function IndexingSubtab() {
                           style={{ width: '100%' }}
                         />
                       </div>
-                      <div className="input-group">
-                        <label style={{ fontSize: '11px', color: 'var(--fg-muted)', marginBottom: '6px' }}>Max concepts / chunk</label>
-                        <input
-                          data-testid="semantic-kg-max-concepts"
-                          type="number"
-                          min={0}
-                          max={50}
-                          value={semanticKgMaxConcepts}
-                          onChange={(e) => setSemanticKgMaxConcepts(parseInt(e.target.value || '0', 10))}
-                          style={{ width: '100%' }}
-                        />
-                      </div>
                     </div>
 
-                    {semanticKgMode === 'llm' && (
-                      <div style={{ marginTop: '12px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', alignItems: 'end' }}>
-                        <ModelPicker
-                          componentType="GEN"
-                          value={semanticKgLlmModel}
-                          onChange={setSemanticKgLlmModel}
-                          label="KG LLM Model"
-                          tooltipKey="SEMANTIC_KG_LLM_MODEL"
-                          allowCustom
-                        />
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                          <span style={{ fontSize: '11px', color: 'var(--fg-muted)' }}>empty = uses enrich_model</span>
-                          <PromptLink promptKey="semantic_kg_extraction">Edit KG Prompt</PromptLink>
-                        </div>
+                    <div style={{ marginTop: '12px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', alignItems: 'end' }}>
+                      <ModelPicker
+                        componentType="GEN"
+                        selectionRole="generation"
+                        value={semanticKgLlmModel}
+                        onChange={setSemanticKgLlmModel}
+                        label="KG LLM Model"
+                        tooltipKey="SEMANTIC_KG_LLM_MODEL"
+                        modelFilter={(model) =>
+                          isSemanticKgCatalogModelAllowed(String(model.provider || ''), String(model.model || ''))
+                        }
+                      />
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                        <span style={{ fontSize: '11px', color: 'var(--fg-muted)' }}>
+                          Empty uses the catalog-preferred GraphRAG model. Plain OpenAI `gpt-5` is intentionally hidden here because it keeps being chosen as a worse default than the newer catalog entries.
+                        </span>
                       </div>
-                    )}
+                    </div>
                   </div>
                 )}
               </div>

@@ -98,6 +98,16 @@ def _extract_debug_trace_id(resp: httpx.Response) -> str | None:
             return value.strip()
     return None
 
+
+def _uses_openai_max_completion_tokens(route: ProviderRoute) -> bool:
+    if route.kind != "cloud_direct":
+        return False
+    if str(route.provider_name or "").strip().lower() != "openai":
+        return False
+    model = str(route.model or "").strip().lower()
+    return model.startswith("gpt-5") or model.startswith("o1") or model.startswith("o3") or model.startswith("o4")
+
+
 def _summarize_provider_error(resp: httpx.Response) -> str:
     """Best-effort extraction of provider error details (safe for UI/debug logs)."""
     try:
@@ -338,9 +348,10 @@ async def generate_chat_text(
             "model": route.model,
             "messages": messages,
             "temperature": float(temperature),
-            "max_tokens": int(max_tokens),
             "stream": False,
         }
+        token_key = "max_completion_tokens" if _uses_openai_max_completion_tokens(route) else "max_tokens"
+        payload[token_key] = int(max_tokens)
 
     with stage_span(
         "generation.provider_call",
@@ -592,10 +603,11 @@ async def stream_chat_text(
                         "model": route.model,
                         "messages": messages,
                         "temperature": float(temperature),
-                        "max_tokens": int(max_tokens),
                         "stream": True,
                         "stream_options": {"include_usage": True},
                     }
+                    token_key = "max_completion_tokens" if _uses_openai_max_completion_tokens(route) else "max_tokens"
+                    payload[token_key] = int(max_tokens)
                     async with client.stream("POST", url, headers=headers, json=payload) as resp:
                         resp.raise_for_status()
                         debug_trace_id = _extract_debug_trace_id(resp)

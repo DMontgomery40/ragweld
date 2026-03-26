@@ -2,6 +2,19 @@
 
 @AGENTS.md
 
+## READ THIS FIRST
+
+Before doing anything else:
+
+1. Read `/Users/davidmontgomery/ragweld/AGENTS.md` fully.
+2. Read this file fully.
+3. Read the project-local memory index at `/Users/davidmontgomery/.codex/projects/-Users-davidmontgomery-ragweld/MEMORY.md`.
+4. Read the latest handoff memory at
+   `/Users/davidmontgomery/.codex/projects/-Users-davidmontgomery-ragweld/memory/next-agent-canon-reset-handoff-2026-03-26.md`.
+5. Read every additional memory file that handoff marks as mandatory context.
+
+Do not plan, browse, edit, or run the app before that read pass is complete.
+
 ## THE ARCHITECTURE IN ONE SENTENCE
 
 **Pydantic is the law. Everything else derives from it. You cannot add features that don't exist in Pydantic first.**

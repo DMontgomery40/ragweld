@@ -44,9 +44,9 @@ def test_resolve_available_synthetic_generation_model_prefers_litellm_gateway_wh
         cfg = TriBridConfig()
         cfg.chat.litellm.enabled = True
         cfg.chat.litellm.base_url = "http://127.0.0.1:4000/v1"
-        cfg.chat.litellm.default_model = "openai/gpt-4o-mini"
+        cfg.chat.litellm.default_model = "openai/gpt-5.4-mini"
         cfg.chat.local_models.default_chat_model = "qwen3:8b"
-        assert resolve_available_synthetic_generation_model(cfg) == "litellm:openai/gpt-4o-mini"
+        assert resolve_available_synthetic_generation_model(cfg) == "litellm:openai/gpt-5.4-mini"
     finally:
         if old_openai is None:
             os.environ.pop("OPENAI_API_KEY", None)
@@ -82,10 +82,10 @@ def _write_gate_failed_run(*, root: Path, corpus_id: str, run_id: str) -> Path:
 
     request = SyntheticRunStartRequest(
         corpus_id=corpus_id,
-        provider="internal_ragweld",
+        provider="synthetic_data_kit",
         recipe="full_stack",
-        generator_model="openai/gpt-4o-mini",
-        judge_model="openai/gpt-4o-mini",
+        generator_model="openai/gpt-5.4-mini",
+        judge_model="openai/gpt-5.4-mini",
     )
     run = SyntheticRun(
         run_id=run_id,
@@ -93,7 +93,7 @@ def _write_gate_failed_run(*, root: Path, corpus_id: str, run_id: str) -> Path:
         status="failed",
         started_at=datetime.now(UTC),
         completed_at=datetime.now(UTC),
-        provider="internal_ragweld",
+        provider="synthetic_data_kit",
         recipe="full_stack",
         config_snapshot={},
         config={},
@@ -143,26 +143,26 @@ async def test_synthetic_stream_route_not_shadowed(client) -> None:
     [
         (
             {
-                "judge_model": "openai/gpt-4o-mini",
+                "judge_model": "openai/gpt-5.4-mini",
             },
             "generator_model",
         ),
         (
             {
-                "generator_model": "openai/gpt-4o-mini",
+                "generator_model": "openai/gpt-5.4-mini",
             },
             "judge_model",
         ),
         (
             {
                 "generator_model": "   ",
-                "judge_model": "openai/gpt-4o-mini",
+                "judge_model": "openai/gpt-5.4-mini",
             },
             "generator_model",
         ),
         (
             {
-                "generator_model": "openai/gpt-4o-mini",
+                "generator_model": "openai/gpt-5.4-mini",
                 "judge_model": "   ",
             },
             "judge_model",
@@ -175,7 +175,7 @@ async def test_synthetic_start_requires_generator_and_judge_models(client, paylo
         "/api/synthetic/run/start",
         json={
             "corpus_id": corpus_id,
-            "provider": "internal_ragweld",
+            "provider": "synthetic_data_kit",
             "recipe": "eval_dataset",
             **payload,
         },
@@ -192,15 +192,51 @@ async def test_synthetic_start_rejects_invalid_corpus_id(client, corpus_id: str)
         "/api/synthetic/run/start",
         json={
             "corpus_id": corpus_id,
-            "provider": "internal_ragweld",
+            "provider": "synthetic_data_kit",
             "recipe": "eval_dataset",
-            "generator_model": "openai/gpt-4o-mini",
-            "judge_model": "openai/gpt-4o-mini",
+            "generator_model": "openai/gpt-5.4-mini",
+            "judge_model": "openai/gpt-5.4-mini",
         },
     )
     assert res.status_code == 422
     detail = str(res.json().get("detail", ""))
     assert "corpus_id" in detail or "repo_id" in detail
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("payload", "needle"),
+    [
+        (
+            {
+                "provider": "internal_ragweld",
+                "generator_model": "openai/gpt-5.4-mini",
+                "judge_model": "openai/gpt-5.4-mini",
+            },
+            "internal_ragweld has been removed",
+        ),
+        (
+            {
+                "provider": "synthetic_data_kit",
+                "generator_model": "openai/gpt-4o-mini",
+                "judge_model": "openai/gpt-5.4-mini",
+            },
+            "must use an OpenAI GPT-5 model",
+        ),
+    ],
+)
+async def test_synthetic_start_rejects_removed_provider_and_banned_openai_models(client, payload, needle: str) -> None:
+    corpus_id = f"pytest_synth_policy_{uuid.uuid4().hex[:8]}"
+    res = await client.post(
+        "/api/synthetic/run/start",
+        json={
+            "corpus_id": corpus_id,
+            "recipe": "eval_dataset",
+            **payload,
+        },
+    )
+    assert res.status_code == 400
+    assert needle in str(res.json().get("detail", ""))
 
 
 @pytest.mark.asyncio
@@ -237,7 +273,7 @@ async def test_synthetic_failed_gate_persists_quality_artifact_and_blocks_publis
             "/api/synthetic/run/start",
             json={
                 "corpus_id": corpus_id,
-                "provider": "internal_ragweld",
+                "provider": "synthetic_data_kit",
                 "recipe": "keywords",
                 "generator_model": model,
                 "judge_model": model,
@@ -294,7 +330,7 @@ async def test_synthetic_run_lifecycle_with_real_provider_when_available(client)
             "/api/synthetic/run/start",
             json={
                 "corpus_id": corpus_id,
-                "provider": "internal_ragweld",
+                "provider": "synthetic_data_kit",
                 "recipe": "eval_dataset",
                 "generator_model": model,
                 "judge_model": model,

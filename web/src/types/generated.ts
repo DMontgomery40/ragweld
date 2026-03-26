@@ -492,7 +492,7 @@ export interface DashboardIndexCosts {
   total_tokens?: number; // default: 0
   /** Estimated embedding cost (USD) when pricing data is available. */
   embedding_cost?: number | null; // default: None
-  /** Estimated semantic KG extraction cost (USD) when semantic_kg_mode='llm'. */
+  /** Estimated GraphRAG semantic extraction cost (USD) when enabled. */
   semantic_kg_cost?: number | null; // default: None
   /** Estimated total indexing cost (USD): embedding + semantic KG (when applicable). */
   total_cost?: number | null; // default: None
@@ -915,7 +915,7 @@ export interface GraphIndexingConfig {
   build_lexical_graph?: boolean; // default: True
   /** Store chunk embeddings on Chunk nodes for Neo4j vector search (requires dense embeddings) */
   store_chunk_embeddings?: boolean; // default: True
-  /** Build semantic knowledge graph (concept entities + relations) linked to chunks during indexing */
+  /** Build an official Neo4j GraphRAG semantic graph with typed entities and relationships linked to chunks during indexing */
   semantic_kg_enabled?: boolean; // default: False
   /** Edge weight for AST containment relationships (module->class/function, class->method). */
   ast_contains_weight?: number; // default: 1.0
@@ -925,13 +925,15 @@ export interface GraphIndexingConfig {
   ast_imports_weight?: number; // default: 1.0
   /** Edge weight for AST call relationships (function->callee). */
   ast_calls_weight?: number; // default: 1.0
-  /** Semantic KG extraction mode. 'heuristic' is deterministic and test-friendly; 'llm' uses an LLM to extract entities + relations. */
-  semantic_kg_mode?: "heuristic" | "llm"; // default: "heuristic"
-  /** When true, semantic KG extraction preserves/uses typed entities (person, org, location, event, concept). */
-  semantic_kg_typed_entities_enabled?: boolean; // default: False
+  /** Semantic KG extraction mode. This branch targets the official Neo4j GraphRAG LLM path; 'heuristic' is a stale legacy setting. */
+  semantic_kg_mode?: "heuristic" | "llm"; // default: "llm"
+  /** When true, semantic KG extraction preserves typed entities (person, org, location, event, concept). */
+  semantic_kg_typed_entities_enabled?: boolean; // default: True
   /** Allowed semantic KG entity types produced by extraction. */
-  semantic_kg_allowed_entity_types?: ("person" | "org" | "location" | "event" | "concept")[]; // default: ["concept"]
-  /** When true in LLM mode, fail semantic KG extraction for a chunk if LLM extraction fails instead of falling back. */
+  semantic_kg_allowed_entity_types?: ("person" | "org" | "location" | "event" | "concept")[]; // default: ["person", "org", "location", "event", "concept"]
+  /** Allowed semantic KG relationship types produced by extraction. */
+  semantic_kg_allowed_relation_types?: ("associated_with" | "met_with" | "communicated_with" | "works_for" | "member_of" | "founded" | "owns" | "funded" | "participated_in" | "located_in" | "references" | "related_to")[]; // default: ["associated_with", "met_with", "communicated_w...
+  /** When true, fail the indexing run if GraphRAG semantic extraction fails for a chunk. */
   semantic_kg_require_llm_success?: boolean; // default: False
   /** Reasoning effort for semantic KG extraction when using OpenAI Responses-compatible models. */
   semantic_kg_reasoning_effort?: "minimal" | "low" | "medium" | "high" | "xhigh"; // default: "medium"
@@ -943,11 +945,11 @@ export interface GraphIndexingConfig {
   semantic_kg_max_concepts_per_chunk?: number; // default: 8
   /** Minimum length for semantic concept tokens */
   semantic_kg_min_concept_len?: number; // default: 4
-  /** Maximum semantic relations to create per chunk (heuristic mode) */
+  /** Maximum semantic relations to retain per chunk during GraphRAG extraction */
   semantic_kg_max_relations_per_chunk?: number; // default: 12
   /** Maximum chunks to process for semantic KG extraction per indexing run (0 = disabled) */
-  semantic_kg_max_chunks?: number; // default: 200
-  /** LLM model name for semantic KG extraction when semantic_kg_mode='llm' (empty = use generation.enrich_model) */
+  semantic_kg_max_chunks?: number; // default: 40000
+  /** LLM model name for GraphRAG semantic extraction (empty = use the catalog-preferred runtime-selectable GEN model; plain openai/gpt-5 is excluded) */
   semantic_kg_llm_model?: string; // default: ""
   /** Timeout (seconds) for semantic KG LLM extraction per chunk */
   semantic_kg_llm_timeout_s?: number; // default: 30
@@ -2293,7 +2295,7 @@ export interface SyntheticRunMeta {
 
 export interface SyntheticRunStartRequest {
   corpus_id: string;
-  provider?: "internal_ragweld" | "synthetic_data_kit"; // default: "internal_ragweld"
+  provider?: "internal_ragweld" | "synthetic_data_kit"; // default: "synthetic_data_kit"
   recipe?: "eval_dataset" | "semantic_cards" | "keywords" | "triplets" | "autotune_retrieval" | "full_stack"; // default: "eval_dataset"
   max_source_chunks?: number | null; // default: 300
   max_pairs?: number | null; // default: 200
@@ -3497,7 +3499,7 @@ export interface HealthStatus {
   services?: Record<string, HealthServiceStatus>;
 }
 
-/** Best-effort estimate for indexing cost/time before running the indexer.  Notes: - Token count is an approximation (byte-based heuristic). - Time is an intentionally rough range (depends on machine, provider latency,   semantic KG mode, and local hardware throughput). */
+/** Best-effort estimate for indexing cost/time before running the indexer.  Notes: - Token count is an approximation (byte-based heuristic). - Time is an intentionally rough range (depends on machine, provider latency,   GraphRAG extraction scope, and local hardware throughput). */
 export interface IndexEstimate {
   /** Corpus identifier */
   corpus_id: string;
@@ -3523,7 +3525,7 @@ export interface IndexEstimate {
   skip_dense: boolean;
   /** Estimated embedding cost (USD) when pricing data is available (0 for local/deterministic). */
   embedding_cost_usd?: number | null;
-  /** Estimated semantic KG extraction cost (USD) when semantic_kg_mode='llm' and pricing is available. */
+  /** Estimated GraphRAG semantic extraction cost (USD) when enabled and pricing data is available. */
   semantic_kg_cost_usd?: number | null;
   /** Estimated total indexing cost (USD): embedding + semantic KG (when applicable). */
   total_cost_usd?: number | null;
@@ -3531,7 +3533,7 @@ export interface IndexEstimate {
   estimated_seconds_low?: number | null;
   /** Very rough high-end estimate for total indexing time (seconds) */
   estimated_seconds_high?: number | null;
-  /** Estimated semantic KG phase time (seconds) when semantic_kg_mode='llm'. */
+  /** Estimated GraphRAG semantic phase time (seconds) when enabled. */
   estimated_seconds_semantic_kg?: number | null;
   /** Human-readable assumptions used for the estimate */
   assumptions?: string[];

@@ -176,7 +176,7 @@ class IndexEstimate(BaseModel):
     Notes:
     - Token count is an approximation (byte-based heuristic).
     - Time is an intentionally rough range (depends on machine, provider latency,
-      semantic KG mode, and local hardware throughput).
+      GraphRAG extraction scope, and local hardware throughput).
     """
 
     repo_id: str = Field(
@@ -204,7 +204,7 @@ class IndexEstimate(BaseModel):
     semantic_kg_cost_usd: float | None = Field(
         default=None,
         ge=0.0,
-        description="Estimated semantic KG extraction cost (USD) when semantic_kg_mode='llm' and pricing is available.",
+        description="Estimated GraphRAG semantic extraction cost (USD) when enabled and pricing data is available.",
     )
     total_cost_usd: float | None = Field(
         default=None,
@@ -220,7 +220,7 @@ class IndexEstimate(BaseModel):
     estimated_seconds_semantic_kg: float | None = Field(
         default=None,
         ge=0.0,
-        description="Estimated semantic KG phase time (seconds) when semantic_kg_mode='llm'.",
+        description="Estimated GraphRAG semantic phase time (seconds) when enabled.",
     )
     assumptions: list[str] = Field(default_factory=list, description="Human-readable assumptions used for the estimate")
 
@@ -497,7 +497,7 @@ class DashboardIndexCosts(BaseModel):
     semantic_kg_cost: float | None = Field(
         default=None,
         ge=0.0,
-        description="Estimated semantic KG extraction cost (USD) when semantic_kg_mode='llm'.",
+        description="Estimated GraphRAG semantic extraction cost (USD) when enabled.",
     )
     total_cost: float | None = Field(
         default=None,
@@ -3451,7 +3451,7 @@ class SyntheticRunStartRequest(BaseModel):
         validation_alias=AliasChoices("repo_id", "corpus_id"),
         serialization_alias="corpus_id",
     )
-    provider: SyntheticProvider = Field(default="internal_ragweld")
+    provider: SyntheticProvider = Field(default="synthetic_data_kit")
     recipe: SyntheticRecipeKind = Field(default="eval_dataset")
 
     max_source_chunks: int | None = Field(default=300, ge=10, le=20000)
@@ -4814,7 +4814,7 @@ class GraphIndexingConfig(BaseModel):
 
     semantic_kg_enabled: bool = Field(
         default=False,
-        description="Build semantic knowledge graph (concept entities + relations) linked to chunks during indexing",
+        description="Build an official Neo4j GraphRAG semantic graph with typed entities and relationships linked to chunks during indexing",
     )
 
     ast_contains_weight: float = Field(
@@ -4846,24 +4846,56 @@ class GraphIndexingConfig(BaseModel):
     )
 
     semantic_kg_mode: Literal["heuristic", "llm"] = Field(
-        default="heuristic",
-        description="Semantic KG extraction mode. 'heuristic' is deterministic and test-friendly; "
-        "'llm' uses an LLM to extract entities + relations.",
+        default="llm",
+        description="Semantic KG extraction mode. This branch targets the official Neo4j GraphRAG LLM path; 'heuristic' is a stale legacy setting.",
     )
 
     semantic_kg_typed_entities_enabled: bool = Field(
-        default=False,
-        description="When true, semantic KG extraction preserves/uses typed entities (person, org, location, event, concept).",
+        default=True,
+        description="When true, semantic KG extraction preserves typed entities (person, org, location, event, concept).",
     )
 
     semantic_kg_allowed_entity_types: list[Literal["person", "org", "location", "event", "concept"]] = Field(
-        default=["concept"],
+        default=["person", "org", "location", "event", "concept"],
         description="Allowed semantic KG entity types produced by extraction.",
+    )
+
+    semantic_kg_allowed_relation_types: list[
+        Literal[
+            "associated_with",
+            "met_with",
+            "communicated_with",
+            "works_for",
+            "member_of",
+            "founded",
+            "owns",
+            "funded",
+            "participated_in",
+            "located_in",
+            "references",
+            "related_to",
+        ]
+    ] = Field(
+        default=[
+            "associated_with",
+            "met_with",
+            "communicated_with",
+            "works_for",
+            "member_of",
+            "founded",
+            "owns",
+            "funded",
+            "participated_in",
+            "located_in",
+            "references",
+            "related_to",
+        ],
+        description="Allowed semantic KG relationship types produced by extraction.",
     )
 
     semantic_kg_require_llm_success: bool = Field(
         default=False,
-        description="When true in LLM mode, fail semantic KG extraction for a chunk if LLM extraction fails instead of falling back.",
+        description="When true, fail the indexing run if GraphRAG semantic extraction fails for a chunk.",
     )
 
     semantic_kg_reasoning_effort: Literal["minimal", "low", "medium", "high", "xhigh"] = Field(
@@ -4903,11 +4935,11 @@ class GraphIndexingConfig(BaseModel):
         default=12,
         ge=0,
         le=200,
-        description="Maximum semantic relations to create per chunk (heuristic mode)",
+        description="Maximum semantic relations to retain per chunk during GraphRAG extraction",
     )
 
     semantic_kg_max_chunks: int = Field(
-        default=200,
+        default=40000,
         ge=0,
         le=100000,
         description="Maximum chunks to process for semantic KG extraction per indexing run (0 = disabled)",
@@ -4915,7 +4947,7 @@ class GraphIndexingConfig(BaseModel):
 
     semantic_kg_llm_model: str = Field(
         default="",
-        description="LLM model name for semantic KG extraction when semantic_kg_mode='llm' (empty = use generation.enrich_model)",
+        description="LLM model name for GraphRAG semantic extraction (empty = use the catalog-preferred runtime-selectable GEN model; plain openai/gpt-5 is excluded)",
     )
 
     semantic_kg_llm_timeout_s: int = Field(

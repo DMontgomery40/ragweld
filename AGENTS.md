@@ -3,6 +3,19 @@
 This file is the agent entrypoint for `/Users/davidmontgomery/ragweld`.
 It is intentionally short: a map, not a manual. Start here, then follow links.
 
+## Mandatory Read Order (Before Doing Anything)
+
+Before running commands, editing files, or making plans:
+
+1. Read this `AGENTS.md` fully.
+2. Read `/Users/davidmontgomery/ragweld/CLAUDE.md` fully.
+3. Read the project-local memory index at `/Users/davidmontgomery/.codex/projects/-Users-davidmontgomery-ragweld/MEMORY.md`.
+4. Read the latest handoff memory:
+   `/Users/davidmontgomery/.codex/projects/-Users-davidmontgomery-ragweld/memory/next-agent-canon-reset-handoff-2026-03-26.md`
+5. Read any additional memory files that the latest handoff marks as required context.
+
+Do not touch code, tests, data, servers, or UI before that read pass is complete.
+
 ## Naming (ragweld vs tribrid)
 
 This project was renamed to **ragweld**. The codebase and API still use **tribrid**

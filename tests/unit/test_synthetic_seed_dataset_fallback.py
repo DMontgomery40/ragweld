@@ -21,10 +21,10 @@ def test_seed_dataset_fallback_hydrates_eval_items_for_eval_recipes() -> None:
     run_id = f"{corpus_id}__run"
     request = SyntheticRunStartRequest(
         corpus_id=corpus_id,
-        provider="internal_ragweld",
+        provider="synthetic_data_kit",
         recipe="eval_dataset",
-        generator_model="openai/gpt-4o-mini",
-        judge_model="openai/gpt-4o-mini",
+        generator_model="openai/gpt-5.4-mini",
+        judge_model="openai/gpt-5.4-mini",
         max_pairs=10,
         seed=42,
     )
@@ -59,10 +59,10 @@ def test_seed_dataset_fallback_skips_non_eval_recipes() -> None:
     run_id = f"{corpus_id}__run"
     request = SyntheticRunStartRequest(
         corpus_id=corpus_id,
-        provider="internal_ragweld",
+        provider="synthetic_data_kit",
         recipe="keywords",
-        generator_model="openai/gpt-4o-mini",
-        judge_model="openai/gpt-4o-mini",
+        generator_model="openai/gpt-5.4-mini",
+        judge_model="openai/gpt-5.4-mini",
     )
     summary = SyntheticRunSummary(items_generated=0)
     artifacts_payloads: dict[str, object] = {"eval_dataset_json": []}
