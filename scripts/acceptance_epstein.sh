@@ -85,7 +85,7 @@ echo "[acceptance_epstein] api=${API_BASE}"
 log_path="$artifact_dir/runner.log"
 if [ -z "$failure_reason" ]; then
   set +e
-  npm --prefix web exec -- node "$ROOT_DIR/web/tmp_synthetic_acceptance.mjs" | tee "$log_path"
+  node "$ROOT_DIR/web/tmp_synthetic_acceptance.mjs" | tee "$log_path"
   runner_exit="${PIPESTATUS[0]}"
   set -e
 
