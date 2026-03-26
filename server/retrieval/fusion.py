@@ -636,7 +636,7 @@ class TriBridFusion:
                         neo4j = Neo4jClient(
                             cfg.graph_storage.neo4j_uri,
                             cfg.graph_storage.neo4j_user,
-                            cfg.graph_storage.neo4j_password,
+                            cfg.graph_storage.resolve_password(),
                             database=db_name,
                         )
                         with SEARCH_STAGE_LATENCY_SECONDS.labels(stage="neo4j_connect").time():

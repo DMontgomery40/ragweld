@@ -35,6 +35,9 @@ from server.api.synthetic import router as synthetic_router
 from server.config import load_config
 from server.mcp.server import get_mcp_server
 from server.observability.metrics import render_latest
+from server.observability.runtime import apply_default_links, current_header_values, start_request_observation
+from server.services.config_store import CorpusNotFoundError
+from server.services.config_store import get_config as load_scoped_config
 
 
 # Load repo-root .env early so env-backed secrets (API keys) are available even
@@ -70,6 +73,17 @@ _load_dotenv_file(Path(__file__).resolve().parents[1] / ".env")
 _global_cfg = load_config()
 if _global_cfg.mcp.enabled:
     _mcp = get_mcp_server()
+
+
+_MANUALLY_INSTRUMENTED_API_PATHS = frozenset(
+    {
+        "/api/chat",
+        "/api/chat/stream",
+        "/api/search",
+        "/api/answer",
+        "/api/answer/stream",
+    }
+)
 
 
 async def _enter_lifecycle_cm(cm: Any) -> None:
@@ -120,6 +134,61 @@ if _global_cfg.mcp.enabled:
 async def metrics() -> Response:
     body, content_type = render_latest()
     return Response(content=body, media_type=content_type)
+
+
+def _request_observability_scope_id(request: Request) -> str | None:
+    for key in ("repo_id", "repo", "corpus_id"):
+        value = str(request.query_params.get(key) or "").strip()
+        if value:
+            return value
+    return None
+
+
+def _request_observability_route_name(path: str) -> str:
+    clean = str(path or "").strip().strip("/")
+    if not clean:
+        return "root"
+    return clean.replace("/", ".").replace("-", "_")
+
+
+async def _load_request_observability_config(request: Request):
+    scope_id = _request_observability_scope_id(request)
+    if not scope_id:
+        return load_config()
+    try:
+        return await load_scoped_config(repo_id=scope_id)
+    except CorpusNotFoundError:
+        return load_config()
+    except Exception:
+        return load_config()
+
+
+@app.middleware("http")
+async def observability_middleware(
+    request: Request, call_next: Callable[[Request], Awaitable[Response]]
+) -> Response:
+    path = request.url.path
+    if not path.startswith("/api") or path in _MANUALLY_INSTRUMENTED_API_PATHS:
+        return await call_next(request)
+
+    config = await _load_request_observability_config(request)
+    scope_id = _request_observability_scope_id(request)
+
+    with start_request_observation(
+        config=config,
+        route_name=_request_observability_route_name(path),
+        path=path,
+        method=request.method,
+        correlation_id=request.headers.get("X-Correlation-ID"),
+        repo_id=scope_id,
+    ) as observation:
+        apply_default_links(config)
+        response = await call_next(request)
+        if observation is not None:
+            observation.span.set_attribute("http.response.status_code", int(response.status_code))
+        for key, value in current_header_values().items():
+            response.headers.setdefault(key, value)
+        return response
 
 
 @app.middleware("http")

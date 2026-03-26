@@ -3,21 +3,44 @@
 
 import { apiClient, api, withCorpusScope } from './client';
 import type {
+  AgentTrainControlPlaneStatusResponse,
+  BenchmarkObservabilitySummaryResponse,
   DashboardIndexStatsResponse,
   DashboardIndexStatusResponse,
   DockerContainer,
   DockerContainersResponse,
   DockerStatus,
+  EvalObservabilitySummaryResponse,
   HealthStatus,
   LokiStatus,
   MCPStatusResponse,
+  ObservabilityCatalogResponse,
+  ObservabilityIncidentsResponse,
+  ObservabilityStatusResponse,
+  PromptObservabilitySummaryResponse,
   RerankerLogsResponse,
+  RetrievalPilotStatusResponse,
   TriBridConfig,
   TracesLatestResponse,
 } from '@/types/generated';
 
 // Re-export selected generated types for convenience in consumers that import `* as DashAPI`.
-export type { DockerContainer, DockerStatus, HealthStatus, LokiStatus, TracesLatestResponse, TriBridConfig };
+export type {
+  AgentTrainControlPlaneStatusResponse,
+  BenchmarkObservabilitySummaryResponse,
+  DockerContainer,
+  DockerStatus,
+  EvalObservabilitySummaryResponse,
+  HealthStatus,
+  LokiStatus,
+  ObservabilityCatalogResponse,
+  ObservabilityIncidentsResponse,
+  ObservabilityStatusResponse,
+  PromptObservabilitySummaryResponse,
+  RetrievalPilotStatusResponse,
+  TracesLatestResponse,
+  TriBridConfig,
+};
 
 // ============================================================================
 // System Status APIs
@@ -118,6 +141,119 @@ export async function getTraces(limit: number = 50): Promise<Trace[]> {
 export async function getLatestTrace(): Promise<TracesLatestResponse | null> {
   try {
     const { data } = await apiClient.get<TracesLatestResponse>(withCorpusScope(api('/traces/latest')));
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+export async function getObservabilityStatus(): Promise<ObservabilityStatusResponse | null> {
+  try {
+    const { data } = await apiClient.get<ObservabilityStatusResponse>(withCorpusScope(api('/observability/status')));
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+export async function getObservabilityCatalog(
+  corpusId?: string
+): Promise<ObservabilityCatalogResponse | null> {
+  try {
+    const qs = new URLSearchParams();
+    if (corpusId) qs.set('corpus_id', corpusId);
+    const suffix = qs.toString() ? `?${qs.toString()}` : '';
+    const { data } = await apiClient.get<ObservabilityCatalogResponse>(api(`/observability/catalog${suffix}`));
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+export async function getObservabilityIncidents(
+  corpusId?: string
+): Promise<ObservabilityIncidentsResponse | null> {
+  try {
+    const qs = new URLSearchParams();
+    if (corpusId) qs.set('corpus_id', corpusId);
+    const suffix = qs.toString() ? `?${qs.toString()}` : '';
+    const { data } = await apiClient.get<ObservabilityIncidentsResponse>(api(`/observability/incidents${suffix}`));
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+export async function getEvalObservabilitySummary(
+  corpusId?: string
+): Promise<EvalObservabilitySummaryResponse | null> {
+  try {
+    const qs = new URLSearchParams();
+    if (corpusId) qs.set('corpus_id', corpusId);
+    const suffix = qs.toString() ? `?${qs.toString()}` : '';
+    const { data } = await apiClient.get<EvalObservabilitySummaryResponse>(api(`/eval/observability/summary${suffix}`));
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+export async function getBenchmarkObservabilitySummary(
+  corpusId?: string
+): Promise<BenchmarkObservabilitySummaryResponse | null> {
+  try {
+    const qs = new URLSearchParams();
+    if (corpusId) qs.set('corpus_id', corpusId);
+    const suffix = qs.toString() ? `?${qs.toString()}` : '';
+    const { data } = await apiClient.get<BenchmarkObservabilitySummaryResponse>(
+      api(`/benchmark/observability/summary${suffix}`)
+    );
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+export async function getPromptObservabilitySummary(
+  corpusId?: string
+): Promise<PromptObservabilitySummaryResponse | null> {
+  try {
+    const qs = new URLSearchParams();
+    if (corpusId) qs.set('corpus_id', corpusId);
+    const suffix = qs.toString() ? `?${qs.toString()}` : '';
+    const { data } = await apiClient.get<PromptObservabilitySummaryResponse>(
+      api(`/prompts/observability/summary${suffix}`)
+    );
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+export async function getAgentControlPlaneStatus(
+  corpusId?: string
+): Promise<AgentTrainControlPlaneStatusResponse | null> {
+  try {
+    const qs = new URLSearchParams();
+    if (corpusId) qs.set('corpus_id', corpusId);
+    const suffix = qs.toString() ? `?${qs.toString()}` : '';
+    const { data } = await apiClient.get<AgentTrainControlPlaneStatusResponse>(
+      api(`/agent/train/control-plane/status${suffix}`)
+    );
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+export async function getRetrievalPilotStatus(
+  corpusId?: string
+): Promise<RetrievalPilotStatusResponse | null> {
+  if (!String(corpusId || '').trim()) return null;
+  try {
+    const { data } = await apiClient.get<RetrievalPilotStatusResponse>(
+      api(`/index/${encodeURIComponent(String(corpusId).trim())}/pilot/status`)
+    );
     return data;
   } catch {
     return null;

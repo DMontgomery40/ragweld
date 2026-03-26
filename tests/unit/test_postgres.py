@@ -302,7 +302,13 @@ async def test_ensure_vector_index_creates_partial_hnsw_index() -> None:
         assert corpus is not None
         assert int(corpus["embedding_dimensions"] or 0) == 3
 
-        created = await pg.ensure_vector_index(repo_id)
+        try:
+            created = await pg.ensure_vector_index(repo_id)
+        except Exception as exc:  # pragma: no cover
+            message = str(exc).lower()
+            if "vector" in message and ("does not exist" in message or "extension not available" in message):
+                pytest.skip(f"vector index creation failed (pgvector unavailable?): {exc}")
+            raise
         assert created == index_name
         async with pg._pool.acquire() as conn:
             row = await conn.fetchrow(

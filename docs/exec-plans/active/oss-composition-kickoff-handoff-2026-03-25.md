@@ -10,11 +10,12 @@ for this branch.
 
 This branch is **replacement-only**.
 
-- No fallbacks
-- No legacy compatibility shims
-- No transition-period dual paths
-- No "keep the old broken thing alive until later"
-- No backend-only migration slices without the matching operator-facing UI/docs/tests/instructions
+- No fallbacks.
+- No legacy compatibility shims.
+- No transition-period dual paths.
+- No "keep the old broken thing alive until later."
+- No backend-only migration slices without the matching operator-facing
+  UI/docs/tests/instructions.
 
 If a subsystem is replaced in this branch, the touched surface must move
 completely. If the new path is not ready, do not land a fake cutover that still
@@ -48,10 +49,30 @@ routes into the old subsystem.
   - `xterm`
   - `Monaco`
 
+## Locked Observability Layer
+
+- Canonical signal standard: `OpenTelemetry` for trace context, spans, logs, and
+  cross-service correlation.
+- Collector/agent: `Grafana Alloy` everywhere.
+- Metrics backbone: `Prometheus + Grafana Mimir`.
+- Traces backbone: `Grafana Tempo`.
+- Logs backbone: `Grafana Loki`.
+- Continuous profiling: `Grafana Pyroscope`.
+- Frontend/browser telemetry: `Grafana Faro`.
+- LLM-native tracing and prompt observability: `Langfuse-first`.
+- Cost layer:
+  - `LiteLLM` for gateway budgets, spend, and model/provider accounting.
+  - `Langfuse` for per-trace and per-generation cost attribution.
+  - `OpenCost` for infra and cluster/GPU cost allocation.
+- Workflow/run truth stays:
+  - `Flyte` for workflow state and execution lineage.
+  - `MLflow` for run, artifact, model, and eval truth.
+
 ## Protected Product Surfaces
 
 - workspace shell and dock/splits experience
-- embedded Grafana and operator-console feel
+- embedded Grafana access plus ragweld-owned observability surfaces in the
+  workbench
 - Training Center as a first-class in-product surface
 - eval analysis and drilldown as a first-class in-product surface
 - graph parity surfaces during the migration
@@ -88,15 +109,18 @@ Key files:
 
 State:
 
-- `Docling + Haystack + Qdrant` now exist as a real pilot seam, not just a plan.
-- Operators can see and use the pilot from the workbench.
-- Legacy retrieval is still dominant outside the pilot, but the new lane is real.
+- `Docling + Haystack + Qdrant` now exist as a real bounded retrieval and
+  indexing path, not just a plan.
+- Operators can see and use that path from the workbench.
+- Legacy retrieval is still dominant outside the touched slice, which is why
+  retrieval replacement is still in the execution queue.
 
 ### 3. Observability Online + Cost Slice
 
 Key files:
 
 - `/Users/davidmontgomery/ragweld/server/models/tribrid_config_model.py`
+- `/Users/davidmontgomery/ragweld/server/main.py`
 - `/Users/davidmontgomery/ragweld/server/observability/runtime.py`
 - `/Users/davidmontgomery/ragweld/server/observability/status.py`
 - `/Users/davidmontgomery/ragweld/server/observability/costing.py`
@@ -107,18 +131,10 @@ Key files:
 - `/Users/davidmontgomery/ragweld/server/chat/handler.py`
 - `/Users/davidmontgomery/ragweld/server/services/answer_service.py`
 - `/Users/davidmontgomery/ragweld/server/services/traces.py`
-- `/Users/davidmontgomery/ragweld/web/src/components/RAG/RetrievalSubtab.tsx`
-- `/Users/davidmontgomery/ragweld/web/src/components/Admin/IntegrationsSubtab.tsx`
-- `/Users/davidmontgomery/ragweld/web/src/components/Admin/SecretsSubtab.tsx`
 - `/Users/davidmontgomery/ragweld/web/src/components/Infrastructure/MonitoringSubtab.tsx`
 - `/Users/davidmontgomery/ragweld/web/src/components/Grafana/GrafanaConfig.tsx`
 - `/Users/davidmontgomery/ragweld/web/src/components/Evaluation/TraceViewer.tsx`
 - `/Users/davidmontgomery/ragweld/web/src/components/tabs/ChatTab.tsx`
-- `/Users/davidmontgomery/ragweld/web/src/components/DevTools/Integrations.tsx`
-- `/Users/davidmontgomery/ragweld/infra/docker-compose.observability.yml`
-- `/Users/davidmontgomery/ragweld/infra/alloy/config.alloy`
-- `/Users/davidmontgomery/ragweld/infra/tempo.yaml`
-- `/Users/davidmontgomery/ragweld/infra/grafana/provisioning/datasources/tempo.yml`
 - `/Users/davidmontgomery/ragweld/docs/references/observability-online-slice.md`
 
 State:
@@ -126,13 +142,87 @@ State:
 - Old LangSmith/LangTrace observability config paths were removed from the live
   operator surfaces and replaced with OTel/Langfuse/Tempo/Alloy/cost fields.
 - `/api/observability/status` exists and drives operator-facing readiness.
-- `/api/traces/latest` now includes canonical observability metadata:
+- `/api/traces/latest` includes canonical observability metadata:
   `trace_id`, `root_span_id`, `correlation_id`, `route_summary`,
-  `external_links`, `cost_summary`.
-- Live request instrumentation is wired through chat/search/answer request paths.
-- The workbench now shows readiness, trace deep links, and cost visibility.
+  `external_links`, and `cost_summary`.
+- Canonical observability headers now cover the wider `/api/*` surface, while
+  richer request instrumentation already exists on the chat/search/answer paths.
+- OTLP readiness is treated as a real reachability target, not just a configured
+  field.
+- The workbench shows readiness, trace links, route/root-span context, and cost
+  visibility.
+
+### 4. Training Control-Plane Truth Slice
+
+Key files:
+
+- `/Users/davidmontgomery/ragweld/server/models/tribrid_config_model.py`
+- `/Users/davidmontgomery/ragweld/server/training/control_plane.py`
+- `/Users/davidmontgomery/ragweld/server/api/agent.py`
+- `/Users/davidmontgomery/ragweld/web/src/components/AgentTraining/ControlPlaneStatus.tsx`
+- `/Users/davidmontgomery/ragweld/web/src/components/AgentTraining/TrainingStudio.tsx`
+- `/Users/davidmontgomery/ragweld/web/src/components/AgentTraining/RunOverview.tsx`
+- `/Users/davidmontgomery/ragweld/docs/references/training-control-plane-slice.md`
+
+State:
+
+- Learning Agent Studio now exposes the `Flyte + MLflow + Unsloth` target lane
+  in-product.
+- `GET /api/agent/train/control-plane/status` reports per-component readiness,
+  links, and operator hints.
+- Learning Agent run models now have typed fields for workflow backend, tracking
+  backend, execution backend, external ids, links, and operator hints.
+- Actual launch execution is still on the local MLX lane; this slice makes the
+  replacement target explicit without claiming the cutover is done.
+
+### 5. Chat Rebuild UI Cutover Slice
+
+Key files:
+
+- `/Users/davidmontgomery/ragweld/server/api/chat.py`
+- `/Users/davidmontgomery/ragweld/server/chat/handler.py`
+- `/Users/davidmontgomery/ragweld/server/models/tribrid_config_model.py`
+- `/Users/davidmontgomery/ragweld/web/src/components/Chat/ChatInterface.tsx`
+- `/Users/davidmontgomery/ragweld/web/src/components/Chat/chatTransport.ts`
+- `/Users/davidmontgomery/ragweld/web/src/components/Chat/chatSessions.ts`
+- `/Users/davidmontgomery/ragweld/docs/references/chat-assistant-ui-slice.md`
+
+State:
+
+- the visible Chat tab is now powered by `assistant-ui` over a ragweld-specific
+  external-store runtime
+- the existing FastAPI SSE contract stays live for the first slice, and raw SSE
+  parsing is isolated in the chat transport adapter
+- ragweld citations, recall plan, provider response id, run ids, and
+  observability headers now ride as structured assistant message metadata
+- chat no longer fabricates retrieval-only answers when no provider is
+  available; non-stream chat fails closed and stream chat emits SSE `error`
+  events instead
+- backend conversation continuity still depends on the in-memory
+  `ConversationStore`, and browser-local thread persistence is still a stopgap
 
 ## What Is Still Legacy And Must Be Replaced Next
+
+### Observability / Tracing
+
+Still legacy:
+
+- browser and frontend telemetry are not yet first-class through the full
+  `Faro + OTel + Grafana` path
+- workflow/job traces, metrics, logs, profiles, and cost are not yet unified
+  end-to-end across `Flyte + MLflow + Langfuse + Grafana`
+- the local workbench trace store still exists as a temporary operator bridge
+
+Required direction:
+
+- every online request must be traceable end to end:
+  `browser -> API -> retrieval -> LiteLLM -> vLLM/provider -> response`
+- every workflow path must be traceable end to end:
+  `UI or schedule -> Flyte workflow -> task logs/metrics -> MLflow artifacts -> Langfuse spans`
+- logs, metrics, traces, profiles, and cost must become first-class visibility
+  surfaces, not only backend plumbing
+- local-only trace bridges should be deleted once canonical APIs and linked
+  backends cover the same operator use case
 
 ### Training Center
 
@@ -141,13 +231,14 @@ Still legacy:
 - custom run directories
 - custom training orchestration
 - MLX-heavy execution path
-- no `Flyte + Unsloth + MLflow` truth layer
+- no real `Flyte + Unsloth + MLflow` launch/status/artifact truth yet
 
 Required direction:
 
 - keep Training Center as a first-class UI surface
 - replace backend truth with `Flyte + Unsloth + MLflow`
-- expose workflow/run/artifact status in-product, not only in backend state
+- expose workflow state, logs, links, artifacts, and operator hints in-product
+- delete the touched local MLX-backed lane instead of preserving it as fallback
 
 ### Eval Analysis / Drilldown
 
@@ -161,20 +252,64 @@ Required direction:
 - keep ragweld-owned drilldown/comparison UX
 - use Langfuse for traces/prompts/spans/per-example inspection
 - use MLflow as run/artifact truth
-- keep ragweld-specific analysis logic for diffs, regressions, provenance, and synthesis
+- keep ragweld-specific analysis logic for diffs, regressions, provenance, and
+  synthesis
+- do not ship backend substrate work without the matching drilldown UI surface
 
-### Chat Rebuild
+### Chat Storage / Persistence Follow-On
 
 Still legacy:
 
-- hand-rolled chat implementation
-- not rebuilt on `assistant-ui`
+- the in-memory `ConversationStore` is still the backend continuity truth
+- browser-local thread persistence is still a stopgap
+- there is still no canonical backend thread list/history truth for the
+  rebuilt `assistant-ui` shell
 
 Required direction:
 
-- rebuild chat inside the ragweld shell on `assistant-ui`
-- keep ragweld recall/source-grounding/corpus semantics as custom adapters
-- do not preserve the old chat implementation out of sentimentality
+- replace chat persistence/backend truth coherently without routing back into
+  the old UI or fallback behavior
+- keep ragweld recall/source-grounding/corpus semantics as first-class
+  assistant-ui metadata and companion controls
+- preserve streaming, citations, provider response id continuity, and
+  observability headers while deleting the temporary storage seams
+
+### Retrieval / Indexing
+
+Still legacy:
+
+- the `Docling + Haystack + Qdrant` lane is still described as a pilot outside
+  the touched slice
+- legacy retrieval remains dominant outside that path
+
+Required direction:
+
+- promote `Docling + Haystack + Qdrant` to branch truth where a retrieval or
+  indexing slice is touched
+- keep provenance and Neo4j graph parity explicit in the same slice
+
+## Locked Execution Queue
+
+As of 2026-03-25, the user explicitly reordered the queue so the chat rebuild
+goes first.
+
+1. Rebuild chat inside the shell on `assistant-ui`.
+2. Finish the observability workstream as a full-stack replacement layer.
+3. Replace one bounded Training Center lane with
+   `Flyte + Unsloth + MLflow`.
+4. Replace the eval analysis and drilldown substrate with
+   `Langfuse + MLflow + Ragas + Promptfoo`.
+5. Promote retrieval/indexing from pilot to replacement truth where touched.
+
+## Dedicated Agent Handoffs
+
+These are intended to be cold-start handoff packages. They duplicate critical
+branch context on purpose so delegated agents do not need prior thread history.
+
+- Chat rebuild with memory and recall preservation:
+  `/Users/davidmontgomery/ragweld/docs/exec-plans/active/chat-rebuild-memory-recall-agent-handoff-2026-03-25.md`
+- Enterprise observability replacement:
+  `/Users/davidmontgomery/ragweld/docs/exec-plans/active/enterprise-observability-agent-handoff-2026-03-25.md`
 
 ## Verification State
 
@@ -211,7 +346,8 @@ fallbacks in the fork slices that are already moving.
 
 Use this literally or with minimal adaptation:
 
-> Continue work on `feat/oss-composition-kickoff` as the OSS-composition fork branch for ragweld.
+> Continue work on `feat/oss-composition-kickoff` as the OSS-composition fork
+> branch for ragweld.
 >
 > Branch canon:
 > - replacement-only
@@ -223,9 +359,11 @@ Use this literally or with minimal adaptation:
 > Read first:
 > - `/Users/davidmontgomery/ragweld/AGENTS.md`
 > - `/Users/davidmontgomery/ragweld/CLAUDE.md`
+> - `/Users/davidmontgomery/ragweld/docs/exec-plans/active/oss-composition-fork-kickoff.md`
+> - `/Users/davidmontgomery/ragweld/docs/exec-plans/active/oss-composition-kickoff-handoff-2026-03-25.md`
 > - `/Users/davidmontgomery/ragweld/docs/references/observability-online-slice.md`
 > - `/Users/davidmontgomery/.codex/projects/-Users-davidmontgomery-ragweld/MEMORY.md`
-> - `/Users/davidmontgomery/.codex/projects/-Users-davidmontgomery-ragweld/memory/branch-canon-and-observability-handoff-2026-03-25.md`
+> - `/Users/davidmontgomery/.codex/projects/-Users-davidmontgomery-ragweld/memory/fork-v3-charter-formalization-2026-03-25.md`
 >
 > Locked stack:
 > - `vLLM`
@@ -242,18 +380,22 @@ Use this literally or with minimal adaptation:
 > Current completed slices:
 > 1. runtime/gateway formalization
 > 2. retrieval/indexing OSS pilot
-> 3. observability online + cost slice
+> 3. observability online + cost
+> 4. training control-plane truth
+> 5. chat rebuild UI cutover on `assistant-ui`
 >
-> Main unfinished defining surfaces:
-> 1. Training Center over `Flyte + Unsloth + MLflow`
-> 2. Eval drilldown substrate over `Langfuse + MLflow + Ragas + Promptfoo`
-> 3. Chat rebuild on `assistant-ui`
+> Locked execution queue:
+> 1. rebuild chat on `assistant-ui`
+> 2. finish observability as a full-stack replacement layer
+> 3. replace one bounded Training Center lane with `Flyte + Unsloth + MLflow`
+> 4. replace eval drilldown substrate with `Langfuse + MLflow + Ragas + Promptfoo`
+> 5. promote retrieval/indexing from pilot to replacement truth where touched
 >
 > Rules for the next move:
 > - pick the next major logical slice, not scattered cleanup
 > - if you touch backend truth, update the workbench surface in the same branch
-> - delete/replace broken legacy behavior in the touched slice instead of preserving it
-> - keep updating project-local memory as you go
+> - delete or replace broken legacy behavior in the touched slice instead of preserving it
+> - keep project-local memory updated in the same turn
 > - keep README/AGENTS/CLAUDE/branch docs aligned with reality
 >
 > Verification expectation:
@@ -261,12 +403,3 @@ Use this literally or with minimal adaptation:
 > - run docs/types/contract validators
 > - run frontend lint/build if frontend changes
 > - attempt full `pytest -q` and report remaining failures honestly
-
-## Suggested Next Major Slice
-
-If you want the highest-leverage continuation, do this next:
-
-1. Replace one bounded Training Center lane with `Flyte + MLflow + Unsloth`
-2. Keep the existing Training Center UI surface first-class
-3. Make workflow state, logs, artifacts, and operator hints visible in-product
-4. Do not preserve the old trainer backend once the new lane is wired for that slice

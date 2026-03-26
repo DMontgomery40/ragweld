@@ -67,6 +67,11 @@ export const TraceViewer: React.FC<TraceViewerProps> = ({ className = '' }) => {
 
     const trace = traceData.trace;
     const events = trace.events || [];
+    const routeSummary = trace.route_summary;
+    const durationMs =
+      trace.ended_at_ms != null && trace.started_at_ms != null
+        ? Math.max(0, trace.ended_at_ms - trace.started_at_ms)
+        : null;
 
     const decideEvent = events.find(ev => ev.kind === 'router.decide');
     const rerankEvent = events.find(ev => ev.kind === 'reranker.rank');
@@ -113,6 +118,19 @@ export const TraceViewer: React.FC<TraceViewerProps> = ({ className = '' }) => {
           </div>
           <div style={{ fontSize: '11px', color: 'var(--fg-muted)', marginTop: '6px' }}>
             Correlation: {trace.correlation_id || 'n/a'}
+          </div>
+          <div style={{ fontSize: '11px', color: 'var(--fg-muted)', marginTop: '6px' }}>
+            Root span: {trace.root_span_id || 'n/a'}
+          </div>
+        </div>
+        <div style={{ background: 'var(--bg-elev2)', borderRadius: '4px', padding: '12px' }}>
+          <div style={{ fontSize: '11px', color: 'var(--fg-muted)', marginBottom: '4px' }}>Request Route</div>
+          <div style={{ fontSize: '12px', color: 'var(--fg)' }}>
+            {routeSummary?.method || '—'} {routeSummary?.path || '—'}
+          </div>
+          <div style={{ fontSize: '11px', color: 'var(--fg-muted)', marginTop: '6px' }}>
+            {routeSummary?.route_name || 'n/a'}
+            {durationMs != null ? ` · ${durationMs} ms` : ''}
           </div>
         </div>
         <div style={{ background: 'var(--bg-elev2)', borderRadius: '4px', padding: '12px' }}>

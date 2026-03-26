@@ -91,7 +91,7 @@ async def readiness_check(scope: CorpusScope = _CORPUS_SCOPE_DEP) -> dict[str, A
         neo4j = Neo4jClient(
             cfg.graph_storage.neo4j_uri,
             cfg.graph_storage.neo4j_user,
-            cfg.graph_storage.neo4j_password,
+            cfg.graph_storage.resolve_password(),
             database=db_name,
         )
         await neo4j.connect()

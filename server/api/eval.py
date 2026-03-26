@@ -35,7 +35,8 @@ from server.models.eval import (
     EvalRunsResponse,
     EvalTestRequest,
 )
-from server.models.tribrid_config_model import CorpusScope, EvalAnalyzeComparisonRequest
+from server.models.tribrid_config_model import CorpusScope, EvalAnalyzeComparisonRequest, EvalObservabilitySummaryResponse
+from server.observability.ml_quality import build_eval_observability_summary
 from server.retrieval.fusion import TriBridFusion
 from server.services.config_store import get_config as load_scoped_config
 
@@ -467,6 +468,15 @@ async def list_eval_runs(
         if len(runs) >= limit:
             break
     return EvalRunsResponse(ok=True, runs=runs)
+
+
+@router.get("/eval/observability/summary", response_model=EvalObservabilitySummaryResponse)
+async def eval_observability_summary(
+    scope: CorpusScope = _CORPUS_SCOPE_DEP,
+) -> EvalObservabilitySummaryResponse:
+    repo_id = scope.resolved_repo_id
+    cfg = await load_scoped_config(repo_id=repo_id)
+    return build_eval_observability_summary(cfg, repo_id)
 
 
 @router.get("/eval/run/stream")

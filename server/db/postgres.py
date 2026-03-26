@@ -960,8 +960,6 @@ class PostgresClient:
             raise ValueError("repo_id is required")
         await self._require_pool()
         assert self._pool is not None
-        if self._vector_available is False:
-            raise RuntimeError("pgvector extension not available")
 
         index_name = _vector_index_name(repo_id)
         repo_literal = _sql_literal_text(repo_id)
@@ -988,6 +986,7 @@ class PostgresClient:
                   WHERE repo_id = '{repo_literal}' AND embedding IS NOT NULL;
                 """
             )
+            self._vector_available = True
             await conn.execute("ANALYZE chunks;")
         return index_name
 

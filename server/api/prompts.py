@@ -7,12 +7,14 @@ from server.models.tribrid_config_model import (
     CorpusScope,
     PromptCategory,
     PromptMetadata,
+    PromptObservabilitySummaryResponse,
     PromptsResponse,
     PromptUpdateRequest,
     PromptUpdateResponse,
     SystemPromptsConfig,
     TriBridConfig,
 )
+from server.observability.ml_quality import build_prompt_observability_summary
 from server.services.config_store import CorpusNotFoundError
 from server.services.config_store import get_config as load_scoped_config
 from server.services.config_store import save_config as save_scoped_config
@@ -214,3 +216,13 @@ async def reset_prompt(
         raise HTTPException(status_code=404, detail=str(e)) from e
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.get("/prompts/observability/summary", response_model=PromptObservabilitySummaryResponse)
+async def prompts_observability_summary(scope: CorpusScope = _CORPUS_SCOPE_DEP) -> PromptObservabilitySummaryResponse:
+    repo_id = scope.resolved_repo_id
+    try:
+        cfg = await load_scoped_config(repo_id=repo_id)
+    except CorpusNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    return build_prompt_observability_summary(cfg, repo_id)

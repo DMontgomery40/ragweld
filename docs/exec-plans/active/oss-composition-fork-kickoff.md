@@ -2,37 +2,35 @@
 
 Date: 2026-03-24
 Branch: `feat/oss-composition-kickoff`
-Status: active execution program
+Status: active execution program, v3 formalized on 2026-03-25
 
 ## Goal
 
-Formalize and start the ragweld OSS-composition fork as a real execution program.
+Formalize and start the ragweld OSS-composition fork as a real execution
+program.
 
-The fork should preserve ragweld's overall MLOps/workbench feel while replacing as
-much bespoke platform machinery as possible with established OSS components,
-frameworks, protocols, and products. Custom code should survive only where it is
+The fork preserves ragweld's overall MLOps and workbench character while
+aggressively replacing bespoke platform code with established OSS components,
+frameworks, protocols, and products. Custom code survives only where it is
 genuinely product-defining: provenance stitching, corpus identity, config
-translation, workbench composition, eval analysis, and drilldown synthesis.
+translation, workbench composition, eval analysis, drilldown synthesis, and the
+ragweld-owned operator workflow across those systems.
 
-## Scope
+## Branch Canon
 
-- Lock the target architecture for the fork so we stop re-litigating major
-  subsystem choices.
-- Preserve the product-defining surfaces that make ragweld feel like ragweld.
-- Start the fork with bounded migration seams instead of a monolithic rewrite.
-- Establish workstreams, phase gates, and verification expectations.
-- Establish explicit memory discipline so decisions and reversals stay durable
-  across agents and turns.
+This branch is **replacement-only**.
 
-## Non-goals
-
-- Shipping the full fork in one branch.
-- Preserving every current implementation detail.
-- Preserving the current chat implementation or chat contract out of inertia.
-- Mass-renaming `tribrid` identifiers to `ragweld`.
-- Hand-editing `mkdocs/**` or `mkdocs.yml`.
-- Building a second bespoke control plane on top of Flyte, LiteLLM, MLflow, or
-  Langfuse.
+- No fallbacks.
+- No legacy compatibility shims.
+- No transition-period dual paths.
+- No backend-only migration slices without matching UI, docs, tests, and agent
+  instructions.
+- If a replacement slice is touched, the touched legacy path must be deleted in
+  the same slice or blocked by a named blocker that prevents deletion.
+- If the new path is not ready, fix the new path instead of routing back into
+  the old subsystem.
+- If older docs, memories, prompts, or rules conflict with this document or
+  `AGENTS.md`, the branch canon wins.
 
 ## Protected Product Surfaces
 
@@ -40,18 +38,24 @@ These surfaces are protected at the product level even if their implementation
 changes completely:
 
 - Workbench shell and dock/splits experience.
-- Embedded Grafana and the operator-console feel.
+- Embedded Grafana access plus ragweld-owned observability surfaces inside the
+  workbench.
 - Training Center as a first-class in-product surface.
 - Eval analysis and drilldown as a first-class in-product surface.
+- Graph parity surfaces during migration.
 
-Chat is explicitly not protected as an implementation. It should be rebuilt on
-stronger OSS foundations inside the ragweld shell.
+Grafana itself is not a ragweld implementation surface. What stays protected is
+the embedded access, drilldown, and operator workflow around it inside the
+ragweld workbench.
+
+Chat is explicitly **not** protected as an implementation. It should be rebuilt
+inside the ragweld shell on `assistant-ui`, not preserved for continuity.
 
 ## Locked Stack
 
 - Inference: `vLLM` for self-hosted serving.
 - Gateway/routing: `LiteLLM` as the unified proxy/router over `vLLM`, hosted
-  providers, and any remaining legacy external backends.
+  providers, and any remaining external backends.
 - Orchestration: `Flyte-first`.
 - Retrieval/indexing: `Haystack + Docling + Qdrant`.
 - Graph parity: `Neo4j` stays in v1 so graph surfaces do not disappear during
@@ -65,21 +69,21 @@ stronger OSS foundations inside the ragweld shell.
 
 ## Locked Observability Layer
 
-- Canonical signal standard: `OpenTelemetry` for trace context, spans, logs, and
-  cross-service correlation.
-- Collector/agent: `Grafana Alloy` everywhere.
+- Canonical signal standard: `OpenTelemetry` for trace context, spans, logs,
+  and cross-service correlation.
+- Collector and agent: `Grafana Alloy` everywhere.
 - Metrics backbone: `Prometheus` for scrape compatibility plus `Grafana Mimir`
   for long-retention multi-tenant metrics.
 - Traces backbone: `Grafana Tempo`.
 - Logs backbone: `Grafana Loki`.
 - Continuous profiling: `Grafana Pyroscope`.
-- Frontend/browser telemetry: `Grafana Faro`.
+- Frontend and browser telemetry: `Grafana Faro`.
 - LLM-native tracing and prompt observability: `Langfuse-first`.
 - Cost layer:
   - `LiteLLM` for gateway budgets, spend, and model/provider accounting.
   - `Langfuse` for per-trace and per-generation cost attribution.
   - `OpenCost` for infra and cluster/GPU cost allocation.
-- Workflow/run truth stays:
+- Workflow and run truth stays:
   - `Flyte` for workflow state and execution lineage.
   - `MLflow` for run, artifact, model, and eval truth.
 
@@ -96,16 +100,62 @@ stronger OSS foundations inside the ragweld shell.
 
 ## Compatibility With The Locked Stack
 
-- `vLLM` remains compatible with the observability plan because it exposes
-  Prometheus-style metrics on its OpenAI-compatible server.
-- `LiteLLM` remains compatible because it gives us a single routing and budget
-  layer plus Langfuse and metrics integration points.
-- `Langfuse` remains the LLM-native trace substrate rather than a replacement
-  for MLflow or Flyte truth.
-- `Flyte` remains the orchestration backbone, but its logs, metrics, and traces
-  must flow into the same Grafana and OTEL fabric instead of becoming an island.
+- `vLLM` fits because it exposes Prometheus-style `/metrics` on its
+  OpenAI-compatible server.
+- `LiteLLM` fits because it gives ragweld a single routing, budget, spend, and
+  Langfuse integration layer over self-hosted and hosted providers.
+- `Langfuse` stays the LLM-native trace substrate rather than a replacement for
+  MLflow or Flyte truth.
+- `Flyte` remains the orchestration backbone, but its logs, metrics, traces, and
+  execution identifiers must flow into the same Grafana and OTel fabric instead
+  of becoming an island.
 - `MLflow` remains the run and artifact system of record and should be linked
-  from traces and dashboards rather than duplicated.
+  from traces, dashboards, and drilldowns rather than duplicated.
+
+## Current Baseline On This Branch
+
+The branch already has four real baseline slices. They are not reopened by this
+charter rewrite; they are the starting truth for the next slices.
+
+### 1. Runtime / Gateway Formalization
+
+- `LiteLLM` and `vLLM` are already real runtime vocabulary and config surfaces.
+- Provider and model routing is more formalized than the old ad hoc runtime path.
+- The workbench already exposes runtime/provider truth instead of hiding it.
+
+### 2. Retrieval / Indexing OSS Pilot
+
+- `Docling + Haystack + Qdrant` already exist as a real bounded retrieval and
+  indexing path on this branch.
+- Operators can already see and use that path from the workbench.
+- Legacy retrieval still dominates outside the touched slice, which is why this
+  remains a branch baseline rather than full retrieval replacement truth.
+
+### 3. Observability Online + Cost
+
+- Old LangSmith/LangTrace operator-facing config paths were removed from live
+  surfaces and replaced with OTel, Langfuse, Tempo, Alloy, and cost fields.
+- `/api/observability/status` exists and drives operator-facing readiness.
+- `/api/traces/latest` already includes canonical observability metadata:
+  `trace_id`, `root_span_id`, `correlation_id`, `route_summary`,
+  `external_links`, and `cost_summary`.
+- Canonical observability headers now cover the broader `/api/*` surface, while
+  richer request instrumentation already exists on the chat, search, and answer
+  paths.
+- The workbench already shows readiness, trace links, route context, and cost
+  visibility in-product.
+
+### 4. Training Control-Plane Truth
+
+- Learning Agent Studio already exposes the `Flyte + MLflow + Unsloth` target
+  lane in-product.
+- `GET /api/agent/train/control-plane/status` reports readiness, links, and
+  operator hints.
+- Learning Agent run models already have typed fields for workflow backend,
+  tracking backend, execution backend, external ids, links, and operator hints.
+- Actual launch execution is still on the local MLX lane, which is why this is
+  a truthful control-plane slice rather than a completed Training Center
+  replacement.
 
 ## Ragweld-Owned Logic That Survives The Fork
 
@@ -116,47 +166,36 @@ Upstream tools provide raw materials. Ragweld still owns:
 - regressed vs improved example surfacing
 - source-aware and provenance-aware explanation
 - AI-written comparison synthesis grounded in real artifacts and traces
-- the operator-facing observability UX inside the workbench
-- the combined view that ties together cost, quality, provenance, and trace
-  evidence in one surface instead of splitting them across multiple products
+- the ragweld-owned observability workflow inside the workbench
+- the combined operator view that ties together cost, quality, provenance, and
+  trace evidence instead of splitting them across multiple products
 
-## Implementation Changes
+## Public Contract Policy
 
-- Replace router-owned jobs, JSON run registries, file-backed state, and ad hoc
-  orchestration with Flyte, Postgres metadata, and MLflow artifacts.
-- Replace OpenRouter-first runtime assumptions with `LiteLLM -> vLLM` as the
-  default serving path.
-- Replace bespoke extraction, chunking, embedding, and fusion orchestration with
-  `Docling + Haystack + Qdrant`, while keeping ragweld-specific provenance and
-  codebase identity stitching.
-- Keep `Neo4j` and rebuild only the graph ingestion and retrieval glue needed
-  for source-grounded graph parity.
-- Rebuild chat on `assistant-ui` and standardize the broader shell on the locked
-  frontend stack.
-- Replace custom docs and spec systems with deterministic docs from Pydantic,
-  OpenAPI, and JSON Schema into MkDocs.
-- Replace custom tracing and log buffers with Langfuse plus the locked
-  OpenTelemetry and Grafana stack.
-- Keep Pydantic and FastAPI as the contract boundary, but split the current
-  monolith into smaller schema and config packages and generate frontend clients
-  and types from the resulting standard artifacts.
+- `FastAPI + Pydantic` remain the public contract boundary.
+- No promise is made to preserve current internal backend architecture.
+- No promise is made to preserve the current chat contract if it conflicts with
+  the rebuild.
+- No branch doc should imply fallback routing, compatibility shims, dual-write
+  behavior, or old/new coexistence on this branch.
+- Observability policy is contract-level intent: every online request and every
+  workflow path must be traceable end to end with canonical correlation, trace
+  context, links, and cost surfaced in-product.
+- Keep MCP on the official Python SDK and limit custom MCP logic to
+  ragweld-specific tools and policies.
 
 ## Replacement Means Removal
 
-- Yes: when an OSS subsystem wins, the goal is to remove the bespoke subsystem
-  it replaces rather than keeping both forever.
-- Compatibility adapters are allowed only as migration seams while parity is
-  being proven.
+- When an OSS subsystem wins, the goal is to delete the bespoke subsystem it
+  replaces rather than keep both forever.
+- Do not accept "wrapped legacy forever" as success.
+- Do not introduce compatibility adapters, migration seams, bridge layers, or
+  continuity-preserving coexistence logic on this branch.
 - Every replacement slice must define:
   - the old code path being retired
-  - the temporary adapter or bridge, if any
+  - the new code path becoming truth
   - the parity gate required before deletion
-  - the explicit cleanup step that removes the obsolete code path
-- Do not accept "wrapped legacy forever" as success. A thin adapter around an
-  old subsystem is only acceptable if it has a scheduled deletion target.
-- The architecture gate is subtractive by default: any surviving custom
-  subsystem must justify why no maintained OSS alternative is suitable and why
-  the remaining custom code is smaller than the replaced bespoke surface.
+  - the cleanup step that deletes the obsolete path
 - Protected product surfaces stay; weak implementations do not.
 
 ## UI Is Part Of The Slice
@@ -170,93 +209,116 @@ Upstream tools provide raw materials. Ragweld still owns:
   - operators can see the new backend state and next-step guidance in-product
   - protected surfaces are not silently degraded while backend work lands
 
-## Public Interfaces
-
-- Preserve route-level and UI-level continuity where useful, but do not freeze
-  the current chat contract or the current backend architecture.
-- Keep `FastAPI + Pydantic` as the public contract layer.
-- Keep MCP on the official Python SDK and limit custom MCP logic to
-  ragweld-specific tools and policies.
-- Use compatibility adapters during migration so the current workbench can
-  survive backend swaps incrementally.
-
 ## Workstreams
 
 ### 1. Runtime, gateway, observability, and cost
 
 - Owns the `LiteLLM -> vLLM` path, provider compatibility, online request
-  telemetry, cost instrumentation, and cross-service tracing.
-- First bounded slice: define the runtime gateway contract, config surface,
-  OTEL propagation, Langfuse hooks, and low-cardinality metrics labels without
-  ripping out the current providers yet.
+  telemetry, workflow/job observability, cost instrumentation, and cross-service
+  tracing.
 - Exit criteria:
   - online request path is traceable end to end
-  - budget and spend surfaces are visible
-  - serving, routing, and gateway failures are diagnosable from the workbench
+  - workflow and job paths are traceable end to end
+  - logs, metrics, traces, profiles, and cost are diagnosable from the
+    workbench
+  - remaining local-only observability bridges have named deletion conditions
 
 ### 2. Training, evals, drilldown, and lineage
 
-- Owns Training Center migration, workflow lineage, run truth, eval orchestration,
-  and ragweld-specific comparison logic.
-- First bounded slice: define one `Flyte + MLflow` job family plus the
-  `Langfuse + MLflow + Ragas + Promptfoo` drilldown data model.
+- Owns Training Center replacement, workflow lineage, run truth, eval
+  orchestration, and ragweld-specific comparison logic.
 - Exit criteria:
-  - one bounded workflow is launchable through the new stack
-  - run artifacts and statuses land in MLflow truth
+  - one bounded Learning Agent lane launches through `Flyte + Unsloth + MLflow`
+  - run statuses, logs, links, and artifacts land in real backend truth
   - drilldown can explain regressions and improvements per example
 
 ### 3. Retrieval, indexing, and graph parity
 
 - Owns ingestion, chunking, retrieval orchestration, provenance contracts, and
   v1 graph parity.
-- First bounded slice: isolate a `Docling + Haystack + Qdrant` ingestion and
-  search seam while preserving current provenance output semantics.
 - Exit criteria:
   - indexed corpora preserve source file and line fidelity
   - graph views do not disappear during migration
   - retrieval quality and provenance remain measurable
+  - touched slices promote `Docling + Haystack + Qdrant` from pilot to branch
+    truth
 
 ### 4. Frontend shell, chat, and workbench migration
 
 - Owns dock layout, shell composition, embedded observability, operator
-  utilities, and the new in-shell chat experience.
-- First bounded slice: create an `assistant-ui` migration seam and document the
-  chat semantics that must survive: recall injection, source grounding,
-  streaming, retry behavior, and session continuity.
+  utilities, and the in-shell chat rebuild.
 - Exit criteria:
   - shell parity is visually and interactively credible
-  - chat passes its new acceptance contract
+  - chat passes its fresh acceptance contract
   - protected surfaces still feel first-class inside the workbench
 
-### 5. Contracts, docs, and migration sequencing
+### 5. Contracts, docs, and program sequencing
 
-- Owns Pydantic contract decomposition, generated clients and types, deterministic
-  docs, and compatibility adapters between old and new subsystems.
-- First bounded slice: split the first contract surface out of the current
-  monolith and prove the generated artifacts can drive the web client and docs.
+- Owns Pydantic contract decomposition, generated clients and types,
+  deterministic docs, and execution-program sequencing.
 - Exit criteria:
   - no hand-written frontend API payload types are reintroduced
   - contract generation stays mechanical
-  - migration order is documented and reversible
+  - canonical program docs and project-local memory remain aligned
+
+## Locked Execution Queue
+
+As of 2026-03-25, the user explicitly reordered the queue so the chat rebuild
+goes first.
+
+1. Rebuild chat inside the shell on `assistant-ui`.
+   - Preserve ragweld semantics for recall, sources, streaming, retries,
+     citations, and session continuity.
+   - Do not preserve the current hand-rolled chat implementation out of
+     continuity concerns.
+
+2. Finish the observability workstream as a full-stack replacement layer, not
+   just online request tracing.
+   - Lock end-to-end online request tracing:
+     `browser -> API -> retrieval -> LiteLLM -> vLLM/provider -> response`.
+   - Lock end-to-end workflow path tracing:
+     `UI or schedule -> Flyte workflow -> task logs/metrics -> MLflow artifacts -> Langfuse spans`.
+   - Treat remaining local-only trace buffers or ad hoc observability stores as
+     temporary surfaces with explicit deletion conditions.
+
+3. Make Training Center the next primary backend replacement target after
+   observability.
+   - Replace one bounded Learning Agent lane with real
+     `Flyte + Unsloth + MLflow` launch, status, logs, links, and artifacts.
+   - Keep the in-product Training Center surface first-class in the same slice.
+   - Delete the touched local MLX-backed lane instead of keeping it as a
+     fallback.
+
+4. Make eval analysis and drilldown the next substrate replacement after that
+   lane is real.
+   - Use `Langfuse` for traces, prompts, spans, and per-example inspection.
+   - Use `MLflow` as run and artifact truth.
+   - Keep ragweld-owned comparison, provenance analysis, regressions, and
+     synthesis in the workbench.
+
+5. Move retrieval and indexing from pilot to replacement path.
+   - Promote `Docling + Haystack + Qdrant` from pilot seam to real backend truth
+     when a retrieval or indexing slice is touched.
+     - Keep provenance and Neo4j graph parity explicit in the same slice.
 
 ## Delivery Phases
 
 ### Phase 0. Program setup
 
-- Lock architecture, protected surfaces, observability layer, and memory rules.
-- Start the branch with a single execution charter and indexed project memory.
+- Lock architecture, protected surfaces, observability layer, branch canon, and
+  memory rules.
 - Done when:
   - this kickoff plan is the canonical execution artifact
-  - project-local memory has a formal kickoff entry
-  - first-slice boundaries are explicit
+  - the branch handoff mirrors this kickoff plan
+  - project-local memory is indexed and current
 
-### Phase 1. Migration seams
+### Phase 1. Bounded replacement slices
 
-- Build the first bounded slice in each workstream without forcing global cutover.
-- Preserve current workbench continuity with compatibility adapters.
+- Deliver one real replacement slice at a time, not broad repo churn.
 - Done when:
-  - each workstream has one real seam implemented or explicitly staged
-  - new artifacts can be exercised without deleting the old path yet
+  - each touched slice moves backend, UI, docs, tests, and instructions together
+  - each touched slice deletes the obsolete path or records a named blocker
+  - no touched slice routes back into legacy behavior
 
 ### Phase 2. Vertical pilots
 
@@ -272,24 +334,28 @@ Upstream tools provide raw materials. Ragweld still owns:
 - Use screenshot and interaction parity gates for protected surfaces.
 - Keep architecture pressure on deleting bespoke code instead of wrapping it.
 
-## First Implementation Slices
+## Test And Acceptance
 
-1. Runtime slice: define the `LiteLLM + vLLM` boundary, config surface, cost
-   hooks, and observability propagation.
-2. Chat slice: establish the `assistant-ui` migration seam and the semantic
-   contract for recall, sources, streaming, retries, and sessions.
-3. Workflow slice: define the first `Flyte + MLflow` run model for one bounded
-   job family rather than trying to migrate every job at once.
-4. Retrieval slice: isolate the first `Docling + Haystack + Qdrant`
-   ingestion/search seam while preserving provenance output contracts and graph
-   parity hooks.
-5. Eval slice: define the `Langfuse + MLflow + Ragas + Promptfoo` drilldown
-   model before rebuilding the screen.
+### Program-formalization acceptance
 
-## Test Plan
+- The kickoff doc is the single canonical repo artifact for the fork.
+- The handoff doc matches the kickoff doc.
+- Project-local memory contains an indexed v3 formalization note.
+- No canonical branch doc instructs fallbacks, compatibility adapters, migration
+  seams, or old/new coexistence on this branch.
+
+### Replacement-slice acceptance
+
+- Backend, UI, docs, tests, and instructions move together.
+- No touched slice routes back into legacy behavior.
+- Protected surfaces remain present and understandable in-product.
+- The obsolete bespoke path is deleted or blocked by a named blocker.
+
+### Test plan
 
 - Require screenshot and interaction parity for the workbench shell, dock
-  behavior, Grafana embed, Training Center, graph view, and eval drilldown.
+  behavior, embedded Grafana access, Training Center, graph view, and eval
+  drilldown.
 - Treat chat as a fresh acceptance target: streaming, recall injection, source
   citations, retry behavior, and session continuity must all pass.
 - Run end-to-end flows for indexing, search, chat, graph exploration, training
@@ -310,41 +376,16 @@ Upstream tools provide raw materials. Ragweld still owns:
 - Every material fork decision must do both of the following in the same turn:
   - update the relevant repo-local execution or reference doc if it changes
     architecture, scope, contract, or acceptance criteria
-  - add or update a project-local memory note and keep
-    `/Users/davidmontgomery/.codex/projects/-Users-davidmontgomery-ragweld/MEMORY.md`
-    indexed
+  - add or update a project-local memory note and keep `MEMORY.md` indexed
 - New memory notes for this program should stay short and use the durable
   structure:
   - `Context`
   - `Decision`
   - `Evidence`
   - `Next`
-- If a change alters the locked stack, protected surfaces, or observability
-  layer, update this kickoff doc in the same turn instead of letting memory
-  drift away from the repo artifact.
-- Workstream-specific notes should capture:
-  - what changed
-  - what was rejected
-  - what remains unverified
-  - what should happen next
-
-## Acceptance Criteria
-
-- The branch contains a single source-of-truth kickoff plan for the fork that
-  captures the locked stack, observability layer, protected surfaces,
-  workstreams, phase gates, and first implementation slices.
-- The plan explicitly preserves:
-  - the general ragweld workbench feel
-  - embedded Grafana
-  - an in-product Training Center
-  - an in-product eval analysis and drilldown surface
-- The plan explicitly allows:
-  - a substantial chat rebuild on OSS foundations
-  - meaningful OSS customization when it deletes more bespoke code overall
-- The first engineering slices are concrete enough to implement without
-  reopening architectural intent.
-- Project-local memory contains a formal kickoff note that future agents can
-  extend without reopening this whole discussion.
+- If a change alters the locked stack, protected surfaces, observability layer,
+  or execution queue, update this kickoff doc in the same turn instead of
+  letting memory drift away from the repo artifact.
 
 ## Risks / Failure Modes
 
@@ -363,26 +404,28 @@ Upstream tools provide raw materials. Ragweld still owns:
 
 ## Verification
 
-- Repo verification for this kickoff-plan update:
+- Repo verification for this charter update:
   - `uv run python scripts/check_docs_ownership.py`
   - `uv run scripts/check_banned.py`
   - `uv run scripts/validate_types.py`
   - `uv run pytest -q`
+- Frontend verification only if frontend code changes:
+  - `npm --prefix web run lint`
+  - `npm --prefix web run build`
 - Human verification:
   - the locked stack is intact
   - the observability layer is explicit
-  - the five workstreams are non-overlapping
-  - protected surfaces and first slices are explicit
+  - the execution queue is explicit
+  - protected surfaces are explicit
   - memory discipline is clear enough for future agents to follow
 
 ## Rollout / Rollback
 
-- Rollout starts with bounded workstream slices, not a repo-wide rewrite.
+- Rollout starts with bounded replacement slices, not a repo-wide rewrite.
 - If a chosen subsystem later proves to be the wrong anchor, rollback means
   replacing that subsystem only; the protected product surfaces and workbench
   goals do not change.
-- Compatibility adapters are allowed during migration, but they are temporary
-  seams, not permanent excuses to keep bespoke subsystems alive.
+- Rollback does not mean reviving fallbacks or dual paths on this branch.
 - "Done" for a replacement slice means the obsolete bespoke path is deleted or
   there is a named blocker preventing deletion.
 
@@ -393,6 +436,7 @@ Upstream tools provide raw materials. Ragweld still owns:
   `/Users/davidmontgomery/.codex/projects/-Users-davidmontgomery-ragweld/memory/oss-first-fork-overhaul-baseline-2026-03-23.md`.
 - Read the formal kickoff memory note at
   `/Users/davidmontgomery/.codex/projects/-Users-davidmontgomery-ragweld/memory/oss-composition-fork-formal-kickoff-2026-03-24.md`.
+- Read the v3 charter formalization memory note once it exists.
 - Keep `Pydantic is the law` and generated frontend types intact while changing
   the systems behind them.
 - Prefer deleting hand-rolled platform responsibilities over polishing them.
@@ -403,5 +447,5 @@ Upstream tools provide raw materials. Ragweld still owns:
 
 - Branch created from `origin/main`
 - Kickoff execution artifact formalized
-- Memory discipline locked
-- Detailed workstream implementation notes pending
+- V3 charter rewrite aligned to replacement-only canon
+- Detailed workstream implementation notes active in project-local memory

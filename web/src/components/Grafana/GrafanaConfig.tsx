@@ -14,11 +14,16 @@ export function GrafanaConfig() {
   const { api } = useAPI();
   const [embedEnabledRaw, setEmbedEnabled, embedMeta] = useConfigField<number>('ui.grafana_embed_enabled', 1);
   const [baseUrl, setBaseUrl] = useConfigField<string>('ui.grafana_base_url', 'http://127.0.0.1:3001');
-  const [dashboardUid, setDashboardUid] = useConfigField<string>('ui.grafana_dashboard_uid', 'tribrid-overview');
-  const [dashboardSlug, setDashboardSlug] = useConfigField<string>('ui.grafana_dashboard_slug', 'tribrid-overview');
+  const [dashboardUid, setDashboardUid] = useConfigField<string>('ui.grafana_dashboard_uid', 'ragweld-oncall-overview');
+  const [dashboardSlug, setDashboardSlug] = useConfigField<string>('ui.grafana_dashboard_slug', 'on-call-overview');
   const [kiosk, setKiosk] = useConfigField<string>('ui.grafana_kiosk', 'tv');
   const [orgId, setOrgId] = useConfigField<number>('ui.grafana_org_id', 1);
   const [refresh, setRefresh] = useConfigField<string>('ui.grafana_refresh', '10s');
+  const [mimirBaseUrl, setMimirBaseUrl] = useConfigField<string>('tracing.mimir_base_url', '');
+  const [pyroscopeBaseUrl, setPyroscopeBaseUrl] = useConfigField<string>('tracing.pyroscope_base_url', '');
+  const [faroBaseUrl, setFaroBaseUrl] = useConfigField<string>('tracing.faro_base_url', '');
+  const [opencostBaseUrl, setOpencostBaseUrl] = useConfigField<string>('tracing.opencost_base_url', '');
+  const [alertmanagerBaseUrl, setAlertmanagerBaseUrl] = useConfigField<string>('tracing.alertmanager_base_url', '');
   const [observability, setObservability] = useState<ObservabilityStatusResponse | null>(null);
 
   useEffect(() => {
@@ -204,7 +209,7 @@ export function GrafanaConfig() {
             type="text"
             value={dashboardUid}
             onChange={(e) => setDashboardUid(e.target.value)}
-            placeholder="tribrid-overview"
+            placeholder="ragweld-oncall-overview"
             style={{
               width: '100%',
               background: 'var(--input-bg)',
@@ -225,7 +230,7 @@ export function GrafanaConfig() {
             type="text"
             value={dashboardSlug}
             onChange={(e) => setDashboardSlug(e.target.value)}
-            placeholder="tribrid-overview"
+            placeholder="on-call-overview"
             style={{
               width: '100%',
               background: 'var(--input-bg)',
@@ -283,6 +288,111 @@ export function GrafanaConfig() {
             <option value="tv">tv</option>
             <option value="1">1 (minimal)</option>
           </select>
+        </div>
+
+        <div>
+          <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: 'var(--fg)', marginBottom: '8px' }}>
+            Alertmanager URL
+          </label>
+          <input
+            type="text"
+            value={alertmanagerBaseUrl}
+            onChange={(e) => setAlertmanagerBaseUrl(e.target.value)}
+            placeholder="http://127.0.0.1:9093"
+            style={{
+              width: '100%',
+              background: 'var(--input-bg)',
+              border: '1px solid var(--line)',
+              color: 'var(--fg)',
+              padding: '10px 12px',
+              borderRadius: '8px',
+              fontSize: '13px'
+            }}
+          />
+        </div>
+
+        <div>
+          <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: 'var(--fg)', marginBottom: '8px' }}>
+            Mimir URL
+          </label>
+          <input
+            type="text"
+            value={mimirBaseUrl}
+            onChange={(e) => setMimirBaseUrl(e.target.value)}
+            placeholder="http://127.0.0.1:9009"
+            style={{
+              width: '100%',
+              background: 'var(--input-bg)',
+              border: '1px solid var(--line)',
+              color: 'var(--fg)',
+              padding: '10px 12px',
+              borderRadius: '8px',
+              fontSize: '13px'
+            }}
+          />
+        </div>
+
+        <div>
+          <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: 'var(--fg)', marginBottom: '8px' }}>
+            Pyroscope URL
+          </label>
+          <input
+            type="text"
+            value={pyroscopeBaseUrl}
+            onChange={(e) => setPyroscopeBaseUrl(e.target.value)}
+            placeholder="http://127.0.0.1:4040"
+            style={{
+              width: '100%',
+              background: 'var(--input-bg)',
+              border: '1px solid var(--line)',
+              color: 'var(--fg)',
+              padding: '10px 12px',
+              borderRadius: '8px',
+              fontSize: '13px'
+            }}
+          />
+        </div>
+
+        <div>
+          <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: 'var(--fg)', marginBottom: '8px' }}>
+            Faro URL
+          </label>
+          <input
+            type="text"
+            value={faroBaseUrl}
+            onChange={(e) => setFaroBaseUrl(e.target.value)}
+            placeholder="http://127.0.0.1:12347"
+            style={{
+              width: '100%',
+              background: 'var(--input-bg)',
+              border: '1px solid var(--line)',
+              color: 'var(--fg)',
+              padding: '10px 12px',
+              borderRadius: '8px',
+              fontSize: '13px'
+            }}
+          />
+        </div>
+
+        <div>
+          <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: 'var(--fg)', marginBottom: '8px' }}>
+            OpenCost URL
+          </label>
+          <input
+            type="text"
+            value={opencostBaseUrl}
+            onChange={(e) => setOpencostBaseUrl(e.target.value)}
+            placeholder="http://127.0.0.1:9003"
+            style={{
+              width: '100%',
+              background: 'var(--input-bg)',
+              border: '1px solid var(--line)',
+              color: 'var(--fg)',
+              padding: '10px 12px',
+              borderRadius: '8px',
+              fontSize: '13px'
+            }}
+          />
         </div>
       </div>
 

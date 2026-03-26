@@ -10,7 +10,7 @@ import httpx
 from fastapi import APIRouter, HTTPException, Query, Response
 from starlette.responses import StreamingResponse
 
-from server.chat.handler import chat_once
+from server.chat.handler import ChatGenerationError, chat_once
 from server.chat.handler import chat_stream as chat_stream_handler
 from server.chat.model_discovery import discover_models
 from server.chat.recall_indexer import index_recall_conversation
@@ -421,6 +421,12 @@ async def chat(request: ChatRequest, response: Response) -> ChatResponse:
                 await trace_store.annotate(run_id, **current_trace_payload_fields())
                 await trace_store.end(run_id)
             raise HTTPException(status_code=409, detail=e.to_detail()) from e
+        except ChatGenerationError as e:
+            if trace_enabled:
+                await trace_store.add_event(run_id, kind="chat.error", msg=str(e), data={"kind": "generation"})
+                await trace_store.annotate(run_id, **current_trace_payload_fields())
+                await trace_store.end(run_id)
+            raise HTTPException(status_code=503, detail=str(e)) from e
         except Exception as e:
             if trace_enabled:
                 await trace_store.add_event(run_id, kind="chat.error", msg=str(e), data={})
@@ -663,6 +669,13 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
                     yield f"data: {json.dumps(payload)}\n\n"
                     continue
 
+                if typ == "error":
+                    raw_message = payload.get("message")
+                    if isinstance(raw_message, str) and raw_message.strip():
+                        accumulated = accumulated.strip() or f"Error: {raw_message.strip()}"
+                    yield sse
+                    continue
+
                 yield sse
         except Exception as e:
             caught_exc = (type(e), e, e.__traceback__)
@@ -819,7 +832,7 @@ async def list_chat_models(
     cloud_direct_ready: set[str] = set()
     openai_api_key = (os.getenv("OPENAI_API_KEY") or "").strip()
     openrouter_api_key = (os.getenv("OPENROUTER_API_KEY") or "").strip()
-    litellm_api_key = (os.getenv("LITELLM_API_KEY") or "").strip() or str(getattr(cfg.chat.litellm, "api_key", "") or "").strip()
+    litellm_api_key = (os.getenv("LITELLM_API_KEY") or "").strip()
     openai_base_url = (str(cfg.generation.openai_base_url or "").strip() or "https://api.openai.com/v1")
 
     # Validate cloud provider credentials best-effort so the UI doesn't advertise unusable providers.
@@ -974,7 +987,7 @@ async def chat_health(
         except CorpusNotFoundError:
             cfg = TriBridConfig()
     out: list[ProviderHealth] = []
-    litellm_api_key = (os.getenv("LITELLM_API_KEY") or "").strip() or str(getattr(cfg.chat.litellm, "api_key", "") or "").strip()
+    litellm_api_key = (os.getenv("LITELLM_API_KEY") or "").strip()
 
     # OpenRouter
     if cfg.chat.openrouter.enabled:

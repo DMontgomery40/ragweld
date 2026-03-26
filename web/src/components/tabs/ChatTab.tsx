@@ -31,6 +31,11 @@ export default function ChatTab() {
   const [lokiStatus, setLokiStatus] = useState<{ reachable: boolean; status: string; url?: string } | null>(null);
 
   const chatShowTraceDefault = Boolean(config?.ui?.chat_show_trace ?? 1);
+  const traceRouteSummary = trace?.route_summary ?? null;
+  const traceDurationMs =
+    trace?.ended_at_ms != null && trace?.started_at_ms != null
+      ? Math.max(0, trace.ended_at_ms - trace.started_at_ms)
+      : null;
 
   useEffect(() => {
     // Apply config default once (do not override manual toggles).
@@ -229,6 +234,19 @@ export default function ChatTab() {
                   <div style={{ fontFamily: 'monospace', fontSize: '11px', color: 'var(--fg)' }}>{trace.trace_id || 'n/a'}</div>
                   <div style={{ fontSize: '11px', color: 'var(--fg-muted)', marginTop: '6px' }}>
                     Correlation: {trace.correlation_id || 'n/a'}
+                  </div>
+                  <div style={{ fontSize: '11px', color: 'var(--fg-muted)', marginTop: '6px' }}>
+                    Root span: {trace.root_span_id || 'n/a'}
+                  </div>
+                </div>
+                <div style={{ border: '1px solid var(--line)', borderRadius: '4px', padding: '10px', background: 'var(--bg)' }}>
+                  <div style={{ fontSize: '11px', color: 'var(--fg-muted)', marginBottom: '4px' }}>Request Route</div>
+                  <div style={{ fontSize: '12px', color: 'var(--fg)' }}>
+                    {traceRouteSummary?.method || '—'} {traceRouteSummary?.path || '—'}
+                  </div>
+                  <div style={{ fontSize: '11px', color: 'var(--fg-muted)', marginTop: '6px' }}>
+                    {traceRouteSummary?.route_name || 'n/a'}
+                    {traceDurationMs != null ? ` · ${traceDurationMs} ms` : ''}
                   </div>
                 </div>
                 <div style={{ border: '1px solid var(--line)', borderRadius: '4px', padding: '10px', background: 'var(--bg)' }}>

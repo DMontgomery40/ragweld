@@ -628,6 +628,19 @@ export function SyntheticLabSubtab() {
               ) : (
                 <div style={{ color: 'var(--fg-muted)', marginTop: 6 }}>not evaluated</div>
               )}
+              {selectedRun.summary?.degradation?.degraded ? (
+                <div style={{ marginTop: 8, padding: '6px 10px', background: 'var(--warn-bg, rgba(255,180,0,0.1))', borderRadius: 4, border: '1px solid var(--warn-border, rgba(255,180,0,0.3))' }}>
+                  <div style={{ fontWeight: 600, marginBottom: 4, color: 'var(--warn, #b8860b)' }}>Degraded Run</div>
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 4 }}>
+                    {selectedRun.summary.degradation.generator_fallback_used && <span className="studio-chip studio-chip-warn">generator fallback</span>}
+                    {selectedRun.summary.degradation.judge_fallback_used && <span className="studio-chip studio-chip-warn">judge fallback</span>}
+                    {selectedRun.summary.degradation.seed_hydration_used && <span className="studio-chip studio-chip-warn">seed hydration ({selectedRun.summary.degradation.seed_hydration_count} rows)</span>}
+                  </div>
+                  {(selectedRun.summary.degradation.reasons || []).map((reason, i) => (
+                    <div key={i} style={{ fontSize: '0.85em', opacity: 0.9, marginBottom: 2 }}>{reason}</div>
+                  ))}
+                </div>
+              ) : null}
             </div>
 
             <div style={{ marginBottom: 10 }}>

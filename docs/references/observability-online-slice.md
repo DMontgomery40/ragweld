@@ -5,30 +5,88 @@ This reference describes the hard-cut observability slice for live online reques
 ## Scope
 
 - Request path: `browser -> FastAPI -> retrieval -> provider router -> LiteLLM/provider -> response`
+- Global API coverage: every `/api/*` response now emits canonical `X-Correlation-ID`, `X-Trace-ID`, and `X-Root-Span-ID` headers through shared middleware
 - Canonical signal path: OpenTelemetry
 - Workbench-facing LLM trace deep links: Langfuse
 - Trace deep links: Tempo
 - Collector/agent for local wiring: Grafana Alloy
-- Local workbench trace cache stays as a short-term UI bridge, not the long-term source of truth
+- Gateway and workflow surfaces now show up in the same operator-facing status deck:
+  - `LiteLLM`
+  - `vLLM`
+  - `Flyte`
+  - `MLflow`
+  - `Unsloth`
+- Expanded stack truth now also covers:
+  - `Mimir`
+  - `Pyroscope`
+  - `Faro`
+  - `OpenCost`
+  - `Alertmanager`
+  - corpus-scoped `Haystack + Docling + Qdrant` retrieval lane health
+- Human-facing visual surfaces:
+  - Grafana is now a four-surface operator workspace: `Overview`, `Dashboards`, `Incidents`, and `Config`
+  - Infrastructure -> Monitoring now carries the same operator deck instead of a narrower readiness card
+  - Benchmark is visible in top-level navigation so runtime regressions are not hidden behind a dark route
+  - the Grafana overview deck combines observability status, dashboard catalog links, recent incidents, latest trace evidence, Loki status, training control-plane truth, retrieval pilot health, and eval/benchmark/prompt regression summaries for the active corpus
+  - the dashboard workspace is now catalog-driven from the backend instead of a frontend-only hardcoded preset list
+- Local workbench trace cache stays as a short-term UI bridge for primary live request surfaces, not the long-term source of truth
 
 ## Source of truth files
 
 - `/Users/davidmontgomery/ragweld/server/models/tribrid_config_model.py`
 - `/Users/davidmontgomery/ragweld/server/observability/runtime.py`
 - `/Users/davidmontgomery/ragweld/server/observability/status.py`
+- `/Users/davidmontgomery/ragweld/server/observability/catalog.py`
+- `/Users/davidmontgomery/ragweld/server/observability/incidents.py`
+- `/Users/davidmontgomery/ragweld/server/observability/ml_quality.py`
 - `/Users/davidmontgomery/ragweld/server/observability/costing.py`
 - `/Users/davidmontgomery/ragweld/server/services/traces.py`
 - `/Users/davidmontgomery/ragweld/server/api/observability.py`
+- `/Users/davidmontgomery/ragweld/server/api/eval.py`
+- `/Users/davidmontgomery/ragweld/server/api/benchmark.py`
+- `/Users/davidmontgomery/ragweld/server/api/prompts.py`
 - `/Users/davidmontgomery/ragweld/server/api/chat.py`
 - `/Users/davidmontgomery/ragweld/server/api/search.py`
+- `/Users/davidmontgomery/ragweld/web/src/components/Observability/OperatorDeck.tsx`
+- `/Users/davidmontgomery/ragweld/web/src/components/Observability/IncidentsBoard.tsx`
+- `/Users/davidmontgomery/ragweld/web/src/components/tabs/GrafanaTab.tsx`
+- `/Users/davidmontgomery/ragweld/web/src/components/Grafana/GrafanaDashboard.tsx`
+- `/Users/davidmontgomery/ragweld/web/src/components/Infrastructure/MonitoringSubtab.tsx`
+- `/Users/davidmontgomery/ragweld/infra/grafana/provisioning/dashboards/oncall-overview.json`
+- `/Users/davidmontgomery/ragweld/infra/grafana/provisioning/dashboards/gateway-serving.json`
+- `/Users/davidmontgomery/ragweld/infra/grafana/provisioning/dashboards/retrieval-indexing-graph.json`
+- `/Users/davidmontgomery/ragweld/infra/grafana/provisioning/dashboards/training-workflow.json`
+- `/Users/davidmontgomery/ragweld/infra/grafana/provisioning/dashboards/eval-benchmark-prompt-regressions.json`
+- `/Users/davidmontgomery/ragweld/infra/grafana/provisioning/dashboards/cost-capacity.json`
+- `/Users/davidmontgomery/ragweld/infra/grafana/provisioning/dashboards/frontend-rum.json`
 
 ## Operator-facing APIs
 
 - `GET /api/observability/status`
+- `GET /api/observability/catalog`
+- `GET /api/observability/incidents`
+- `GET /api/eval/observability/summary`
+- `GET /api/benchmark/observability/summary`
+- `GET /api/prompts/observability/summary`
 - `GET /api/traces/latest`
+- `GET /api/agent/train/control-plane/status`
+- `GET /api/loki/status`
+- `GET /api/index/{corpus_id}/pilot/status`
 - `X-Correlation-ID`
 - `X-Trace-ID`
 - `X-Root-Span-ID`
+
+## Readiness semantics
+
+- `GET /api/observability/status` now treats OTLP export as a real target, not just a configured field.
+- If OTLP, Alloy, Tempo, Langfuse, Grafana, Mimir, Pyroscope, Faro, OpenCost, Alertmanager, or the configured gateway/training lane is enabled and unreachable, the status response should fail closed with grouped component severity plus an operator hint.
+- The same status surface now includes gateway, workflow, and retrieval truth for `LiteLLM`, `vLLM`, `Flyte`, `MLflow`, `Unsloth`, and the active `Haystack + Docling + Qdrant` lane, so the workbench can render a command-center view instead of a backend-only readiness blob.
+- The incident feed is intentionally multi-source:
+  - infrastructure/component failures
+  - retrieval degradation
+  - eval regression summaries
+  - benchmark regression summaries
+  - prompt-regression / pending-verification correlation
 
 ## Local dev wiring
 

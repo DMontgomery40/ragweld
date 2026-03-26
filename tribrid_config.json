@@ -176,12 +176,12 @@
     "parquet_extract_text_columns_only": 1,
     "parquet_extract_include_column_names": 1,
     "skip_dense": 0,
+    "auto_prepare_dense_retrieval": true,
     "estimated_tokens_per_second_local": null
   },
   "graph_storage": {
     "neo4j_uri": "bolt://localhost:7687",
     "neo4j_user": "neo4j",
-    "neo4j_password": "password",
     "neo4j_database": "neo4j",
     "neo4j_database_mode": "shared",
     "neo4j_database_prefix": "tribrid_",
@@ -294,8 +294,8 @@
     "gen_top_p": 1.0,
     "gen_timeout": 60,
     "gen_retry_max": 2,
-    "enrich_model": "gpt-4o-mini",
     "gen_backend": "openai",
+    "enrich_model": "gpt-4o-mini",
     "enrich_backend": "openai",
     "enrich_disabled": 0,
     "ollama_num_ctx": 8192,
@@ -375,6 +375,11 @@
     "langfuse_project": "ragweld",
     "tempo_base_url": "",
     "alloy_base_url": "",
+    "mimir_base_url": "",
+    "pyroscope_base_url": "",
+    "faro_base_url": "",
+    "opencost_base_url": "",
+    "alertmanager_base_url": "",
     "cost_tracking_enabled": 1
   },
   "training": {
@@ -406,6 +411,8 @@
     "learning_reranker_unload_after_sec": 0,
     "learning_reranker_telemetry_interval_steps": 2,
     "ragweld_agent_backend": "mlx_qwen3",
+    "ragweld_agent_workflow_backend": "local",
+    "ragweld_agent_tracking_backend": "local",
     "ragweld_agent_base_model": "mlx-community/Qwen3-1.7B-4bit",
     "ragweld_agent_model_path": "models/learning-agent-epstein-files-1",
     "ragweld_agent_unload_after_sec": 0,
@@ -423,7 +430,15 @@
     "ragweld_agent_grad_accum_steps": 8,
     "ragweld_agent_telemetry_interval_steps": 2,
     "ragweld_agent_promote_if_improves": 1,
-    "ragweld_agent_promote_epsilon": 0.0
+    "ragweld_agent_promote_epsilon": 0.0,
+    "ragweld_agent_flyte_admin_base_url": "",
+    "ragweld_agent_flyte_console_base_url": "",
+    "ragweld_agent_flyte_project": "ragweld",
+    "ragweld_agent_flyte_domain": "development",
+    "ragweld_agent_flyte_launchplan": "",
+    "ragweld_agent_mlflow_tracking_url": "",
+    "ragweld_agent_mlflow_experiment_name": "ragweld-learning-agent",
+    "ragweld_agent_unsloth_image": ""
   },
   "ui": {
     "chat_streaming_enabled": 1,
@@ -537,6 +552,17 @@
       "default_steps": 8,
       "default_resolution": "1024x1024"
     },
+    "vllm": {
+      "enabled": false,
+      "base_url": "http://127.0.0.1:8000/v1",
+      "default_model": "Qwen/Qwen2.5-7B-Instruct"
+    },
+    "litellm": {
+      "enabled": false,
+      "base_url": "http://127.0.0.1:4000/v1",
+      "default_model": "openai/gpt-4o-mini",
+      "fallback_models": []
+    },
     "local_models": {
       "providers": [
         {
@@ -564,7 +590,6 @@
     },
     "openrouter": {
       "enabled": false,
-      "api_key": "",
       "base_url": "https://openrouter.ai/api/v1",
       "default_model": "anthropic/claude-sonnet-4",
       "site_name": "TriBridRAG",

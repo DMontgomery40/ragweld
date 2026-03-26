@@ -197,7 +197,7 @@ async def discover_litellm_models(cfg: LiteLLMConfig) -> list[dict[str, Any]]:
     if not base_url:
         return []
 
-    api_key = (os.getenv("LITELLM_API_KEY") or "").strip() or str(getattr(cfg, "api_key", "") or "").strip()
+    api_key = (os.getenv("LITELLM_API_KEY") or "").strip()
     headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
 
     try:

@@ -104,6 +104,14 @@ def _collect_ui_bindings() -> tuple[set[str], list[str]]:
     return bindings, errors
 
 
+def _collect_control_plane_bindings() -> tuple[set[str], list[str]]:
+    try:
+        from server.config_control_plane import build_config_field_descriptors
+    except Exception as exc:
+        return set(), [f"Failed to load config control plane descriptors: {exc}"]
+    return {descriptor.path for descriptor in build_config_field_descriptors()}, []
+
+
 def _validate_component_extensions() -> list[str]:
     root = _repo_root()
     rag_dir = root / "web" / "src" / "components" / "RAG"
@@ -166,9 +174,12 @@ def validate_retrieval_config_surface() -> list[str]:
 
     bindings, binding_errors = _collect_ui_bindings()
     errors.extend(binding_errors)
+    control_plane_bindings, control_plane_errors = _collect_control_plane_bindings()
+    errors.extend(control_plane_errors)
 
     target_prefixes = {f"{section}." for section in REQUIRED_SECTIONS}
     scoped_bindings = {k for k in bindings if any(k.startswith(prefix) for prefix in target_prefixes)}
+    scoped_bindings.update({k for k in control_plane_bindings if any(k.startswith(prefix) for prefix in target_prefixes)})
 
     missing = sorted(required - scoped_bindings)
     unknown = sorted(scoped_bindings - required)

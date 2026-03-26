@@ -215,7 +215,14 @@ def start_request_observation(
     correlation_id: str | None = None,
     run_id: str | None = None,
     repo_id: str | None = None,
-) -> Iterator[RequestObservation]:
+) -> Iterator[RequestObservation | None]:
+    if int(getattr(config.tracing, "tracing_enabled", 1) or 0) != 1:
+        yield None
+        return
+    if normalize_tracing_mode(config.tracing.tracing_mode) == "off":
+        yield None
+        return
+
     manager = get_observability_manager(config)
     request_correlation_id = str(correlation_id or uuid.uuid4())
     span_name = f"ragweld.{route_name}"

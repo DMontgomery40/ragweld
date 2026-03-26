@@ -341,7 +341,8 @@ async def _generate_eval_candidates_for_chunk(
     if not file_path:
         return []
 
-    source_excerpt = "\n".join((chunk.content or "").splitlines()[:80])
+    gen_cfg = cfg.synthetic.generator
+    source_excerpt = "\n".join((chunk.content or "").splitlines()[:gen_cfg.source_excerpt_max_lines])
     source_kind = _infer_source_kind(file_path, source_excerpt)
     answer_mode = "required" if include_expected_answer else "optional"
 
@@ -373,8 +374,8 @@ async def _generate_eval_candidates_for_chunk(
         user_message=user_message,
         images=[],
         image_detail="auto",
-        temperature=0.0,
-        max_tokens=1200,
+        temperature=gen_cfg.temperature,
+        max_tokens=gen_cfg.max_tokens,
         context_text=source_excerpt,
         context_chunks=[],
         timeout_s=float(cfg.generation.gen_timeout or 60),
@@ -395,9 +396,9 @@ async def _generate_eval_candidates_for_chunk(
             continue
         rows.append(
             {
-                "question": question[:180],
-                "expected_answer": expected_answer[:400] if expected_answer else "",
-                "evidence_quote": evidence_quote[:200] if evidence_quote else "",
+                "question": question[:gen_cfg.question_max_chars],
+                "expected_answer": expected_answer[:gen_cfg.expected_answer_max_chars] if expected_answer else "",
+                "evidence_quote": evidence_quote[:gen_cfg.evidence_quote_max_chars] if evidence_quote else "",
             }
         )
     return rows
@@ -443,6 +444,7 @@ async def _judge_eval_item(
     }
     user_message = json.dumps(payload, ensure_ascii=False)
 
+    judge_cfg = cfg.synthetic.judge
     response_text, _resp_id = await generate_chat_text(
         route=route,
         openrouter_cfg=cfg.chat.openrouter,
@@ -450,8 +452,8 @@ async def _judge_eval_item(
         user_message=user_message,
         images=[],
         image_detail="auto",
-        temperature=0.0,
-        max_tokens=400,
+        temperature=judge_cfg.temperature,
+        max_tokens=judge_cfg.max_tokens,
         context_text=source_excerpt[:2500],
         context_chunks=[],
         timeout_s=float(cfg.generation.gen_timeout or 60),
@@ -487,6 +489,7 @@ async def _make_eval_items_with_llm(
     include_tags: bool,
     curate_enabled: bool,
     curate_threshold: float,
+    summary: SyntheticRunSummary,
 ) -> tuple[list[EvalDatasetItem], int, int, float | None]:
     generated_rows: list[tuple[EvalDatasetItem, Chunk]] = []
     generator_failed = False
@@ -509,8 +512,18 @@ async def _make_eval_items_with_llm(
                     pairs_per_source=max(1, pairs_per_source),
                     include_expected_answer=include_expected_answer,
                 )
-            except Exception:
+            except Exception as gen_exc:
+                if cfg.synthetic.generator.fail_on_error:
+                    raise RuntimeError(
+                        f"Generator LLM unreachable: {gen_exc}"
+                    ) from gen_exc
                 generator_failed = True
+                if not summary.degradation.generator_fallback_used:
+                    summary.degradation.generator_fallback_used = True
+                    summary.degradation.degraded = True
+                    summary.degradation.reasons.append(
+                        f"Generator LLM failed ({type(gen_exc).__name__}); fell back to deterministic extraction."
+                    )
                 candidates = _fallback_eval_candidates_for_chunk(
                     chunk=ch,
                     pairs_per_source=max(1, pairs_per_source),
@@ -554,7 +567,7 @@ async def _make_eval_items_with_llm(
     judge_failed = False
 
     for item, ch in generated_rows:
-        excerpt = "\n".join((ch.content or "").splitlines()[:80])
+        excerpt = "\n".join((ch.content or "").splitlines()[:cfg.synthetic.generator.source_excerpt_max_lines])
         if judge_failed:
             score = float(threshold)
             keep = True
@@ -568,9 +581,18 @@ async def _make_eval_items_with_llm(
                     source_file_path=str(ch.file_path or ""),
                     threshold=threshold,
                 )
-            except Exception:
+            except Exception as judge_exc:
+                if cfg.synthetic.judge.fail_on_error:
+                    raise RuntimeError(
+                        f"Judge LLM unreachable: {judge_exc}"
+                    ) from judge_exc
                 judge_failed = True
-                # Keep fallback-generated rows when judge inference is unavailable.
+                if not summary.degradation.judge_fallback_used:
+                    summary.degradation.judge_fallback_used = True
+                    summary.degradation.degraded = True
+                    summary.degradation.reasons.append(
+                        f"Judge LLM failed ({type(judge_exc).__name__}); auto-passing all remaining items."
+                    )
                 score = float(threshold)
                 keep = True
         scores.append(score)
@@ -676,6 +698,7 @@ async def generate_recipe_payloads(
     judge_route = resolve_synthetic_route(cfg=cfg, model=str(request.judge_model or ""))
     _ = (generator_route, judge_route)
 
+    summary = SyntheticRunSummary()
     summaries = [_chunk_to_summary(ch, card_source="deterministic") for ch in chunks]
 
     eval_items: list[EvalDatasetItem] = []
@@ -695,6 +718,7 @@ async def generate_recipe_payloads(
             include_tags=bool(request.include_tags),
             curate_enabled=bool(request.curate_enabled),
             curate_threshold=float(request.curate_threshold or 7.0),
+            summary=summary,
         )
 
     keywords = _derive_keywords(summaries, max_keywords=int(cfg.keywords.keywords_max_per_repo or 80))
@@ -732,18 +756,16 @@ async def generate_recipe_payloads(
         )
     artifacts["report_md"] = report
 
-    summary = SyntheticRunSummary(
-        sources_used=len(chunks),
-        items_generated=sum(
-            [
-                len(eval_items),
-                len(summaries),
-                len(triplets),
-                len(keywords),
-            ]
-        ),
-        items_curated_in=curated_in,
-        items_curated_out=curated_out,
-        avg_judge_score=avg_judge_score,
+    summary.sources_used = len(chunks)
+    summary.items_generated = sum(
+        [
+            len(eval_items),
+            len(summaries),
+            len(triplets),
+            len(keywords),
+        ]
     )
+    summary.items_curated_in = curated_in
+    summary.items_curated_out = curated_out
+    summary.avg_judge_score = avg_judge_score
     return artifacts, summary
