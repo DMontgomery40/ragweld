@@ -15,8 +15,10 @@ FRONTEND_HOST="${FRONTEND_HOST:-127.0.0.1}"
 BACKEND_HOST="${BACKEND_HOST:-127.0.0.1}"
 PREFERRED_BACKEND_PORT="${BACKEND_PORT:-8012}"
 BACKEND_PORT_CANDIDATE_TEXT="${BACKEND_PORT_CANDIDATES:-8013 8014 8015}"
+BACKEND_PORT_SEARCH_WINDOW="${BACKEND_PORT_SEARCH_WINDOW:-5}"
 PREFERRED_UI_PORT="${UI_PORT:-5173}"
 UI_PORT_CANDIDATE_TEXT="${UI_PORT_CANDIDATES:-4173 4174 4175 5174}"
+UI_PORT_SEARCH_WINDOW="${UI_PORT_SEARCH_WINDOW:-5}"
 IFS=' ' read -r -a BACKEND_PORT_CANDIDATES <<<"$BACKEND_PORT_CANDIDATE_TEXT"
 IFS=' ' read -r -a UI_PORT_CANDIDATES <<<"$UI_PORT_CANDIDATE_TEXT"
 
@@ -109,6 +111,18 @@ api_root_from_base() {
 port_free() {
   local port="$1"
   [ -z "$(listener_pid "$port")" ]
+}
+
+highest_port() {
+  local max_port="$1"
+  shift || true
+  local port
+  for port in "$@"; do
+    if [ "$port" -gt "$max_port" ]; then
+      max_port="$port"
+    fi
+  done
+  printf '%s\n' "$max_port"
 }
 
 is_current_worktree_listener() {
@@ -232,6 +246,8 @@ ui_matches_resolved_api() {
 
 ensure_ui_root() {
   local expected_api_root=""
+  local highest_ui_port
+  local extra_ui_port
   if [ -n "${resolved_api_base:-}" ]; then
     expected_api_root="$(api_root_from_base "$resolved_api_base")"
   fi
@@ -267,6 +283,14 @@ ensure_ui_root() {
     fi
   done
 
+  highest_ui_port="$(highest_port "$PREFERRED_UI_PORT" "${UI_PORT_CANDIDATES[@]}")"
+  for ((extra_ui_port=highest_ui_port + 1; extra_ui_port<=highest_ui_port + UI_PORT_SEARCH_WINDOW; extra_ui_port++)); do
+    if is_current_worktree_listener "$extra_ui_port" && wait_for_ui_root "http://${FRONTEND_HOST}:${extra_ui_port}" "$artifact_dir/ui_probe_port_${extra_ui_port}"; then
+      printf '%s\n' "http://${FRONTEND_HOST}:${extra_ui_port}"
+      return 0
+    fi
+  done
+
   if port_free "$PREFERRED_UI_PORT"; then
     if start_frontend_on_port "$PREFERRED_UI_PORT" "$expected_api_root"; then
       printf '%s\n' "http://${FRONTEND_HOST}:${PREFERRED_UI_PORT}"
@@ -277,6 +301,13 @@ ensure_ui_root() {
   for port in "${UI_PORT_CANDIDATES[@]}"; do
     if port_free "$port" && start_frontend_on_port "$port" "$expected_api_root"; then
       printf '%s\n' "http://${FRONTEND_HOST}:${port}"
+      return 0
+    fi
+  done
+
+  for ((extra_ui_port=highest_ui_port + 1; extra_ui_port<=highest_ui_port + UI_PORT_SEARCH_WINDOW; extra_ui_port++)); do
+    if port_free "$extra_ui_port" && start_frontend_on_port "$extra_ui_port" "$expected_api_root"; then
+      printf '%s\n' "http://${FRONTEND_HOST}:${extra_ui_port}"
       return 0
     fi
   done
@@ -310,6 +341,8 @@ start_backend() {
 }
 
 ensure_api_base() {
+  local highest_backend_port
+  local extra_backend_port
   if [ -n "${API_BASE:-}" ]; then
     if wait_for_api "$API_BASE"; then
       printf '%s\n' "$API_BASE"
@@ -342,9 +375,26 @@ ensure_api_base() {
     fi
   done
 
+  highest_backend_port="$(highest_port "$PREFERRED_BACKEND_PORT" "${BACKEND_PORT_CANDIDATES[@]}")"
+  for ((extra_backend_port=highest_backend_port + 1; extra_backend_port<=highest_backend_port + BACKEND_PORT_SEARCH_WINDOW; extra_backend_port++)); do
+    local api_base="http://${BACKEND_HOST}:${extra_backend_port}/api"
+    if is_current_worktree_listener "$extra_backend_port" && wait_for_api "$api_base"; then
+      printf '%s\n' "$api_base"
+      return 0
+    fi
+  done
+
   for port in "${BACKEND_PORT_CANDIDATES[@]}"; do
     local api_base="http://${BACKEND_HOST}:${port}/api"
     if port_free "$port" && start_backend "$port"; then
+      printf '%s\n' "$api_base"
+      return 0
+    fi
+  done
+
+  for ((extra_backend_port=highest_backend_port + 1; extra_backend_port<=highest_backend_port + BACKEND_PORT_SEARCH_WINDOW; extra_backend_port++)); do
+    local api_base="http://${BACKEND_HOST}:${extra_backend_port}/api"
+    if port_free "$extra_backend_port" && start_backend "$extra_backend_port"; then
       printf '%s\n' "$api_base"
       return 0
     fi

@@ -131,11 +131,27 @@ async function selectModel(labelText) {
   const options = await select.locator('option').evaluateAll((opts) =>
     opts.map((o) => ({ value: o.getAttribute('value') || '', text: (o.textContent || '').trim() }))
   );
-  const preferred = options.find((o) => o.value.includes('gpt-4o-mini'));
-  const fallback = options.find((o) => o.value && o.value !== '__custom__');
-  const picked = preferred || fallback;
+  const picked = options.find((o) => {
+    const raw = String(o.value || '').trim().toLowerCase();
+    if (!raw || raw === '__custom__') return false;
+    let candidate = raw;
+    for (const prefix of ['openrouter:', 'litellm:']) {
+      if (candidate.startsWith(prefix)) {
+        candidate = candidate.slice(prefix.length);
+        break;
+      }
+    }
+    if (candidate.startsWith('openai/')) {
+      candidate = candidate.slice('openai/'.length);
+    }
+    return candidate.startsWith('gpt-5');
+  });
   if (!picked) {
-    throw new Error(`No selectable option found for ${labelText}`);
+    throw new Error(
+      `No selectable GPT-5 option found for ${labelText}. Available values: ${options
+        .map((option) => option.value || option.text || '<empty>')
+        .join(', ')}`
+    );
   }
   await select.selectOption(picked.value);
   return picked;
