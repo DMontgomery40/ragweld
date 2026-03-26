@@ -37,6 +37,9 @@ _REMOVED_NESTED_KEYS: tuple[str, ...] = (
     "indexing.rag_out_base",
     "indexing.repos_file",
     "indexing.bm25_stopwords_lang",
+    "graph_storage.neo4j_password",
+    "chat.litellm.api_key",
+    "chat.openrouter.api_key",
 )
 
 _REMOVED_FLAT_KEYS: tuple[str, ...] = (
@@ -47,6 +50,7 @@ _REMOVED_FLAT_KEYS: tuple[str, ...] = (
     "RAG_OUT_BASE",
     "REPOS_FILE",
     "BM25_STOPWORDS_LANG",
+    "NEO4J_PASSWORD",
 )
 
 

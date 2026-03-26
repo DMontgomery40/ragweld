@@ -35,3 +35,13 @@ def test_lineage_and_benchmark_models_exist_in_generated_ts() -> None:
     assert "export interface LineageBundle" in content
     assert "export interface LineageRef" in content
     assert "export interface BenchmarkRun" in content
+
+
+def test_config_control_plane_models_exist_in_generated_ts() -> None:
+    content = GENERATED_TS.read_text()
+    assert "export interface ConfigFieldDescriptor" in content
+    assert "export interface ConfigIntegrationContract" in content
+    assert "export interface ConfigRegistryResponse" in content
+    assert "export interface ConfigReadinessResponse" in content
+    assert "export interface SecretRequirement" in content
+    assert "export interface IntegrationReadiness" in content

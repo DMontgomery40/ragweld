@@ -16,6 +16,79 @@
         "title": "ActiveSources",
         "type": "object"
       },
+      "AgentTrainControlPlaneStatusResponse": {
+        "properties": {
+          "components": {
+            "description": "Per-component readiness details for the target control plane.",
+            "items": {
+              "$ref": "#/components/schemas/TrainingControlPlaneComponentStatus"
+            },
+            "title": "Components",
+            "type": "array"
+          },
+          "execution_backend": {
+            "default": "mlx_qwen3",
+            "description": "Configured execution backend target.",
+            "title": "Execution Backend",
+            "type": "string"
+          },
+          "lane": {
+            "default": "legacy_local",
+            "description": "Resolved target lane for the Learning Agent Training Center surface.",
+            "enum": [
+              "legacy_local",
+              "flyte_mlflow_unsloth"
+            ],
+            "title": "Lane",
+            "type": "string"
+          },
+          "links": {
+            "description": "Top-level Learning Agent control-plane links.",
+            "items": {
+              "$ref": "#/components/schemas/TraceExternalLink"
+            },
+            "title": "Links",
+            "type": "array"
+          },
+          "ok": {
+            "default": true,
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "operator_hint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "High-signal next-step guidance for operators.",
+            "title": "Operator Hint"
+          },
+          "ready": {
+            "default": false,
+            "description": "Whether the Flyte + MLflow + Unsloth control plane is fully configured and reachable.",
+            "title": "Ready",
+            "type": "boolean"
+          },
+          "tracking_backend": {
+            "default": "local",
+            "description": "Configured tracking backend target.",
+            "title": "Tracking Backend",
+            "type": "string"
+          },
+          "workflow_backend": {
+            "default": "local",
+            "description": "Configured workflow backend target.",
+            "title": "Workflow Backend",
+            "type": "string"
+          }
+        },
+        "title": "AgentTrainControlPlaneStatusResponse",
+        "type": "object"
+      },
       "AgentTrainDiffRequest": {
         "properties": {
           "baseline_run_id": {
@@ -432,6 +505,18 @@
       },
       "AgentTrainRun": {
         "properties": {
+          "artifacts_uri": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Artifact URI or storage path for the run outputs when available.",
+            "title": "Artifacts Uri"
+          },
           "batch_size": {
             "maximum": 256.0,
             "minimum": 1.0,
@@ -486,6 +571,20 @@
             "title": "Epochs",
             "type": "integer"
           },
+          "execution_backend": {
+            "default": "mlx_qwen3",
+            "description": "Execution backend used for this run (for example mlx_qwen3 or unsloth).",
+            "title": "Execution Backend",
+            "type": "string"
+          },
+          "external_links": {
+            "description": "Direct operator links for workflow, tracking, or artifact surfaces.",
+            "items": {
+              "$ref": "#/components/schemas/TraceExternalLink"
+            },
+            "title": "External Links",
+            "type": "array"
+          },
           "input_bundle_id": {
             "anyOf": [
               {
@@ -538,6 +637,18 @@
               }
             ],
             "description": "Immutable agent model artifact version produced by this run."
+          },
+          "operator_hint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "High-signal next-step guidance for operators inspecting this run.",
+            "title": "Operator Hint"
           },
           "primary_goal": {
             "default": "minimize",
@@ -593,11 +704,47 @@
           "summary": {
             "$ref": "#/components/schemas/AgentTrainRunSummary"
           },
+          "tracking_backend": {
+            "default": "local",
+            "description": "Run/artifact truth backend used for this run (for example local or mlflow).",
+            "title": "Tracking Backend",
+            "type": "string"
+          },
+          "tracking_run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "External run identifier in the tracking system when available.",
+            "title": "Tracking Run Id"
+          },
           "warmup_ratio": {
             "maximum": 1.0,
             "minimum": 0.0,
             "title": "Warmup Ratio",
             "type": "number"
+          },
+          "workflow_backend": {
+            "default": "local",
+            "description": "Workflow state backend used for this run (for example local or flyte).",
+            "title": "Workflow Backend",
+            "type": "string"
+          },
+          "workflow_run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "External workflow execution identifier when orchestration is delegated.",
+            "title": "Workflow Run Id"
           }
         },
         "required": [
@@ -641,6 +788,11 @@
           },
           "corpus_id": {
             "title": "Corpus Id",
+            "type": "string"
+          },
+          "execution_backend": {
+            "default": "mlx_qwen3",
+            "title": "Execution Backend",
             "type": "string"
           },
           "lineage_ref": {
@@ -694,6 +846,38 @@
             ],
             "title": "Status",
             "type": "string"
+          },
+          "tracking_backend": {
+            "default": "local",
+            "title": "Tracking Backend",
+            "type": "string"
+          },
+          "tracking_run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tracking Run Id"
+          },
+          "workflow_backend": {
+            "default": "local",
+            "title": "Workflow Backend",
+            "type": "string"
+          },
+          "workflow_run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workflow Run Id"
           }
         },
         "required": [
@@ -1048,6 +1232,59 @@
         "title": "AnswerResponse",
         "type": "object"
       },
+      "BenchmarkBreakdownDelta": {
+        "description": "Per-phase benchmark timing delta.",
+        "properties": {
+          "current_ms": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Latest average phase duration in ms.",
+            "title": "Current Ms"
+          },
+          "delta_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Current minus previous duration in ms.",
+            "title": "Delta Ms"
+          },
+          "phase": {
+            "description": "Benchmark breakdown phase.",
+            "title": "Phase",
+            "type": "string"
+          },
+          "previous_ms": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Previous average phase duration in ms.",
+            "title": "Previous Ms"
+          }
+        },
+        "required": [
+          "phase"
+        ],
+        "title": "BenchmarkBreakdownDelta",
+        "type": "object"
+      },
       "BenchmarkConfig": {
         "description": "Split-screen model comparison + pipeline profiling.",
         "properties": {
@@ -1085,6 +1322,162 @@
           }
         },
         "title": "BenchmarkConfig",
+        "type": "object"
+      },
+      "BenchmarkObservabilitySummaryResponse": {
+        "description": "Corpus-scoped benchmark observability summary.",
+        "properties": {
+          "average_latency_ms": {
+            "$ref": "#/components/schemas/ObservabilityMetricDelta"
+          },
+          "breakdown_deltas": {
+            "description": "Timing shifts by benchmark breakdown phase.",
+            "items": {
+              "$ref": "#/components/schemas/BenchmarkBreakdownDelta"
+            },
+            "title": "Breakdown Deltas",
+            "type": "array"
+          },
+          "corpus_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional corpus identifier for the summary.",
+            "title": "Corpus Id"
+          },
+          "latest_bundle_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Latest bundle id tied to the benchmark run.",
+            "title": "Latest Bundle Id"
+          },
+          "latest_error_count": {
+            "default": 0,
+            "description": "Error count in the latest benchmark run.",
+            "minimum": 0.0,
+            "title": "Latest Error Count",
+            "type": "integer"
+          },
+          "latest_model_count": {
+            "default": 0,
+            "description": "Model count in the latest benchmark run.",
+            "minimum": 0.0,
+            "title": "Latest Model Count",
+            "type": "integer"
+          },
+          "latest_prompt_set_ref": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LineageRef"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Prompt set used by the latest benchmark run."
+          },
+          "latest_run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Most recent benchmark run id.",
+            "title": "Latest Run Id"
+          },
+          "latest_started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Start time for the latest benchmark run.",
+            "title": "Latest Started At"
+          },
+          "ok": {
+            "default": true,
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "operator_hint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Suggested next step for benchmark triage.",
+            "title": "Operator Hint"
+          },
+          "p95_latency_ms": {
+            "$ref": "#/components/schemas/ObservabilityMetricDelta"
+          },
+          "previous_error_count": {
+            "default": 0,
+            "description": "Error count in the previous benchmark run.",
+            "minimum": 0.0,
+            "title": "Previous Error Count",
+            "type": "integer"
+          },
+          "previous_prompt_set_ref": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LineageRef"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Prompt set used by the previous benchmark run."
+          },
+          "previous_run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Previous benchmark run id when available.",
+            "title": "Previous Run Id"
+          },
+          "provider_routes": {
+            "description": "Provider/model routes used in the latest run.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Provider Routes",
+            "type": "array"
+          },
+          "response_length_mean": {
+            "$ref": "#/components/schemas/ObservabilityMetricDelta"
+          },
+          "success_rate": {
+            "$ref": "#/components/schemas/ObservabilityMetricDelta"
+          }
+        },
+        "title": "BenchmarkObservabilitySummaryResponse",
         "type": "object"
       },
       "BenchmarkResult": {
@@ -1757,12 +2150,12 @@
                 "type": "null"
               }
             ],
-            "description": "Short reason the LLM was not used (best-effort; never includes secrets).",
+            "description": "Short best-effort reason generation failed or was unavailable (never includes secrets).",
             "title": "Llm Error"
           },
           "llm_used": {
             "default": true,
-            "description": "Whether an LLM/provider response was used (false = retrieval-only fallback).",
+            "description": "Whether an LLM/provider response was successfully used for the answer.",
             "title": "Llm Used",
             "type": "boolean"
           },
@@ -2915,6 +3308,265 @@
           "level"
         ],
         "title": "Community",
+        "type": "object"
+      },
+      "ConfigFieldDescriptor": {
+        "description": "Registry entry for one leaf config field in TriBridConfig.",
+        "properties": {
+          "default": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Default value from the Pydantic model, when serializable.",
+            "title": "Default"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Field description pulled from the source-of-truth model.",
+            "title": "Description"
+          },
+          "enum_values": {
+            "description": "Allowed enum values when the field is a closed choice.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Enum Values",
+            "type": "array"
+          },
+          "exposure_level": {
+            "description": "Layered operator exposure tier for the field.",
+            "enum": [
+              "basic",
+              "advanced",
+              "expert"
+            ],
+            "title": "Exposure Level",
+            "type": "string"
+          },
+          "impact": {
+            "description": "Primary operator impact when the field changes.",
+            "enum": [
+              "live",
+              "restart",
+              "reindex",
+              "redeploy"
+            ],
+            "title": "Impact",
+            "type": "string"
+          },
+          "integration": {
+            "description": "Integration contract responsible for this field.",
+            "title": "Integration",
+            "type": "string"
+          },
+          "label": {
+            "description": "Human-readable field label.",
+            "title": "Label",
+            "type": "string"
+          },
+          "path": {
+            "description": "Dotted leaf path inside TriBridConfig.",
+            "title": "Path",
+            "type": "string"
+          },
+          "read_only": {
+            "default": false,
+            "description": "Whether the field is exposed for inspection only in the configuration center.",
+            "title": "Read Only",
+            "type": "boolean"
+          },
+          "scope": {
+            "description": "Primary operator scope for the field.",
+            "enum": [
+              "global",
+              "corpus"
+            ],
+            "title": "Scope",
+            "type": "string"
+          },
+          "secret_dependency_ids": {
+            "description": "Env-only secrets that may be required for this field to take effect.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Secret Dependency Ids",
+            "type": "array"
+          },
+          "section": {
+            "description": "Top-level TriBridConfig section.",
+            "title": "Section",
+            "type": "string"
+          },
+          "type": {
+            "description": "Normalized UI type for the field (string, integer, number, boolean, enum, array, object).",
+            "title": "Type",
+            "type": "string"
+          },
+          "ui_surface": {
+            "description": "Workbench configuration surface that owns this field.",
+            "title": "Ui Surface",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "section",
+          "label",
+          "type",
+          "scope",
+          "integration",
+          "exposure_level",
+          "impact",
+          "ui_surface"
+        ],
+        "title": "ConfigFieldDescriptor",
+        "type": "object"
+      },
+      "ConfigIntegrationContract": {
+        "description": "Registry contract for one OSS integration or protected operator surface.",
+        "properties": {
+          "blocked_surfaces": {
+            "description": "Operator surfaces that are misleading or blocked when this contract is not ready.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Blocked Surfaces",
+            "type": "array"
+          },
+          "id": {
+            "description": "Stable integration identifier.",
+            "title": "Id",
+            "type": "string"
+          },
+          "label": {
+            "description": "Human-readable integration label.",
+            "title": "Label",
+            "type": "string"
+          },
+          "readiness_checks": {
+            "description": "Deterministic checks performed by /api/config/readiness for this integration.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Readiness Checks",
+            "type": "array"
+          },
+          "required_config_paths": {
+            "description": "High-signal config fields required to operate this integration.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Required Config Paths",
+            "type": "array"
+          },
+          "required_secret_ids": {
+            "description": "Env-only secret requirements that block this integration when missing.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Required Secret Ids",
+            "type": "array"
+          },
+          "summary": {
+            "description": "Short explanation of the subsystem boundary.",
+            "title": "Summary",
+            "type": "string"
+          },
+          "ui_surface": {
+            "description": "Primary workbench surface that owns this contract.",
+            "title": "Ui Surface",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "summary",
+          "ui_surface"
+        ],
+        "title": "ConfigIntegrationContract",
+        "type": "object"
+      },
+      "ConfigReadinessResponse": {
+        "description": "Response payload for GET /api/config/readiness.",
+        "properties": {
+          "integrations": {
+            "description": "Integration readiness states for the current config and environment.",
+            "items": {
+              "$ref": "#/components/schemas/IntegrationReadiness"
+            },
+            "title": "Integrations",
+            "type": "array"
+          },
+          "ok": {
+            "default": false,
+            "description": "Whether the current configuration control plane is ready enough for the protected surfaces.",
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "operator_hint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Top-level next-step guidance for operators.",
+            "title": "Operator Hint"
+          },
+          "secrets": {
+            "description": "Configured/missing env-only secrets relevant to the current control plane.",
+            "items": {
+              "$ref": "#/components/schemas/SecretRequirementStatus"
+            },
+            "title": "Secrets",
+            "type": "array"
+          }
+        },
+        "title": "ConfigReadinessResponse",
+        "type": "object"
+      },
+      "ConfigRegistryResponse": {
+        "description": "Response payload for GET /api/config/registry.",
+        "properties": {
+          "fields": {
+            "description": "Leaf config descriptors derived from TriBridConfig plus manual operator metadata.",
+            "items": {
+              "$ref": "#/components/schemas/ConfigFieldDescriptor"
+            },
+            "title": "Fields",
+            "type": "array"
+          },
+          "integrations": {
+            "description": "Integration contracts required by the OSS composition branch.",
+            "items": {
+              "$ref": "#/components/schemas/ConfigIntegrationContract"
+            },
+            "title": "Integrations",
+            "type": "array"
+          },
+          "secrets": {
+            "description": "Env-only secret requirements surfaced by the control plane.",
+            "items": {
+              "$ref": "#/components/schemas/SecretRequirement"
+            },
+            "title": "Secrets",
+            "type": "array"
+          }
+        },
+        "title": "ConfigRegistryResponse",
         "type": "object"
       },
       "Corpus": {
@@ -5017,6 +5669,181 @@
         "title": "EvalMetrics",
         "type": "object"
       },
+      "EvalObservabilitySummaryResponse": {
+        "description": "Corpus-scoped eval observability summary.",
+        "properties": {
+          "ai_comparison_ready": {
+            "default": false,
+            "description": "Whether a comparison-ready pair of runs exists for AI analysis.",
+            "title": "Ai Comparison Ready",
+            "type": "boolean"
+          },
+          "corpus_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional corpus identifier for the summary.",
+            "title": "Corpus Id"
+          },
+          "freshness_minutes": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "How old the latest eval run is.",
+            "title": "Freshness Minutes"
+          },
+          "improved_count": {
+            "default": 0,
+            "description": "Question count that improved vs previous run.",
+            "minimum": 0.0,
+            "title": "Improved Count",
+            "type": "integer"
+          },
+          "latest_bundle_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Latest bundle id tied to the eval run.",
+            "title": "Latest Bundle Id"
+          },
+          "latest_completed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Completion time for the latest eval run.",
+            "title": "Latest Completed At"
+          },
+          "latest_prompt_set_ref": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LineageRef"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Prompt set used by the latest eval run."
+          },
+          "latest_run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Most recent eval run id.",
+            "title": "Latest Run Id"
+          },
+          "map_at_5": {
+            "$ref": "#/components/schemas/ObservabilityMetricDelta"
+          },
+          "mrr": {
+            "$ref": "#/components/schemas/ObservabilityMetricDelta"
+          },
+          "ndcg_at_10": {
+            "$ref": "#/components/schemas/ObservabilityMetricDelta"
+          },
+          "ok": {
+            "default": true,
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "operator_hint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Suggested next step for eval triage.",
+            "title": "Operator Hint"
+          },
+          "previous_prompt_set_ref": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LineageRef"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Prompt set used by the previous eval run."
+          },
+          "previous_run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Previous eval run id when available.",
+            "title": "Previous Run Id"
+          },
+          "recall_at_10": {
+            "$ref": "#/components/schemas/ObservabilityMetricDelta"
+          },
+          "recall_at_5": {
+            "$ref": "#/components/schemas/ObservabilityMetricDelta"
+          },
+          "regressed_count": {
+            "default": 0,
+            "description": "Question count that regressed vs previous run.",
+            "minimum": 0.0,
+            "title": "Regressed Count",
+            "type": "integer"
+          },
+          "stable_count": {
+            "default": 0,
+            "description": "Question count with no top-k state change.",
+            "minimum": 0.0,
+            "title": "Stable Count",
+            "type": "integer"
+          },
+          "top1_accuracy": {
+            "$ref": "#/components/schemas/ObservabilityMetricDelta"
+          },
+          "topk_accuracy": {
+            "$ref": "#/components/schemas/ObservabilityMetricDelta"
+          },
+          "total_questions": {
+            "default": 0,
+            "description": "Question count for the latest eval run.",
+            "minimum": 0.0,
+            "title": "Total Questions",
+            "type": "integer"
+          }
+        },
+        "title": "EvalObservabilitySummaryResponse",
+        "type": "object"
+      },
       "EvalRequest": {
         "description": "Request payload for evaluation run.",
         "properties": {
@@ -6382,11 +7209,6 @@
             "title": "Neo4J Database Prefix",
             "type": "string"
           },
-          "neo4j_password": {
-            "description": "Neo4j password (defaults to NEO4J_PASSWORD env var when unset)",
-            "title": "Neo4J Password",
-            "type": "string"
-          },
           "neo4j_uri": {
             "default": "bolt://localhost:7687",
             "description": "Neo4j connection URI (bolt:// or neo4j://)",
@@ -7345,6 +8167,121 @@
         "title": "IndexingRuntimeCapabilities",
         "type": "object"
       },
+      "IntegrationReadiness": {
+        "description": "Current readiness state for one integration contract.",
+        "properties": {
+          "blocked_surfaces": {
+            "description": "Protected surfaces blocked or degraded by this readiness state.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Blocked Surfaces",
+            "type": "array"
+          },
+          "configured": {
+            "description": "Whether the required config is present.",
+            "title": "Configured",
+            "type": "boolean"
+          },
+          "enabled": {
+            "description": "Whether the integration is selected or expected by the current config.",
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "failing_checks": {
+            "description": "Named readiness checks that are currently failing.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Failing Checks",
+            "type": "array"
+          },
+          "id": {
+            "description": "Integration identifier.",
+            "title": "Id",
+            "type": "string"
+          },
+          "label": {
+            "description": "Human-readable integration label.",
+            "title": "Label",
+            "type": "string"
+          },
+          "links": {
+            "description": "Useful deep links for debugging or operating the integration.",
+            "items": {
+              "$ref": "#/components/schemas/TraceExternalLink"
+            },
+            "title": "Links",
+            "type": "array"
+          },
+          "missing_config_paths": {
+            "description": "Required config paths that are currently empty or unset.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Missing Config Paths",
+            "type": "array"
+          },
+          "missing_secret_ids": {
+            "description": "Required env-only secrets that are currently missing.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Missing Secret Ids",
+            "type": "array"
+          },
+          "operator_hint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "High-signal next-step guidance for operators.",
+            "title": "Operator Hint"
+          },
+          "reachable": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Whether runtime reachability checks passed, when applicable.",
+            "title": "Reachable"
+          },
+          "state": {
+            "description": "Current readiness state.",
+            "enum": [
+              "ready",
+              "degraded",
+              "unconfigured",
+              "disabled"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "ui_surface": {
+            "description": "Primary workbench surface for the integration.",
+            "title": "Ui Surface",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "ui_surface",
+          "state",
+          "enabled",
+          "configured"
+        ],
+        "title": "IntegrationReadiness",
+        "type": "object"
+      },
       "KeywordsConfig": {
         "description": "Discriminative keywords configuration.",
         "properties": {
@@ -7867,11 +8804,6 @@
       "LiteLLMConfig": {
         "description": "Gateway configuration for an OpenAI-compatible LiteLLM proxy.",
         "properties": {
-          "api_key": {
-            "default": "",
-            "title": "Api Key",
-            "type": "string"
-          },
           "base_url": {
             "default": "http://127.0.0.1:4000/v1",
             "title": "Base Url",
@@ -8773,6 +9705,55 @@
         "title": "ModelValidationWarning",
         "type": "object"
       },
+      "ObservabilityCatalogResponse": {
+        "description": "Catalog of dashboard and workbench observability surfaces.",
+        "properties": {
+          "dashboards": {
+            "description": "Curated Grafana dashboard families available to operators.",
+            "items": {
+              "$ref": "#/components/schemas/ObservabilityDashboardFamily"
+            },
+            "title": "Dashboards",
+            "type": "array"
+          },
+          "external_links": {
+            "description": "Cross-stack external links surfaced alongside the catalog.",
+            "items": {
+              "$ref": "#/components/schemas/TraceExternalLink"
+            },
+            "title": "External Links",
+            "type": "array"
+          },
+          "generated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the catalog payload was generated.",
+            "title": "Generated At"
+          },
+          "ok": {
+            "default": true,
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "workbench_links": {
+            "description": "Primary in-product destinations tied to observability workflows.",
+            "items": {
+              "$ref": "#/components/schemas/ObservabilityWorkbenchLink"
+            },
+            "title": "Workbench Links",
+            "type": "array"
+          }
+        },
+        "title": "ObservabilityCatalogResponse",
+        "type": "object"
+      },
       "ObservabilityComponentStatus": {
         "description": "Status for one observability component or backend.",
         "properties": {
@@ -8798,6 +9779,12 @@
             "title": "Enabled",
             "type": "boolean"
           },
+          "group": {
+            "default": "observability",
+            "description": "Operator grouping for this component.",
+            "title": "Group",
+            "type": "string"
+          },
           "id": {
             "description": "Stable component identifier.",
             "title": "Id",
@@ -8807,6 +9794,26 @@
             "description": "Human-readable component label.",
             "title": "Label",
             "type": "string"
+          },
+          "links": {
+            "description": "Curated deep links relevant to this component.",
+            "items": {
+              "$ref": "#/components/schemas/TraceExternalLink"
+            },
+            "title": "Links",
+            "type": "array"
+          },
+          "operator_hint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Component-local operator hint.",
+            "title": "Operator Hint"
           },
           "reachable": {
             "anyOf": [
@@ -8819,6 +9826,30 @@
             ],
             "description": "Whether the component endpoint was reachable, when checked.",
             "title": "Reachable"
+          },
+          "severity": {
+            "default": "info",
+            "description": "Computed incident/severity state for the component.",
+            "enum": [
+              "healthy",
+              "info",
+              "warning",
+              "critical"
+            ],
+            "title": "Severity",
+            "type": "string"
+          },
+          "slo_state": {
+            "default": "unknown",
+            "description": "Service-level state inferred for this component.",
+            "enum": [
+              "healthy",
+              "at_risk",
+              "breached",
+              "unknown"
+            ],
+            "title": "Slo State",
+            "type": "string"
           },
           "url": {
             "anyOf": [
@@ -8842,9 +9873,466 @@
         "title": "ObservabilityComponentStatus",
         "type": "object"
       },
+      "ObservabilityDashboardFamily": {
+        "description": "Catalog entry for one Grafana dashboard family.",
+        "properties": {
+          "category": {
+            "description": "High-level grouping such as oncall, quality, or cost.",
+            "title": "Category",
+            "type": "string"
+          },
+          "default": {
+            "default": false,
+            "description": "Whether this is the default landing dashboard.",
+            "title": "Default",
+            "type": "boolean"
+          },
+          "description": {
+            "description": "Short explanation of what this dashboard is for.",
+            "title": "Description",
+            "type": "string"
+          },
+          "id": {
+            "description": "Stable dashboard family identifier.",
+            "title": "Id",
+            "type": "string"
+          },
+          "links": {
+            "description": "External links for this dashboard.",
+            "items": {
+              "$ref": "#/components/schemas/TraceExternalLink"
+            },
+            "title": "Links",
+            "type": "array"
+          },
+          "slug": {
+            "description": "Provisioned Grafana dashboard slug.",
+            "title": "Slug",
+            "type": "string"
+          },
+          "tags": {
+            "description": "Dashboard tags from provisioning metadata.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Tags",
+            "type": "array"
+          },
+          "title": {
+            "description": "Dashboard title shown to operators.",
+            "title": "Title",
+            "type": "string"
+          },
+          "uid": {
+            "description": "Provisioned Grafana dashboard UID.",
+            "title": "Uid",
+            "type": "string"
+          },
+          "variables": {
+            "description": "Declared dashboard variables expected to be available in Grafana.",
+            "items": {
+              "$ref": "#/components/schemas/ObservabilityDashboardVariable"
+            },
+            "title": "Variables",
+            "type": "array"
+          },
+          "workbench_links": {
+            "description": "Related in-product workbench destinations.",
+            "items": {
+              "$ref": "#/components/schemas/ObservabilityWorkbenchLink"
+            },
+            "title": "Workbench Links",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "description",
+          "uid",
+          "slug",
+          "category"
+        ],
+        "title": "ObservabilityDashboardFamily",
+        "type": "object"
+      },
+      "ObservabilityDashboardVariable": {
+        "description": "Declared Grafana/dashboard variable surfaced in the catalog.",
+        "properties": {
+          "default_value": {
+            "default": "*",
+            "description": "Default value used for the variable.",
+            "title": "Default Value",
+            "type": "string"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Operator hint for the variable.",
+            "title": "Description"
+          },
+          "id": {
+            "description": "Stable variable identifier.",
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "default": "textbox",
+            "description": "Grafana variable kind.",
+            "enum": [
+              "textbox",
+              "custom",
+              "time_range"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "description": "Human-readable variable label.",
+            "title": "Label",
+            "type": "string"
+          },
+          "values": {
+            "description": "Explicit choices for custom variables.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Values",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "label"
+        ],
+        "title": "ObservabilityDashboardVariable",
+        "type": "object"
+      },
+      "ObservabilityIncident": {
+        "description": "Unified observability incident entry.",
+        "properties": {
+          "change_correlation": {
+            "description": "Changes correlated against the incident.",
+            "items": {
+              "$ref": "#/components/schemas/ObservabilityIncidentChange"
+            },
+            "title": "Change Correlation",
+            "type": "array"
+          },
+          "component_ids": {
+            "description": "Affected component ids.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Component Ids",
+            "type": "array"
+          },
+          "dashboard_ids": {
+            "description": "Relevant dashboard family ids.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Dashboard Ids",
+            "type": "array"
+          },
+          "id": {
+            "description": "Stable incident identifier.",
+            "title": "Id",
+            "type": "string"
+          },
+          "links": {
+            "description": "External links for triage.",
+            "items": {
+              "$ref": "#/components/schemas/TraceExternalLink"
+            },
+            "title": "Links",
+            "type": "array"
+          },
+          "muted": {
+            "default": false,
+            "description": "Whether the incident is muted/silenced.",
+            "title": "Muted",
+            "type": "boolean"
+          },
+          "operator_hint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Recommended next operator action.",
+            "title": "Operator Hint"
+          },
+          "owner": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Suggested on-call owner or team.",
+            "title": "Owner"
+          },
+          "severity": {
+            "default": "warning",
+            "description": "Severity used for wake-up and prioritization.",
+            "enum": [
+              "healthy",
+              "info",
+              "warning",
+              "critical"
+            ],
+            "title": "Severity",
+            "type": "string"
+          },
+          "slo_state": {
+            "default": "unknown",
+            "description": "Associated SLO state for the incident.",
+            "enum": [
+              "healthy",
+              "at_risk",
+              "breached",
+              "unknown"
+            ],
+            "title": "Slo State",
+            "type": "string"
+          },
+          "source": {
+            "description": "Incident source family such as infrastructure, workflow, or eval.",
+            "title": "Source",
+            "type": "string"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the incident started or was detected.",
+            "title": "Started At"
+          },
+          "status": {
+            "default": "firing",
+            "description": "Current lifecycle state for the incident.",
+            "enum": [
+              "firing",
+              "warning",
+              "resolved"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "summary": {
+            "description": "High-signal incident summary.",
+            "title": "Summary",
+            "type": "string"
+          },
+          "title": {
+            "description": "Short incident title.",
+            "title": "Title",
+            "type": "string"
+          },
+          "workbench_links": {
+            "description": "In-product destinations for the incident.",
+            "items": {
+              "$ref": "#/components/schemas/ObservabilityWorkbenchLink"
+            },
+            "title": "Workbench Links",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "summary",
+          "source"
+        ],
+        "title": "ObservabilityIncident",
+        "type": "object"
+      },
+      "ObservabilityIncidentChange": {
+        "description": "Correlated change item attached to an incident.",
+        "properties": {
+          "current_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Current value when known.",
+            "title": "Current Value"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Operator-facing context for the change.",
+            "title": "Detail"
+          },
+          "kind": {
+            "description": "Change kind such as prompt_set, config, model_route, or dataset.",
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "description": "Human-readable change label.",
+            "title": "Label",
+            "type": "string"
+          },
+          "previous_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Prior value when known.",
+            "title": "Previous Value"
+          }
+        },
+        "required": [
+          "kind",
+          "label"
+        ],
+        "title": "ObservabilityIncidentChange",
+        "type": "object"
+      },
+      "ObservabilityIncidentsResponse": {
+        "description": "Unified incident feed for the observability workspace.",
+        "properties": {
+          "critical_count": {
+            "default": 0,
+            "description": "Critical incident count in this payload.",
+            "minimum": 0.0,
+            "title": "Critical Count",
+            "type": "integer"
+          },
+          "generated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the incidents payload was generated.",
+            "title": "Generated At"
+          },
+          "incidents": {
+            "description": "Active or recent incidents.",
+            "items": {
+              "$ref": "#/components/schemas/ObservabilityIncident"
+            },
+            "title": "Incidents",
+            "type": "array"
+          },
+          "ok": {
+            "default": true,
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "total_count": {
+            "default": 0,
+            "description": "Total incident count in this payload.",
+            "minimum": 0.0,
+            "title": "Total Count",
+            "type": "integer"
+          }
+        },
+        "title": "ObservabilityIncidentsResponse",
+        "type": "object"
+      },
+      "ObservabilityMetricDelta": {
+        "description": "Current/previous metric values and their delta.",
+        "properties": {
+          "absolute_delta": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Current minus previous.",
+            "title": "Absolute Delta"
+          },
+          "current_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Latest metric value.",
+            "title": "Current Value"
+          },
+          "percent_delta": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Percentage delta vs previous when available.",
+            "title": "Percent Delta"
+          },
+          "previous_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Previous metric value when available.",
+            "title": "Previous Value"
+          }
+        },
+        "title": "ObservabilityMetricDelta",
+        "type": "object"
+      },
       "ObservabilityStatusResponse": {
         "description": "Operator-facing readiness summary for the observability stack.",
         "properties": {
+          "catalog_path": {
+            "default": "/api/observability/catalog",
+            "description": "Catalog endpoint for dashboard/workbench surfaces.",
+            "title": "Catalog Path",
+            "type": "string"
+          },
           "components": {
             "description": "Observability components/backends and their readiness state.",
             "items": {
@@ -8852,6 +10340,39 @@
             },
             "title": "Components",
             "type": "array"
+          },
+          "critical_incident_count": {
+            "default": 0,
+            "description": "Critical incident count for the current snapshot.",
+            "minimum": 0.0,
+            "title": "Critical Incident Count",
+            "type": "integer"
+          },
+          "generated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When this status snapshot was generated.",
+            "title": "Generated At"
+          },
+          "incident_count": {
+            "default": 0,
+            "description": "Incident count surfaced alongside this status snapshot.",
+            "minimum": 0.0,
+            "title": "Incident Count",
+            "type": "integer"
+          },
+          "incidents_path": {
+            "default": "/api/observability/incidents",
+            "description": "Incident-feed endpoint for operators.",
+            "title": "Incidents Path",
+            "type": "string"
           },
           "links": {
             "description": "Useful external links for the current observability config.",
@@ -8889,9 +10410,88 @@
             ],
             "description": "High-signal next-step guidance for operators.",
             "title": "Operator Hint"
+          },
+          "severity": {
+            "default": "info",
+            "description": "Overall observability severity for the current stack.",
+            "enum": [
+              "healthy",
+              "info",
+              "warning",
+              "critical"
+            ],
+            "title": "Severity",
+            "type": "string"
+          },
+          "slo_state": {
+            "default": "unknown",
+            "description": "Overall SLO state for the current stack.",
+            "enum": [
+              "healthy",
+              "at_risk",
+              "breached",
+              "unknown"
+            ],
+            "title": "Slo State",
+            "type": "string"
           }
         },
         "title": "ObservabilityStatusResponse",
+        "type": "object"
+      },
+      "ObservabilityWorkbenchLink": {
+        "description": "Workbench deep link for an observability workflow.",
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Operator-facing explanation for the destination.",
+            "title": "Description"
+          },
+          "kind": {
+            "default": "route",
+            "description": "Whether this is in-product or external.",
+            "enum": [
+              "route",
+              "external"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "description": "Short user-facing label.",
+            "title": "Label",
+            "type": "string"
+          },
+          "path": {
+            "description": "Application path or URL for this destination.",
+            "title": "Path",
+            "type": "string"
+          },
+          "subtab": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional workbench subtab identifier.",
+            "title": "Subtab"
+          }
+        },
+        "required": [
+          "label",
+          "path"
+        ],
+        "title": "ObservabilityWorkbenchLink",
         "type": "object"
       },
       "OkResponse": {
@@ -8912,11 +10512,6 @@
       "OpenRouterConfig": {
         "description": "Unified gateway to many cloud models via OpenAI-compatible routing.",
         "properties": {
-          "api_key": {
-            "default": "",
-            "title": "Api Key",
-            "type": "string"
-          },
           "base_url": {
             "default": "https://openrouter.ai/api/v1",
             "title": "Base Url",
@@ -9013,6 +10608,147 @@
           "category"
         ],
         "title": "PromptMetadata",
+        "type": "object"
+      },
+      "PromptObservabilitySummaryResponse": {
+        "description": "Prompt-set observability and change-correlation summary.",
+        "properties": {
+          "benchmark_regression_suspected": {
+            "default": false,
+            "description": "Whether prompt changes correlate with benchmark regression.",
+            "title": "Benchmark Regression Suspected",
+            "type": "boolean"
+          },
+          "changed_since_latest_benchmark": {
+            "default": false,
+            "description": "Whether prompts changed since the latest benchmark.",
+            "title": "Changed Since Latest Benchmark",
+            "type": "boolean"
+          },
+          "changed_since_latest_eval": {
+            "default": false,
+            "description": "Whether prompts changed since the latest eval.",
+            "title": "Changed Since Latest Eval",
+            "type": "boolean"
+          },
+          "corpus_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional corpus identifier for the summary.",
+            "title": "Corpus Id"
+          },
+          "current_prompt_set_ref": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LineageRef"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Current prompt-set lineage ref."
+          },
+          "eval_regression_suspected": {
+            "default": false,
+            "description": "Whether prompt changes correlate with eval regression.",
+            "title": "Eval Regression Suspected",
+            "type": "boolean"
+          },
+          "latest_benchmark_prompt_set_ref": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LineageRef"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Prompt set pinned to the latest benchmark run."
+          },
+          "latest_benchmark_run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Latest benchmark run id used for prompt correlation.",
+            "title": "Latest Benchmark Run Id"
+          },
+          "latest_eval_prompt_set_ref": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LineageRef"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Prompt set pinned to the latest eval run."
+          },
+          "latest_eval_run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Latest eval run id used for prompt correlation.",
+            "title": "Latest Eval Run Id"
+          },
+          "ok": {
+            "default": true,
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "operator_hint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Suggested next step for prompt-regression triage.",
+            "title": "Operator Hint"
+          },
+          "pending_verification": {
+            "default": false,
+            "description": "Whether the current prompt set has not yet been re-verified by eval/benchmark runs.",
+            "title": "Pending Verification",
+            "type": "boolean"
+          },
+          "previous_prompt_set_ref": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LineageRef"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Previous prompt-set lineage ref."
+          },
+          "recent_prompt_set_count": {
+            "default": 0,
+            "description": "Unique prompt-set versions seen in recent bundles.",
+            "minimum": 0.0,
+            "title": "Recent Prompt Set Count",
+            "type": "integer"
+          }
+        },
+        "title": "PromptObservabilitySummaryResponse",
         "type": "object"
       },
       "PromptUpdateRequest": {
@@ -12694,6 +14430,93 @@
         "title": "SearchRuntimeCapabilities",
         "type": "object"
       },
+      "SecretRequirement": {
+        "description": "Env-only secret or credential required by one or more operator surfaces.",
+        "properties": {
+          "description": {
+            "description": "Short explanation of where the secret is used.",
+            "title": "Description",
+            "type": "string"
+          },
+          "env_var": {
+            "description": "Backing environment variable name.",
+            "title": "Env Var",
+            "type": "string"
+          },
+          "id": {
+            "description": "Stable secret identifier used by field descriptors and readiness responses.",
+            "title": "Id",
+            "type": "string"
+          },
+          "integrations": {
+            "description": "Integration contracts that may depend on this secret.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Integrations",
+            "type": "array"
+          },
+          "label": {
+            "description": "Human-readable label for operators.",
+            "title": "Label",
+            "type": "string"
+          },
+          "optional": {
+            "default": false,
+            "description": "Whether the secret is optional and therefore not always a readiness blocker.",
+            "title": "Optional",
+            "type": "boolean"
+          },
+          "ui_surface": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Primary operator surface where this secret is configured or inspected.",
+            "title": "Ui Surface"
+          }
+        },
+        "required": [
+          "id",
+          "env_var",
+          "label",
+          "description"
+        ],
+        "title": "SecretRequirement",
+        "type": "object"
+      },
+      "SecretRequirementStatus": {
+        "description": "Current status for one env-only secret requirement.",
+        "properties": {
+          "blocker_for_integrations": {
+            "description": "Integrations currently blocked by this missing secret.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Blocker For Integrations",
+            "type": "array"
+          },
+          "configured": {
+            "description": "Whether the env var is present and non-empty in the current process.",
+            "title": "Configured",
+            "type": "boolean"
+          },
+          "requirement": {
+            "$ref": "#/components/schemas/SecretRequirement",
+            "description": "Static requirement metadata."
+          }
+        },
+        "required": [
+          "requirement",
+          "configured"
+        ],
+        "title": "SecretRequirementStatus",
+        "type": "object"
+      },
       "SemanticCacheConfig": {
         "description": "Configuration for semantic caching across search/answer/chat endpoints.",
         "properties": {
@@ -12985,6 +14808,25 @@
         "title": "SyntheticArtifactRef",
         "type": "object"
       },
+      "SyntheticConfig": {
+        "description": "Top-level synthetic data pipeline configuration.",
+        "properties": {
+          "generator": {
+            "$ref": "#/components/schemas/SyntheticGeneratorConfig",
+            "description": "LLM generation parameters for synthetic pipeline"
+          },
+          "judge": {
+            "$ref": "#/components/schemas/SyntheticJudgeConfig",
+            "description": "LLM judge parameters for synthetic curation"
+          },
+          "quality_gate": {
+            "$ref": "#/components/schemas/SyntheticQualityGateConfig",
+            "description": "Quality gate thresholds for synthetic data evaluation"
+          }
+        },
+        "title": "SyntheticConfig",
+        "type": "object"
+      },
       "SyntheticConfigPatchResponse": {
         "properties": {
           "artifact_path": {
@@ -13045,6 +14887,96 @@
           "corpus_id"
         ],
         "title": "SyntheticConfigPatchResponse",
+        "type": "object"
+      },
+      "SyntheticGeneratorConfig": {
+        "description": "LLM generation parameters for the synthetic pipeline.",
+        "properties": {
+          "evidence_quote_max_chars": {
+            "default": 200,
+            "description": "Max characters for evidence quote field",
+            "maximum": 1000.0,
+            "minimum": 50.0,
+            "title": "Evidence Quote Max Chars",
+            "type": "integer"
+          },
+          "expected_answer_max_chars": {
+            "default": 400,
+            "description": "Max characters for expected answer field",
+            "maximum": 2000.0,
+            "minimum": 50.0,
+            "title": "Expected Answer Max Chars",
+            "type": "integer"
+          },
+          "fail_on_error": {
+            "default": true,
+            "description": "If True, fail the run when generator LLM is unreachable instead of silently falling back to deterministic extraction.",
+            "title": "Fail On Error",
+            "type": "boolean"
+          },
+          "max_tokens": {
+            "default": 1200,
+            "description": "Max tokens for generator LLM response",
+            "maximum": 16000.0,
+            "minimum": 100.0,
+            "title": "Max Tokens",
+            "type": "integer"
+          },
+          "question_max_chars": {
+            "default": 180,
+            "description": "Max characters for generated question text",
+            "maximum": 500.0,
+            "minimum": 50.0,
+            "title": "Question Max Chars",
+            "type": "integer"
+          },
+          "source_excerpt_max_lines": {
+            "default": 80,
+            "description": "Max lines of source chunk content sent as context to generator/judge",
+            "maximum": 500.0,
+            "minimum": 10.0,
+            "title": "Source Excerpt Max Lines",
+            "type": "integer"
+          },
+          "temperature": {
+            "default": 0.0,
+            "description": "Temperature for synthetic generator LLM calls",
+            "maximum": 2.0,
+            "minimum": 0.0,
+            "title": "Temperature",
+            "type": "number"
+          }
+        },
+        "title": "SyntheticGeneratorConfig",
+        "type": "object"
+      },
+      "SyntheticJudgeConfig": {
+        "description": "LLM judge parameters for synthetic curation.",
+        "properties": {
+          "fail_on_error": {
+            "default": true,
+            "description": "If True, fail the run when judge LLM is unreachable instead of silently auto-passing all items.",
+            "title": "Fail On Error",
+            "type": "boolean"
+          },
+          "max_tokens": {
+            "default": 400,
+            "description": "Max tokens for judge LLM response",
+            "maximum": 4000.0,
+            "minimum": 100.0,
+            "title": "Max Tokens",
+            "type": "integer"
+          },
+          "temperature": {
+            "default": 0.0,
+            "description": "Temperature for synthetic judge LLM calls",
+            "maximum": 2.0,
+            "minimum": 0.0,
+            "title": "Temperature",
+            "type": "number"
+          }
+        },
+        "title": "SyntheticJudgeConfig",
         "type": "object"
       },
       "SyntheticPublishResponse": {
@@ -13127,6 +15059,29 @@
           "kind"
         ],
         "title": "SyntheticPublishResponse",
+        "type": "object"
+      },
+      "SyntheticQualityGateConfig": {
+        "description": "Quality gate thresholds for synthetic data evaluation.",
+        "properties": {
+          "sample_size": {
+            "default": 50,
+            "description": "Number of eval items to sample for quality gate evaluation",
+            "maximum": 10000.0,
+            "minimum": 1.0,
+            "title": "Sample Size",
+            "type": "integer"
+          },
+          "top1_min": {
+            "default": 0.4,
+            "description": "Minimum top-1 retrieval accuracy to pass quality gate",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Top1 Min",
+            "type": "number"
+          }
+        },
+        "title": "SyntheticQualityGateConfig",
         "type": "object"
       },
       "SyntheticRun": {
@@ -13275,6 +15230,52 @@
           "request"
         ],
         "title": "SyntheticRun",
+        "type": "object"
+      },
+      "SyntheticRunDegradation": {
+        "description": "Degradation flags -- honest about what actually happened during a synthetic run.",
+        "properties": {
+          "degraded": {
+            "default": false,
+            "description": "True if any fallback or degradation occurred during the run",
+            "title": "Degraded",
+            "type": "boolean"
+          },
+          "generator_fallback_used": {
+            "default": false,
+            "description": "True if generator LLM failed and deterministic fallback was used",
+            "title": "Generator Fallback Used",
+            "type": "boolean"
+          },
+          "judge_fallback_used": {
+            "default": false,
+            "description": "True if judge LLM failed and all items were auto-passed",
+            "title": "Judge Fallback Used",
+            "type": "boolean"
+          },
+          "reasons": {
+            "description": "Human-readable list of degradation reasons",
+            "items": {
+              "type": "string"
+            },
+            "title": "Reasons",
+            "type": "array"
+          },
+          "seed_hydration_count": {
+            "default": 0,
+            "description": "Number of items hydrated from seed dataset",
+            "minimum": 0.0,
+            "title": "Seed Hydration Count",
+            "type": "integer"
+          },
+          "seed_hydration_used": {
+            "default": false,
+            "description": "True if eval dataset was populated from seed dataset instead of generation",
+            "title": "Seed Hydration Used",
+            "type": "boolean"
+          }
+        },
+        "title": "SyntheticRunDegradation",
         "type": "object"
       },
       "SyntheticRunMeta": {
@@ -13639,6 +15640,10 @@
               }
             ],
             "title": "Avg Judge Score"
+          },
+          "degradation": {
+            "$ref": "#/components/schemas/SyntheticRunDegradation",
+            "description": "Degradation flags -- honest about what actually happened during the run"
           },
           "items_curated_in": {
             "default": 0,
@@ -14289,7 +16294,7 @@
                 "type": "null"
               }
             ],
-            "description": "Short reason for retrieval-only fallback, if any.",
+            "description": "Short reason generation failed or was unavailable.",
             "title": "Llm Error"
           },
           "llm_used": {
@@ -14432,6 +16437,12 @@
             "title": "Alert Webhook Timeout",
             "type": "integer"
           },
+          "alertmanager_base_url": {
+            "default": "",
+            "description": "Alertmanager base URL used for wake-up path status checks",
+            "title": "Alertmanager Base Url",
+            "type": "string"
+          },
           "alloy_base_url": {
             "default": "",
             "description": "Grafana Alloy base URL used for collector status checks",
@@ -14445,6 +16456,12 @@
             "minimum": 0.0,
             "title": "Cost Tracking Enabled",
             "type": "integer"
+          },
+          "faro_base_url": {
+            "default": "",
+            "description": "Grafana Faro or collector base URL used for frontend telemetry status checks",
+            "title": "Faro Base Url",
+            "type": "string"
           },
           "langfuse_base_url": {
             "default": "",
@@ -14481,6 +16498,18 @@
             "title": "Metrics Enabled",
             "type": "integer"
           },
+          "mimir_base_url": {
+            "default": "",
+            "description": "Grafana Mimir base URL used for metrics backend status checks",
+            "title": "Mimir Base Url",
+            "type": "string"
+          },
+          "opencost_base_url": {
+            "default": "",
+            "description": "OpenCost base URL used for cost and capacity status checks",
+            "title": "Opencost Base Url",
+            "type": "string"
+          },
           "otel_export_enabled": {
             "default": 1,
             "description": "Enable OTLP export for traces",
@@ -14514,6 +16543,12 @@
             "minimum": 1024.0,
             "title": "Prometheus Port",
             "type": "integer"
+          },
+          "pyroscope_base_url": {
+            "default": "",
+            "description": "Grafana Pyroscope base URL used for profiling status checks",
+            "title": "Pyroscope Base Url",
+            "type": "string"
           },
           "tempo_base_url": {
             "default": "",
@@ -14674,6 +16709,36 @@
             "title": "Ragweld Agent Base Model",
             "type": "string"
           },
+          "ragweld_agent_flyte_admin_base_url": {
+            "default": "",
+            "description": "Base URL for Flyte Admin HTTP access (used for readiness checks and operator links).",
+            "title": "Ragweld Agent Flyte Admin Base Url",
+            "type": "string"
+          },
+          "ragweld_agent_flyte_console_base_url": {
+            "default": "",
+            "description": "Base URL for Flyte Console (used for operator deep links).",
+            "title": "Ragweld Agent Flyte Console Base Url",
+            "type": "string"
+          },
+          "ragweld_agent_flyte_domain": {
+            "default": "development",
+            "description": "Flyte domain/environment that owns Learning Agent executions.",
+            "title": "Ragweld Agent Flyte Domain",
+            "type": "string"
+          },
+          "ragweld_agent_flyte_launchplan": {
+            "default": "",
+            "description": "Flyte launch plan name for the Learning Agent workflow lane.",
+            "title": "Ragweld Agent Flyte Launchplan",
+            "type": "string"
+          },
+          "ragweld_agent_flyte_project": {
+            "default": "ragweld",
+            "description": "Flyte project that owns Learning Agent executions.",
+            "title": "Ragweld Agent Flyte Project",
+            "type": "string"
+          },
           "ragweld_agent_grad_accum_steps": {
             "default": 8,
             "description": "Gradient accumulation steps per optimizer update for ragweld agent training.",
@@ -14715,6 +16780,18 @@
             "title": "Ragweld Agent Lora Target Modules",
             "type": "array"
           },
+          "ragweld_agent_mlflow_experiment_name": {
+            "default": "ragweld-learning-agent",
+            "description": "MLflow experiment name for Learning Agent runs.",
+            "title": "Ragweld Agent Mlflow Experiment Name",
+            "type": "string"
+          },
+          "ragweld_agent_mlflow_tracking_url": {
+            "default": "",
+            "description": "Base URL for MLflow Tracking/UI used by Learning Agent runs.",
+            "title": "Ragweld Agent Mlflow Tracking Url",
+            "type": "string"
+          },
           "ragweld_agent_model_path": {
             "default": "models/learning-agent-epstein-files-1",
             "description": "Active ragweld agent adapter artifact path (directory containing adapter.npz + adapter_config.json).",
@@ -14753,6 +16830,16 @@
             "title": "Ragweld Agent Telemetry Interval Steps",
             "type": "integer"
           },
+          "ragweld_agent_tracking_backend": {
+            "default": "local",
+            "description": "Run/artifact tracking backend for Learning Agent runs.",
+            "enum": [
+              "local",
+              "mlflow"
+            ],
+            "title": "Ragweld Agent Tracking Backend",
+            "type": "string"
+          },
           "ragweld_agent_train_dataset_path": {
             "default": "",
             "description": "Training dataset path for the ragweld agent (empty = use evaluation.eval_dataset_path).",
@@ -14766,6 +16853,22 @@
             "minimum": 0.0,
             "title": "Ragweld Agent Unload After Sec",
             "type": "integer"
+          },
+          "ragweld_agent_unsloth_image": {
+            "default": "",
+            "description": "Container image or artifact reference used by the Flyte task to run Unsloth training.",
+            "title": "Ragweld Agent Unsloth Image",
+            "type": "string"
+          },
+          "ragweld_agent_workflow_backend": {
+            "default": "local",
+            "description": "Workflow/orchestration backend for Learning Agent runs.",
+            "enum": [
+              "local",
+              "flyte"
+            ],
+            "title": "Ragweld Agent Workflow Backend",
+            "type": "string"
           },
           "reranker_train_batch": {
             "default": 16,
@@ -14845,6 +16948,75 @@
         "title": "TrainingConfig",
         "type": "object"
       },
+      "TrainingControlPlaneComponentStatus": {
+        "properties": {
+          "configured": {
+            "default": false,
+            "description": "Whether required config values are present.",
+            "title": "Configured",
+            "type": "boolean"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Short status note for operators.",
+            "title": "Detail"
+          },
+          "enabled": {
+            "default": false,
+            "description": "Whether this component is intended for the active target lane.",
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "kind": {
+            "description": "Control-plane component kind.",
+            "enum": [
+              "flyte",
+              "mlflow",
+              "unsloth"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "description": "Human-readable component label.",
+            "title": "Label",
+            "type": "string"
+          },
+          "links": {
+            "description": "Relevant control-plane links for this component.",
+            "items": {
+              "$ref": "#/components/schemas/TraceExternalLink"
+            },
+            "title": "Links",
+            "type": "array"
+          },
+          "state": {
+            "default": "disabled",
+            "description": "Operator-facing component state.",
+            "enum": [
+              "disabled",
+              "unconfigured",
+              "ready",
+              "degraded"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "label"
+        ],
+        "title": "TrainingControlPlaneComponentStatus",
+        "type": "object"
+      },
       "TriBridConfig-Input": {
         "additionalProperties": true,
         "description": "TRIBRID RAG Engine tunable configuration parameters",
@@ -14914,6 +17086,9 @@
           },
           "sparse_search": {
             "$ref": "#/components/schemas/SparseSearchConfig"
+          },
+          "synthetic": {
+            "$ref": "#/components/schemas/SyntheticConfig"
           },
           "system_prompts": {
             "$ref": "#/components/schemas/SystemPromptsConfig"
@@ -15006,6 +17181,9 @@
           },
           "sparse_search": {
             "$ref": "#/components/schemas/SparseSearchConfig"
+          },
+          "synthetic": {
+            "$ref": "#/components/schemas/SyntheticConfig"
           },
           "system_prompts": {
             "$ref": "#/components/schemas/SystemPromptsConfig"
@@ -15159,13 +17337,13 @@
             "type": "string"
           },
           "grafana_dashboard_slug": {
-            "default": "tribrid-overview",
+            "default": "on-call-overview",
             "description": "Grafana dashboard slug",
             "title": "Grafana Dashboard Slug",
             "type": "string"
           },
           "grafana_dashboard_uid": {
-            "default": "tribrid-overview",
+            "default": "ragweld-oncall-overview",
             "description": "Default Grafana dashboard UID",
             "title": "Grafana Dashboard Uid",
             "type": "string"
@@ -15568,6 +17746,93 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/agent/train/control-plane/status": {
+      "get": {
+        "operationId": "get_train_control_plane_status_api_agent_train_control_plane_status_get",
+        "parameters": [
+          {
+            "description": "Optional corpus_id to scope config",
+            "in": "query",
+            "name": "repo",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional corpus_id to scope config",
+              "title": "Repo"
+            }
+          },
+          {
+            "description": "Alias for repo",
+            "in": "query",
+            "name": "corpus_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Alias for repo",
+              "title": "Corpus Id"
+            }
+          },
+          {
+            "description": "Alias for corpus_id",
+            "in": "query",
+            "name": "repo_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Alias for corpus_id",
+              "title": "Repo Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentTrainControlPlaneStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Train Control Plane Status",
+        "tags": [
+          "agent"
+        ]
+      }
+    },
     "/api/agent/train/profile": {
       "get": {
         "operationId": "get_train_profile_api_agent_train_profile_get",
@@ -16056,6 +18321,87 @@
         "summary": "Answer Stream",
         "tags": [
           "search"
+        ]
+      }
+    },
+    "/api/benchmark/observability/summary": {
+      "get": {
+        "operationId": "benchmark_observability_summary_api_benchmark_observability_summary_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "corpus_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Corpus Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "repo_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Repo Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "repo",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Repo"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BenchmarkObservabilitySummaryResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Benchmark Observability Summary",
+        "tags": [
+          "benchmark"
         ]
       }
     },
@@ -16972,6 +19318,108 @@
           }
         },
         "summary": "Update Config",
+        "tags": [
+          "config"
+        ]
+      }
+    },
+    "/api/config/readiness": {
+      "get": {
+        "operationId": "get_config_readiness_api_config_readiness_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "corpus_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Corpus Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "repo_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Repo Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "repo",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Repo"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigReadinessResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Config Readiness",
+        "tags": [
+          "config"
+        ]
+      }
+    },
+    "/api/config/registry": {
+      "get": {
+        "operationId": "get_config_registry_api_config_registry_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigRegistryResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Config Registry",
         "tags": [
           "config"
         ]
@@ -18879,6 +21327,87 @@
           }
         },
         "summary": "Analyze Eval Comparison",
+        "tags": [
+          "eval"
+        ]
+      }
+    },
+    "/api/eval/observability/summary": {
+      "get": {
+        "operationId": "eval_observability_summary_api_eval_observability_summary_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "corpus_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Corpus Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "repo_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Repo Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "repo",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Repo"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvalObservabilitySummaryResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Eval Observability Summary",
         "tags": [
           "eval"
         ]
@@ -22559,6 +25088,180 @@
         ]
       }
     },
+    "/api/observability/catalog": {
+      "get": {
+        "operationId": "observability_catalog_api_observability_catalog_get",
+        "parameters": [
+          {
+            "description": "Optional corpus_id to scope config",
+            "in": "query",
+            "name": "repo",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional corpus_id to scope config",
+              "title": "Repo"
+            }
+          },
+          {
+            "description": "Alias for repo",
+            "in": "query",
+            "name": "corpus_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Alias for repo",
+              "title": "Corpus Id"
+            }
+          },
+          {
+            "description": "Alias for corpus_id",
+            "in": "query",
+            "name": "repo_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Alias for corpus_id",
+              "title": "Repo Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ObservabilityCatalogResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Observability Catalog",
+        "tags": [
+          "observability"
+        ]
+      }
+    },
+    "/api/observability/incidents": {
+      "get": {
+        "operationId": "observability_incidents_api_observability_incidents_get",
+        "parameters": [
+          {
+            "description": "Optional corpus_id to scope incident correlation",
+            "in": "query",
+            "name": "repo",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional corpus_id to scope incident correlation",
+              "title": "Repo"
+            }
+          },
+          {
+            "description": "Alias for repo",
+            "in": "query",
+            "name": "corpus_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Alias for repo",
+              "title": "Corpus Id"
+            }
+          },
+          {
+            "description": "Alias for corpus_id",
+            "in": "query",
+            "name": "repo_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Alias for corpus_id",
+              "title": "Repo Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ObservabilityIncidentsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Observability Incidents",
+        "tags": [
+          "observability"
+        ]
+      }
+    },
     "/api/observability/status": {
       "get": {
         "operationId": "observability_status_api_observability_status_get",
@@ -22722,6 +25425,87 @@
           }
         },
         "summary": "List Prompts",
+        "tags": [
+          "prompts"
+        ]
+      }
+    },
+    "/api/prompts/observability/summary": {
+      "get": {
+        "operationId": "prompts_observability_summary_api_prompts_observability_summary_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "corpus_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Corpus Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "repo_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Repo Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "repo",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Repo"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PromptObservabilitySummaryResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Prompts Observability Summary",
         "tags": [
           "prompts"
         ]

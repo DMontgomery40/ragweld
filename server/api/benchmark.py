@@ -13,7 +13,9 @@ from server.lineage import (
     ensure_current_bundle,
     make_ref,
 )
+from server.observability.ml_quality import build_benchmark_observability_summary
 from server.models.tribrid_config_model import (
+    BenchmarkObservabilitySummaryResponse,
     BenchmarkRun,
     BenchmarkRunRequest,
     BenchmarkRunsResponse,
@@ -143,3 +145,18 @@ async def benchmark_results(
             continue
         runs.append(run)
     return BenchmarkRunsResponse(ok=True, runs=runs)
+
+
+@router.get("/benchmark/observability/summary", response_model=BenchmarkObservabilitySummaryResponse)
+async def benchmark_observability_summary(
+    scope: CorpusScope = _CORPUS_SCOPE_DEP,
+) -> BenchmarkObservabilitySummaryResponse:
+    repo_id = scope.resolved_repo_id
+    if repo_id:
+        try:
+            cfg = await load_scoped_config(repo_id=repo_id)
+        except CorpusNotFoundError as e:
+            raise HTTPException(status_code=404, detail=str(e)) from e
+    else:
+        cfg = load_config()
+    return build_benchmark_observability_summary(cfg, repo_id)

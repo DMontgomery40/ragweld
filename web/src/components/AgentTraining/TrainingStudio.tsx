@@ -13,6 +13,7 @@ import { useActiveRepo } from '@/stores/useRepoStore';
 import { useConfigField, useNotification } from '@/hooks';
 import { agentTrainingService, type AgentTrainRunsScope } from '@/services/AgentTrainingService';
 import type {
+  AgentTrainControlPlaneStatusResponse,
   AgentTrainMetricEvent,
   AgentTrainRun,
   AgentTrainRunMeta,
@@ -24,6 +25,7 @@ import type {
 import { NeuralVisualizer, type TelemetryPoint } from '@/components/RerankerTraining/NeuralVisualizer';
 import { GradientDescentViz } from '@/components/RerankerTraining/GradientDescentViz';
 import { StudioLogTerminal } from '@/components/RerankerTraining/StudioLogTerminal';
+import { ControlPlaneStatus } from './ControlPlaneStatus';
 import { RunDiff } from './RunDiff';
 import { RunOverview } from './RunOverview';
 
@@ -205,6 +207,9 @@ export function TrainingStudio() {
   const [runs, setRuns] = useState<AgentTrainRunMeta[]>([]);
   const [runsLoading, setRunsLoading] = useState(false);
   const [runsError, setRunsError] = useState<string | null>(null);
+  const [controlPlaneStatus, setControlPlaneStatus] = useState<AgentTrainControlPlaneStatusResponse | null>(null);
+  const [controlPlaneLoading, setControlPlaneLoading] = useState(false);
+  const [controlPlaneError, setControlPlaneError] = useState<string | null>(null);
 
   const [selectedRunId, setSelectedRunId] = useState('');
   const [selectedRun, setSelectedRun] = useState<AgentTrainRun | null>(null);
@@ -234,6 +239,14 @@ export function TrainingStudio() {
 
   // Ragweld agent config (editable in inspector config tab).
   const [ragweldBackend, setRagweldBackend] = useConfigField<string>('training.ragweld_agent_backend', 'mlx_qwen3');
+  const [workflowBackend, setWorkflowBackend] = useConfigField<'local' | 'flyte'>(
+    'training.ragweld_agent_workflow_backend',
+    'local'
+  );
+  const [trackingBackend, setTrackingBackend] = useConfigField<'local' | 'mlflow'>(
+    'training.ragweld_agent_tracking_backend',
+    'local'
+  );
   const [ragweldBaseModel, setRagweldBaseModel] = useConfigField<string>(
     'training.ragweld_agent_base_model',
     'mlx-community/Qwen3-1.7B-4bit'
@@ -257,6 +270,23 @@ export function TrainingStudio() {
   );
   const [promoteIfImproves, setPromoteIfImproves] = useConfigField<number>('training.ragweld_agent_promote_if_improves', 1);
   const [promoteEpsilon, setPromoteEpsilon] = useConfigField<number>('training.ragweld_agent_promote_epsilon', 0.0);
+  const [flyteAdminBaseUrl, setFlyteAdminBaseUrl] = useConfigField<string>('training.ragweld_agent_flyte_admin_base_url', '');
+  const [flyteConsoleBaseUrl, setFlyteConsoleBaseUrl] = useConfigField<string>(
+    'training.ragweld_agent_flyte_console_base_url',
+    ''
+  );
+  const [flyteProject, setFlyteProject] = useConfigField<string>('training.ragweld_agent_flyte_project', 'ragweld');
+  const [flyteDomain, setFlyteDomain] = useConfigField<string>('training.ragweld_agent_flyte_domain', 'development');
+  const [flyteLaunchplan, setFlyteLaunchplan] = useConfigField<string>('training.ragweld_agent_flyte_launchplan', '');
+  const [mlflowTrackingUrl, setMlflowTrackingUrl] = useConfigField<string>(
+    'training.ragweld_agent_mlflow_tracking_url',
+    ''
+  );
+  const [mlflowExperimentName, setMlflowExperimentName] = useConfigField<string>(
+    'training.ragweld_agent_mlflow_experiment_name',
+    'ragweld-learning-agent'
+  );
+  const [unslothImage, setUnslothImage] = useConfigField<string>('training.ragweld_agent_unsloth_image', '');
 
   // Studio layout prefs (reuse the existing Learning Reranker Studio UI keys so the layout feels identical).
   const [layoutEngine, setLayoutEngine] = useConfigField<'dockview' | 'panels'>('ui.learning_reranker_layout_engine', 'dockview');
@@ -327,6 +357,47 @@ export function TrainingStudio() {
   useEffect(() => {
     if (!config) void loadConfig();
   }, [config, loadConfig]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const handle = window.setTimeout(() => {
+      setControlPlaneLoading(true);
+      setControlPlaneError(null);
+      void agentTrainingService
+        .getControlPlaneStatus(activeCorpus || undefined)
+        .then((status) => {
+          if (cancelled) return;
+          setControlPlaneStatus(status);
+        })
+        .catch((e) => {
+          if (cancelled) return;
+          setControlPlaneStatus(null);
+          setControlPlaneError(e instanceof Error ? e.message : 'Failed to load control-plane status');
+        })
+        .finally(() => {
+          if (cancelled) return;
+          setControlPlaneLoading(false);
+        });
+    }, 500);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(handle);
+    };
+  }, [
+    activeCorpus,
+    flyteAdminBaseUrl,
+    flyteConsoleBaseUrl,
+    flyteDomain,
+    flyteLaunchplan,
+    flyteProject,
+    mlflowExperimentName,
+    mlflowTrackingUrl,
+    ragweldBackend,
+    trackingBackend,
+    unslothImage,
+    workflowBackend,
+  ]);
 
   useEffect(() => {
     if (!activeCorpus && scope === 'corpus') {
@@ -1172,6 +1243,21 @@ export function TrainingStudio() {
                   </label>
                   <select value={ragweldBackend} onChange={(e) => setRagweldBackend(e.target.value)}>
                     <option value="mlx_qwen3">mlx_qwen3</option>
+                    <option value="unsloth">unsloth</option>
+                  </select>
+                </div>
+                <div className="input-group">
+                  <label>Workflow backend</label>
+                  <select value={workflowBackend} onChange={(e) => setWorkflowBackend(e.target.value as 'local' | 'flyte')}>
+                    <option value="local">local</option>
+                    <option value="flyte">flyte</option>
+                  </select>
+                </div>
+                <div className="input-group">
+                  <label>Tracking backend</label>
+                  <select value={trackingBackend} onChange={(e) => setTrackingBackend(e.target.value as 'local' | 'mlflow')}>
+                    <option value="local">local</option>
+                    <option value="mlflow">mlflow</option>
                   </select>
                 </div>
                 <div className="input-group">
@@ -1215,6 +1301,48 @@ export function TrainingStudio() {
                   </button>
                 </div>
               </div>
+
+              <details className="studio-details" open={workflowBackend === 'flyte' || trackingBackend === 'mlflow' || ragweldBackend === 'unsloth'}>
+                <summary>Flyte + MLflow + Unsloth target lane</summary>
+                <div className="studio-form-grid two">
+                  <div className="input-group">
+                    <label>Flyte admin base URL</label>
+                    <input type="text" value={flyteAdminBaseUrl} onChange={(e) => setFlyteAdminBaseUrl(e.target.value)} placeholder="http://localhost:30080" />
+                  </div>
+                  <div className="input-group">
+                    <label>Flyte console base URL</label>
+                    <input type="text" value={flyteConsoleBaseUrl} onChange={(e) => setFlyteConsoleBaseUrl(e.target.value)} placeholder="http://localhost:30080/console" />
+                  </div>
+                  <div className="input-group">
+                    <label>Flyte project</label>
+                    <input type="text" value={flyteProject} onChange={(e) => setFlyteProject(e.target.value)} />
+                  </div>
+                  <div className="input-group">
+                    <label>Flyte domain</label>
+                    <input type="text" value={flyteDomain} onChange={(e) => setFlyteDomain(e.target.value)} />
+                  </div>
+                  <div className="input-group">
+                    <label>Flyte launch plan</label>
+                    <input type="text" value={flyteLaunchplan} onChange={(e) => setFlyteLaunchplan(e.target.value)} placeholder="learning-agent-train" />
+                  </div>
+                  <div className="input-group">
+                    <label>MLflow tracking URL</label>
+                    <input type="text" value={mlflowTrackingUrl} onChange={(e) => setMlflowTrackingUrl(e.target.value)} placeholder="http://localhost:5000" />
+                  </div>
+                  <div className="input-group">
+                    <label>MLflow experiment</label>
+                    <input type="text" value={mlflowExperimentName} onChange={(e) => setMlflowExperimentName(e.target.value)} />
+                  </div>
+                  <div className="input-group">
+                    <label>Unsloth image</label>
+                    <input type="text" value={unslothImage} onChange={(e) => setUnslothImage(e.target.value)} placeholder="ghcr.io/your-org/unsloth:tag" />
+                  </div>
+                </div>
+                <div className="studio-callout">
+                  Current Learning Agent runs still execute on the local MLX trainer. This target-lane section exists to make the
+                  Flyte + MLflow + Unsloth replacement concrete and visible in-product while the launch cutover is wired next.
+                </div>
+              </details>
 
               <details className="studio-details">
                 <summary>MLX LoRA + promotion (advanced)</summary>
@@ -1723,8 +1851,9 @@ export function TrainingStudio() {
         <div>
           <h2 className="studio-title">Learning Agent Studio</h2>
           <p className="studio-subtitle">
-            Train MLX LoRA adapters for <span className="studio-mono">{String(ragweldBaseModel || '').trim() || 'ragweld'}</span> and promote
-            them to <span className="studio-mono">{String(ragweldModelPath || '').trim() || 'training.ragweld_agent_model_path'}</span>.
+            Train local adapters for <span className="studio-mono">{String(ragweldBaseModel || '').trim() || 'ragweld'}</span>, promote them to{' '}
+            <span className="studio-mono">{String(ragweldModelPath || '').trim() || 'training.ragweld_agent_model_path'}</span>, and expose the
+            Flyte / MLflow / Unsloth replacement lane in-product.
           </p>
         </div>
 
@@ -1805,6 +1934,14 @@ export function TrainingStudio() {
             <span className="studio-value studio-mono">{String(ragweldBackend || '').trim() || '—'}</span>
           </div>
           <div className="studio-run-setup-item">
+            <span className="studio-label">Workflow</span>
+            <span className="studio-value studio-mono">{String(workflowBackend || '').trim() || '—'}</span>
+          </div>
+          <div className="studio-run-setup-item">
+            <span className="studio-label">Tracking</span>
+            <span className="studio-value studio-mono">{String(trackingBackend || '').trim() || '—'}</span>
+          </div>
+          <div className="studio-run-setup-item">
             <span className="studio-label">Base model</span>
             <span className="studio-value studio-mono studio-truncate" title={String(ragweldBaseModel || '')}>
               {String(ragweldBaseModel || '').trim() || '—'}
@@ -1818,6 +1955,8 @@ export function TrainingStudio() {
           </div>
         </div>
       ) : null}
+
+      <ControlPlaneStatus status={controlPlaneStatus} loading={controlPlaneLoading} error={controlPlaneError} />
 
       <div className="studio-workspace" data-layout-engine={layoutEngine}>
         {layoutEngine === 'dockview' ? (

@@ -330,7 +330,7 @@ class TestChatEndpointWithMockedLLM:
 
     @pytest.mark.asyncio
     async def test_chat_handles_error(self, chat_client: AsyncClient):
-        """Test that chat handles errors gracefully."""
+        """Test that chat fails closed when generation cannot run."""
         with patch(
             "server.chat.handler.generate_chat_text",
             new=AsyncMock(side_effect=Exception("LLM unavailable")),
@@ -341,10 +341,9 @@ class TestChatEndpointWithMockedLLM:
                 json={"message": "Hello", "sources": {"corpus_ids": []}},
             )
 
-            assert response.status_code == 200
+            assert response.status_code == 503
             data = response.json()
-            assert data.get("debug", {}).get("llm_used") is False
-            assert "LLM unavailable" in str(data.get("debug", {}).get("llm_error") or "")
+            assert "LLM unavailable" in str(data.get("detail") or "")
 
 
 class TestStreamEndpoint:

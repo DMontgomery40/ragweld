@@ -61,34 +61,8 @@ def _coerce_generation_result(result: Any) -> GenerationResult:
     )
 
 
-def _format_retrieval_only_chat_answer(*, message: str, corpus_ids: list[str], sources: list[ChunkMatch]) -> str:
-    if not sources:
-        corpora = ", ".join([cid for cid in corpus_ids if cid]) or "(none)"
-        return (
-            "No chat provider is available and retrieval returned no matches.\n\n"
-            f"Message: {message}\n"
-            f"Sources: {corpora}\n"
-            "Tip: enable LiteLLM, start a local provider (Ollama/llama.cpp/vLLM), or configure OpenRouter/OpenAI."
-        )
-
-    corpora = ", ".join([cid for cid in corpus_ids if cid]) or "(none)"
-    lines: list[str] = [
-        "No chat provider is available. Returning retrieval-only results.",
-        "",
-        f"Message: {message}",
-        f"Sources: {corpora}",
-        "",
-        "Top matching sources:",
-    ]
-    for i, ch in enumerate(sources[: min(len(sources), 8)]):
-        loc = f"{ch.file_path}:{int(ch.start_line)}-{int(ch.end_line)}"
-        score = f"{float(ch.score):.4f}" if ch.score is not None else "0.0000"
-        snippet = (ch.content or "").strip()
-        snippet = re.sub(r"\\s+", " ", snippet)[:220]
-        lines.append(f"{i+1}. {loc} (score {score})")
-        if snippet:
-            lines.append(f"   {snippet}")
-    return "\n".join(lines).strip()
+class ChatGenerationError(RuntimeError):
+    """Raised when chat generation cannot complete on the real provider path."""
 
 
 def _conversation_turn_for_request(*, conversation: Conversation, message: str) -> int:
@@ -515,8 +489,7 @@ async def chat_once(
     except Exception as e:
         llm_used = False
         llm_error = _safe_error_message(e)
-        text = _format_retrieval_only_chat_answer(message=request.message, corpus_ids=corpus_ids, sources=sources)
-        provider_id = None
+        raise ChatGenerationError(llm_error) from e
 
     # Update in-memory conversation continuity (best-effort for local providers)
     if provider_id:
@@ -833,9 +806,26 @@ async def chat_stream(
     except Exception as e:
         llm_used = False
         llm_error = _safe_error_message(e)
-        msg = _format_retrieval_only_chat_answer(message=request.message, corpus_ids=corpus_ids, sources=sources)
-        accumulated = msg
-        yield f"data: {json.dumps({'type': 'text', 'content': msg})}\n\n"
+        yield f"data: {json.dumps({'type': 'error', 'message': llm_error})}\n\n"
+        ended_at_ms = int(time.time() * 1000)
+        sources_json = [s.model_dump(mode="serialization", by_alias=True) for s in sources]
+        done_event_payload: dict[str, Any] = {
+            "type": "done",
+            "run_id": run_id,
+            "started_at_ms": int(started_at_ms),
+            "ended_at_ms": int(ended_at_ms),
+            "conversation_id": conversation.id,
+            "sources": sources_json,
+            "recall_plan": (
+                recall_plan.model_dump(mode="serialization", by_alias=True) if recall_plan is not None else None
+            ),
+            "provider": provider_info.model_dump(mode="serialization") if provider_info is not None else None,
+            "provider_response_id": provider_response_id,
+            "llm_used": False,
+            "llm_error": llm_error,
+        }
+        yield f"data: {json.dumps(done_event_payload)}\n\n"
+        return
 
     if provider_response_id:
         conversation.last_provider_response_id = provider_response_id

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 
+import { ApiKeyStatus } from '@/components/ui/ApiKeyStatus';
 import { TooltipIcon } from '@/components/ui/TooltipIcon';
 import { useConfig, useConfigField } from '@/hooks';
 import { useRepoStore } from '@/stores/useRepoStore';
@@ -17,7 +18,6 @@ export function PathsSubtab() {
   );
   const [neo4jUri, setNeo4jUri] = useConfigField<string>('graph_storage.neo4j_uri', 'bolt://localhost:7687');
   const [neo4jUser, setNeo4jUser] = useConfigField<string>('graph_storage.neo4j_user', 'neo4j');
-  const [neo4jPassword, setNeo4jPassword] = useConfigField<string>('graph_storage.neo4j_password', '');
   const [neo4jDatabase, setNeo4jDatabase] = useConfigField<string>('graph_storage.neo4j_database', 'neo4j');
   const [neo4jDatabaseMode, setNeo4jDatabaseMode] = useConfigField<'shared' | 'per_corpus'>(
     'graph_storage.neo4j_database_mode',
@@ -175,24 +175,13 @@ export function PathsSubtab() {
         </div>
         <div className="input-group">
           <label>
-            Neo4j Password
-            <TooltipIcon name="neo4j_password" />
+            Neo4j Password (env-only)
           </label>
-          <input
-            data-testid="neo4j-password"
-            type="password"
-            value={neo4jPassword}
-            onChange={(e) => setNeo4jPassword(e.target.value)}
-            placeholder="password"
-            style={{
-              width: '100%',
-              padding: '8px',
-              background: 'var(--input-bg)',
-              border: '1px solid var(--line)',
-              borderRadius: '4px',
-              color: 'var(--fg)',
-            }}
-          />
+          <ApiKeyStatus keyName="NEO4J_PASSWORD" label="Neo4j Password" />
+          <p className="small" style={{ marginTop: 8 }}>
+            Neo4j credentials now stay env-only. Set <code>NEO4J_PASSWORD</code> in the backend environment and use the Admin
+            dependency panel to verify readiness.
+          </p>
         </div>
       </div>
 

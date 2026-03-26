@@ -303,6 +303,28 @@ def build_runtime_capabilities_response_for_config(config: TriBridConfig) -> Run
 
 
 def _default_generation_route(config: TriBridConfig) -> ChatProviderInfo | None:
+    enabled_local = [provider for provider in config.chat.local_models.providers if provider.enabled]
+    if enabled_local:
+        chosen = sorted(enabled_local, key=lambda provider: (provider.priority, provider.name))[0]
+        base_url = str(chosen.base_url or "").strip().rstrip("/")
+        if base_url.endswith("/v1"):
+            base_url = base_url[: -len("/v1")]
+        return ChatProviderInfo(
+            kind="local",
+            provider_name=chosen.name,
+            model=str(config.chat.local_models.default_chat_model or "").strip(),
+            base_url=base_url,
+        )
+
+    litellm_base_url = str(getattr(config.chat.litellm, "base_url", "") or "").strip().rstrip("/")
+    if getattr(config.chat.litellm, "enabled", False) and litellm_base_url:
+        return ChatProviderInfo(
+            kind="litellm",
+            provider_name="LiteLLM",
+            model=str(getattr(config.chat.litellm, "default_model", "") or "").strip(),
+            base_url=litellm_base_url,
+        )
+
     from server.chat.provider_router import select_provider_route
 
     try:

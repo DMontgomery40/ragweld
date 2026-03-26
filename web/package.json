@@ -12,6 +12,7 @@
     "preview:lan": "vite preview --host 0.0.0.0"
   },
   "dependencies": {
+    "@assistant-ui/react": "^0.12.20",
     "@fontsource/ibm-plex-mono": "^5.2.7",
     "@fontsource/space-grotesk": "^5.2.10",
     "@monaco-editor/react": "^4.7.0",

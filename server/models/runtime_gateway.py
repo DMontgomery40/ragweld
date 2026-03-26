@@ -203,7 +203,6 @@ class OpenRouterConfig(BaseModel):
     """Unified gateway to many cloud models via OpenAI-compatible routing."""
 
     enabled: bool = Field(default=False)
-    api_key: str = Field(default="")
     base_url: str = Field(default="https://openrouter.ai/api/v1")
     default_model: str = Field(default="anthropic/claude-sonnet-4")
     site_name: str = Field(default="TriBridRAG")
@@ -214,7 +213,6 @@ class LiteLLMConfig(BaseModel):
     """Gateway configuration for an OpenAI-compatible LiteLLM proxy."""
 
     enabled: bool = Field(default=False)
-    api_key: str = Field(default="")
     base_url: str = Field(default="http://127.0.0.1:4000/v1")
     default_model: str = Field(default="openai/gpt-4o-mini")
     fallback_models: list[str] = Field(default_factory=list)

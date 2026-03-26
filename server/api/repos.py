@@ -42,7 +42,7 @@ async def _get_neo4j(repo_id: str | None = None) -> Neo4jClient:
     neo4j = Neo4jClient(
         cfg.graph_storage.neo4j_uri,
         cfg.graph_storage.neo4j_user,
-        cfg.graph_storage.neo4j_password,
+        cfg.graph_storage.resolve_password(),
         database=db_name,
     )
     await neo4j.connect()
@@ -106,7 +106,7 @@ async def add_repo(request: CorpusCreateRequest) -> Corpus:
         neo4j = Neo4jClient(
             cfg.graph_storage.neo4j_uri,
             cfg.graph_storage.neo4j_user,
-            cfg.graph_storage.neo4j_password,
+            cfg.graph_storage.resolve_password(),
             database=cfg.graph_storage.neo4j_database,
         )
         await neo4j.connect()

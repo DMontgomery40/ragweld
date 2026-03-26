@@ -10,15 +10,16 @@ interface AdminSubtabsProps {
 
 export function AdminSubtabs({ activeSubtab, onSubtabChange }: AdminSubtabsProps) {
   const subtabs = [
-    { id: 'general', title: 'General' },
-    { id: 'secrets', title: 'Secrets' },
-    { id: 'integrations', title: 'Integrations' }
+    { id: 'basic', title: 'Basic' },
+    { id: 'advanced', title: 'Advanced' },
+    { id: 'raw', title: 'Raw' },
+    { id: 'dependencies', title: 'Dependencies' }
   ];
 
   // Ensure a default subtab is selected
   useEffect(() => {
     if (!activeSubtab) {
-      onSubtabChange('general');
+      onSubtabChange('basic');
     }
   }, [activeSubtab, onSubtabChange]);
 

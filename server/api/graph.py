@@ -28,7 +28,7 @@ async def list_entities(
     neo4j = Neo4jClient(
         cfg.graph_storage.neo4j_uri,
         cfg.graph_storage.neo4j_user,
-        cfg.graph_storage.neo4j_password,
+        cfg.graph_storage.resolve_password(),
         database=db_name,
     )
     try:
@@ -50,7 +50,7 @@ async def get_entity(corpus_id: str, entity_id: str) -> Entity:
     neo4j = Neo4jClient(
         cfg.graph_storage.neo4j_uri,
         cfg.graph_storage.neo4j_user,
-        cfg.graph_storage.neo4j_password,
+        cfg.graph_storage.resolve_password(),
         database=db_name,
     )
     try:
@@ -74,7 +74,7 @@ async def get_entity_relationships(corpus_id: str, entity_id: str) -> list[Relat
     neo4j = Neo4jClient(
         cfg.graph_storage.neo4j_uri,
         cfg.graph_storage.neo4j_user,
-        cfg.graph_storage.neo4j_password,
+        cfg.graph_storage.resolve_password(),
         database=db_name,
     )
     try:
@@ -95,7 +95,7 @@ async def get_entity_neighbors(corpus_id: str, entity_id: str, max_hops: int = 2
     neo4j = Neo4jClient(
         cfg.graph_storage.neo4j_uri,
         cfg.graph_storage.neo4j_user,
-        cfg.graph_storage.neo4j_password,
+        cfg.graph_storage.resolve_password(),
         database=db_name,
     )
     try:
@@ -119,7 +119,7 @@ async def get_community_members(corpus_id: str, community_id: str, limit: int = 
     neo4j = Neo4jClient(
         cfg.graph_storage.neo4j_uri,
         cfg.graph_storage.neo4j_user,
-        cfg.graph_storage.neo4j_password,
+        cfg.graph_storage.resolve_password(),
         database=db_name,
     )
     try:
@@ -148,7 +148,7 @@ async def get_community_subgraph(
     neo4j = Neo4jClient(
         cfg.graph_storage.neo4j_uri,
         cfg.graph_storage.neo4j_user,
-        cfg.graph_storage.neo4j_password,
+        cfg.graph_storage.resolve_password(),
         database=db_name,
     )
     try:
@@ -172,7 +172,7 @@ async def list_communities(corpus_id: str, level: int | None = None) -> list[Com
     neo4j = Neo4jClient(
         cfg.graph_storage.neo4j_uri,
         cfg.graph_storage.neo4j_user,
-        cfg.graph_storage.neo4j_password,
+        cfg.graph_storage.resolve_password(),
         database=db_name,
     )
     try:
@@ -194,7 +194,7 @@ async def get_graph_stats(corpus_id: str) -> GraphStats:
     neo4j = Neo4jClient(
         cfg.graph_storage.neo4j_uri,
         cfg.graph_storage.neo4j_user,
-        cfg.graph_storage.neo4j_password,
+        cfg.graph_storage.resolve_password(),
         database=db_name,
     )
     try:
@@ -216,7 +216,7 @@ async def graph_query(corpus_id: str, cypher: str) -> list[dict[str, Any]]:
     neo4j = Neo4jClient(
         cfg.graph_storage.neo4j_uri,
         cfg.graph_storage.neo4j_user,
-        cfg.graph_storage.neo4j_password,
+        cfg.graph_storage.resolve_password(),
         database=db_name,
     )
     try:

@@ -5,7 +5,6 @@ import os
 import random
 import re
 from collections import Counter, defaultdict
-from dataclasses import dataclass
 from fnmatch import fnmatch
 from pathlib import Path
 from typing import Any
@@ -24,27 +23,11 @@ from server.models.tribrid_config_model import (
     TriBridConfig,
 )
 from server.synthetic.layering import infer_layer_from_path
-from server.synthetic.materialized_corpus import (
-    MaterializedCorpusRow,
-    build_materialized_candidate_paths,
-    build_materialized_eval_items,
-    load_materialized_corpus_rows,
-)
 
 _TOKEN_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]{2,63}")
 _DEF_RE = re.compile(r"^\s*(def|class)\s+([A-Za-z_][A-Za-z0-9_]*)", re.MULTILINE)
 _IMPORT_RE = re.compile(r"^\s*(?:from|import)\s+([A-Za-z0-9_\.]+)", re.MULTILINE)
 _ROUTE_RE = re.compile(r"(?:/api/[A-Za-z0-9_./-]+)")
-_RECIPES_REQUIRING_EVAL_DATASET = frozenset({"eval_dataset", "triplets", "autotune_retrieval", "full_stack"})
-_RECIPES_MANIFEST_ONLY_SAFE = frozenset({"eval_dataset", "triplets", "autotune_retrieval"})
-
-
-@dataclass(frozen=True)
-class MaterializedCorpusEvalAdapter:
-    rows: list[MaterializedCorpusRow]
-    eval_items: list[EvalDatasetItem]
-    candidate_paths: list[str]
-    repo_path: str
 
 
 def synthetic_generation_model_category(model: str) -> str:
@@ -197,64 +180,6 @@ async def select_source_chunks(
 
     rng = random.Random(int(request.seed or 1337))
     return _round_robin_chunks(filtered, max_source_chunks, rng)
-
-
-def recipe_supports_materialized_manifest(recipe: SyntheticRecipeKind) -> bool:
-    return str(recipe) in _RECIPES_REQUIRING_EVAL_DATASET
-
-
-def recipe_can_skip_source_chunks_for_manifest(recipe: SyntheticRecipeKind) -> bool:
-    return str(recipe) in _RECIPES_MANIFEST_ONLY_SAFE
-
-
-async def load_materialized_corpus_eval_adapter(
-    *,
-    repo_id: str,
-    cfg: TriBridConfig,
-    request: SyntheticRunStartRequest,
-) -> MaterializedCorpusEvalAdapter | None:
-    if not recipe_supports_materialized_manifest(request.recipe):
-        return None
-
-    pg = PostgresClient(cfg.indexing.postgres_url, schema_mode="control")
-    corpus_path = ""
-    try:
-        await pg.connect()
-        corpus = await pg.get_corpus(repo_id)
-        corpus_path = str((corpus or {}).get("path") or "").strip()
-    except Exception:
-        corpus_path = ""
-    finally:
-        try:
-            await pg.disconnect()
-        except Exception:
-            pass
-
-    if not corpus_path:
-        return None
-
-    rows = load_materialized_corpus_rows(corpus_path)
-    if not rows:
-        return None
-
-    eval_items = build_materialized_eval_items(
-        rows=rows,
-        max_pairs=int(request.max_pairs or 150),
-        pairs_per_source=int(request.pairs_per_source or 1),
-        include_expected_answer=bool(request.include_expected_answer),
-        include_tags=bool(request.include_tags),
-    )
-    if not eval_items:
-        raise RuntimeError(
-            f"Materialized corpus manifest at {corpus_path} produced zero eval rows for repo_id={repo_id}"
-        )
-
-    return MaterializedCorpusEvalAdapter(
-        rows=rows,
-        eval_items=eval_items,
-        candidate_paths=build_materialized_candidate_paths(rows),
-        repo_path=corpus_path,
-    )
 
 
 def _chunk_to_summary(chunk: Chunk, *, card_source: str = "deterministic") -> ChunkSummary:
@@ -416,7 +341,8 @@ async def _generate_eval_candidates_for_chunk(
     if not file_path:
         return []
 
-    source_excerpt = "\n".join((chunk.content or "").splitlines()[:80])
+    gen_cfg = cfg.synthetic.generator
+    source_excerpt = "\n".join((chunk.content or "").splitlines()[:gen_cfg.source_excerpt_max_lines])
     source_kind = _infer_source_kind(file_path, source_excerpt)
     answer_mode = "required" if include_expected_answer else "optional"
 
@@ -448,8 +374,8 @@ async def _generate_eval_candidates_for_chunk(
         user_message=user_message,
         images=[],
         image_detail="auto",
-        temperature=0.0,
-        max_tokens=1200,
+        temperature=gen_cfg.temperature,
+        max_tokens=gen_cfg.max_tokens,
         context_text=source_excerpt,
         context_chunks=[],
         timeout_s=float(cfg.generation.gen_timeout or 60),
@@ -470,9 +396,9 @@ async def _generate_eval_candidates_for_chunk(
             continue
         rows.append(
             {
-                "question": question[:180],
-                "expected_answer": expected_answer[:400] if expected_answer else "",
-                "evidence_quote": evidence_quote[:200] if evidence_quote else "",
+                "question": question[:gen_cfg.question_max_chars],
+                "expected_answer": expected_answer[:gen_cfg.expected_answer_max_chars] if expected_answer else "",
+                "evidence_quote": evidence_quote[:gen_cfg.evidence_quote_max_chars] if evidence_quote else "",
             }
         )
     return rows
@@ -518,6 +444,7 @@ async def _judge_eval_item(
     }
     user_message = json.dumps(payload, ensure_ascii=False)
 
+    judge_cfg = cfg.synthetic.judge
     response_text, _resp_id = await generate_chat_text(
         route=route,
         openrouter_cfg=cfg.chat.openrouter,
@@ -525,8 +452,8 @@ async def _judge_eval_item(
         user_message=user_message,
         images=[],
         image_detail="auto",
-        temperature=0.0,
-        max_tokens=400,
+        temperature=judge_cfg.temperature,
+        max_tokens=judge_cfg.max_tokens,
         context_text=source_excerpt[:2500],
         context_chunks=[],
         timeout_s=float(cfg.generation.gen_timeout or 60),
@@ -562,6 +489,7 @@ async def _make_eval_items_with_llm(
     include_tags: bool,
     curate_enabled: bool,
     curate_threshold: float,
+    summary: SyntheticRunSummary,
 ) -> tuple[list[EvalDatasetItem], int, int, float | None]:
     generated_rows: list[tuple[EvalDatasetItem, Chunk]] = []
     generator_failed = False
@@ -584,8 +512,18 @@ async def _make_eval_items_with_llm(
                     pairs_per_source=max(1, pairs_per_source),
                     include_expected_answer=include_expected_answer,
                 )
-            except Exception:
+            except Exception as gen_exc:
+                if cfg.synthetic.generator.fail_on_error:
+                    raise RuntimeError(
+                        f"Generator LLM unreachable: {gen_exc}"
+                    ) from gen_exc
                 generator_failed = True
+                if not summary.degradation.generator_fallback_used:
+                    summary.degradation.generator_fallback_used = True
+                    summary.degradation.degraded = True
+                    summary.degradation.reasons.append(
+                        f"Generator LLM failed ({type(gen_exc).__name__}); fell back to deterministic extraction."
+                    )
                 candidates = _fallback_eval_candidates_for_chunk(
                     chunk=ch,
                     pairs_per_source=max(1, pairs_per_source),
@@ -629,7 +567,7 @@ async def _make_eval_items_with_llm(
     judge_failed = False
 
     for item, ch in generated_rows:
-        excerpt = "\n".join((ch.content or "").splitlines()[:80])
+        excerpt = "\n".join((ch.content or "").splitlines()[:cfg.synthetic.generator.source_excerpt_max_lines])
         if judge_failed:
             score = float(threshold)
             keep = True
@@ -643,9 +581,18 @@ async def _make_eval_items_with_llm(
                     source_file_path=str(ch.file_path or ""),
                     threshold=threshold,
                 )
-            except Exception:
+            except Exception as judge_exc:
+                if cfg.synthetic.judge.fail_on_error:
+                    raise RuntimeError(
+                        f"Judge LLM unreachable: {judge_exc}"
+                    ) from judge_exc
                 judge_failed = True
-                # Keep fallback-generated rows when judge inference is unavailable.
+                if not summary.degradation.judge_fallback_used:
+                    summary.degradation.judge_fallback_used = True
+                    summary.degradation.degraded = True
+                    summary.degradation.reasons.append(
+                        f"Judge LLM failed ({type(judge_exc).__name__}); auto-passing all remaining items."
+                    )
                 score = float(threshold)
                 keep = True
         scores.append(score)
@@ -742,33 +689,24 @@ def _autotune_patch(
 
 async def generate_recipe_payloads(
     *,
-    repo_id: str,
     recipe: SyntheticRecipeKind,
     cfg: TriBridConfig,
     request: SyntheticRunStartRequest,
     chunks: list[Chunk],
-    materialized_manifest: MaterializedCorpusEvalAdapter | None = None,
 ) -> tuple[dict[SyntheticArtifactKind, Any], SyntheticRunSummary]:
+    generator_route = resolve_synthetic_route(cfg=cfg, model=str(request.generator_model or ""))
+    judge_route = resolve_synthetic_route(cfg=cfg, model=str(request.judge_model or ""))
+    _ = (generator_route, judge_route)
+
+    summary = SyntheticRunSummary()
     summaries = [_chunk_to_summary(ch, card_source="deterministic") for ch in chunks]
 
     eval_items: list[EvalDatasetItem] = []
     curated_in = 0
     curated_out = 0
     avg_judge_score: float | None = None
-    manifest_paths: list[str] = []
-    manifest_report_line: str | None = None
 
-    if materialized_manifest is not None and recipe in _RECIPES_REQUIRING_EVAL_DATASET:
-        eval_items = list(materialized_manifest.eval_items)
-        curated_in = len(eval_items)
-        manifest_paths = list(materialized_manifest.candidate_paths)
-        manifest_report_line = (
-            "Eval dataset materialized from corpus manifest "
-            f"({len(materialized_manifest.rows)} manifest rows, path={materialized_manifest.repo_path})."
-        )
-    elif recipe in _RECIPES_REQUIRING_EVAL_DATASET:
-        generator_route = resolve_synthetic_route(cfg=cfg, model=str(request.generator_model or ""))
-        judge_route = resolve_synthetic_route(cfg=cfg, model=str(request.judge_model or ""))
+    if recipe in {"eval_dataset", "triplets", "autotune_retrieval", "full_stack"}:
         eval_items, curated_in, curated_out, avg_judge_score = await _make_eval_items_with_llm(
             cfg=cfg,
             generator_route=generator_route,
@@ -780,10 +718,11 @@ async def generate_recipe_payloads(
             include_tags=bool(request.include_tags),
             curate_enabled=bool(request.curate_enabled),
             curate_threshold=float(request.curate_threshold or 7.0),
+            summary=summary,
         )
 
     keywords = _derive_keywords(summaries, max_keywords=int(cfg.keywords.keywords_max_per_repo or 80))
-    all_paths = list(manifest_paths) if manifest_paths else [str(ch.file_path or "") for ch in chunks if str(ch.file_path or "").strip()]
+    all_paths = [str(ch.file_path or "") for ch in chunks if str(ch.file_path or "").strip()]
     triplets = _build_triplets(
         eval_items=eval_items,
         candidate_paths=all_paths,
@@ -815,22 +754,18 @@ async def generate_recipe_payloads(
             f"Curated in: {curated_in}\n"
             f"Curated out: {curated_out}\n"
         )
-    if manifest_report_line:
-        report += f"{manifest_report_line}\n"
     artifacts["report_md"] = report
 
-    summary = SyntheticRunSummary(
-        sources_used=max(len(chunks), len({path for path in all_paths if path})),
-        items_generated=sum(
-            [
-                len(eval_items),
-                len(summaries),
-                len(triplets),
-                len(keywords),
-            ]
-        ),
-        items_curated_in=curated_in,
-        items_curated_out=curated_out,
-        avg_judge_score=avg_judge_score,
+    summary.sources_used = len(chunks)
+    summary.items_generated = sum(
+        [
+            len(eval_items),
+            len(summaries),
+            len(triplets),
+            len(keywords),
+        ]
     )
+    summary.items_curated_in = curated_in
+    summary.items_curated_out = curated_out
+    summary.avg_judge_score = avg_judge_score
     return artifacts, summary

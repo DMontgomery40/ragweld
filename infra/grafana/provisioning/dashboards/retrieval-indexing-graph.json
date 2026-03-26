@@ -1,0 +1,121 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" } },
+      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 0 },
+      "id": 1,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "targets": [{ "expr": "max_over_time(tribrid_chunks_indexed_current[1h])", "legendFormat": "chunks" }],
+      "title": "Indexed Chunks",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" } },
+      "gridPos": { "h": 6, "w": 8, "x": 8, "y": 0 },
+      "id": 2,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "targets": [{ "expr": "max_over_time(tribrid_graph_relationships_current[1h])", "legendFormat": "relationships" }],
+      "title": "Graph Relationships",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" } },
+      "gridPos": { "h": 6, "w": 8, "x": 16, "y": 0 },
+      "id": 3,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "targets": [{ "expr": "sum(rate(tribrid_search_requests_total[5m]))", "legendFormat": "searches/s" }],
+      "title": "Retrieval Traffic",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 2,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "unit": "s"
+        }
+      },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 6 },
+      "id": 4,
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        { "expr": "histogram_quantile(0.50, rate(tribrid_vector_leg_latency_seconds_bucket[5m]))", "legendFormat": "vector p50" },
+        { "expr": "histogram_quantile(0.50, rate(tribrid_sparse_leg_latency_seconds_bucket[5m]))", "legendFormat": "sparse p50" },
+        { "expr": "histogram_quantile(0.50, rate(tribrid_graph_leg_latency_seconds_bucket[5m]))", "legendFormat": "graph p50" }
+      ],
+      "title": "Retrieval Leg Latency",
+      "type": "timeseries"
+    },
+    {
+      "gridPos": { "h": 7, "w": 24, "x": 0, "y": 14 },
+      "id": 5,
+      "options": {
+        "content": "## Retrieval / Indexing / Graph\nUse this board with the ragweld retrieval pilot and indexing workbench tabs. The shared variables are there so the same corpus and run context can travel with you into Eval Analysis and Benchmark.",
+        "mode": "markdown"
+      },
+      "title": "Operator Notes",
+      "type": "text"
+    }
+  ],
+  "refresh": "10s",
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": ["ragweld", "observability", "retrieval", "graph"],
+  "templating": {
+    "list": [
+      { "name": "corpus_id", "label": "Corpus", "type": "textbox", "query": "*", "current": { "text": "*", "value": "*" } },
+      { "name": "run_id", "label": "Run", "type": "textbox", "query": "*", "current": { "text": "*", "value": "*" } },
+      { "name": "model", "label": "Model", "type": "textbox", "query": "*", "current": { "text": "*", "value": "*" } },
+      { "name": "provider", "label": "Provider", "type": "textbox", "query": "*", "current": { "text": "*", "value": "*" } },
+      { "name": "prompt_set", "label": "Prompt Set", "type": "textbox", "query": "current", "current": { "text": "current", "value": "current" } },
+      { "name": "workflow_id", "label": "Workflow", "type": "textbox", "query": "*", "current": { "text": "*", "value": "*" } }
+    ]
+  },
+  "time": { "from": "now-1h", "to": "now" },
+  "timepicker": {},
+  "timezone": "",
+  "title": "Retrieval/Indexing/Graph",
+  "uid": "ragweld-retrieval-indexing-graph",
+  "version": 1,
+  "weekStart": ""
+}

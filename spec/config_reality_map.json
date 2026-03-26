@@ -84,6 +84,10 @@
       "disposition": "runtime_effect",
       "evidence": ["server/training/reranker_trainer.py"]
     },
+    "synthetic": {
+      "disposition": "runtime_effect",
+      "evidence": ["server/api/synthetic.py", "server/synthetic/orchestrator.py"]
+    },
     "ui": {
       "disposition": "ui_effect",
       "evidence": ["web/src/stores/useUIStore.ts"]
@@ -142,6 +146,18 @@
     "indexing.bm25_stopwords_lang": {
       "disposition": "remove",
       "evidence": ["server/services/config_store.py", "server/models/tribrid_config_model.py"]
+    },
+    "graph_storage.neo4j_password": {
+      "disposition": "remove",
+      "evidence": ["server/services/config_store.py", "server/models/tribrid_config_model.py"]
+    },
+    "chat.litellm.api_key": {
+      "disposition": "remove",
+      "evidence": ["server/services/config_store.py", "server/models/runtime_gateway.py"]
+    },
+    "chat.openrouter.api_key": {
+      "disposition": "remove",
+      "evidence": ["server/services/config_store.py", "server/models/runtime_gateway.py"]
     }
   }
 }

@@ -1,5 +1,10 @@
 import { apiClient, api, withCorpusScope } from './client';
-import type { TriBridConfig, ModelValidationResult } from '@/types/generated';
+import type {
+  ConfigReadinessResponse,
+  ConfigRegistryResponse,
+  ModelValidationResult,
+  TriBridConfig,
+} from '@/types/generated';
 
 export const configApi = {
   /**
@@ -54,6 +59,22 @@ export const configApi = {
    */
   async validate(): Promise<ModelValidationResult> {
     const { data } = await apiClient.get<ModelValidationResult>(withCorpusScope(api('/config/validate')));
+    return data;
+  },
+
+  /**
+   * Load the registry-driven config field/integration metadata.
+   */
+  async registry(): Promise<ConfigRegistryResponse> {
+    const { data } = await apiClient.get<ConfigRegistryResponse>(api('/config/registry'));
+    return data;
+  },
+
+  /**
+   * Load current integration and secret readiness for the selected scope.
+   */
+  async readiness(): Promise<ConfigReadinessResponse> {
+    const { data } = await apiClient.get<ConfigReadinessResponse>(withCorpusScope(api('/config/readiness')));
     return data;
   },
 

@@ -91,7 +91,9 @@ export const routes: RouteConfig[] = [
     icon: '📈',
     order: 4,
     subtabs: [
-      { id: 'dashboard', title: 'Dashboard' },
+      { id: 'overview', title: 'Overview' },
+      { id: 'dashboards', title: 'Dashboards' },
+      { id: 'incidents', title: 'Incidents' },
       { id: 'config', title: 'Config' }
     ],
     nav: { visible: true, className: 'promoted-tab' }
@@ -103,7 +105,11 @@ export const routes: RouteConfig[] = [
     icon: '🏁',
     order: 5,
     subtabs: [],
-    nav: { visible: false }
+    nav: {
+      visible: true,
+      className: 'promoted-tab',
+      title: 'Visible benchmark surface for runtime and prompt-regression triage'
+    }
   },
   {
     path: '/rag',
@@ -164,9 +170,10 @@ export const routes: RouteConfig[] = [
     icon: '⚙️',
     order: 9,
     subtabs: [
-      { id: 'general', title: 'General' },
-      { id: 'secrets', title: 'Secrets' },
-      { id: 'integrations', title: 'Integrations' }
+      { id: 'basic', title: 'Basic' },
+      { id: 'advanced', title: 'Advanced' },
+      { id: 'raw', title: 'Raw' },
+      { id: 'dependencies', title: 'Dependencies' }
     ],
     nav: { visible: true }
   },

@@ -99,6 +99,7 @@ def select_provider_route(
     override = model_override.strip()
     openai_api_key_hint = os.getenv("OPENAI_API_KEY", "").strip()
     openrouter_api_key_hint = os.getenv("OPENROUTER_API_KEY", "").strip()
+    has_enabled_local = any(provider.enabled for provider in chat_config.local_models.providers)
     if not override:
         gen_backend = str(getattr(config.generation, "gen_backend", "") or "").strip().lower()
         gen_model = str(getattr(config.generation, "gen_model", "") or "").strip()
@@ -107,7 +108,13 @@ def select_provider_route(
                 normalized_openai_model = gen_model if ("/" in gen_model or ":" in gen_model) else f"openai/{gen_model}"
                 default_gen_model = str(GenerationConfig.model_fields["gen_model"].default or "gpt-4o-mini").strip()
                 cloud_capable = bool(openai_api_key_hint or (chat_config.openrouter.enabled and openrouter_api_key_hint))
-                if gen_model != default_gen_model or cloud_capable:
+                # OpenAI-backed generation defaults should still honor the
+                # saved OpenAI/OpenRouter cloud route. LiteLLM is an explicit
+                # gateway override for generation; the built-in local provider
+                # inventory is a serving surface and should not silently
+                # hijack the saved OpenAI backend.
+                explicit_runtime_route = bool(getattr(chat_config.litellm, "enabled", False))
+                if gen_model != default_gen_model or (cloud_capable and not explicit_runtime_route):
                     override = normalized_openai_model
             elif gen_backend in {"ollama", "mlx"}:
                 override = f"local:{gen_model}"
@@ -126,7 +133,7 @@ def select_provider_route(
             else:
                 override = gen_model
     openrouter_api_key = os.getenv("OPENROUTER_API_KEY", "").strip()
-    litellm_api_key = (os.getenv("LITELLM_API_KEY", "").strip() or str(getattr(chat_config.litellm, "api_key", "") or "").strip())
+    litellm_api_key = os.getenv("LITELLM_API_KEY", "").strip()
     openai_api_key = os.getenv("OPENAI_API_KEY", "").strip()
     openai_base_url = (str(getattr(config.generation, "openai_base_url", "") or "").strip() or _OPENAI_DEFAULT_BASE_URL)
     openai_protocol_policy = str(getattr(config.chat, "openai_protocol", "auto") or "auto").strip().lower()

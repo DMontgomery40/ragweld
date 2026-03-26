@@ -7,10 +7,17 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
+from server.config_control_plane import (
+    allowed_secret_env_vars,
+    build_config_readiness_response,
+    build_config_registry_response,
+)
 from server.config import load_config as load_global_config
 from server.db.postgres import PostgresClient
 from server.lineage import ensure_current_bundle
 from server.models.tribrid_config_model import (
+    ConfigReadinessResponse,
+    ConfigRegistryResponse,
     CorpusScope,
     MCPHTTPTransportStatus,
     MCPRagSearchResponse,
@@ -37,25 +44,6 @@ router = APIRouter(tags=["config"])
 
 # Ruff B008: avoid function calls in argument defaults (FastAPI Depends()).
 _CORPUS_SCOPE_DEP = Depends()
-
-_SECRETS_CHECK_ALLOWLIST = {
-    # Provider secrets
-    "OPENAI_API_KEY",
-    "LITELLM_API_KEY",
-    "OPENROUTER_API_KEY",
-    "ANTHROPIC_API_KEY",
-    "GOOGLE_API_KEY",
-    "COHERE_API_KEY",
-    "VOYAGE_API_KEY",
-    "JINA_API_KEY",
-    # Integrations (UI surfaces these; backend does not expose values)
-    "LANGFUSE_PUBLIC_KEY",
-    "LANGFUSE_SECRET_KEY",
-    "NETLIFY_API_KEY",
-    "GRAFANA_API_KEY",
-    "SLACK_WEBHOOK_URL",
-    "DISCORD_WEBHOOK_URL",
-}
 
 _CONFIG_WRITE_LOCKS: dict[str | None, asyncio.Lock] = {}
 
@@ -531,6 +519,23 @@ async def validate_config(scope: CorpusScope = _CORPUS_SCOPE_DEP) -> ModelValida
     return ModelValidationResult(valid=True, warnings=warnings)
 
 
+@router.get("/config/registry", response_model=ConfigRegistryResponse)
+async def get_config_registry() -> ConfigRegistryResponse:
+    return build_config_registry_response()
+
+
+@router.get("/config/readiness", response_model=ConfigReadinessResponse)
+async def get_config_readiness(scope: CorpusScope = _CORPUS_SCOPE_DEP) -> ConfigReadinessResponse:
+    repo_id = scope.resolved_repo_id
+    try:
+        config = await load_scoped_config(repo_id=repo_id)
+    except CorpusNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+    return await build_config_readiness_response(config, scope_id=repo_id)
+
+
 @router.get("/config", response_model=TriBridConfig)
 async def get_config(scope: CorpusScope = _CORPUS_SCOPE_DEP) -> TriBridConfig:
     repo_id = scope.resolved_repo_id
@@ -644,32 +649,15 @@ async def check_secrets(keys: str = Query(..., description="Comma-separated env 
     if not names:
         return {}
 
-    invalid = [name for name in names if name not in _SECRETS_CHECK_ALLOWLIST]
+    allowed = allowed_secret_env_vars()
+    invalid = [name for name in names if name not in allowed]
     if invalid:
         raise HTTPException(
             status_code=400,
             detail=f"Unsupported secret key(s): {', '.join(sorted(set(invalid)))}",
         )
 
-    # Use explicit getenv calls (no dynamic env lookups) to keep env usage auditable/"LAW"-compliant.
-    status = {
-        "OPENAI_API_KEY": bool(os.getenv("OPENAI_API_KEY")),
-        "LITELLM_API_KEY": bool(os.getenv("LITELLM_API_KEY")),
-        "OPENROUTER_API_KEY": bool(os.getenv("OPENROUTER_API_KEY")),
-        "ANTHROPIC_API_KEY": bool(os.getenv("ANTHROPIC_API_KEY")),
-        "GOOGLE_API_KEY": bool(os.getenv("GOOGLE_API_KEY")),
-        "COHERE_API_KEY": bool(os.getenv("COHERE_API_KEY")),
-        "VOYAGE_API_KEY": bool(os.getenv("VOYAGE_API_KEY")),
-        "JINA_API_KEY": bool(os.getenv("JINA_API_KEY")),
-        "LANGFUSE_PUBLIC_KEY": bool(os.getenv("LANGFUSE_PUBLIC_KEY")),
-        "LANGFUSE_SECRET_KEY": bool(os.getenv("LANGFUSE_SECRET_KEY")),
-        "NETLIFY_API_KEY": bool(os.getenv("NETLIFY_API_KEY")),
-        "GRAFANA_API_KEY": bool(os.getenv("GRAFANA_API_KEY")),
-        "SLACK_WEBHOOK_URL": bool(os.getenv("SLACK_WEBHOOK_URL")),
-        "DISCORD_WEBHOOK_URL": bool(os.getenv("DISCORD_WEBHOOK_URL")),
-    }
-
-    return {name: status[name] for name in names}
+    return {name: bool(os.getenv(name)) for name in names}
 
 
 @router.get("/mcp/status", response_model=MCPStatusResponse)

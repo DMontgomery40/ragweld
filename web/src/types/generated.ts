@@ -50,6 +50,11 @@ export interface AgentTrainRunMeta {
   completed_at?: string | null; // default: None
   primary_metric_best?: number | null; // default: None
   primary_metric_final?: number | null; // default: None
+  workflow_backend?: string; // default: "local"
+  tracking_backend?: string; // default: "local"
+  execution_backend?: string; // default: "mlx_qwen3"
+  workflow_run_id?: string | null; // default: None
+  tracking_run_id?: string | null; // default: None
   bundle_id?: string | null; // default: None
   lineage_ref?: LineageRef | null; // default: None
 }
@@ -62,6 +67,18 @@ export interface AgentTrainRunSummary {
   stability_stddev?: number | null; // default: None
   /** Whether lower/higher values of primary_metric are better. */
   primary_goal?: "minimize" | "maximize"; // default: "minimize"
+}
+
+/** Per-phase benchmark timing delta. */
+export interface BenchmarkBreakdownDelta {
+  /** Benchmark breakdown phase. */
+  phase: string;
+  /** Latest average phase duration in ms. */
+  current_ms?: number | null; // default: None
+  /** Previous average phase duration in ms. */
+  previous_ms?: number | null; // default: None
+  /** Current minus previous duration in ms. */
+  delta_ms?: number | null; // default: None
 }
 
 /** Split-screen model comparison + pipeline profiling. */
@@ -152,9 +169,9 @@ export interface ChatConfig {
 
 /** Developer-facing debug metadata for a single chat answer. */
 export interface ChatDebugInfo {
-  /** Whether an LLM/provider response was used (false = retrieval-only fallback). */
+  /** Whether an LLM/provider response was successfully used for the answer. */
   llm_used?: boolean; // default: True
-  /** Short reason the LLM was not used (best-effort; never includes secrets). */
+  /** Short best-effort reason generation failed or was unavailable (never includes secrets). */
   llm_error?: string | null; // default: None
   /** Heuristic confidence score for this answer (0-1). */
   confidence?: number | null; // default: None
@@ -388,6 +405,58 @@ export interface ChunkingConfig {
 export interface ChunkingRuntimeCapabilities {
   /** Chunking strategies implemented today. */
   strategies?: RuntimeOption[];
+}
+
+/** Registry entry for one leaf config field in TriBridConfig. */
+export interface ConfigFieldDescriptor {
+  /** Dotted leaf path inside TriBridConfig. */
+  path: string;
+  /** Top-level TriBridConfig section. */
+  section: string;
+  /** Human-readable field label. */
+  label: string;
+  /** Normalized UI type for the field (string, integer, number, boolean, enum, array, object). */
+  type: string;
+  /** Default value from the Pydantic model, when serializable. */
+  default?: unknown | null; // default: None
+  /** Field description pulled from the source-of-truth model. */
+  description?: string | null; // default: None
+  /** Primary operator scope for the field. */
+  scope: "global" | "corpus";
+  /** Integration contract responsible for this field. */
+  integration: string;
+  /** Layered operator exposure tier for the field. */
+  exposure_level: "basic" | "advanced" | "expert";
+  /** Primary operator impact when the field changes. */
+  impact: "live" | "restart" | "reindex" | "redeploy";
+  /** Env-only secrets that may be required for this field to take effect. */
+  secret_dependency_ids?: string[];
+  /** Workbench configuration surface that owns this field. */
+  ui_surface: string;
+  /** Allowed enum values when the field is a closed choice. */
+  enum_values?: string[];
+  /** Whether the field is exposed for inspection only in the configuration center. */
+  read_only?: boolean; // default: False
+}
+
+/** Registry contract for one OSS integration or protected operator surface. */
+export interface ConfigIntegrationContract {
+  /** Stable integration identifier. */
+  id: string;
+  /** Human-readable integration label. */
+  label: string;
+  /** Short explanation of the subsystem boundary. */
+  summary: string;
+  /** Primary workbench surface that owns this contract. */
+  ui_surface: string;
+  /** High-signal config fields required to operate this integration. */
+  required_config_paths?: string[];
+  /** Env-only secret requirements that block this integration when missing. */
+  required_secret_ids?: string[];
+  /** Deterministic checks performed by /api/config/readiness for this integration. */
+  readiness_checks?: string[];
+  /** Operator surfaces that are misleading or blocked when this contract is not ready. */
+  blocked_surfaces?: string[];
 }
 
 export interface CorpusEvalProfile {
@@ -942,8 +1011,6 @@ export interface GraphStorageConfig {
   neo4j_uri?: string; // default: "bolt://localhost:7687"
   /** Neo4j username */
   neo4j_user?: string; // default: "neo4j"
-  /** Neo4j password (defaults to NEO4J_PASSWORD env var when unset) */
-  neo4j_password?: string;
   /** Neo4j database name */
   neo4j_database?: string; // default: "neo4j"
   /** Database isolation mode: 'shared' uses a single Neo4j database (Community-compatible), 'per_corpus' uses a separate Neo4j database per corpus (Enterprise multi-database). */
@@ -1076,6 +1143,36 @@ export interface IndexingRuntimeCapabilities {
   storage_backends?: RuntimeOption[];
 }
 
+/** Current readiness state for one integration contract. */
+export interface IntegrationReadiness {
+  /** Integration identifier. */
+  id: string;
+  /** Human-readable integration label. */
+  label: string;
+  /** Primary workbench surface for the integration. */
+  ui_surface: string;
+  /** Current readiness state. */
+  state: "ready" | "degraded" | "unconfigured" | "disabled";
+  /** Whether the integration is selected or expected by the current config. */
+  enabled: boolean;
+  /** Whether the required config is present. */
+  configured: boolean;
+  /** Whether runtime reachability checks passed, when applicable. */
+  reachable?: boolean | null; // default: None
+  /** Required config paths that are currently empty or unset. */
+  missing_config_paths?: string[];
+  /** Required env-only secrets that are currently missing. */
+  missing_secret_ids?: string[];
+  /** Named readiness checks that are currently failing. */
+  failing_checks?: string[];
+  /** Protected surfaces blocked or degraded by this readiness state. */
+  blocked_surfaces?: string[];
+  /** High-signal next-step guidance for operators. */
+  operator_hint?: string | null; // default: None
+  /** Useful deep links for debugging or operating the integration. */
+  links?: TraceExternalLink[];
+}
+
 /** Discriminative keywords configuration. */
 export interface KeywordsConfig {
   /** Max discriminative keywords per repo */
@@ -1199,7 +1296,6 @@ export interface LineageRef {
 /** Gateway configuration for an OpenAI-compatible LiteLLM proxy. */
 export interface LiteLLMConfig {
   enabled?: boolean; // default: False
-  api_key?: string; // default: ""
   base_url?: string; // default: "http://127.0.0.1:4000/v1"
   default_model?: string; // default: "openai/gpt-4o-mini"
   fallback_models?: string[];
@@ -1341,6 +1437,8 @@ export interface ObservabilityComponentStatus {
   id: string;
   /** Human-readable component label. */
   label: string;
+  /** Operator grouping for this component. */
+  group?: string; // default: "observability"
   /** Whether the component is enabled by config. */
   enabled: boolean;
   /** Whether the component has the minimum config required to operate. */
@@ -1351,12 +1449,137 @@ export interface ObservabilityComponentStatus {
   detail?: string | null; // default: None
   /** Configured URL for the component when applicable. */
   url?: string | null; // default: None
+  /** Computed incident/severity state for the component. */
+  severity?: "healthy" | "info" | "warning" | "critical"; // default: "info"
+  /** Service-level state inferred for this component. */
+  slo_state?: "healthy" | "at_risk" | "breached" | "unknown"; // default: "unknown"
+  /** Component-local operator hint. */
+  operator_hint?: string | null; // default: None
+  /** Curated deep links relevant to this component. */
+  links?: TraceExternalLink[];
+}
+
+/** Catalog entry for one Grafana dashboard family. */
+export interface ObservabilityDashboardFamily {
+  /** Stable dashboard family identifier. */
+  id: string;
+  /** Dashboard title shown to operators. */
+  title: string;
+  /** Short explanation of what this dashboard is for. */
+  description: string;
+  /** Provisioned Grafana dashboard UID. */
+  uid: string;
+  /** Provisioned Grafana dashboard slug. */
+  slug: string;
+  /** High-level grouping such as oncall, quality, or cost. */
+  category: string;
+  /** Whether this is the default landing dashboard. */
+  default?: boolean; // default: False
+  /** Dashboard tags from provisioning metadata. */
+  tags?: string[];
+  /** Declared dashboard variables expected to be available in Grafana. */
+  variables?: ObservabilityDashboardVariable[];
+  /** External links for this dashboard. */
+  links?: TraceExternalLink[];
+  /** Related in-product workbench destinations. */
+  workbench_links?: ObservabilityWorkbenchLink[];
+}
+
+/** Declared Grafana/dashboard variable surfaced in the catalog. */
+export interface ObservabilityDashboardVariable {
+  /** Stable variable identifier. */
+  id: string;
+  /** Human-readable variable label. */
+  label: string;
+  /** Grafana variable kind. */
+  kind?: "textbox" | "custom" | "time_range"; // default: "textbox"
+  /** Default value used for the variable. */
+  default_value?: string; // default: "*"
+  /** Operator hint for the variable. */
+  description?: string | null; // default: None
+  /** Explicit choices for custom variables. */
+  values?: string[];
+}
+
+/** Unified observability incident entry. */
+export interface ObservabilityIncident {
+  /** Stable incident identifier. */
+  id: string;
+  /** Short incident title. */
+  title: string;
+  /** High-signal incident summary. */
+  summary: string;
+  /** Incident source family such as infrastructure, workflow, or eval. */
+  source: string;
+  /** Severity used for wake-up and prioritization. */
+  severity?: "healthy" | "info" | "warning" | "critical"; // default: "warning"
+  /** Current lifecycle state for the incident. */
+  status?: "firing" | "warning" | "resolved"; // default: "firing"
+  /** When the incident started or was detected. */
+  started_at?: string | null; // default: None
+  /** Suggested on-call owner or team. */
+  owner?: string | null; // default: None
+  /** Affected component ids. */
+  component_ids?: string[];
+  /** Relevant dashboard family ids. */
+  dashboard_ids?: string[];
+  /** External links for triage. */
+  links?: TraceExternalLink[];
+  /** In-product destinations for the incident. */
+  workbench_links?: ObservabilityWorkbenchLink[];
+  /** Whether the incident is muted/silenced. */
+  muted?: boolean; // default: False
+  /** Associated SLO state for the incident. */
+  slo_state?: "healthy" | "at_risk" | "breached" | "unknown"; // default: "unknown"
+  /** Recommended next operator action. */
+  operator_hint?: string | null; // default: None
+  /** Changes correlated against the incident. */
+  change_correlation?: ObservabilityIncidentChange[];
+}
+
+/** Correlated change item attached to an incident. */
+export interface ObservabilityIncidentChange {
+  /** Change kind such as prompt_set, config, model_route, or dataset. */
+  kind: string;
+  /** Human-readable change label. */
+  label: string;
+  /** Prior value when known. */
+  previous_value?: string | null; // default: None
+  /** Current value when known. */
+  current_value?: string | null; // default: None
+  /** Operator-facing context for the change. */
+  detail?: string | null; // default: None
+}
+
+/** Current/previous metric values and their delta. */
+export interface ObservabilityMetricDelta {
+  /** Latest metric value. */
+  current_value?: number | null; // default: None
+  /** Previous metric value when available. */
+  previous_value?: number | null; // default: None
+  /** Current minus previous. */
+  absolute_delta?: number | null; // default: None
+  /** Percentage delta vs previous when available. */
+  percent_delta?: number | null; // default: None
+}
+
+/** Workbench deep link for an observability workflow. */
+export interface ObservabilityWorkbenchLink {
+  /** Short user-facing label. */
+  label: string;
+  /** Application path or URL for this destination. */
+  path: string;
+  /** Whether this is in-product or external. */
+  kind?: "route" | "external"; // default: "route"
+  /** Optional workbench subtab identifier. */
+  subtab?: string | null; // default: None
+  /** Operator-facing explanation for the destination. */
+  description?: string | null; // default: None
 }
 
 /** Unified gateway to many cloud models via OpenAI-compatible routing. */
 export interface OpenRouterConfig {
   enabled?: boolean; // default: False
-  api_key?: string; // default: ""
   base_url?: string; // default: "https://openrouter.ai/api/v1"
   default_model?: string; // default: "anthropic/claude-sonnet-4"
   site_name?: string; // default: "TriBridRAG"
@@ -1902,6 +2125,34 @@ export interface SearchRuntimeCapabilities {
   graph_backends?: RuntimeOption[];
 }
 
+/** Env-only secret or credential required by one or more operator surfaces. */
+export interface SecretRequirement {
+  /** Stable secret identifier used by field descriptors and readiness responses. */
+  id: string;
+  /** Backing environment variable name. */
+  env_var: string;
+  /** Human-readable label for operators. */
+  label: string;
+  /** Short explanation of where the secret is used. */
+  description: string;
+  /** Integration contracts that may depend on this secret. */
+  integrations?: string[];
+  /** Whether the secret is optional and therefore not always a readiness blocker. */
+  optional?: boolean; // default: False
+  /** Primary operator surface where this secret is configured or inspected. */
+  ui_surface?: string | null; // default: None
+}
+
+/** Current status for one env-only secret requirement. */
+export interface SecretRequirementStatus {
+  /** Static requirement metadata. */
+  requirement: SecretRequirement;
+  /** Whether the env var is present and non-empty in the current process. */
+  configured: boolean;
+  /** Integrations currently blocked by this missing secret. */
+  blocker_for_integrations?: string[];
+}
+
 /** Configuration for semantic caching across search/answer/chat endpoints. */
 export interface SemanticCacheConfig {
   /** Enable semantic cache reads/writes (0=off, 1=on). */
@@ -1965,6 +2216,68 @@ export interface SyntheticArtifactRef {
   created_at: string;
 }
 
+/** Top-level synthetic data pipeline configuration. */
+export interface SyntheticConfig {
+  /** Quality gate thresholds for synthetic data evaluation */
+  quality_gate?: SyntheticQualityGateConfig;
+  /** LLM generation parameters for synthetic pipeline */
+  generator?: SyntheticGeneratorConfig;
+  /** LLM judge parameters for synthetic curation */
+  judge?: SyntheticJudgeConfig;
+}
+
+/** LLM generation parameters for the synthetic pipeline. */
+export interface SyntheticGeneratorConfig {
+  /** Temperature for synthetic generator LLM calls */
+  temperature?: number; // default: 0.0
+  /** Max tokens for generator LLM response */
+  max_tokens?: number; // default: 1200
+  /** Max characters for generated question text */
+  question_max_chars?: number; // default: 180
+  /** Max characters for evidence quote field */
+  evidence_quote_max_chars?: number; // default: 200
+  /** Max characters for expected answer field */
+  expected_answer_max_chars?: number; // default: 400
+  /** Max lines of source chunk content sent as context to generator/judge */
+  source_excerpt_max_lines?: number; // default: 80
+  /** If True, fail the run when generator LLM is unreachable instead of silently falling back to deterministic extraction. */
+  fail_on_error?: boolean; // default: True
+}
+
+/** LLM judge parameters for synthetic curation. */
+export interface SyntheticJudgeConfig {
+  /** Temperature for synthetic judge LLM calls */
+  temperature?: number; // default: 0.0
+  /** Max tokens for judge LLM response */
+  max_tokens?: number; // default: 400
+  /** If True, fail the run when judge LLM is unreachable instead of silently auto-passing all items. */
+  fail_on_error?: boolean; // default: True
+}
+
+/** Quality gate thresholds for synthetic data evaluation. */
+export interface SyntheticQualityGateConfig {
+  /** Minimum top-1 retrieval accuracy to pass quality gate */
+  top1_min?: number; // default: 0.4
+  /** Number of eval items to sample for quality gate evaluation */
+  sample_size?: number; // default: 50
+}
+
+/** Degradation flags -- honest about what actually happened during a synthetic run. */
+export interface SyntheticRunDegradation {
+  /** True if generator LLM failed and deterministic fallback was used */
+  generator_fallback_used?: boolean; // default: False
+  /** True if judge LLM failed and all items were auto-passed */
+  judge_fallback_used?: boolean; // default: False
+  /** True if eval dataset was populated from seed dataset instead of generation */
+  seed_hydration_used?: boolean; // default: False
+  /** Number of items hydrated from seed dataset */
+  seed_hydration_count?: number; // default: 0
+  /** True if any fallback or degradation occurred during the run */
+  degraded?: boolean; // default: False
+  /** Human-readable list of degradation reasons */
+  reasons?: string[];
+}
+
 export interface SyntheticRunMeta {
   run_id: string;
   corpus_id: string;
@@ -2007,6 +2320,8 @@ export interface SyntheticRunSummary {
   quality_gate_threshold?: number | null; // default: None
   quality_gate_passed?: boolean | null; // default: None
   quality_failure_reason?: string | null; // default: None
+  /** Degradation flags -- honest about what actually happened during the run */
+  degradation?: SyntheticRunDegradation;
 }
 
 /** System prompts for LLM interactions - affects RAG pipeline behavior.  These prompts control how LLMs behave during query processing, code analysis, and result generation. Changes here can significantly impact RAG accuracy. */
@@ -2151,7 +2466,7 @@ export interface TraceRouteSummary {
   final_results?: number | null; // default: None
   /** Whether an LLM/provider response was used. */
   llm_used?: boolean | null; // default: None
-  /** Short reason for retrieval-only fallback, if any. */
+  /** Short reason generation failed or was unavailable. */
   llm_error?: string | null; // default: None
 }
 
@@ -2197,6 +2512,16 @@ export interface TracingConfig {
   tempo_base_url?: string; // default: ""
   /** Grafana Alloy base URL used for collector status checks */
   alloy_base_url?: string; // default: ""
+  /** Grafana Mimir base URL used for metrics backend status checks */
+  mimir_base_url?: string; // default: ""
+  /** Grafana Pyroscope base URL used for profiling status checks */
+  pyroscope_base_url?: string; // default: ""
+  /** Grafana Faro or collector base URL used for frontend telemetry status checks */
+  faro_base_url?: string; // default: ""
+  /** OpenCost base URL used for cost and capacity status checks */
+  opencost_base_url?: string; // default: ""
+  /** Alertmanager base URL used for wake-up path status checks */
+  alertmanager_base_url?: string; // default: ""
   /** Enable online request cost attribution in traces */
   cost_tracking_enabled?: number; // default: 1
 }
@@ -2249,6 +2574,10 @@ export interface TrainingConfig {
   learning_reranker_telemetry_interval_steps?: number; // default: 2
   /** Ragweld agent backend (in-process chat model). Currently: mlx_qwen3 */
   ragweld_agent_backend?: string; // default: "mlx_qwen3"
+  /** Workflow/orchestration backend for Learning Agent runs. */
+  ragweld_agent_workflow_backend?: "local" | "flyte"; // default: "local"
+  /** Run/artifact tracking backend for Learning Agent runs. */
+  ragweld_agent_tracking_backend?: "local" | "mlflow"; // default: "local"
   /** Shipped base model for the ragweld agent (MLX). */
   ragweld_agent_base_model?: string; // default: "mlx-community/Qwen3-1.7B-4bit"
   /** Active ragweld agent adapter artifact path (directory containing adapter.npz + adapter_config.json). */
@@ -2275,6 +2604,39 @@ export interface TrainingConfig {
   ragweld_agent_promote_if_improves?: number; // default: 1
   /** Minimum eval_loss improvement required to auto-promote (baseline_loss - new_loss >= epsilon). */
   ragweld_agent_promote_epsilon?: number; // default: 0.0
+  /** Base URL for Flyte Admin HTTP access (used for readiness checks and operator links). */
+  ragweld_agent_flyte_admin_base_url?: string; // default: ""
+  /** Base URL for Flyte Console (used for operator deep links). */
+  ragweld_agent_flyte_console_base_url?: string; // default: ""
+  /** Flyte project that owns Learning Agent executions. */
+  ragweld_agent_flyte_project?: string; // default: "ragweld"
+  /** Flyte domain/environment that owns Learning Agent executions. */
+  ragweld_agent_flyte_domain?: string; // default: "development"
+  /** Flyte launch plan name for the Learning Agent workflow lane. */
+  ragweld_agent_flyte_launchplan?: string; // default: ""
+  /** Base URL for MLflow Tracking/UI used by Learning Agent runs. */
+  ragweld_agent_mlflow_tracking_url?: string; // default: ""
+  /** MLflow experiment name for Learning Agent runs. */
+  ragweld_agent_mlflow_experiment_name?: string; // default: "ragweld-learning-agent"
+  /** Container image or artifact reference used by the Flyte task to run Unsloth training. */
+  ragweld_agent_unsloth_image?: string; // default: ""
+}
+
+export interface TrainingControlPlaneComponentStatus {
+  /** Control-plane component kind. */
+  kind: "flyte" | "mlflow" | "unsloth";
+  /** Human-readable component label. */
+  label: string;
+  /** Whether this component is intended for the active target lane. */
+  enabled?: boolean; // default: False
+  /** Whether required config values are present. */
+  configured?: boolean; // default: False
+  /** Operator-facing component state. */
+  state?: "disabled" | "unconfigured" | "ready" | "degraded"; // default: "disabled"
+  /** Short status note for operators. */
+  detail?: string | null; // default: None
+  /** Relevant control-plane links for this component. */
+  links?: TraceExternalLink[];
 }
 
 /** User interface configuration. */
@@ -2302,9 +2664,9 @@ export interface UIConfig {
   /** Embedded editor port */
   editor_port?: number; // default: 4440
   /** Default Grafana dashboard UID */
-  grafana_dashboard_uid?: string; // default: "tribrid-overview"
+  grafana_dashboard_uid?: string; // default: "ragweld-oncall-overview"
   /** Grafana dashboard slug */
-  grafana_dashboard_slug?: string; // default: "tribrid-overview"
+  grafana_dashboard_slug?: string; // default: "on-call-overview"
   /** Grafana base URL */
   grafana_base_url?: string; // default: "http://127.0.0.1:3001"
   /** Grafana authentication mode */
@@ -2396,6 +2758,26 @@ export interface VocabPreviewTerm {
   doc_count: number;
 }
 
+export interface AgentTrainControlPlaneStatusResponse {
+  ok?: boolean;
+  /** Resolved target lane for the Learning Agent Training Center surface. */
+  lane?: "legacy_local" | "flyte_mlflow_unsloth";
+  /** Whether the Flyte + MLflow + Unsloth control plane is fully configured and reachable. */
+  ready?: boolean;
+  /** Configured workflow backend target. */
+  workflow_backend?: string;
+  /** Configured tracking backend target. */
+  tracking_backend?: string;
+  /** Configured execution backend target. */
+  execution_backend?: string;
+  /** Per-component readiness details for the target control plane. */
+  components?: TrainingControlPlaneComponentStatus[];
+  /** Top-level Learning Agent control-plane links. */
+  links?: TraceExternalLink[];
+  /** High-signal next-step guidance for operators. */
+  operator_hint?: string | null;
+}
+
 export interface AgentTrainDiffRequest {
   baseline_run_id: string;
   current_run_id: string;
@@ -2450,6 +2832,22 @@ export interface AgentTrainRun {
   lr: number;
   warmup_ratio: number;
   max_length: number;
+  /** Workflow state backend used for this run (for example local or flyte). */
+  workflow_backend?: string;
+  /** Run/artifact truth backend used for this run (for example local or mlflow). */
+  tracking_backend?: string;
+  /** Execution backend used for this run (for example mlx_qwen3 or unsloth). */
+  execution_backend?: string;
+  /** External workflow execution identifier when orchestration is delegated. */
+  workflow_run_id?: string | null;
+  /** External run identifier in the tracking system when available. */
+  tracking_run_id?: string | null;
+  /** Artifact URI or storage path for the run outputs when available. */
+  artifacts_uri?: string | null;
+  /** Direct operator links for workflow, tracking, or artifact surfaces. */
+  external_links?: TraceExternalLink[];
+  /** High-signal next-step guidance for operators inspecting this run. */
+  operator_hint?: string | null;
   summary?: AgentTrainRunSummary;
   /** Current bundle id captured before training started. */
   input_bundle_id?: string | null;
@@ -2525,6 +2923,41 @@ export interface AnswerResponse {
   latency_ms: number;
   /** Developer debug metadata (best-effort) */
   debug?: ChatDebugInfo | null;
+}
+
+/** Corpus-scoped benchmark observability summary. */
+export interface BenchmarkObservabilitySummaryResponse {
+  ok?: boolean;
+  /** Optional corpus identifier for the summary. */
+  corpus_id?: string | null;
+  /** Most recent benchmark run id. */
+  latest_run_id?: string | null;
+  /** Previous benchmark run id when available. */
+  previous_run_id?: string | null;
+  /** Start time for the latest benchmark run. */
+  latest_started_at?: string | null;
+  /** Model count in the latest benchmark run. */
+  latest_model_count?: number;
+  /** Error count in the latest benchmark run. */
+  latest_error_count?: number;
+  /** Error count in the previous benchmark run. */
+  previous_error_count?: number;
+  /** Provider/model routes used in the latest run. */
+  provider_routes?: string[];
+  average_latency_ms?: ObservabilityMetricDelta;
+  p95_latency_ms?: ObservabilityMetricDelta;
+  response_length_mean?: ObservabilityMetricDelta;
+  success_rate?: ObservabilityMetricDelta;
+  /** Timing shifts by benchmark breakdown phase. */
+  breakdown_deltas?: BenchmarkBreakdownDelta[];
+  /** Latest bundle id tied to the benchmark run. */
+  latest_bundle_id?: string | null;
+  /** Prompt set used by the latest benchmark run. */
+  latest_prompt_set_ref?: LineageRef | null;
+  /** Prompt set used by the previous benchmark run. */
+  previous_prompt_set_ref?: LineageRef | null;
+  /** Suggested next step for benchmark triage. */
+  operator_hint?: string | null;
 }
 
 /** Request payload for POST /api/benchmark/run. */
@@ -2654,6 +3087,28 @@ export interface Community {
   member_ids: string[];
   /** Hierarchy level (0 = top level) */
   level: number;
+}
+
+/** Response payload for GET /api/config/readiness. */
+export interface ConfigReadinessResponse {
+  /** Whether the current configuration control plane is ready enough for the protected surfaces. */
+  ok?: boolean;
+  /** Integration readiness states for the current config and environment. */
+  integrations?: IntegrationReadiness[];
+  /** Configured/missing env-only secrets relevant to the current control plane. */
+  secrets?: SecretRequirementStatus[];
+  /** Top-level next-step guidance for operators. */
+  operator_hint?: string | null;
+}
+
+/** Response payload for GET /api/config/registry. */
+export interface ConfigRegistryResponse {
+  /** Leaf config descriptors derived from TriBridConfig plus manual operator metadata. */
+  fields?: ConfigFieldDescriptor[];
+  /** Integration contracts required by the OSS composition branch. */
+  integrations?: ConfigIntegrationContract[];
+  /** Env-only secret requirements surfaced by the control plane. */
+  secrets?: SecretRequirement[];
 }
 
 /** User-managed corpus (formerly "repo" in earlier versions).  A corpus is the unit of isolation for: - indexing storage (Postgres) - graph storage (Neo4j) - configuration (per-corpus TriBridConfig) */
@@ -2876,6 +3331,46 @@ export interface EvalDatasetItem {
   tags?: string[];
   /** When this entry was created */
   created_at?: string;
+}
+
+/** Corpus-scoped eval observability summary. */
+export interface EvalObservabilitySummaryResponse {
+  ok?: boolean;
+  /** Optional corpus identifier for the summary. */
+  corpus_id?: string | null;
+  /** Most recent eval run id. */
+  latest_run_id?: string | null;
+  /** Previous eval run id when available. */
+  previous_run_id?: string | null;
+  /** Completion time for the latest eval run. */
+  latest_completed_at?: string | null;
+  /** How old the latest eval run is. */
+  freshness_minutes?: number | null;
+  /** Question count for the latest eval run. */
+  total_questions?: number;
+  /** Whether a comparison-ready pair of runs exists for AI analysis. */
+  ai_comparison_ready?: boolean;
+  top1_accuracy?: ObservabilityMetricDelta;
+  topk_accuracy?: ObservabilityMetricDelta;
+  mrr?: ObservabilityMetricDelta;
+  ndcg_at_10?: ObservabilityMetricDelta;
+  map_at_5?: ObservabilityMetricDelta;
+  recall_at_5?: ObservabilityMetricDelta;
+  recall_at_10?: ObservabilityMetricDelta;
+  /** Question count that improved vs previous run. */
+  improved_count?: number;
+  /** Question count that regressed vs previous run. */
+  regressed_count?: number;
+  /** Question count with no top-k state change. */
+  stable_count?: number;
+  /** Latest bundle id tied to the eval run. */
+  latest_bundle_id?: string | null;
+  /** Prompt set used by the latest eval run. */
+  latest_prompt_set_ref?: LineageRef | null;
+  /** Prompt set used by the previous eval run. */
+  previous_prompt_set_ref?: LineageRef | null;
+  /** Suggested next step for eval triage. */
+  operator_hint?: string | null;
 }
 
 /** Request payload for evaluation run. */
@@ -3255,15 +3750,55 @@ export interface ModelValidationResult {
   warnings?: ModelValidationWarning[];
 }
 
+/** Catalog of dashboard and workbench observability surfaces. */
+export interface ObservabilityCatalogResponse {
+  ok?: boolean;
+  /** When the catalog payload was generated. */
+  generated_at?: string | null;
+  /** Curated Grafana dashboard families available to operators. */
+  dashboards?: ObservabilityDashboardFamily[];
+  /** Primary in-product destinations tied to observability workflows. */
+  workbench_links?: ObservabilityWorkbenchLink[];
+  /** Cross-stack external links surfaced alongside the catalog. */
+  external_links?: TraceExternalLink[];
+}
+
+/** Unified incident feed for the observability workspace. */
+export interface ObservabilityIncidentsResponse {
+  ok?: boolean;
+  /** When the incidents payload was generated. */
+  generated_at?: string | null;
+  /** Active or recent incidents. */
+  incidents?: ObservabilityIncident[];
+  /** Total incident count in this payload. */
+  total_count?: number;
+  /** Critical incident count in this payload. */
+  critical_count?: number;
+}
+
 /** Operator-facing readiness summary for the observability stack. */
 export interface ObservabilityStatusResponse {
   ok?: boolean;
+  /** When this status snapshot was generated. */
+  generated_at?: string | null;
   /** Normalized observability mode for the current config. */
   mode?: "local" | "otel" | "otel_langfuse" | "off";
+  /** Overall observability severity for the current stack. */
+  severity?: "healthy" | "info" | "warning" | "critical";
+  /** Overall SLO state for the current stack. */
+  slo_state?: "healthy" | "at_risk" | "breached" | "unknown";
   /** Observability components/backends and their readiness state. */
   components?: ObservabilityComponentStatus[];
   /** Useful external links for the current observability config. */
   links?: TraceExternalLink[];
+  /** Catalog endpoint for dashboard/workbench surfaces. */
+  catalog_path?: string;
+  /** Incident-feed endpoint for operators. */
+  incidents_path?: string;
+  /** Incident count surfaced alongside this status snapshot. */
+  incident_count?: number;
+  /** Critical incident count for the current snapshot. */
+  critical_incident_count?: number;
   /** High-signal next-step guidance for operators. */
   operator_hint?: string | null;
 }
@@ -3272,6 +3807,39 @@ export interface ObservabilityStatusResponse {
 export interface OkResponse {
   /** Whether the operation succeeded */
   ok: boolean;
+}
+
+/** Prompt-set observability and change-correlation summary. */
+export interface PromptObservabilitySummaryResponse {
+  ok?: boolean;
+  /** Optional corpus identifier for the summary. */
+  corpus_id?: string | null;
+  /** Current prompt-set lineage ref. */
+  current_prompt_set_ref?: LineageRef | null;
+  /** Previous prompt-set lineage ref. */
+  previous_prompt_set_ref?: LineageRef | null;
+  /** Latest eval run id used for prompt correlation. */
+  latest_eval_run_id?: string | null;
+  /** Prompt set pinned to the latest eval run. */
+  latest_eval_prompt_set_ref?: LineageRef | null;
+  /** Latest benchmark run id used for prompt correlation. */
+  latest_benchmark_run_id?: string | null;
+  /** Prompt set pinned to the latest benchmark run. */
+  latest_benchmark_prompt_set_ref?: LineageRef | null;
+  /** Whether prompts changed since the latest eval. */
+  changed_since_latest_eval?: boolean;
+  /** Whether prompts changed since the latest benchmark. */
+  changed_since_latest_benchmark?: boolean;
+  /** Whether prompt changes correlate with eval regression. */
+  eval_regression_suspected?: boolean;
+  /** Whether prompt changes correlate with benchmark regression. */
+  benchmark_regression_suspected?: boolean;
+  /** Whether the current prompt set has not yet been re-verified by eval/benchmark runs. */
+  pending_verification?: boolean;
+  /** Unique prompt-set versions seen in recent bundles. */
+  recent_prompt_set_count?: number;
+  /** Suggested next step for prompt-regression triage. */
+  operator_hint?: string | null;
 }
 
 export interface PromptUpdateRequest {
@@ -3777,6 +4345,7 @@ export interface TriBridConfig {
   evaluation?: EvaluationConfig;
   system_prompts?: SystemPromptsConfig;
   mcp?: MCPConfig;
+  synthetic?: SyntheticConfig;
   docker?: DockerConfig;
 }
 

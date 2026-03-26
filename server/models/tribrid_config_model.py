@@ -40,6 +40,20 @@ from server.models.runtime_gateway import ProviderHealth as ProviderHealth
 from server.models.runtime_gateway import ProvidersHealthResponse as ProvidersHealthResponse
 from server.models.runtime_gateway import VLLMConfig as VLLMConfig
 
+from server.models.synthetic import SyntheticConfig as SyntheticConfig
+from server.models.synthetic import SyntheticGeneratorConfig as SyntheticGeneratorConfig
+from server.models.synthetic import SyntheticJudgeConfig as SyntheticJudgeConfig
+from server.models.synthetic import SyntheticQualityGateConfig as SyntheticQualityGateConfig
+from server.models.synthetic import SyntheticRunDegradation as SyntheticRunDegradation
+
+_SYNTHETIC_REEXPORTS = (
+    SyntheticConfig,
+    SyntheticGeneratorConfig,
+    SyntheticJudgeConfig,
+    SyntheticQualityGateConfig,
+    SyntheticRunDegradation,
+)
+
 _RUNTIME_GATEWAY_REEXPORTS = (
     BenchmarkConfig,
     ChatModelInfo,
@@ -1393,11 +1407,11 @@ class ChatDebugInfo(BaseModel):
 
     llm_used: bool = Field(
         default=True,
-        description="Whether an LLM/provider response was used (false = retrieval-only fallback).",
+        description="Whether an LLM/provider response was successfully used for the answer.",
     )
     llm_error: str | None = Field(
         default=None,
-        description="Short reason the LLM was not used (best-effort; never includes secrets).",
+        description="Short best-effort reason generation failed or was unavailable (never includes secrets).",
     )
 
     confidence: float | None = Field(
@@ -1525,7 +1539,7 @@ class TraceRouteSummary(BaseModel):
     graph_results: int | None = Field(default=None, ge=0, description="Graph leg hydrated chunks returned.")
     final_results: int | None = Field(default=None, ge=0, description="Final results returned to the caller.")
     llm_used: bool | None = Field(default=None, description="Whether an LLM/provider response was used.")
-    llm_error: str | None = Field(default=None, description="Short reason for retrieval-only fallback, if any.")
+    llm_error: str | None = Field(default=None, description="Short reason generation failed or was unavailable.")
 
 
 class TraceEvent(BaseModel):
@@ -1579,20 +1593,285 @@ class ObservabilityComponentStatus(BaseModel):
 
     id: str = Field(description="Stable component identifier.")
     label: str = Field(description="Human-readable component label.")
+    group: str = Field(default="observability", description="Operator grouping for this component.")
     enabled: bool = Field(description="Whether the component is enabled by config.")
     configured: bool = Field(description="Whether the component has the minimum config required to operate.")
     reachable: bool | None = Field(default=None, description="Whether the component endpoint was reachable, when checked.")
     detail: str | None = Field(default=None, description="Short operator-facing detail or error message.")
     url: str | None = Field(default=None, description="Configured URL for the component when applicable.")
+    severity: Literal["healthy", "info", "warning", "critical"] = Field(
+        default="info",
+        description="Computed incident/severity state for the component.",
+    )
+    slo_state: Literal["healthy", "at_risk", "breached", "unknown"] = Field(
+        default="unknown",
+        description="Service-level state inferred for this component.",
+    )
+    operator_hint: str | None = Field(default=None, description="Component-local operator hint.")
+    links: list[TraceExternalLink] = Field(
+        default_factory=list,
+        description="Curated deep links relevant to this component.",
+    )
+
+
+class ObservabilityWorkbenchLink(BaseModel):
+    """Workbench deep link for an observability workflow."""
+
+    label: str = Field(description="Short user-facing label.")
+    path: str = Field(description="Application path or URL for this destination.")
+    kind: Literal["route", "external"] = Field(default="route", description="Whether this is in-product or external.")
+    subtab: str | None = Field(default=None, description="Optional workbench subtab identifier.")
+    description: str | None = Field(default=None, description="Operator-facing explanation for the destination.")
+
+
+class ObservabilityDashboardVariable(BaseModel):
+    """Declared Grafana/dashboard variable surfaced in the catalog."""
+
+    id: str = Field(description="Stable variable identifier.")
+    label: str = Field(description="Human-readable variable label.")
+    kind: Literal["textbox", "custom", "time_range"] = Field(default="textbox", description="Grafana variable kind.")
+    default_value: str = Field(default="*", description="Default value used for the variable.")
+    description: str | None = Field(default=None, description="Operator hint for the variable.")
+    values: list[str] = Field(default_factory=list, description="Explicit choices for custom variables.")
+
+
+class ObservabilityDashboardFamily(BaseModel):
+    """Catalog entry for one Grafana dashboard family."""
+
+    id: str = Field(description="Stable dashboard family identifier.")
+    title: str = Field(description="Dashboard title shown to operators.")
+    description: str = Field(description="Short explanation of what this dashboard is for.")
+    uid: str = Field(description="Provisioned Grafana dashboard UID.")
+    slug: str = Field(description="Provisioned Grafana dashboard slug.")
+    category: str = Field(description="High-level grouping such as oncall, quality, or cost.")
+    default: bool = Field(default=False, description="Whether this is the default landing dashboard.")
+    tags: list[str] = Field(default_factory=list, description="Dashboard tags from provisioning metadata.")
+    variables: list[ObservabilityDashboardVariable] = Field(
+        default_factory=list,
+        description="Declared dashboard variables expected to be available in Grafana.",
+    )
+    links: list[TraceExternalLink] = Field(default_factory=list, description="External links for this dashboard.")
+    workbench_links: list[ObservabilityWorkbenchLink] = Field(
+        default_factory=list,
+        description="Related in-product workbench destinations.",
+    )
+
+
+class ObservabilityCatalogResponse(BaseModel):
+    """Catalog of dashboard and workbench observability surfaces."""
+
+    ok: bool = Field(default=True)
+    generated_at: datetime | None = Field(default=None, description="When the catalog payload was generated.")
+    dashboards: list[ObservabilityDashboardFamily] = Field(
+        default_factory=list,
+        description="Curated Grafana dashboard families available to operators.",
+    )
+    workbench_links: list[ObservabilityWorkbenchLink] = Field(
+        default_factory=list,
+        description="Primary in-product destinations tied to observability workflows.",
+    )
+    external_links: list[TraceExternalLink] = Field(
+        default_factory=list,
+        description="Cross-stack external links surfaced alongside the catalog.",
+    )
+
+
+class ObservabilityIncidentChange(BaseModel):
+    """Correlated change item attached to an incident."""
+
+    kind: str = Field(description="Change kind such as prompt_set, config, model_route, or dataset.")
+    label: str = Field(description="Human-readable change label.")
+    previous_value: str | None = Field(default=None, description="Prior value when known.")
+    current_value: str | None = Field(default=None, description="Current value when known.")
+    detail: str | None = Field(default=None, description="Operator-facing context for the change.")
+
+
+class ObservabilityIncident(BaseModel):
+    """Unified observability incident entry."""
+
+    id: str = Field(description="Stable incident identifier.")
+    title: str = Field(description="Short incident title.")
+    summary: str = Field(description="High-signal incident summary.")
+    source: str = Field(description="Incident source family such as infrastructure, workflow, or eval.")
+    severity: Literal["healthy", "info", "warning", "critical"] = Field(
+        default="warning",
+        description="Severity used for wake-up and prioritization.",
+    )
+    status: Literal["firing", "warning", "resolved"] = Field(
+        default="firing",
+        description="Current lifecycle state for the incident.",
+    )
+    started_at: datetime | None = Field(default=None, description="When the incident started or was detected.")
+    owner: str | None = Field(default=None, description="Suggested on-call owner or team.")
+    component_ids: list[str] = Field(default_factory=list, description="Affected component ids.")
+    dashboard_ids: list[str] = Field(default_factory=list, description="Relevant dashboard family ids.")
+    links: list[TraceExternalLink] = Field(default_factory=list, description="External links for triage.")
+    workbench_links: list[ObservabilityWorkbenchLink] = Field(
+        default_factory=list,
+        description="In-product destinations for the incident.",
+    )
+    muted: bool = Field(default=False, description="Whether the incident is muted/silenced.")
+    slo_state: Literal["healthy", "at_risk", "breached", "unknown"] = Field(
+        default="unknown",
+        description="Associated SLO state for the incident.",
+    )
+    operator_hint: str | None = Field(default=None, description="Recommended next operator action.")
+    change_correlation: list[ObservabilityIncidentChange] = Field(
+        default_factory=list,
+        description="Changes correlated against the incident.",
+    )
+
+
+class ObservabilityIncidentsResponse(BaseModel):
+    """Unified incident feed for the observability workspace."""
+
+    ok: bool = Field(default=True)
+    generated_at: datetime | None = Field(default=None, description="When the incidents payload was generated.")
+    incidents: list[ObservabilityIncident] = Field(default_factory=list, description="Active or recent incidents.")
+    total_count: int = Field(default=0, ge=0, description="Total incident count in this payload.")
+    critical_count: int = Field(default=0, ge=0, description="Critical incident count in this payload.")
+
+
+class ObservabilityMetricDelta(BaseModel):
+    """Current/previous metric values and their delta."""
+
+    current_value: float | None = Field(default=None, description="Latest metric value.")
+    previous_value: float | None = Field(default=None, description="Previous metric value when available.")
+    absolute_delta: float | None = Field(default=None, description="Current minus previous.")
+    percent_delta: float | None = Field(default=None, description="Percentage delta vs previous when available.")
+
+
+class BenchmarkBreakdownDelta(BaseModel):
+    """Per-phase benchmark timing delta."""
+
+    phase: str = Field(description="Benchmark breakdown phase.")
+    current_ms: float | None = Field(default=None, ge=0.0, description="Latest average phase duration in ms.")
+    previous_ms: float | None = Field(default=None, ge=0.0, description="Previous average phase duration in ms.")
+    delta_ms: float | None = Field(default=None, description="Current minus previous duration in ms.")
+
+
+class EvalObservabilitySummaryResponse(BaseModel):
+    """Corpus-scoped eval observability summary."""
+
+    ok: bool = Field(default=True)
+    repo_id: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("repo_id", "corpus_id"),
+        serialization_alias="corpus_id",
+        description="Optional corpus identifier for the summary.",
+    )
+    latest_run_id: str | None = Field(default=None, description="Most recent eval run id.")
+    previous_run_id: str | None = Field(default=None, description="Previous eval run id when available.")
+    latest_completed_at: datetime | None = Field(default=None, description="Completion time for the latest eval run.")
+    freshness_minutes: float | None = Field(default=None, ge=0.0, description="How old the latest eval run is.")
+    total_questions: int = Field(default=0, ge=0, description="Question count for the latest eval run.")
+    ai_comparison_ready: bool = Field(
+        default=False,
+        description="Whether a comparison-ready pair of runs exists for AI analysis.",
+    )
+    top1_accuracy: ObservabilityMetricDelta = Field(default_factory=ObservabilityMetricDelta)
+    topk_accuracy: ObservabilityMetricDelta = Field(default_factory=ObservabilityMetricDelta)
+    mrr: ObservabilityMetricDelta = Field(default_factory=ObservabilityMetricDelta)
+    ndcg_at_10: ObservabilityMetricDelta = Field(default_factory=ObservabilityMetricDelta)
+    map_at_5: ObservabilityMetricDelta = Field(default_factory=ObservabilityMetricDelta)
+    recall_at_5: ObservabilityMetricDelta = Field(default_factory=ObservabilityMetricDelta)
+    recall_at_10: ObservabilityMetricDelta = Field(default_factory=ObservabilityMetricDelta)
+    improved_count: int = Field(default=0, ge=0, description="Question count that improved vs previous run.")
+    regressed_count: int = Field(default=0, ge=0, description="Question count that regressed vs previous run.")
+    stable_count: int = Field(default=0, ge=0, description="Question count with no top-k state change.")
+    latest_bundle_id: str | None = Field(default=None, description="Latest bundle id tied to the eval run.")
+    latest_prompt_set_ref: LineageRef | None = Field(default=None, description="Prompt set used by the latest eval run.")
+    previous_prompt_set_ref: LineageRef | None = Field(default=None, description="Prompt set used by the previous eval run.")
+    operator_hint: str | None = Field(default=None, description="Suggested next step for eval triage.")
+
+
+class BenchmarkObservabilitySummaryResponse(BaseModel):
+    """Corpus-scoped benchmark observability summary."""
+
+    ok: bool = Field(default=True)
+    repo_id: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("repo_id", "corpus_id"),
+        serialization_alias="corpus_id",
+        description="Optional corpus identifier for the summary.",
+    )
+    latest_run_id: str | None = Field(default=None, description="Most recent benchmark run id.")
+    previous_run_id: str | None = Field(default=None, description="Previous benchmark run id when available.")
+    latest_started_at: datetime | None = Field(default=None, description="Start time for the latest benchmark run.")
+    latest_model_count: int = Field(default=0, ge=0, description="Model count in the latest benchmark run.")
+    latest_error_count: int = Field(default=0, ge=0, description="Error count in the latest benchmark run.")
+    previous_error_count: int = Field(default=0, ge=0, description="Error count in the previous benchmark run.")
+    provider_routes: list[str] = Field(default_factory=list, description="Provider/model routes used in the latest run.")
+    average_latency_ms: ObservabilityMetricDelta = Field(default_factory=ObservabilityMetricDelta)
+    p95_latency_ms: ObservabilityMetricDelta = Field(default_factory=ObservabilityMetricDelta)
+    response_length_mean: ObservabilityMetricDelta = Field(default_factory=ObservabilityMetricDelta)
+    success_rate: ObservabilityMetricDelta = Field(default_factory=ObservabilityMetricDelta)
+    breakdown_deltas: list[BenchmarkBreakdownDelta] = Field(
+        default_factory=list,
+        description="Timing shifts by benchmark breakdown phase.",
+    )
+    latest_bundle_id: str | None = Field(default=None, description="Latest bundle id tied to the benchmark run.")
+    latest_prompt_set_ref: LineageRef | None = Field(default=None, description="Prompt set used by the latest benchmark run.")
+    previous_prompt_set_ref: LineageRef | None = Field(default=None, description="Prompt set used by the previous benchmark run.")
+    operator_hint: str | None = Field(default=None, description="Suggested next step for benchmark triage.")
+
+
+class PromptObservabilitySummaryResponse(BaseModel):
+    """Prompt-set observability and change-correlation summary."""
+
+    ok: bool = Field(default=True)
+    repo_id: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("repo_id", "corpus_id"),
+        serialization_alias="corpus_id",
+        description="Optional corpus identifier for the summary.",
+    )
+    current_prompt_set_ref: LineageRef | None = Field(default=None, description="Current prompt-set lineage ref.")
+    previous_prompt_set_ref: LineageRef | None = Field(default=None, description="Previous prompt-set lineage ref.")
+    latest_eval_run_id: str | None = Field(default=None, description="Latest eval run id used for prompt correlation.")
+    latest_eval_prompt_set_ref: LineageRef | None = Field(default=None, description="Prompt set pinned to the latest eval run.")
+    latest_benchmark_run_id: str | None = Field(
+        default=None,
+        description="Latest benchmark run id used for prompt correlation.",
+    )
+    latest_benchmark_prompt_set_ref: LineageRef | None = Field(
+        default=None,
+        description="Prompt set pinned to the latest benchmark run.",
+    )
+    changed_since_latest_eval: bool = Field(default=False, description="Whether prompts changed since the latest eval.")
+    changed_since_latest_benchmark: bool = Field(
+        default=False,
+        description="Whether prompts changed since the latest benchmark.",
+    )
+    eval_regression_suspected: bool = Field(default=False, description="Whether prompt changes correlate with eval regression.")
+    benchmark_regression_suspected: bool = Field(
+        default=False,
+        description="Whether prompt changes correlate with benchmark regression.",
+    )
+    pending_verification: bool = Field(
+        default=False,
+        description="Whether the current prompt set has not yet been re-verified by eval/benchmark runs.",
+    )
+    recent_prompt_set_count: int = Field(default=0, ge=0, description="Unique prompt-set versions seen in recent bundles.")
+    operator_hint: str | None = Field(default=None, description="Suggested next step for prompt-regression triage.")
 
 
 class ObservabilityStatusResponse(BaseModel):
     """Operator-facing readiness summary for the observability stack."""
 
     ok: bool = Field(default=True)
+    generated_at: datetime | None = Field(default=None, description="When this status snapshot was generated.")
     mode: Literal["local", "otel", "otel_langfuse", "off"] = Field(
         default="local",
         description="Normalized observability mode for the current config.",
+    )
+    severity: Literal["healthy", "info", "warning", "critical"] = Field(
+        default="info",
+        description="Overall observability severity for the current stack.",
+    )
+    slo_state: Literal["healthy", "at_risk", "breached", "unknown"] = Field(
+        default="unknown",
+        description="Overall SLO state for the current stack.",
     )
     components: list[ObservabilityComponentStatus] = Field(
         default_factory=list,
@@ -1602,6 +1881,10 @@ class ObservabilityStatusResponse(BaseModel):
         default_factory=list,
         description="Useful external links for the current observability config.",
     )
+    catalog_path: str = Field(default="/api/observability/catalog", description="Catalog endpoint for dashboard/workbench surfaces.")
+    incidents_path: str = Field(default="/api/observability/incidents", description="Incident-feed endpoint for operators.")
+    incident_count: int = Field(default=0, ge=0, description="Incident count surfaced alongside this status snapshot.")
+    critical_incident_count: int = Field(default=0, ge=0, description="Critical incident count for the current snapshot.")
     operator_hint: str | None = Field(default=None, description="High-signal next-step guidance for operators.")
 
 
@@ -1788,6 +2071,162 @@ class RuntimeCapabilitiesResponse(BaseModel):
     chunking: ChunkingRuntimeCapabilities = Field(default_factory=ChunkingRuntimeCapabilities)
     indexing: IndexingRuntimeCapabilities = Field(default_factory=IndexingRuntimeCapabilities)
     search: SearchRuntimeCapabilities = Field(default_factory=SearchRuntimeCapabilities)
+
+
+class SecretRequirement(BaseModel):
+    """Env-only secret or credential required by one or more operator surfaces."""
+
+    id: str = Field(description="Stable secret identifier used by field descriptors and readiness responses.")
+    env_var: str = Field(description="Backing environment variable name.")
+    label: str = Field(description="Human-readable label for operators.")
+    description: str = Field(description="Short explanation of where the secret is used.")
+    integrations: list[str] = Field(
+        default_factory=list,
+        description="Integration contracts that may depend on this secret.",
+    )
+    optional: bool = Field(
+        default=False,
+        description="Whether the secret is optional and therefore not always a readiness blocker.",
+    )
+    ui_surface: str | None = Field(
+        default=None,
+        description="Primary operator surface where this secret is configured or inspected.",
+    )
+
+
+class SecretRequirementStatus(BaseModel):
+    """Current status for one env-only secret requirement."""
+
+    requirement: SecretRequirement = Field(description="Static requirement metadata.")
+    configured: bool = Field(description="Whether the env var is present and non-empty in the current process.")
+    blocker_for_integrations: list[str] = Field(
+        default_factory=list,
+        description="Integrations currently blocked by this missing secret.",
+    )
+
+
+class ConfigFieldDescriptor(BaseModel):
+    """Registry entry for one leaf config field in TriBridConfig."""
+
+    path: str = Field(description="Dotted leaf path inside TriBridConfig.")
+    section: str = Field(description="Top-level TriBridConfig section.")
+    label: str = Field(description="Human-readable field label.")
+    type: str = Field(description="Normalized UI type for the field (string, integer, number, boolean, enum, array, object).")
+    default: Any | None = Field(default=None, description="Default value from the Pydantic model, when serializable.")
+    description: str | None = Field(default=None, description="Field description pulled from the source-of-truth model.")
+    scope: Literal["global", "corpus"] = Field(description="Primary operator scope for the field.")
+    integration: str = Field(description="Integration contract responsible for this field.")
+    exposure_level: Literal["basic", "advanced", "expert"] = Field(
+        description="Layered operator exposure tier for the field.",
+    )
+    impact: Literal["live", "restart", "reindex", "redeploy"] = Field(
+        description="Primary operator impact when the field changes.",
+    )
+    secret_dependency_ids: list[str] = Field(
+        default_factory=list,
+        description="Env-only secrets that may be required for this field to take effect.",
+    )
+    ui_surface: str = Field(description="Workbench configuration surface that owns this field.")
+    enum_values: list[str] = Field(
+        default_factory=list,
+        description="Allowed enum values when the field is a closed choice.",
+    )
+    read_only: bool = Field(
+        default=False,
+        description="Whether the field is exposed for inspection only in the configuration center.",
+    )
+
+
+class ConfigIntegrationContract(BaseModel):
+    """Registry contract for one OSS integration or protected operator surface."""
+
+    id: str = Field(description="Stable integration identifier.")
+    label: str = Field(description="Human-readable integration label.")
+    summary: str = Field(description="Short explanation of the subsystem boundary.")
+    ui_surface: str = Field(description="Primary workbench surface that owns this contract.")
+    required_config_paths: list[str] = Field(
+        default_factory=list,
+        description="High-signal config fields required to operate this integration.",
+    )
+    required_secret_ids: list[str] = Field(
+        default_factory=list,
+        description="Env-only secret requirements that block this integration when missing.",
+    )
+    readiness_checks: list[str] = Field(
+        default_factory=list,
+        description="Deterministic checks performed by /api/config/readiness for this integration.",
+    )
+    blocked_surfaces: list[str] = Field(
+        default_factory=list,
+        description="Operator surfaces that are misleading or blocked when this contract is not ready.",
+    )
+
+
+class IntegrationReadiness(BaseModel):
+    """Current readiness state for one integration contract."""
+
+    id: str = Field(description="Integration identifier.")
+    label: str = Field(description="Human-readable integration label.")
+    ui_surface: str = Field(description="Primary workbench surface for the integration.")
+    state: Literal["ready", "degraded", "unconfigured", "disabled"] = Field(
+        description="Current readiness state.",
+    )
+    enabled: bool = Field(description="Whether the integration is selected or expected by the current config.")
+    configured: bool = Field(description="Whether the required config is present.")
+    reachable: bool | None = Field(default=None, description="Whether runtime reachability checks passed, when applicable.")
+    missing_config_paths: list[str] = Field(
+        default_factory=list,
+        description="Required config paths that are currently empty or unset.",
+    )
+    missing_secret_ids: list[str] = Field(
+        default_factory=list,
+        description="Required env-only secrets that are currently missing.",
+    )
+    failing_checks: list[str] = Field(
+        default_factory=list,
+        description="Named readiness checks that are currently failing.",
+    )
+    blocked_surfaces: list[str] = Field(
+        default_factory=list,
+        description="Protected surfaces blocked or degraded by this readiness state.",
+    )
+    operator_hint: str | None = Field(default=None, description="High-signal next-step guidance for operators.")
+    links: list[TraceExternalLink] = Field(
+        default_factory=list,
+        description="Useful deep links for debugging or operating the integration.",
+    )
+
+
+class ConfigRegistryResponse(BaseModel):
+    """Response payload for GET /api/config/registry."""
+
+    fields: list[ConfigFieldDescriptor] = Field(
+        default_factory=list,
+        description="Leaf config descriptors derived from TriBridConfig plus manual operator metadata.",
+    )
+    integrations: list[ConfigIntegrationContract] = Field(
+        default_factory=list,
+        description="Integration contracts required by the OSS composition branch.",
+    )
+    secrets: list[SecretRequirement] = Field(
+        default_factory=list,
+        description="Env-only secret requirements surfaced by the control plane.",
+    )
+
+
+class ConfigReadinessResponse(BaseModel):
+    """Response payload for GET /api/config/readiness."""
+
+    ok: bool = Field(default=False, description="Whether the current configuration control plane is ready enough for the protected surfaces.")
+    integrations: list[IntegrationReadiness] = Field(
+        default_factory=list,
+        description="Integration readiness states for the current config and environment.",
+    )
+    secrets: list[SecretRequirementStatus] = Field(
+        default_factory=list,
+        description="Configured/missing env-only secrets relevant to the current control plane.",
+    )
+    operator_hint: str | None = Field(default=None, description="Top-level next-step guidance for operators.")
 
 
 class FeedbackRequest(BaseModel):
@@ -2796,6 +3235,38 @@ class AgentTrainRun(BaseModel):
     lr: float = Field(gt=0.0)
     warmup_ratio: float = Field(ge=0.0, le=1.0)
     max_length: int = Field(ge=32, le=8192)
+    workflow_backend: str = Field(
+        default="local",
+        description="Workflow state backend used for this run (for example local or flyte).",
+    )
+    tracking_backend: str = Field(
+        default="local",
+        description="Run/artifact truth backend used for this run (for example local or mlflow).",
+    )
+    execution_backend: str = Field(
+        default="mlx_qwen3",
+        description="Execution backend used for this run (for example mlx_qwen3 or unsloth).",
+    )
+    workflow_run_id: str | None = Field(
+        default=None,
+        description="External workflow execution identifier when orchestration is delegated.",
+    )
+    tracking_run_id: str | None = Field(
+        default=None,
+        description="External run identifier in the tracking system when available.",
+    )
+    artifacts_uri: str | None = Field(
+        default=None,
+        description="Artifact URI or storage path for the run outputs when available.",
+    )
+    external_links: list[TraceExternalLink] = Field(
+        default_factory=list,
+        description="Direct operator links for workflow, tracking, or artifact surfaces.",
+    )
+    operator_hint: str | None = Field(
+        default=None,
+        description="High-signal next-step guidance for operators inspecting this run.",
+    )
 
     summary: AgentTrainRunSummary = Field(default_factory=AgentTrainRunSummary)
     input_bundle_id: str | None = Field(default=None, description="Current bundle id captured before training started.")
@@ -2819,6 +3290,11 @@ class AgentTrainRunMeta(BaseModel):
     completed_at: datetime | None = None
     primary_metric_best: float | None = None
     primary_metric_final: float | None = None
+    workflow_backend: str = "local"
+    tracking_backend: str = "local"
+    execution_backend: str = "mlx_qwen3"
+    workflow_run_id: str | None = None
+    tracking_run_id: str | None = None
     bundle_id: str | None = None
     lineage_ref: LineageRef | None = None
 
@@ -2862,6 +3338,50 @@ class AgentTrainStartResponse(BaseModel):
 class AgentTrainMetricsResponse(BaseModel):
     ok: bool = Field(default=True)
     events: list[AgentTrainMetricEvent] = Field(default_factory=list)
+
+
+TrainingControlPlaneComponentKind = Literal["flyte", "mlflow", "unsloth"]
+TrainingControlPlaneComponentState = Literal["disabled", "unconfigured", "ready", "degraded"]
+
+
+class TrainingControlPlaneComponentStatus(BaseModel):
+    kind: TrainingControlPlaneComponentKind = Field(description="Control-plane component kind.")
+    label: str = Field(description="Human-readable component label.")
+    enabled: bool = Field(default=False, description="Whether this component is intended for the active target lane.")
+    configured: bool = Field(default=False, description="Whether required config values are present.")
+    state: TrainingControlPlaneComponentState = Field(
+        default="disabled",
+        description="Operator-facing component state.",
+    )
+    detail: str | None = Field(default=None, description="Short status note for operators.")
+    links: list[TraceExternalLink] = Field(
+        default_factory=list,
+        description="Relevant control-plane links for this component.",
+    )
+
+
+class AgentTrainControlPlaneStatusResponse(BaseModel):
+    ok: bool = Field(default=True)
+    lane: Literal["legacy_local", "flyte_mlflow_unsloth"] = Field(
+        default="legacy_local",
+        description="Resolved target lane for the Learning Agent Training Center surface.",
+    )
+    ready: bool = Field(
+        default=False,
+        description="Whether the Flyte + MLflow + Unsloth control plane is fully configured and reachable.",
+    )
+    workflow_backend: str = Field(default="local", description="Configured workflow backend target.")
+    tracking_backend: str = Field(default="local", description="Configured tracking backend target.")
+    execution_backend: str = Field(default="mlx_qwen3", description="Configured execution backend target.")
+    components: list[TrainingControlPlaneComponentStatus] = Field(
+        default_factory=list,
+        description="Per-component readiness details for the target control plane.",
+    )
+    links: list[TraceExternalLink] = Field(
+        default_factory=list,
+        description="Top-level Learning Agent control-plane links.",
+    )
+    operator_hint: str | None = Field(default=None, description="High-signal next-step guidance for operators.")
 
 
 class AgentTrainDiffRequest(BaseModel):
@@ -2996,6 +3516,11 @@ class SyntheticRunSummary(BaseModel):
     quality_gate_threshold: float | None = Field(default=None, ge=0.0, le=1.0)
     quality_gate_passed: bool | None = Field(default=None)
     quality_failure_reason: str | None = Field(default=None)
+
+    degradation: SyntheticRunDegradation = Field(
+        default_factory=SyntheticRunDegradation,
+        description="Degradation flags -- honest about what actually happened during the run",
+    )
 
 
 class SyntheticRun(BaseModel):
@@ -3964,25 +4489,10 @@ class GraphStorageConfig(BaseModel):
         description="Neo4j username"
     )
 
-    neo4j_password: str = Field(
-        default_factory=lambda: os.getenv("NEO4J_PASSWORD", ""),
-        description="Neo4j password (defaults to NEO4J_PASSWORD env var when unset)",
-    )
-
     neo4j_database: str = Field(
         default="neo4j",
         description="Neo4j database name"
     )
-
-    @model_validator(mode="after")
-    def _fill_password_from_env(self) -> Self:
-        # Config files often ship with neo4j_password="" for safety. Treat empty as "unset"
-        # and allow the env var to supply credentials without requiring users to edit JSON.
-        if not str(self.neo4j_password or "").strip():
-            env_pw = str(os.getenv("NEO4J_PASSWORD", "") or "").strip()
-            if env_pw:
-                self.neo4j_password = env_pw
-        return self
 
     neo4j_database_mode: Literal["shared", "per_corpus"] = Field(
         default="shared",
@@ -4038,6 +4548,10 @@ class GraphStorageConfig(BaseModel):
         le=100,
         description="Number of results from graph traversal"
     )
+
+    def resolve_password(self) -> str:
+        """Resolve the Neo4j password from env-only operator secrets."""
+        return str(os.getenv("NEO4J_PASSWORD", "") or "").strip()
 
     def resolve_database(self, corpus_id: str | None) -> str:
         """Resolve the Neo4j database name for a corpus.
@@ -4838,6 +5352,31 @@ class TracingConfig(BaseModel):
         description="Grafana Alloy base URL used for collector status checks"
     )
 
+    mimir_base_url: str = Field(
+        default="",
+        description="Grafana Mimir base URL used for metrics backend status checks"
+    )
+
+    pyroscope_base_url: str = Field(
+        default="",
+        description="Grafana Pyroscope base URL used for profiling status checks"
+    )
+
+    faro_base_url: str = Field(
+        default="",
+        description="Grafana Faro or collector base URL used for frontend telemetry status checks"
+    )
+
+    opencost_base_url: str = Field(
+        default="",
+        description="OpenCost base URL used for cost and capacity status checks"
+    )
+
+    alertmanager_base_url: str = Field(
+        default="",
+        description="Alertmanager base URL used for wake-up path status checks"
+    )
+
     cost_tracking_enabled: int = Field(
         default=1,
         ge=0,
@@ -5030,6 +5569,16 @@ class TrainingConfig(BaseModel):
         description="Ragweld agent backend (in-process chat model). Currently: mlx_qwen3",
     )
 
+    ragweld_agent_workflow_backend: Literal["local", "flyte"] = Field(
+        default="local",
+        description="Workflow/orchestration backend for Learning Agent runs.",
+    )
+
+    ragweld_agent_tracking_backend: Literal["local", "mlflow"] = Field(
+        default="local",
+        description="Run/artifact tracking backend for Learning Agent runs.",
+    )
+
     ragweld_agent_base_model: str = Field(
         default="mlx-community/Qwen3-1.7B-4bit",
         description="Shipped base model for the ragweld agent (MLX).",
@@ -5114,6 +5663,46 @@ class TrainingConfig(BaseModel):
         description="Minimum eval_loss improvement required to auto-promote (baseline_loss - new_loss >= epsilon).",
     )
 
+    ragweld_agent_flyte_admin_base_url: str = Field(
+        default="",
+        description="Base URL for Flyte Admin HTTP access (used for readiness checks and operator links).",
+    )
+
+    ragweld_agent_flyte_console_base_url: str = Field(
+        default="",
+        description="Base URL for Flyte Console (used for operator deep links).",
+    )
+
+    ragweld_agent_flyte_project: str = Field(
+        default="ragweld",
+        description="Flyte project that owns Learning Agent executions.",
+    )
+
+    ragweld_agent_flyte_domain: str = Field(
+        default="development",
+        description="Flyte domain/environment that owns Learning Agent executions.",
+    )
+
+    ragweld_agent_flyte_launchplan: str = Field(
+        default="",
+        description="Flyte launch plan name for the Learning Agent workflow lane.",
+    )
+
+    ragweld_agent_mlflow_tracking_url: str = Field(
+        default="",
+        description="Base URL for MLflow Tracking/UI used by Learning Agent runs.",
+    )
+
+    ragweld_agent_mlflow_experiment_name: str = Field(
+        default="ragweld-learning-agent",
+        description="MLflow experiment name for Learning Agent runs.",
+    )
+
+    ragweld_agent_unsloth_image: str = Field(
+        default="",
+        description="Container image or artifact reference used by the Flyte task to run Unsloth training.",
+    )
+
 
 class UIConfig(BaseModel):
     """User interface configuration."""
@@ -5194,12 +5783,12 @@ class UIConfig(BaseModel):
     )
 
     grafana_dashboard_uid: str = Field(
-        default="tribrid-overview",
+        default="ragweld-oncall-overview",
         description="Default Grafana dashboard UID"
     )
 
     grafana_dashboard_slug: str = Field(
-        default="tribrid-overview",
+        default="on-call-overview",
         description="Grafana dashboard slug"
     )
 
@@ -6020,6 +6609,7 @@ class TriBridConfig(BaseModel):
     evaluation: EvaluationConfig = Field(default_factory=EvaluationConfig)
     system_prompts: SystemPromptsConfig = Field(default_factory=SystemPromptsConfig)
     mcp: MCPConfig = Field(default_factory=MCPConfig)
+    synthetic: SyntheticConfig = Field(default_factory=SyntheticConfig)
     docker: DockerConfig = Field(default_factory=DockerConfig)
 
     model_config = ConfigDict(
@@ -6139,7 +6729,6 @@ class TriBridConfig(BaseModel):
             # Graph storage params (Neo4j)
             'NEO4J_URI': self.graph_storage.neo4j_uri,
             'NEO4J_USER': self.graph_storage.neo4j_user,
-            'NEO4J_PASSWORD': self.graph_storage.neo4j_password,
             'NEO4J_DATABASE': self.graph_storage.neo4j_database,
             'NEO4J_VECTOR_QUERY_MODE': self.graph_storage.neo4j_vector_query_mode,
             'GRAPH_MAX_HOPS': self.graph_storage.max_hops,
@@ -6232,6 +6821,11 @@ class TriBridConfig(BaseModel):
             'LANGFUSE_PROJECT': self.tracing.langfuse_project,
             'TEMPO_BASE_URL': self.tracing.tempo_base_url,
             'ALLOY_BASE_URL': self.tracing.alloy_base_url,
+            'MIMIR_BASE_URL': self.tracing.mimir_base_url,
+            'PYROSCOPE_BASE_URL': self.tracing.pyroscope_base_url,
+            'FARO_BASE_URL': self.tracing.faro_base_url,
+            'OPENCOST_BASE_URL': self.tracing.opencost_base_url,
+            'ALERTMANAGER_BASE_URL': self.tracing.alertmanager_base_url,
             'COST_TRACKING_ENABLED': self.tracing.cost_tracking_enabled,
     # Training params (22)
             'RERANKER_TRAIN_EPOCHS': self.training.reranker_train_epochs,
@@ -6257,6 +6851,8 @@ class TriBridConfig(BaseModel):
             'LEARNING_RERANKER_UNLOAD_AFTER_SEC': self.training.learning_reranker_unload_after_sec,
             'LEARNING_RERANKER_TELEMETRY_INTERVAL_STEPS': self.training.learning_reranker_telemetry_interval_steps,
             'RAGWELD_AGENT_BACKEND': self.training.ragweld_agent_backend,
+            'RAGWELD_AGENT_WORKFLOW_BACKEND': self.training.ragweld_agent_workflow_backend,
+            'RAGWELD_AGENT_TRACKING_BACKEND': self.training.ragweld_agent_tracking_backend,
             'RAGWELD_AGENT_BASE_MODEL': self.training.ragweld_agent_base_model,
             'RAGWELD_AGENT_MODEL_PATH': self.training.ragweld_agent_model_path,
             'RAGWELD_AGENT_UNLOAD_AFTER_SEC': self.training.ragweld_agent_unload_after_sec,
@@ -6270,6 +6866,14 @@ class TriBridConfig(BaseModel):
             'RAGWELD_AGENT_TELEMETRY_INTERVAL_STEPS': self.training.ragweld_agent_telemetry_interval_steps,
             'RAGWELD_AGENT_PROMOTE_IF_IMPROVES': self.training.ragweld_agent_promote_if_improves,
             'RAGWELD_AGENT_PROMOTE_EPSILON': self.training.ragweld_agent_promote_epsilon,
+            'RAGWELD_AGENT_FLYTE_ADMIN_BASE_URL': self.training.ragweld_agent_flyte_admin_base_url,
+            'RAGWELD_AGENT_FLYTE_CONSOLE_BASE_URL': self.training.ragweld_agent_flyte_console_base_url,
+            'RAGWELD_AGENT_FLYTE_PROJECT': self.training.ragweld_agent_flyte_project,
+            'RAGWELD_AGENT_FLYTE_DOMAIN': self.training.ragweld_agent_flyte_domain,
+            'RAGWELD_AGENT_FLYTE_LAUNCHPLAN': self.training.ragweld_agent_flyte_launchplan,
+            'RAGWELD_AGENT_MLFLOW_TRACKING_URL': self.training.ragweld_agent_mlflow_tracking_url,
+            'RAGWELD_AGENT_MLFLOW_EXPERIMENT_NAME': self.training.ragweld_agent_mlflow_experiment_name,
+            'RAGWELD_AGENT_UNSLOTH_IMAGE': self.training.ragweld_agent_unsloth_image,
             # UI params (43)
             'CHAT_STREAMING_ENABLED': self.ui.chat_streaming_enabled,
             'CHAT_HISTORY_MAX': self.ui.chat_history_max,
@@ -6489,7 +7093,6 @@ class TriBridConfig(BaseModel):
             graph_storage=GraphStorageConfig(
                 neo4j_uri=data.get('NEO4J_URI', 'bolt://localhost:7687'),
                 neo4j_user=data.get('NEO4J_USER', 'neo4j'),
-                neo4j_password=data.get('NEO4J_PASSWORD', ''),
                 neo4j_database=data.get('NEO4J_DATABASE', 'neo4j'),
                 neo4j_vector_query_mode=data.get('NEO4J_VECTOR_QUERY_MODE', 'auto'),
                 max_hops=data.get('GRAPH_MAX_HOPS', 2),
@@ -6590,6 +7193,11 @@ class TriBridConfig(BaseModel):
                 langfuse_project=data.get('LANGFUSE_PROJECT', 'ragweld'),
                 tempo_base_url=data.get('TEMPO_BASE_URL', ''),
                 alloy_base_url=data.get('ALLOY_BASE_URL', ''),
+                mimir_base_url=data.get('MIMIR_BASE_URL', ''),
+                pyroscope_base_url=data.get('PYROSCOPE_BASE_URL', ''),
+                faro_base_url=data.get('FARO_BASE_URL', ''),
+                opencost_base_url=data.get('OPENCOST_BASE_URL', ''),
+                alertmanager_base_url=data.get('ALERTMANAGER_BASE_URL', ''),
                 cost_tracking_enabled=data.get('COST_TRACKING_ENABLED', 1),
             ),
             training=TrainingConfig(
@@ -6619,6 +7227,8 @@ class TriBridConfig(BaseModel):
                 learning_reranker_unload_after_sec=data.get('LEARNING_RERANKER_UNLOAD_AFTER_SEC', 0),
                 learning_reranker_telemetry_interval_steps=data.get('LEARNING_RERANKER_TELEMETRY_INTERVAL_STEPS', 2),
                 ragweld_agent_backend=data.get('RAGWELD_AGENT_BACKEND', 'mlx_qwen3'),
+                ragweld_agent_workflow_backend=data.get('RAGWELD_AGENT_WORKFLOW_BACKEND', 'local'),
+                ragweld_agent_tracking_backend=data.get('RAGWELD_AGENT_TRACKING_BACKEND', 'local'),
                 ragweld_agent_base_model=data.get('RAGWELD_AGENT_BASE_MODEL', 'mlx-community/Qwen3-1.7B-4bit'),
                 ragweld_agent_model_path=data.get('RAGWELD_AGENT_MODEL_PATH', 'models/learning-agent-epstein-files-1'),
                 ragweld_agent_unload_after_sec=data.get('RAGWELD_AGENT_UNLOAD_AFTER_SEC', 0),
@@ -6635,6 +7245,14 @@ class TriBridConfig(BaseModel):
                 ragweld_agent_telemetry_interval_steps=data.get('RAGWELD_AGENT_TELEMETRY_INTERVAL_STEPS', 2),
                 ragweld_agent_promote_if_improves=data.get('RAGWELD_AGENT_PROMOTE_IF_IMPROVES', 1),
                 ragweld_agent_promote_epsilon=data.get('RAGWELD_AGENT_PROMOTE_EPSILON', 0.0),
+                ragweld_agent_flyte_admin_base_url=data.get('RAGWELD_AGENT_FLYTE_ADMIN_BASE_URL', ''),
+                ragweld_agent_flyte_console_base_url=data.get('RAGWELD_AGENT_FLYTE_CONSOLE_BASE_URL', ''),
+                ragweld_agent_flyte_project=data.get('RAGWELD_AGENT_FLYTE_PROJECT', 'ragweld'),
+                ragweld_agent_flyte_domain=data.get('RAGWELD_AGENT_FLYTE_DOMAIN', 'development'),
+                ragweld_agent_flyte_launchplan=data.get('RAGWELD_AGENT_FLYTE_LAUNCHPLAN', ''),
+                ragweld_agent_mlflow_tracking_url=data.get('RAGWELD_AGENT_MLFLOW_TRACKING_URL', ''),
+                ragweld_agent_mlflow_experiment_name=data.get('RAGWELD_AGENT_MLFLOW_EXPERIMENT_NAME', 'ragweld-learning-agent'),
+                ragweld_agent_unsloth_image=data.get('RAGWELD_AGENT_UNSLOTH_IMAGE', ''),
             ),
             ui=UIConfig(
                 chat_streaming_enabled=data.get('CHAT_STREAMING_ENABLED', 1),
@@ -6648,8 +7266,8 @@ class TriBridConfig(BaseModel):
                 chat_stream_timeout=data.get('CHAT_STREAM_TIMEOUT', 120),
                 chat_thinking_budget_tokens=data.get('CHAT_THINKING_BUDGET_TOKENS', 10000),
                 editor_port=data.get('EDITOR_PORT', 4440),
-                grafana_dashboard_uid=data.get('GRAFANA_DASHBOARD_UID', 'tribrid-overview'),
-                grafana_dashboard_slug=data.get('GRAFANA_DASHBOARD_SLUG', 'tribrid-overview'),
+                grafana_dashboard_uid=data.get('GRAFANA_DASHBOARD_UID', 'ragweld-oncall-overview'),
+                grafana_dashboard_slug=data.get('GRAFANA_DASHBOARD_SLUG', 'on-call-overview'),
                 grafana_base_url=data.get('GRAFANA_BASE_URL', 'http://127.0.0.1:3001'),
                 grafana_auth_mode=data.get('GRAFANA_AUTH_MODE', 'anonymous'),
                 grafana_embed_enabled=data.get('GRAFANA_EMBED_ENABLED', 1),

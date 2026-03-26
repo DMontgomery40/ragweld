@@ -56,6 +56,26 @@ export function RunOverview({ run, latestMetrics }: Props) {
         <TooltipIcon name="RAGWELD_AGENT_PROMOTE_IF_IMPROVES" />
       </div>
 
+      <div className="studio-chip-row">
+        <span className="studio-chip">workflow={String(run.workflow_backend || 'local')}</span>
+        <span className="studio-chip">tracking={String(run.tracking_backend || 'local')}</span>
+        <span className="studio-chip">execution={String(run.execution_backend || 'mlx_qwen3')}</span>
+        {run.workflow_run_id ? <span className="studio-chip">workflow_run={run.workflow_run_id}</span> : null}
+        {run.tracking_run_id ? <span className="studio-chip">tracking_run={run.tracking_run_id}</span> : null}
+      </div>
+
+      {run.operator_hint ? <div className="studio-callout">{run.operator_hint}</div> : null}
+
+      {(run.external_links || []).length ? (
+        <div className="studio-mini-grid">
+          {(run.external_links || []).map((link) => (
+            <a key={`${link.label}-${link.url}`} href={link.url} target="_blank" rel="noreferrer" className="studio-mono">
+              {link.label}
+            </a>
+          ))}
+        </div>
+      ) : null}
+
       <div className="studio-metric-grid">
         {(run.metrics_available || []).map((key) => (
           <article key={key} className="studio-metric-card">

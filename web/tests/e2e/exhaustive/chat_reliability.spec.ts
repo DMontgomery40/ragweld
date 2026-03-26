@@ -226,9 +226,9 @@ async function setSources(page: Page, corpusLabels: string[], recallEnabled: boo
 }
 
 async function waitForStreamingTerminal(page: Page): Promise<void> {
-  const spinner = page.getByText('Generating response...');
-  await expect(spinner).toBeVisible({ timeout: 20_000 });
-  await expect(spinner).toBeHidden({ timeout: 120_000 });
+  const streamingBadge = page.getByText('Streaming').last();
+  await expect(streamingBadge).toBeVisible({ timeout: 20_000 });
+  await expect(streamingBadge).toBeHidden({ timeout: 120_000 });
 }
 
 async function seedFeedbackSession(page: Page, eventId: string): Promise<void> {
@@ -247,16 +247,25 @@ async function seedFeedbackSession(page: Page, eventId: string): Promise<void> {
           {
             id: `assistant-${now}`,
             role: 'assistant',
-            content: 'Seeded assistant response for feedback linkage.',
-            timestamp: now,
-            runId: linkedRunId,
-            eventId: linkedRunId,
+            createdAt: new Date(now).toISOString(),
+            content: [{ type: 'text', text: 'Seeded assistant response for feedback linkage.' }],
+            status: { type: 'complete', reason: 'stop' },
+            metadata: {
+              unstable_state: null,
+              unstable_annotations: [],
+              unstable_data: [],
+              steps: [],
+              custom: {
+                runId: linkedRunId,
+                eventId: linkedRunId,
+              },
+            },
           },
         ],
       };
       localStorage.setItem(
-        'tribrid-chat-sessions:v1:global',
-        JSON.stringify({ version: 1, active_conversation_id: convId, sessions: [session] })
+        'ragweld-chat-threads:v2',
+        JSON.stringify({ version: 2, active_conversation_id: convId, sessions: [session] })
       );
       localStorage.setItem('tribrid_active_corpus', corpusId);
       localStorage.setItem('tribrid_active_repo', corpusId);
@@ -266,7 +275,7 @@ async function seedFeedbackSession(page: Page, eventId: string): Promise<void> {
 }
 
 async function clickHelpfulFeedback(page: Page): Promise<void> {
-  const helpful = page.locator('button[title="This was helpful - trains the reranker"]').first();
+  const helpful = page.getByRole('button', { name: 'Helpful' }).first();
   await expect(helpful).toBeVisible({ timeout: 30_000 });
   await helpful.click();
 }
@@ -304,7 +313,7 @@ test.describe.serial('chat reliability', () => {
     await waitForStreamingTerminal(page);
 
     await expect(page.locator('#chat-input')).toBeEnabled({ timeout: 20_000 });
-    await expect(page.getByText('Generating response...')).toBeHidden();
+    await expect(page.getByText('Streaming')).toBeHidden();
   });
 
   test('new chat resets in-flight state and clears active stream UI', async ({ page, request }) => {
@@ -320,9 +329,9 @@ test.describe.serial('chat reliability', () => {
     await sendMessage(page, `reliability-new-chat-${Date.now()}`);
     await page.getByTestId('chat-new-chat').click();
 
-    await expect(page.getByText('Generating response...')).toBeHidden({ timeout: 20_000 });
+    await expect(page.getByText('Streaming')).toBeHidden({ timeout: 20_000 });
     await expect(page.locator('#chat-input')).toBeEnabled({ timeout: 20_000 });
-    await expect(page.getByText('Start a conversation with your codebase')).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByText('Chat stays grounded in recall, sources, and session continuity.')).toBeVisible({ timeout: 20_000 });
   });
 
   test('feedback is persisted and mineable via matching event_id', async ({ page, request }) => {

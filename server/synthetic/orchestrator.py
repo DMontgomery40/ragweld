@@ -24,6 +24,7 @@ from server.models.tribrid_config_model import (
     SyntheticRunEvent,
     SyntheticRunStartRequest,
     SyntheticRunSummary,
+    TriBridConfig,
 )
 from server.services.config_store import get_config as load_scoped_config
 from server.synthetic.providers.internal_provider import run_internal_provider
@@ -40,8 +41,6 @@ from server.synthetic.storage import (
 
 _run_tasks: dict[str, asyncio.Task[None]] = {}
 _run_cancel_events: dict[str, asyncio.Event] = {}
-_QUALITY_GATE_TOP1_MIN = 0.40
-_QUALITY_GATE_SAMPLE_SIZE = 50
 _CORPUS_ID_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 _ROOT = Path(__file__).resolve().parents[2]
 _DATASET_DIR = _ROOT / "data" / "eval_datasets"
@@ -251,6 +250,13 @@ def _hydrate_eval_dataset_from_seed(
     artifacts_payloads["eval_dataset_json"] = [row.model_dump(mode="json") for row in chosen]
     summary.items_generated = int(summary.items_generated) + len(chosen)
 
+    summary.degradation.seed_hydration_used = True
+    summary.degradation.seed_hydration_count = len(chosen)
+    summary.degradation.degraded = True
+    summary.degradation.reasons.append(
+        f"Eval dataset hydrated from seed ({len(chosen)} rows) instead of LLM generation."
+    )
+
     dataset_label = str(source_path) if source_path is not None else "seed dataset"
     _append_log(
         run_id,
@@ -270,13 +276,18 @@ async def _evaluate_quality_gate(
     *,
     run_id: str,
     repo_id: str,
+    cfg: TriBridConfig,
     artifacts_payloads: dict[Any, Any],
     summary: SyntheticRunSummary,
 ) -> tuple[bool | None, str | None]:
+    gate = cfg.synthetic.quality_gate
+    top1_min = float(gate.top1_min)
+    sample_size = int(gate.sample_size)
+
     eval_items = _coerce_eval_items(artifacts_payloads.get("eval_dataset_json"))
     if not eval_items:
         reason = "Quality gate evaluation failed: no eval items generated"
-        summary.quality_gate_threshold = float(_QUALITY_GATE_TOP1_MIN)
+        summary.quality_gate_threshold = top1_min
         summary.quality_sample_size = 0
         summary.quality_gate_passed = False
         summary.quality_failure_reason = reason
@@ -284,7 +295,7 @@ async def _evaluate_quality_gate(
             "run_id": run_id,
             "corpus_id": repo_id,
             "sample_size": 0,
-            "threshold": float(_QUALITY_GATE_TOP1_MIN),
+            "threshold": top1_min,
             "passed": False,
             "error": "no eval items generated",
         }
@@ -294,21 +305,21 @@ async def _evaluate_quality_gate(
         eval_run = await evaluate_dataset_entries(
             repo_id=repo_id,
             dataset=eval_items,
-            sample_size=_QUALITY_GATE_SAMPLE_SIZE,
+            sample_size=sample_size,
             dataset_id=f"synthetic:{run_id}",
             persist_run=False,
         )
     except Exception as e:
         reason = f"Quality gate evaluation failed: {e}"
-        summary.quality_gate_threshold = float(_QUALITY_GATE_TOP1_MIN)
-        summary.quality_sample_size = int(min(len(eval_items), _QUALITY_GATE_SAMPLE_SIZE))
+        summary.quality_gate_threshold = top1_min
+        summary.quality_sample_size = int(min(len(eval_items), sample_size))
         summary.quality_gate_passed = False
         summary.quality_failure_reason = reason
         artifacts_payloads["quality_eval_json"] = {
             "run_id": run_id,
             "corpus_id": repo_id,
-            "sample_size": int(min(len(eval_items), _QUALITY_GATE_SAMPLE_SIZE)),
-            "threshold": float(_QUALITY_GATE_TOP1_MIN),
+            "sample_size": int(min(len(eval_items), sample_size)),
+            "threshold": top1_min,
             "passed": False,
             "error": str(e),
         }
@@ -316,26 +327,26 @@ async def _evaluate_quality_gate(
     quality_payload = {
         "run_id": run_id,
         "corpus_id": repo_id,
-        "sample_size": int(min(len(eval_items), _QUALITY_GATE_SAMPLE_SIZE)),
+        "sample_size": int(min(len(eval_items), sample_size)),
         "top1_accuracy": float(eval_run.top1_accuracy),
         "topk_accuracy": float(eval_run.topk_accuracy),
         "mrr": float(eval_run.metrics.mrr),
-        "threshold": float(_QUALITY_GATE_TOP1_MIN),
-        "passed": bool(float(eval_run.top1_accuracy) >= float(_QUALITY_GATE_TOP1_MIN)),
+        "threshold": top1_min,
+        "passed": bool(float(eval_run.top1_accuracy) >= top1_min),
     }
     artifacts_payloads["quality_eval_json"] = quality_payload
 
     summary.quality_top1_accuracy = float(eval_run.top1_accuracy)
     summary.quality_topk_accuracy = float(eval_run.topk_accuracy)
     summary.quality_mrr = float(eval_run.metrics.mrr)
-    summary.quality_sample_size = int(min(len(eval_items), _QUALITY_GATE_SAMPLE_SIZE))
-    summary.quality_gate_threshold = float(_QUALITY_GATE_TOP1_MIN)
-    passed = bool(float(eval_run.top1_accuracy) >= float(_QUALITY_GATE_TOP1_MIN))
+    summary.quality_sample_size = int(min(len(eval_items), sample_size))
+    summary.quality_gate_threshold = top1_min
+    passed = bool(float(eval_run.top1_accuracy) >= top1_min)
     summary.quality_gate_passed = passed
     if not passed:
         reason = (
             f"Quality gate failed: top1={float(eval_run.top1_accuracy):.3f} "
-            f"< threshold={float(_QUALITY_GATE_TOP1_MIN):.3f} "
+            f"< threshold={top1_min:.3f} "
             f"(sample={summary.quality_sample_size})"
         )
         summary.quality_failure_reason = reason
@@ -447,6 +458,7 @@ async def _run_job(*, run_id: str, request: SyntheticRunStartRequest, cancel_eve
         gate_passed, gate_reason = await _evaluate_quality_gate(
             run_id=run_id,
             repo_id=repo_id,
+            cfg=cfg,
             artifacts_payloads=artifacts_payloads,
             summary=summary,
         )

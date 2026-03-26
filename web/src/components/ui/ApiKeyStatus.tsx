@@ -2,21 +2,21 @@ import { useEffect, useState } from 'react';
 import { useAPI } from '@/hooks/useAPI';
 
 interface ApiKeyStatusProps {
-  keyName: string;  // e.g., "COHERE_API_KEY", "OPENAI_API_KEY"
+  keyName: string;  // e.g., "COHERE_API_KEY", "OPENAI_API_KEY", "NEO4J_PASSWORD"
   label?: string;   // Optional display label, defaults to keyName
 }
 
 /**
- * ApiKeyStatus - Shows whether an API key is configured in .env
+ * ApiKeyStatus - Shows whether an env-only secret is configured
  * 
  * Uses useAPI hook for proper Zustand/Pydantic compliance.
- * NEVER reads or exposes the actual key value.
+ * NEVER reads or exposes the actual secret value.
  * Only checks via backend if the key exists and is non-empty.
  * 
  * States:
  * - Loading: "Checking..."
  * - Configured: Green checkmark with "Configured" 
- * - Not configured: Orange warning with instructions to add to .env
+ * - Not configured: Orange warning with instructions to add to the backend environment
  */
 export function ApiKeyStatus({ keyName, label }: ApiKeyStatusProps) {
   const [isConfigured, setIsConfigured] = useState<boolean | null>(null);
@@ -82,7 +82,7 @@ export function ApiKeyStatus({ keyName, label }: ApiKeyStatusProps) {
           </span>
         </div>
         <div style={{ color: 'var(--fg-muted)', marginTop: '4px' }}>
-          Key is set in .env file and ready to use.
+          Secret is present in the backend environment and ready to use.
         </div>
       </div>
     );
@@ -142,7 +142,7 @@ export function ApiKeyStatus({ keyName, label }: ApiKeyStatusProps) {
           borderRadius: '4px',
           fontFamily: 'var(--font-mono)',
           fontSize: '11px'
-        }}>{keyName}=your_key</code> to your <code style={{
+        }}>{keyName}=your_value</code> to your backend environment or <code style={{
           background: 'var(--bg-elev2)',
           padding: '2px 6px',
           borderRadius: '4px',
@@ -155,4 +155,3 @@ export function ApiKeyStatus({ keyName, label }: ApiKeyStatusProps) {
 }
 
 export default ApiKeyStatus;
-

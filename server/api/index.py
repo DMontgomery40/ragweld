@@ -334,6 +334,26 @@ def _allow_parallel_chunk_batches(*, indexing_workers: int, batch_count: int, ha
     return True
 
 
+def _allow_cross_file_chunk_batching(
+    *,
+    has_graph_upserts: bool,
+    semantic_kg_enabled: bool,
+    has_graph_builder: bool,
+) -> bool:
+    """Whether small-file chunks can be batched across files before embedding/upsert.
+
+    Cross-file batching is only safe when we do not need per-file graph writes,
+    per-file AST graph inputs, or per-file semantic KG extraction queues.
+    """
+    if has_graph_upserts:
+        return False
+    if semantic_kg_enabled:
+        return False
+    if has_graph_builder:
+        return False
+    return True
+
+
 def _should_run_ast_graph_build(*, has_graph_builder: bool, graph_file_count: int) -> bool:
     """Whether the AST graph build pass should run."""
     return bool(has_graph_builder and int(graph_file_count or 0) > 0)
@@ -720,7 +740,7 @@ async def _compute_dashboard_storage_breakdown(*, repo_id: str) -> DashboardInde
         neo4j = Neo4jClient(
             cfg.graph_storage.neo4j_uri,
             cfg.graph_storage.neo4j_user,
-            cfg.graph_storage.neo4j_password,
+            cfg.graph_storage.resolve_password(),
             database=db_name,
         )
         await neo4j.connect()
@@ -1408,7 +1428,7 @@ async def _run_index(
             neo4j = Neo4jClient(
                 cfg.graph_storage.neo4j_uri,
                 cfg.graph_storage.neo4j_user,
-                cfg.graph_storage.neo4j_password,
+                cfg.graph_storage.resolve_password(),
                 database=db_name,
             )
             await neo4j.connect()
@@ -1552,6 +1572,118 @@ async def _run_index_body(
     semantic_llm_fallback_chunks = 0
     contextual_mode = str(getattr(cfg.embedding, "contextual_chunk_embeddings", "off") or "off").strip().lower()
     indexing_workers = max(1, int(getattr(cfg.indexing, "indexing_workers", 1) or 1))
+    has_graph_upserts = bool(neo4j is not None and cfg.graph_indexing.build_lexical_graph)
+    cross_file_chunk_batching = _allow_cross_file_chunk_batching(
+        has_graph_upserts=has_graph_upserts,
+        semantic_kg_enabled=bool(neo4j is not None and cfg.graph_indexing.semantic_kg_enabled),
+        has_graph_builder=graph_builder is not None,
+    )
+    pending_cross_file_chunks: list[Chunk] = []
+    indexing_batch = max(10, int(getattr(cfg.indexing, "indexing_batch_size", 100) or 100))
+    cross_file_flush_size = max(indexing_batch, indexing_batch * max(1, indexing_workers))
+
+    async def _upsert_chunk_batch(chunks: list[Chunk]) -> list[Chunk]:
+        nonlocal total_chunks, total_tokens
+        if not chunks:
+            return []
+        total_chunks += len(chunks)
+        chunk_tokens = sum(int(c.token_count or 0) for c in chunks)
+        total_tokens += chunk_tokens
+        INDEX_CHUNKS_CREATED_TOTAL.inc(len(chunks))
+        INDEX_TOKENS_TOTAL.inc(chunk_tokens)
+
+        if skip_dense:
+            with INDEX_STAGE_LATENCY_SECONDS.labels(stage="postgres_upsert_fts").time():
+                await postgres.upsert_fts(write_repo_id, chunks, ts_config=cfg.indexing.postgres_ts_config)
+            if neo4j is not None and cfg.graph_indexing.build_lexical_graph:
+                batch_paths = {str(ch.file_path or "") for ch in chunks}
+                if len(batch_paths) != 1:
+                    raise RuntimeError("Lexical graph upserts require a single-file chunk batch")
+                with INDEX_STAGE_LATENCY_SECONDS.labels(stage="neo4j_upsert_document_chunks").time():
+                    await neo4j.upsert_document_and_chunks(
+                        write_repo_id,
+                        next(iter(batch_paths)),
+                        chunks,
+                        store_embeddings=False,
+                        embedding_property=cfg.graph_indexing.chunk_embedding_property,
+                    )
+            return chunks
+
+        assert embedder is not None
+        if all(c.embedding is not None for c in chunks):
+            embedded = chunks
+        else:
+            contextual_inputs: list[str] | None = None
+            if contextual_mode == "prepend_context":
+                contextual_inputs = [
+                    (
+                        f"[file_path={c.file_path}] [line_range={int(c.start_line)}-{int(c.end_line)}]\n"
+                        f"{c.content}"
+                    )
+                    for c in chunks
+                ]
+            with INDEX_STAGE_LATENCY_SECONDS.labels(stage="embed_chunks").time():
+                embedded = await embedder.embed_chunks(chunks, embed_texts=contextual_inputs)
+        with INDEX_STAGE_LATENCY_SECONDS.labels(stage="postgres_upsert_embeddings").time():
+            await postgres.upsert_embeddings(write_repo_id, embedded)
+        with INDEX_STAGE_LATENCY_SECONDS.labels(stage="postgres_upsert_fts").time():
+            await postgres.upsert_fts(write_repo_id, embedded, ts_config=cfg.indexing.postgres_ts_config)
+        if neo4j is not None and cfg.graph_indexing.build_lexical_graph:
+            batch_paths = {str(ch.file_path or "") for ch in embedded}
+            if len(batch_paths) != 1:
+                raise RuntimeError("Lexical graph upserts require a single-file chunk batch")
+            with INDEX_STAGE_LATENCY_SECONDS.labels(stage="neo4j_upsert_document_chunks").time():
+                await neo4j.upsert_document_and_chunks(
+                    write_repo_id,
+                    next(iter(batch_paths)),
+                    embedded,
+                    store_embeddings=bool(cfg.graph_indexing.store_chunk_embeddings),
+                    embedding_property=cfg.graph_indexing.chunk_embedding_property,
+                )
+        return embedded
+
+    async def _upsert_chunk_batches(
+        chunks: list[Chunk],
+        *,
+        _indexing_batch: int = indexing_batch,
+        _indexing_workers: int = indexing_workers,
+    ) -> list[Chunk]:
+        if not chunks:
+            return []
+        batches = [chunks[i0 : i0 + _indexing_batch] for i0 in range(0, len(chunks), _indexing_batch)]
+        if not _allow_parallel_chunk_batches(
+            indexing_workers=_indexing_workers,
+            batch_count=len(batches),
+            has_graph_upserts=has_graph_upserts,
+        ):
+            out: list[Chunk] = []
+            for b in batches:
+                out.extend(await _upsert_chunk_batch(b))
+            return out
+
+        sem = asyncio.Semaphore(_indexing_workers)
+        results: list[list[Chunk] | None] = [None] * len(batches)
+
+        async def _run_batch(i: int, batch: list[Chunk]) -> None:
+            async with sem:
+                results[i] = await _upsert_chunk_batch(batch)
+
+        await asyncio.gather(*(_run_batch(i, batch) for i, batch in enumerate(batches)))
+        merged: list[Chunk] = []
+        for r in results:
+            if r:
+                merged.extend(r)
+        return merged
+
+    async def _flush_pending_cross_file_chunks(*, force: bool = False) -> None:
+        nonlocal pending_cross_file_chunks
+        if not cross_file_chunk_batching or not pending_cross_file_chunks:
+            return
+        while pending_cross_file_chunks and (force or len(pending_cross_file_chunks) >= cross_file_flush_size):
+            batch_len = len(pending_cross_file_chunks) if force else cross_file_flush_size
+            batch = pending_cross_file_chunks[:batch_len]
+            pending_cross_file_chunks = pending_cross_file_chunks[batch_len:]
+            await _upsert_chunk_batches(batch)
 
     for idx, (rel_path, abs_path) in enumerate(file_entries, start=1):
         ext = "." + rel_path.split(".")[-1] if "." in rel_path else ""
@@ -1605,100 +1737,13 @@ async def _run_index_body(
             and size_bytes >= stream_block_chars
         )
 
-        async def _upsert_chunks_for_file(chunks: list[Chunk], rel_path: str = rel_path) -> list[Chunk]:
-            nonlocal total_chunks, total_tokens
-            if not chunks:
-                return []
-            total_chunks += len(chunks)
-            chunk_tokens = sum(int(c.token_count or 0) for c in chunks)
-            total_tokens += chunk_tokens
-            INDEX_CHUNKS_CREATED_TOTAL.inc(len(chunks))
-            INDEX_TOKENS_TOTAL.inc(chunk_tokens)
-
-            if skip_dense:
-                with INDEX_STAGE_LATENCY_SECONDS.labels(stage="postgres_upsert_fts").time():
-                    await postgres.upsert_fts(write_repo_id, chunks, ts_config=cfg.indexing.postgres_ts_config)
-                if neo4j is not None and cfg.graph_indexing.build_lexical_graph:
-                    with INDEX_STAGE_LATENCY_SECONDS.labels(stage="neo4j_upsert_document_chunks").time():
-                        await neo4j.upsert_document_and_chunks(
-                            write_repo_id,
-                            rel_path,
-                            chunks,
-                            store_embeddings=False,
-                            embedding_property=cfg.graph_indexing.chunk_embedding_property,
-                        )
-                return chunks
-
-            assert embedder is not None
-            if all(c.embedding is not None for c in chunks):
-                embedded = chunks
-            else:
-                contextual_inputs: list[str] | None = None
-                if contextual_mode == "prepend_context":
-                    contextual_inputs = [
-                        (
-                            f"[file_path={rel_path}] [line_range={int(c.start_line)}-{int(c.end_line)}]\n"
-                            f"{c.content}"
-                        )
-                        for c in chunks
-                    ]
-                with INDEX_STAGE_LATENCY_SECONDS.labels(stage="embed_chunks").time():
-                    embedded = await embedder.embed_chunks(chunks, embed_texts=contextual_inputs)
-            with INDEX_STAGE_LATENCY_SECONDS.labels(stage="postgres_upsert_embeddings").time():
-                await postgres.upsert_embeddings(write_repo_id, embedded)
-            with INDEX_STAGE_LATENCY_SECONDS.labels(stage="postgres_upsert_fts").time():
-                await postgres.upsert_fts(write_repo_id, embedded, ts_config=cfg.indexing.postgres_ts_config)
-            if neo4j is not None and cfg.graph_indexing.build_lexical_graph:
-                with INDEX_STAGE_LATENCY_SECONDS.labels(stage="neo4j_upsert_document_chunks").time():
-                    await neo4j.upsert_document_and_chunks(
-                        write_repo_id,
-                        rel_path,
-                        embedded,
-                        store_embeddings=bool(cfg.graph_indexing.store_chunk_embeddings),
-                        embedding_property=cfg.graph_indexing.chunk_embedding_property,
-                    )
-            return embedded
-
-        indexing_batch = max(10, int(getattr(cfg.indexing, "indexing_batch_size", 100) or 100))
-
-        async def _upsert_chunk_batches(
-            chunks: list[Chunk],
-            *,
-            _indexing_batch: int = indexing_batch,
-            _indexing_workers: int = indexing_workers,
-        ) -> list[Chunk]:
-            if not chunks:
-                return []
-            batches = [chunks[i0 : i0 + _indexing_batch] for i0 in range(0, len(chunks), _indexing_batch)]
-            has_graph_upserts = bool(neo4j is not None and cfg.graph_indexing.build_lexical_graph)
-            if not _allow_parallel_chunk_batches(
-                indexing_workers=_indexing_workers,
-                batch_count=len(batches),
-                has_graph_upserts=has_graph_upserts,
-            ):
-                out: list[Chunk] = []
-                for b in batches:
-                    out.extend(await _upsert_chunks_for_file(b))
-                return out
-
-            sem = asyncio.Semaphore(_indexing_workers)
-            results: list[list[Chunk] | None] = [None] * len(batches)
-
-            async def _run_batch(i: int, batch: list[Chunk]) -> None:
-                async with sem:
-                    results[i] = await _upsert_chunks_for_file(batch)
-
-            await asyncio.gather(*(_run_batch(i, batch) for i, batch in enumerate(batches)))
-            merged: list[Chunk] = []
-            for r in results:
-                if r:
-                    merged.extend(r)
-            return merged
-
         # Chunks queued for semantic KG extraction during this file iteration.
         # Keep this as a per-iteration queue; reprocessing prior chunks on every
         # file causes quadratic work and makes indexing appear stalled.
         semantic_pending_chunks: list[Chunk] = []
+
+        if use_stream:
+            await _flush_pending_cross_file_chunks(force=True)
 
         if use_stream:
             base_char = 0
@@ -1792,6 +1837,7 @@ async def _run_index_body(
                 == "late_chunking_local_only"
             )
             if late_mode:
+                await _flush_pending_cross_file_chunks(force=True)
                 from server.indexing.late_chunking import late_chunk_document
 
                 strat = str(getattr(cfg.chunking, "chunking_strategy", "") or "").strip().lower()
@@ -1820,6 +1866,10 @@ async def _run_index_body(
                 chunks = chunker.chunk_file(rel_path, content)
             INDEX_FILES_PROCESSED_TOTAL.inc()
             if not chunks:
+                continue
+            if cross_file_chunk_batching:
+                pending_cross_file_chunks.extend(chunks)
+                await _flush_pending_cross_file_chunks(force=False)
                 continue
             embedded_batches = await _upsert_chunk_batches(chunks)
             if (
@@ -2154,6 +2204,8 @@ async def _run_index_body(
                 # Important: only process each queued chunk once.
                 semantic_pending_chunks.clear()
 
+    await _flush_pending_cross_file_chunks(force=True)
+
     if graph_builder is not None:
         try:
             if _should_run_ast_graph_build(has_graph_builder=True, graph_file_count=len(graph_files)):
@@ -2315,7 +2367,7 @@ async def _background_index_job(request: IndexRequest, queue: asyncio.Queue[dict
             neo4j = Neo4jClient(
                 cfg.graph_storage.neo4j_uri,
                 cfg.graph_storage.neo4j_user,
-                cfg.graph_storage.neo4j_password,
+                cfg.graph_storage.resolve_password(),
                 database=db_name,
             )
             await neo4j.connect()
@@ -2345,7 +2397,7 @@ async def _background_index_job(request: IndexRequest, queue: asyncio.Queue[dict
                 neo4j = Neo4jClient(
                     cfg.graph_storage.neo4j_uri,
                     cfg.graph_storage.neo4j_user,
-                    cfg.graph_storage.neo4j_password,
+                    cfg.graph_storage.resolve_password(),
                     database=db_name,
                 )
                 await neo4j.connect()
@@ -2398,7 +2450,7 @@ async def _background_index_job(request: IndexRequest, queue: asyncio.Queue[dict
                 neo4j = Neo4jClient(
                     cfg.graph_storage.neo4j_uri,
                     cfg.graph_storage.neo4j_user,
-                    cfg.graph_storage.neo4j_password,
+                    cfg.graph_storage.resolve_password(),
                     database=db_name,
                 )
                 await neo4j.connect()
@@ -2457,7 +2509,7 @@ async def _background_index_job(request: IndexRequest, queue: asyncio.Queue[dict
                 neo4j = Neo4jClient(
                     cfg.graph_storage.neo4j_uri,
                     cfg.graph_storage.neo4j_user,
-                    cfg.graph_storage.neo4j_password,
+                    cfg.graph_storage.resolve_password(),
                     database=db_name,
                 )
                 await neo4j.connect()
@@ -3147,7 +3199,7 @@ async def delete_index(corpus_id: str) -> dict[str, Any]:
         neo4j = Neo4jClient(
             cfg.graph_storage.neo4j_uri,
             cfg.graph_storage.neo4j_user,
-            cfg.graph_storage.neo4j_password,
+            cfg.graph_storage.resolve_password(),
             database=db_name,
         )
         await neo4j.connect()

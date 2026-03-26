@@ -2,7 +2,14 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Query
 
-from server.models.tribrid_config_model import ObservabilityStatusResponse, TriBridConfig
+from server.models.tribrid_config_model import (
+    ObservabilityCatalogResponse,
+    ObservabilityIncidentsResponse,
+    ObservabilityStatusResponse,
+    TriBridConfig,
+)
+from server.observability.catalog import build_observability_catalog
+from server.observability.incidents import build_observability_incidents
 from server.observability.status import build_observability_status
 from server.services.config_store import CorpusNotFoundError
 from server.services.config_store import get_config as load_scoped_config
@@ -21,4 +28,36 @@ async def observability_status(
         cfg = await load_scoped_config(repo_id=scope_id)
     except CorpusNotFoundError:
         cfg = await load_scoped_config(repo_id=None)
-    return await build_observability_status(cfg)
+    incidents = await build_observability_incidents(cfg, repo_id=scope_id)
+    status = await build_observability_status(cfg, repo_id=scope_id)
+    status.incident_count = int(incidents.total_count or 0)
+    status.critical_incident_count = int(incidents.critical_count or 0)
+    return status
+
+
+@router.get("/catalog", response_model=ObservabilityCatalogResponse)
+async def observability_catalog(
+    repo: str | None = Query(default=None, description="Optional corpus_id to scope config"),
+    corpus_id: str | None = Query(default=None, description="Alias for repo"),
+    repo_id: str | None = Query(default=None, description="Alias for corpus_id"),
+) -> ObservabilityCatalogResponse:
+    scope_id = (repo or corpus_id or repo_id or "").strip() or None
+    try:
+        cfg = await load_scoped_config(repo_id=scope_id)
+    except CorpusNotFoundError:
+        cfg = await load_scoped_config(repo_id=None)
+    return build_observability_catalog(cfg)
+
+
+@router.get("/incidents", response_model=ObservabilityIncidentsResponse)
+async def observability_incidents(
+    repo: str | None = Query(default=None, description="Optional corpus_id to scope incident correlation"),
+    corpus_id: str | None = Query(default=None, description="Alias for repo"),
+    repo_id: str | None = Query(default=None, description="Alias for corpus_id"),
+) -> ObservabilityIncidentsResponse:
+    scope_id = (repo or corpus_id or repo_id or "").strip() or None
+    try:
+        cfg = await load_scoped_config(repo_id=scope_id)
+    except CorpusNotFoundError:
+        cfg = await load_scoped_config(repo_id=None)
+    return await build_observability_incidents(cfg, repo_id=scope_id)

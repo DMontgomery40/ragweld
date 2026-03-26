@@ -27,6 +27,7 @@ from server.lineage import (
     make_ref,
 )
 from server.models.tribrid_config_model import (
+    AgentTrainControlPlaneStatusResponse,
     AgentTrainDiffRequest,
     AgentTrainDiffResponse,
     AgentTrainMetricEvent,
@@ -39,9 +40,16 @@ from server.models.tribrid_config_model import (
     ChunkMatch,
     EvalDatasetItem,
     OkResponse,
+    TriBridConfig,
 )
 from server.retrieval.mlx_qwen3 import mlx_is_available
+from server.services.config_store import CorpusNotFoundError
 from server.services.config_store import get_config as load_scoped_config
+from server.training.control_plane import (
+    build_agent_control_plane_status,
+    build_agent_run_links,
+    build_agent_run_operator_hint,
+)
 from server.training.mlx_qwen3_agent_trainer import (
     deterministic_split,
     evaluate_mlx_qwen3_agent_loss,
@@ -153,11 +161,27 @@ def _capture_model_artifact_ref(run_id: str, repo_id: str) -> Any | None:
     return make_ref("agent_model_artifact", version.version_id)
 
 
+def _cfg_from_run_snapshot(run: AgentTrainRun) -> TriBridConfig | None:
+    try:
+        return TriBridConfig.model_validate(run.config_snapshot)
+    except Exception:
+        return None
+
+
+def _apply_run_control_plane_metadata(run: AgentTrainRun, cfg: TriBridConfig) -> AgentTrainRun:
+    run.external_links = build_agent_run_links(run, cfg)
+    if not str(run.operator_hint or "").strip():
+        run.operator_hint = build_agent_run_operator_hint(run, cfg)
+    return run
+
+
 def _attach_lineage(run: AgentTrainRun, cfg: Any, *, promoted: bool = False) -> AgentTrainRun:
     repo_id = str(run.repo_id)
     model_ref = _capture_model_artifact_ref(run.run_id, repo_id)
     if model_ref is not None:
         run.model_artifact_ref = model_ref
+    if isinstance(cfg, TriBridConfig):
+        run = _apply_run_control_plane_metadata(run, cfg)
     try:
         dataset_rows = [row.model_dump(mode="json", by_alias=True) for row in _load_dataset(corpus_id=repo_id)]
     except Exception:
@@ -300,7 +324,11 @@ def _load_run(run_id: str) -> AgentTrainRun:
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to read agent train run: {e}") from e
     run = AgentTrainRun.model_validate(raw)
-    return _maybe_reconcile_run(run)
+    run = _maybe_reconcile_run(run)
+    cfg = _cfg_from_run_snapshot(run)
+    if cfg is not None:
+        run = _apply_run_control_plane_metadata(run, cfg)
+    return run
 
 
 def _save_run(run: AgentTrainRun) -> None:
@@ -915,6 +943,20 @@ async def get_train_profile() -> OkResponse:
     return OkResponse(ok=True)
 
 
+@router.get("/agent/train/control-plane/status", response_model=AgentTrainControlPlaneStatusResponse)
+async def get_train_control_plane_status(
+    repo: str | None = Query(default=None, description="Optional corpus_id to scope config"),
+    corpus_id: str | None = Query(default=None, description="Alias for repo"),
+    repo_id: str | None = Query(default=None, description="Alias for corpus_id"),
+) -> AgentTrainControlPlaneStatusResponse:
+    scope_id = (repo or corpus_id or repo_id or "").strip() or None
+    try:
+        cfg = await load_scoped_config(repo_id=scope_id)
+    except CorpusNotFoundError:
+        cfg = await load_scoped_config(repo_id=None)
+    return await build_agent_control_plane_status(cfg)
+
+
 @router.get("/agent/train/runs", response_model=AgentTrainRunsResponse)
 async def list_train_runs(
     corpus_id: str | None = Query(default=None, description="Corpus identifier for corpus scope"),
@@ -950,6 +992,11 @@ async def list_train_runs(
                 completed_at=run.completed_at,
                 primary_metric_best=run.summary.primary_metric_best,
                 primary_metric_final=run.summary.primary_metric_final,
+                workflow_backend=run.workflow_backend,
+                tracking_backend=run.tracking_backend,
+                execution_backend=run.execution_backend,
+                workflow_run_id=run.workflow_run_id,
+                tracking_run_id=run.tracking_run_id,
                 bundle_id=run.bundle_id,
                 lineage_ref=run.lineage_ref,
             )
@@ -1001,8 +1048,12 @@ async def start_train_run(request: AgentTrainStartRequest) -> AgentTrainStartRes
         lr=float(request.lr) if request.lr is not None else float(cfg.training.reranker_train_lr),
         warmup_ratio=float(request.warmup_ratio) if request.warmup_ratio is not None else float(cfg.training.reranker_warmup_ratio),
         max_length=int(request.max_length) if request.max_length is not None else int(getattr(cfg.reranking, "tribrid_reranker_maxlen", 512) or 512),
+        workflow_backend="local",
+        tracking_backend="local",
+        execution_backend="mlx_qwen3",
         input_bundle_id=current_bundle.bundle_id,
     )
+    run = _apply_run_control_plane_metadata(run, cfg)
 
     # Persist request-level dataset override into the run snapshot so the background
     # job can apply the correct precedence without rereading the request.

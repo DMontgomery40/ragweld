@@ -1,0 +1,164 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 0.5 },
+              { "color": "red", "value": 1.0 }
+            ]
+          },
+          "unit": "s"
+        }
+      },
+      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 0 },
+      "id": 1,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "targets": [
+        { "expr": "histogram_quantile(0.95, rate(tribrid_search_latency_seconds_bucket[5m]))", "legendFormat": "p95" }
+      ],
+      "title": "Search Latency (p95)",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 0.01 },
+              { "color": "red", "value": 0.05 }
+            ]
+          },
+          "unit": "percentunit"
+        }
+      },
+      "gridPos": { "h": 6, "w": 8, "x": 8, "y": 0 },
+      "id": 2,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(tribrid_search_errors_total[5m])) / clamp_min(sum(rate(tribrid_search_requests_total[5m])), 1)",
+          "legendFormat": "error rate"
+        }
+      ],
+      "title": "Search Error Rate",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1 },
+              { "color": "red", "value": 3 }
+            ]
+          },
+          "unit": "none"
+        }
+      },
+      "gridPos": { "h": 6, "w": 8, "x": 16, "y": 0 },
+      "id": 3,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "targets": [
+        { "expr": "increase(tribrid_reranker_train_runs_total{outcome=\"failed\"}[24h])", "legendFormat": "failed" }
+      ],
+      "title": "Training Failures (24h)",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 2,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "unit": "reqps"
+        }
+      },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 6 },
+      "id": 4,
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        { "expr": "sum(rate(tribrid_search_requests_total[5m]))", "legendFormat": "searches/s" }
+      ],
+      "title": "Traffic Overview",
+      "type": "timeseries"
+    },
+    {
+      "gridPos": { "h": 7, "w": 24, "x": 0, "y": 14 },
+      "id": 5,
+      "options": {
+        "content": "## On-call Workflow\nStart here when something pages.\n\n- Check latency, error rate, and active training failures.\n- Jump to Grafana Incidents and the ragweld workbench links for eval, benchmark, and prompt regressions.\n- Use the shared dashboard variables to keep the same corpus/run/model context across tabs.",
+        "mode": "markdown"
+      },
+      "title": "Operator Notes",
+      "type": "text"
+    }
+  ],
+  "refresh": "10s",
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": ["ragweld", "observability", "oncall"],
+  "templating": {
+    "list": [
+      { "name": "corpus_id", "label": "Corpus", "type": "textbox", "query": "*", "current": { "text": "*", "value": "*" } },
+      { "name": "run_id", "label": "Run", "type": "textbox", "query": "*", "current": { "text": "*", "value": "*" } },
+      { "name": "model", "label": "Model", "type": "textbox", "query": "*", "current": { "text": "*", "value": "*" } },
+      { "name": "provider", "label": "Provider", "type": "textbox", "query": "*", "current": { "text": "*", "value": "*" } },
+      { "name": "prompt_set", "label": "Prompt Set", "type": "textbox", "query": "current", "current": { "text": "current", "value": "current" } },
+      { "name": "workflow_id", "label": "Workflow", "type": "textbox", "query": "*", "current": { "text": "*", "value": "*" } }
+    ]
+  },
+  "time": { "from": "now-1h", "to": "now" },
+  "timepicker": {},
+  "timezone": "",
+  "title": "On-call Overview",
+  "uid": "ragweld-oncall-overview",
+  "version": 1,
+  "weekStart": ""
+}
