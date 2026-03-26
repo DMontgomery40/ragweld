@@ -2,9 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import ForceGraph2D from 'react-force-graph-2d';
 import { useGraph } from '@/hooks/useGraph';
+import { useIndexing } from '@/hooks/useIndexing';
 import { SyntheticCallout } from '@/components/RAG/SyntheticCallout';
 import { useRepoStore } from '@/stores/useRepoStore';
-import type { Community, Entity, Relationship } from '@/types/generated';
+import type { Community, Entity, IndexStatus, Relationship } from '@/types/generated';
 
 /** Node with computed degree for importance labeling */
 type NodeWithDegree = Entity & { __degree?: number };
@@ -41,6 +42,12 @@ function formatRelProvenance(r: Relationship): string {
 export function GraphSubtab() {
   const { repos, activeRepo, loadRepos, setActiveRepo } = useRepoStore();
   const {
+    status: activeIndexStatus,
+    stats: activeIndexSnapshot,
+    fetchStatus: fetchIndexStatus,
+    fetchStats: fetchIndexStats,
+  } = useIndexing();
+  const {
     entities,
     relationships,
     communities,
@@ -69,6 +76,7 @@ export function GraphSubtab() {
   const [accentColor, setAccentColor] = useState<string>('#00ff88');
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [fullscreenAnimating, setFullscreenAnimating] = useState(false);
+  const lastSeenIndexStateRef = useRef<IndexStatus['status'] | null>(null);
   const fgRef = useRef<any>(null);
   const fullscreenFgRef = useRef<any>(null);
   const vizCanvasRef = useRef<HTMLDivElement | null>(null);
@@ -79,6 +87,51 @@ export function GraphSubtab() {
   useEffect(() => {
     if (!repos.length) void loadRepos();
   }, [repos.length, loadRepos]);
+
+  useEffect(() => {
+    if (!activeRepo) {
+      lastSeenIndexStateRef.current = null;
+      return;
+    }
+
+    let cancelled = false;
+    let timer: number | null = null;
+
+    const poll = async () => {
+      try {
+        const [nextStatus] = await Promise.all([
+          fetchIndexStatus(activeRepo, { quiet: true }).catch(() => null),
+          fetchIndexStats(activeRepo, { quiet: true }).catch(() => null),
+        ]);
+        if (cancelled) return;
+
+        const previousState = lastSeenIndexStateRef.current;
+        const currentState = nextStatus?.status ?? null;
+        lastSeenIndexStateRef.current = currentState;
+
+        if (previousState === 'indexing' && currentState === 'complete') {
+          await loadGraph();
+        }
+
+        const delayMs = currentState === 'indexing' ? 3000 : 15000;
+        timer = window.setTimeout(() => {
+          void poll();
+        }, delayMs);
+      } catch {
+        if (cancelled) return;
+        timer = window.setTimeout(() => {
+          void poll();
+        }, 15000);
+      }
+    };
+
+    void poll();
+
+    return () => {
+      cancelled = true;
+      if (timer !== null) window.clearTimeout(timer);
+    };
+  }, [activeRepo, fetchIndexStatus, fetchIndexStats, loadGraph]);
 
   useEffect(() => {
     // Pull the CSS theme accent into canvas-land (ForceGraph uses canvas fillStyles).
@@ -361,6 +414,18 @@ export function GraphSubtab() {
     return Array.from(types).sort((a, b) => a.localeCompare(b));
   }, [stats, relationships]);
 
+  const indexProgressPercent = useMemo(() => {
+    const raw = Number(activeIndexStatus?.progress ?? 0);
+    return Math.max(0, Math.min(100, Math.round(raw * 100)));
+  }, [activeIndexStatus?.progress]);
+
+  const isGraphPromotionPending = activeIndexStatus?.status === 'indexing';
+  const promotedSnapshotTime = String(activeIndexSnapshot?.last_indexed || '').trim();
+  const activeIndexStartedAt = String(activeIndexStatus?.started_at || '').trim();
+  const promotedGraphIsStale =
+    isGraphPromotionPending &&
+    (!!activeIndexSnapshot?.last_indexed || (stats?.total_entities ?? 0) === 0);
+
   const handleSearch = async () => {
     await searchEntities(entityQuery, 200);
   };
@@ -424,6 +489,55 @@ export function GraphSubtab() {
       </div>
 
       <SyntheticCallout context="graph" />
+
+      {promotedGraphIsStale ? (
+        <div
+          style={{
+            background: 'rgba(var(--accent-rgb), 0.08)',
+            border: '1px solid rgba(var(--accent-rgb), 0.28)',
+            borderRadius: '12px',
+            padding: '14px 16px',
+            marginBottom: '16px',
+          }}
+          data-testid="graph-staging-banner"
+        >
+          <div style={{ fontSize: '13px', fontWeight: 800, color: 'var(--fg)' }}>
+            GraphRAG reindex is still building in staging.
+          </div>
+          <div style={{ marginTop: '6px', fontSize: '12px', color: 'var(--fg-muted)', lineHeight: 1.55 }}>
+            This panel shows the last promoted graph. During an active reindex, graph stats can stay at zero until the
+            new run finishes and promotes.
+          </div>
+          <div
+            style={{
+              display: 'flex',
+              gap: '14px',
+              flexWrap: 'wrap',
+              marginTop: '10px',
+              fontSize: '12px',
+            }}
+          >
+            <span style={{ color: 'var(--fg)' }}>
+              <strong style={{ color: 'var(--accent)' }}>{indexProgressPercent}%</strong> complete
+            </span>
+            {activeIndexStatus?.current_file ? (
+              <span style={{ color: 'var(--fg-muted)' }}>
+                Current file: <span style={{ color: 'var(--fg)' }}>{activeIndexStatus.current_file}</span>
+              </span>
+            ) : null}
+            {activeIndexStartedAt ? (
+              <span style={{ color: 'var(--fg-muted)' }}>
+                Started: <span style={{ color: 'var(--fg)' }}>{new Date(activeIndexStartedAt).toLocaleString()}</span>
+              </span>
+            ) : null}
+            {promotedSnapshotTime ? (
+              <span style={{ color: 'var(--fg-muted)' }}>
+                Last promoted: <span style={{ color: 'var(--fg)' }}>{new Date(promotedSnapshotTime).toLocaleString()}</span>
+              </span>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
 
       {error && (
         <div
