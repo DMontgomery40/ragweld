@@ -1,6 +1,6 @@
 {
   "currency": "USD",
-  "last_updated": "2026-03-26",
+  "last_updated": "2026-03-31",
   "sources": [
     "https://openai.com/api/pricing/ (2026-02-07)",
     "https://www.anthropic.com/pricing (2026-02-07)",
@@ -10,7 +10,7 @@
     "https://mistral.ai/pricing (2025-11-29)",
     "https://api-docs.deepseek.com/quick_start/pricing (2025-11-29)",
     "https://jina.ai/embeddings/ (2025-11-29)",
-    "https://openrouter.ai/api/v1/models (2026-03-26)"
+    "https://openrouter.ai/api/v1/models (2026-03-31)"
   ],
   "models": [
     {
@@ -763,6 +763,34 @@
       ],
       "selection_status": "runtime_selectable",
       "selection_reason": null
+    },
+    {
+      "provider": "google",
+      "family": "lyria-3-clip-preview",
+      "model": "lyria-3-clip-preview",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 1048576,
+      "input_per_1k": 0.0,
+      "output_per_1k": 0.0,
+      "base_url": "https://generativelanguage.googleapis.com",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "google",
+      "family": "lyria-3-pro-preview",
+      "model": "lyria-3-pro-preview",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 1048576,
+      "input_per_1k": 0.0,
+      "output_per_1k": 0.0,
+      "base_url": "https://generativelanguage.googleapis.com",
+      "notes": "Added automatically from OpenRouter feed."
     },
     {
       "provider": "huggingface",
