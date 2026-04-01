@@ -1,6 +1,6 @@
 {
   "currency": "USD",
-  "last_updated": "2026-03-31",
+  "last_updated": "2026-04-01",
   "sources": [
     "https://openai.com/api/pricing/ (2026-02-07)",
     "https://www.anthropic.com/pricing (2026-02-07)",
@@ -10,7 +10,7 @@
     "https://mistral.ai/pricing (2025-11-29)",
     "https://api-docs.deepseek.com/quick_start/pricing (2025-11-29)",
     "https://jina.ai/embeddings/ (2025-11-29)",
-    "https://openrouter.ai/api/v1/models (2026-03-31)"
+    "https://openrouter.ai/api/v1/models (2026-04-01)"
   ],
   "models": [
     {
@@ -2465,6 +2465,25 @@
     },
     {
       "provider": "xai",
+      "family": "grok-3-beta",
+      "model": "grok-3-beta",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 131072,
+      "input_per_1k": 0.003,
+      "output_per_1k": 0.015,
+      "base_url": "https://api.x.ai/v1",
+      "notes": "Added automatically from OpenRouter feed.",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
+    },
+    {
+      "provider": "xai",
       "family": "grok-3-mini",
       "model": "grok-3-mini",
       "components": [
@@ -2503,25 +2522,6 @@
     },
     {
       "provider": "xai",
-      "family": "grok-4",
-      "model": "grok-4",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "input_per_1k": 0.003,
-      "output_per_1k": 0.015,
-      "context": 256000,
-      "notes": "Grok 3 base (source: per 1M = $3/$15)",
-      "base_url": "https://api.x.ai/v1",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
-    },
-    {
-      "provider": "xai",
       "family": "grok-4.1-fast",
       "model": "grok-4.1-fast",
       "components": [
@@ -2541,8 +2541,27 @@
     },
     {
       "provider": "xai",
-      "family": "grok-4.20-beta",
-      "model": "grok-4.20-beta",
+      "family": "grok-4.20",
+      "model": "grok-4.20",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "input_per_1k": 0.002,
+      "output_per_1k": 0.006,
+      "context": 2000000,
+      "notes": "Grok 3 base (source: per 1M = $3/$15)",
+      "base_url": "https://api.x.ai/v1",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
+    },
+    {
+      "provider": "xai",
+      "family": "grok-4.20-multi-agent",
+      "model": "grok-4.20-multi-agent",
       "components": [
         "GEN"
       ],
@@ -2551,12 +2570,7 @@
       "input_per_1k": 0.002,
       "output_per_1k": 0.006,
       "base_url": "https://api.x.ai/v1",
-      "notes": "Added automatically from OpenRouter feed.",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "notes": "Added automatically from OpenRouter feed."
     },
     {
       "provider": "xai",
@@ -2570,7 +2584,7 @@
       "input_per_1k": 0.002,
       "output_per_1k": 0.006,
       "base_url": "https://api.x.ai/v1",
-      "notes": "Added automatically from OpenRouter feed.",
+      "notes": "Added automatically from OpenRouter feed. | [auto-refresh] deprecated_on=2026-04-01",
       "selection_roles": [
         "generation"
       ],
