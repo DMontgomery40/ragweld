@@ -1,6 +1,6 @@
 {
   "currency": "USD",
-  "last_updated": "2026-04-01",
+  "last_updated": "2026-04-03",
   "sources": [
     "https://openai.com/api/pricing/ (2026-02-07)",
     "https://www.anthropic.com/pricing (2026-02-07)",
@@ -10,7 +10,7 @@
     "https://mistral.ai/pricing (2025-11-29)",
     "https://api-docs.deepseek.com/quick_start/pricing (2025-11-29)",
     "https://jina.ai/embeddings/ (2025-11-29)",
-    "https://openrouter.ai/api/v1/models (2026-04-01)"
+    "https://openrouter.ai/api/v1/models (2026-04-03)"
   ],
   "models": [
     {
@@ -763,6 +763,20 @@
       ],
       "selection_status": "runtime_selectable",
       "selection_reason": null
+    },
+    {
+      "provider": "google",
+      "family": "gemma-4-31b-it",
+      "model": "gemma-4-31b-it",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 262144,
+      "input_per_1k": 0.00014,
+      "output_per_1k": 0.0004,
+      "base_url": "https://generativelanguage.googleapis.com",
+      "notes": "Added automatically from OpenRouter feed."
     },
     {
       "provider": "google",
