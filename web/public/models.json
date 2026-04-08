@@ -1,6 +1,6 @@
 {
   "currency": "USD",
-  "last_updated": "2026-04-04",
+  "last_updated": "2026-04-08",
   "sources": [
     "https://openai.com/api/pricing/ (2026-02-07)",
     "https://www.anthropic.com/pricing (2026-02-07)",
@@ -10,7 +10,7 @@
     "https://mistral.ai/pricing (2025-11-29)",
     "https://api-docs.deepseek.com/quick_start/pricing (2025-11-29)",
     "https://jina.ai/embeddings/ (2025-11-29)",
-    "https://openrouter.ai/api/v1/models (2026-04-04)"
+    "https://openrouter.ai/api/v1/models (2026-04-08)"
   ],
   "models": [
     {
@@ -50,6 +50,20 @@
       ],
       "selection_status": "runtime_selectable",
       "selection_reason": null
+    },
+    {
+      "provider": "anthropic",
+      "family": "claude-opus-4.6-fast",
+      "model": "claude-opus-4.6-fast",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 1000000,
+      "input_per_1k": 0.03,
+      "output_per_1k": 0.15,
+      "base_url": "https://api.anthropic.com",
+      "notes": "Added automatically from OpenRouter feed."
     },
     {
       "provider": "anthropic",
