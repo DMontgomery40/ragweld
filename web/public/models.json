@@ -1,6 +1,6 @@
 {
   "currency": "USD",
-  "last_updated": "2026-04-16",
+  "last_updated": "2026-04-17",
   "sources": [
     "https://openai.com/api/pricing/ (2026-02-07)",
     "https://www.anthropic.com/pricing (2026-02-07)",
@@ -10,7 +10,7 @@
     "https://mistral.ai/pricing (2025-11-29)",
     "https://api-docs.deepseek.com/quick_start/pricing (2025-11-29)",
     "https://jina.ai/embeddings/ (2025-11-29)",
-    "https://openrouter.ai/api/v1/models (2026-04-16)"
+    "https://openrouter.ai/api/v1/models (2026-04-17)"
   ],
   "models": [
     {
@@ -34,8 +34,22 @@
     },
     {
       "provider": "anthropic",
-      "family": "claude-opus-4.6",
-      "model": "claude-opus-4.6",
+      "family": "claude-opus-4.6-fast",
+      "model": "claude-opus-4.6-fast",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 1000000,
+      "input_per_1k": 0.03,
+      "output_per_1k": 0.15,
+      "base_url": "https://api.anthropic.com",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "anthropic",
+      "family": "claude-opus-4.7",
+      "model": "claude-opus-4.7",
       "components": [
         "GEN"
       ],
@@ -50,20 +64,6 @@
       ],
       "selection_status": "runtime_selectable",
       "selection_reason": null
-    },
-    {
-      "provider": "anthropic",
-      "family": "claude-opus-4.6-fast",
-      "model": "claude-opus-4.6-fast",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 1000000,
-      "input_per_1k": 0.03,
-      "output_per_1k": 0.15,
-      "base_url": "https://api.anthropic.com",
-      "notes": "Added automatically from OpenRouter feed."
     },
     {
       "provider": "anthropic",
@@ -787,8 +787,8 @@
       ],
       "unit": "1k_tokens",
       "context": 262144,
-      "input_per_1k": 7e-05,
-      "output_per_1k": 0.0004,
+      "input_per_1k": 8e-05,
+      "output_per_1k": 0.00035,
       "base_url": "https://generativelanguage.googleapis.com",
       "notes": "Added automatically from OpenRouter feed."
     },
@@ -1826,8 +1826,8 @@
     },
     {
       "provider": "openai",
-      "family": "gpt-4o-mini",
-      "model": "gpt-4o-mini",
+      "family": "gpt-4o-mini-2024-07-18",
+      "model": "gpt-4o-mini-2024-07-18",
       "components": [
         "GEN"
       ],
