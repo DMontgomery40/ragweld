@@ -1,6 +1,6 @@
 {
   "currency": "USD",
-  "last_updated": "2026-04-21",
+  "last_updated": "2026-04-22",
   "sources": [
     "https://openai.com/api/pricing/ (2026-02-07)",
     "https://www.anthropic.com/pricing (2026-02-07)",
@@ -10,7 +10,7 @@
     "https://mistral.ai/pricing (2025-11-29)",
     "https://api-docs.deepseek.com/quick_start/pricing (2025-11-29)",
     "https://jina.ai/embeddings/ (2025-11-29)",
-    "https://openrouter.ai/api/v1/models (2026-04-21)"
+    "https://openrouter.ai/api/v1/models (2026-04-22)"
   ],
   "models": [
     {
@@ -787,7 +787,7 @@
       ],
       "unit": "1k_tokens",
       "context": 262144,
-      "input_per_1k": 8e-05,
+      "input_per_1k": 7e-05,
       "output_per_1k": 0.00035,
       "base_url": "https://generativelanguage.googleapis.com",
       "notes": "Added automatically from OpenRouter feed."
@@ -1826,8 +1826,8 @@
     },
     {
       "provider": "openai",
-      "family": "gpt-4o-mini",
-      "model": "gpt-4o-mini",
+      "family": "gpt-4o-mini-2024-07-18",
+      "model": "gpt-4o-mini-2024-07-18",
       "components": [
         "GEN"
       ],
@@ -1872,25 +1872,6 @@
       "unit": "1k_tokens",
       "context": 128000,
       "input_per_1k": 0.0025,
-      "output_per_1k": 0.01,
-      "base_url": "https://api.openai.com/v1",
-      "notes": "Added automatically from OpenRouter feed.",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
-    },
-    {
-      "provider": "openai",
-      "family": "gpt-5-image",
-      "model": "gpt-5-image",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 400000,
-      "input_per_1k": 0.01,
       "output_per_1k": 0.01,
       "base_url": "https://api.openai.com/v1",
       "notes": "Added automatically from OpenRouter feed.",
@@ -2005,6 +1986,25 @@
       "unit": "1k_tokens",
       "context": 1050000,
       "input_per_1k": 0.0025,
+      "output_per_1k": 0.015,
+      "base_url": "https://api.openai.com/v1",
+      "notes": "Added automatically from OpenRouter feed.",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
+    },
+    {
+      "provider": "openai",
+      "family": "gpt-5.4-image-2",
+      "model": "gpt-5.4-image-2",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 272000,
+      "input_per_1k": 0.008,
       "output_per_1k": 0.015,
       "base_url": "https://api.openai.com/v1",
       "notes": "Added automatically from OpenRouter feed.",
