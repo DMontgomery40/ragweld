@@ -1,6 +1,6 @@
 {
   "currency": "USD",
-  "last_updated": "2026-04-24",
+  "last_updated": "2026-04-25",
   "sources": [
     "https://openai.com/api/pricing/ (2026-02-07)",
     "https://www.anthropic.com/pricing (2026-02-07)",
@@ -10,7 +10,7 @@
     "https://mistral.ai/pricing (2025-11-29)",
     "https://api-docs.deepseek.com/quick_start/pricing (2025-11-29)",
     "https://jina.ai/embeddings/ (2025-11-29)",
-    "https://openrouter.ai/api/v1/models (2026-04-24)"
+    "https://openrouter.ai/api/v1/models (2026-04-25)"
   ],
   "models": [
     {
@@ -2006,25 +2006,6 @@
     },
     {
       "provider": "openai",
-      "family": "gpt-5.4",
-      "model": "gpt-5.4",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 1050000,
-      "input_per_1k": 0.0025,
-      "output_per_1k": 0.015,
-      "base_url": "https://api.openai.com/v1",
-      "notes": "Added automatically from OpenRouter feed.",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
-    },
-    {
-      "provider": "openai",
       "family": "gpt-5.4-image-2",
       "model": "gpt-5.4-image-2",
       "components": [
@@ -2082,8 +2063,27 @@
     },
     {
       "provider": "openai",
-      "family": "gpt-5.4-pro",
-      "model": "gpt-5.4-pro",
+      "family": "gpt-5.5",
+      "model": "gpt-5.5",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 1050000,
+      "input_per_1k": 0.005,
+      "output_per_1k": 0.03,
+      "base_url": "https://api.openai.com/v1",
+      "notes": "Added automatically from OpenRouter feed.",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
+    },
+    {
+      "provider": "openai",
+      "family": "gpt-5.5-pro",
+      "model": "gpt-5.5-pro",
       "components": [
         "GEN"
       ],
