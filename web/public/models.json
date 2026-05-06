@@ -1,6 +1,6 @@
 {
   "currency": "USD",
-  "last_updated": "2026-05-05",
+  "last_updated": "2026-05-06",
   "sources": [
     "https://openai.com/api/pricing/ (2026-02-07)",
     "https://www.anthropic.com/pricing (2026-02-07)",
@@ -10,7 +10,7 @@
     "https://mistral.ai/pricing (2025-11-29)",
     "https://api-docs.deepseek.com/quick_start/pricing (2025-11-29)",
     "https://jina.ai/embeddings/ (2025-11-29)",
-    "https://openrouter.ai/api/v1/models (2026-05-05)"
+    "https://openrouter.ai/api/v1/models (2026-05-06)"
   ],
   "models": [
     {
@@ -2136,6 +2136,20 @@
       ],
       "selection_status": "runtime_selectable",
       "selection_reason": null
+    },
+    {
+      "provider": "openai",
+      "family": "gpt-chat-latest",
+      "model": "gpt-chat-latest",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 400000,
+      "input_per_1k": 0.005,
+      "output_per_1k": 0.03,
+      "base_url": "https://api.openai.com/v1",
+      "notes": "Added automatically from OpenRouter feed."
     },
     {
       "provider": "openai",
