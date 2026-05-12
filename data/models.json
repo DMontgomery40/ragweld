@@ -1,6 +1,6 @@
 {
   "currency": "USD",
-  "last_updated": "2026-05-08",
+  "last_updated": "2026-05-12",
   "sources": [
     "https://openai.com/api/pricing/ (2026-02-07)",
     "https://www.anthropic.com/pricing (2026-02-07)",
@@ -10,7 +10,7 @@
     "https://mistral.ai/pricing (2025-11-29)",
     "https://api-docs.deepseek.com/quick_start/pricing (2025-11-29)",
     "https://jina.ai/embeddings/ (2025-11-29)",
-    "https://openrouter.ai/api/v1/models (2026-05-08)"
+    "https://openrouter.ai/api/v1/models (2026-05-12)"
   ],
   "models": [
     {
@@ -316,9 +316,9 @@
         "GEN"
       ],
       "unit": "1k_tokens",
-      "context": 32768,
-      "input_per_1k": 0.00015,
-      "output_per_1k": 0.00075,
+      "context": 163840,
+      "input_per_1k": 0.00021,
+      "output_per_1k": 0.00079,
       "base_url": "https://api.deepseek.com/v1",
       "notes": "Added automatically from OpenRouter feed.",
       "selection_roles": [
@@ -829,8 +829,8 @@
       ],
       "unit": "1k_tokens",
       "context": 262144,
-      "input_per_1k": 0.00013,
-      "output_per_1k": 0.00038,
+      "input_per_1k": 0.00012,
+      "output_per_1k": 0.00037,
       "base_url": "https://generativelanguage.googleapis.com",
       "notes": "Added automatically from OpenRouter feed."
     },
