@@ -1,6 +1,6 @@
 {
   "currency": "USD",
-  "last_updated": "2026-05-19",
+  "last_updated": "2026-05-20",
   "sources": [
     "https://openai.com/api/pricing/ (2026-02-07)",
     "https://www.anthropic.com/pricing (2026-02-07)",
@@ -10,7 +10,7 @@
     "https://mistral.ai/pricing (2025-11-29)",
     "https://api-docs.deepseek.com/quick_start/pricing (2025-11-29)",
     "https://jina.ai/embeddings/ (2025-11-29)",
-    "https://openrouter.ai/api/v1/models (2026-05-19)"
+    "https://openrouter.ai/api/v1/models (2026-05-20)"
   ],
   "models": [
     {
@@ -508,25 +508,6 @@
     },
     {
       "provider": "google",
-      "family": "gemini-2.5-flash",
-      "model": "gemini-2.5-flash",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "input_per_1k": 0.0003,
-      "output_per_1k": 0.0025,
-      "context": 1048576,
-      "notes": "Gemini 2.0 Flash (source: per 1M = $0.10/$0.40)",
-      "base_url": "https://generativelanguage.googleapis.com",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
-    },
-    {
-      "provider": "google",
       "family": "gemini-2.5-flash-image",
       "model": "gemini-2.5-flash-image",
       "components": [
@@ -690,6 +671,25 @@
       "output_per_1k": 0.012,
       "base_url": "https://generativelanguage.googleapis.com",
       "notes": "Added automatically from OpenRouter feed.",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
+    },
+    {
+      "provider": "google",
+      "family": "gemini-3.5-flash",
+      "model": "gemini-3.5-flash",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "input_per_1k": 0.0015,
+      "output_per_1k": 0.009,
+      "context": 1048576,
+      "notes": "Gemini 2.0 Flash (source: per 1M = $0.10/$0.40)",
+      "base_url": "https://generativelanguage.googleapis.com",
       "selection_roles": [
         "generation"
       ],
@@ -1854,8 +1854,8 @@
     },
     {
       "provider": "openai",
-      "family": "gpt-4o-mini",
-      "model": "gpt-4o-mini",
+      "family": "gpt-4o-mini-2024-07-18",
+      "model": "gpt-4o-mini-2024-07-18",
       "components": [
         "GEN"
       ],
