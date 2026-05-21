@@ -1,6 +1,6 @@
 {
   "currency": "USD",
-  "last_updated": "2026-05-20",
+  "last_updated": "2026-05-21",
   "sources": [
     "https://openai.com/api/pricing/ (2026-02-07)",
     "https://www.anthropic.com/pricing (2026-02-07)",
@@ -10,7 +10,7 @@
     "https://mistral.ai/pricing (2025-11-29)",
     "https://api-docs.deepseek.com/quick_start/pricing (2025-11-29)",
     "https://jina.ai/embeddings/ (2025-11-29)",
-    "https://openrouter.ai/api/v1/models (2026-05-20)"
+    "https://openrouter.ai/api/v1/models (2026-05-21)"
   ],
   "models": [
     {
@@ -2674,6 +2674,20 @@
       ],
       "selection_status": "runtime_selectable",
       "selection_reason": null
+    },
+    {
+      "provider": "xai",
+      "family": "grok-build-0.1",
+      "model": "grok-build-0.1",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 256000,
+      "input_per_1k": 0.001,
+      "output_per_1k": 0.002,
+      "base_url": "https://api.x.ai/v1",
+      "notes": "Added automatically from OpenRouter feed."
     },
     {
       "provider": "xai",
