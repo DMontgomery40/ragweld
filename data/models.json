@@ -1,6 +1,6 @@
 {
   "currency": "USD",
-  "last_updated": "2026-05-23",
+  "last_updated": "2026-05-25",
   "sources": [
     "https://openai.com/api/pricing/ (2026-02-07)",
     "https://www.anthropic.com/pricing (2026-02-07)",
@@ -10,7 +10,7 @@
     "https://mistral.ai/pricing (2025-11-29)",
     "https://api-docs.deepseek.com/quick_start/pricing (2025-11-29)",
     "https://jina.ai/embeddings/ (2025-11-29)",
-    "https://openrouter.ai/api/v1/models (2026-05-23)"
+    "https://openrouter.ai/api/v1/models (2026-05-25)"
   ],
   "models": [
     {
@@ -297,9 +297,9 @@
         "GEN"
       ],
       "unit": "1k_tokens",
-      "input_per_1k": 0.00032,
-      "output_per_1k": 0.00089,
-      "context": 163840,
+      "input_per_1k": 0.0002288,
+      "output_per_1k": 0.0009144,
+      "context": 131072,
       "notes": "DeepSeek V3.2-Exp non-thinking (source: per 1M = $0.28/$0.42, cache hit $0.028)",
       "base_url": "https://api.deepseek.com/v1",
       "selection_roles": [
