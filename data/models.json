@@ -1,6 +1,6 @@
 {
   "currency": "USD",
-  "last_updated": "2026-05-29",
+  "last_updated": "2026-05-30",
   "sources": [
     "https://openai.com/api/pricing/ (2026-02-07)",
     "https://www.anthropic.com/pricing (2026-02-07)",
@@ -10,7 +10,7 @@
     "https://mistral.ai/pricing (2025-11-29)",
     "https://api-docs.deepseek.com/quick_start/pricing (2025-11-29)",
     "https://jina.ai/embeddings/ (2025-11-29)",
-    "https://openrouter.ai/api/v1/models (2026-05-29)"
+    "https://openrouter.ai/api/v1/models (2026-05-30)"
   ],
   "models": [
     {
@@ -487,8 +487,8 @@
       ],
       "unit": "1k_tokens",
       "context": 1048576,
-      "input_per_1k": 0.0001,
-      "output_per_1k": 0.0002,
+      "input_per_1k": 9.83e-05,
+      "output_per_1k": 0.0001966,
       "base_url": "https://api.deepseek.com/v1",
       "notes": "Added automatically from OpenRouter feed."
     },
@@ -1330,7 +1330,7 @@
       "input_per_1k": 0.00011,
       "output_per_1k": 0.00019,
       "base_url": "https://api.mistral.ai/v1",
-      "notes": "Added automatically from OpenRouter feed.",
+      "notes": "Added automatically from OpenRouter feed. | [auto-refresh] deprecated_on=2026-05-30",
       "selection_roles": [
         "generation"
       ],
@@ -1845,7 +1845,7 @@
       "input_per_1k": 0.0025,
       "output_per_1k": 0.01,
       "base_url": "https://api.openai.com/v1",
-      "notes": "Added automatically from OpenRouter feed.",
+      "notes": "Added automatically from OpenRouter feed. | [auto-refresh] deprecated_on=2026-05-30",
       "selection_roles": [
         "generation"
       ],
@@ -1854,8 +1854,8 @@
     },
     {
       "provider": "openai",
-      "family": "gpt-4o-mini",
-      "model": "gpt-4o-mini",
+      "family": "gpt-4o-mini-2024-07-18",
+      "model": "gpt-4o-mini-2024-07-18",
       "components": [
         "GEN"
       ],
@@ -2179,7 +2179,7 @@
       ],
       "unit": "1k_tokens",
       "context": 131072,
-      "input_per_1k": 3e-05,
+      "input_per_1k": 2.9e-05,
       "output_per_1k": 0.00014,
       "base_url": "https://api.openai.com/v1",
       "notes": "Added automatically from OpenRouter feed.",
