@@ -1,6 +1,6 @@
 {
   "currency": "USD",
-  "last_updated": "2026-06-07",
+  "last_updated": "2026-06-10",
   "sources": [
     "https://openai.com/api/pricing/ (2026-02-07)",
     "https://www.anthropic.com/pricing (2026-02-07)",
@@ -10,9 +10,23 @@
     "https://mistral.ai/pricing (2025-11-29)",
     "https://api-docs.deepseek.com/quick_start/pricing (2025-11-29)",
     "https://jina.ai/embeddings/ (2025-11-29)",
-    "https://openrouter.ai/api/v1/models (2026-06-07)"
+    "https://openrouter.ai/api/v1/models (2026-06-10)"
   ],
   "models": [
+    {
+      "provider": "anthropic",
+      "family": "claude-fable-5",
+      "model": "claude-fable-5",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 1000000,
+      "input_per_1k": 0.01,
+      "output_per_1k": 0.05,
+      "base_url": "https://api.anthropic.com",
+      "notes": "Added automatically from OpenRouter feed."
+    },
     {
       "provider": "anthropic",
       "family": "claude-haiku-4.5",
