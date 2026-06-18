@@ -1,6 +1,6 @@
 {
   "currency": "USD",
-  "last_updated": "2026-06-17",
+  "last_updated": "2026-06-18",
   "sources": [
     "https://openai.com/api/pricing/ (2026-02-07)",
     "https://www.anthropic.com/pricing (2026-02-07)",
@@ -10,7 +10,7 @@
     "https://mistral.ai/pricing (2025-11-29)",
     "https://api-docs.deepseek.com/quick_start/pricing (2025-11-29)",
     "https://jina.ai/embeddings/ (2025-11-29)",
-    "https://openrouter.ai/api/v1/models (2026-06-17)"
+    "https://openrouter.ai/api/v1/models (2026-06-18)"
   ],
   "models": [
     {
@@ -522,25 +522,6 @@
     },
     {
       "provider": "google",
-      "family": "gemini-2.5-flash-image",
-      "model": "gemini-2.5-flash-image",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 32768,
-      "input_per_1k": 0.0003,
-      "output_per_1k": 0.0025,
-      "base_url": "https://generativelanguage.googleapis.com",
-      "notes": "Added automatically from OpenRouter feed.",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
-    },
-    {
-      "provider": "google",
       "family": "gemini-2.5-pro",
       "model": "gemini-2.5-pro",
       "components": [
@@ -579,6 +560,20 @@
     },
     {
       "provider": "google",
+      "family": "gemini-3-pro-image",
+      "model": "gemini-3-pro-image",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 65536,
+      "input_per_1k": 0.002,
+      "output_per_1k": 0.012,
+      "base_url": "https://generativelanguage.googleapis.com",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "google",
       "family": "gemini-3-pro-image-preview",
       "model": "gemini-3-pro-image-preview",
       "components": [
@@ -588,6 +583,25 @@
       "context": 65536,
       "input_per_1k": 0.002,
       "output_per_1k": 0.012,
+      "base_url": "https://generativelanguage.googleapis.com",
+      "notes": "Added automatically from OpenRouter feed.",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
+    },
+    {
+      "provider": "google",
+      "family": "gemini-3.1-flash-image",
+      "model": "gemini-3.1-flash-image",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 131072,
+      "input_per_1k": 0.0005,
+      "output_per_1k": 0.003,
       "base_url": "https://generativelanguage.googleapis.com",
       "notes": "Added automatically from OpenRouter feed.",
       "selection_roles": [
