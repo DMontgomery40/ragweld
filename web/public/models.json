@@ -1,6 +1,6 @@
 {
   "currency": "USD",
-  "last_updated": "2026-06-18",
+  "last_updated": "2026-06-25",
   "sources": [
     "https://openai.com/api/pricing/ (2026-02-07)",
     "https://www.anthropic.com/pricing (2026-02-07)",
@@ -10,7 +10,7 @@
     "https://mistral.ai/pricing (2025-11-29)",
     "https://api-docs.deepseek.com/quick_start/pricing (2025-11-29)",
     "https://jina.ai/embeddings/ (2025-11-29)",
-    "https://openrouter.ai/api/v1/models (2026-06-18)"
+    "https://openrouter.ai/api/v1/models (2026-06-25)"
   ],
   "models": [
     {
@@ -311,8 +311,8 @@
         "GEN"
       ],
       "unit": "1k_tokens",
-      "input_per_1k": 0.0002002,
-      "output_per_1k": 0.0008001,
+      "input_per_1k": 0.0,
+      "output_per_1k": 0.0,
       "context": 131072,
       "notes": "DeepSeek V3.2-Exp non-thinking (source: per 1M = $0.28/$0.42, cache hit $0.028)",
       "base_url": "https://api.deepseek.com/v1",
@@ -350,8 +350,8 @@
       ],
       "unit": "1k_tokens",
       "context": 163840,
-      "input_per_1k": 0.0005,
-      "output_per_1k": 0.00215,
+      "input_per_1k": 0.0,
+      "output_per_1k": 0.0,
       "base_url": "https://api.deepseek.com/v1",
       "notes": "Added automatically from OpenRouter feed.",
       "selection_roles": [
@@ -424,9 +424,9 @@
         "GEN"
       ],
       "unit": "1k_tokens",
-      "context": 163840,
-      "input_per_1k": 0.00027,
-      "output_per_1k": 0.00095,
+      "context": 131072,
+      "input_per_1k": 0.0,
+      "output_per_1k": 0.0,
       "base_url": "https://api.deepseek.com/v1",
       "notes": "Added automatically from OpenRouter feed.",
       "selection_roles": [
@@ -444,8 +444,8 @@
       ],
       "unit": "1k_tokens",
       "context": 131072,
-      "input_per_1k": 0.0002288,
-      "output_per_1k": 0.0003432,
+      "input_per_1k": 0.0,
+      "output_per_1k": 0.0,
       "base_url": "https://api.deepseek.com/v1",
       "notes": "Added automatically from OpenRouter feed.",
       "selection_roles": [
@@ -501,8 +501,8 @@
       ],
       "unit": "1k_tokens",
       "context": 1048576,
-      "input_per_1k": 9e-05,
-      "output_per_1k": 0.00018,
+      "input_per_1k": 0.0,
+      "output_per_1k": 0.0,
       "base_url": "https://api.deepseek.com/v1",
       "notes": "Added automatically from OpenRouter feed."
     },
@@ -515,8 +515,8 @@
       ],
       "unit": "1k_tokens",
       "context": 1048576,
-      "input_per_1k": 0.000435,
-      "output_per_1k": 0.00087,
+      "input_per_1k": 0.0,
+      "output_per_1k": 0.0,
       "base_url": "https://api.deepseek.com/v1",
       "notes": "Added automatically from OpenRouter feed."
     },
@@ -1882,8 +1882,8 @@
     },
     {
       "provider": "openai",
-      "family": "gpt-4o-mini-2024-07-18",
-      "model": "gpt-4o-mini-2024-07-18",
+      "family": "gpt-4o-mini",
+      "model": "gpt-4o-mini",
       "components": [
         "GEN"
       ],
