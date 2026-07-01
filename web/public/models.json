@@ -1,6 +1,6 @@
 {
   "currency": "USD",
-  "last_updated": "2026-06-30",
+  "last_updated": "2026-07-01",
   "sources": [
     "https://openai.com/api/pricing/ (2026-02-07)",
     "https://www.anthropic.com/pricing (2026-02-07)",
@@ -10,7 +10,7 @@
     "https://mistral.ai/pricing (2025-11-29)",
     "https://api-docs.deepseek.com/quick_start/pricing (2025-11-29)",
     "https://jina.ai/embeddings/ (2025-11-29)",
-    "https://openrouter.ai/api/v1/models (2026-06-30)"
+    "https://openrouter.ai/api/v1/models (2026-07-01)"
   ],
   "models": [
     {
@@ -81,15 +81,15 @@
     },
     {
       "provider": "anthropic",
-      "family": "claude-sonnet-4.6",
-      "model": "claude-sonnet-4.6",
+      "family": "claude-sonnet-5",
+      "model": "claude-sonnet-5",
       "components": [
         "GEN"
       ],
       "unit": "1k_tokens",
       "context": 1000000,
-      "input_per_1k": 0.003,
-      "output_per_1k": 0.015,
+      "input_per_1k": 0.002,
+      "output_per_1k": 0.01,
       "base_url": "https://api.anthropic.com",
       "notes": "Added automatically from OpenRouter feed.",
       "selection_roles": [
@@ -501,8 +501,8 @@
       ],
       "unit": "1k_tokens",
       "context": 1048576,
-      "input_per_1k": 9e-05,
-      "output_per_1k": 0.00018,
+      "input_per_1k": 9.8e-05,
+      "output_per_1k": 0.000196,
       "base_url": "https://api.deepseek.com/v1",
       "notes": "Added automatically from OpenRouter feed."
     },
@@ -647,6 +647,20 @@
       ],
       "selection_status": "runtime_selectable",
       "selection_reason": null
+    },
+    {
+      "provider": "google",
+      "family": "gemini-3.1-flash-lite-image",
+      "model": "gemini-3.1-flash-lite-image",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 65536,
+      "input_per_1k": 0.00025,
+      "output_per_1k": 0.0015,
+      "base_url": "https://generativelanguage.googleapis.com",
+      "notes": "Added automatically from OpenRouter feed."
     },
     {
       "provider": "google",
