@@ -1,6 +1,6 @@
 {
   "currency": "USD",
-  "last_updated": "2026-07-08",
+  "last_updated": "2026-07-09",
   "sources": [
     "https://openai.com/api/pricing/ (2026-02-07)",
     "https://www.anthropic.com/pricing (2026-02-07)",
@@ -10,7 +10,7 @@
     "https://mistral.ai/pricing (2025-11-29)",
     "https://api-docs.deepseek.com/quick_start/pricing (2025-11-29)",
     "https://jina.ai/embeddings/ (2025-11-29)",
-    "https://openrouter.ai/api/v1/models (2026-07-08)"
+    "https://openrouter.ai/api/v1/models (2026-07-09)"
   ],
   "models": [
     {
@@ -1896,8 +1896,8 @@
     },
     {
       "provider": "openai",
-      "family": "gpt-4o-mini",
-      "model": "gpt-4o-mini",
+      "family": "gpt-4o-mini-2024-07-18",
+      "model": "gpt-4o-mini-2024-07-18",
       "components": [
         "GEN"
       ],
@@ -2700,15 +2700,15 @@
     },
     {
       "provider": "xai",
-      "family": "grok-4.3",
-      "model": "grok-4.3",
+      "family": "grok-4.5",
+      "model": "grok-4.5",
       "components": [
         "GEN"
       ],
       "unit": "1k_tokens",
-      "input_per_1k": 0.00125,
-      "output_per_1k": 0.0025,
-      "context": 1000000,
+      "input_per_1k": 0.002,
+      "output_per_1k": 0.006,
+      "context": 500000,
       "notes": "Grok 3 base (source: per 1M = $3/$15)",
       "base_url": "https://api.x.ai/v1",
       "selection_roles": [
