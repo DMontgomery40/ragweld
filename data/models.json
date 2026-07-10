@@ -1,6 +1,6 @@
 {
   "currency": "USD",
-  "last_updated": "2026-07-09",
+  "last_updated": "2026-07-10",
   "sources": [
     "https://openai.com/api/pricing/ (2026-02-07)",
     "https://www.anthropic.com/pricing (2026-02-07)",
@@ -10,7 +10,7 @@
     "https://mistral.ai/pricing (2025-11-29)",
     "https://api-docs.deepseek.com/quick_start/pricing (2025-11-29)",
     "https://jina.ai/embeddings/ (2025-11-29)",
-    "https://openrouter.ai/api/v1/models (2026-07-09)"
+    "https://openrouter.ai/api/v1/models (2026-07-10)"
   ],
   "models": [
     {
@@ -444,8 +444,8 @@
       ],
       "unit": "1k_tokens",
       "context": 131072,
-      "input_per_1k": 0.0002288,
-      "output_per_1k": 0.0003432,
+      "input_per_1k": 0.0002145,
+      "output_per_1k": 0.00032175,
       "base_url": "https://api.deepseek.com/v1",
       "notes": "Added automatically from OpenRouter feed.",
       "selection_roles": [
@@ -2143,6 +2143,90 @@
     },
     {
       "provider": "openai",
+      "family": "gpt-5.6-luna",
+      "model": "gpt-5.6-luna",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 1050000,
+      "input_per_1k": 0.001,
+      "output_per_1k": 0.006,
+      "base_url": "https://api.openai.com/v1",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "openai",
+      "family": "gpt-5.6-luna-pro",
+      "model": "gpt-5.6-luna-pro",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 1050000,
+      "input_per_1k": 0.001,
+      "output_per_1k": 0.006,
+      "base_url": "https://api.openai.com/v1",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "openai",
+      "family": "gpt-5.6-sol",
+      "model": "gpt-5.6-sol",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 1050000,
+      "input_per_1k": 0.005,
+      "output_per_1k": 0.03,
+      "base_url": "https://api.openai.com/v1",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "openai",
+      "family": "gpt-5.6-sol-pro",
+      "model": "gpt-5.6-sol-pro",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 1050000,
+      "input_per_1k": 0.005,
+      "output_per_1k": 0.03,
+      "base_url": "https://api.openai.com/v1",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "openai",
+      "family": "gpt-5.6-terra",
+      "model": "gpt-5.6-terra",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 1050000,
+      "input_per_1k": 0.0025,
+      "output_per_1k": 0.015,
+      "base_url": "https://api.openai.com/v1",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "openai",
+      "family": "gpt-5.6-terra-pro",
+      "model": "gpt-5.6-terra-pro",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 1050000,
+      "input_per_1k": 0.0025,
+      "output_per_1k": 0.015,
+      "base_url": "https://api.openai.com/v1",
+      "notes": "Added automatically from OpenRouter feed."
+    },
+    {
+      "provider": "openai",
       "family": "gpt-audio",
       "model": "gpt-audio",
       "components": [
@@ -2202,8 +2286,8 @@
       ],
       "unit": "1k_tokens",
       "context": 131072,
-      "input_per_1k": 3e-05,
-      "output_per_1k": 0.00015,
+      "input_per_1k": 3.6e-05,
+      "output_per_1k": 0.00018,
       "base_url": "https://api.openai.com/v1",
       "notes": "Added automatically from OpenRouter feed.",
       "selection_roles": [
