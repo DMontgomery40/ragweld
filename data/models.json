@@ -1,6 +1,6 @@
 {
   "currency": "USD",
-  "last_updated": "2026-07-14",
+  "last_updated": "2026-07-15",
   "sources": [
     "https://openai.com/api/pricing/ (2026-02-07)",
     "https://www.anthropic.com/pricing (2026-02-07)",
@@ -10,7 +10,7 @@
     "https://mistral.ai/pricing (2025-11-29)",
     "https://api-docs.deepseek.com/quick_start/pricing (2025-11-29)",
     "https://jina.ai/embeddings/ (2025-11-29)",
-    "https://openrouter.ai/api/v1/models (2026-07-14)"
+    "https://openrouter.ai/api/v1/models (2026-07-15)"
   ],
   "models": [
     {
@@ -424,9 +424,9 @@
         "GEN"
       ],
       "unit": "1k_tokens",
-      "context": 163840,
+      "context": 131072,
       "input_per_1k": 0.00027,
-      "output_per_1k": 0.00095,
+      "output_per_1k": 0.001,
       "base_url": "https://api.deepseek.com/v1",
       "notes": "Added automatically from OpenRouter feed.",
       "selection_roles": [
@@ -443,9 +443,9 @@
         "GEN"
       ],
       "unit": "1k_tokens",
-      "context": 131072,
-      "input_per_1k": 0.0002145,
-      "output_per_1k": 0.00032175,
+      "context": 163840,
+      "input_per_1k": 0.000269,
+      "output_per_1k": 0.0004,
       "base_url": "https://api.deepseek.com/v1",
       "notes": "Added automatically from OpenRouter feed.",
       "selection_roles": [
@@ -501,8 +501,8 @@
       ],
       "unit": "1k_tokens",
       "context": 1048576,
-      "input_per_1k": 9e-05,
-      "output_per_1k": 0.00018,
+      "input_per_1k": 9.8e-05,
+      "output_per_1k": 0.000196,
       "base_url": "https://api.deepseek.com/v1",
       "notes": "Added automatically from OpenRouter feed."
     },
@@ -801,7 +801,7 @@
       "unit": "1k_tokens",
       "context": 131072,
       "input_per_1k": 8e-05,
-      "output_per_1k": 0.00016,
+      "output_per_1k": 0.00045,
       "base_url": "https://generativelanguage.googleapis.com",
       "notes": "Added automatically from OpenRouter feed.",
       "selection_roles": [
@@ -857,8 +857,8 @@
       ],
       "unit": "1k_tokens",
       "context": 262144,
-      "input_per_1k": 6e-05,
-      "output_per_1k": 0.00033,
+      "input_per_1k": 0.0001,
+      "output_per_1k": 0.0003,
       "base_url": "https://generativelanguage.googleapis.com",
       "notes": "Added automatically from OpenRouter feed."
     },
@@ -871,8 +871,8 @@
       ],
       "unit": "1k_tokens",
       "context": 262144,
-      "input_per_1k": 6e-05,
-      "output_per_1k": 0.00035,
+      "input_per_1k": 0.00022,
+      "output_per_1k": 0.00055,
       "base_url": "https://generativelanguage.googleapis.com",
       "notes": "Added automatically from OpenRouter feed."
     },
@@ -1442,7 +1442,7 @@
       "unit": "1k_tokens",
       "context": 131072,
       "input_per_1k": 2e-05,
-      "output_per_1k": 3e-05,
+      "output_per_1k": 4e-05,
       "base_url": "https://api.mistral.ai/v1",
       "notes": "Added automatically from OpenRouter feed.",
       "selection_roles": [
@@ -1497,9 +1497,9 @@
         "GEN"
       ],
       "unit": "1k_tokens",
-      "context": 128000,
-      "input_per_1k": 7.5e-05,
-      "output_per_1k": 0.0002,
+      "context": 131072,
+      "input_per_1k": 0.0001,
+      "output_per_1k": 0.0003,
       "base_url": "https://api.mistral.ai/v1",
       "notes": "Added automatically from OpenRouter feed.",
       "selection_roles": [
@@ -2286,8 +2286,8 @@
       ],
       "unit": "1k_tokens",
       "context": 131072,
-      "input_per_1k": 3e-05,
-      "output_per_1k": 0.00015,
+      "input_per_1k": 3.7e-05,
+      "output_per_1k": 0.00017,
       "base_url": "https://api.openai.com/v1",
       "notes": "Added automatically from OpenRouter feed.",
       "selection_roles": [
@@ -2305,8 +2305,8 @@
       ],
       "unit": "1k_tokens",
       "context": 131072,
-      "input_per_1k": 2.9e-05,
-      "output_per_1k": 0.00014,
+      "input_per_1k": 3e-05,
+      "output_per_1k": 0.00013,
       "base_url": "https://api.openai.com/v1",
       "notes": "Added automatically from OpenRouter feed.",
       "selection_roles": [
