@@ -1,6 +1,6 @@
 {
   "currency": "USD",
-  "last_updated": "2026-07-21",
+  "last_updated": "2026-07-22",
   "sources": [
     "https://openai.com/api/pricing/ (2026-02-07)",
     "https://www.anthropic.com/pricing (2026-02-07)",
@@ -10,7 +10,7 @@
     "https://mistral.ai/pricing (2025-11-29)",
     "https://api-docs.deepseek.com/quick_start/pricing (2025-11-29)",
     "https://jina.ai/embeddings/ (2025-11-29)",
-    "https://openrouter.ai/api/v1/models (2026-07-21)"
+    "https://openrouter.ai/api/v1/models (2026-07-22)"
   ],
   "models": [
     {
@@ -313,7 +313,7 @@
       "unit": "1k_tokens",
       "input_per_1k": 0.0002002,
       "output_per_1k": 0.0008001,
-      "context": 131072,
+      "context": 163840,
       "notes": "DeepSeek V3.2-Exp non-thinking (source: per 1M = $0.28/$0.42, cache hit $0.028)",
       "base_url": "https://api.deepseek.com/v1",
       "selection_roles": [
@@ -368,7 +368,7 @@
         "GEN"
       ],
       "unit": "1k_tokens",
-      "context": 128000,
+      "context": 8192,
       "input_per_1k": 0.0008,
       "output_per_1k": 0.0008,
       "base_url": "https://api.deepseek.com/v1",
@@ -424,7 +424,7 @@
         "GEN"
       ],
       "unit": "1k_tokens",
-      "context": 131072,
+      "context": 163840,
       "input_per_1k": 0.00027,
       "output_per_1k": 0.001,
       "base_url": "https://api.deepseek.com/v1",
@@ -501,8 +501,8 @@
       ],
       "unit": "1k_tokens",
       "context": 1048576,
-      "input_per_1k": 9.38e-05,
-      "output_per_1k": 0.0001876,
+      "input_per_1k": 9.8e-05,
+      "output_per_1k": 0.000196,
       "base_url": "https://api.deepseek.com/v1",
       "notes": "Added automatically from OpenRouter feed."
     },
@@ -566,7 +566,7 @@
         "GEN"
       ],
       "unit": "1k_tokens",
-      "context": 65536,
+      "context": 131072,
       "input_per_1k": 0.002,
       "output_per_1k": 0.012,
       "base_url": "https://generativelanguage.googleapis.com",
@@ -621,25 +621,6 @@
       "context": 131072,
       "input_per_1k": 0.0005,
       "output_per_1k": 0.003,
-      "base_url": "https://generativelanguage.googleapis.com",
-      "notes": "Added automatically from OpenRouter feed.",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
-    },
-    {
-      "provider": "google",
-      "family": "gemini-3.1-flash-lite",
-      "model": "gemini-3.1-flash-lite",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 1048576,
-      "input_per_1k": 0.00025,
-      "output_per_1k": 0.0015,
       "base_url": "https://generativelanguage.googleapis.com",
       "notes": "Added automatically from OpenRouter feed.",
       "selection_roles": [
@@ -708,7 +689,7 @@
         "GEN"
       ],
       "unit": "1k_tokens",
-      "context": 1048756,
+      "context": 1048576,
       "input_per_1k": 0.002,
       "output_per_1k": 0.012,
       "base_url": "https://generativelanguage.googleapis.com",
@@ -721,14 +702,33 @@
     },
     {
       "provider": "google",
-      "family": "gemini-3.5-flash",
-      "model": "gemini-3.5-flash",
+      "family": "gemini-3.5-flash-lite",
+      "model": "gemini-3.5-flash-lite",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 1048576,
+      "input_per_1k": 0.0003,
+      "output_per_1k": 0.0025,
+      "base_url": "https://generativelanguage.googleapis.com",
+      "notes": "Added automatically from OpenRouter feed.",
+      "selection_roles": [
+        "generation"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
+    },
+    {
+      "provider": "google",
+      "family": "gemini-3.6-flash",
+      "model": "gemini-3.6-flash",
       "components": [
         "GEN"
       ],
       "unit": "1k_tokens",
       "input_per_1k": 0.0015,
-      "output_per_1k": 0.009,
+      "output_per_1k": 0.0075,
       "context": 1048576,
       "notes": "Gemini 2.0 Flash (source: per 1M = $0.10/$0.40)",
       "base_url": "https://generativelanguage.googleapis.com",
@@ -799,7 +799,7 @@
         "GEN"
       ],
       "unit": "1k_tokens",
-      "context": 131072,
+      "context": 262144,
       "input_per_1k": 0.0001,
       "output_per_1k": 0.0003,
       "base_url": "https://generativelanguage.googleapis.com",
@@ -1497,7 +1497,7 @@
         "GEN"
       ],
       "unit": "1k_tokens",
-      "context": 131072,
+      "context": 256000,
       "input_per_1k": 0.0001,
       "output_per_1k": 0.0003,
       "base_url": "https://api.mistral.ai/v1",
