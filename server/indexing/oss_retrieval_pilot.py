@@ -326,6 +326,18 @@ def _require_execution_packages() -> None:
         raise RuntimeError(f"Missing OSS retrieval execution packages: {joined}")
 
 
+def _close_qdrant_document_store(store: Any) -> None:
+    """Release the embedded Qdrant client owned by a Haystack document store.
+
+    QdrantDocumentStore does not currently expose a public close method. Its
+    lazily-created sync client does, and must be closed before a local pilot
+    directory can be safely removed or rebuilt by a long-running API process.
+    """
+    client = getattr(store, "_client", None)
+    if client is not None:
+        client.close()
+
+
 async def ingest_retrieval_pilot_execution(*, corpus_id: str, repo_path: str, force_rebuild: bool) -> RetrievalPilotIngestResponse:
     _require_execution_packages()
 
@@ -354,42 +366,46 @@ async def ingest_retrieval_pilot_execution(*, corpus_id: str, repo_path: str, fo
         progress_bar=False,
     )
 
-    lines = [line for line in documents_path.read_text(encoding="utf-8").splitlines() if line.strip()]
-    batch_size = 64
-    indexed_document_count = 0
-    for start in range(0, len(lines), batch_size):
-        batch_lines = lines[start : start + batch_size]
-        parsed_batch: list[dict[str, Any]] = []
-        texts: list[str] = []
-        for line in batch_lines:
-            try:
-                raw = json.loads(line)
-            except Exception:
+    try:
+        lines = [line for line in documents_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+        batch_size = 64
+        indexed_document_count = 0
+        for start in range(0, len(lines), batch_size):
+            batch_lines = lines[start : start + batch_size]
+            parsed_batch: list[dict[str, Any]] = []
+            texts: list[str] = []
+            for line in batch_lines:
+                try:
+                    raw = json.loads(line)
+                except Exception:
+                    continue
+                if not isinstance(raw, dict):
+                    continue
+                parsed_batch.append(raw)
+                texts.append(str(raw.get("content") or ""))
+            if not parsed_batch:
                 continue
-            if not isinstance(raw, dict):
-                continue
-            parsed_batch.append(raw)
-            texts.append(str(raw.get("content") or ""))
-        if not parsed_batch:
-            continue
-        embeddings = await embedder.embed_batch(texts)
-        docs = [
-            Document(
-                id=str(raw.get("id") or ""),
-                content=str(raw.get("content") or ""),
-                embedding=list(emb),
-                meta=dict(raw.get("meta") or {}),
-            )
-            for raw, emb in zip(parsed_batch, embeddings, strict=True)
-        ]
-        store.write_documents(docs, policy=DuplicatePolicy.OVERWRITE)
-        indexed_document_count += len(docs)
+            embeddings = await embedder.embed_batch(texts)
+            docs = [
+                Document(
+                    id=str(raw.get("id") or ""),
+                    content=str(raw.get("content") or ""),
+                    embedding=list(emb),
+                    meta=dict(raw.get("meta") or {}),
+                )
+                for raw, emb in zip(parsed_batch, embeddings, strict=True)
+            ]
+            store.write_documents(docs, policy=DuplicatePolicy.OVERWRITE)
+            indexed_document_count += len(docs)
+        stored_document_count = int(store.count_documents())
+    finally:
+        _close_qdrant_document_store(store)
 
     manifest = _parse_manifest(corpus_id)
     manifest.update(
         {
             "execution_ready": True,
-            "indexed_document_count": int(store.count_documents()),
+            "indexed_document_count": stored_document_count,
             "last_indexed_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
         }
     )
@@ -532,10 +548,13 @@ async def search_retrieval_pilot_execution(
         on_disk=True,
         progress_bar=False,
     )
-    retriever = QdrantEmbeddingRetriever(document_store=store, top_k=int(top_k))
-    query_embedding = await embedder.embed(query)
-    response = retriever.run(query_embedding=query_embedding, top_k=int(top_k))
-    documents = list(response.get("documents") or [])
+    try:
+        retriever = QdrantEmbeddingRetriever(document_store=store, top_k=int(top_k))
+        query_embedding = await embedder.embed(query)
+        response = retriever.run(query_embedding=query_embedding, top_k=int(top_k))
+        documents = list(response.get("documents") or [])
+    finally:
+        _close_qdrant_document_store(store)
 
     results = [
         RetrievalPilotSearchResult(

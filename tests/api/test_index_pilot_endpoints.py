@@ -2,6 +2,7 @@ import shutil
 import uuid
 from pathlib import Path
 
+import psutil
 import pytest
 from httpx import AsyncClient
 
@@ -142,5 +143,9 @@ async def test_retrieval_pilot_ingest_and_real_search_return_qdrant_hits(client:
         assert top["file_path"] in {"src/retrieval_target.py", "README.md"}
         assert float(top["score"]) >= 0.0
         assert body["status"]["execution_ready"] is True
+
+        qdrant_path = Path(body["status"]["qdrant_path"]).resolve()
+        open_files = [Path(item.path).resolve() for item in psutil.Process().open_files()]
+        assert not any(path == qdrant_path or qdrant_path in path.parents for path in open_files)
     finally:
         shutil.rmtree(export_dir, ignore_errors=True)
