@@ -27,9 +27,6 @@ components:
   - name: GlossarySubtab
     props: []
 
-  - name: HelpGlossary
-    props: []
-
   - name: EmbeddingConfigPanel
     props: []
 
