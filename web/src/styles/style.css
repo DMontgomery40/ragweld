@@ -186,18 +186,6 @@ details summary { cursor:pointer; color: var(--muted); }
   color: var(--fg-muted);
 }
 
-/* Live indicator for cost calculator */
-.live-indicator {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  color: var(--accent);
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-
 /* Tooltip styles */
 .help-icon {
   display: inline-flex;
@@ -274,4 +262,3 @@ details summary { cursor:pointer; color: var(--muted); }
   0%, 100% { opacity: 1; box-shadow: 0 0 4px var(--accent); }
   50% { opacity: 0.3; box-shadow: 0 0 0 var(--accent); }
 }
-
