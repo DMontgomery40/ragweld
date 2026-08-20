@@ -469,9 +469,8 @@ async def chat_once(
 
         generation = _coerce_generation_result(
             await generate_chat_text(
-            route=route,
-            openrouter_cfg=config.chat.openrouter,
-            system_prompt=system_prompt,
+                route=route,
+                system_prompt=system_prompt,
             user_message=request.message,
             images=list(request.images or []),
             image_detail=str(config.chat.multimodal.image_detail or "auto"),
@@ -781,7 +780,6 @@ async def chat_stream(
 
         async for delta in stream_chat_text(
             route=route,
-            openrouter_cfg=config.chat.openrouter,
             system_prompt=system_prompt,
             user_message=request.message,
             images=list(request.images or []),

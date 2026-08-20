@@ -117,7 +117,6 @@ class _RouteBackedSdkitClient:
         system_prompt, user_message = _messages_to_prompt(messages)
         result = await generate_chat_text(
             route=self.route,
-            openrouter_cfg=self.cfg.chat.openrouter,
             system_prompt=system_prompt,
             user_message=user_message,
             images=[],

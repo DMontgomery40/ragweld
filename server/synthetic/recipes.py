@@ -386,7 +386,6 @@ async def _generate_eval_candidates_for_chunk(
 
     response = await generate_chat_text(
         route=route,
-        openrouter_cfg=cfg.chat.openrouter,
         system_prompt=system_prompt,
         user_message=user_message,
         images=[],
@@ -464,7 +463,6 @@ async def _judge_eval_item(
     judge_cfg = cfg.synthetic.judge
     response = await generate_chat_text(
         route=route,
-        openrouter_cfg=cfg.chat.openrouter,
         system_prompt=system_prompt,
         user_message=user_message,
         images=[],

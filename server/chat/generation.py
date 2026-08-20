@@ -1,18 +1,20 @@
+"""One OpenAI-compatible generation transport through LiteLLM."""
+
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
 from collections.abc import AsyncIterator, Callable
+from dataclasses import dataclass
 from typing import Any
 
 import httpx
 
 from server.chat.provider_router import ProviderRoute
-from server.observability.costing import build_trace_cost_summary, extract_provider_cost
-from server.observability.runtime import record_langfuse_generation, set_cost_summary, stage_span
-from server.models.chat_config import ImageAttachment, OpenRouterConfig
+from server.models.chat_config import ImageAttachment
 from server.models.retrieval import ChunkMatch
 from server.models.tribrid_config_model import TraceCostSummary
+from server.observability.costing import build_trace_cost_summary, extract_provider_cost
+from server.observability.runtime import record_langfuse_generation, set_cost_summary, stage_span
 
 
 @dataclass(slots=True)
@@ -28,249 +30,118 @@ def _format_chunks_for_context(chunks: list[ChunkMatch]) -> str:
     if not chunks:
         return "No relevant context found."
     parts: list[str] = []
-    for ch in chunks:
-        header = f"## {ch.file_path}:{int(ch.start_line)}-{int(ch.end_line)}"
-        if ch.language:
-            header += f" ({ch.language})"
-        parts.append(f"{header}\n```\n{ch.content}\n```")
+    for chunk in chunks:
+        header = f"## {chunk.file_path}:{int(chunk.start_line)}-{int(chunk.end_line)}"
+        if chunk.language:
+            header += f" ({chunk.language})"
+        parts.append(f"{header}\n```\n{chunk.content}\n```")
     return "\n\n".join(parts)
 
 
-def _attachment_to_openai_part(att: ImageAttachment, *, image_detail: str = "auto") -> dict[str, Any]:
-    if att.url:
-        url = str(att.url)
-    else:
-        # Spec: base64 is provided without a `data:` prefix.
-        url = f"data:{att.mime_type};base64,{att.base64}"
-    detail = (image_detail or "").strip().lower() or "auto"
-    return {
-        "type": "image_url",
-        "image_url": {"url": url, **({"detail": detail} if detail in {"auto", "low", "high"} else {})},
-    }
+def _attachment_to_openai_part(att: ImageAttachment, *, image_detail: str) -> dict[str, Any]:
+    url = str(att.url) if att.url else f"data:{att.mime_type};base64,{att.base64}"
+    detail = (image_detail or "auto").strip().lower()
+    image_url: dict[str, Any] = {"url": url}
+    if detail in {"auto", "low", "high"}:
+        image_url["detail"] = detail
+    return {"type": "image_url", "image_url": image_url}
 
 
 def _build_messages(
-    *,
-    system_prompt: str,
-    user_message: str,
-    images: list[ImageAttachment],
-    image_detail: str = "auto",
+    *, system_prompt: str, user_message: str, images: list[ImageAttachment], image_detail: str
 ) -> list[dict[str, Any]]:
     if images:
         content: list[dict[str, Any]] = [{"type": "text", "text": user_message}]
-        content.extend([_attachment_to_openai_part(att, image_detail=image_detail) for att in images])
-        user_payload: dict[str, Any] = {"role": "user", "content": content}
+        content.extend(_attachment_to_openai_part(image, image_detail=image_detail) for image in images)
+        user: dict[str, Any] = {"role": "user", "content": content}
     else:
-        user_payload = {"role": "user", "content": user_message}
-    return [{"role": "system", "content": system_prompt}, user_payload]
+        user = {"role": "user", "content": user_message}
+    return [{"role": "system", "content": system_prompt}, user]
 
 
-def _openrouter_headers(*, api_key: str, cfg: OpenRouterConfig) -> dict[str, str]:
-    # OpenRouter recommends providing app identity headers.
-    headers: dict[str, str] = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-    }
-    site_name = (cfg.site_name or "").strip()
-    if site_name:
-        headers["X-Title"] = site_name
-    return headers
+def _prompt_with_context(
+    *, system_prompt: str, context_text: str | None, context_chunks: list[ChunkMatch]
+) -> str:
+    context = str(context_text or "").strip() if context_text is not None else _format_chunks_for_context(context_chunks)
+    return system_prompt if not context else f"{system_prompt}\n\n## Context\n{context}"
 
 
-def _bearer_headers(*, api_key: str) -> dict[str, str]:
-    return {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-    }
+def _headers(route: ProviderRoute) -> dict[str, str]:
+    return {"Authorization": f"Bearer {route.api_key}", "Content-Type": "application/json"}
 
 
-def _extract_usage_payload(data: Any) -> dict[str, Any] | None:
-    if not isinstance(data, dict):
-        return None
-    usage = data.get("usage")
-    return usage if isinstance(usage, dict) else None
+def _url(route: ProviderRoute) -> str:
+    return f"{route.base_url.rstrip('/')}/chat/completions"
 
 
-def _extract_debug_trace_id(resp: httpx.Response) -> str | None:
+def _usage(data: Any) -> dict[str, Any] | None:
+    value = data.get("usage") if isinstance(data, dict) else None
+    return value if isinstance(value, dict) else None
+
+
+def _debug_trace_id(response: httpx.Response) -> str | None:
     for name in ("x-debug-trace-id", "x-request-id", "openai-request-id", "request-id"):
-        value = resp.headers.get(name)
-        if isinstance(value, str) and value.strip():
+        value = response.headers.get(name)
+        if value and value.strip():
             return value.strip()
     return None
 
 
-def _uses_openai_max_completion_tokens(route: ProviderRoute) -> bool:
-    if route.kind != "cloud_direct":
-        return False
-    if str(route.provider_name or "").strip().lower() != "openai":
-        return False
-    model = str(route.model or "").strip().lower()
-    return model.startswith("gpt-5") or model.startswith("o1") or model.startswith("o3") or model.startswith("o4")
-
-
-def _summarize_provider_error(resp: httpx.Response) -> str:
-    """Best-effort extraction of provider error details (safe for UI/debug logs)."""
+def _error_detail(response: httpx.Response) -> str:
     try:
-        raw = resp.text or ""
+        data = response.json()
     except Exception:
-        raw = ""
-
-    if not raw:
-        return ""
-
-    # Prefer structured JSON error messages when available.
-    try:
-        data: Any = resp.json()
-        # OpenAI-style: {"error": {"message": "...", ...}}
-        if isinstance(data, dict):
-            err = data.get("error")
-            if isinstance(err, dict):
-                msg = err.get("message")
-                if isinstance(msg, str) and msg.strip():
-                    return msg.strip()
-                # Some providers use {"error":{"type":"...","code":"...","param":"..."}}
-                return json.dumps(err, ensure_ascii=False)[:400]
-            # OpenRouter sometimes: {"message":"..."} or {"error":"..."}
-            msg = data.get("message") or data.get("error")
-            if isinstance(msg, str) and msg.strip():
-                return msg.strip()
-    except Exception:
-        pass
-
-    # Fallback to raw body snippet (keep bounded).
-    return raw.strip()[:400]
-
-
-def _extract_text_from_chat_completions_response(data: Any) -> str:
-    """Extract assistant text from an OpenAI-compatible chat completions response.
-
-    Many OpenAI-compatible providers differ slightly in response shapes. This
-    helper tries a few common patterns and raises on explicit error payloads.
-    """
+        return (response.text or "").strip()[:400]
     if isinstance(data, dict):
-        err = data.get("error")
-        if err:
-            # Some gateways incorrectly return HTTP 200 with an error payload.
-            if isinstance(err, dict):
-                msg = err.get("message")
-                if isinstance(msg, str) and msg.strip():
-                    raise RuntimeError(msg.strip())
-                raise RuntimeError(json.dumps(err, ensure_ascii=False)[:400])
-            if isinstance(err, str) and err.strip():
-                raise RuntimeError(err.strip())
+        error = data.get("error")
+        if isinstance(error, dict) and isinstance(error.get("message"), str):
+            return error["message"].strip()
+        if isinstance(error, str):
+            return error.strip()
+        if isinstance(data.get("message"), str):
+            return data["message"].strip()
+    return ""
 
+
+def _response_text(data: Any) -> str:
     if not isinstance(data, dict):
-        raise RuntimeError("Provider returned non-JSON object response")
-
+        raise RuntimeError("Gateway returned a non-object response")
+    if data.get("error"):
+        raise RuntimeError(str(data["error"]))
     choices = data.get("choices")
-    if not isinstance(choices, list) or not choices:
-        raise RuntimeError("Provider response missing choices[]")
-
-    choice0 = choices[0] if isinstance(choices[0], dict) else None
-    if not isinstance(choice0, dict):
-        raise RuntimeError("Provider response has invalid choices[0]")
-
-    # Some providers return `text` directly on choices.
-    if isinstance(choice0.get("text"), str) and choice0["text"].strip():
-        return str(choice0["text"])
-
-    msg = choice0.get("message")
-    if isinstance(msg, dict):
-        # OpenAI-like refusal text
-        refusal = msg.get("refusal")
-        if isinstance(refusal, str) and refusal.strip():
-            return refusal.strip()
-
-        content = msg.get("content")
+    if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
+        raise RuntimeError("Gateway response missing choices[]")
+    choice = choices[0]
+    message = choice.get("message")
+    if isinstance(message, dict):
+        content = message.get("content")
         if isinstance(content, str):
             return content
-        # Some providers use a list of parts: [{"type":"text","text":"..."}]
         if isinstance(content, list):
-            parts: list[str] = []
-            for p in content:
-                if isinstance(p, str) and p.strip():
-                    parts.append(p)
-                elif isinstance(p, dict):
-                    t = p.get("text")
-                    if isinstance(t, str) and t.strip():
-                        parts.append(t)
+            parts = [
+                str(part.get("text"))
+                for part in content
+                if isinstance(part, dict) and isinstance(part.get("text"), str) and part.get("text")
+            ]
             if parts:
                 return "\n".join(parts)
-
-    raise RuntimeError("Provider response missing assistant content")
-
-
-def _extract_text_from_responses_response(data: Any) -> str:
-    """Extract assistant text from OpenAI Responses payloads."""
-    if isinstance(data, dict):
-        err = data.get("error")
-        if err:
-            if isinstance(err, dict):
-                msg = err.get("message")
-                if isinstance(msg, str) and msg.strip():
-                    raise RuntimeError(msg.strip())
-                raise RuntimeError(json.dumps(err, ensure_ascii=False)[:400])
-            if isinstance(err, str) and err.strip():
-                raise RuntimeError(err.strip())
-    if not isinstance(data, dict):
-        raise RuntimeError("Provider returned non-JSON object response")
-
-    out_text = data.get("output_text")
-    if isinstance(out_text, str) and out_text.strip():
-        return out_text
-
-    output = data.get("output")
-    if isinstance(output, list):
-        parts: list[str] = []
-        for item in output:
-            if not isinstance(item, dict):
-                continue
-            content = item.get("content")
-            if not isinstance(content, list):
-                continue
-            for c in content:
-                if not isinstance(c, dict):
-                    continue
-                if str(c.get("type") or "").strip() == "output_text":
-                    t = c.get("text")
-                    if isinstance(t, str) and t:
-                        parts.append(t)
-                elif isinstance(c.get("text"), str) and c.get("text"):
-                    parts.append(str(c.get("text")))
-        if parts:
-            return "\n".join(parts)
-
-    raise RuntimeError("Provider response missing assistant content")
+    if isinstance(choice.get("text"), str):
+        return str(choice["text"])
+    raise RuntimeError("Gateway response missing assistant content")
 
 
-def _build_responses_input(
-    *,
-    user_message: str,
-    images: list[ImageAttachment],
-    image_detail: str = "auto",
-) -> str | list[dict[str, Any]]:
-    """Build OpenAI Responses API input payload from user text + image attachments."""
-    if not images:
-        return user_message
-
-    parts: list[dict[str, Any]] = [{"type": "input_text", "text": user_message}]
-    detail = (image_detail or "").strip().lower() or "auto"
-    for att in images:
-        if att.url:
-            url = str(att.url)
-        else:
-            url = f"data:{att.mime_type};base64,{att.base64}"
-        image_payload: dict[str, Any] = {"type": "input_image", "image_url": url}
-        if detail in {"auto", "low", "high"}:
-            image_payload["detail"] = detail
-        parts.append(image_payload)
-    return [{"role": "user", "content": parts}]
+def _raise_status(error: httpx.HTTPStatusError) -> None:
+    status = int(error.response.status_code)
+    detail = _error_detail(error.response)
+    if status == 401:
+        raise RuntimeError("LiteLLM unauthorized (check LITELLM_API_KEY)") from error
+    suffix = f": {detail}" if detail else ""
+    raise RuntimeError(f"LiteLLM request failed (HTTP {status}){suffix}") from error
 
 
 async def generate_chat_text(
     *,
     route: ProviderRoute,
-    openrouter_cfg: OpenRouterConfig,
     system_prompt: str,
     user_message: str,
     images: list[ImageAttachment],
@@ -281,165 +152,73 @@ async def generate_chat_text(
     context_chunks: list[ChunkMatch],
     timeout_s: float = 120.0,
 ) -> GenerationResult:
-    """Generate a single non-streaming chat response (OpenAI-compatible)."""
+    """Generate one non-streaming response through LiteLLM."""
 
-    if context_text is not None:
-        context_block = str(context_text or "").strip()
-    else:
-        context_block = _format_chunks_for_context(context_chunks)
-
-    prompt = system_prompt if not context_block else f"{system_prompt}\n\n## Context\n{context_block}"
-    messages = _build_messages(system_prompt=prompt, user_message=user_message, images=images, image_detail=image_detail)
-
-    if route.kind == "ragweld":
-        if images:
-            raise RuntimeError("ragweld provider does not support vision/images yet")
-        from server.chat.ragweld_mlx import generate as ragweld_generate
-
-        text, provider_response_id = await ragweld_generate(
-            model_id=str(route.model),
-            backend=str(getattr(route, "ragweld_backend", "") or "mlx_qwen3"),
-            base_model=str(getattr(route, "ragweld_base_model", "") or route.model),
-            adapter_dir=str(getattr(route, "ragweld_adapter_dir", "") or ""),
-            messages=messages,
-            temperature=float(temperature),
-            max_tokens=int(max_tokens),
-            reload_period_sec=int(getattr(route, "ragweld_reload_period_sec", 60) or 60),
-            unload_after_sec=int(getattr(route, "ragweld_unload_after_sec", 0) or 0),
-        )
-        return GenerationResult(text=text, provider_response_id=provider_response_id)
-
-    base_url = route.base_url.rstrip("/")
-    headers: dict[str, str] = {"Content-Type": "application/json"}
-    if route.kind == "openrouter":
-        if not route.api_key:
-            raise RuntimeError("OpenRouter enabled but OPENROUTER_API_KEY is not set")
-        headers = _openrouter_headers(api_key=route.api_key, cfg=openrouter_cfg)
-    if route.kind == "cloud_direct":
-        if not route.api_key:
-            raise RuntimeError("Cloud provider enabled but API key is not set")
-        headers = _bearer_headers(api_key=route.api_key)
-    if route.kind == "litellm":
-        headers = _bearer_headers(api_key=route.api_key) if route.api_key else {"Content-Type": "application/json"}
-
-    is_openai_responses = (
-        route.kind == "cloud_direct"
-        and str(route.provider_name or "").strip().lower() == "openai"
-        and str(getattr(route, "openai_protocol", "") or "").strip().lower() == "responses"
+    prompt = _prompt_with_context(
+        system_prompt=system_prompt, context_text=context_text, context_chunks=context_chunks
     )
-
-    if is_openai_responses:
-        url = f"{base_url}/responses" if base_url.endswith("/v1") else f"{base_url}/v1/responses"
-        payload: dict[str, Any] = {
-            "model": route.model,
-            "instructions": prompt,
-            "input": _build_responses_input(user_message=user_message, images=images, image_detail=image_detail),
-            "max_output_tokens": int(max_tokens),
-        }
-        # Responses-only models require explicit reasoning settings.
-        payload["reasoning"] = {"effort": "medium"}
-    else:
-        url = (
-            f"{base_url}/chat/completions"
-            if route.kind in {"openrouter", "cloud_direct", "litellm"}
-            else f"{base_url}/v1/chat/completions"
-        )
-        payload = {
-            "model": route.model,
-            "messages": messages,
-            "temperature": float(temperature),
-            "stream": False,
-        }
-        token_key = "max_completion_tokens" if _uses_openai_max_completion_tokens(route) else "max_tokens"
-        payload[token_key] = int(max_tokens)
-
+    payload = {
+        "model": route.model,
+        "messages": _build_messages(
+            system_prompt=prompt,
+            user_message=user_message,
+            images=images,
+            image_detail=image_detail,
+        ),
+        "temperature": float(temperature),
+        "max_tokens": int(max_tokens),
+        "stream": False,
+    }
     with stage_span(
-        "generation.provider_call",
-        provider_name=str(route.provider_name),
-        provider_kind=str(route.kind),
-        model=str(route.model),
+        "generation.gateway_call", provider_name="LiteLLM", provider_kind="litellm", model=route.model
     ):
         async with httpx.AsyncClient(timeout=timeout_s) as client:
             try:
-                resp = await client.post(url, headers=headers, json=payload)
-                resp.raise_for_status()
-                data: Any = resp.json()
-            except httpx.HTTPStatusError as e:
-                status = int(getattr(e.response, "status_code", 0) or 0)
-                detail = ""
-                try:
-                    msg = _summarize_provider_error(e.response)
-                    if msg:
-                        detail = f": {msg}"
-                except Exception:
-                    detail = ""
-                if status == 401:
-                    if route.kind == "openrouter":
-                        raise RuntimeError("OpenRouter unauthorized (check OPENROUTER_API_KEY)") from e
-                    if route.kind == "cloud_direct":
-                        raise RuntimeError("OpenAI unauthorized (check OPENAI_API_KEY)") from e
-                    if route.kind == "litellm":
-                        raise RuntimeError("LiteLLM unauthorized (check LITELLM_API_KEY or gateway auth)") from e
-                raise RuntimeError(f"LLM request failed (HTTP {status}){detail}") from e
-            except httpx.RequestError as e:
+                response = await client.post(_url(route), headers=_headers(route), json=payload)
+                response.raise_for_status()
+                data: Any = response.json()
+            except httpx.HTTPStatusError as error:
+                _raise_status(error)
+                raise AssertionError("unreachable")
+            except httpx.RequestError as error:
                 raise RuntimeError(
-                    f"Provider request failed ({route.kind} {route.provider_name} @ {route.base_url}): "
-                    f"{type(e).__name__}: {e}"
-                ) from e
+                    f"LiteLLM request failed at {route.base_url}: {type(error).__name__}: {error}"
+                ) from error
 
         try:
-            if is_openai_responses:
-                text = _extract_text_from_responses_response(data)
-            else:
-                text = _extract_text_from_chat_completions_response(data)
-        except Exception as e:
-            raise RuntimeError(f"LLM response parse failed: {e}") from e
-
-        provider_response_id: str | None = None
-        try:
-            rid = data.get("id")
-            if isinstance(rid, str) and rid.strip():
-                provider_response_id = rid.strip()
-        except Exception:
-            provider_response_id = None
-
-        usage = _extract_usage_payload(data)
-        debug_trace_id = _extract_debug_trace_id(resp)
-        provider_cost_usd = extract_provider_cost(data if isinstance(data, dict) else None)
-        cost_summary = build_trace_cost_summary(
-            provider=str(route.provider_name),
-            model=str(route.model),
-            usage=usage,
-            provider_cost_usd=provider_cost_usd,
+            text = _response_text(data)
+        except Exception as error:
+            raise RuntimeError(f"LiteLLM response parse failed: {error}") from error
+        usage = _usage(data)
+        provider_cost_usd = extract_provider_cost(data)
+        cost = build_trace_cost_summary(
+            provider="LiteLLM", model=route.model, usage=usage, provider_cost_usd=provider_cost_usd
         )
-        set_cost_summary(cost_summary)
+        trace_id = _debug_trace_id(response)
+        set_cost_summary(cost)
         record_langfuse_generation(
             name="chat.generation",
-            model=str(route.model),
+            model=route.model,
             input_payload={"system_prompt": prompt, "user_message": user_message},
             output_text=text,
             usage_details=usage,
-            cost_details=cost_summary.model_dump(mode="json", by_alias=True),
-            metadata={
-                "provider_kind": str(route.kind),
-                "provider_name": str(route.provider_name),
-                "debug_trace_id": debug_trace_id,
-            },
+            cost_details=cost.model_dump(mode="json", by_alias=True),
+            metadata={"provider_kind": "litellm", "provider_name": "LiteLLM", "debug_trace_id": trace_id},
         )
 
+    response_id = data.get("id") if isinstance(data.get("id"), str) else None
     return GenerationResult(
         text=text,
-        provider_response_id=provider_response_id,
+        provider_response_id=response_id,
         usage=usage,
-        cost_summary=cost_summary,
-        debug_trace_id=debug_trace_id,
+        cost_summary=cost,
+        debug_trace_id=trace_id,
     )
 
 
 async def stream_chat_text(
     *,
     route: ProviderRoute,
-    openrouter_cfg: OpenRouterConfig,
     system_prompt: str,
     user_message: str,
     images: list[ImageAttachment],
@@ -453,292 +232,99 @@ async def stream_chat_text(
     on_usage: Callable[[dict[str, Any]], None] | None = None,
     on_debug_trace_id: Callable[[str], None] | None = None,
 ) -> AsyncIterator[str]:
-    """Stream chat response deltas (OpenAI-compatible chat completions stream)."""
+    """Stream OpenAI Chat Completions deltas through LiteLLM."""
 
-    if context_text is not None:
-        context_block = str(context_text or "").strip()
-    else:
-        context_block = _format_chunks_for_context(context_chunks)
-
-    prompt = system_prompt if not context_block else f"{system_prompt}\n\n## Context\n{context_block}"
-    messages = _build_messages(system_prompt=prompt, user_message=user_message, images=images, image_detail=image_detail)
-
-    if route.kind == "ragweld":
-        if images:
-            raise RuntimeError("ragweld provider does not support vision/images yet")
-        from server.chat.ragweld_mlx import stream as ragweld_stream
-
-        async for delta in ragweld_stream(
-            model_id=str(route.model),
-            backend=str(getattr(route, "ragweld_backend", "") or "mlx_qwen3"),
-            base_model=str(getattr(route, "ragweld_base_model", "") or route.model),
-            adapter_dir=str(getattr(route, "ragweld_adapter_dir", "") or ""),
-            messages=messages,
-            temperature=float(temperature),
-            max_tokens=int(max_tokens),
-            reload_period_sec=int(getattr(route, "ragweld_reload_period_sec", 60) or 60),
-            unload_after_sec=int(getattr(route, "ragweld_unload_after_sec", 0) or 0),
-        ):
-            yield delta
-        return
-
-    base_url = route.base_url.rstrip("/")
-    headers: dict[str, str] = {"Content-Type": "application/json"}
-    if route.kind == "openrouter":
-        if not route.api_key:
-            raise RuntimeError("OpenRouter enabled but OPENROUTER_API_KEY is not set")
-        headers = _openrouter_headers(api_key=route.api_key, cfg=openrouter_cfg)
-    if route.kind == "cloud_direct":
-        if not route.api_key:
-            raise RuntimeError("Cloud provider enabled but API key is not set")
-        headers = _bearer_headers(api_key=route.api_key)
-    if route.kind == "litellm":
-        headers = _bearer_headers(api_key=route.api_key) if route.api_key else {"Content-Type": "application/json"}
-
-    is_openai_responses = (
-        route.kind == "cloud_direct"
-        and str(route.provider_name or "").strip().lower() == "openai"
-        and str(getattr(route, "openai_protocol", "") or "").strip().lower() == "responses"
+    prompt = _prompt_with_context(
+        system_prompt=system_prompt, context_text=context_text, context_chunks=context_chunks
     )
-
-    sent_provider_id = False
-    yielded_any = False
+    payload = {
+        "model": route.model,
+        "messages": _build_messages(
+            system_prompt=prompt,
+            user_message=user_message,
+            images=images,
+            image_detail=image_detail,
+        ),
+        "temperature": float(temperature),
+        "max_tokens": int(max_tokens),
+        "stream": True,
+        "stream_options": {"include_usage": True},
+    }
+    sent_response_id = False
     streamed_text = ""
     captured_usage: dict[str, Any] | None = None
-    captured_debug_trace_id: str | None = None
+    captured_trace_id: str | None = None
     with stage_span(
-        "generation.provider_stream",
-        provider_name=str(route.provider_name),
-        provider_kind=str(route.kind),
-        model=str(route.model),
+        "generation.gateway_stream", provider_name="LiteLLM", provider_kind="litellm", model=route.model
     ):
         async with httpx.AsyncClient(timeout=timeout_s) as client:
             try:
-                if is_openai_responses:
-                    url = f"{base_url}/responses" if base_url.endswith("/v1") else f"{base_url}/v1/responses"
-                    payload: dict[str, Any] = {
-                        "model": route.model,
-                        "instructions": prompt,
-                        "input": _build_responses_input(user_message=user_message, images=images, image_detail=image_detail),
-                        "max_output_tokens": int(max_tokens),
-                        "reasoning": {"effort": "medium"},
-                        "stream": True,
-                    }
-                    current_event = ""
-                    async with client.stream("POST", url, headers=headers, json=payload) as resp:
-                        resp.raise_for_status()
-                        debug_trace_id = _extract_debug_trace_id(resp)
-                        if debug_trace_id and on_debug_trace_id is not None:
-                            on_debug_trace_id(debug_trace_id)
-                        captured_debug_trace_id = debug_trace_id or captured_debug_trace_id
-                        async for raw_line in resp.aiter_lines():
-                            line = (raw_line or "").strip()
-                            if not line:
-                                continue
-                            if line.startswith("event:"):
-                                current_event = line[len("event:") :].strip()
-                                continue
-                            if not line.startswith("data:"):
-                                continue
-                            data_str = line[len("data:") :].strip()
-                            if data_str == "[DONE]":
-                                break
-                            try:
-                                evt = json.loads(data_str)
-                            except Exception:
-                                continue
-                            if not isinstance(evt, dict):
-                                continue
-                            if on_usage is not None:
-                                usage = _extract_usage_payload(evt)
-                                if usage is not None:
-                                    captured_usage = usage
-                                    on_usage(usage)
-                            else:
-                                usage = _extract_usage_payload(evt)
-                                if usage is not None:
-                                    captured_usage = usage
-                            err = evt.get("error")
-                            if err:
-                                if isinstance(err, dict):
-                                    msg = err.get("message")
-                                    raise RuntimeError(str(msg or json.dumps(err, ensure_ascii=False)[:400]))
-                                raise RuntimeError(str(err))
-                            if not sent_provider_id and on_provider_response_id is not None:
-                                rid = (
-                                    evt.get("id")
-                                    or (evt.get("response") or {}).get("id")
-                                    if isinstance(evt.get("response"), dict)
-                                    else evt.get("id")
-                                )
-                                if isinstance(rid, str) and rid.strip():
-                                    sent_provider_id = True
-                                    on_provider_response_id(rid.strip())
-                            evt_type = str(evt.get("type") or current_event or "").strip()
-                            if evt_type in {"response.output_text.delta", "response.refusal.delta"}:
-                                evt_delta = evt.get("delta")
-                                if isinstance(evt_delta, str) and evt_delta:
-                                    yielded_any = True
-                                    streamed_text += evt_delta
-                                    yield evt_delta
-                                    continue
-                            if evt_type == "response.completed":
-                                response_obj = evt.get("response") if isinstance(evt.get("response"), dict) else evt
-                                try:
-                                    completed_text = _extract_text_from_responses_response(response_obj)
-                                except Exception:
-                                    completed_text = ""
-                                if completed_text and not yielded_any:
-                                    yielded_any = True
-                                    streamed_text += completed_text
-                                    yield completed_text
-                                break
-                else:
-                    url = (
-                        f"{base_url}/chat/completions"
-                        if route.kind in {"openrouter", "cloud_direct", "litellm"}
-                        else f"{base_url}/v1/chat/completions"
-                    )
-                    payload = {
-                        "model": route.model,
-                        "messages": messages,
-                        "temperature": float(temperature),
-                        "stream": True,
-                        "stream_options": {"include_usage": True},
-                    }
-                    token_key = "max_completion_tokens" if _uses_openai_max_completion_tokens(route) else "max_tokens"
-                    payload[token_key] = int(max_tokens)
-                    async with client.stream("POST", url, headers=headers, json=payload) as resp:
-                        resp.raise_for_status()
-                        debug_trace_id = _extract_debug_trace_id(resp)
-                        if debug_trace_id and on_debug_trace_id is not None:
-                            on_debug_trace_id(debug_trace_id)
-                        captured_debug_trace_id = debug_trace_id or captured_debug_trace_id
-                        async for raw_line in resp.aiter_lines():
-                            line = (raw_line or "").strip()
-                            if not line:
-                                continue
-                            if not line.startswith("data:"):
-                                continue
-                            data_str = line[len("data:") :].strip()
-                            if data_str == "[DONE]":
-                                break
-                            try:
-                                evt = json.loads(data_str)
-                            except Exception:
-                                continue
-                            if isinstance(evt, dict) and evt.get("error"):
-                                err = evt.get("error")
-                                if isinstance(err, dict):
-                                    msg = err.get("message")
-                                    raise RuntimeError(str(msg or json.dumps(err, ensure_ascii=False)[:400]))
-                                raise RuntimeError(str(err))
-                            if not sent_provider_id and on_provider_response_id is not None:
-                                try:
-                                    rid = evt.get("id")
-                                    if isinstance(rid, str) and rid.strip():
-                                        sent_provider_id = True
-                                        on_provider_response_id(rid.strip())
-                                except Exception:
-                                    pass
-                            try:
-                                choices = evt.get("choices") or []
-                                if on_usage is not None:
-                                    usage = _extract_usage_payload(evt)
-                                    if usage is not None:
-                                        captured_usage = usage
-                                        on_usage(usage)
-                                else:
-                                    usage = _extract_usage_payload(evt)
-                                    if usage is not None:
-                                        captured_usage = usage
-                                if not choices:
-                                    continue
-                                c0 = choices[0] if isinstance(choices[0], dict) else None
-                                if not isinstance(c0, dict):
-                                    continue
-                                delta_text = (
-                                    (c0.get("delta") or {}).get("content") if isinstance(c0.get("delta"), dict) else None
-                                )
-                                if isinstance(delta_text, str) and delta_text:
-                                    yielded_any = True
-                                    streamed_text += delta_text
-                                    yield delta_text
-                                    continue
-                                if not yielded_any:
-                                    msg = c0.get("message")
-                                    if isinstance(msg, dict):
-                                        content = msg.get("content")
-                                        if isinstance(content, str) and content.strip():
-                                            yielded_any = True
-                                            streamed_text += content
-                                            yield content
-                                            continue
-                                        if isinstance(content, list):
-                                            parts: list[str] = []
-                                            for p in content:
-                                                if isinstance(p, str) and p.strip():
-                                                    parts.append(p)
-                                                elif isinstance(p, dict):
-                                                    t = p.get("text")
-                                                    if isinstance(t, str) and t.strip():
-                                                        parts.append(t)
-                                            if parts:
-                                                yielded_any = True
-                                                text_block = "\n".join(parts)
-                                                streamed_text += text_block
-                                                yield text_block
-                                                continue
-                                if not yielded_any and isinstance(c0.get("text"), str) and c0["text"].strip():
-                                    yielded_any = True
-                                    text_block = str(c0["text"])
-                                    streamed_text += text_block
-                                    yield text_block
-                            except Exception:
-                                continue
-            except httpx.HTTPStatusError as e:
-                status = int(getattr(e.response, "status_code", 0) or 0)
-                detail = ""
-                try:
-                    msg = _summarize_provider_error(e.response)
-                    if msg:
-                        detail = f": {msg}"
-                except Exception:
-                    detail = ""
-                if status == 401:
-                    if route.kind == "openrouter":
-                        raise RuntimeError("OpenRouter unauthorized (check OPENROUTER_API_KEY)") from e
-                    if route.kind == "cloud_direct":
-                        raise RuntimeError("OpenAI unauthorized (check OPENAI_API_KEY)") from e
-                    if route.kind == "litellm":
-                        raise RuntimeError("LiteLLM unauthorized (check LITELLM_API_KEY or gateway auth)") from e
-                raise RuntimeError(f"LLM request failed (HTTP {status}){detail}") from e
-            except httpx.RequestError as e:
+                async with client.stream("POST", _url(route), headers=_headers(route), json=payload) as response:
+                    response.raise_for_status()
+                    captured_trace_id = _debug_trace_id(response)
+                    if captured_trace_id and on_debug_trace_id:
+                        on_debug_trace_id(captured_trace_id)
+                    async for raw_line in response.aiter_lines():
+                        line = (raw_line or "").strip()
+                        if not line.startswith("data:"):
+                            continue
+                        encoded = line[len("data:") :].strip()
+                        if encoded == "[DONE]":
+                            break
+                        try:
+                            event = json.loads(encoded)
+                        except json.JSONDecodeError:
+                            continue
+                        if not isinstance(event, dict):
+                            continue
+                        if event.get("error"):
+                            raise RuntimeError(str(event["error"]))
+                        response_id = event.get("id")
+                        if (
+                            not sent_response_id
+                            and isinstance(response_id, str)
+                            and response_id.strip()
+                            and on_provider_response_id
+                        ):
+                            sent_response_id = True
+                            on_provider_response_id(response_id.strip())
+                        event_usage = _usage(event)
+                        if event_usage is not None:
+                            captured_usage = event_usage
+                            if on_usage:
+                                on_usage(event_usage)
+                        choices = event.get("choices")
+                        if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
+                            continue
+                        delta = choices[0].get("delta")
+                        content = delta.get("content") if isinstance(delta, dict) else None
+                        if isinstance(content, str) and content:
+                            streamed_text += content
+                            yield content
+            except httpx.HTTPStatusError as error:
+                _raise_status(error)
+                raise AssertionError("unreachable")
+            except httpx.RequestError as error:
                 raise RuntimeError(
-                    f"Provider request failed ({route.kind} {route.provider_name} @ {route.base_url}): "
-                    f"{type(e).__name__}: {e}"
-                ) from e
+                    f"LiteLLM stream failed at {route.base_url}: {type(error).__name__}: {error}"
+                ) from error
 
-        if not yielded_any:
-            raise RuntimeError("LLM stream produced no content (provider may not support selected streaming format)")
-
-        cost_summary = build_trace_cost_summary(
-            provider=str(route.provider_name),
-            model=str(route.model),
-            usage=captured_usage,
-            provider_cost_usd=None,
+        if not streamed_text:
+            raise RuntimeError("LiteLLM stream produced no content")
+        cost = build_trace_cost_summary(
+            provider="LiteLLM", model=route.model, usage=captured_usage, provider_cost_usd=None
         )
-        set_cost_summary(cost_summary)
+        set_cost_summary(cost)
         record_langfuse_generation(
             name="chat.generation.stream",
-            model=str(route.model),
+            model=route.model,
             input_payload={"system_prompt": prompt, "user_message": user_message},
             output_text=streamed_text,
             usage_details=captured_usage,
-            cost_details=cost_summary.model_dump(mode="json", by_alias=True),
+            cost_details=cost.model_dump(mode="json", by_alias=True),
             metadata={
-                "provider_kind": str(route.kind),
-                "provider_name": str(route.provider_name),
-                "debug_trace_id": captured_debug_trace_id,
+                "provider_kind": "litellm",
+                "provider_name": "LiteLLM",
+                "debug_trace_id": captured_trace_id,
             },
         )

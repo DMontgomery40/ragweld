@@ -305,9 +305,8 @@ async def answer_best_effort(
 
         generation = _coerce_generation_result(
             await generate_chat_text(
-            route=route,
-            openrouter_cfg=config.chat.openrouter,
-            system_prompt=system_prompt,
+                route=route,
+                system_prompt=system_prompt,
             user_message=query,
             images=[],
             image_detail=str(config.chat.multimodal.image_detail or "auto"),
@@ -544,7 +543,6 @@ async def stream_answer_best_effort(
 
         async for delta in stream_chat_text(
             route=route,
-            openrouter_cfg=config.chat.openrouter,
             system_prompt=system_prompt,
             user_message=query,
             images=[],

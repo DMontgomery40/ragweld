@@ -932,7 +932,6 @@ async def analyze_eval_comparison(
     try:
         result = await generate_chat_text(
             route=route,
-            openrouter_cfg=cfg.chat.openrouter,
             system_prompt=cfg.system_prompts.eval_analysis,
             user_message=user_prompt,
             images=[],

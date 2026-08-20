@@ -58,7 +58,6 @@ async def _run_one(
         try:
             result = await generate_chat_text(
                 route=route,
-                openrouter_cfg=config.chat.openrouter,
                 system_prompt=config.chat.system_prompt_base,
                 user_message=prompt,
                 images=[],
