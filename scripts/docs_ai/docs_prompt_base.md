@@ -17,9 +17,9 @@ Beyond fused tri-brid retrieval (vector + sparse + graph), ragweld includes broa
 - **Eval**: Eval datasets, runs, drilldown, AI analysis, trace viewer, feedback. MRR/NDCG/MAP metrics; canary comparisons.
 - **Grafana**: Embedded dashboards, config, kiosk mode. Provisioned via Docker.
 - **Tracing modes**: local trace buffering plus canonical OTel/Langfuse observability modes when configured.
-- **Webhooks**: Alert notifications (MRR drop, canary regression, etc.). Configure severity, timeout, resolved alerts.
-- **Docker UI**: Mini-Portainer — list/start/stop containers, status. Infrastructure tab.
-- **Admin**: Secrets, integrations, model catalog, webhook config.
+- **Alert delivery and incidents**: Alertmanager status and incident signals live in Monitoring; alert policy and timeout controls live on their owning retrieval/operations surfaces.
+- **Docker UI**: Project-scoped ragweld service status, logs, and lifecycle controls. It never exposes host-wide arbitrary container control.
+- **Admin**: Basic, advanced, and raw configuration plus dependency and secret readiness. Integration controls live on their owning RAG, Grafana, and Infrastructure surfaces.
 - **Semantic cache + Recall gating**: cost-saving cache controls and retrieval gates for chat memory behavior.
 - **Model/provider routing**: route local/cloud providers, daily-refresh model catalog, custom model registration.
 
@@ -158,5 +158,5 @@ When doing a bootstrap or large catch-up, consider creating/updating:
 - `guides/training_studios.md` — Reranker + Agent training studios, runs, metrics, NeuralVisualizer
 - `guides/eval.md` — Eval datasets, drilldown, AI analysis, canary, MRR/NDCG
 - `operations/grafana.md` — Embedded Grafana, config, kiosk mode
-- `operations/webhooks.md` — Alert webhooks, MRR/canary notifications
+- `operations/alerts.md` — Alert delivery, incident signals, and MRR/canary notifications
 - `operations/docker_ui.md` — project-scoped Ragweld service status, logs, and lifecycle controls

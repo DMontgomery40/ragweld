@@ -57,9 +57,9 @@ In `generate_docs_from_diff.py`, `_select_context_files` uses a `preferred` list
 - Training studios (RerankerTraining/TrainingStudio, AgentTraining/TrainingStudio)
 - Eval UI (EvalDrillDown, EvalAnalysisTab, TraceViewer)
 - Grafana (GrafanaDashboard, GrafanaConfig, GrafanaEmbed)
-- Webhooks (IntegrationsSubtab, GeneralSubtab, webhooks API)
+- Alert delivery and incident status (RetrievalSubtab, MonitoringSubtab)
 - Docker UI (project-scoped Infrastructure Docker and Services subtabs)
-- Admin panels (IntegrationsSubtab, GeneralSubtab)
+- Active Admin panels (ConfigBasics, ConfigExplorer, ConfigRaw, Dependencies)
 
 ### 1.5 Config Reference (Deterministic)
 
@@ -75,8 +75,8 @@ This is comprehensive for config fields. No changes needed there.
 
 1. **Diff-driven**: If chat UI, eval, training studios, etc. haven't changed in a commit, they never enter the diff context.
 2. **Preferred list bias**: Even in bootstrap, only ~25–60 files get diffs; the list favors RAG/API.
-3. **Prompt scope**: `docs_prompt_base.md` describes TriBridRAG as "vector + sparse + graph" — doesn't tell the LLM about chat recall, eval drilldown, training studios, Grafana, webhooks, Docker UI, onboarding.
-4. **Nav structure**: `mkdocs.yml` has no explicit nav entries for Training Studios, Eval Analysis, Grafana, Webhooks, Onboarding — so the LLM has no target pages to create.
+3. **Prompt scope**: older prompt revisions described only "vector + sparse + graph" and omitted chat recall, eval drilldown, training studios, Grafana, alert operations, Docker UI, and onboarding.
+4. **Nav structure**: `mkdocs.yml` needs explicit targets for Training Studios, Eval Analysis, Grafana, alert operations, Docker UI, and Onboarding.
 
 ---
 
@@ -107,13 +107,17 @@ Add to `_select_context_files` in `generate_docs_from_diff.py`:
 "web/src/components/Evaluation/TraceViewer.tsx",
 "server/api/eval.py",
 "server/api/dataset.py",
-# Grafana + Webhooks
+# Grafana + alerting/operations
 "web/src/components/Grafana/GrafanaDashboard.tsx",
 "web/src/components/Grafana/GrafanaConfig.tsx",
 "web/src/pages/GrafanaEmbed.tsx",
-"web/src/components/Admin/IntegrationsSubtab.tsx",
-"web/src/components/Admin/GeneralSubtab.tsx",
-"web/src/api/webhooks.ts",
+"web/src/components/RAG/RetrievalSubtab.tsx",
+"web/src/components/Dashboard/MonitoringSubtab.tsx",
+# Active Admin control-plane surfaces
+"web/src/components/Admin/ConfigBasicsSubtab.tsx",
+"web/src/components/Admin/ConfigExplorerSubtab.tsx",
+"web/src/components/Admin/ConfigRawSubtab.tsx",
+"web/src/components/Admin/DependenciesSubtab.tsx",
 # Docker UI
 "web/src/components/Infrastructure/DockerSubtab.tsx",
 "server/api/docker.py",
@@ -133,9 +137,9 @@ Beyond tri-brid retrieval (vector + sparse + graph), ragweld includes:
 - **Training studios**: Learning Reranker Studio (LoRA fine-tuning) and Learning Agent Studio (generative model LoRA). Run management, metrics, NeuralVisualizer, telemetry.
 - **Eval**: Eval datasets, runs, drilldown, AI analysis, trace viewer, feedback. MRR/NDCG/MAP metrics; canary comparisons.
 - **Grafana**: Embedded dashboards, config, kiosk mode. Provisioned via Docker.
-- **Webhooks**: Alert notifications (MRR drop, canary regression, etc.). Configure severity, timeout, resolved alerts.
-- **Docker UI**: Mini-Portainer — list/start/stop containers, status. Infrastructure tab.
-- **Admin**: Secrets, integrations, model catalog, webhook config.
+- **Alert delivery and incidents**: Alertmanager status and incident signals live in Monitoring; alert policy and timeout controls live on their owning retrieval/operations surfaces.
+- **Docker UI**: Project-scoped ragweld service status, logs, and lifecycle controls. It never exposes host-wide arbitrary container control.
+- **Admin**: Basic, advanced, and raw configuration plus dependency and secret readiness. Integration controls live on their owning RAG, Grafana, and Infrastructure surfaces.
 ```
 
 ### 3.3 Add Nav Placeholders in mkdocs.yml
@@ -154,7 +158,7 @@ Add nav entries so the LLM has targets. The LLM can create pages; nav tells it w
 - Operations:
     ...
     - Grafana & dashboards: operations/grafana.md
-    - Webhooks & alerts: operations/webhooks.md
+    - Alerts & incidents: operations/alerts.md
     - Docker UI: operations/docker_ui.md
 ```
 
@@ -197,7 +201,7 @@ mkdocs build --strict
 
 | File | Change |
 |------|--------|
-| `scripts/docs_ai/generate_docs_from_diff.py` | Expanded `preferred` list with chat, onboarding, training studios, eval, Grafana, webhooks, Docker UI; expanded `_selected_docs_context` for bootstrap |
+| `scripts/docs_ai/generate_docs_from_diff.py` | Expanded `preferred` list with chat, onboarding, training studios, eval, Grafana, alert operations, active Admin surfaces, and Docker UI; expanded `_selected_docs_context` for bootstrap |
 | `scripts/docs_ai/docs_prompt_base.md` | Added feature inventory + suggested doc structure |
 
 ---

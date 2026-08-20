@@ -274,13 +274,9 @@ def _select_context_files(changed: List[str], *, limit: int) -> List[str]:
         "server/services/answer_service.py",
         "server/retrieval/fusion.py",
         "server/retrieval/rerank.py",
-        "server/retrieval/vector.py",
-        "server/retrieval/sparse.py",
-        "server/retrieval/graph.py",
         "server/indexing/chunker.py",
         "server/indexing/loader.py",
         "server/indexing/embedder.py",
-        "server/indexing/graph_builder.py",
         "server/db/postgres.py",
         "server/db/neo4j.py",
         # Frontend API client layer
@@ -290,7 +286,6 @@ def _select_context_files(changed: List[str], *, limit: int) -> List[str]:
         "web/src/api/models.ts",
         "web/src/api/health.ts",
         "web/src/api/docker.ts",
-        "web/src/api/webhooks.ts",
         # Chat UI + Recall
         "web/src/components/Chat/ChatInterface.tsx",
         "web/src/components/Chat/ChatSettings.tsx",
@@ -307,12 +302,17 @@ def _select_context_files(changed: List[str], *, limit: int) -> List[str]:
         "web/src/components/Evaluation/EvalDrillDown.tsx",
         "web/src/components/tabs/EvalAnalysisTab.tsx",
         "web/src/components/Evaluation/TraceViewer.tsx",
-        # Grafana + Webhooks
+        # Grafana + alerting/operations
         "web/src/components/Grafana/GrafanaDashboard.tsx",
         "web/src/components/Grafana/GrafanaConfig.tsx",
         "web/src/pages/GrafanaEmbed.tsx",
-        "web/src/components/Admin/IntegrationsSubtab.tsx",
-        "web/src/components/Admin/GeneralSubtab.tsx",
+        "web/src/components/RAG/RetrievalSubtab.tsx",
+        "web/src/components/Dashboard/MonitoringSubtab.tsx",
+        # Active Admin control-plane surfaces
+        "web/src/components/Admin/ConfigBasicsSubtab.tsx",
+        "web/src/components/Admin/ConfigExplorerSubtab.tsx",
+        "web/src/components/Admin/ConfigRawSubtab.tsx",
+        "web/src/components/Admin/DependenciesSubtab.tsx",
         # Docker UI (mini-Portainer)
         "web/src/components/Infrastructure/DockerSubtab.tsx",
     ]

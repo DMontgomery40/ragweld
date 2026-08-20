@@ -23,7 +23,7 @@ const RECOMMENDED_TARGETS: Array<Pick<DockTarget, 'path' | 'search'>> = [
   { path: '/chat', search: '' },
   { path: '/rag', search: '?subtab=retrieval' },
   { path: '/rag', search: '?subtab=graph' },
-  { path: '/admin', search: '?subtab=secrets' },
+  { path: '/admin', search: '?subtab=dependencies' },
 ];
 
 function normalizeSearch(search: string): string {
@@ -348,4 +348,3 @@ export function DockPickerModal({ isOpen, onClose, onPick }: DockPickerModalProp
     </div>
   );
 }
-

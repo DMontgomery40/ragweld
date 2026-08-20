@@ -41,10 +41,7 @@ export type { Model } from './useModels';
 export { useRuntimeCapabilities } from './useRuntimeCapabilities';
 export { useReranker } from './useReranker';
 export { useKeywords } from './useKeywords';
-export { useMCPRag } from './useMCPRag';
 export { useMCPServer } from './useMCPServer';
-export { useCost } from './useCost';
-export { useModelFlows } from './useModelFlows';
 // useOnboarding removed - banned feature per CLAUDE.md
 export { useStorageCalculator } from './useStorageCalculator';
 
