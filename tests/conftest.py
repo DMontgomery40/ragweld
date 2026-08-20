@@ -11,6 +11,32 @@ import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+_TEST_CONFIG_RUNTIME_DIR: str | None = None
+if os.environ.get("RAGWELD_STRICT_INTEGRATION", "").strip() == "1":
+    strict_config_raw = os.environ.get("RAGWELD_CONFIG_PATH", "").strip()
+    if not strict_config_raw:
+        raise RuntimeError("Strict integration requires a private RAGWELD_CONFIG_PATH")
+    strict_config_path = Path(strict_config_raw).expanduser().resolve()
+    strict_runtime_raw = os.environ.get("RAGWELD_INTEGRATION_RUNTIME_DIR", "").strip()
+    if not strict_runtime_raw:
+        raise RuntimeError("Strict integration requires a launcher-owned runtime directory")
+    strict_runtime_dir = Path(strict_runtime_raw).expanduser().resolve()
+    if strict_config_path.parent != strict_runtime_dir:
+        raise RuntimeError("Strict integration config must be inside its launcher-owned runtime directory")
+    try:
+        strict_runtime_dir.relative_to(PROJECT_ROOT.resolve())
+    except ValueError:
+        pass
+    else:
+        raise RuntimeError("Strict integration refuses config paths inside the repository")
+else:
+    _TEST_CONFIG_RUNTIME_DIR = tempfile.mkdtemp(prefix="ragweld-pytest-config-")
+    test_config_path = Path(_TEST_CONFIG_RUNTIME_DIR) / "tribrid_config.json"
+    shutil.copy2(PROJECT_ROOT / "tribrid_config.json", test_config_path)
+    test_config_path.chmod(0o600)
+    os.environ["RAGWELD_CONFIG_PATH"] = str(test_config_path)
+
 # Tests receive integration configuration explicitly. Never leak a developer
 # .env into collection or use its mere presence as a readiness signal.
 os.environ["RAGWELD_LOAD_DOTENV"] = "0"
@@ -20,8 +46,16 @@ os.environ.setdefault("LITELLM_API_KEY", "sk-ragweld-test")
 
 pytest_plugins = ("tests.service_requirements",)
 
+from server.config import DEFAULT_CONFIG_PATH  # noqa: E402
 from server.main import app  # noqa: E402
 from server.models.tribrid_config_model import TriBridConfig  # noqa: E402
+
+
+@pytest.fixture(scope="session", autouse=True)
+def cleanup_private_test_config() -> Generator[None, None, None]:
+    yield
+    if _TEST_CONFIG_RUNTIME_DIR is not None:
+        shutil.rmtree(_TEST_CONFIG_RUNTIME_DIR, ignore_errors=True)
 
 
 @pytest.fixture(scope="session")
@@ -73,14 +107,13 @@ class Calculator:
 
 
 @pytest.fixture(autouse=True)
-def isolate_tracked_config_file() -> Generator[None, None, None]:
-    """Keep tracked tribrid_config.json stable across tests.
+def isolate_runtime_config_file() -> Generator[None, None, None]:
+    """Keep the pytest-owned runtime config stable across tests.
 
-    Some config endpoint tests persist updates to the real config path. Snapshot
-    and restore the file each test so local worktrees and automation runs do not
-    end with dirty tracked config.
+    Some config endpoint tests persist updates. Snapshot and restore the private
+    runtime file each test so the tracked operator config is never a test target.
     """
-    config_path = Path("tribrid_config.json")
+    config_path = DEFAULT_CONFIG_PATH
     existed = config_path.exists()
     original = config_path.read_text(encoding="utf-8") if existed else None
     try:

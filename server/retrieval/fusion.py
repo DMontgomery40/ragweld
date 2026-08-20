@@ -5,11 +5,16 @@ import math
 import re
 from collections import defaultdict
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from server.db.neo4j import Neo4jClient
 from server.db.postgres import PostgresClient
-from server.dependency_errors import is_neo4j_unavailable, is_postgres_unavailable
+from server.dependency_errors import (
+    DependencyUnavailableError,
+    is_neo4j_unavailable,
+    is_postgres_unavailable,
+    is_transport_unavailable,
+)
 from server.indexing.embedder import Embedder, configure_postgres_embedding_cache_backend
 from server.models.retrieval import ChunkMatch
 from server.models.tribrid_config_model import (
@@ -30,12 +35,46 @@ from server.observability.metrics import (
 )
 from server.observability.runtime import stage_span
 from server.retrieval.cache import CacheEndpoint, CacheMode, SemanticCacheService
-from server.retrieval.errors import EmbeddingContractMismatchError, SparseContractMismatchError
+from server.retrieval.errors import (
+    EmbeddingContractMismatchError,
+    RequiredRetrievalLegError,
+    SparseContractMismatchError,
+)
 from server.retrieval.rerank import Reranker
 from server.retrieval.scoring_boosts import apply_scoring_boosts
 from server.services.config_store import get_config as load_scoped_config
 
 logger = logging.getLogger(__name__)
+
+
+def _raise_postgres_boundary_error(
+    exc: Exception,
+    *,
+    operation: str,
+    leg: Literal["vector", "sparse", "graph"] | None = None,
+) -> None:
+    if is_postgres_unavailable(exc) or is_transport_unavailable(exc):
+        raise DependencyUnavailableError("postgres", operation) from exc
+    if leg is not None:
+        raise RequiredRetrievalLegError(leg=leg, operation=operation) from exc
+    raise exc
+
+
+def _raise_neo4j_boundary_error(exc: Exception, *, operation: str) -> None:
+    if is_neo4j_unavailable(exc) or is_transport_unavailable(exc):
+        raise DependencyUnavailableError("neo4j", operation) from exc
+    raise RequiredRetrievalLegError(leg="graph", operation=operation) from exc
+
+
+def _raise_required_leg_error(
+    exc: Exception,
+    *,
+    leg: Literal["vector", "sparse", "graph"],
+    operation: str,
+) -> None:
+    if isinstance(exc, (DependencyUnavailableError, RequiredRetrievalLegError)):
+        raise exc
+    raise RequiredRetrievalLegError(leg=leg, operation=operation) from exc
 
 
 class TriBridFusion:
@@ -324,17 +363,14 @@ class TriBridFusion:
             TrainingConfig,
             str,
         ]:
-            cfg_error: Exception | None = None
             try:
                 cfg = scoped_cfgs.get(cid)
                 if cfg is None:
                     cfg = await load_scoped_config(repo_id=cid)
                     scoped_cfgs[cid] = cfg
             except Exception as e:
-                # Fail open: if corpus config cannot be loaded (missing corpus, Postgres down, etc),
-                # return empty results with debug instead of raising into a 500.
-                cfg_error = e
-                cfg = TriBridConfig()
+                _raise_postgres_boundary_error(e, operation="retrieval config load")
+                raise
 
             vector_results: list[ChunkMatch] = []
             sparse_results: list[ChunkMatch] = []
@@ -370,41 +406,14 @@ class TriBridFusion:
                 "fusion_graph_entity_expansion_hits": 0,
             }
 
-            if cfg_error is not None:
-                debug["fusion_config_error"] = _safe_error_message(cfg_error)
-                debug["fusion_config_error_kind"] = type(cfg_error).__name__
-                SEARCH_STAGE_ERRORS_TOTAL.labels(stage="config_load").inc()
-                return (
-                    [],
-                    [],
-                    [],
-                    debug,
-                    int(cfg.retrieval.final_k),
-                    cfg.reranking,
-                    cfg.training,
-                    str(cfg.training.tribrid_reranker_model_path or ""),
-                )
-
             # Use real storage backends per corpus config.
             postgres = PostgresClient(cfg.indexing.postgres_url)
             try:
                 await postgres.connect()
             except Exception as e:
-                if is_postgres_unavailable(e):
-                    raise
-                debug["fusion_postgres_error"] = _safe_error_message(e)
-                debug["fusion_postgres_error_kind"] = type(e).__name__
                 SEARCH_STAGE_ERRORS_TOTAL.labels(stage="postgres_connect").inc()
-                return (
-                    [],
-                    [],
-                    [],
-                    debug,
-                    int(cfg.retrieval.final_k),
-                    cfg.reranking,
-                    cfg.training,
-                    str(cfg.training.tribrid_reranker_model_path or ""),
-                )
+                _raise_postgres_boundary_error(e, operation="retrieval Postgres connect")
+                raise
 
             embedder = Embedder(cfg.embedding, cfg.tokenization)
             configure_postgres_embedding_cache_backend(embedder, postgres)
@@ -416,15 +425,8 @@ class TriBridFusion:
             try:
                 corpus_meta = await postgres.get_corpus(cid)
             except Exception as e:
-                if is_postgres_unavailable(e):
-                    raise
-                logger.warning(
-                    "Failed to fetch corpus metadata for '%s': %s — "
-                    "proceeding without dimension/ts_config guards",
-                    cid, e,
-                )
-                debug["fusion_corpus_meta_error"] = _safe_error_message(e)
-                corpus_meta = None
+                _raise_postgres_boundary_error(e, operation="retrieval corpus metadata")
+                raise
 
             stored_backend = str((corpus_meta or {}).get("embedding_backend") or "").strip().lower()
             stored_provider = str((corpus_meta or {}).get("embedding_provider") or "").strip().lower()
@@ -480,11 +482,7 @@ class TriBridFusion:
                 debug["fusion_vector_dim_mismatch"] = stored_dim > 0 and stored_dim != current_dim
                 debug["fusion_vector_dim_stored"] = stored_dim
                 debug["fusion_vector_dim_query"] = current_dim
-                can_fallback_from_vector = bool(
-                    (include_sparse and cfg.sparse_search.enabled)
-                    or (include_graph and cfg.graph_search.enabled)
-                )
-                if include_vector and cfg.vector_search.enabled and not can_fallback_from_vector:
+                if include_vector and cfg.vector_search.enabled:
                     raise EmbeddingContractMismatchError(
                         corpus_id=cid,
                         expected_contract={
@@ -500,12 +498,6 @@ class TriBridFusion:
                             "dimensions": current_dim,
                         },
                     )
-                if include_vector and cfg.vector_search.enabled and can_fallback_from_vector:
-                    debug["fusion_degraded_retrieval"] = True
-                    reasons = [str(x) for x in list(debug.get("fusion_degraded_reasons") or [])]
-                    if "vector_contract_mismatch" not in reasons:
-                        reasons.append("vector_contract_mismatch")
-                    debug["fusion_degraded_reasons"] = reasons
 
             # Reuse query embeddings across legs when possible (vector + graph chunk-mode).
             q_emb: list[float] | None = None
@@ -513,22 +505,28 @@ class TriBridFusion:
             # Run legs (request toggles + config.*.enabled)
             if include_vector and cfg.vector_search.enabled and not vector_contract_mismatch:
                 with stage_span("retrieval.vector", ragweld_corpus_id=cid), VECTOR_LEG_LATENCY_SECONDS.time():
-                    try:
-                        if q_emb is None:
+                    if q_emb is None:
+                        try:
                             with SEARCH_STAGE_LATENCY_SECONDS.labels(stage="embed_query").time():
                                 q_emb = await embedder.embed(query)
+                        except Exception as e:
+                            SEARCH_STAGE_ERRORS_TOTAL.labels(stage="embed_query").inc()
+                            _raise_required_leg_error(e, leg="vector", operation="vector query embedding")
+                            raise
+                    try:
                         with SEARCH_STAGE_LATENCY_SECONDS.labels(stage="postgres_vector_search").time():
                             vector_results = await postgres.vector_search(
                                 cid, q_emb, int(top_k or cfg.vector_search.top_k),
                                 expected_dimensions=stored_dim,
                             )
                     except Exception as e:
-                        if is_postgres_unavailable(e):
-                            raise
-                        debug["fusion_vector_error"] = _safe_error_message(e)
-                        debug["fusion_vector_error_kind"] = type(e).__name__
                         SEARCH_STAGE_ERRORS_TOTAL.labels(stage="vector_leg").inc()
-                        vector_results = []
+                        _raise_postgres_boundary_error(
+                            e,
+                            operation="Postgres vector search",
+                            leg="vector",
+                        )
+                        raise
                     if cfg.vector_search.similarity_threshold > 0:
                         vector_results = [
                             r for r in vector_results if r.score >= cfg.vector_search.similarity_threshold
@@ -541,7 +539,6 @@ class TriBridFusion:
             stored_ts = str((corpus_meta or {}).get("ts_config") or "").strip()
             current_ts = str(cfg.indexing.postgres_ts_config or "").strip()
             sparse_contract_mismatch = bool(stored_ts and current_ts and stored_ts != current_ts)
-            skip_sparse_due_contract_mismatch = False
             if sparse_contract_mismatch:
                 logger.warning(
                     "FTS ts_config mismatch for corpus '%s': "
@@ -551,11 +548,7 @@ class TriBridFusion:
                 debug["fusion_sparse_ts_config_mismatch"] = True
                 debug["fusion_sparse_ts_config_stored"] = stored_ts
                 debug["fusion_sparse_ts_config_query"] = current_ts
-                can_fallback_from_sparse = bool(
-                    (include_vector and cfg.vector_search.enabled and not vector_contract_mismatch)
-                    or (include_graph and cfg.graph_search.enabled)
-                )
-                if include_sparse and cfg.sparse_search.enabled and not can_fallback_from_sparse:
+                if include_sparse and cfg.sparse_search.enabled:
                     raise SparseContractMismatchError(
                         corpus_id=cid,
                         expected_contract={"ts_config": stored_ts},
@@ -565,16 +558,8 @@ class TriBridFusion:
                             "bm25_stemmer_lang": str(cfg.indexing.bm25_stemmer_lang or "").strip().lower(),
                         },
                     )
-                if include_sparse and cfg.sparse_search.enabled and can_fallback_from_sparse:
-                    skip_sparse_due_contract_mismatch = True
-                    debug["fusion_sparse_disabled_due_contract_mismatch"] = True
-                    debug["fusion_degraded_retrieval"] = True
-                    reasons = [str(x) for x in list(debug.get("fusion_degraded_reasons") or [])]
-                    if "sparse_contract_mismatch" not in reasons:
-                        reasons.append("sparse_contract_mismatch")
-                    debug["fusion_degraded_reasons"] = reasons
 
-            if include_sparse and cfg.sparse_search.enabled and not skip_sparse_due_contract_mismatch:
+            if include_sparse and cfg.sparse_search.enabled:
                 with stage_span("retrieval.sparse", ragweld_corpus_id=cid), SPARSE_LEG_LATENCY_SECONDS.time():
                     try:
                         with SEARCH_STAGE_LATENCY_SECONDS.labels(stage="postgres_sparse_search").time():
@@ -590,12 +575,13 @@ class TriBridFusion:
                                 relax_max_terms=int(getattr(cfg.sparse_search, "relax_max_terms", 8) or 8),
                             )
                     except Exception as e:
-                        if is_postgres_unavailable(e):
-                            raise
-                        debug["fusion_sparse_error"] = _safe_error_message(e)
-                        debug["fusion_sparse_error_kind"] = type(e).__name__
                         SEARCH_STAGE_ERRORS_TOTAL.labels(stage="sparse_leg").inc()
-                        sparse_results = []
+                        _raise_postgres_boundary_error(
+                            e,
+                            operation="Postgres sparse search",
+                            leg="sparse",
+                        )
+                        raise
 
                 if not sparse_results and bool(getattr(cfg.sparse_search, "file_path_fallback", True)):
                     try:
@@ -608,8 +594,11 @@ class TriBridFusion:
                             )
                         debug["fusion_sparse_file_path_fallback_used"] = bool(sparse_results)
                     except Exception as e:
-                        if is_postgres_unavailable(e):
-                            raise
+                        if is_postgres_unavailable(e) or is_transport_unavailable(e):
+                            raise DependencyUnavailableError(
+                                "postgres",
+                                "Postgres sparse file-path fallback",
+                            ) from e
                         debug["fusion_sparse_file_path_fallback_error"] = _safe_error_message(e)
                         debug["fusion_sparse_file_path_fallback_error_kind"] = type(e).__name__
                         SEARCH_STAGE_ERRORS_TOTAL.labels(stage="sparse_file_path_fallback").inc()
@@ -642,13 +631,25 @@ class TriBridFusion:
                             cfg.graph_storage.resolve_password(),
                             database=db_name,
                         )
-                        with SEARCH_STAGE_LATENCY_SECONDS.labels(stage="neo4j_connect").time():
-                            await neo4j.connect()
+                        try:
+                            with SEARCH_STAGE_LATENCY_SECONDS.labels(stage="neo4j_connect").time():
+                                await neo4j.connect()
+                        except Exception as e:
+                            _raise_neo4j_boundary_error(e, operation="Neo4j graph connect")
+                            raise
                         if getattr(cfg.graph_search, "mode", "entity") == "chunk":
                             # Chunk-level graph retrieval: Neo4j vector index over Chunk nodes.
                             if q_emb is None:
-                                with SEARCH_STAGE_LATENCY_SECONDS.labels(stage="embed_query").time():
-                                    q_emb = await embedder.embed(query)
+                                try:
+                                    with SEARCH_STAGE_LATENCY_SECONDS.labels(stage="embed_query").time():
+                                        q_emb = await embedder.embed(query)
+                                except Exception as e:
+                                    _raise_required_leg_error(
+                                        e,
+                                        leg="graph",
+                                        operation="graph query embedding",
+                                    )
+                                    raise
                             overfetch = (
                                 int(getattr(cfg.graph_search, "chunk_seed_overfetch_multiplier", 1) or 1)
                                 if cfg.graph_storage.neo4j_database_mode == "shared"
@@ -670,15 +671,28 @@ class TriBridFusion:
                                 except TypeError as e:
                                     # Backward-compat for test doubles / older client stubs.
                                     if "query_mode" not in str(e):
+                                        _raise_neo4j_boundary_error(e, operation="Neo4j chunk vector search")
                                         raise
-                                    hits = await neo4j.chunk_vector_search(
-                                        cid,
-                                        q_emb,
-                                        index_name=cfg.graph_indexing.chunk_vector_index_name,
-                                        top_k=graph_k,
-                                        neighbor_window=int(getattr(cfg.graph_search, "chunk_neighbor_window", 0) or 0),
-                                        overfetch_multiplier=overfetch,
-                                    )
+                                    try:
+                                        hits = await neo4j.chunk_vector_search(
+                                            cid,
+                                            q_emb,
+                                            index_name=cfg.graph_indexing.chunk_vector_index_name,
+                                            top_k=graph_k,
+                                            neighbor_window=int(
+                                                getattr(cfg.graph_search, "chunk_neighbor_window", 0) or 0
+                                            ),
+                                            overfetch_multiplier=overfetch,
+                                        )
+                                    except Exception as fallback_error:
+                                        _raise_neo4j_boundary_error(
+                                            fallback_error,
+                                            operation="Neo4j chunk vector search",
+                                        )
+                                        raise
+                                except Exception as e:
+                                    _raise_neo4j_boundary_error(e, operation="Neo4j chunk vector search")
+                                    raise
                             debug["fusion_graph_entity_hits"] = len(hits)
 
                             score_by_id = {chunk_id: float(score) for chunk_id, score in hits}
@@ -690,12 +704,19 @@ class TriBridFusion:
                                 with SEARCH_STAGE_LATENCY_SECONDS.labels(
                                     stage="neo4j_expand_chunks_via_entities"
                                 ).time():
-                                    exp_hits = await neo4j.expand_chunks_via_entities(
-                                        cid,
-                                        hits,
-                                        max_hops=int(cfg.graph_search.max_hops),
-                                        top_k=graph_k,
-                                    )
+                                    try:
+                                        exp_hits = await neo4j.expand_chunks_via_entities(
+                                            cid,
+                                            hits,
+                                            max_hops=int(cfg.graph_search.max_hops),
+                                            top_k=graph_k,
+                                        )
+                                    except Exception as e:
+                                        _raise_neo4j_boundary_error(
+                                            e,
+                                            operation="Neo4j entity expansion",
+                                        )
+                                        raise
                                 debug["fusion_graph_entity_expansion_hits"] = len(exp_hits)
                                 w = float(getattr(cfg.graph_search, "chunk_entity_expansion_weight", 1.0) or 0.0)
                                 for chunk_id, score in exp_hits:
@@ -707,7 +728,15 @@ class TriBridFusion:
                                 score_by_id, key=lambda chunk_id: (-float(score_by_id[chunk_id]), chunk_id)
                             )[:graph_k]
                             with SEARCH_STAGE_LATENCY_SECONDS.labels(stage="postgres_get_chunks").time():
-                                hydrated = await postgres.get_chunks(cid, chunk_ids)
+                                try:
+                                    hydrated = await postgres.get_chunks(cid, chunk_ids)
+                                except Exception as e:
+                                    _raise_postgres_boundary_error(
+                                        e,
+                                        operation="Postgres graph chunk hydration",
+                                        leg="graph",
+                                    )
+                                    raise
                             graph_results = [
                                 ChunkMatch(
                                     chunk_id=ch.chunk_id,
@@ -732,13 +761,30 @@ class TriBridFusion:
                         else:
                             # Entity-mode graph retrieval: return real chunk_ids via Entity-[:IN_CHUNK]->Chunk.
                             with SEARCH_STAGE_LATENCY_SECONDS.labels(stage="neo4j_entity_chunk_search").time():
-                                hits = await neo4j.entity_chunk_search(cid, query, cfg.graph_search.max_hops, graph_k)
+                                try:
+                                    hits = await neo4j.entity_chunk_search(
+                                        cid,
+                                        query,
+                                        cfg.graph_search.max_hops,
+                                        graph_k,
+                                    )
+                                except Exception as e:
+                                    _raise_neo4j_boundary_error(e, operation="Neo4j entity chunk search")
+                                    raise
                             debug["fusion_graph_entity_hits"] = len(hits)
 
                             score_by_id = {chunk_id: float(score) for chunk_id, score in hits}
                             chunk_ids = [chunk_id for chunk_id, _score in hits]
                             with SEARCH_STAGE_LATENCY_SECONDS.labels(stage="postgres_get_chunks").time():
-                                hydrated = await postgres.get_chunks(cid, chunk_ids)
+                                try:
+                                    hydrated = await postgres.get_chunks(cid, chunk_ids)
+                                except Exception as e:
+                                    _raise_postgres_boundary_error(
+                                        e,
+                                        operation="Postgres graph chunk hydration",
+                                        leg="graph",
+                                    )
+                                    raise
                             graph_results = [
                                 ChunkMatch(
                                     chunk_id=ch.chunk_id,
@@ -756,10 +802,17 @@ class TriBridFusion:
                             ]
                             debug["fusion_graph_hydrated_chunks"] = len(graph_results)
                 except Exception as e:
-                    if is_neo4j_unavailable(e) or is_postgres_unavailable(e):
+                    if isinstance(e, (DependencyUnavailableError, RequiredRetrievalLegError)):
                         raise
-                    debug["fusion_graph_error"] = str(e)
                     SEARCH_STAGE_ERRORS_TOTAL.labels(stage="graph_leg").inc()
+                    if is_neo4j_unavailable(e):
+                        raise DependencyUnavailableError("neo4j", "Neo4j graph retrieval") from e
+                    if is_postgres_unavailable(e):
+                        raise DependencyUnavailableError("postgres", "Postgres graph hydration") from e
+                    raise RequiredRetrievalLegError(
+                        leg="graph",
+                        operation="graph retrieval",
+                    ) from e
                 finally:
                     if neo4j is not None:
                         try:

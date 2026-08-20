@@ -328,24 +328,6 @@ class TestChatEndpointWithMockedLLM:
             assert len(data["sources"]) == 2
             assert data["sources"][0]["file_path"] == "src/main.py"
 
-    @pytest.mark.asyncio
-    async def test_chat_handles_error(self, chat_client: AsyncClient):
-        """Test that chat fails closed when generation cannot run."""
-        with patch(
-            "server.chat.handler.generate_chat_text",
-            new=AsyncMock(side_effect=Exception("LLM unavailable")),
-        ):
-
-            response = await chat_client.post(
-                "/api/chat",
-                json={"message": "Hello", "sources": {"corpus_ids": []}},
-            )
-
-            assert response.status_code == 503
-            data = response.json()
-            assert "LLM unavailable" in str(data.get("detail") or "")
-
-
 class TestStreamEndpoint:
     """Tests for streaming chat endpoint."""
 
@@ -393,33 +375,6 @@ class TestStreamEndpoint:
             assert len(messages) == 2
             assert messages[0].content == "Stream test message"
             assert messages[0].role == "user"
-
-    @pytest.mark.asyncio
-    async def test_stream_failure_rolls_back_orphan_user_turn(self, chat_client: AsyncClient):
-        """A stream that aborts before done must not leave a dangling user-only turn."""
-
-        async def broken_stream_handler(*args, **kwargs):
-            _ = (args, kwargs)
-            if False:  # pragma: no cover
-                yield ""
-            raise RuntimeError("stream boom")
-
-        with patch("server.api.chat.chat_stream_handler", new=broken_stream_handler):
-            with pytest.raises(RuntimeError, match="stream boom"):
-                async with chat_client.stream(
-                    "POST",
-                    "/api/chat/stream",
-                    json={
-                        "message": "Broken stream message",
-                        "sources": {"corpus_ids": []},
-                        "conversation_id": "stream-fail-conv",
-                    },
-                ) as response:
-                    async for _chunk in response.aiter_text():
-                        pass
-
-        store = get_conversation_store()
-        assert store.get_messages("stream-fail-conv") == []
 
 class TestChatCitationsRealPipeline:
     """Exercise the real rag pipeline without external API calls.

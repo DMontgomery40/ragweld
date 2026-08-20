@@ -8,6 +8,18 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query, Response
 from starlette.responses import StreamingResponse
 
+from server.api.dependency_errors import (
+    raise_postgres_unavailable_if_applicable,
+    raise_required_dependency_unavailable_if_applicable,
+)
+from server.api.generation_errors import (
+    CHAT_RUNTIME_UNAVAILABLE_RESPONSES,
+    generation_unavailable_http_exception,
+)
+from server.api.retrieval_errors import (
+    RETRIEVAL_RUNTIME_UNAVAILABLE_RESPONSES,
+    required_retrieval_leg_http_exception,
+)
 from server.chat.handler import ChatGenerationError, chat_once
 from server.chat.handler import chat_stream as chat_stream_handler
 from server.chat.model_discovery import discover_litellm_models
@@ -37,7 +49,7 @@ from server.observability.runtime import (
     start_request_observation,
     update_route_summary,
 )
-from server.retrieval.errors import RetrievalContractMismatchError
+from server.retrieval.errors import RequiredRetrievalLegError, RetrievalContractMismatchError
 from server.retrieval.fusion import TriBridFusion
 from server.services.config_store import CorpusNotFoundError
 from server.services.config_store import get_config as load_scoped_config
@@ -196,7 +208,11 @@ async def get_latest_trace(
     return await store.latest(repo=repo_id, run_id=(run_id or "").strip() or None)
 
 
-@router.post("/chat", response_model=ChatResponse)
+@router.post(
+    "/chat",
+    response_model=ChatResponse,
+    responses=CHAT_RUNTIME_UNAVAILABLE_RESPONSES,
+)
 async def chat(request: ChatRequest, response: Response) -> ChatResponse:
     """Process a chat message and return a response (Chat 2.0)."""
     store = get_conversation_store()
@@ -211,6 +227,9 @@ async def chat(request: ChatRequest, response: Response) -> ChatResponse:
             config = await load_scoped_config(repo_id=primary) if primary else TriBridConfig()
         except CorpusNotFoundError:
             config = TriBridConfig()
+        except Exception as e:
+            raise_postgres_unavailable_if_applicable(e, boundary="Chat config load")
+            raise
 
     _validate_chat_images(list(request.images or []), config.chat.multimodal)
 
@@ -412,12 +431,18 @@ async def chat(request: ChatRequest, response: Response) -> ChatResponse:
                 await trace_store.annotate(run_id, **current_trace_payload_fields())
                 await trace_store.end(run_id)
             raise HTTPException(status_code=409, detail=e.to_detail()) from e
+        except RequiredRetrievalLegError as e:
+            if trace_enabled:
+                await trace_store.add_event(run_id, kind="chat.error", msg=str(e), data={"kind": "retrieval"})
+                await trace_store.annotate(run_id, **current_trace_payload_fields())
+                await trace_store.end(run_id)
+            raise required_retrieval_leg_http_exception(e) from e
         except ChatGenerationError as e:
             if trace_enabled:
                 await trace_store.add_event(run_id, kind="chat.error", msg=str(e), data={"kind": "generation"})
                 await trace_store.annotate(run_id, **current_trace_payload_fields())
                 await trace_store.end(run_id)
-            raise HTTPException(status_code=503, detail=str(e)) from e
+            raise generation_unavailable_http_exception(e, operation="Chat generation") from e
         except Exception as e:
             if trace_enabled:
                 await trace_store.add_event(run_id, kind="chat.error", msg=str(e), data={})
@@ -426,7 +451,10 @@ async def chat(request: ChatRequest, response: Response) -> ChatResponse:
             raise HTTPException(status_code=500, detail=str(e)) from e
 
 
-@router.post("/chat/stream")
+@router.post(
+    "/chat/stream",
+    responses=RETRIEVAL_RUNTIME_UNAVAILABLE_RESPONSES,
+)
 async def chat_stream(request: ChatRequest) -> StreamingResponse:
     """Stream a chat response using Server-Sent Events.
 
@@ -446,6 +474,9 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
             config = await load_scoped_config(repo_id=primary) if primary else TriBridConfig()
         except CorpusNotFoundError:
             config = TriBridConfig()
+        except Exception as e:
+            raise_postgres_unavailable_if_applicable(e, boundary="Chat stream config load")
+            raise
 
     _validate_chat_images(list(request.images or []), config.chat.multimodal)
 
@@ -491,6 +522,41 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
     user_msg = Message(role="user", content=request.message)
     store.add_message(conv.id, user_msg, None)
 
+    handler_stream = chat_stream_handler(
+        request=request,
+        config=config,
+        fusion=fusion,
+        conversation=conv,
+        run_id=run_id,
+        started_at_ms=started_at_ms,
+    )
+    try:
+        first_sse = await anext(handler_stream)
+    except StopAsyncIteration:
+        first_sse = None
+    except Exception as e:
+        try:
+            store.remove_last_message(conv.id, role="user", content=request.message)
+        except Exception:
+            pass
+        if trace_enabled:
+            await trace_store.add_event(run_id, kind="chat.error", msg=str(e), data={})
+            await trace_store.annotate(run_id, **current_trace_payload_fields())
+            await trace_store.end(run_id)
+        obs_cm.__exit__(type(e), e, e.__traceback__)
+        if isinstance(e, RetrievalContractMismatchError):
+            raise HTTPException(status_code=409, detail=e.to_detail()) from e
+        if isinstance(e, RequiredRetrievalLegError):
+            raise required_retrieval_leg_http_exception(e) from e
+        raise_required_dependency_unavailable_if_applicable(e, boundary="Chat stream retrieval")
+        raise HTTPException(status_code=500, detail="Chat stream initialization failed") from e
+
+    async def primed_handler_stream() -> Any:
+        if first_sse is not None:
+            yield first_sse
+        async for sse in handler_stream:
+            yield sse
+
     async def wrapped_stream() -> Any:
         ended_at_ms: int | None = None
         accumulated = ""
@@ -498,14 +564,7 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
         assistant_persisted = False
         caught_exc: tuple[type[BaseException] | None, BaseException | None, Any] = (None, None, None)
         try:
-            async for sse in chat_stream_handler(
-                request=request,
-                config=config,
-                fusion=fusion,
-                conversation=conv,
-                run_id=run_id,
-                started_at_ms=started_at_ms,
-            ):
+            async for sse in primed_handler_stream():
                 if not sse.startswith("data: "):
                     yield sse
                     continue

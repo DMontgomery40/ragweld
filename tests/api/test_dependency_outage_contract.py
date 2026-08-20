@@ -13,19 +13,41 @@ def test_stateful_api_openapi_documents_typed_dependency_503() -> None:
     from server.main import app
 
     schema = app.openapi()
-    operations = (
-        ("/api/corpora", "get"),
-        ("/api/search", "post"),
-        ("/api/answer", "post"),
-        ("/api/config", "get"),
-        ("/api/feedback", "post"),
-        ("/api/graph/{corpus_id}/stats", "get"),
-        ("/api/lineage/current", "get"),
-    )
-    for path, method in operations:
+    operations = {
+        ("/api/corpora", "get"): {"DependencyUnavailableResponse"},
+        ("/api/search", "post"): {
+            "DependencyUnavailableResponse",
+            "RequiredRetrievalLegFailureResponse",
+        },
+        ("/api/answer", "post"): {
+            "DependencyUnavailableResponse",
+            "RequiredRetrievalLegFailureResponse",
+        },
+        ("/api/chat", "post"): {
+            "DependencyUnavailableResponse",
+            "GenerationUnavailableResponse",
+            "RequiredRetrievalLegFailureResponse",
+        },
+        ("/api/chat/stream", "post"): {
+            "DependencyUnavailableResponse",
+            "RequiredRetrievalLegFailureResponse",
+        },
+        ("/api/mcp/rag_search", "get"): {
+            "DependencyUnavailableResponse",
+            "RequiredRetrievalLegFailureResponse",
+        },
+        ("/api/config", "get"): {"DependencyUnavailableResponse"},
+        ("/api/feedback", "post"): {"DependencyUnavailableResponse"},
+        ("/api/graph/{corpus_id}/stats", "get"): {"DependencyUnavailableResponse"},
+        ("/api/lineage/current", "get"): {"DependencyUnavailableResponse"},
+    }
+    for (path, method), expected_models in operations.items():
         response = schema["paths"][path][method]["responses"]["503"]
         detail_schema = response["content"]["application/json"]["schema"]
-        assert detail_schema["$ref"].endswith("/DependencyUnavailableResponse")
+        refs = [detail_schema["$ref"]] if "$ref" in detail_schema else [
+            item["$ref"] for item in detail_schema.get("anyOf", [])
+        ]
+        assert {ref.rsplit("/", 1)[-1] for ref in refs} == expected_models
 
 
 def test_postgres_outage_returns_structured_503_across_stateful_api_families(tmp_path: Path) -> None:
@@ -45,6 +67,8 @@ REQUESTS = [
     ("POST", "/api/search", {"query": "status", "repo_id": "missing", "include_vector": False, "include_sparse": False, "include_graph": False}),
     ("POST", "/api/answer", {"query": "status", "repo_id": "missing", "include_vector": False, "include_sparse": False, "include_graph": False}),
     ("POST", "/api/answer/stream", {"query": "status", "repo_id": "missing", "include_vector": False, "include_sparse": False, "include_graph": False}),
+    ("POST", "/api/chat", {"message": "status", "sources": {"corpus_ids": ["missing"]}, "include_vector": False, "include_sparse": False, "include_graph": False}),
+    ("POST", "/api/chat/stream", {"message": "status", "sources": {"corpus_ids": ["missing"]}, "include_vector": False, "include_sparse": False, "include_graph": False}),
     ("GET", "/api/mcp/rag_search?q=status&corpus_id=missing", None),
     ("GET", "/api/config?corpus_id=missing", None),
     ("GET", "/api/config/validate?corpus_id=missing", None),
@@ -71,6 +95,7 @@ asyncio.run(main())
     env = dict(os.environ)
     env["PYTHONPATH"] = str(ROOT)
     env["RAGWELD_LOAD_DOTENV"] = "0"
+    env["RAGWELD_CONFIG_PATH"] = str(tmp_path / "tribrid_config.json")
     result = subprocess.run(
         [sys.executable, "-c", script],
         cwd=tmp_path,
@@ -83,7 +108,7 @@ asyncio.run(main())
 
     assert result.returncode == 0, result.stdout + result.stderr
     rows = json.loads(result.stdout.strip().splitlines()[-1])
-    assert len(rows) == 11
+    assert len(rows) == 13
     for row in rows:
         assert row["status"] == 503, row
         detail = row["body"].get("detail")
@@ -94,6 +119,52 @@ asyncio.run(main())
         assert detail["retryable"] is True
         assert "operator_hint" in detail
         assert "127.0.0.1:1" not in json.dumps(row["body"])
+
+
+def test_chat_generation_failure_returns_typed_sanitized_503(tmp_path: Path) -> None:
+    runtime_config = tmp_path / "tribrid_config.json"
+    runtime_config.write_bytes((ROOT / "tribrid_config.json").read_bytes())
+    script = """
+import asyncio
+import json
+from httpx import ASGITransport, AsyncClient
+from server.main import app
+
+async def main():
+    transport = ASGITransport(app=app, raise_app_exceptions=False)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/api/chat",
+            json={"message": "hello", "sources": {"corpus_ids": []}},
+        )
+    print(json.dumps({"status": response.status_code, "body": response.json()}))
+
+asyncio.run(main())
+"""
+    env = dict(os.environ)
+    env.pop("LITELLM_API_KEY", None)
+    env["PYTHONPATH"] = str(ROOT)
+    env["RAGWELD_LOAD_DOTENV"] = "0"
+    env["RAGWELD_CONFIG_PATH"] = str(runtime_config)
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=tmp_path,
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=30,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    payload = json.loads(result.stdout.strip().splitlines()[-1])
+    assert payload["status"] == 503
+    detail = payload["body"]["detail"]
+    assert detail["code"] == "generation_unavailable"
+    assert detail["operation"] == "Chat generation"
+    assert detail["retryable"] is True
+    assert detail["operator_hint"]
+    assert "LITELLM_API_KEY" not in json.dumps(payload["body"])
 
 
 def test_readiness_is_503_and_sanitized_when_required_dependencies_are_unavailable(tmp_path: Path) -> None:
@@ -120,6 +191,7 @@ asyncio.run(main())
     env = dict(os.environ)
     env["PYTHONPATH"] = str(ROOT)
     env["RAGWELD_LOAD_DOTENV"] = "0"
+    env["RAGWELD_CONFIG_PATH"] = str(tmp_path / "tribrid_config.json")
     result = subprocess.run(
         [sys.executable, "-c", script],
         cwd=tmp_path,

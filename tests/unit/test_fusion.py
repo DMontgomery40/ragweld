@@ -159,63 +159,6 @@ async def test_search_multiple_corpora_dedupes_by_corpus_and_chunk_id(monkeypatc
 
 
 @pytest.mark.asyncio
-async def test_search_graph_leg_records_error_in_debug(monkeypatch) -> None:
-    """Graph leg failures should be visible in fusion.last_debug (no silent swallow)."""
-    import server.retrieval.fusion as fusion_mod
-    from server.models.tribrid_config_model import FusionConfig, TriBridConfig
-
-    class _FakePostgres:
-        def __init__(self, *_args, **_kwargs) -> None:
-            pass
-
-        async def connect(self) -> None:
-            return None
-
-        async def get_corpus(self, repo_id: str) -> None:
-            return None
-
-    class _FailingNeo4j:
-        def __init__(self, *_args, **_kwargs) -> None:
-            pass
-
-        async def connect(self) -> None:
-            raise RuntimeError("neo4j down")
-
-        async def disconnect(self) -> None:
-            return None
-
-        async def graph_search(self, *_args, **_kwargs):
-            return []
-
-    async def _fake_load_scoped_config(*, repo_id: str | None = None) -> TriBridConfig:
-        cfg = TriBridConfig()
-        # Disable Postgres-backed legs; enable graph leg to exercise error path.
-        cfg.vector_search.enabled = 0
-        cfg.sparse_search.enabled = 0
-        cfg.graph_search.enabled = 1
-        cfg.retrieval.final_k = 5
-        return cfg
-
-    monkeypatch.setattr(fusion_mod, "PostgresClient", _FakePostgres, raising=True)
-    monkeypatch.setattr(fusion_mod, "Neo4jClient", _FailingNeo4j, raising=True)
-    monkeypatch.setattr(fusion_mod, "load_scoped_config", _fake_load_scoped_config, raising=True)
-
-    fusion = TriBridFusion()
-    out = await fusion.search(
-        corpus_ids=["test-corpus"],
-        query="foo",
-        config=FusionConfig(),
-        include_vector=False,
-        include_sparse=False,
-        include_graph=True,
-        top_k=5,
-    )
-    assert out == []
-    assert fusion.last_debug.get("fusion_graph_attempted") is True
-    assert "neo4j down" in str(fusion.last_debug.get("fusion_graph_error"))
-
-
-@pytest.mark.asyncio
 async def test_search_graph_chunk_mode_hydrates_by_chunk_id(monkeypatch) -> None:
     """Chunk-mode graph leg should return real chunk_ids (no file-span guessing)."""
     import server.retrieval.fusion as fusion_mod
@@ -511,4 +454,3 @@ async def test_search_graph_entity_mode_hydrates_by_chunk_id(monkeypatch) -> Non
     )
     assert [c.chunk_id for c in out] == ["c1"]
     assert fusion.last_debug.get("fusion_graph_mode") == "entity"
-

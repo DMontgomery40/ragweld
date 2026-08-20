@@ -14,7 +14,7 @@ from server.dependency_errors import is_required_dependency_unavailable
 from server.models.retrieval import ChunkMatch
 from server.models.tribrid_config_model import ChatDebugInfo, ChatProviderInfo, TriBridConfig
 from server.retrieval.cache import CacheMode, SemanticCacheService
-from server.retrieval.errors import RetrievalContractMismatchError
+from server.retrieval.errors import RequiredRetrievalLegError, RetrievalContractMismatchError
 from server.services.rag import FusionProtocol, build_chat_debug_info
 
 
@@ -152,7 +152,7 @@ async def retrieve_best_effort(
         )
         retrieval_debug: dict[str, Any] = getattr(fusion, "last_debug", None) or {}
         return (chunks, retrieval_debug)
-    except RetrievalContractMismatchError:
+    except (RetrievalContractMismatchError, RequiredRetrievalLegError):
         raise
     except Exception as e:
         if is_required_dependency_unavailable(e):

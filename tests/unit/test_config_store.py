@@ -23,6 +23,15 @@ async def test_get_global_config_returns_detached_copy() -> None:
     assert cfg3.generation.gen_model == original
 
 
+@pytest.mark.asyncio
+async def test_warm_corpus_cache_does_not_hide_postgres_outage() -> None:
+    store = ConfigStore("postgresql://postgres:postgres@127.0.0.1:1/ragweld_outage")
+    store._cache["warm-corpus"] = TriBridConfig()
+
+    with pytest.raises((ConnectionError, OSError, TimeoutError)):
+        await store.get(repo_id="warm-corpus")
+
+
 class _ControlledPostgres:
     def __init__(self, *, raw: dict[str, object], started: asyncio.Event, release: asyncio.Event) -> None:
         self._raw = raw

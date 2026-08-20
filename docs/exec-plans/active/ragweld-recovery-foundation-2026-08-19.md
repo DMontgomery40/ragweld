@@ -131,6 +131,7 @@ Implementation:
 - Add one session-scoped real capability probe.
 - Mark live-service tests; do not mock the services.
 - Add a strict integration launcher that assumes Docker/Colima is already running, starts isolated empty services, runs marked tests, and tears down its volumes.
+- The launcher writes a mode-`0600` temporary runtime config and points the app at the disposable random-port Postgres and Neo4j bindings; exported probe variables alone are not treated as app configuration.
 
 Acceptance:
 

@@ -146,7 +146,7 @@ class ConfigStore:
         """Get config for a corpus (repo_id) or global when repo_id is None."""
         lock = await self._get_lock(repo_id)
         async with lock:
-            if repo_id in self._cache:
+            if repo_id is None and repo_id in self._cache:
                 return self._cache[repo_id].model_copy(deep=True)
 
             if repo_id is None:
@@ -180,6 +180,9 @@ class ConfigStore:
             corpus = await self._postgres.get_corpus(repo_id)
             if corpus is None:
                 raise CorpusNotFoundError(f"Corpus not found: {repo_id}")
+
+            if repo_id in self._cache:
+                return self._cache[repo_id].model_copy(deep=True)
 
             raw = await self._postgres.get_corpus_config_json(repo_id)
             if raw is None:

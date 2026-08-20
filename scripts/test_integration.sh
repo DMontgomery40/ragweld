@@ -4,9 +4,14 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-ragweld-integration-$$}"
+if [[ -n "${COMPOSE_PROJECT_NAME:-}" ]]; then
+  echo "ERROR: COMPOSE_PROJECT_NAME cannot override the disposable integration project." >&2
+  exit 2
+fi
+readonly COMPOSE_PROJECT_NAME="ragweld-integration-${RANDOM}-$$"
 POSTGRES_PASSWORD="ragweld-integration"
 NEO4J_PASSWORD="ragweld-integration"
+INTEGRATION_RUNTIME_DIR=""
 
 compose() {
   env \
@@ -28,6 +33,10 @@ compose() {
 
 cleanup() {
   compose down --volumes --remove-orphans >/dev/null 2>&1 || true
+  if [[ -n "${INTEGRATION_RUNTIME_DIR:-}" && -d "$INTEGRATION_RUNTIME_DIR" ]]; then
+    rm -f "$INTEGRATION_RUNTIME_DIR/tribrid_config.json"
+    rmdir "$INTEGRATION_RUNTIME_DIR" 2>/dev/null || true
+  fi
 }
 trap cleanup EXIT
 trap 'exit 130' INT
@@ -66,9 +75,28 @@ export NEO4J_PASSWORD
 export RAGWELD_LOAD_DOTENV=0
 export RAGWELD_STRICT_INTEGRATION=1
 
-UV_CACHE_DIR="${UV_CACHE_DIR:-/private/tmp/ragweld-uv-cache}" \
-UV_PROJECT_ENVIRONMENT="${UV_PROJECT_ENVIRONMENT:-/private/tmp/ragweld-uv-env}" \
-uv run python - <<'PY'
+INTEGRATION_RUNTIME_DIR="$(mktemp -d "${TMPDIR:-/tmp}/ragweld-integration-config.XXXXXX")"
+export RAGWELD_INTEGRATION_RUNTIME_DIR="$INTEGRATION_RUNTIME_DIR"
+export RAGWELD_CONFIG_PATH="$INTEGRATION_RUNTIME_DIR/tribrid_config.json"
+export RAGWELD_SOURCE_CONFIG_PATH="$ROOT_DIR/tribrid_config.json"
+
+UV_CACHE_DIR="${UV_CACHE_DIR:-${TMPDIR:-/tmp}/ragweld-uv-cache}" \
+uv run --no-sync python - <<'PY'
+import json
+import os
+from pathlib import Path
+
+source = Path(os.environ["RAGWELD_SOURCE_CONFIG_PATH"])
+target = Path(os.environ["RAGWELD_CONFIG_PATH"])
+payload = json.loads(source.read_text(encoding="utf-8"))
+payload["indexing"]["postgres_url"] = os.environ["POSTGRES_DSN"]
+payload["graph_storage"]["neo4j_uri"] = os.environ["NEO4J_URI"]
+target.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+target.chmod(0o600)
+PY
+
+UV_CACHE_DIR="${UV_CACHE_DIR:-${TMPDIR:-/tmp}/ragweld-uv-cache}" \
+uv run --no-sync python - <<'PY'
 import asyncio
 import os
 
@@ -97,6 +125,5 @@ asyncio.run(main())
 PY
 
 echo "[integration] schemas ready; running strict live-service tests"
-UV_CACHE_DIR="${UV_CACHE_DIR:-/private/tmp/ragweld-uv-cache}" \
-UV_PROJECT_ENVIRONMENT="${UV_PROJECT_ENVIRONMENT:-/private/tmp/ragweld-uv-env}" \
-uv run pytest -q -m "(requires_postgres or requires_neo4j) and not requires_pg_search" "$@"
+UV_CACHE_DIR="${UV_CACHE_DIR:-${TMPDIR:-/tmp}/ragweld-uv-cache}" \
+uv run --no-sync pytest -q -m "(requires_postgres or requires_neo4j) and not requires_pg_search" "$@"

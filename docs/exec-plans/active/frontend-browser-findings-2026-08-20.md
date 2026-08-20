@@ -204,6 +204,28 @@ The rendered app logs React Router warnings for:
 There was no error overlay, but the flags should be resolved before the router
 upgrade so warnings do not hide more important console output.
 
+## P2: Chat renders typed retrieval failures as raw JSON in an assistant bubble
+
+### Evidence
+
+After the fail-closed retrieval slice, a real standard-Recall send against
+`recall_default` correctly stopped before LiteLLM/vLLM generation because the
+stored embedding contract is 3072 dimensions while the current query contract
+is 384. The rendered Chat surface showed:
+
+`Error: Failed to start streaming: {"detail":{"code":"embedding_contract_mismatch", ...}}`
+
+followed by `Generation ended with an error.` This is operationally truthful,
+but it exposes the transport envelope and full contract dictionaries as prose in
+the conversation instead of rendering the stable error fields intentionally.
+
+### Expected
+
+- Render a compact error card using `code`, `leg`, and `required_action`.
+- Keep expected/current contract details behind a disclosure control.
+- Do not present a failed request as a normal Assistant message.
+- Preserve the important truth that generation did not run.
+
 ## Acceptance pass for the follow-up session
 
 1. Open `/web` and `/web/`; both reach the real app.
@@ -215,3 +237,5 @@ upgrade so warnings do not hide more important console output.
 5. Confirm status labels distinguish host API, container API, dependencies, and
    telemetry truth.
 6. Confirm the browser console has no framework warnings or errors.
+7. Trigger a retrieval contract mismatch and verify a structured error card,
+   no generated assistant answer, and no raw JSON transport envelope.

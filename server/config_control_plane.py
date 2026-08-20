@@ -17,6 +17,11 @@ from server.chat.gateway_runtime import (
 )
 from server.db.neo4j import Neo4jClient
 from server.db.postgres import PostgresClient
+from server.dependency_errors import (
+    DependencyUnavailableError,
+    is_postgres_unavailable,
+    is_transport_unavailable,
+)
 from server.indexing.oss_retrieval_pilot import build_retrieval_pilot_status
 from server.models.tribrid_config_model import (
     ConfigFieldDescriptor,
@@ -730,7 +735,9 @@ async def _resolve_corpus_path(corpus_id: str | None, postgres_dsn: str) -> str 
     try:
         await pg.connect()
         corpus = await pg.get_corpus(target)
-    except Exception:
+    except Exception as exc:
+        if is_postgres_unavailable(exc) or is_transport_unavailable(exc):
+            raise DependencyUnavailableError("postgres", "Config retrieval readiness") from exc
         return None
     finally:
         try:

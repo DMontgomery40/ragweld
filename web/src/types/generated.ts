@@ -866,6 +866,19 @@ export interface GenerationRuntimeCapabilities {
   default_route?: ChatProviderInfo | null; // default: None
 }
 
+/** Public error detail returned when the generation gateway cannot complete. */
+export interface GenerationUnavailableDetail {
+  code?: "generation_unavailable"; // default: "generation_unavailable"
+  /** Generation operation that could not complete */
+  operation: string;
+  /** Stable, non-sensitive failure summary */
+  message: string;
+  /** Whether the caller may retry after remediation */
+  retryable?: boolean; // default: True
+  /** High-signal next step for the operator */
+  operator_hint: string;
+}
+
 /** Best-effort git context captured when minting lineage versions. */
 export interface GitSnapshot {
   /** Resolved HEAD commit SHA when available. */
@@ -1707,6 +1720,21 @@ export interface Relationship {
   weight?: number; // default: 1.0
   /** Additional properties */
   properties?: Record<string, unknown>;
+}
+
+/** Public error detail returned when a requested retrieval leg fails. */
+export interface RequiredRetrievalLegFailureDetail {
+  code?: "required_retrieval_leg_failed"; // default: "required_retrieval_leg_failed"
+  /** Requested retrieval leg */
+  leg: "vector" | "sparse" | "graph";
+  /** Retrieval operation that could not complete */
+  operation: string;
+  /** Stable, non-sensitive failure summary */
+  message: string;
+  /** Whether the caller may retry after remediation */
+  retryable?: boolean; // default: True
+  /** High-signal next step for the operator */
+  operator_hint: string;
 }
 
 /** Reranker status for a single retrieval run (best-effort). */
@@ -3447,6 +3475,11 @@ export interface FeedbackResponse {
   ok: boolean;
 }
 
+/** FastAPI response envelope for a generation-gateway failure. */
+export interface GenerationUnavailableResponse {
+  detail: GenerationUnavailableDetail;
+}
+
 /** Neighbor subgraph centered on a single entity. */
 export interface GraphNeighborsResponse {
   /** Entities in the neighborhood (includes the center entity) */
@@ -3877,6 +3910,11 @@ export interface RecallStatusResponse {
   exists: boolean;
   /** Approximate number of chunks stored for Recall */
   chunk_count?: number;
+}
+
+/** FastAPI response envelope for a required retrieval-leg failure. */
+export interface RequiredRetrievalLegFailureResponse {
+  detail: RequiredRetrievalLegFailureDetail;
 }
 
 /** Request payload for POST /api/reranker/click. */

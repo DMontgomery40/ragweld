@@ -5,7 +5,11 @@ from typing import Literal
 
 from fastapi import HTTPException
 
-from server.dependency_errors import is_neo4j_unavailable, is_postgres_unavailable
+from server.dependency_errors import (
+    is_neo4j_unavailable,
+    is_postgres_unavailable,
+    is_transport_unavailable,
+)
 from server.models.tribrid_config_model import (
     DependencyUnavailableDetail,
     DependencyUnavailableResponse,
@@ -61,12 +65,12 @@ def dependency_unavailable_http_exception(
 
 
 def raise_postgres_unavailable_if_applicable(exc: BaseException, *, boundary: str) -> None:
-    if is_postgres_unavailable(exc):
+    if is_postgres_unavailable(exc) or is_transport_unavailable(exc):
         raise dependency_unavailable_http_exception("postgres", boundary=boundary, exc=exc) from exc
 
 
 def raise_neo4j_unavailable_if_applicable(exc: BaseException, *, boundary: str) -> None:
-    if is_neo4j_unavailable(exc):
+    if is_neo4j_unavailable(exc) or is_transport_unavailable(exc):
         raise dependency_unavailable_http_exception("neo4j", boundary=boundary, exc=exc) from exc
 
 

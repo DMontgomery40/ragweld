@@ -9,9 +9,12 @@ from fastapi import APIRouter, HTTPException, Response
 from starlette.responses import StreamingResponse
 
 from server.api.dependency_errors import (
-    DEPENDENCY_UNAVAILABLE_RESPONSES,
     raise_postgres_unavailable_if_applicable,
     raise_required_dependency_unavailable_if_applicable,
+)
+from server.api.retrieval_errors import (
+    RETRIEVAL_RUNTIME_UNAVAILABLE_RESPONSES,
+    required_retrieval_leg_http_exception,
 )
 from server.config import load_config
 from server.db.postgres import PostgresClient
@@ -27,7 +30,7 @@ from server.observability.runtime import (
     update_route_summary,
 )
 from server.retrieval.cache import CacheMode
-from server.retrieval.errors import RetrievalContractMismatchError
+from server.retrieval.errors import RequiredRetrievalLegError, RetrievalContractMismatchError
 from server.retrieval.fusion import TriBridFusion
 from server.services.answer_service import (
     answer_best_effort,
@@ -39,7 +42,7 @@ from server.services.config_store import get_config as load_scoped_config
 from server.services.conversation_store import get_conversation_store
 from server.services.traces import get_trace_store
 
-router = APIRouter(tags=["search"], responses=DEPENDENCY_UNAVAILABLE_RESPONSES)
+router = APIRouter(tags=["search"], responses=RETRIEVAL_RUNTIME_UNAVAILABLE_RESPONSES)
 
 
 def _normalize_cache_mode(cache_mode: str | None) -> CacheMode:
@@ -136,6 +139,8 @@ async def search(request: SearchRequest, response: Response) -> SearchResponse:
                 await trace_store.annotate(run_id, **current_trace_payload_fields())
                 await trace_store.end(run_id)
             raise HTTPException(status_code=409, detail=e.to_detail()) from e
+        except RequiredRetrievalLegError as e:
+            raise required_retrieval_leg_http_exception(e) from e
         except Exception as e:
             raise_required_dependency_unavailable_if_applicable(e, boundary="Search retrieval")
             raise
@@ -273,6 +278,8 @@ async def answer(request: AnswerRequest, response: Response) -> AnswerResponse:
                 await trace_store.annotate(run_id, **current_trace_payload_fields())
                 await trace_store.end(run_id)
             raise HTTPException(status_code=409, detail=e.to_detail()) from e
+        except RequiredRetrievalLegError as e:
+            raise required_retrieval_leg_http_exception(e) from e
         except Exception as e:
             if trace_enabled:
                 await trace_store.add_event(run_id, kind="answer.error", msg=str(e), data={})
@@ -389,6 +396,8 @@ async def answer_stream(request: AnswerRequest) -> StreamingResponse:
             await trace_store.end(run_id)
         obs_cm.__exit__(type(e), e, e.__traceback__)
         raise HTTPException(status_code=409, detail=e.to_detail()) from e
+    except RequiredRetrievalLegError as e:
+        raise required_retrieval_leg_http_exception(e) from e
     except Exception as e:
         if trace_enabled:
             await trace_store.add_event(run_id, kind="answer.error", msg=str(e), data={})

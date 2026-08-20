@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from server.config import DEFAULT_CONFIG_PATH
 from server.models.tribrid_config_model import TriBridConfig
 
 
@@ -56,7 +57,7 @@ async def test_feedback_endpoint_rejects_unknown_corpus_scope(client) -> None:
 
 
 async def test_feedback_endpoint_returns_500_on_log_write_failure(client, tmp_path: Path) -> None:
-    config_path = Path("tribrid_config.json")
+    config_path = DEFAULT_CONFIG_PATH
     if not config_path.exists():
         pytest.skip("tribrid_config.json missing in test environment")
 

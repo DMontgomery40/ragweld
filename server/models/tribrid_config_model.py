@@ -897,6 +897,39 @@ class DependencyUnavailableResponse(BaseModel):
     detail: DependencyUnavailableDetail
 
 
+class RequiredRetrievalLegFailureDetail(BaseModel):
+    """Public error detail returned when a requested retrieval leg fails."""
+
+    code: Literal["required_retrieval_leg_failed"] = "required_retrieval_leg_failed"
+    leg: Literal["vector", "sparse", "graph"] = Field(description="Requested retrieval leg")
+    operation: str = Field(description="Retrieval operation that could not complete")
+    message: str = Field(description="Stable, non-sensitive failure summary")
+    retryable: bool = Field(default=True, description="Whether the caller may retry after remediation")
+    operator_hint: str = Field(description="High-signal next step for the operator")
+
+
+class RequiredRetrievalLegFailureResponse(BaseModel):
+    """FastAPI response envelope for a required retrieval-leg failure."""
+
+    detail: RequiredRetrievalLegFailureDetail
+
+
+class GenerationUnavailableDetail(BaseModel):
+    """Public error detail returned when the generation gateway cannot complete."""
+
+    code: Literal["generation_unavailable"] = "generation_unavailable"
+    operation: str = Field(description="Generation operation that could not complete")
+    message: str = Field(description="Stable, non-sensitive failure summary")
+    retryable: bool = Field(default=True, description="Whether the caller may retry after remediation")
+    operator_hint: str = Field(description="High-signal next step for the operator")
+
+
+class GenerationUnavailableResponse(BaseModel):
+    """FastAPI response envelope for a generation-gateway failure."""
+
+    detail: GenerationUnavailableDetail
+
+
 class VocabPreviewTerm(BaseModel):
     """A single term in the Postgres FTS vocabulary preview."""
 

@@ -1,6 +1,33 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
+
+
+class RequiredRetrievalLegError(RuntimeError):
+    """A requested retrieval leg could not complete its operation."""
+
+    def __init__(
+        self,
+        *,
+        leg: Literal["vector", "sparse", "graph"],
+        operation: str,
+    ) -> None:
+        self.leg = leg
+        self.operation = str(operation)
+        super().__init__(f"Required {leg} retrieval failed during {self.operation}")
+
+    def to_detail(self) -> dict[str, Any]:
+        return {
+            "code": "required_retrieval_leg_failed",
+            "leg": self.leg,
+            "operation": self.operation,
+            "message": f"The requested {self.leg} retrieval leg could not complete.",
+            "retryable": True,
+            "operator_hint": (
+                f"Inspect the {self.leg} retrieval runtime and index contract for this corpus, "
+                "then retry. Ragweld did not substitute a partial retrieval result."
+            ),
+        }
 
 
 class RetrievalContractMismatchError(RuntimeError):

@@ -1,8 +1,9 @@
+import os
 from pathlib import Path
 
 from server.models.tribrid_config_model import TriBridConfig
 
-DEFAULT_CONFIG_PATH = Path("tribrid_config.json")
+DEFAULT_CONFIG_PATH = Path(os.environ.get("RAGWELD_CONFIG_PATH") or "tribrid_config.json")
 
 
 def load_config(path: Path = DEFAULT_CONFIG_PATH) -> TriBridConfig:

@@ -11,6 +11,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from server.api.dependency_errors import (
     DEPENDENCY_UNAVAILABLE_RESPONSES,
     raise_postgres_unavailable_if_applicable,
+    raise_required_dependency_unavailable_if_applicable,
+)
+from server.api.retrieval_errors import (
+    RETRIEVAL_RUNTIME_UNAVAILABLE_RESPONSES,
+    required_retrieval_leg_http_exception,
 )
 from server.config import load_config as load_global_config
 from server.config_control_plane import (
@@ -19,6 +24,7 @@ from server.config_control_plane import (
     build_config_registry_response,
 )
 from server.db.postgres import PostgresClient
+from server.dependency_errors import DependencyUnavailableError
 from server.lineage import ensure_current_bundle
 from server.models.tribrid_config_model import (
     ConfigReadinessResponse,
@@ -38,6 +44,7 @@ from server.retrieval.contracts import (
     provider_requires_tokenizer,
     sparse_contract_from_config,
 )
+from server.retrieval.errors import RequiredRetrievalLegError, RetrievalContractMismatchError
 from server.retrieval.fusion import TriBridFusion
 from server.runtime_capabilities import SUPPORTED_RERANKER_CLOUD_PROVIDERS
 from server.services.config_store import CorpusNotFoundError
@@ -483,7 +490,11 @@ async def get_config_registry() -> ConfigRegistryResponse:
 async def get_config_readiness(scope: CorpusScope = _CORPUS_SCOPE_DEP) -> ConfigReadinessResponse:
     repo_id = scope.resolved_repo_id
     config = await _load_config_for_api(repo_id, boundary="Config readiness API")
-    return await build_config_readiness_response(config, scope_id=repo_id)
+    try:
+        return await build_config_readiness_response(config, scope_id=repo_id)
+    except DependencyUnavailableError as exc:
+        raise_postgres_unavailable_if_applicable(exc, boundary="Config readiness API")
+        raise
 
 
 @router.get("/config", response_model=TriBridConfig)
@@ -663,7 +674,11 @@ async def mcp_status(request: Request) -> MCPStatusResponse:
     )
 
 
-@router.get("/mcp/rag_search", response_model=MCPRagSearchResponse)
+@router.get(
+    "/mcp/rag_search",
+    response_model=MCPRagSearchResponse,
+    responses=RETRIEVAL_RUNTIME_UNAVAILABLE_RESPONSES,
+)
 async def mcp_rag_search(
     q: str = Query(..., description="Search query"),
     top_k: int | None = Query(default=None, ge=1, le=100, description="Number of results to return"),
@@ -678,14 +693,20 @@ async def mcp_rag_search(
 
     try:
         # Validate corpus exists (avoid implicitly creating new corpora/configs).
-        global_cfg = load_global_config()
-        pg = PostgresClient(global_cfg.indexing.postgres_url)
-        await pg.connect()
-        corpus = await pg.get_corpus(repo_id)
-        if corpus is None:
-            raise HTTPException(status_code=404, detail=f"Corpus not found: {repo_id}")
+        try:
+            global_cfg = load_global_config()
+            pg = PostgresClient(global_cfg.indexing.postgres_url)
+            await pg.connect()
+            corpus = await pg.get_corpus(repo_id)
+            if corpus is None:
+                raise HTTPException(status_code=404, detail=f"Corpus not found: {repo_id}")
+            cfg = await load_scoped_config(repo_id=repo_id)
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise_postgres_unavailable_if_applicable(exc, boundary="MCP corpus validation")
+            raise
 
-        cfg = await load_scoped_config(repo_id=repo_id)
         fusion = TriBridFusion()
         effective_top_k = int(top_k or cfg.mcp.default_top_k)
         matches = await fusion.search(
@@ -710,6 +731,10 @@ async def mcp_rag_search(
         return MCPRagSearchResponse(results=results, error=None)
     except HTTPException:
         raise
+    except RetrievalContractMismatchError as exc:
+        raise HTTPException(status_code=409, detail=exc.to_detail()) from exc
+    except RequiredRetrievalLegError as exc:
+        raise required_retrieval_leg_http_exception(exc) from exc
     except Exception as exc:
-        raise_postgres_unavailable_if_applicable(exc, boundary="MCP RAG search API")
+        raise_required_dependency_unavailable_if_applicable(exc, boundary="MCP RAG search API")
         raise

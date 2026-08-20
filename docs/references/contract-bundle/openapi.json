@@ -6634,6 +6634,58 @@
         "title": "GenerationRuntimeCapabilities",
         "type": "object"
       },
+      "GenerationUnavailableDetail": {
+        "description": "Public error detail returned when the generation gateway cannot complete.",
+        "properties": {
+          "code": {
+            "const": "generation_unavailable",
+            "default": "generation_unavailable",
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "description": "Stable, non-sensitive failure summary",
+            "title": "Message",
+            "type": "string"
+          },
+          "operation": {
+            "description": "Generation operation that could not complete",
+            "title": "Operation",
+            "type": "string"
+          },
+          "operator_hint": {
+            "description": "High-signal next step for the operator",
+            "title": "Operator Hint",
+            "type": "string"
+          },
+          "retryable": {
+            "default": true,
+            "description": "Whether the caller may retry after remediation",
+            "title": "Retryable",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "operation",
+          "message",
+          "operator_hint"
+        ],
+        "title": "GenerationUnavailableDetail",
+        "type": "object"
+      },
+      "GenerationUnavailableResponse": {
+        "description": "FastAPI response envelope for a generation-gateway failure.",
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/GenerationUnavailableDetail"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "GenerationUnavailableResponse",
+        "type": "object"
+      },
       "GraphIndexingConfig": {
         "description": "Configuration for building/persisting graph data during indexing.",
         "properties": {
@@ -11295,6 +11347,69 @@
           "relation_type"
         ],
         "title": "Relationship",
+        "type": "object"
+      },
+      "RequiredRetrievalLegFailureDetail": {
+        "description": "Public error detail returned when a requested retrieval leg fails.",
+        "properties": {
+          "code": {
+            "const": "required_retrieval_leg_failed",
+            "default": "required_retrieval_leg_failed",
+            "title": "Code",
+            "type": "string"
+          },
+          "leg": {
+            "description": "Requested retrieval leg",
+            "enum": [
+              "vector",
+              "sparse",
+              "graph"
+            ],
+            "title": "Leg",
+            "type": "string"
+          },
+          "message": {
+            "description": "Stable, non-sensitive failure summary",
+            "title": "Message",
+            "type": "string"
+          },
+          "operation": {
+            "description": "Retrieval operation that could not complete",
+            "title": "Operation",
+            "type": "string"
+          },
+          "operator_hint": {
+            "description": "High-signal next step for the operator",
+            "title": "Operator Hint",
+            "type": "string"
+          },
+          "retryable": {
+            "default": true,
+            "description": "Whether the caller may retry after remediation",
+            "title": "Retryable",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "leg",
+          "operation",
+          "message",
+          "operator_hint"
+        ],
+        "title": "RequiredRetrievalLegFailureDetail",
+        "type": "object"
+      },
+      "RequiredRetrievalLegFailureResponse": {
+        "description": "FastAPI response envelope for a required retrieval-leg failure.",
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/RequiredRetrievalLegFailureDetail"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "RequiredRetrievalLegFailureResponse",
         "type": "object"
       },
       "RerankDebugInfo": {
@@ -18158,11 +18273,19 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/DependencyUnavailableResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/DependencyUnavailableResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/RequiredRetrievalLegFailureResponse"
+                    }
+                  ],
+                  "title": "Response 503 Answer Api Answer Post"
                 }
               }
             },
-            "description": "A required runtime dependency is unavailable."
+            "description": "A required storage dependency or requested retrieval leg is unavailable."
           }
         },
         "summary": "Answer",
@@ -18207,11 +18330,19 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/DependencyUnavailableResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/DependencyUnavailableResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/RequiredRetrievalLegFailureResponse"
+                    }
+                  ],
+                  "title": "Response 503 Answer Stream Api Answer Stream Post"
                 }
               }
             },
-            "description": "A required runtime dependency is unavailable."
+            "description": "A required storage dependency or requested retrieval leg is unavailable."
           }
         },
         "summary": "Answer Stream",
@@ -18521,6 +18652,27 @@
               }
             },
             "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/DependencyUnavailableResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/RequiredRetrievalLegFailureResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/GenerationUnavailableResponse"
+                    }
+                  ],
+                  "title": "Response 503 Chat Api Chat Post"
+                }
+              }
+            },
+            "description": "Chat storage, retrieval, or generation is unavailable."
           }
         },
         "summary": "Chat",
@@ -18827,6 +18979,24 @@
               }
             },
             "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/DependencyUnavailableResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/RequiredRetrievalLegFailureResponse"
+                    }
+                  ],
+                  "title": "Response 503 Chat Stream Api Chat Stream Post"
+                }
+              }
+            },
+            "description": "A required storage dependency or requested retrieval leg is unavailable."
           }
         },
         "summary": "Chat Stream",
@@ -24316,11 +24486,19 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/DependencyUnavailableResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/DependencyUnavailableResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/RequiredRetrievalLegFailureResponse"
+                    }
+                  ],
+                  "title": "Response 503 Mcp Rag Search Api Mcp Rag Search Get"
                 }
               }
             },
-            "description": "A required runtime dependency is unavailable."
+            "description": "A required storage dependency or requested retrieval leg is unavailable."
           }
         },
         "summary": "Mcp Rag Search",
@@ -27129,11 +27307,19 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/DependencyUnavailableResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/DependencyUnavailableResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/RequiredRetrievalLegFailureResponse"
+                    }
+                  ],
+                  "title": "Response 503 Search Api Search Post"
                 }
               }
             },
-            "description": "A required runtime dependency is unavailable."
+            "description": "A required storage dependency or requested retrieval leg is unavailable."
           }
         },
         "summary": "Search",
