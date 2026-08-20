@@ -246,30 +246,6 @@ def load_asset(version_id: str, *, root: Path | None = None) -> LineageAssetVers
     return LineageAssetVersion.model_validate(_read_json_object(path))
 
 
-def list_assets(
-    *,
-    kind: LineageAssetKind | None = None,
-    repo_id: str | None = None,
-    limit: int = 50,
-    root: Path | None = None,
-) -> list[LineageAssetVersion]:
-    kinds = [kind] if kind is not None else cast(list[LineageAssetKind], [p.name for p in (lineage_root(root) / "assets").glob("*") if p.is_dir()])
-    out: list[LineageAssetVersion] = []
-    for asset_kind in kinds:
-        for path in sorted(_assets_dir(asset_kind, root=root).glob("*.json"), reverse=True):
-            try:
-                version = LineageAssetVersion.model_validate(_read_json_object(path))
-            except Exception:
-                continue
-            if repo_id and str(version.repo_id or "").strip() != str(repo_id).strip():
-                continue
-            out.append(version)
-            if len(out) >= max(1, int(limit)):
-                return out
-    out.sort(key=lambda item: item.created_at, reverse=True)
-    return out[: max(1, int(limit))]
-
-
 def _snapshot_file_entry(path: Path, *, base: Path | None = None) -> dict[str, Any]:
     rel = str(path.relative_to(base)) if base is not None else str(path)
     exists = path.exists()
@@ -708,11 +684,6 @@ def current_bundle(repo_id: str, *, root: Path | None = None) -> LineageBundle |
         return load_bundle(repo_id, alias.bundle_id, root=root)
     except Exception:
         return None
-
-
-def current_bundle_id(repo_id: str, *, root: Path | None = None) -> str | None:
-    bundle = current_bundle(repo_id, root=root)
-    return bundle.bundle_id if bundle is not None else None
 
 
 def _default_eval_dataset_path(repo_id: str) -> Path:
