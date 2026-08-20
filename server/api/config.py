@@ -7,12 +7,16 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
+from server.api.dependency_errors import (
+    DEPENDENCY_UNAVAILABLE_RESPONSES,
+    raise_postgres_unavailable_if_applicable,
+)
+from server.config import load_config as load_global_config
 from server.config_control_plane import (
     allowed_secret_env_vars,
     build_config_readiness_response,
     build_config_registry_response,
 )
-from server.config import load_config as load_global_config
 from server.db.postgres import PostgresClient
 from server.lineage import ensure_current_bundle
 from server.models.tribrid_config_model import (
@@ -40,12 +44,22 @@ from server.services.config_store import get_config as load_scoped_config
 from server.services.config_store import reset_config as reset_scoped_config
 from server.services.config_store import save_config as save_scoped_config
 
-router = APIRouter(tags=["config"])
+router = APIRouter(tags=["config"], responses=DEPENDENCY_UNAVAILABLE_RESPONSES)
 
 # Ruff B008: avoid function calls in argument defaults (FastAPI Depends()).
 _CORPUS_SCOPE_DEP = Depends()
 
 _CONFIG_WRITE_LOCKS: dict[str | None, asyncio.Lock] = {}
+
+
+async def _load_config_for_api(repo_id: str | None, *, boundary: str) -> TriBridConfig:
+    try:
+        return await load_scoped_config(repo_id=repo_id)
+    except CorpusNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        raise_postgres_unavailable_if_applicable(exc, boundary=boundary)
+        raise
 
 
 def _get_config_write_lock(repo_id: str | None) -> asyncio.Lock:
@@ -508,12 +522,7 @@ async def validate_config(scope: CorpusScope = _CORPUS_SCOPE_DEP) -> ModelValida
     blocking config saves. The PUT /api/config response is unchanged.
     """
     repo_id = scope.resolved_repo_id
-    try:
-        config = await load_scoped_config(repo_id=repo_id)
-    except CorpusNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e)) from e
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
+    config = await _load_config_for_api(repo_id, boundary="Config validation API")
 
     warnings = _collect_model_warnings(config)
     return ModelValidationResult(valid=True, warnings=warnings)
@@ -527,24 +536,14 @@ async def get_config_registry() -> ConfigRegistryResponse:
 @router.get("/config/readiness", response_model=ConfigReadinessResponse)
 async def get_config_readiness(scope: CorpusScope = _CORPUS_SCOPE_DEP) -> ConfigReadinessResponse:
     repo_id = scope.resolved_repo_id
-    try:
-        config = await load_scoped_config(repo_id=repo_id)
-    except CorpusNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e)) from e
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
+    config = await _load_config_for_api(repo_id, boundary="Config readiness API")
     return await build_config_readiness_response(config, scope_id=repo_id)
 
 
 @router.get("/config", response_model=TriBridConfig)
 async def get_config(scope: CorpusScope = _CORPUS_SCOPE_DEP) -> TriBridConfig:
     repo_id = scope.resolved_repo_id
-    try:
-        return await load_scoped_config(repo_id=repo_id)
-    except CorpusNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e)) from e
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
+    return await _load_config_for_api(repo_id, boundary="Config API")
 
 
 @router.put("/config", response_model=TriBridConfig)
@@ -571,7 +570,8 @@ async def update_config(
     except CorpusNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise_postgres_unavailable_if_applicable(e, boundary="Config update API")
+        raise
 
 
 @router.patch("/config/{section}", response_model=TriBridConfig)
@@ -582,12 +582,7 @@ async def update_config_section(
 ) -> TriBridConfig:
     repo_id = scope.resolved_repo_id
     async with _get_config_write_lock(repo_id):
-        try:
-            config = await load_scoped_config(repo_id=repo_id)
-        except CorpusNotFoundError as e:
-            raise HTTPException(status_code=404, detail=str(e)) from e
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e)) from e
+        config = await _load_config_for_api(repo_id, boundary="Config section update API")
 
         # Only allow patching known top-level sections
         if section not in TriBridConfig.model_fields:
@@ -624,7 +619,8 @@ async def update_config_section(
         except CorpusNotFoundError as e:
             raise HTTPException(status_code=404, detail=str(e)) from e
         except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e)) from e
+            raise_postgres_unavailable_if_applicable(e, boundary="Config section update API")
+            raise
 
 
 @router.post("/config/reset", response_model=TriBridConfig)
@@ -639,7 +635,8 @@ async def reset_config(scope: CorpusScope = _CORPUS_SCOPE_DEP) -> TriBridConfig:
     except CorpusNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise_postgres_unavailable_if_applicable(e, boundary="Config reset API")
+        raise
 
 
 @router.get("/secrets/check")
@@ -727,21 +724,13 @@ async def mcp_rag_search(
     force_local: bool = Query(False, description="Legacy flag (ignored)"),
     scope: CorpusScope = _CORPUS_SCOPE_DEP,
 ) -> MCPRagSearchResponse:
-    """Legacy debug endpoint: run tri-brid search and return compact results.
-
-    Notes:
-    - This endpoint exists for UI/debug tooling migrated from the legacy JS modules.
-    - It returns HTTP 200 with an `error` field on failure (so callers can display the message).
-    """
+    """Run tri-brid search and return compact results for MCP/debug tooling."""
     _ = force_local  # ignored (legacy param)
     repo_id = scope.resolved_repo_id
     if not repo_id:
-        return MCPRagSearchResponse(
-            results=[],
-            error="Missing corpus_id/repo_id (pass ?repo=... or ?corpus_id=...)",
-        )
+        raise HTTPException(status_code=422, detail="Missing corpus_id (or legacy repo_id)")
     if not q.strip():
-        return MCPRagSearchResponse(results=[], error="Query must not be empty")
+        raise HTTPException(status_code=400, detail="Query must not be empty")
 
     try:
         # Validate corpus exists (avoid implicitly creating new corpora/configs).
@@ -750,7 +739,7 @@ async def mcp_rag_search(
         await pg.connect()
         corpus = await pg.get_corpus(repo_id)
         if corpus is None:
-            return MCPRagSearchResponse(results=[], error=f"Corpus not found: {repo_id}")
+            raise HTTPException(status_code=404, detail=f"Corpus not found: {repo_id}")
 
         cfg = await load_scoped_config(repo_id=repo_id)
         fusion = TriBridFusion(vector=None, sparse=None, graph=None)
@@ -775,5 +764,8 @@ async def mcp_rag_search(
             for m in matches
         ]
         return MCPRagSearchResponse(results=results, error=None)
-    except Exception as e:
-        return MCPRagSearchResponse(results=[], error=str(e))
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise_postgres_unavailable_if_applicable(exc, boundary="MCP RAG search API")
+        raise

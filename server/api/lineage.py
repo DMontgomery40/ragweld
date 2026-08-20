@@ -3,6 +3,10 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from server.api.dataset import _dataset_path_for_corpus, _load_dataset
+from server.api.dependency_errors import (
+    DEPENDENCY_UNAVAILABLE_RESPONSES,
+    raise_postgres_unavailable_if_applicable,
+)
 from server.lineage import (
     current_bundle,
     ensure_current_bundle,
@@ -24,7 +28,7 @@ from server.models.tribrid_config_model import (
 from server.services.config_store import CorpusNotFoundError
 from server.services.config_store import get_config as load_scoped_config
 
-router = APIRouter(prefix="/api/lineage", tags=["lineage"])
+router = APIRouter(prefix="/api/lineage", tags=["lineage"], responses=DEPENDENCY_UNAVAILABLE_RESPONSES)
 
 # Ruff B008: avoid function calls in argument defaults (FastAPI Depends()).
 _CORPUS_SCOPE_DEP = Depends()
@@ -38,6 +42,9 @@ async def _scoped_bundle(scope: CorpusScope) -> LineageBundle:
         cfg = await load_scoped_config(repo_id=repo_id)
     except CorpusNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
+    except Exception as e:
+        raise_postgres_unavailable_if_applicable(e, boundary="Lineage API")
+        raise
     dataset = _load_dataset(corpus_id=repo_id)
     return ensure_current_bundle(
         repo_id=repo_id,
@@ -55,6 +62,9 @@ async def _require_repo_id(scope: CorpusScope) -> str:
         await load_scoped_config(repo_id=repo_id)
     except CorpusNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
+    except Exception as e:
+        raise_postgres_unavailable_if_applicable(e, boundary="Lineage API")
+        raise
     return repo_id
 
 

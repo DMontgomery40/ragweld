@@ -4635,6 +4635,68 @@
         "title": "DashboardIndexStorageBreakdown",
         "type": "object"
       },
+      "DependencyUnavailableDetail": {
+        "description": "Public error detail returned when a required runtime dependency is unavailable.",
+        "properties": {
+          "code": {
+            "const": "dependency_unavailable",
+            "default": "dependency_unavailable",
+            "title": "Code",
+            "type": "string"
+          },
+          "dependency": {
+            "description": "Unavailable required dependency",
+            "enum": [
+              "postgres",
+              "neo4j"
+            ],
+            "title": "Dependency",
+            "type": "string"
+          },
+          "message": {
+            "description": "Stable, non-sensitive failure summary",
+            "title": "Message",
+            "type": "string"
+          },
+          "operation": {
+            "description": "API operation that could not complete",
+            "title": "Operation",
+            "type": "string"
+          },
+          "operator_hint": {
+            "description": "High-signal next step for the operator",
+            "title": "Operator Hint",
+            "type": "string"
+          },
+          "retryable": {
+            "default": true,
+            "description": "Whether the caller may retry after operator remediation",
+            "title": "Retryable",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "dependency",
+          "operation",
+          "message",
+          "operator_hint"
+        ],
+        "title": "DependencyUnavailableDetail",
+        "type": "object"
+      },
+      "DependencyUnavailableResponse": {
+        "description": "FastAPI response envelope for a dependency-unavailable detail.",
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/DependencyUnavailableDetail"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "DependencyUnavailableResponse",
+        "type": "object"
+      },
       "DevStackStatusResponse": {
         "description": "Status of the local dev stack (frontend + backend).",
         "properties": {
@@ -10871,6 +10933,128 @@
           }
         },
         "title": "ProvidersHealthResponse",
+        "type": "object"
+      },
+      "ReadinessDependencyStatus": {
+        "description": "Sanitized readiness state for one required runtime dependency.",
+        "properties": {
+          "database": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Resolved logical database name when applicable.",
+            "title": "Database"
+          },
+          "database_exists": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Database Exists"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Stable, non-sensitive failure summary.",
+            "title": "Error"
+          },
+          "info": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Sanitized dependency readiness metadata.",
+            "title": "Info"
+          },
+          "ok": {
+            "default": false,
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "operator_hint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "High-signal next step for the operator.",
+            "title": "Operator Hint"
+          }
+        },
+        "title": "ReadinessDependencyStatus",
+        "type": "object"
+      },
+      "ReadinessStatus": {
+        "description": "Readiness payload; unavailable required dependencies are served with HTTP 503.",
+        "properties": {
+          "corpus_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Corpus Error"
+          },
+          "corpus_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Corpus Id"
+          },
+          "dependencies": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ReadinessDependencyStatus"
+            },
+            "propertyNames": {
+              "enum": [
+                "postgres",
+                "neo4j"
+              ]
+            },
+            "title": "Dependencies",
+            "type": "object"
+          },
+          "ready": {
+            "title": "Ready",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ready",
+          "dependencies"
+        ],
+        "title": "ReadinessStatus",
         "type": "object"
       },
       "RecallConfig": {
@@ -18236,6 +18420,16 @@
               }
             },
             "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DependencyUnavailableResponse"
+                }
+              }
+            },
+            "description": "A required runtime dependency is unavailable."
           }
         },
         "summary": "Answer",
@@ -18275,6 +18469,16 @@
               }
             },
             "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DependencyUnavailableResponse"
+                }
+              }
+            },
+            "description": "A required runtime dependency is unavailable."
           }
         },
         "summary": "Answer Stream",
@@ -19185,6 +19389,16 @@
               }
             },
             "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DependencyUnavailableResponse"
+                }
+              }
+            },
+            "description": "A required runtime dependency is unavailable."
           }
         },
         "summary": "Get Config",
@@ -19274,6 +19488,16 @@
               }
             },
             "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DependencyUnavailableResponse"
+                }
+              }
+            },
+            "description": "A required runtime dependency is unavailable."
           }
         },
         "summary": "Update Config",
@@ -19355,6 +19579,16 @@
               }
             },
             "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DependencyUnavailableResponse"
+                }
+              }
+            },
+            "description": "A required runtime dependency is unavailable."
           }
         },
         "summary": "Get Config Readiness",
@@ -19376,6 +19610,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DependencyUnavailableResponse"
+                }
+              }
+            },
+            "description": "A required runtime dependency is unavailable."
           }
         },
         "summary": "Get Config Registry",
@@ -19457,6 +19701,16 @@
               }
             },
             "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DependencyUnavailableResponse"
+                }
+              }
+            },
+            "description": "A required runtime dependency is unavailable."
           }
         },
         "summary": "Reset Config",
@@ -19539,6 +19793,16 @@
               }
             },
             "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DependencyUnavailableResponse"
+                }
+              }
+            },
+            "description": "A required runtime dependency is unavailable."
           }
         },
         "summary": "Validate Config",
@@ -19641,6 +19905,16 @@
               }
             },
             "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DependencyUnavailableResponse"
+                }
+              }
+            },
+            "description": "A required runtime dependency is unavailable."
           }
         },
         "summary": "Update Config Section",
@@ -19666,6 +19940,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DependencyUnavailableResponse"
+                }
+              }
+            },
+            "description": "A required runtime dependency is unavailable."
           }
         },
         "summary": "List Corpora",
@@ -19705,6 +19989,16 @@
               }
             },
             "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DependencyUnavailableResponse"
+                }
+              }
+            },
+            "description": "A required runtime dependency is unavailable."
           }
         },
         "summary": "Add Corpus",
@@ -19749,6 +20043,16 @@
               }
             },
             "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DependencyUnavailableResponse"
+                }
+              }
+            },
+            "description": "A required runtime dependency is unavailable."
           }
         },
         "summary": "Delete Corpus",
@@ -19789,6 +20093,16 @@
               }
             },
             "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DependencyUnavailableResponse"
+                }
+              }
+            },
+            "description": "A required runtime dependency is unavailable."
           }
         },
         "summary": "Get Corpus",
@@ -19840,6 +20154,16 @@
               }
             },
             "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DependencyUnavailableResponse"
+                }
+              }
+            },
+            "description": "A required runtime dependency is unavailable."
           }
         },
         "summary": "Update Corpus Endpoint",
@@ -19882,6 +20206,16 @@
               }
             },
             "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DependencyUnavailableResponse"
+                }
+              }
+            },
+            "description": "A required runtime dependency is unavailable."
           }
         },
         "summary": "Get Corpus Stats",
@@ -21665,6 +21999,16 @@
               }
             },
             "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DependencyUnavailableResponse"
+                }
+              }
+            },
+            "description": "A required runtime dependency is unavailable."
           }
         },
         "summary": "Post Feedback",
@@ -21727,6 +22071,16 @@
               }
             },
             "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DependencyUnavailableResponse"
+                }
+              }
+            },
+            "description": "A required runtime dependency is unavailable."
           }
         },
         "summary": "List Communities",
@@ -21792,6 +22146,16 @@
               }
             },
             "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DependencyUnavailableResponse"
+                }
+              }
+            },
+            "description": "A required runtime dependency is unavailable."
           }
         },
         "summary": "Get Community Members",
@@ -21854,6 +22218,16 @@
               }
             },
             "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DependencyUnavailableResponse"
+                }
+              }
+            },
+            "description": "A required runtime dependency is unavailable."
           }
         },
         "summary": "Get Community Subgraph",
@@ -21942,6 +22316,16 @@
               }
             },
             "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DependencyUnavailableResponse"
+                }
+              }
+            },
+            "description": "A required runtime dependency is unavailable."
           }
         },
         "summary": "List Entities",
@@ -21993,6 +22377,16 @@
               }
             },
             "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DependencyUnavailableResponse"
+                }
+              }
+            },
+            "description": "A required runtime dependency is unavailable."
           }
         },
         "summary": "Get Entity",
@@ -22064,6 +22458,16 @@
               }
             },
             "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DependencyUnavailableResponse"
+                }
+              }
+            },
+            "description": "A required runtime dependency is unavailable."
           }
         },
         "summary": "Get Entity Neighbors",
@@ -22119,6 +22523,16 @@
               }
             },
             "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DependencyUnavailableResponse"
+                }
+              }
+            },
+            "description": "A required runtime dependency is unavailable."
           }
         },
         "summary": "Get Entity Relationships",
@@ -22175,6 +22589,16 @@
               }
             },
             "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DependencyUnavailableResponse"
+                }
+              }
+            },
+            "description": "A required runtime dependency is unavailable."
           }
         },
         "summary": "Graph Query",
@@ -22217,6 +22641,16 @@
               }
             },
             "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DependencyUnavailableResponse"
+                }
+              }
+            },
+            "description": "A required runtime dependency is unavailable."
           }
         },
         "summary": "Get Graph Stats",
@@ -23455,6 +23889,16 @@
               }
             },
             "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DependencyUnavailableResponse"
+                }
+              }
+            },
+            "description": "A required runtime dependency is unavailable."
           }
         },
         "summary": "Get Aliases",
@@ -23561,6 +24005,16 @@
               }
             },
             "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DependencyUnavailableResponse"
+                }
+              }
+            },
+            "description": "A required runtime dependency is unavailable."
           }
         },
         "summary": "Update Alias",
@@ -23659,6 +24113,16 @@
               }
             },
             "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DependencyUnavailableResponse"
+                }
+              }
+            },
+            "description": "A required runtime dependency is unavailable."
           }
         },
         "summary": "Snapshot Bundle",
@@ -23749,6 +24213,16 @@
               }
             },
             "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DependencyUnavailableResponse"
+                }
+              }
+            },
+            "description": "A required runtime dependency is unavailable."
           }
         },
         "summary": "Get Bundle",
@@ -23842,6 +24316,16 @@
               }
             },
             "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DependencyUnavailableResponse"
+                }
+              }
+            },
+            "description": "A required runtime dependency is unavailable."
           }
         },
         "summary": "Get Bundles",
@@ -23923,6 +24407,16 @@
               }
             },
             "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DependencyUnavailableResponse"
+                }
+              }
+            },
+            "description": "A required runtime dependency is unavailable."
           }
         },
         "summary": "Get Current Lineage",
@@ -24065,7 +24559,7 @@
     },
     "/api/mcp/rag_search": {
       "get": {
-        "description": "Legacy debug endpoint: run tri-brid search and return compact results.\n\nNotes:\n- This endpoint exists for UI/debug tooling migrated from the legacy JS modules.\n- It returns HTTP 200 with an `error` field on failure (so callers can display the message).",
+        "description": "Run tri-brid search and return compact results for MCP/debug tooling.",
         "operationId": "mcp_rag_search_api_mcp_rag_search_get",
         "parameters": [
           {
@@ -24180,6 +24674,16 @@
               }
             },
             "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DependencyUnavailableResponse"
+                }
+              }
+            },
+            "description": "A required runtime dependency is unavailable."
           }
         },
         "summary": "Mcp Rag Search",
@@ -24202,6 +24706,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DependencyUnavailableResponse"
+                }
+              }
+            },
+            "description": "A required runtime dependency is unavailable."
           }
         },
         "summary": "Mcp Status",
@@ -25301,9 +25815,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Readiness Check Api Ready Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/ReadinessStatus"
                 }
               }
             },
@@ -25407,6 +25919,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DependencyUnavailableResponse"
+                }
+              }
+            },
+            "description": "A required runtime dependency is unavailable."
           }
         },
         "summary": "List Repos",
@@ -25446,6 +25968,16 @@
               }
             },
             "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DependencyUnavailableResponse"
+                }
+              }
+            },
+            "description": "A required runtime dependency is unavailable."
           }
         },
         "summary": "Add Repo",
@@ -25490,6 +26022,16 @@
               }
             },
             "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DependencyUnavailableResponse"
+                }
+              }
+            },
+            "description": "A required runtime dependency is unavailable."
           }
         },
         "summary": "Delete Repo",
@@ -25530,6 +26072,16 @@
               }
             },
             "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DependencyUnavailableResponse"
+                }
+              }
+            },
+            "description": "A required runtime dependency is unavailable."
           }
         },
         "summary": "Get Repo",
@@ -25581,6 +26133,16 @@
               }
             },
             "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DependencyUnavailableResponse"
+                }
+              }
+            },
+            "description": "A required runtime dependency is unavailable."
           }
         },
         "summary": "Update Repo",
@@ -25623,6 +26185,16 @@
               }
             },
             "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DependencyUnavailableResponse"
+                }
+              }
+            },
+            "description": "A required runtime dependency is unavailable."
           }
         },
         "summary": "Get Repo Stats",
@@ -27150,6 +27722,16 @@
               }
             },
             "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DependencyUnavailableResponse"
+                }
+              }
+            },
+            "description": "A required runtime dependency is unavailable."
           }
         },
         "summary": "Search",
@@ -27199,6 +27781,16 @@
               }
             },
             "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DependencyUnavailableResponse"
+                }
+              }
+            },
+            "description": "A required runtime dependency is unavailable."
           }
         },
         "summary": "Check Secrets",

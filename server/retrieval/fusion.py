@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 from server.db.neo4j import Neo4jClient
 from server.db.postgres import PostgresClient
+from server.dependency_errors import is_neo4j_unavailable, is_postgres_unavailable
 from server.indexing.embedder import Embedder, configure_postgres_embedding_cache_backend
 from server.models.retrieval import ChunkMatch
 from server.models.tribrid_config_model import (
@@ -397,6 +398,8 @@ class TriBridFusion:
             try:
                 await postgres.connect()
             except Exception as e:
+                if is_postgres_unavailable(e):
+                    raise
                 debug["fusion_postgres_error"] = _safe_error_message(e)
                 debug["fusion_postgres_error_kind"] = type(e).__name__
                 SEARCH_STAGE_ERRORS_TOTAL.labels(stage="postgres_connect").inc()
@@ -421,6 +424,8 @@ class TriBridFusion:
             try:
                 corpus_meta = await postgres.get_corpus(cid)
             except Exception as e:
+                if is_postgres_unavailable(e):
+                    raise
                 logger.warning(
                     "Failed to fetch corpus metadata for '%s': %s — "
                     "proceeding without dimension/ts_config guards",
@@ -526,6 +531,8 @@ class TriBridFusion:
                                 expected_dimensions=stored_dim,
                             )
                     except Exception as e:
+                        if is_postgres_unavailable(e):
+                            raise
                         debug["fusion_vector_error"] = _safe_error_message(e)
                         debug["fusion_vector_error_kind"] = type(e).__name__
                         SEARCH_STAGE_ERRORS_TOTAL.labels(stage="vector_leg").inc()
@@ -591,6 +598,8 @@ class TriBridFusion:
                                 relax_max_terms=int(getattr(cfg.sparse_search, "relax_max_terms", 8) or 8),
                             )
                     except Exception as e:
+                        if is_postgres_unavailable(e):
+                            raise
                         debug["fusion_sparse_error"] = _safe_error_message(e)
                         debug["fusion_sparse_error_kind"] = type(e).__name__
                         SEARCH_STAGE_ERRORS_TOTAL.labels(stage="sparse_leg").inc()
@@ -607,6 +616,8 @@ class TriBridFusion:
                             )
                         debug["fusion_sparse_file_path_fallback_used"] = bool(sparse_results)
                     except Exception as e:
+                        if is_postgres_unavailable(e):
+                            raise
                         debug["fusion_sparse_file_path_fallback_error"] = _safe_error_message(e)
                         debug["fusion_sparse_file_path_fallback_error_kind"] = type(e).__name__
                         SEARCH_STAGE_ERRORS_TOTAL.labels(stage="sparse_file_path_fallback").inc()
@@ -753,6 +764,8 @@ class TriBridFusion:
                             ]
                             debug["fusion_graph_hydrated_chunks"] = len(graph_results)
                 except Exception as e:
+                    if is_neo4j_unavailable(e) or is_postgres_unavailable(e):
+                        raise
                     debug["fusion_graph_error"] = str(e)
                     SEARCH_STAGE_ERRORS_TOTAL.labels(stage="graph_leg").inc()
                 finally:

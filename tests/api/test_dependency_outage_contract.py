@@ -1,0 +1,142 @@
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+
+
+def test_stateful_api_openapi_documents_typed_dependency_503() -> None:
+    from server.main import app
+
+    schema = app.openapi()
+    operations = (
+        ("/api/corpora", "get"),
+        ("/api/search", "post"),
+        ("/api/answer", "post"),
+        ("/api/config", "get"),
+        ("/api/feedback", "post"),
+        ("/api/graph/{corpus_id}/stats", "get"),
+        ("/api/lineage/current", "get"),
+    )
+    for path, method in operations:
+        response = schema["paths"][path][method]["responses"]["503"]
+        detail_schema = response["content"]["application/json"]["schema"]
+        assert detail_schema["$ref"].endswith("/DependencyUnavailableResponse")
+
+
+def test_postgres_outage_returns_structured_503_across_stateful_api_families(tmp_path: Path) -> None:
+    config = json.loads((ROOT / "tribrid_config.json").read_text(encoding="utf-8"))
+    config["indexing"]["postgres_url"] = "postgresql://postgres:postgres@127.0.0.1:1/ragweld_outage"
+    (tmp_path / "tribrid_config.json").write_text(json.dumps(config), encoding="utf-8")
+
+    script = """
+import asyncio
+import json
+from httpx import ASGITransport, AsyncClient
+from server.main import app
+
+REQUESTS = [
+    ("GET", "/api/repos", None),
+    ("GET", "/api/corpora", None),
+    ("POST", "/api/search", {"query": "status", "repo_id": "missing", "include_vector": False, "include_sparse": False, "include_graph": False}),
+    ("POST", "/api/answer", {"query": "status", "repo_id": "missing", "include_vector": False, "include_sparse": False, "include_graph": False}),
+    ("POST", "/api/answer/stream", {"query": "status", "repo_id": "missing", "include_vector": False, "include_sparse": False, "include_graph": False}),
+    ("GET", "/api/mcp/rag_search?q=status&corpus_id=missing", None),
+    ("GET", "/api/config?corpus_id=missing", None),
+    ("GET", "/api/config/validate?corpus_id=missing", None),
+    ("GET", "/api/graph/missing/stats", None),
+    ("GET", "/api/lineage/current?corpus_id=missing", None),
+    ("POST", "/api/feedback?corpus_id=missing", {"event_id": "outage-test", "signal": "thumbsup"}),
+]
+
+async def main():
+    transport = ASGITransport(app=app, raise_app_exceptions=False)
+    rows = []
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        for method, path, body in REQUESTS:
+            response = await client.request(method, path, json=body)
+            try:
+                payload = response.json()
+            except Exception:
+                payload = {"raw": response.text}
+            rows.append({"method": method, "path": path, "status": response.status_code, "body": payload})
+    print(json.dumps(rows))
+
+asyncio.run(main())
+"""
+    env = dict(os.environ)
+    env["PYTHONPATH"] = str(ROOT)
+    env["RAGWELD_LOAD_DOTENV"] = "0"
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=tmp_path,
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=30,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    rows = json.loads(result.stdout.strip().splitlines()[-1])
+    assert len(rows) == 11
+    for row in rows:
+        assert row["status"] == 503, row
+        detail = row["body"].get("detail")
+        assert isinstance(detail, dict), row
+        assert detail["code"] == "dependency_unavailable"
+        assert detail["dependency"] == "postgres"
+        assert detail["operation"]
+        assert detail["retryable"] is True
+        assert "operator_hint" in detail
+        assert "127.0.0.1:1" not in json.dumps(row["body"])
+
+
+def test_readiness_is_503_and_sanitized_when_required_dependencies_are_unavailable(tmp_path: Path) -> None:
+    config = json.loads((ROOT / "tribrid_config.json").read_text(encoding="utf-8"))
+    config["indexing"]["postgres_url"] = "postgresql://postgres:secret@127.0.0.1:1/ragweld_outage"
+    config["graph_storage"]["neo4j_uri"] = "bolt://127.0.0.1:1"
+    (tmp_path / "tribrid_config.json").write_text(json.dumps(config), encoding="utf-8")
+
+    script = """
+import asyncio
+import json
+from httpx import ASGITransport, AsyncClient
+from server.main import app
+
+async def main():
+    transport = ASGITransport(app=app, raise_app_exceptions=False)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        health = await client.get("/api/health")
+        ready = await client.get("/api/ready")
+    print(json.dumps({"health": [health.status_code, health.json()], "ready": [ready.status_code, ready.json()]}))
+
+asyncio.run(main())
+"""
+    env = dict(os.environ)
+    env["PYTHONPATH"] = str(ROOT)
+    env["RAGWELD_LOAD_DOTENV"] = "0"
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=tmp_path,
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=30,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    payload = json.loads(result.stdout.strip().splitlines()[-1])
+    assert payload["health"][0] == 200
+    assert payload["ready"][0] == 503
+    assert payload["ready"][1]["ready"] is False
+    assert payload["ready"][1]["dependencies"]["postgres"]["ok"] is False
+    assert payload["ready"][1]["dependencies"]["neo4j"]["ok"] is False
+    serialized = json.dumps(payload["ready"][1])
+    assert "127.0.0.1:1" not in serialized
+    assert "secret" not in serialized

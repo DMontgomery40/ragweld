@@ -8,6 +8,11 @@ from typing import cast
 from fastapi import APIRouter, HTTPException, Response
 from starlette.responses import StreamingResponse
 
+from server.api.dependency_errors import (
+    DEPENDENCY_UNAVAILABLE_RESPONSES,
+    raise_postgres_unavailable_if_applicable,
+    raise_required_dependency_unavailable_if_applicable,
+)
 from server.config import load_config
 from server.db.postgres import PostgresClient
 from server.models.retrieval import AnswerRequest, AnswerResponse, SearchRequest, SearchResponse
@@ -34,7 +39,7 @@ from server.services.config_store import get_config as load_scoped_config
 from server.services.conversation_store import get_conversation_store
 from server.services.traces import get_trace_store
 
-router = APIRouter(tags=["search"])
+router = APIRouter(tags=["search"], responses=DEPENDENCY_UNAVAILABLE_RESPONSES)
 
 
 def _normalize_cache_mode(cache_mode: str | None) -> CacheMode:
@@ -44,6 +49,28 @@ def _normalize_cache_mode(cache_mode: str | None) -> CacheMode:
     return "default"
 
 
+async def _validated_scoped_config(repo_id: str, *, boundary: str) -> TriBridConfig:
+    global_cfg = load_config()
+    pg = PostgresClient(global_cfg.indexing.postgres_url)
+    try:
+        await pg.connect()
+        corpus = await pg.get_corpus(repo_id)
+    except Exception as exc:
+        raise_postgres_unavailable_if_applicable(exc, boundary=boundary)
+        raise
+
+    if corpus is None:
+        raise HTTPException(status_code=404, detail=f"Corpus not found: {repo_id}")
+
+    try:
+        return await load_scoped_config(repo_id=repo_id)
+    except CorpusNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        raise_postgres_unavailable_if_applicable(exc, boundary=boundary)
+        raise
+
+
 @router.post("/search", response_model=SearchResponse)
 async def search(request: SearchRequest, response: Response) -> SearchResponse:
     if not request.query.strip():
@@ -51,25 +78,7 @@ async def search(request: SearchRequest, response: Response) -> SearchResponse:
 
     SEARCH_REQUESTS_TOTAL.inc()
 
-    global_cfg = load_config()
-    pg = PostgresClient(global_cfg.indexing.postgres_url)
-    corpus_validation_error: str | None = None
-    corpus = None
-    try:
-        await pg.connect()
-        corpus = await pg.get_corpus(request.repo_id)
-    except Exception as e:
-        corpus_validation_error = str(e)
-
-    if corpus_validation_error is None and corpus is None:
-        raise HTTPException(status_code=404, detail=f"Corpus not found: {request.repo_id}")
-
-    try:
-        cfg = await load_scoped_config(repo_id=request.repo_id)
-    except CorpusNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e)) from e
-    except Exception:
-        cfg = TriBridConfig()
+    cfg = await _validated_scoped_config(request.repo_id, boundary="Search API")
     fusion = TriBridFusion(vector=None, sparse=None, graph=None)
     request_cache_mode = _normalize_cache_mode(request.cache_mode)
     run_id = str(uuid.uuid4())
@@ -127,6 +136,9 @@ async def search(request: SearchRequest, response: Response) -> SearchResponse:
                 await trace_store.annotate(run_id, **current_trace_payload_fields())
                 await trace_store.end(run_id)
             raise HTTPException(status_code=409, detail=e.to_detail()) from e
+        except Exception as e:
+            raise_required_dependency_unavailable_if_applicable(e, boundary="Search retrieval")
+            raise
         dt_ms = (time.perf_counter() - t0) * 1000.0
 
         update_route_summary(
@@ -146,7 +158,6 @@ async def search(request: SearchRequest, response: Response) -> SearchResponse:
             "vector_enabled": bool(request.include_vector),
             "sparse_enabled": bool(request.include_sparse),
             "graph_enabled": bool(request.include_graph),
-            "corpus_validation_error": corpus_validation_error,
             "observability_run_id": run_id,
             "observability_trace_id": current_trace_payload_fields().get("trace_id"),
             "observability_correlation_id": current_trace_payload_fields().get("correlation_id"),
@@ -201,25 +212,7 @@ async def answer(request: AnswerRequest, response: Response) -> AnswerResponse:
         raise HTTPException(status_code=400, detail="Query must not be empty")
 
     # Validate corpus exists (return 404 rather than bubbling CorpusNotFoundError as 500).
-    global_cfg = load_config()
-    pg = PostgresClient(global_cfg.indexing.postgres_url)
-    corpus_validation_error: str | None = None
-    corpus = None
-    try:
-        await pg.connect()
-        corpus = await pg.get_corpus(request.repo_id)
-    except Exception as e:
-        corpus_validation_error = str(e)
-
-    if corpus_validation_error is None and corpus is None:
-        raise HTTPException(status_code=404, detail=f"Corpus not found: {request.repo_id}")
-
-    try:
-        cfg = await load_scoped_config(repo_id=request.repo_id)
-    except CorpusNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e)) from e
-    except Exception:
-        cfg = TriBridConfig()
+    cfg = await _validated_scoped_config(request.repo_id, boundary="Answer API")
     fusion = TriBridFusion(vector=None, sparse=None, graph=None)
     request_cache_mode = _normalize_cache_mode(request.cache_mode)
     run_id = str(uuid.uuid4())
@@ -285,16 +278,10 @@ async def answer(request: AnswerRequest, response: Response) -> AnswerResponse:
                 await trace_store.add_event(run_id, kind="answer.error", msg=str(e), data={})
                 await trace_store.annotate(run_id, **current_trace_payload_fields())
                 await trace_store.end(run_id)
-            raise HTTPException(status_code=500, detail=str(e)) from e
+            raise_required_dependency_unavailable_if_applicable(e, boundary="Answer retrieval")
+            raise HTTPException(status_code=500, detail="Answer generation failed") from e
 
         dt_ms = (time.perf_counter() - t0) * 1000.0
-
-        if corpus_validation_error:
-            debug = debug.model_copy(
-                update={
-                    "fusion_debug": {**(debug.fusion_debug or {}), "corpus_validation_error": corpus_validation_error}
-                }
-            )
 
         set_provider_route(provider_info)
         update_route_summary(
@@ -342,25 +329,7 @@ async def answer_stream(request: AnswerRequest) -> StreamingResponse:
         raise HTTPException(status_code=400, detail="Query must not be empty")
 
     # Validate corpus exists (return 404 rather than bubbling CorpusNotFoundError as 500).
-    global_cfg = load_config()
-    pg = PostgresClient(global_cfg.indexing.postgres_url)
-    corpus_validation_error: str | None = None
-    corpus = None
-    try:
-        await pg.connect()
-        corpus = await pg.get_corpus(request.repo_id)
-    except Exception as e:
-        corpus_validation_error = str(e)
-
-    if corpus_validation_error is None and corpus is None:
-        raise HTTPException(status_code=404, detail=f"Corpus not found: {request.repo_id}")
-
-    try:
-        cfg = await load_scoped_config(repo_id=request.repo_id)
-    except CorpusNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e)) from e
-    except Exception:
-        cfg = TriBridConfig()
+    cfg = await _validated_scoped_config(request.repo_id, boundary="Streaming answer API")
     fusion = TriBridFusion(vector=None, sparse=None, graph=None)
     request_cache_mode = _normalize_cache_mode(request.cache_mode)
     run_id = str(uuid.uuid4())
@@ -426,7 +395,8 @@ async def answer_stream(request: AnswerRequest) -> StreamingResponse:
             await trace_store.annotate(run_id, **current_trace_payload_fields())
             await trace_store.end(run_id)
         obs_cm.__exit__(type(e), e, e.__traceback__)
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise_required_dependency_unavailable_if_applicable(e, boundary="Streaming answer retrieval")
+        raise HTTPException(status_code=500, detail="Streaming answer generation failed") from e
 
     async def wrapped_stream() -> object:
         ended_at_ms: int | None = None

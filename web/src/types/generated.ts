@@ -540,6 +540,21 @@ export interface DashboardIndexStorageBreakdown {
   total_storage_bytes?: number; // default: 0
 }
 
+/** Public error detail returned when a required runtime dependency is unavailable. */
+export interface DependencyUnavailableDetail {
+  code?: "dependency_unavailable"; // default: "dependency_unavailable"
+  /** Unavailable required dependency */
+  dependency: "postgres" | "neo4j";
+  /** API operation that could not complete */
+  operation: string;
+  /** Stable, non-sensitive failure summary */
+  message: string;
+  /** Whether the caller may retry after operator remediation */
+  retryable?: boolean; // default: True
+  /** High-signal next step for the operator */
+  operator_hint: string;
+}
+
 /** Docker infrastructure configuration. */
 export interface DockerConfig {
   /** Timeout for Docker status check (seconds) */
@@ -1608,6 +1623,20 @@ export interface ProviderHealth {
   reachable: boolean;
   /** Optional detail/error message */
   detail?: string | null; // default: None
+}
+
+/** Sanitized readiness state for one required runtime dependency. */
+export interface ReadinessDependencyStatus {
+  ok?: boolean; // default: False
+  /** Stable, non-sensitive failure summary. */
+  error?: string | null; // default: None
+  /** High-signal next step for the operator. */
+  operator_hint?: string | null; // default: None
+  /** Resolved logical database name when applicable. */
+  database?: string | null; // default: None
+  database_exists?: boolean | null; // default: None
+  /** Sanitized dependency readiness metadata. */
+  info?: Record<string, unknown> | null; // default: None
 }
 
 /** Persistent chat memory. ON by default.  Indexes every conversation into a lightweight pgvector corpus. Self-hosted, local, zero privacy risk, negligible storage. */
@@ -3213,6 +3242,11 @@ export interface DashboardIndexStatusResponse {
   current_file?: string | null;
 }
 
+/** FastAPI response envelope for a dependency-unavailable detail. */
+export interface DependencyUnavailableResponse {
+  detail: DependencyUnavailableDetail;
+}
+
 /** Status of the local dev stack (frontend + backend). */
 export interface DevStackStatusResponse {
   /** Whether the dev frontend (Vite) is reachable. */
@@ -3863,6 +3897,14 @@ export interface PromptsResponse {
 /** Response payload for GET /api/chat/health. */
 export interface ProvidersHealthResponse {
   providers?: ProviderHealth[];
+}
+
+/** Readiness payload; unavailable required dependencies are served with HTTP 503. */
+export interface ReadinessStatus {
+  ready: boolean;
+  corpus_id?: string | null;
+  corpus_error?: string | null;
+  dependencies: Record<string, ReadinessDependencyStatus>;
 }
 
 /** Request payload for POST /api/recall/index. */

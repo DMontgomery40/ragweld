@@ -581,6 +581,26 @@ class HealthStatus(BaseModel):
     )
 
 
+class ReadinessDependencyStatus(BaseModel):
+    """Sanitized readiness state for one required runtime dependency."""
+
+    ok: bool = Field(default=False)
+    error: str | None = Field(default=None, description="Stable, non-sensitive failure summary.")
+    operator_hint: str | None = Field(default=None, description="High-signal next step for the operator.")
+    database: str | None = Field(default=None, description="Resolved logical database name when applicable.")
+    database_exists: bool | None = Field(default=None)
+    info: dict[str, Any] | None = Field(default=None, description="Sanitized dependency readiness metadata.")
+
+
+class ReadinessStatus(BaseModel):
+    """Readiness payload; unavailable required dependencies are served with HTTP 503."""
+
+    ready: bool
+    corpus_id: str | None = None
+    corpus_error: str | None = None
+    dependencies: dict[Literal["postgres", "neo4j"], ReadinessDependencyStatus]
+
+
 class DockerContainer(BaseModel):
     """Ragweld-owned Compose service exposed to the local Docker control surface."""
 
@@ -858,6 +878,23 @@ class CorpusScope(BaseModel):
             return None
         v = v.strip()
         return v or None
+
+
+class DependencyUnavailableDetail(BaseModel):
+    """Public error detail returned when a required runtime dependency is unavailable."""
+
+    code: Literal["dependency_unavailable"] = "dependency_unavailable"
+    dependency: Literal["postgres", "neo4j"] = Field(description="Unavailable required dependency")
+    operation: str = Field(description="API operation that could not complete")
+    message: str = Field(description="Stable, non-sensitive failure summary")
+    retryable: bool = Field(default=True, description="Whether the caller may retry after operator remediation")
+    operator_hint: str = Field(description="High-signal next step for the operator")
+
+
+class DependencyUnavailableResponse(BaseModel):
+    """FastAPI response envelope for a dependency-unavailable detail."""
+
+    detail: DependencyUnavailableDetail
 
 
 class VocabPreviewTerm(BaseModel):

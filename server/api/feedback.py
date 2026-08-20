@@ -4,13 +4,17 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
+from server.api.dependency_errors import (
+    DEPENDENCY_UNAVAILABLE_RESPONSES,
+    raise_postgres_unavailable_if_applicable,
+)
 from server.config import load_config as load_global_config
 from server.models.tribrid_config_model import CorpusScope, FeedbackRequest, FeedbackResponse
 from server.observability.query_log import append_feedback_log
 from server.services.config_store import CorpusNotFoundError
 from server.services.config_store import get_config as load_scoped_config
 
-router = APIRouter(tags=["feedback"])
+router = APIRouter(tags=["feedback"], responses=DEPENDENCY_UNAVAILABLE_RESPONSES)
 logger = logging.getLogger(__name__)
 
 # Ruff B008: avoid function calls in argument defaults (FastAPI Depends()).
@@ -65,6 +69,7 @@ async def post_feedback(
             except CorpusNotFoundError as e:
                 raise HTTPException(status_code=404, detail=f"corpus_id={repo_id} not found") from e
             except Exception as e:
+                raise_postgres_unavailable_if_applicable(e, boundary="Feedback API")
                 logger.exception("Failed to load scoped config for feedback logging")
                 raise HTTPException(status_code=500, detail="Failed to load corpus config") from e
         else:

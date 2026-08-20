@@ -7,6 +7,11 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException
 
+from server.api.dependency_errors import (
+    DEPENDENCY_UNAVAILABLE_RESPONSES,
+    raise_neo4j_unavailable_if_applicable,
+    raise_postgres_unavailable_if_applicable,
+)
 from server.config import load_config
 from server.db.neo4j import Neo4jClient
 from server.db.postgres import PostgresClient
@@ -19,7 +24,7 @@ from server.models.tribrid_config_model import (
     CorpusUpdateRequest,
 )
 
-router = APIRouter(tags=["repos"])
+router = APIRouter(tags=["repos"], responses=DEPENDENCY_UNAVAILABLE_RESPONSES)
 
 
 def _slugify(value: str) -> str:
@@ -32,7 +37,11 @@ def _slugify(value: str) -> str:
 async def _get_postgres() -> PostgresClient:
     cfg = load_config()
     pg = PostgresClient(cfg.indexing.postgres_url, schema_mode="control")
-    await pg.connect()
+    try:
+        await pg.connect()
+    except Exception as exc:
+        raise_postgres_unavailable_if_applicable(exc, boundary="Corpus API")
+        raise
     return pg
 
 
@@ -45,7 +54,12 @@ async def _get_neo4j(repo_id: str | None = None) -> Neo4jClient:
         cfg.graph_storage.resolve_password(),
         database=db_name,
     )
-    await neo4j.connect()
+    try:
+        await neo4j.connect()
+        await neo4j.ping()
+    except Exception as exc:
+        raise_neo4j_unavailable_if_applicable(exc, boundary="Corpus graph setup")
+        raise
     return neo4j
 
 
@@ -255,8 +269,9 @@ async def get_repo_stats(corpus_id: str) -> CorpusStats:
         index_stats = await pg.get_index_stats(repo_id)
         if index_stats.total_chunks == 0:
             index_stats = None
-    except Exception:
-        index_stats = None
+    except Exception as exc:
+        raise_postgres_unavailable_if_applicable(exc, boundary="Corpus index stats API")
+        raise
 
     graph_stats = None
     try:
@@ -265,8 +280,9 @@ async def get_repo_stats(corpus_id: str) -> CorpusStats:
         await neo4j.disconnect()
         if graph_stats.total_entities == 0:
             graph_stats = None
-    except Exception:
-        graph_stats = None
+    except Exception as exc:
+        raise_neo4j_unavailable_if_applicable(exc, boundary="Corpus graph stats API")
+        raise
 
     return CorpusStats(
         repo_id=repo_id,
@@ -287,13 +303,24 @@ async def get_corpus_stats(corpus_id: str) -> CorpusStats:
 async def delete_repo(corpus_id: str) -> dict[str, Any]:
     repo_id = corpus_id
     pg = await _get_postgres()
-    await pg.delete_corpus(repo_id)
+    row = await pg.get_corpus(repo_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"Corpus not found: {repo_id}")
+
+    neo4j = await _get_neo4j(repo_id)
     try:
-        neo4j = await _get_neo4j(repo_id)
         await neo4j.delete_graph(repo_id)
+    except Exception as exc:
+        raise_neo4j_unavailable_if_applicable(exc, boundary="Corpus deletion API")
+        raise
+    finally:
         await neo4j.disconnect()
-    except Exception:
-        pass
+
+    try:
+        await pg.delete_corpus(repo_id)
+    except Exception as exc:
+        raise_postgres_unavailable_if_applicable(exc, boundary="Corpus deletion API")
+        raise
     return {"ok": True}
 
 

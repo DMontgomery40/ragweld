@@ -1,7 +1,5 @@
-from typing import Any
-
 from fastapi import APIRouter, Depends
-from starlette.responses import Response
+from starlette.responses import JSONResponse, Response
 
 from server.config import load_config
 from server.db.neo4j import Neo4jClient
@@ -10,6 +8,8 @@ from server.models.tribrid_config_model import (
     CorpusScope,
     HealthServiceStatus,
     HealthStatus,
+    ReadinessDependencyStatus,
+    ReadinessStatus,
     TriBridConfig,
 )
 from server.observability.metrics import render_latest
@@ -36,8 +36,8 @@ async def health_check() -> HealthStatus:
     )
 
 
-@router.get("/ready")
-async def readiness_check(scope: CorpusScope = _CORPUS_SCOPE_DEP) -> dict[str, Any]:
+@router.get("/ready", response_model=ReadinessStatus)
+async def readiness_check(scope: CorpusScope = _CORPUS_SCOPE_DEP) -> ReadinessStatus | JSONResponse:
     """Readiness probe.
 
     Returns dependency status for Postgres + Neo4j.
@@ -56,34 +56,27 @@ async def readiness_check(scope: CorpusScope = _CORPUS_SCOPE_DEP) -> dict[str, A
             # Fall back to global config so we can still report dependency health.
             corpus_error = str(e)
             cfg = load_config()
-        except Exception as e:
+        except Exception:
             # Keep /ready robust: report failure but do not crash.
-            corpus_error = str(e)
+            corpus_error = "Scoped corpus config is unavailable."
             cfg = load_config()
     else:
         cfg = load_config()
 
-    out: dict[str, Any] = {
-        "ready": True,
-        "corpus_id": corpus_id,
-        "corpus_error": corpus_error,
-        "dependencies": {
-            "postgres": {"ok": False, "error": None},
-            "neo4j": {"ok": False, "error": None, "database": cfg.graph_storage.resolve_database(corpus_id)},
-        },
-    }
-    if corpus_error:
-        out["ready"] = False
+    postgres = ReadinessDependencyStatus()
+    neo4j_status = ReadinessDependencyStatus(database=cfg.graph_storage.resolve_database(corpus_id))
+    ready = not bool(corpus_error)
 
     # Postgres
     try:
         pg = PostgresClient(cfg.indexing.postgres_url)
         await pg.connect()
-        out["dependencies"]["postgres"]["ok"] = True
+        postgres.ok = True
         await pg.disconnect()
-    except Exception as e:
-        out["ready"] = False
-        out["dependencies"]["postgres"]["error"] = str(e)
+    except Exception:
+        ready = False
+        postgres.error = "PostgreSQL control store is unavailable."
+        postgres.operator_hint = "Verify the scoped Ragweld Postgres service and DSN, then retry readiness."
 
     # Neo4j
     try:
@@ -96,21 +89,38 @@ async def readiness_check(scope: CorpusScope = _CORPUS_SCOPE_DEP) -> dict[str, A
         )
         await neo4j.connect()
         info = await neo4j.ping()
-        out["dependencies"]["neo4j"]["ok"] = True
-        out["dependencies"]["neo4j"]["info"] = info
+        neo4j_status.ok = True
+        neo4j_status.info = info
         # Database existence check (multi-db aware). For Community, this should still work.
         try:
             exists = await neo4j.database_exists(db_name)
-            out["dependencies"]["neo4j"]["database_exists"] = bool(exists)
-        except Exception as e:
-            out["dependencies"]["neo4j"]["database_exists"] = None
-            out["dependencies"]["neo4j"]["database_error"] = str(e)
+            neo4j_status.database_exists = bool(exists)
+            if not exists:
+                ready = False
+                neo4j_status.ok = False
+                neo4j_status.error = "Resolved Neo4j database does not exist."
+                neo4j_status.operator_hint = "Create the resolved graph database or correct the corpus database mapping."
+        except Exception:
+            ready = False
+            neo4j_status.ok = False
+            neo4j_status.error = "Neo4j database readiness could not be verified."
+            neo4j_status.operator_hint = "Verify Neo4j database permissions and the resolved corpus database."
         await neo4j.disconnect()
-    except Exception as e:
-        out["ready"] = False
-        out["dependencies"]["neo4j"]["error"] = str(e)
+    except Exception:
+        ready = False
+        neo4j_status.ok = False
+        neo4j_status.error = "Neo4j graph store is unavailable."
+        neo4j_status.operator_hint = "Verify the scoped Ragweld Neo4j service and credentials, then retry readiness."
 
-    return out
+    status = ReadinessStatus(
+        ready=ready,
+        corpus_id=corpus_id,
+        corpus_error=corpus_error,
+        dependencies={"postgres": postgres, "neo4j": neo4j_status},
+    )
+    if ready:
+        return status
+    return JSONResponse(status_code=503, content=status.model_dump(mode="json"))
 
 
 @router.get("/metrics")

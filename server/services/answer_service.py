@@ -10,6 +10,7 @@ from server.chat.context_formatter import format_context_for_llm
 from server.chat.generation import GenerationResult, generate_chat_text, stream_chat_text
 from server.chat.prompt_builder import get_system_prompt
 from server.chat.provider_router import select_provider_route
+from server.dependency_errors import is_required_dependency_unavailable
 from server.models.retrieval import ChunkMatch
 from server.models.tribrid_config_model import ChatDebugInfo, ChatProviderInfo, TriBridConfig
 from server.retrieval.cache import CacheMode, SemanticCacheService
@@ -154,6 +155,8 @@ async def retrieve_best_effort(
     except RetrievalContractMismatchError:
         raise
     except Exception as e:
+        if is_required_dependency_unavailable(e):
+            raise
         return (
             [],
             {

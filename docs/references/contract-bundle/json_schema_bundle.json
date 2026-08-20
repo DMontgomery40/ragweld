@@ -1,5 +1,5 @@
 {
-  "model_count": 250,
+  "model_count": 254,
   "module": "server.models.tribrid_config_model",
   "root_models": {
     "ActiveSources": {
@@ -9852,6 +9852,119 @@
         }
       },
       "title": "DashboardIndexStorageBreakdown",
+      "type": "object"
+    },
+    "DependencyUnavailableDetail": {
+      "description": "Public error detail returned when a required runtime dependency is unavailable.",
+      "properties": {
+        "code": {
+          "const": "dependency_unavailable",
+          "default": "dependency_unavailable",
+          "title": "Code",
+          "type": "string"
+        },
+        "dependency": {
+          "description": "Unavailable required dependency",
+          "enum": [
+            "postgres",
+            "neo4j"
+          ],
+          "title": "Dependency",
+          "type": "string"
+        },
+        "message": {
+          "description": "Stable, non-sensitive failure summary",
+          "title": "Message",
+          "type": "string"
+        },
+        "operation": {
+          "description": "API operation that could not complete",
+          "title": "Operation",
+          "type": "string"
+        },
+        "operator_hint": {
+          "description": "High-signal next step for the operator",
+          "title": "Operator Hint",
+          "type": "string"
+        },
+        "retryable": {
+          "default": true,
+          "description": "Whether the caller may retry after operator remediation",
+          "title": "Retryable",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "dependency",
+        "operation",
+        "message",
+        "operator_hint"
+      ],
+      "title": "DependencyUnavailableDetail",
+      "type": "object"
+    },
+    "DependencyUnavailableResponse": {
+      "$defs": {
+        "DependencyUnavailableDetail": {
+          "description": "Public error detail returned when a required runtime dependency is unavailable.",
+          "properties": {
+            "code": {
+              "const": "dependency_unavailable",
+              "default": "dependency_unavailable",
+              "title": "Code",
+              "type": "string"
+            },
+            "dependency": {
+              "description": "Unavailable required dependency",
+              "enum": [
+                "postgres",
+                "neo4j"
+              ],
+              "title": "Dependency",
+              "type": "string"
+            },
+            "message": {
+              "description": "Stable, non-sensitive failure summary",
+              "title": "Message",
+              "type": "string"
+            },
+            "operation": {
+              "description": "API operation that could not complete",
+              "title": "Operation",
+              "type": "string"
+            },
+            "operator_hint": {
+              "description": "High-signal next step for the operator",
+              "title": "Operator Hint",
+              "type": "string"
+            },
+            "retryable": {
+              "default": true,
+              "description": "Whether the caller may retry after operator remediation",
+              "title": "Retryable",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "dependency",
+            "operation",
+            "message",
+            "operator_hint"
+          ],
+          "title": "DependencyUnavailableDetail",
+          "type": "object"
+        }
+      },
+      "description": "FastAPI response envelope for a dependency-unavailable detail.",
+      "properties": {
+        "detail": {
+          "$ref": "#/$defs/DependencyUnavailableDetail"
+        }
+      },
+      "required": [
+        "detail"
+      ],
+      "title": "DependencyUnavailableResponse",
       "type": "object"
     },
     "DevStackStatusResponse": {
@@ -20749,6 +20862,214 @@
         }
       },
       "title": "ProvidersHealthResponse",
+      "type": "object"
+    },
+    "ReadinessDependencyStatus": {
+      "description": "Sanitized readiness state for one required runtime dependency.",
+      "properties": {
+        "database": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Resolved logical database name when applicable.",
+          "title": "Database"
+        },
+        "database_exists": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Database Exists"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Stable, non-sensitive failure summary.",
+          "title": "Error"
+        },
+        "info": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Sanitized dependency readiness metadata.",
+          "title": "Info"
+        },
+        "ok": {
+          "default": false,
+          "title": "Ok",
+          "type": "boolean"
+        },
+        "operator_hint": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "High-signal next step for the operator.",
+          "title": "Operator Hint"
+        }
+      },
+      "title": "ReadinessDependencyStatus",
+      "type": "object"
+    },
+    "ReadinessStatus": {
+      "$defs": {
+        "ReadinessDependencyStatus": {
+          "description": "Sanitized readiness state for one required runtime dependency.",
+          "properties": {
+            "database": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Resolved logical database name when applicable.",
+              "title": "Database"
+            },
+            "database_exists": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Database Exists"
+            },
+            "error": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Stable, non-sensitive failure summary.",
+              "title": "Error"
+            },
+            "info": {
+              "anyOf": [
+                {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Sanitized dependency readiness metadata.",
+              "title": "Info"
+            },
+            "ok": {
+              "default": false,
+              "title": "Ok",
+              "type": "boolean"
+            },
+            "operator_hint": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "High-signal next step for the operator.",
+              "title": "Operator Hint"
+            }
+          },
+          "title": "ReadinessDependencyStatus",
+          "type": "object"
+        }
+      },
+      "description": "Readiness payload; unavailable required dependencies are served with HTTP 503.",
+      "properties": {
+        "corpus_error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Corpus Error"
+        },
+        "corpus_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Corpus Id"
+        },
+        "dependencies": {
+          "additionalProperties": {
+            "$ref": "#/$defs/ReadinessDependencyStatus"
+          },
+          "propertyNames": {
+            "enum": [
+              "postgres",
+              "neo4j"
+            ]
+          },
+          "title": "Dependencies",
+          "type": "object"
+        },
+        "ready": {
+          "title": "Ready",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "ready",
+        "dependencies"
+      ],
+      "title": "ReadinessStatus",
       "type": "object"
     },
     "RecallConfig": {
