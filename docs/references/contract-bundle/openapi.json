@@ -4604,7 +4604,9 @@
             "description": "Unavailable required dependency",
             "enum": [
               "postgres",
-              "neo4j"
+              "neo4j",
+              "feedback_log",
+              "lineage_store"
             ],
             "title": "Dependency",
             "type": "string"
@@ -25837,6 +25839,16 @@
               }
             },
             "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DependencyUnavailableResponse"
+                }
+              }
+            },
+            "description": "A required runtime dependency is unavailable."
           }
         },
         "summary": "Track Click",

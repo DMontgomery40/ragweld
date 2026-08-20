@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -22,6 +23,7 @@ from server.models.tribrid_config_model import (
     CorpusCreateRequest,
     CorpusStats,
     CorpusUpdateRequest,
+    GraphStats,
 )
 
 router = APIRouter(tags=["repos"], responses=DEPENDENCY_UNAVAILABLE_RESPONSES)
@@ -45,6 +47,11 @@ async def _get_postgres() -> PostgresClient:
     return pg
 
 
+async def _disconnect_neo4j_quietly(neo4j: Neo4jClient) -> None:
+    with suppress(Exception):
+        await neo4j.disconnect()
+
+
 async def _get_neo4j(repo_id: str | None = None) -> Neo4jClient:
     cfg = load_config()
     db_name = cfg.graph_storage.resolve_database(repo_id)
@@ -58,9 +65,23 @@ async def _get_neo4j(repo_id: str | None = None) -> Neo4jClient:
         await neo4j.connect()
         await neo4j.ping()
     except Exception as exc:
+        await _disconnect_neo4j_quietly(neo4j)
         raise_neo4j_unavailable_if_applicable(exc, boundary="Corpus graph setup")
         raise
     return neo4j
+
+
+async def _get_graph_stats_or_none(neo4j: Neo4jClient, repo_id: str) -> GraphStats | None:
+    try:
+        graph_stats = await neo4j.get_graph_stats(repo_id)
+        if graph_stats.total_entities == 0:
+            return None
+        return graph_stats
+    except Exception as exc:
+        raise_neo4j_unavailable_if_applicable(exc, boundary="Corpus graph stats API")
+        raise
+    finally:
+        await _disconnect_neo4j_quietly(neo4j)
 
 
 @router.get("/repos", response_model=list[Corpus])
@@ -246,6 +267,11 @@ async def get_repo_stats(corpus_id: str) -> CorpusStats:
     if row is None:
         raise HTTPException(status_code=404, detail=f"Corpus not found: {repo_id}")
 
+    # If graph storage is down, the whole endpoint is a structured 503; fail fast
+    # before walking the corpus tree or loading index stats from Postgres.
+    neo4j = await _get_neo4j(repo_id)
+    graph_stats = await _get_graph_stats_or_none(neo4j, repo_id)
+
     # Compute file stats from disk (best-effort for now)
     root_path = row["path"]
     loader = FileLoader(ignore_patterns=[])
@@ -271,17 +297,6 @@ async def get_repo_stats(corpus_id: str) -> CorpusStats:
             index_stats = None
     except Exception as exc:
         raise_postgres_unavailable_if_applicable(exc, boundary="Corpus index stats API")
-        raise
-
-    graph_stats = None
-    try:
-        neo4j = await _get_neo4j(repo_id)
-        graph_stats = await neo4j.get_graph_stats(repo_id)
-        await neo4j.disconnect()
-        if graph_stats.total_entities == 0:
-            graph_stats = None
-    except Exception as exc:
-        raise_neo4j_unavailable_if_applicable(exc, boundary="Corpus graph stats API")
         raise
 
     return CorpusStats(

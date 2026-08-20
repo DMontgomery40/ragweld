@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from server.dependency_errors import DependencyUnavailableError
 from server.models.tribrid_config_model import TriBridConfig
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -89,4 +90,7 @@ async def append_feedback_log(
     if context:
         payload["context"] = str(context)
 
-    await append_query_log(config, entry=payload)
+    try:
+        await append_query_log(config, entry=payload)
+    except OSError as exc:
+        raise DependencyUnavailableError("feedback_log", "Feedback log append") from exc

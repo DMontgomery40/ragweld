@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 import pytest
 from neo4j.exceptions import ServiceUnavailable
 
@@ -12,6 +14,7 @@ from server.dependency_errors import (
     DependencyUnavailableError,
     is_neo4j_unavailable,
     is_postgres_unavailable,
+    is_required_dependency_unavailable,
 )
 from server.models.tribrid_config_model import DependencyUnavailableDetail
 from server.retrieval.fusion import _raise_neo4j_boundary_error, _raise_postgres_boundary_error
@@ -79,7 +82,7 @@ def test_fusion_database_boundaries_tag_raw_transport_provenance(raiser, depende
     assert caught.value.dependency == dependency
 
 
-@pytest.mark.parametrize("dependency", ["postgres", "neo4j"])
+@pytest.mark.parametrize("dependency", ["postgres", "neo4j", "feedback_log", "lineage_store"])
 def test_dependency_http_exception_uses_typed_safe_detail(dependency: str) -> None:
     raw = ConnectionRefusedError(61, "127.0.0.1:1 secret-password")
     error = dependency_unavailable_http_exception(
@@ -96,3 +99,32 @@ def test_dependency_http_exception_uses_typed_safe_detail(dependency: str) -> No
     assert "Test boundary" in detail.operator_hint
     assert "127.0.0.1:1" not in str(error.detail)
     assert "secret-password" not in str(error.detail)
+
+
+def test_dependency_http_exception_logs_structured_event_without_traceback(caplog: pytest.LogCaptureFixture) -> None:
+    raw = ConnectionRefusedError(61, "127.0.0.1:1 secret-password")
+
+    with caplog.at_level(logging.ERROR, logger="server.api.dependency_errors"):
+        dependency_unavailable_http_exception(
+            "postgres",
+            boundary="Test boundary",
+            exc=raw,
+        )
+
+    assert caplog.records
+    record = caplog.records[-1]
+    assert record.getMessage() == "Required dependency unavailable"
+    assert getattr(record, "dependency") == "postgres"
+    assert getattr(record, "boundary") == "Test boundary"
+    assert getattr(record, "exception_type") == "ConnectionRefusedError"
+    assert getattr(record, "operator_hint")
+    assert record.exc_info is None
+    assert "Traceback" not in caplog.text
+    assert "127.0.0.1:1" not in caplog.text
+    assert "secret-password" not in caplog.text
+
+
+@pytest.mark.parametrize("dependency", ["postgres", "neo4j", "feedback_log", "lineage_store"])
+def test_explicit_dependency_errors_are_required_failures(dependency: str) -> None:
+    error = DependencyUnavailableError(dependency, "Test operation")  # type: ignore[arg-type]
+    assert is_required_dependency_unavailable(error) is True

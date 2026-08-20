@@ -9,6 +9,9 @@ from pathlib import Path
 from typing import Any, cast
 from urllib.parse import quote
 
+from pydantic import ValidationError
+
+from server.dependency_errors import DependencyUnavailableError
 from server.models.tribrid_config_model import (
     BenchmarkRun,
     GitSnapshot,
@@ -36,13 +39,27 @@ def resolve_project_path(path_str: str) -> Path:
     return p
 
 
+def _raise_lineage_store_error(operation: str, exc: BaseException) -> None:
+    raise DependencyUnavailableError("lineage_store", operation) from exc
+
+
+def _validate_lineage_model(model: Any, payload: dict[str, Any], *, operation: str) -> Any:
+    try:
+        return model.model_validate(payload)
+    except ValidationError as exc:
+        _raise_lineage_store_error(operation, exc)
+
+
 def lineage_root(root: Path | None = None) -> Path:
     if root is not None:
         base = Path(root)
     else:
         raw = str(os.environ.get("RAGWELD_LINEAGE_ROOT") or "").strip()
         base = resolve_project_path(raw) if raw else (repo_root() / "data" / "lineage")
-    base.mkdir(parents=True, exist_ok=True)
+    try:
+        base.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        _raise_lineage_store_error("Lineage root initialization", exc)
     return base
 
 
@@ -52,7 +69,10 @@ def _safe_repo_id(repo_id: str) -> str:
 
 def _assets_dir(kind: LineageAssetKind, *, root: Path | None = None) -> Path:
     d = lineage_root(root) / "assets" / str(kind)
-    d.mkdir(parents=True, exist_ok=True)
+    try:
+        d.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        _raise_lineage_store_error("Lineage asset directory access", exc)
     return d
 
 
@@ -62,7 +82,10 @@ def _asset_path(kind: LineageAssetKind, version_id: str, *, root: Path | None = 
 
 def _bundles_dir(repo_id: str, *, root: Path | None = None) -> Path:
     d = lineage_root(root) / "bundles" / _safe_repo_id(repo_id)
-    d.mkdir(parents=True, exist_ok=True)
+    try:
+        d.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        _raise_lineage_store_error("Lineage bundle directory access", exc)
     return d
 
 
@@ -72,7 +95,10 @@ def _bundle_path(repo_id: str, bundle_id: str, *, root: Path | None = None) -> P
 
 def _aliases_dir(repo_id: str, *, root: Path | None = None) -> Path:
     d = lineage_root(root) / "aliases" / _safe_repo_id(repo_id)
-    d.mkdir(parents=True, exist_ok=True)
+    try:
+        d.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        _raise_lineage_store_error("Lineage alias directory access", exc)
     return d
 
 
@@ -110,16 +136,25 @@ def _sha256_json(value: Any) -> str:
 
 
 def _atomic_write_json(path: Path, payload: Any) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps(_jsonable(payload), ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    tmp.replace(path)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(path.suffix + ".tmp")
+        tmp.write_text(
+            json.dumps(_jsonable(payload), ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        tmp.replace(path)
+    except OSError as exc:
+        _raise_lineage_store_error("Lineage store write", exc)
 
 
-def _read_json_object(path: Path) -> dict[str, Any]:
-    raw = json.loads(path.read_text(encoding="utf-8"))
+def _read_json_object(path: Path, *, operation: str) -> dict[str, Any]:
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        _raise_lineage_store_error(operation, exc)
     if not isinstance(raw, dict):
-        raise ValueError(f"Expected JSON object at {path}")
+        _raise_lineage_store_error(operation, TypeError("Expected JSON object"))
     return cast(dict[str, Any], raw)
 
 
@@ -219,7 +254,14 @@ def capture_asset_version(
     version_id = _version_id_for(kind, digest)
     path = _asset_path(kind, version_id, root=root)
     if path.exists():
-        return LineageAssetVersion.model_validate(_read_json_object(path))
+        return cast(
+            LineageAssetVersion,
+            _validate_lineage_model(
+                LineageAssetVersion,
+                _read_json_object(path, operation="Lineage asset read"),
+                operation="Lineage asset read",
+            ),
+        )
 
     version = LineageAssetVersion(
         version_id=version_id,
@@ -243,7 +285,14 @@ def load_asset(version_id: str, *, root: Path | None = None) -> LineageAssetVers
     path = _asset_path(cast(LineageAssetKind, kind), version_id, root=root)
     if not path.exists():
         raise FileNotFoundError(f"lineage asset not found: {version_id}")
-    return LineageAssetVersion.model_validate(_read_json_object(path))
+    return cast(
+        LineageAssetVersion,
+        _validate_lineage_model(
+            LineageAssetVersion,
+            _read_json_object(path, operation="Lineage asset read"),
+            operation="Lineage asset read",
+        ),
+    )
 
 
 def _snapshot_file_entry(path: Path, *, base: Path | None = None) -> dict[str, Any]:
@@ -459,16 +508,25 @@ def load_bundle(repo_id: str, bundle_id: str, *, root: Path | None = None) -> Li
     path = _bundle_path(repo_id, bundle_id, root=root)
     if not path.exists():
         raise FileNotFoundError(f"lineage bundle not found: {bundle_id}")
-    return LineageBundle.model_validate(_read_json_object(path))
+    return cast(
+        LineageBundle,
+        _validate_lineage_model(
+            LineageBundle,
+            _read_json_object(path, operation="Lineage bundle read"),
+            operation="Lineage bundle read",
+        ),
+    )
 
 
 def list_bundles(*, repo_id: str, limit: int = 50, root: Path | None = None) -> list[LineageBundle]:
     out: list[LineageBundle] = []
     for path in sorted(_bundles_dir(repo_id, root=root).glob("*.json"), reverse=True):
         try:
-            out.append(LineageBundle.model_validate(_read_json_object(path)))
-        except Exception:
-            continue
+            out.append(load_bundle(repo_id, path.stem, root=root))
+        except DependencyUnavailableError:
+            raise
+        except FileNotFoundError as exc:
+            _raise_lineage_store_error("Lineage bundle list", exc)
         if len(out) >= max(1, int(limit)):
             break
     return out
@@ -478,10 +536,14 @@ def load_alias(repo_id: str, alias: LineageAliasName, *, root: Path | None = Non
     path = _alias_path(repo_id, alias, root=root)
     if not path.exists():
         return None
-    try:
-        return LineageAlias.model_validate(_read_json_object(path))
-    except Exception:
-        return None
+    return cast(
+        LineageAlias,
+        _validate_lineage_model(
+            LineageAlias,
+            _read_json_object(path, operation="Lineage alias read"),
+            operation="Lineage alias read",
+        ),
+    )
 
 
 def list_aliases(*, repo_id: str, root: Path | None = None) -> list[LineageAlias]:
@@ -540,8 +602,10 @@ def create_or_update_bundle(
     if current_alias is not None:
         try:
             current_bundle = load_bundle(repo_id, current_alias.bundle_id, root=root)
-        except Exception:
-            current_bundle = None
+        except DependencyUnavailableError:
+            raise
+        except FileNotFoundError as exc:
+            _raise_lineage_store_error("Lineage current bundle preservation", exc)
 
     payload = {
         "repo_id": repo_id,
@@ -646,7 +710,7 @@ def create_or_update_bundle(
     bundle_id = _bundle_id_for(payload)
     path = _bundle_path(repo_id, bundle_id, root=root)
     if path.exists():
-        bundle = LineageBundle.model_validate(_read_json_object(path))
+        bundle = load_bundle(repo_id, bundle_id, root=root)
     else:
         bundle = LineageBundle(
             bundle_id=bundle_id,
@@ -681,8 +745,10 @@ def current_bundle(repo_id: str, *, root: Path | None = None) -> LineageBundle |
         return None
     try:
         return load_bundle(repo_id, alias.bundle_id, root=root)
-    except Exception:
-        return None
+    except DependencyUnavailableError:
+        raise
+    except FileNotFoundError as exc:
+        _raise_lineage_store_error("Lineage current bundle resolution", exc)
 
 
 def _default_eval_dataset_path(repo_id: str) -> Path:

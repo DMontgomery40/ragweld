@@ -5,11 +5,15 @@ from pathlib import Path
 
 import pytest
 
+from server.dependency_errors import DependencyUnavailableError
 from server.lineage.registry import (
     capture_asset_version,
     capture_published_artifact_version,
     collect_git_snapshot,
+    current_bundle,
     create_or_update_bundle,
+    list_aliases,
+    list_bundles,
     load_bundle,
     make_ref,
     set_alias,
@@ -168,3 +172,79 @@ def test_capture_published_artifact_version_changes_when_source_or_target_bytes_
     assert first.version_id != second.version_id
     assert first.payload["source_snapshot"]["sha256"] != second.payload["source_snapshot"]["sha256"]
     assert first.payload["target_snapshot"]["sha256"] != second.payload["target_snapshot"]["sha256"]
+
+
+def test_current_bundle_raises_lineage_store_error_for_invalid_current_alias(tmp_path: Path) -> None:
+    prompt = capture_asset_version(
+        kind="prompt_set",
+        payload={"system_prompts": {"query_rewrite": "x"}},
+        repo_id="corpus-a",
+        source="runtime",
+        root=tmp_path,
+    )
+    bundle, _aliases = create_or_update_bundle(
+        repo_id="corpus-a",
+        prompt_set=make_ref("prompt_set", prompt.version_id),
+        set_aliases_to=("current",),
+        root=tmp_path,
+    )
+    assert bundle.bundle_id
+
+    alias_path = tmp_path / "aliases" / "corpus-a" / "current.json"
+    alias_path.write_text('{"alias": [}\n', encoding="utf-8")
+
+    with pytest.raises(DependencyUnavailableError) as caught:
+        current_bundle("corpus-a", root=tmp_path)
+
+    assert caught.value.dependency == "lineage_store"
+
+
+def test_list_aliases_raises_lineage_store_error_for_invalid_alias_payload(tmp_path: Path) -> None:
+    prompt = capture_asset_version(
+        kind="prompt_set",
+        payload={"system_prompts": {"query_rewrite": "x"}},
+        repo_id="corpus-a",
+        source="runtime",
+        root=tmp_path,
+    )
+    bundle, _aliases = create_or_update_bundle(
+        repo_id="corpus-a",
+        prompt_set=make_ref("prompt_set", prompt.version_id),
+        set_aliases_to=("current",),
+        root=tmp_path,
+    )
+    assert bundle.bundle_id
+
+    alias_path = tmp_path / "aliases" / "corpus-a" / "current.json"
+    alias_path.write_text('{"repo_id": "corpus-a"}\n', encoding="utf-8")
+
+    with pytest.raises(DependencyUnavailableError) as caught:
+        list_aliases(repo_id="corpus-a", root=tmp_path)
+
+    assert caught.value.dependency == "lineage_store"
+
+
+def test_load_and_list_bundles_raise_lineage_store_error_for_invalid_bundle_payload(tmp_path: Path) -> None:
+    prompt = capture_asset_version(
+        kind="prompt_set",
+        payload={"system_prompts": {"query_rewrite": "x"}},
+        repo_id="corpus-a",
+        source="runtime",
+        root=tmp_path,
+    )
+    bundle, _aliases = create_or_update_bundle(
+        repo_id="corpus-a",
+        prompt_set=make_ref("prompt_set", prompt.version_id),
+        set_aliases_to=("current",),
+        root=tmp_path,
+    )
+    bundle_path = tmp_path / "bundles" / "corpus-a" / f"{bundle.bundle_id}.json"
+    bundle_path.write_text('{"bundle_id": 7}\n', encoding="utf-8")
+
+    with pytest.raises(DependencyUnavailableError) as caught_load:
+        load_bundle("corpus-a", bundle.bundle_id, root=tmp_path)
+    assert caught_load.value.dependency == "lineage_store"
+
+    with pytest.raises(DependencyUnavailableError) as caught_list:
+        list_bundles(repo_id="corpus-a", root=tmp_path)
+    assert caught_list.value.dependency == "lineage_store"

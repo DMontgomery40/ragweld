@@ -884,7 +884,9 @@ class DependencyUnavailableDetail(BaseModel):
     """Public error detail returned when a required runtime dependency is unavailable."""
 
     code: Literal["dependency_unavailable"] = "dependency_unavailable"
-    dependency: Literal["postgres", "neo4j"] = Field(description="Unavailable required dependency")
+    dependency: Literal["postgres", "neo4j", "feedback_log", "lineage_store"] = Field(
+        description="Unavailable required dependency"
+    )
     operation: str = Field(description="API operation that could not complete")
     message: str = Field(description="Stable, non-sensitive failure summary")
     retryable: bool = Field(default=True, description="Whether the caller may retry after operator remediation")

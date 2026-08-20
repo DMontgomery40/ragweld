@@ -18,9 +18,15 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 from starlette.responses import StreamingResponse
 
+from server.api.dependency_errors import (
+    DEPENDENCY_UNAVAILABLE_RESPONSES,
+    dependency_unavailable_http_exception,
+    raise_postgres_unavailable_if_applicable,
+)
 from server.api.dataset import _dataset_path_for_corpus, _load_dataset
 from server.config import load_config
 from server.db.postgres import PostgresClient
+from server.dependency_errors import DependencyUnavailableError
 from server.lineage import (
     attach_refs_to_current_bundle,
     capture_path_version,
@@ -93,7 +99,7 @@ from server.retrieval.mlx_qwen3 import (
     write_mlx_manifest,
 )
 from server.retrieval.rerank import resolve_learning_backend
-from server.services.config_store import get_config as load_scoped_config
+from server.services.config_store import CorpusNotFoundError, get_config as load_scoped_config
 from server.training.metric_policy import infer_corpus_eval_profile
 from server.training.mlx_qwen3_trainer import (
     TrainingCancelledError,
@@ -261,7 +267,7 @@ def _atomic_copy_dir(src: Path, dst: Path) -> None:
     shutil.rmtree(bak, ignore_errors=True)
 
 
-@router.post("/reranker/click", response_model=OkResponse)
+@router.post("/reranker/click", response_model=OkResponse, responses=DEPENDENCY_UNAVAILABLE_RESPONSES)
 async def track_click(
     payload: RerankerClickRequest,
     request: Request,
@@ -272,20 +278,33 @@ async def track_click(
     Expected payload: {"event_id": str, "doc_id": str}
     """
     if not _is_test_request(request):
-        try:
-            from server.observability.query_log import append_feedback_log
+        from server.observability.query_log import append_feedback_log
 
-            cfg = None
-            if corpus_id and corpus_id.strip():
-                try:
-                    cfg = await load_scoped_config(repo_id=corpus_id.strip())
-                except Exception:
-                    cfg = None
-            if cfg is None:
-                cfg = load_config()
+        if corpus_id and corpus_id.strip():
+            try:
+                cfg = await load_scoped_config(repo_id=corpus_id.strip())
+            except CorpusNotFoundError as exc:
+                raise HTTPException(status_code=404, detail=str(exc)) from exc
+            except Exception as exc:
+                raise_postgres_unavailable_if_applicable(exc, boundary="Reranker click corpus config")
+                logger.exception("Failed to resolve scoped config for reranker click")
+                raise HTTPException(status_code=500, detail="Failed to resolve corpus config") from exc
+        else:
+            cfg = load_config()
+
+        try:
             await append_feedback_log(cfg, event_id=payload.event_id, signal="click", doc_id=payload.doc_id)
-        except Exception:
-            pass
+        except DependencyUnavailableError as exc:
+            if exc.dependency == "feedback_log":
+                raise dependency_unavailable_http_exception(
+                    "feedback_log",
+                    boundary="Reranker click feedback",
+                    exc=exc,
+                ) from exc
+            raise
+        except Exception as exc:
+            logger.exception("Failed to append reranker click feedback")
+            raise HTTPException(status_code=500, detail="Failed to record reranker click") from exc
 
     return OkResponse(ok=True)
 

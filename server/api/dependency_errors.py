@@ -17,7 +17,7 @@ from server.models.tribrid_config_model import (
 
 logger = logging.getLogger(__name__)
 
-DependencyName = Literal["postgres", "neo4j"]
+DependencyName = Literal["postgres", "neo4j", "feedback_log", "lineage_store"]
 
 DEPENDENCY_UNAVAILABLE_RESPONSES = {
     503: {
@@ -38,11 +38,23 @@ def dependency_unavailable_http_exception(
             f"{boundary} could not reach the corpus control store before validating the request; "
             "verify the scoped Ragweld Postgres service and DSN, then retry."
         )
-    else:
+    elif dependency == "neo4j":
         message = "Neo4j graph store is unavailable."
         operator_hint = (
             f"{boundary} reached graph storage but could not establish the corpus database connection; "
             "verify the scoped Ragweld Neo4j service and resolved database, then retry."
+        )
+    elif dependency == "feedback_log":
+        message = "Feedback log storage is unavailable."
+        operator_hint = (
+            f"{boundary} could not persist the feedback event; verify the configured Ragweld feedback-log "
+            "path and filesystem permissions, then retry."
+        )
+    else:
+        message = "Lineage store is unavailable."
+        operator_hint = (
+            f"{boundary} could not read or persist lineage state; verify the configured Ragweld lineage-store "
+            "path and filesystem permissions, then retry."
         )
 
     detail = DependencyUnavailableDetail(
@@ -59,7 +71,6 @@ def dependency_unavailable_http_exception(
             "operator_hint": operator_hint,
             "exception_type": type(exc).__name__,
         },
-        exc_info=(type(exc), exc, exc.__traceback__),
     )
     return HTTPException(status_code=503, detail=detail.model_dump(mode="json"))
 

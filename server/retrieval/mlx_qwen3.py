@@ -2,20 +2,33 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import importlib.util
+import subprocess
+import sys
 import time
 from dataclasses import dataclass
+from functools import cache
 from pathlib import Path
 from typing import Any, cast
 
 
+@cache
 def mlx_is_available() -> bool:
-    try:
-        import mlx  # noqa: F401
-        import mlx_lm  # noqa: F401
-
-        return True
-    except Exception:
+    """Probe MLX in a child process so a native import abort cannot kill the API."""
+    if importlib.util.find_spec("mlx") is None or importlib.util.find_spec("mlx_lm") is None:
         return False
+    try:
+        result = subprocess.run(
+            [sys.executable, "-c", "import mlx; import mlx_lm"],
+            check=False,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=15,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return result.returncode == 0
 
 
 SYSTEM_PROMPT: str = (

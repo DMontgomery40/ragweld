@@ -38,6 +38,7 @@ def test_stateful_api_openapi_documents_typed_dependency_503() -> None:
         },
         ("/api/config", "get"): {"DependencyUnavailableResponse"},
         ("/api/feedback", "post"): {"DependencyUnavailableResponse"},
+        ("/api/reranker/click", "post"): {"DependencyUnavailableResponse"},
         ("/api/graph/{corpus_id}/stats", "get"): {"DependencyUnavailableResponse"},
         ("/api/lineage/current", "get"): {"DependencyUnavailableResponse"},
     }
@@ -75,6 +76,7 @@ REQUESTS = [
     ("GET", "/api/graph/missing/stats", None),
     ("GET", "/api/lineage/current?corpus_id=missing", None),
     ("POST", "/api/feedback?corpus_id=missing", {"event_id": "outage-test", "signal": "thumbsup"}),
+    ("POST", "/api/reranker/click?corpus_id=missing", {"event_id": "outage-click", "doc_id": "missing.md"}),
 ]
 
 async def main():
@@ -108,7 +110,7 @@ asyncio.run(main())
 
     assert result.returncode == 0, result.stdout + result.stderr
     rows = json.loads(result.stdout.strip().splitlines()[-1])
-    assert len(rows) == 13
+    assert len(rows) == 14
     for row in rows:
         assert row["status"] == 503, row
         detail = row["body"].get("detail")

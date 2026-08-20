@@ -26,7 +26,7 @@ _TRANSPORT_UNAVAILABLE = (
     TimeoutError,
 )
 
-DependencyName = Literal["postgres", "neo4j"]
+DependencyName = Literal["postgres", "neo4j", "feedback_log", "lineage_store"]
 
 
 class DependencyUnavailableError(RuntimeError):
@@ -76,4 +76,8 @@ def is_transport_unavailable(exc: BaseException) -> bool:
 
 
 def is_required_dependency_unavailable(exc: BaseException) -> bool:
-    return is_postgres_unavailable(exc) or is_neo4j_unavailable(exc)
+    return any(
+        isinstance(item, DependencyUnavailableError)
+        or isinstance(item, _POSTGRES_UNAVAILABLE + _NEO4J_UNAVAILABLE)
+        for item in _exception_chain(exc)
+    )

@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 from httpx import AsyncClient
 
+from server.lineage.registry import lineage_root
 from server.models.tribrid_config_model import (
     SyntheticArtifactRef,
     SyntheticRun,
@@ -215,6 +216,100 @@ async def test_lineage_current_alias_round_trips_without_read_side_effects(clien
         current_again = await client.get("/api/lineage/current", params={"corpus_id": corpus_id})
         assert current_again.status_code == 200
         assert current_again.json()["bundle_id"] == before["bundle_id"]
+    finally:
+        await client.delete(f"/api/corpora/{corpus_id}")
+
+
+@pytest.mark.asyncio
+async def test_lineage_current_returns_typed_503_when_current_alias_storage_is_invalid(
+    client: AsyncClient,
+    tmp_path: Path,
+) -> None:
+    corpus_id = f"pytest_lineage_invalid_current_{uuid.uuid4().hex[:8]}"
+    await _create_corpus(client, corpus_id=corpus_id, path=tmp_path)
+
+    try:
+        current = await client.get("/api/lineage/current", params={"corpus_id": corpus_id})
+        assert current.status_code == 200
+
+        alias_path = lineage_root() / "aliases" / corpus_id / "current.json"
+        alias_path.write_text('{"alias": [}\n', encoding="utf-8")
+
+        broken = await client.get("/api/lineage/current", params={"corpus_id": corpus_id})
+        assert broken.status_code == 503
+        detail = broken.json()["detail"]
+        assert detail["code"] == "dependency_unavailable"
+        assert detail["dependency"] == "lineage_store"
+        assert detail["retryable"] is True
+        assert detail["operator_hint"]
+        assert str(alias_path) not in json.dumps(broken.json())
+    finally:
+        await client.delete(f"/api/corpora/{corpus_id}")
+
+
+@pytest.mark.asyncio
+async def test_lineage_bundle_endpoint_preserves_404_for_missing_bundle(client: AsyncClient, tmp_path: Path) -> None:
+    corpus_id = f"pytest_lineage_missing_bundle_{uuid.uuid4().hex[:8]}"
+    await _create_corpus(client, corpus_id=corpus_id, path=tmp_path)
+
+    try:
+        missing = await client.get("/api/lineage/bundle/bundle__missing", params={"corpus_id": corpus_id})
+        assert missing.status_code == 404
+    finally:
+        await client.delete(f"/api/corpora/{corpus_id}")
+
+
+@pytest.mark.asyncio
+async def test_lineage_bundle_endpoint_returns_typed_503_when_bundle_storage_is_invalid(
+    client: AsyncClient,
+    tmp_path: Path,
+) -> None:
+    corpus_id = f"pytest_lineage_invalid_bundle_{uuid.uuid4().hex[:8]}"
+    await _create_corpus(client, corpus_id=corpus_id, path=tmp_path)
+
+    try:
+        current = await client.get("/api/lineage/current", params={"corpus_id": corpus_id})
+        assert current.status_code == 200
+        bundle_id = current.json()["bundle_id"]
+
+        bundle_path = lineage_root() / "bundles" / corpus_id / f"{bundle_id}.json"
+        bundle_path.write_text('{"bundle_id": 7}\n', encoding="utf-8")
+
+        broken = await client.get(f"/api/lineage/bundle/{bundle_id}", params={"corpus_id": corpus_id})
+        assert broken.status_code == 503
+        detail = broken.json()["detail"]
+        assert detail["code"] == "dependency_unavailable"
+        assert detail["dependency"] == "lineage_store"
+        assert detail["retryable"] is True
+        assert detail["operator_hint"]
+        assert str(bundle_path) not in json.dumps(broken.json())
+    finally:
+        await client.delete(f"/api/corpora/{corpus_id}")
+
+
+@pytest.mark.asyncio
+async def test_lineage_aliases_returns_typed_503_when_alias_storage_is_invalid(
+    client: AsyncClient,
+    tmp_path: Path,
+) -> None:
+    corpus_id = f"pytest_lineage_invalid_alias_{uuid.uuid4().hex[:8]}"
+    await _create_corpus(client, corpus_id=corpus_id, path=tmp_path)
+
+    try:
+        current = await client.get("/api/lineage/current", params={"corpus_id": corpus_id})
+        assert current.status_code == 200
+
+        alias_path = lineage_root() / "aliases" / corpus_id / "current.json"
+        alias_path.write_text('{"repo_id": "broken"}\n', encoding="utf-8")
+
+        broken = await client.get("/api/lineage/aliases", params={"corpus_id": corpus_id})
+        assert broken.status_code == 503
+        detail = broken.json()["detail"]
+        assert detail["code"] == "dependency_unavailable"
+        assert detail["dependency"] == "lineage_store"
+        assert detail["retryable"] is True
+        assert detail["operator_hint"]
+        assert str(alias_path) not in json.dumps(broken.json())
     finally:
         await client.delete(f"/api/corpora/{corpus_id}")
 

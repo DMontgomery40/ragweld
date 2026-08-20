@@ -1,3 +1,5 @@
+from contextlib import suppress
+
 import httpx
 from fastapi import APIRouter, Depends
 from starlette.responses import JSONResponse
@@ -25,6 +27,40 @@ router = APIRouter(tags=["health"])
 
 # Ruff B008: avoid function calls in argument defaults (FastAPI Depends()).
 _CORPUS_SCOPE_DEP = Depends()
+
+
+async def _disconnect_neo4j_quietly(neo4j: Neo4jClient) -> None:
+    with suppress(Exception):
+        await neo4j.disconnect()
+
+
+async def _probe_neo4j_readiness(
+    neo4j: Neo4jClient,
+    *,
+    db_name: str,
+    status: ReadinessDependencyStatus,
+) -> bool:
+    try:
+        await neo4j.connect()
+        info = await neo4j.ping()
+        status.ok = True
+        status.info = info
+        try:
+            exists = await neo4j.database_exists(db_name)
+            status.database_exists = bool(exists)
+            if not exists:
+                status.ok = False
+                status.error = "Resolved Neo4j database does not exist."
+                status.operator_hint = "Create the resolved graph database or correct the corpus database mapping."
+                return False
+        except Exception:
+            status.ok = False
+            status.error = "Neo4j database readiness could not be verified."
+            status.operator_hint = "Verify Neo4j database permissions and the resolved corpus database."
+            return False
+        return True
+    finally:
+        await _disconnect_neo4j_quietly(neo4j)
 
 
 @router.get("/health", response_model=HealthStatus)
@@ -94,25 +130,8 @@ async def readiness_check(scope: CorpusScope = _CORPUS_SCOPE_DEP) -> ReadinessSt
             cfg.graph_storage.resolve_password(),
             database=db_name,
         )
-        await neo4j.connect()
-        info = await neo4j.ping()
-        neo4j_status.ok = True
-        neo4j_status.info = info
-        # Database existence check (multi-db aware). For Community, this should still work.
-        try:
-            exists = await neo4j.database_exists(db_name)
-            neo4j_status.database_exists = bool(exists)
-            if not exists:
-                ready = False
-                neo4j_status.ok = False
-                neo4j_status.error = "Resolved Neo4j database does not exist."
-                neo4j_status.operator_hint = "Create the resolved graph database or correct the corpus database mapping."
-        except Exception:
+        if not await _probe_neo4j_readiness(neo4j, db_name=db_name, status=neo4j_status):
             ready = False
-            neo4j_status.ok = False
-            neo4j_status.error = "Neo4j database readiness could not be verified."
-            neo4j_status.operator_hint = "Verify Neo4j database permissions and the resolved corpus database."
-        await neo4j.disconnect()
     except Exception:
         ready = False
         neo4j_status.ok = False

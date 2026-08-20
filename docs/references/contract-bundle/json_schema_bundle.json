@@ -9665,7 +9665,9 @@
           "description": "Unavailable required dependency",
           "enum": [
             "postgres",
-            "neo4j"
+            "neo4j",
+            "feedback_log",
+            "lineage_store"
           ],
           "title": "Dependency",
           "type": "string"
@@ -9716,7 +9718,9 @@
               "description": "Unavailable required dependency",
               "enum": [
                 "postgres",
-                "neo4j"
+                "neo4j",
+                "feedback_log",
+                "lineage_store"
               ],
               "title": "Dependency",
               "type": "string"

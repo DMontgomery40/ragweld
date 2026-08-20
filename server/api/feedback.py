@@ -6,9 +6,11 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 
 from server.api.dependency_errors import (
     DEPENDENCY_UNAVAILABLE_RESPONSES,
+    dependency_unavailable_http_exception,
     raise_postgres_unavailable_if_applicable,
 )
 from server.config import load_config as load_global_config
+from server.dependency_errors import DependencyUnavailableError
 from server.models.tribrid_config_model import CorpusScope, FeedbackRequest, FeedbackResponse
 from server.observability.query_log import append_feedback_log
 from server.services.config_store import CorpusNotFoundError
@@ -87,6 +89,10 @@ async def post_feedback(
                 timestamp=body.timestamp,
                 context=body.context,
             )
+        except DependencyUnavailableError as e:
+            if e.dependency == "feedback_log":
+                raise dependency_unavailable_http_exception("feedback_log", boundary="Feedback API", exc=e) from e
+            raise
         except Exception as e:
             logger.exception("Failed to append feedback log")
             raise HTTPException(status_code=500, detail="Failed to record feedback") from e

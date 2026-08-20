@@ -542,7 +542,7 @@ export interface DashboardIndexStorageBreakdown {
 export interface DependencyUnavailableDetail {
   code?: "dependency_unavailable"; // default: "dependency_unavailable"
   /** Unavailable required dependency */
-  dependency: "postgres" | "neo4j";
+  dependency: "postgres" | "neo4j" | "feedback_log" | "lineage_store";
   /** API operation that could not complete */
   operation: string;
   /** Stable, non-sensitive failure summary */

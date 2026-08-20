@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import pytest
 
+from server.retrieval.mlx_qwen3 import mlx_is_available
+
 
 def test_apply_lora_layers_wraps_target_linear_modules() -> None:
-    pytest.importorskip("mlx")  # only runs on Apple Silicon dev envs with MLX installed
-    pytest.importorskip("mlx.nn")
-    pytest.importorskip("mlx.core")
+    if not mlx_is_available():
+        pytest.skip("MLX native imports are not usable in this runtime")
 
     import mlx.core as mx
     import mlx.nn as nn
