@@ -159,4 +159,4 @@ When doing a bootstrap or large catch-up, consider creating/updating:
 - `guides/eval.md` — Eval datasets, drilldown, AI analysis, canary, MRR/NDCG
 - `operations/grafana.md` — Embedded Grafana, config, kiosk mode
 - `operations/webhooks.md` — Alert webhooks, MRR/canary notifications
-- `operations/docker_ui.md` — Docker UI (mini-Portainer), container management
+- `operations/docker_ui.md` — project-scoped Ragweld service status, logs, and lifecycle controls

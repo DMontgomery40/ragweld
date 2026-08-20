@@ -12,43 +12,46 @@ modules:
   - name: chat.ts
     description: Chat API functions
     functions:
-      - sendMessage: (request: ChatRequest) => Promise<ChatResponse>
-      - streamMessage: (request: ChatRequest, onChunk: (text: string) => void) => Promise<void>
-      - getHistory: (conversationId: string) => Promise<Message[]>
-      - clearHistory: (conversationId: string) => Promise<void>
+      - sendMessage: "(request: ChatRequest) => Promise<ChatResponse>"
+      - streamMessage: "(request: ChatRequest, onChunk: (text: string) => void) => Promise<void>"
+      - getHistory: "(conversationId: string) => Promise<Message[]>"
+      - clearHistory: "(conversationId: string) => Promise<void>"
 
   - name: config.ts
     description: Config API functions
     functions:
       - getConfig: () => Promise<TriBridConfig>
-      - updateConfig: (config: TriBridConfig) => Promise<TriBridConfig>
-      - patchConfig: (section: string, updates: object) => Promise<TriBridConfig>
+      - updateConfig: "(config: TriBridConfig) => Promise<TriBridConfig>"
+      - patchConfig: "(section: string, updates: object) => Promise<TriBridConfig>"
       - resetConfig: () => Promise<TriBridConfig>
 
   - name: docker.ts
-    description: Docker API functions
+    description: Project-scoped Ragweld Docker service API functions
     functions:
-      - getStatus: () => Promise<Record<string, ContainerStatus>>
-      - restartContainer: (name: string) => Promise<void>
-      - getLogs: (name: string, lines?: number) => Promise<string[]>
+      - getStatus: () => Promise<DockerStatus>
+      - listServices: () => Promise<DockerContainersResponse>
+      - startService: "(service: RagweldDockerService) => Promise<void>"
+      - stopService: "(service: RagweldDockerService) => Promise<void>"
+      - restartService: "(service: RagweldDockerService) => Promise<void>"
+      - getServiceLogs: "(service: RagweldDockerService, tail?: number) => Promise<DockerServiceLogsResponse>"
 
   - name: eval.ts
     description: Evaluation API functions
     functions:
-      - runEval: (request: EvalRequest) => Promise<EvalRun>
-      - listRuns: (repoId?: string) => Promise<EvalRun[]>
-      - getRun: (runId: string) => Promise<EvalRun>
-      - deleteRun: (runId: string) => Promise<void>
+      - runEval: "(request: EvalRequest) => Promise<EvalRun>"
+      - listRuns: "(repoId?: string) => Promise<EvalRun[]>"
+      - getRun: "(runId: string) => Promise<EvalRun>"
+      - deleteRun: "(runId: string) => Promise<void>"
 
   - name: graph.ts
     description: Graph API functions
     functions:
-      - listEntities: (repoId: string, type?: string) => Promise<Entity[]>
-      - getEntity: (repoId: string, entityId: string) => Promise<Entity>
-      - getRelationships: (repoId: string, entityId: string) => Promise<Relationship[]>
-      - listCommunities: (repoId: string, level?: number) => Promise<Community[]>
-      - getStats: (repoId: string) => Promise<GraphStats>
-      - executeQuery: (repoId: string, cypher: string) => Promise<any[]>
+      - listEntities: "(repoId: string, type?: string) => Promise<Entity[]>"
+      - getEntity: "(repoId: string, entityId: string) => Promise<Entity>"
+      - getRelationships: "(repoId: string, entityId: string) => Promise<Relationship[]>"
+      - listCommunities: "(repoId: string, level?: number) => Promise<Community[]>"
+      - getStats: "(repoId: string) => Promise<GraphStats>"
+      - executeQuery: "(repoId: string, cypher: string) => Promise<any[]>"
 
   - name: health.ts
     description: Health API functions
@@ -59,6 +62,6 @@ modules:
   - name: search.ts
     description: Search API functions
     functions:
-      - search: (request: SearchRequest) => Promise<SearchResponse>
-      - answer: (request: AnswerRequest) => Promise<AnswerResponse>
-      - streamAnswer: (request: AnswerRequest, onChunk: (text: string) => void) => Promise<void>
+      - search: "(request: SearchRequest) => Promise<SearchResponse>"
+      - answer: "(request: AnswerRequest) => Promise<AnswerResponse>"
+      - streamAnswer: "(request: AnswerRequest, onChunk: (text: string) => void) => Promise<void>"

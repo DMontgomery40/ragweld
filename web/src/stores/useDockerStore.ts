@@ -1,6 +1,14 @@
 import { create } from 'zustand';
-import { dockerApi, type DevStackStatus } from '@/api/docker';
-import type { DockerContainer, DockerStatus } from '@/types/generated';
+import {
+  dockerApi,
+  type DevStackStatus,
+  type RagweldDockerService,
+} from '@/api/docker';
+import type {
+  DockerContainer,
+  DockerServiceLogsResponse,
+  DockerStatus,
+} from '@/types/generated';
 
 interface DockerStore {
   status: DockerStatus | null;
@@ -13,15 +21,11 @@ interface DockerStore {
   devStackLoading: boolean;
 
   // Actions
-  fetchStatus: () => Promise<void>;
-  fetchContainers: () => Promise<void>;
-  startContainer: (id: string) => Promise<void>;
-  stopContainer: (id: string) => Promise<void>;
-  restartContainer: (id: string) => Promise<void>;
-  pauseContainer: (id: string) => Promise<void>;
-  unpauseContainer: (id: string) => Promise<void>;
-  removeContainer: (id: string) => Promise<void>;
-  getContainerLogs: (id: string, tail?: number) => Promise<{ success: boolean; logs: string; error?: string }>;
+  refreshDocker: () => Promise<void>;
+  startService: (service: RagweldDockerService) => Promise<void>;
+  stopService: (service: RagweldDockerService) => Promise<void>;
+  restartService: (service: RagweldDockerService) => Promise<void>;
+  getServiceLogs: (service: RagweldDockerService, tail?: number) => Promise<DockerServiceLogsResponse>;
 
   // Dev Stack Actions
   fetchDevStackStatus: () => Promise<void>;
@@ -39,107 +43,73 @@ export const useDockerStore = create<DockerStore>((set, get) => ({
   devStackStatus: null,
   devStackLoading: false,
 
-  fetchStatus: async () => {
+  refreshDocker: async () => {
     set({ loading: true, error: null });
-    try {
-      const status = await dockerApi.getStatus();
-      set({ status, loading: false, error: null });
-    } catch (error) {
-      set({
-        loading: false,
-        error: error instanceof Error ? error.message : 'Failed to fetch Docker status'
-      });
+    const [statusResult, servicesResult] = await Promise.allSettled([
+      dockerApi.getStatus(),
+      dockerApi.listServices(),
+    ]);
+    const failures: string[] = [];
+    if (statusResult.status === 'rejected') {
+      failures.push(statusResult.reason instanceof Error ? statusResult.reason.message : 'Docker status is unavailable');
     }
+    if (servicesResult.status === 'rejected') {
+      failures.push(servicesResult.reason instanceof Error ? servicesResult.reason.message : 'Ragweld service inventory is unavailable');
+    }
+    set({
+      status: statusResult.status === 'fulfilled' ? statusResult.value : null,
+      containers: servicesResult.status === 'fulfilled' ? servicesResult.value.containers ?? [] : [],
+      loading: false,
+      error: failures.length > 0 ? failures.join(' · ') : null,
+    });
   },
 
-  fetchContainers: async () => {
-    set({ loading: true, error: null });
+  startService: async (service: RagweldDockerService) => {
     try {
-      const { containers } = await dockerApi.listContainers();
-      set({ containers, loading: false, error: null });
+      await dockerApi.startService(service);
     } catch (error) {
+      const message = error instanceof Error ? error.message : `Failed to start ${service}`;
       set({
-        loading: false,
-        error: error instanceof Error ? error.message : 'Failed to fetch containers'
+        error: message,
       });
+      throw error;
     }
+    await get().refreshDocker();
   },
 
-  startContainer: async (id: string) => {
+  stopService: async (service: RagweldDockerService) => {
     try {
-      await dockerApi.startContainer(id);
-      await get().fetchContainers();
+      await dockerApi.stopService(service);
     } catch (error) {
+      const message = error instanceof Error ? error.message : `Failed to stop ${service}`;
       set({
-        error: error instanceof Error ? error.message : 'Failed to start container'
+        error: message,
       });
+      throw error;
     }
+    await get().refreshDocker();
   },
 
-  stopContainer: async (id: string) => {
+  restartService: async (service: RagweldDockerService) => {
     try {
-      await dockerApi.stopContainer(id);
-      await get().fetchContainers();
+      await dockerApi.restartService(service);
     } catch (error) {
+      const message = error instanceof Error ? error.message : `Failed to restart ${service}`;
       set({
-        error: error instanceof Error ? error.message : 'Failed to stop container'
+        error: message,
       });
+      throw error;
     }
+    await get().refreshDocker();
   },
 
-  restartContainer: async (id: string) => {
+  getServiceLogs: async (service: RagweldDockerService, tail: number = 100) => {
     try {
-      await dockerApi.restartContainer(id);
-      await get().fetchContainers();
+      return await dockerApi.getServiceLogs(service, tail);
     } catch (error) {
-      set({
-        error: error instanceof Error ? error.message : 'Failed to restart container'
-      });
-    }
-  },
-
-  pauseContainer: async (id: string) => {
-    try {
-      await dockerApi.pauseContainer(id);
-      await get().fetchContainers();
-    } catch (error) {
-      set({
-        error: error instanceof Error ? error.message : 'Failed to pause container'
-      });
-    }
-  },
-
-  unpauseContainer: async (id: string) => {
-    try {
-      await dockerApi.unpauseContainer(id);
-      await get().fetchContainers();
-    } catch (error) {
-      set({
-        error: error instanceof Error ? error.message : 'Failed to unpause container'
-      });
-    }
-  },
-
-  removeContainer: async (id: string) => {
-    try {
-      await dockerApi.removeContainer(id);
-      await get().fetchContainers();
-    } catch (error) {
-      set({
-        error: error instanceof Error ? error.message : 'Failed to remove container'
-      });
-    }
-  },
-
-  getContainerLogs: async (id: string, tail: number = 100) => {
-    try {
-      return await dockerApi.getContainerLogs(id, tail);
-    } catch (error) {
-      return {
-        success: false,
-        logs: '',
-        error: error instanceof Error ? error.message : 'Failed to fetch logs'
-      };
+      const message = error instanceof Error ? error.message : `Failed to fetch ${service} logs`;
+      set({ error: message });
+      throw error;
     }
   },
 

@@ -315,8 +315,6 @@ def _select_context_files(changed: List[str], *, limit: int) -> List[str]:
         "web/src/components/Admin/GeneralSubtab.tsx",
         # Docker UI (mini-Portainer)
         "web/src/components/Infrastructure/DockerSubtab.tsx",
-        "web/src/components/Docker/ContainerCard.tsx",
-        "web/src/pages/Docker.tsx",
     ]
 
     changed_set = set(changed)

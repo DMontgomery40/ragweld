@@ -2,9 +2,25 @@ import { apiClient, api } from './client';
 import type {
   DevStackStatusResponse,
   DockerContainersResponse,
+  DockerServiceLogsResponse,
   DockerStatus,
   LokiStatus,
 } from '@/types/generated';
+
+export const RAGWELD_DOCKER_SERVICES = [
+  'postgres',
+  'postgres-exporter',
+  'neo4j',
+  'grafana',
+  'prometheus',
+  'loki',
+  'promtail',
+  'api',
+  'tempo',
+  'alloy',
+] as const;
+
+export type RagweldDockerService = (typeof RAGWELD_DOCKER_SERVICES)[number];
 
 export const dockerApi = {
   /**
@@ -15,62 +31,29 @@ export const dockerApi = {
     return data;
   },
 
-  /**
-   * List all Docker containers
-   */
-  async listContainers(): Promise<DockerContainersResponse> {
-    const { data } = await apiClient.get<DockerContainersResponse>(api('/docker/containers/all'));
+  async listServices(): Promise<DockerContainersResponse> {
+    const { data } = await apiClient.get<DockerContainersResponse>(api('/docker/services'));
     return data;
   },
 
-  /**
-   * Start a container by ID
-   */
-  async startContainer(id: string): Promise<void> {
-    await apiClient.post(api(`/docker/container/${id}/start`));
+  async startService(service: RagweldDockerService): Promise<void> {
+    await apiClient.post(api(`/docker/services/${service}/start`));
   },
 
-  /**
-   * Stop a container by ID
-   */
-  async stopContainer(id: string): Promise<void> {
-    await apiClient.post(api(`/docker/container/${id}/stop`));
+  async stopService(service: RagweldDockerService): Promise<void> {
+    await apiClient.post(api(`/docker/services/${service}/stop`));
   },
 
-  /**
-   * Restart a container by ID
-   */
-  async restartContainer(id: string): Promise<void> {
-    await apiClient.post(api(`/docker/container/${id}/restart`));
+  async restartService(service: RagweldDockerService): Promise<void> {
+    await apiClient.post(api(`/docker/services/${service}/restart`));
   },
 
-  /**
-   * Pause a container by ID
-   */
-  async pauseContainer(id: string): Promise<void> {
-    await apiClient.post(api(`/docker/container/${id}/pause`));
-  },
-
-  /**
-   * Unpause a container by ID
-   */
-  async unpauseContainer(id: string): Promise<void> {
-    await apiClient.post(api(`/docker/container/${id}/unpause`));
-  },
-
-  /**
-   * Remove a container by ID
-   */
-  async removeContainer(id: string): Promise<void> {
-    await apiClient.post(api(`/docker/container/${id}/remove`));
-  },
-
-  /**
-   * Get container logs
-   */
-  async getContainerLogs(id: string, tail: number = 100): Promise<{ success: boolean; logs: string; error?: string }> {
-    const { data } = await apiClient.get<{ success: boolean; logs: string; error?: string }>(
-      api(`/docker/container/${id}/logs?tail=${tail}`)
+  async getServiceLogs(
+    service: RagweldDockerService,
+    tail: number = 100,
+  ): Promise<DockerServiceLogsResponse> {
+    const { data } = await apiClient.get<DockerServiceLogsResponse>(
+      api(`/docker/services/${service}/logs?tail=${tail}`)
     );
     return data;
   },

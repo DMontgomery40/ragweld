@@ -120,10 +120,14 @@ export function SystemStatusSubtab() {
       if (dockerData.status === 'fulfilled') {
         const d = dockerData.value;
         if (d.status.running) {
-          const managed = d.containers.filter((c) => c.tribrid_managed);
-          const total = managed.length;
-          const running = managed.filter((c) => c.state === 'running').length;
-          setContainers(`${running}/${total}`);
+          if (d.inventoryAvailable) {
+            const managed = d.containers.filter((c) => c.managed);
+            const total = managed.length;
+            const running = managed.filter((c) => c.state === 'running').length;
+            setContainers(`${running}/${total}`);
+          } else {
+            setContainers('inventory unavailable');
+          }
         } else {
           setContainers('unavailable');
         }

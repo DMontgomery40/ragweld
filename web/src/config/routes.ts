@@ -3,7 +3,6 @@
 
 import { ReactNode, ComponentType, Suspense, createElement, lazy } from 'react';
 import { Dashboard } from '../pages/Dashboard';
-import Docker from '../pages/Docker';
 // Tab components (all TypeScript)
 import ChatTab from '../components/tabs/ChatTab';
 import GrafanaTab from '../components/tabs/GrafanaTab';
@@ -176,15 +175,6 @@ export const routes: RouteConfig[] = [
       { id: 'dependencies', title: 'Dependencies' }
     ],
     nav: { visible: true }
-  },
-  {
-    path: '/docker',
-    element: Docker,
-    label: 'Docker',
-    icon: '🐳',
-    order: 10,
-    subtabs: [],
-    nav: { visible: false }
   }
 ];
 

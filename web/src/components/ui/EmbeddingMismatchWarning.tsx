@@ -38,7 +38,6 @@ const APP_ROUTE_SEGMENTS = new Set<string>([
   '/eval',
   '/infrastructure',
   '/admin',
-  '/docker',
   '/d',
 ]);
 

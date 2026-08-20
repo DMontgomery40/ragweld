@@ -311,17 +311,17 @@ export async function getRerankerOptions(): Promise<RerankerOption[]> {
 export type DockerOverview = {
   status: DockerStatus;
   containers: DockerContainer[];
+  inventoryAvailable: boolean;
 };
 
 /**
- * Get Docker daemon status + container list.
- * Calls both /api/docker/status and /api/docker/containers.
+ * Get Docker daemon status plus the project-scoped Ragweld service list.
  */
 export async function getDockerStatus(): Promise<DockerOverview> {
   try {
     const [statusRes, containersRes] = await Promise.allSettled([
       apiClient.get<DockerStatus>(api('/docker/status')),
-      apiClient.get<DockerContainersResponse>(api('/docker/containers')),
+      apiClient.get<DockerContainersResponse>(api('/docker/services')),
     ]);
 
     const status: DockerStatus =
@@ -334,24 +334,18 @@ export async function getDockerStatus(): Promise<DockerOverview> {
         ? containersRes.value.data.containers ?? []
         : [];
 
-    return { status, containers };
+    return {
+      status,
+      containers,
+      inventoryAvailable: containersRes.status === 'fulfilled',
+    };
   } catch (err) {
     console.error('[getDockerStatus] Error:', err);
-    return { status: { running: false, runtime: '', containers_count: 0 }, containers: [] };
-  }
-}
-
-/**
- * Get raw container list from Docker.
- * Returns the containers array directly (unwrapped from response object).
- */
-export async function getDockerContainers(): Promise<DockerContainer[]> {
-  try {
-    const { data } = await apiClient.get<DockerContainersResponse>(api('/docker/containers'));
-    return data.containers || [];
-  } catch (err) {
-    console.error('[getDockerContainers] Error:', err);
-    return [];
+    return {
+      status: { running: false, runtime: '', containers_count: 0 },
+      containers: [],
+      inventoryAvailable: false,
+    };
   }
 }
 

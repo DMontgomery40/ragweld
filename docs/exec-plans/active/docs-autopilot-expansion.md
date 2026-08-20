@@ -58,7 +58,7 @@ In `generate_docs_from_diff.py`, `_select_context_files` uses a `preferred` list
 - Eval UI (EvalDrillDown, EvalAnalysisTab, TraceViewer)
 - Grafana (GrafanaDashboard, GrafanaConfig, GrafanaEmbed)
 - Webhooks (IntegrationsSubtab, GeneralSubtab, webhooks API)
-- Docker UI (DockerSubtab, ContainerCard, DockerContainerCard, pages/Docker)
+- Docker UI (project-scoped Infrastructure Docker and Services subtabs)
 - Admin panels (IntegrationsSubtab, GeneralSubtab)
 
 ### 1.5 Config Reference (Deterministic)
@@ -116,8 +116,6 @@ Add to `_select_context_files` in `generate_docs_from_diff.py`:
 "web/src/api/webhooks.ts",
 # Docker UI
 "web/src/components/Infrastructure/DockerSubtab.tsx",
-"web/src/components/Docker/ContainerCard.tsx",
-"web/src/pages/Docker.tsx",
 "server/api/docker.py",
 ```
 
