@@ -1,11 +1,11 @@
-"""Tests for model re-exports from THE LAW.
+"""Tests for focused model re-exports from the boundary-model aggregate.
 
 Verifies that all model files correctly re-export from tribrid_config_model.py
 and backward compatibility aliases work.
 """
 
 class TestEvalModelExports:
-    """Test eval.py re-exports from THE LAW."""
+    """Test eval.py re-exports from the boundary-model aggregate."""
 
     def test_imports_from_eval_module(self) -> None:
         """Test all exports are available from server.models.eval."""
@@ -35,7 +35,7 @@ class TestEvalModelExports:
 
 
 class TestGraphModelExports:
-    """Test graph.py re-exports from THE LAW."""
+    """Test graph.py re-exports from the boundary-model aggregate."""
 
     def test_imports_from_graph_module(self) -> None:
         """Test all exports are available from server.models.graph."""
@@ -53,7 +53,7 @@ class TestGraphModelExports:
 
 
 class TestRetrievalModelExports:
-    """Test retrieval.py re-exports from THE LAW."""
+    """Test retrieval.py re-exports from the boundary-model aggregate."""
 
     def test_imports_from_retrieval_module(self) -> None:
         """Test all exports are available from server.models.retrieval."""
@@ -73,7 +73,7 @@ class TestRetrievalModelExports:
 
 
 class TestChatModelExports:
-    """Test chat.py re-exports from THE LAW."""
+    """Test chat.py re-exports from the boundary-model aggregate."""
 
     def test_imports_from_chat_module(self) -> None:
         """Test all exports are available from server.models.chat."""
@@ -89,7 +89,7 @@ class TestChatModelExports:
 
 
 class TestIndexModelExports:
-    """Test index.py re-exports from THE LAW."""
+    """Test index.py re-exports from the boundary-model aggregate."""
 
     def test_imports_from_index_module(self) -> None:
         """Test all exports are available from server.models.index."""
@@ -106,11 +106,11 @@ class TestIndexModelExports:
         assert callable(IndexStats)
 
 
-class TestTypesMatchTheLaw:
-    """Test that exported types match THE LAW definitions."""
+class TestTypesMatchBoundaryAggregate:
+    """Test that focused exports preserve boundary-model identity."""
 
     def test_types_are_same_class(self) -> None:
-        """Verify re-exported types are the exact same class from THE LAW."""
+        """Verify re-exported types are the exact same boundary class."""
         from server.models.tribrid_config_model import (
             ChunkMatch as LawChunkMatch,
             Entity as LawEntity,

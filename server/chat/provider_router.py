@@ -90,7 +90,7 @@ def select_provider_route(
        otherwise fall back to OpenRouter, then local.
 
     Args:
-        config: THE LAW full configuration (TriBridConfig). Used for chat + training-backed providers.
+        config: Validated full runtime configuration. Used for chat + training-backed providers.
         model_override: Optional override model string. If non-empty (after
             stripping whitespace), it is used as the selected model.
     """

@@ -128,7 +128,7 @@ def route_prompt(prompt: str) -> Route:
     if not required:
         required = [
             "Follow the verification loop for this change type (Stop hook will enforce).",
-            "Prefer Pydantic-first shapes; keep single sources of truth.",
+            "Keep registered public API contracts generated and local UI/domain types locally owned.",
         ]
 
     # De-dupe while preserving order
@@ -168,7 +168,9 @@ def main() -> int:
         lines.append(f"- `{ref}`")
     lines.append("")
     lines.append("Mandatory constraints:")
-    lines.append("- Pydantic is the law (define shapes in Pydantic first; TS types from generated.ts).")
+    lines.append("- Registered public API and configuration boundaries use Pydantic; frontend wire types come from generated.ts.")
+    lines.append("- Local UI and internal domain types may be local; explicit tested boundary transformations are allowed.")
+    lines.append("- Compatibility fallbacks, dual contracts, and silent payload guessing remain forbidden.")
     lines.append("- No fake-green tests: no Playwright request interception; no Python mocking in new/edited tests.")
     lines.append("- `mkdocs/**` and `mkdocs.yml` are docs-autopilot output; do not hand-edit them during feature work.")
     lines.append("")

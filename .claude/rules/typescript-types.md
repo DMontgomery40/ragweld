@@ -3,35 +3,37 @@ paths:
   - "web/src/**/*.{ts,tsx}"
 ---
 
-# TypeScript Type Rules (Frontend)
+# TypeScript Boundary Type Rules (Frontend)
 
-> Branch canon for `feat/oss-composition-kickoff`: no frontend adapters, fallback rendering for removed contracts, or dual old/new payload support.
+> Local `main` is canonical. Do not preserve removed contracts with fallback
+> rendering, dual payload support, or silent shape guessing.
 
-## Rule 2: No Hand-Written API Types
-All TypeScript interfaces for API data MUST come from `generated.ts`.
+## Generated public wire contracts
+
+FastAPI request/response and public configuration payloads come from
+`web/src/types/generated.ts`. Do not hand-copy those payloads into API or
+service modules under new names.
 
 ```typescript
-// WRONG - hand-written interface
-interface SearchResponse {
-  results: ChunkMatch[];
-  latency: number;
-}
-
-// RIGHT - imported from generated
-import { SearchResponse } from '../types/generated';
+import type { SearchResponse } from '../types/generated';
 ```
 
-## No Adapters/Transformers/Mappers
-- **WRONG:** Write an adapter function to convert API shape -> component shape
-- **RIGHT:** Change the Pydantic model to return the right shape
+## Local UI types are local
 
-## Architecture Smells (BANNED in .tsx files)
-- `interface` declarations that don't trace back to Pydantic -> import from `generated.ts`
-- `class *Adapter` / `class *Transformer` / `class *Mapper` -> fix the Pydantic model
-- `function transform*` -> fix the Pydantic model
+Component props, form state, Zustand state, browser-only state, and derived view
+models may be handwritten near their owning feature. They must describe UI
+semantics rather than duplicate a backend wire payload.
 
-## Field Constraints
-Pydantic `Field()` constraints define valid ranges. The UI MUST honor them:
+## Explicit view-model transformations are allowed
+
+An explicit, typed, tested transformation from a generated wire contract to a
+local UI view model is legitimate. Keep it one-directional and feature-owned.
+Do not build mapper chains, hide field loss, guess between old/new shapes, or
+maintain competing canonical transport schemas.
+
+## Boundary constraints
+
+Pydantic `Field()` constraints on public/configuration boundaries define valid ranges. The UI must honor them:
 - `ge`/`le` -> slider min/max
 - `default` -> slider default
-- Don't override these in the frontend. The Pydantic model IS the spec.
+- Do not override these with incompatible frontend limits.

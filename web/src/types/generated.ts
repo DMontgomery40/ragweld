@@ -6,12 +6,14 @@
  *
  * To regenerate: uv run scripts/generate_types.py
  *
- * ALL TypeScript types for API data MUST be imported from this file.
- * Hand-writing interfaces that should come from Pydantic is FORBIDDEN.
+ * Public wire types for the registered public API and configuration boundary
+ * MUST be imported from this file.
+ * Local UI state and view models may be handwritten near their owning feature;
+ * they must not duplicate a public wire payload.
  *
  * This file contains:
  * - Configuration interfaces (TriBridConfig and sub-configs)
- * - Domain model interfaces (ChunkMatch, SearchRequest, Entity, etc.)
+ * - Registered public API interfaces (ChunkMatch, SearchRequest, Entity, etc.)
  */
 
 /** What the user has checked in the data sources dropdown.  This is what the frontend sends. The backend passes corpus_ids straight into fusion. */

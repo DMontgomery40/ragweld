@@ -1,7 +1,7 @@
 /**
  * Graph Store - Zustand store for knowledge graph state
  *
- * Uses types from generated.ts (Pydantic-first architecture):
+ * Uses public wire types from generated.ts:
  * - Entity, Relationship, Community, GraphStats
  */
 import { create } from 'zustand';

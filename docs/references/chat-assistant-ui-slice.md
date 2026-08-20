@@ -3,7 +3,7 @@
 ## Scope
 
 This page records the first real chat rebuild slice on
-`feat/oss-composition-kickoff`: replace the visible Chat tab with
+On canonical `main`, replace the visible Chat tab with
 `assistant-ui` while preserving ragweld recall, source-grounding, and
 conversation continuity semantics.
 

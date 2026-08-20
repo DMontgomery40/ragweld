@@ -24,7 +24,7 @@ function parseList(text: string): string[] {
 export function DataQualitySubtab() {
   const activeRepo = useActiveRepo();
 
-  // Config fields (THE LAW)
+  // Validated public config fields
   const [excludeDirs, setExcludeDirs] = useConfigField<string[]>(
     'chunk_summaries.exclude_dirs',
     []

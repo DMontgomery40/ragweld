@@ -5,7 +5,7 @@ paths:
 
 # Prompts Management API
 
-> Branch canon for `feat/oss-composition-kickoff`: no fallback or legacy prompt/config API paths. Replace touched surfaces completely.
+> Local `main` is canonical: no fallback or legacy prompt/config API paths. Replace touched surfaces completely.
 
 System prompts are editable via API. All prompts defined in `SystemPromptsConfig`.
 

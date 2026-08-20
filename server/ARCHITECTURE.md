@@ -1,13 +1,17 @@
 # TriBridRAG Backend Architecture (`server/`)
 
 ## The rule in one sentence
-**Pydantic is the law.** All API payload shapes and all tunable runtime behavior are defined in Pydantic models first (especially `server/models/tribrid_config_model.py`).
+
+Pydantic validates serialized boundaries and operator configuration. Internal
+domain types stay with their owning modules, and registered public wire schemas
+feed frontend type generation.
 
 ## Canonical directory responsibilities
 
 ### `models/`
-- **Source of truth** for API payload shapes and configuration models.
-- If the frontend needs a type, it must exist as a Pydantic model and be included in TypeScript generation.
+- Own validated API payload and configuration models by domain.
+- If the frontend consumes a public wire payload, register its Pydantic schema for TypeScript generation.
+- Internal computation records may use dataclasses, `TypedDict`, `Protocol`, enums, or plain classes.
 
 ### `api/`
 - FastAPI routers only.
@@ -20,7 +24,7 @@
 
 ### `db/`
 - Database clients for Postgres and Neo4j.
-- Clients must be configured via Pydantic config/settings objects, not direct environment reads.
+- Clients consume typed config/settings objects rather than scattering environment reads.
 
 ### `retrieval/` and `indexing/`
 - Retrieval and indexing pipeline logic.
@@ -74,4 +78,3 @@ flowchart TD
 - **No env reads outside `server/settings.py`.**
 - **No `python-dotenv` loading outside `server/settings.py`.**
 - API routers must return Pydantic models (no ad-hoc dict shapes drifting away from the spec).
-

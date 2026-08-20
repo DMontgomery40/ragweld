@@ -221,7 +221,7 @@ Required stable anchor headings (MUST be exact headings):
         "instruction": """Write the configuration reference and mental model.
 
 Hard requirements:
-1. Explain “Pydantic is the law” and what that means for users and contributors.
+1. Explain validated API/configuration boundaries, generated frontend wire contracts, and when internal/local types remain domain-owned.
 2. Show how defaults/ranges are enforced, and how invalid configs fail (validation).
 3. Include BIG tables for the most important config sections (retrieval/fusion/reranking/indexing/graph/embedding/chunking).
 4. Include a section on type generation (pydantic2ts) and how the UI consumes generated types.

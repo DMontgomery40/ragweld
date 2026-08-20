@@ -7,7 +7,7 @@ This script is intentionally self-contained and reproducible:
 
 Notes:
 - Requires Postgres + Neo4j to be running (see README).
-- Uses the current `tribrid_config.json` as the baseline (Pydantic-first).
+- Uses the current validated `tribrid_config.json` as the baseline.
 """
 
 from __future__ import annotations
@@ -323,4 +323,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

@@ -10,9 +10,9 @@ Before running commands, editing files, or making plans:
 1. Read this `AGENTS.md` fully.
 2. Read `/Users/davidmontgomery/ragweld/CLAUDE.md` fully.
 3. Read the project-local memory index at `/Users/davidmontgomery/.codex/projects/-Users-davidmontgomery-ragweld/MEMORY.md`.
-4. Read the latest handoff memory:
-   `/Users/davidmontgomery/.codex/projects/-Users-davidmontgomery-ragweld/memory/next-agent-canon-reset-handoff-2026-03-26.md`
-5. Read any additional memory files that the latest handoff marks as required context.
+4. Read the current recovery handoff:
+   `/Users/davidmontgomery/ragweld/docs/exec-plans/active/ragweld-recovery-foundation-2026-08-19.md`
+5. Read any additional repo-local references that the current handoff marks as required context.
 
 Do not touch code, tests, data, servers, or UI before that read pass is complete.
 
@@ -25,16 +25,18 @@ expected and not a bug.
 - Do not attempt mass-renames of `tribrid` -> `ragweld`.
 - Treat `tribrid` as stable internal naming; treat `ragweld` as the product/repo name.
 
-## Branch Canon (feat/oss-composition-kickoff)
+## Main Canon and Replacement-Only Modernization
 
-This branch is the OSS-composition fork branch. It is **replacement-only**.
+Local `main` is the canonical development line and `origin/main` is its publication target.
+Keep one local branch and one worktree unless the user explicitly authorizes another.
+Modernization work is **replacement-only**.
 
 - Do not add legacy fallbacks, compatibility shims, transition periods, dual-write paths, or "temporary" old/new coexistence logic.
 - If a slice is being replaced on this branch, the touched backend, UI, docs, tests, and agent instructions must move to the new path together.
 - If the replacement is not ready, do not land a half-migrated cutover that routes back into the legacy subsystem.
-- If older docs, memories, prompts, or rules conflict with this branch canon, this section wins.
+- If older docs, memories, prompts, or rules conflict with this canon, this section wins.
 
-Locked target stack for this branch:
+Locked target stack:
 - Inference: `vLLM`
 - Gateway/routing: `LiteLLM`
 - Orchestration: `Flyte`
@@ -46,14 +48,14 @@ Locked target stack for this branch:
 - Observability fabric: `OpenTelemetry + Grafana Alloy + Tempo + Loki + Mimir + Pyroscope + Faro`
 - Frontend shell/workbench target: `Dockview + react-resizable-panels + TanStack Query + assistant-ui + shadcn/ui + Radix + xterm + Monaco`
 
-Active branch references:
+Active modernization references:
 - `/Users/davidmontgomery/ragweld/docs/references/observability-online-slice.md`
-- `/Users/davidmontgomery/ragweld/docs/exec-plans/active/oss-composition-kickoff-handoff-2026-03-25.md`
+- `/Users/davidmontgomery/ragweld/docs/exec-plans/active/ragweld-recovery-foundation-2026-08-19.md`
 
 ## Start Here (Repo Map)
 
 Source of truth files (if it is not here, it does not exist):
-- `/Users/davidmontgomery/ragweld/server/models/tribrid_config_model.py` (Pydantic: config + API shapes)
+- `/Users/davidmontgomery/ragweld/server/models/tribrid_config_model.py` (current aggregate for validated config + registered API boundary shapes)
 - `/Users/davidmontgomery/ragweld/data/models.json` (model catalog: providers, pricing, context)
 - `/Users/davidmontgomery/ragweld/data/glossary.json` (tooltips + terminology)
 
@@ -78,9 +80,12 @@ Executable specs (structured, machine-checkable intent):
 
 ## Hard Invariants (Non-Negotiable)
 
-- Pydantic-first: define shapes and config in `/Users/davidmontgomery/ragweld/server/models/tribrid_config_model.py` first.
-- No hand-written API payload types in the frontend: import from `generated.ts`.
-- No adapters/transformers/mappers to reshape API payloads: fix the Pydantic model.
+- Pydantic validates serialized boundaries: FastAPI request/response bodies, persisted operator configuration, and untrusted external or cross-process payloads.
+- Boundary models belong in the closest domain-owned module. `/Users/davidmontgomery/ragweld/server/models/tribrid_config_model.py` remains the current aggregate and config composition root, not the mandatory home of every internal type.
+- Public frontend wire types are generated and imported from `generated.ts`; do not hand-copy them.
+- Internal Python types and local frontend props, form state, Zustand state, and view models may be handwritten near their owners.
+- Explicit, typed, tested transformations are allowed at real boundaries. Hidden or lossy mapping, competing canonical schemas, compatibility fallbacks, and dual-read/write contracts are forbidden.
+- Put real operator/runtime tunables in typed config. Keep constants, invariants, derived values, and UI-only state in ordinary code.
 - OSS-composition fork rule: on this branch, replacement means replacement.
   - Do not keep old behavior alive by silently routing back into the legacy subsystem once a replacement slice exists.
   - Do not introduce migration seams, compatibility adapters, legacy toggles, or transition periods on this branch.

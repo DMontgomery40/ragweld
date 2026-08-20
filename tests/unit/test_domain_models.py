@@ -1,4 +1,4 @@
-"""Tests for domain models consolidated in THE LAW (tribrid_config_model.py).
+"""Tests for registered boundary models in the current aggregate.
 
 Tests cover:
 - Chunk and retrieval models (ChunkMatch, SearchRequest, SearchResponse)

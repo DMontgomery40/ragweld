@@ -21,9 +21,9 @@
 
 ---
 
-## Branch Status: OSS-Composition Fork v3
+## Mainline Status: OSS-Composition Modernization
 
-This branch, `feat/oss-composition-kickoff`, is the active fork branch. It is not "main with a few experiments." It is the formal replacement program for the broken bespoke platform layers.
+Local `main` is the canonical development line and `origin/main` is its publication target. The OSS-composition work is a formal replacement program for the broken bespoke platform layers, not a parallel experimental branch.
 
 ### Replacement-Only Rule
 
@@ -31,9 +31,9 @@ This branch, `feat/oss-composition-kickoff`, is the active fork branch. It is no
 - No legacy compatibility shims
 - No transition-period dual paths
 - No backend-only swaps that leave operator UI stale
-- If a subsystem is replaced in this branch, the touched backend/UI/docs/tests/instructions must move to the new path together
+- If a subsystem is replaced, the touched backend/UI/docs/tests/instructions must move to the new path together
 
-### Locked Target Stack For This Branch
+### Locked Target Stack
 
 - Inference: `vLLM`
 - Gateway/routing: `LiteLLM`
@@ -250,7 +250,7 @@ Per-query (ms):
 
 ### Branch-Specific Note
 
-If you are working on `feat/oss-composition-kickoff`, treat the branch status section above as the architecture truth for fork decisions. Mainline implementation details below may still describe older subsystems that have not been fully replaced yet.
+Treat the mainline status section above as the architecture truth for modernization decisions. Implementation details below may still describe older subsystems that have not been fully replaced yet.
 
 ### Prerequisites
 
@@ -619,15 +619,20 @@ SHOW INDEXES YIELD name, type, state WHERE type="VECTOR" RETURN name, state;
 
 ## Architecture
 
-### The Golden Rule
+### Schema and Type Boundaries
 
-> **Pydantic is the law.**
+Pydantic validates public API payloads, persisted operator configuration, and
+untrusted external or cross-process data. Registered public wire schemas feed
+TypeScript generation; internal domain types and local UI state/view models stay
+with their owning modules.
 
-All configuration, all types, all API contracts are defined in `server/models/tribrid_config_model.py`. TypeScript types are **generated** from Pydantic—never hand-written. This ensures the backend and frontend can never drift apart.
+Public frontend wire types are **generated** and never hand-copied. Explicit,
+typed, tested transformations are allowed at semantic boundaries. Compatibility
+fallbacks, shape guessing, dual contracts, and competing transport truths are not.
 
 ```
-tribrid_config_model.py  ──►  generate_types.py  ──►  web/src/types/generated.ts
-     (Pydantic)                    (script)              (TypeScript)
+registered Pydantic schemas ──► generate_types.py ──► web/src/types/generated.ts
+      (API + config)                 (script)               (wire types)
          │                                                    │
          ▼                                                    ▼
     FastAPI uses                                      React components use

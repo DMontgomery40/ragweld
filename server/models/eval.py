@@ -1,6 +1,6 @@
-"""Evaluation-related models - Re-exported from THE LAW.
+"""Evaluation-related registered boundary model exports.
 
-All domain models are defined in tribrid_config_model.py (THE LAW).
+These public schemas currently aggregate through tribrid_config_model.py.
 This file re-exports them for backwards compatibility.
 """
 from server.models.tribrid_config_model import (

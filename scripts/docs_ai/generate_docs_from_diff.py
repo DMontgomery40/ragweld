@@ -245,7 +245,7 @@ def _select_context_files(changed: List[str], *, limit: int) -> List[str]:
     """Pick a high-signal subset of files to include diffs for."""
 
     preferred = [
-        # "Pydantic is the law" + core entrypoints
+        # Validated schema boundaries + core entrypoints
         "server/models/tribrid_config_model.py",
         "server/main.py",
         "server/config.py",

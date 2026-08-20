@@ -1,7 +1,7 @@
 /**
  * RerankerTrainingService - Thin API client for /api/reranker/train endpoints
  *
- * ALL TYPES COME FROM generated.ts (Pydantic-first architecture).
+ * Public API wire types come from generated.ts.
  */
 
 import { apiClient, api, apiUrl } from '@/api/client';

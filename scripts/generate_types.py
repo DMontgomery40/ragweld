@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""Generate TypeScript types from Pydantic models.
+"""Generate TypeScript wire types from registered Pydantic boundary models.
 
-This script is THE ENFORCEMENT MECHANISM for the Pydantic-first architecture.
-Run this after ANY change to server/models/tribrid_config_model.py.
+Run this after changing a registered public API or configuration boundary model.
 
 Usage:
     uv run scripts/generate_types.py
 
 The generated file (web/src/types/generated.ts) should NEVER be edited by hand.
-All TypeScript types for API data MUST be imported from generated.ts.
+All public API wire types MUST be imported from generated.ts. Local UI state and
+view-model types remain local to the frontend.
 """
 import json
 import sys
@@ -241,7 +241,7 @@ def main(output_path: Path | None = None) -> None:
     print(f"Output: {output_path}\n")
 
     try:
-        # Import all models from THE LAW
+        # Import registered public API and configuration boundary models.
         from server.models.tribrid_config_model import (  # noqa: I001
             # Root config
             TriBridConfig,
@@ -725,12 +725,14 @@ def main(output_path: Path | None = None) -> None:
  *
  * To regenerate: uv run scripts/generate_types.py
  *
- * ALL TypeScript types for API data MUST be imported from this file.
- * Hand-writing interfaces that should come from Pydantic is FORBIDDEN.
+ * Public wire types for the registered public API and configuration boundary
+ * MUST be imported from this file.
+ * Local UI state and view models may be handwritten near their owning feature;
+ * they must not duplicate a public wire payload.
  *
  * This file contains:
  * - Configuration interfaces (TriBridConfig and sub-configs)
- * - Domain model interfaces (ChunkMatch, SearchRequest, Entity, etc.)
+ * - Registered public API interfaces (ChunkMatch, SearchRequest, Entity, etc.)
  */
 
 '''
@@ -748,7 +750,7 @@ def main(output_path: Path | None = None) -> None:
     print(f"Types: {type_count}")
     print(f"Total exports: {interface_count + type_count}")
     print()
-    print("Remember: Import from 'types/generated' not hand-written interfaces!")
+    print("Remember: import public wire contracts from 'types/generated'.")
 
 
 if __name__ == "__main__":

@@ -3,43 +3,42 @@ paths:
   - "server/**/*.py"
 ---
 
-# Pydantic-First Rules (Python/Server)
+# Schema Boundary Rules (Python/Server)
 
-> Branch canon for `feat/oss-composition-kickoff`: replacement-only. No legacy fallbacks, no compatibility shims, no transition-period dual paths.
+> Local `main` is canonical. Modernization is replacement-only: no legacy
+> fallbacks, compatibility shims, transition-period dual paths, or silent
+> routing back into a superseded subsystem.
 
-## Rule 1: Pydantic First
-Before adding ANY feature:
-1. Add the field to `tribrid_config_model.py` with proper `Field()` constraints
-2. Run `uv run scripts/generate_types.py` to regenerate TypeScript
-3. THEN implement the feature
+## Validated serialized boundaries
 
-**WRONG:** Add behavior, then figure out where to store the value
-**RIGHT:** Add to Pydantic -> generate types -> implement
+Use Pydantic for FastAPI request/response bodies, persisted operator
+configuration, and untrusted external, artifact, or cross-process payloads.
+Boundary schemas belong in the closest domain-owned module and may be
+registered through the current aggregate for TypeScript generation.
 
-## Rule 3: No Adapters/Transformers
-If the backend returns shape A and the frontend expects shape B:
-- **WRONG:** Write an adapter function to convert A -> B
-- **RIGHT:** Change the Pydantic model to return shape B
+Internal computation records do not need to become public schemas. Dataclasses,
+`TypedDict`, `Protocol`, enums, and plain classes are all valid internal types.
 
-Adapters are technical debt. Fix the source.
+## Explicit transformations are allowed
 
-## Rule 4: Config Controls Everything
-Every behavior that could vary must be controlled by config:
-- Thresholds -> `tribrid_config_model.py`
-- Feature flags -> `tribrid_config_model.py`
-- Model selection -> `data/models.json`
-- Tooltips -> `data/glossary.json`
+Named, typed, one-directional, contract-tested transformations are appropriate
+at real semantic boundaries, including provider-to-domain, persistence-to-domain,
+API-to-domain, and API-wire-to-UI-view-model boundaries.
 
-**WRONG:** Hardcode `if score > 0.5`
-**RIGHT:** `if score > config.retrieval.confidence_threshold`
+Hidden or lossy transforms, payload shape guessing, competing canonical
+schemas, compatibility translators, and dual-read/write paths remain forbidden.
 
-## Rule 5: Field Constraints Are Law
-```python
-rrf_k: int = Field(default=60, ge=1, le=200, description="RRF smoothing")
-```
-- UI slider MUST have min=1, max=200
-- API MUST reject values outside [1, 200]
-- Default MUST be 60
+## Configuration is for real tunables
+
+Operator/runtime choices belong in typed, domain-owned config composed by
+`TriBridConfig`. Secrets and deployment wiring remain environment/infrastructure
+inputs. Constants, protocol invariants, derived values, and internal structure
+stay ordinary code rather than fake configuration knobs.
+
+## Boundary constraints
+
+Pydantic `Field()` constraints on public/configuration boundaries are contract:
+the UI and API must honor ranges, defaults, and validation behavior.
 
 ## Banned Python Imports
 ```python
@@ -49,12 +48,5 @@ import redis                     # Removed
 from langchain import ...        # Banned (use langgraph directly)
 import langchain                 # Banned (use langgraph directly)
 ```
-LangGraph IS allowed — use it directly, not through LangChain wrappers.
-Qdrant/Haystack/Docling are allowed on this branch.
-
-## Architecture Smells (BANNED)
-- `class *Adapter` -> Fix the Pydantic model instead
-- `class *Transformer` -> Fix the Pydantic model instead
-- `class *Mapper` -> Fix the Pydantic model instead
-- `function transform*` -> Fix the Pydantic model instead
-- `fallback_*` / `legacy_*` / compatibility dual-path helpers -> replace the subsystem instead
+LangGraph is allowed directly. Qdrant, Haystack, and Docling are part of the
+locked target stack.

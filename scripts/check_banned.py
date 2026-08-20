@@ -76,15 +76,15 @@ BANNED_TERMS: List[Tuple[str, str]] = [
 ]
 
 # =============================================================================
-# Env usage policy ("THE LAW")
+# Environment usage policy
 # =============================================================================
 #
 # Environment variables are allowed for:
 # - Secrets (API keys)
 # - Infrastructure/runtime wiring (ports, DSNs, container flags)
 #
-# They are NOT allowed for model selection or other tunable behavior that should
-# be governed by Pydantic config (server/models/tribrid_config_model.py).
+# They are NOT allowed for model selection or other operator-tunable behavior
+# governed by the validated runtime configuration boundary.
 ENV_EXAMPLE_BANNED_KEYS = {
     # Legacy/no-op keys that have caused repeated confusion.
     "EMBEDDING_PROVIDER",
@@ -99,7 +99,7 @@ ENV_EXAMPLE_BANNED_KEYS = {
 #
 # If you add a new env dependency, it must be either:
 # - a secret/infra key, added here with justification, OR
-# - moved under Pydantic config (preferred).
+# - moved under validated runtime config (preferred).
 SERVER_ENV_GETENV_ALLOWLIST = {
     # Provider secrets
     "OPENAI_API_KEY",
@@ -136,7 +136,7 @@ SERVER_ENV_GETENV_ALLOWLIST = {
     "LOKI_BASE_URL",
 }
 
-# Keys that must never be read from env in server code (config must be Pydantic-driven).
+# Keys that must never be read from env in server code (use validated config).
 SERVER_ENV_GETENV_BANNED = {
     "LLM_MODEL",
     "LLM_PROVIDER",
@@ -236,11 +236,10 @@ def check_python_files() -> List[str]:
     return errors
 
 
-def check_typescript_files() -> List[str]:
+def check_typescript_files(web_src: Path = Path('web/src')) -> List[str]:
     """Check TypeScript files for banned patterns."""
     errors: list[str] = []
 
-    web_src = Path('web/src')
     if not web_src.exists():
         return errors
 
@@ -262,7 +261,7 @@ def check_typescript_files() -> List[str]:
         rel_norm = rel_path.replace("\\", "/")
 
         # ---------------------------------------------------------------------
-        # Pydantic-first enforcement: do not import API payload types from @web/types
+        # Public wire contracts must come from the generated boundary types.
         # ---------------------------------------------------------------------
         if "/web/src/api/" in f"/{rel_norm}" or "/web/src/stores/" in f"/{rel_norm}":
             # Allow UI-only modules (explicit allowlist).
@@ -279,7 +278,7 @@ def check_typescript_files() -> List[str]:
                 if any(spec == p or spec.startswith(p + "/") for p in allow_prefixes):
                     continue
                 errors.append(
-                    f"{rel_path}:{i}: API types must be imported from types/generated.ts, not {spec}"
+                    f"{rel_path}:{i}: Public wire types must be imported from types/generated.ts, not {spec}"
                 )
 
         # ---------------------------------------------------------------------
@@ -289,18 +288,9 @@ def check_typescript_files() -> List[str]:
             for i, line in enumerate(content.split("\n"), 1):
                 if re.search(r"export\s+interface\s+\w+(Request|Response|Status)\b", line):
                     errors.append(
-                        f"{rel_path}:{i}: Hand-written API interface found. "
-                        "Define it in Pydantic and import from types/generated.ts."
+                        f"{rel_path}:{i}: Hand-written public wire interface found. "
+                        "Define the registered backend boundary contract and import its generated type."
                     )
-
-        # Check for hand-written Config interfaces (should import from generated.ts)
-        # Only flag in component files, not in hooks/stores/types directories
-        if '/components/' in str(ts_file):
-            if re.search(r'^interface\s+\w+Config\s*\{', content, re.MULTILINE):
-                errors.append(
-                    f"{ts_file}: Hand-written Config interface found. "
-                    "Import from '../types/generated' instead."
-                )
 
     return errors
 
@@ -485,7 +475,7 @@ def check_server_env_getenv_allowlist() -> List[str]:
             if key in SERVER_ENV_GETENV_BANNED:
                 errors.append(
                     f"{_normalize_relpath(py_file)}:{i}: Env key '{key}' is banned in server code. "
-                    "Move this under Pydantic config (THE LAW)."
+                    "Move this under the validated runtime configuration boundary."
                 )
                 continue
             if key not in SERVER_ENV_GETENV_ALLOWLIST:

@@ -1,7 +1,7 @@
 /**
  * useGraph - Hook for knowledge graph operations
  *
- * Uses types from generated.ts (Pydantic-first architecture):
+ * Uses public wire types from generated.ts:
  * - Entity, Relationship, Community, GraphStats
  *
  * USAGE:

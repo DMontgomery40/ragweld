@@ -1,9 +1,8 @@
 """Chat 2.0 configuration models (thin re-export).
 
-TriBridRAG is **Pydantic-first**: the source of truth ("THE LAW") lives in
-`server/models/tribrid_config_model.py`. This module exists only as a stable,
-focused import path for the Chat 2.0 config models and must not define any new
-Pydantic models.
+The current registered boundary aggregate lives in
+`server/models/tribrid_config_model.py`. This module provides the focused import
+path for Chat configuration models.
 """
 
 from .tribrid_config_model import (  # noqa: F401

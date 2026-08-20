@@ -10,7 +10,7 @@ Produce one clean, reproducible Ragweld development platform from current `main`
 
 ## Locked operating model
 
-- Branch: `feat/ragweld-recovery-foundation`
+- Branch: local `main` is canonical; `origin/main` is the publication target
 - Colima: dedicated host-managed `ragweld` profile
 - Docker context: selected explicitly by the operator before repository launch
 - Data and observability: one Compose project named `ragweld`
@@ -25,12 +25,11 @@ Produce one clean, reproducible Ragweld development platform from current `main`
 
 ## Completed recovery evidence
 
-- Current remote `main`: `d39c84605f8063b292270341ba0258e8ea512aee`
+- Pre-recovery remote `main` baseline: `d39c84605f8063b292270341ba0258e8ea512aee`
 - Recovered OSS replay tree before local graph work: `281f510014f706680fd2503e494391a08ecc5fb3`
 - Preserved graph patch ID: `7ca5c5fb1d5d90cfe818855ccb82349177b1eb61`
 - Primary checkout is the only worktree.
-- Local `main` equals `origin/main`.
-- Local branches are reduced to `main` and the active recovery branch. The six
+- Local branches are reduced to `main`; it contains the recovered OSS-composition work and is intentionally ahead until publication. The six
   agent-created archive/rescue refs were removed after a complete temporary
   recovery bundle was verified outside the repository.
 - Old Postgres, Neo4j, and Qdrant state was deleted after explicit clean-start authorization.

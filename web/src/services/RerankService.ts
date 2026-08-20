@@ -1,7 +1,7 @@
 /**
  * RerankService - Learning reranker legacy workflow API client
  *
- * ALL API TYPES COME FROM generated.ts (Pydantic-first).
+ * Public API wire types come from generated.ts.
  */
 
 export type {

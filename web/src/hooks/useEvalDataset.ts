@@ -1,7 +1,7 @@
 /**
  * useEvalDataset - Hook for managing evaluation dataset entries
  *
- * Uses types from generated.ts (Pydantic-first architecture):
+ * Uses public wire types from generated.ts:
  * - EvalDatasetItem (the individual dataset entries)
  *
  * USAGE:

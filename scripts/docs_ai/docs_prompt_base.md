@@ -41,7 +41,8 @@ Beyond fused tri-brid retrieval (vector + sparse + graph), ragweld includes broa
 
 ## Non-negotiable project truths
 
-- **Pydantic is the law**: config and types flow from `server/models/tribrid_config_model.py`.
+- **Validated boundaries**: Pydantic owns public API/configuration schemas; generated frontend wire types flow from the registered boundary models.
+- Internal domain and local UI/view-model types may stay with their owning modules. Explicit tested boundary transformations are allowed; compatibility fallbacks and duplicate transport truths are not.
 - `data/models.json` is the broad catalog for pricing/candidates; runtime-selectable truth comes from catalog `selection_*` metadata plus `server/runtime_capabilities.py` / `/api/runtime-capabilities`.
 - Corpus separation is fundamental (code uses `repo_id` to mean corpus id).
 - Retrieval = vector + sparse + graph (fused), optionally reranked.

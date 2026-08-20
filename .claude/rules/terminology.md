@@ -1,6 +1,6 @@
 # Terminology & Naming Conventions
 
-> Branch canon for `feat/oss-composition-kickoff`: do not preserve legacy naming or copy in operator-facing surfaces when the branch has already replaced that subsystem.
+> Local `main` is canonical: do not preserve legacy naming or copy in operator-facing surfaces after a subsystem has been replaced.
 
 ## Naming (ragweld vs tribrid)
 - Repo = `ragweld`, internal identifiers = `tribrid`. This is expected.

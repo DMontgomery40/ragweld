@@ -1,13 +1,17 @@
 # TriBridRAG Frontend Architecture (`web/src/`)
 
 ## The rule in one sentence
-**Pydantic is the law.** Frontend types come from `web/src/types/generated.ts` (generated from `server/models/tribrid_config_model.py`). Don’t hand-write API payload types.
+
+Public API wire types come from `web/src/types/generated.ts`. Component props,
+form/store state, and derived view models may be local and handwritten when they
+do not duplicate a transport payload.
 
 ## Canonical directory responsibilities
 
 ### `types/`
-- **`types/generated.ts` is the source of truth** for API payload + config types.
+- **`types/generated.ts` is the source of truth** for registered public API payload + config wire types.
 - **Do not edit `generated.ts` by hand.** Regenerate via `uv run scripts/generate_types.py`.
+- Keep browser-only and presentation types near their owning feature.
 
 ### `api/`
 - **All HTTP calls live here.**
@@ -20,11 +24,11 @@
 
 ### `stores/` (Zustand)
 - Shared state, persistence, cross-tab state, derived selectors.
-- Store types must come from `types/generated.ts` (when representing backend data).
+- Store types must come from `types/generated.ts` when they represent backend wire data; local derived state may be handwritten.
 
 ### `hooks/`
 - React hooks that bind stores/services to component-friendly APIs.
-- Hooks can perform side effects (polling, subscriptions) but should **not** create new data models.
+- Hooks can perform side effects (polling, subscriptions) and may expose typed local view models without duplicating wire contracts.
 
 ### `components/`
 - React components only.

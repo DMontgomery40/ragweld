@@ -1,4 +1,4 @@
-"""Tests for configuration models - using THE LAW (tribrid_config_model.py)."""
+"""Tests for validated configuration models."""
 
 import pytest
 from pydantic import ValidationError

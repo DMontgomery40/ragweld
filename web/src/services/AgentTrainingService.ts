@@ -1,7 +1,7 @@
 /**
  * AgentTrainingService - Thin API client for /api/agent/train endpoints
  *
- * ALL TYPES COME FROM generated.ts (Pydantic-first architecture).
+ * Public API wire types come from generated.ts.
  */
 
 import { apiClient, api, apiUrl } from '@/api/client';

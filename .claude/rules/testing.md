@@ -7,7 +7,7 @@ paths:
 
 # Testing Rules
 
-> Branch canon for `feat/oss-composition-kickoff`: tests must validate the replacement path. Do not add tests that bless legacy fallbacks, compatibility shims, or transition-period behavior.
+> Local `main` is canonical: tests must validate the replacement path. Do not add tests that bless legacy fallbacks, compatibility shims, or transition-period behavior.
 
 ## Mandatory Testing
 Every change MUST be tested before completion.

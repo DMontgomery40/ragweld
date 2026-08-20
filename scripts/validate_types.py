@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Validate that generated.ts matches current Pydantic models.
+Validate that generated.ts matches registered Pydantic boundary models.
 
 This script should be run in CI and as a pre-commit hook.
 It fails if the TypeScript types are out of sync with the Pydantic models.
@@ -54,9 +54,9 @@ def validate_types_file(generated_path: Path = GENERATED_TS_PATH) -> int:
 
         # Compare content (strip to handle trailing newlines)
         if existing_content.strip() != fresh_content.strip():
-            print("ERROR: generated.ts is OUT OF SYNC with Pydantic models!")
+            print("ERROR: generated.ts is OUT OF SYNC with registered boundary models!")
             print("")
-            print("The TypeScript types do not match the current Pydantic model definitions.")
+            print("The TypeScript wire types do not match the registered boundary definitions.")
             print("This can cause runtime type mismatches between frontend and backend.")
             print("")
             print("To fix, run:")
@@ -64,7 +64,7 @@ def validate_types_file(generated_path: Path = GENERATED_TS_PATH) -> int:
             print("")
             return 1
 
-        print("✓ Types are in sync - generated.ts matches Pydantic models")
+        print("✓ Types are in sync - generated.ts matches registered boundary models")
         return 0
 
     except Exception as e:

@@ -50,8 +50,6 @@
         {"term": "golden.*question", "message": "Use 'eval_dataset' not 'golden questions'"},
         {"term": "\\bgolden\\b", "message": "Use 'dataset' or 'eval_dataset' not 'golden'"},
         {"term": "\\branker\\b(?!e)", "message": "Use 'reranker' not 'ranker'"},
-        {"term": "from qdrant", "message": "Qdrant is banned - use pgvector"},
-        {"term": "import qdrant", "message": "Qdrant is banned - use pgvector"},
         {"term": "from redis", "message": "Redis is banned"},
         {"term": "import redis", "message": "Redis is banned"},
         {"term": "from langchain", "message": "LangChain is banned"},
@@ -59,10 +57,7 @@
         {"term": "pip install", "message": "Use 'uv add' not pip"},
         {"term": "pip3 install", "message": "Use 'uv add' not pip"},
         {"term": "python -m venv", "message": "Use 'uv' not venv"},
-        {"term": "virtualenv", "message": "Use 'uv' not virtualenv"},
-        {"term": "class.*Adapter", "message": "No adapters - fix the Pydantic model instead"},
-        {"term": "class.*Transformer", "message": "No transformers - fix the Pydantic model instead"},
-        {"term": "class.*Mapper", "message": "No mappers - fix the Pydantic model instead"}
+        {"term": "virtualenv", "message": "Use 'uv' not virtualenv"}
       ],
       "max_stores": 6,
       "max_hooks": 14,

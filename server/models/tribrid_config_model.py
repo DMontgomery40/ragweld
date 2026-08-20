@@ -8,8 +8,10 @@ Using Pydantic provides:
 - Default values that match current hardcoded values
 - JSON schema generation for documentation
 
-This is THE LAW - all domain models and config types must be defined here.
-Other files should re-export from this module.
+This remains the current aggregate for registered public boundary models and the
+typed runtime-config composition root. New internal domain types may live with
+their owning modules; new public boundary models may be domain-owned and
+registered for generation here while this aggregate is gradually decomposed.
 """
 from __future__ import annotations
 

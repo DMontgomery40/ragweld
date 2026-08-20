@@ -41,7 +41,7 @@ async def client() -> AsyncGenerator[AsyncClient, None]:
 def test_config() -> TriBridConfig:
     """Create test configuration.
 
-    Uses THE LAW's default_factory for all values.
+    Uses the validated config model's default_factory for all values.
     The comprehensive TriBridConfig provides sensible defaults for testing.
     """
     return TriBridConfig()

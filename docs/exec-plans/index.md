@@ -21,8 +21,8 @@ Plans are first-class artifacts. They let agents make progress without relying o
 
 - `active/`: plans currently in progress
 - `completed/`: plans that have shipped
+- `superseded/`: historical plans and handoffs that must not drive current execution
 
 ## Trackers
 
 - [Tech debt tracker](tech-debt-tracker.md)
-

@@ -9,19 +9,21 @@ Before doing anything else:
 1. Read `/Users/davidmontgomery/ragweld/AGENTS.md` fully.
 2. Read this file fully.
 3. Read the project-local memory index at `/Users/davidmontgomery/.codex/projects/-Users-davidmontgomery-ragweld/MEMORY.md`.
-4. Read the latest handoff memory at
-   `/Users/davidmontgomery/.codex/projects/-Users-davidmontgomery-ragweld/memory/next-agent-canon-reset-handoff-2026-03-26.md`.
-5. Read every additional memory file that handoff marks as mandatory context.
+4. Read the current recovery handoff at
+   `/Users/davidmontgomery/ragweld/docs/exec-plans/active/ragweld-recovery-foundation-2026-08-19.md`.
+5. Read every additional repo-local reference that handoff marks as mandatory context.
 
 Do not plan, browse, edit, or run the app before that read pass is complete.
 
 ## THE ARCHITECTURE IN ONE SENTENCE
 
-**Pydantic is the law. Everything else derives from it. You cannot add features that don't exist in Pydantic first.**
+**Pydantic validates serialized boundaries; internal domain and local UI types stay with their owners, while public frontend wire contracts are generated from registered backend schemas.**
 
-## FEATURE BRANCH CANON (feat/oss-composition-kickoff)
+## MAIN CANON AND REPLACEMENT-ONLY MODERNIZATION
 
-This branch is replacement-only.
+Local `main` is canonical; `origin/main` is its publication target. Keep one local
+branch and one worktree unless the user explicitly requests another. Modernization
+work is replacement-only.
 
 - No fallbacks.
 - No legacy compatibility shims.
@@ -29,7 +31,7 @@ This branch is replacement-only.
 - No keeping broken old subsystems alive "just in case."
 - If a slice is replaced in backend code, the UI/docs/tests/instructions for that slice must move with it in the same branch.
 
-Locked branch target:
+Locked target:
 - `vLLM` + `LiteLLM`
 - `Flyte`
 - `Haystack + Docling + Qdrant`
@@ -40,7 +42,7 @@ Locked branch target:
 - `OpenTelemetry + Grafana Alloy + Tempo + Loki + Mimir + Pyroscope + Faro`
 - `assistant-ui` inside the ragweld shell for the future chat rebuild
 
-If older repo notes conflict with this branch canon, this section and `AGENTS.md` win.
+If older repo notes conflict with this canon, this section and `AGENTS.md` win.
 
 ## Naming (ragweld vs tribrid)
 
@@ -51,20 +53,20 @@ in many places (config keys, module names, docs titles). This is expected.
 
 ---
 
-## SOURCE OF TRUTH FILES (THE LAW)
+## SOURCE OF TRUTH FILES
 
 These files define what exists. If something isn't in these files, IT DOES NOT EXIST.
 
-1. `server/models/tribrid_config_model.py` (~1000+ fields) — every tunable parameter, feature flag, threshold
+1. `server/models/tribrid_config_model.py` — current typed config composition root and registered boundary-model aggregate
 2. `data/models.json` (~50+ model definitions) — LLM/embedding/reranker models, pricing, context windows
 3. `data/glossary.json` (~250 terms) — tooltip definitions
 
 ---
 
-## THE DERIVATION CHAIN
+## PUBLIC WIRE CONTRACT CHAIN
 
 ```
-tribrid_config_model.py (PYDANTIC - SOURCE OF TRUTH)
+registered Pydantic boundary models
     ↓ pydantic2ts (uv run scripts/generate_types.py)
 web/src/types/generated.ts (AUTO-GENERATED - DO NOT EDIT)
     ↓ imports
@@ -81,9 +83,10 @@ web/src/components/**/*.tsx (REACT COMPONENTS)
 
 1. **Pydantic First** — add field to config model before implementing anything
 2. **No Hand-Written API Types** — import from `generated.ts`
-3. **No Adapters/Transformers** — fix the Pydantic model instead
-4. **Config Controls Everything** — no hardcoded thresholds
-5. **Field Constraints Are Law** — UI/API must honor `ge`/`le`/`default`
+3. **Local Types Stay Local** — internal Python/domain types and frontend view/state types need not become wire contracts
+4. **Explicit Boundary Mapping** — typed, tested transformations are allowed at real semantic boundaries
+5. **Typed Tunables** — operator/runtime choices belong in config; constants, invariants, and derived values do not
+6. **Field Constraints Govern Boundaries** — UI/API must honor public `ge`/`le`/`default` constraints
 
 ---
 
@@ -91,19 +94,19 @@ web/src/components/**/*.tsx (REACT COMPONENTS)
 
 - Imports: redis, langchain wrappers (LangGraph IS allowed; Qdrant/Haystack/Docling are allowed on this branch)
 - Terms: card/cards -> chunk_summary, golden questions -> eval_dataset, ranker -> reranker
-- Smells: `class *Adapter`, `class *Transformer`, `class *Mapper`, `interface` in .tsx
+- Smells: duplicated wire DTOs, lossy payload guessing, compatibility fallbacks, and dual-read/write contracts
 
 ---
 
 ## FILE CREATION RULES
 
 ### Before Creating Any File:
-1. Does the feature need configurable parameters? → Add to `tribrid_config_model.py` FIRST
-2. Does it need Pydantic types? → Add to config model, run `generate_types.py`
-3. Is it a new component? → Trace the chain: What hook? → What store? → What Pydantic model?
+1. Does the feature expose a serialized public boundary? → Define a focused Pydantic schema and register it for generation when the frontend consumes it.
+2. Does it add a real operator/runtime tunable? → Add it to the closest domain config composed by `TriBridConfig`.
+3. Is it internal domain state or a local UI view model? → Keep it local and typed; do not export it merely to satisfy generation.
 
 ### When Adding a New Feature:
-1. Add to `tribrid_config_model.py` (if configurable)
+1. Add to the closest domain-owned boundary/config module when serialized or configurable
 2. Add to `data/glossary.json` (tooltip for the feature)
 3. Run `uv run scripts/generate_types.py`
 4. Update store if needed
@@ -116,7 +119,7 @@ web/src/components/**/*.tsx (REACT COMPONENTS)
 
 ```
 server/
-├── models/              # Pydantic models - THE LAW
+├── models/              # Validated boundary schemas and config models
 ├── api/                 # FastAPI routers
 ├── db/                  # Database clients (Postgres, Neo4j)
 ├── retrieval/           # Search pipeline
@@ -142,7 +145,7 @@ data/
 ## COMMANDS
 
 ```bash
-uv run scripts/generate_types.py     # Regenerate TS types (after ANY Pydantic change)
+uv run scripts/generate_types.py     # Regenerate after registered public boundary/config changes
 uv run scripts/validate_types.py     # Verify type sync
 uv run scripts/check_banned.py       # Check banned patterns
 ./start.sh                           # Docker + Backend + Frontend
@@ -210,7 +213,8 @@ This ensures institutional knowledge accumulates across sessions.
 
 ## WHEN IN DOUBT
 
-1. **Can I add this field?** → Is it in tribrid_config_model.py? No → Add it there first.
-2. **Can I use this type?** → Is it in generated.ts? No → Add to Pydantic first.
-3. **Can I hardcode this value?** → Should it be configurable? Yes → Add to config.
-4. **Can I write an adapter or fallback?** → No. Fix or replace the real path.
+1. **Is this serialized across a public, persistence, provider, or process boundary?** → Use a focused validated boundary schema.
+2. **Is this a frontend wire payload?** → Import its generated type; do not duplicate it.
+3. **Is this internal or UI-only state?** → A local dataclass, Protocol, TypedDict, interface, or type alias is appropriate.
+4. **Should this value be operator-tunable?** → Put it in typed domain config; otherwise keep the invariant in code.
+5. **Can I map between semantic boundaries?** → Yes, explicitly and with contract tests. Do not add compatibility fallbacks or competing schemas.

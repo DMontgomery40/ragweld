@@ -1,7 +1,7 @@
 /**
  * KeywordManager - Manages discriminative keywords for a corpus
  *
- * Uses types from generated.ts (Pydantic-first):
+ * Uses public wire types from generated.ts:
  * - KeywordsGenerateRequest, KeywordsGenerateResponse
  */
 

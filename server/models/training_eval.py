@@ -1,4 +1,4 @@
-"""Training-eval related models - Re-exported from THE LAW."""
+"""Training-eval registered boundary model exports."""
 
 from server.models.tribrid_config_model import (
     CorpusEvalProfile,
@@ -21,4 +21,3 @@ __all__ = [
     "RerankerTrainRunsResponse",
     "RerankerTrainMetricEvent",
 ]
-
