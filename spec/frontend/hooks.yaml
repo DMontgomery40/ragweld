@@ -5,63 +5,63 @@ version: "1.0"
 hooks:
   - name: useAPI
     returns:
-      - get: <T>(url: string) => Promise<T>
-      - post: <T>(url: string, data?: any) => Promise<T>
-      - put: <T>(url: string, data: any) => Promise<T>
-      - patch: <T>(url: string, data: any) => Promise<T>
-      - delete: (url: string) => Promise<void>
-      - stream: (url: string, data: any, onChunk: (chunk: string) => void) => Promise<void>
+      - get: "<T>(url: string) => Promise<T>"
+      - post: "<T>(url: string, data?: any) => Promise<T>"
+      - put: "<T>(url: string, data: any) => Promise<T>"
+      - patch: "<T>(url: string, data: any) => Promise<T>"
+      - delete: "(url: string) => Promise<void>"
+      - stream: "(url: string, data: any, onChunk: (chunk: string) => void) => Promise<void>"
 
   - name: useConfig
     returns:
-      - config: TriBridConfig | null
+      - config: "TriBridConfig | null"
       - loading: boolean
-      - error: string | null
+      - error: "string | null"
       - dirty: boolean
-      - updateConfig: (updates: Partial<TriBridConfig>) => Promise<void>
-      - updateEmbedding: (updates: Partial<EmbeddingConfig>) => Promise<void>
-      - updateFusion: (updates: Partial<FusionConfig>) => Promise<void>
-      - updateReranker: (updates: Partial<RerankerConfig>) => Promise<void>
-      - saveConfig: () => Promise<void>
-      - resetConfig: () => Promise<void>
+      - updateConfig: "(updates: Partial<TriBridConfig>) => Promise<void>"
+      - updateEmbedding: "(updates: Partial<EmbeddingConfig>) => Promise<void>"
+      - updateFusion: "(updates: Partial<FusionConfig>) => Promise<void>"
+      - updateReranker: "(updates: Partial<RerankerConfig>) => Promise<void>"
+      - saveConfig: "() => Promise<void>"
+      - resetConfig: "() => Promise<void>"
 
   - name: useIndexing
     returns:
-      - status: IndexStatus | null
-      - stats: IndexStats | null
-      - startIndex: (repoId: string, force?: boolean) => Promise<void>
-      - cancelIndex: () => Promise<void>
-      - refreshStatus: () => Promise<void>
-      - refreshStats: (repoId: string) => Promise<void>
+      - status: "IndexStatus | null"
+      - stats: "IndexStats | null"
+      - startIndex: "(repoId: string, force?: boolean) => Promise<void>"
+      - cancelIndex: "() => Promise<void>"
+      - refreshStatus: "() => Promise<void>"
+      - refreshStats: "(repoId: string) => Promise<void>"
 
   - name: useFusion
     returns:
-      - weights: { vector: number; sparse: number; graph: number }
-      - method: 'rrf' | 'weighted'
-      - setWeights: (weights: {...}) => void
-      - setMethod: (method: 'rrf' | 'weighted') => void
-      - normalizeWeights: () => void
+      - weights: "{ vector: number; sparse: number; graph: number }"
+      - method: "'rrf' | 'weighted'"
+      - setWeights: "(weights: {...}) => void"
+      - setMethod: "(method: 'rrf' | 'weighted') => void"
+      - normalizeWeights: "() => void"
 
   - name: useGraph
     returns:
-      - entities: Entity[]
-      - relationships: Relationship[]
-      - communities: Community[]
-      - selectedEntity: Entity | null
-      - stats: GraphStats | null
+      - entities: "Entity[]"
+      - relationships: "Relationship[]"
+      - communities: "Community[]"
+      - selectedEntity: "Entity | null"
+      - stats: "GraphStats | null"
       - loading: boolean
-      - fetchEntities: (type?: string) => Promise<void>
-      - selectEntity: (entityId: string) => Promise<void>
-      - fetchCommunities: (level?: number) => Promise<void>
-      - executeQuery: (cypher: string) => Promise<any[]>
+      - fetchEntities: "(type?: string) => Promise<void>"
+      - selectEntity: "(entityId: string) => Promise<void>"
+      - fetchCommunities: "(level?: number) => Promise<void>"
+      - executeQuery: "(cypher: string) => Promise<any[]>"
 
   - name: useTheme
     returns:
-      - theme: 'light' | 'dark' | 'system'
-      - resolvedTheme: 'light' | 'dark'
-      - setTheme: (theme: 'light' | 'dark' | 'system') => void
+      - theme: "'light' | 'dark' | 'system'"
+      - resolvedTheme: "'light' | 'dark'"
+      - setTheme: "(theme: 'light' | 'dark' | 'system') => void"
 
   - name: useAppInit
     returns:
       - initialized: boolean
-      - error: string | null
+      - error: "string | null"

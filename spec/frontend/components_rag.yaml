@@ -21,7 +21,7 @@ components:
   - name: FusionWeightsPanel
     props:
       - name: onChange
-        type: (weights: FusionConfig) => void
+        type: "(weights: FusionConfig) => void"
         required: false
 
   - name: RerankerConfigSubtab
@@ -34,12 +34,6 @@ components:
     props: []
 
   - name: DataQualitySubtab
-    props: []
-
-  - name: ChunkSummaryPanel
-    props: []
-
-  - name: ChunkSummaryViewer
     props: []
 
   - name: ModelPicker

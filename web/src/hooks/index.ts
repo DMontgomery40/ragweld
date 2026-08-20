@@ -45,8 +45,6 @@ export { useMCPRag } from './useMCPRag';
 export { useMCPServer } from './useMCPServer';
 export { useCost } from './useCost';
 export { useModelFlows } from './useModelFlows';
-// Chunk Summaries (formerly "cards" - renamed per CLAUDE.md)
-export { useChunkSummaries, useCards } from './useChunkSummaries';
 // useOnboarding removed - banned feature per CLAUDE.md
 export { useStorageCalculator } from './useStorageCalculator';
 

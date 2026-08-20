@@ -6,10 +6,10 @@ components:
   - name: Button
     props:
       - name: variant
-        type: 'primary' | 'secondary' | 'danger' | 'ghost'
+        type: "'primary' | 'secondary' | 'danger' | 'ghost'"
         default: 'primary'
       - name: size
-        type: 'sm' | 'md' | 'lg'
+        type: "'sm' | 'md' | 'lg'"
         default: 'md'
       - name: loading
         type: boolean
@@ -18,7 +18,7 @@ components:
         type: boolean
         default: false
       - name: onClick
-        type: () => void
+        type: "() => void"
         required: false
       - name: children
         type: ReactNode
@@ -30,7 +30,7 @@ components:
         type: string
         required: true
       - name: size
-        type: 'sm' | 'md'
+        type: "'sm' | 'md'"
         default: 'sm'
 
   - name: ProgressBar
@@ -42,13 +42,13 @@ components:
         type: string
         required: false
       - name: variant
-        type: 'default' | 'success' | 'warning' | 'error'
+        type: "'default' | 'success' | 'warning' | 'error'"
         default: 'default'
 
   - name: StatusIndicator
     props:
       - name: status
-        type: 'healthy' | 'warning' | 'error' | 'unknown'
+        type: "'healthy' | 'warning' | 'error' | 'unknown'"
         required: true
       - name: label
         type: string
@@ -57,7 +57,7 @@ components:
   - name: LoadingSpinner
     props:
       - name: size
-        type: 'sm' | 'md' | 'lg'
+        type: "'sm' | 'md' | 'lg'"
         default: 'md'
 
   - name: CollapsibleSection
@@ -84,8 +84,8 @@ components:
   - name: RepoSelector
     props:
       - name: value
-        type: string | null
+        type: "string | null"
         required: true
       - name: onChange
-        type: (repoId: string) => void
+        type: "(repoId: string) => void"
         required: true

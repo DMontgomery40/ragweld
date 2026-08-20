@@ -17,7 +17,7 @@ files:
           type: string
           x?: number
           y?: number
-          properties: Record<string, any>
+          properties: "Record<string, any>"
 
       - GraphEdge:
           source: string
@@ -26,11 +26,11 @@ files:
           weight: number
 
       - GraphData:
-          nodes: GraphNode[]
-          edges: GraphEdge[]
+          nodes: "GraphNode[]"
+          edges: "GraphEdge[]"
 
       - GraphViewSettings:
-          layout: 'force' | 'hierarchical' | 'circular'
+          layout: "'force' | 'hierarchical' | 'circular'"
           showLabels: boolean
           nodeSize: number
           edgeWidth: number
@@ -43,28 +43,28 @@ files:
           term: string
           definition: string
           category: string
-          links: Array<{ label: string; url: string }>
+          links: "Array<{ label: string; url: string }>"
 
       - ActivityItem:
           id: string
           type: string
           message: string
           timestamp: Date
-          metadata?: Record<string, any>
+          metadata?: "Record<string, any>"
 
       - SystemStatus:
-          overall: 'healthy' | 'degraded' | 'down'
-          services: Record<string, ServiceStatus>
+          overall: "'healthy' | 'degraded' | 'down'"
+          services: "Record<string, ServiceStatus>"
           lastUpdated: Date
 
       - ServiceStatus:
           name: string
           healthy: boolean
           latency_ms: number
-          error: string | null
+          error: "string | null"
 
       - ContainerStatus:
           name: string
-          status: 'running' | 'stopped' | 'error'
-          uptime: string | null
-          memory_mb: number | null
+          status: "'running' | 'stopped' | 'error'"
+          uptime: "string | null"
+          memory_mb: "number | null"

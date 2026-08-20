@@ -6,7 +6,6 @@ export { useAlertThresholdsStore } from './useAlertThresholdsStore';
 export { useRepoStore, useActiveRepo, useRepos, useRepoLoading, useRepoInitialized } from './useRepoStore';
 export { useTooltipStore } from './useTooltipStore';
 export { useUIStore } from './useUIStore';
-export { useChunkSummariesStore } from './useChunkSummariesStore';
 // Graph store (knowledge graph state)
 export { useGraphStore } from './useGraphStore';
 // Cost calculator store (for Sidepanel)
