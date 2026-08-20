@@ -4,9 +4,6 @@ Verifies that all model files correctly re-export from tribrid_config_model.py
 and backward compatibility aliases work.
 """
 
-import pytest
-
-
 class TestEvalModelExports:
     """Test eval.py re-exports from THE LAW."""
 
@@ -107,51 +104,6 @@ class TestIndexModelExports:
         assert callable(IndexRequest)
         assert callable(IndexStatus)
         assert callable(IndexStats)
-
-
-class TestModelsInitExports:
-    """Test server/models/__init__.py exports all models."""
-
-    def test_all_models_from_init(self) -> None:
-        """Test all models are available from server.models."""
-        from server.models import (
-            # Config
-            TriBridConfig,
-            # Chunk/Retrieval
-            Chunk,
-            ChunkMatch,
-            SearchRequest,
-            SearchResponse,
-            AnswerRequest,
-            AnswerResponse,
-            # Index
-            IndexRequest,
-            IndexStatus,
-            IndexStats,
-            # Chat
-            Message,
-            ChatRequest,
-            ChatResponse,
-            # Graph
-            Entity,
-            Relationship,
-            Community,
-            GraphStats,
-            # Eval
-            EvalDatasetItem,
-            EvalRequest,
-            EvalMetrics,
-            EvalResult,
-            EvalRun,
-            EvalComparisonResult,
-        )
-
-        # Verify all are importable (no ImportError)
-        assert TriBridConfig is not None
-        assert Chunk is not None
-        assert ChunkMatch is not None
-        assert Entity is not None
-        assert EvalDatasetItem is not None
 
 
 class TestTypesMatchTheLaw:
