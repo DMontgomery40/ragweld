@@ -47,8 +47,8 @@ async def test_ready_reports_gateway_and_serving_failures_separately(client: Asy
 
 @pytest.mark.requires_postgres
 @pytest.mark.asyncio
-async def test_ready_unknown_corpus_does_not_crash(client: AsyncClient) -> None:
-    """GET /api/ready with a missing corpus_id should return 200 + a readiness payload (not 500)."""
+async def test_ready_unknown_corpus_reports_not_ready(client: AsyncClient) -> None:
+    """A missing requested corpus is a truthful 503 readiness failure, not a crash."""
     corpora = await client.get("/api/corpora")
     assert corpora.status_code == 200
     existing_ids = {
@@ -61,7 +61,12 @@ async def test_ready_unknown_corpus_does_not_crash(client: AsyncClient) -> None:
     assert missing_id not in existing_ids
 
     resp = await client.get("/api/ready", params={"corpus_id": missing_id})
-    assert resp.status_code == 200
+    assert resp.status_code == 503
+    payload = resp.json()
+    assert payload["ready"] is False
+    assert payload["corpus_id"] == missing_id
+    assert payload["corpus_error"] == f"Corpus not found: {missing_id}"
+    assert payload["dependencies"]["postgres"]["ok"] is True
 
     data = resp.json()
     assert data.get("corpus_id") == missing_id

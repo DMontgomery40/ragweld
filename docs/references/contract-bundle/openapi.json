@@ -1736,7 +1736,7 @@
             "$ref": "#/components/schemas/LiteLLMConfig"
           },
           "max_tokens": {
-            "default": 4096,
+            "default": 512,
             "maximum": 16384.0,
             "minimum": 100.0,
             "title": "Max Tokens",
@@ -1847,7 +1847,7 @@
             "$ref": "#/components/schemas/LiteLLMConfig"
           },
           "max_tokens": {
-            "default": 4096,
+            "default": 512,
             "maximum": 16384.0,
             "minimum": 100.0,
             "title": "Max Tokens",
@@ -5022,7 +5022,7 @@
             "type": "string"
           },
           "embedding_model_local": {
-            "default": "all-MiniLM-L6-v2",
+            "default": "BAAI/bge-small-en-v1.5",
             "description": "Local SentenceTransformer model",
             "title": "Embedding Model Local",
             "type": "string"
@@ -6541,7 +6541,7 @@
             "type": "string"
           },
           "gen_max_tokens": {
-            "default": 2048,
+            "default": 512,
             "description": "Max tokens for generation",
             "maximum": 8192.0,
             "minimum": 100.0,

@@ -245,8 +245,8 @@ async def test_lineage_dataset_and_synthetic_publish_refresh_current_bundle(clie
         corpus_id=corpus_id,
         provider="synthetic_data_kit",
         recipe="eval_dataset",
-        generator_model="openai/gpt-5.4-mini",
-        judge_model="openai/gpt-5.4-mini",
+        generator_model="ragweld-local",
+        judge_model="ragweld-local",
     )
     run = SyntheticRun(
         run_id=run_id,

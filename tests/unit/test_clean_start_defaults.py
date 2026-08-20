@@ -18,6 +18,15 @@ def test_clean_start_uses_generic_model_data_and_chat_defaults() -> None:
     assert ChatConfig().default_corpus_ids == ["recall_default"]
 
 
+def test_clean_start_embedding_does_not_select_in_process_mlx() -> None:
+    runtime_config = json.loads((ROOT / "tribrid_config.json").read_text(encoding="utf-8"))
+
+    assert runtime_config["embedding"]["embedding_backend"] == "provider"
+    assert runtime_config["embedding"]["embedding_type"] == "huggingface"
+    assert runtime_config["embedding"]["embedding_model_local"] == "BAAI/bge-small-en-v1.5"
+    assert runtime_config["embedding"]["embedding_dim"] == 384
+
+
 def test_generic_runtime_surfaces_do_not_embed_optional_epstein_lane_defaults() -> None:
     generic_paths = [
         "server/models/tribrid_config_model.py",

@@ -164,3 +164,23 @@ async def test_gateway_failure_is_not_retried_or_fallback_routed() -> None:
             )
 
     assert len(_GatewayHandler.requests) == 1
+
+
+@pytest.mark.asyncio
+async def test_streaming_gateway_failure_reads_and_reports_error_body() -> None:
+    with _gateway_server() as base_url:
+        with pytest.raises(RuntimeError, match="controlled failure"):
+            _ = [
+                delta
+                async for delta in stream_chat_text(
+                    route=_route(base_url, model="fail-once"),
+                    system_prompt="System",
+                    user_message="Hello",
+                    images=[],
+                    temperature=0,
+                    max_tokens=8,
+                    context_chunks=[],
+                )
+            ]
+
+    assert len(_GatewayHandler.requests) == 1

@@ -49,7 +49,7 @@ export function ChatSettings() {
   );
   const [temperature, setTemperature] = useConfigField('chat.temperature', 0.3);
   const [temperatureNoRetrieval, setTemperatureNoRetrieval] = useConfigField('chat.temperature_no_retrieval', 0.7);
-  const [maxTokens, setMaxTokens] = useConfigField('chat.max_tokens', 4096);
+  const [maxTokens, setMaxTokens] = useConfigField('chat.max_tokens', 512);
 
   // Recall (nested) — update the whole object to avoid shallow-merge clobbering.
   const [recall, setRecall] = useConfigField<RecallConfig>('chat.recall', {});

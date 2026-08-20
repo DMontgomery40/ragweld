@@ -242,16 +242,20 @@ def test_observability_overlay_resolves_repo_files_and_avoids_foreign_ports() ->
     assert published.isdisjoint(foreign_ports)
 
 
-def test_prometheus_scrapes_only_clean_start_targets_and_accepts_tempo_metrics() -> None:
+def test_prometheus_scrapes_clean_start_data_and_generation_targets() -> None:
     import yaml
 
     payload = yaml.safe_load((ROOT / "infra" / "prometheus.yml").read_text(encoding="utf-8"))
     scrape_configs = payload["scrape_configs"]
     jobs = {config["job_name"]: config for config in scrape_configs}
 
-    assert set(jobs) == {"prometheus", "ragweld-api-host", "postgres"}
+    assert set(jobs) == {"prometheus", "ragweld-api-host", "postgres", "litellm", "vllm"}
     api_targets = jobs["ragweld-api-host"]["static_configs"][0]["targets"]
     assert api_targets == ["host.docker.internal:58012"]
+    assert jobs["litellm"]["metrics_path"] == "/metrics"
+    assert jobs["litellm"]["static_configs"][0]["targets"] == ["litellm:4000"]
+    assert jobs["vllm"]["metrics_path"] == "/metrics"
+    assert jobs["vllm"]["static_configs"][0]["targets"] == ["vllm:8000"]
 
     compose = _compose_config("docker-compose.yml")
     assert "--web.enable-remote-write-receiver" in compose["services"]["prometheus"]["command"]
@@ -292,6 +296,7 @@ def test_docker_service_allowlists_match_frontend_and_managed_compose_services()
 
 def test_generation_gateway_topology_is_pinned_local_and_has_no_paid_fallback() -> None:
     import yaml
+    from server.models.tribrid_config_model import TriBridConfig
 
     config = _compose_config("docker-compose.yml", "infra/docker-compose.observability.yml")
     services = config["services"]
@@ -306,6 +311,14 @@ def test_generation_gateway_topology_is_pinned_local_and_has_no_paid_fallback() 
     assert _published_ports(litellm) == {54000}
     assert all(port.get("host_ip") == "127.0.0.1" for port in vllm["ports"])
     assert all(port.get("host_ip") == "127.0.0.1" for port in litellm["ports"])
+    vllm_command = [str(part) for part in vllm["command"]]
+    memory_flag = vllm_command.index("--gpu-memory-utilization")
+    assert vllm_command[memory_flag + 1] == "0.32"
+    context_flag = vllm_command.index("--max-model-len")
+    max_model_len = int(vllm_command[context_flag + 1])
+    runtime_config = TriBridConfig()
+    assert runtime_config.chat.max_tokens <= max_model_len // 2
+    assert runtime_config.generation.gen_max_tokens <= max_model_len // 2
 
     assert litellm["depends_on"]["vllm"]["condition"] == "service_healthy"
     assert api["depends_on"]["litellm"]["condition"] == "service_healthy"
@@ -331,6 +344,33 @@ def test_generation_gateway_topology_is_pinned_local_and_has_no_paid_fallback() 
     }
     assert gateway["model_list"][1]["litellm_params"]["model"] == "openrouter/openai/gpt-5.4-mini"
     assert gateway["model_list"][1]["litellm_params"]["api_key"] == "os.environ/OPENROUTER_API_KEY"
+
+    launcher = (ROOT / "start.sh").read_text(encoding="utf-8")
+    assert "unset OPENROUTER_API_KEY ANTHROPIC_API_KEY GOOGLE_API_KEY" in launcher
+    assert "colima start --profile ragweld --vm-type vz --cpu 4 --memory 16" in launcher
     assert gateway["litellm_settings"]["num_retries"] == 0
     assert gateway["litellm_settings"].get("fallbacks", []) == []
     assert gateway["litellm_settings"].get("context_window_fallbacks", []) == []
+    assert gateway["litellm_settings"]["callbacks"] == ["prometheus"]
+    assert gateway["litellm_settings"]["require_auth_for_metrics_endpoint"] is False
+
+    litellm_health = " ".join(str(part) for part in litellm["healthcheck"]["test"])
+    assert "/v1/models" in litellm_health
+    assert "LITELLM_MASTER_KEY" in litellm_health
+    assert "Authorization" in litellm_health
+    api_health = " ".join(str(part) for part in api["healthcheck"]["test"])
+    assert "/api/ready" in api_health
+    dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+    assert "http://localhost:8000/api/ready" in dockerfile
+    assert "http://localhost:8000/health" not in dockerfile
+
+    gateway_dashboard = json.loads(
+        (ROOT / "infra/grafana/provisioning/dashboards/gateway-serving.json").read_text(encoding="utf-8")
+    )
+    dashboard_source = json.dumps(gateway_dashboard)
+    assert "tribrid_search_" not in dashboard_source
+    assert "tribrid_vector_leg_" not in dashboard_source
+    assert "litellm_proxy_total_requests_metric_total" in dashboard_source
+    assert "litellm_request_total_latency_metric_bucket" in dashboard_source
+    assert "vllm:num_requests_running" in dashboard_source
+    assert "vllm:num_requests_waiting" in dashboard_source

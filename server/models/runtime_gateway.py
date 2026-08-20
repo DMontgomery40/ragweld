@@ -98,7 +98,7 @@ class GenerationConfig(BaseModel):
     )
 
     gen_max_tokens: int = Field(
-        default=2048,
+        default=512,
         ge=100,
         le=8192,
         description="Max tokens for generation",

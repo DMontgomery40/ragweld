@@ -122,7 +122,7 @@ export function RetrievalSubtab() {
   const [genModelHttp, setGenModelHttp] = useConfigField<string>('generation.gen_model_http', '');
   const [genModelMcp, setGenModelMcp] = useConfigField<string>('generation.gen_model_mcp', '');
   const [genModelCli, setGenModelCli] = useConfigField<string>('generation.gen_model_cli', '');
-  const [genMaxTokens, setGenMaxTokens] = useConfigField<number>('generation.gen_max_tokens', 2048);
+  const [genMaxTokens, setGenMaxTokens] = useConfigField<number>('generation.gen_max_tokens', 512);
   const [genTopP, setGenTopP] = useConfigField<number>('generation.gen_top_p', 1.0);
   const [genTimeout, setGenTimeout] = useConfigField<number>('generation.gen_timeout', 60);
   const [enrichDisabled, setEnrichDisabled] = useConfigField<number>('generation.enrich_disabled', 0);
@@ -1446,7 +1446,7 @@ export function RetrievalSubtab() {
                     max={8192}
                     step={1}
                     value={genMaxTokens}
-                    onChange={(e) => setGenMaxTokens(snapNumber(e.target.value, 2048))}
+                    onChange={(e) => setGenMaxTokens(snapNumber(e.target.value, 512))}
                   />
                 </div>
                 <div className="input-group">

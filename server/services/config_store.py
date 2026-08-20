@@ -91,6 +91,35 @@ def _upgrade_raw_config(raw: dict[str, Any]) -> tuple[TriBridConfig, bool, list[
             chunking["chunking_strategy"] = "fixed_chars"
             migrated_keys.append("chunking.chunking_strategy")
 
+    generation = working.get("generation")
+    if isinstance(generation, dict) and generation.get("gen_max_tokens") == 2048:
+        generation["gen_max_tokens"] = 512
+        migrated_keys.append("generation.gen_max_tokens")
+
+    chat = working.get("chat")
+    if isinstance(chat, dict) and chat.get("max_tokens") == 4096:
+        chat["max_tokens"] = 512
+        migrated_keys.append("chat.max_tokens")
+
+    embedding = working.get("embedding")
+    if (
+        isinstance(embedding, dict)
+        and embedding.get("embedding_backend") == "provider"
+        and embedding.get("embedding_type") == "mlx"
+        and embedding.get("embedding_model_mlx") == "mlx-community/all-MiniLM-L6-v2-4bit"
+    ):
+        embedding["embedding_type"] = "huggingface"
+        migrated_keys.append("embedding.embedding_type")
+
+    if (
+        isinstance(embedding, dict)
+        and embedding.get("embedding_backend") == "provider"
+        and embedding.get("embedding_type") in {"local", "huggingface"}
+        and embedding.get("embedding_model_local", "all-MiniLM-L6-v2") == "all-MiniLM-L6-v2"
+    ):
+        embedding["embedding_model_local"] = "BAAI/bge-small-en-v1.5"
+        migrated_keys.append("embedding.embedding_model_local")
+
     cfg = TriBridConfig.model_validate(working)
     changed = bool(migrated_keys)
     return (cfg, changed, sorted(set(migrated_keys)))

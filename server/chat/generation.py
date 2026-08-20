@@ -260,6 +260,8 @@ async def stream_chat_text(
         async with httpx.AsyncClient(timeout=timeout_s) as client:
             try:
                 async with client.stream("POST", _url(route), headers=_headers(route), json=payload) as response:
+                    if response.is_error:
+                        await response.aread()
                     response.raise_for_status()
                     captured_trace_id = _debug_trace_id(response)
                     if captured_trace_id and on_debug_trace_id:

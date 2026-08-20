@@ -855,7 +855,7 @@ export function ChatInterface({ onTraceUpdate }: ChatInterfaceProps) {
   const [messageFeedback, setMessageFeedback] = useState<Record<string, { type: string; rating?: number }>>({});
 
   const [temperature, setTemperature] = useConfigField<number>('chat.temperature', 0.3);
-  const [maxTokens, setMaxTokens] = useConfigField<number>('chat.max_tokens', 4096);
+  const [maxTokens, setMaxTokens] = useConfigField<number>('chat.max_tokens', 512);
   const [topK, setTopK] = useConfigField<number>('retrieval.final_k', 10);
 
   const chatShowConfidence = Boolean(config?.ui?.chat_show_confidence ?? 0);

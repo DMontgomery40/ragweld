@@ -42,7 +42,7 @@ Docker/Colima ownership:
   This script never starts, stops, resets, or deletes Docker Desktop or Colima.
   Start the dedicated host profile yourself, then select its Docker context:
 
-    colima start --profile ragweld --vm-type vz --cpu 4 --memory 8
+    colima start --profile ragweld --vm-type vz --cpu 4 --memory 16
     docker context use colima-ragweld
 EOF
 }
@@ -228,6 +228,11 @@ if [[ -f .env ]]; then
   source .env
   set +a
 fi
+
+# Upstream provider credentials belong to the LiteLLM container's private
+# infra/litellm.env boundary. Never pass inherited shell values into the host
+# Ragweld API or Vite processes.
+unset OPENROUTER_API_KEY ANTHROPIC_API_KEY GOOGLE_API_KEY
 
 if [[ -n "${COMPOSE_PROJECT_NAME:-}" && "$COMPOSE_PROJECT_NAME" != "$RAGWELD_COMPOSE_PROJECT" ]]; then
   die "COMPOSE_PROJECT_NAME must be '${RAGWELD_COMPOSE_PROJECT}', got '${COMPOSE_PROJECT_NAME}'"

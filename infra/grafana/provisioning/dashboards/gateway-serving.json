@@ -20,8 +20,8 @@
         "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
         "textMode": "auto"
       },
-      "targets": [{ "expr": "sum(rate(tribrid_search_requests_total[5m]))", "legendFormat": "requests/s" }],
-      "title": "Gateway Traffic",
+      "targets": [{ "expr": "sum(rate(litellm_proxy_total_requests_metric_total[5m]))", "legendFormat": "requests/s" }],
+      "title": "LiteLLM Traffic",
       "type": "stat"
     },
     {
@@ -37,8 +37,8 @@
         "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
         "textMode": "auto"
       },
-      "targets": [{ "expr": "histogram_quantile(0.95, rate(tribrid_search_latency_seconds_bucket[5m]))", "legendFormat": "p95" }],
-      "title": "Latency (p95)",
+      "targets": [{ "expr": "histogram_quantile(0.95, sum by (le) (rate(litellm_request_total_latency_metric_bucket[5m])))", "legendFormat": "p95" }],
+      "title": "LiteLLM Latency (p95)",
       "type": "stat"
     },
     {
@@ -56,11 +56,11 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(tribrid_search_errors_total[5m])) / clamp_min(sum(rate(tribrid_search_requests_total[5m])), 1)",
+          "expr": "sum(rate(litellm_proxy_failed_requests_metric_total[5m])) / clamp_min(sum(rate(litellm_proxy_total_requests_metric_total[5m])), 1)",
           "legendFormat": "error rate"
         }
       ],
-      "title": "Error Rate",
+      "title": "LiteLLM Error Rate",
       "type": "stat"
     },
     {
@@ -74,7 +74,7 @@
             "showPoints": "never",
             "spanNulls": false
           },
-          "unit": "s"
+          "unit": "short"
         }
       },
       "gridPos": { "h": 8, "w": 24, "x": 0, "y": 6 },
@@ -84,18 +84,17 @@
         "tooltip": { "mode": "multi", "sort": "desc" }
       },
       "targets": [
-        { "expr": "histogram_quantile(0.50, rate(tribrid_vector_leg_latency_seconds_bucket[5m]))", "legendFormat": "vector p50" },
-        { "expr": "histogram_quantile(0.50, rate(tribrid_sparse_leg_latency_seconds_bucket[5m]))", "legendFormat": "sparse p50" },
-        { "expr": "histogram_quantile(0.50, rate(tribrid_graph_leg_latency_seconds_bucket[5m]))", "legendFormat": "graph p50" }
+        { "expr": "sum(vllm:num_requests_running)", "legendFormat": "running" },
+        { "expr": "sum(vllm:num_requests_waiting)", "legendFormat": "waiting" }
       ],
-      "title": "Serving Path Latency By Leg",
+      "title": "vLLM Request Concurrency",
       "type": "timeseries"
     },
     {
       "gridPos": { "h": 7, "w": 24, "x": 0, "y": 14 },
       "id": 5,
       "options": {
-        "content": "## Gateway and Serving\nThis dashboard is the runtime lane for LiteLLM and vLLM.\n\nUse the shared variables to keep provider/model/run context aligned with Benchmark and Eval Analysis when traffic or latency shifts.",
+        "content": "## Gateway and Serving\nThis dashboard reads the metrics emitted by the live LiteLLM and vLLM services.\n\nCheck `up{job=\"litellm\"}` and `up{job=\"vllm\"}` before interpreting request rate, latency, errors, or serving concurrency. The OpenRouter smoke alias is explicit and never a fallback.",
         "mode": "markdown"
       },
       "title": "Operator Notes",

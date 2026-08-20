@@ -144,7 +144,7 @@ RAGWELD_STRICT_INTEGRATION=1 ./scripts/test_integration.sh
 Host action, outside repository automation:
 
 ```bash
-colima start --profile ragweld --vm-type vz --cpu 4 --memory 8
+colima start --profile ragweld --vm-type vz --cpu 4 --memory 16
 docker context use colima-ragweld
 ```
 

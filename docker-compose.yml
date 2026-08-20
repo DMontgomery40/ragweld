@@ -156,6 +156,8 @@ services:
       - "2048"
       - --max-num-seqs
       - "1"
+      - --gpu-memory-utilization
+      - "0.32"
     ports:
       - "127.0.0.1:${VLLM_PORT:-58080}:8000"
     volumes:
@@ -186,7 +188,7 @@ services:
       vllm:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4000/health/liveliness', timeout=5)"]
+      test: ["CMD", "python", "-c", "import os, urllib.request; request = urllib.request.Request('http://127.0.0.1:4000/v1/models', headers={'Authorization': 'Bearer ' + os.environ['LITELLM_MASTER_KEY']}); urllib.request.urlopen(request, timeout=5)"]
       interval: 10s
       timeout: 10s
       retries: 30
@@ -221,7 +223,7 @@ services:
       litellm:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/ready"]
       interval: 10s
       timeout: 5s
       retries: 5

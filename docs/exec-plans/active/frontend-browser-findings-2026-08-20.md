@@ -11,7 +11,7 @@ These findings came from the Codex in-app Browser against the real running app:
 - UI: `http://127.0.0.1:55173/web/`
 - API: `http://127.0.0.1:58012/api`
 - viewport: 1600 x 900
-- real navigation exercised: Dashboard, Admin, Chat, Infrastructure
+- real navigation exercised: Dashboard, Admin, Chat, Infrastructure, RAG
 - no request interception or synthetic frontend data
 
 The API and data plane were healthy during this pass. Screenshots and semantic
@@ -68,6 +68,13 @@ so the clipped content cannot be recovered with normal horizontal scrolling.
 - Chat workbench nested scroll/positioning
 
 ## P1: Chat advertises models that are not runnable
+
+### Retest status
+
+Resolved by the gateway-only runtime slice. The rendered Chat, Dashboard quick
+switcher, Retrieval, and Indexing surfaces now expose only
+`LiteLLM · ragweld-local`. A real Browser send returned `BROWSER_OK` through
+LiteLLM to local vLLM with provider response and trace IDs.
 
 ### Evidence
 
@@ -135,6 +142,58 @@ Each surface should label exactly what it is reporting: host process, managed
 container, dependency readiness, or telemetry backend. A missing optional API
 container must not read like a missing Ragweld API when the host API is live.
 
+## P1: Indexing mutates embedding settings on view and immediately conflicts
+
+### Retest status
+
+Resolved by the clean-start config correction. The catalog-backed default and
+stored-config migration now use `BAAI/bge-small-en-v1.5` at 384 dimensions.
+Reopening the rendered Indexing page leaves `Apply All Changes` disabled and
+shows no 409. Keep the acceptance criteria below as regression guidance.
+
+### Evidence
+
+Opening `RAG > Indexing` against the real `recall_default` corpus changed the
+rendered embedding model from the configured local
+`all-MiniLM-L6-v2`/384-dimensional lane to the first catalog option
+`BAAI/bge-m3`/1024 dimensions. No operator selection was made. The global apply
+bar immediately showed an unsaved-change marker and `Request failed with status
+code 409`.
+
+The page therefore turns a read/navigation action into an attempted corpus
+config mutation, then collides with the index contract lock. This is especially
+dangerous because the visible selected model no longer describes the model that
+produced existing vectors.
+
+### Expected
+
+- Opening the tab is read-only.
+- A configured value absent from the catalog renders as explicitly unavailable;
+  it is never silently replaced by the first option.
+- Dimension auto-sync runs only after an explicit user model selection.
+- Index-contract conflicts explain the exact immutable field and required
+  operator action instead of a raw 409.
+
+## P2: direct-provider labels remain after the gateway-only cutover
+
+### Evidence
+
+`Chat > Settings` still renders `Local` and `OpenRouter` top-level tabs. Their
+content has already been replaced by the same LiteLLM/vLLM gateway panel, but
+the headings and descriptions still promise direct local OpenAI-compatible
+endpoints and a combined LiteLLM/OpenRouter/local routing surface.
+
+`RAG > Indexing` also describes the `local` embedding option as having
+"optional MLX fast-paths," although local/Hugging Face embedding now follows
+the explicit SentenceTransformer path and MLX is a separate explicit provider.
+
+### Expected
+
+- Remove or rename the stale `Local` and `OpenRouter` Chat settings tabs.
+- Provider copy describes the one real gateway topology and the isolated paid
+  smoke alias without implying direct app routing.
+- Embedding copy matches explicit provider dispatch; no hidden MLX fast path.
+
 ## P3: React Router future warnings
 
 The rendered app logs React Router warnings for:
@@ -156,4 +215,3 @@ upgrade so warnings do not hide more important console output.
 5. Confirm status labels distinguish host API, container API, dependencies, and
    telemetry truth.
 6. Confirm the browser console has no framework warnings or errors.
-

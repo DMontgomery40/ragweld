@@ -4134,7 +4134,7 @@ class EmbeddingConfig(BaseModel):
         description="Voyage embedding model"
     )
     embedding_model_local: str = Field(
-        default="all-MiniLM-L6-v2",
+        default="BAAI/bge-small-en-v1.5",
         description="Local SentenceTransformer model"
     )
     embedding_model_mlx: str = Field(
@@ -6585,7 +6585,7 @@ Be helpful, friendly, and engaging, and base your answers on the actual database
         le=2.0,
         description="Temperature when nothing is checked (direct chat = more creative)",
     )
-    max_tokens: int = Field(default=4096, ge=100, le=16384)
+    max_tokens: int = Field(default=512, ge=100, le=16384)
 
     show_source_dropdown: bool = Field(default=True)
     send_shortcut: str = Field(default="ctrl+enter")
@@ -7095,7 +7095,7 @@ class TriBridConfig(BaseModel):
                 embedding_model=data.get('EMBEDDING_MODEL', 'text-embedding-3-large'),
                 embedding_dim=data.get('EMBEDDING_DIM', 3072),
                 voyage_model=data.get('VOYAGE_MODEL', 'voyage-code-3'),
-                embedding_model_local=data.get('EMBEDDING_MODEL_LOCAL', 'all-MiniLM-L6-v2'),
+                embedding_model_local=data.get('EMBEDDING_MODEL_LOCAL', 'BAAI/bge-small-en-v1.5'),
                 embedding_model_mlx=data.get('EMBEDDING_MODEL_MLX', 'mlx-community/all-MiniLM-L6-v2-4bit'),
                 embedding_batch_size=data.get('EMBEDDING_BATCH_SIZE', 64),
                 embedding_max_tokens=data.get('EMBEDDING_MAX_TOKENS', 8000),
@@ -7169,7 +7169,7 @@ class TriBridConfig(BaseModel):
             generation=GenerationConfig(
                 gen_model=data.get('GEN_MODEL', 'ragweld-local'),
                 gen_temperature=data.get('GEN_TEMPERATURE', 0.0),
-                gen_max_tokens=data.get('GEN_MAX_TOKENS', 2048),
+                gen_max_tokens=data.get('GEN_MAX_TOKENS', 512),
                 gen_top_p=data.get('GEN_TOP_P', 1.0),
                 gen_timeout=data.get('GEN_TIMEOUT', 60),
                 enrich_model=data.get('ENRICH_MODEL', 'ragweld-local'),

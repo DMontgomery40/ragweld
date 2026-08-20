@@ -160,7 +160,7 @@ export interface ChatConfig {
   temperature?: number; // default: 0.3
   /** Temperature when nothing is checked (direct chat = more creative) */
   temperature_no_retrieval?: number; // default: 0.7
-  max_tokens?: number; // default: 4096
+  max_tokens?: number; // default: 512
   show_source_dropdown?: boolean; // default: True
   send_shortcut?: string; // default: "ctrl+enter"
 }
@@ -620,7 +620,7 @@ export interface EmbeddingConfig {
   /** Voyage embedding model */
   voyage_model?: string; // default: "voyage-code-3"
   /** Local SentenceTransformer model */
-  embedding_model_local?: string; // default: "all-MiniLM-L6-v2"
+  embedding_model_local?: string; // default: "BAAI/bge-small-en-v1.5"
   /** MLX-optimized embedding model (used when embedding_type=mlx) */
   embedding_model_mlx?: string; // default: "mlx-community/all-MiniLM-L6-v2-4bit"
   /** Batch size for embedding generation */
@@ -839,7 +839,7 @@ export interface GenerationConfig {
   /** Generation temperature */
   gen_temperature?: number; // default: 0.0
   /** Max tokens for generation */
-  gen_max_tokens?: number; // default: 2048
+  gen_max_tokens?: number; // default: 512
   /** Nucleus sampling threshold */
   gen_top_p?: number; // default: 1.0
   /** Generation timeout (seconds) */

@@ -64,3 +64,70 @@ def test_upgrade_raw_config_normalizes_legacy_semantic_chunking() -> None:
     assert changed is True
     assert cfg.chunking.chunking_strategy == "fixed_chars"
     assert "chunking.chunking_strategy" in set(migrated)
+
+
+def test_upgrade_raw_config_replaces_pre_gateway_token_defaults() -> None:
+    raw = {
+        "generation": {"gen_max_tokens": 2048},
+        "chat": {"max_tokens": 4096},
+    }
+
+    cfg, changed, migrated = _upgrade_raw_config(raw)
+
+    assert changed is True
+    assert cfg.generation.gen_max_tokens == 512
+    assert cfg.chat.max_tokens == 512
+    assert set(migrated) >= {
+        "generation.gen_max_tokens",
+        "chat.max_tokens",
+    }
+
+
+def test_upgrade_raw_config_preserves_explicit_nonlegacy_token_budgets() -> None:
+    raw = {
+        "generation": {"gen_max_tokens": 768},
+        "chat": {"max_tokens": 1024},
+    }
+
+    cfg, changed, migrated = _upgrade_raw_config(raw)
+
+    assert changed is False
+    assert migrated == []
+    assert cfg.generation.gen_max_tokens == 768
+    assert cfg.chat.max_tokens == 1024
+
+
+def test_upgrade_raw_config_replaces_pre_gateway_mlx_embedding_default() -> None:
+    raw = {
+        "embedding": {
+            "embedding_backend": "provider",
+            "embedding_type": "mlx",
+            "embedding_model_mlx": "mlx-community/all-MiniLM-L6-v2-4bit",
+            "embedding_dim": 384,
+        }
+    }
+
+    cfg, changed, migrated = _upgrade_raw_config(raw)
+
+    assert changed is True
+    assert cfg.embedding.embedding_type == "huggingface"
+    assert cfg.embedding.embedding_model_local == "BAAI/bge-small-en-v1.5"
+    assert "embedding.embedding_type" in set(migrated)
+    assert "embedding.embedding_model_local" in set(migrated)
+
+
+def test_upgrade_raw_config_replaces_uncataloged_local_embedding_default() -> None:
+    raw = {
+        "embedding": {
+            "embedding_backend": "provider",
+            "embedding_type": "huggingface",
+            "embedding_model_local": "all-MiniLM-L6-v2",
+            "embedding_dim": 384,
+        }
+    }
+
+    cfg, changed, migrated = _upgrade_raw_config(raw)
+
+    assert changed is True
+    assert cfg.embedding.embedding_model_local == "BAAI/bge-small-en-v1.5"
+    assert "embedding.embedding_model_local" in set(migrated)

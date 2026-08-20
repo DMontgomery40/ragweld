@@ -13,6 +13,8 @@ litellm_settings:
   num_retries: 0
   fallbacks: []
   context_window_fallbacks: []
+  callbacks: [prometheus]
+  require_auth_for_metrics_endpoint: false
 
 router_settings:
   num_retries: 0

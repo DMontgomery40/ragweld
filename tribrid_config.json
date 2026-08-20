@@ -107,7 +107,7 @@
   },
   "embedding": {
     "embedding_backend": "provider",
-    "embedding_type": "mlx",
+    "embedding_type": "huggingface",
     "embedding_model": "text-embedding-3-large",
     "embedding_dim": 384,
     "auto_set_dimensions": true,
@@ -117,7 +117,7 @@
     "contextual_chunk_embeddings": "off",
     "late_chunking_max_doc_tokens": 8192,
     "voyage_model": "voyage-code-3",
-    "embedding_model_local": "all-MiniLM-L6-v2",
+    "embedding_model_local": "BAAI/bge-small-en-v1.5",
     "embedding_model_mlx": "mlx-community/all-MiniLM-L6-v2-4bit",
     "embedding_batch_size": 64,
     "embedding_max_tokens": 8000,
@@ -308,7 +308,7 @@
   "generation": {
     "gen_model": "ragweld-local",
     "gen_temperature": 0.0,
-    "gen_max_tokens": 2048,
+    "gen_max_tokens": 512,
     "gen_top_p": 1.0,
     "gen_timeout": 60,
     "enrich_model": "ragweld-local",
@@ -580,7 +580,7 @@
     },
     "temperature": 0.3,
     "temperature_no_retrieval": 0.7,
-    "max_tokens": 4096,
+    "max_tokens": 512,
     "show_source_dropdown": true,
     "send_shortcut": "ctrl+enter"
   },
