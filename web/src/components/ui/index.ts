@@ -11,8 +11,6 @@ export { Button } from './Button';
 // Progress indicators
 export { ProgressBar } from './ProgressBar';
 export type { ProgressBarProps } from './ProgressBar';
-export { ProgressBarWithShimmer } from './ProgressBarWithShimmer';
-export type { ProgressBarWithShimmerProps } from './ProgressBarWithShimmer';
 
 // Status indicators
 export { StatusIndicator } from './StatusIndicator';
