@@ -5,11 +5,11 @@ import os
 import shutil
 import socket
 import subprocess
+import tempfile
 import time
 from pathlib import Path
 
 import pytest
-
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -18,7 +18,11 @@ def _run(*args: str, env: dict[str, str] | None = None) -> subprocess.CompletedP
     merged = dict(os.environ)
     if env:
         merged.update(env)
-    return subprocess.run(args, cwd=ROOT, env=merged, text=True, capture_output=True, check=False)
+    if env and "RAGWELD_RUNTIME_DIR" in env:
+        return subprocess.run(args, cwd=ROOT, env=merged, text=True, capture_output=True, check=False)
+    with tempfile.TemporaryDirectory(prefix="ragweld-runtime-test-") as runtime_dir:
+        merged["RAGWELD_RUNTIME_DIR"] = runtime_dir
+        return subprocess.run(args, cwd=ROOT, env=merged, text=True, capture_output=True, check=False)
 
 
 def _unused_tcp_port() -> int:

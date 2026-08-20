@@ -5,6 +5,7 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -17,14 +18,25 @@ def _run(*args: str, env: dict[str, str] | None = None) -> subprocess.CompletedP
     merged_env = dict(os.environ)
     if env:
         merged_env.update(env)
-    return subprocess.run(
-        list(args),
-        cwd=ROOT,
-        env=merged_env,
-        text=True,
-        capture_output=True,
-        check=False,
-    )
+    if env and "RAGWELD_RUNTIME_DIR" in env:
+        return subprocess.run(
+            list(args),
+            cwd=ROOT,
+            env=merged_env,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+    with tempfile.TemporaryDirectory(prefix="ragweld-runtime-test-") as runtime_dir:
+        merged_env["RAGWELD_RUNTIME_DIR"] = runtime_dir
+        return subprocess.run(
+            list(args),
+            cwd=ROOT,
+            env=merged_env,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
 
 
 def _compose_config(*files: str) -> dict[str, Any]:
