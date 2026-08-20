@@ -95,7 +95,7 @@ Implementation:
 - Replace external database bind mounts with named volumes.
 - Fix secondary Compose-file paths using paths that resolve correctly from the project directory.
 - Make Grafana, Loki, Tempo, Alloy, Prometheus, and OTLP host ports configurable.
-- Keep application ports `8012` and `5173`; keep Postgres `5432` and Neo4j `7474`/`7687` while they are free.
+- Use namespaced application ports `58012` and `55173`; keep Postgres `5432` and Neo4j `7474`/`7687` while they are free.
 
 Acceptance:
 

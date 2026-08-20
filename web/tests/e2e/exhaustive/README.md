@@ -53,7 +53,7 @@ npm --prefix web exec -- playwright test \
 
 - `EXHAUSTIVE_SUITE_TIMEOUT_MS` (default: 48h)
 - `EXHAUSTIVE_TEST_TIMEOUT_MS` (default: 10m per test action timeout window)
-- `EXHAUSTIVE_API_BASE_URL` (default: `http://127.0.0.1:8012/api`)
+- `EXHAUSTIVE_API_BASE_URL` (default: `http://127.0.0.1:58012/api`)
 - `EXHAUSTIVE_OUTPUT_DIR` (default: `output/playwright/exhaustive`)
 - `EXHAUSTIVE_MODE=preflight|full` (default: `full`)
 - `EXHAUSTIVE_RESUME=1|0` (default: `1`; resumes from prior `outcomes.ndjson`)

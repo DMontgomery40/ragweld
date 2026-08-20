@@ -319,15 +319,15 @@ Reference:
 
 ```bash
 uv sync
-uv run uvicorn server.main:app --reload --port 8012
+uv run uvicorn server.main:app --reload --port 58012
 ```
 
 Notes:
 - The backend will **auto-load** repo-root `.env` on startup (dev convenience).
 - If you change `.env` while the backend is running, you must **restart** the backend for changes to take effect.
 
-API available at http://localhost:8012
-OpenAPI docs at http://localhost:8012/docs
+API available at http://localhost:58012
+OpenAPI docs at http://localhost:58012/docs
 
 ### 4. Start Frontend
 
@@ -351,12 +351,28 @@ With full observability stack (Prometheus + Grafana + Loki + Promtail):
 ./start.sh --with-observability
 ```
 
+Stop only Ragweld-owned host processes and containers while preserving all data
+volumes and the host-owned Colima VM:
+
+```bash
+./stop.sh
+```
+
+Reset only the fixed `ragweld` Compose project's volumes after stopping it:
+
+```bash
+./stop.sh
+./reset-data.sh --confirm=DELETE-RAGWELD-DATA
+```
+
+The reset command never deletes repo-local files, models, or Colima itself.
+
 Observability URLs:
 - Grafana: http://localhost:3301 (admin/admin)
-- Prometheus: http://localhost:9090
+- Prometheus: http://localhost:59090
 - Loki: http://localhost:53100
 
-UI available at http://localhost:5173
+UI available at http://localhost:55173
 
 ### 5. Index Your First Corpus
 
@@ -365,7 +381,7 @@ Via UI: Use the corpus switcher in the top navigation.
 Via API:
 ```bash
 # Create a corpus
-curl -X POST "http://localhost:8012/api/repos" \
+curl -X POST "http://localhost:58012/api/repos" \
   -H "Content-Type: application/json" \
   -d '{
     "name": "my-project",
@@ -373,18 +389,18 @@ curl -X POST "http://localhost:8012/api/repos" \
   }'
 
 # Start indexing
-curl -X POST "http://localhost:8012/api/index/start" \
+curl -X POST "http://localhost:58012/api/index" \
   -H "Content-Type: application/json" \
-  -d '{"repo_id": "my-project"}'
+  -d '{"repo_id": "my-project", "repo_path": "/path/to/my-project", "force_reindex": false}'
 
 # Check progress
-curl "http://localhost:8012/api/index/my-project/status"
+curl "http://localhost:58012/api/index/my-project/status"
 ```
 
 ### 6. Search
 
 ```bash
-curl -X POST "http://localhost:8012/api/search" \
+curl -X POST "http://localhost:58012/api/search" \
   -H "Content-Type: application/json" \
   -d '{
     "query": "How does the authentication system work?",
@@ -415,7 +431,7 @@ Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_
 {
   "mcpServers": {
     "tribrid-rag": {
-      "url": "http://localhost:8012/mcp/"
+      "url": "http://localhost:58012/mcp/"
     }
   }
 }
@@ -449,7 +465,7 @@ MCP settings are in `tribrid_config.json` under the `mcp` section:
 ### Check MCP Status
 
 ```bash
-curl http://localhost:8012/api/mcp/status
+curl http://localhost:58012/api/mcp/status
 ```
 
 ---
@@ -539,21 +555,21 @@ chmod -R a+rwX "$TRIBRID_DB_DIR/postgres" "$TRIBRID_DB_DIR/neo4j/data" "$TRIBRID
 docker compose restart postgres neo4j
 
 # Start backend (avoid --reload for long indexing)
-NEO4J_PASSWORD=password uv run uvicorn server.main:app --host 127.0.0.1 --port 8012
+NEO4J_PASSWORD=password uv run uvicorn server.main:app --host 127.0.0.1 --port 58012
 
 # Create corpus + exclude known heavy build outputs (epstein-files-1)
-curl -sS -X POST http://127.0.0.1:8012/api/repos -H 'Content-Type: application/json' -d '{"corpus_id":"epstein-files-1","name":"epstein-files-1","path":"/Users/davidmontgomery/epstein-files-1"}'
-curl -sS -X PATCH http://127.0.0.1:8012/api/repos/epstein-files-1 -H 'Content-Type: application/json' -d '{"exclude_paths":[".worktrees/","out.noindex/","data/qdrant/","node_modules/","dist/"]}'
+curl -sS -X POST http://127.0.0.1:58012/api/repos -H 'Content-Type: application/json' -d '{"corpus_id":"epstein-files-1","name":"epstein-files-1","path":"/Users/davidmontgomery/epstein-files-1"}'
+curl -sS -X PATCH http://127.0.0.1:58012/api/repos/epstein-files-1 -H 'Content-Type: application/json' -d '{"exclude_paths":[".worktrees/","out.noindex/","data/qdrant/","node_modules/","dist/"]}'
 
 # Index + poll
-curl -sS -X POST http://127.0.0.1:8012/api/index -H 'Content-Type: application/json' -d '{"corpus_id":"epstein-files-1","repo_path":"/Users/davidmontgomery/epstein-files-1","force_reindex":true}'
-while true; do curl -sS http://127.0.0.1:8012/api/index/epstein-files-1/status | python -m json.tool; sleep 2; done
+curl -sS -X POST http://127.0.0.1:58012/api/index -H 'Content-Type: application/json' -d '{"corpus_id":"epstein-files-1","repo_path":"/Users/davidmontgomery/epstein-files-1","force_reindex":true}'
+while true; do curl -sS http://127.0.0.1:58012/api/index/epstein-files-1/status | python -m json.tool; sleep 2; done
 ```
 
 ### Verify GraphRAG is actually contributing results
 
 ```bash
-curl -sS -X POST http://127.0.0.1:8012/api/search \
+curl -sS -X POST http://127.0.0.1:58012/api/search \
   -H 'Content-Type: application/json' \
   -d '{"corpus_id":"epstein-files-1","query":"authentication flow","top_k":8,"include_vector":true,"include_sparse":true,"include_graph":true}' \
   | python -m json.tool
@@ -724,7 +740,7 @@ ragweld is highly configurable. Every parameter is defined in Pydantic with vali
 ### Example: Adjust Fusion Weights
 
 ```bash
-curl -X PUT "http://localhost:8012/api/config" \
+curl -X PUT "http://localhost:58012/api/config" \
   -H "Content-Type: application/json" \
   -d '{
     "fusion": {
@@ -817,7 +833,7 @@ curl -X PUT "http://localhost:8012/api/config" \
 | `/api/eval/run` | POST | Run evaluation suite |
 | `/api/eval/results` | GET | Get evaluation results |
 
-Full OpenAPI documentation: http://localhost:8012/docs
+Full OpenAPI documentation: http://localhost:58012/docs
 
 ---
 
@@ -868,11 +884,12 @@ uv run pytest tests/api
 # Integration tests (requires running services)
 uv run pytest tests/integration
 
-# Frontend tests
-cd web && npm test
+# Frontend type and production-build checks
+npm --prefix web run lint
+npm --prefix web run build
 
 # E2E tests
-cd web && npx playwright test
+web/node_modules/.bin/playwright test --config playwright.config.ts
 ```
 
 ---
@@ -883,24 +900,28 @@ cd web && npx playwright test
 
 | Service | URL | Credentials |
 |---------|-----|-------------|
-| API Docs | http://localhost:8012/docs | - |
+| API Docs | http://localhost:58012/docs | - |
 | Grafana | http://localhost:3301 | admin/admin |
-| Prometheus | http://localhost:9090 | - |
+| Prometheus | http://localhost:59090 | - |
 | Loki | http://localhost:53100 | - |
 | Neo4j Browser | http://localhost:7474 | neo4j/password |
 
 ### Health Check
 
 ```bash
-curl http://localhost:8012/api/health
+curl http://localhost:58012/api/health
 ```
 
-Returns status of all services (Postgres, Neo4j, embedding provider).
+Returns dependency-free process liveness. Use readiness for live store status:
+
+```bash
+curl http://localhost:58012/api/ready
+```
 
 ### Metrics
 
 ```bash
-curl http://localhost:8012/metrics
+curl http://localhost:58012/metrics
 ```
 
 Prometheus-format metrics for retrieval latency, throughput, error rates.
@@ -935,7 +956,7 @@ Configure in `.env` or via the UI.
 The `/api/cost/estimate` endpoint provides detailed breakdowns:
 
 ```bash
-curl -X POST "http://localhost:8012/api/cost/estimate" \
+curl -X POST "http://localhost:58012/api/cost/estimate" \
   -H "Content-Type: application/json" \
   -d '{
     "gen_provider": "openai",

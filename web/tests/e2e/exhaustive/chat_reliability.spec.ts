@@ -3,8 +3,8 @@ import { mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
-const API_BASE = process.env.EXHAUSTIVE_API_BASE_URL ?? 'http://127.0.0.1:8012/api';
-const CORPUS_ID = String(process.env.EXHAUSTIVE_CORPUS_ID || '').trim() || 'epstein-files-1';
+const API_BASE = process.env.EXHAUSTIVE_API_BASE_URL ?? 'http://127.0.0.1:58012/api';
+const CORPUS_ID = String(process.env.EXHAUSTIVE_CORPUS_ID || '').trim() || 'ragweld-exhaustive';
 const CORPUS_NAME = String(process.env.EXHAUSTIVE_CORPUS_NAME || '').trim() || CORPUS_ID;
 const CORPUS_PATH_OVERRIDE = String(process.env.EXHAUSTIVE_CORPUS_PATH || '').trim();
 

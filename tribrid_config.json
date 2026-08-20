@@ -680,7 +680,7 @@
     "docker_container_action_timeout": 30,
     "docker_logs_tail": 100,
     "docker_logs_timestamps": 1,
-    "dev_frontend_port": 5173,
-    "dev_backend_port": 8012
+    "dev_frontend_port": 55173,
+    "dev_backend_port": 58012
   }
 }

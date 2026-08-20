@@ -49,10 +49,9 @@ def main() -> None:
     print("\n=== Setup Complete! ===")
     print("\nNext steps:")
     print("1. Edit .env with your API keys")
-    print("2. Run: docker compose up -d postgres neo4j")
-    print("3. Run: uv run uvicorn server.main:app --reload")
-    print("4. In another terminal: cd web && npm run dev")
-    print("5. Open http://localhost:5173")
+    print("2. Start and select your host-owned Docker/Colima runtime")
+    print("3. Run: ./start.sh")
+    print("4. Open http://localhost:55173/web/")
 
 
 if __name__ == "__main__":

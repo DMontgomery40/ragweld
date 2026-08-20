@@ -553,9 +553,9 @@ export interface DockerConfig {
   /** Include timestamps in Docker logs (1=yes, 0=no) */
   docker_logs_timestamps?: number; // default: 1
   /** Port for dev frontend (Vite) */
-  dev_frontend_port?: number; // default: 5173
+  dev_frontend_port?: number; // default: 55173
   /** Port for dev backend (Uvicorn) */
-  dev_backend_port?: number; // default: 8012
+  dev_backend_port?: number; // default: 58012
 }
 
 /** Ragweld-owned Compose service exposed to the local Docker control surface. */

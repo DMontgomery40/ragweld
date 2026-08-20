@@ -11,7 +11,7 @@ function normalizeBuildBase(input: string | undefined): string {
 }
 
 function normalizeApiProxyTarget(input: string | undefined): string {
-  const raw = String(input || '').trim() || 'http://127.0.0.1:8012'
+  const raw = String(input || '').trim() || 'http://127.0.0.1:58012'
   return raw.replace(/\/+$/, '')
 }
 
@@ -37,7 +37,8 @@ export default defineConfig(({ mode }) => {
       },
     },
     server: {
-      port: 5173,
+      port: Number(env.FRONTEND_PORT || 55173),
+      strictPort: true,
       proxy: {
         '/api': {
           target: apiProxyTarget,

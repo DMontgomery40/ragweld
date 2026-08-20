@@ -4708,7 +4708,7 @@
         "description": "Docker infrastructure configuration.",
         "properties": {
           "dev_backend_port": {
-            "default": 8012,
+            "default": 58012,
             "description": "Port for dev backend (Uvicorn)",
             "maximum": 65535.0,
             "minimum": 1024.0,
@@ -4716,7 +4716,7 @@
             "type": "integer"
           },
           "dev_frontend_port": {
-            "default": 5173,
+            "default": 55173,
             "description": "Port for dev frontend (Vite)",
             "maximum": 65535.0,
             "minimum": 1024.0,

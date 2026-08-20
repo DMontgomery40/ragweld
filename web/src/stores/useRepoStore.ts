@@ -44,21 +44,16 @@ interface RepoStore {
  * what: |
  *   Determines the API base URL for HTTP requests based on the current browser environment.
  *   Takes no parameters. Returns a string representing the API endpoint base URL.
- *   Parses window.location.href to extract origin and port information.
- *   If running on development port 5173 (Vite dev server), returns hardcoded backend URL 'http://127.0.0.1:8012/api'.
- *   Otherwise returns the current origin with '/api' appended. Falls back to '/api' if URL parsing fails.
+ *   Delegates to the shared API resolver, which uses a query override or same-origin '/api'.
  *
  * why: |
  *   Centralizes API endpoint configuration to handle different deployment environments (local development vs. production).
- *   Development environment (port 5173) typically runs a separate backend server, requiring explicit URL override.
- *   Production deployments serve API from the same origin, so relative path '/api' works correctly.
+ *   Vite development and production both use the same-origin API contract.
  *   Try-catch wrapper prevents crashes if window.location is inaccessible in edge cases (SSR, iframe restrictions).
  *
  * guardrails:
- *   - DO NOT hardcode 'http://127.0.0.1:8012/api' in multiple places; this function is the single source of truth for dev backend routing
- *   - ALWAYS verify that port 5173 matches your actual Vite dev server configuration before deploying; mismatched ports will route to wrong backend
- *   - NOTE: Hardcoded backend URL assumes backend runs on localhost:8012 during development; this breaks if backend runs on different host/port
- *   - ASK USER: Before changing the development backend URL or port detection logic, confirm the actual dev environment setup and whether multiple developers use different backend ports
+ *   - DO NOT hardcode backend URLs here; api/client.ts is the single source of truth
+ *   - NOTE: start.sh and web/vite.config.ts own local port and proxy configuration
  * ---/agentspec
  */
 const getApiBase = (): string => {

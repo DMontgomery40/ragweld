@@ -59,11 +59,11 @@ Beyond fused tri-brid retrieval (vector + sparse + graph), ragweld includes broa
 ## Product URLs + API prefix (critical for accuracy)
 
 - In dev, the backend is mounted under **`/api`** (FastAPI routers are included with `prefix="/api"`).
-  - Correct examples: `http://127.0.0.1:8012/api/search`, `fetch("/api/config")`
+  - Correct examples: `http://127.0.0.1:58012/api/search`, `fetch("/api/config")`
   - Incorrect examples: `/search`, `/config`, `http://localhost:8000/search`
 - Default dev entrypoints (unless overridden by env vars):
-  - **UI**: `http://127.0.0.1:5173/web`
-  - **API**: `http://127.0.0.1:8012/api`
+  - **UI**: `http://127.0.0.1:55173/web`
+  - **API**: `http://127.0.0.1:58012/api`
 
 ## MkDocs Material formatting (mandatory)
 

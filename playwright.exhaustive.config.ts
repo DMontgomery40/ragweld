@@ -1,6 +1,6 @@
 // Exhaustive UI suite config.
 // Intentionally avoids importing "@playwright/test" so it can run from `web/node_modules`.
-const webBaseURL = process.env.PLAYWRIGHT_WEB_BASE_URL ?? 'http://127.0.0.1:5173/web';
+const webBaseURL = process.env.PLAYWRIGHT_WEB_BASE_URL ?? 'http://127.0.0.1:55173/web';
 
 function ensureTrailingSlash(url: string): string {
   return url.endsWith('/') ? url : `${url}/`;

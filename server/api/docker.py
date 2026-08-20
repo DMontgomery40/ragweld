@@ -62,10 +62,10 @@ def _resolve_dev_ports() -> tuple[int, int]:
     """Resolve dev ports with env override, then config defaults."""
     try:
         cfg = load_config()
-        cfg_front = int(getattr(cfg.docker, "dev_frontend_port", 5173))
-        cfg_back = int(getattr(cfg.docker, "dev_backend_port", 8012))
+        cfg_front = int(getattr(cfg.docker, "dev_frontend_port", 55173))
+        cfg_back = int(getattr(cfg.docker, "dev_backend_port", 58012))
     except Exception:
-        cfg_front, cfg_back = 5173, 8012
+        cfg_front, cfg_back = 55173, 58012
 
     frontend_port = int(os.getenv("FRONTEND_PORT") or cfg_front)
     backend_port = int(os.getenv("BACKEND_PORT") or cfg_back)

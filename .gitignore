@@ -48,6 +48,7 @@ output/
 tmp/
 .agent-memory-nexus/
 .tmp-pg/
+.ragweld-runtime/
 models/learning-agent-*/
 site/
 mkdocs-docs-plan.md

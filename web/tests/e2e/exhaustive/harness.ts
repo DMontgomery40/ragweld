@@ -9,7 +9,7 @@ import {
   UI_SURFACES,
 } from './suite_config';
 
-const API_BASE = process.env.EXHAUSTIVE_API_BASE_URL ?? 'http://127.0.0.1:8012/api';
+const API_BASE = process.env.EXHAUSTIVE_API_BASE_URL ?? 'http://127.0.0.1:58012/api';
 const ALLOW_DESTRUCTIVE = process.env.EXHAUSTIVE_DESTRUCTIVE === '1';
 const SELECT_ALL_OPTIONS = process.env.EXHAUSTIVE_SELECT_ALL_OPTIONS === '1';
 const ENABLE_PROPAGATION_SCAN = process.env.EXHAUSTIVE_PROPAGATION_SCAN !== '0';

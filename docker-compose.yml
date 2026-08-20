@@ -152,7 +152,7 @@ services:
     env_file:
       - .env
     ports:
-      - "127.0.0.1:${SERVER_PORT:-8012}:8000"
+      - "127.0.0.1:${SERVER_PORT:-58012}:8000"
     volumes:
       - ./models:/app/models
       - ./data:/app/data

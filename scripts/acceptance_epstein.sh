@@ -10,8 +10,8 @@ latest_path="$ROOT_DIR/output/automation/acceptance/latest.json"
 mkdir -p "$artifact_dir"
 
 export CORPUS_ID="${CORPUS_ID:-epstein-files-1}"
-default_ui_base="http://127.0.0.1:5173/web"
-default_api_base="http://127.0.0.1:8012/api"
+default_ui_base="http://127.0.0.1:55173/web"
+default_api_base="http://127.0.0.1:58012/api"
 bootstrap_latest="$ROOT_DIR/output/automation/bootstrap/latest.json"
 bootstrap_status=""
 
@@ -61,7 +61,7 @@ probe_synthetic_route() {
 }
 
 if [ -n "$UI_BASE" ] && [ "$UI_BASE" = "$default_ui_base" ] && ! probe_synthetic_route "$UI_BASE"; then
-  fallback_ui_base="http://127.0.0.1:5173"
+  fallback_ui_base="http://127.0.0.1:55173"
   if probe_synthetic_route "$fallback_ui_base"; then
     export UI_BASE="$fallback_ui_base"
   fi

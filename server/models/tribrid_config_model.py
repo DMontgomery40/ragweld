@@ -6340,14 +6340,14 @@ class DockerConfig(BaseModel):
     )
 
     dev_frontend_port: int = Field(
-        default=5173,
+        default=55173,
         ge=1024,
         le=65535,
         description="Port for dev frontend (Vite)"
     )
 
     dev_backend_port: int = Field(
-        default=8012,
+        default=58012,
         ge=1024,
         le=65535,
         description="Port for dev backend (Uvicorn)"
@@ -7325,8 +7325,8 @@ class TriBridConfig(BaseModel):
                 docker_container_action_timeout=data.get('DOCKER_CONTAINER_ACTION_TIMEOUT', 30),
                 docker_logs_tail=data.get('DOCKER_LOGS_TAIL', 100),
                 docker_logs_timestamps=data.get('DOCKER_LOGS_TIMESTAMPS', 1),
-                dev_frontend_port=data.get('DEV_FRONTEND_PORT', 5173),
-                dev_backend_port=data.get('DEV_BACKEND_PORT', 8012),
+                dev_frontend_port=data.get('DEV_FRONTEND_PORT', 55173),
+                dev_backend_port=data.get('DEV_BACKEND_PORT', 58012),
             ),
         )
 

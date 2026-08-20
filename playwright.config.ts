@@ -4,7 +4,7 @@
 const mkdocsBaseURL = process.env.PLAYWRIGHT_MKDOCS_BASE_URL ?? 'http://127.0.0.1:8001';
 // Use IPv4 loopback by default; on some machines Vite only binds 127.0.0.1 (not ::1),
 // and Node/Playwright will prefer ::1 when resolving "localhost".
-const webBaseURL = process.env.PLAYWRIGHT_WEB_BASE_URL ?? 'http://127.0.0.1:5173/web';
+const webBaseURL = process.env.PLAYWRIGHT_WEB_BASE_URL ?? 'http://127.0.0.1:55173/web';
 
 function ensureTrailingSlash(url: string): string {
   return url.endsWith('/') ? url : `${url}/`;

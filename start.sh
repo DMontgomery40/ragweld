@@ -3,11 +3,12 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT_DIR"
+# shellcheck disable=SC1091
+source "$ROOT_DIR/scripts/runtime_lifecycle.sh"
 
-BACKEND_PORT="${BACKEND_PORT:-8012}"
-FRONTEND_PORT="${FRONTEND_PORT:-5173}"
+BACKEND_PORT="${BACKEND_PORT:-58012}"
+FRONTEND_PORT="${FRONTEND_PORT:-55173}"
 FRONTEND_HOST="${FRONTEND_HOST:-127.0.0.1}"
-COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-ragweld}"
 
 START_DOCKER=1
 START_BACKEND=1
@@ -17,6 +18,7 @@ WITH_OBSERVABILITY=0
 NATIVE_POSTGRES=0
 DRY_RUN=0
 BACKEND_PID=""
+FRONTEND_PID=""
 
 usage() {
   cat <<'EOF'
@@ -69,22 +71,30 @@ run() {
 }
 
 docker_daemon_ready() {
-  docker info >/dev/null 2>&1
+  local_docker_ready
 }
 
 docker_context_name() {
-  docker context show 2>/dev/null || echo "unknown"
+  env -u DOCKER_HOST -u DOCKER_CONTEXT docker context show 2>/dev/null || echo "unknown"
 }
 
 resolve_docker_compose() {
-  docker compose version >/dev/null 2>&1
+  env -u DOCKER_HOST -u DOCKER_CONTEXT docker compose version >/dev/null 2>&1
 }
 
-port_listen_pids() {
-  local port="$1"
-  if have_cmd lsof; then
-    lsof -nP -iTCP:"${port}" -sTCP:LISTEN -t 2>/dev/null || true
-  fi
+require_free_port() {
+  local label="$1"
+  local port="$2"
+  local listeners
+  listeners="$(port_listen_pids "$port")"
+  [[ -z "$listeners" ]] || die "${label} port ${port} is already in use (pid(s): ${listeners//$'\n'/,})"
+}
+
+validate_port() {
+  local label="$1"
+  local port="$2"
+  [[ "$port" =~ ^[0-9]+$ ]] || die "${label} port must be numeric"
+  (( port >= 1024 && port <= 65535 )) || die "${label} port must be between 1024 and 65535"
 }
 
 wait_for_http_ok() {
@@ -132,12 +142,59 @@ wait_for_native_postgres() {
 }
 
 cleanup() {
-  if [[ -n "$BACKEND_PID" ]] && kill -0 "$BACKEND_PID" >/dev/null 2>&1; then
-    log "Stopping backend pid=$BACKEND_PID"
-    kill "$BACKEND_PID" >/dev/null 2>&1 || true
+  if [[ -n "$FRONTEND_PID" ]]; then
+    stop_owned_process_exact "frontend" "$ROOT_DIR/web" "$FRONTEND_PID"
   fi
+  if [[ -n "$BACKEND_PID" ]]; then
+    stop_owned_process_exact "backend" "$ROOT_DIR" "$BACKEND_PID"
+  fi
+  release_lifecycle_lock
+  return 0
 }
-trap cleanup EXIT INT TERM
+
+on_signal() {
+  exit 130
+}
+
+supervise_host_processes() {
+  local record i
+  while true; do
+    if [[ -n "$BACKEND_PID" ]] && ! kill -0 "$BACKEND_PID" >/dev/null 2>&1; then
+      record="$(sed -n '1p' "$(runtime_pid_file backend)" 2>/dev/null || true)"
+      if [[ "${record%%|*}" != "$BACKEND_PID" ]]; then
+        i=0
+        while [[ "$i" -lt 60 ]]; do
+          if owned_host_records_released "$BACKEND_PID" "$FRONTEND_PID"; then
+            log "Ragweld host processes stopped through the owned lifecycle."
+            return 0
+          fi
+          sleep 0.1
+          i=$((i + 1))
+        done
+      fi
+      die "Ragweld backend exited unexpectedly"
+    fi
+    if [[ -n "$FRONTEND_PID" ]] && ! kill -0 "$FRONTEND_PID" >/dev/null 2>&1; then
+      record="$(sed -n '1p' "$(runtime_pid_file frontend)" 2>/dev/null || true)"
+      if [[ "${record%%|*}" != "$FRONTEND_PID" ]]; then
+        i=0
+        while [[ "$i" -lt 60 ]]; do
+          if owned_host_records_released "$BACKEND_PID" "$FRONTEND_PID"; then
+            log "Ragweld host processes stopped through the owned lifecycle."
+            return 0
+          fi
+          sleep 0.1
+          i=$((i + 1))
+        done
+      fi
+      die "Ragweld frontend exited unexpectedly"
+    fi
+    sleep 1
+  done
+}
+
+trap cleanup EXIT
+trap on_signal INT TERM
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -172,9 +229,28 @@ if [[ -f .env ]]; then
   set +a
 fi
 
+if [[ -n "${COMPOSE_PROJECT_NAME:-}" && "$COMPOSE_PROJECT_NAME" != "$RAGWELD_COMPOSE_PROJECT" ]]; then
+  die "COMPOSE_PROJECT_NAME must be '${RAGWELD_COMPOSE_PROJECT}', got '${COMPOSE_PROJECT_NAME}'"
+fi
+export COMPOSE_PROJECT_NAME="$RAGWELD_COMPOSE_PROJECT"
+
 # Keep the host API, Vite proxy, and /api/dev/status on one resolved port.
 export BACKEND_PORT FRONTEND_PORT
-export VITE_API_PROXY_TARGET="${VITE_API_PROXY_TARGET:-http://127.0.0.1:${BACKEND_PORT}}"
+export VITE_API_PROXY_TARGET="http://127.0.0.1:${BACKEND_PORT}"
+
+validate_port "Backend" "$BACKEND_PORT"
+validate_port "Frontend" "$FRONTEND_PORT"
+require_process_inspector
+acquire_lifecycle_lock
+if owned_pid "backend" "$ROOT_DIR" >/dev/null 2>&1 || \
+   owned_pid "frontend" "$ROOT_DIR/web" >/dev/null 2>&1; then
+  die "Ragweld host processes are already owned by another launcher; run ./stop.sh first"
+fi
+if [[ "$START_BACKEND" == "1" && "$START_FRONTEND" == "1" && "$BACKEND_PORT" == "$FRONTEND_PORT" ]]; then
+  die "Backend and frontend ports must be different"
+fi
+[[ "$START_BACKEND" == "1" ]] && require_free_port "Backend" "$BACKEND_PORT"
+[[ "$START_FRONTEND" == "1" ]] && require_free_port "Frontend" "$FRONTEND_PORT"
 
 if [[ "$NATIVE_POSTGRES" == "1" && "$DRY_RUN" == "0" ]]; then
   wait_for_native_postgres
@@ -186,6 +262,7 @@ if [[ "$START_DOCKER" == "1" ]]; then
 
   context="$(docker_context_name)"
   if docker_daemon_ready; then
+    require_local_docker_context
     log "Using host-owned Docker runtime (context=${context})"
   elif [[ "$DRY_RUN" == "1" ]]; then
     log "Host-owned Docker runtime is unavailable (context=${context}); start/select it before a real launch."
@@ -193,7 +270,7 @@ if [[ "$START_DOCKER" == "1" ]]; then
     die "Host-owned Docker runtime is unavailable (context=${context}). Start/select the dedicated runtime, then retry."
   fi
 
-  compose=(docker compose --project-name "$COMPOSE_PROJECT_NAME" -f docker-compose.yml)
+  compose=(env -u DOCKER_HOST -u DOCKER_CONTEXT docker compose --project-name "$RAGWELD_COMPOSE_PROJECT" -f docker-compose.yml)
   if [[ "$NATIVE_POSTGRES" == "1" ]]; then
     compose+=(-f infra/docker-compose.native-postgres.yml)
   fi
@@ -210,7 +287,7 @@ if [[ "$START_DOCKER" == "1" ]]; then
     services+=(api)
   fi
 
-  log "Compose project=${COMPOSE_PROJECT_NAME}; services=${services[*]}"
+  log "Compose project=${RAGWELD_COMPOSE_PROJECT}; services=${services[*]}"
   if [[ "$DRY_RUN" == "1" ]]; then
     run env SERVER_PORT="$BACKEND_PORT" "${compose[@]}" up -d --wait "${services[@]}"
   else
@@ -220,8 +297,6 @@ fi
 
 if [[ "$START_BACKEND" == "1" && "$BACKEND_MODE" == "local" ]]; then
   have_cmd uv || die "uv is unavailable"
-  existing_pids="$(port_listen_pids "$BACKEND_PORT")"
-  [[ -n "$existing_pids" ]] && die "Backend port ${BACKEND_PORT} is already in use"
 
   if [[ ! -d .venv ]]; then
     if [[ "$(uname -s)" == "Darwin" && "$(uname -m)" == "arm64" ]]; then
@@ -232,10 +307,15 @@ if [[ "$START_BACKEND" == "1" && "$BACKEND_MODE" == "local" ]]; then
   fi
 
   if [[ "$DRY_RUN" == "1" ]]; then
-    run uv run uvicorn server.main:app --host 127.0.0.1 --port "$BACKEND_PORT" --reload
+    run "$ROOT_DIR/.venv/bin/uvicorn" server.main:app --host 127.0.0.1 --port "$BACKEND_PORT"
   else
-    uv run uvicorn server.main:app --host 127.0.0.1 --port "$BACKEND_PORT" --reload &
+    [[ -x "$ROOT_DIR/.venv/bin/uvicorn" ]] || die "Expected .venv/bin/uvicorn after dependency setup"
+    (
+      cd "$ROOT_DIR"
+      exec "$ROOT_DIR/.venv/bin/uvicorn" server.main:app --host 127.0.0.1 --port "$BACKEND_PORT"
+    ) &
     BACKEND_PID="$!"
+    write_owned_pid "backend" "$BACKEND_PID" "$BACKEND_PORT"
     wait_for_http_ok "http://127.0.0.1:${BACKEND_PORT}/api/health" 60
     wait_for_backend_ready 120
   fi
@@ -249,7 +329,26 @@ if [[ "$START_FRONTEND" == "1" ]]; then
   [[ -d web ]] || die "web directory is missing"
   [[ -d web/node_modules || "$DRY_RUN" == "1" ]] || npm --prefix web install
   log "UI: http://localhost:${FRONTEND_PORT}/web"
-  run npm --prefix web run dev -- --host "$FRONTEND_HOST" --port "$FRONTEND_PORT"
+  if [[ "$DRY_RUN" == "1" ]]; then
+    run env FRONTEND_PORT="$FRONTEND_PORT" web/node_modules/.bin/vite \
+      --host "$FRONTEND_HOST" --port "$FRONTEND_PORT" --strictPort
+  else
+    (
+      cd "$ROOT_DIR/web"
+      exec ./node_modules/.bin/vite --host "$FRONTEND_HOST" --port "$FRONTEND_PORT" --strictPort
+    ) &
+    FRONTEND_PID="$!"
+    write_owned_pid "frontend" "$FRONTEND_PID" "$FRONTEND_PORT"
+    wait_for_http_ok "http://127.0.0.1:${FRONTEND_PORT}/web/" 60
+  fi
+fi
+
+if [[ "$DRY_RUN" == "1" ]]; then
+  log "Check complete."
+elif [[ -n "$BACKEND_PID" || -n "$FRONTEND_PID" ]]; then
+  release_lifecycle_lock
+  log "Ragweld is running. Press Ctrl-C or run ./stop.sh from another terminal."
+  supervise_host_processes
 else
   log "Done."
 fi
