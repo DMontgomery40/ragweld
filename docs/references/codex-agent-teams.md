@@ -63,6 +63,17 @@ cd /Users/davidmontgomery/ragweld
 This installs an isolated runtime in `~/.codex/agent-teams` and a global wrapper
 binary `~/.codex/bin/codex-team`.
 
+It also installs `~/.codex/bin/codex`, a launcher wrapper that opens a live,
+auto-refreshing team/session panel when you press `Shift+Down` while Codex CLI
+is running. Press `Shift+Down` again (or `q`) to close the panel and return to
+Codex.
+
+Emergency bypass (runs real Codex with no overlay):
+
+```bash
+CODEX_TEAM_OVERLAY_DISABLE=1 ~/.codex/bin/codex
+```
+
 Portable bundle for other machines (no repo checkout required):
 
 ```bash

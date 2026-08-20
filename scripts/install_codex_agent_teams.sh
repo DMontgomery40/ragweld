@@ -142,6 +142,9 @@ if [[ ${INSTALL_CODEX_WRAPPER} -eq 1 ]]; then
 set -euo pipefail
 PREFIX="${PREFIX}"
 REAL_CODEX_PATH="${REAL_CODEX_PATH}"
+if [[ "\${CODEX_TEAM_OVERLAY_DISABLE:-0}" == "1" ]]; then
+  exec "\${REAL_CODEX_PATH}" "\$@"
+fi
 exec "\${PREFIX}/.venv/bin/python" "\${PREFIX}/bin/codex_overlay.py" --real-codex "\${REAL_CODEX_PATH}" -- "\$@"
 EOF
       chmod +x "${WRAPPER_TARGET}"
