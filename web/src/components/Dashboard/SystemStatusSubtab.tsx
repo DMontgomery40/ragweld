@@ -1,7 +1,7 @@
 // TriBridRAG - System Status Subtab
 // Real-time system health, status, and quick overview
 
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import * as DashAPI from '@/api/dashboard';
 import { QuickActions } from './QuickActions';
@@ -58,7 +58,7 @@ export function SystemStatusSubtab() {
     return `${value.toFixed(idx === 0 ? 0 : 1)} ${units[idx]}`;
   };
 
-  const refreshStatus = async () => {
+  const refreshStatus = useCallback(async () => {
     setLoading(true);
     setError(null);
 
@@ -75,7 +75,7 @@ export function SystemStatusSubtab() {
         DashAPI.getMCPStatus(),
         // DashAPI.getAutotuneStatus(), // HIDDEN - Pro feature
         DashAPI.getDockerStatus(),
-        DashAPI.getIndexStatus()
+        activeRepo ? DashAPI.getIndexStatus(activeRepo) : Promise.resolve(null)
       ]);
 
       // Health
@@ -84,7 +84,7 @@ export function SystemStatusSubtab() {
         setHealth(`${h.status}`);
       }
 
-      if (indexData.status === 'fulfilled' && indexData.value.metadata) {
+      if (indexData.status === 'fulfilled' && indexData.value?.metadata) {
         // DashboardIndexStatusMetadata does not expose a per-corpus repo breakdown.
         // Keep this empty until the backend provides a deterministic schema.
         setTopFolders([]);
@@ -139,7 +139,7 @@ export function SystemStatusSubtab() {
       setError(err instanceof Error ? err.message : String(err));
       setLoading(false);
     }
-  };
+  }, [activeRepo]);
 
   useEffect(() => {
     refreshStatus();
@@ -165,7 +165,7 @@ export function SystemStatusSubtab() {
       clearInterval(interval);
       window.removeEventListener('dashboard-refresh', handleRefresh);
     };
-  }, []); // Empty array - run once on mount, Zustand actions are stable
+  }, [fetchDevStackStatus, loadRepos, refreshStatus, reposInitialized, reposLoading]);
 
   // If the dashboard mounted while the backend was down, `loadRepos()` can fail and the store
   // intentionally marks itself initialized to avoid retry loops. When the backend comes back,

@@ -40,10 +40,16 @@ def probe_postgres(
             available=False,
             reason=f"Invalid POSTGRES_PORT: {port_text!r}",
         )
+    dsn = values.get("POSTGRES_DSN")
+    if not dsn and not values.get("POSTGRES_HOST"):
+        return ServiceCapability(
+            service="PostgreSQL",
+            available=False,
+            reason="PostgreSQL integration is not configured; use scripts/test_integration.sh or set POSTGRES_DSN/POSTGRES_HOST.",
+        )
     database = values.get("POSTGRES_DB", "tribrid_rag")
     user = values.get("POSTGRES_USER", "postgres")
     password = values.get("POSTGRES_PASSWORD", "postgres")
-    dsn = values.get("POSTGRES_DSN")
 
     async def _connect() -> None:
         kwargs: dict[str, object] = {"timeout": timeout_seconds}
@@ -86,7 +92,13 @@ def probe_neo4j(
     timeout_seconds: float = 1.0,
 ) -> ServiceCapability:
     values = os.environ if env is None else env
-    uri = values.get("NEO4J_URI", "bolt://127.0.0.1:7687")
+    uri = values.get("NEO4J_URI")
+    if not uri:
+        return ServiceCapability(
+            service="Neo4j",
+            available=False,
+            reason="Neo4j integration is not configured; use scripts/test_integration.sh or set NEO4J_URI.",
+        )
     user = values.get("NEO4J_USER", "neo4j")
     password = values.get("NEO4J_PASSWORD", "password")
     driver = None

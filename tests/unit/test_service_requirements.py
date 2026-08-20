@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from dotenv import dotenv_values
 
-from tests.service_requirements import probe_postgres
+from tests.service_requirements import probe_neo4j, probe_postgres
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -35,6 +35,16 @@ def test_postgres_probe_reports_invalid_port_without_crashing_collection() -> No
 
     assert capability.available is False
     assert "invalid postgres_port" in capability.reason.lower()
+
+
+def test_service_probes_require_explicit_integration_configuration() -> None:
+    postgres = probe_postgres({})
+    neo4j = probe_neo4j({})
+
+    assert postgres.available is False
+    assert neo4j.available is False
+    assert "not configured" in postgres.reason.lower()
+    assert "not configured" in neo4j.reason.lower()
 
 
 @pytest.mark.parametrize("value", ["0", "false", "no", "off"])

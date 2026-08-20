@@ -172,6 +172,10 @@ if [[ -f .env ]]; then
   set +a
 fi
 
+# Keep the host API, Vite proxy, and /api/dev/status on one resolved port.
+export BACKEND_PORT FRONTEND_PORT
+export VITE_API_PROXY_TARGET="${VITE_API_PROXY_TARGET:-http://127.0.0.1:${BACKEND_PORT}}"
+
 if [[ "$NATIVE_POSTGRES" == "1" && "$DRY_RUN" == "0" ]]; then
   wait_for_native_postgres
 fi

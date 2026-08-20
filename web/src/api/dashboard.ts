@@ -278,8 +278,10 @@ export async function getIndexStats(): Promise<DashboardIndexStatsResponse> {
   return data;
 }
 
-export async function getIndexStatus(): Promise<DashboardIndexStatusResponse> {
-  const { data } = await apiClient.get<DashboardIndexStatusResponse>(withCorpusScope(api('/index/status')));
+export async function getIndexStatus(corpusId: string): Promise<DashboardIndexStatusResponse> {
+  const { data } = await apiClient.get<DashboardIndexStatusResponse>(
+    withCorpusScope(api('/index/status'), corpusId),
+  );
   return data;
 }
 

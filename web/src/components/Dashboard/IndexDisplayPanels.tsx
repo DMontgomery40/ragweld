@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import * as DashAPI from '@/api/dashboard';
+import { useRepoStore } from '@/stores/useRepoStore';
 import type { DashboardIndexStatusMetadata } from '@/types/generated';
 
 const formatBytes = (bytes?: number) => {
@@ -11,16 +12,24 @@ const formatBytes = (bytes?: number) => {
 };
 
 export function IndexDisplayPanels() {
+  const activeRepo = useRepoStore((state) => state.activeRepo);
   const [metadata, setMetadata] = useState<DashboardIndexStatusMetadata | null>(null);
   const [lines, setLines] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const loadStatus = async () => {
+  const loadStatus = useCallback(async () => {
+    if (!activeRepo) {
+      setMetadata(null);
+      setLines(['Create or select a corpus to see index readiness.']);
+      setError(null);
+      setLoading(false);
+      return;
+    }
     try {
       setLoading(true);
       setError(null);
-      const status = await DashAPI.getIndexStatus();
+      const status = await DashAPI.getIndexStatus(activeRepo);
       setMetadata((status.metadata || null) as DashboardIndexStatusMetadata | null);
       setLines(status.lines || []);
     } catch (err) {
@@ -30,7 +39,7 @@ export function IndexDisplayPanels() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [activeRepo]);
 
   useEffect(() => {
     loadStatus();
@@ -46,7 +55,7 @@ export function IndexDisplayPanels() {
       window.removeEventListener('tribrid-corpus-changed', handleCorpusChanged);
       window.removeEventListener('tribrid-corpus-loaded', handleCorpusChanged);
     };
-  }, []);
+  }, [loadStatus]);
 
   if (loading) {
     return <div style={{ color: 'var(--fg-muted)', fontSize: '13px' }}>Loading index readiness…</div>;

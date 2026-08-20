@@ -88,6 +88,12 @@ def test_vite_config_has_no_hidden_process_launcher() -> None:
     assert "spawn(" not in source
 
 
+def test_start_routes_vite_proxy_to_the_resolved_backend_port() -> None:
+    source = (ROOT / "start.sh").read_text(encoding="utf-8")
+
+    assert 'export VITE_API_PROXY_TARGET="${VITE_API_PROXY_TARGET:-http://127.0.0.1:${BACKEND_PORT}}"' in source
+
+
 def test_acceptance_bootstrap_uses_proxied_status_with_resolved_backend_port() -> None:
     source = (ROOT / "scripts" / "automation_bootstrap.sh").read_text(encoding="utf-8")
 
