@@ -35,9 +35,3 @@ methods:
       - chunks: list[ChunkMatch]
     returns: list[ChunkMatch]
     description: Cloud API-based reranking
-
-  - name: load_model
-    description: Best-effort warmup (currently no-op)
-
-  - name: reload_model
-    description: Best-effort reload (currently no-op)

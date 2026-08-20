@@ -415,14 +415,3 @@ class Reranker:
 
         updated.sort(key=lambda c: (-float(c.score), _stable_chunk_key(c)))
         return [*updated, *remainder]
-
-    def load_model(self) -> None:
-        """Best-effort warmup for the in-process learning reranker.
-
-        The MLX learning reranker loads lazily on first use.
-        """
-        return
-
-    def reload_model(self) -> None:
-        """Best-effort model reload (no-op for MLX backend)."""
-        return

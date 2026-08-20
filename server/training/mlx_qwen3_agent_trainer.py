@@ -818,8 +818,3 @@ def train_mlx_qwen3_agent(
         return {"ok": True, "backend": "mlx_qwen3", "total_steps": int(total_steps)}
 
     return _train_sync()
-
-
-def train_qwen3_lora_agent(**kwargs: Any) -> dict[str, object]:
-    """Compatibility alias for the agent LoRA SFT training entrypoint."""
-    return train_mlx_qwen3_agent(**kwargs)
