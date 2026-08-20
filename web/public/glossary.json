@@ -5177,37 +5177,6 @@
       ]
     },
     {
-      "term": "Infrastructure Down Timeout",
-      "key": "DOCKER_INFRA_DOWN_TIMEOUT",
-      "definition": "Controls how long the orchestrator waits for compose shutdown to complete before treating stop as failed. In RAG stacks this protects stateful services such as Postgres and vector stores, which need time to flush write-ahead logs and close files cleanly. If set too low, forced termination can leave partial writes, slower recovery, or integrity checks on restart; if set too high, rollback and local iteration become sluggish. Tune this from measured shutdown duration under heavy ingest and keep headroom for worst-case disk latency.",
-      "category": "infrastructure",
-      "related": [],
-      "links": [
-        {
-          "text": "Docker Compose down",
-          "href": "https://docs.docker.com/reference/cli/docker/compose/down/"
-        },
-        {
-          "text": "Compose stop_grace_period",
-          "href": "https://docs.docker.com/reference/compose-file/services/#stop_grace_period"
-        },
-        {
-          "text": "Docker daemon reference",
-          "href": "https://docs.docker.com/engine/daemon/"
-        },
-        {
-          "text": "Decomposing Docker Container Startup Performance (2026)",
-          "href": "https://arxiv.org/abs/2602.15214"
-        }
-      ],
-      "badges": [
-        {
-          "text": "Infrastructure shutdown",
-          "class": "info"
-        }
-      ]
-    },
-    {
       "term": "Infrastructure Services",
       "key": "DOCKER_INFRASTRUCTURE_SERVICES",
       "definition": "Defined set of infrastructure containers that provide the core substrate for retrieval and operations: vector-capable storage, graph reasoning storage, metrics, logs, and alerting. Treat this as a dependency graph rather than a flat list, because failures in observability services can hide problems in retrieval services and vice versa. Healthy operation requires both data-plane services (for query/index workloads) and control-plane services (for telemetry and incident response). Managing this group consistently is essential for predictable RAG behavior in production.",
@@ -5237,37 +5206,6 @@
       "badges": [
         {
           "text": "Core services",
-          "class": "info"
-        }
-      ]
-    },
-    {
-      "term": "Infrastructure Up Timeout",
-      "key": "DOCKER_INFRA_UP_TIMEOUT",
-      "definition": "Defines the maximum wait for infrastructure startup readiness. During first boot or after image updates, pulls, migrations, and service warm-up can dominate startup time in a RAG environment. If the timeout is too short, healthy services may be marked failed before they pass health checks; if too long, real boot failures surface late and slow feedback loops. Set this from observed cold-start timings and revisit it when adding heavy dependencies such as observability or graph services.",
-      "category": "infrastructure",
-      "related": [],
-      "links": [
-        {
-          "text": "Docker Compose up",
-          "href": "https://docs.docker.com/reference/cli/docker/compose/up/"
-        },
-        {
-          "text": "Compose healthcheck",
-          "href": "https://docs.docker.com/reference/compose-file/services/#healthcheck"
-        },
-        {
-          "text": "Docker daemon reference",
-          "href": "https://docs.docker.com/engine/daemon/"
-        },
-        {
-          "text": "Decomposing Docker Container Startup Performance (2026)",
-          "href": "https://arxiv.org/abs/2602.15214"
-        }
-      ],
-      "badges": [
-        {
-          "text": "Infrastructure startup",
           "class": "info"
         }
       ]

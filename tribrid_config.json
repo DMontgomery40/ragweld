@@ -675,12 +675,9 @@
     "default_mode": "tribrid"
   },
   "docker": {
-    "docker_host": "",
     "docker_status_timeout": 5,
     "docker_container_list_timeout": 10,
     "docker_container_action_timeout": 30,
-    "docker_infra_up_timeout": 60,
-    "docker_infra_down_timeout": 30,
     "docker_logs_tail": 100,
     "docker_logs_timestamps": 1,
     "dev_frontend_port": 5173,

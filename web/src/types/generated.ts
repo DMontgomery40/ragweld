@@ -542,18 +542,12 @@ export interface DashboardIndexStorageBreakdown {
 
 /** Docker infrastructure configuration. */
 export interface DockerConfig {
-  /** Docker socket URL (e.g., unix:///var/run/docker.sock). Leave empty for auto-detection. */
-  docker_host?: string; // default: ""
   /** Timeout for Docker status check (seconds) */
   docker_status_timeout?: number; // default: 5
   /** Timeout for Docker container list (seconds) */
   docker_container_list_timeout?: number; // default: 10
   /** Timeout for Docker container actions (start/stop/restart) */
   docker_container_action_timeout?: number; // default: 30
-  /** Timeout for Docker infrastructure up command (seconds) */
-  docker_infra_up_timeout?: number; // default: 60
-  /** Timeout for Docker infrastructure down command (seconds) */
-  docker_infra_down_timeout?: number; // default: 30
   /** Default number of log lines to tail from containers */
   docker_logs_tail?: number; // default: 100
   /** Include timestamps in Docker logs (1=yes, 0=no) */
@@ -564,7 +558,7 @@ export interface DockerConfig {
   dev_backend_port?: number; // default: 8012
 }
 
-/** Normalized Docker container entry used by the Docker tab + dashboard. */
+/** Ragweld-owned Compose service exposed to the local Docker control surface. */
 export interface DockerContainer {
   /** Full container ID. */
   id: string;
@@ -580,12 +574,12 @@ export interface DockerContainer {
   status: string;
   /** Port mapping summary string (may be empty). */
   ports?: string | null; // default: None
-  /** Docker Compose project label (if present). */
-  compose_project?: string | null; // default: None
-  /** Docker Compose service label (if present). */
-  compose_service?: string | null; // default: None
-  /** Whether this container belongs to the TriBrid dev stack. */
-  tribrid_managed?: boolean; // default: False
+  /** Exact Docker Compose project label; always ragweld on this surface. */
+  compose_project: string;
+  /** Allowlisted Docker Compose service label. */
+  compose_service: string;
+  /** Whether exact Ragweld project and ownership labels authorize local control. */
+  managed: boolean;
 }
 
 /** Embedding generation and caching configuration. */
@@ -3237,10 +3231,20 @@ export interface DevStackStatusResponse {
   details?: string[];
 }
 
-/** Response payload for /api/docker/containers (and /api/docker/containers/all). */
+/** Response payload for the project-scoped /api/docker/services endpoint. */
 export interface DockerContainersResponse {
   /** List of Docker containers. */
   containers?: DockerContainer[];
+}
+
+/** Typed response for project-scoped Docker service logs. */
+export interface DockerServiceLogsResponse {
+  /** Whether Docker returned logs successfully. */
+  success: boolean;
+  /** Recent logs for the authorized Ragweld service. */
+  logs?: string;
+  /** Docker error when logs could not be read. */
+  error?: string | null;
 }
 
 /** Response payload for /api/docker/status. */
@@ -3249,7 +3253,9 @@ export interface DockerStatus {
   running?: boolean;
   /** Runtime label/version string (best-effort). */
   runtime?: string;
-  /** Total number of containers (docker ps -aq). */
+  /** Fixed Docker Compose project authorized by this local control surface. */
+  project_name?: "ragweld";
+  /** Number of authorized Ragweld service containers. */
   containers_count?: number;
 }
 

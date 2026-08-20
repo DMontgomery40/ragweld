@@ -5,25 +5,29 @@
 services:
   tempo:
     image: grafana/tempo:2.7.2
+    labels:
+      io.ragweld.managed: "true"
     command: ["-config.file=/etc/tempo/tempo.yaml"]
     ports:
-      - "${TEMPO_HTTP_PORT:-53200}:3200"
-      - "${TEMPO_OTLP_GRPC_PORT:-54317}:4317"
-      - "${TEMPO_OTLP_HTTP_PORT:-54318}:4318"
+      - "127.0.0.1:${TEMPO_HTTP_PORT:-53200}:3200"
+      - "127.0.0.1:${TEMPO_OTLP_GRPC_PORT:-54317}:4317"
+      - "127.0.0.1:${TEMPO_OTLP_HTTP_PORT:-54318}:4318"
     volumes:
       - ./infra/tempo.yaml:/etc/tempo/tempo.yaml:ro
       - tempo_data:/tmp/tempo
 
   alloy:
     image: grafana/alloy:v1.8.3
+    labels:
+      io.ragweld.managed: "true"
     command:
       - run
       - /etc/alloy/config.alloy
       - --server.http.listen-addr=0.0.0.0:12345
     ports:
-      - "${ALLOY_HTTP_PORT:-52345}:12345"
-      - "${ALLOY_OTLP_GRPC_PORT:-54319}:4317"
-      - "${ALLOY_OTLP_HTTP_PORT:-54320}:4318"
+      - "127.0.0.1:${ALLOY_HTTP_PORT:-52345}:12345"
+      - "127.0.0.1:${ALLOY_OTLP_GRPC_PORT:-54319}:4317"
+      - "127.0.0.1:${ALLOY_OTLP_HTTP_PORT:-54320}:4318"
     volumes:
       - ./infra/alloy/config.alloy:/etc/alloy/config.alloy:ro
     depends_on:

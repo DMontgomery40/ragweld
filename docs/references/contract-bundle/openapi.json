@@ -4739,28 +4739,6 @@
             "title": "Docker Container List Timeout",
             "type": "integer"
           },
-          "docker_host": {
-            "default": "",
-            "description": "Docker socket URL (e.g., unix:///var/run/docker.sock). Leave empty for auto-detection.",
-            "title": "Docker Host",
-            "type": "string"
-          },
-          "docker_infra_down_timeout": {
-            "default": 30,
-            "description": "Timeout for Docker infrastructure down command (seconds)",
-            "maximum": 120.0,
-            "minimum": 10.0,
-            "title": "Docker Infra Down Timeout",
-            "type": "integer"
-          },
-          "docker_infra_up_timeout": {
-            "default": 60,
-            "description": "Timeout for Docker infrastructure up command (seconds)",
-            "maximum": 300.0,
-            "minimum": 30.0,
-            "title": "Docker Infra Up Timeout",
-            "type": "integer"
-          },
           "docker_logs_tail": {
             "default": 100,
             "description": "Default number of log lines to tail from containers",
@@ -4790,31 +4768,17 @@
         "type": "object"
       },
       "DockerContainer": {
-        "description": "Normalized Docker container entry used by the Docker tab + dashboard.",
+        "description": "Ragweld-owned Compose service exposed to the local Docker control surface.",
         "properties": {
           "compose_project": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Docker Compose project label (if present).",
-            "title": "Compose Project"
+            "description": "Exact Docker Compose project label; always ragweld on this surface.",
+            "title": "Compose Project",
+            "type": "string"
           },
           "compose_service": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Docker Compose service label (if present).",
-            "title": "Compose Service"
+            "description": "Allowlisted Docker Compose service label.",
+            "title": "Compose Service",
+            "type": "string"
           },
           "id": {
             "description": "Full container ID.",
@@ -4825,6 +4789,11 @@
             "description": "Container image reference.",
             "title": "Image",
             "type": "string"
+          },
+          "managed": {
+            "description": "Whether exact Ragweld project and ownership labels authorize local control.",
+            "title": "Managed",
+            "type": "boolean"
           },
           "name": {
             "description": "Container name.",
@@ -4857,12 +4826,6 @@
             "description": "Human-readable docker status string.",
             "title": "Status",
             "type": "string"
-          },
-          "tribrid_managed": {
-            "default": false,
-            "description": "Whether this container belongs to the TriBrid dev stack.",
-            "title": "Tribrid Managed",
-            "type": "boolean"
           }
         },
         "required": [
@@ -4871,13 +4834,16 @@
           "name",
           "image",
           "state",
-          "status"
+          "status",
+          "compose_project",
+          "compose_service",
+          "managed"
         ],
         "title": "DockerContainer",
         "type": "object"
       },
       "DockerContainersResponse": {
-        "description": "Response payload for /api/docker/containers (and /api/docker/containers/all).",
+        "description": "Response payload for the project-scoped /api/docker/services endpoint.",
         "properties": {
           "containers": {
             "description": "List of Docker containers.",
@@ -4891,15 +4857,55 @@
         "title": "DockerContainersResponse",
         "type": "object"
       },
+      "DockerServiceLogsResponse": {
+        "description": "Typed response for project-scoped Docker service logs.",
+        "properties": {
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Docker error when logs could not be read.",
+            "title": "Error"
+          },
+          "logs": {
+            "default": "",
+            "description": "Recent logs for the authorized Ragweld service.",
+            "title": "Logs",
+            "type": "string"
+          },
+          "success": {
+            "description": "Whether Docker returned logs successfully.",
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "success"
+        ],
+        "title": "DockerServiceLogsResponse",
+        "type": "object"
+      },
       "DockerStatus": {
         "description": "Response payload for /api/docker/status.",
         "properties": {
           "containers_count": {
             "default": 0,
-            "description": "Total number of containers (docker ps -aq).",
+            "description": "Number of authorized Ragweld service containers.",
             "minimum": 0.0,
             "title": "Containers Count",
             "type": "integer"
+          },
+          "project_name": {
+            "const": "ragweld",
+            "default": "ragweld",
+            "description": "Fixed Docker Compose project authorized by this local control surface.",
+            "title": "Project Name",
+            "type": "string"
           },
           "running": {
             "default": false,
@@ -20620,16 +20626,37 @@
         ]
       }
     },
-    "/api/docker/container/{container_id}/logs": {
+    "/api/docker/services": {
       "get": {
-        "operationId": "get_container_logs_api_docker_container__container_id__logs_get",
+        "operationId": "list_docker_services_api_docker_services_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DockerContainersResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Docker Services",
+        "tags": [
+          "docker"
+        ]
+      }
+    },
+    "/api/docker/services/{service}/logs": {
+      "get": {
+        "operationId": "get_docker_service_logs_api_docker_services__service__logs_get",
         "parameters": [
           {
             "in": "path",
-            "name": "container_id",
+            "name": "service",
             "required": true,
             "schema": {
-              "title": "Container Id",
+              "title": "Service",
               "type": "string"
             }
           },
@@ -20657,9 +20684,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Get Container Logs Api Docker Container  Container Id  Logs Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/DockerServiceLogsResponse"
                 }
               }
             },
@@ -20676,22 +20701,31 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Get Container Logs",
+        "summary": "Get Docker Service Logs",
         "tags": [
           "docker"
         ]
       }
     },
-    "/api/docker/container/{container_id}/pause": {
+    "/api/docker/services/{service}/{action}": {
       "post": {
-        "operationId": "pause_container_api_docker_container__container_id__pause_post",
+        "operationId": "control_docker_service_api_docker_services__service___action__post",
         "parameters": [
           {
             "in": "path",
-            "name": "container_id",
+            "name": "service",
             "required": true,
             "schema": {
-              "title": "Container Id",
+              "title": "Service",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "action",
+            "required": true,
+            "schema": {
+              "title": "Action",
               "type": "string"
             }
           }
@@ -20702,7 +20736,7 @@
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Pause Container Api Docker Container  Container Id  Pause Post",
+                  "title": "Response Control Docker Service Api Docker Services  Service   Action  Post",
                   "type": "object"
                 }
               }
@@ -20720,269 +20754,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Pause Container",
-        "tags": [
-          "docker"
-        ]
-      }
-    },
-    "/api/docker/container/{container_id}/remove": {
-      "post": {
-        "operationId": "remove_container_api_docker_container__container_id__remove_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "container_id",
-            "required": true,
-            "schema": {
-              "title": "Container Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Remove Container Api Docker Container  Container Id  Remove Post",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Remove Container",
-        "tags": [
-          "docker"
-        ]
-      }
-    },
-    "/api/docker/container/{container_id}/restart": {
-      "post": {
-        "operationId": "restart_container_by_id_api_docker_container__container_id__restart_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "container_id",
-            "required": true,
-            "schema": {
-              "title": "Container Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Restart Container By Id Api Docker Container  Container Id  Restart Post",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Restart Container By Id",
-        "tags": [
-          "docker"
-        ]
-      }
-    },
-    "/api/docker/container/{container_id}/start": {
-      "post": {
-        "operationId": "start_container_api_docker_container__container_id__start_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "container_id",
-            "required": true,
-            "schema": {
-              "title": "Container Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Start Container Api Docker Container  Container Id  Start Post",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Start Container",
-        "tags": [
-          "docker"
-        ]
-      }
-    },
-    "/api/docker/container/{container_id}/stop": {
-      "post": {
-        "operationId": "stop_container_api_docker_container__container_id__stop_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "container_id",
-            "required": true,
-            "schema": {
-              "title": "Container Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Stop Container Api Docker Container  Container Id  Stop Post",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Stop Container",
-        "tags": [
-          "docker"
-        ]
-      }
-    },
-    "/api/docker/container/{container_id}/unpause": {
-      "post": {
-        "operationId": "unpause_container_api_docker_container__container_id__unpause_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "container_id",
-            "required": true,
-            "schema": {
-              "title": "Container Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Unpause Container Api Docker Container  Container Id  Unpause Post",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Unpause Container",
-        "tags": [
-          "docker"
-        ]
-      }
-    },
-    "/api/docker/containers": {
-      "get": {
-        "operationId": "list_docker_containers_api_docker_containers_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DockerContainersResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "List Docker Containers",
-        "tags": [
-          "docker"
-        ]
-      }
-    },
-    "/api/docker/containers/all": {
-      "get": {
-        "operationId": "list_docker_containers_all_api_docker_containers_all_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DockerContainersResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "List Docker Containers All",
+        "summary": "Control Docker Service",
         "tags": [
           "docker"
         ]
@@ -21004,106 +20776,6 @@
           }
         },
         "summary": "Get Docker Status",
-        "tags": [
-          "docker"
-        ]
-      }
-    },
-    "/api/docker/{container}/logs": {
-      "get": {
-        "operationId": "get_container_logs_legacy_api_docker__container__logs_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "container",
-            "required": true,
-            "schema": {
-              "title": "Container",
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "lines",
-            "required": false,
-            "schema": {
-              "default": 100,
-              "title": "Lines",
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "type": "string"
-                  },
-                  "title": "Response Get Container Logs Legacy Api Docker  Container  Logs Get",
-                  "type": "array"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Get Container Logs Legacy",
-        "tags": [
-          "docker"
-        ]
-      }
-    },
-    "/api/docker/{container}/restart": {
-      "post": {
-        "operationId": "restart_container_api_docker__container__restart_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "container",
-            "required": true,
-            "schema": {
-              "title": "Container",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Restart Container Api Docker  Container  Restart Post",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Restart Container",
         "tags": [
           "docker"
         ]

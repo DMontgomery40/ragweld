@@ -15,6 +15,12 @@ scrape_configs:
       - host: unix:///var/run/docker.sock
         refresh_interval: 5s
     relabel_configs:
+      - source_labels:
+          - '__meta_docker_container_label_com_docker_compose_project'
+          - '__meta_docker_container_label_io_ragweld_managed'
+        separator: ';'
+        regex: 'ragweld;true'
+        action: keep
       - source_labels: ['__meta_docker_container_name']
         regex: '/(.*)'
         target_label: 'container'
@@ -33,19 +39,3 @@ scrape_configs:
       - labels:
           level:
           stream:
-
-  # Host logs (best-effort; meaningful on Linux)
-  - job_name: varlogs
-    static_configs:
-      - targets: [localhost]
-        labels:
-          job: varlogs
-          __path__: /var/log/*.log
-
-  # App logs if present (optional)
-  - job_name: tribrid-data-logs
-    static_configs:
-      - targets: [localhost]
-        labels:
-          job: tribrid-data
-          __path__: /app/data/**/*.log

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import subprocess
 import time
 from collections import deque
@@ -18,12 +19,34 @@ from server.models.tribrid_config_model import (
     DevStackStatusResponse,
     DockerContainer,
     DockerContainersResponse,
+    DockerServiceLogsResponse,
     DockerStatus,
     LokiStatus,
     TriBridConfig,
 )
 
 router = APIRouter(tags=["docker"])
+
+_DOCKER_PROJECT = "ragweld"
+_DOCKER_MANAGED_LABEL = "io.ragweld.managed"
+_DOCKER_MANAGED_VALUE = "true"
+_DOCKER_SERVICES = frozenset(
+    {
+        "api",
+        "grafana",
+        "loki",
+        "neo4j",
+        "postgres",
+        "postgres-exporter",
+        "prometheus",
+        "promtail",
+        "tempo",
+        "alloy",
+    }
+)
+_DOCKER_ACTIONS = frozenset({"start", "stop", "restart"})
+_FULL_CONTAINER_ID = re.compile(r"^[0-9a-f]{64}$")
+
 
 def _is_local_client(request: Request) -> bool:
     host = request.client.host if request.client else ""
@@ -59,13 +82,30 @@ async def _http_ok(url: str, timeout_s: float = 1.5) -> bool:
         return False
 
 
-def _docker_env(cfg: TriBridConfig) -> dict[str, str]:
-    """Build env for docker CLI, honoring config overrides (best-effort)."""
+def _docker_env() -> dict[str, str]:
+    """Build a local-context Docker CLI environment without remote-daemon authority."""
     env = os.environ.copy()
-    host = (getattr(cfg.docker, "docker_host", "") or "").strip()
-    if host:
-        env["DOCKER_HOST"] = host
+    env.pop("DOCKER_HOST", None)
+    env.pop("DOCKER_CONTEXT", None)
     return env
+
+
+async def _ensure_local_docker_context(*, timeout_s: int, env: dict[str, str]) -> None:
+    """Reject selected Docker contexts that address a remote daemon."""
+    try:
+        result = await _run_cmd_async(
+            ["docker", "context", "inspect", "--format", "{{.Endpoints.docker.Host}}"],
+            timeout_s=timeout_s,
+            env=env,
+        )
+    except FileNotFoundError:
+        return
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "Docker context could not be inspected.").strip()
+        raise HTTPException(status_code=503, detail=detail)
+    endpoint = (result.stdout or "").strip().lower()
+    if not endpoint.startswith(("unix://", "npipe://")):
+        raise HTTPException(status_code=403, detail="Ragweld Docker control requires a local Docker context.")
 
 
 def _loki_candidate_urls() -> list[str]:
@@ -145,30 +185,37 @@ async def _docker_running(*, timeout_s: int, env: dict[str, str] | None) -> tupl
     return True, f"docker{(' ' + ver) if ver else ''}".strip()
 
 
-async def _docker_containers_count(*, timeout_s: int, env: dict[str, str] | None) -> int:
-    try:
-        res = await _run_cmd_async(["docker", "ps", "-aq"], timeout_s=timeout_s, env=env)
-    except FileNotFoundError:
-        return 0
-    if res.returncode != 0:
-        return 0
-    lines = [ln for ln in (res.stdout or "").splitlines() if ln.strip()]
-    return len(lines)
+def _parse_managed_service(line: str) -> dict[str, Any] | None:
+    parts = line.split("\t")
+    if len(parts) < 9:
+        return None
+    cid, image, name, state, status, ports, compose_project, compose_service, managed = parts[:9]
+    cid = cid.strip().lower()
+    compose_project = compose_project.strip()
+    compose_service = compose_service.strip()
+    managed = managed.strip()
+    if not _FULL_CONTAINER_ID.fullmatch(cid):
+        return None
+    if compose_project != _DOCKER_PROJECT or managed != _DOCKER_MANAGED_VALUE:
+        return None
+    if compose_service not in _DOCKER_SERVICES:
+        return None
+    return {
+        "id": cid,
+        "short_id": cid[:12],
+        "name": name,
+        "image": image,
+        "state": (state or "").lower() or "unknown",
+        "status": status,
+        "ports": ports,
+        "compose_project": compose_project,
+        "compose_service": compose_service,
+        "managed": True,
+    }
 
 
-def _parse_labels(raw: str) -> dict[str, str]:
-    out: dict[str, str] = {}
-    for part in (raw or "").split(","):
-        part = part.strip()
-        if not part or "=" not in part:
-            continue
-        k, v = part.split("=", 1)
-        out[k.strip()] = v.strip()
-    return out
-
-
-async def _list_docker_containers(*, timeout_s: int, env: dict[str, str] | None) -> list[dict[str, Any]]:
-    """Return containers in the Dashboard/Docker UI shape."""
+async def _list_managed_services(*, timeout_s: int, env: dict[str, str] | None) -> list[dict[str, Any]]:
+    """List only exactly labelled, allowlisted services in the Ragweld Compose project."""
     try:
         res = await _run_cmd_async(
             [
@@ -176,8 +223,17 @@ async def _list_docker_containers(*, timeout_s: int, env: dict[str, str] | None)
                 "ps",
                 "-a",
                 "--no-trunc",
+                "--filter",
+                f"label=com.docker.compose.project={_DOCKER_PROJECT}",
+                "--filter",
+                f"label={_DOCKER_MANAGED_LABEL}={_DOCKER_MANAGED_VALUE}",
                 "--format",
-                "{{.ID}}\t{{.Image}}\t{{.Names}}\t{{.State}}\t{{.Status}}\t{{.Ports}}\t{{.Labels}}",
+                (
+                    '{{.ID}}\t{{.Image}}\t{{.Names}}\t{{.State}}\t{{.Status}}\t{{.Ports}}\t'
+                    '{{.Label "com.docker.compose.project"}}\t'
+                    '{{.Label "com.docker.compose.service"}}\t'
+                    f'{{{{.Label "{_DOCKER_MANAGED_LABEL}"}}}}'
+                ),
             ],
             timeout_s=timeout_s,
             env=env,
@@ -189,31 +245,67 @@ async def _list_docker_containers(*, timeout_s: int, env: dict[str, str] | None)
 
     containers: list[dict[str, Any]] = []
     for line in (res.stdout or "").splitlines():
-        if not line.strip():
-            continue
-        parts = line.split("\t")
-        if len(parts) < 7:
-            continue
-        cid, image, name, state, status, ports, labels_raw = parts[:7]
-        labels = _parse_labels(labels_raw)
-        compose_project = labels.get("com.docker.compose.project")
-        compose_service = labels.get("com.docker.compose.service")
-        tribrid_managed = bool(compose_project == "tribrid" or name.startswith("tribrid-"))
-        containers.append(
-            {
-                "id": cid,
-                "short_id": cid[:12],
-                "name": name,
-                "image": image,
-                "state": (state or "").lower() or "unknown",
-                "status": status,
-                "ports": ports,
-                "compose_project": compose_project,
-                "compose_service": compose_service,
-                "tribrid_managed": tribrid_managed,
-            }
-        )
+        parsed = _parse_managed_service(line)
+        if parsed is not None:
+            containers.append(parsed)
     return containers
+
+
+def _validate_service(service: str) -> str:
+    if service not in _DOCKER_SERVICES:
+        raise HTTPException(status_code=404, detail="Ragweld Docker service not found.")
+    return service
+
+
+async def _resolve_managed_service_id(
+    service: str,
+    *,
+    timeout_s: int,
+    env: dict[str, str] | None,
+) -> str:
+    """Resolve a service to one immutable full ID, then revalidate its ownership labels."""
+    service = _validate_service(service)
+    matches = [
+        item
+        for item in await _list_managed_services(timeout_s=timeout_s, env=env)
+        if item["compose_service"] == service
+    ]
+    if not matches:
+        raise HTTPException(status_code=404, detail="Ragweld Docker service not found.")
+    if len(matches) != 1:
+        raise HTTPException(status_code=409, detail="Ragweld Docker service ownership is ambiguous.")
+
+    candidate_id = str(matches[0]["id"])
+    inspect_format = (
+        '{{.Id}}\t{{index .Config.Labels "com.docker.compose.project"}}\t'
+        '{{index .Config.Labels "com.docker.compose.service"}}\t'
+        f'{{{{index .Config.Labels "{_DOCKER_MANAGED_LABEL}"}}}}'
+    )
+    try:
+        result = await _run_cmd_async(
+            ["docker", "inspect", "--format", inspect_format, candidate_id],
+            timeout_s=timeout_s,
+            env=env,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=503, detail="Docker CLI is unavailable.") from exc
+    if result.returncode != 0:
+        raise HTTPException(status_code=404, detail="Ragweld Docker service not found.")
+
+    parts = (result.stdout or "").strip().split("\t")
+    if len(parts) != 4:
+        raise HTTPException(status_code=404, detail="Ragweld Docker service ownership could not be verified.")
+    inspected_id, project, inspected_service, managed = (part.strip() for part in parts)
+    inspected_id = inspected_id.lower()
+    if (
+        not _FULL_CONTAINER_ID.fullmatch(inspected_id)
+        or inspected_id != candidate_id
+        or project != _DOCKER_PROJECT
+        or inspected_service != service
+        or managed != _DOCKER_MANAGED_VALUE
+    ):
+        raise HTTPException(status_code=404, detail="Ragweld Docker service ownership could not be verified.")
+    return inspected_id
 
 
 # ============================================================================
@@ -222,7 +314,8 @@ async def _list_docker_containers(*, timeout_s: int, env: dict[str, str] | None)
 
 
 @router.get("/docker/status", response_model=DockerStatus)
-async def get_docker_status() -> DockerStatus:
+async def get_docker_status(request: Request) -> DockerStatus:
+    _ensure_local_request(request)
     try:
         cfg = load_config()
         timeout = int(getattr(cfg.docker, "docker_status_timeout", 5))
@@ -231,147 +324,67 @@ async def get_docker_status() -> DockerStatus:
         cfg = TriBridConfig()
         timeout, list_timeout = 5, 10
 
-    env = _docker_env(cfg)
+    env = _docker_env()
+    await _ensure_local_docker_context(timeout_s=timeout, env=env)
     running, runtime = await _docker_running(timeout_s=timeout, env=env)
-    containers_count = await _docker_containers_count(timeout_s=list_timeout, env=env) if running else 0
-    return DockerStatus(running=bool(running), runtime=str(runtime or ""), containers_count=int(containers_count))
+    containers = await _list_managed_services(timeout_s=list_timeout, env=env) if running else []
+    return DockerStatus(
+        running=bool(running),
+        runtime=str(runtime or ""),
+        project_name=_DOCKER_PROJECT,
+        containers_count=len(containers),
+    )
 
 
-@router.get("/docker/containers", response_model=DockerContainersResponse)
-async def list_docker_containers() -> DockerContainersResponse:
+@router.get("/docker/services", response_model=DockerContainersResponse)
+async def list_docker_services(request: Request) -> DockerContainersResponse:
+    _ensure_local_request(request)
     try:
         cfg = load_config()
         timeout = int(getattr(cfg.docker, "docker_container_list_timeout", 10))
     except Exception:
         cfg = TriBridConfig()
         timeout = 10
-    env = _docker_env(cfg)
-    container_dicts = await _list_docker_containers(timeout_s=timeout, env=env)
+    env = _docker_env()
+    await _ensure_local_docker_context(timeout_s=timeout, env=env)
+    container_dicts = await _list_managed_services(timeout_s=timeout, env=env)
     containers = [DockerContainer.model_validate(c) for c in container_dicts]
     return DockerContainersResponse(containers=containers)
 
 
-@router.get("/docker/containers/all", response_model=DockerContainersResponse)
-async def list_docker_containers_all() -> DockerContainersResponse:
-    # Backward-compatible alias used by the Docker tab (axios client).
-    return await list_docker_containers()
-
-
-@router.post("/docker/container/{container_id}/start")
-async def start_container(container_id: str) -> dict[str, Any]:
+@router.post("/docker/services/{service}/{action}")
+async def control_docker_service(request: Request, service: str, action: str) -> dict[str, Any]:
+    _ensure_local_request(request)
+    service = _validate_service(service)
+    if action not in _DOCKER_ACTIONS:
+        raise HTTPException(status_code=404, detail="Ragweld Docker action not found.")
     try:
         cfg = load_config()
         timeout = int(getattr(cfg.docker, "docker_container_action_timeout", 30))
     except Exception:
         cfg = TriBridConfig()
         timeout = 30
+    env = _docker_env()
+    await _ensure_local_docker_context(timeout_s=timeout, env=env)
+    container_id = await _resolve_managed_service_id(service, timeout_s=timeout, env=env)
     try:
-        env = _docker_env(cfg)
-        res = await _run_cmd_async(["docker", "start", container_id], timeout_s=timeout, env=env)
-    except FileNotFoundError as e:
-        raise HTTPException(status_code=503, detail=str(e)) from e
-    if res.returncode != 0:
-        raise HTTPException(status_code=500, detail=(res.stderr or res.stdout or "Failed to start container").strip())
-    return {"success": True}
+        result = await _run_cmd_async(["docker", action, "--", container_id], timeout_s=timeout, env=env)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=503, detail="Docker CLI is unavailable.") from exc
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or f"Failed to {action} Ragweld service.").strip()
+        raise HTTPException(status_code=502, detail=detail)
+    return {"success": True, "service": service, "action": action}
 
 
-@router.post("/docker/container/{container_id}/stop")
-async def stop_container(container_id: str) -> dict[str, Any]:
-    try:
-        cfg = load_config()
-        timeout = int(getattr(cfg.docker, "docker_container_action_timeout", 30))
-    except Exception:
-        cfg = TriBridConfig()
-        timeout = 30
-    try:
-        env = _docker_env(cfg)
-        res = await _run_cmd_async(["docker", "stop", container_id], timeout_s=timeout, env=env)
-    except FileNotFoundError as e:
-        raise HTTPException(status_code=503, detail=str(e)) from e
-    if res.returncode != 0:
-        raise HTTPException(status_code=500, detail=(res.stderr or res.stdout or "Failed to stop container").strip())
-    return {"success": True}
-
-
-@router.post("/docker/container/{container_id}/restart")
-async def restart_container_by_id(container_id: str) -> dict[str, Any]:
-    try:
-        cfg = load_config()
-        timeout = int(getattr(cfg.docker, "docker_container_action_timeout", 30))
-    except Exception:
-        cfg = TriBridConfig()
-        timeout = 30
-    try:
-        env = _docker_env(cfg)
-        res = await _run_cmd_async(["docker", "restart", container_id], timeout_s=timeout, env=env)
-    except FileNotFoundError as e:
-        raise HTTPException(status_code=503, detail=str(e)) from e
-    if res.returncode != 0:
-        raise HTTPException(
-            status_code=500, detail=(res.stderr or res.stdout or "Failed to restart container").strip()
-        )
-    return {"success": True}
-
-
-@router.post("/docker/container/{container_id}/pause")
-async def pause_container(container_id: str) -> dict[str, Any]:
-    try:
-        cfg = load_config()
-        timeout = int(getattr(cfg.docker, "docker_container_action_timeout", 30))
-    except Exception:
-        cfg = TriBridConfig()
-        timeout = 30
-    try:
-        env = _docker_env(cfg)
-        res = await _run_cmd_async(["docker", "pause", container_id], timeout_s=timeout, env=env)
-    except FileNotFoundError as e:
-        raise HTTPException(status_code=503, detail=str(e)) from e
-    if res.returncode != 0:
-        raise HTTPException(status_code=500, detail=(res.stderr or res.stdout or "Failed to pause container").strip())
-    return {"success": True}
-
-
-@router.post("/docker/container/{container_id}/unpause")
-async def unpause_container(container_id: str) -> dict[str, Any]:
-    try:
-        cfg = load_config()
-        timeout = int(getattr(cfg.docker, "docker_container_action_timeout", 30))
-    except Exception:
-        cfg = TriBridConfig()
-        timeout = 30
-    try:
-        env = _docker_env(cfg)
-        res = await _run_cmd_async(["docker", "unpause", container_id], timeout_s=timeout, env=env)
-    except FileNotFoundError as e:
-        raise HTTPException(status_code=503, detail=str(e)) from e
-    if res.returncode != 0:
-        raise HTTPException(status_code=500, detail=(res.stderr or res.stdout or "Failed to unpause container").strip())
-    return {"success": True}
-
-
-@router.post("/docker/container/{container_id}/remove")
-async def remove_container(container_id: str) -> dict[str, Any]:
-    try:
-        cfg = load_config()
-        timeout = int(getattr(cfg.docker, "docker_container_action_timeout", 30))
-    except Exception:
-        cfg = TriBridConfig()
-        timeout = 30
-    try:
-        env = _docker_env(cfg)
-        res = await _run_cmd_async(["docker", "rm", "-f", container_id], timeout_s=timeout, env=env)
-    except FileNotFoundError as e:
-        raise HTTPException(status_code=503, detail=str(e)) from e
-    if res.returncode != 0:
-        raise HTTPException(status_code=500, detail=(res.stderr or res.stdout or "Failed to remove container").strip())
-    return {"success": True}
-
-
-@router.get("/docker/container/{container_id}/logs")
-async def get_container_logs(
-    container_id: str,
+@router.get("/docker/services/{service}/logs", response_model=DockerServiceLogsResponse)
+async def get_docker_service_logs(
+    request: Request,
+    service: str,
     tail: int | None = Query(default=None, ge=10, le=1000),
-) -> dict[str, Any]:
+) -> DockerServiceLogsResponse:
+    _ensure_local_request(request)
+    service = _validate_service(service)
     try:
         cfg = load_config()
         timeout = int(getattr(cfg.docker, "docker_container_list_timeout", 10))
@@ -381,34 +394,23 @@ async def get_container_logs(
         cfg = TriBridConfig()
         timeout, default_tail, timestamps = 10, 100, 1
 
-    env = _docker_env(cfg)
+    env = _docker_env()
+    await _ensure_local_docker_context(timeout_s=timeout, env=env)
     effective_tail = int(tail or default_tail)
+    container_id = await _resolve_managed_service_id(service, timeout_s=timeout, env=env)
 
     args = ["docker", "logs", "--tail", str(effective_tail)]
     if timestamps:
         args.append("--timestamps")
-    args.append(container_id)
+    args.extend(["--", container_id])
     try:
         res = await _run_cmd_async(args, timeout_s=timeout, env=env)
     except FileNotFoundError as e:
-        return {"success": False, "logs": "", "error": str(e)}
+        return DockerServiceLogsResponse(success=False, logs="", error=str(e))
     if res.returncode != 0:
-        return {"success": False, "logs": "", "error": (res.stderr or res.stdout or "Failed to fetch logs").strip()}
-    return {"success": True, "logs": res.stdout or ""}
-
-
-# Legacy aliases (older UI paths)
-@router.post("/docker/{container}/restart")
-async def restart_container(container: str) -> dict[str, Any]:
-    return await restart_container_by_id(container)
-
-
-@router.get("/docker/{container}/logs")
-async def get_container_logs_legacy(container: str, lines: int = 100) -> list[str]:
-    res = await get_container_logs(container, tail=lines)
-    if not res.get("success"):
-        raise HTTPException(status_code=500, detail=res.get("error") or "Failed to fetch logs")
-    return str(res.get("logs") or "").splitlines()
+        error = (res.stderr or res.stdout or "Failed to fetch logs").strip()
+        return DockerServiceLogsResponse(success=False, logs="", error=error)
+    return DockerServiceLogsResponse(success=True, logs=res.stdout or "", error=None)
 
 
 # ============================================================================

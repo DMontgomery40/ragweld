@@ -1,14 +1,18 @@
+name: ragweld
+
 services:
   postgres:
     # Default: pgvector/pgvector (dense vectors). For BM25 via ParadeDB pg_search:
     #   POSTGRES_IMAGE=paradedb/paradedb:latest
     image: ${POSTGRES_IMAGE:-pgvector/pgvector:pg16}
+    labels:
+      io.ragweld.managed: "true"
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-tribrid_rag}
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -19,6 +23,8 @@ services:
 
   postgres-exporter:
     image: prometheuscommunity/postgres-exporter:latest
+    labels:
+      io.ragweld.managed: "true"
     environment:
       # Prometheus exporter expects a Postgres DSN.
       # Use the same defaults as the postgres service.
@@ -32,6 +38,8 @@ services:
     #   NEO4J_IMAGE=neo4j:5.26.20-enterprise
     #   NEO4J_ACCEPT_LICENSE_AGREEMENT=yes
     image: ${NEO4J_IMAGE:-neo4j:5.26.20-community}
+    labels:
+      io.ragweld.managed: "true"
     environment:
       NEO4J_AUTH: ${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD:-password}
       # Required for Enterprise. Safe to set even when using Community.
@@ -47,8 +55,8 @@ services:
       NEO4J_server_memory_heap_max__size: ${NEO4J_HEAP_MAX:-4G}
       NEO4J_server_memory_pagecache_size: ${NEO4J_PAGECACHE:-2G}
     ports:
-      - "${NEO4J_HTTP_PORT:-7474}:7474"  # HTTP
-      - "${NEO4J_BOLT_PORT:-7687}:7687"  # Bolt
+      - "127.0.0.1:${NEO4J_HTTP_PORT:-7474}:7474"  # HTTP
+      - "127.0.0.1:${NEO4J_BOLT_PORT:-7687}:7687"  # Bolt
     volumes:
       - neo4j_data:/data
       - neo4j_logs:/logs
@@ -61,6 +69,8 @@ services:
 
   grafana:
     image: grafana/grafana-oss:10.0.0
+    labels:
+      io.ragweld.managed: "true"
     environment:
       GF_SECURITY_ADMIN_USER: admin
       GF_SECURITY_ADMIN_PASSWORD: admin
@@ -75,7 +85,7 @@ services:
       # Required for cross-origin iframe cookies in some browsers.
       GF_SECURITY_COOKIE_SAMESITE: disabled
     ports:
-      - "${GRAFANA_PORT:-3301}:3000"
+      - "127.0.0.1:${GRAFANA_PORT:-3301}:3000"
     volumes:
       - grafana_data:/var/lib/grafana
       - ./infra/grafana/provisioning:/etc/grafana/provisioning
@@ -85,12 +95,14 @@ services:
 
   prometheus:
     image: prom/prometheus:v2.45.0
+    labels:
+      io.ragweld.managed: "true"
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
       - '--web.enable-lifecycle'
     ports:
-      - "${PROMETHEUS_PORT:-59090}:9090"
+      - "127.0.0.1:${PROMETHEUS_PORT:-59090}:9090"
     volumes:
       - ./infra/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus_data:/prometheus
@@ -101,9 +113,11 @@ services:
 
   loki:
     image: grafana/loki:latest
+    labels:
+      io.ragweld.managed: "true"
     restart: unless-stopped
     ports:
-      - "${LOKI_PORT:-53100}:3100"
+      - "127.0.0.1:${LOKI_PORT:-53100}:3100"
     volumes:
       - ./infra/loki-config.yml:/etc/loki/local-config.yaml:ro
       - loki_data:/loki
@@ -111,15 +125,13 @@ services:
 
   promtail:
     image: grafana/promtail:latest
+    labels:
+      io.ragweld.managed: "true"
     restart: unless-stopped
     volumes:
       - ./infra/promtail-config.yml:/etc/promtail/config.yml:ro
-      # Docker container logs (works across platforms with Docker Desktop).
+      # Container discovery is filtered to the exact Ragweld project and ownership label.
       - /var/run/docker.sock:/var/run/docker.sock:ro
-      # Optional: allow tailing host logs on Linux (best-effort; harmless if empty).
-      - /var/log:/var/log:ro
-      # Optional: app data logs if present.
-      - ./data:/app/data:ro
     command: -config.file=/etc/promtail/config.yml
     depends_on:
       - loki
@@ -130,6 +142,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    labels:
+      io.ragweld.managed: "true"
     environment:
       - POSTGRES_HOST=postgres
       - POSTGRES_PORT=5432
@@ -137,7 +151,7 @@ services:
     env_file:
       - .env
     ports:
-      - "${SERVER_PORT:-8012}:8000"
+      - "127.0.0.1:${SERVER_PORT:-8012}:8000"
     volumes:
       - ./models:/app/models
       - ./data:/app/data

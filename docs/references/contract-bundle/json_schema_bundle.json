@@ -1,5 +1,5 @@
 {
-  "model_count": 249,
+  "model_count": 250,
   "module": "server.models.tribrid_config_model",
   "root_models": {
     "ActiveSources": {
@@ -9960,28 +9960,6 @@
           "title": "Docker Container List Timeout",
           "type": "integer"
         },
-        "docker_host": {
-          "default": "",
-          "description": "Docker socket URL (e.g., unix:///var/run/docker.sock). Leave empty for auto-detection.",
-          "title": "Docker Host",
-          "type": "string"
-        },
-        "docker_infra_down_timeout": {
-          "default": 30,
-          "description": "Timeout for Docker infrastructure down command (seconds)",
-          "maximum": 120,
-          "minimum": 10,
-          "title": "Docker Infra Down Timeout",
-          "type": "integer"
-        },
-        "docker_infra_up_timeout": {
-          "default": 60,
-          "description": "Timeout for Docker infrastructure up command (seconds)",
-          "maximum": 300,
-          "minimum": 30,
-          "title": "Docker Infra Up Timeout",
-          "type": "integer"
-        },
         "docker_logs_tail": {
           "default": 100,
           "description": "Default number of log lines to tail from containers",
@@ -10011,33 +9989,17 @@
       "type": "object"
     },
     "DockerContainer": {
-      "description": "Normalized Docker container entry used by the Docker tab + dashboard.",
+      "description": "Ragweld-owned Compose service exposed to the local Docker control surface.",
       "properties": {
         "compose_project": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "Docker Compose project label (if present).",
-          "title": "Compose Project"
+          "description": "Exact Docker Compose project label; always ragweld on this surface.",
+          "title": "Compose Project",
+          "type": "string"
         },
         "compose_service": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "Docker Compose service label (if present).",
-          "title": "Compose Service"
+          "description": "Allowlisted Docker Compose service label.",
+          "title": "Compose Service",
+          "type": "string"
         },
         "id": {
           "description": "Full container ID.",
@@ -10048,6 +10010,11 @@
           "description": "Container image reference.",
           "title": "Image",
           "type": "string"
+        },
+        "managed": {
+          "description": "Whether exact Ragweld project and ownership labels authorize local control.",
+          "title": "Managed",
+          "type": "boolean"
         },
         "name": {
           "description": "Container name.",
@@ -10081,12 +10048,6 @@
           "description": "Human-readable docker status string.",
           "title": "Status",
           "type": "string"
-        },
-        "tribrid_managed": {
-          "default": false,
-          "description": "Whether this container belongs to the TriBrid dev stack.",
-          "title": "Tribrid Managed",
-          "type": "boolean"
         }
       },
       "required": [
@@ -10095,7 +10056,10 @@
         "name",
         "image",
         "state",
-        "status"
+        "status",
+        "compose_project",
+        "compose_service",
+        "managed"
       ],
       "title": "DockerContainer",
       "type": "object"
@@ -10103,33 +10067,17 @@
     "DockerContainersResponse": {
       "$defs": {
         "DockerContainer": {
-          "description": "Normalized Docker container entry used by the Docker tab + dashboard.",
+          "description": "Ragweld-owned Compose service exposed to the local Docker control surface.",
           "properties": {
             "compose_project": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "description": "Docker Compose project label (if present).",
-              "title": "Compose Project"
+              "description": "Exact Docker Compose project label; always ragweld on this surface.",
+              "title": "Compose Project",
+              "type": "string"
             },
             "compose_service": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "description": "Docker Compose service label (if present).",
-              "title": "Compose Service"
+              "description": "Allowlisted Docker Compose service label.",
+              "title": "Compose Service",
+              "type": "string"
             },
             "id": {
               "description": "Full container ID.",
@@ -10140,6 +10088,11 @@
               "description": "Container image reference.",
               "title": "Image",
               "type": "string"
+            },
+            "managed": {
+              "description": "Whether exact Ragweld project and ownership labels authorize local control.",
+              "title": "Managed",
+              "type": "boolean"
             },
             "name": {
               "description": "Container name.",
@@ -10173,12 +10126,6 @@
               "description": "Human-readable docker status string.",
               "title": "Status",
               "type": "string"
-            },
-            "tribrid_managed": {
-              "default": false,
-              "description": "Whether this container belongs to the TriBrid dev stack.",
-              "title": "Tribrid Managed",
-              "type": "boolean"
             }
           },
           "required": [
@@ -10187,13 +10134,16 @@
             "name",
             "image",
             "state",
-            "status"
+            "status",
+            "compose_project",
+            "compose_service",
+            "managed"
           ],
           "title": "DockerContainer",
           "type": "object"
         }
       },
-      "description": "Response payload for /api/docker/containers (and /api/docker/containers/all).",
+      "description": "Response payload for the project-scoped /api/docker/services endpoint.",
       "properties": {
         "containers": {
           "description": "List of Docker containers.",
@@ -10207,15 +10157,56 @@
       "title": "DockerContainersResponse",
       "type": "object"
     },
+    "DockerServiceLogsResponse": {
+      "description": "Typed response for project-scoped Docker service logs.",
+      "properties": {
+        "error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Docker error when logs could not be read.",
+          "title": "Error"
+        },
+        "logs": {
+          "default": "",
+          "description": "Recent logs for the authorized Ragweld service.",
+          "title": "Logs",
+          "type": "string"
+        },
+        "success": {
+          "description": "Whether Docker returned logs successfully.",
+          "title": "Success",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "success"
+      ],
+      "title": "DockerServiceLogsResponse",
+      "type": "object"
+    },
     "DockerStatus": {
       "description": "Response payload for /api/docker/status.",
       "properties": {
         "containers_count": {
           "default": 0,
-          "description": "Total number of containers (docker ps -aq).",
+          "description": "Number of authorized Ragweld service containers.",
           "minimum": 0,
           "title": "Containers Count",
           "type": "integer"
+        },
+        "project_name": {
+          "const": "ragweld",
+          "default": "ragweld",
+          "description": "Fixed Docker Compose project authorized by this local control surface.",
+          "title": "Project Name",
+          "type": "string"
         },
         "running": {
           "default": false,
@@ -32342,28 +32333,6 @@
               "maximum": 60,
               "minimum": 1,
               "title": "Docker Container List Timeout",
-              "type": "integer"
-            },
-            "docker_host": {
-              "default": "",
-              "description": "Docker socket URL (e.g., unix:///var/run/docker.sock). Leave empty for auto-detection.",
-              "title": "Docker Host",
-              "type": "string"
-            },
-            "docker_infra_down_timeout": {
-              "default": 30,
-              "description": "Timeout for Docker infrastructure down command (seconds)",
-              "maximum": 120,
-              "minimum": 10,
-              "title": "Docker Infra Down Timeout",
-              "type": "integer"
-            },
-            "docker_infra_up_timeout": {
-              "default": 60,
-              "description": "Timeout for Docker infrastructure up command (seconds)",
-              "maximum": 300,
-              "minimum": 30,
-              "title": "Docker Infra Up Timeout",
               "type": "integer"
             },
             "docker_logs_tail": {

@@ -582,7 +582,7 @@ class HealthStatus(BaseModel):
 
 
 class DockerContainer(BaseModel):
-    """Normalized Docker container entry used by the Docker tab + dashboard."""
+    """Ragweld-owned Compose service exposed to the local Docker control surface."""
 
     id: str = Field(description="Full container ID.")
     short_id: str = Field(description="Short container ID (first 12 chars).")
@@ -591,13 +591,13 @@ class DockerContainer(BaseModel):
     state: str = Field(description="Container state (lowercase, best-effort).")
     status: str = Field(description="Human-readable docker status string.")
     ports: str | None = Field(default=None, description="Port mapping summary string (may be empty).")
-    compose_project: str | None = Field(default=None, description="Docker Compose project label (if present).")
-    compose_service: str | None = Field(default=None, description="Docker Compose service label (if present).")
-    tribrid_managed: bool = Field(default=False, description="Whether this container belongs to the TriBrid dev stack.")
+    compose_project: str = Field(description="Exact Docker Compose project label; always ragweld on this surface.")
+    compose_service: str = Field(description="Allowlisted Docker Compose service label.")
+    managed: bool = Field(description="Whether exact Ragweld project and ownership labels authorize local control.")
 
 
 class DockerContainersResponse(BaseModel):
-    """Response payload for /api/docker/containers (and /api/docker/containers/all)."""
+    """Response payload for the project-scoped /api/docker/services endpoint."""
 
     containers: list[DockerContainer] = Field(default_factory=list, description="List of Docker containers.")
 
@@ -607,7 +607,19 @@ class DockerStatus(BaseModel):
 
     running: bool = Field(default=False, description="Whether Docker is available and responding.")
     runtime: str = Field(default="", description="Runtime label/version string (best-effort).")
-    containers_count: int = Field(default=0, ge=0, description="Total number of containers (docker ps -aq).")
+    project_name: Literal["ragweld"] = Field(
+        default="ragweld",
+        description="Fixed Docker Compose project authorized by this local control surface.",
+    )
+    containers_count: int = Field(default=0, ge=0, description="Number of authorized Ragweld service containers.")
+
+
+class DockerServiceLogsResponse(BaseModel):
+    """Typed response for project-scoped Docker service logs."""
+
+    success: bool = Field(description="Whether Docker returned logs successfully.")
+    logs: str = Field(default="", description="Recent logs for the authorized Ragweld service.")
+    error: str | None = Field(default=None, description="Docker error when logs could not be read.")
 
 
 class LokiStatus(BaseModel):
@@ -6292,11 +6304,6 @@ Rules:
 class DockerConfig(BaseModel):
     """Docker infrastructure configuration."""
 
-    docker_host: str = Field(
-        default="",
-        description="Docker socket URL (e.g., unix:///var/run/docker.sock). Leave empty for auto-detection."
-    )
-
     docker_status_timeout: int = Field(
         default=5,
         ge=1,
@@ -6316,20 +6323,6 @@ class DockerConfig(BaseModel):
         ge=5,
         le=120,
         description="Timeout for Docker container actions (start/stop/restart)"
-    )
-
-    docker_infra_up_timeout: int = Field(
-        default=60,
-        ge=30,
-        le=300,
-        description="Timeout for Docker infrastructure up command (seconds)"
-    )
-
-    docker_infra_down_timeout: int = Field(
-        default=30,
-        ge=10,
-        le=120,
-        description="Timeout for Docker infrastructure down command (seconds)"
     )
 
     docker_logs_tail: int = Field(
@@ -6935,13 +6928,10 @@ class TriBridConfig(BaseModel):
             'MCP_REQUIRE_API_KEY': self.mcp.require_api_key,
             'MCP_DEFAULT_TOP_K': self.mcp.default_top_k,
             'MCP_DEFAULT_MODE': self.mcp.default_mode,
-            # Docker params (10)
-            'DOCKER_HOST': self.docker.docker_host,
+            # Local Docker diagnostics and scoped service-control params (7)
             'DOCKER_STATUS_TIMEOUT': self.docker.docker_status_timeout,
             'DOCKER_CONTAINER_LIST_TIMEOUT': self.docker.docker_container_list_timeout,
             'DOCKER_CONTAINER_ACTION_TIMEOUT': self.docker.docker_container_action_timeout,
-            'DOCKER_INFRA_UP_TIMEOUT': self.docker.docker_infra_up_timeout,
-            'DOCKER_INFRA_DOWN_TIMEOUT': self.docker.docker_infra_down_timeout,
             'DOCKER_LOGS_TAIL': self.docker.docker_logs_tail,
             'DOCKER_LOGS_TIMESTAMPS': self.docker.docker_logs_timestamps,
             'DEV_FRONTEND_PORT': self.docker.dev_frontend_port,
@@ -7330,12 +7320,9 @@ class TriBridConfig(BaseModel):
                 default_mode=data.get('MCP_DEFAULT_MODE', MCPConfig().default_mode),
             ),
             docker=DockerConfig(
-                docker_host=data.get('DOCKER_HOST', ''),
                 docker_status_timeout=data.get('DOCKER_STATUS_TIMEOUT', 5),
                 docker_container_list_timeout=data.get('DOCKER_CONTAINER_LIST_TIMEOUT', 10),
                 docker_container_action_timeout=data.get('DOCKER_CONTAINER_ACTION_TIMEOUT', 30),
-                docker_infra_up_timeout=data.get('DOCKER_INFRA_UP_TIMEOUT', 60),
-                docker_infra_down_timeout=data.get('DOCKER_INFRA_DOWN_TIMEOUT', 30),
                 docker_logs_tail=data.get('DOCKER_LOGS_TAIL', 100),
                 docker_logs_timestamps=data.get('DOCKER_LOGS_TIMESTAMPS', 1),
                 dev_frontend_port=data.get('DEV_FRONTEND_PORT', 5173),
@@ -7626,13 +7613,10 @@ TRIBRID_CONFIG_KEYS = {
     'MCP_REQUIRE_API_KEY',
     'MCP_DEFAULT_TOP_K',
     'MCP_DEFAULT_MODE',
-    # Docker params (11)
-    'DOCKER_HOST',
+    # Local Docker diagnostics and scoped service-control params (7)
     'DOCKER_STATUS_TIMEOUT',
     'DOCKER_CONTAINER_LIST_TIMEOUT',
     'DOCKER_CONTAINER_ACTION_TIMEOUT',
-    'DOCKER_INFRA_UP_TIMEOUT',
-    'DOCKER_INFRA_DOWN_TIMEOUT',
     'DOCKER_LOGS_TAIL',
     'DOCKER_LOGS_TIMESTAMPS',
     'DEV_FRONTEND_PORT',

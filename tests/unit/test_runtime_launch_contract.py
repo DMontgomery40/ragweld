@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -115,6 +116,11 @@ def test_base_compose_uses_project_scoped_names_and_named_database_volumes() -> 
 
     assert all("container_name" not in service for service in services.values())
     assert config["networks"]["default"]["name"] == "ragweld_default"
+    assert all(service.get("labels", {}).get("io.ragweld.managed") == "true" for service in services.values())
+
+    for service in services.values():
+        for port in service.get("ports", []):
+            assert port.get("host_ip") == "127.0.0.1"
 
     postgres_data = _volume_for_target(services["postgres"], "/var/lib/postgresql/data")
     neo4j_data = _volume_for_target(services["neo4j"], "/data")
@@ -122,6 +128,48 @@ def test_base_compose_uses_project_scoped_names_and_named_database_volumes() -> 
     assert postgres_data["type"] == "volume"
     assert neo4j_data["type"] == "volume"
     assert neo4j_logs["type"] == "volume"
+
+
+def test_promtail_collects_only_ragweld_owned_container_logs() -> None:
+    import yaml
+
+    payload = yaml.safe_load((ROOT / "infra" / "promtail-config.yml").read_text(encoding="utf-8"))
+    scrape_configs = payload["scrape_configs"]
+
+    assert [config["job_name"] for config in scrape_configs] == ["docker"]
+    relabel_configs = scrape_configs[0]["relabel_configs"]
+    assert {
+        "source_labels": [
+            "__meta_docker_container_label_com_docker_compose_project",
+            "__meta_docker_container_label_io_ragweld_managed",
+        ],
+        "separator": ";",
+        "regex": "ragweld;true",
+        "action": "keep",
+    } in relabel_configs
+
+
+def test_active_docker_config_has_no_remote_daemon_or_dead_infra_authority() -> None:
+    from server.models.tribrid_config_model import DockerConfig, TriBridConfig
+
+    removed_model_fields = {"docker_host", "docker_infra_up_timeout", "docker_infra_down_timeout"}
+    removed_flat_keys = {"DOCKER_HOST", "DOCKER_INFRA_UP_TIMEOUT", "DOCKER_INFRA_DOWN_TIMEOUT"}
+    schema_fields = set(DockerConfig.model_json_schema()["properties"])
+    active_config = json.loads((ROOT / "tribrid_config.json").read_text(encoding="utf-8"))
+    flat_config = TriBridConfig().to_flat_dict()
+
+    assert schema_fields.isdisjoint(removed_model_fields)
+    assert set(active_config["docker"]).isdisjoint(removed_model_fields)
+    assert set(flat_config).isdisjoint(removed_flat_keys)
+
+
+def test_removed_docker_controls_are_absent_from_glossary_mirrors() -> None:
+    removed_keys = {"DOCKER_INFRA_UP_TIMEOUT", "DOCKER_INFRA_DOWN_TIMEOUT"}
+    source = json.loads((ROOT / "data" / "glossary.json").read_text(encoding="utf-8"))
+    public = json.loads((ROOT / "web" / "public" / "glossary.json").read_text(encoding="utf-8"))
+
+    assert source == public
+    assert {entry["key"] for entry in source["terms"]}.isdisjoint(removed_keys)
 
 
 def test_observability_overlay_resolves_repo_files_and_avoids_foreign_ports() -> None:
@@ -133,6 +181,11 @@ def test_observability_overlay_resolves_repo_files_and_avoids_foreign_ports() ->
     assert Path(tempo_config["source"]).resolve() == (ROOT / "infra" / "tempo.yaml").resolve()
     assert Path(alloy_config["source"]).resolve() == (ROOT / "infra" / "alloy" / "config.alloy").resolve()
 
+    for service_name in ("tempo", "alloy"):
+        service = services[service_name]
+        assert service["labels"]["io.ragweld.managed"] == "true"
+        assert all(port.get("host_ip") == "127.0.0.1" for port in service.get("ports", []))
+
     foreign_ports = {3001, 3100, 4317, 4318, 12345}
     published = set().union(
         _published_ports(services["grafana"]),
@@ -141,3 +194,21 @@ def test_observability_overlay_resolves_repo_files_and_avoids_foreign_ports() ->
         _published_ports(services["alloy"]),
     )
     assert published.isdisjoint(foreign_ports)
+
+
+def test_docker_service_allowlists_match_frontend_and_managed_compose_services() -> None:
+    from server.api.docker import _DOCKER_SERVICES
+
+    frontend_source = (ROOT / "web" / "src" / "api" / "docker.ts").read_text(encoding="utf-8")
+    match = re.search(r"RAGWELD_DOCKER_SERVICES\s*=\s*\[(.*?)\]\s*as const", frontend_source, re.DOTALL)
+    assert match is not None
+    frontend_services = set(re.findall(r"'([^']+)'", match.group(1)))
+
+    config = _compose_config("docker-compose.yml", "infra/docker-compose.observability.yml")
+    managed_services = {
+        name
+        for name, service in config["services"].items()
+        if service.get("labels", {}).get("io.ragweld.managed") == "true"
+    }
+
+    assert set(_DOCKER_SERVICES) == frontend_services == managed_services
