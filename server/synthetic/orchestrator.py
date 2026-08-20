@@ -60,13 +60,7 @@ def _is_openai_gpt5_synthetic_model(model: str) -> bool:
     return raw.startswith("gpt-5")
 
 
-def _reject_removed_or_banned_synthetic_inputs(request: SyntheticRunStartRequest) -> None:
-    if str(request.provider or "").strip() != "synthetic_data_kit":
-        raise RuntimeError(
-            "internal_ragweld has been removed from this branch's live Synthetic Lab path. "
-            "Use synthetic_data_kit while the Unsloth Data Recipes replacement is wired in."
-        )
-
+def _reject_banned_synthetic_models(request: SyntheticRunStartRequest) -> None:
     for field_name in ("generator_model", "judge_model"):
         model = str(getattr(request, field_name, "") or "").strip()
         lower = model.lower()
@@ -387,7 +381,7 @@ async def _evaluate_quality_gate(
 
 async def start_run(request: SyntheticRunStartRequest) -> SyntheticRun:
     repo_id = _validate_repo_id(request.repo_id)
-    _reject_removed_or_banned_synthetic_inputs(request)
+    _reject_banned_synthetic_models(request)
 
     active = active_run_id_for_corpus(repo_id)
     if active:

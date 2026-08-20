@@ -2287,7 +2287,7 @@ export interface SyntheticRunMeta {
   started_at: string;
   completed_at?: string | null; // default: None
   recipe: "eval_dataset" | "semantic_cards" | "keywords" | "triplets" | "autotune_retrieval" | "full_stack";
-  provider: "internal_ragweld" | "synthetic_data_kit";
+  provider: "synthetic_data_kit";
   items_generated?: number | null; // default: None
   bundle_id?: string | null; // default: None
   lineage_ref?: LineageRef | null; // default: None
@@ -2295,7 +2295,7 @@ export interface SyntheticRunMeta {
 
 export interface SyntheticRunStartRequest {
   corpus_id: string;
-  provider?: "internal_ragweld" | "synthetic_data_kit"; // default: "synthetic_data_kit"
+  provider?: "synthetic_data_kit"; // default: "synthetic_data_kit"
   recipe?: "eval_dataset" | "semantic_cards" | "keywords" | "triplets" | "autotune_retrieval" | "full_stack"; // default: "eval_dataset"
   max_source_chunks?: number | null; // default: 300
   max_pairs?: number | null; // default: 200
@@ -4275,7 +4275,7 @@ export interface SyntheticRun {
   status?: "queued" | "running" | "completed" | "failed" | "cancelled";
   started_at: string;
   completed_at?: string | null;
-  provider: "internal_ragweld" | "synthetic_data_kit";
+  provider: "synthetic_data_kit";
   recipe: "eval_dataset" | "semantic_cards" | "keywords" | "triplets" | "autotune_retrieval" | "full_stack";
   config_snapshot?: Record<string, unknown>;
   config?: Record<string, unknown>;

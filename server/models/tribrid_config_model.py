@@ -3419,10 +3419,7 @@ class AgentTrainDiffResponse(BaseModel):
 # DOMAIN MODELS - Synthetic run orchestration
 # =============================================================================
 
-SyntheticProvider = Literal[
-    "internal_ragweld",
-    "synthetic_data_kit",
-]
+SyntheticProvider = Literal["synthetic_data_kit"]
 
 SyntheticRunStatus = Literal["queued", "running", "completed", "failed", "cancelled"]
 

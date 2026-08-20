@@ -28449,11 +28449,8 @@
               "title": "Pairs Per Source"
             },
             "provider": {
+              "const": "synthetic_data_kit",
               "default": "synthetic_data_kit",
-              "enum": [
-                "internal_ragweld",
-                "synthetic_data_kit"
-              ],
               "title": "Provider",
               "type": "string"
             },
@@ -28727,10 +28724,7 @@
           "description": "Immutable synthetic run version reference."
         },
         "provider": {
-          "enum": [
-            "internal_ragweld",
-            "synthetic_data_kit"
-          ],
+          "const": "synthetic_data_kit",
           "title": "Provider",
           "type": "string"
         },
@@ -29075,10 +29069,7 @@
           "default": null
         },
         "provider": {
-          "enum": [
-            "internal_ragweld",
-            "synthetic_data_kit"
-          ],
+          "const": "synthetic_data_kit",
           "title": "Provider",
           "type": "string"
         },
@@ -29207,11 +29198,8 @@
           "title": "Pairs Per Source"
         },
         "provider": {
+          "const": "synthetic_data_kit",
           "default": "synthetic_data_kit",
-          "enum": [
-            "internal_ragweld",
-            "synthetic_data_kit"
-          ],
           "title": "Provider",
           "type": "string"
         },
@@ -29546,10 +29534,7 @@
               "default": null
             },
             "provider": {
-              "enum": [
-                "internal_ragweld",
-                "synthetic_data_kit"
-              ],
+              "const": "synthetic_data_kit",
               "title": "Provider",
               "type": "string"
             },

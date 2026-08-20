@@ -204,39 +204,38 @@ async def test_synthetic_start_rejects_invalid_corpus_id(client, corpus_id: str)
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("payload", "needle"),
-    [
-        (
-            {
-                "provider": "internal_ragweld",
-                "generator_model": "openai/gpt-5.4-mini",
-                "judge_model": "openai/gpt-5.4-mini",
-            },
-            "internal_ragweld has been removed",
-        ),
-        (
-            {
-                "provider": "synthetic_data_kit",
-                "generator_model": "openai/gpt-4o-mini",
-                "judge_model": "openai/gpt-5.4-mini",
-            },
-            "must use an OpenAI GPT-5 model",
-        ),
-    ],
-)
-async def test_synthetic_start_rejects_removed_provider_and_banned_openai_models(client, payload, needle: str) -> None:
+@pytest.mark.parametrize("provider", ["internal_ragweld", "unknown_provider", ""])
+async def test_synthetic_start_schema_rejects_every_provider_except_synthetic_data_kit(client, provider: str) -> None:
     corpus_id = f"pytest_synth_policy_{uuid.uuid4().hex[:8]}"
     res = await client.post(
         "/api/synthetic/run/start",
         json={
             "corpus_id": corpus_id,
+            "provider": provider,
             "recipe": "eval_dataset",
-            **payload,
+            "generator_model": "openai/gpt-5.4-mini",
+            "judge_model": "openai/gpt-5.4-mini",
+        },
+    )
+    assert res.status_code == 422
+    assert "provider" in str(res.json().get("detail", ""))
+
+
+@pytest.mark.asyncio
+async def test_synthetic_start_rejects_banned_openai_model(client) -> None:
+    corpus_id = f"pytest_synth_policy_{uuid.uuid4().hex[:8]}"
+    res = await client.post(
+        "/api/synthetic/run/start",
+        json={
+            "corpus_id": corpus_id,
+            "provider": "synthetic_data_kit",
+            "recipe": "eval_dataset",
+            "generator_model": "openai/gpt-4o-mini",
+            "judge_model": "openai/gpt-5.4-mini",
         },
     )
     assert res.status_code == 400
-    assert needle in str(res.json().get("detail", ""))
+    assert "must use an OpenAI GPT-5 model" in str(res.json().get("detail", ""))
 
 
 @pytest.mark.asyncio
