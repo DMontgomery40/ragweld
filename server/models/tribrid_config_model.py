@@ -39,35 +39,11 @@ from server.models.runtime_gateway import OpenRouterConfig as OpenRouterConfig
 from server.models.runtime_gateway import ProviderHealth as ProviderHealth
 from server.models.runtime_gateway import ProvidersHealthResponse as ProvidersHealthResponse
 from server.models.runtime_gateway import VLLMConfig as VLLMConfig
-
 from server.models.synthetic import SyntheticConfig as SyntheticConfig
 from server.models.synthetic import SyntheticGeneratorConfig as SyntheticGeneratorConfig
 from server.models.synthetic import SyntheticJudgeConfig as SyntheticJudgeConfig
 from server.models.synthetic import SyntheticQualityGateConfig as SyntheticQualityGateConfig
 from server.models.synthetic import SyntheticRunDegradation as SyntheticRunDegradation
-
-_SYNTHETIC_REEXPORTS = (
-    SyntheticConfig,
-    SyntheticGeneratorConfig,
-    SyntheticJudgeConfig,
-    SyntheticQualityGateConfig,
-    SyntheticRunDegradation,
-)
-
-_RUNTIME_GATEWAY_REEXPORTS = (
-    BenchmarkConfig,
-    ChatModelInfo,
-    ChatModelsResponse,
-    ChatProviderInfo,
-    GenerationConfig,
-    LiteLLMConfig,
-    LocalModelConfig,
-    LocalProviderEntry,
-    OpenRouterConfig,
-    ProviderHealth,
-    ProvidersHealthResponse,
-    VLLMConfig,
-)
 
 # =============================================================================
 # DOMAIN MODELS - Core data types for the tribrid RAG system

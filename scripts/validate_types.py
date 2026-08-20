@@ -11,9 +11,11 @@ Exit codes:
     2 - generated.ts doesn't exist
     3 - Generation failed
 """
-import subprocess
+import importlib.util
+import io
 import sys
 import tempfile
+from contextlib import redirect_stdout
 from pathlib import Path
 
 # Add project root to path
@@ -24,26 +26,18 @@ GENERATED_TS_PATH = PROJECT_ROOT / "web/src/types/generated.ts"
 GENERATE_SCRIPT = PROJECT_ROOT / "scripts/generate_types.py"
 
 
-def main() -> int:
+def validate_types_file(generated_path: Path = GENERATED_TS_PATH) -> int:
     # Check generated.ts exists
-    if not GENERATED_TS_PATH.exists():
-        print(f"ERROR: {GENERATED_TS_PATH} does not exist!")
+    if not generated_path.exists():
+        print(f"ERROR: {generated_path} does not exist!")
         print("Run: uv run scripts/generate_types.py")
         return 2
 
     try:
         # Read existing content
-        existing_content = GENERATED_TS_PATH.read_text()
-
-        # Generate fresh content to a temp file
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.ts', delete=False) as tmp:
-            tmp_path = Path(tmp.name)
-
-        # Temporarily redirect the output
-        original_generated_ts = GENERATED_TS_PATH
+        existing_content = generated_path.read_text(encoding="utf-8")
 
         # Import and run generation directly
-        import importlib.util
         spec = importlib.util.spec_from_file_location("generate_types", GENERATE_SCRIPT)
         if spec is None or spec.loader is None:
             print("ERROR: Could not load generate_types.py")
@@ -51,17 +45,12 @@ def main() -> int:
 
         generate_module = importlib.util.module_from_spec(spec)
 
-        # Monkey-patch the output path
-        old_stdout = sys.stdout
-        sys.stdout = open('/dev/null', 'w')
-
-        try:
+        with tempfile.TemporaryDirectory(prefix="ragweld-validate-types-") as tmp_dir:
+            fresh_path = Path(tmp_dir) / "generated.ts"
             spec.loader.exec_module(generate_module)
-            # Get the newly generated content
-            fresh_content = GENERATED_TS_PATH.read_text()
-        finally:
-            sys.stdout.close()
-            sys.stdout = old_stdout
+            with redirect_stdout(io.StringIO()):
+                generate_module.main(output_path=fresh_path)
+            fresh_content = fresh_path.read_text(encoding="utf-8")
 
         # Compare content (strip to handle trailing newlines)
         if existing_content.strip() != fresh_content.strip():
@@ -83,6 +72,10 @@ def main() -> int:
         import traceback
         traceback.print_exc()
         return 3
+
+
+def main() -> int:
+    return validate_types_file()
 
 
 if __name__ == '__main__':

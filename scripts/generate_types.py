@@ -222,7 +222,7 @@ def generate_root_interface(name: str, schema: dict[str, Any], definitions: dict
     return "\n".join(lines)
 
 
-def main() -> None:
+def main(output_path: Path | None = None) -> None:
     """Generate TypeScript types from Pydantic models."""
     print("=" * 60)
     print("GENERATING TYPESCRIPT TYPES FROM PYDANTIC MODELS")
@@ -231,7 +231,10 @@ def main() -> None:
     project_root = Path(__file__).parent.parent
     sys.path.insert(0, str(project_root))
 
-    output_path = project_root / "web" / "src" / "types" / "generated.ts"
+    if output_path is None:
+        output_path = project_root / "web" / "src" / "types" / "generated.ts"
+    else:
+        output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     print("\nSource: server.models.tribrid_config_model")
