@@ -55,7 +55,7 @@ In `generate_docs_from_diff.py`, `_select_context_files` uses a `preferred` list
 - Chat UI (ChatInterface, ChatSettings, SourceDropdown, Recall)
 - Onboarding (StartTab, useOnboardingStore)
 - Training studios (RerankerTraining/TrainingStudio, AgentTraining/TrainingStudio)
-- Eval UI (EvalDrillDown, EvalAnalysisTab, HistoryViewer, TraceViewer)
+- Eval UI (EvalDrillDown, EvalAnalysisTab, TraceViewer)
 - Grafana (GrafanaDashboard, GrafanaConfig, GrafanaEmbed)
 - Webhooks (IntegrationsSubtab, GeneralSubtab, webhooks API)
 - Docker UI (DockerSubtab, ContainerCard, DockerContainerCard, pages/Docker)
@@ -104,7 +104,6 @@ Add to `_select_context_files` in `generate_docs_from_diff.py`:
 # Eval
 "web/src/components/Evaluation/EvalDrillDown.tsx",
 "web/src/components/tabs/EvalAnalysisTab.tsx",
-"web/src/components/Evaluation/HistoryViewer.tsx",
 "web/src/components/Evaluation/TraceViewer.tsx",
 "server/api/eval.py",
 "server/api/dataset.py",

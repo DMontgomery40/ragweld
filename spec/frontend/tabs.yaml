@@ -31,20 +31,14 @@ tabs:
       - chat
       - settings
 
-  - name: EvaluationTab
-    route: /evaluation
-    description: Run evaluations
-    subtabs:
-      - runner
-      - dataset
-
   - name: EvalAnalysisTab
-    route: /analysis
+    route: /eval
     description: Analyze evaluation results
     subtabs:
-      - history
-      - drilldown
-      - traces
+      - analysis
+      - dataset
+      - prompts
+      - trace
 
   - name: GrafanaTab
     route: /grafana

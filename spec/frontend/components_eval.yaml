@@ -3,15 +3,6 @@ description: Evaluation UI components
 version: "1.0"
 
 components:
-  - name: EvaluationRunner
-    props:
-      - name: repoId
-        type: string
-        required: true
-      - name: onComplete
-        type: (run: EvalRun) => void
-        required: false
-
   - name: DatasetManager
     props:
       - name: repoId
@@ -23,12 +14,6 @@ components:
       - name: run
         type: EvalRun
         required: true
-
-  - name: FeedbackPanel
-    props: []
-
-  - name: HistoryViewer
-    props: []
 
   - name: TraceViewer
     props: []

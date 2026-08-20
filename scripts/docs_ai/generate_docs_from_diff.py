@@ -306,7 +306,6 @@ def _select_context_files(changed: List[str], *, limit: int) -> List[str]:
         # Eval
         "web/src/components/Evaluation/EvalDrillDown.tsx",
         "web/src/components/tabs/EvalAnalysisTab.tsx",
-        "web/src/components/Evaluation/HistoryViewer.tsx",
         "web/src/components/Evaluation/TraceViewer.tsx",
         # Grafana + Webhooks
         "web/src/components/Grafana/GrafanaDashboard.tsx",

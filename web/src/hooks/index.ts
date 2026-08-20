@@ -52,9 +52,7 @@ export { useChunkSummaries, useCards } from './useChunkSummaries';
 export { useStorageCalculator } from './useStorageCalculator';
 
 // Evaluation hooks (using generated types from Pydantic)
-export { useEvaluation } from './useEvaluation';
 export { useEvalDataset } from './useEvalDataset';
-export { useEvalHistory } from './useEvalHistory';
 
 // Graph hooks (using generated types from Pydantic)
 export { useGraph } from './useGraph';
