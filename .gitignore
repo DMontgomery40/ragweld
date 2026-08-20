@@ -45,6 +45,8 @@ CLAUDE.local.md
 
 # Local artifacts (generated output, recordings, etc.)
 output/
+.agent-memory-nexus/
+.tmp-pg/
 models/learning-agent-*/
 site/
 mkdocs-docs-plan.md
