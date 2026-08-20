@@ -21,7 +21,6 @@ export { useTooltipStore } from '../stores/useTooltipStore';
 export { useGlobalSearch } from './useGlobalSearch';
 
 // Navigation hooks (React Router integration)
-export { useNavigation } from './useNavigation';
 export { useSubtab } from './useSubtab';
 
 // Config management (Zustand-backed)
@@ -43,8 +42,6 @@ export { useReranker } from './useReranker';
 export { useKeywords } from './useKeywords';
 export { useMCPServer } from './useMCPServer';
 // useOnboarding removed - banned feature per CLAUDE.md
-export { useStorageCalculator } from './useStorageCalculator';
-
 // Evaluation hooks (using generated types from Pydantic)
 export { useEvalDataset } from './useEvalDataset';
 
