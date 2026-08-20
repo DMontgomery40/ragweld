@@ -181,6 +181,7 @@ async def test_invalid_config_section(client: AsyncClient) -> None:
     assert response.status_code in [400, 404, 422]
 
 
+@pytest.mark.requires_postgres
 @pytest.mark.asyncio
 async def test_get_config_unknown_corpus_does_not_autocreate(client: AsyncClient) -> None:
     """GET /api/config for an unknown corpus must 404 and must not create a corpus row."""
@@ -200,6 +201,7 @@ async def test_get_config_unknown_corpus_does_not_autocreate(client: AsyncClient
     assert after_ids == before_ids
 
 
+@pytest.mark.requires_postgres
 @pytest.mark.asyncio
 async def test_concurrent_section_patches_do_not_lose_updates(client: AsyncClient) -> None:
     """Concurrent PATCHes to different sections must not clobber each other."""

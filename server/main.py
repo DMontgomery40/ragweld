@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -35,7 +36,11 @@ from server.api.synthetic import router as synthetic_router
 from server.config import load_config
 from server.mcp.server import get_mcp_server
 from server.observability.metrics import render_latest
-from server.observability.runtime import apply_default_links, current_header_values, start_request_observation
+from server.observability.runtime import (
+    apply_default_links,
+    current_header_values,
+    start_request_observation,
+)
 from server.services.config_store import CorpusNotFoundError
 from server.services.config_store import get_config as load_scoped_config
 
@@ -67,8 +72,15 @@ def _load_dotenv_file(dotenv_path: Path) -> bool:
         return False
 
 
-# Best-effort convenience only; never block API startup.
-_load_dotenv_file(Path(__file__).resolve().parents[1] / ".env")
+def _dotenv_loading_enabled(value: str | None = None) -> bool:
+    raw = os.environ.get("RAGWELD_LOAD_DOTENV", "1") if value is None else value
+    return raw.strip().lower() not in {"0", "false", "no", "off"}
+
+
+# Best-effort convenience only; never block API startup. Test and integration
+# lanes pass configuration explicitly and disable repository dotenv loading.
+if _dotenv_loading_enabled():
+    _load_dotenv_file(Path(__file__).resolve().parents[1] / ".env")
 
 _global_cfg = load_config()
 if _global_cfg.mcp.enabled:

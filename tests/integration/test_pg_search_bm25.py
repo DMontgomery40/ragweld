@@ -10,6 +10,8 @@ from server.db.postgres import PostgresClient
 from server.models.index import Chunk
 
 
+@pytest.mark.requires_postgres
+@pytest.mark.requires_pg_search
 @pytest.mark.asyncio
 async def test_pg_search_bm25_returns_relevant_chunks() -> None:
     """If pg_search is available, ensure BM25 path returns relevant results."""
@@ -17,10 +19,7 @@ async def test_pg_search_bm25_returns_relevant_chunks() -> None:
     dsn = os.getenv("POSTGRES_DSN") or "postgresql://postgres:postgres@localhost:5432/tribrid_rag"
     pg = PostgresClient(dsn)
 
-    try:
-        await pg.connect()
-    except Exception:
-        pytest.skip("Postgres not reachable for integration test")
+    await pg.connect()
 
     repo_id = f"it_pg_search_bm25_{os.getpid()}"
     try:
@@ -68,4 +67,3 @@ async def test_pg_search_bm25_returns_relevant_chunks() -> None:
             await pg.disconnect()
         except Exception:
             pass
-

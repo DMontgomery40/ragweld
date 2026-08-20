@@ -17,6 +17,7 @@ async def test_health_endpoint_returns_pydantic_shape(client: AsyncClient) -> No
     assert data["services"]["api"]["status"] == "up"
 
 
+@pytest.mark.requires_postgres
 @pytest.mark.asyncio
 async def test_ready_unknown_corpus_does_not_crash(client: AsyncClient) -> None:
     """GET /api/ready with a missing corpus_id should return 200 + a readiness payload (not 500)."""

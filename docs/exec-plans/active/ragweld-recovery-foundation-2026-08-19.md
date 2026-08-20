@@ -107,6 +107,8 @@ uv run pytest -q tests/unit/test_runtime_launch_contract.py
 
 ## Task 3: Make test service requirements explicit
 
+Status: complete; live disposable-service execution is part of Task 4
+
 Files:
 
 - Modify `server/main.py`

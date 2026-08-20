@@ -16,6 +16,8 @@ from server.models.tribrid_config_model import (
     SyntheticRunSummary,
 )
 
+pytestmark = pytest.mark.requires_postgres
+
 
 def _repo_root() -> Path:
     return Path(__file__).resolve().parents[2]

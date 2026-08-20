@@ -282,6 +282,7 @@ async def test_traces_latest_returns_extended_observability_fields(client: Async
     assert data["trace"]["cost_summary"]["estimated_cost_usd"] == 0.0042
 
 
+@pytest.mark.requires_postgres
 @pytest.mark.asyncio
 async def test_observability_summaries_and_incidents_correlate_eval_benchmark_and_prompt_changes(
     client: AsyncClient,

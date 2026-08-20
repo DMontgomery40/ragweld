@@ -3,9 +3,13 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from server.api.chat import set_config, set_fusion
 from server.models.retrieval import ChunkMatch
 from server.models.tribrid_config_model import FusionConfig
+
+pytestmark = pytest.mark.requires_postgres
 
 
 class _DeterministicFusion:

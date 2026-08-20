@@ -5,6 +5,8 @@ import time
 
 import pytest
 
+pytestmark = pytest.mark.requires_postgres
+
 
 @pytest.mark.asyncio
 async def test_eval_analyze_comparison_prefers_openai_cloud_direct_when_openai_key_set(client, tmp_path) -> None:
@@ -79,4 +81,3 @@ async def test_eval_analyze_comparison_prefers_openai_cloud_direct_when_openai_k
             os.environ["OPENROUTER_API_KEY"] = old_openrouter
 
         await client.delete(f"/api/corpora/{corpus_id}")
-

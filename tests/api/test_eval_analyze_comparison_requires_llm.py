@@ -5,6 +5,8 @@ import time
 
 import pytest
 
+pytestmark = pytest.mark.requires_postgres
+
 
 @pytest.mark.asyncio
 async def test_eval_analyze_comparison_returns_verbose_error_when_no_provider(client, tmp_path) -> None:

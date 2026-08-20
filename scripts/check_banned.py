@@ -132,6 +132,7 @@ SERVER_ENV_GETENV_ALLOWLIST = {
     # Dev stack / container wiring
     "FRONTEND_PORT",
     "BACKEND_PORT",
+    "RAGWELD_LOAD_DOTENV",
     "LOKI_BASE_URL",
 }
 

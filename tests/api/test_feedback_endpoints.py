@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 import pytest
+
 from server.models.tribrid_config_model import TriBridConfig
 
 
@@ -45,6 +46,7 @@ async def test_feedback_endpoint_rejects_mixed_rating_and_signal(client) -> None
     assert r.status_code == 422
 
 
+@pytest.mark.requires_postgres
 async def test_feedback_endpoint_rejects_unknown_corpus_scope(client) -> None:
     r = await client.post(
         "/api/feedback?corpus_id=definitely-not-a-real-corpus",

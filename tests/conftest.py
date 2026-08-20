@@ -4,15 +4,21 @@ import asyncio
 import os
 import shutil
 import tempfile
+from collections.abc import AsyncGenerator, Generator
 from pathlib import Path
-from typing import AsyncGenerator, Generator
 
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
-from server.main import app
-from server.models.tribrid_config_model import TriBridConfig
+# Tests receive integration configuration explicitly. Never leak a developer
+# .env into collection or use its mere presence as a readiness signal.
+os.environ["RAGWELD_LOAD_DOTENV"] = "0"
+
+pytest_plugins = ("tests.service_requirements",)
+
+from server.main import app  # noqa: E402
+from server.models.tribrid_config_model import TriBridConfig  # noqa: E402
 
 
 @pytest.fixture(scope="session")

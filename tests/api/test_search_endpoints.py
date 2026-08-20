@@ -1,18 +1,11 @@
 """API tests for search endpoints."""
 
-import os
-
 import pytest
 from httpx import AsyncClient
 
-POSTGRES_CONFIGURED = os.environ.get("POSTGRES_HOST") is not None
 
-
+@pytest.mark.requires_postgres
 @pytest.mark.asyncio
-@pytest.mark.skipif(
-    not POSTGRES_CONFIGURED,
-    reason="PostgreSQL not configured (set POSTGRES_HOST)",
-)
 async def test_search(client: AsyncClient) -> None:
     """Test POST /api/search endpoint."""
     request = {
@@ -31,11 +24,8 @@ async def test_search(client: AsyncClient) -> None:
         assert "latency_ms" in data
 
 
+@pytest.mark.requires_postgres
 @pytest.mark.asyncio
-@pytest.mark.skipif(
-    not POSTGRES_CONFIGURED,
-    reason="PostgreSQL not configured (set POSTGRES_HOST)",
-)
 async def test_search_with_options(client: AsyncClient) -> None:
     """Test POST /api/search with search type options."""
     request = {
@@ -51,10 +41,6 @@ async def test_search_with_options(client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.skipif(
-    not POSTGRES_CONFIGURED,
-    reason="PostgreSQL not configured (set POSTGRES_HOST)",
-)
 async def test_search_empty_query(client: AsyncClient) -> None:
     """Test POST /api/search with empty query."""
     request = {
@@ -65,11 +51,8 @@ async def test_search_empty_query(client: AsyncClient) -> None:
     assert response.status_code in [400, 422]
 
 
+@pytest.mark.requires_postgres
 @pytest.mark.asyncio
-@pytest.mark.skipif(
-    not POSTGRES_CONFIGURED,
-    reason="PostgreSQL not configured (set POSTGRES_HOST)",
-)
 async def test_answer(client: AsyncClient) -> None:
     """Test POST /api/answer endpoint."""
     request = {
@@ -88,11 +71,8 @@ async def test_answer(client: AsyncClient) -> None:
         assert "sources" in data
 
 
+@pytest.mark.requires_postgres
 @pytest.mark.asyncio
-@pytest.mark.skipif(
-    not POSTGRES_CONFIGURED,
-    reason="PostgreSQL not configured (set POSTGRES_HOST)",
-)
 async def test_answer_with_system_prompt(client: AsyncClient) -> None:
     """Test POST /api/answer with custom system prompt."""
     request = {
@@ -105,11 +85,8 @@ async def test_answer_with_system_prompt(client: AsyncClient) -> None:
     assert response.status_code in [200, 404]
 
 
+@pytest.mark.requires_postgres
 @pytest.mark.asyncio
-@pytest.mark.skipif(
-    not POSTGRES_CONFIGURED,
-    reason="PostgreSQL not configured (set POSTGRES_HOST)",
-)
 async def test_answer_stream(client: AsyncClient) -> None:
     """Test POST /api/answer/stream endpoint."""
     request = {

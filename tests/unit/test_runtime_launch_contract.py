@@ -9,7 +9,6 @@ from typing import Any
 
 import pytest
 
-
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -94,6 +93,20 @@ def test_acceptance_bootstrap_uses_proxied_status_with_resolved_backend_port() -
     assert "/__dev__/" not in source
     assert '"${root}/api/dev/status"' in source
     assert source.count("BACKEND_PORT=") >= 2
+
+
+def test_integration_launcher_is_disposable_strict_and_host_owned() -> None:
+    source = (ROOT / "scripts" / "test_integration.sh").read_text(encoding="utf-8").lower()
+
+    assert "colima start" not in source
+    assert "colima stop" not in source
+    assert "colima delete" not in source
+    assert "postgres_port=0" in source
+    assert "neo4j_http_port=0" in source
+    assert "neo4j_bolt_port=0" in source
+    assert "down --volumes --remove-orphans" in source
+    assert "ragweld_strict_integration=1" in source
+    assert "not requires_pg_search" in source
 
 
 def test_base_compose_uses_project_scoped_names_and_named_database_volumes() -> None:

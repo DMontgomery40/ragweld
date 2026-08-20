@@ -4,6 +4,8 @@ import time
 
 import pytest
 
+pytestmark = pytest.mark.requires_postgres
+
 
 @pytest.mark.asyncio
 async def test_prompts_list_update_reset(client, tmp_path) -> None:

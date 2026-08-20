@@ -12,9 +12,7 @@ from server.db.postgres import PostgresClient
 from server.models.index import Chunk
 from server.models.tribrid_config_model import TriBridConfig
 
-
-def _postgres_available() -> bool:
-    return bool(os.getenv("POSTGRES_DSN") or os.getenv("POSTGRES_HOST"))
+pytestmark = pytest.mark.requires_postgres
 
 
 def _disable_all_chat_providers(cfg: TriBridConfig) -> TriBridConfig:
@@ -28,9 +26,6 @@ def _disable_all_chat_providers(cfg: TriBridConfig) -> TriBridConfig:
 
 @pytest.mark.asyncio
 async def test_answer_returns_200_without_any_llm_keys(client: AsyncClient) -> None:
-    if not _postgres_available():
-        pytest.skip("POSTGRES_DSN/POSTGRES_HOST not set")
-
     # Ensure env keys don't accidentally route cloud-direct.
     old_openai = os.environ.pop("OPENAI_API_KEY", None)
     old_openrouter = os.environ.pop("OPENROUTER_API_KEY", None)
@@ -90,4 +85,3 @@ async def test_answer_returns_200_without_any_llm_keys(client: AsyncClient) -> N
             os.environ["OPENROUTER_API_KEY"] = old_openrouter
         else:
             os.environ.pop("OPENROUTER_API_KEY", None)
-

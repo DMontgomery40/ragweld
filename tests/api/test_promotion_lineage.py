@@ -10,7 +10,14 @@ import pytest
 from httpx import AsyncClient
 
 from server.lineage import load_asset
-from server.models.tribrid_config_model import AgentTrainRun, CorpusEvalProfile, RerankerTrainRun, TriBridConfig
+from server.models.tribrid_config_model import (
+    AgentTrainRun,
+    CorpusEvalProfile,
+    RerankerTrainRun,
+    TriBridConfig,
+)
+
+pytestmark = pytest.mark.requires_postgres
 
 
 def _repo_root() -> Path:

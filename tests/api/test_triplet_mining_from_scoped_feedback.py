@@ -3,6 +3,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
+pytestmark = pytest.mark.requires_postgres
+
 
 async def test_scoped_feedback_logs_are_mineable(client, tmp_path: Path) -> None:
     corpus_id = f"test-mine-{tmp_path.name}"

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import uuid
 
 import pytest
@@ -12,9 +11,7 @@ from server.db.postgres import PostgresClient
 from server.models.index import Chunk
 from server.models.tribrid_config_model import TriBridConfig
 
-
-def _postgres_available() -> bool:
-    return bool(os.getenv("POSTGRES_DSN") or os.getenv("POSTGRES_HOST"))
+pytestmark = pytest.mark.requires_postgres
 
 
 async def _seed_repo(pg: PostgresClient, repo_id: str) -> None:
@@ -48,9 +45,6 @@ async def _seed_repo(pg: PostgresClient, repo_id: str) -> None:
 
 @pytest.mark.asyncio
 async def test_search_semantic_cache_exact_then_hit(client: AsyncClient) -> None:
-    if not _postgres_available():
-        pytest.skip("POSTGRES_DSN/POSTGRES_HOST not set")
-
     repo_id = f"test_semcache_exact_{uuid.uuid4().hex[:10]}"
     pg = PostgresClient("postgresql://ignored")
     await pg.connect()
@@ -85,9 +79,6 @@ async def test_search_semantic_cache_exact_then_hit(client: AsyncClient) -> None
 
 @pytest.mark.asyncio
 async def test_search_semantic_cache_semantic_hit_and_bypass_mode(client: AsyncClient) -> None:
-    if not _postgres_available():
-        pytest.skip("POSTGRES_DSN/POSTGRES_HOST not set")
-
     repo_id = f"test_semcache_sem_{uuid.uuid4().hex[:10]}"
     pg = PostgresClient("postgresql://ignored")
     await pg.connect()

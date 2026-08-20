@@ -138,3 +138,9 @@ asyncio_default_fixture_loop_scope = "session"
 asyncio_default_test_loop_scope = "session"
 testpaths = ["tests"]
 addopts = "-v --cov=server --cov-report=term-missing"
+markers = [
+    "integration: exercises a cross-component integration contract",
+    "requires_postgres: requires a live authenticated PostgreSQL connection",
+    "requires_neo4j: requires a live authenticated Neo4j connection",
+    "requires_pg_search: requires the optional ParadeDB pg_search extension",
+]

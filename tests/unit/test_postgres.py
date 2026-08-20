@@ -5,7 +5,6 @@ These tests use a real Postgres instance (CI provides pgvector/pg16).
 
 from __future__ import annotations
 
-import os
 import uuid
 from contextlib import suppress
 
@@ -23,10 +22,6 @@ from server.models.tribrid_config_model import (
     ChunkSummary,
     RecallIntensity,
 )
-
-
-def _postgres_available() -> bool:
-    return bool(os.getenv("POSTGRES_DSN") or os.getenv("POSTGRES_HOST"))
 
 
 def test_vector_index_name_is_stable_and_bounded() -> None:
@@ -66,11 +61,9 @@ def test_json_dumps_sanitized_preserves_str_enum_values() -> None:
     assert "RecallIntensity.standard" not in dumped
 
 
+@pytest.mark.requires_postgres
 @pytest.mark.asyncio
 async def test_upsert_fts_stores_metadata_and_get_chunk_returns_it() -> None:
-    if not _postgres_available():
-        pytest.skip("POSTGRES_DSN/POSTGRES_HOST not set")
-
     repo_id = f"test_meta_{uuid.uuid4().hex[:10]}"
     pg = PostgresClient("postgresql://ignored")
     await pg.connect()
@@ -101,11 +94,9 @@ async def test_upsert_fts_stores_metadata_and_get_chunk_returns_it() -> None:
             pass
 
 
+@pytest.mark.requires_postgres
 @pytest.mark.asyncio
 async def test_vector_search_returns_metadata() -> None:
-    if not _postgres_available():
-        pytest.skip("POSTGRES_DSN/POSTGRES_HOST not set")
-
     repo_id = f"test_vecmeta_{uuid.uuid4().hex[:10]}"
     pg = PostgresClient("postgresql://ignored")
     await pg.connect()
@@ -140,11 +131,9 @@ async def test_vector_search_returns_metadata() -> None:
             pass
 
 
+@pytest.mark.requires_postgres
 @pytest.mark.asyncio
 async def test_fts_search_relaxed_or_finds_hits_when_plain_is_empty() -> None:
-    if not _postgres_available():
-        pytest.skip("POSTGRES_DSN/POSTGRES_HOST not set")
-
     repo_id = f"test_relaxfts_{uuid.uuid4().hex[:10]}"
     pg = PostgresClient("postgresql://ignored")
     await pg.connect()
@@ -180,11 +169,9 @@ async def test_fts_search_relaxed_or_finds_hits_when_plain_is_empty() -> None:
             pass
 
 
+@pytest.mark.requires_postgres
 @pytest.mark.asyncio
 async def test_file_path_search_finds_filename_like_queries() -> None:
-    if not _postgres_available():
-        pytest.skip("POSTGRES_DSN/POSTGRES_HOST not set")
-
     repo_id = f"test_filepath_{uuid.uuid4().hex[:10]}"
     pg = PostgresClient("postgresql://ignored")
     await pg.connect()
@@ -215,11 +202,9 @@ async def test_file_path_search_finds_filename_like_queries() -> None:
             pass
 
 
+@pytest.mark.requires_postgres
 @pytest.mark.asyncio
 async def test_chunk_summaries_roundtrip_extended_fields() -> None:
-    if not _postgres_available():
-        pytest.skip("POSTGRES_DSN/POSTGRES_HOST not set")
-
     repo_id = f"test_chunk_summary_ext_{uuid.uuid4().hex[:10]}"
     pg = PostgresClient("postgresql://ignored")
     await pg.connect()
@@ -260,11 +245,9 @@ async def test_chunk_summaries_roundtrip_extended_fields() -> None:
             pass
 
 
+@pytest.mark.requires_postgres
 @pytest.mark.asyncio
 async def test_ensure_vector_index_creates_partial_hnsw_index() -> None:
-    if not _postgres_available():
-        pytest.skip("POSTGRES_DSN/POSTGRES_HOST not set")
-
     repo_id = f"test_vecidx_{uuid.uuid4().hex[:10]}"
     pg = PostgresClient("postgresql://ignored")
     await pg.connect()
