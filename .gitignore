@@ -124,6 +124,7 @@ repos.json
 
 # ===== Docker =====
 .docker/
+infra/litellm.env
 
 # ===== OS =====
 .DS_Store

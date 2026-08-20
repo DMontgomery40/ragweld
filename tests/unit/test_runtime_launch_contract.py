@@ -288,3 +288,49 @@ def test_docker_service_allowlists_match_frontend_and_managed_compose_services()
     }
 
     assert set(_DOCKER_SERVICES) == frontend_services == managed_services
+
+
+def test_generation_gateway_topology_is_pinned_local_and_has_no_paid_fallback() -> None:
+    import yaml
+
+    config = _compose_config("docker-compose.yml", "infra/docker-compose.observability.yml")
+    services = config["services"]
+
+    vllm = services["vllm"]
+    litellm = services["litellm"]
+    api = services["api"]
+
+    assert vllm["image"] == "vllm/vllm-openai-cpu:v0.26.0-arm64"
+    assert litellm["image"] == "ghcr.io/berriai/litellm:v1.94.0"
+    assert _published_ports(vllm) == {58080}
+    assert _published_ports(litellm) == {54000}
+    assert all(port.get("host_ip") == "127.0.0.1" for port in vllm["ports"])
+    assert all(port.get("host_ip") == "127.0.0.1" for port in litellm["ports"])
+
+    assert litellm["depends_on"]["vllm"]["condition"] == "service_healthy"
+    assert api["depends_on"]["litellm"]["condition"] == "service_healthy"
+    assert api["environment"]["LITELLM_BASE_URL"] == "http://litellm:4000/v1"
+    assert api["environment"]["OPENROUTER_API_KEY"] == ""
+    assert "OPENROUTER_API_KEY" not in vllm.get("environment", {})
+
+    config_mount = _volume_for_target(litellm, "/app/config.yaml")
+    assert config_mount["read_only"] is True
+    assert Path(config_mount["source"]).resolve() == (ROOT / "infra/litellm-config.yaml").resolve()
+    hf_cache = _volume_for_target(vllm, "/root/.cache/huggingface")
+    assert hf_cache["type"] == "volume"
+
+    gateway = yaml.safe_load((ROOT / "infra/litellm-config.yaml").read_text(encoding="utf-8"))
+    assert [row["model_name"] for row in gateway["model_list"]] == [
+        "ragweld-local",
+        "ragweld-openrouter-smoke",
+    ]
+    assert gateway["model_list"][0]["litellm_params"] == {
+        "model": "openai/ragweld-local",
+        "api_base": "http://vllm:8000/v1",
+        "api_key": "none",
+    }
+    assert gateway["model_list"][1]["litellm_params"]["model"] == "openrouter/openai/gpt-5.4-mini"
+    assert gateway["model_list"][1]["litellm_params"]["api_key"] == "os.environ/OPENROUTER_API_KEY"
+    assert gateway["litellm_settings"]["num_retries"] == 0
+    assert gateway["litellm_settings"].get("fallbacks", []) == []
+    assert gateway["litellm_settings"].get("context_window_fallbacks", []) == []

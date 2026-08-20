@@ -21,6 +21,11 @@ const SERVICE_GROUPS: Array<{
     services: ['api', 'postgres-exporter'],
   },
   {
+    title: 'Gateway and serving',
+    description: 'The only supported generation path: LiteLLM routes model aliases to vLLM.',
+    services: ['litellm', 'vllm'],
+  },
+  {
     title: 'Observability',
     description: 'Metrics, traces, logs, dashboards, and telemetry collection.',
     services: ['grafana', 'prometheus', 'loki', 'promtail', 'tempo', 'alloy'],
@@ -38,6 +43,8 @@ const SERVICE_LABELS: Record<RagweldDockerService, string> = {
   api: 'Ragweld API',
   tempo: 'Tempo',
   alloy: 'Grafana Alloy',
+  litellm: 'LiteLLM Gateway',
+  vllm: 'vLLM Serving',
 };
 
 function isKnownService(value: string | null | undefined): value is RagweldDockerService {

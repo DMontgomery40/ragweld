@@ -18,6 +18,8 @@ export const RAGWELD_DOCKER_SERVICES = [
   'api',
   'tempo',
   'alloy',
+  'litellm',
+  'vllm',
 ] as const;
 
 export type RagweldDockerService = (typeof RAGWELD_DOCKER_SERVICES)[number];

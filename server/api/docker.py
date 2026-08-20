@@ -42,6 +42,8 @@ _DOCKER_SERVICES = frozenset(
         "promtail",
         "tempo",
         "alloy",
+        "litellm",
+        "vllm",
     }
 )
 _DOCKER_ACTIONS = frozenset({"start", "stop", "restart"})

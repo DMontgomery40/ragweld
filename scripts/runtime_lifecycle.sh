@@ -214,7 +214,7 @@ validate_reset_docker_scope() {
       "$id")"
     service="${labels##*|}"
     case "$service" in
-      postgres|postgres-exporter|neo4j|grafana|prometheus|loki|promtail|api|tempo|alloy) ;;
+      postgres|postgres-exporter|neo4j|grafana|prometheus|loki|promtail|api|tempo|alloy|litellm|vllm) ;;
       *) echo "ERROR: refusing reset with unexpected Ragweld container service: ${service:-unknown}" >&2; return 1 ;;
     esac
     [[ "$labels" == "ragweld|true|${service}" ]] || {
@@ -232,7 +232,7 @@ validate_reset_docker_scope() {
   while IFS= read -r volume; do
     [[ -n "$volume" ]] || continue
     case "$volume" in
-      ragweld_postgres_data|ragweld_neo4j_data|ragweld_neo4j_logs|ragweld_grafana_data|ragweld_prometheus_data|ragweld_loki_data|ragweld_tempo_data) ;;
+      ragweld_postgres_data|ragweld_neo4j_data|ragweld_neo4j_logs|ragweld_grafana_data|ragweld_prometheus_data|ragweld_loki_data|ragweld_tempo_data|ragweld_hf_cache) ;;
       *) echo "ERROR: refusing reset with unexpected Ragweld project volume: ${volume}" >&2; return 1 ;;
     esac
   done <<<"$volume_names"

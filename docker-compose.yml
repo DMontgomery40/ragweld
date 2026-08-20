@@ -139,6 +139,59 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
+  vllm:
+    image: vllm/vllm-openai-cpu:v0.26.0-arm64
+    labels:
+      io.ragweld.managed: "true"
+    command:
+      - --model
+      - ${VLLM_MODEL:-Qwen/Qwen3-0.6B}
+      - --served-model-name
+      - ragweld-local
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --max-model-len
+      - "2048"
+      - --max-num-seqs
+      - "1"
+    ports:
+      - "127.0.0.1:${VLLM_PORT:-58080}:8000"
+    volumes:
+      - hf_cache:/root/.cache/huggingface
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)"]
+      interval: 10s
+      timeout: 10s
+      retries: 60
+      start_period: 30s
+
+  litellm:
+    image: ghcr.io/berriai/litellm:v1.94.0
+    labels:
+      io.ragweld.managed: "true"
+    command: ["--config", "/app/config.yaml", "--port", "4000"]
+    environment:
+      LITELLM_MASTER_KEY: ${LITELLM_API_KEY:-sk-ragweld-local}
+    env_file:
+      - ./infra/litellm.env.example
+      - path: ./infra/litellm.env
+        required: false
+    ports:
+      - "127.0.0.1:${LITELLM_PORT:-54000}:4000"
+    volumes:
+      - ./infra/litellm-config.yaml:/app/config.yaml:ro
+    depends_on:
+      vllm:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4000/health/liveliness', timeout=5)"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 15s
+
   api:
     build:
       context: .
@@ -149,6 +202,9 @@ services:
       - POSTGRES_HOST=postgres
       - POSTGRES_PORT=5432
       - NEO4J_URI=bolt://neo4j:7687
+      - LITELLM_BASE_URL=http://litellm:4000/v1
+      - LITELLM_API_KEY=${LITELLM_API_KEY:-sk-ragweld-local}
+      - OPENROUTER_API_KEY=
     env_file:
       - .env
     ports:
@@ -160,6 +216,8 @@ services:
       postgres:
         condition: service_healthy
       neo4j:
+        condition: service_healthy
+      litellm:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
@@ -174,3 +232,4 @@ volumes:
   grafana_data:
   prometheus_data:
   loki_data:
+  hf_cache:
