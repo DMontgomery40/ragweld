@@ -9,12 +9,6 @@ components:
   - name: IndexingSubtab
     props: []
 
-  - name: IndexStatsPanel
-    props:
-      - name: repoId
-        type: string
-        required: true
-
   - name: RetrievalSubtab
     props: []
 
