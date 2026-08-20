@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from server.reranker.mlx_qwen3 import (
+from server.retrieval.mlx_qwen3 import (
     is_mlx_qwen3_artifact_compatible,
     read_manifest,
     read_manifest_backend,
@@ -33,4 +33,3 @@ def test_is_mlx_qwen3_artifact_compatible_requires_backend_and_base_model_match(
 
     _write_manifest(tmp_path, {"backend": "mlx_qwen3", "base_model": "Qwen/Qwen3-Reranker-0.6B"})
     assert is_mlx_qwen3_artifact_compatible(artifact_dir=tmp_path, base_model="Qwen/Qwen3-Reranker-0.6B") is True
-

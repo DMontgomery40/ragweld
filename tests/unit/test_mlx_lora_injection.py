@@ -4,14 +4,14 @@ import pytest
 
 
 def test_apply_lora_layers_wraps_target_linear_modules() -> None:
-    mlx = pytest.importorskip("mlx")  # only runs on Apple Silicon dev envs with MLX installed
+    pytest.importorskip("mlx")  # only runs on Apple Silicon dev envs with MLX installed
     pytest.importorskip("mlx.nn")
     pytest.importorskip("mlx.core")
 
     import mlx.core as mx
     import mlx.nn as nn
 
-    from server.reranker.mlx_qwen3 import apply_lora_layers
+    from server.retrieval.mlx_qwen3 import apply_lora_layers
 
     class Tiny(nn.Module):
         def __init__(self) -> None:
@@ -38,4 +38,3 @@ def test_apply_lora_layers_wraps_target_linear_modules() -> None:
     y = m(x)
     mx.eval(y)
     assert tuple(y.shape) == (2, 8)
-

@@ -5,7 +5,7 @@ import platform
 import pytest
 
 from server.models.tribrid_config_model import TrainingConfig
-from server.reranker.mlx_qwen3 import mlx_is_available
+from server.retrieval.mlx_qwen3 import mlx_is_available
 from server.retrieval.rerank import resolve_learning_backend
 
 
