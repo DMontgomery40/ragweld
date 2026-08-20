@@ -79,7 +79,7 @@ async def search(request: SearchRequest, response: Response) -> SearchResponse:
     SEARCH_REQUESTS_TOTAL.inc()
 
     cfg = await _validated_scoped_config(request.repo_id, boundary="Search API")
-    fusion = TriBridFusion(vector=None, sparse=None, graph=None)
+    fusion = TriBridFusion()
     request_cache_mode = _normalize_cache_mode(request.cache_mode)
     run_id = str(uuid.uuid4())
     started_at_ms = int(time.time() * 1000)
@@ -213,7 +213,7 @@ async def answer(request: AnswerRequest, response: Response) -> AnswerResponse:
 
     # Validate corpus exists (return 404 rather than bubbling CorpusNotFoundError as 500).
     cfg = await _validated_scoped_config(request.repo_id, boundary="Answer API")
-    fusion = TriBridFusion(vector=None, sparse=None, graph=None)
+    fusion = TriBridFusion()
     request_cache_mode = _normalize_cache_mode(request.cache_mode)
     run_id = str(uuid.uuid4())
     started_at_ms = int(time.time() * 1000)
@@ -330,7 +330,7 @@ async def answer_stream(request: AnswerRequest) -> StreamingResponse:
 
     # Validate corpus exists (return 404 rather than bubbling CorpusNotFoundError as 500).
     cfg = await _validated_scoped_config(request.repo_id, boundary="Streaming answer API")
-    fusion = TriBridFusion(vector=None, sparse=None, graph=None)
+    fusion = TriBridFusion()
     request_cache_mode = _normalize_cache_mode(request.cache_mode)
     run_id = str(uuid.uuid4())
     started_at_ms = int(time.time() * 1000)

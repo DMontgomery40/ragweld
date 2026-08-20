@@ -5,7 +5,7 @@ import math
 import re
 from collections import defaultdict
 from datetime import datetime
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from server.db.neo4j import Neo4jClient
 from server.db.postgres import PostgresClient
@@ -35,19 +35,11 @@ from server.retrieval.rerank import Reranker
 from server.retrieval.scoring_boosts import apply_scoring_boosts
 from server.services.config_store import get_config as load_scoped_config
 
-if TYPE_CHECKING:
-    from server.retrieval.graph import GraphRetriever
-    from server.retrieval.sparse import SparseRetriever
-    from server.retrieval.vector import VectorRetriever
-
 logger = logging.getLogger(__name__)
 
 
 class TriBridFusion:
-    def __init__(self, vector: VectorRetriever | None, sparse: SparseRetriever | None, graph: GraphRetriever | None):
-        self.vector = vector
-        self.sparse = sparse
-        self.graph = graph
+    def __init__(self) -> None:
         # Populated after each search() call; used by API layers to expose deterministic debug.
         self.last_debug: dict[str, Any] = {}
 

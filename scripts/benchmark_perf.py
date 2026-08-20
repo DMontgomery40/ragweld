@@ -91,7 +91,7 @@ async def _benchmark_search(
     top_k: int | None,
 ) -> dict[str, Any]:
     cfg = await load_scoped_config(repo_id=corpus_id)
-    fusion = TriBridFusion(vector=None, sparse=None, graph=None)
+    fusion = TriBridFusion()
 
     per_query: list[dict[str, Any]] = []
     all_lat_ms: list[float] = []

@@ -742,7 +742,7 @@ async def mcp_rag_search(
             raise HTTPException(status_code=404, detail=f"Corpus not found: {repo_id}")
 
         cfg = await load_scoped_config(repo_id=repo_id)
-        fusion = TriBridFusion(vector=None, sparse=None, graph=None)
+        fusion = TriBridFusion()
         effective_top_k = int(top_k or cfg.mcp.default_top_k)
         matches = await fusion.search(
             [repo_id],

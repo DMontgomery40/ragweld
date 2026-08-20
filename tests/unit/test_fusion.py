@@ -22,7 +22,7 @@ def make_chunk(chunk_id: str, score: float, source: str) -> ChunkMatch:
 
 def test_rrf_fusion_basic() -> None:
     """Test basic RRF fusion."""
-    fusion = TriBridFusion(vector=None, sparse=None, graph=None)
+    fusion = TriBridFusion()
 
     vector_results = [make_chunk("v1", 0.9, "vector"), make_chunk("v2", 0.8, "vector")]
     sparse_results = [make_chunk("s1", 0.85, "sparse"), make_chunk("v1", 0.7, "sparse")]
@@ -40,14 +40,14 @@ def test_rrf_fusion_basic() -> None:
 
 def test_rrf_fusion_empty() -> None:
     """Test RRF fusion with empty results."""
-    fusion = TriBridFusion(vector=None, sparse=None, graph=None)
+    fusion = TriBridFusion()
     results = fusion.rrf_fusion([[], [], []], k=60)
     assert len(results) == 0
 
 
 def test_weighted_fusion() -> None:
     """Test weighted fusion."""
-    fusion = TriBridFusion(vector=None, sparse=None, graph=None)
+    fusion = TriBridFusion()
 
     vector_results = [make_chunk("v1", 0.9, "vector")]
     sparse_results = [make_chunk("s1", 0.8, "sparse")]
@@ -63,7 +63,7 @@ def test_weighted_fusion() -> None:
 
 def test_weighted_fusion_normalization() -> None:
     """Test that weighted fusion normalizes scores."""
-    fusion = TriBridFusion(vector=None, sparse=None, graph=None)
+    fusion = TriBridFusion()
 
     # Same chunk with different scores from different sources
     vector_results = [make_chunk("c1", 0.9, "vector")]
@@ -84,7 +84,7 @@ async def test_search_empty_corpus_ids_returns_empty() -> None:
     """Multi-corpus search should return empty list for empty corpus_ids."""
     from server.models.tribrid_config_model import FusionConfig
 
-    fusion = TriBridFusion(vector=None, sparse=None, graph=None)
+    fusion = TriBridFusion()
     out = await fusion.search(
         corpus_ids=[],
         query="foo",
@@ -142,7 +142,7 @@ async def test_search_multiple_corpora_dedupes_by_corpus_and_chunk_id(monkeypatc
     monkeypatch.setattr(fusion_mod, "PostgresClient", _FakePostgres, raising=True)
     monkeypatch.setattr(fusion_mod, "load_scoped_config", _fake_load_scoped_config, raising=True)
 
-    fusion = TriBridFusion(vector=None, sparse=None, graph=None)
+    fusion = TriBridFusion()
     out = await fusion.search(
         corpus_ids=["a", "b"],
         query="foo",
@@ -200,7 +200,7 @@ async def test_search_graph_leg_records_error_in_debug(monkeypatch) -> None:
     monkeypatch.setattr(fusion_mod, "Neo4jClient", _FailingNeo4j, raising=True)
     monkeypatch.setattr(fusion_mod, "load_scoped_config", _fake_load_scoped_config, raising=True)
 
-    fusion = TriBridFusion(vector=None, sparse=None, graph=None)
+    fusion = TriBridFusion()
     out = await fusion.search(
         corpus_ids=["test-corpus"],
         query="foo",
@@ -310,7 +310,7 @@ async def test_search_graph_chunk_mode_hydrates_by_chunk_id(monkeypatch) -> None
     monkeypatch.setattr(fusion_mod, "Embedder", _FakeEmbedder, raising=True)
     monkeypatch.setattr(fusion_mod, "load_scoped_config", _fake_load_scoped_config, raising=True)
 
-    fusion = TriBridFusion(vector=None, sparse=None, graph=None)
+    fusion = TriBridFusion()
     out = await fusion.search(
         corpus_ids=["test-corpus"],
         query="foo",
@@ -419,7 +419,7 @@ async def test_search_graph_chunk_mode_entity_expansion_adds_chunks(monkeypatch)
     monkeypatch.setattr(fusion_mod, "Embedder", _FakeEmbedder, raising=True)
     monkeypatch.setattr(fusion_mod, "load_scoped_config", _fake_load_scoped_config, raising=True)
 
-    fusion = TriBridFusion(vector=None, sparse=None, graph=None)
+    fusion = TriBridFusion()
     out = await fusion.search(
         corpus_ids=["test-corpus"],
         query="foo",
@@ -499,7 +499,7 @@ async def test_search_graph_entity_mode_hydrates_by_chunk_id(monkeypatch) -> Non
     monkeypatch.setattr(fusion_mod, "Neo4jClient", _FakeNeo4j, raising=True)
     monkeypatch.setattr(fusion_mod, "load_scoped_config", _fake_load_scoped_config, raising=True)
 
-    fusion = TriBridFusion(vector=None, sparse=None, graph=None)
+    fusion = TriBridFusion()
     out = await fusion.search(
         corpus_ids=["test-corpus"],
         query="foo",

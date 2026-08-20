@@ -58,7 +58,7 @@ def register_mcp_tools(mcp: FastMCP, cfg: MCPConfig) -> None:
         include_vector, include_sparse, include_graph = _mode_to_flags(effective_mode)
         effective_top_k = int(top_k or cfg.default_top_k)
 
-        fusion = TriBridFusion(vector=None, sparse=None, graph=None)
+        fusion = TriBridFusion()
         return await fusion.search(
             [corpus_id],
             query,
@@ -87,7 +87,7 @@ def register_mcp_tools(mcp: FastMCP, cfg: MCPConfig) -> None:
         include_vector, include_sparse, include_graph = _mode_to_flags(effective_mode)
         effective_top_k = int(top_k or cfg.default_top_k)
 
-        fusion = TriBridFusion(vector=None, sparse=None, graph=None)
+        fusion = TriBridFusion()
 
         t0 = time.perf_counter()
         text, sources, provider_info, debug = await answer_best_effort(

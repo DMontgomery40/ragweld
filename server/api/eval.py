@@ -35,7 +35,11 @@ from server.models.eval import (
     EvalRunsResponse,
     EvalTestRequest,
 )
-from server.models.tribrid_config_model import CorpusScope, EvalAnalyzeComparisonRequest, EvalObservabilitySummaryResponse
+from server.models.tribrid_config_model import (
+    CorpusScope,
+    EvalAnalyzeComparisonRequest,
+    EvalObservabilitySummaryResponse,
+)
 from server.observability.ml_quality import build_eval_observability_summary
 from server.retrieval.fusion import TriBridFusion
 from server.services.config_store import get_config as load_scoped_config
@@ -195,7 +199,7 @@ async def evaluate_dataset_entries(
         if persist_run
         else None
     )
-    fusion = TriBridFusion(vector=None, sparse=None, graph=None)
+    fusion = TriBridFusion()
 
     final_k = int(cfg.retrieval.eval_final_k)
     use_multi = bool(int(cfg.retrieval.eval_multi))
@@ -370,7 +374,7 @@ async def test_eval_entry(request: EvalTestRequest) -> EvalResult:
     """Test a single query against the current index and return a drill-down result."""
     repo_id = request.repo_id
     cfg = await load_scoped_config(repo_id=repo_id)
-    fusion = TriBridFusion(vector=None, sparse=None, graph=None)
+    fusion = TriBridFusion()
 
     final_k = int(request.final_k) if request.final_k is not None else int(cfg.retrieval.eval_final_k)
     final_k = max(1, final_k)
@@ -551,7 +555,7 @@ async def eval_run_stream(
             )
             yield "data: " + json.dumps({"type": "log", "message": f"Loaded {total} eval_dataset entries"}) + "\n\n"
 
-            fusion = TriBridFusion(vector=None, sparse=None, graph=None)
+            fusion = TriBridFusion()
 
             rr_vals: list[float] = []
             recall5_vals: list[float] = []

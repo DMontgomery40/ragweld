@@ -74,7 +74,7 @@ def get_fusion() -> FusionProtocol:
     if _fusion is not None:
         return _fusion
     # Default: real tri-brid fusion over Postgres + Neo4j using per-corpus config.
-    return TriBridFusion(vector=None, sparse=None, graph=None)
+    return TriBridFusion()
 
 
 def set_config(config: TriBridConfig | None) -> None:
