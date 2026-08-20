@@ -31,7 +31,7 @@
 - Components should be “dumb” where possible: use hooks for data/state.
 
 ### `components/ui/` (primitives only)
-This directory is for reusable, app-wide **UI primitives** (Button, ProgressBar, ErrorBoundary, TooltipIcon, etc.).
+This directory is for reusable, app-wide **UI primitives** (Button, LoadingSpinner, ErrorBoundary, TooltipIcon, etc.).
 
 **Not allowed here:** feature components with domain semantics (Repo selector, terminal, model picker, storage calculator). Those belong under a feature directory (e.g. `components/RAG/`, `components/LiveTerminal/`).
 
@@ -84,4 +84,3 @@ flowchart TD
 ## Routing and subtabs
 - Main routing is defined in `config/routes.ts` (and rendered by the navigation components).
 - Subtabs should be **URL-first** via `?subtab=` for deep-linking and reload safety.
-

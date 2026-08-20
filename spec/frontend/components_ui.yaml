@@ -33,18 +33,6 @@ components:
         type: "'sm' | 'md'"
         default: 'sm'
 
-  - name: ProgressBar
-    props:
-      - name: progress
-        type: number
-        required: true
-      - name: label
-        type: string
-        required: false
-      - name: variant
-        type: "'default' | 'success' | 'warning' | 'error'"
-        default: 'default'
-
   - name: StatusIndicator
     props:
       - name: status
