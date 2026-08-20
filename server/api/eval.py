@@ -761,12 +761,6 @@ async def get_eval_run(run_id: str) -> EvalRun:
     return _load_run(run_id)
 
 
-# Alias for UI code that expects /eval/runs/{id}
-@router.get("/eval/runs/{run_id}", response_model=EvalRun)
-async def get_eval_run_alias(run_id: str) -> EvalRun:
-    return _load_run(run_id)
-
-
 @router.delete("/eval/run/{run_id}")
 async def delete_eval_run(run_id: str) -> dict[str, Any]:
     path = _run_path(run_id)
@@ -774,13 +768,6 @@ async def delete_eval_run(run_id: str) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail=f"run_id={run_id} not found")
     path.unlink()
     return {"ok": True, "deleted": 1}
-
-
-@router.delete("/eval/runs/{run_id}")
-async def delete_eval_run_alias(run_id: str) -> dict[str, Any]:
-    return await delete_eval_run(run_id)
-
-
 @router.get("/eval/status")
 async def eval_status() -> dict[str, Any]:
     """Return in-process eval status (best-effort)."""
