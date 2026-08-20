@@ -8,7 +8,6 @@
 // App lifecycle
 export { useAppInit } from './useAppInit';
 export { useEventBus } from './useEventBus';
-export { useGlobalState } from './useGlobalState';
 export { useApplyButton } from './useApplyButton';
 export { useNotification } from './useNotification';
 export { useErrorHandler } from './useErrorHandler';
