@@ -5,7 +5,6 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import { useNavigate } from 'react-router-dom';
 import 'dockview/dist/styles/dockview.css';
 
-import { apiClient, api } from '@/api/client';
 import { LineageMeta } from '@/components/ui/LineageMeta';
 import { TooltipIcon } from '@/components/ui/TooltipIcon';
 import { useConfigStore } from '@/stores/useConfigStore';
@@ -18,8 +17,6 @@ import type {
   AgentTrainRun,
   AgentTrainRunMeta,
   AgentTrainStartRequest,
-  ChatRequest,
-  ChatResponse,
 } from '@/types/generated';
 
 import { NeuralVisualizer, type TelemetryPoint } from '@/components/RerankerTraining/NeuralVisualizer';
@@ -685,47 +682,6 @@ export function TrainingStudio() {
       return ev.type === 'log' || ev.type === 'error' || ev.type === 'state' || ev.type === 'complete';
     });
   }, [events, logClearIso]);
-
-  // Debug prompt: run a single /api/chat call using ragweld:<base_model>.
-  const [debugPrompt, setDebugPrompt] = useState('');
-  const [debugRunning, setDebugRunning] = useState(false);
-  const [debugOutput, setDebugOutput] = useState('');
-  const [debugError, setDebugError] = useState<string | null>(null);
-
-  const onRunDebugPrompt = async () => {
-    if (!activeCorpus) {
-      notifyError('No active corpus selected');
-      return;
-    }
-    const prompt = String(debugPrompt || '').trim();
-    if (!prompt) return;
-
-    setDebugRunning(true);
-    setDebugOutput('');
-    setDebugError(null);
-
-    try {
-      const modelOverride = `ragweld:${String(ragweldBaseModel || '').trim()}`;
-      const payload: ChatRequest = {
-        message: prompt,
-        sources: { corpus_ids: [activeCorpus] },
-        stream: false,
-        images: [],
-        model_override: modelOverride,
-        include_vector: true,
-        include_sparse: true,
-        include_graph: true,
-      };
-      const { data } = await apiClient.post<ChatResponse>(api('/chat'), payload, { headers: { 'Cache-Control': 'no-store' } });
-      const text = String(data?.message?.content || '').trim();
-      setDebugOutput(text || '(empty)');
-    } catch (e) {
-      setDebugError(e instanceof Error ? e.message : 'Failed to run debug prompt');
-      setDebugOutput('');
-    } finally {
-      setDebugRunning(false);
-    }
-  };
 
   const onTopLayout = (layout: Record<string, number>) => {
     const nextLeft = clamp(Math.round(Number(layout.left ?? studioLeftPct)), 15, 35);
@@ -1587,23 +1543,12 @@ export function TrainingStudio() {
             <section className="studio-panel studio-compact-panel" data-testid="studio-debug-prompt-panel">
               <header className="studio-panel-header">
                 <h3 className="studio-panel-title">Debug Prompt</h3>
-                <button className="small-button" onClick={onRunDebugPrompt} disabled={debugRunning || !debugPrompt.trim() || !activeCorpus}>
-                  {debugRunning ? 'Running…' : 'Run'}
-                </button>
               </header>
 
               <div className="studio-form-grid one">
-                <div className="input-group">
-                  <label>Prompt</label>
-                  <textarea value={debugPrompt} onChange={(e) => setDebugPrompt(e.target.value)} rows={4} placeholder="Ask the agent something…" />
+                <div className="studio-callout">
+                  Debug prompting is unavailable until a promoted training artifact is served by vLLM and registered as a LiteLLM alias.
                 </div>
-                <div className="studio-status-line studio-mono">
-                  model_override={String(`ragweld:${String(ragweldBaseModel || '').trim()}`)}
-                </div>
-                {debugError ? <div className="studio-callout studio-callout-err">{debugError}</div> : null}
-                <pre className="studio-pre studio-pre-full" data-testid="studio-debug-prompt-output">
-                  {debugOutput || '—'}
-                </pre>
               </div>
             </section>
           ) : null}
@@ -1613,10 +1558,6 @@ export function TrainingStudio() {
   }, [
     activeCorpus,
     cancelling,
-    debugError,
-    debugOutput,
-    debugPrompt,
-    debugRunning,
     defaultPreset,
     epochs,
     gradAccumSteps,
@@ -1639,7 +1580,6 @@ export function TrainingStudio() {
     maxLen,
     onCancel,
     onPromote,
-    onRunDebugPrompt,
     promoteEpsilon,
     promoteIfImproves,
     promoting,
@@ -1650,7 +1590,6 @@ export function TrainingStudio() {
     selectedRun,
     selectedRunId,
     setBottomTab,
-    setDebugPrompt,
     setDefaultPreset,
     setEpochs,
     setGradAccumSteps,

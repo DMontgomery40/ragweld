@@ -306,26 +306,16 @@
     "rerank_input_snippet_chars": 700
   },
   "generation": {
-    "gen_model": "gpt-5.3-codex",
+    "gen_model": "ragweld-local",
     "gen_temperature": 0.0,
     "gen_max_tokens": 2048,
     "gen_top_p": 1.0,
     "gen_timeout": 60,
-    "gen_retry_max": 2,
-    "gen_backend": "openai",
-    "enrich_model": "gpt-4o-mini",
-    "enrich_backend": "openai",
+    "enrich_model": "ragweld-local",
     "enrich_disabled": 0,
-    "ollama_num_ctx": 8192,
-    "gen_model_cli": "qwen3-coder:14b",
-    "gen_model_ollama": "qwen3-coder:30b",
+    "gen_model_cli": "",
     "gen_model_http": "",
-    "gen_model_mcp": "",
-    "enrich_model_ollama": "",
-    "ollama_url": "http://127.0.0.1:11434/api",
-    "openai_base_url": "",
-    "ollama_request_timeout": 300,
-    "ollama_stream_idle_timeout": 60
+    "gen_model_mcp": ""
   },
   "enrichment": {
     "chunk_summaries_enrich_default": 1,
@@ -466,7 +456,7 @@
     "chat_show_citations": 1,
     "chat_show_trace": 1,
     "chat_show_debug_footer": 1,
-    "chat_default_model": "gpt-4o-mini",
+    "chat_default_model": "ragweld-local",
     "chat_stream_timeout": 120,
     "chat_thinking_budget_tokens": 10000,
     "editor_port": 4440,
@@ -578,43 +568,7 @@
     "litellm": {
       "enabled": true,
       "base_url": "http://127.0.0.1:54000/v1",
-      "default_model": "ragweld-local",
-      "fallback_models": []
-    },
-    "local_models": {
-      "providers": [
-        {
-          "name": "Ollama",
-          "provider_type": "ollama",
-          "base_url": "http://127.0.0.1:11434",
-          "enabled": true,
-          "priority": 0
-        },
-        {
-          "name": "llama.cpp",
-          "provider_type": "llamacpp",
-          "base_url": "http://127.0.0.1:8080",
-          "enabled": true,
-          "priority": 1
-        }
-      ],
-      "auto_detect": true,
-      "health_check_interval": 30,
-      "fallback_to_cloud": true,
-      "gpu_memory_limit_gb": 0.0,
-      "default_chat_model": "qwen3:8b",
-      "default_vision_model": "qwen3-vl:8b",
-      "default_embedding_model": "nomic-embed-text"
-    },
-    "openrouter": {
-      "enabled": false,
-      "base_url": "https://openrouter.ai/api/v1",
-      "default_model": "anthropic/claude-sonnet-4",
-      "site_name": "TriBridRAG",
-      "fallback_models": [
-        "openai/gpt-4o",
-        "google/gemini-2.0-flash"
-      ]
+      "default_model": "ragweld-local"
     },
     "benchmark": {
       "enabled": true,
@@ -624,7 +578,6 @@
       "include_cost_tracking": true,
       "include_timing_breakdown": true
     },
-    "openai_protocol": "auto",
     "temperature": 0.3,
     "temperature_no_retrieval": 0.7,
     "max_tokens": 4096,

@@ -46,10 +46,7 @@ class _FakeFusion:
 
 
 def _disable_all_chat_providers(cfg: TriBridConfig) -> TriBridConfig:
-    cfg.chat.openrouter.enabled = False
     cfg.chat.litellm.enabled = False
-    for provider in cfg.chat.local_models.providers:
-        provider.enabled = False
     return cfg
 
 
@@ -83,8 +80,7 @@ async def test_chat_returns_503_without_providers(
     providerless_chat_config: TriBridConfig,
     providerless_fusion: _FakeFusion,
 ) -> None:
-    old_openai = os.environ.pop("OPENAI_API_KEY", None)
-    old_openrouter = os.environ.pop("OPENROUTER_API_KEY", None)
+    old_litellm = os.environ.pop("LITELLM_API_KEY", None)
 
     try:
         set_config(providerless_chat_config)
@@ -102,14 +98,10 @@ async def test_chat_returns_503_without_providers(
     finally:
         set_config(None)
         set_fusion(None)
-        if old_openai is not None:
-            os.environ["OPENAI_API_KEY"] = old_openai
+        if old_litellm is not None:
+            os.environ["LITELLM_API_KEY"] = old_litellm
         else:
-            os.environ.pop("OPENAI_API_KEY", None)
-        if old_openrouter is not None:
-            os.environ["OPENROUTER_API_KEY"] = old_openrouter
-        else:
-            os.environ.pop("OPENROUTER_API_KEY", None)
+            os.environ.pop("LITELLM_API_KEY", None)
 
 
 @pytest.mark.asyncio

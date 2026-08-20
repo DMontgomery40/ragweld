@@ -5,7 +5,7 @@ import type { ModelCatalogEntry, ModelCatalogResponse } from '@/types/generated'
 export type Model = ModelCatalogEntry;
 
 type ComponentType = 'EMB' | 'GEN' | 'RERANK';
-type SelectionRole = 'generation' | 'embedding_provider' | 'reranker_cloud';
+type SelectionRole = 'embedding_provider' | 'reranker_cloud';
 
 interface UseModelsOptions {
   selectionRole?: SelectionRole;

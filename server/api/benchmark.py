@@ -70,7 +70,7 @@ async def benchmark_run(
 
     This endpoint is intended for local benchmarking and may require provider
     credentials (for example `OPENAI_API_KEY`, `LITELLM_API_KEY`, or
-    `OPENROUTER_API_KEY`) plus any required local inference servers.
+    `LITELLM_API_KEY`) and the managed LiteLLM/vLLM services.
     """
     repo_id = scope.resolved_repo_id
     if repo_id:

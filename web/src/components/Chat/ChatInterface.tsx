@@ -1058,26 +1058,15 @@ export function ChatInterface({ onTraceUpdate }: ChatInterfaceProps) {
 
     const litellmEnabled = Boolean(config.chat?.litellm?.enabled);
     const litellmDefault = String(config.chat?.litellm?.default_model || '').trim();
-    const openrouterEnabled = Boolean(config.chat?.openrouter?.enabled);
-    const openrouterDefault = String(config.chat?.openrouter?.default_model || '').trim();
-    const localDefault = String(config.chat?.local_models?.default_chat_model || '').trim();
 
     const selectOverride = (model: ChatModelInfo): string => String(model.override || model.id || '').trim();
     const litellmModels = chatModels.filter((model) => model.source === 'litellm');
-    const localModels = chatModels.filter((model) => model.source === 'local');
 
     const nextModel =
       (litellmEnabled && litellmDefault
         ? litellmModels.find((model) => String(model.id || '').trim() === litellmDefault || String(model.catalog_model || '').trim() === litellmDefault)
         : undefined) ||
       (litellmEnabled ? litellmModels[0] : undefined) ||
-      (openrouterEnabled && openrouterDefault
-        ? chatModels.find((model) => model.source === 'openrouter' && (String(model.id || '').trim() === openrouterDefault || String(model.catalog_model || '').trim() === openrouterDefault))
-        : undefined) ||
-      (localDefault
-        ? localModels.find((model) => String(model.id || '').trim() === localDefault || String(model.catalog_model || '').trim() === localDefault)
-        : undefined) ||
-      localModels[0] ||
       chatModels[0];
 
     if (nextModel) setModelOverride(selectOverride(nextModel));
@@ -1104,7 +1093,6 @@ export function ChatInterface({ onTraceUpdate }: ChatInterfaceProps) {
     Boolean(config?.chat?.litellm?.enabled),
     String(config?.chat?.litellm?.base_url || '').trim(),
     String(config?.chat?.litellm?.default_model || '').trim(),
-    Boolean(config?.chat?.openrouter?.enabled),
   ]);
 
   useEffect(() => {

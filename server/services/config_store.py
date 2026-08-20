@@ -39,7 +39,6 @@ _REMOVED_NESTED_KEYS: tuple[str, ...] = (
     "indexing.bm25_stopwords_lang",
     "graph_storage.neo4j_password",
     "chat.litellm.api_key",
-    "chat.openrouter.api_key",
 )
 
 _REMOVED_FLAT_KEYS: tuple[str, ...] = (
@@ -70,25 +69,6 @@ def _remove_nested_key(payload: dict[str, Any], dotted_path: str) -> bool:
     return False
 
 
-def _migrate_config_in_place(cfg: TriBridConfig) -> list[str]:
-    """Apply small backward-compatible config migrations.
-
-    This is intentionally minimal and only handles known-bad historical values.
-    """
-    migrated: list[str] = []
-
-    # OpenRouter model ids must be valid OpenRouter `provider/model` strings.
-    # A prior default shipped with a non-existent suffix, which breaks provider calls.
-    try:
-        if cfg.chat.openrouter.default_model == "anthropic/claude-sonnet-4-20250514":
-            cfg.chat.openrouter.default_model = "anthropic/claude-sonnet-4"
-            migrated.append("chat.openrouter.default_model")
-    except Exception:
-        # Best-effort; never block config loads.
-        pass
-    return migrated
-
-
 def _upgrade_raw_config(raw: dict[str, Any]) -> tuple[TriBridConfig, bool, list[str]]:
     """Upgrade stored JSON config and return (validated_cfg, changed, migrated_keys)."""
     original = copy.deepcopy(raw or {})
@@ -112,7 +92,6 @@ def _upgrade_raw_config(raw: dict[str, Any]) -> tuple[TriBridConfig, bool, list[
             migrated_keys.append("chunking.chunking_strategy")
 
     cfg = TriBridConfig.model_validate(working)
-    migrated_keys.extend(_migrate_config_in_place(cfg))
     changed = bool(migrated_keys)
     return (cfg, changed, sorted(set(migrated_keys)))
 
@@ -191,7 +170,6 @@ class ConfigStore:
         """Persist config for a corpus (repo_id) or global when repo_id is None."""
         lock = await self._get_lock(repo_id)
         async with lock:
-            _migrate_config_in_place(config)
             if repo_id is None:
                 save_global_config(config)
                 self._cache[None] = config.model_copy(deep=True)

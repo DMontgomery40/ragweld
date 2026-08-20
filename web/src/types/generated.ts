@@ -156,11 +156,7 @@ export interface ChatConfig {
   image_gen?: ImageGenConfig;
   vllm?: VLLMConfig;
   litellm?: LiteLLMConfig;
-  local_models?: LocalModelConfig;
-  openrouter?: OpenRouterConfig;
   benchmark?: BenchmarkConfig;
-  /** Protocol for OpenAI cloud_direct calls. 'auto' routes codex-only models to Responses. */
-  openai_protocol?: "auto" | "responses" | "chat_completions"; // default: "auto"
   temperature?: number; // default: 0.3
   /** Temperature when nothing is checked (direct chat = more creative) */
   temperature_no_retrieval?: number; // default: 0.7
@@ -237,19 +233,19 @@ export interface ChatModelInfo {
   id: string;
   /** Canonical model_override value to send in chat requests */
   override: string;
-  /** Provider display name (e.g., OpenRouter, LiteLLM, Ollama) */
+  /** Gateway display name */
   provider: string;
-  /** Provider key used in the model catalog */
+  /** Gateway key */
   provider_key?: string | null; // default: None
-  /** Catalog model identifier when sourced from /api/models */
+  /** Optional catalog identity */
   catalog_model?: string | null; // default: None
   /** Capabilities for this model option */
   components?: ("GEN" | "EMB" | "RERANK")[];
   /** Model source group for UI grouping. */
-  source: "cloud_direct" | "openrouter" | "local" | "ragweld" | "litellm";
-  /** Provider type (ollama, llamacpp, openrouter, litellm, etc) */
+  source: "litellm";
+  /** Gateway type */
   provider_type?: string | null; // default: None
-  /** Provider base URL (local/openrouter/litellm) */
+  /** LiteLLM base URL */
   base_url?: string | null; // default: None
   /** Whether this model is expected to support vision inputs */
   supports_vision?: boolean; // default: False
@@ -269,13 +265,13 @@ export interface ChatMultimodalConfig {
 
 /** Selected provider route for a chat answer. */
 export interface ChatProviderInfo {
-  /** Provider kind (router selection) */
-  kind: "cloud_direct" | "openrouter" | "local" | "ragweld" | "litellm";
-  /** Provider display name (e.g., OpenAI, OpenRouter, LiteLLM) */
+  /** Application-visible generation boundary */
+  kind: "litellm";
+  /** Gateway display name */
   provider_name: string;
-  /** Model identifier sent to provider */
+  /** LiteLLM model alias */
   model: string;
-  /** Provider base URL (when applicable) */
+  /** LiteLLM OpenAI-compatible base URL */
   base_url?: string | null; // default: None
 }
 
@@ -838,8 +834,8 @@ export interface FusionConfig {
 
 /** LLM generation configuration. */
 export interface GenerationConfig {
-  /** Primary generation model */
-  gen_model?: string; // default: "gpt-4o-mini"
+  /** Primary LiteLLM model alias */
+  gen_model?: string; // default: "ragweld-local"
   /** Generation temperature */
   gen_temperature?: number; // default: 0.0
   /** Max tokens for generation */
@@ -848,36 +844,16 @@ export interface GenerationConfig {
   gen_top_p?: number; // default: 1.0
   /** Generation timeout (seconds) */
   gen_timeout?: number; // default: 60
-  /** Max retries for generation */
-  gen_retry_max?: number; // default: 2
-  /** Provider backend for gen_model and channel overrides */
-  gen_backend?: string; // default: "openai"
-  /** Model for code enrichment */
-  enrich_model?: string; // default: "gpt-4o-mini"
-  /** Enrichment backend */
-  enrich_backend?: string; // default: "openai"
+  /** LiteLLM alias for code enrichment */
+  enrich_model?: string; // default: "ragweld-local"
   /** Disable code enrichment */
   enrich_disabled?: number; // default: 0
-  /** Context window for Ollama */
-  ollama_num_ctx?: number; // default: 8192
-  /** CLI generation model */
-  gen_model_cli?: string; // default: "qwen3-coder:14b"
-  /** Ollama generation model */
-  gen_model_ollama?: string; // default: "qwen3-coder:30b"
+  /** Optional LiteLLM alias for CLI requests */
+  gen_model_cli?: string; // default: ""
   /** HTTP transport generation model override */
   gen_model_http?: string; // default: ""
   /** MCP transport generation model override */
   gen_model_mcp?: string; // default: ""
-  /** Ollama enrichment model */
-  enrich_model_ollama?: string; // default: ""
-  /** Ollama API URL */
-  ollama_url?: string; // default: "http://127.0.0.1:11434/api"
-  /** OpenAI API base URL override (for proxies) */
-  openai_base_url?: string; // default: ""
-  /** Maximum total time to wait for a local (Ollama) generation request to complete (seconds) */
-  ollama_request_timeout?: number; // default: 300
-  /** Maximum idle time allowed between streamed chunks from local (Ollama) during generation (seconds) */
-  ollama_stream_idle_timeout?: number; // default: 60
 }
 
 /** Runtime capability matrix for generation routing and serving. */
@@ -958,7 +934,7 @@ export interface GraphIndexingConfig {
   semantic_kg_max_relations_per_chunk?: number; // default: 12
   /** Maximum chunks to process for semantic KG extraction per indexing run (0 = disabled) */
   semantic_kg_max_chunks?: number; // default: 40000
-  /** Explicit runtime-selectable GEN catalog model for GraphRAG semantic extraction; required when semantic KG is enabled */
+  /** Optional LiteLLM alias for GraphRAG semantic extraction; empty uses the gateway default */
   semantic_kg_llm_model?: string; // default: ""
   /** Timeout (seconds) for semantic KG LLM extraction per chunk */
   semantic_kg_llm_timeout_s?: number; // default: 30
@@ -1309,31 +1285,6 @@ export interface LiteLLMConfig {
   enabled?: boolean; // default: True
   base_url?: string; // default: "http://127.0.0.1:54000/v1"
   default_model?: string; // default: "ragweld-local"
-  fallback_models?: string[];
-}
-
-/** Supports multiple simultaneous local inference providers. */
-export interface LocalModelConfig {
-  providers?: LocalProviderEntry[]; // default: [{"name": "Ollama", "provider_type": "ollama", ...
-  auto_detect?: boolean; // default: True
-  health_check_interval?: number; // default: 30
-  fallback_to_cloud?: boolean; // default: True
-  gpu_memory_limit_gb?: number; // default: 0
-  default_chat_model?: string; // default: "qwen3:8b"
-  default_vision_model?: string; // default: "qwen3-vl:8b"
-  default_embedding_model?: string; // default: "nomic-embed-text"
-}
-
-/** A single local inference provider endpoint. */
-export interface LocalProviderEntry {
-  /** Display name */
-  name: string;
-  provider_type: string;
-  /** Provider API endpoint */
-  base_url: string;
-  enabled?: boolean; // default: True
-  /** Lower = higher priority when multiple have same model. */
-  priority?: number; // default: 0
 }
 
 /** Inbound MCP (Model Context Protocol) server configuration.  This config controls TriBridRAG's embedded MCP Streamable HTTP endpoint. */
@@ -1425,7 +1376,7 @@ export interface ModelCatalogEntry {
   /** Freeform notes */
   notes?: string | null; // default: None
   /** Runtime selection surfaces that should expose this row. */
-  selection_roles?: ("generation" | "embedding_provider" | "reranker_cloud")[];
+  selection_roles?: ("embedding_provider" | "reranker_cloud")[];
   /** Whether this row is currently selectable in the runtime product surface. */
   selection_status?: "runtime_selectable" | "catalog_only"; // default: "catalog_only"
   /** Why the row is catalog-only when not runtime selectable. */
@@ -1588,15 +1539,6 @@ export interface ObservabilityWorkbenchLink {
   description?: string | null; // default: None
 }
 
-/** Unified gateway to many cloud models via OpenAI-compatible routing. */
-export interface OpenRouterConfig {
-  enabled?: boolean; // default: False
-  base_url?: string; // default: "https://openrouter.ai/api/v1"
-  default_model?: string; // default: "anthropic/claude-sonnet-4"
-  site_name?: string; // default: "TriBridRAG"
-  fallback_models?: string[]; // default: ["openai/gpt-4o", "google/gemini-2.0-flash"]
-}
-
 /** Metadata describing how a prompt is used and edited in the UI. */
 export interface PromptMetadata {
   /** Human-friendly label */
@@ -1617,8 +1559,8 @@ export interface PromptMetadata {
 export interface ProviderHealth {
   /** Provider display name */
   provider: string;
-  /** Provider kind */
-  kind: "openrouter" | "local" | "ragweld" | "litellm";
+  /** Gateway kind */
+  kind: "litellm";
   /** Provider base URL */
   base_url: string;
   /** Whether the provider endpoint is reachable */
@@ -2681,7 +2623,7 @@ export interface UIConfig {
   /** Show dev/debug footer under chat answers */
   chat_show_debug_footer?: number; // default: 1
   /** Default model for chat if not specified in request */
-  chat_default_model?: string; // default: "gpt-4o-mini"
+  chat_default_model?: string; // default: "ragweld-local"
   /** Streaming response timeout in seconds */
   chat_stream_timeout?: number; // default: 120
   /** Max thinking tokens for Anthropic extended thinking */

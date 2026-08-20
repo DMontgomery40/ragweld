@@ -23,8 +23,8 @@ def test_seed_dataset_fallback_hydrates_eval_items_for_eval_recipes() -> None:
         corpus_id=corpus_id,
         provider="synthetic_data_kit",
         recipe="eval_dataset",
-        generator_model="openai/gpt-5.4-mini",
-        judge_model="openai/gpt-5.4-mini",
+        generator_model="litellm:synthetic-quality",
+        judge_model="litellm:synthetic-quality",
         max_pairs=10,
         seed=42,
     )
@@ -61,8 +61,8 @@ def test_seed_dataset_fallback_skips_non_eval_recipes() -> None:
         corpus_id=corpus_id,
         provider="synthetic_data_kit",
         recipe="keywords",
-        generator_model="openai/gpt-5.4-mini",
-        judge_model="openai/gpt-5.4-mini",
+        generator_model="litellm:synthetic-quality",
+        judge_model="litellm:synthetic-quality",
     )
     summary = SyntheticRunSummary(items_generated=0)
     artifacts_payloads: dict[str, object] = {"eval_dataset_json": []}

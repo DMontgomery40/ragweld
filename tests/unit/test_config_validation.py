@@ -17,8 +17,8 @@ async def test_validate_config_returns_200(client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
-async def test_validate_config_warns_for_unknown_model(client: AsyncClient) -> None:
-    """Setting an unknown model should produce a validation warning."""
+async def test_validate_config_accepts_gateway_alias_without_catalog_warning(client: AsyncClient) -> None:
+    """Gateway alias truth comes from LiteLLM discovery, not the provider catalog."""
     baseline = await client.get("/api/config")
     assert baseline.status_code == 200
     cfg = baseline.json()
@@ -36,8 +36,7 @@ async def test_validate_config_warns_for_unknown_model(client: AsyncClient) -> N
         w for w in result["warnings"]
         if w["field"] == "generation.gen_model"
     ]
-    assert len(gen_model_warnings) >= 1
-    assert "totally-fake-model-xyz-9999" in gen_model_warnings[0]["model_value"]
+    assert gen_model_warnings == []
 
 
 @pytest.mark.asyncio

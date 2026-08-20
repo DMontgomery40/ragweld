@@ -9,12 +9,7 @@ pytestmark = pytest.mark.requires_postgres
 
 
 @pytest.mark.asyncio
-async def test_eval_analyze_comparison_prefers_openai_cloud_direct_when_openai_key_set(client, tmp_path) -> None:
-    """Regression: Eval drill-down analysis should not get stuck on OpenRouter when OpenAI is configured.
-
-    If OPENAI_API_KEY is set and generation.gen_model looks like an OpenAI model (e.g. "gpt-5.1"),
-    the provider router should select cloud-direct OpenAI even if OpenRouter is enabled.
-    """
+async def test_eval_analyze_comparison_uses_only_litellm_alias(client, tmp_path) -> None:
 
     corpus_id = f"test_eval_ai_route_{int(time.time() * 1000)}"
 
@@ -24,30 +19,20 @@ async def test_eval_analyze_comparison_prefers_openai_cloud_direct_when_openai_k
     )
     assert create.status_code == 200
 
-    old_openai = os.environ.get("OPENAI_API_KEY")
-    old_openrouter = os.environ.get("OPENROUTER_API_KEY")
+    old_key = os.environ.get("LITELLM_API_KEY")
+    old_url = os.environ.get("LITELLM_BASE_URL")
 
     try:
-        # Fake keys: we do not want real network calls in tests. Force OpenAI to a dead URL so it fails fast,
-        # but still report the selected route/model in the error string.
-        os.environ["OPENAI_API_KEY"] = "sk-test"
-        os.environ["OPENROUTER_API_KEY"] = "or-invalid"
+        os.environ["LITELLM_API_KEY"] = "sk-test"
+        os.environ["LITELLM_BASE_URL"] = "http://127.0.0.1:9/v1"
 
         patch_generation = await client.request(
             "PATCH",
             "/api/config/generation",
             params={"corpus_id": corpus_id},
-            json={"gen_model": "gpt-5.1", "openai_base_url": "http://127.0.0.1:9/v1"},
+            json={"gen_model": "analysis-alias"},
         )
         assert patch_generation.status_code == 200
-
-        patch_chat = await client.request(
-            "PATCH",
-            "/api/config/chat",
-            params={"corpus_id": corpus_id},
-            json={"openrouter": {"enabled": True}},
-        )
-        assert patch_chat.status_code == 200
 
         payload = {
             "current_run": {"run_id": "current", "top1_accuracy": 0.5, "topk_accuracy": 0.6, "total": 10, "duration_secs": 1.0},
@@ -64,20 +49,19 @@ async def test_eval_analyze_comparison_prefers_openai_cloud_direct_when_openai_k
         data = res.json()
         assert data.get("ok") is False
 
-        assert data.get("model_used") == "gpt-5.1"
+        assert data.get("model_used") == "analysis-alias"
 
         err = str(data.get("error") or "")
-        assert "Selected route: cloud_direct" in err
-        assert "Selected model: gpt-5.1" in err
-        assert "Selected route: openrouter" not in err
+        assert "Selected route: litellm" in err
+        assert "Selected model: analysis-alias" in err
     finally:
-        if old_openai is None:
-            os.environ.pop("OPENAI_API_KEY", None)
+        if old_key is None:
+            os.environ.pop("LITELLM_API_KEY", None)
         else:
-            os.environ["OPENAI_API_KEY"] = old_openai
-        if old_openrouter is None:
-            os.environ.pop("OPENROUTER_API_KEY", None)
+            os.environ["LITELLM_API_KEY"] = old_key
+        if old_url is None:
+            os.environ.pop("LITELLM_BASE_URL", None)
         else:
-            os.environ["OPENROUTER_API_KEY"] = old_openrouter
+            os.environ["LITELLM_BASE_URL"] = old_url
 
         await client.delete(f"/api/corpora/{corpus_id}")

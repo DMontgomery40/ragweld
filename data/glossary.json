@@ -3355,37 +3355,6 @@
       ]
     },
     {
-      "term": "Enrichment Backend",
-      "key": "ENRICH_BACKEND",
-      "definition": "This chooses the runtime that generates enrichment metadata during indexing, such as chunk summaries, tags, and semantic hints. Backend choice changes quality, latency, cost, privacy posture, and operational complexity, so it can materially alter downstream retrieval and reranking behavior. Hosted backends generally reduce ops burden and may provide stronger quality, while local backends can improve data control and predictable marginal cost. Treat backend changes like model migrations: version prompts and settings, then rerun evaluation before production rollout. Do not assume enrichment outputs are interchangeable across backends.",
-      "category": "general",
-      "related": [],
-      "links": [
-        {
-          "text": "Meta-RAG on Large Codebases Using Code Summarization (arXiv 2025)",
-          "href": "https://arxiv.org/abs/2508.02611"
-        },
-        {
-          "text": "openai-python API Reference",
-          "href": "https://github.com/openai/openai-python/blob/main/api.md"
-        },
-        {
-          "text": "Ollama API Docs",
-          "href": "https://github.com/ollama/ollama/blob/main/docs/api.md"
-        },
-        {
-          "text": "MLX Repository",
-          "href": "https://github.com/ml-explore/mlx"
-        }
-      ],
-      "badges": [
-        {
-          "text": "Index pipeline",
-          "class": "info"
-        }
-      ]
-    },
-    {
       "term": "Enrichment Model",
       "key": "ENRICH_MODEL",
       "definition": "This selects the exact model used by the configured enrichment backend. It is the main lever on the quality versus cost versus throughput tradeoff for generated summaries and keywords. Higher-capability models can improve semantic signals for reranking and explanation quality, while lighter models reduce expense and indexing time. Even without changing embeddings, enrichment model swaps can shift retrieval outcomes, so they should be benchmarked and version-controlled. Pin model ids and evaluate outputs on representative repositories before adopting changes in production pipelines.",
@@ -3413,37 +3382,6 @@
         {
           "text": "Affects quality/cost",
           "class": "warn"
-        }
-      ]
-    },
-    {
-      "term": "Enrichment Model (Ollama)",
-      "key": "ENRICH_MODEL_OLLAMA",
-      "definition": "Selects the local Ollama model used for enrichment steps such as code-card expansion, metadata extraction, and structure-aware summaries before retrieval. This choice is a quality versus latency tradeoff: larger coder models usually produce richer symbols and relationships, while smaller models reduce indexing time and hardware pressure. Keep the selected model pinned to an explicit tag so enrichment output stays reproducible across rebuilds. In production, validate the model on a fixed enrichment sample set and monitor drift in extracted fields after model upgrades.",
-      "category": "generation",
-      "related": [],
-      "links": [
-        {
-          "text": "rStar-Coder (arXiv)",
-          "href": "https://arxiv.org/abs/2505.21297"
-        },
-        {
-          "text": "Ollama Documentation",
-          "href": "https://docs.ollama.com/"
-        },
-        {
-          "text": "Ollama Model Library",
-          "href": "https://ollama.com/library"
-        },
-        {
-          "text": "Ollama Quickstart",
-          "href": "https://github.com/ollama/ollama#quickstart"
-        }
-      ],
-      "badges": [
-        {
-          "text": "Local model tuning",
-          "class": "info"
         }
       ]
     },
@@ -4045,68 +3983,6 @@
       ]
     },
     {
-      "term": "Generation Backend",
-      "key": "GEN_BACKEND",
-      "definition": "Generation backend selects the provider stack that executes model calls, which affects auth, parameter semantics, rate limits, timeouts, and tool-calling behavior. Treat backend choice as an operational contract, not a cosmetic model switch. In RAG systems, keep backend-specific defaults normalized so output length, safety behavior, and citation style stay predictable across providers. If you support multiple backends, define a deterministic fallback order and record backend metadata in logs for incident triage. Backend heterogeneity without observability is a common source of inconsistent answer quality.",
-      "category": "generation",
-      "related": [],
-      "links": [
-        {
-          "text": "Universal Model Routing for Efficient LLM Inference (arXiv 2025)",
-          "href": "https://arxiv.org/abs/2502.08773"
-        },
-        {
-          "text": "OpenAI Python SDK",
-          "href": "https://github.com/openai/openai-python"
-        },
-        {
-          "text": "Anthropic Claude Models",
-          "href": "https://docs.anthropic.com/en/docs/about-claude/models"
-        },
-        {
-          "text": "Ollama API Reference",
-          "href": "https://github.com/ollama/ollama/blob/main/docs/api.md"
-        }
-      ],
-      "badges": [
-        {
-          "text": "Provider routing",
-          "class": "info"
-        }
-      ]
-    },
-    {
-      "term": "Generation Max Retries",
-      "key": "GEN_RETRY_MAX",
-      "definition": "This sets how many times generation requests are retried after transient failures such as rate limits or temporary backend faults. Higher values can improve success rate but also increase latency and amplify traffic during outages if backoff is weak. Use bounded retries with exponential backoff and jitter, and track request IDs to avoid accidental duplicate side effects. Interactive channels usually need fewer retries than background jobs. If retries are frequent but final success stays low, reduce retries and fix timeout, routing, or provider health first.",
-      "category": "generation",
-      "related": [],
-      "links": [
-        {
-          "text": "KevlarFlow: Resiliency in LLM Serving (arXiv 2026)",
-          "href": "https://arxiv.org/abs/2601.22438"
-        },
-        {
-          "text": "OpenAI Cookbook: Handle Rate Limits",
-          "href": "https://github.com/openai/openai-cookbook/blob/main/examples/How_to_handle_rate_limits.ipynb"
-        },
-        {
-          "text": "Anthropic API Errors",
-          "href": "https://docs.anthropic.com/en/api/errors"
-        },
-        {
-          "text": "LiteLLM Reliability and Fallbacks",
-          "href": "https://docs.litellm.ai/docs/proxy/reliability"
-        }
-      ],
-      "badges": [
-        {
-          "text": "Resilience",
-          "class": "info"
-        }
-      ]
-    },
-    {
       "term": "Generation Model",
       "key": "GEN_MODEL",
       "definition": "This is the primary model used to synthesize answers from retrieved context, and it dominates quality, latency, and cost behavior. Choose it with workload-specific evaluation sets, not leaderboard intuition, because retrieval quality and prompt structure can change model rankings. Version model IDs explicitly so experiments are reproducible and regressions can be traced. Re-evaluate whenever provider releases shift default behavior, even if API names stay stable. Good retrieval can still underperform if the generation model is misaligned with your task style and response requirements.",
@@ -4136,32 +4012,6 @@
           "class": "info"
         }
       ]
-    },
-    {
-      "term": "Generation Model (Ollama)",
-      "key": "GEN_MODEL_OLLAMA",
-      "definition": "`GEN_MODEL_OLLAMA` selects the concrete local model tag used when generation is routed through Ollama instead of a hosted provider. In this configuration family, the default is `qwen3-coder:30b`, and changing it directly affects response quality, latency, memory pressure, and token-context behavior for all generation calls that use the Ollama path. Use explicit model tags and keep them consistent across environments so evaluation runs remain reproducible and regressions can be traced to model changes rather than retrieval or prompt drift. When updating this value, validate compatibility with your configured context and timeout settings before promoting to shared environments.",
-      "category": "generation",
-      "related": [],
-      "links": [
-        {
-          "text": "Production-Grade Local LLM Inference on Apple Silicon: A Comparative Study of MLX, MLC-LLM, Ollama, llama.cpp, and PyTorch (arXiv)",
-          "href": "https://arxiv.org/abs/2511.05502"
-        },
-        {
-          "text": "Ollama API Reference (repo docs)",
-          "href": "https://github.com/ollama/ollama/blob/main/docs/api.md"
-        },
-        {
-          "text": "Ollama Modelfile Reference",
-          "href": "https://github.com/ollama/ollama/blob/main/docs/modelfile.mdx"
-        },
-        {
-          "text": "Ollama Context Length Guide",
-          "href": "https://github.com/ollama/ollama/blob/main/docs/context-length.mdx"
-        }
-      ],
-      "badges": []
     },
     {
       "term": "Generation Timeout",
@@ -6972,58 +6822,6 @@
       ]
     },
     {
-      "term": "Local Request Timeout (seconds)",
-      "key": "OLLAMA_REQUEST_TIMEOUT",
-      "definition": "Ollama request timeout is the hard client-side budget for a full generation call, including model warmup, first-token delay, and decode time. Set it too low and valid long-context responses fail prematurely; set it too high and stalled calls tie up worker capacity and degrade system responsiveness. Calibrate timeout from observed p95/p99 latency per model and hardware profile, and revisit after model swaps or context-window changes. Use streaming plus clear retry/abort policy so timeout behavior remains predictable during spikes.",
-      "category": "generation",
-      "related": [],
-      "links": [
-        {
-          "text": "Efficient Multi-Adapter LLM Serving via Cross-Model KV-Cache Reuse (arXiv 2025)",
-          "href": "https://arxiv.org/abs/2512.17910"
-        },
-        {
-          "text": "Ollama Generate API",
-          "href": "https://docs.ollama.com/api/generate"
-        },
-        {
-          "text": "Ollama Streaming API",
-          "href": "https://docs.ollama.com/api/streaming"
-        },
-        {
-          "text": "vLLM Multi-LoRA Serving and Latency Metrics (2026)",
-          "href": "https://blog.vllm.ai/2026/02/26/multi-lora.html"
-        }
-      ],
-      "badges": []
-    },
-    {
-      "term": "Local Stream Idle Timeout (seconds)",
-      "key": "OLLAMA_STREAM_IDLE_TIMEOUT",
-      "definition": "Maximum allowed silent gap (in seconds) between streamed tokens/chunks from the local Ollama endpoint before Crucible treats the response as stalled and aborts the request. This protects the UI from hanging indefinitely when a socket is half-open or a backend worker dies mid-generation. Set it too low and you will cut off valid long-prefill responses on larger context windows; set it too high and users wait too long on dead streams. Tune this together with network proxy timeouts and model size so cancellation behavior is fast but not trigger-happy.",
-      "category": "generation",
-      "related": [],
-      "links": [
-        {
-          "text": "Rethinking Latency DoS in KV Cache Systems (arXiv 2026)",
-          "href": "https://arxiv.org/abs/2602.07878"
-        },
-        {
-          "text": "Ollama Streaming API",
-          "href": "https://docs.ollama.com/api/streaming"
-        },
-        {
-          "text": "Nginx proxy_read_timeout",
-          "href": "https://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_read_timeout"
-        },
-        {
-          "text": "Node.js AbortSignal.timeout()",
-          "href": "https://nodejs.org/api/globals.html#abortsignaltimeoutdelay"
-        }
-      ],
-      "badges": []
-    },
-    {
       "term": "Log Level",
       "key": "LOG_LEVEL",
       "definition": "Controls runtime verbosity for diagnostics, operational visibility, and incident response. `DEBUG` is best for short-lived debugging sessions where per-step details matter; `INFO` is the stable default for normal operation; `WARNING` and `ERROR` reduce noise when you only need actionable signals. Excessive debug logging can materially impact latency and storage cost, and can also increase risk of sensitive payload exposure if message templates are not scrubbed. Production-safe practice is to run at INFO/WARNING and temporarily raise verbosity during scoped investigations.",
@@ -8313,58 +8111,6 @@
       ]
     },
     {
-      "term": "Ollama Context Window",
-      "key": "OLLAMA_NUM_CTX",
-      "definition": "Ollama `num_ctx` sets the maximum context tokens used per generation request, directly affecting both quality headroom and memory footprint. Higher values let you include more retrieved evidence and longer instructions, but they increase KV-cache pressure and can reduce throughput on constrained hardware. Tune this parameter from measured prompt composition (system + query + retrieved chunks + expected answer) rather than guessing. If requests regularly approach the ceiling, improve chunk selection and compression before simply raising `num_ctx`, because blindly increasing window size can destabilize latency.",
-      "category": "generation",
-      "related": [],
-      "links": [
-        {
-          "text": "ParisKV: KV-Cache Compression for Long-Context LLMs (arXiv 2026)",
-          "href": "https://arxiv.org/abs/2602.07721"
-        },
-        {
-          "text": "Ollama Context Length",
-          "href": "https://docs.ollama.com/context-length"
-        },
-        {
-          "text": "Ollama Modelfile Reference",
-          "href": "https://docs.ollama.com/modelfile"
-        },
-        {
-          "text": "Ollama FAQ",
-          "href": "https://docs.ollama.com/faq"
-        }
-      ],
-      "badges": []
-    },
-    {
-      "term": "Ollama URL",
-      "key": "OLLAMA_URL",
-      "definition": "Base URL Crucible uses to reach Ollama over HTTP for local-model inference (for example, endpoints such as `/api/chat`, `/api/generate`, and `/api/tags`). This value controls where requests are sent from the app backend, so incorrect hostnames, ports, or path prefixes cause immediate model-routing failures. For remote or containerized setups, use a reachable address from the process that runs Crucible, not just from your browser. When multiple OpenAI-compatible backends are in play, keep this endpoint explicit so provider routing and debugging stay deterministic.",
-      "category": "generation",
-      "related": [],
-      "links": [
-        {
-          "text": "FlyingServing: Scalable and Fault-Tolerant LLM Serving (arXiv 2026)",
-          "href": "https://arxiv.org/abs/2602.22593"
-        },
-        {
-          "text": "Ollama API Reference",
-          "href": "https://docs.ollama.com/api"
-        },
-        {
-          "text": "Ollama Model Tags Endpoint",
-          "href": "https://docs.ollama.com/api/tags"
-        },
-        {
-          "text": "vLLM OpenAI-Compatible Server",
-          "href": "https://docs.vllm.ai/en/latest/serving/openai_compatible_server/"
-        }
-      ],
-      "badges": []
-    },
-    {
       "term": "OpenAI API Key",
       "key": "OPENAI_API_KEY",
       "definition": "Secret credential used by Crucible to authenticate OpenAI API requests for generation, embedding, or other provider-backed operations. Treat this as server-side sensitive configuration: never embed it in client bundles, logs, screenshots, or shared notebooks. If requests intermittently fail with auth errors, verify key scope, organization/project binding, and environment injection path before changing models. Rotation, secret scanning, and least-privilege operational controls are mandatory once this runs outside local-only testing.",
@@ -8389,41 +8135,6 @@
         }
       ],
       "badges": []
-    },
-    {
-      "term": "OpenAI Base URL",
-      "key": "OPENAI_BASE_URL",
-      "definition": "Advanced endpoint override for OpenAI-compatible APIs. Use this when routing Crucible through alternative backends such as Azure-hosted deployments, vLLM, or internal gateway proxies that implement OpenAI-style request/response contracts. Base URL mismatches are a common root cause of 404/401 errors because SDK path composition, versioning, and auth headers differ across providers. Keep this setting paired with explicit model/provider assignments so you can trace which endpoint handled each request during failures.",
-      "category": "generation",
-      "related": [],
-      "links": [
-        {
-          "text": "LMCache: Optimizing LLM Caching and Routing (arXiv 2025)",
-          "href": "https://arxiv.org/abs/2510.09665"
-        },
-        {
-          "text": "OpenAI Node SDK",
-          "href": "https://github.com/openai/openai-node"
-        },
-        {
-          "text": "vLLM OpenAI-Compatible Server",
-          "href": "https://docs.vllm.ai/en/latest/serving/openai_compatible_server/"
-        },
-        {
-          "text": "Azure OpenAI API Version and Endpoint Guidance",
-          "href": "https://learn.microsoft.com/en-us/azure/ai-services/openai/api-version-deprecation"
-        }
-      ],
-      "badges": [
-        {
-          "text": "Advanced",
-          "class": "warn"
-        },
-        {
-          "text": "For compatible endpoints only",
-          "class": "info"
-        }
-      ]
     },
     {
       "term": "OTel Export Enabled",

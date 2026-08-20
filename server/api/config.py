@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import importlib.util
 import os
+import re
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -114,19 +115,6 @@ def _catalog_capabilities_for_model(
     if not raw:
         return set()
 
-    # Ragweld uses an in-process generation route.
-    if raw.lower().startswith("ragweld:"):
-        return {"GEN"}
-
-    # Prefix-based route override format (local:/litellm:/openrouter:).
-    if ":" in raw:
-        prefix, rest = raw.split(":", 1)
-        p = prefix.strip().lower()
-        if p == "ragweld":
-            return {"GEN"}
-        if p in {"local", "openrouter", "litellm"}:
-            raw = rest.strip()
-
     model_core = raw
     scoped_provider = str(provider_hint or "").strip().lower() or None
     known_providers = {
@@ -222,53 +210,24 @@ def _validate_model_capabilities(config: TriBridConfig) -> None:
     _validate_embedding_tokenization_compat(config)
     _validate_reranker_runtime_support(config)
 
+    for field_name, value in (
+        ("generation.gen_model", config.generation.gen_model),
+        ("generation.enrich_model", config.generation.enrich_model),
+        ("generation.gen_model_http", config.generation.gen_model_http),
+        ("generation.gen_model_mcp", config.generation.gen_model_mcp),
+        ("generation.gen_model_cli", config.generation.gen_model_cli),
+        ("chat.multimodal.vision_model_override", config.chat.multimodal.vision_model_override),
+    ):
+        alias = str(value or "").strip()
+        if alias and re.fullmatch(r"[A-Za-z0-9._-]+", alias) is None:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Invalid LiteLLM alias for {field_name}: '{alias}'. Use a configured gateway alias.",
+            )
+
     catalog_models = _load_catalog_models_for_validation()
     if not catalog_models:
         return
-
-    # Generation fields (must be GEN-capable).
-    _validate_capability(
-        catalog_models,
-        field_name="generation.gen_model",
-        model_value=str(config.generation.gen_model or ""),
-        required_component="GEN",
-    )
-    _validate_capability(
-        catalog_models,
-        field_name="generation.enrich_model",
-        model_value=str(config.generation.enrich_model or ""),
-        required_component="GEN",
-    )
-    _validate_capability(
-        catalog_models,
-        field_name="generation.enrich_model_ollama",
-        model_value=str(config.generation.enrich_model_ollama or ""),
-        required_component="GEN",
-    )
-    _validate_capability(
-        catalog_models,
-        field_name="generation.gen_model_http",
-        model_value=str(config.generation.gen_model_http or ""),
-        required_component="GEN",
-    )
-    _validate_capability(
-        catalog_models,
-        field_name="generation.gen_model_mcp",
-        model_value=str(config.generation.gen_model_mcp or ""),
-        required_component="GEN",
-    )
-    _validate_capability(
-        catalog_models,
-        field_name="generation.gen_model_cli",
-        model_value=str(config.generation.gen_model_cli or ""),
-        required_component="GEN",
-    )
-    _validate_capability(
-        catalog_models,
-        field_name="chat.multimodal.vision_model_override",
-        model_value=str(config.chat.multimodal.vision_model_override or ""),
-        required_component="GEN",
-    )
 
     # Embedding fields (must be EMB-capable).
     embedding_provider = str(config.embedding.embedding_type or "").strip().lower() or None
@@ -474,19 +433,6 @@ def _collect_model_warnings(config: TriBridConfig) -> list[ModelValidationWarnin
                 model_value=raw,
                 message=f"Model '{raw}' supports [{found}] but this field requires [{required_component}].",
             ))
-
-    _check("generation.gen_model", str(config.generation.gen_model or ""), "GEN")
-    _check("generation.gen_model_ollama", str(config.generation.gen_model_ollama or ""), "GEN")
-    _check("generation.gen_model_http", str(config.generation.gen_model_http or ""), "GEN")
-    _check("generation.gen_model_mcp", str(config.generation.gen_model_mcp or ""), "GEN")
-    _check("generation.gen_model_cli", str(config.generation.gen_model_cli or ""), "GEN")
-    _check("generation.enrich_model", str(config.generation.enrich_model or ""), "GEN")
-    _check("generation.enrich_model_ollama", str(config.generation.enrich_model_ollama or ""), "GEN")
-    _check(
-        "graph_indexing.semantic_kg_llm_model",
-        str(config.graph_indexing.semantic_kg_llm_model or ""),
-        "GEN",
-    )
 
     if (
         str(config.embedding.embedding_backend or "").strip().lower() == "provider"
@@ -721,11 +667,9 @@ async def mcp_status(request: Request) -> MCPStatusResponse:
 async def mcp_rag_search(
     q: str = Query(..., description="Search query"),
     top_k: int | None = Query(default=None, ge=1, le=100, description="Number of results to return"),
-    force_local: bool = Query(False, description="Legacy flag (ignored)"),
     scope: CorpusScope = _CORPUS_SCOPE_DEP,
 ) -> MCPRagSearchResponse:
     """Run tri-brid search and return compact results for MCP/debug tooling."""
-    _ = force_local  # ignored (legacy param)
     repo_id = scope.resolved_repo_id
     if not repo_id:
         raise HTTPException(status_code=422, detail="Missing corpus_id (or legacy repo_id)")

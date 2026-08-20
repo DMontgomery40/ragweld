@@ -18,17 +18,14 @@ pytestmark = pytest.mark.requires_postgres
 def _disable_all_chat_providers(cfg: TriBridConfig) -> TriBridConfig:
     # Ensure provider routing fails fast (no network calls) so the endpoint
     # deterministically falls back to retrieval-only.
-    cfg.chat.openrouter.enabled = False
-    for p in cfg.chat.local_models.providers:
-        p.enabled = False
+    cfg.chat.litellm.enabled = False
     return cfg
 
 
 @pytest.mark.asyncio
 async def test_answer_returns_200_without_any_llm_keys(client: AsyncClient) -> None:
     # Ensure env keys don't accidentally route cloud-direct.
-    old_openai = os.environ.pop("OPENAI_API_KEY", None)
-    old_openrouter = os.environ.pop("OPENROUTER_API_KEY", None)
+    old_litellm = os.environ.pop("LITELLM_API_KEY", None)
 
     repo_id = f"test_ans_nollm_{uuid.uuid4().hex[:10]}"
     pg = PostgresClient("postgresql://ignored")
@@ -77,11 +74,7 @@ async def test_answer_returns_200_without_any_llm_keys(client: AsyncClient) -> N
             await pg.delete_corpus(repo_id)
         except Exception:
             pass
-        if old_openai is not None:
-            os.environ["OPENAI_API_KEY"] = old_openai
+        if old_litellm is not None:
+            os.environ["LITELLM_API_KEY"] = old_litellm
         else:
-            os.environ.pop("OPENAI_API_KEY", None)
-        if old_openrouter is not None:
-            os.environ["OPENROUTER_API_KEY"] = old_openrouter
-        else:
-            os.environ.pop("OPENROUTER_API_KEY", None)
+            os.environ.pop("LITELLM_API_KEY", None)

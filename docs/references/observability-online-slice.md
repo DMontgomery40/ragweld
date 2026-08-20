@@ -4,7 +4,7 @@ This reference describes the hard-cut observability slice for live online reques
 
 ## Scope
 
-- Request path: `browser -> FastAPI -> retrieval -> provider router -> LiteLLM/provider -> response`
+- Request path: `browser -> FastAPI -> retrieval -> LiteLLM -> vLLM or explicit gateway-owned upstream alias -> response`
 - Global API coverage: every `/api/*` response now emits canonical `X-Correlation-ID`, `X-Trace-ID`, and `X-Root-Span-ID` headers through shared middleware
 - Canonical signal path: OpenTelemetry
 - Workbench-facing LLM trace deep links: Langfuse

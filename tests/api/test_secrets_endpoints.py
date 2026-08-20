@@ -45,6 +45,10 @@ async def test_secrets_check_reflects_process_env(client: AsyncClient) -> None:
         # Unknown keys are rejected (prevents env-driven configuration creep).
         bad = await client.get("/api/secrets/check?keys=TRIBRID_TEST_SECRET_PRESENT")
         assert bad.status_code == 400
+
+        for gateway_owned_key in ("OPENROUTER_API_KEY", "ANTHROPIC_API_KEY", "GOOGLE_API_KEY"):
+            rejected = await client.get(f"/api/secrets/check?keys={gateway_owned_key}")
+            assert rejected.status_code == 400
     finally:
         if old_present is None:
             os.environ.pop(key_present, None)

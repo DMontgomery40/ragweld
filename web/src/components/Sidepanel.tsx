@@ -1,14 +1,16 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useConfigStore } from '@/stores';
 import { EmbeddingMismatchWarning } from './ui/EmbeddingMismatchWarning';
-import { ModelPicker } from './RAG/ModelPicker';
-import { useEmbeddingModel, useModels } from '@/hooks';
+import { ModelPicker as ChatModelPicker } from './Chat/ModelPicker';
+import { useAPI, useEmbeddingModel, useModels } from '@/hooks';
+import { useRepoStore } from '@/stores/useRepoStore';
+import type { ChatModelInfo, ChatModelsResponse } from '@/types/generated';
 
 export function Sidepanel() {
   const config = useConfigStore((s) => s.config);
   const patchSection = useConfigStore((s) => s.patchSection);
-
-  const genBackend = String(config?.generation?.gen_backend || 'openai');
+  const { api } = useAPI();
+  const activeRepo = useRepoStore((s) => s.activeRepo);
   const {
     providers: embeddingProviders,
     getModelsForProvider: getEmbeddingModelsForProvider,
@@ -26,6 +28,7 @@ export function Sidepanel() {
   const { embeddingType: configEmbeddingType, currentModel: configEmbeddingModel } = useEmbeddingModel();
 
   const [genModel, setGenModel] = useState<string>('');
+  const [generationModels, setGenerationModels] = useState<ChatModelInfo[]>([]);
   const [embeddingProvider, setEmbeddingProvider] = useState<string>('openai');
   const [embeddingModel, setEmbeddingModel] = useState<string>('');
   const [rerankProvider, setRerankProvider] = useState<string>('cohere');
@@ -54,6 +57,30 @@ export function Sidepanel() {
       setRerankModel('');
     }
   }, [config, configEmbeddingType, configEmbeddingModel]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const scope = String(activeRepo || '').trim();
+    const query = scope ? `?corpus_id=${encodeURIComponent(scope)}` : '';
+    fetch(api(`chat/models${query}`), { signal: controller.signal })
+      .then((response) => {
+        if (!response.ok) throw new Error(String(response.status));
+        return response.json();
+      })
+      .then((payload) => {
+        const rows = (payload as ChatModelsResponse).models;
+        setGenerationModels(Array.isArray(rows) ? rows : []);
+      })
+      .catch((cause) => {
+        if (cause instanceof DOMException && cause.name === 'AbortError') return;
+        setGenerationModels([]);
+      });
+    return () => controller.abort();
+  }, [activeRepo, api]);
+
+  const generationAliasUnavailable = Boolean(
+    genModel && !generationModels.some((model) => String(model.id || '').trim() === genModel),
+  );
 
   const embeddingProviderOptions = useMemo(() => {
     const s = new Set<string>(embeddingProviders);
@@ -86,6 +113,9 @@ export function Sidepanel() {
 
   const handleApplyChanges = async () => {
     try {
+      if (generationAliasUnavailable) {
+        throw new Error(`Generation alias '${genModel}' is not available from LiteLLM`);
+      }
       // Build updates for different config sections (TriBridConfig is the law)
       const embeddingUpdates: Record<string, unknown> = {};
       const rerankingUpdates: Record<string, unknown> = {};
@@ -195,14 +225,17 @@ export function Sidepanel() {
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
           <div>
-            <ModelPicker
-              componentType="GEN"
-              provider={genBackend}
+            <ChatModelPicker
               value={genModel}
               onChange={setGenModel}
-              label="GENERATION MODEL"
-              allowCustom
+              models={generationModels}
+              valueMode="id"
             />
+            {generationAliasUnavailable ? (
+              <div style={{ color: 'var(--err)', fontSize: '11px', marginTop: '4px' }}>
+                Choose an available LiteLLM alias before applying changes.
+              </div>
+            ) : null}
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
@@ -369,6 +402,7 @@ export function Sidepanel() {
       >
         <button
           onClick={handleApplyChanges}
+          disabled={generationAliasUnavailable}
           style={{
             width: '100%',
             background: 'var(--accent)',

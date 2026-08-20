@@ -33,14 +33,10 @@ type BenchmarkRunResponse = {
 };
 
 const SOURCE_LABELS: Record<ChatModelInfo['source'], string> = {
-  cloud_direct: 'Cloud Direct',
-  openrouter: 'OpenRouter',
   litellm: 'LiteLLM',
-  local: 'Local',
-  ragweld: 'Ragweld',
 } as const;
 
-const SOURCE_ORDER: Array<ChatModelInfo['source']> = ['ragweld', 'local', 'litellm', 'openrouter', 'cloud_direct'] as const;
+const SOURCE_ORDER: Array<ChatModelInfo['source']> = ['litellm'] as const;
 
 function toModelValue(model: ChatModelInfo): string {
   return String(model.override || model.id || '').trim();
@@ -356,7 +352,7 @@ export default function BenchmarkTab() {
                               {toModelLabel(m)}
                             </div>
                             <div style={{ marginTop: 2, fontSize: 12, color: 'var(--fg-muted)' }}>
-                              {m.source === 'local' ? 'Local' : m.provider}
+                              {m.provider}
                             </div>
                           </div>
                         </label>

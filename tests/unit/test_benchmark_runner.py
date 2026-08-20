@@ -18,7 +18,7 @@ async def test_run_benchmark_clamps_invalid_max_concurrency_to_avoid_deadlock() 
     payload = await asyncio.wait_for(
         run_benchmark(
             prompt="ping",
-            models=["openrouter:openai/gpt-4o-mini"],
+            models=["litellm:ragweld-local"],
             config=cfg,
         ),
         timeout=1.0,
@@ -44,7 +44,7 @@ async def test_run_benchmark_saves_relative_results_path_from_repo_root(tmp_path
         payload = await asyncio.wait_for(
             run_benchmark(
                 prompt="ping",
-                models=["openrouter:openai/gpt-4o-mini"],
+                models=["litellm:ragweld-local"],
                 config=cfg,
             ),
             timeout=1.0,

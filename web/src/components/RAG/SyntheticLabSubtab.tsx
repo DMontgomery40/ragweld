@@ -31,16 +31,6 @@ const RECIPES: SyntheticRecipeKind[] = [
   'full_stack',
 ];
 
-const MODEL_SOURCE_LABELS = {
-  local: 'Local',
-  litellm: 'LiteLLM',
-  ragweld: 'Ragweld',
-  openrouter: 'OpenRouter',
-  cloud_direct: 'Cloud Direct',
-} as const;
-
-const MODEL_SOURCE_ORDER = ['local', 'litellm', 'ragweld', 'openrouter', 'cloud_direct'] as const;
-
 function toModelValue(model: ChatModelInfo): string {
   return String(model.override || model.id || '').trim();
 }
@@ -48,16 +38,6 @@ function toModelValue(model: ChatModelInfo): string {
 function toModelLabel(model: ChatModelInfo): string {
   const name = String(model.catalog_model || model.id || '').trim();
   return `${model.provider} · ${name}`;
-}
-
-function isAllowedSyntheticModel(model: ChatModelInfo): boolean {
-  const provider = String(model.provider || '').trim().toLowerCase();
-  const catalog = String(model.catalog_model || model.id || '').trim().toLowerCase();
-  const override = String(model.override || '').trim().toLowerCase();
-  const candidate = override.startsWith('openai/') ? override.slice('openai/'.length) : catalog;
-
-  if (provider !== 'openai') return true;
-  return candidate.startsWith('gpt-5');
 }
 
 function SyntheticModelPicker({
@@ -76,29 +56,8 @@ function SyntheticModelPicker({
   error: string | null;
 }) {
   const groupedModels = useMemo(() => {
-    const normalized = models.filter((model) => Boolean(toModelValue(model)));
-    const ordered = MODEL_SOURCE_ORDER.map((source) => ({
-      source,
-      label: MODEL_SOURCE_LABELS[source],
-      items: normalized.filter((model) => model.source === source),
-    })).filter((group) => group.items.length > 0);
-
-    const knownSources = new Set(MODEL_SOURCE_ORDER);
-    const extras = Array.from(
-      new Set(
-        normalized
-          .map((model) => String(model.source || '').trim())
-          .filter((source) => source && !knownSources.has(source as (typeof MODEL_SOURCE_ORDER)[number]))
-      )
-    )
-      .sort((a, b) => a.localeCompare(b))
-      .map((source) => ({
-        source,
-        label: source,
-        items: normalized.filter((model) => String(model.source || '').trim() === source),
-      }));
-
-    return [...ordered, ...extras];
+    const items = models.filter((model) => model.source === 'litellm' && Boolean(toModelValue(model)));
+    return items.length > 0 ? [{ source: 'litellm', label: 'LiteLLM', items }] : [];
   }, [models]);
 
   return (
@@ -216,7 +175,7 @@ export function SyntheticLabSubtab() {
               (model) =>
                 Array.isArray(model.components) &&
                 model.components.includes('GEN') &&
-                isAllowedSyntheticModel(model)
+                model.source === 'litellm'
             )
           : [];
         setAvailableModels(models);

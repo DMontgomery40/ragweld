@@ -80,7 +80,6 @@ _SECTION_DEFAULTS: dict[str, _SectionDefaults] = {
 }
 
 _FIELD_OVERRIDES: dict[str, dict[str, Any]] = {
-    "generation.gen_backend": {"integration": "litellm", "ui_surface": "runtime", "exposure_level": "basic"},
     "generation.gen_model": {"integration": "litellm", "ui_surface": "runtime", "exposure_level": "basic"},
     "chat.temperature": {"integration": "litellm", "ui_surface": "runtime", "exposure_level": "basic"},
     "chat.max_tokens": {"integration": "litellm", "ui_surface": "runtime", "exposure_level": "basic"},
@@ -98,9 +97,6 @@ _FIELD_OVERRIDES: dict[str, dict[str, Any]] = {
     "vector_search.enabled": {"integration": "haystack_docling_qdrant", "ui_surface": "retrieval", "exposure_level": "basic"},
     "sparse_search.enabled": {"integration": "haystack_docling_qdrant", "ui_surface": "retrieval", "exposure_level": "basic"},
     "graph_search.enabled": {"integration": "neo4j", "ui_surface": "graph", "exposure_level": "basic"},
-    "chat.openrouter.enabled": {"integration": "litellm", "ui_surface": "runtime", "exposure_level": "advanced"},
-    "chat.openrouter.base_url": {"integration": "litellm", "ui_surface": "runtime", "exposure_level": "advanced"},
-    "chat.openrouter.default_model": {"integration": "litellm", "ui_surface": "runtime", "exposure_level": "advanced"},
     "training.ragweld_agent_workflow_backend": {"integration": "flyte", "ui_surface": "training", "exposure_level": "basic"},
     "training.ragweld_agent_flyte_admin_base_url": {"integration": "flyte", "ui_surface": "training", "exposure_level": "basic"},
     "training.ragweld_agent_flyte_console_base_url": {"integration": "flyte", "ui_surface": "training", "exposure_level": "basic"},
@@ -133,8 +129,8 @@ _LOCKED_INTEGRATION_CONTRACTS: tuple[ConfigIntegrationContract, ...] = (
         summary="Gateway and routing surface for model/provider traffic.",
         ui_surface="runtime",
         required_config_paths=["chat.litellm.enabled", "chat.litellm.base_url", "chat.litellm.default_model"],
-        required_secret_ids=[],
-        readiness_checks=["enabled", "base_url_present", "default_model_present", "http_probe"],
+        required_secret_ids=["litellm_api_key"],
+        readiness_checks=["enabled", "base_url_present", "default_model_present", "required_secret_present", "http_probe"],
         blocked_surfaces=["runtime", "chat", "benchmark"],
     ),
     ConfigIntegrationContract(
@@ -270,45 +266,18 @@ _SECRET_REQUIREMENTS: tuple[SecretRequirement, ...] = (
         id="openai_api_key",
         env_var="OPENAI_API_KEY",
         label="OpenAI API Key",
-        description="Cloud-direct OpenAI provider access for chat, eval, and benchmark flows.",
-        integrations=["litellm", "ragas", "promptfoo"],
+        description="OpenAI access for the preserved provider-backed embedding boundary.",
+        integrations=["haystack_docling_qdrant"],
         optional=True,
-        ui_surface="runtime",
-    ),
-    SecretRequirement(
-        id="openrouter_api_key",
-        env_var="OPENROUTER_API_KEY",
-        label="OpenRouter API Key",
-        description="OpenRouter gateway access for compatible external providers.",
-        integrations=["litellm", "ragas", "promptfoo"],
-        optional=True,
-        ui_surface="runtime",
+        ui_surface="retrieval",
     ),
     SecretRequirement(
         id="litellm_api_key",
         env_var="LITELLM_API_KEY",
         label="LiteLLM API Key",
-        description="Optional gateway auth for LiteLLM deployments that require bearer credentials.",
+        description="Required API-to-LiteLLM client credential. Upstream provider keys remain gateway-owned.",
         integrations=["litellm"],
-        optional=True,
-        ui_surface="runtime",
-    ),
-    SecretRequirement(
-        id="anthropic_api_key",
-        env_var="ANTHROPIC_API_KEY",
-        label="Anthropic API Key",
-        description="Optional provider credential for Anthropic-backed model routes.",
-        integrations=["litellm"],
-        optional=True,
-        ui_surface="runtime",
-    ),
-    SecretRequirement(
-        id="google_api_key",
-        env_var="GOOGLE_API_KEY",
-        label="Google API Key",
-        description="Optional provider credential for Google-backed model routes.",
-        integrations=["litellm"],
-        optional=True,
+        optional=False,
         ui_surface="runtime",
     ),
     SecretRequirement(
@@ -585,8 +554,6 @@ def _infer_exposure_level(path: str, field_type: str, enum_values: list[str], fa
 def _secret_dependencies_for_path(path: str) -> list[str]:
     if path.startswith("chat.litellm."):
         return ["litellm_api_key"]
-    if path.startswith("chat.openrouter."):
-        return ["openrouter_api_key"]
     if path.startswith("graph_storage."):
         return ["neo4j_password"]
     if path.startswith("tracing.langfuse_"):
@@ -784,6 +751,11 @@ async def _build_runtime_integration_readiness(config: TriBridConfig, contract: 
     if contract.id == "litellm":
         enabled = bool(config.chat.litellm.enabled)
         missing = [path for path in contract.required_config_paths[1:] if _is_missing(_config_value(config, path))]
+        missing_secret_ids = [
+            secret_id
+            for secret_id in contract.required_secret_ids
+            if not os.getenv(get_secret_requirement_by_id(secret_id).env_var, "").strip()
+        ]
         if not enabled:
             return _build_integration_readiness(
                 contract,
@@ -791,8 +763,21 @@ async def _build_runtime_integration_readiness(config: TriBridConfig, contract: 
                 enabled=False,
                 configured=not missing,
                 missing_config_paths=missing,
+                missing_secret_ids=missing_secret_ids,
                 failing_checks=["enabled"],
                 operator_hint="Enable LiteLLM and point it at the gateway URL before treating the runtime lane as migrated.",
+            )
+        if missing_secret_ids:
+            return _build_integration_readiness(
+                contract,
+                state="unconfigured",
+                enabled=True,
+                configured=False,
+                reachable=None,
+                missing_config_paths=missing,
+                missing_secret_ids=missing_secret_ids,
+                failing_checks=["required_secret_present"],
+                operator_hint="Set the API-to-LiteLLM client key before using generation surfaces.",
             )
         try:
             runtime_url = resolve_litellm_base_url(configured_url=config.chat.litellm.base_url)
@@ -816,6 +801,7 @@ async def _build_runtime_integration_readiness(config: TriBridConfig, contract: 
             configured=not missing,
             reachable=reachable,
             missing_config_paths=missing,
+            missing_secret_ids=[],
             failing_checks=failing_checks,
             operator_hint=detail if state == "degraded" else "LiteLLM is selected as the gateway/routing layer.",
             links=[

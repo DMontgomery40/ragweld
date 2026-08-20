@@ -106,6 +106,10 @@ RERANKER_LEARNING_BACKEND_OPTIONS: tuple[RuntimeOption, ...] = (
 
 SUPPORTED_LEARNING_RERANKER_BACKENDS: set[str] = {item.id for item in RERANKER_LEARNING_BACKEND_OPTIONS}
 
+_GENERATION_CATALOG_ONLY_REASON = (
+    "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
+)
+
 CHUNKING_STRATEGY_OPTIONS: tuple[RuntimeOption, ...] = (
     RuntimeOption(id="ast", label="AST-aware", description="Preserve top-level code structure for supported languages."),
     RuntimeOption(id="hybrid", label="Hybrid", description="Prefer AST-aware chunking with runtime fallbacks."),
@@ -299,8 +303,6 @@ def selection_metadata_for_catalog_row(row: dict[str, Any]) -> dict[str, Any]:
     provider = str(row.get("provider") or "").strip().lower()
 
     roles: list[str] = []
-    if "GEN" in components:
-        roles.append("generation")
     if "EMB" in components and provider in SUPPORTED_PROVIDER_BACKEND_EMBEDDING_PROVIDERS:
         roles.append("embedding_provider")
     if "RERANK" in components and provider in SUPPORTED_RERANKER_CLOUD_PROVIDERS:
@@ -314,6 +316,8 @@ def selection_metadata_for_catalog_row(row: dict[str, Any]) -> dict[str, Any]:
         }
 
     reasons: list[str] = []
+    if "GEN" in components:
+        reasons.append(_GENERATION_CATALOG_ONLY_REASON)
     if "EMB" in components:
         reasons.append(_EMBEDDING_CATALOG_ONLY_REASON)
     if "RERANK" in components:

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import random
 import re
 from collections import Counter, defaultdict
@@ -34,36 +33,16 @@ def synthetic_generation_model_category(model: str) -> str:
     raw = str(model or "").strip().lower()
     if not raw:
         return "unknown"
-    if raw.startswith("litellm:"):
-        return "litellm"
-    if raw.startswith("openrouter:"):
-        return "openrouter"
-    if raw.startswith("local:"):
-        return "local"
-    if raw.startswith("ragweld:"):
-        return "ragweld"
-    if raw.startswith("openai/"):
-        return "openai"
-    if raw.startswith("gpt-") or raw.startswith("o1") or raw.startswith("o3") or raw.startswith("o4"):
-        return "openai"
-    if "/" in raw:
-        return raw.split("/", 1)[0]
-    return "auto"
+    return "litellm" if raw.startswith("litellm:") else "litellm_alias"
 
 
 def _is_allowed_branch_synthetic_model(model: str) -> bool:
     raw = str(model or "").strip().lower()
     if not raw:
         return False
-    for prefix in ("openrouter:", "litellm:"):
-        if raw.startswith(prefix):
-            raw = raw[len(prefix) :]
-            break
-    if raw.startswith("openai/"):
-        raw = raw.split("/", 1)[1]
-    if raw.startswith(("gpt-", "o1", "o3", "o4")):
-        return raw.startswith("gpt-5")
-    return True
+    if raw.startswith("litellm:"):
+        raw = raw[len("litellm:") :]
+    return re.fullmatch(r"[a-z0-9._-]+", raw) is not None
 
 
 def resolve_synthetic_route(*, cfg: TriBridConfig, model: str) -> ProviderRoute:
@@ -79,24 +58,11 @@ def resolve_synthetic_route(*, cfg: TriBridConfig, model: str) -> ProviderRoute:
 
 def resolve_available_synthetic_generation_model(cfg: TriBridConfig) -> str | None:
     candidates: list[str] = []
-
-    if os.getenv("OPENAI_API_KEY", "").strip():
-        candidates.append("openai/gpt-5.4-mini")
     litellm_default = str(getattr(cfg.chat.litellm, "default_model", "") or "").strip()
     litellm_enabled = bool(getattr(cfg.chat.litellm, "enabled", False))
     litellm_base = str(getattr(cfg.chat.litellm, "base_url", "") or "").strip()
     if litellm_enabled and litellm_base and litellm_default and _is_allowed_branch_synthetic_model(litellm_default):
         candidates.append(f"litellm:{litellm_default}")
-    if os.getenv("OPENROUTER_API_KEY", "").strip():
-        candidates.append("openrouter:openai/gpt-5.4-mini")
-
-    local_default = str(cfg.chat.local_models.default_chat_model or "").strip()
-    if local_default:
-        candidates.append(f"local:{local_default}")
-
-    ragweld_base = str(cfg.training.ragweld_agent_base_model or "").strip()
-    if ragweld_base:
-        candidates.append(f"ragweld:{ragweld_base}")
 
     for model in candidates:
         if not _is_allowed_branch_synthetic_model(model):

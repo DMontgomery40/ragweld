@@ -65,11 +65,11 @@ def build_surface_target_manifest() -> dict[str, Any]:
         "status": "kickoff",
         "surfaces": {
             "inference": {
-                "current": ["openrouter", "provider_router", "ragweld_mlx", "mlx_qwen3"],
+                "current": ["vllm"],
                 "target": ["vllm"],
             },
             "gateway_routing": {
-                "current": ["openrouter", "provider_router"],
+                "current": ["litellm"],
                 "target": ["litellm"],
             },
             "orchestration": {

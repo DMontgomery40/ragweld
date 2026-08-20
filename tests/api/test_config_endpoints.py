@@ -249,8 +249,8 @@ async def test_concurrent_section_patches_do_not_lose_updates(client: AsyncClien
 
 
 @pytest.mark.asyncio
-async def test_put_config_rejects_reranker_model_for_generation_override(client: AsyncClient) -> None:
-    """Known non-GEN models assigned to generation override fields must fail with 422."""
+async def test_put_config_rejects_direct_provider_id_for_generation_override(client: AsyncClient) -> None:
+    """Generation config stores LiteLLM aliases, never upstream provider ids."""
     baseline = await client.get("/api/config")
     assert baseline.status_code == 200
     cfg = baseline.json()
@@ -260,13 +260,14 @@ async def test_put_config_rejects_reranker_model_for_generation_override(client:
     assert response.status_code == 422
 
     detail = str(response.json().get("detail") or "")
-    assert "generation.gen_model_mcp" in detail
-    assert "requires [GEN]" in detail
+    assert "generation" in detail
+    assert "gen_model_mcp" in detail
+    assert "LiteLLM alias" in detail
 
 
 @pytest.mark.asyncio
-async def test_put_config_rejects_reranker_model_for_litellm_generation_override(client: AsyncClient) -> None:
-    """Known non-GEN models must still fail when wrapped in a litellm route override."""
+async def test_put_config_rejects_prefixed_upstream_id_for_generation_override(client: AsyncClient) -> None:
+    """A LiteLLM prefix does not turn an upstream provider id into an alias."""
     baseline = await client.get("/api/config")
     assert baseline.status_code == 200
     cfg = baseline.json()
@@ -276,8 +277,16 @@ async def test_put_config_rejects_reranker_model_for_litellm_generation_override
     assert response.status_code == 422
 
     detail = str(response.json().get("detail") or "")
-    assert "generation.gen_model_mcp" in detail
-    assert "requires [GEN]" in detail
+    assert "generation" in detail
+    assert "gen_model_mcp" in detail
+    assert "LiteLLM alias" in detail
+
+
+@pytest.mark.asyncio
+async def test_put_config_rejects_removed_flat_generation_keys_at_root(client: AsyncClient) -> None:
+    response = await client.put("/api/config", json={"GEN_BACKEND": "openai"})
+    assert response.status_code == 422
+    assert "GEN_BACKEND" in str(response.json())
 
 
 @pytest.mark.asyncio

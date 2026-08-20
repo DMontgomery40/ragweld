@@ -118,9 +118,9 @@ def test_new_model_with_pricing_is_added_as_gen() -> None:
     assert row["input_per_1k"] == 0.001
     assert row["output_per_1k"] == 0.004
     assert row["context"] == 256_000
-    assert row["selection_roles"] == ["generation"]
-    assert row["selection_status"] == "runtime_selectable"
-    assert row["selection_reason"] is None
+    assert row["selection_roles"] == []
+    assert row["selection_status"] == "catalog_only"
+    assert "LiteLLM aliases" in str(row["selection_reason"])
 
 
 def test_new_model_missing_pricing_is_added_with_unknown_marker() -> None:

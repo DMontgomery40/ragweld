@@ -328,16 +328,15 @@ def build_runtime_model_set_payload(cfg: TriBridConfig) -> dict[str, Any]:
     return {
         "generation": {
             "gen_model": str(getattr(cfg.generation, "gen_model", "") or ""),
-            "gen_model_ollama": str(getattr(cfg.generation, "gen_model_ollama", "") or ""),
             "gen_model_http": str(getattr(cfg.generation, "gen_model_http", "") or ""),
             "gen_model_mcp": str(getattr(cfg.generation, "gen_model_mcp", "") or ""),
             "gen_model_cli": str(getattr(cfg.generation, "gen_model_cli", "") or ""),
             "enrich_model": str(getattr(cfg.generation, "enrich_model", "") or ""),
-            "enrich_model_ollama": str(getattr(cfg.generation, "enrich_model_ollama", "") or ""),
         },
         "chat": {
             "default_model": str(getattr(cfg.ui, "chat_default_model", "") or ""),
-            "openrouter_default_model": str(getattr(getattr(cfg.chat, "openrouter", None), "default_model", "") or ""),
+            "litellm_default_model": str(getattr(cfg.chat.litellm, "default_model", "") or ""),
+            "vllm_default_model": str(getattr(cfg.chat.vllm, "default_model", "") or ""),
             "vision_model_override": str(getattr(getattr(cfg.chat, "multimodal", None), "vision_model_override", "") or ""),
         },
         "embedding": {

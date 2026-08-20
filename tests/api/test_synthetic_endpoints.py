@@ -38,24 +38,11 @@ def _provider_model_for_env() -> str | None:
 
 
 def test_resolve_available_synthetic_generation_model_prefers_litellm_gateway_when_configured() -> None:
-    old_openai = os.environ.pop("OPENAI_API_KEY", None)
-    old_openrouter = os.environ.pop("OPENROUTER_API_KEY", None)
-    try:
-        cfg = TriBridConfig()
-        cfg.chat.litellm.enabled = True
-        cfg.chat.litellm.base_url = "http://127.0.0.1:4000/v1"
-        cfg.chat.litellm.default_model = "openai/gpt-5.4-mini"
-        cfg.chat.local_models.default_chat_model = "qwen3:8b"
-        assert resolve_available_synthetic_generation_model(cfg) == "litellm:openai/gpt-5.4-mini"
-    finally:
-        if old_openai is None:
-            os.environ.pop("OPENAI_API_KEY", None)
-        else:
-            os.environ["OPENAI_API_KEY"] = old_openai
-        if old_openrouter is None:
-            os.environ.pop("OPENROUTER_API_KEY", None)
-        else:
-            os.environ["OPENROUTER_API_KEY"] = old_openrouter
+    cfg = TriBridConfig()
+    cfg.chat.litellm.enabled = True
+    cfg.chat.litellm.base_url = "http://127.0.0.1:54000/v1"
+    cfg.chat.litellm.default_model = "synthetic-quality"
+    assert resolve_available_synthetic_generation_model(cfg) == "litellm:synthetic-quality"
 
 
 def _write_gate_failed_run(*, root: Path, corpus_id: str, run_id: str) -> Path:
@@ -84,8 +71,8 @@ def _write_gate_failed_run(*, root: Path, corpus_id: str, run_id: str) -> Path:
         corpus_id=corpus_id,
         provider="synthetic_data_kit",
         recipe="full_stack",
-        generator_model="openai/gpt-5.4-mini",
-        judge_model="openai/gpt-5.4-mini",
+        generator_model="litellm:synthetic-quality",
+        judge_model="litellm:synthetic-quality",
     )
     run = SyntheticRun(
         run_id=run_id,
@@ -143,26 +130,26 @@ async def test_synthetic_stream_route_not_shadowed(client) -> None:
     [
         (
             {
-                "judge_model": "openai/gpt-5.4-mini",
+                "judge_model": "litellm:synthetic-quality",
             },
             "generator_model",
         ),
         (
             {
-                "generator_model": "openai/gpt-5.4-mini",
+                "generator_model": "litellm:synthetic-quality",
             },
             "judge_model",
         ),
         (
             {
                 "generator_model": "   ",
-                "judge_model": "openai/gpt-5.4-mini",
+                "judge_model": "litellm:synthetic-quality",
             },
             "generator_model",
         ),
         (
             {
-                "generator_model": "openai/gpt-5.4-mini",
+                "generator_model": "litellm:synthetic-quality",
                 "judge_model": "   ",
             },
             "judge_model",
@@ -194,8 +181,8 @@ async def test_synthetic_start_rejects_invalid_corpus_id(client, corpus_id: str)
             "corpus_id": corpus_id,
             "provider": "synthetic_data_kit",
             "recipe": "eval_dataset",
-            "generator_model": "openai/gpt-5.4-mini",
-            "judge_model": "openai/gpt-5.4-mini",
+            "generator_model": "litellm:synthetic-quality",
+            "judge_model": "litellm:synthetic-quality",
         },
     )
     assert res.status_code == 422
@@ -213,8 +200,8 @@ async def test_synthetic_start_schema_rejects_every_provider_except_synthetic_da
             "corpus_id": corpus_id,
             "provider": provider,
             "recipe": "eval_dataset",
-            "generator_model": "openai/gpt-5.4-mini",
-            "judge_model": "openai/gpt-5.4-mini",
+            "generator_model": "litellm:synthetic-quality",
+            "judge_model": "litellm:synthetic-quality",
         },
     )
     assert res.status_code == 422
@@ -222,7 +209,7 @@ async def test_synthetic_start_schema_rejects_every_provider_except_synthetic_da
 
 
 @pytest.mark.asyncio
-async def test_synthetic_start_rejects_banned_openai_model(client) -> None:
+async def test_synthetic_start_rejects_direct_provider_model(client) -> None:
     corpus_id = f"pytest_synth_policy_{uuid.uuid4().hex[:8]}"
     res = await client.post(
         "/api/synthetic/run/start",
@@ -231,11 +218,11 @@ async def test_synthetic_start_rejects_banned_openai_model(client) -> None:
             "provider": "synthetic_data_kit",
             "recipe": "eval_dataset",
             "generator_model": "openai/gpt-4o-mini",
-            "judge_model": "openai/gpt-5.4-mini",
+            "judge_model": "litellm:synthetic-quality",
         },
     )
-    assert res.status_code == 400
-    assert "must use an OpenAI GPT-5 model" in str(res.json().get("detail", ""))
+    assert res.status_code == 422
+    assert "LiteLLM alias" in str(res.json().get("detail", ""))
 
 
 @pytest.mark.asyncio

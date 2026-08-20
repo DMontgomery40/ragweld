@@ -1712,6 +1712,7 @@
         "type": "object"
       },
       "ChatConfig-Input": {
+        "additionalProperties": false,
         "description": "Top-level chat configuration. Lives at TriBridConfig.chat.\n\nKEY CONCEPT: There are no modes. The user checks/unchecks data sources.\nRecall is always available and ON by default. Corpora are available when indexed.\nEverything composes freely.",
         "properties": {
           "benchmark": {
@@ -1734,9 +1735,6 @@
           "litellm": {
             "$ref": "#/components/schemas/LiteLLMConfig"
           },
-          "local_models": {
-            "$ref": "#/components/schemas/LocalModelConfig"
-          },
           "max_tokens": {
             "default": 4096,
             "maximum": 16384.0,
@@ -1746,20 +1744,6 @@
           },
           "multimodal": {
             "$ref": "#/components/schemas/ChatMultimodalConfig"
-          },
-          "openai_protocol": {
-            "default": "auto",
-            "description": "Protocol for OpenAI cloud_direct calls. 'auto' routes codex-only models to Responses.",
-            "enum": [
-              "auto",
-              "responses",
-              "chat_completions"
-            ],
-            "title": "Openai Protocol",
-            "type": "string"
-          },
-          "openrouter": {
-            "$ref": "#/components/schemas/OpenRouterConfig"
           },
           "recall": {
             "$ref": "#/components/schemas/RecallConfig"
@@ -1839,6 +1823,7 @@
         "type": "object"
       },
       "ChatConfig-Output": {
+        "additionalProperties": false,
         "description": "Top-level chat configuration. Lives at TriBridConfig.chat.\n\nKEY CONCEPT: There are no modes. The user checks/unchecks data sources.\nRecall is always available and ON by default. Corpora are available when indexed.\nEverything composes freely.",
         "properties": {
           "benchmark": {
@@ -1861,9 +1846,6 @@
           "litellm": {
             "$ref": "#/components/schemas/LiteLLMConfig"
           },
-          "local_models": {
-            "$ref": "#/components/schemas/LocalModelConfig"
-          },
           "max_tokens": {
             "default": 4096,
             "maximum": 16384.0,
@@ -1873,20 +1855,6 @@
           },
           "multimodal": {
             "$ref": "#/components/schemas/ChatMultimodalConfig"
-          },
-          "openai_protocol": {
-            "default": "auto",
-            "description": "Protocol for OpenAI cloud_direct calls. 'auto' routes codex-only models to Responses.",
-            "enum": [
-              "auto",
-              "responses",
-              "chat_completions"
-            ],
-            "title": "Openai Protocol",
-            "type": "string"
-          },
-          "openrouter": {
-            "$ref": "#/components/schemas/OpenRouterConfig"
           },
           "recall": {
             "$ref": "#/components/schemas/RecallConfig"
@@ -2324,7 +2292,7 @@
                 "type": "null"
               }
             ],
-            "description": "Provider base URL (local/openrouter/litellm)",
+            "description": "LiteLLM base URL",
             "title": "Base Url"
           },
           "catalog_model": {
@@ -2336,7 +2304,7 @@
                 "type": "null"
               }
             ],
-            "description": "Catalog model identifier when sourced from /api/models",
+            "description": "Optional catalog identity",
             "title": "Catalog Model"
           },
           "components": {
@@ -2363,7 +2331,7 @@
             "type": "string"
           },
           "provider": {
-            "description": "Provider display name (e.g., OpenRouter, LiteLLM, Ollama)",
+            "description": "Gateway display name",
             "title": "Provider",
             "type": "string"
           },
@@ -2376,7 +2344,7 @@
                 "type": "null"
               }
             ],
-            "description": "Provider key used in the model catalog",
+            "description": "Gateway key",
             "title": "Provider Key"
           },
           "provider_type": {
@@ -2388,18 +2356,12 @@
                 "type": "null"
               }
             ],
-            "description": "Provider type (ollama, llamacpp, openrouter, litellm, etc)",
+            "description": "Gateway type",
             "title": "Provider Type"
           },
           "source": {
+            "const": "litellm",
             "description": "Model source group for UI grouping.",
-            "enum": [
-              "cloud_direct",
-              "openrouter",
-              "local",
-              "ragweld",
-              "litellm"
-            ],
             "title": "Source",
             "type": "string"
           },
@@ -2498,28 +2460,22 @@
                 "type": "null"
               }
             ],
-            "description": "Provider base URL (when applicable)",
+            "description": "LiteLLM OpenAI-compatible base URL",
             "title": "Base Url"
           },
           "kind": {
-            "description": "Provider kind (router selection)",
-            "enum": [
-              "cloud_direct",
-              "openrouter",
-              "local",
-              "ragweld",
-              "litellm"
-            ],
+            "const": "litellm",
+            "description": "Application-visible generation boundary",
             "title": "Kind",
             "type": "string"
           },
           "model": {
-            "description": "Model identifier sent to provider",
+            "description": "LiteLLM model alias",
             "title": "Model",
             "type": "string"
           },
           "provider_name": {
-            "description": "Provider display name (e.g., OpenAI, OpenRouter, LiteLLM)",
+            "description": "Gateway display name",
             "title": "Provider Name",
             "type": "string"
           }
@@ -6567,15 +6523,9 @@
         "type": "object"
       },
       "GenerationConfig": {
+        "additionalProperties": false,
         "description": "LLM generation configuration.",
         "properties": {
-          "enrich_backend": {
-            "default": "openai",
-            "description": "Enrichment backend",
-            "pattern": "^(openai|ollama|mlx)$",
-            "title": "Enrich Backend",
-            "type": "string"
-          },
           "enrich_disabled": {
             "default": 0,
             "description": "Disable code enrichment",
@@ -6585,22 +6535,9 @@
             "type": "integer"
           },
           "enrich_model": {
-            "default": "gpt-4o-mini",
-            "description": "Model for code enrichment",
+            "default": "ragweld-local",
+            "description": "LiteLLM alias for code enrichment",
             "title": "Enrich Model",
-            "type": "string"
-          },
-          "enrich_model_ollama": {
-            "default": "",
-            "description": "Ollama enrichment model",
-            "title": "Enrich Model Ollama",
-            "type": "string"
-          },
-          "gen_backend": {
-            "default": "openai",
-            "description": "Provider backend for gen_model and channel overrides",
-            "pattern": "^(openai|anthropic|ollama|mlx|openrouter|litellm)$",
-            "title": "Gen Backend",
             "type": "string"
           },
           "gen_max_tokens": {
@@ -6612,14 +6549,14 @@
             "type": "integer"
           },
           "gen_model": {
-            "default": "gpt-4o-mini",
-            "description": "Primary generation model",
+            "default": "ragweld-local",
+            "description": "Primary LiteLLM model alias",
             "title": "Gen Model",
             "type": "string"
           },
           "gen_model_cli": {
-            "default": "qwen3-coder:14b",
-            "description": "CLI generation model",
+            "default": "",
+            "description": "Optional LiteLLM alias for CLI requests",
             "title": "Gen Model Cli",
             "type": "string"
           },
@@ -6634,20 +6571,6 @@
             "description": "MCP transport generation model override",
             "title": "Gen Model Mcp",
             "type": "string"
-          },
-          "gen_model_ollama": {
-            "default": "qwen3-coder:30b",
-            "description": "Ollama generation model",
-            "title": "Gen Model Ollama",
-            "type": "string"
-          },
-          "gen_retry_max": {
-            "default": 2,
-            "description": "Max retries for generation",
-            "maximum": 5.0,
-            "minimum": 1.0,
-            "title": "Gen Retry Max",
-            "type": "integer"
           },
           "gen_temperature": {
             "default": 0.0,
@@ -6672,42 +6595,6 @@
             "minimum": 0.0,
             "title": "Gen Top P",
             "type": "number"
-          },
-          "ollama_num_ctx": {
-            "default": 8192,
-            "description": "Context window for Ollama",
-            "maximum": 32768.0,
-            "minimum": 2048.0,
-            "title": "Ollama Num Ctx",
-            "type": "integer"
-          },
-          "ollama_request_timeout": {
-            "default": 300,
-            "description": "Maximum total time to wait for a local (Ollama) generation request to complete (seconds)",
-            "maximum": 1200.0,
-            "minimum": 30.0,
-            "title": "Ollama Request Timeout",
-            "type": "integer"
-          },
-          "ollama_stream_idle_timeout": {
-            "default": 60,
-            "description": "Maximum idle time allowed between streamed chunks from local (Ollama) during generation (seconds)",
-            "maximum": 300.0,
-            "minimum": 5.0,
-            "title": "Ollama Stream Idle Timeout",
-            "type": "integer"
-          },
-          "ollama_url": {
-            "default": "http://127.0.0.1:11434/api",
-            "description": "Ollama API URL",
-            "title": "Ollama Url",
-            "type": "string"
-          },
-          "openai_base_url": {
-            "default": "",
-            "description": "OpenAI API base URL override (for proxies)",
-            "title": "Openai Base Url",
-            "type": "string"
           }
         },
         "title": "GenerationConfig",
@@ -6872,7 +6759,7 @@
           },
           "semantic_kg_llm_model": {
             "default": "",
-            "description": "Explicit runtime-selectable GEN catalog model for GraphRAG semantic extraction; required when semantic KG is enabled",
+            "description": "Optional LiteLLM alias for GraphRAG semantic extraction; empty uses the gateway default",
             "title": "Semantic Kg Llm Model",
             "type": "string"
           },
@@ -8835,139 +8722,26 @@
         "type": "object"
       },
       "LiteLLMConfig": {
+        "additionalProperties": false,
         "description": "Gateway configuration for an OpenAI-compatible LiteLLM proxy.",
         "properties": {
           "base_url": {
-            "default": "http://127.0.0.1:4000/v1",
+            "default": "http://127.0.0.1:54000/v1",
             "title": "Base Url",
             "type": "string"
           },
           "default_model": {
-            "default": "openai/gpt-4o-mini",
+            "default": "ragweld-local",
             "title": "Default Model",
             "type": "string"
           },
           "enabled": {
-            "default": false,
+            "default": true,
             "title": "Enabled",
             "type": "boolean"
-          },
-          "fallback_models": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Fallback Models",
-            "type": "array"
           }
         },
         "title": "LiteLLMConfig",
-        "type": "object"
-      },
-      "LocalModelConfig": {
-        "description": "Supports multiple simultaneous local inference providers.",
-        "properties": {
-          "auto_detect": {
-            "default": true,
-            "title": "Auto Detect",
-            "type": "boolean"
-          },
-          "default_chat_model": {
-            "default": "qwen3:8b",
-            "title": "Default Chat Model",
-            "type": "string"
-          },
-          "default_embedding_model": {
-            "default": "nomic-embed-text",
-            "title": "Default Embedding Model",
-            "type": "string"
-          },
-          "default_vision_model": {
-            "default": "qwen3-vl:8b",
-            "title": "Default Vision Model",
-            "type": "string"
-          },
-          "fallback_to_cloud": {
-            "default": true,
-            "title": "Fallback To Cloud",
-            "type": "boolean"
-          },
-          "gpu_memory_limit_gb": {
-            "default": 0,
-            "minimum": 0.0,
-            "title": "Gpu Memory Limit Gb",
-            "type": "number"
-          },
-          "health_check_interval": {
-            "default": 30,
-            "maximum": 300.0,
-            "minimum": 10.0,
-            "title": "Health Check Interval",
-            "type": "integer"
-          },
-          "providers": {
-            "default": [
-              {
-                "base_url": "http://127.0.0.1:11434",
-                "enabled": true,
-                "name": "Ollama",
-                "priority": 0,
-                "provider_type": "ollama"
-              },
-              {
-                "base_url": "http://127.0.0.1:8080",
-                "enabled": true,
-                "name": "llama.cpp",
-                "priority": 1,
-                "provider_type": "llamacpp"
-              }
-            ],
-            "items": {
-              "$ref": "#/components/schemas/LocalProviderEntry"
-            },
-            "title": "Providers",
-            "type": "array"
-          }
-        },
-        "title": "LocalModelConfig",
-        "type": "object"
-      },
-      "LocalProviderEntry": {
-        "description": "A single local inference provider endpoint.",
-        "properties": {
-          "base_url": {
-            "description": "Provider API endpoint",
-            "title": "Base Url",
-            "type": "string"
-          },
-          "enabled": {
-            "default": true,
-            "title": "Enabled",
-            "type": "boolean"
-          },
-          "name": {
-            "description": "Display name",
-            "title": "Name",
-            "type": "string"
-          },
-          "priority": {
-            "default": 0,
-            "description": "Lower = higher priority when multiple have same model.",
-            "minimum": 0.0,
-            "title": "Priority",
-            "type": "integer"
-          },
-          "provider_type": {
-            "pattern": "^(ollama|llamacpp|lmstudio|vllm|litellm|custom)$",
-            "title": "Provider Type",
-            "type": "string"
-          }
-        },
-        "required": [
-          "name",
-          "provider_type",
-          "base_url"
-        ],
-        "title": "LocalProviderEntry",
         "type": "object"
       },
       "LokiStatus": {
@@ -9418,7 +9192,6 @@
             "description": "Runtime selection surfaces that should expose this row.",
             "items": {
               "enum": [
-                "generation",
                 "embedding_provider",
                 "reranker_cloud"
               ],
@@ -10542,44 +10315,6 @@
         "title": "OkResponse",
         "type": "object"
       },
-      "OpenRouterConfig": {
-        "description": "Unified gateway to many cloud models via OpenAI-compatible routing.",
-        "properties": {
-          "base_url": {
-            "default": "https://openrouter.ai/api/v1",
-            "title": "Base Url",
-            "type": "string"
-          },
-          "default_model": {
-            "default": "anthropic/claude-sonnet-4",
-            "title": "Default Model",
-            "type": "string"
-          },
-          "enabled": {
-            "default": false,
-            "title": "Enabled",
-            "type": "boolean"
-          },
-          "fallback_models": {
-            "default": [
-              "openai/gpt-4o",
-              "google/gemini-2.0-flash"
-            ],
-            "items": {
-              "type": "string"
-            },
-            "title": "Fallback Models",
-            "type": "array"
-          },
-          "site_name": {
-            "default": "TriBridRAG",
-            "title": "Site Name",
-            "type": "string"
-          }
-        },
-        "title": "OpenRouterConfig",
-        "type": "object"
-      },
       "PromptMetadata": {
         "description": "Metadata describing how a prompt is used and edited in the UI.",
         "properties": {
@@ -10891,13 +10626,8 @@
             "title": "Detail"
           },
           "kind": {
-            "description": "Provider kind",
-            "enum": [
-              "openrouter",
-              "local",
-              "ragweld",
-              "litellm"
-            ],
+            "const": "litellm",
+            "description": "Gateway kind",
             "title": "Kind",
             "type": "string"
           },
@@ -11039,7 +10769,9 @@
             "propertyNames": {
               "enum": [
                 "postgres",
-                "neo4j"
+                "neo4j",
+                "litellm",
+                "vllm"
               ]
             },
             "title": "Dependencies",
@@ -17354,7 +17086,7 @@
         "description": "User interface configuration.",
         "properties": {
           "chat_default_model": {
-            "default": "gpt-4o-mini",
+            "default": "ragweld-local",
             "description": "Default model for chat if not specified in request",
             "title": "Chat Default Model",
             "type": "string"
@@ -17714,20 +17446,21 @@
         "type": "object"
       },
       "VLLMConfig": {
+        "additionalProperties": false,
         "description": "Reference configuration for the self-hosted vLLM serving layer.",
         "properties": {
           "base_url": {
-            "default": "http://127.0.0.1:8000/v1",
+            "default": "http://127.0.0.1:58080/v1",
             "title": "Base Url",
             "type": "string"
           },
           "default_model": {
-            "default": "Qwen/Qwen2.5-7B-Instruct",
+            "default": "Qwen/Qwen3-0.6B",
             "title": "Default Model",
             "type": "string"
           },
           "enabled": {
-            "default": false,
+            "default": true,
             "title": "Enabled",
             "type": "boolean"
           }
@@ -18664,7 +18397,7 @@
     },
     "/api/benchmark/run": {
       "post": {
-        "description": "Run the same prompt against multiple models (best-effort).\n\nThis endpoint is intended for local benchmarking and may require provider\ncredentials (for example `OPENAI_API_KEY`, `LITELLM_API_KEY`, or\n`OPENROUTER_API_KEY`) plus any required local inference servers.",
+        "description": "Run the same prompt against multiple models (best-effort).\n\nThis endpoint is intended for local benchmarking and may require provider\ncredentials (for example `OPENAI_API_KEY`, `LITELLM_API_KEY`, or\n`LITELLM_API_KEY`) and the managed LiteLLM/vLLM services.",
         "operationId": "benchmark_run_api_benchmark_run_post",
         "parameters": [
           {
@@ -18798,7 +18531,7 @@
     },
     "/api/chat/health": {
       "get": {
-        "description": "Return health status for chat providers.",
+        "description": "Report the one application-visible generation gateway.",
         "operationId": "chat_health_api_chat_health_get",
         "parameters": [
           {
@@ -18976,7 +18709,7 @@
     },
     "/api/chat/models": {
       "get": {
-        "description": "Return available chat models with canonical `override` values for requests.",
+        "description": "Return authenticated LiteLLM aliases available to ordinary Chat users.",
         "operationId": "list_chat_models_api_chat_models_get",
         "parameters": [
           {
@@ -24510,18 +24243,6 @@
             }
           },
           {
-            "description": "Legacy flag (ignored)",
-            "in": "query",
-            "name": "force_local",
-            "required": false,
-            "schema": {
-              "default": false,
-              "description": "Legacy flag (ignored)",
-              "title": "Force Local",
-              "type": "boolean"
-            }
-          },
-          {
             "in": "query",
             "name": "corpus_id",
             "required": false,
@@ -24644,56 +24365,6 @@
       "get": {
         "description": "Return the full models.json catalog (metadata + models list).\n\nThe catalog is the pricing/candidate source of truth. Runtime-selectable rows\nare identified by ``selection_roles`` / ``selection_status`` metadata and the\nbackend runtime capabilities endpoint.",
         "operationId": "get_all_models_api_models_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "corpus_id",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Corpus Id"
-            }
-          },
-          {
-            "in": "query",
-            "name": "repo_id",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Repo Id"
-            }
-          },
-          {
-            "in": "query",
-            "name": "repo",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Repo"
-            }
-          }
-        ],
         "responses": {
           "200": {
             "content": {
@@ -24704,16 +24375,6 @@
               }
             },
             "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
           }
         },
         "summary": "Get All Models",
@@ -24734,54 +24395,6 @@
             "schema": {
               "title": "Component Type",
               "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "corpus_id",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Corpus Id"
-            }
-          },
-          {
-            "in": "query",
-            "name": "repo_id",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Repo Id"
-            }
-          },
-          {
-            "in": "query",
-            "name": "repo",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Repo"
             }
           }
         ],
@@ -24821,56 +24434,6 @@
       "get": {
         "description": "Return unique list of providers, sorted alphabetically.",
         "operationId": "get_providers_api_models_providers_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "corpus_id",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Corpus Id"
-            }
-          },
-          {
-            "in": "query",
-            "name": "repo_id",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Repo Id"
-            }
-          },
-          {
-            "in": "query",
-            "name": "repo",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Repo"
-            }
-          }
-        ],
         "responses": {
           "200": {
             "content": {
@@ -24885,16 +24448,6 @@
               }
             },
             "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
           }
         },
         "summary": "Get Providers",
@@ -24915,54 +24468,6 @@
             "schema": {
               "title": "Provider",
               "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "corpus_id",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Corpus Id"
-            }
-          },
-          {
-            "in": "query",
-            "name": "repo_id",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Repo Id"
-            }
-          },
-          {
-            "in": "query",
-            "name": "repo",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Repo"
             }
           }
         ],
@@ -25655,7 +25160,7 @@
     },
     "/api/ready": {
       "get": {
-        "description": "Readiness probe.\n\nReturns dependency status for Postgres + Neo4j.\nIf a corpus is specified via query params (repo_id/corpus_id), checks the\nconfigured Neo4j database for that corpus as well.",
+        "description": "Readiness probe.\n\nReturns dependency status for Postgres, Neo4j, LiteLLM, and vLLM.\nIf a corpus is specified via query params (repo_id/corpus_id), checks the\nconfigured Neo4j database for that corpus as well.",
         "operationId": "readiness_check_api_ready_get",
         "parameters": [
           {

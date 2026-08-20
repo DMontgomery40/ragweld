@@ -120,16 +120,7 @@ _LOCAL_EMBED_TPS_TABLE: dict[str, dict[str, int]] = {
 
 # Semantic KG LLM extraction throughput heuristic (calls/sec) by provider.
 _SEMANTIC_KG_CALLS_PER_SECOND: dict[str, float] = {
-    "openai": 1.6,
-    "anthropic": 1.0,
-    "google": 2.0,
-    "mistral": 1.3,
-    "cohere": 1.5,
-    "deepseek": 1.2,
-    "openrouter": 1.2,
-    "ollama": 0.6,
-    "mlx": 0.7,
-    "local": 0.8,
+    "litellm": 1.0,
 }
 
 
@@ -487,65 +478,17 @@ def _find_model_spec(
     return None
 
 
-def _strip_route_prefix(model: str | None) -> str:
-    raw = str(model or "").strip()
-    if ":" not in raw:
-        return raw
-    prefix, rest = raw.split(":", 1)
-    if prefix.strip().lower() in {"openrouter", "litellm", "local", "ragweld"}:
-        return rest.strip()
-    return raw
-
-
-def _semantic_kg_catalog_rows() -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
-    for row in _load_models_json():
-        if not _model_has_component(row, "GEN"):
-            continue
-        status = str(row.get("selection_status") or "").strip().lower()
-        if status != "runtime_selectable":
-            continue
-        provider = _norm_key(row.get("provider"))
-        model_name = str(row.get("model") or "").strip()
-        if provider == "openai" and model_name == "gpt-5":
-            continue
-        rows.append(row)
-    return rows
-
-
-def _semantic_kg_row_matches_override(row: dict[str, Any], override: str) -> bool:
-    candidate = _strip_route_prefix(override)
-    provider = str(row.get("provider") or "").strip()
-    model_name = str(row.get("model") or "").strip()
-    if not provider or not model_name:
-        return False
-    return candidate == model_name or candidate == f"{provider}/{model_name}"
-
-
-def _semantic_kg_catalog_row(cfg: TriBridConfig) -> dict[str, Any]:
-    explicit = str(cfg.graph_indexing.semantic_kg_llm_model or "").strip()
-    if not explicit:
-        raise ValueError("Select a runtime-selectable GEN catalog model for GraphRAG semantic extraction.")
-    for row in _semantic_kg_catalog_rows():
-        if _semantic_kg_row_matches_override(row, explicit):
-            return row
-    raise ValueError(
-        "GraphRAG semantic model must be a runtime-selectable GEN catalog entry; plain openai/gpt-5 is intentionally excluded."
-    )
-
-
 def _semantic_kg_model_override(cfg: TriBridConfig) -> str:
-    explicit = str(cfg.graph_indexing.semantic_kg_llm_model or "").strip()
-    _semantic_kg_catalog_row(cfg)
-    return explicit
+    alias = str(cfg.graph_indexing.semantic_kg_llm_model or cfg.chat.litellm.default_model or "").strip()
+    if re.fullmatch(r"[A-Za-z0-9._-]+", alias) is None:
+        raise ValueError("GraphRAG semantic model must be a configured LiteLLM alias.")
+    return alias
 
 
 def _resolve_semantic_kg_route(cfg: TriBridConfig) -> ProviderRoute:
     route = select_provider_route(config=cfg, model_override=_semantic_kg_model_override(cfg))
-    if route.kind not in {"cloud_direct", "openrouter", "litellm"}:
-        raise ValueError(
-            f"GraphRAG semantic model must resolve to an OpenAI-compatible route, got {route.kind}."
-        )
+    if route.kind != "litellm":
+        raise ValueError(f"GraphRAG semantic model must resolve through LiteLLM, got {route.kind}.")
     if not str(route.base_url or "").strip():
         raise ValueError("GraphRAG semantic model resolved without a base URL.")
     if not str(route.model or "").strip():
@@ -596,8 +539,7 @@ def _estimate_local_tokens_per_second(*, cfg: TriBridConfig, provider: str) -> i
 
 
 def _resolve_semantic_kg_model_and_provider(cfg: TriBridConfig) -> tuple[str, str]:
-    row = _semantic_kg_catalog_row(cfg)
-    return str(row.get("model") or "").strip(), str(row.get("provider") or "").strip().lower()
+    return _semantic_kg_model_override(cfg), "litellm"
 
 
 def _estimate_semantic_kg_cost_usd(

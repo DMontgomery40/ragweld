@@ -47,30 +47,6 @@ _LEGACY_DATASET_DIR = _ROOT / "data" / "eval_dataset"
 _RECIPES_REQUIRING_EVAL_DATASET = frozenset({"eval_dataset", "triplets", "autotune_retrieval", "full_stack"})
 
 
-def _is_openai_gpt5_synthetic_model(model: str) -> bool:
-    raw = str(model or "").strip().lower()
-    if not raw:
-        return False
-    for prefix in ("openrouter:", "litellm:"):
-        if raw.startswith(prefix):
-            raw = raw[len(prefix) :]
-            break
-    if raw.startswith("openai/"):
-        raw = raw.split("/", 1)[1]
-    return raw.startswith("gpt-5")
-
-
-def _reject_banned_synthetic_models(request: SyntheticRunStartRequest) -> None:
-    for field_name in ("generator_model", "judge_model"):
-        model = str(getattr(request, field_name, "") or "").strip()
-        lower = model.lower()
-        if "openai/" in lower or lower.startswith(("gpt-", "o1", "o3", "o4", "openrouter:openai/", "litellm:openai/")):
-            if not _is_openai_gpt5_synthetic_model(model):
-                raise RuntimeError(
-                    f"{field_name} must use an OpenAI GPT-5 model on this branch. Got {model!r}."
-                )
-
-
 def _append_log(run_id: str, message: str) -> None:
     append_event(
         run_id,
@@ -381,7 +357,6 @@ async def _evaluate_quality_gate(
 
 async def start_run(request: SyntheticRunStartRequest) -> SyntheticRun:
     repo_id = _validate_repo_id(request.repo_id)
-    _reject_banned_synthetic_models(request)
 
     active = active_run_id_for_corpus(repo_id)
     if active:

@@ -51,15 +51,6 @@ class GraphRAGExtractionResult:
     empty_chunks: int
 
 
-def _strip_openai_prefix(model: str) -> str:
-    raw = str(model or "").strip()
-    lower = raw.lower()
-    for prefix in ("openai/", "litellm:openai/", "openrouter:openai/"):
-        if lower.startswith(prefix):
-            return raw[len(prefix) :]
-    return raw
-
-
 def _normalize_relation_type(value: str) -> str:
     normalized = re.sub(r"[^a-z0-9_]+", "_", str(value or "").strip().lower()).strip("_")
     return normalized

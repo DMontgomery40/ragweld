@@ -58,7 +58,7 @@ Chat is explicitly **not** protected as an implementation. It should be rebuilt 
 
 ### What This Branch Already Replaced
 
-- Runtime/gateway truth is formalized around `LiteLLM` / `vLLM`-aware capability and provider routing surfaces.
+- Generation now has one application boundary: `Ragweld API -> LiteLLM -> vLLM`. Upstream paid credentials and routes remain private to LiteLLM; the application sees authenticated aliases only.
 - Retrieval/indexing has a real OSS pilot seam for `Docling + Haystack + Qdrant`, with in-product UI parity.
 - Online observability now has a hard-cut `OTel + Langfuse + Tempo + Alloy` control surface, canonical trace metadata, cost attribution, and workbench visibility.
 
@@ -156,7 +156,7 @@ Each search method compensates for the others' weaknesses. The result: **dramati
 - **Evaluation Workbench**: run management, drilldowns, and diffs across retrieval, indexing, model, and routing changes
 - **Tracing + Observability**: branch target is `OTel + Langfuse + Tempo + Alloy + Grafana`; the online request slice is already wired end-to-end with in-product status, trace deep links, and cost attribution
 - **Semantic Cache + Recall Gates**: token-cost control and smart memory retrieval policy in the chat path
-- **Routing + Model Catalog**: `LiteLLM` / `vLLM` aware provider-model routing controls, daily catalog refreshes, and custom model registration
+- **Gateway Aliases + Model Catalog**: authenticated LiteLLM runtime aliases alongside a separate pricing/candidate catalog
 
 ### Tri-Brid Retrieval
 - **Vector Search**: pgvector in PostgreSQL with HNSW indexing
@@ -173,7 +173,7 @@ Each search method compensates for the others' weaknesses. The result: **dramati
 
 ### API-first Integration
 - **Primary contract**: FastAPI endpoints under `/api/*` are the canonical production interface
-- **Channel routing**: independent model/provider routing for API, chat, CLI, and MCP channels
+- **Channel aliases**: optional LiteLLM model aliases for API, chat, CLI, and MCP channels through one gateway
 - **Ops surface**: indexing, retrieval, evals, training, tracing, and observability are all API-addressable
 
 ### MCP Integration (Model Context Protocol)

@@ -5,15 +5,15 @@ import { IntentMatrixEditor } from '@/components/RAG/IntentMatrixEditor';
 import { RetrievalPilotPanel } from '@/components/RAG/RetrievalPilotPanel';
 import { SyntheticCallout } from '@/components/RAG/SyntheticCallout';
 import { ModelAssignments } from '@/components/RAG/ModelAssignments';
-import { ModelPicker } from '@/components/RAG/ModelPicker';
+import { ModelPicker as ChatModelPicker } from '@/components/Chat/ModelPicker';
 import { PromptLink } from '@/components/ui/PromptLink';
 import { ApiKeyStatus } from '@/components/ui/ApiKeyStatus';
 import { TooltipIcon } from '@/components/ui/TooltipIcon';
 import { createAlertError, createInlineError } from '@/utils/errorHelpers';
-import { useConfig, useConfigField } from '@/hooks';
+import { useAPI, useConfig, useConfigField } from '@/hooks';
 import { tracesApi } from '@/api';
 import { useRepoStore } from '@/stores/useRepoStore';
-import type { TracesLatestResponse } from '@/types/generated';
+import type { ChatModelInfo, ChatModelsResponse, TracesLatestResponse } from '@/types/generated';
 
 type RetrievalCardId = 'search_paths' | 'fusion_scoring' | 'generation' | 'ops_tracing';
 type OpsTracingViewId = 'runtime_compatibility' | 'observability_integrations';
@@ -103,6 +103,7 @@ const SECTION_DESC_STYLE: CSSProperties = {
 };
 
 export function RetrievalSubtab() {
+  const { api } = useAPI();
   const [selectedCard, setSelectedCard] = useState<RetrievalCardId>('search_paths');
   const [opsTracingView, setOpsTracingView] = useState<OpsTracingViewId>('runtime_compatibility');
   const [hydrating, setHydrating] = useState(true);
@@ -116,26 +117,36 @@ export function RetrievalSubtab() {
 
   // --- Generation ---------------------------------------------------------
   const [genModel, setGenModel] = useConfigField<string>('generation.gen_model', '');
-  const [genModelOllama, setGenModelOllama] = useConfigField<string>('generation.gen_model_ollama', '');
   const [genTemperature, setGenTemperature] = useConfigField<number>('generation.gen_temperature', 0.0);
   const [enrichModel, setEnrichModel] = useConfigField<string>('generation.enrich_model', '');
-  const [enrichModelOllama, setEnrichModelOllama] = useConfigField<string>('generation.enrich_model_ollama', '');
-  const [ollamaUrl, setOllamaUrl] = useConfigField<string>('generation.ollama_url', 'http://127.0.0.1:11434/api');
-  const [openaiBaseUrl, setOpenaiBaseUrl] = useConfigField<string>('generation.openai_base_url', '');
   const [genModelHttp, setGenModelHttp] = useConfigField<string>('generation.gen_model_http', '');
   const [genModelMcp, setGenModelMcp] = useConfigField<string>('generation.gen_model_mcp', '');
   const [genModelCli, setGenModelCli] = useConfigField<string>('generation.gen_model_cli', '');
-  const [genBackend] = useConfigField<string>('generation.gen_backend', 'openai');
-  const [enrichBackend, setEnrichBackend] = useConfigField<string>('generation.enrich_backend', 'openai');
   const [genMaxTokens, setGenMaxTokens] = useConfigField<number>('generation.gen_max_tokens', 2048);
   const [genTopP, setGenTopP] = useConfigField<number>('generation.gen_top_p', 1.0);
   const [genTimeout, setGenTimeout] = useConfigField<number>('generation.gen_timeout', 60);
-  const [genRetryMax, setGenRetryMax] = useConfigField<number>('generation.gen_retry_max', 2);
   const [enrichDisabled, setEnrichDisabled] = useConfigField<number>('generation.enrich_disabled', 0);
-  const [ollamaNumCtx, setOllamaNumCtx] = useConfigField<number>('generation.ollama_num_ctx', 8192);
-  const [ollamaRequestTimeout, setOllamaRequestTimeout] = useConfigField<number>('generation.ollama_request_timeout', 300);
-  const [ollamaStreamIdleTimeout, setOllamaStreamIdleTimeout] =
-    useConfigField<number>('generation.ollama_stream_idle_timeout', 60);
+  const [generationModels, setGenerationModels] = useState<ChatModelInfo[]>([]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const scope = String(activeRepo || '').trim();
+    const query = scope ? `?corpus_id=${encodeURIComponent(scope)}` : '';
+    fetch(api(`chat/models${query}`), { signal: controller.signal })
+      .then((response) => {
+        if (!response.ok) throw new Error(String(response.status));
+        return response.json();
+      })
+      .then((payload) => {
+        const rows = (payload as ChatModelsResponse).models;
+        setGenerationModels(Array.isArray(rows) ? rows : []);
+      })
+      .catch((cause) => {
+        if (cause instanceof DOMException && cause.name === 'AbortError') return;
+        setGenerationModels([]);
+      });
+    return () => controller.abort();
+  }, [activeRepo, api]);
 
   // --- Retrieval ----------------------------------------------------------
   const [rrfKDiv, setRrfKDiv] = useConfigField<number>('retrieval.rrf_k_div', 60);
@@ -465,14 +476,12 @@ export function RetrievalSubtab() {
           </div>
 
           <div className="input-group">
-            <ModelPicker
-              componentType="GEN"
-              provider={genBackend}
+            <label>Generation Alias</label>
+            <ChatModelPicker
               value={genModel}
               onChange={setGenModel}
-              label="Generation Model"
-              tooltipKey="GEN_MODEL"
-              allowCustom
+              models={generationModels}
+              valueMode="id"
             />
           </div>
 
@@ -1317,62 +1326,47 @@ export function RetrievalSubtab() {
 
               <div className="input-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 16 }}>
                 <div className="input-group">
-                  <ModelPicker
-                    componentType="GEN"
-                    provider={genBackend}
+                  <label>Generation Alias</label>
+                  <ChatModelPicker
                     value={genModel}
                     onChange={setGenModel}
-                    label="Generation Model"
-                    tooltipKey="GEN_MODEL"
-                    allowCustom
+                    models={generationModels}
+                    valueMode="id"
+                    allowEmpty
                   />
                   <PromptLink promptKey="main_rag_chat">Edit Chat Prompt</PromptLink>
-                </div>
-                <div className="input-group">
-                  <label>
-                    Ollama Model <TooltipIcon name="GEN_MODEL_OLLAMA" />
-                  </label>
-                  <input
-                    type="text"
-                    value={genModelOllama}
-                    onChange={(e) => setGenModelOllama(e.target.value)}
-                    placeholder="qwen3-coder:30b"
-                  />
                 </div>
               </div>
 
               <div className="input-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 16 }}>
                 <div className="input-group">
-                  <ModelPicker
-                    componentType="GEN"
-                    provider={genBackend}
+                  <label>HTTP Alias Override</label>
+                  <ChatModelPicker
                     value={genModelHttp}
                     onChange={setGenModelHttp}
-                    label="HTTP Override"
-                    tooltipKey="GEN_MODEL_HTTP"
-                    allowCustom
+                    models={generationModels}
+                    valueMode="id"
+                    allowEmpty
                   />
                 </div>
                 <div className="input-group">
-                  <ModelPicker
-                    componentType="GEN"
-                    provider={genBackend}
+                  <label>MCP Alias Override</label>
+                  <ChatModelPicker
                     value={genModelMcp}
                     onChange={setGenModelMcp}
-                    label="MCP Override"
-                    tooltipKey="GEN_MODEL_MCP"
-                    allowCustom
+                    models={generationModels}
+                    valueMode="id"
+                    allowEmpty
                   />
                 </div>
                 <div className="input-group">
-                  <ModelPicker
-                    componentType="GEN"
-                    provider={genBackend}
+                  <label>CLI Alias Override</label>
+                  <ChatModelPicker
                     value={genModelCli}
                     onChange={setGenModelCli}
-                    label="CLI Override"
-                    tooltipKey="GEN_MODEL_CLI"
-                    allowCustom
+                    models={generationModels}
+                    valueMode="id"
+                    allowEmpty
                   />
                 </div>
               </div>
@@ -1381,44 +1375,18 @@ export function RetrievalSubtab() {
             <div style={{ ...SECTION_STYLE, marginBottom: 14 }} data-testid="retrieval-section-generation-enrichment-routing">
               <div style={SECTION_TITLE_STYLE}>2) Enrichment Routing</div>
               <div style={SECTION_DESC_STYLE}>
-                Select enrichment models/backend and explicitly disable enrichment when pure retrieval answers are preferred.
+                Select a gateway alias and explicitly disable enrichment when pure retrieval answers are preferred.
               </div>
 
               <div className="input-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 16 }}>
                 <div className="input-group">
-                  <ModelPicker
-                    componentType="GEN"
-                    provider={enrichBackend}
+                  <label>Enrichment Alias</label>
+                  <ChatModelPicker
                     value={enrichModel}
                     onChange={setEnrichModel}
-                    label="Enrich Model"
-                    tooltipKey="ENRICH_MODEL"
-                    allowCustom
+                    models={generationModels}
+                    valueMode="id"
                   />
-                </div>
-                <div className="input-group">
-                  <label>
-                    Enrich Model (Ollama) <TooltipIcon name="ENRICH_MODEL_OLLAMA" />
-                  </label>
-                  <input
-                    type="text"
-                    value={enrichModelOllama}
-                    onChange={(e) => setEnrichModelOllama(e.target.value)}
-                    placeholder="qwen3-coder:14b"
-                  />
-                </div>
-              </div>
-
-              <div className="input-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 16 }}>
-                <div className="input-group">
-                  <label>
-                    Enrichment Backend <TooltipIcon name="ENRICH_BACKEND" />
-                  </label>
-                  <select value={enrichBackend} onChange={(e) => setEnrichBackend(e.target.value)}>
-                    <option value="openai">openai</option>
-                    <option value="ollama">ollama</option>
-                    <option value="mlx">mlx</option>
-                  </select>
                 </div>
                 <div className="input-group">
                   <label>
@@ -1435,65 +1403,21 @@ export function RetrievalSubtab() {
             <div style={{ ...SECTION_STYLE, marginBottom: 14 }} data-testid="retrieval-section-generation-provider-readiness">
               <div style={SECTION_TITLE_STYLE}>3) Provider Readiness</div>
               <div style={SECTION_DESC_STYLE}>
-                Confirm provider credentials before choosing models that depend on those services.
+                Confirm the application-to-gateway credential before using generation aliases.
               </div>
 
-              <div className="input-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 16 }}>
+              <div className="input-row">
                 <div className="input-group">
                   <label>
-                    OpenAI API Key <TooltipIcon name="OPENAI_API_KEY" />
+                    LiteLLM Client Key
                   </label>
-                  <ApiKeyStatus keyName="OPENAI_API_KEY" label="OpenAI API Key" />
-                </div>
-                <div className="input-group">
-                  <label>
-                    Anthropic API Key <TooltipIcon name="ANTHROPIC_API_KEY" />
-                  </label>
-                  <ApiKeyStatus keyName="ANTHROPIC_API_KEY" label="Anthropic API Key" />
-                </div>
-                <div className="input-group">
-                  <label>
-                    Google API Key <TooltipIcon name="GOOGLE_API_KEY" />
-                  </label>
-                  <ApiKeyStatus keyName="GOOGLE_API_KEY" label="Google API Key" />
-                </div>
-              </div>
-            </div>
-
-            <div style={{ ...SECTION_STYLE, marginBottom: 14 }} data-testid="retrieval-section-generation-endpoint-overrides">
-              <div style={SECTION_TITLE_STYLE}>4) Endpoint Overrides</div>
-              <div style={SECTION_DESC_STYLE}>
-                Override transport endpoints for local gateways, proxies, or self-hosted OpenAI-compatible deployments.
-              </div>
-
-              <div className="input-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 16 }}>
-                <div className="input-group">
-                  <label>
-                    Ollama URL <TooltipIcon name="OLLAMA_URL" />
-                  </label>
-                  <input
-                    type="text"
-                    value={ollamaUrl}
-                    onChange={(e) => setOllamaUrl(e.target.value)}
-                    placeholder="http://127.0.0.1:11434/api"
-                  />
-                </div>
-                <div className="input-group">
-                  <label>
-                    OpenAI Base URL <TooltipIcon name="OPENAI_BASE_URL" />
-                  </label>
-                  <input
-                    type="text"
-                    value={openaiBaseUrl}
-                    onChange={(e) => setOpenaiBaseUrl(e.target.value)}
-                    placeholder="Proxy override"
-                  />
+                  <ApiKeyStatus keyName="LITELLM_API_KEY" label="LiteLLM Client Key" />
                 </div>
               </div>
             </div>
 
             <div style={{ ...SECTION_STYLE, marginBottom: 14 }} data-testid="retrieval-section-generation-sampling-budget">
-              <div style={SECTION_TITLE_STYLE}>5) Sampling Budget</div>
+              <div style={SECTION_TITLE_STYLE}>4) Sampling Budget</div>
               <div style={SECTION_DESC_STYLE}>
                 Set creativity and output budget controls that directly affect answer style, length, and variability.
               </div>
@@ -1542,12 +1466,12 @@ export function RetrievalSubtab() {
             </div>
 
             <div style={SECTION_STYLE} data-testid="retrieval-section-generation-reliability">
-              <div style={SECTION_TITLE_STYLE}>6) Reliability / Timeouts</div>
+              <div style={SECTION_TITLE_STYLE}>5) Reliability / Timeouts</div>
               <div style={SECTION_DESC_STYLE}>
-                Bound request duration and retry strategy for stable execution across local and cloud generation backends.
+                Bound application request duration. Gateway retry and fallback policy is fixed in LiteLLM deployment config.
               </div>
 
-              <div className="input-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))', gap: 16 }}>
+              <div className="input-row">
                 <div className="input-group">
                   <label>
                     GEN Timeout <TooltipIcon name="GEN_TIMEOUT" />
@@ -1558,54 +1482,6 @@ export function RetrievalSubtab() {
                     max={300}
                     value={genTimeout}
                     onChange={(e) => setGenTimeout(snapNumber(e.target.value, 60))}
-                  />
-                </div>
-                <div className="input-group">
-                  <label>
-                    Retry Attempts <TooltipIcon name="GEN_RETRY_MAX" />
-                  </label>
-                  <input
-                    type="number"
-                    min={1}
-                    max={10}
-                    value={genRetryMax}
-                    onChange={(e) => setGenRetryMax(snapNumber(e.target.value, 2))}
-                  />
-                </div>
-                <div className="input-group">
-                  <label>
-                    Ollama Num Ctx <TooltipIcon name="OLLAMA_NUM_CTX" />
-                  </label>
-                  <input
-                    type="number"
-                    min={2048}
-                    max={32768}
-                    value={ollamaNumCtx}
-                    onChange={(e) => setOllamaNumCtx(snapNumber(e.target.value, 8192))}
-                  />
-                </div>
-                <div className="input-group">
-                  <label>
-                    Ollama Request Timeout <TooltipIcon name="OLLAMA_REQUEST_TIMEOUT" />
-                  </label>
-                  <input
-                    type="number"
-                    min={30}
-                    max={1200}
-                    value={ollamaRequestTimeout}
-                    onChange={(e) => setOllamaRequestTimeout(snapNumber(e.target.value, 300))}
-                  />
-                </div>
-                <div className="input-group">
-                  <label>
-                    Ollama Stream Idle Timeout <TooltipIcon name="OLLAMA_STREAM_IDLE_TIMEOUT" />
-                  </label>
-                  <input
-                    type="number"
-                    min={5}
-                    max={300}
-                    value={ollamaStreamIdleTimeout}
-                    onChange={(e) => setOllamaStreamIdleTimeout(snapNumber(e.target.value, 60))}
                   />
                 </div>
               </div>

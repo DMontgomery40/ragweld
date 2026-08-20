@@ -4,21 +4,12 @@ type ModelPickerProps = {
   value: string;
   onChange: (modelOverride: string) => void;
   models: ChatModelInfo[];
+  valueMode?: 'override' | 'id';
+  allowEmpty?: boolean;
 };
 
-const SOURCE_LABELS = {
-  cloud_direct: 'Cloud Direct',
-  openrouter: 'OpenRouter',
-  litellm: 'LiteLLM',
-  local: 'Local',
-  ragweld: 'Ragweld',
-} as const;
-
-// Put Local first so it's easy to find even when OpenRouter lists hundreds of models.
-const SOURCE_ORDER = ['local', 'litellm', 'ragweld', 'openrouter', 'cloud_direct'] as const;
-
-function toOptionValue(model: ChatModelInfo): string {
-  return String(model.override || model.id || '');
+function toOptionValue(model: ChatModelInfo, valueMode: 'override' | 'id'): string {
+  return String(valueMode === 'id' ? model.id : model.override || model.id || '');
 }
 
 function toOptionLabel(model: ChatModelInfo): string {
@@ -26,13 +17,12 @@ function toOptionLabel(model: ChatModelInfo): string {
   return `${model.provider} · ${name}`;
 }
 
-export function ModelPicker({ value, onChange, models }: ModelPickerProps) {
-  const grouped = SOURCE_ORDER.map((source) => ({
-    source,
-    label: SOURCE_LABELS[source],
-    items: models.filter((m) => m.source === source),
-  })).filter((g) => g.items.length > 0);
-  const hasModels = grouped.length > 0;
+export function ModelPicker({ value, onChange, models, valueMode = 'override', allowEmpty = false }: ModelPickerProps) {
+  const gatewayModels = models.filter((model) => model.source === 'litellm');
+  const hasModels = gatewayModels.length > 0;
+  const currentValueAvailable = !value
+    ? allowEmpty
+    : gatewayModels.some((model) => toOptionValue(model, valueMode) === value);
 
   return (
     <select
@@ -40,6 +30,7 @@ export function ModelPicker({ value, onChange, models }: ModelPickerProps) {
       value={hasModels ? value : ''}
       onChange={(e) => onChange(e.target.value)}
       disabled={!hasModels}
+      aria-invalid={!currentValueAvailable}
       style={{
         width: '100%',
         padding: '10px 12px',
@@ -51,10 +42,14 @@ export function ModelPicker({ value, onChange, models }: ModelPickerProps) {
       }}
     >
       {!hasModels ? <option value="">No models available</option> : null}
-      {grouped.map((group) => (
-        <optgroup key={group.source} label={group.label}>
-          {group.items.map((model) => {
-            const optionValue = toOptionValue(model);
+      {hasModels && value && !currentValueAvailable ? (
+        <option value={value} disabled>Unavailable alias: {value}</option>
+      ) : null}
+      {hasModels && allowEmpty ? <option value="">Use default alias</option> : null}
+      {hasModels ? (
+        <optgroup label="LiteLLM">
+          {gatewayModels.map((model) => {
+            const optionValue = toOptionValue(model, valueMode);
             return (
               <option key={optionValue} value={optionValue}>
                 {toOptionLabel(model)}
@@ -62,7 +57,7 @@ export function ModelPicker({ value, onChange, models }: ModelPickerProps) {
             );
           })}
         </optgroup>
-      ))}
+      ) : null}
     </select>
   );
 }

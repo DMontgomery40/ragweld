@@ -1,7 +1,8 @@
 /**
  * ModelPicker - Model dropdown from models.json
  *
- * Uses useModels hook to load models filtered by component type (EMB/GEN/RERANK).
+ * Uses useModels to load embedding/reranker catalog rows. Generation aliases
+ * come from the authenticated Chat model picker instead.
  * When `provider` is given, shows models for that provider only.
  * When `provider` is omitted, shows all providers grouped via <optgroup>.
  */
@@ -12,9 +13,9 @@ import { TooltipIcon } from '@/components/ui/TooltipIcon';
 
 interface ModelPickerProps {
   /** Component type filter */
-  componentType: 'EMB' | 'GEN' | 'RERANK';
+  componentType: 'EMB' | 'RERANK';
   /** Optional runtime selection role filter */
-  selectionRole?: 'generation' | 'embedding_provider' | 'reranker_cloud';
+  selectionRole?: 'embedding_provider' | 'reranker_cloud';
   /** Provider to filter models by. When omitted, all providers shown grouped. */
   provider?: string;
   /** Current selected model name */

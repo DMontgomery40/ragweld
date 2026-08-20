@@ -125,7 +125,7 @@ def _component_operator_hint(component_id: str, url: str | None, reachable: bool
     if component_id == "langfuse":
         return "Langfuse should be reachable before operators rely on generation trace drilldown."
     if component_id == "litellm":
-        return "Gateway failures will directly hit model routing, provider failover, and spend visibility."
+        return "Gateway failures block generation routing, policy enforcement, and spend visibility."
     if component_id == "vllm":
         return "Serving failures will page the generation lane even if the rest of the UI looks healthy."
     if component_id == "haystack_docling_qdrant":
@@ -216,20 +216,28 @@ async def build_observability_status(config: TriBridConfig, *, repo_id: str | No
     opencost_url = str(config.tracing.opencost_base_url or "").strip()
     alertmanager_url = str(config.tracing.alertmanager_base_url or "").strip()
     langfuse_url = str(config.tracing.langfuse_base_url or "").strip()
-    try:
-        litellm_url = resolve_litellm_base_url(configured_url=config.chat.litellm.base_url)
-        litellm_key = resolve_litellm_api_key()
-        litellm_resolution_error = None
-    except RuntimeError as exc:
+    litellm_enabled = bool(config.chat.litellm.enabled)
+    vllm_enabled = bool(config.chat.vllm.enabled)
+    litellm_key: str | None = None
+    litellm_resolution_error: str | None = None
+    vllm_resolution_error: str | None = None
+    if litellm_enabled:
+        try:
+            litellm_url = resolve_litellm_base_url(configured_url=config.chat.litellm.base_url)
+            litellm_key = resolve_litellm_api_key()
+        except RuntimeError as exc:
+            litellm_url = str(config.chat.litellm.base_url or "").strip()
+            litellm_resolution_error = str(exc)
+    else:
         litellm_url = str(config.chat.litellm.base_url or "").strip()
-        litellm_key = None
-        litellm_resolution_error = str(exc)
-    try:
-        vllm_url = resolve_vllm_base_url(configured_url=config.chat.vllm.base_url)
-        vllm_resolution_error = None
-    except RuntimeError as exc:
+    if vllm_enabled:
+        try:
+            vllm_url = resolve_vllm_base_url(configured_url=config.chat.vllm.base_url)
+        except RuntimeError as exc:
+            vllm_url = str(config.chat.vllm.base_url or "").strip()
+            vllm_resolution_error = str(exc)
+    else:
         vllm_url = str(config.chat.vllm.base_url or "").strip()
-        vllm_resolution_error = str(exc)
 
     otlp_reachable, otlp_detail = await _check_url(otlp_url)
     grafana_reachable, grafana_detail = await _check_url(grafana_url)
@@ -241,11 +249,15 @@ async def build_observability_status(config: TriBridConfig, *, repo_id: str | No
     opencost_reachable, opencost_detail = await _check_url(opencost_url)
     alertmanager_reachable, alertmanager_detail = await _check_url(alertmanager_url)
     langfuse_reachable, langfuse_detail = await _check_url(langfuse_url)
-    if litellm_resolution_error:
+    if not litellm_enabled:
+        litellm_reachable, litellm_detail = None, None
+    elif litellm_resolution_error:
         litellm_reachable, litellm_detail = False, litellm_resolution_error
     else:
         litellm_reachable, litellm_detail = await _check_model_api(litellm_url, api_key=litellm_key)
-    if vllm_resolution_error:
+    if not vllm_enabled:
+        vllm_reachable, vllm_detail = None, None
+    elif vllm_resolution_error:
         vllm_reachable, vllm_detail = False, vllm_resolution_error
     else:
         vllm_reachable, vllm_detail = await _check_model_api(vllm_url)
@@ -362,12 +374,12 @@ async def build_observability_status(config: TriBridConfig, *, repo_id: str | No
         _decorate_component(
             component_id="litellm",
             label="LiteLLM",
-            enabled=bool(getattr(config.chat.litellm, "enabled", False)),
-            configured=bool(litellm_url),
-            reachable=litellm_reachable if bool(getattr(config.chat.litellm, "enabled", False)) and litellm_url else None,
+            enabled=litellm_enabled,
+            configured=bool(litellm_url) and litellm_key is not None,
+            reachable=litellm_reachable if litellm_enabled and litellm_url and litellm_key is not None else None,
             detail=(
                 litellm_detail
-                if bool(getattr(config.chat.litellm, "enabled", False)) and litellm_url
+                if litellm_enabled
                 else "Gateway routing and spend surface for model/provider traffic."
             ),
             url=litellm_url or None,
@@ -376,12 +388,12 @@ async def build_observability_status(config: TriBridConfig, *, repo_id: str | No
         _decorate_component(
             component_id="vllm",
             label="vLLM",
-            enabled=bool(getattr(config.chat.vllm, "enabled", False)),
+            enabled=vllm_enabled,
             configured=bool(vllm_url),
-            reachable=vllm_reachable if bool(getattr(config.chat.vllm, "enabled", False)) and vllm_url else None,
+            reachable=vllm_reachable if vllm_enabled and vllm_url else None,
             detail=(
                 vllm_detail
-                if bool(getattr(config.chat.vllm, "enabled", False)) and vllm_url
+                if vllm_enabled and vllm_url
                 else "Self-hosted serving endpoint for local generation traffic."
             ),
             url=vllm_url or None,

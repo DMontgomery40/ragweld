@@ -3,51 +3,31 @@ from __future__ import annotations
 import pytest
 
 from server.api.index import (
-    _semantic_kg_catalog_row,
-    _semantic_kg_catalog_rows,
+    _resolve_semantic_kg_model_and_provider,
     _semantic_kg_model_override,
 )
 from server.models.tribrid_config_model import TriBridConfig
 
 
-def test_semantic_kg_catalog_rows_require_runtime_selectable_generation_metadata() -> None:
-    rows = _semantic_kg_catalog_rows()
-    assert rows
-    for row in rows:
-        provider = str(row.get("provider") or "").strip().lower()
-        model = str(row.get("model") or "").strip()
-        assert "GEN" in row.get("components", [])
-        assert row.get("selection_status") == "runtime_selectable"
-        assert "generation" in row.get("selection_roles", [])
-        assert (provider, model) != ("openai", "gpt-5")
-
-
-def test_semantic_kg_model_override_requires_explicit_catalog_selection() -> None:
+def test_semantic_kg_model_override_defaults_to_litellm_alias() -> None:
     cfg = TriBridConfig()
 
-    with pytest.raises(ValueError, match="Select a runtime-selectable GEN catalog model"):
-        _semantic_kg_model_override(cfg)
+    assert _semantic_kg_model_override(cfg) == "ragweld-local"
+    assert _resolve_semantic_kg_model_and_provider(cfg) == ("ragweld-local", "litellm")
 
 
-def test_semantic_kg_model_override_accepts_runtime_selectable_catalog_entries() -> None:
-    selectable = _semantic_kg_catalog_rows()
-    assert selectable
-    expected = selectable[0]
-    provider = str(expected.get("provider") or "").strip()
-    model = str(expected.get("model") or "").strip()
-
+def test_semantic_kg_model_override_accepts_gateway_alias() -> None:
     cfg = TriBridConfig()
-    cfg.graph_indexing.semantic_kg_llm_model = f"{provider}/{model}"
+    cfg.graph_indexing.semantic_kg_llm_model = "semantic-graph"
 
-    assert _semantic_kg_model_override(cfg) == f"{provider}/{model}"
-    row = _semantic_kg_catalog_row(cfg)
-    assert str(row.get("provider") or "").strip() == provider
-    assert str(row.get("model") or "").strip() == model
+    assert _semantic_kg_model_override(cfg) == "semantic-graph"
+    assert _resolve_semantic_kg_model_and_provider(cfg) == ("semantic-graph", "litellm")
 
 
-def test_semantic_kg_model_override_rejects_plain_openai_gpt5() -> None:
+@pytest.mark.parametrize("model", ["openai/gpt-5", "openrouter:openai/gpt-5", "local:qwen3"])
+def test_semantic_kg_model_override_rejects_direct_provider_ids(model: str) -> None:
     cfg = TriBridConfig()
-    cfg.graph_indexing.semantic_kg_llm_model = "openai/gpt-5"
+    cfg.graph_indexing.semantic_kg_llm_model = model
 
-    with pytest.raises(ValueError, match="plain openai/gpt-5"):
+    with pytest.raises(ValueError, match="LiteLLM alias"):
         _semantic_kg_model_override(cfg)

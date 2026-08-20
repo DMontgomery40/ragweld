@@ -18,18 +18,16 @@ async def test_eval_analyze_comparison_returns_verbose_error_when_no_provider(cl
     )
     assert create.status_code == 200
 
-    old_openai = os.environ.pop("OPENAI_API_KEY", None)
-    old_openrouter = os.environ.pop("OPENROUTER_API_KEY", None)
+    old_litellm = os.environ.pop("LITELLM_API_KEY", None)
 
     try:
-        # Ensure the scoped config has no enabled local/openrouter providers.
+        # Disable the sole generation gateway.
         patch = await client.request(
             "PATCH",
             "/api/config/chat",
             params={"corpus_id": corpus_id},
             json={
-                "openrouter": {"enabled": False},
-                "local_models": {"providers": []},
+                "litellm": {"enabled": False},
             },
         )
         assert patch.status_code == 200
@@ -49,20 +47,14 @@ async def test_eval_analyze_comparison_returns_verbose_error_when_no_provider(cl
         assert data.get("ok") is False
 
         err = str(data.get("error") or "")
-        assert "Provider setup checklist" in err
-        assert "OPENAI_API_KEY" in err
-        assert "OPENROUTER_API_KEY" in err
-        assert "chat.openrouter.enabled" in err
-        assert "chat.local_models.providers" in err
+        assert "Generation setup checklist" in err
+        assert "LITELLM_API_KEY" in err
+        assert "LiteLLM" in err
     finally:
         # Restore env vars so other tests / local runs are unaffected.
-        if old_openai is not None:
-            os.environ["OPENAI_API_KEY"] = old_openai
+        if old_litellm is not None:
+            os.environ["LITELLM_API_KEY"] = old_litellm
         else:
-            os.environ.pop("OPENAI_API_KEY", None)
-        if old_openrouter is not None:
-            os.environ["OPENROUTER_API_KEY"] = old_openrouter
-        else:
-            os.environ.pop("OPENROUTER_API_KEY", None)
+            os.environ.pop("LITELLM_API_KEY", None)
 
         await client.delete(f"/api/corpora/{corpus_id}")

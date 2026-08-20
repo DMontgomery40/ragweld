@@ -17,37 +17,6 @@ _ROOT = Path(__file__).resolve().parents[2]
 _RUNS_DIR = _ROOT / "data" / "synthetic_runs"
 
 
-def _normalize_legacy_run_payload(raw: dict[str, Any]) -> dict[str, Any]:
-    """Backfill required request model fields for legacy persisted runs.
-
-    Older synthetic runs may have only `generator_model_override` /
-    `judge_model_override` (or nulls). New schemas require non-empty
-    `generator_model` and `judge_model` strings.
-    """
-    req = raw.get("request")
-    if not isinstance(req, dict):
-        return raw
-
-    gm = req.get("generator_model")
-    if not isinstance(gm, str) or not gm.strip():
-        legacy_gm = req.get("generator_model_override")
-        if isinstance(legacy_gm, str) and legacy_gm.strip():
-            req["generator_model"] = legacy_gm.strip()
-        else:
-            req["generator_model"] = "__legacy_missing_generator_model__"
-
-    jm = req.get("judge_model")
-    if not isinstance(jm, str) or not jm.strip():
-        legacy_jm = req.get("judge_model_override")
-        if isinstance(legacy_jm, str) and legacy_jm.strip():
-            req["judge_model"] = legacy_jm.strip()
-        else:
-            req["judge_model"] = "__legacy_missing_judge_model__"
-
-    raw["request"] = req
-    return raw
-
-
 def runs_dir() -> Path:
     _RUNS_DIR.mkdir(parents=True, exist_ok=True)
     return _RUNS_DIR
@@ -126,7 +95,7 @@ def load_run(run_id: str) -> SyntheticRun:
     path = run_json_path(run_id)
     if not path.exists():
         raise FileNotFoundError(f"run_id={run_id} not found")
-    raw = _normalize_legacy_run_payload(json.loads(path.read_text(encoding="utf-8")))
+    raw = json.loads(path.read_text(encoding="utf-8"))
     return SyntheticRun.model_validate(raw)
 
 
@@ -163,7 +132,7 @@ def list_runs(*, corpus_id: str | None = None, limit: int = 50) -> list[Syntheti
         if not p.exists():
             continue
         try:
-            raw = _normalize_legacy_run_payload(json.loads(p.read_text(encoding="utf-8")))
+            raw = json.loads(p.read_text(encoding="utf-8"))
             run = SyntheticRun.model_validate(raw)
         except Exception:
             continue
@@ -210,7 +179,7 @@ def active_run_id_for_corpus(corpus_id: str) -> str | None:
         if not p.exists():
             continue
         try:
-            raw = _normalize_legacy_run_payload(json.loads(p.read_text(encoding="utf-8")))
+            raw = json.loads(p.read_text(encoding="utf-8"))
             run = SyntheticRun.model_validate(raw)
         except Exception:
             continue

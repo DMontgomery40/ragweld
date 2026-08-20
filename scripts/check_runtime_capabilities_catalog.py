@@ -7,10 +7,11 @@ import json
 import sys
 from pathlib import Path
 
-from server.runtime_capabilities import validate_catalog_selection_metadata
+from server.runtime_capabilities import apply_selection_metadata_to_catalog, validate_catalog_selection_metadata
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 CATALOG_PATH = PROJECT_ROOT / "data" / "models.json"
+WEB_CATALOG_PATH = PROJECT_ROOT / "web" / "public" / "models.json"
 
 
 def main() -> int:
@@ -19,6 +20,13 @@ def main() -> int:
         return 1
 
     raw = json.loads(CATALOG_PATH.read_text(encoding="utf-8"))
+    if "--fix" in sys.argv[1:]:
+        updated = apply_selection_metadata_to_catalog(raw)
+        rendered = json.dumps(updated, ensure_ascii=False, indent=2) + "\n"
+        CATALOG_PATH.write_text(rendered, encoding="utf-8")
+        WEB_CATALOG_PATH.write_text(rendered, encoding="utf-8")
+        raw = updated
+        print("Applied runtime capability metadata to both catalog mirrors")
     rows = raw.get("models")
     if not isinstance(rows, list):
         print("ERROR: models.json must contain a top-level 'models' list")

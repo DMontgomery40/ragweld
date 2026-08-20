@@ -114,3 +114,40 @@ async def test_config_readiness_uses_deployment_gateway_urls(client: AsyncClient
 
     assert integrations["litellm"]["links"][0]["url"] == "http://127.0.0.1:7/v1"
     assert integrations["vllm"]["links"][0]["url"] == "http://127.0.0.1:8/v1"
+
+
+@pytest.mark.asyncio
+async def test_gateway_registry_owns_only_litellm_client_key(client: AsyncClient) -> None:
+    registry = await client.get("/api/config/registry")
+    assert registry.status_code == 200
+    payload = registry.json()
+    fields = {item["path"] for item in payload["fields"]}
+    secrets = {item["id"]: item for item in payload["secrets"]}
+    integrations = {item["id"]: item for item in payload["integrations"]}
+
+    assert not any(path.startswith("chat.openrouter.") for path in fields)
+    assert not any(path.startswith("chat.local_models.") for path in fields)
+    assert integrations["litellm"]["required_secret_ids"] == ["litellm_api_key"]
+    assert secrets["litellm_api_key"]["optional"] is False
+    assert "openrouter_api_key" not in secrets
+    assert "anthropic_api_key" not in secrets
+    assert "google_api_key" not in secrets
+    assert "litellm" not in secrets["openai_api_key"]["integrations"]
+
+
+@pytest.mark.asyncio
+async def test_config_readiness_marks_missing_litellm_key_unconfigured(client: AsyncClient) -> None:
+    old_key = os.environ.pop("LITELLM_API_KEY", None)
+    try:
+        readiness = await client.get("/api/config/readiness")
+        assert readiness.status_code == 200
+        payload = readiness.json()
+    finally:
+        if old_key is not None:
+            os.environ["LITELLM_API_KEY"] = old_key
+
+    litellm = next(item for item in payload["integrations"] if item["id"] == "litellm")
+    assert litellm["state"] == "unconfigured"
+    assert litellm["configured"] is False
+    assert litellm["reachable"] is None
+    assert litellm["missing_secret_ids"] == ["litellm_api_key"]

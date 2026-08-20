@@ -24,12 +24,15 @@ import { IndexingPilotPanel } from '@/components/RAG/IndexingPilotPanel';
 import { RepositoryConfig } from '@/components/RAG/RepositoryConfig';
 import { SyntheticCallout } from '@/components/RAG/SyntheticCallout';
 import { ModelPicker } from '@/components/RAG/ModelPicker';
+import { ModelPicker as ChatModelPicker } from '@/components/Chat/ModelPicker';
 import { PromptLink } from '@/components/ui/PromptLink';
 import { EmbeddingMismatchWarning } from '@/components/ui/EmbeddingMismatchWarning';
 import { TooltipIcon } from '@/components/ui/TooltipIcon';
 import { indexingApi } from '@/api';
 import { formatBytes, formatCurrency, formatDuration, formatNumber } from '@/utils/formatters';
 import type {
+  ChatModelInfo,
+  ChatModelsResponse,
   IndexEstimate,
   IndexRequest,
   IndexRunEvent,
@@ -66,15 +69,6 @@ const FALLBACK_CHUNKING_STRATEGIES = [
   { id: 'ast', label: 'AST-aware', description: 'Preserve functions/blocks (best for code)' },
   { id: 'hybrid', label: 'Hybrid', description: 'AST with fallback behavior' },
 ];
-
-function isSemanticKgCatalogModelAllowed(provider: string, modelName: string): boolean {
-  const providerKey = String(provider || '').trim().toLowerCase();
-  const normalizedModel = String(modelName || '').trim().toLowerCase();
-  if (providerKey === 'openai' && normalizedModel === 'gpt-5') {
-    return false;
-  }
-  return true;
-}
 
 export function IndexingSubtab() {
   const { api } = useAPI();
@@ -214,6 +208,27 @@ export function IndexingSubtab() {
   const [semanticKgMode, setSemanticKgMode] = useConfigField<'heuristic' | 'llm'>('graph_indexing.semantic_kg_mode', 'llm');
   const [semanticKgMaxChunks, setSemanticKgMaxChunks] = useConfigField<number>('graph_indexing.semantic_kg_max_chunks', 40000);
   const [semanticKgLlmModel, setSemanticKgLlmModel] = useConfigField<string>('graph_indexing.semantic_kg_llm_model', '');
+  const [generationModels, setGenerationModels] = useState<ChatModelInfo[]>([]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const scope = String(activeRepo || '').trim();
+    const query = scope ? `?corpus_id=${encodeURIComponent(scope)}` : '';
+    fetch(api(`chat/models${query}`), { signal: controller.signal })
+      .then((response) => {
+        if (!response.ok) throw new Error(String(response.status));
+        return response.json();
+      })
+      .then((payload) => {
+        const rows = (payload as ChatModelsResponse).models;
+        setGenerationModels(Array.isArray(rows) ? rows : []);
+      })
+      .catch((cause) => {
+        if (cause instanceof DOMException && cause.name === 'AbortError') return;
+        setGenerationModels([]);
+      });
+    return () => controller.abort();
+  }, [activeRepo, api]);
 
   // (Models loaded via useModels hook below — no manual state needed)
 
@@ -412,8 +427,13 @@ export function IndexingSubtab() {
   }, [embeddingBackend, normalizedEmbeddingType, runtimeCapabilities, skipDense, tokenizationStrategy]);
 
   const indexBlockingReason = useMemo(() => {
-    if (semanticKgEnabled && !String(semanticKgLlmModel || '').trim()) {
-      return 'Select a runtime-selectable KG LLM model before enabling Semantic KG indexing.';
+    const semanticAlias = String(semanticKgLlmModel || '').trim();
+    if (
+      semanticKgEnabled
+      && semanticAlias
+      && !generationModels.some((model) => String(model.id || '').trim() === semanticAlias)
+    ) {
+      return `Semantic KG alias '${semanticAlias}' is not available from LiteLLM.`;
     }
     if (skipDense !== 1 && String(embeddingBackend || '').toLowerCase() === 'provider' && !supportedRuntimeProvider) {
       return `Embedding provider '${normalizedEmbeddingType}' is not supported by the current backend runtime.`;
@@ -430,6 +450,7 @@ export function IndexingSubtab() {
     embeddingStatus?.isMismatched,
     forceReindex,
     normalizedEmbeddingType,
+    generationModels,
     semanticKgEnabled,
     semanticKgLlmModel,
     skipDense,
@@ -2574,20 +2595,19 @@ export function IndexingSubtab() {
                     </div>
 
                     <div style={{ marginTop: '12px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', alignItems: 'end' }}>
-                      <ModelPicker
-                        componentType="GEN"
-                        selectionRole="generation"
-                        value={semanticKgLlmModel}
-                        onChange={setSemanticKgLlmModel}
-                        label="KG LLM Model"
-                        tooltipKey="SEMANTIC_KG_LLM_MODEL"
-                        modelFilter={(model) =>
-                          isSemanticKgCatalogModelAllowed(String(model.provider || ''), String(model.model || ''))
-                        }
-                      />
+                      <div className="input-group">
+                        <label>KG LLM Alias</label>
+                        <ChatModelPicker
+                          value={semanticKgLlmModel}
+                          onChange={setSemanticKgLlmModel}
+                          models={generationModels}
+                          valueMode="id"
+                          allowEmpty
+                        />
+                      </div>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                         <span style={{ fontSize: '11px', color: 'var(--fg-muted)' }}>
-                          Choose an explicit runtime-selectable model. Plain OpenAI `gpt-5` is intentionally excluded.
+                          Choose a LiteLLM alias. Empty uses the configured gateway default.
                         </span>
                       </div>
                     </div>

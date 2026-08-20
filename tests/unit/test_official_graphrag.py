@@ -10,17 +10,10 @@ from server.indexing.official_graphrag import (
     _count_semantic_edges,
     _lexical_graph_config,
     _schema,
-    _strip_openai_prefix,
     write_lexical_graph_with_graphrag,
 )
 from server.models.index import Chunk
 from server.models.tribrid_config_model import TriBridConfig
-
-
-def test_strip_openai_prefix_handles_prefixed_models() -> None:
-    assert _strip_openai_prefix("openai/gpt-5.4-mini") == "gpt-5.4-mini"
-    assert _strip_openai_prefix("litellm:openai/gpt-5.4-mini") == "gpt-5.4-mini"
-    assert _strip_openai_prefix("gpt-5.4-mini") == "gpt-5.4-mini"
 
 
 @pytest.mark.asyncio

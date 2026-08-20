@@ -276,7 +276,7 @@ async def test_answer_stream_empty_provider_output_is_not_cached(client: AsyncCl
 
     def _fake_select_provider_route(*_args, **_kwargs):
         return SimpleNamespace(
-            kind="cloud_direct",
+            kind="litellm",
             provider_name="OpenAI",
             model="gpt-4o-mini",
             base_url="https://api.openai.com/v1",

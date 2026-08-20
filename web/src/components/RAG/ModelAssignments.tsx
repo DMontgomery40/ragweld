@@ -1,7 +1,7 @@
 /**
  * ModelAssignments - Read-only overview of every model-dependent task in the pipeline.
  *
- * Shows task, provider, effective model (with fallback resolution), system prompt link,
+ * Shows task, provider, effective model, system prompt link,
  * and catalog validation status.
  */
 
@@ -22,13 +22,12 @@ interface AssignmentRow {
 
 export function ModelAssignments() {
   const { config } = useConfig();
-  const { models: genModels } = useModels('GEN');
   const { models: embModels } = useModels('EMB');
   const { models: rerankModels } = useModels('RERANK');
 
   const allModels = useMemo(
-    () => [...genModels, ...embModels, ...rerankModels],
-    [genModels, embModels, rerankModels],
+    () => [...embModels, ...rerankModels],
+    [embModels, rerankModels],
   );
 
   const rows = useMemo<AssignmentRow[]>(() => {
@@ -39,17 +38,12 @@ export function ModelAssignments() {
     const emb = config.embedding;
     const rr = config.reranking;
 
-    const genBackend = gen?.gen_backend || 'openai';
-    const enrichBackend = gen?.enrich_backend || 'openai';
     const embType = emb?.embedding_type || 'openai';
     const rrMode = String(rr?.reranker_mode || 'none').toLowerCase();
 
-    const enrichModel = gen?.enrich_model || 'gpt-4o-mini';
+    const enrichModel = gen?.enrich_model || 'ragweld-local';
 
-    // Semantic KG is replacement-only: the operator must select a catalog model explicitly.
-    const kgModel = graph?.semantic_kg_llm_model || '';
-    const kgCatalogRow = genModels.find((model) => String(model.model || '').trim() === kgModel);
-    const kgProvider = String(kgCatalogRow?.provider || '').trim() || 'unresolved';
+    const kgModel = graph?.semantic_kg_llm_model || config.chat?.litellm?.default_model || 'ragweld-local';
 
     // Resolve embedding model based on type
     let embModel = '';
@@ -80,32 +74,32 @@ export function ModelAssignments() {
     const out: AssignmentRow[] = [
       {
         task: 'Chat Answer',
-        provider: genBackend,
-        model: gen?.gen_model || 'gpt-4o-mini',
+        provider: 'litellm',
+        model: gen?.gen_model || 'ragweld-local',
         promptKey: 'main_rag_chat',
         promptLabel: 'Chat Prompt',
       },
       {
         task: 'Enrichment',
-        provider: enrichBackend,
+        provider: 'litellm',
         model: enrichModel,
       },
       {
         task: 'Semantic KG LLM',
-        provider: kgProvider,
-        model: kgModel || '(selection required)',
+        provider: 'litellm',
+        model: kgModel,
       },
       {
         task: 'Query Expansion',
-        provider: genBackend,
-        model: gen?.gen_model || 'gpt-4o-mini',
+        provider: 'litellm',
+        model: gen?.gen_model || 'ragweld-local',
         promptKey: 'query_expansion',
         promptLabel: 'Expansion Prompt',
       },
       {
         task: 'Query Rewrite',
-        provider: genBackend,
-        model: gen?.gen_model || 'gpt-4o-mini',
+        provider: 'litellm',
+        model: gen?.gen_model || 'ragweld-local',
         promptKey: 'query_rewrite',
         promptLabel: 'Rewrite Prompt',
       },
@@ -125,41 +119,26 @@ export function ModelAssignments() {
     if (gen?.gen_model_http) {
       out.push({
         task: 'HTTP Override',
-        provider: genBackend,
+        provider: 'litellm',
         model: gen.gen_model_http,
       });
     }
     if (gen?.gen_model_mcp) {
       out.push({
         task: 'MCP Override',
-        provider: genBackend,
+        provider: 'litellm',
         model: gen.gen_model_mcp,
       });
     }
     if (gen?.gen_model_cli) {
       out.push({
         task: 'CLI Override',
-        provider: genBackend,
+        provider: 'litellm',
         model: gen.gen_model_cli,
       });
     }
-    if (gen?.gen_model_ollama) {
-      out.push({
-        task: 'Chat Answer (Ollama)',
-        provider: 'ollama',
-        model: gen.gen_model_ollama,
-      });
-    }
-    if (gen?.enrich_model_ollama) {
-      out.push({
-        task: 'Enrichment (Ollama)',
-        provider: 'ollama',
-        model: gen.enrich_model_ollama,
-      });
-    }
-
     return out;
-  }, [config, genModels]);
+  }, [config]);
 
   // Validate model against catalog
   const isInCatalog = useMemo(() => {
@@ -170,7 +149,7 @@ export function ModelAssignments() {
     return (provider: string, model: string) => {
       if (!model || model.startsWith('(')) return true; // placeholders
       const p = String(provider || '').trim().toLowerCase();
-      if (p === 'learning' || p === 'none') return true;
+      if (p === 'learning' || p === 'none' || p === 'litellm') return true;
       const m = model.trim();
       if (byProvider.has(`${p}::${m}`)) return true;
       return byModelOnly.has(m);

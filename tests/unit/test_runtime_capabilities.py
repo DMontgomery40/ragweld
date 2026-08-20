@@ -53,7 +53,7 @@ def test_runtime_capabilities_can_resolve_litellm_as_default_generation_route() 
                 litellm=LiteLLMConfig(
                     enabled=True,
                     base_url="http://127.0.0.1:4000/v1",
-                    default_model="openai/gpt-4o-mini",
+                    default_model="ragweld-local",
                 ),
             ),
         )
@@ -61,7 +61,7 @@ def test_runtime_capabilities_can_resolve_litellm_as_default_generation_route() 
         assert response.generation.default_route is not None
         assert response.generation.default_route.kind == "litellm"
         assert response.generation.default_route.provider_name == "LiteLLM"
-        assert response.generation.default_route.model == "openai/gpt-4o-mini"
+        assert response.generation.default_route.model == "ragweld-local"
         assert response.generation.default_route.base_url == "http://127.0.0.1:4000/v1"
     finally:
         if old_litellm is None:

@@ -887,31 +887,23 @@ async def analyze_eval_comparison(
                 f"Selected model: {selected_model or '(unknown)'}\n"
             )
 
-        openrouter_default = str(getattr(cfg.chat.openrouter, "default_model", "") or "").strip()
         litellm_default = str(getattr(cfg.chat.litellm, "default_model", "") or "").strip()
-        local_default = str(getattr(cfg.chat.local_models, "default_chat_model", "") or "").strip()
         gen_model = str(getattr(cfg.generation, "gen_model", "") or "").strip()
-        openai_base_url = str(getattr(cfg.generation, "openai_base_url", "") or "").strip()
         litellm_base_url = str(getattr(cfg.chat.litellm, "base_url", "") or "").strip()
         vllm_base_url = str(getattr(cfg.chat.vllm, "base_url", "") or "").strip()
 
         extra = [
             "",
-            "Provider setup checklist:",
-            "1) OpenAI (cloud-direct): set `OPENAI_API_KEY` in `.env` and restart the backend.",
-            "   - If you use a proxy, set `generation.openai_base_url` in config (not `OPENAI_BASE_URL`).",
-            "2) LiteLLM gateway: set `chat.litellm.enabled=true`, set `chat.litellm.base_url`, and set `LITELLM_API_KEY` if your gateway requires auth.",
-            "3) OpenRouter: set `OPENROUTER_API_KEY` in `.env` and set `chat.openrouter.enabled=true`.",
-            "4) Local or vLLM: start Ollama/llama.cpp/vLLM and ensure `chat.local_models.providers` includes an enabled provider, or route vLLM through LiteLLM.",
+            "Generation setup checklist:",
+            "1) Start the managed vLLM serving backend and wait for its model to load.",
+            "2) Start the managed LiteLLM gateway and set the API-to-gateway `LITELLM_API_KEY`.",
+            "3) Select a LiteLLM model alias; upstream provider credentials remain gateway-owned.",
             "",
             "Model selection notes:",
             f"- chat.litellm.default_model: {litellm_default or '(empty)'}",
-            f"- chat.openrouter.default_model: {openrouter_default or '(empty)'}",
-            f"- chat.local_models.default_chat_model: {local_default or '(empty)'}",
             f"- generation.gen_model: {gen_model or '(empty)'}",
             f"- chat.litellm.base_url: {litellm_base_url or '(empty)'}",
             f"- chat.vllm.base_url: {vllm_base_url or '(empty)'}",
-            f"- generation.openai_base_url: {openai_base_url or '(default)'}",
         ]
         return f"{reason}{model_line}\n" + "\n".join(extra)
 

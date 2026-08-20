@@ -73,8 +73,8 @@ def test_seed_hydration_sets_degradation_flags(tmp_path: object) -> None:
     request = SyntheticRunStartRequest(
         repo_id="test_honest_failures",
         recipe="eval_dataset",
-        generator_model="openai/gpt-4o-mini",
-        judge_model="openai/gpt-4o-mini",
+        generator_model="litellm:synthetic-quality",
+        judge_model="litellm:synthetic-quality",
     )
 
     # This will try to load seed items from disk -- with no seed file it returns 0
@@ -99,8 +99,8 @@ def test_seed_hydration_skips_non_eval_recipes() -> None:
     request = SyntheticRunStartRequest(
         repo_id="test_keywords_only",
         recipe="keywords",
-        generator_model="openai/gpt-4o-mini",
-        judge_model="openai/gpt-4o-mini",
+        generator_model="litellm:synthetic-quality",
+        judge_model="litellm:synthetic-quality",
     )
 
     count = _hydrate_eval_dataset_from_seed(

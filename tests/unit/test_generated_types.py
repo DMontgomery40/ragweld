@@ -20,9 +20,12 @@ def test_model_validation_result_in_generated_ts() -> None:
     assert "export interface ModelValidationResult" in content
 
 
-def test_generation_config_has_gen_backend() -> None:
+def test_generation_config_exposes_gateway_alias_not_direct_backend() -> None:
     content = GENERATED_TS.read_text()
-    assert "gen_backend" in content
+    assert "gen_model?: string" in content
+    assert "gen_backend" not in content
+    assert "OpenRouterConfig" not in content
+    assert "LocalModelConfig" not in content
 
 
 def test_model_validation_result_has_warnings_typed() -> None:

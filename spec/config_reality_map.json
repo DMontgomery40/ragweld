@@ -2,162 +2,335 @@
   "sections": {
     "retrieval": {
       "disposition": "runtime_effect",
-      "evidence": ["server/retrieval/fusion.py"]
+      "evidence": [
+        "server/retrieval/fusion.py"
+      ]
     },
     "semantic_cache": {
       "disposition": "runtime_effect",
-      "evidence": ["server/retrieval/cache.py"]
+      "evidence": [
+        "server/retrieval/cache.py"
+      ]
     },
     "scoring": {
       "disposition": "runtime_effect",
-      "evidence": ["server/retrieval/fusion.py"]
+      "evidence": [
+        "server/retrieval/fusion.py"
+      ]
     },
     "layer_bonus": {
       "disposition": "runtime_effect",
-      "evidence": ["server/retrieval/fusion.py"]
+      "evidence": [
+        "server/retrieval/fusion.py"
+      ]
     },
     "embedding": {
       "disposition": "runtime_effect",
-      "evidence": ["server/indexing/embedder.py"]
+      "evidence": [
+        "server/indexing/embedder.py"
+      ]
     },
     "tokenization": {
       "disposition": "runtime_effect",
-      "evidence": ["server/indexing/tokenizer.py"]
+      "evidence": [
+        "server/indexing/tokenizer.py"
+      ]
     },
     "chunking": {
       "disposition": "runtime_effect",
-      "evidence": ["server/indexing/chunker.py"]
+      "evidence": [
+        "server/indexing/chunker.py"
+      ]
     },
     "indexing": {
       "disposition": "runtime_effect",
-      "evidence": ["server/api/index.py"]
+      "evidence": [
+        "server/api/index.py"
+      ]
     },
     "graph_storage": {
       "disposition": "runtime_effect",
-      "evidence": ["server/db/neo4j.py"]
+      "evidence": [
+        "server/db/neo4j.py"
+      ]
     },
     "graph_indexing": {
       "disposition": "runtime_effect",
-      "evidence": ["server/api/index.py"]
+      "evidence": [
+        "server/api/index.py"
+      ]
     },
     "fusion": {
       "disposition": "runtime_effect",
-      "evidence": ["server/retrieval/fusion.py"]
+      "evidence": [
+        "server/retrieval/fusion.py"
+      ]
     },
     "vector_search": {
       "disposition": "runtime_effect",
-      "evidence": ["server/retrieval/vector.py"]
+      "evidence": [
+        "server/retrieval/vector.py"
+      ]
     },
     "sparse_search": {
       "disposition": "runtime_effect",
-      "evidence": ["server/retrieval/sparse.py"]
+      "evidence": [
+        "server/retrieval/sparse.py"
+      ]
     },
     "graph_search": {
       "disposition": "runtime_effect",
-      "evidence": ["server/retrieval/graph.py"]
+      "evidence": [
+        "server/retrieval/graph.py"
+      ]
     },
     "reranking": {
       "disposition": "runtime_effect",
-      "evidence": ["server/retrieval/rerank.py"]
+      "evidence": [
+        "server/retrieval/rerank.py"
+      ]
     },
     "generation": {
       "disposition": "runtime_effect",
-      "evidence": ["server/chat/generation.py"]
+      "evidence": [
+        "server/chat/generation.py"
+      ]
     },
     "enrichment": {
       "disposition": "runtime_effect",
-      "evidence": ["server/api/index.py"]
+      "evidence": [
+        "server/api/index.py"
+      ]
     },
     "chunk_summaries": {
       "disposition": "runtime_effect",
-      "evidence": ["server/api/index.py"]
+      "evidence": [
+        "server/api/index.py"
+      ]
     },
     "keywords": {
       "disposition": "runtime_effect",
-      "evidence": ["server/api/keywords.py"]
+      "evidence": [
+        "server/api/keywords.py"
+      ]
     },
     "tracing": {
       "disposition": "runtime_effect",
-      "evidence": ["server/observability/metrics.py"]
+      "evidence": [
+        "server/observability/metrics.py"
+      ]
     },
     "training": {
       "disposition": "runtime_effect",
-      "evidence": ["server/training/reranker_trainer.py"]
+      "evidence": [
+        "server/training/reranker_trainer.py"
+      ]
     },
     "synthetic": {
       "disposition": "runtime_effect",
-      "evidence": ["server/api/synthetic.py", "server/synthetic/orchestrator.py"]
+      "evidence": [
+        "server/api/synthetic.py",
+        "server/synthetic/orchestrator.py"
+      ]
     },
     "ui": {
       "disposition": "ui_effect",
-      "evidence": ["web/src/stores/useUIStore.ts"]
+      "evidence": [
+        "web/src/stores/useUIStore.ts"
+      ]
     },
     "chat": {
       "disposition": "runtime_effect",
-      "evidence": ["server/api/chat.py"]
+      "evidence": [
+        "server/api/chat.py"
+      ]
     },
     "hydration": {
       "disposition": "runtime_effect",
-      "evidence": ["server/retrieval/fusion.py"]
+      "evidence": [
+        "server/retrieval/fusion.py"
+      ]
     },
     "evaluation": {
       "disposition": "runtime_effect",
-      "evidence": ["server/api/eval.py"]
+      "evidence": [
+        "server/api/eval.py"
+      ]
     },
     "system_prompts": {
       "disposition": "runtime_effect",
-      "evidence": ["server/api/prompts.py"]
+      "evidence": [
+        "server/api/prompts.py"
+      ]
     },
     "mcp": {
       "disposition": "runtime_effect",
-      "evidence": ["server/mcp/server.py"]
+      "evidence": [
+        "server/mcp/server.py"
+      ]
     },
     "docker": {
       "disposition": "runtime_effect",
-      "evidence": ["server/api/docker.py"]
+      "evidence": [
+        "server/api/docker.py"
+      ]
     }
   },
   "overrides": {},
   "legacy_removed": {
     "indexing.table_name": {
       "disposition": "remove",
-      "evidence": ["server/services/config_store.py", "server/models/tribrid_config_model.py"]
+      "evidence": [
+        "server/services/config_store.py",
+        "server/models/tribrid_config_model.py"
+      ]
     },
     "indexing.collection_suffix": {
       "disposition": "remove",
-      "evidence": ["server/services/config_store.py", "server/models/tribrid_config_model.py"]
+      "evidence": [
+        "server/services/config_store.py",
+        "server/models/tribrid_config_model.py"
+      ]
     },
     "indexing.repo_path": {
       "disposition": "remove",
-      "evidence": ["server/services/config_store.py", "server/models/tribrid_config_model.py"]
+      "evidence": [
+        "server/services/config_store.py",
+        "server/models/tribrid_config_model.py"
+      ]
     },
     "indexing.out_dir_base": {
       "disposition": "remove",
-      "evidence": ["server/services/config_store.py", "server/models/tribrid_config_model.py"]
+      "evidence": [
+        "server/services/config_store.py",
+        "server/models/tribrid_config_model.py"
+      ]
     },
     "indexing.rag_out_base": {
       "disposition": "remove",
-      "evidence": ["server/services/config_store.py", "server/models/tribrid_config_model.py"]
+      "evidence": [
+        "server/services/config_store.py",
+        "server/models/tribrid_config_model.py"
+      ]
     },
     "indexing.repos_file": {
       "disposition": "remove",
-      "evidence": ["server/services/config_store.py", "server/models/tribrid_config_model.py"]
+      "evidence": [
+        "server/services/config_store.py",
+        "server/models/tribrid_config_model.py"
+      ]
     },
     "indexing.bm25_stopwords_lang": {
       "disposition": "remove",
-      "evidence": ["server/services/config_store.py", "server/models/tribrid_config_model.py"]
+      "evidence": [
+        "server/services/config_store.py",
+        "server/models/tribrid_config_model.py"
+      ]
     },
     "graph_storage.neo4j_password": {
       "disposition": "remove",
-      "evidence": ["server/services/config_store.py", "server/models/tribrid_config_model.py"]
+      "evidence": [
+        "server/services/config_store.py",
+        "server/models/tribrid_config_model.py"
+      ]
     },
     "chat.litellm.api_key": {
       "disposition": "remove",
-      "evidence": ["server/services/config_store.py", "server/models/runtime_gateway.py"]
+      "evidence": [
+        "server/services/config_store.py",
+        "server/models/runtime_gateway.py"
+      ]
     },
-    "chat.openrouter.api_key": {
+    "generation.gen_backend": {
       "disposition": "remove",
-      "evidence": ["server/services/config_store.py", "server/models/runtime_gateway.py"]
+      "evidence": [
+        "server/models/runtime_gateway.py",
+        "tests/unit/test_gateway_config_contract.py"
+      ]
+    },
+    "generation.enrich_backend": {
+      "disposition": "remove",
+      "evidence": [
+        "server/models/runtime_gateway.py",
+        "tests/unit/test_gateway_config_contract.py"
+      ]
+    },
+    "generation.gen_retry_max": {
+      "disposition": "remove",
+      "evidence": [
+        "server/models/runtime_gateway.py",
+        "tests/unit/test_gateway_config_contract.py"
+      ]
+    },
+    "generation.gen_model_ollama": {
+      "disposition": "remove",
+      "evidence": [
+        "server/models/runtime_gateway.py",
+        "tests/unit/test_gateway_config_contract.py"
+      ]
+    },
+    "generation.enrich_model_ollama": {
+      "disposition": "remove",
+      "evidence": [
+        "server/models/runtime_gateway.py",
+        "tests/unit/test_gateway_config_contract.py"
+      ]
+    },
+    "generation.ollama_num_ctx": {
+      "disposition": "remove",
+      "evidence": [
+        "server/models/runtime_gateway.py",
+        "tests/unit/test_gateway_config_contract.py"
+      ]
+    },
+    "generation.ollama_url": {
+      "disposition": "remove",
+      "evidence": [
+        "server/models/runtime_gateway.py",
+        "tests/unit/test_gateway_config_contract.py"
+      ]
+    },
+    "generation.ollama_request_timeout": {
+      "disposition": "remove",
+      "evidence": [
+        "server/models/runtime_gateway.py",
+        "tests/unit/test_gateway_config_contract.py"
+      ]
+    },
+    "generation.ollama_stream_idle_timeout": {
+      "disposition": "remove",
+      "evidence": [
+        "server/models/runtime_gateway.py",
+        "tests/unit/test_gateway_config_contract.py"
+      ]
+    },
+    "generation.openai_base_url": {
+      "disposition": "remove",
+      "evidence": [
+        "server/models/runtime_gateway.py",
+        "tests/unit/test_gateway_config_contract.py"
+      ]
+    },
+    "chat.openrouter": {
+      "disposition": "remove",
+      "evidence": [
+        "server/models/tribrid_config_model.py",
+        "tests/unit/test_gateway_config_contract.py"
+      ]
+    },
+    "chat.local_models": {
+      "disposition": "remove",
+      "evidence": [
+        "server/models/tribrid_config_model.py",
+        "tests/unit/test_gateway_config_contract.py"
+      ]
+    },
+    "chat.openai_protocol": {
+      "disposition": "remove",
+      "evidence": [
+        "server/models/tribrid_config_model.py",
+        "tests/unit/test_gateway_config_contract.py"
+      ]
     }
   }
 }

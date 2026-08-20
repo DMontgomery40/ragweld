@@ -7,11 +7,9 @@ from server.synthetic.orchestrator import _evaluate_quality_gate
 from server.synthetic.recipes import synthetic_generation_model_category
 
 
-def test_synthetic_generation_model_category_accepts_expected_prefixes() -> None:
-    assert synthetic_generation_model_category("openai/gpt-4o-mini") == "openai"
-    assert synthetic_generation_model_category("openrouter:openai/gpt-4o-mini") == "openrouter"
-    assert synthetic_generation_model_category("local:qwen3-coder:14b") == "local"
-    assert synthetic_generation_model_category("ragweld:mlx-community/Qwen3-1.7B-4bit") == "ragweld"
+def test_synthetic_generation_model_category_accepts_gateway_aliases() -> None:
+    assert synthetic_generation_model_category("litellm:synthetic-quality") == "litellm"
+    assert synthetic_generation_model_category("synthetic-quality") == "litellm_alias"
 
 
 @pytest.mark.asyncio

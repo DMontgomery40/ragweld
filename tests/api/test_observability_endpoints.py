@@ -452,11 +452,11 @@ async def test_observability_summaries_and_incidents_correlate_eval_benchmark_an
             run_id=f"{corpus_id}__benchmark_prev",
             repo_id=corpus_id,
             prompt="ping",
-            models=["openrouter:openai/gpt-4o-mini", "litellm:openai/gpt-4.1-mini"],
+            models=["litellm:ragweld-local", "litellm:quality-review"],
             started_at_ms=1_742_873_100_000,
             ended_at_ms=1_742_873_101_000,
             results=[
-                BenchmarkResult(model="openrouter:openai/gpt-4o-mini", response="ok", latency_ms=100.0, breakdown_ms={"generate": 100.0}),
+                BenchmarkResult(model="litellm:ragweld-local", response="ok", latency_ms=100.0, breakdown_ms={"generate": 100.0}),
                 BenchmarkResult(model="litellm:openai/gpt-4.1-mini", response="ok", latency_ms=120.0, breakdown_ms={"generate": 120.0}),
             ],
             bundle_id=base_bundle_id,
@@ -465,11 +465,11 @@ async def test_observability_summaries_and_incidents_correlate_eval_benchmark_an
             run_id=f"{corpus_id}__benchmark_latest",
             repo_id=corpus_id,
             prompt="ping",
-            models=["openrouter:openai/gpt-4o-mini", "litellm:openai/gpt-4.1-mini"],
+            models=["litellm:ragweld-local", "litellm:quality-review"],
             started_at_ms=1_742_873_200_000,
             ended_at_ms=1_742_873_201_000,
             results=[
-                BenchmarkResult(model="openrouter:openai/gpt-4o-mini", response="still ok", latency_ms=650.0, breakdown_ms={"generate": 650.0}),
+                BenchmarkResult(model="litellm:ragweld-local", response="still ok", latency_ms=650.0, breakdown_ms={"generate": 650.0}),
                 BenchmarkResult(
                     model="litellm:openai/gpt-4.1-mini",
                     response="",

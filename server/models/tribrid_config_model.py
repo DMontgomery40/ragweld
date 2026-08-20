@@ -35,12 +35,10 @@ from server.models.runtime_gateway import ChatModelsResponse as ChatModelsRespon
 from server.models.runtime_gateway import ChatProviderInfo as ChatProviderInfo
 from server.models.runtime_gateway import GenerationConfig as GenerationConfig
 from server.models.runtime_gateway import LiteLLMConfig as LiteLLMConfig
-from server.models.runtime_gateway import LocalModelConfig as LocalModelConfig
-from server.models.runtime_gateway import LocalProviderEntry as LocalProviderEntry
-from server.models.runtime_gateway import OpenRouterConfig as OpenRouterConfig
 from server.models.runtime_gateway import ProviderHealth as ProviderHealth
 from server.models.runtime_gateway import ProvidersHealthResponse as ProvidersHealthResponse
 from server.models.runtime_gateway import VLLMConfig as VLLMConfig
+from server.models.runtime_gateway import validate_litellm_alias
 from server.models.synthetic import SyntheticConfig as SyntheticConfig
 from server.models.synthetic import SyntheticGeneratorConfig as SyntheticGeneratorConfig
 from server.models.synthetic import SyntheticJudgeConfig as SyntheticJudgeConfig
@@ -1940,7 +1938,7 @@ class ModelCatalogEntry(BaseModel):
     per_request: float | None = Field(default=None, ge=0.0, description="Cost per request")
     base_url: str | None = Field(default=None, description="Optional provider base URL")
     notes: str | None = Field(default=None, description="Freeform notes")
-    selection_roles: list[Literal["generation", "embedding_provider", "reranker_cloud"]] = Field(
+    selection_roles: list[Literal["embedding_provider", "reranker_cloud"]] = Field(
         default_factory=list,
         description="Runtime selection surfaces that should expose this row.",
     )
@@ -3478,16 +3476,8 @@ class SyntheticRunStartRequest(BaseModel):
     include_tags: bool = Field(default=True)
 
     seed: int | None = Field(default=1337)
-    generator_model: str = Field(
-        validation_alias=AliasChoices("generator_model", "generator_model_override"),
-        serialization_alias="generator_model",
-        min_length=1,
-    )
-    judge_model: str = Field(
-        validation_alias=AliasChoices("judge_model", "judge_model_override"),
-        serialization_alias="judge_model",
-        min_length=1,
-    )
+    generator_model: str = Field(min_length=1)
+    judge_model: str = Field(min_length=1)
 
     @field_validator("generator_model", "judge_model")
     @classmethod
@@ -3495,6 +3485,9 @@ class SyntheticRunStartRequest(BaseModel):
         model_name = str(value or "").strip()
         if not model_name:
             raise ValueError("must not be empty")
+        alias = model_name[len("litellm:") :] if model_name.lower().startswith("litellm:") else model_name
+        if not re.fullmatch(r"[A-Za-z0-9._-]+", alias):
+            raise ValueError("must be a LiteLLM alias")
         return model_name
 
     @field_validator("repo_id")
@@ -4961,8 +4954,13 @@ class GraphIndexingConfig(BaseModel):
 
     semantic_kg_llm_model: str = Field(
         default="",
-        description="Explicit runtime-selectable GEN catalog model for GraphRAG semantic extraction; required when semantic KG is enabled",
+        description="Optional LiteLLM alias for GraphRAG semantic extraction; empty uses the gateway default",
     )
+
+    @field_validator("semantic_kg_llm_model")
+    @classmethod
+    def validate_semantic_kg_alias(cls, value: str) -> str:
+        return validate_litellm_alias(value, allow_empty=True)
 
     semantic_kg_llm_timeout_s: int = Field(
         default=30,
@@ -5803,7 +5801,7 @@ class UIConfig(BaseModel):
     )
 
     chat_default_model: str = Field(
-        default="gpt-4o-mini",
+        default="ragweld-local",
         description="Default model for chat if not specified in request"
     )
 
@@ -6450,6 +6448,11 @@ class ChatMultimodalConfig(BaseModel):
         description="Force model for vision. Empty=use chat model if it supports vision.",
     )
 
+    @field_validator("vision_model_override")
+    @classmethod
+    def validate_vision_alias(cls, value: str) -> str:
+        return validate_litellm_alias(value, allow_empty=True)
+
 
 class ImageGenConfig(BaseModel):
     """Two tiers:
@@ -6484,6 +6487,8 @@ class ChatConfig(BaseModel):
     Recall is always available and ON by default. Corpora are available when indexed.
     Everything composes freely.
     """
+
+    model_config = ConfigDict(extra="forbid")
 
     default_corpus_ids: list[str] = Field(
         default=["recall_default"],
@@ -6571,13 +6576,7 @@ Be helpful, friendly, and engaging, and base your answers on the actual database
     image_gen: ImageGenConfig = Field(default_factory=ImageGenConfig)
     vllm: VLLMConfig = Field(default_factory=VLLMConfig)
     litellm: LiteLLMConfig = Field(default_factory=LiteLLMConfig)
-    local_models: LocalModelConfig = Field(default_factory=LocalModelConfig)
-    openrouter: OpenRouterConfig = Field(default_factory=OpenRouterConfig)
     benchmark: BenchmarkConfig = Field(default_factory=BenchmarkConfig)
-    openai_protocol: Literal["auto", "responses", "chat_completions"] = Field(
-        default="auto",
-        description="Protocol for OpenAI cloud_direct calls. 'auto' routes codex-only models to Responses.",
-    )
 
     temperature: float = Field(default=0.3, ge=0.0, le=2.0)
     temperature_no_retrieval: float = Field(
@@ -6638,6 +6637,27 @@ class TriBridConfig(BaseModel):
             "title": "TRIBRID Config",
         },
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_removed_direct_generation_flat_keys(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            removed_keys = {
+                "GEN_BACKEND",
+                "ENRICH_BACKEND",
+                "GEN_RETRY_MAX",
+                "GEN_MODEL_OLLAMA",
+                "ENRICH_MODEL_OLLAMA",
+                "OLLAMA_NUM_CTX",
+                "OLLAMA_URL",
+                "OLLAMA_REQUEST_TIMEOUT",
+                "OLLAMA_STREAM_IDLE_TIMEOUT",
+                "OPENAI_BASE_URL",
+            }
+            present = sorted(removed_keys.intersection(data))
+            if present:
+                raise ValueError(f"Removed direct-generation config keys: {', '.join(present)}")
+        return data
 
     def to_flat_dict(self) -> dict[str, Any]:
         """Convert nested config to flat dict with env-style keys.
@@ -6776,27 +6796,17 @@ class TriBridConfig(BaseModel):
             'TRIBRID_RERANKER_RELOAD_PERIOD_SEC': self.reranking.tribrid_reranker_reload_period_sec,
             'RERANKER_TIMEOUT': self.reranking.reranker_timeout,
             'RERANK_INPUT_SNIPPET_CHARS': self.reranking.rerank_input_snippet_chars,
-    # Generation params (12)
+    # Generation aliases and transport-agnostic controls
             'GEN_MODEL': self.generation.gen_model,
             'GEN_TEMPERATURE': self.generation.gen_temperature,
             'GEN_MAX_TOKENS': self.generation.gen_max_tokens,
             'GEN_TOP_P': self.generation.gen_top_p,
             'GEN_TIMEOUT': self.generation.gen_timeout,
-            'GEN_RETRY_MAX': self.generation.gen_retry_max,
-            'GEN_BACKEND': self.generation.gen_backend,
             'ENRICH_MODEL': self.generation.enrich_model,
-            'ENRICH_BACKEND': self.generation.enrich_backend,
             'ENRICH_DISABLED': self.generation.enrich_disabled,
-            'OLLAMA_NUM_CTX': self.generation.ollama_num_ctx,
-            'OLLAMA_REQUEST_TIMEOUT': self.generation.ollama_request_timeout,
-            'OLLAMA_STREAM_IDLE_TIMEOUT': self.generation.ollama_stream_idle_timeout,
             'GEN_MODEL_CLI': self.generation.gen_model_cli,
-            'GEN_MODEL_OLLAMA': self.generation.gen_model_ollama,
             'GEN_MODEL_HTTP': self.generation.gen_model_http,
             'GEN_MODEL_MCP': self.generation.gen_model_mcp,
-            'ENRICH_MODEL_OLLAMA': self.generation.enrich_model_ollama,
-            'OLLAMA_URL': self.generation.ollama_url,
-            'OPENAI_BASE_URL': self.generation.openai_base_url,
             # Enrichment params (6)
             'CHUNK_SUMMARIES_ENRICH_DEFAULT': self.enrichment.chunk_summaries_enrich_default,
             'CHUNK_SUMMARIES_MAX': self.enrichment.chunk_summaries_max,
@@ -6994,6 +7004,22 @@ class TriBridConfig(BaseModel):
         Returns:
             TriBridConfig instance with nested structure
         """
+        removed_generation_keys = {
+            "GEN_BACKEND",
+            "ENRICH_BACKEND",
+            "GEN_RETRY_MAX",
+            "GEN_MODEL_OLLAMA",
+            "ENRICH_MODEL_OLLAMA",
+            "OLLAMA_NUM_CTX",
+            "OLLAMA_URL",
+            "OLLAMA_REQUEST_TIMEOUT",
+            "OLLAMA_STREAM_IDLE_TIMEOUT",
+            "OPENAI_BASE_URL",
+        }
+        present_removed_keys = sorted(removed_generation_keys.intersection(data))
+        if present_removed_keys:
+            raise ValueError(f"Removed direct-generation config keys: {', '.join(present_removed_keys)}")
+
         def _parse_csv_list(raw: Any, default: list[str]) -> list[str]:
             if isinstance(raw, list):
                 out = [str(x).strip() for x in raw if str(x).strip()]
@@ -7141,26 +7167,16 @@ class TriBridConfig(BaseModel):
                 rerank_input_snippet_chars=data.get('RERANK_INPUT_SNIPPET_CHARS', 700),
             ),
             generation=GenerationConfig(
-                gen_model=data.get('GEN_MODEL', 'gpt-4o-mini'),
+                gen_model=data.get('GEN_MODEL', 'ragweld-local'),
                 gen_temperature=data.get('GEN_TEMPERATURE', 0.0),
                 gen_max_tokens=data.get('GEN_MAX_TOKENS', 2048),
                 gen_top_p=data.get('GEN_TOP_P', 1.0),
                 gen_timeout=data.get('GEN_TIMEOUT', 60),
-                gen_retry_max=data.get('GEN_RETRY_MAX', 2),
-                gen_backend=data.get('GEN_BACKEND', 'openai'),
-                enrich_model=data.get('ENRICH_MODEL', 'gpt-4o-mini'),
-                enrich_backend=data.get('ENRICH_BACKEND', 'openai'),
+                enrich_model=data.get('ENRICH_MODEL', 'ragweld-local'),
                 enrich_disabled=data.get('ENRICH_DISABLED', 0),
-                ollama_num_ctx=data.get('OLLAMA_NUM_CTX', 8192),
-                ollama_request_timeout=data.get('OLLAMA_REQUEST_TIMEOUT', 300),
-                ollama_stream_idle_timeout=data.get('OLLAMA_STREAM_IDLE_TIMEOUT', 60),
-                gen_model_cli=data.get('GEN_MODEL_CLI', 'qwen3-coder:14b'),
-                gen_model_ollama=data.get('GEN_MODEL_OLLAMA', 'qwen3-coder:30b'),
+                gen_model_cli=data.get('GEN_MODEL_CLI', ''),
                 gen_model_http=data.get('GEN_MODEL_HTTP', ''),
                 gen_model_mcp=data.get('GEN_MODEL_MCP', ''),
-                enrich_model_ollama=data.get('ENRICH_MODEL_OLLAMA', ''),
-                ollama_url=data.get('OLLAMA_URL', 'http://127.0.0.1:11434/api'),
-                openai_base_url=data.get('OPENAI_BASE_URL', ''),
             ),
             enrichment=EnrichmentConfig(
                 chunk_summaries_enrich_default=data.get('CHUNK_SUMMARIES_ENRICH_DEFAULT', 1),
@@ -7277,7 +7293,7 @@ class TriBridConfig(BaseModel):
                 chat_show_citations=data.get('CHAT_SHOW_CITATIONS', 1),
                 chat_show_trace=data.get('CHAT_SHOW_TRACE', 1),
                 chat_show_debug_footer=data.get('CHAT_SHOW_DEBUG_FOOTER', 1),
-                chat_default_model=data.get('CHAT_DEFAULT_MODEL', 'gpt-4o-mini'),
+                chat_default_model=data.get('CHAT_DEFAULT_MODEL', 'ragweld-local'),
                 chat_stream_timeout=data.get('CHAT_STREAM_TIMEOUT', 120),
                 chat_thinking_budget_tokens=data.get('CHAT_THINKING_BUDGET_TOKENS', 10000),
                 editor_port=data.get('EDITOR_PORT', 4440),
@@ -7485,26 +7501,17 @@ TRIBRID_CONFIG_KEYS = {
     'TRIBRID_RERANKER_RELOAD_PERIOD_SEC',
     'RERANKER_TIMEOUT',
     'RERANK_INPUT_SNIPPET_CHARS',
-    # Generation params (17)
+    # Generation aliases and transport-agnostic controls
     'GEN_MODEL',
     'GEN_TEMPERATURE',
     'GEN_MAX_TOKENS',
     'GEN_TOP_P',
     'GEN_TIMEOUT',
-    'GEN_RETRY_MAX',
     'ENRICH_MODEL',
-    'ENRICH_MODEL_OLLAMA',
-    'ENRICH_BACKEND',
     'ENRICH_DISABLED',
-    'OLLAMA_NUM_CTX',
-    'OLLAMA_URL',
-    'OPENAI_BASE_URL',
-    'OLLAMA_REQUEST_TIMEOUT',
-    'OLLAMA_STREAM_IDLE_TIMEOUT',
     'GEN_MODEL_CLI',
     'GEN_MODEL_HTTP',
     'GEN_MODEL_MCP',
-    'GEN_MODEL_OLLAMA',
     # Enrichment params (6)
     'CHUNK_SUMMARIES_ENRICH_DEFAULT',
     'CHUNK_SUMMARIES_MAX',

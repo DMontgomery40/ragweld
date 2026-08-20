@@ -35,8 +35,7 @@
     },
     "gateway_routing": {
       "current": [
-        "openrouter",
-        "provider_router"
+        "litellm"
       ],
       "target": [
         "litellm"
@@ -52,10 +51,7 @@
     },
     "inference": {
       "current": [
-        "openrouter",
-        "provider_router",
-        "ragweld_mlx",
-        "mlx_qwen3"
+        "vllm"
       ],
       "target": [
         "vllm"

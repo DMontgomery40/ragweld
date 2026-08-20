@@ -103,11 +103,8 @@ ENV_EXAMPLE_BANNED_KEYS = {
 SERVER_ENV_GETENV_ALLOWLIST = {
     # Provider secrets
     "OPENAI_API_KEY",
-    "OPENROUTER_API_KEY",
     "LITELLM_API_KEY",
     "COHERE_API_KEY",
-    "ANTHROPIC_API_KEY",
-    "GOOGLE_API_KEY",
     "VOYAGE_API_KEY",
     "JINA_API_KEY",
     # Integrations (UI-only presence checks; values are never returned)
@@ -144,7 +141,7 @@ SERVER_ENV_GETENV_BANNED = {
     "EMBEDDING_PROVIDER",
     "EMBEDDING_MODEL",
     "EMBEDDING_DIMENSIONS",
-    # Use TriBridConfig.generation.openai_base_url instead.
+    # Provider routing URLs belong to the private LiteLLM deployment config.
     "OPENAI_BASE_URL",
     # Use TriBridConfig.embedding.embedding_dim instead.
     "TRIBRID_EMBEDDING_DIM",

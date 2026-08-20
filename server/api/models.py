@@ -9,14 +9,12 @@ from __future__ import annotations
 
 import asyncio
 import json
-import logging
 from pathlib import Path
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, HTTPException
 
 from server.models.tribrid_config_model import (
-    CorpusScope,
     ModelCatalogEntry,
     ModelCatalogResponse,
     ModelCatalogUpsertRequest,
@@ -26,18 +24,12 @@ from server.runtime_capabilities import (
     apply_selection_metadata_to_catalog,
     apply_selection_metadata_to_row,
 )
-from server.services.config_store import CorpusNotFoundError
-from server.services.config_store import get_config as load_scoped_config
 
 router = APIRouter(prefix="/api/models", tags=["models"])
 
 MODELS_PATH = Path(__file__).parent.parent.parent / "data" / "models.json"
 WEB_MODELS_PATH = Path(__file__).parent.parent.parent / "web" / "public" / "models.json"
 
-logger = logging.getLogger(__name__)
-
-# Ruff B008: avoid function calls in argument defaults (FastAPI Depends()).
-_CORPUS_SCOPE_DEP = Depends()
 _CATALOG_WRITE_LOCK = asyncio.Lock()
 
 
@@ -172,69 +164,6 @@ def _atomic_write_json(path: Path, data: dict[str, Any]) -> None:
     tmp.replace(path)
 
 
-async def _resolve_ragweld_base_model(scope: CorpusScope | None) -> str | None:
-    repo_id: str | None = None
-    try:
-        repo_id = scope.resolved_repo_id if scope is not None else None
-    except Exception:
-        repo_id = None
-
-    cfg = None
-    if repo_id:
-        try:
-            cfg = await load_scoped_config(repo_id=repo_id)
-        except CorpusNotFoundError as e:
-            # Don't break clients if a UI passes a stale corpus id.
-            logger.warning("models catalog: corpus not found for scope repo_id=%s (%s)", repo_id, e)
-            cfg = None
-        except Exception as e:
-            logger.warning("models catalog: failed to load scoped config for repo_id=%s (%s)", repo_id, e)
-            cfg = None
-
-    if cfg is None:
-        try:
-            cfg = await load_scoped_config(repo_id=None)
-        except Exception as e:
-            logger.warning("models catalog: failed to load global config (%s)", e)
-            return None
-
-    base = str(getattr(getattr(cfg, "training", None), "ragweld_agent_base_model", "") or "").strip()
-    if base.startswith("ragweld:"):
-        base = base.split(":", 1)[1].strip()
-    return base or None
-
-
-def _augment_catalog_with_ragweld(catalog: dict[str, Any], ragweld_base_model: str | None) -> dict[str, Any]:
-    if not ragweld_base_model:
-        return catalog
-
-    model_id = f"ragweld:{ragweld_base_model}"
-    models = catalog.get("models")
-    if not isinstance(models, list):
-        models = []
-        catalog["models"] = models
-
-    for m in models:
-        if isinstance(m, dict) and str(m.get("model") or "") == model_id:
-            return catalog
-
-    models.append(
-        {
-            "provider": "ragweld",
-            "family": ragweld_base_model,
-            "model": model_id,
-            "components": ["GEN"],
-            "context": 0,
-            "unit": "1k_tokens",
-            "input_per_1k": 0.0,
-            "output_per_1k": 0.0,
-            "base_url": "",
-            "notes": "Ragweld in-process MLX model (Qwen3 base + hot-swappable LoRA adapter; context unknown)",
-        }
-    )
-    return catalog
-
-
 def _load_catalog() -> dict[str, Any]:
     """Load the full models.json catalog."""
     if not MODELS_PATH.exists():
@@ -256,14 +185,8 @@ def _catalog_models(catalog: dict[str, Any]) -> list[dict[str, Any]]:
     return []
 
 
-async def _augmented_catalog(scope: CorpusScope | None) -> dict[str, Any]:
-    catalog = _load_catalog()
-    base = await _resolve_ragweld_base_model(scope)
-    return apply_selection_metadata_to_catalog(_augment_catalog_with_ragweld(catalog, base))
-
-
 @router.get("", response_model=ModelCatalogResponse)
-async def get_all_models(scope: CorpusScope = _CORPUS_SCOPE_DEP) -> ModelCatalogResponse:
+async def get_all_models() -> ModelCatalogResponse:
     """
     Return the full models.json catalog (metadata + models list).
 
@@ -271,17 +194,17 @@ async def get_all_models(scope: CorpusScope = _CORPUS_SCOPE_DEP) -> ModelCatalog
     are identified by ``selection_roles`` / ``selection_status`` metadata and the
     backend runtime capabilities endpoint.
     """
-    catalog = await _augmented_catalog(scope)
+    catalog = _load_catalog()
     return ModelCatalogResponse.model_validate(catalog)
 
 
 @router.get("/by-type/{component_type}", response_model=list[ModelCatalogEntry])
-async def get_models_by_type(component_type: str, scope: CorpusScope = _CORPUS_SCOPE_DEP) -> list[ModelCatalogEntry]:
+async def get_models_by_type(component_type: str) -> list[ModelCatalogEntry]:
     """Return models filtered by component type."""
     comp = component_type.upper()
     if comp not in ("EMB", "GEN", "RERANK"):
         raise HTTPException(status_code=400, detail=f"Invalid component_type: {component_type}. Must be EMB, GEN, or RERANK")
-    catalog = await _augmented_catalog(scope)
+    catalog = _load_catalog()
     models = _catalog_models(catalog)
     return [
         ModelCatalogEntry.model_validate(m)
@@ -291,18 +214,18 @@ async def get_models_by_type(component_type: str, scope: CorpusScope = _CORPUS_S
 
 
 @router.get("/providers", response_model=list[str])
-async def get_providers(scope: CorpusScope = _CORPUS_SCOPE_DEP) -> list[str]:
+async def get_providers() -> list[str]:
     """Return unique list of providers, sorted alphabetically."""
-    catalog = await _augmented_catalog(scope)
+    catalog = _load_catalog()
     models = _catalog_models(catalog)
     providers = sorted(set(str(m.get("provider", "unknown")) for m in models))
     return providers
 
 
 @router.get("/providers/{provider}", response_model=list[ModelCatalogEntry])
-async def get_models_for_provider(provider: str, scope: CorpusScope = _CORPUS_SCOPE_DEP) -> list[ModelCatalogEntry]:
+async def get_models_for_provider(provider: str) -> list[ModelCatalogEntry]:
     """Return all models for a specific provider."""
-    catalog = await _augmented_catalog(scope)
+    catalog = _load_catalog()
     models = _catalog_models(catalog)
     p = provider.strip().lower()
     return [ModelCatalogEntry.model_validate(m) for m in models if str(m.get("provider", "")).strip().lower() == p]

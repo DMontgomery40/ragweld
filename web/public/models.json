@@ -26,11 +26,9 @@
       "output_per_1k": 0.05,
       "base_url": "https://api.anthropic.com",
       "notes": "Added automatically from OpenRouter feed.",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "anthropic",
@@ -45,11 +43,9 @@
       "output_per_1k": 0.005,
       "base_url": "https://api.anthropic.com",
       "notes": "Added automatically from OpenRouter feed.",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "anthropic",
@@ -64,11 +60,9 @@
       "output_per_1k": 0.025,
       "base_url": "https://api.anthropic.com",
       "notes": "Added automatically from OpenRouter feed.",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "anthropic",
@@ -83,11 +77,9 @@
       "output_per_1k": 0.05,
       "base_url": "https://api.anthropic.com",
       "notes": "Added automatically from OpenRouter feed.",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "anthropic",
@@ -102,11 +94,9 @@
       "output_per_1k": 0.01,
       "base_url": "https://api.anthropic.com",
       "notes": "Added automatically from OpenRouter feed.",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "cohere",
@@ -120,11 +110,9 @@
       "output_per_1k": 0.002,
       "context": 128000,
       "notes": "Command legacy (source: per 1M = $1.00/$2.00) | [auto-refresh] deprecated_on=2026-02-27",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "cohere",
@@ -139,11 +127,9 @@
       "context": 256000,
       "notes": "Command A (source: per 1M = $2.50/$10.00)",
       "base_url": "https://api.cohere.ai/v2",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "cohere",
@@ -157,11 +143,9 @@
       "output_per_1k": 0.0006,
       "context": 128000,
       "notes": "Command Light (source: per 1M = $0.30/$0.60) | [auto-refresh] deprecated_on=2026-02-27",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "cohere",
@@ -176,11 +160,9 @@
       "context": 128000,
       "notes": "Command R 03-2024 (source: per 1M = $0.50/$1.50)",
       "base_url": "https://api.cohere.ai/v2",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "cohere",
@@ -195,11 +177,9 @@
       "context": 128000,
       "notes": "Command R+ 08-2024 (source: per 1M = $2.50/$10.00)",
       "base_url": "https://api.cohere.ai/v2",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "cohere",
@@ -214,11 +194,9 @@
       "output_per_1k": 0.00015,
       "base_url": "https://api.cohere.ai/v2",
       "notes": "Added automatically from OpenRouter feed.",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "cohere",
@@ -326,11 +304,9 @@
       "context": 163840,
       "notes": "DeepSeek V3.2-Exp non-thinking (source: per 1M = $0.28/$0.42, cache hit $0.028)",
       "base_url": "https://api.deepseek.com/v1",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "deepseek",
@@ -345,11 +321,9 @@
       "output_per_1k": 0.00095,
       "base_url": "https://api.deepseek.com/v1",
       "notes": "Added automatically from OpenRouter feed.",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "deepseek",
@@ -364,11 +338,9 @@
       "output_per_1k": 0.00215,
       "base_url": "https://api.deepseek.com/v1",
       "notes": "Added automatically from OpenRouter feed.",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "deepseek",
@@ -383,11 +355,9 @@
       "output_per_1k": 0.0008,
       "base_url": "https://api.deepseek.com/v1",
       "notes": "Added automatically from OpenRouter feed.",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "deepseek",
@@ -402,11 +372,9 @@
       "output_per_1k": 0.00029,
       "base_url": "https://api.deepseek.com/v1",
       "notes": "Added automatically from OpenRouter feed. | [auto-refresh] deprecated_on=2026-06-16",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "deepseek",
@@ -420,11 +388,9 @@
       "output_per_1k": 0.00042,
       "context": 128000,
       "notes": "DeepSeek V3.2-Exp thinking mode (source: per 1M = $0.28/$0.42, cache hit $0.028) | [auto-refresh] deprecated_on=2026-02-27",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "deepseek",
@@ -439,11 +405,9 @@
       "output_per_1k": 0.001,
       "base_url": "https://api.deepseek.com/v1",
       "notes": "Added automatically from OpenRouter feed.",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "deepseek",
@@ -458,11 +422,9 @@
       "output_per_1k": 0.0004,
       "base_url": "https://api.deepseek.com/v1",
       "notes": "Added automatically from OpenRouter feed.",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "deepseek",
@@ -477,11 +439,9 @@
       "output_per_1k": 0.00041,
       "base_url": "https://api.deepseek.com/v1",
       "notes": "Added automatically from OpenRouter feed.",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "deepseek",
@@ -496,11 +456,9 @@
       "output_per_1k": 0.000431,
       "base_url": "https://api.deepseek.com/v1",
       "notes": "Added automatically from OpenRouter feed. | [auto-refresh] deprecated_on=2026-05-29",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "deepseek",
@@ -515,11 +473,9 @@
       "output_per_1k": 0.00028,
       "base_url": "https://api.deepseek.com/v1",
       "notes": "Added automatically from OpenRouter feed.",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "deepseek",
@@ -534,11 +490,9 @@
       "output_per_1k": 0.00087,
       "base_url": "https://api.deepseek.com/v1",
       "notes": "Added automatically from OpenRouter feed.",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "google",
@@ -553,11 +507,9 @@
       "context": 1048576,
       "notes": "Gemini 2.5 Pro <=200k (source: per 1M = $1.25/$10.00)",
       "base_url": "https://generativelanguage.googleapis.com",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "google",
@@ -572,11 +524,9 @@
       "output_per_1k": 0.003,
       "base_url": "https://generativelanguage.googleapis.com",
       "notes": "Added automatically from OpenRouter feed.",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "google",
@@ -591,11 +541,9 @@
       "output_per_1k": 0.012,
       "base_url": "https://generativelanguage.googleapis.com",
       "notes": "Added automatically from OpenRouter feed.",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "google",
@@ -610,11 +558,9 @@
       "output_per_1k": 0.012,
       "base_url": "https://generativelanguage.googleapis.com",
       "notes": "Added automatically from OpenRouter feed.",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "google",
@@ -629,11 +575,9 @@
       "output_per_1k": 0.003,
       "base_url": "https://generativelanguage.googleapis.com",
       "notes": "Added automatically from OpenRouter feed.",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "google",
@@ -648,11 +592,9 @@
       "output_per_1k": 0.003,
       "base_url": "https://generativelanguage.googleapis.com",
       "notes": "Added automatically from OpenRouter feed.",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "google",
@@ -667,11 +609,9 @@
       "output_per_1k": 0.0015,
       "base_url": "https://generativelanguage.googleapis.com",
       "notes": "Added automatically from OpenRouter feed.",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "google",
@@ -686,11 +626,9 @@
       "output_per_1k": 0.0015,
       "base_url": "https://generativelanguage.googleapis.com",
       "notes": "Added automatically from OpenRouter feed.",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "google",
@@ -705,11 +643,9 @@
       "output_per_1k": 0.012,
       "base_url": "https://generativelanguage.googleapis.com",
       "notes": "Added automatically from OpenRouter feed.",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "google",
@@ -724,11 +660,9 @@
       "output_per_1k": 0.012,
       "base_url": "https://generativelanguage.googleapis.com",
       "notes": "Added automatically from OpenRouter feed.",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "google",
@@ -743,11 +677,9 @@
       "output_per_1k": 0.0025,
       "base_url": "https://generativelanguage.googleapis.com",
       "notes": "Added automatically from OpenRouter feed.",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "google",
@@ -762,11 +694,9 @@
       "context": 1048576,
       "notes": "Gemini 2.0 Flash (source: per 1M = $0.10/$0.40)",
       "base_url": "https://generativelanguage.googleapis.com",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "google",
@@ -796,11 +726,9 @@
       "output_per_1k": 9e-05,
       "base_url": "https://generativelanguage.googleapis.com",
       "notes": "Added automatically from OpenRouter feed. | [auto-refresh] deprecated_on=2026-04-15",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "google",
@@ -815,11 +743,9 @@
       "output_per_1k": 0.00015,
       "base_url": "https://generativelanguage.googleapis.com",
       "notes": "Added automatically from OpenRouter feed.",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "google",
@@ -834,11 +760,9 @@
       "output_per_1k": 0.00045,
       "base_url": "https://generativelanguage.googleapis.com",
       "notes": "Added automatically from OpenRouter feed.",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "google",
@@ -853,11 +777,9 @@
       "output_per_1k": 0.0001,
       "base_url": "https://generativelanguage.googleapis.com",
       "notes": "Added automatically from OpenRouter feed.",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "google",
@@ -872,11 +794,9 @@
       "output_per_1k": 0.00012,
       "base_url": "https://generativelanguage.googleapis.com",
       "notes": "Added automatically from OpenRouter feed.",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "google",
@@ -891,11 +811,9 @@
       "output_per_1k": 0.00034,
       "base_url": "https://generativelanguage.googleapis.com",
       "notes": "Added automatically from OpenRouter feed.",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "google",
@@ -910,11 +828,9 @@
       "output_per_1k": 0.00034,
       "base_url": "https://generativelanguage.googleapis.com",
       "notes": "Added automatically from OpenRouter feed.",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "google",
@@ -929,11 +845,9 @@
       "output_per_1k": 0.0,
       "base_url": "https://generativelanguage.googleapis.com",
       "notes": "Added automatically from OpenRouter feed.",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "google",
@@ -948,11 +862,9 @@
       "output_per_1k": 0.0,
       "base_url": "https://generativelanguage.googleapis.com",
       "notes": "Added automatically from OpenRouter feed.",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "huggingface",
@@ -1171,11 +1083,9 @@
       "output_per_1k": 0.0,
       "context": 128000,
       "notes": "DeepSeek Coder v3 16B local",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "local",
@@ -1189,11 +1099,9 @@
       "output_per_1k": 0.0,
       "context": 128000,
       "notes": "DeepSeek Coder v3 236B local",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "local",
@@ -1239,11 +1147,9 @@
       "context": 256000,
       "notes": "Codestral code generation (source: per 1M = $0.30/$0.90)",
       "base_url": "https://api.mistral.ai/v1",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "mistral",
@@ -1258,11 +1164,9 @@
       "output_per_1k": 0.002,
       "base_url": "https://api.mistral.ai/v1",
       "notes": "Added automatically from OpenRouter feed. | [auto-refresh] deprecated_on=2026-07-31",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "mistral",
@@ -1277,11 +1181,9 @@
       "output_per_1k": 0.002,
       "base_url": "https://api.mistral.ai/v1",
       "notes": "Added automatically from OpenRouter feed. | [auto-refresh] deprecated_on=2026-05-31",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "mistral",
@@ -1296,11 +1198,9 @@
       "output_per_1k": 0.0003,
       "base_url": "https://api.mistral.ai/v1",
       "notes": "Added automatically from OpenRouter feed. | [auto-refresh] deprecated_on=2026-05-31",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "mistral",
@@ -1315,11 +1215,9 @@
       "output_per_1k": 0.0002,
       "base_url": "https://api.mistral.ai/v1",
       "notes": "Added automatically from OpenRouter feed.",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "mistral",
@@ -1334,11 +1232,9 @@
       "output_per_1k": 0.0001,
       "base_url": "https://api.mistral.ai/v1",
       "notes": "Added automatically from OpenRouter feed.",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "mistral",
@@ -1353,11 +1249,9 @@
       "output_per_1k": 0.00015,
       "base_url": "https://api.mistral.ai/v1",
       "notes": "Added automatically from OpenRouter feed.",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "mistral",
@@ -1371,11 +1265,9 @@
       "output_per_1k": 0.00025,
       "context": 32768,
       "notes": "Mistral 7B open (source: per 1M = $0.25/$0.25) | [auto-refresh] deprecated_on=2026-02-27",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "mistral",
@@ -1390,11 +1282,9 @@
       "output_per_1k": 0.0002,
       "base_url": "https://api.mistral.ai/v1",
       "notes": "Added automatically from OpenRouter feed. | [auto-refresh] deprecated_on=2026-03-03",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "mistral",
@@ -1409,11 +1299,9 @@
       "output_per_1k": 0.00019,
       "base_url": "https://api.mistral.ai/v1",
       "notes": "Added automatically from OpenRouter feed. | [auto-refresh] deprecated_on=2026-05-30",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "mistral",
@@ -1443,11 +1331,9 @@
       "context": 262144,
       "notes": "Mistral Large (source: per 1M = $2.00/$6.00)",
       "base_url": "https://api.mistral.ai/v1",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "mistral",
@@ -1462,11 +1348,9 @@
       "context": 262144,
       "notes": "Mistral Medium 3 (source: per 1M = $0.40/$2.00)",
       "base_url": "https://api.mistral.ai/v1",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "mistral",
@@ -1481,11 +1365,9 @@
       "output_per_1k": 3e-05,
       "base_url": "https://api.mistral.ai/v1",
       "notes": "Added automatically from OpenRouter feed.",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "mistral",
@@ -1500,11 +1382,9 @@
       "output_per_1k": 0.0006,
       "base_url": "https://api.mistral.ai/v1",
       "notes": "Added automatically from OpenRouter feed.",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "mistral",
@@ -1518,11 +1398,9 @@
       "output_per_1k": 0.0006,
       "context": 262144,
       "notes": "Mistral Small (source: per 1M = $0.10/$0.30)",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null,
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases.",
       "base_url": "https://api.mistral.ai/v1"
     },
     {
@@ -1538,11 +1416,9 @@
       "output_per_1k": 0.0002,
       "base_url": "https://api.mistral.ai/v1",
       "notes": "Added automatically from OpenRouter feed.",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "mistral",
@@ -1557,11 +1433,9 @@
       "output_per_1k": 0.0003,
       "base_url": "https://api.mistral.ai/v1",
       "notes": "Added automatically from OpenRouter feed. | [auto-refresh] deprecated_on=2026-04-30",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "mistral",
@@ -1575,11 +1449,9 @@
       "output_per_1k": 0.006,
       "context": 64000,
       "notes": "Mixtral 8x22B MOE (source: per 1M = $2.00/$6.00) | [auto-refresh] deprecated_on=2026-02-27",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "mistral",
@@ -1594,11 +1466,9 @@
       "output_per_1k": 0.006,
       "base_url": "https://api.mistral.ai/v1",
       "notes": "Added automatically from OpenRouter feed.",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "mistral",
@@ -1612,11 +1482,9 @@
       "output_per_1k": 0.0007,
       "context": 32768,
       "notes": "Mixtral 8x7B (source: per 1M = $0.70/$0.70) | [auto-refresh] deprecated_on=2026-02-27",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "mistral",
@@ -1631,11 +1499,9 @@
       "output_per_1k": 0.00054,
       "base_url": "https://api.mistral.ai/v1",
       "notes": "Added automatically from OpenRouter feed. | [auto-refresh] deprecated_on=2026-05-08",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "mistral",
@@ -1650,11 +1516,9 @@
       "output_per_1k": 0.006,
       "base_url": "https://api.mistral.ai/v1",
       "notes": "Added automatically from OpenRouter feed. | [auto-refresh] deprecated_on=2026-05-31",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "mistral",
@@ -1669,11 +1533,9 @@
       "output_per_1k": 0.0003,
       "base_url": "https://api.mistral.ai/v1",
       "notes": "Added automatically from OpenRouter feed.",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "mlx",
@@ -1704,11 +1566,9 @@
       "output_per_1k": 0.0,
       "context": 128000,
       "notes": "Llama 3.2 1B local",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "ollama",
@@ -1722,11 +1582,9 @@
       "output_per_1k": 0.0,
       "context": 128000,
       "notes": "Llama 3.2 3B local",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "ollama",
@@ -1755,11 +1613,9 @@
       "output_per_1k": 0.0,
       "context": 256000,
       "notes": "Qwen3 Coder 14B local",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "ollama",
@@ -1773,11 +1629,9 @@
       "output_per_1k": 0.0,
       "context": 256000,
       "notes": "Qwen3 Coder 30B local",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "ollama",
@@ -1791,11 +1645,9 @@
       "output_per_1k": 0.0,
       "context": 256000,
       "notes": "Qwen3 Coder 7B local",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "openai",
@@ -1810,11 +1662,9 @@
       "output_per_1k": 0.004,
       "base_url": "https://api.openai.com/v1",
       "notes": "Added automatically from OpenRouter feed.",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "openai",
@@ -1829,11 +1679,9 @@
       "output_per_1k": 0.002,
       "base_url": "https://api.openai.com/v1",
       "notes": "Added automatically from OpenRouter feed.",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "openai",
@@ -1848,11 +1696,9 @@
       "output_per_1k": 0.03,
       "base_url": "https://api.openai.com/v1",
       "notes": "Added automatically from OpenRouter feed. | [auto-refresh] deprecated_on=2026-06-07",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "openai",
@@ -1867,11 +1713,9 @@
       "output_per_1k": 0.03,
       "base_url": "https://api.openai.com/v1",
       "notes": "Added automatically from OpenRouter feed.",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "openai",
@@ -1886,11 +1730,9 @@
       "output_per_1k": 0.03,
       "base_url": "https://api.openai.com/v1",
       "notes": "Added automatically from OpenRouter feed.",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "openai",
@@ -1905,11 +1747,9 @@
       "output_per_1k": 0.01,
       "base_url": "https://api.openai.com/v1",
       "notes": "Added automatically from OpenRouter feed.",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "openai",
@@ -1924,11 +1764,9 @@
       "output_per_1k": 0.01,
       "base_url": "https://api.openai.com/v1",
       "notes": "Added automatically from OpenRouter feed. | [auto-refresh] deprecated_on=2026-05-30",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "openai",
@@ -1943,11 +1781,9 @@
       "output_per_1k": 0.0006,
       "base_url": "https://api.openai.com/v1",
       "notes": "Added automatically from OpenRouter feed.",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "openai",
@@ -1962,11 +1798,9 @@
       "output_per_1k": 0.0006,
       "base_url": "https://api.openai.com/v1",
       "notes": "Added automatically from OpenRouter feed. | [auto-refresh] deprecated_on=2026-07-27",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "openai",
@@ -1981,11 +1815,9 @@
       "output_per_1k": 0.01,
       "base_url": "https://api.openai.com/v1",
       "notes": "Added automatically from OpenRouter feed. | [auto-refresh] deprecated_on=2026-07-27",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "openai",
@@ -2000,11 +1832,9 @@
       "output_per_1k": 0.002,
       "base_url": "https://api.openai.com/v1",
       "notes": "Added automatically from OpenRouter feed.",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "openai",
@@ -2019,11 +1849,9 @@
       "output_per_1k": 0.01,
       "base_url": "https://api.openai.com/v1",
       "notes": "Added automatically from OpenRouter feed.",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "openai",
@@ -2038,11 +1866,9 @@
       "output_per_1k": 0.002,
       "base_url": "https://api.openai.com/v1",
       "notes": "Added automatically from OpenRouter feed.",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "openai",
@@ -2057,11 +1883,9 @@
       "output_per_1k": 0.014,
       "base_url": "https://api.openai.com/v1",
       "notes": "Added automatically from OpenRouter feed.",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "openai",
@@ -2076,11 +1900,9 @@
       "output_per_1k": 0.014,
       "base_url": "https://api.openai.com/v1",
       "notes": "Added automatically from OpenRouter feed.",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "openai",
@@ -2095,11 +1917,9 @@
       "output_per_1k": 0.015,
       "base_url": "https://api.openai.com/v1",
       "notes": "Added automatically from OpenRouter feed.",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "openai",
@@ -2114,11 +1934,9 @@
       "context": 400000,
       "notes": "GPT-4.1 mini (source: per 1M = $0.40/$1.60)",
       "base_url": "https://api.openai.com/v1",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "openai",
@@ -2133,11 +1951,9 @@
       "context": 400000,
       "notes": "GPT-4.1 nano (source: per 1M = $0.10/$0.40)",
       "base_url": "https://api.openai.com/v1",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "openai",
@@ -2152,11 +1968,9 @@
       "output_per_1k": 0.03,
       "base_url": "https://api.openai.com/v1",
       "notes": "Added automatically from OpenRouter feed.",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "openai",
@@ -2171,11 +1985,9 @@
       "output_per_1k": 0.18,
       "base_url": "https://api.openai.com/v1",
       "notes": "Added automatically from OpenRouter feed.",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "openai",
@@ -2190,11 +2002,9 @@
       "output_per_1k": 0.0006,
       "base_url": "https://api.openai.com/v1",
       "notes": "Added automatically from OpenRouter feed.",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "openai",
@@ -2209,11 +2019,9 @@
       "output_per_1k": 0.0006,
       "base_url": "https://api.openai.com/v1",
       "notes": "Added automatically from OpenRouter feed.",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "openai",
@@ -2228,11 +2036,9 @@
       "output_per_1k": 0.03,
       "base_url": "https://api.openai.com/v1",
       "notes": "Added automatically from OpenRouter feed.",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "openai",
@@ -2247,11 +2053,9 @@
       "output_per_1k": 0.03,
       "base_url": "https://api.openai.com/v1",
       "notes": "Added automatically from OpenRouter feed.",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "openai",
@@ -2266,11 +2070,9 @@
       "output_per_1k": 0.006,
       "base_url": "https://api.openai.com/v1",
       "notes": "Added automatically from OpenRouter feed.",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "openai",
@@ -2285,11 +2087,9 @@
       "output_per_1k": 0.006,
       "base_url": "https://api.openai.com/v1",
       "notes": "Added automatically from OpenRouter feed.",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "openai",
@@ -2304,11 +2104,9 @@
       "output_per_1k": 0.01,
       "base_url": "https://api.openai.com/v1",
       "notes": "Added automatically from OpenRouter feed.",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "openai",
@@ -2323,11 +2121,9 @@
       "output_per_1k": 0.0024,
       "base_url": "https://api.openai.com/v1",
       "notes": "Added automatically from OpenRouter feed.",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "openai",
@@ -2342,11 +2138,9 @@
       "output_per_1k": 0.03,
       "base_url": "https://api.openai.com/v1",
       "notes": "Added automatically from OpenRouter feed.",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "openai",
@@ -2361,11 +2155,9 @@
       "output_per_1k": 0.00017,
       "base_url": "https://api.openai.com/v1",
       "notes": "Added automatically from OpenRouter feed.",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "openai",
@@ -2380,11 +2172,9 @@
       "output_per_1k": 0.00014,
       "base_url": "https://api.openai.com/v1",
       "notes": "Added automatically from OpenRouter feed.",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "openai",
@@ -2399,11 +2189,9 @@
       "output_per_1k": 0.0003,
       "base_url": "https://api.openai.com/v1",
       "notes": "Added automatically from OpenRouter feed.",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "openai",
@@ -2418,11 +2206,9 @@
       "output_per_1k": 0.008,
       "base_url": "https://api.openai.com/v1",
       "notes": "Added automatically from OpenRouter feed.",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "openai",
@@ -2437,11 +2223,9 @@
       "output_per_1k": 0.04,
       "base_url": "https://api.openai.com/v1",
       "notes": "Added automatically from OpenRouter feed. | [auto-refresh] deprecated_on=2026-07-31",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "openai",
@@ -2456,11 +2240,9 @@
       "output_per_1k": 0.08,
       "base_url": "https://api.openai.com/v1",
       "notes": "Added automatically from OpenRouter feed.",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "openai",
@@ -2475,11 +2257,9 @@
       "output_per_1k": 0.0044,
       "base_url": "https://api.openai.com/v1",
       "notes": "Added automatically from OpenRouter feed.",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "openai",
@@ -2494,11 +2274,9 @@
       "output_per_1k": 0.008,
       "base_url": "https://api.openai.com/v1",
       "notes": "Added automatically from OpenRouter feed. | [auto-refresh] deprecated_on=2026-07-31",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "openai",
@@ -2513,11 +2291,9 @@
       "output_per_1k": 0.0044,
       "base_url": "https://api.openai.com/v1",
       "notes": "Added automatically from OpenRouter feed.",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "openai",
@@ -2757,11 +2533,9 @@
       "output_per_1k": 0.015,
       "base_url": "https://api.x.ai/v1",
       "notes": "Added automatically from OpenRouter feed. | [auto-refresh] deprecated_on=2026-05-16",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "xai",
@@ -2776,11 +2550,9 @@
       "output_per_1k": 0.0005,
       "base_url": "https://api.x.ai/v1",
       "notes": "Added automatically from OpenRouter feed. | [auto-refresh] deprecated_on=2026-05-16",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "xai",
@@ -2795,11 +2567,9 @@
       "output_per_1k": 0.0005,
       "base_url": "https://api.x.ai/v1",
       "notes": "Added automatically from OpenRouter feed. | [auto-refresh] deprecated_on=2026-05-16",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "xai",
@@ -2814,11 +2584,9 @@
       "output_per_1k": 0.0005,
       "base_url": "https://api.x.ai/v1",
       "notes": "Added automatically from OpenRouter feed. | [auto-refresh] deprecated_on=2026-05-16",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "xai",
@@ -2833,11 +2601,9 @@
       "output_per_1k": 0.0025,
       "base_url": "https://api.x.ai/v1",
       "notes": "Added automatically from OpenRouter feed.",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "xai",
@@ -2852,11 +2618,9 @@
       "output_per_1k": 0.006,
       "base_url": "https://api.x.ai/v1",
       "notes": "Added automatically from OpenRouter feed. | [auto-refresh] deprecated_on=2026-04-01",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "xai",
@@ -2871,11 +2635,9 @@
       "context": 500000,
       "notes": "Grok 3 base (source: per 1M = $3/$15)",
       "base_url": "https://api.x.ai/v1",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "xai",
@@ -2890,11 +2652,9 @@
       "output_per_1k": 0.002,
       "base_url": "https://api.x.ai/v1",
       "notes": "Added automatically from OpenRouter feed.",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
       "provider": "xai",
@@ -2909,11 +2669,9 @@
       "output_per_1k": 0.0015,
       "base_url": "https://api.x.ai/v1",
       "notes": "Added automatically from OpenRouter feed. | [auto-refresh] deprecated_on=2026-05-16",
-      "selection_roles": [
-        "generation"
-      ],
-      "selection_status": "runtime_selectable",
-      "selection_reason": null
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     }
   ]
 }

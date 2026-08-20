@@ -135,25 +135,16 @@ async def test_case_insensitive_component_type(client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
-async def test_models_by_type_matches_catalog_for_ragweld_gen_entries(client: AsyncClient) -> None:
-    """Ragweld augmentation in /api/models must be reflected in /api/models/by-type/GEN."""
-    all_resp = await client.get("/api/models")
-    assert all_resp.status_code == 200
-    all_models = all_resp.json()["models"]
-    ragweld_gen_models = {
-        str(m.get("model"))
-        for m in all_models
-        if str(m.get("provider", "")).strip().lower() == "ragweld"
-    }
-
+async def test_models_by_type_keeps_generation_rows_catalog_only(client: AsyncClient) -> None:
+    """Provider GEN rows remain pricing evidence, never runtime route choices."""
     gen_resp = await client.get("/api/models/by-type/GEN")
     assert gen_resp.status_code == 200
     gen_models = gen_resp.json()
-    gen_ids = {str(m.get("model")) for m in gen_models}
 
-    assert ragweld_gen_models.issubset(gen_ids)
+    assert gen_models
     for model in gen_models:
         assert "GEN" in model.get("components", [])
+        assert "generation" not in model.get("selection_roles", [])
 
 
 @pytest.mark.asyncio
@@ -240,8 +231,8 @@ async def test_models_upsert_creates_entry_and_autofills_provider_base_url(
         assert body["model"]["model"] == "gpt-upserted"
         assert body["model"]["base_url"] == "https://proxy.example/v1"
         assert "GEN" in body["model"]["components"]
-        assert body["model"]["selection_status"] == "runtime_selectable"
-        assert body["model"]["selection_roles"] == ["generation"]
+        assert body["model"]["selection_status"] == "catalog_only"
+        assert body["model"]["selection_roles"] == []
 
         data_catalog = json.loads(data_path.read_text(encoding="utf-8"))
         web_catalog = json.loads(web_path.read_text(encoding="utf-8"))
