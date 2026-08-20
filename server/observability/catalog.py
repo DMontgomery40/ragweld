@@ -183,7 +183,7 @@ _DASHBOARD_MANIFEST: tuple[dict[str, object], ...] = (
         "id": "eval_benchmark_prompt_regressions",
         "file_name": "eval-benchmark-prompt-regressions.json",
         "title": "Eval/Benchmark/Prompt Regressions",
-        "uid": "ragweld-eval-benchmark-prompt-regressions",
+        "uid": "ragweld-eval-regressions",
         "slug": "eval-benchmark-prompt-regressions",
         "category": "quality",
         "default": False,

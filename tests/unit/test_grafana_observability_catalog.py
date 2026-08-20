@@ -5,7 +5,10 @@ from pathlib import Path
 
 
 def test_grafana_observability_dashboard_families_are_provisioned() -> None:
-    root = Path(__file__).resolve().parents[2] / "infra" / "grafana" / "provisioning" / "dashboards"
+    provisioning_root = Path(__file__).resolve().parents[2] / "infra" / "grafana" / "provisioning"
+    root = provisioning_root / "dashboards"
+    for directory in ("plugins", "notifiers", "alerting"):
+        assert (provisioning_root / directory).is_dir()
     expected = {
         "oncall-overview.json": ("On-call Overview", "ragweld-oncall-overview"),
         "gateway-serving.json": ("Gateway & Serving", "ragweld-gateway-serving"),
@@ -13,7 +16,7 @@ def test_grafana_observability_dashboard_families_are_provisioned() -> None:
         "training-workflow.json": ("Training & Workflow", "ragweld-training-workflow"),
         "eval-benchmark-prompt-regressions.json": (
             "Eval/Benchmark/Prompt Regressions",
-            "ragweld-eval-benchmark-prompt-regressions",
+            "ragweld-eval-regressions",
         ),
         "cost-capacity.json": ("Cost & Capacity", "ragweld-cost-capacity"),
         "frontend-rum.json": ("Frontend/RUM", "ragweld-frontend-rum"),
@@ -27,5 +30,6 @@ def test_grafana_observability_dashboard_families_are_provisioned() -> None:
         payload = json.loads(path.read_text(encoding="utf-8"))
         assert payload["title"] == title
         assert payload["uid"] == uid
+        assert len(payload["uid"]) <= 40
         variables = {item.get("name") for item in payload.get("templating", {}).get("list", [])}
         assert required_variables.issubset(variables)

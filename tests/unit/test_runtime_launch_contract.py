@@ -198,6 +198,11 @@ def test_observability_overlay_resolves_repo_files_and_avoids_foreign_ports() ->
     assert otlp_protocols["http"]["endpoint"] == "0.0.0.0:4318"
     assert tempo_payload["storage"]["trace"]["wal"]["path"] == "/var/tempo/wal"
     assert tempo_payload["storage"]["trace"]["local"]["path"] == "/var/tempo/blocks"
+    metrics_storage = tempo_payload["metrics_generator"]["storage"]
+    assert metrics_storage["path"] == "/var/tempo/generator/wal"
+    assert metrics_storage["remote_write"] == [
+        {"url": "http://prometheus:9090/api/v1/write", "send_exemplars": True}
+    ]
 
     for service_name in ("tempo", "alloy"):
         service = services[service_name]
@@ -212,6 +217,21 @@ def test_observability_overlay_resolves_repo_files_and_avoids_foreign_ports() ->
         _published_ports(services["alloy"]),
     )
     assert published.isdisjoint(foreign_ports)
+
+
+def test_prometheus_scrapes_only_clean_start_targets_and_accepts_tempo_metrics() -> None:
+    import yaml
+
+    payload = yaml.safe_load((ROOT / "infra" / "prometheus.yml").read_text(encoding="utf-8"))
+    scrape_configs = payload["scrape_configs"]
+    jobs = {config["job_name"]: config for config in scrape_configs}
+
+    assert set(jobs) == {"prometheus", "ragweld-api-host", "postgres"}
+    api_targets = jobs["ragweld-api-host"]["static_configs"][0]["targets"]
+    assert api_targets == ["host.docker.internal:58012"]
+
+    compose = _compose_config("docker-compose.yml")
+    assert "--web.enable-remote-write-receiver" in compose["services"]["prometheus"]["command"]
 
 
 def test_active_observability_urls_match_namespaced_loopback_ports() -> None:

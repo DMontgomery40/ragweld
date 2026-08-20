@@ -38,7 +38,7 @@ export const GRAFANA_DASHBOARD_PRESETS: GrafanaDashboardPreset[] = [
   {
     id: 'eval-benchmark-prompt-regressions',
     label: 'Eval/Benchmark/Prompt Regressions',
-    uid: 'ragweld-eval-benchmark-prompt-regressions',
+    uid: 'ragweld-eval-regressions',
     slug: 'eval-benchmark-prompt-regressions',
     description: 'ML-quality dashboard for eval deltas, benchmark shifts, and prompt-set regressions.',
   },

@@ -87,7 +87,7 @@
   "timepicker": {},
   "timezone": "",
   "title": "Eval/Benchmark/Prompt Regressions",
-  "uid": "ragweld-eval-benchmark-prompt-regressions",
+  "uid": "ragweld-eval-regressions",
   "version": 1,
   "weekStart": ""
 }
