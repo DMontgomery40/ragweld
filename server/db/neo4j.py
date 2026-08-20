@@ -14,7 +14,6 @@ from neo4j import AsyncDriver, AsyncGraphDatabase
 from neo4j_graphrag.experimental.components.types import LexicalGraphConfig, Neo4jGraph
 
 from server.models.graph import Community, Entity, GraphNeighborsResponse, GraphStats, Relationship
-from server.models.index import Chunk
 from server.models.retrieval import ChunkMatch
 
 EntityType = Literal["function", "class", "module", "variable", "concept", "person", "org", "location", "event"]
@@ -282,92 +281,6 @@ class Neo4jClient:
             await asyncio.sleep(0.25)
         return False
 
-    async def upsert_document_and_chunks(
-        self,
-        repo_id: str,
-        file_path: str,
-        chunks: list[Chunk],
-        *,
-        store_embeddings: bool,
-        embedding_property: str = "embedding",
-    ) -> int:
-        """Upsert a lexical Document/Chunk graph for a single file.
-
-        Stores Chunk nodes keyed by (repo_id, chunk_id) and links them with:
-        - (Document)-[:HAS_CHUNK]->(Chunk)
-        - (Chunk)-[:NEXT_CHUNK]->(Chunk) in file order
-        """
-        if not chunks:
-            return 0
-        prop = _sanitize_cypher_identifier(embedding_property)
-        if not prop:
-            raise ValueError(f"Invalid Neo4j embedding property name: {embedding_property!r}")
-
-        driver = self._require_driver()
-        payload: list[dict[str, Any]] = []
-        for i, ch in enumerate(chunks):
-            payload.append(
-                {
-                    "seq": int(i),
-                    "chunk_id": ch.chunk_id,
-                    "file_path": ch.file_path,
-                    "start_line": int(ch.start_line),
-                    "end_line": int(ch.end_line),
-                    "language": ch.language,
-                    "token_count": int(ch.token_count or 0),
-                    "embedding": ch.embedding,
-                }
-            )
-
-        cypher = f"""
-        // Ensure the Document exists
-        MERGE (d:Document {{repo_id: $repo_id, file_path: $file_path}})
-
-        // Remove prior edges from this Document (we rebuild deterministically)
-        WITH d
-        OPTIONAL MATCH (d)-[old:HAS_CHUNK]->(:Chunk)
-        WITH d, collect(old) AS olds
-        FOREACH (r IN olds | DELETE r)
-
-        // Upsert chunks + reattach
-        WITH d
-        UNWIND $chunks AS ch
-        WITH d, ch
-        ORDER BY ch.seq ASC
-        MERGE (c:Chunk {{repo_id: $repo_id, chunk_id: ch.chunk_id}})
-        SET c.file_path = ch.file_path,
-            c.start_line = ch.start_line,
-            c.end_line = ch.end_line,
-            c.language = ch.language,
-            c.token_count = ch.token_count
-        FOREACH (_ IN CASE WHEN $store_embeddings AND ch.embedding IS NOT NULL THEN [1] ELSE [] END |
-            SET c.`{prop}` = ch.embedding
-        )
-        MERGE (d)-[:HAS_CHUNK]->(c)
-        WITH collect(c) AS cs
-
-        // Clear previous NEXT_CHUNK edges for this file (avoid stale adjacency)
-        OPTIONAL MATCH (a:Chunk {{repo_id: $repo_id, file_path: $file_path}})-[r:NEXT_CHUNK]->(b:Chunk {{repo_id: $repo_id, file_path: $file_path}})
-        WITH cs, collect(r) AS rels
-        FOREACH (r IN rels | DELETE r)
-
-        // Recreate NEXT_CHUNK edges in order
-        WITH cs
-        UNWIND CASE WHEN size(cs) < 2 THEN [] ELSE range(0, size(cs)-2) END AS i
-        WITH cs[i] AS a, cs[i+1] AS b
-        MERGE (a)-[:NEXT_CHUNK]->(b);
-        """
-
-        async with driver.session(database=self.database) as session:
-            await session.run(
-                cypher,
-                repo_id=repo_id,
-                file_path=str(file_path),
-                chunks=payload,
-                store_embeddings=bool(store_embeddings),
-            )
-        return len(chunks)
-
     async def upsert_graphrag_graph(
         self,
         repo_id: str,
@@ -610,50 +523,6 @@ class Neo4jClient:
             out.append((cid, float(r.get("score") or 0.0)))
         return out
 
-    # Entity operations
-    async def upsert_entity(self, repo_id: str, entity: Entity) -> None:
-        await self.upsert_entities(repo_id, [entity])
-
-    async def upsert_entities(self, repo_id: str, entities: list[Entity]) -> int:
-        if not entities:
-            return 0
-        driver = self._require_driver()
-
-        payload = []
-        for e in entities:
-            props = e.properties or {}
-            start_line = props.get("start_line")
-            end_line = props.get("end_line")
-            payload.append(
-                {
-                    "entity_id": e.entity_id,
-                    "name": e.name,
-                    "entity_type": e.entity_type,
-                    "file_path": e.file_path,
-                    "description": e.description,
-                    "properties_json": json.dumps(e.properties or {}),
-                    "start_line": int(start_line) if start_line is not None else None,
-                    "end_line": int(end_line) if end_line is not None else None,
-                }
-            )
-
-        query = """
-        UNWIND $entities AS e
-        MERGE (n:__Entity__ {repo_id: $repo_id, entity_id: e.entity_id})
-        SET n.name = e.name,
-            n.entity_type = e.entity_type,
-            n.file_path = e.file_path,
-            n.description = e.description,
-            n.properties_json = e.properties_json,
-            n.start_line = e.start_line,
-            n.end_line = e.end_line;
-        """
-
-        async with driver.session(database=self.database) as session:
-            for batch in _iter_batches(payload):
-                await session.run(query, repo_id=repo_id, entities=batch)
-        return len(entities)
-
     async def get_entity(self, entity_id: str) -> Entity | None:
         driver = self._require_driver()
         async with driver.session(database=self.database) as session:
@@ -709,59 +578,6 @@ class Neo4jClient:
             res = await session.run(query, **params)
             records = await res.data()
         return [_entity_from_mapping(r) for r in records]
-
-    async def delete_entities(self, repo_id: str) -> int:
-        driver = self._require_driver()
-        async with driver.session(database=self.database) as session:
-            result = await session.run(
-                """
-                MATCH (n:__Entity__ {repo_id: $repo_id})
-                WITH n, count(n) AS n_count
-                DETACH DELETE n
-                RETURN n_count AS n_count;
-                """,
-                repo_id=repo_id,
-            )
-            rec = await result.single()
-        return int(rec["n_count"] if rec else 0)
-
-    # Relationship operations
-    async def upsert_relationship(self, repo_id: str, rel: Relationship) -> None:
-        await self.upsert_relationships(repo_id, [rel])
-
-    async def upsert_relationships(self, repo_id: str, rels: list[Relationship]) -> int:
-        if not rels:
-            return 0
-        driver = self._require_driver()
-
-        grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
-        for r in rels:
-            rel_type = str(r.relation_type)
-            if rel_type not in ALL_RELATION_TYPES:
-                continue
-            grouped[rel_type].append(
-                {
-                    "source_id": r.source_id,
-                    "target_id": r.target_id,
-                    "weight": float(r.weight or 0.0),
-                    "properties_json": json.dumps(r.properties or {}),
-                }
-            )
-
-        async with driver.session(database=self.database) as session:
-            for rel_type, payload in grouped.items():
-                # Relationship type must be literal in Cypher; rel_type is validated against allowed.
-                query = f"""
-                UNWIND $rels AS r
-                MATCH (a:__Entity__ {{repo_id: $repo_id, entity_id: r.source_id}})
-                MATCH (b:__Entity__ {{repo_id: $repo_id, entity_id: r.target_id}})
-                MERGE (a)-[rel:{rel_type}]->(b)
-                SET rel.weight = r.weight,
-                    rel.properties_json = r.properties_json;
-                """
-                for batch in _iter_batches(payload):
-                    await session.run(query, repo_id=repo_id, rels=batch)
-        return sum(len(v) for v in grouped.values())
 
     async def get_relationships(self, entity_id: str) -> list[Relationship]:
         driver = self._require_driver()
@@ -1203,67 +1019,6 @@ class Neo4jClient:
                 )
             )
         return out
-
-    async def rebuild_entity_chunk_links(self, repo_id: str) -> int:
-        """(Re)create Entity->Chunk links for a corpus.
-
-        Requires:
-        - Entity nodes with numeric start_line/end_line properties
-        - Chunk nodes with file_path/start_line/end_line
-        """
-        driver = self._require_driver()
-        async with driver.session(database=self.database) as session:
-            # Clear existing links for this corpus
-            await session.run(
-                """
-                MATCH (e:__Entity__ {repo_id: $repo_id})-[r:IN_CHUNK]->(c:Chunk {repo_id: $repo_id})
-                WHERE e.file_path IS NOT NULL
-                  AND e.start_line IS NOT NULL
-                  AND e.end_line IS NOT NULL
-                DELETE r;
-                """,
-                repo_id=repo_id,
-            )
-            # Rebuild deterministically by line-overlap
-            res = await session.run(
-                """
-                MATCH (e:__Entity__ {repo_id: $repo_id})
-                WHERE e.file_path IS NOT NULL
-                  AND e.start_line IS NOT NULL
-                  AND e.end_line IS NOT NULL
-                MATCH (c:Chunk {repo_id: $repo_id, file_path: e.file_path})
-                WHERE NOT (c.end_line < e.start_line OR c.start_line > e.end_line)
-                MERGE (e)-[:IN_CHUNK]->(c)
-                RETURN count(*) AS n;
-                """,
-                repo_id=repo_id,
-            )
-            rec = await res.single()
-        return int(rec.get("n") or 0) if rec else 0
-
-    async def link_entities_to_chunks(self, repo_id: str, links: list[dict[str, str]]) -> int:
-        """Create (Entity)-[:IN_CHUNK]->(Chunk) links in batch.
-
-        Expects each link dict to contain:
-        - entity_id
-        - chunk_id
-        """
-        if not links:
-            return 0
-        driver = self._require_driver()
-        async with driver.session(database=self.database) as session:
-            for batch in _iter_batches(links):
-                await session.run(
-                    """
-                    UNWIND $links AS l
-                    MATCH (e:__Entity__ {repo_id: $repo_id, entity_id: l.entity_id})
-                    MATCH (c:Chunk {repo_id: $repo_id, chunk_id: l.chunk_id})
-                    MERGE (e)-[:IN_CHUNK]->(c);
-                    """,
-                    repo_id=repo_id,
-                    links=batch,
-                )
-        return len(links)
 
     async def expand_chunks_via_entities(
         self,

@@ -13,20 +13,13 @@ methods:
     async: true
     description: Disconnect from Neo4j
 
-  - name: upsert_entity
+  - name: upsert_graphrag_graph
     async: true
     params:
       - repo_id: str
-      - entity: Entity
-    description: Upsert single entity
-
-  - name: upsert_entities
-    async: true
-    params:
-      - repo_id: str
-      - entities: list[Entity]
-    returns: int
-    description: Upsert multiple entities
+      - graph: Neo4jGraph
+      - lexical_graph_config: LexicalGraphConfig
+    description: Persist the official GraphRAG lexical and semantic graph contract
 
   - name: get_entity
     async: true
