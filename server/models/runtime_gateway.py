@@ -212,18 +212,18 @@ class OpenRouterConfig(BaseModel):
 class LiteLLMConfig(BaseModel):
     """Gateway configuration for an OpenAI-compatible LiteLLM proxy."""
 
-    enabled: bool = Field(default=False)
-    base_url: str = Field(default="http://127.0.0.1:4000/v1")
-    default_model: str = Field(default="openai/gpt-4o-mini")
+    enabled: bool = Field(default=True)
+    base_url: str = Field(default="http://127.0.0.1:54000/v1")
+    default_model: str = Field(default="ragweld-local")
     fallback_models: list[str] = Field(default_factory=list)
 
 
 class VLLMConfig(BaseModel):
     """Reference configuration for the self-hosted vLLM serving layer."""
 
-    enabled: bool = Field(default=False)
-    base_url: str = Field(default="http://127.0.0.1:8000/v1")
-    default_model: str = Field(default="Qwen/Qwen2.5-7B-Instruct")
+    enabled: bool = Field(default=True)
+    base_url: str = Field(default="http://127.0.0.1:58080/v1")
+    default_model: str = Field(default="Qwen/Qwen3-0.6B")
 
 
 class LocalProviderEntry(BaseModel):

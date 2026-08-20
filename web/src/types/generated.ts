@@ -1306,9 +1306,9 @@ export interface LineageRef {
 
 /** Gateway configuration for an OpenAI-compatible LiteLLM proxy. */
 export interface LiteLLMConfig {
-  enabled?: boolean; // default: False
-  base_url?: string; // default: "http://127.0.0.1:4000/v1"
-  default_model?: string; // default: "openai/gpt-4o-mini"
+  enabled?: boolean; // default: True
+  base_url?: string; // default: "http://127.0.0.1:54000/v1"
+  default_model?: string; // default: "ragweld-local"
   fallback_models?: string[];
 }
 
@@ -2760,9 +2760,9 @@ export interface UIConfig {
 
 /** Reference configuration for the self-hosted vLLM serving layer. */
 export interface VLLMConfig {
-  enabled?: boolean; // default: False
-  base_url?: string; // default: "http://127.0.0.1:8000/v1"
-  default_model?: string; // default: "Qwen/Qwen2.5-7B-Instruct"
+  enabled?: boolean; // default: True
+  base_url?: string; // default: "http://127.0.0.1:58080/v1"
+  default_model?: string; // default: "Qwen/Qwen3-0.6B"
 }
 
 /** Configuration for vector (dense) search using pgvector. */

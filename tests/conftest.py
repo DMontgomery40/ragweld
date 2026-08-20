@@ -14,6 +14,9 @@ from httpx import ASGITransport, AsyncClient
 # Tests receive integration configuration explicitly. Never leak a developer
 # .env into collection or use its mere presence as a readiness signal.
 os.environ["RAGWELD_LOAD_DOTENV"] = "0"
+# The clean-start gateway uses a deterministic local client key. Individual
+# fail-closed tests explicitly remove it when exercising the missing-key path.
+os.environ.setdefault("LITELLM_API_KEY", "sk-ragweld-test")
 
 pytest_plugins = ("tests.service_requirements",)
 
