@@ -53,6 +53,3 @@ export const useChunkSummariesStore = create<ChunkSummariesStore>()((set) => ({
       error: null,
     }),
 }));
-
-// Legacy alias - DO NOT USE in new code
-export const useCardsStore = useChunkSummariesStore;
