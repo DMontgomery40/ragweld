@@ -10,7 +10,7 @@ latest_path="$ROOT_DIR/output/automation/bootstrap/latest.json"
 runtime_dir="$ROOT_DIR/output/automation/runtime"
 mkdir -p "$artifact_dir" "$runtime_dir"
 
-CORPUS_ID="${CORPUS_ID:-epstein-files-1}"
+CORPUS_ID="${CORPUS_ID:-ragweld-acceptance}"
 FRONTEND_HOST="${FRONTEND_HOST:-127.0.0.1}"
 BACKEND_HOST="${BACKEND_HOST:-127.0.0.1}"
 PREFERRED_BACKEND_PORT="${BACKEND_PORT:-58012}"
@@ -405,27 +405,24 @@ ensure_api_base() {
 }
 
 resolve_corpus_path() {
-  if [ -n "${CORPUS_PATH:-}" ] && [ -d "${CORPUS_PATH:-}" ]; then
+  if [ -n "${CORPUS_PATH:-}" ]; then
+    [ -d "$CORPUS_PATH" ] || return 1
     printf '%s\n' "$CORPUS_PATH"
     return 0
   fi
 
-  if [ "$CORPUS_ID" = "epstein-files-1" ]; then
-    local candidates=(
-      "$HOME/epstein-files-1"
-      "$HOME/epstein-files/documents"
-      "$HOME/epstein-files"
-    )
-    local candidate
-    for candidate in "${candidates[@]}"; do
-      if [ -d "$candidate" ]; then
-        printf '%s\n' "$candidate"
-        return 0
-      fi
-    done
-  fi
-
-  printf '%s\n' ""
+  case "$CORPUS_ID" in
+    *[!A-Za-z0-9._-]*) return 1 ;;
+  esac
+  local fixture_dir="$ROOT_DIR/output/automation/fixtures/$CORPUS_ID"
+  mkdir -p "$fixture_dir"
+  printf '%s\n' \
+    '# Ragweld acceptance corpus' \
+    '' \
+    'This deterministic fixture verifies clean corpus creation, indexing, retrieval, and UI routing.' \
+    'Northwind Labs builds retrieval systems in Denver. Alex Rivera works for Northwind Labs.' \
+    >"$fixture_dir/README.md"
+  printf '%s\n' "$fixture_dir"
 }
 
 ensure_corpus_exists() {

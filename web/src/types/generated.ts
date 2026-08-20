@@ -136,7 +136,7 @@ export interface BenchmarkRun {
 /** Top-level chat configuration. Lives at TriBridConfig.chat.  KEY CONCEPT: There are no modes. The user checks/unchecks data sources. Recall is always available and ON by default. Corpora are available when indexed. Everything composes freely. */
 export interface ChatConfig {
   /** Default checked user-facing corpus IDs for new conversations. */
-  default_corpus_ids?: string[]; // default: ["epstein-files-1"]
+  default_corpus_ids?: string[]; // default: ["recall_default"]
   system_prompt_base?: string; // default: "You are a helpful assistant."
   system_prompt_recall_suffix?: string; // default: " You have access to conversation history. Refer..."
   system_prompt_rag_suffix?: string; // default: " Answer questions using the provided database i..."
@@ -2535,13 +2535,13 @@ export interface TrainingConfig {
   /** Triplet mining mode */
   triplets_mine_mode?: string; // default: "replace"
   /** Active learning reranker artifact path (MLX adapter directory). */
-  tribrid_reranker_model_path?: string; // default: "models/learning-reranker-epstein-files-1"
+  tribrid_reranker_model_path?: string; // default: "models/learning-reranker-active"
   /** Triplet mining mode */
   tribrid_reranker_mine_mode?: string; // default: "replace"
   /** Reset triplets file before mining */
   tribrid_reranker_mine_reset?: number; // default: 0
   /** Training triplets file path */
-  tribrid_triplets_path?: string; // default: "data/training/triplets__epstein-files-1.jsonl"
+  tribrid_triplets_path?: string; // default: "data/training/triplets.jsonl"
   /** Learning reranker backend: auto (prefer MLX Qwen3 on Apple Silicon), mlx_qwen3 (force). Legacy values 'transformers'/'hf' normalize to 'auto'. */
   learning_reranker_backend?: "auto" | "mlx_qwen3"; // default: "auto"
   /** Base model to fine-tune for MLX Qwen3 learning reranker */
@@ -2575,7 +2575,7 @@ export interface TrainingConfig {
   /** Shipped base model for the ragweld agent (MLX). */
   ragweld_agent_base_model?: string; // default: "mlx-community/Qwen3-1.7B-4bit"
   /** Active ragweld agent adapter artifact path (directory containing adapter.npz + adapter_config.json). */
-  ragweld_agent_model_path?: string; // default: "models/learning-agent-epstein-files-1"
+  ragweld_agent_model_path?: string; // default: "models/learning-agent-active"
   /** Unload ragweld agent model after idle seconds (0 = never). */
   ragweld_agent_unload_after_sec?: number; // default: 0
   /** Adapter reload check period (seconds). 0 = check every request. */

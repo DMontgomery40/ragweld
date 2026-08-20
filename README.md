@@ -543,27 +543,16 @@ This section is optimized for running a **real on-disk corpus** end-to-end (Post
 ### TL;DR (10–15 line runbook)
 
 ```bash
-# (Optional) store DB volumes outside repo
-export TRIBRID_DB_DIR="/Users/davidmontgomery/ragweld-db"
+# Start the fixed Ragweld Compose project plus the host API/UI.
+./start.sh
 
-# Neo4j memory tuning (recommended for large corpora on ~24GB VM)
-export NEO4J_HEAP_INIT=4G NEO4J_HEAP_MAX=12G NEO4J_PAGECACHE=8G
-docker compose up -d postgres neo4j
-
-# If you see Permission denied / AccessDeniedException in DB logs, fix perms then restart:
-chmod -R a+rwX "$TRIBRID_DB_DIR/postgres" "$TRIBRID_DB_DIR/neo4j/data" "$TRIBRID_DB_DIR/neo4j/logs"
-docker compose restart postgres neo4j
-
-# Start backend (avoid --reload for long indexing)
-NEO4J_PASSWORD=password uv run uvicorn server.main:app --host 127.0.0.1 --port 58012
-
-# Create corpus + exclude known heavy build outputs (epstein-files-1)
-curl -sS -X POST http://127.0.0.1:58012/api/repos -H 'Content-Type: application/json' -d '{"corpus_id":"epstein-files-1","name":"epstein-files-1","path":"/Users/davidmontgomery/epstein-files-1"}'
-curl -sS -X PATCH http://127.0.0.1:58012/api/repos/epstein-files-1 -H 'Content-Type: application/json' -d '{"exclude_paths":[".worktrees/","out.noindex/","data/qdrant/","node_modules/","dist/"]}'
+# Create a corpus from any real document directory, then exclude heavy build outputs.
+curl -sS -X POST http://127.0.0.1:58012/api/repos -H 'Content-Type: application/json' -d '{"corpus_id":"example-corpus","name":"Example corpus","path":"/path/to/documents"}'
+curl -sS -X PATCH http://127.0.0.1:58012/api/repos/example-corpus -H 'Content-Type: application/json' -d '{"exclude_paths":[".worktrees/","out.noindex/","data/qdrant/","node_modules/","dist/"]}'
 
 # Index + poll
-curl -sS -X POST http://127.0.0.1:58012/api/index -H 'Content-Type: application/json' -d '{"corpus_id":"epstein-files-1","repo_path":"/Users/davidmontgomery/epstein-files-1","force_reindex":true}'
-while true; do curl -sS http://127.0.0.1:58012/api/index/epstein-files-1/status | python -m json.tool; sleep 2; done
+curl -sS -X POST http://127.0.0.1:58012/api/index -H 'Content-Type: application/json' -d '{"repo_id":"example-corpus","repo_path":"/path/to/documents","force_reindex":true}'
+while true; do curl -sS http://127.0.0.1:58012/api/index/example-corpus/status | python -m json.tool; sleep 2; done
 ```
 
 ### Verify GraphRAG is actually contributing results
@@ -571,7 +560,7 @@ while true; do curl -sS http://127.0.0.1:58012/api/index/epstein-files-1/status 
 ```bash
 curl -sS -X POST http://127.0.0.1:58012/api/search \
   -H 'Content-Type: application/json' \
-  -d '{"corpus_id":"epstein-files-1","query":"authentication flow","top_k":8,"include_vector":true,"include_sparse":true,"include_graph":true}' \
+  -d '{"corpus_id":"example-corpus","query":"How does the retrieval pipeline work?","top_k":8,"include_vector":true,"include_sparse":true,"include_graph":true}' \
   | python -m json.tool
 ```
 
@@ -588,21 +577,20 @@ Success criteria:
 - **Size skip (LAW)**: files larger than `min(chunking.max_indexable_file_size, indexing.index_max_file_size_mb*1024*1024)` are skipped *before* reading/chunking.
 - **Corpus-level excludes**: set `exclude_paths` on the corpus (stored in Postgres `corpora.meta`) to skip large build outputs that are not gitignored. You can set this via **UI** (`RAG → Indexing → Corpus settings`) or **API** (`PATCH /api/corpora/{corpus_id}`).
 
-### Troubleshooting (real failures we hit)
+### Troubleshooting
 
 - **Neo4j health in `docker compose ps` may say "starting" forever**: the Neo4j container healthcheck uses `curl`, but the Neo4j image doesn't ship curl. Use cypher-shell instead:
 
 ```bash
-docker exec tribrid-neo4j cypher-shell -u neo4j -p password 'RETURN 1 AS ok;'
+docker compose --project-name ragweld exec neo4j cypher-shell -u neo4j -p password 'RETURN 1 AS ok;'
 ```
 
 - **Neo4j "critical error needs restart"**:
-  - Most commonly caused by bind-mount permissions (Neo4j can't write vector-index temp files).
-  - Fix permissions on `$TRIBRID_DB_DIR/neo4j/data` and `$TRIBRID_DB_DIR/neo4j/logs`, then `docker compose restart neo4j`.
-  - If Neo4j data is corrupted from a prior crash, you may need to wipe `$TRIBRID_DB_DIR/neo4j/data` (destructive).
+  - Inspect the scoped service logs with `docker compose --project-name ragweld logs neo4j`.
+  - Use `./stop.sh` for a non-destructive stop. Only use the separately confirmed `reset-data.sh` workflow when the named project volumes should be discarded.
 
-- **Postgres "Permission denied" writing relation files**:
-  - Fix permissions on `$TRIBRID_DB_DIR/postgres`, then `docker compose restart postgres`.
+- **Postgres startup failure**:
+  - Inspect `docker compose --project-name ragweld logs postgres`; do not change permissions or remove volumes without identifying the failing path first.
 
 ### Graph inspection (UI + Neo4j Browser)
 
@@ -612,10 +600,10 @@ docker exec tribrid-neo4j cypher-shell -u neo4j -p password 'RETURN 1 AS ok;'
 - Useful Cypher examples:
 
 ```cypher
-MATCH (c:Chunk {repo_id:"epstein-files-1"}) RETURN count(c);
-MATCH (d:Document {repo_id:"epstein-files-1"}) RETURN count(d);
-MATCH (e:Entity {repo_id:"epstein-files-1"}) RETURN e.entity_type, count(*) ORDER BY count(*) DESC;
-MATCH (e:Entity {repo_id:"epstein-files-1"})-[:IN_CHUNK]->(c:Chunk {repo_id:"epstein-files-1"}) RETURN e.name, c.file_path, c.chunk_id LIMIT 25;
+MATCH (c:Chunk {repo_id:"example-corpus"}) RETURN count(c);
+MATCH (d:Document {repo_id:"example-corpus"}) RETURN count(d);
+MATCH (e:Entity {repo_id:"example-corpus"}) RETURN e.entity_type, count(*) ORDER BY count(*) DESC;
+MATCH (e:Entity {repo_id:"example-corpus"})-[:IN_CHUNK]->(c:Chunk {repo_id:"example-corpus"}) RETURN e.name, c.file_path, c.chunk_id LIMIT 25;
 SHOW INDEXES YIELD name, type, state WHERE type="VECTOR" RETURN name, state;
 ```
 

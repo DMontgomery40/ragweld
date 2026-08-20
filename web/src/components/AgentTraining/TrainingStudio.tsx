@@ -253,7 +253,7 @@ export function TrainingStudio() {
   );
   const [ragweldModelPath, setRagweldModelPath] = useConfigField<string>(
     'training.ragweld_agent_model_path',
-    'models/learning-agent-epstein-files-1'
+    'models/learning-agent-active'
   );
   const [ragweldDatasetPath, setRagweldDatasetPath] = useConfigField<string>('training.ragweld_agent_train_dataset_path', '');
   const [loraRank, setLoraRank] = useConfigField<number>('training.ragweld_agent_lora_rank', 16);

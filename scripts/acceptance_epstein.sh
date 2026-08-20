@@ -27,14 +27,17 @@ ui = str(data.get("ui_base") or "").strip()
 api = str(data.get("api_base") or "").strip()
 print(ui)
 print(api)
+print(str(data.get("corpus_id") or "").strip())
 PY
   )"
   bootstrap_status="$(printf '%s\n' "$bootstrap_defaults" | sed -n '1p')"
   bootstrap_ui_base="$(printf '%s\n' "$bootstrap_defaults" | sed -n '2p')"
   bootstrap_api_base="$(printf '%s\n' "$bootstrap_defaults" | sed -n '3p')"
+  bootstrap_corpus_id="$(printf '%s\n' "$bootstrap_defaults" | sed -n '4p')"
 else
   bootstrap_ui_base=""
   bootstrap_api_base=""
+  bootstrap_corpus_id=""
 fi
 
 resolved_ui_base="${UI_BASE:-}"
@@ -74,6 +77,9 @@ latest_summary_path=""
 
 if [ -z "$UI_BASE" ] || [ -z "$API_BASE" ]; then
   failure_reason="bootstrap_stack_unavailable"
+elif [ "$bootstrap_status" = "passed" ] && [ "$bootstrap_corpus_id" != "$CORPUS_ID" ]; then
+  failure_reason="bootstrap_corpus_mismatch"
+  echo "Run CORPUS_ID=epstein-files-1 CORPUS_PATH=/path/to/epstein-corpus ./scripts/automation_bootstrap.sh first." >&2
 elif [ "$bootstrap_status" != "passed" ] && [ -z "${UI_BASE:-}" ] && [ -z "${API_BASE:-}" ]; then
   failure_reason="bootstrap_not_passed"
 fi

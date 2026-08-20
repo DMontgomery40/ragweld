@@ -35,7 +35,7 @@ export function RerankerConfigSubtab() {
   // Learning reranker is configured under training + reranking
   const [learningModelPath, setLearningModelPath] = useConfigField<string>(
     'training.tribrid_reranker_model_path',
-    'models/learning-reranker-epstein-files-1'
+    'models/learning-reranker-active'
   );
   const [learningBackend, setLearningBackend] = useConfigField<LearningBackend>(
     'training.learning_reranker_backend',
@@ -267,7 +267,7 @@ export function RerankerConfigSubtab() {
                 type="text"
                 value={learningModelPath}
                 onChange={(e) => setLearningModelPath(e.target.value)}
-                placeholder="models/learning-reranker-epstein-files-1"
+                placeholder="models/learning-reranker-active"
               />
             </div>
             <div className="input-group" />

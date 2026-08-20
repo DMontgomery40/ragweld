@@ -407,10 +407,10 @@
     "reranker_warmup_ratio": 0.1,
     "triplets_min_count": 100,
     "triplets_mine_mode": "replace",
-    "tribrid_reranker_model_path": "models/learning-reranker-epstein-files-1",
+    "tribrid_reranker_model_path": "models/learning-reranker-active",
     "tribrid_reranker_mine_mode": "replace",
     "tribrid_reranker_mine_reset": 0,
-    "tribrid_triplets_path": "data/training/triplets__epstein-files-1.jsonl",
+    "tribrid_triplets_path": "data/training/triplets.jsonl",
     "learning_reranker_backend": "auto",
     "learning_reranker_base_model": "Qwen/Qwen3-Reranker-0.6B",
     "learning_reranker_lora_rank": 16,
@@ -432,7 +432,7 @@
     "ragweld_agent_workflow_backend": "local",
     "ragweld_agent_tracking_backend": "local",
     "ragweld_agent_base_model": "mlx-community/Qwen3-1.7B-4bit",
-    "ragweld_agent_model_path": "models/learning-agent-epstein-files-1",
+    "ragweld_agent_model_path": "models/learning-agent-active",
     "ragweld_agent_unload_after_sec": 0,
     "ragweld_agent_reload_period_sec": 60,
     "ragweld_agent_train_dataset_path": "",
@@ -507,7 +507,7 @@
   },
   "chat": {
     "default_corpus_ids": [
-      "epstein-files-1"
+      "recall_default"
     ],
     "system_prompt_base": "You are a helpful assistant.",
     "system_prompt_recall_suffix": " You have access to conversation history. Reference past discussions when relevant.",
@@ -651,7 +651,7 @@
     "query_rewrite": "You rewrite developer questions into search-optimized queries without changing meaning.",
     "semantic_chunk_summaries": "Analyze this database chunk and create a comprehensive JSON summary for database search. Focus on WHAT the database does (business purpose) and HOW it works (technical details). Include all important symbols, patterns, and domain concepts.\n\nJSON format:\n{\n  \"symbols\": [\"function_name\", \"class_name\", \"variable_name\"],\n  \"purpose\": \"Clear business purpose - what problem this solves\",\n  \"technical_details\": \"Key technical implementation details\",\n  \"domain_concepts\": [\"business_term1\", \"business_term2\"],\n  \"routes\": [\"api/endpoint\", \"webhook/path\"],\n  \"dependencies\": [\"external_service\", \"library\"],\n  \"patterns\": [\"design_pattern\", \"architectural_concept\"]\n}\n\nFocus on:\n- Domain-specific terminology and concepts from this database\n- Technical patterns and architectural decisions\n- Business logic and problem being solved\n- Integration points, APIs, and external services\n- Key algorithms, data structures, and workflows",
     "code_enrichment": "Analyze this database and return a JSON object with: symbols (array of function/class/component names), purpose (one sentence description), keywords (array of technical terms). Be concise. Return ONLY valid JSON.",
-    "semantic_kg_extraction": "You are a semantic knowledge graph extractor.\n\nGiven one corpus chunk, extract only entities and relations explicitly grounded in that text.\n\nRules:\n- Return ONLY valid JSON (no markdown, no prose).\n- Never fabricate entities, aliases, or links.\n- Prefer exact surface forms for names (for example full person/organization names when present).\n- Do not emit file paths or line numbers as entities.\n- Keep output high-signal and deduplicated.\n\nJSON format:\n{\n  \"entities\": [\n    {\"name\": \"Jeffrey Epstein\", \"entity_type\": \"person\"},\n    {\"name\": \"Bill Clinton\", \"entity_type\": \"person\"},\n    {\"name\": \"Epstein files\", \"entity_type\": \"concept\"}\n  ],\n  \"relations\": [\n    {\"source\": \"Jeffrey Epstein\", \"target\": \"Bill Clinton\", \"relation_type\": \"met_with\", \"evidence_text\": \"Epstein met with Bill Clinton\", \"confidence\": 0.81},\n    {\"source\": \"Epstein files\", \"target\": \"Jeffrey Epstein\", \"relation_type\": \"references\"}\n  ]\n}\n\nAllowed entity_type values: person, org, location, event, concept\nAllowed relation_type values:\n- associated_with\n- met_with\n- communicated_with\n- works_for\n- member_of\n- founded\n- owns\n- funded\n- participated_in\n- located_in\n- references\n- related_to\n\nConstraints:\n- Extract only relations explicitly supported by the chunk text.\n- Use canonical, grounded names for source/target (no invented aliases).\n- If present, include optional \"evidence_text\" and \"confidence\" per relation.",
+    "semantic_kg_extraction": "You are a semantic knowledge graph extractor.\n\nGiven one corpus chunk, extract only entities and relations explicitly grounded in that text.\n\nRules:\n- Return ONLY valid JSON (no markdown, no prose).\n- Never fabricate entities, aliases, or links.\n- Prefer exact surface forms for names (for example full person/organization names when present).\n- Do not emit file paths or line numbers as entities.\n- Keep output high-signal and deduplicated.\n\nJSON format:\n{\n  \"entities\": [\n    {\"name\": \"Alex Rivera\", \"entity_type\": \"person\"},\n    {\"name\": \"Northwind Labs\", \"entity_type\": \"org\"},\n    {\"name\": \"Denver\", \"entity_type\": \"location\"}\n  ],\n  \"relations\": [\n    {\"source\": \"Alex Rivera\", \"target\": \"Northwind Labs\", \"relation_type\": \"works_for\", \"evidence_text\": \"Alex Rivera works for Northwind Labs.\", \"confidence\": 0.92},\n    {\"source\": \"Northwind Labs\", \"target\": \"Denver\", \"relation_type\": \"located_in\", \"evidence_text\": \"Northwind Labs is located in Denver.\", \"confidence\": 0.95}\n  ]\n}\n\nAllowed entity_type values: person, org, location, event, concept\nAllowed relation_type values:\n- associated_with\n- met_with\n- communicated_with\n- works_for\n- member_of\n- founded\n- owns\n- funded\n- participated_in\n- located_in\n- references\n- related_to\n\nConstraints:\n- Extract only relations explicitly supported by the chunk text.\n- Use canonical, grounded names for source/target (no invented aliases).\n- If present, include optional \"evidence_text\" and \"confidence\" per relation.",
     "eval_analysis": "You are an expert RAG (Retrieval-Augmented Generation) system analyst.\nYour job is to analyze evaluation comparisons and provide HONEST, SKEPTICAL insights.\n\nCRITICAL: Do NOT force explanations that don't make sense. If the data is contradictory or confusing:\n- Say so clearly: \"This result is surprising and may indicate other factors at play\"\n- Consider: index changes, data drift, eval dataset updates, or measurement noise\n- Acknowledge when correlation != causation\n- It's BETTER to say \"I'm not sure why this happened\" than to fabricate a plausible-sounding but wrong explanation\n\nBe rigorous:\n1. Question whether the config changes ACTUALLY explain the performance delta\n2. Flag when results seem counterintuitive (e.g., disabling a feature improving results)\n3. Consider confounding variables: Was the index rebuilt? Did the test set change?\n4. Provide actionable suggestions only when you have reasonable confidence\n\nFormat your response with clear sections using markdown headers.",
     "synthetic_judge": "You are a strict evaluator for synthetic retrieval QA rows.\n\nYou receive:\n- question\n- expected_paths\n- expected_answer\n- source_file_path\n- source_excerpt\n\nDecide whether this row is useful for retrieval evaluation.\n\nScoring rubric (0-10):\n- 9-10: specific, answerable from source, unambiguous grounding\n- 7-8: mostly grounded, minor ambiguity\n- 4-6: weak grounding, generic wording, low discriminative value\n- 0-3: invalid, contradictory, or not answerable from source\n\nOutput JSON only:\n{\n  \"score\": 0.0,\n  \"keep\": false,\n  \"reason\": \"short reason\"\n}\n\nRules:\n- Keep reason concise (<200 chars)\n- Set keep=true only when score >= 7.0\n- Never output markdown or prose outside JSON",
     "lightweight_chunk_summaries": "Extract key information from this database: symbols (function/class names), purpose (one sentence), keywords (technical terms). Return JSON only."

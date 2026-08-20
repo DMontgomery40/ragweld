@@ -31,8 +31,8 @@ async def test_pg_search_bm25_returns_relevant_chunks() -> None:
         chunks = [
             Chunk(
                 chunk_id="c1",
-                content="Jeffrey Epstein court filing transcript excerpt",
-                file_path="epstein.txt",
+                content="Northwind Labs architecture review transcript excerpt",
+                file_path="northwind.txt",
                 start_line=1,
                 end_line=1,
                 language=None,
@@ -54,9 +54,9 @@ async def test_pg_search_bm25_returns_relevant_chunks() -> None:
         # Insert rows (content + metadata); BM25 index (if present) should pick them up.
         await pg.upsert_fts(repo_id, chunks, ts_config="english")
 
-        hits = await pg.bm25_search_pg_search(repo_id, "Epstein filing transcript", 5, query_mode="plain")
+        hits = await pg.bm25_search_pg_search(repo_id, "Northwind architecture transcript", 5, query_mode="plain")
         assert hits, "Expected at least one BM25 hit"
-        assert any("epstein" in (h.content or "").lower() for h in hits)
+        assert any("northwind" in (h.content or "").lower() for h in hits)
     finally:
         # Best-effort cleanup.
         try:

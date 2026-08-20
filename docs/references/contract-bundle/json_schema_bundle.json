@@ -4413,7 +4413,7 @@
         },
         "default_corpus_ids": {
           "default": [
-            "epstein-files-1"
+            "recall_default"
           ],
           "description": "Default checked user-facing corpus IDs for new conversations.",
           "items": {
@@ -29562,7 +29562,7 @@
           "type": "string"
         },
         "semantic_kg_extraction": {
-          "default": "You are a semantic knowledge graph extractor.\n\nGiven one corpus chunk, extract only entities and relations explicitly grounded in that text.\n\nRules:\n- Return ONLY valid JSON (no markdown, no prose).\n- Never fabricate entities, aliases, or links.\n- Prefer exact surface forms for names (for example full person/organization names when present).\n- Do not emit file paths or line numbers as entities.\n- Keep output high-signal and deduplicated.\n\nJSON format:\n{\n  \"entities\": [\n    {\"name\": \"Jeffrey Epstein\", \"entity_type\": \"person\"},\n    {\"name\": \"Bill Clinton\", \"entity_type\": \"person\"},\n    {\"name\": \"Epstein files\", \"entity_type\": \"concept\"}\n  ],\n  \"relations\": [\n    {\"source\": \"Jeffrey Epstein\", \"target\": \"Bill Clinton\", \"relation_type\": \"met_with\", \"evidence_text\": \"Epstein met with Bill Clinton\", \"confidence\": 0.81},\n    {\"source\": \"Epstein files\", \"target\": \"Jeffrey Epstein\", \"relation_type\": \"references\"}\n  ]\n}\n\nAllowed entity_type values: person, org, location, event, concept\nAllowed relation_type values:\n- associated_with\n- met_with\n- communicated_with\n- works_for\n- member_of\n- founded\n- owns\n- funded\n- participated_in\n- located_in\n- references\n- related_to\n\nConstraints:\n- Extract only relations explicitly supported by the chunk text.\n- Use canonical, grounded names for source/target (no invented aliases).\n- If present, include optional \"evidence_text\" and \"confidence\" per relation.",
+          "default": "You are a semantic knowledge graph extractor.\n\nGiven one corpus chunk, extract only entities and relations explicitly grounded in that text.\n\nRules:\n- Return ONLY valid JSON (no markdown, no prose).\n- Never fabricate entities, aliases, or links.\n- Prefer exact surface forms for names (for example full person/organization names when present).\n- Do not emit file paths or line numbers as entities.\n- Keep output high-signal and deduplicated.\n\nJSON format:\n{\n  \"entities\": [\n    {\"name\": \"Alex Rivera\", \"entity_type\": \"person\"},\n    {\"name\": \"Northwind Labs\", \"entity_type\": \"org\"},\n    {\"name\": \"Denver\", \"entity_type\": \"location\"}\n  ],\n  \"relations\": [\n    {\"source\": \"Alex Rivera\", \"target\": \"Northwind Labs\", \"relation_type\": \"works_for\", \"evidence_text\": \"Alex Rivera works for Northwind Labs.\", \"confidence\": 0.92},\n    {\"source\": \"Northwind Labs\", \"target\": \"Denver\", \"relation_type\": \"located_in\", \"evidence_text\": \"Northwind Labs is located in Denver.\", \"confidence\": 0.95}\n  ]\n}\n\nAllowed entity_type values: person, org, location, event, concept\nAllowed relation_type values:\n- associated_with\n- met_with\n- communicated_with\n- works_for\n- member_of\n- founded\n- owns\n- funded\n- participated_in\n- located_in\n- references\n- related_to\n\nConstraints:\n- Extract only relations explicitly supported by the chunk text.\n- Use canonical, grounded names for source/target (no invented aliases).\n- If present, include optional \"evidence_text\" and \"confidence\" per relation.",
           "description": "Prompt for LLM-assisted semantic KG extraction (typed entities + relations)",
           "title": "Semantic Kg Extraction",
           "type": "string"
@@ -31588,7 +31588,7 @@
           "type": "string"
         },
         "ragweld_agent_model_path": {
-          "default": "models/learning-agent-epstein-files-1",
+          "default": "models/learning-agent-active",
           "description": "Active ragweld agent adapter artifact path (directory containing adapter.npz + adapter_config.json).",
           "title": "Ragweld Agent Model Path",
           "type": "string"
@@ -31713,13 +31713,13 @@
           "type": "integer"
         },
         "tribrid_reranker_model_path": {
-          "default": "models/learning-reranker-epstein-files-1",
+          "default": "models/learning-reranker-active",
           "description": "Active learning reranker artifact path (MLX adapter directory).",
           "title": "Tribrid Reranker Model Path",
           "type": "string"
         },
         "tribrid_triplets_path": {
-          "default": "data/training/triplets__epstein-files-1.jsonl",
+          "default": "data/training/triplets.jsonl",
           "description": "Training triplets file path",
           "title": "Tribrid Triplets Path",
           "type": "string"
@@ -31910,7 +31910,7 @@
             },
             "default_corpus_ids": {
               "default": [
-                "epstein-files-1"
+                "recall_default"
               ],
               "description": "Default checked user-facing corpus IDs for new conversations.",
               "items": {
@@ -34835,7 +34835,7 @@
               "type": "string"
             },
             "semantic_kg_extraction": {
-              "default": "You are a semantic knowledge graph extractor.\n\nGiven one corpus chunk, extract only entities and relations explicitly grounded in that text.\n\nRules:\n- Return ONLY valid JSON (no markdown, no prose).\n- Never fabricate entities, aliases, or links.\n- Prefer exact surface forms for names (for example full person/organization names when present).\n- Do not emit file paths or line numbers as entities.\n- Keep output high-signal and deduplicated.\n\nJSON format:\n{\n  \"entities\": [\n    {\"name\": \"Jeffrey Epstein\", \"entity_type\": \"person\"},\n    {\"name\": \"Bill Clinton\", \"entity_type\": \"person\"},\n    {\"name\": \"Epstein files\", \"entity_type\": \"concept\"}\n  ],\n  \"relations\": [\n    {\"source\": \"Jeffrey Epstein\", \"target\": \"Bill Clinton\", \"relation_type\": \"met_with\", \"evidence_text\": \"Epstein met with Bill Clinton\", \"confidence\": 0.81},\n    {\"source\": \"Epstein files\", \"target\": \"Jeffrey Epstein\", \"relation_type\": \"references\"}\n  ]\n}\n\nAllowed entity_type values: person, org, location, event, concept\nAllowed relation_type values:\n- associated_with\n- met_with\n- communicated_with\n- works_for\n- member_of\n- founded\n- owns\n- funded\n- participated_in\n- located_in\n- references\n- related_to\n\nConstraints:\n- Extract only relations explicitly supported by the chunk text.\n- Use canonical, grounded names for source/target (no invented aliases).\n- If present, include optional \"evidence_text\" and \"confidence\" per relation.",
+              "default": "You are a semantic knowledge graph extractor.\n\nGiven one corpus chunk, extract only entities and relations explicitly grounded in that text.\n\nRules:\n- Return ONLY valid JSON (no markdown, no prose).\n- Never fabricate entities, aliases, or links.\n- Prefer exact surface forms for names (for example full person/organization names when present).\n- Do not emit file paths or line numbers as entities.\n- Keep output high-signal and deduplicated.\n\nJSON format:\n{\n  \"entities\": [\n    {\"name\": \"Alex Rivera\", \"entity_type\": \"person\"},\n    {\"name\": \"Northwind Labs\", \"entity_type\": \"org\"},\n    {\"name\": \"Denver\", \"entity_type\": \"location\"}\n  ],\n  \"relations\": [\n    {\"source\": \"Alex Rivera\", \"target\": \"Northwind Labs\", \"relation_type\": \"works_for\", \"evidence_text\": \"Alex Rivera works for Northwind Labs.\", \"confidence\": 0.92},\n    {\"source\": \"Northwind Labs\", \"target\": \"Denver\", \"relation_type\": \"located_in\", \"evidence_text\": \"Northwind Labs is located in Denver.\", \"confidence\": 0.95}\n  ]\n}\n\nAllowed entity_type values: person, org, location, event, concept\nAllowed relation_type values:\n- associated_with\n- met_with\n- communicated_with\n- works_for\n- member_of\n- founded\n- owns\n- funded\n- participated_in\n- located_in\n- references\n- related_to\n\nConstraints:\n- Extract only relations explicitly supported by the chunk text.\n- Use canonical, grounded names for source/target (no invented aliases).\n- If present, include optional \"evidence_text\" and \"confidence\" per relation.",
               "description": "Prompt for LLM-assisted semantic KG extraction (typed entities + relations)",
               "title": "Semantic Kg Extraction",
               "type": "string"
@@ -35287,7 +35287,7 @@
               "type": "string"
             },
             "ragweld_agent_model_path": {
-              "default": "models/learning-agent-epstein-files-1",
+              "default": "models/learning-agent-active",
               "description": "Active ragweld agent adapter artifact path (directory containing adapter.npz + adapter_config.json).",
               "title": "Ragweld Agent Model Path",
               "type": "string"
@@ -35412,13 +35412,13 @@
               "type": "integer"
             },
             "tribrid_reranker_model_path": {
-              "default": "models/learning-reranker-epstein-files-1",
+              "default": "models/learning-reranker-active",
               "description": "Active learning reranker artifact path (MLX adapter directory).",
               "title": "Tribrid Reranker Model Path",
               "type": "string"
             },
             "tribrid_triplets_path": {
-              "default": "data/training/triplets__epstein-files-1.jsonl",
+              "default": "data/training/triplets.jsonl",
               "description": "Training triplets file path",
               "title": "Tribrid Triplets Path",
               "type": "string"

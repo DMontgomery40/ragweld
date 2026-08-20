@@ -1197,20 +1197,6 @@
     },
     {
       "provider": "local",
-      "family": "learning-reranker-epstein-files-1",
-      "model": "learning-reranker-epstein-files-1",
-      "components": [
-        "RERANK"
-      ],
-      "unit": "request",
-      "per_request": 0.0,
-      "notes": "TriBrid Qwen3 LoRA learning reranker artifact (local)",
-      "selection_roles": [],
-      "selection_status": "catalog_only",
-      "selection_reason": "Catalog entry only. Current cloud reranker runtime supports cohere only; the learning reranker is selected via training.* config rather than catalog rows."
-    },
-    {
-      "provider": "local",
       "family": "nemo-retriever-llama3.2-embed",
       "model": "nemo-retriever-llama3.2-embed",
       "components": [

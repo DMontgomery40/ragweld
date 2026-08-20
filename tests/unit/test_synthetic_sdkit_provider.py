@@ -25,18 +25,18 @@ def test_match_curated_pairs_preserves_duplicate_pairs_in_order() -> None:
     generated_pairs = [
         {
             "question": "Who is named?",
-            "answer": "Jeffrey Epstein",
+            "answer": "Alex Rivera",
             "source_path": "a.txt",
         },
         {
             "question": "Who is named?",
-            "answer": "Jeffrey Epstein",
+            "answer": "Alex Rivera",
             "source_path": "b.txt",
         },
     ]
     rated_pairs = [
-        {"question": "Who is named?", "answer": "Jeffrey Epstein", "rating": 8.5},
-        {"question": "Who is named?", "answer": "Jeffrey Epstein", "rating": 9.0},
+        {"question": "Who is named?", "answer": "Alex Rivera", "rating": 8.5},
+        {"question": "Who is named?", "answer": "Alex Rivera", "rating": 9.0},
     ]
 
     matched = _match_curated_pairs(generated_pairs=generated_pairs, rated_pairs=rated_pairs)

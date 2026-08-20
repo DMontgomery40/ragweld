@@ -5450,7 +5450,7 @@ class TrainingConfig(BaseModel):
     )
 
     tribrid_reranker_model_path: str = Field(
-        default="models/learning-reranker-epstein-files-1",
+        default="models/learning-reranker-active",
         description="Active learning reranker artifact path (MLX adapter directory)."
     )
 
@@ -5468,7 +5468,7 @@ class TrainingConfig(BaseModel):
     )
 
     tribrid_triplets_path: str = Field(
-        default="data/training/triplets__epstein-files-1.jsonl",
+        default="data/training/triplets.jsonl",
         description="Training triplets file path"
     )
 
@@ -5592,7 +5592,7 @@ class TrainingConfig(BaseModel):
     )
 
     ragweld_agent_model_path: str = Field(
-        default="models/learning-agent-epstein-files-1",
+        default="models/learning-agent-active",
         description="Active ragweld agent adapter artifact path (directory containing adapter.npz + adapter_config.json).",
     )
 
@@ -6211,13 +6211,13 @@ Rules:
 JSON format:
 {
   "entities": [
-    {"name": "Jeffrey Epstein", "entity_type": "person"},
-    {"name": "Bill Clinton", "entity_type": "person"},
-    {"name": "Epstein files", "entity_type": "concept"}
+    {"name": "Alex Rivera", "entity_type": "person"},
+    {"name": "Northwind Labs", "entity_type": "org"},
+    {"name": "Denver", "entity_type": "location"}
   ],
   "relations": [
-    {"source": "Jeffrey Epstein", "target": "Bill Clinton", "relation_type": "met_with", "evidence_text": "Epstein met with Bill Clinton", "confidence": 0.81},
-    {"source": "Epstein files", "target": "Jeffrey Epstein", "relation_type": "references"}
+    {"source": "Alex Rivera", "target": "Northwind Labs", "relation_type": "works_for", "evidence_text": "Alex Rivera works for Northwind Labs.", "confidence": 0.92},
+    {"source": "Northwind Labs", "target": "Denver", "relation_type": "located_in", "evidence_text": "Northwind Labs is located in Denver.", "confidence": 0.95}
   ]
 }
 
@@ -6447,7 +6447,7 @@ class ChatConfig(BaseModel):
     """
 
     default_corpus_ids: list[str] = Field(
-        default=["epstein-files-1"],
+        default=["recall_default"],
         description="Default checked user-facing corpus IDs for new conversations.",
     )
 
@@ -7183,10 +7183,10 @@ class TriBridConfig(BaseModel):
                 reranker_warmup_ratio=data.get('RERANKER_WARMUP_RATIO', 0.1),
                 triplets_min_count=data.get('TRIPLETS_MIN_COUNT', 100),
                 triplets_mine_mode=data.get('TRIPLETS_MINE_MODE', 'replace'),
-                tribrid_reranker_model_path=data.get('TRIBRID_RERANKER_MODEL_PATH', 'models/learning-reranker-epstein-files-1'),
+                tribrid_reranker_model_path=data.get('TRIBRID_RERANKER_MODEL_PATH', 'models/learning-reranker-active'),
                 tribrid_reranker_mine_mode=data.get('TRIBRID_RERANKER_MINE_MODE', 'replace'),
                 tribrid_reranker_mine_reset=data.get('TRIBRID_RERANKER_MINE_RESET', 0),
-                tribrid_triplets_path=data.get('TRIBRID_TRIPLETS_PATH', 'data/training/triplets__epstein-files-1.jsonl'),
+                tribrid_triplets_path=data.get('TRIBRID_TRIPLETS_PATH', 'data/training/triplets.jsonl'),
                 learning_reranker_backend=data.get('LEARNING_RERANKER_BACKEND', 'auto'),
                 learning_reranker_base_model=data.get('LEARNING_RERANKER_BASE_MODEL', 'Qwen/Qwen3-Reranker-0.6B'),
                 learning_reranker_lora_rank=data.get('LEARNING_RERANKER_LORA_RANK', 16),
@@ -7206,7 +7206,7 @@ class TriBridConfig(BaseModel):
                 ragweld_agent_workflow_backend=data.get('RAGWELD_AGENT_WORKFLOW_BACKEND', 'local'),
                 ragweld_agent_tracking_backend=data.get('RAGWELD_AGENT_TRACKING_BACKEND', 'local'),
                 ragweld_agent_base_model=data.get('RAGWELD_AGENT_BASE_MODEL', 'mlx-community/Qwen3-1.7B-4bit'),
-                ragweld_agent_model_path=data.get('RAGWELD_AGENT_MODEL_PATH', 'models/learning-agent-epstein-files-1'),
+                ragweld_agent_model_path=data.get('RAGWELD_AGENT_MODEL_PATH', 'models/learning-agent-active'),
                 ragweld_agent_unload_after_sec=data.get('RAGWELD_AGENT_UNLOAD_AFTER_SEC', 0),
                 ragweld_agent_reload_period_sec=data.get('RAGWELD_AGENT_RELOAD_PERIOD_SEC', 60),
                 ragweld_agent_train_dataset_path=data.get('RAGWELD_AGENT_TRAIN_DATASET_PATH', ''),
