@@ -11,27 +11,16 @@ async def test_runtime_capabilities_endpoint_exposes_current_runtime_surface(cli
     body = response.json()
 
     generation_routing = {str(item.get("id") or "") for item in body["generation"]["routing_backends"]}
-    assert generation_routing == {
-        "litellm",
-        "openrouter",
-        "local_openai_compatible",
-        "openai_cloud_direct",
-        "ragweld_mlx",
-    }
+    assert generation_routing == {"litellm"}
 
     generation_serving = {str(item.get("id") or "") for item in body["generation"]["serving_backends"]}
-    assert generation_serving == {
-        "vllm",
-        "ollama",
-        "llamacpp",
-        "mlx_ragweld",
-        "openai_cloud",
-    }
+    assert generation_serving == {"vllm"}
 
     default_route = body["generation"]["default_route"]
     assert default_route is not None
-    assert default_route["kind"] == "local"
-    assert default_route["provider_name"] == "Ollama"
+    assert default_route["kind"] == "litellm"
+    assert default_route["provider_name"] == "LiteLLM"
+    assert default_route["model"] == "ragweld-local"
 
     embedding_providers = {str(item.get("provider") or "") for item in body["embedding"]["providers"]}
     assert embedding_providers == {"openai", "mlx", "local", "huggingface"}

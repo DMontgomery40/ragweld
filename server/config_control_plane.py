@@ -10,6 +10,11 @@ from typing import Any, Literal, get_args, get_origin
 import httpx
 from pydantic import BaseModel
 
+from server.chat.gateway_runtime import (
+    resolve_litellm_api_key,
+    resolve_litellm_base_url,
+    resolve_vllm_base_url,
+)
 from server.db.neo4j import Neo4jClient
 from server.db.postgres import PostgresClient
 from server.indexing.oss_retrieval_pilot import build_retrieval_pilot_status
@@ -455,6 +460,16 @@ async def _probe_url(url: str | None) -> tuple[bool | None, str | None]:
         return False, f"{type(exc).__name__}: {exc}"
 
 
+async def _probe_model_api(url: str, *, api_key: str | None = None) -> tuple[bool, str]:
+    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+    try:
+        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+            response = await client.get(f"{url.rstrip('/')}/models", headers=headers)
+        return response.status_code == 200, f"HTTP {response.status_code}"
+    except Exception as exc:
+        return False, type(exc).__name__
+
+
 def _jsonable(value: Any) -> Any:
     if isinstance(value, BaseModel):
         return value.model_dump(mode="json")
@@ -779,7 +794,13 @@ async def _build_runtime_integration_readiness(config: TriBridConfig, contract: 
                 failing_checks=["enabled"],
                 operator_hint="Enable LiteLLM and point it at the gateway URL before treating the runtime lane as migrated.",
             )
-        reachable, detail = await _probe_url(config.chat.litellm.base_url)
+        try:
+            runtime_url = resolve_litellm_base_url(configured_url=config.chat.litellm.base_url)
+            runtime_key = resolve_litellm_api_key()
+            reachable, detail = await _probe_model_api(runtime_url, api_key=runtime_key)
+        except RuntimeError as exc:
+            runtime_url = str(config.chat.litellm.base_url or "")
+            reachable, detail = False, str(exc)
         state: Literal["ready", "degraded", "unconfigured", "disabled"] = "ready"
         failing_checks: list[str] = []
         if missing:
@@ -801,11 +822,11 @@ async def _build_runtime_integration_readiness(config: TriBridConfig, contract: 
                 TraceExternalLink(
                     label="LiteLLM Gateway",
                     kind="custom",
-                    url=str(config.chat.litellm.base_url or ""),
+                    url=runtime_url,
                     detail="Gateway routing endpoint",
                 )
             ]
-            if str(config.chat.litellm.base_url or "").strip()
+            if runtime_url
             else [],
         )
 
@@ -821,7 +842,12 @@ async def _build_runtime_integration_readiness(config: TriBridConfig, contract: 
             failing_checks=["enabled"],
             operator_hint="Enable vLLM and configure its base URL/default model before cutting the serving lane over.",
         )
-    reachable, detail = await _probe_url(config.chat.vllm.base_url)
+    try:
+        runtime_url = resolve_vllm_base_url(configured_url=config.chat.vllm.base_url)
+        reachable, detail = await _probe_model_api(runtime_url)
+    except RuntimeError as exc:
+        runtime_url = str(config.chat.vllm.base_url or "")
+        reachable, detail = False, str(exc)
     state = "ready"
     failing_checks: list[str] = []
     if missing:
@@ -843,11 +869,11 @@ async def _build_runtime_integration_readiness(config: TriBridConfig, contract: 
             TraceExternalLink(
                 label="vLLM Endpoint",
                 kind="custom",
-                url=str(config.chat.vllm.base_url or ""),
+                url=runtime_url,
                 detail="Serving endpoint",
             )
         ]
-        if str(config.chat.vllm.base_url or "").strip()
+        if runtime_url
         else [],
     )
 

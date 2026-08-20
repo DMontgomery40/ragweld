@@ -4,7 +4,7 @@ import json
 import os
 from pathlib import Path
 
-from server.models.chat_config import ChatConfig, LiteLLMConfig, LocalModelConfig, OpenRouterConfig
+from server.models.chat_config import ChatConfig, LiteLLMConfig
 from server.models.tribrid_config_model import TriBridConfig
 from server.runtime_capabilities import (
     SUPPORTED_PROVIDER_BACKEND_EMBEDDING_PROVIDERS,
@@ -19,23 +19,12 @@ from server.runtime_capabilities import (
 def test_runtime_capabilities_response_matches_backend_constants() -> None:
     response = build_runtime_capabilities_response()
 
-    assert {item.id for item in response.generation.routing_backends} == {
-        "litellm",
-        "openrouter",
-        "local_openai_compatible",
-        "openai_cloud_direct",
-        "ragweld_mlx",
-    }
-    assert {item.id for item in response.generation.serving_backends} == {
-        "vllm",
-        "ollama",
-        "llamacpp",
-        "mlx_ragweld",
-        "openai_cloud",
-    }
+    assert {item.id for item in response.generation.routing_backends} == {"litellm"}
+    assert {item.id for item in response.generation.serving_backends} == {"vllm"}
     assert response.generation.default_route is not None
-    assert response.generation.default_route.kind == "local"
-    assert response.generation.default_route.provider_name == "Ollama"
+    assert response.generation.default_route.kind == "litellm"
+    assert response.generation.default_route.provider_name == "LiteLLM"
+    assert response.generation.default_route.model == "ragweld-local"
 
     assert {item.provider for item in response.embedding.providers} == SUPPORTED_PROVIDER_BACKEND_EMBEDDING_PROVIDERS
     assert {item.id for item in response.reranker.cloud_providers} == SUPPORTED_RERANKER_CLOUD_PROVIDERS
@@ -66,8 +55,6 @@ def test_runtime_capabilities_can_resolve_litellm_as_default_generation_route() 
                     base_url="http://127.0.0.1:4000/v1",
                     default_model="openai/gpt-4o-mini",
                 ),
-                local_models=LocalModelConfig(providers=[]),
-                openrouter=OpenRouterConfig(enabled=False),
             ),
         )
         response = build_runtime_capabilities_response_for_config(cfg)

@@ -204,6 +204,7 @@ services:
       - NEO4J_URI=bolt://neo4j:7687
       - LITELLM_BASE_URL=http://litellm:4000/v1
       - LITELLM_API_KEY=${LITELLM_API_KEY:-sk-ragweld-local}
+      - VLLM_BASE_URL=http://vllm:8000/v1
       - OPENROUTER_API_KEY=
     env_file:
       - .env

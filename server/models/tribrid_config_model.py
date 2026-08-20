@@ -600,7 +600,7 @@ class ReadinessStatus(BaseModel):
     ready: bool
     corpus_id: str | None = None
     corpus_error: str | None = None
-    dependencies: dict[Literal["postgres", "neo4j"], ReadinessDependencyStatus]
+    dependencies: dict[Literal["postgres", "neo4j", "litellm", "vllm"], ReadinessDependencyStatus]
 
 
 class DockerContainer(BaseModel):

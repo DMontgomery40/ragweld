@@ -152,20 +152,36 @@ async def test_observability_status_includes_gateway_and_workflow_control_plane_
     cfg["training"]["ragweld_agent_mlflow_experiment_name"] = "ragweld-learning-agent"
     cfg["training"]["ragweld_agent_unsloth_image"] = "ghcr.io/ragweld/unsloth:latest"
 
-    saved = await client.put("/api/config", json=cfg)
-    assert saved.status_code == 200
+    old_litellm_url = os.environ.get("LITELLM_BASE_URL")
+    old_vllm_url = os.environ.get("VLLM_BASE_URL")
+    os.environ["LITELLM_BASE_URL"] = "http://127.0.0.1:7/v1"
+    os.environ["VLLM_BASE_URL"] = "http://127.0.0.1:8/v1"
+    try:
+        saved = await client.put("/api/config", json=cfg)
+        assert saved.status_code == 200
 
-    response = await client.get("/api/observability/status")
-    assert response.status_code == 200
-    data = response.json()
-    components = {component["id"]: component for component in data["components"]}
+        response = await client.get("/api/observability/status")
+        assert response.status_code == 200
+        data = response.json()
+        components = {component["id"]: component for component in data["components"]}
+    finally:
+        if old_litellm_url is None:
+            os.environ.pop("LITELLM_BASE_URL", None)
+        else:
+            os.environ["LITELLM_BASE_URL"] = old_litellm_url
+        if old_vllm_url is None:
+            os.environ.pop("VLLM_BASE_URL", None)
+        else:
+            os.environ["VLLM_BASE_URL"] = old_vllm_url
 
     assert components["litellm"]["enabled"] is True
     assert components["litellm"]["configured"] is True
     assert components["litellm"]["reachable"] is False
+    assert components["litellm"]["url"] == "http://127.0.0.1:7/v1"
     assert components["vllm"]["enabled"] is True
     assert components["vllm"]["configured"] is True
     assert components["vllm"]["reachable"] is False
+    assert components["vllm"]["url"] == "http://127.0.0.1:8/v1"
     assert components["flyte"]["enabled"] is True
     assert components["mlflow"]["enabled"] is True
     assert components["unsloth"]["enabled"] is True

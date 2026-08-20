@@ -126,26 +126,6 @@ GENERATION_ROUTING_BACKEND_OPTIONS: tuple[RuntimeOption, ...] = (
         label="LiteLLM gateway",
         description="Unified OpenAI-compatible gateway and router for self-hosted and cloud generation backends.",
     ),
-    RuntimeOption(
-        id="openrouter",
-        label="OpenRouter gateway",
-        description="OpenAI-compatible cloud routing path used for compatible external providers.",
-    ),
-    RuntimeOption(
-        id="local_openai_compatible",
-        label="Local OpenAI-compatible",
-        description="Direct routing to configured local OpenAI-compatible providers such as Ollama, llama.cpp, LM Studio, or vLLM.",
-    ),
-    RuntimeOption(
-        id="openai_cloud_direct",
-        label="OpenAI direct",
-        description="Direct cloud routing to OpenAI-compatible APIs without an intermediate gateway.",
-    ),
-    RuntimeOption(
-        id="ragweld_mlx",
-        label="Ragweld MLX",
-        description="In-process Apple Silicon MLX path for the ragweld agent model.",
-    ),
 )
 
 GENERATION_SERVING_BACKEND_OPTIONS: tuple[RuntimeOption, ...] = (
@@ -153,26 +133,6 @@ GENERATION_SERVING_BACKEND_OPTIONS: tuple[RuntimeOption, ...] = (
         id="vllm",
         label="vLLM",
         description="OpenAI-compatible self-hosted serving runtime for owned generation models.",
-    ),
-    RuntimeOption(
-        id="ollama",
-        label="Ollama",
-        description="OpenAI-compatible local serving runtime commonly used for workstation-hosted models.",
-    ),
-    RuntimeOption(
-        id="llamacpp",
-        label="llama.cpp",
-        description="OpenAI-compatible local serving runtime backed by llama.cpp.",
-    ),
-    RuntimeOption(
-        id="mlx_ragweld",
-        label="MLX Ragweld",
-        description="In-process Apple Silicon MLX serving path for ragweld-owned models.",
-    ),
-    RuntimeOption(
-        id="openai_cloud",
-        label="OpenAI cloud",
-        description="Cloud-hosted generation runtime reached directly or through a compatible gateway.",
     ),
 )
 
@@ -303,19 +263,6 @@ def build_runtime_capabilities_response_for_config(config: TriBridConfig) -> Run
 
 
 def _default_generation_route(config: TriBridConfig) -> ChatProviderInfo | None:
-    enabled_local = [provider for provider in config.chat.local_models.providers if provider.enabled]
-    if enabled_local:
-        chosen = sorted(enabled_local, key=lambda provider: (provider.priority, provider.name))[0]
-        base_url = str(chosen.base_url or "").strip().rstrip("/")
-        if base_url.endswith("/v1"):
-            base_url = base_url[: -len("/v1")]
-        return ChatProviderInfo(
-            kind="local",
-            provider_name=chosen.name,
-            model=str(config.chat.local_models.default_chat_model or "").strip(),
-            base_url=base_url,
-        )
-
     litellm_base_url = str(getattr(config.chat.litellm, "base_url", "") or "").strip().rstrip("/")
     if getattr(config.chat.litellm, "enabled", False) and litellm_base_url:
         return ChatProviderInfo(
@@ -325,19 +272,7 @@ def _default_generation_route(config: TriBridConfig) -> ChatProviderInfo | None:
             base_url=litellm_base_url,
         )
 
-    from server.chat.provider_router import select_provider_route
-
-    try:
-        route = select_provider_route(config=config)
-    except Exception:
-        return None
-
-    return ChatProviderInfo(
-        kind=route.kind,
-        provider_name=route.provider_name,
-        model=route.model,
-        base_url=route.base_url,
-    )
+    return None
 
 
 def provider_requires_tokenizer(provider: str) -> set[str] | None:

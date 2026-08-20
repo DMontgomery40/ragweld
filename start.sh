@@ -239,6 +239,7 @@ export BACKEND_PORT FRONTEND_PORT
 export VITE_API_PROXY_TARGET="http://127.0.0.1:${BACKEND_PORT}"
 export LITELLM_BASE_URL="${LITELLM_BASE_URL:-http://127.0.0.1:54000/v1}"
 export LITELLM_API_KEY="${LITELLM_API_KEY:-sk-ragweld-local}"
+export VLLM_BASE_URL="${VLLM_BASE_URL:-http://127.0.0.1:58080/v1}"
 
 validate_port "Backend" "$BACKEND_PORT"
 validate_port "Frontend" "$FRONTEND_PORT"

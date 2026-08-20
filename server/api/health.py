@@ -1,7 +1,13 @@
+import httpx
 from fastapi import APIRouter, Depends
 from starlette.responses import JSONResponse
 
 from server.config import load_config
+from server.chat.gateway_runtime import (
+    resolve_litellm_api_key,
+    resolve_litellm_base_url,
+    resolve_vllm_base_url,
+)
 from server.db.neo4j import Neo4jClient
 from server.db.postgres import PostgresClient
 from server.models.tribrid_config_model import (
@@ -39,7 +45,7 @@ async def health_check() -> HealthStatus:
 async def readiness_check(scope: CorpusScope = _CORPUS_SCOPE_DEP) -> ReadinessStatus | JSONResponse:
     """Readiness probe.
 
-    Returns dependency status for Postgres + Neo4j.
+    Returns dependency status for Postgres, Neo4j, LiteLLM, and vLLM.
     If a corpus is specified via query params (repo_id/corpus_id), checks the
     configured Neo4j database for that corpus as well.
     """
@@ -64,6 +70,8 @@ async def readiness_check(scope: CorpusScope = _CORPUS_SCOPE_DEP) -> ReadinessSt
 
     postgres = ReadinessDependencyStatus()
     neo4j_status = ReadinessDependencyStatus(database=cfg.graph_storage.resolve_database(corpus_id))
+    litellm_status = ReadinessDependencyStatus()
+    vllm_status = ReadinessDependencyStatus()
     ready = not bool(corpus_error)
 
     # Postgres
@@ -111,11 +119,46 @@ async def readiness_check(scope: CorpusScope = _CORPUS_SCOPE_DEP) -> ReadinessSt
         neo4j_status.error = "Neo4j graph store is unavailable."
         neo4j_status.operator_hint = "Verify the scoped Ragweld Neo4j service and credentials, then retry readiness."
 
+    # Generation gateway
+    try:
+        litellm_url = resolve_litellm_base_url(configured_url=cfg.chat.litellm.base_url)
+        litellm_key = resolve_litellm_api_key()
+        async with httpx.AsyncClient(timeout=2.0) as client:
+            response = await client.get(
+                f"{litellm_url}/models",
+                headers={"Authorization": f"Bearer {litellm_key}"},
+            )
+            response.raise_for_status()
+        litellm_status.ok = True
+        litellm_status.info = {"status": "authenticated and reachable"}
+    except Exception:
+        ready = False
+        litellm_status.error = "LiteLLM generation gateway is unavailable."
+        litellm_status.operator_hint = "Start the managed LiteLLM service and verify its client key."
+
+    # Local serving backend
+    try:
+        vllm_url = resolve_vllm_base_url(configured_url=cfg.chat.vllm.base_url)
+        async with httpx.AsyncClient(timeout=2.0) as client:
+            response = await client.get(f"{vllm_url}/models")
+            response.raise_for_status()
+        vllm_status.ok = True
+        vllm_status.info = {"status": "reachable"}
+    except Exception:
+        ready = False
+        vllm_status.error = "vLLM model serving is unavailable."
+        vllm_status.operator_hint = "Start the managed vLLM service and wait for model loading to complete."
+
     status = ReadinessStatus(
         ready=ready,
         corpus_id=corpus_id,
         corpus_error=corpus_error,
-        dependencies={"postgres": postgres, "neo4j": neo4j_status},
+        dependencies={
+            "postgres": postgres,
+            "neo4j": neo4j_status,
+            "litellm": litellm_status,
+            "vllm": vllm_status,
+        },
     )
     if ready:
         return status

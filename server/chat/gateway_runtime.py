@@ -27,6 +27,21 @@ def resolve_litellm_base_url(
     return raw
 
 
+def resolve_vllm_base_url(
+    *,
+    configured_url: str,
+    environ: Mapping[str, str] | None = None,
+) -> str:
+    """Return the normalized OpenAI-compatible vLLM `/v1` base URL."""
+
+    env = os.environ if environ is None else environ
+    raw = str(env.get("VLLM_BASE_URL") or configured_url or "").strip().rstrip("/")
+    parsed = urlsplit(raw)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc or parsed.path != "/v1":
+        raise RuntimeError("vLLM base URL must be an absolute http(s) URL ending in /v1")
+    return raw
+
+
 def resolve_litellm_api_key(*, environ: Mapping[str, str] | None = None) -> str:
     """Return the API-to-gateway client key without reading upstream secrets."""
 
@@ -35,4 +50,3 @@ def resolve_litellm_api_key(*, environ: Mapping[str, str] | None = None) -> str:
     if not key:
         raise RuntimeError("LITELLM_API_KEY is required for the generation gateway")
     return key
-

@@ -5,6 +5,11 @@ from datetime import UTC, datetime
 
 import httpx
 
+from server.chat.gateway_runtime import (
+    resolve_litellm_api_key,
+    resolve_litellm_base_url,
+    resolve_vllm_base_url,
+)
 from server.db.postgres import PostgresClient
 from server.indexing.oss_retrieval_pilot import build_retrieval_pilot_status
 from server.models.tribrid_config_model import (
@@ -29,6 +34,18 @@ async def _check_url(url: str) -> tuple[bool | None, str | None]:
         return response.status_code < 500, f"HTTP {response.status_code}"
     except Exception as exc:
         return False, str(exc)
+
+
+async def _check_model_api(url: str, *, api_key: str | None = None) -> tuple[bool, str]:
+    """Probe an OpenAI-compatible model endpoint without leaking credentials."""
+
+    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+    try:
+        async with httpx.AsyncClient(timeout=2.0) as client:
+            response = await client.get(f"{url.rstrip('/')}/models", headers=headers)
+        return response.status_code == 200, f"HTTP {response.status_code}"
+    except Exception as exc:
+        return False, type(exc).__name__
 
 
 def _append_link(links: list[TraceExternalLink], link: TraceExternalLink) -> None:
@@ -199,8 +216,20 @@ async def build_observability_status(config: TriBridConfig, *, repo_id: str | No
     opencost_url = str(config.tracing.opencost_base_url or "").strip()
     alertmanager_url = str(config.tracing.alertmanager_base_url or "").strip()
     langfuse_url = str(config.tracing.langfuse_base_url or "").strip()
-    litellm_url = str(getattr(config.chat.litellm, "base_url", "") or "").strip()
-    vllm_url = str(getattr(config.chat.vllm, "base_url", "") or "").strip()
+    try:
+        litellm_url = resolve_litellm_base_url(configured_url=config.chat.litellm.base_url)
+        litellm_key = resolve_litellm_api_key()
+        litellm_resolution_error = None
+    except RuntimeError as exc:
+        litellm_url = str(config.chat.litellm.base_url or "").strip()
+        litellm_key = None
+        litellm_resolution_error = str(exc)
+    try:
+        vllm_url = resolve_vllm_base_url(configured_url=config.chat.vllm.base_url)
+        vllm_resolution_error = None
+    except RuntimeError as exc:
+        vllm_url = str(config.chat.vllm.base_url or "").strip()
+        vllm_resolution_error = str(exc)
 
     otlp_reachable, otlp_detail = await _check_url(otlp_url)
     grafana_reachable, grafana_detail = await _check_url(grafana_url)
@@ -212,8 +241,14 @@ async def build_observability_status(config: TriBridConfig, *, repo_id: str | No
     opencost_reachable, opencost_detail = await _check_url(opencost_url)
     alertmanager_reachable, alertmanager_detail = await _check_url(alertmanager_url)
     langfuse_reachable, langfuse_detail = await _check_url(langfuse_url)
-    litellm_reachable, litellm_detail = await _check_url(litellm_url)
-    vllm_reachable, vllm_detail = await _check_url(vllm_url)
+    if litellm_resolution_error:
+        litellm_reachable, litellm_detail = False, litellm_resolution_error
+    else:
+        litellm_reachable, litellm_detail = await _check_model_api(litellm_url, api_key=litellm_key)
+    if vllm_resolution_error:
+        vllm_reachable, vllm_detail = False, vllm_resolution_error
+    else:
+        vllm_reachable, vllm_detail = await _check_model_api(vllm_url)
 
     components = [
         _decorate_component(
@@ -336,7 +371,7 @@ async def build_observability_status(config: TriBridConfig, *, repo_id: str | No
                 else "Gateway routing and spend surface for model/provider traffic."
             ),
             url=litellm_url or None,
-            links=_make_links("LiteLLM Gateway", litellm_url, "Gateway routing and provider failover surface."),
+            links=_make_links("LiteLLM Gateway", litellm_url, "Gateway routing and provider policy surface."),
         ),
         _decorate_component(
             component_id="vllm",

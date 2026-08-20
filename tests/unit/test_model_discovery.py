@@ -1,62 +1,96 @@
+from __future__ import annotations
+
+import json
 import os
+import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
-from server.chat.model_discovery import (
-    discover_litellm_models,
-    discover_local_models,
-    discover_models,
-    discover_openrouter_models,
-)
-from server.models.chat_config import LiteLLMConfig, LocalModelConfig, LocalProviderEntry, OpenRouterConfig
+from server.chat.model_discovery import discover_litellm_models
+from server.models.chat_config import LiteLLMConfig
 
 
-@pytest.mark.asyncio
-async def test_discover_local_models_offline_provider_does_not_raise() -> None:
-    provider = LocalProviderEntry(
-        name="Offline",
-        provider_type="custom",
-        base_url="http://127.0.0.1:1",  # connection refused (fast)
-        enabled=True,
-    )
-    models = await discover_local_models([provider])
-    assert models == []
+class _ModelsHandler(BaseHTTPRequestHandler):
+    authorization: str | None = None
+
+    def log_message(self, _format: str, *_args: object) -> None:
+        return
+
+    def do_GET(self) -> None:  # noqa: N802 - stdlib handler contract
+        type(self).authorization = self.headers.get("Authorization")
+        if type(self).authorization != "Bearer gateway-key":
+            self.send_response(401)
+            self.end_headers()
+            return
+        body = json.dumps(
+            {
+                "data": [
+                    {"id": "ragweld-local"},
+                    {"id": "ragweld-openrouter-smoke"},
+                    {"id": "ragweld-local"},
+                ]
+            }
+        ).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
 
-@pytest.mark.asyncio
-async def test_discover_openrouter_models_disabled_or_missing_env_returns_empty() -> None:
-    # Disabled => always empty, no env required.
-    disabled = OpenRouterConfig(enabled=False)
-    assert await discover_openrouter_models(disabled) == []
-
-    # Enabled but no OPENROUTER_API_KEY => empty.
-    enabled = OpenRouterConfig(enabled=True)
-    old = os.environ.pop("OPENROUTER_API_KEY", None)
+@contextmanager
+def _models_server() -> Iterator[str]:
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _ModelsHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
     try:
-        assert await discover_openrouter_models(enabled) == []
+        host, port = server.server_address
+        yield f"http://{host}:{port}/v1"
     finally:
-        if old is not None:
-            os.environ["OPENROUTER_API_KEY"] = old
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
+@contextmanager
+def _key(value: str | None) -> Iterator[None]:
+    old = os.environ.get("LITELLM_API_KEY")
+    if value is None:
+        os.environ.pop("LITELLM_API_KEY", None)
+    else:
+        os.environ["LITELLM_API_KEY"] = value
+    try:
+        yield
+    finally:
+        if old is None:
+            os.environ.pop("LITELLM_API_KEY", None)
+        else:
+            os.environ["LITELLM_API_KEY"] = old
 
 
 @pytest.mark.asyncio
-async def test_discover_litellm_models_disabled_returns_empty() -> None:
-    disabled = LiteLLMConfig(enabled=False)
-    assert await discover_litellm_models(disabled) == []
+async def test_discovery_is_authenticated_litellm_only_and_deduplicated() -> None:
+    with _models_server() as base_url, _key("gateway-key"):
+        rows = await discover_litellm_models(
+            LiteLLMConfig(enabled=True, base_url=base_url, default_model="ragweld-local")
+        )
+
+    assert [row["id"] for row in rows] == ["ragweld-local", "ragweld-openrouter-smoke"]
+    assert {row["source"] for row in rows} == {"litellm"}
+    assert _ModelsHandler.authorization == "Bearer gateway-key"
 
 
 @pytest.mark.asyncio
-async def test_discover_models_combines_lists_without_raising() -> None:
-    local_cfg = LocalModelConfig(
-        providers=[
-            LocalProviderEntry(
-                name="Offline",
-                provider_type="custom",
-                base_url="http://127.0.0.1:1",
-                enabled=True,
-            )
-        ]
-    )
-    openrouter_cfg = OpenRouterConfig(enabled=False)
-    models = await discover_models(local_cfg, openrouter_cfg, LiteLLMConfig(enabled=False))
-    assert models == []
+async def test_disabled_gateway_fails_honestly() -> None:
+    with pytest.raises(RuntimeError, match="disabled"):
+        await discover_litellm_models(LiteLLMConfig(enabled=False))
+
+
+@pytest.mark.asyncio
+async def test_bad_gateway_auth_fails_honestly() -> None:
+    with _models_server() as base_url, _key("wrong-key"):
+        with pytest.raises(RuntimeError, match="HTTP 401"):
+            await discover_litellm_models(LiteLLMConfig(enabled=True, base_url=base_url))

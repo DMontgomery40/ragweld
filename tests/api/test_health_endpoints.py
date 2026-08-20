@@ -1,5 +1,7 @@
 """Tests for health endpoints."""
 
+import os
+
 import pytest
 from httpx import AsyncClient
 
@@ -15,6 +17,32 @@ async def test_health_endpoint_returns_pydantic_shape(client: AsyncClient) -> No
     assert "ts" in data
     assert isinstance(data.get("services"), dict)
     assert data["services"]["api"]["status"] == "up"
+
+
+@pytest.mark.asyncio
+async def test_ready_reports_gateway_and_serving_failures_separately(client: AsyncClient) -> None:
+    old_litellm = os.environ.get("LITELLM_BASE_URL")
+    old_vllm = os.environ.get("VLLM_BASE_URL")
+    os.environ["LITELLM_BASE_URL"] = "http://127.0.0.1:1/v1"
+    os.environ["VLLM_BASE_URL"] = "http://127.0.0.1:1/v1"
+    try:
+        response = await client.get("/api/ready")
+    finally:
+        if old_litellm is None:
+            os.environ.pop("LITELLM_BASE_URL", None)
+        else:
+            os.environ["LITELLM_BASE_URL"] = old_litellm
+        if old_vllm is None:
+            os.environ.pop("VLLM_BASE_URL", None)
+        else:
+            os.environ["VLLM_BASE_URL"] = old_vllm
+
+    assert response.status_code == 503
+    dependencies = response.json()["dependencies"]
+    assert dependencies["litellm"]["ok"] is False
+    assert dependencies["vllm"]["ok"] is False
+    assert "operator_hint" in dependencies["litellm"]
+    assert "operator_hint" in dependencies["vllm"]
 
 
 @pytest.mark.requires_postgres

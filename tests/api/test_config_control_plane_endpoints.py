@@ -90,3 +90,27 @@ async def test_get_config_readiness_surfaces_langfuse_secret_blockers(client: As
             os.environ.pop("LANGFUSE_SECRET_KEY", None)
         else:
             os.environ["LANGFUSE_SECRET_KEY"] = old_secret
+
+
+@pytest.mark.asyncio
+async def test_config_readiness_uses_deployment_gateway_urls(client: AsyncClient) -> None:
+    old_litellm_url = os.environ.get("LITELLM_BASE_URL")
+    old_vllm_url = os.environ.get("VLLM_BASE_URL")
+    os.environ["LITELLM_BASE_URL"] = "http://127.0.0.1:7/v1"
+    os.environ["VLLM_BASE_URL"] = "http://127.0.0.1:8/v1"
+    try:
+        readiness = await client.get("/api/config/readiness")
+        assert readiness.status_code == 200
+        integrations = {item["id"]: item for item in readiness.json()["integrations"]}
+    finally:
+        if old_litellm_url is None:
+            os.environ.pop("LITELLM_BASE_URL", None)
+        else:
+            os.environ["LITELLM_BASE_URL"] = old_litellm_url
+        if old_vllm_url is None:
+            os.environ.pop("VLLM_BASE_URL", None)
+        else:
+            os.environ["VLLM_BASE_URL"] = old_vllm_url
+
+    assert integrations["litellm"]["links"][0]["url"] == "http://127.0.0.1:7/v1"
+    assert integrations["vllm"]["links"][0]["url"] == "http://127.0.0.1:8/v1"

@@ -1,18 +1,16 @@
 """Chat API endpoints (Chat 2.0)."""
 import asyncio
 import json
-import os
 import time
 import uuid
-from typing import Any, Literal, cast
+from typing import Any
 
-import httpx
 from fastapi import APIRouter, HTTPException, Query, Response
 from starlette.responses import StreamingResponse
 
 from server.chat.handler import ChatGenerationError, chat_once
 from server.chat.handler import chat_stream as chat_stream_handler
-from server.chat.model_discovery import discover_models
+from server.chat.model_discovery import discover_litellm_models
 from server.chat.recall_indexer import index_recall_conversation
 from server.chat.source_router import resolve_sources
 from server.db.postgres import PostgresClient
@@ -53,13 +51,6 @@ router = APIRouter(tags=["chat"])
 # Dependency holders (can be overridden for testing)
 _config: TriBridConfig | None = None
 _fusion: FusionProtocol | None = None
-
-ChatModelComponent = Literal["GEN", "EMB", "RERANK"]
-
-
-def _default_chat_components() -> list[ChatModelComponent]:
-    return ["GEN"]
-
 
 def get_config() -> TriBridConfig:
     """Get the current config. Override with set_config() for testing."""
@@ -722,7 +713,7 @@ async def list_chat_models(
     corpus_id: str | None = Query(default=None, description="Alias for repo"),
     repo_id: str | None = Query(default=None, description="Alias for corpus_id"),
 ) -> ChatModelsResponse:
-    """Return available chat models with canonical `override` values for requests."""
+    """Return authenticated LiteLLM aliases available to ordinary Chat users."""
     scope_id = (repo or corpus_id or repo_id or "").strip() or None
     if _config is not None:
         cfg = _config
@@ -732,243 +723,31 @@ async def list_chat_models(
         except CorpusNotFoundError:
             cfg = TriBridConfig()
 
-    def _provider_label(provider_key: str) -> str:
-        p = (provider_key or "").strip().lower()
-        if p == "openai":
-            return "OpenAI"
-        if p == "openrouter":
-            return "OpenRouter"
-        if p == "litellm":
-            return "LiteLLM"
-        if p == "ragweld":
-            return "Ragweld"
-        if p == "anthropic":
-            return "Anthropic"
-        if p == "google":
-            return "Google"
-        if p == "cohere":
-            return "Cohere"
-        if p == "voyage":
-            return "Voyage"
-        if p == "jina":
-            return "Jina"
-        if p == "mistral":
-            return "Mistral"
-        if p == "deepseek":
-            return "DeepSeek"
-        if not p:
-            return "Unknown"
-        return p.capitalize()
-
-    def _norm_components(raw: Any) -> list[ChatModelComponent]:
-        allowed: set[ChatModelComponent] = {"GEN", "EMB", "RERANK"}
-        if not isinstance(raw, list):
-            return _default_chat_components()
-        out: list[ChatModelComponent] = []
-        for item in raw:
-            c = str(item or "").strip().upper()
-            if c in allowed and c not in out:
-                out.append(cast(ChatModelComponent, c))
-        return out or _default_chat_components()
-
-    def _find_catalog_entry(
-        catalog_rows: list[dict[str, Any]],
-        *,
-        provider_key: str | None,
-        model_name: str,
-    ) -> dict[str, Any] | None:
-        p = str(provider_key or "").strip().lower()
-        m = str(model_name or "").strip()
-        if not m:
-            return None
-        if p:
-            for row in catalog_rows:
-                if str(row.get("provider", "")).strip().lower() == p and str(row.get("model", "")).strip() == m:
-                    return row
-        for row in catalog_rows:
-            if str(row.get("model", "")).strip() == m:
-                return row
-        return None
+    try:
+        discovered = await discover_litellm_models(cfg.chat.litellm)
+    except RuntimeError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
 
     models: list[ChatModelInfo] = []
-    catalog_rows: list[dict[str, Any]] = []
-
-    # Runtime catalog is authoritative for canonical provider/model metadata.
-    try:
-        from server.api.models import _catalog_models, _load_catalog
-
-        catalog = _load_catalog()
-        rows = _catalog_models(catalog)
-        catalog_rows = [r for r in rows if "GEN" in _norm_components(r.get("components"))]
-    except Exception:
-        catalog_rows = []
-
-    # Ragweld (in-process MLX agent model)
-    try:
-        ragweld_base = str(getattr(cfg.training, "ragweld_agent_base_model", "") or "").strip()
-    except Exception:
-        ragweld_base = ""
-    if ragweld_base:
-        model_name = ragweld_base.split(":", 1)[1].strip() if ragweld_base.startswith("ragweld:") else ragweld_base
-        if model_name:
-            catalog_model = f"ragweld:{model_name}"
-            models.append(
-                ChatModelInfo(
-                    id=model_name,
-                    override=f"ragweld:{model_name}",
-                    provider="Ragweld",
-                    provider_key="ragweld",
-                    catalog_model=catalog_model,
-                    components=["GEN"],
-                    source="ragweld",
-                    provider_type="mlx",
-                    base_url=None,
-                    supports_vision=False,
-                )
-            )
-
-    # Only advertise cloud_direct providers that are actually configured + supported.
-    # Chat 2.0 currently supports direct OpenAI calls via OPENAI_API_KEY.
-    cloud_direct_ready: set[str] = set()
-    openai_api_key = (os.getenv("OPENAI_API_KEY") or "").strip()
-    openrouter_api_key = (os.getenv("OPENROUTER_API_KEY") or "").strip()
-    litellm_api_key = (os.getenv("LITELLM_API_KEY") or "").strip()
-    openai_base_url = (str(cfg.generation.openai_base_url or "").strip() or "https://api.openai.com/v1")
-
-    # Validate cloud provider credentials best-effort so the UI doesn't advertise unusable providers.
-    openai_valid = False
-    if openai_api_key:
-        try:
-            async with httpx.AsyncClient(timeout=2.0) as client:
-                r = await client.get(
-                    f"{openai_base_url.rstrip('/')}/models",
-                    headers={"Authorization": f"Bearer {openai_api_key}"},
-                )
-                openai_valid = r.status_code == 200
-        except Exception:
-            openai_valid = False
-
-    if openai_valid:
-        cloud_direct_ready.add("openai")
-
-    litellm_valid = False
-    if bool(cfg.chat.litellm.enabled):
-        try:
-            async with httpx.AsyncClient(timeout=2.0) as client:
-                headers = {"Authorization": f"Bearer {litellm_api_key}"} if litellm_api_key else {}
-                base = str(cfg.chat.litellm.base_url or "").rstrip("/")
-                r = await client.get(f"{base}/models", headers=headers)
-                litellm_valid = r.status_code == 200
-        except Exception:
-            litellm_valid = False
-
-    # OpenRouter key probe is still used to decide whether OpenRouter discovery is viable.
-    openrouter_valid = False
-    if bool(cfg.chat.openrouter.enabled) and openrouter_api_key:
-        try:
-            async with httpx.AsyncClient(timeout=2.0) as client:
-                base = cfg.chat.openrouter.base_url.rstrip("/")
-                r = await client.get(f"{base}/key", headers={"Authorization": f"Bearer {openrouter_api_key}"})
-                openrouter_valid = r.status_code == 200
-        except Exception:
-            openrouter_valid = False
-
-    # Cloud-direct models from runtime catalog (GEN component).
-    for row in catalog_rows:
-        catalog_provider_key = str(row.get("provider", "")).strip().lower()
-        if catalog_provider_key not in cloud_direct_ready:
+    for row in discovered:
+        model_id = str(row.get("id") or "").strip()
+        if not model_id or model_id == "ragweld-openrouter-smoke":
             continue
-        model_name = str(row.get("model", "")).strip()
-        if not model_name:
-            continue
-        override = f"{catalog_provider_key}/{model_name}"
         models.append(
             ChatModelInfo(
-                id=model_name,
-                override=override,
-                provider=_provider_label(catalog_provider_key),
-                provider_key=catalog_provider_key,
-                catalog_model=model_name,
-                components=_norm_components(row.get("components")),
-                source="cloud_direct",
-                provider_type=catalog_provider_key,
-                base_url=openai_base_url if catalog_provider_key == "openai" else None,
+                id=model_id,
+                override=f"litellm:{model_id}",
+                provider="LiteLLM",
+                provider_key="litellm",
+                catalog_model=None,
+                components=["GEN"],
+                source="litellm",
+                provider_type="litellm",
+                base_url=str(row.get("base_url") or "") or None,
                 supports_vision=False,
             )
         )
-
-    # Provider discovery (best-effort).
-    discovered = await discover_models(
-        cfg.chat.local_models,
-        cfg.chat.openrouter if openrouter_valid else cfg.chat.openrouter.model_copy(update={"enabled": False}),
-        cfg.chat.litellm if litellm_valid else cfg.chat.litellm.model_copy(update={"enabled": False}),
-    )
-    for d in discovered:
-        try:
-            source_raw = str(d.get("source") or "").strip().lower()
-            if source_raw == "openrouter":
-                source_kind: Literal["openrouter", "local", "litellm"] = "openrouter"
-            elif source_raw == "litellm":
-                source_kind = "litellm"
-            elif source_raw == "local":
-                source_kind = "local"
-            else:
-                continue
-            model_id = str(d.get("id") or "").strip()
-            if not model_id:
-                continue
-
-            discovered_provider_key: str | None = None
-            discovered_catalog_model: str | None = None
-            discovered_components: list[ChatModelComponent] = _default_chat_components()
-
-            lookup_provider: str | None = None
-            lookup_model = model_id
-            if "/" in model_id:
-                pfx, rest = model_id.split("/", 1)
-                lookup_provider = pfx.strip().lower() or None
-                lookup_model = rest.strip()
-            catalog_match = _find_catalog_entry(catalog_rows, provider_key=lookup_provider, model_name=lookup_model)
-            if catalog_match is not None:
-                discovered_provider_key = str(catalog_match.get("provider") or "").strip().lower() or None
-                discovered_catalog_model = str(catalog_match.get("model") or "").strip() or None
-                discovered_components = _norm_components(catalog_match.get("components"))
-            elif source_kind == "openrouter" and lookup_provider:
-                discovered_provider_key = lookup_provider
-                discovered_catalog_model = lookup_model or None
-
-            override = f"{source_kind}:{model_id}"
-            provider_name = (
-                "OpenRouter"
-                if source_kind == "openrouter"
-                else "LiteLLM"
-                if source_kind == "litellm"
-                else (str(d.get("provider") or "").strip() or _provider_label(discovered_provider_key or "local"))
-            )
-
-            models.append(
-                ChatModelInfo(
-                    id=model_id,
-                    override=override,
-                    provider=provider_name,
-                    provider_key=discovered_provider_key,
-                    catalog_model=discovered_catalog_model,
-                    components=discovered_components,
-                    source=source_kind,
-                    provider_type=(str(d.get("provider_type")) if d.get("provider_type") else None),
-                    base_url=(str(d.get("base_url")) if d.get("base_url") else None),
-                    supports_vision=False,
-                )
-            )
-        except Exception:
-            continue
-
-    # De-dupe by canonical override (request payload contract).
-    uniq: dict[str, ChatModelInfo] = {}
-    for m in models:
-        uniq[str(m.override)] = m
-
-    return ChatModelsResponse(models=list(uniq.values()))
+    return ChatModelsResponse(models=models)
 
 
 @router.get("/chat/health", response_model=ProvidersHealthResponse)
@@ -977,7 +756,7 @@ async def chat_health(
     corpus_id: str | None = Query(default=None, description="Alias for repo"),
     repo_id: str | None = Query(default=None, description="Alias for corpus_id"),
 ) -> ProvidersHealthResponse:
-    """Return health status for chat providers."""
+    """Report the one application-visible generation gateway."""
     scope_id = (repo or corpus_id or repo_id or "").strip() or None
     if _config is not None:
         cfg = _config
@@ -986,169 +765,26 @@ async def chat_health(
             cfg = await load_scoped_config(repo_id=scope_id) if scope_id else TriBridConfig()
         except CorpusNotFoundError:
             cfg = TriBridConfig()
-    out: list[ProviderHealth] = []
-    litellm_api_key = (os.getenv("LITELLM_API_KEY") or "").strip()
 
-    # OpenRouter
-    if cfg.chat.openrouter.enabled:
-        api_key = (os.getenv("OPENROUTER_API_KEY") or "").strip()
-        if not api_key:
-            out.append(
-                ProviderHealth(
-                    provider="OpenRouter",
-                    kind="openrouter",
-                    base_url=cfg.chat.openrouter.base_url,
-                    reachable=False,
-                    detail="Missing OPENROUTER_API_KEY",
-                )
-            )
-        else:
-            try:
-                async with httpx.AsyncClient(timeout=2.0) as client:
-                    base = cfg.chat.openrouter.base_url.rstrip("/")
-                    r = await client.get(f"{base}/key", headers={"Authorization": f"Bearer {api_key}"})
-                    ok = r.status_code == 200
-                    detail = None
-                    if not ok:
-                        # Best-effort parse error message without leaking anything sensitive.
-                        msg = None
-                        try:
-                            payload = r.json()
-                            msg = (
-                                (payload.get("error") or {}).get("message")
-                                if isinstance(payload, dict)
-                                else None
-                            )
-                        except Exception:
-                            msg = None
-                        detail = msg or f"HTTP {r.status_code}"
-                out.append(
-                    ProviderHealth(
-                        provider="OpenRouter",
-                        kind="openrouter",
-                        base_url=cfg.chat.openrouter.base_url,
-                        reachable=bool(ok),
-                        detail=detail,
-                    )
-                )
-            except Exception as e:
-                out.append(
-                    ProviderHealth(
-                        provider="OpenRouter",
-                        kind="openrouter",
-                        base_url=cfg.chat.openrouter.base_url,
-                        reachable=False,
-                        detail=str(e),
-                    )
-                )
-
-    # LiteLLM
-    if cfg.chat.litellm.enabled:
-        base = str(cfg.chat.litellm.base_url or "").rstrip("/")
-        headers = {"Authorization": f"Bearer {litellm_api_key}"} if litellm_api_key else {}
-        try:
-            async with httpx.AsyncClient(timeout=2.0) as client:
-                r = await client.get(f"{base}/models", headers=headers)
-                ok = r.status_code == 200
-            out.append(
-                ProviderHealth(
-                    provider="LiteLLM",
-                    kind="litellm",
-                    base_url=base or cfg.chat.litellm.base_url,
-                    reachable=bool(ok),
-                    detail=None if ok else f"HTTP {r.status_code}",
-                )
-            )
-        except Exception as e:
-            out.append(
-                ProviderHealth(
-                    provider="LiteLLM",
-                    kind="litellm",
-                    base_url=base or cfg.chat.litellm.base_url,
-                    reachable=False,
-                    detail=str(e),
-                )
-            )
-
-    # Local providers
-    for p in cfg.chat.local_models.providers:
-        if not p.enabled:
-            continue
-        base_url = str(p.base_url or "").rstrip("/")
-        # Be forgiving: some UIs/examples include a trailing /v1. Normalize to the provider root.
-        if base_url.endswith("/v1"):
-            base_url = base_url[: -len("/v1")]
-        try:
-            async with httpx.AsyncClient(timeout=1.5) as client:
-                r = await client.get(f"{base_url}/v1/models")
-                ok = r.status_code < 400
-            out.append(
-                ProviderHealth(
-                    provider=p.name,
-                    kind="local",
-                    base_url=base_url or p.base_url,
-                    reachable=bool(ok),
-                    detail=None if ok else f"HTTP {r.status_code}",
-                )
-            )
-        except Exception as e:
-            out.append(
-                ProviderHealth(
-                    provider=p.name,
-                    kind="local",
-                    base_url=base_url or p.base_url,
-                    reachable=False,
-                    detail=str(e),
-                )
-            )
-
-    # Ragweld (in-process)
     try:
-        from server.retrieval.mlx_qwen3 import mlx_is_available as _mlx_is_available
-
-        ragweld_base = str(getattr(cfg.training, "ragweld_agent_base_model", "") or "").strip()
-        if not _mlx_is_available():
-            out.append(
-                ProviderHealth(
-                    provider="Ragweld",
-                    kind="ragweld",
-                    base_url="in-process",
-                    reachable=False,
-                    detail="MLX not available on this platform (install optional mlx deps; Apple Silicon required).",
-                )
-            )
-        elif not ragweld_base:
-            out.append(
-                ProviderHealth(
-                    provider="Ragweld",
-                    kind="ragweld",
-                    base_url="in-process",
-                    reachable=False,
-                    detail="Missing training.ragweld_agent_base_model",
-                )
-            )
-        else:
-            out.append(
-                ProviderHealth(
-                    provider="Ragweld",
-                    kind="ragweld",
-                    base_url="in-process",
-                    reachable=True,
-                    detail=None,
-                )
-            )
-    except Exception as e:
-        out.append(
-            ProviderHealth(
-                provider="Ragweld",
-                kind="ragweld",
-                base_url="in-process",
-                reachable=False,
-                detail=str(e),
-            )
+        rows = await discover_litellm_models(cfg.chat.litellm)
+        base_url = str(rows[0].get("base_url") or cfg.chat.litellm.base_url) if rows else cfg.chat.litellm.base_url
+        health = ProviderHealth(
+            provider="LiteLLM",
+            kind="litellm",
+            base_url=base_url,
+            reachable=True,
+            detail=None,
         )
-
-    return ProvidersHealthResponse(providers=out)
+    except RuntimeError as error:
+        health = ProviderHealth(
+            provider="LiteLLM",
+            kind="litellm",
+            base_url=cfg.chat.litellm.base_url,
+            reachable=False,
+            detail=str(error),
+        )
+    return ProvidersHealthResponse(providers=[health])
 
 
 @router.post("/recall/index", response_model=RecallIndexResponse)
