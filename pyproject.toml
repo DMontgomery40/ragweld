@@ -21,7 +21,6 @@ dependencies = [
     "pgvector>=0.2.4",
     "neo4j>=5.15.0",
     # AI/ML
-    "pydantic-ai>=0.0.24",
     "openai>=1.12.0",
     "voyageai>=0.2.0",
     "cohere>=4.47.0",
