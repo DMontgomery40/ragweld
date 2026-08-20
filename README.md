@@ -303,10 +303,10 @@ Recommended matching config values on this branch:
 
 ```text
 tracing.tracing_mode=otel or otel_langfuse
-tracing.otlp_endpoint=http://localhost:4320/v1/traces
-tracing.alloy_base_url=http://localhost:12345
-tracing.tempo_base_url=http://localhost:3200
-ui.grafana_base_url=http://localhost:3001
+tracing.otlp_endpoint=http://localhost:54320/v1/traces
+tracing.alloy_base_url=http://localhost:52345
+tracing.tempo_base_url=http://localhost:53200
+ui.grafana_base_url=http://localhost:3301
 ```
 
 Reference:
@@ -352,9 +352,9 @@ With full observability stack (Prometheus + Grafana + Loki + Promtail):
 ```
 
 Observability URLs:
-- Grafana: http://localhost:3001 (admin/admin)
+- Grafana: http://localhost:3301 (admin/admin)
 - Prometheus: http://localhost:9090
-- Loki: http://localhost:3100
+- Loki: http://localhost:53100
 
 UI available at http://localhost:5173
 
@@ -884,9 +884,9 @@ cd web && npx playwright test
 | Service | URL | Credentials |
 |---------|-----|-------------|
 | API Docs | http://localhost:8012/docs | - |
-| Grafana | http://localhost:3001 | admin/admin |
+| Grafana | http://localhost:3301 | admin/admin |
 | Prometheus | http://localhost:9090 | - |
-| Loki | http://localhost:3100 | - |
+| Loki | http://localhost:53100 | - |
 | Neo4j Browser | http://localhost:7474 | neo4j/password |
 
 ### Health Check

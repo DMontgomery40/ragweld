@@ -1,13 +1,16 @@
 server:
   http_listen_port: 3200
-  grpc_listen_port: 4317
+  # Keep Tempo's internal gRPC server separate from the OTLP receiver on 4317.
+  grpc_listen_port: 9095
 
 distributor:
   receivers:
     otlp:
       protocols:
         grpc:
+          endpoint: 0.0.0.0:4317
         http:
+          endpoint: 0.0.0.0:4318
 
 ingester:
   max_block_duration: 5m
@@ -20,9 +23,9 @@ storage:
   trace:
     backend: local
     wal:
-      path: /tmp/tempo/wal
+      path: /var/tempo/wal
     local:
-      path: /tmp/tempo/blocks
+      path: /var/tempo/blocks
 
 overrides:
   defaults:

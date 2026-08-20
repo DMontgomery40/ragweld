@@ -104,10 +104,10 @@ docker compose -f docker-compose.yml -f infra/docker-compose.observability.yml u
 Suggested local config values:
 
 - `tracing.tracing_mode = "otel_langfuse"` when Langfuse is configured, otherwise `otel` or `local`
-- `tracing.otlp_endpoint = "http://localhost:4320/v1/traces"`
-- `tracing.alloy_base_url = "http://localhost:12345"`
-- `tracing.tempo_base_url = "http://localhost:3200"`
-- `ui.grafana_base_url = "http://localhost:3001"`
+- `tracing.otlp_endpoint = "http://localhost:54320/v1/traces"`
+- `tracing.alloy_base_url = "http://localhost:52345"`
+- `tracing.tempo_base_url = "http://localhost:53200"`
+- `ui.grafana_base_url = "http://localhost:3301"`
 
 ## Deletion condition for the local trace bridge
 

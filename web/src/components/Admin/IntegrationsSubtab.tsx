@@ -328,7 +328,7 @@ export function IntegrationsSubtab() {
               type="text"
               value={tempoBaseUrl}
               onChange={(e) => setTempoBaseUrl(e.target.value)}
-              placeholder="http://127.0.0.1:3200"
+              placeholder="http://127.0.0.1:53200"
               style={{
                 width: '100%',
                 padding: '8px',
@@ -345,7 +345,7 @@ export function IntegrationsSubtab() {
               type="text"
               value={alloyBaseUrl}
               onChange={(e) => setAlloyBaseUrl(e.target.value)}
-              placeholder="http://127.0.0.1:12345"
+              placeholder="http://127.0.0.1:52345"
               style={{
                 width: '100%',
                 padding: '8px',

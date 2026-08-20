@@ -13,7 +13,7 @@ import type { ObservabilityStatusResponse } from '@/types/generated';
 export function GrafanaConfig() {
   const { api } = useAPI();
   const [embedEnabledRaw, setEmbedEnabled, embedMeta] = useConfigField<number>('ui.grafana_embed_enabled', 1);
-  const [baseUrl, setBaseUrl] = useConfigField<string>('ui.grafana_base_url', 'http://127.0.0.1:3001');
+  const [baseUrl, setBaseUrl] = useConfigField<string>('ui.grafana_base_url', 'http://127.0.0.1:3301');
   const [dashboardUid, setDashboardUid] = useConfigField<string>('ui.grafana_dashboard_uid', 'ragweld-oncall-overview');
   const [dashboardSlug, setDashboardSlug] = useConfigField<string>('ui.grafana_dashboard_slug', 'on-call-overview');
   const [kiosk, setKiosk] = useConfigField<string>('ui.grafana_kiosk', 'tv');
@@ -164,7 +164,7 @@ export function GrafanaConfig() {
             type="text"
             value={baseUrl}
             onChange={(e) => setBaseUrl(e.target.value)}
-                  placeholder="http://127.0.0.1:3001"
+                  placeholder="http://127.0.0.1:3301"
             style={{
               width: '100%',
               background: 'var(--input-bg)',
@@ -404,7 +404,7 @@ export function GrafanaConfig() {
         alignItems: 'center'
       }}>
         <a
-                href={normalizedBase || 'http://127.0.0.1:3001'}
+                href={normalizedBase || 'http://127.0.0.1:3301'}
           target="_blank"
           rel="noopener noreferrer"
           style={{

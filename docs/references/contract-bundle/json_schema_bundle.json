@@ -35566,7 +35566,7 @@
               "type": "string"
             },
             "grafana_base_url": {
-              "default": "http://127.0.0.1:3001",
+              "default": "http://127.0.0.1:3301",
               "description": "Grafana base URL",
               "title": "Grafana Base Url",
               "type": "string"
@@ -36075,7 +36075,7 @@
           "type": "string"
         },
         "grafana_base_url": {
-          "default": "http://127.0.0.1:3001",
+          "default": "http://127.0.0.1:3301",
           "description": "Grafana base URL",
           "title": "Grafana Base Url",
           "type": "string"

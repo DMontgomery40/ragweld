@@ -2662,7 +2662,7 @@ export interface UIConfig {
   /** Grafana dashboard slug */
   grafana_dashboard_slug?: string; // default: "on-call-overview"
   /** Grafana base URL */
-  grafana_base_url?: string; // default: "http://127.0.0.1:3001"
+  grafana_base_url?: string; // default: "http://127.0.0.1:3301"
   /** Grafana authentication mode */
   grafana_auth_mode?: string; // default: "anonymous"
   /** Enable Grafana embedding */

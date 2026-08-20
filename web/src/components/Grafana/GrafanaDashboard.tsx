@@ -20,7 +20,7 @@ type DashboardOption = {
 export function GrafanaDashboard() {
   const activeRepo = useActiveRepo();
 
-  const [baseUrl] = useConfigField<string>('ui.grafana_base_url', 'http://127.0.0.1:3001');
+  const [baseUrl] = useConfigField<string>('ui.grafana_base_url', 'http://127.0.0.1:3301');
   const [dashboardUid, setDashboardUid] = useConfigField<string>('ui.grafana_dashboard_uid', 'ragweld-oncall-overview');
   const [dashboardSlug, setDashboardSlug] = useConfigField<string>('ui.grafana_dashboard_slug', 'on-call-overview');
   const [kiosk] = useConfigField<string>('ui.grafana_kiosk', 'tv');

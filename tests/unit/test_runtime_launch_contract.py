@@ -187,6 +187,18 @@ def test_observability_overlay_resolves_repo_files_and_avoids_foreign_ports() ->
     assert Path(tempo_config["source"]).resolve() == (ROOT / "infra" / "tempo.yaml").resolve()
     assert Path(alloy_config["source"]).resolve() == (ROOT / "infra" / "alloy" / "config.alloy").resolve()
 
+    tempo_data = _volume_for_target(services["tempo"], "/var/tempo")
+    assert tempo_data["type"] == "volume"
+    import yaml
+
+    tempo_payload = yaml.safe_load((ROOT / "infra" / "tempo.yaml").read_text(encoding="utf-8"))
+    assert tempo_payload["server"]["grpc_listen_port"] == 9095
+    otlp_protocols = tempo_payload["distributor"]["receivers"]["otlp"]["protocols"]
+    assert otlp_protocols["grpc"]["endpoint"] == "0.0.0.0:4317"
+    assert otlp_protocols["http"]["endpoint"] == "0.0.0.0:4318"
+    assert tempo_payload["storage"]["trace"]["wal"]["path"] == "/var/tempo/wal"
+    assert tempo_payload["storage"]["trace"]["local"]["path"] == "/var/tempo/blocks"
+
     for service_name in ("tempo", "alloy"):
         service = services[service_name]
         assert service["labels"]["io.ragweld.managed"] == "true"
@@ -200,6 +212,21 @@ def test_observability_overlay_resolves_repo_files_and_avoids_foreign_ports() ->
         _published_ports(services["alloy"]),
     )
     assert published.isdisjoint(foreign_ports)
+
+
+def test_active_observability_urls_match_namespaced_loopback_ports() -> None:
+    from server.api.docker import _loki_candidate_urls
+    from server.models.tribrid_config_model import TriBridConfig
+
+    active = json.loads((ROOT / "tribrid_config.json").read_text(encoding="utf-8"))
+    assert active["tracing"]["tracing_mode"] == "otel"
+    assert active["ui"]["grafana_base_url"] == "http://127.0.0.1:3301"
+    assert active["tracing"]["tempo_base_url"] == "http://127.0.0.1:53200"
+    assert active["tracing"]["alloy_base_url"] == "http://127.0.0.1:52345"
+    assert active["tracing"]["otlp_endpoint"] == "http://127.0.0.1:54320/v1/traces"
+    assert TriBridConfig().ui.grafana_base_url == "http://127.0.0.1:3301"
+    assert "http://127.0.0.1:53100" in _loki_candidate_urls()
+    assert "http://127.0.0.1:3100" not in _loki_candidate_urls()
 
 
 def test_docker_service_allowlists_match_frontend_and_managed_compose_services() -> None:

@@ -363,7 +363,7 @@ export function Integrations() {
               type="text"
               value={tracing.tempo_base_url || ''}
               onChange={(event) => updateTracing('tempo_base_url', event.target.value)}
-              placeholder="http://localhost:3200"
+              placeholder="http://localhost:53200"
               style={{ background: 'var(--input-bg)', border: '1px solid var(--line)', color: 'var(--fg)', padding: '8px 12px', borderRadius: '4px' }}
             />
           </label>
@@ -373,7 +373,7 @@ export function Integrations() {
               type="text"
               value={tracing.alloy_base_url || ''}
               onChange={(event) => updateTracing('alloy_base_url', event.target.value)}
-              placeholder="http://localhost:12345"
+              placeholder="http://localhost:52345"
               style={{ background: 'var(--input-bg)', border: '1px solid var(--line)', color: 'var(--fg)', padding: '8px 12px', borderRadius: '4px' }}
             />
           </label>
@@ -383,7 +383,7 @@ export function Integrations() {
               type="text"
               value={ui.grafana_base_url || ''}
               onChange={(event) => updateUi('grafana_base_url', event.target.value)}
-              placeholder="http://localhost:3001"
+              placeholder="http://localhost:3301"
               style={{ background: 'var(--input-bg)', border: '1px solid var(--line)', color: 'var(--fg)', padding: '8px 12px', borderRadius: '4px' }}
             />
           </label>

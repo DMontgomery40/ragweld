@@ -2373,7 +2373,7 @@ export function RetrievalSubtab() {
                         type="text"
                         value={tempoBaseUrl}
                         onChange={(e) => setTempoBaseUrl(e.target.value)}
-                        placeholder="http://127.0.0.1:3200"
+                        placeholder="http://127.0.0.1:53200"
                       />
                     </div>
                     <div className="input-group">
@@ -2382,7 +2382,7 @@ export function RetrievalSubtab() {
                         type="text"
                         value={alloyBaseUrl}
                         onChange={(e) => setAlloyBaseUrl(e.target.value)}
-                        placeholder="http://127.0.0.1:12345"
+                        placeholder="http://127.0.0.1:52345"
                       />
                     </div>
                     <div className="input-group">

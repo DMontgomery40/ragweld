@@ -115,7 +115,7 @@ def _loki_candidate_urls() -> list[str]:
     if env:
         candidates.append(env)
     # Local dev (run on host)
-    candidates.append("http://127.0.0.1:3100")
+    candidates.append("http://127.0.0.1:53100")
     # Docker-compose network (backend inside compose)
     candidates.append("http://loki:3100")
     # Docker Desktop host alias
