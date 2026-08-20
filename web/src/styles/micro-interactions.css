@@ -839,39 +839,6 @@ code:hover {
 }
 
 
-/* ============================================
-   DEV STACK BUTTON INTERACTIONS
-   ============================================ */
-
-/* Dev Stack Control Buttons */
-.dev-stack-btn {
-  will-change: transform, box-shadow;
-  position: relative;
-  overflow: hidden;
-}
-
-.dev-stack-btn:hover:not(:disabled) {
-  transform: translateY(-1px) scale(1.02);
-  box-shadow: var(--shadow-sm);
-  background: var(--bg-hover);
-}
-
-.dev-stack-btn:active:not(:disabled) {
-  transform: translateY(0) scale(0.98);
-  transition-duration: var(--timing-instant);
-  box-shadow: none;
-}
-
-.dev-stack-btn.btn-primary:hover:not(:disabled) {
-  filter: brightness(1.1);
-  box-shadow: var(--shadow-md);
-}
-
-.dev-stack-btn:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
 /* Running status pulse animation */
 .status-running {
   animation: health-pulse 2s ease-in-out infinite;

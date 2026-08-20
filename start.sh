@@ -7,49 +7,46 @@ cd "$ROOT_DIR"
 BACKEND_PORT="${BACKEND_PORT:-8012}"
 FRONTEND_PORT="${FRONTEND_PORT:-5173}"
 FRONTEND_HOST="${FRONTEND_HOST:-127.0.0.1}"
+COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-ragweld}"
 
 START_DOCKER=1
 START_BACKEND=1
 START_FRONTEND=1
-
-BACKEND_MODE="local" # local|docker
+BACKEND_MODE="local"
 WITH_OBSERVABILITY=0
 NATIVE_POSTGRES=0
 DRY_RUN=0
-
 BACKEND_PID=""
 
 usage() {
   cat <<'EOF'
-Usage:
-  ./start.sh [options]
+Usage: ./start.sh [options]
 
-Starts:
-  - Docker services (postgres + neo4j)
-  - Backend API on http://127.0.0.1:8012 (FastAPI)
-  - Frontend UI on http://localhost:5173/web (Vite)
+Normal development runs Postgres/Neo4j in the `ragweld` Compose project and
+runs FastAPI plus Vite on the host.
 
 Options:
-  --docker-backend         Run backend via Docker Compose (maps host :8012 -> container :8000)
-  --with-observability     Also start prometheus + grafana (optional)
-  --native-postgres        Use a host-installed Postgres (skip Docker postgres)
-  --lan                    Bind frontend dev server to 0.0.0.0 (accessible on your LAN)
-  --no-docker              Skip Docker services
-  --no-backend             Skip backend
-  --no-frontend            Skip frontend
-  --check                  Print what would run, then exit
-  -h, --help               Show help
+  --docker-backend       Run the API through Compose instead of on the host
+  --with-observability   Add Prometheus, Grafana, Loki, Promtail, Tempo, and Alloy
+  --native-postgres      Use an already-running host Postgres instead of Compose Postgres
+  --lan                  Bind Vite to 0.0.0.0
+  --no-docker            Do not start Compose services
+  --no-backend           Do not start FastAPI
+  --no-frontend          Do not start Vite
+  --check                Print the resolved actions without starting anything
+  -h, --help             Show this help
 
-Environment overrides:
-  BACKEND_PORT=8012        Backend host port (defaults to 8012)
-  FRONTEND_PORT=5173       Frontend dev server port (defaults to 5173)
-  FRONTEND_HOST=127.0.0.1  Frontend dev server host (defaults to 127.0.0.1; set 0.0.0.0 for LAN)
+Docker/Colima ownership:
+  This script never starts, stops, resets, or deletes Docker Desktop or Colima.
+  Start the dedicated host profile yourself, then select its Docker context:
 
-Notes:
-  - The frontend code + Vite proxy expect the backend on port 8012 during dev.
-  - If .env is missing, this script copies .env.example -> .env (you still need to add keys).
-  - --native-postgres uses host-installed Postgres. Docker services connect via host.docker.internal.
+    colima start --profile ragweld --vm-type vz --cpu 4 --memory 8
+    docker context use colima-ragweld
 EOF
+}
+
+log() {
+  echo "[start.sh] $*"
 }
 
 die() {
@@ -57,469 +54,198 @@ die() {
   exit 1
 }
 
-log() {
-  echo "[start.sh] $*"
-}
-
 have_cmd() {
   command -v "$1" >/dev/null 2>&1
 }
 
-port_listen_pids() {
-  local port="$1"
-  if have_cmd lsof; then
-    # One PID per line (may be multiple listeners in edge cases)
-    lsof -nP -iTCP:"${port}" -sTCP:LISTEN -t 2>/dev/null || true
+run() {
+  if [[ "$DRY_RUN" == "1" ]]; then
+    printf '+'
+    printf ' %q' "$@"
+    printf '\n'
     return 0
   fi
-  # Best-effort when lsof is unavailable: can't detect listeners.
-  return 0
-}
-
-DOCKER_COMPOSE=()
-resolve_docker_compose() {
-  if docker compose version >/dev/null 2>&1; then
-    DOCKER_COMPOSE=(docker compose)
-    return 0
-  fi
-  if have_cmd docker-compose; then
-    DOCKER_COMPOSE=(docker-compose)
-    return 0
-  fi
-  return 1
+  "$@"
 }
 
 docker_daemon_ready() {
   docker info >/dev/null 2>&1
 }
 
-# ---------------------------------------------------------------------------
-# Colima resource requirements
-#
-# Neo4j defaults: heap_max=4G + pagecache=2G = 6G bare minimum.
-# Add headroom for Postgres, the Docker daemon, and the guest OS.
-# ---------------------------------------------------------------------------
-COLIMA_MIN_CPU=4
-COLIMA_MIN_MEMORY_GB=8
-COLIMA_VM_TYPE="vz"
-
-colima_running() {
-  colima status >/dev/null 2>&1
+docker_context_name() {
+  docker context show 2>/dev/null || echo "unknown"
 }
 
-colima_memory_gb() {
-  local mem_bytes
-  mem_bytes="$(colima status --json 2>/dev/null \
-    | grep -Eo '"memory"[[:space:]]*:[[:space:]]*"?[0-9]+' \
-    | head -1 \
-    | grep -Eo '[0-9]+')" || true
-  if [[ -z "${mem_bytes:-}" || "$mem_bytes" == "0" ]]; then
-    echo 0
-    return
+resolve_docker_compose() {
+  docker compose version >/dev/null 2>&1
+}
+
+port_listen_pids() {
+  local port="$1"
+  if have_cmd lsof; then
+    lsof -nP -iTCP:"${port}" -sTCP:LISTEN -t 2>/dev/null || true
   fi
-  echo $(( mem_bytes / 1073741824 ))
-}
-
-colima_start_with_resources() {
-  log "Starting Colima (cpu=${COLIMA_MIN_CPU}, memory=${COLIMA_MIN_MEMORY_GB}G, vm-type=${COLIMA_VM_TYPE})..."
-  colima start \
-    --vm-type "$COLIMA_VM_TYPE" \
-    --cpu "$COLIMA_MIN_CPU" \
-    --memory "$COLIMA_MIN_MEMORY_GB" 2>&1
-}
-
-colima_recover_stale_vm() {
-  log "Colima start failed — attempting to recover stale VM state..."
-  local ha_log="${HOME}/.colima/_lima/colima/ha.stderr.log"
-  if [[ -f "$ha_log" ]]; then
-    log "Recent Colima hostagent errors:"
-    tail -n 10 "$ha_log" | sed 's/^/[start.sh]   /'
-  fi
-  log "Running: colima delete --force"
-  colima delete --force 2>&1 || true
-  log "Retrying Colima start after cleanup..."
-  colima_start_with_resources
-}
-
-ensure_docker_daemon() {
-  # Fast path: Docker already reachable (Docker Desktop, or Colima already up).
-  if docker_daemon_ready; then
-    # If Colima is the provider, make sure it has enough memory.
-    if have_cmd colima && colima_running; then
-      local mem_gb
-      mem_gb="$(colima_memory_gb)"
-      if [[ "$mem_gb" -gt 0 && "$mem_gb" -lt "$COLIMA_MIN_MEMORY_GB" ]]; then
-        log "Colima is running with ${mem_gb}GB RAM but ragweld needs at least ${COLIMA_MIN_MEMORY_GB}GB."
-        log "Restarting Colima with adequate resources..."
-        colima stop 2>&1 || true
-        if ! colima_start_with_resources; then
-          colima_recover_stale_vm || return 1
-        fi
-      fi
-    fi
-    if docker_daemon_ready; then
-      return 0
-    fi
-  fi
-
-  # Docker not running — try Colima.
-  if have_cmd colima; then
-    if ! colima_start_with_resources; then
-      colima_recover_stale_vm || return 1
-    fi
-    if docker_daemon_ready; then
-      return 0
-    fi
-  fi
-
-  return 1
-}
-
-container_name_for_service() {
-  case "$1" in
-    postgres|neo4j|prometheus|grafana|loki|promtail|api)
-      echo "tribrid-$1"
-      ;;
-    *)
-      echo ""
-      ;;
-  esac
-}
-
-container_exists() {
-  local name="$1"
-  docker ps -a --format '{{.Names}}' | grep -Fxq "$name"
-}
-
-start_existing_service_container() {
-  local service="$1"
-  local cname
-  cname="$(container_name_for_service "$service")"
-  if [[ -z "$cname" ]]; then
-    return 1
-  fi
-  if ! container_exists "$cname"; then
-    return 1
-  fi
-  log "Reusing existing container for ${service}: ${cname}"
-  docker start "$cname" >/dev/null
-}
-
-run() {
-  if [[ "$DRY_RUN" == "1" ]]; then
-    echo "+ $*"
-    return 0
-  fi
-  "$@"
-}
-
-wait_for_container_healthy() {
-  local cname="$1"
-  local timeout_s="${2:-120}"
-  local start_s
-  start_s="$(date +%s)"
-
-  log "Waiting for $cname to become healthy (timeout ${timeout_s}s)..."
-  while true; do
-    local status=""
-    status="$(docker inspect -f '{{.State.Health.Status}}' "$cname" 2>/dev/null || true)"
-    if [[ "$status" == "healthy" ]]; then
-      log "$cname is healthy."
-      return 0
-    fi
-    if [[ "$status" == "unhealthy" ]]; then
-      die "$cname is unhealthy. Check logs: docker logs $cname"
-    fi
-    if [[ -z "$status" ]]; then
-      die "Could not inspect $cname (is Docker running? did the container start?)"
-    fi
-
-    local now_s
-    now_s="$(date +%s)"
-    if (( now_s - start_s >= timeout_s )); then
-      die "Timed out waiting for $cname health (current status: $status)"
-    fi
-    sleep 2
-  done
 }
 
 wait_for_http_ok() {
   local url="$1"
   local timeout_s="${2:-60}"
-  local start_s
-  start_s="$(date +%s)"
+  local started
+  started="$(date +%s)"
+  while ! curl -fsS "$url" >/dev/null 2>&1; do
+    if (( $(date +%s) - started >= timeout_s )); then
+      die "Timed out waiting for $url"
+    fi
+    sleep 1
+  done
+  log "Ready: $url"
+}
 
-  log "Waiting for HTTP OK: $url (timeout ${timeout_s}s)..."
+wait_for_backend_ready() {
+  local url="http://127.0.0.1:${BACKEND_PORT}/api/ready"
+  local timeout_s="${1:-120}"
+  local started
+  started="$(date +%s)"
   while true; do
-    if curl -fsS "$url" >/dev/null 2>&1; then
-      log "OK: $url"
+    local body
+    body="$(curl -fsS "$url" 2>/dev/null || true)"
+    if [[ "$body" == *'"ready":true'* || "$body" == *'"ready": true'* ]]; then
+      log "Ready: $url"
       return 0
     fi
-    local now_s
-    now_s="$(date +%s)"
-    if (( now_s - start_s >= timeout_s )); then
-      die "Timed out waiting for: $url"
+    if (( $(date +%s) - started >= timeout_s )); then
+      [[ -n "$body" ]] && echo "$body" >&2
+      die "Timed out waiting for backend readiness at $url"
     fi
     sleep 1
   done
 }
 
 wait_for_native_postgres() {
-  local timeout_s="${1:-60}"
-  have_cmd pg_isready || die "pg_isready not found. Install Postgres (or use Docker Postgres) before using --native-postgres."
-
-  local host="${POSTGRES_HOST:-localhost}"
+  have_cmd pg_isready || die "pg_isready is required for --native-postgres"
+  local host="${POSTGRES_HOST:-127.0.0.1}"
   local port="${POSTGRES_PORT:-5432}"
   local user="${POSTGRES_USER:-postgres}"
-
-  # host.docker.internal is for containers; on the host we should check localhost.
-  if [[ "$host" == "host.docker.internal" ]]; then
-    host="127.0.0.1"
-  fi
-
-  log "Waiting for native Postgres (pg_isready -h ${host} -p ${port}) (timeout ${timeout_s}s)..."
-  local start_s
-  start_s="$(date +%s)"
-  while true; do
-    if PGPASSWORD="${POSTGRES_PASSWORD:-}" pg_isready -h "$host" -p "$port" -U "$user" >/dev/null 2>&1; then
-      log "Native Postgres is ready."
-      return 0
-    fi
-    local now_s
-    now_s="$(date +%s)"
-    if (( now_s - start_s >= timeout_s )); then
-      die "Timed out waiting for native Postgres readiness (pg_isready). Check POSTGRES_HOST/POSTGRES_PORT and ensure Postgres is running."
-    fi
-    sleep 1
-  done
+  [[ "$host" == "host.docker.internal" ]] && host="127.0.0.1"
+  PGPASSWORD="${POSTGRES_PASSWORD:-}" pg_isready -h "$host" -p "$port" -U "$user" >/dev/null \
+    || die "Host Postgres is not ready at ${host}:${port}"
 }
 
 cleanup() {
-  if [[ -n "${BACKEND_PID:-}" ]]; then
-    if kill -0 "$BACKEND_PID" >/dev/null 2>&1; then
-      log "Stopping backend (pid=$BACKEND_PID)..."
-      kill "$BACKEND_PID" >/dev/null 2>&1 || true
-    fi
+  if [[ -n "$BACKEND_PID" ]] && kill -0 "$BACKEND_PID" >/dev/null 2>&1; then
+    log "Stopping backend pid=$BACKEND_PID"
+    kill "$BACKEND_PID" >/dev/null 2>&1 || true
   fi
 }
 trap cleanup EXIT INT TERM
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --docker-backend)
-      BACKEND_MODE="docker"
-      ;;
-    --with-observability)
-      WITH_OBSERVABILITY=1
-      ;;
-    --native-postgres)
-      NATIVE_POSTGRES=1
-      ;;
-    --lan)
-      FRONTEND_HOST="0.0.0.0"
-      ;;
-    --no-docker)
-      START_DOCKER=0
-      ;;
-    --no-backend)
-      START_BACKEND=0
-      ;;
-    --no-frontend)
-      START_FRONTEND=0
-      ;;
-    --check)
-      DRY_RUN=1
-      ;;
-    -h|--help)
-      usage
-      exit 0
-      ;;
-    *)
-      usage
-      die "Unknown option: $1"
-      ;;
+    --docker-backend) BACKEND_MODE="docker" ;;
+    --with-observability) WITH_OBSERVABILITY=1 ;;
+    --native-postgres) NATIVE_POSTGRES=1 ;;
+    --lan) FRONTEND_HOST="0.0.0.0" ;;
+    --no-docker) START_DOCKER=0 ;;
+    --no-backend) START_BACKEND=0 ;;
+    --no-frontend) START_FRONTEND=0 ;;
+    --check) DRY_RUN=1 ;;
+    -h|--help) usage; exit 0 ;;
+    *) usage; die "Unknown option: $1" ;;
   esac
   shift
 done
 
-if [[ ! -f ".env" ]]; then
-  if [[ -f ".env.example" ]]; then
-    log ".env not found; copying .env.example -> .env"
-    run cp ".env.example" ".env"
-    log "Reminder: edit .env with your API keys if you want embeddings/LLM calls."
+if [[ ! -f .env && -f .env.example ]]; then
+  if [[ "$DRY_RUN" == "1" ]]; then
+    log "Would copy .env.example to .env"
   else
-    log ".env not found and .env.example missing; continuing."
+    cp .env.example .env
+    log "Created .env from .env.example; add secrets only when a provider needs them."
   fi
 fi
 
-# Load .env for local backend so Neo4j/Postgres credentials are available.
-# (Docker Compose reads .env automatically, but local uvicorn does not.)
-if [[ -f ".env" ]]; then
+if [[ -f .env ]]; then
   log "Loading environment from .env"
   set -a
   # shellcheck disable=SC1091
-  source ".env"
+  source .env
   set +a
 fi
 
 if [[ "$NATIVE_POSTGRES" == "1" && "$DRY_RUN" == "0" ]]; then
-  if [[ "$START_BACKEND" == "1" || "$START_DOCKER" == "1" ]]; then
-    wait_for_native_postgres 60
-  fi
+  wait_for_native_postgres
 fi
 
-wait_for_backend_ready() {
-  local url="http://127.0.0.1:${BACKEND_PORT}/api/ready"
-  local timeout_s="${1:-90}"
-  local start_s
-  start_s="$(date +%s)"
-
-  log "Waiting for backend readiness: $url (timeout ${timeout_s}s)..."
-  while true; do
-    local body=""
-    body="$(curl -fsS "$url" 2>/dev/null || true)"
-    if [[ -n "$body" ]] && echo "$body" | grep -Eq '"ready"[[:space:]]*:[[:space:]]*true'; then
-      log "Ready: $url"
-      return 0
-    fi
-    local now_s
-    now_s="$(date +%s)"
-    if (( now_s - start_s >= timeout_s )); then
-      echo "$body" >&2
-      die "Timed out waiting for backend readiness: $url"
-    fi
-    sleep 1
-  done
-}
-
 if [[ "$START_DOCKER" == "1" ]]; then
-  resolve_docker_compose || die "Docker Compose not found. Install Docker Desktop."
-  COMPOSE_FILE_ARGS=()
-  if [[ "$NATIVE_POSTGRES" == "1" ]]; then
-    COMPOSE_FILE_ARGS=(-f docker-compose.yml -f infra/docker-compose.native-postgres.yml)
-  fi
-  if [[ "$DRY_RUN" == "1" ]]; then
-    if ! docker_daemon_ready; then
-      log "Docker daemon unavailable (check mode): would attempt Colima start."
-    fi
+  have_cmd docker || die "Docker CLI is unavailable"
+  resolve_docker_compose || die "Docker Compose plugin is unavailable"
+
+  context="$(docker_context_name)"
+  if docker_daemon_ready; then
+    log "Using host-owned Docker runtime (context=${context})"
+  elif [[ "$DRY_RUN" == "1" ]]; then
+    log "Host-owned Docker runtime is unavailable (context=${context}); start/select it before a real launch."
   else
-    ensure_docker_daemon || die "Docker daemon is unavailable. Start Docker Desktop or fix Colima, then retry."
+    die "Host-owned Docker runtime is unavailable (context=${context}). Start/select the dedicated runtime, then retry."
+  fi
+
+  compose=(docker compose --project-name "$COMPOSE_PROJECT_NAME" -f docker-compose.yml)
+  if [[ "$NATIVE_POSTGRES" == "1" ]]; then
+    compose+=(-f infra/docker-compose.native-postgres.yml)
+  fi
+  if [[ "$WITH_OBSERVABILITY" == "1" ]]; then
+    compose+=(-f infra/docker-compose.observability.yml)
   fi
 
   services=(postgres neo4j)
-  if [[ "$NATIVE_POSTGRES" == "1" ]]; then
-    services=(neo4j)
-  fi
+  [[ "$NATIVE_POSTGRES" == "1" ]] && services=(neo4j)
   if [[ "$WITH_OBSERVABILITY" == "1" ]]; then
-    services+=(prometheus grafana loki promtail)
+    services+=(postgres-exporter prometheus grafana loki promtail tempo alloy)
   fi
   if [[ "$BACKEND_MODE" == "docker" && "$START_BACKEND" == "1" ]]; then
     services+=(api)
   fi
 
-  log "Starting Docker services: ${services[*]}"
-  compose_cmd=("${DOCKER_COMPOSE[@]}")
-  if (( ${#COMPOSE_FILE_ARGS[@]} > 0 )); then
-    compose_cmd+=("${COMPOSE_FILE_ARGS[@]}")
-  fi
-
-  compose_up_failed=0
-  if [[ "$BACKEND_MODE" == "docker" && "$START_BACKEND" == "1" ]]; then
-    if ! run env SERVER_PORT="$BACKEND_PORT" "${compose_cmd[@]}" up -d "${services[@]}"; then
-      compose_up_failed=1
-    fi
+  log "Compose project=${COMPOSE_PROJECT_NAME}; services=${services[*]}"
+  if [[ "$DRY_RUN" == "1" ]]; then
+    run env SERVER_PORT="$BACKEND_PORT" "${compose[@]}" up -d --wait "${services[@]}"
   else
-    if ! run "${compose_cmd[@]}" up -d "${services[@]}"; then
-      compose_up_failed=1
-    fi
-  fi
-
-  if [[ "$compose_up_failed" == "1" && "$DRY_RUN" == "0" ]]; then
-    log "docker compose up failed; attempting to reuse existing named tribrid containers..."
-    for svc in "${services[@]}"; do
-      start_existing_service_container "$svc" || true
-    done
-  fi
-
-  if [[ "$DRY_RUN" == "0" ]]; then
-    if [[ "$NATIVE_POSTGRES" == "0" ]]; then
-      container_exists "tribrid-postgres" || die "Missing required container tribrid-postgres after startup attempt."
-    fi
-    container_exists "tribrid-neo4j" || die "Missing required container tribrid-neo4j after startup attempt."
-    if [[ "$NATIVE_POSTGRES" == "0" ]]; then
-      wait_for_container_healthy "tribrid-postgres" 120
-    fi
-    wait_for_container_healthy "tribrid-neo4j" 180
+    env SERVER_PORT="$BACKEND_PORT" "${compose[@]}" up -d --wait "${services[@]}"
   fi
 fi
 
 if [[ "$START_BACKEND" == "1" && "$BACKEND_MODE" == "local" ]]; then
-  have_cmd uv || die "uv not found. Install uv, then re-run (see README prerequisites)."
-  # Apple Silicon local backend: ensure MLX extras are installed so
-  # learning_reranker_backend=auto can resolve to mlx_qwen3.
-  if [[ "$(uname -s)" == "Darwin" && "$(uname -m)" == "arm64" ]]; then
-    log "Ensuring Python deps are installed (uv sync --extra mlx)..."
-    # Run once per machine; safe/no-op if already synced.
-    run uv sync --extra mlx
-  else
-    log "Ensuring Python deps are installed (uv sync)..."
-    # Run once per machine; safe/no-op if already synced.
-    run uv sync
-  fi
-
-  log "Starting backend (uvicorn) on port $BACKEND_PORT..."
+  have_cmd uv || die "uv is unavailable"
   existing_pids="$(port_listen_pids "$BACKEND_PORT")"
-  if [[ -n "${existing_pids:-}" ]]; then
-    log "Backend port $BACKEND_PORT is already in use."
-    log "Listener PID(s):"
-    echo "$existing_pids" | sed 's/^/[start.sh]   - /'
-    die "Port $BACKEND_PORT is already in use. Stop the existing process, or run ./start.sh --no-backend if you want to reuse an already-running backend, or set BACKEND_PORT."
+  [[ -n "$existing_pids" ]] && die "Backend port ${BACKEND_PORT} is already in use"
+
+  if [[ ! -d .venv ]]; then
+    if [[ "$(uname -s)" == "Darwin" && "$(uname -m)" == "arm64" ]]; then
+      run uv sync --extra mlx
+    else
+      run uv sync
+    fi
   fi
 
   if [[ "$DRY_RUN" == "1" ]]; then
-    run uv run uvicorn server.main:app --reload --port "$BACKEND_PORT"
+    run uv run uvicorn server.main:app --host 127.0.0.1 --port "$BACKEND_PORT" --reload
   else
-    uv run uvicorn server.main:app --reload --port "$BACKEND_PORT" &
+    uv run uvicorn server.main:app --host 127.0.0.1 --port "$BACKEND_PORT" --reload &
     BACKEND_PID="$!"
-    # If uvicorn fails fast (e.g., bind error), fail loudly instead of
-    # accidentally proceeding with a stale process on the port.
-    sleep 0.2
-    if ! kill -0 "$BACKEND_PID" >/dev/null 2>&1; then
-      die "Backend failed to start (uvicorn exited immediately). Scroll up for the error."
-    fi
     wait_for_http_ok "http://127.0.0.1:${BACKEND_PORT}/api/health" 60
     wait_for_backend_ready 120
-
-    log "MCP (Streamable HTTP): http://localhost:${BACKEND_PORT}/mcp/"
   fi
-elif [[ "$START_BACKEND" == "1" && "$BACKEND_MODE" == "docker" ]]; then
-  if [[ "$DRY_RUN" == "0" ]]; then
-    wait_for_http_ok "http://127.0.0.1:${BACKEND_PORT}/api/health" 90
-    wait_for_backend_ready 120
-
-    log "MCP (Streamable HTTP): http://localhost:${BACKEND_PORT}/mcp/"
-  fi
+elif [[ "$START_BACKEND" == "1" && "$BACKEND_MODE" == "docker" && "$DRY_RUN" == "0" ]]; then
+  wait_for_http_ok "http://127.0.0.1:${BACKEND_PORT}/api/health" 90
+  wait_for_backend_ready 120
 fi
 
 if [[ "$START_FRONTEND" == "1" ]]; then
-  have_cmd npm || die "npm not found. Install Node.js 18+, then re-run."
-  if [[ ! -d "web" ]]; then
-    die "web/ directory not found."
-  fi
-
-  if [[ "$DRY_RUN" == "0" && ! -d "web/node_modules" ]]; then
-    log "web/node_modules missing; running npm install..."
-    run npm --prefix web install
-  fi
-
-  log "Starting frontend (Vite) on ${FRONTEND_HOST}:${FRONTEND_PORT}..."
+  have_cmd npm || die "npm is unavailable"
+  [[ -d web ]] || die "web directory is missing"
+  [[ -d web/node_modules || "$DRY_RUN" == "1" ]] || npm --prefix web install
   log "UI: http://localhost:${FRONTEND_PORT}/web"
-  if [[ "$FRONTEND_HOST" == "0.0.0.0" ]]; then
-    log "UI (LAN): http://<your-ip>:${FRONTEND_PORT}/web"
-  fi
-  # Bind explicitly to IPv4 loopback so tests and scripts that use 127.0.0.1 work
-  # even when "localhost" resolves to ::1 first.
   run npm --prefix web run dev -- --host "$FRONTEND_HOST" --port "$FRONTEND_PORT"
 else
-  log "Done. (Nothing left to run in foreground.)"
+  log "Done."
 fi

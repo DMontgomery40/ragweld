@@ -130,7 +130,6 @@ SERVER_ENV_GETENV_ALLOWLIST = {
     "NEO4J_PASSWORD",
     "TRIBRID_DB_DIR",
     # Dev stack / container wiring
-    "TRIBRID_DEV_ORCHESTRATOR",
     "FRONTEND_PORT",
     "BACKEND_PORT",
     "LOKI_BASE_URL",

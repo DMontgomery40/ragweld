@@ -562,8 +562,6 @@ export interface DockerConfig {
   dev_frontend_port?: number; // default: 5173
   /** Port for dev backend (Uvicorn) */
   dev_backend_port?: number; // default: 8012
-  /** Timeout for dev stack restart operations (seconds) */
-  dev_stack_restart_timeout?: number; // default: 30
 }
 
 /** Normalized Docker container entry used by the Docker tab + dashboard. */
@@ -3219,20 +3217,6 @@ export interface DashboardIndexStatusResponse {
   progress?: number | null;
   /** File currently being indexed (if running). */
   current_file?: string | null;
-}
-
-/** Response payload for a dev stack restart operation. */
-export interface DevStackRestartResponse {
-  /** Whether the operation was accepted and executed successfully. */
-  success: boolean;
-  /** Human-readable success message. */
-  message?: string | null;
-  /** Error message (if success=false). */
-  error?: string | null;
-  /** Frontend port (if applicable). */
-  frontend_port?: number | null;
-  /** Backend port (if applicable). */
-  backend_port?: number | null;
 }
 
 /** Status of the local dev stack (frontend + backend). */

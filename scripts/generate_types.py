@@ -271,7 +271,6 @@ def main() -> None:
             DashboardIndexStatsResponse,
             # Domain models - Dev stack orchestration (local dev only)
             DevStackStatusResponse,
-            DevStackRestartResponse,
             # Domain models - Health + infra status
             HealthServiceStatus,
             HealthStatus,
@@ -488,7 +487,6 @@ def main() -> None:
         DashboardIndexStatusResponse,
         DashboardIndexStatsResponse,
         DevStackStatusResponse,
-        DevStackRestartResponse,
         HealthServiceStatus,
         HealthStatus,
         DockerStatus,

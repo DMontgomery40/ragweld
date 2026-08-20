@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-import signal
 import subprocess
 import time
 from collections import deque
@@ -11,12 +10,11 @@ from pathlib import Path
 from typing import Any
 
 import httpx
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from starlette.responses import StreamingResponse
 
 from server.config import load_config
 from server.models.tribrid_config_model import (
-    DevStackRestartResponse,
     DevStackStatusResponse,
     DockerContainer,
     DockerContainersResponse,
@@ -27,75 +25,14 @@ from server.models.tribrid_config_model import (
 
 router = APIRouter(tags=["docker"])
 
-_DEV_STACK_LOCK = asyncio.Lock()
-_DEV_LOCK_PATH = Path("/tmp/tribrid-dev-stack.lock")
-_DEV_LOCK_FH: Any | None = None
-
-try:  # pragma: no cover - Windows compatibility
-    import fcntl
-except Exception:  # pragma: no cover
-    fcntl = None  # type: ignore[assignment]
-
-
-def _project_root() -> Path:
-    # server/api/docker.py -> server/api -> server -> project root
-    return Path(__file__).resolve().parents[2]
-
-
 def _is_local_client(request: Request) -> bool:
     host = request.client.host if request.client else ""
     return host in {"127.0.0.1", "::1"}
 
 
-def _ensure_dev_orchestrator_allowed(request: Request) -> None:
+def _ensure_local_request(request: Request) -> None:
     if not _is_local_client(request):
-        raise HTTPException(status_code=403, detail="Dev stack control is only allowed from localhost.")
-
-    flag = (os.getenv("TRIBRID_DEV_ORCHESTRATOR") or "").strip().lower()
-    if flag in {"0", "false", "no", "off"}:
-        raise HTTPException(status_code=403, detail="Dev stack control is disabled (TRIBRID_DEV_ORCHESTRATOR=0).")
-
-
-def _dev_lock_try_acquire() -> bool:
-    """Try to acquire a global dev-stack lock (non-blocking)."""
-    global _DEV_LOCK_FH
-    if _DEV_LOCK_FH is not None:
-        return False
-    fh = _DEV_LOCK_PATH.open("a+", encoding="utf-8")
-    if fcntl is not None:
-        try:
-            fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            fh.close()
-            return False
-    _DEV_LOCK_FH = fh
-    return True
-
-
-def _dev_lock_release() -> None:
-    global _DEV_LOCK_FH
-    fh = _DEV_LOCK_FH
-    _DEV_LOCK_FH = None
-    if not fh:
-        return
-    try:
-        if fcntl is not None:
-            try:
-                fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
-            except Exception:
-                pass
-    finally:
-        try:
-            fh.close()
-        except Exception:
-            pass
-
-
-def _dev_task_run_and_release(func: Any, *args: Any, **kwargs: Any) -> None:
-    try:
-        func(*args, **kwargs)
-    finally:
-        _dev_lock_release()
+        raise HTTPException(status_code=403, detail="Local runtime diagnostics are only available from localhost.")
 
 
 def _resolve_dev_ports() -> tuple[int, int]:
@@ -277,140 +214,6 @@ async def _list_docker_containers(*, timeout_s: int, env: dict[str, str] | None)
             }
         )
     return containers
-
-
-def _lsof_listen_pids(port: int) -> list[int]:
-    """Best-effort: return PIDs listening on TCP port (macOS/Linux)."""
-    try:
-        res = _run_cmd(
-            ["lsof", "-nP", f"-iTCP:{port}", "-sTCP:LISTEN", "-t"],
-            timeout_s=2,
-        )
-    except FileNotFoundError:
-        return []
-    if res.returncode != 0:
-        return []
-    pids: list[int] = []
-    for ln in (res.stdout or "").splitlines():
-        ln = ln.strip()
-        if not ln:
-            continue
-        try:
-            pids.append(int(ln))
-        except ValueError:
-            continue
-    return pids
-
-
-def _terminate_pids(pids: list[int], *, timeout_s: float = 5.0) -> None:
-    """Terminate PIDs (SIGTERM then SIGKILL best-effort)."""
-    for pid in pids:
-        try:
-            os.kill(pid, signal.SIGTERM)
-        except ProcessLookupError:
-            continue
-        except PermissionError:
-            continue
-
-    # Wait a bit for graceful exit
-    deadline = time.monotonic() + timeout_s
-    while time.monotonic() < deadline:
-        alive = False
-        for pid in pids:
-            try:
-                os.kill(pid, 0)
-                alive = True
-            except ProcessLookupError:
-                continue
-            except PermissionError:
-                # If we can't check, assume alive to avoid busy loop
-                alive = True
-        if not alive:
-            return
-        # short sleep (sync) - only used in background tasks
-        time.sleep(0.1)
-
-    # Force kill remaining
-    for pid in pids:
-        try:
-            os.kill(pid, signal.SIGKILL)
-        except Exception:
-            continue
-
-
-def _restart_vite_dev_server(*, port: int, timeout_s: int) -> None:
-    root = _project_root()
-    # Kill anything currently listening on the port.
-    pids = _lsof_listen_pids(port)
-    if pids:
-        _terminate_pids(pids, timeout_s=5.0)
-
-    # Start Vite (detached). Keep stdout/stderr in a predictable log file.
-    log_dir = root / ".tests"
-    log_dir.mkdir(parents=True, exist_ok=True)
-    log_path = log_dir / "vite-dev.log"
-    with log_path.open("a", encoding="utf-8") as logf:
-        subprocess.Popen(
-            ["npm", "--prefix", "web", "run", "dev", "--", "--port", str(port)],
-            cwd=str(root),
-            stdout=logf,
-            stderr=logf,
-            start_new_session=True,
-            env=os.environ.copy(),
-        )
-
-    # Best-effort: give it a moment to bind before returning
-    try:
-        subprocess.run(
-            ["node", "--version"],
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=max(1, min(5, timeout_s)),
-        )
-    except Exception:
-        pass
-
-
-def _touch_reload_trigger() -> None:
-    """Trigger uvicorn --reload by touching a gitignored file."""
-    root = _project_root()
-    trigger = root / ".tests" / "dev-reload.trigger"
-    trigger.parent.mkdir(parents=True, exist_ok=True)
-    trigger.write_text(str(time.time()), encoding="utf-8")
-
-
-def _clear_python_bytecode_cache() -> None:
-    root = _project_root()
-    # Clear only safe, repo-owned locations.
-    candidates = [
-        root / "server",
-        root / "tests",
-        root / "scripts",
-    ]
-    for base in candidates:
-        if not base.exists():
-            continue
-        for p in base.rglob("__pycache__"):
-            try:
-                # Remove directory tree
-                for child in p.rglob("*"):
-                    try:
-                        if child.is_file() or child.is_symlink():
-                            child.unlink(missing_ok=True)
-                    except Exception:
-                        continue
-                try:
-                    p.rmdir()
-                except Exception:
-                    pass
-            except Exception:
-                continue
-        for p in base.rglob("*.pyc"):
-            try:
-                p.unlink(missing_ok=True)
-            except Exception:
-                continue
 
 
 # ============================================================================
@@ -670,104 +473,6 @@ async def get_dev_stack_status() -> DevStackStatusResponse:
     )
 
 
-@router.post("/dev/frontend/restart", response_model=DevStackRestartResponse)
-async def restart_dev_frontend(request: Request, background_tasks: BackgroundTasks) -> DevStackRestartResponse:
-    _ensure_dev_orchestrator_allowed(request)
-    frontend_port, _backend_port = _resolve_dev_ports()
-
-    try:
-        cfg = load_config()
-        timeout = int(getattr(cfg.docker, "dev_stack_restart_timeout", 30))
-    except Exception:
-        timeout = 30
-
-    async with _DEV_STACK_LOCK:
-        if not _dev_lock_try_acquire():
-            raise HTTPException(status_code=409, detail="A dev stack operation is already in progress.")
-
-        # Run after response so Vite's /api proxy can return successfully before we restart it.
-        background_tasks.add_task(
-            _dev_task_run_and_release,
-            _restart_vite_dev_server,
-            port=frontend_port,
-            timeout_s=timeout,
-        )
-        return DevStackRestartResponse(
-            success=True,
-            message="Frontend restart scheduled",
-            frontend_port=frontend_port,
-        )
-
-
-@router.post("/dev/backend/restart", response_model=DevStackRestartResponse)
-async def restart_dev_backend(request: Request, background_tasks: BackgroundTasks) -> DevStackRestartResponse:
-    _ensure_dev_orchestrator_allowed(request)
-    _frontend_port, backend_port = _resolve_dev_ports()
-
-    async with _DEV_STACK_LOCK:
-        if not _dev_lock_try_acquire():
-            raise HTTPException(status_code=409, detail="A dev stack operation is already in progress.")
-
-        # Touch a file to trigger uvicorn --reload. Run after response to avoid proxy disconnects.
-        background_tasks.add_task(_dev_task_run_and_release, _touch_reload_trigger)
-        return DevStackRestartResponse(
-            success=True,
-            message="Backend reload triggered",
-            backend_port=backend_port,
-        )
-
-
-@router.post("/dev/backend/clear-cache-restart", response_model=DevStackRestartResponse)
-async def clear_cache_and_restart_backend(request: Request, background_tasks: BackgroundTasks) -> DevStackRestartResponse:
-    _ensure_dev_orchestrator_allowed(request)
-    _frontend_port, backend_port = _resolve_dev_ports()
-
-    async with _DEV_STACK_LOCK:
-        if not _dev_lock_try_acquire():
-            raise HTTPException(status_code=409, detail="A dev stack operation is already in progress.")
-
-        def _clear_and_reload() -> None:
-            _clear_python_bytecode_cache()
-            _touch_reload_trigger()
-
-        background_tasks.add_task(_dev_task_run_and_release, _clear_and_reload)
-        return DevStackRestartResponse(
-            success=True,
-            message="Cleared Python bytecode caches and triggered backend reload",
-            backend_port=backend_port,
-        )
-
-
-@router.post("/dev/stack/restart", response_model=DevStackRestartResponse)
-async def restart_dev_stack(request: Request, background_tasks: BackgroundTasks) -> DevStackRestartResponse:
-    _ensure_dev_orchestrator_allowed(request)
-    frontend_port, backend_port = _resolve_dev_ports()
-
-    try:
-        cfg = load_config()
-        timeout = int(getattr(cfg.docker, "dev_stack_restart_timeout", 30))
-    except Exception:
-        timeout = 30
-
-    async with _DEV_STACK_LOCK:
-        if not _dev_lock_try_acquire():
-            raise HTTPException(status_code=409, detail="A dev stack operation is already in progress.")
-
-        def _restart_stack() -> None:
-            # Order: restart frontend first (UI will go down briefly), then trigger backend reload.
-            _restart_vite_dev_server(port=frontend_port, timeout_s=timeout)
-            _touch_reload_trigger()
-
-        # Run after response so Vite's /api proxy can return before we restart it.
-        background_tasks.add_task(_dev_task_run_and_release, _restart_stack)
-        return DevStackRestartResponse(
-            success=True,
-            message="Full stack restart scheduled",
-            frontend_port=frontend_port,
-            backend_port=backend_port,
-        )
-
-
 # ==============================================================================
 # Loki proxy + streaming (dev tooling)
 # ==============================================================================
@@ -776,7 +481,7 @@ async def restart_dev_stack(request: Request, background_tasks: BackgroundTasks)
 @router.get("/loki/status", response_model=LokiStatus)
 async def loki_status(request: Request) -> LokiStatus:
     """Check whether Loki is reachable (local dev)."""
-    _ensure_dev_orchestrator_allowed(request)
+    _ensure_local_request(request)
     base = await _resolve_loki_base_url()
     if not base:
         return LokiStatus(reachable=False, url=None, status="unreachable")
@@ -804,7 +509,7 @@ async def loki_query_range(
     direction: str = Query(default="forward", pattern="^(forward|backward)$"),
 ) -> dict[str, Any]:
     """Proxy Loki query_range (dev tooling)."""
-    _ensure_dev_orchestrator_allowed(request)
+    _ensure_local_request(request)
     base = await _resolve_loki_base_url()
     if not base:
         raise HTTPException(status_code=503, detail="Loki not reachable")
@@ -844,7 +549,7 @@ async def loki_tail(
     - {"type":"error","message":"..."}
     - {"type":"complete"}
     """
-    _ensure_dev_orchestrator_allowed(request)
+    _ensure_local_request(request)
     base = await _resolve_loki_base_url()
 
     async def _gen() -> Any:

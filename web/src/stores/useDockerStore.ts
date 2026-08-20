@@ -11,10 +11,6 @@ interface DockerStore {
   // Dev Stack state
   devStackStatus: DevStackStatus | null;
   devStackLoading: boolean;
-  restartingFrontend: boolean;
-  restartingBackend: boolean;
-  restartingStack: boolean;
-  clearingCache: boolean;
 
   // Actions
   fetchStatus: () => Promise<void>;
@@ -29,10 +25,6 @@ interface DockerStore {
 
   // Dev Stack Actions
   fetchDevStackStatus: () => Promise<void>;
-  restartFrontend: () => Promise<void>;
-  restartBackend: () => Promise<void>;
-  restartStack: () => Promise<void>;
-  clearCacheAndRestart: () => Promise<void>;
 
   reset: () => void;
 }
@@ -46,10 +38,6 @@ export const useDockerStore = create<DockerStore>((set, get) => ({
   // Dev Stack state (mirrors Pydantic DevStackStatus from backend)
   devStackStatus: null,
   devStackLoading: false,
-  restartingFrontend: false,
-  restartingBackend: false,
-  restartingStack: false,
-  clearingCache: false,
 
   fetchStatus: async () => {
     set({ loading: true, error: null });
@@ -155,7 +143,7 @@ export const useDockerStore = create<DockerStore>((set, get) => ({
     }
   },
 
-  // Dev Stack Actions (Pydantic response models: DevStackStatusResponse, DevStackRestartResponse)
+  // Dev Stack status (Pydantic response model: DevStackStatusResponse)
   fetchDevStackStatus: async () => {
     set({ devStackLoading: true, error: null });
     try {
@@ -169,79 +157,6 @@ export const useDockerStore = create<DockerStore>((set, get) => ({
     }
   },
 
-  restartFrontend: async () => {
-    set({ restartingFrontend: true, error: null });
-    try {
-      const result = await dockerApi.restartFrontend();
-      if (!result.success) {
-        set({ restartingFrontend: false, error: result.error || 'Frontend restart failed' });
-        return;
-      }
-      // Refresh status after restart
-      setTimeout(() => get().fetchDevStackStatus(), 3000);
-      set({ restartingFrontend: false });
-    } catch (error) {
-      set({
-        restartingFrontend: false,
-        error: error instanceof Error ? error.message : 'Failed to restart frontend'
-      });
-    }
-  },
-
-  restartBackend: async () => {
-    set({ restartingBackend: true, error: null });
-    try {
-      const result = await dockerApi.restartBackend();
-      if (!result.success) {
-        set({ restartingBackend: false, error: result.error || 'Backend restart failed' });
-        return;
-      }
-      set({ restartingBackend: false });
-      // Backend restarts itself - refresh after delay
-      setTimeout(() => get().fetchDevStackStatus(), 5000);
-    } catch (error) {
-      // Request may fail because backend restarted - expected behavior
-      set({ restartingBackend: false });
-      setTimeout(() => get().fetchDevStackStatus(), 5000);
-    }
-  },
-
-  restartStack: async () => {
-    set({ restartingStack: true, error: null });
-    try {
-      const result = await dockerApi.restartStack();
-      if (!result.success) {
-        set({ restartingStack: false, error: result.error || 'Stack restart failed' });
-        return;
-      }
-      set({ restartingStack: false });
-      // Stack restarts - refresh after delay
-      setTimeout(() => get().fetchDevStackStatus(), 5000);
-    } catch (error) {
-      // Request may fail because backend restarted - expected behavior
-      set({ restartingStack: false });
-      setTimeout(() => get().fetchDevStackStatus(), 5000);
-    }
-  },
-
-  clearCacheAndRestart: async () => {
-    set({ clearingCache: true, error: null });
-    try {
-      const result = await dockerApi.clearCacheAndRestart();
-      if (!result.success) {
-        set({ clearingCache: false, error: result.error || 'Cache clear failed' });
-        return;
-      }
-      set({ clearingCache: false });
-      // Backend restarts - refresh after delay
-      setTimeout(() => get().fetchDevStackStatus(), 5000);
-    } catch (error) {
-      // Request may fail because backend restarted - expected behavior
-      set({ clearingCache: false });
-      setTimeout(() => get().fetchDevStackStatus(), 5000);
-    }
-  },
-
   reset: () => set({
     status: null,
     containers: [],
@@ -249,9 +164,5 @@ export const useDockerStore = create<DockerStore>((set, get) => ({
     error: null,
     devStackStatus: null,
     devStackLoading: false,
-    restartingFrontend: false,
-    restartingBackend: false,
-    restartingStack: false,
-    clearingCache: false,
   }),
 }));

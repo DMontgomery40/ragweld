@@ -1,5 +1,5 @@
 {
-  "model_count": 250,
+  "model_count": 249,
   "module": "server.models.tribrid_config_model",
   "root_models": {
     "ActiveSources": {
@@ -9854,77 +9854,6 @@
       "title": "DashboardIndexStorageBreakdown",
       "type": "object"
     },
-    "DevStackRestartResponse": {
-      "description": "Response payload for a dev stack restart operation.",
-      "properties": {
-        "backend_port": {
-          "anyOf": [
-            {
-              "maximum": 65535,
-              "minimum": 1024,
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "Backend port (if applicable).",
-          "title": "Backend Port"
-        },
-        "error": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "Error message (if success=false).",
-          "title": "Error"
-        },
-        "frontend_port": {
-          "anyOf": [
-            {
-              "maximum": 65535,
-              "minimum": 1024,
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "Frontend port (if applicable).",
-          "title": "Frontend Port"
-        },
-        "message": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "Human-readable success message.",
-          "title": "Message"
-        },
-        "success": {
-          "description": "Whether the operation was accepted and executed successfully.",
-          "title": "Success",
-          "type": "boolean"
-        }
-      },
-      "required": [
-        "success"
-      ],
-      "title": "DevStackRestartResponse",
-      "type": "object"
-    },
     "DevStackStatusResponse": {
       "description": "Status of the local dev stack (frontend + backend).",
       "properties": {
@@ -10013,14 +9942,6 @@
           "maximum": 65535,
           "minimum": 1024,
           "title": "Dev Frontend Port",
-          "type": "integer"
-        },
-        "dev_stack_restart_timeout": {
-          "default": 30,
-          "description": "Timeout for dev stack restart operations (seconds)",
-          "maximum": 120,
-          "minimum": 5,
-          "title": "Dev Stack Restart Timeout",
           "type": "integer"
         },
         "docker_container_action_timeout": {
@@ -32405,14 +32326,6 @@
               "maximum": 65535,
               "minimum": 1024,
               "title": "Dev Frontend Port",
-              "type": "integer"
-            },
-            "dev_stack_restart_timeout": {
-              "default": 30,
-              "description": "Timeout for dev stack restart operations (seconds)",
-              "maximum": 120,
-              "minimum": 5,
-              "title": "Dev Stack Restart Timeout",
               "type": "integer"
             },
             "docker_container_action_timeout": {

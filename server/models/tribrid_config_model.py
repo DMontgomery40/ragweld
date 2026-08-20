@@ -578,16 +578,6 @@ class DevStackStatusResponse(BaseModel):
     )
 
 
-class DevStackRestartResponse(BaseModel):
-    """Response payload for a dev stack restart operation."""
-
-    success: bool = Field(description="Whether the operation was accepted and executed successfully.")
-    message: str | None = Field(default=None, description="Human-readable success message.")
-    error: str | None = Field(default=None, description="Error message (if success=false).")
-    frontend_port: int | None = Field(default=None, ge=1024, le=65535, description="Frontend port (if applicable).")
-    backend_port: int | None = Field(default=None, ge=1024, le=65535, description="Backend port (if applicable).")
-
-
 # =============================================================================
 # HEALTH + INFRASTRUCTURE API MODELS
 # =============================================================================
@@ -6394,14 +6384,6 @@ class DockerConfig(BaseModel):
         description="Port for dev backend (Uvicorn)"
     )
 
-    dev_stack_restart_timeout: int = Field(
-        default=30,
-        ge=5,
-        le=120,
-        description="Timeout for dev stack restart operations (seconds)"
-    )
-
-
 class RecallConfig(BaseModel):
     """Persistent chat memory. ON by default.
 
@@ -6977,7 +6959,7 @@ class TriBridConfig(BaseModel):
             'MCP_REQUIRE_API_KEY': self.mcp.require_api_key,
             'MCP_DEFAULT_TOP_K': self.mcp.default_top_k,
             'MCP_DEFAULT_MODE': self.mcp.default_mode,
-            # Docker params (11)
+            # Docker params (10)
             'DOCKER_HOST': self.docker.docker_host,
             'DOCKER_STATUS_TIMEOUT': self.docker.docker_status_timeout,
             'DOCKER_CONTAINER_LIST_TIMEOUT': self.docker.docker_container_list_timeout,
@@ -6988,7 +6970,6 @@ class TriBridConfig(BaseModel):
             'DOCKER_LOGS_TIMESTAMPS': self.docker.docker_logs_timestamps,
             'DEV_FRONTEND_PORT': self.docker.dev_frontend_port,
             'DEV_BACKEND_PORT': self.docker.dev_backend_port,
-            'DEV_STACK_RESTART_TIMEOUT': self.docker.dev_stack_restart_timeout,
         }
 
     def to_env_dict(self) -> dict[str, Any]:
@@ -7383,7 +7364,6 @@ class TriBridConfig(BaseModel):
                 docker_logs_timestamps=data.get('DOCKER_LOGS_TIMESTAMPS', 1),
                 dev_frontend_port=data.get('DEV_FRONTEND_PORT', 5173),
                 dev_backend_port=data.get('DEV_BACKEND_PORT', 8012),
-                dev_stack_restart_timeout=data.get('DEV_STACK_RESTART_TIMEOUT', 30),
             ),
         )
 
@@ -7681,7 +7661,6 @@ TRIBRID_CONFIG_KEYS = {
     'DOCKER_LOGS_TIMESTAMPS',
     'DEV_FRONTEND_PORT',
     'DEV_BACKEND_PORT',
-    'DEV_STACK_RESTART_TIMEOUT',
 }
 
 

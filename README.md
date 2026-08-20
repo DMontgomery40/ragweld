@@ -642,7 +642,7 @@ ragweld/
 │   │   ├── repos.py            # /api/repos - corpus management
 │   │   ├── config.py           # /api/config - configuration + MCP status
 │   │   ├── graph.py            # /api/graph - knowledge graph queries
-│   │   ├── docker.py           # /api/dev/* - dev stack + Loki proxy
+│   │   ├── docker.py           # Docker, local runtime status, and Loki diagnostics
 │   │   ├── cost.py             # /api/cost - detailed cost estimation
 │   │   ├── eval.py             # /api/eval - evaluation framework
 │   │   └── health.py           # /api/health - service health

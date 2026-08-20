@@ -4635,73 +4635,6 @@
         "title": "DashboardIndexStorageBreakdown",
         "type": "object"
       },
-      "DevStackRestartResponse": {
-        "description": "Response payload for a dev stack restart operation.",
-        "properties": {
-          "backend_port": {
-            "anyOf": [
-              {
-                "maximum": 65535.0,
-                "minimum": 1024.0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Backend port (if applicable).",
-            "title": "Backend Port"
-          },
-          "error": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Error message (if success=false).",
-            "title": "Error"
-          },
-          "frontend_port": {
-            "anyOf": [
-              {
-                "maximum": 65535.0,
-                "minimum": 1024.0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Frontend port (if applicable).",
-            "title": "Frontend Port"
-          },
-          "message": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Human-readable success message.",
-            "title": "Message"
-          },
-          "success": {
-            "description": "Whether the operation was accepted and executed successfully.",
-            "title": "Success",
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "success"
-        ],
-        "title": "DevStackRestartResponse",
-        "type": "object"
-      },
       "DevStackStatusResponse": {
         "description": "Status of the local dev stack (frontend + backend).",
         "properties": {
@@ -4788,14 +4721,6 @@
             "maximum": 65535.0,
             "minimum": 1024.0,
             "title": "Dev Frontend Port",
-            "type": "integer"
-          },
-          "dev_stack_restart_timeout": {
-            "default": 30,
-            "description": "Timeout for dev stack restart operations (seconds)",
-            "maximum": 120.0,
-            "minimum": 5.0,
-            "title": "Dev Stack Restart Timeout",
             "type": "integer"
           },
           "docker_container_action_timeout": {
@@ -20671,90 +20596,6 @@
         "summary": "Update Dataset Entry",
         "tags": [
           "dataset"
-        ]
-      }
-    },
-    "/api/dev/backend/clear-cache-restart": {
-      "post": {
-        "operationId": "clear_cache_and_restart_backend_api_dev_backend_clear_cache_restart_post",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DevStackRestartResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "Clear Cache And Restart Backend",
-        "tags": [
-          "docker"
-        ]
-      }
-    },
-    "/api/dev/backend/restart": {
-      "post": {
-        "operationId": "restart_dev_backend_api_dev_backend_restart_post",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DevStackRestartResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "Restart Dev Backend",
-        "tags": [
-          "docker"
-        ]
-      }
-    },
-    "/api/dev/frontend/restart": {
-      "post": {
-        "operationId": "restart_dev_frontend_api_dev_frontend_restart_post",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DevStackRestartResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "Restart Dev Frontend",
-        "tags": [
-          "docker"
-        ]
-      }
-    },
-    "/api/dev/stack/restart": {
-      "post": {
-        "operationId": "restart_dev_stack_api_dev_stack_restart_post",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DevStackRestartResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "Restart Dev Stack",
-        "tags": [
-          "docker"
         ]
       }
     },

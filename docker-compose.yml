@@ -3,7 +3,6 @@ services:
     # Default: pgvector/pgvector (dense vectors). For BM25 via ParadeDB pg_search:
     #   POSTGRES_IMAGE=paradedb/paradedb:latest
     image: ${POSTGRES_IMAGE:-pgvector/pgvector:pg16}
-    container_name: tribrid-postgres
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-tribrid_rag}
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
@@ -11,10 +10,7 @@ services:
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
-      # Store DB data outside the repo by default:
-      #   ../tribrid-rag-db/postgres
-      # Override with TRIBRID_DB_DIR=/absolute/path/to/tribrid-rag-db
-      - ${TRIBRID_DB_DIR:-../tribrid-rag-db}/postgres:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 5s
@@ -23,7 +19,6 @@ services:
 
   postgres-exporter:
     image: prometheuscommunity/postgres-exporter:latest
-    container_name: tribrid-postgres-exporter
     environment:
       # Prometheus exporter expects a Postgres DSN.
       # Use the same defaults as the postgres service.
@@ -37,7 +32,6 @@ services:
     #   NEO4J_IMAGE=neo4j:5.26.20-enterprise
     #   NEO4J_ACCEPT_LICENSE_AGREEMENT=yes
     image: ${NEO4J_IMAGE:-neo4j:5.26.20-community}
-    container_name: tribrid-neo4j
     environment:
       NEO4J_AUTH: ${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD:-password}
       # Required for Enterprise. Safe to set even when using Community.
@@ -53,14 +47,11 @@ services:
       NEO4J_server_memory_heap_max__size: ${NEO4J_HEAP_MAX:-4G}
       NEO4J_server_memory_pagecache_size: ${NEO4J_PAGECACHE:-2G}
     ports:
-      - "7474:7474"  # HTTP
-      - "7687:7687"  # Bolt
+      - "${NEO4J_HTTP_PORT:-7474}:7474"  # HTTP
+      - "${NEO4J_BOLT_PORT:-7687}:7687"  # Bolt
     volumes:
-      # Store DB data outside the repo by default:
-      #   ../tribrid-rag-db/neo4j/{data,logs}
-      # Override with TRIBRID_DB_DIR=/absolute/path/to/tribrid-rag-db
-      - ${TRIBRID_DB_DIR:-../tribrid-rag-db}/neo4j/data:/data
-      - ${TRIBRID_DB_DIR:-../tribrid-rag-db}/neo4j/logs:/logs
+      - neo4j_data:/data
+      - neo4j_logs:/logs
     healthcheck:
       # The Neo4j image does not ship with curl; prefer cypher-shell.
       test: ["CMD-SHELL", "cypher-shell -u ${NEO4J_USER:-neo4j} -p ${NEO4J_PASSWORD:-password} 'RETURN 1 AS ok;' >/dev/null 2>&1"]
@@ -70,7 +61,6 @@ services:
 
   grafana:
     image: grafana/grafana-oss:10.0.0
-    container_name: tribrid-grafana
     environment:
       GF_SECURITY_ADMIN_USER: admin
       GF_SECURITY_ADMIN_PASSWORD: admin
@@ -85,7 +75,7 @@ services:
       # Required for cross-origin iframe cookies in some browsers.
       GF_SECURITY_COOKIE_SAMESITE: disabled
     ports:
-      - "${GRAFANA_PORT:-3001}:3000"
+      - "${GRAFANA_PORT:-3301}:3000"
     volumes:
       - grafana_data:/var/lib/grafana
       - ./infra/grafana/provisioning:/etc/grafana/provisioning
@@ -95,13 +85,12 @@ services:
 
   prometheus:
     image: prom/prometheus:v2.45.0
-    container_name: tribrid-prometheus
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
       - '--web.enable-lifecycle'
     ports:
-      - "9090:9090"
+      - "${PROMETHEUS_PORT:-59090}:9090"
     volumes:
       - ./infra/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus_data:/prometheus
@@ -112,10 +101,9 @@ services:
 
   loki:
     image: grafana/loki:latest
-    container_name: tribrid-loki
     restart: unless-stopped
     ports:
-      - "3100:3100"
+      - "${LOKI_PORT:-53100}:3100"
     volumes:
       - ./infra/loki-config.yml:/etc/loki/local-config.yaml:ro
       - loki_data:/loki
@@ -123,7 +111,6 @@ services:
 
   promtail:
     image: grafana/promtail:latest
-    container_name: tribrid-promtail
     restart: unless-stopped
     volumes:
       - ./infra/promtail-config.yml:/etc/promtail/config.yml:ro
@@ -143,7 +130,6 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: tribrid-api
     environment:
       - POSTGRES_HOST=postgres
       - POSTGRES_PORT=5432
@@ -151,7 +137,7 @@ services:
     env_file:
       - .env
     ports:
-      - "${SERVER_PORT:-8000}:8000"
+      - "${SERVER_PORT:-8012}:8000"
     volumes:
       - ./models:/app/models
       - ./data:/app/data
@@ -161,16 +147,15 @@ services:
       neo4j:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
       interval: 10s
       timeout: 5s
       retries: 5
 
 volumes:
+  postgres_data:
+  neo4j_data:
+  neo4j_logs:
   grafana_data:
   prometheus_data:
   loki_data:
-
-networks:
-  default:
-    name: tribrid-network

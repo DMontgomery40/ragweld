@@ -30,12 +30,16 @@ Produce one clean, reproducible Ragweld development platform from current `main`
 - Preserved graph patch ID: `7ca5c5fb1d5d90cfe818855ccb82349177b1eb61`
 - Primary checkout is the only worktree.
 - Local `main` equals `origin/main`.
-- Five rescue branches preserve root work, stability evidence, UI evidence, and both old stashes.
+- Local branches are reduced to `main` and the active recovery branch. The six
+  agent-created archive/rescue refs were removed after a complete temporary
+  recovery bundle was verified outside the repository.
 - Old Postgres, Neo4j, and Qdrant state was deleted after explicit clean-start authorization.
 - 6,543 committed `tmp/` and `web/tmp/` artifacts were removed and ignored.
 - Replacement-only synthetic contracts and model-catalog selection metadata are repaired.
 
 ## Task 1: Lock runtime ownership with executable tests
+
+Status: complete
 
 Files:
 
@@ -66,6 +70,8 @@ npm --prefix web run build
 ```
 
 ## Task 2: Make Compose project-scoped and path-correct
+
+Status: complete
 
 Files:
 

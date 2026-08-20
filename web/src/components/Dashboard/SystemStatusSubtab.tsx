@@ -47,15 +47,7 @@ export function SystemStatusSubtab() {
   const {
     devStackStatus,
     devStackLoading,
-    restartingFrontend,
-    restartingBackend,
-    restartingStack,
-    clearingCache,
     fetchDevStackStatus,
-    restartFrontend,
-    restartBackend,
-    restartStack,
-    clearCacheAndRestart,
   } = useDockerStore();
 
   const formatBytes = (bytes: number) => {
@@ -388,7 +380,7 @@ export function SystemStatusSubtab() {
                         boxShadow: '0 0 6px var(--link)'
                       }}
                     />
-                    Dev Stack
+                    Local Runtime
                   </span>
 
                   {/* Status indicators */}
@@ -481,110 +473,6 @@ export function SystemStatusSubtab() {
                     </div>
                   </div>
 
-                  {/* Restart buttons */}
-                  <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                    <button
-                      onClick={restartFrontend}
-                      disabled={restartingFrontend || restartingStack || clearingCache}
-                      className="dev-stack-btn"
-                      style={{
-                        flex: 1,
-                        minWidth: '70px',
-                        padding: '6px 8px',
-                        background: 'var(--bg-elev2)',
-                        color: 'var(--fg)',
-                        border: '1px solid var(--line)',
-                        borderRadius: '4px',
-                        fontSize: '10px',
-                        fontWeight: 500,
-                        cursor: restartingFrontend || restartingStack || clearingCache ? 'wait' : 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        gap: '4px'
-                      }}
-                    >
-                      {restartingFrontend && <span className="loading-spinner" style={{ width: '10px', height: '10px' }} />}
-                      ↻ Frontend
-                    </button>
-
-                    <button
-                      onClick={restartBackend}
-                      disabled={restartingBackend || restartingStack || clearingCache}
-                      className="dev-stack-btn"
-                      style={{
-                        flex: 1,
-                        minWidth: '70px',
-                        padding: '6px 8px',
-                        background: 'var(--bg-elev2)',
-                        color: 'var(--fg)',
-                        border: '1px solid var(--line)',
-                        borderRadius: '4px',
-                        fontSize: '10px',
-                        fontWeight: 500,
-                        cursor: restartingBackend || restartingStack || clearingCache ? 'wait' : 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        gap: '4px'
-                      }}
-                    >
-                      {restartingBackend && <span className="loading-spinner" style={{ width: '10px', height: '10px' }} />}
-                      ↻ Backend
-                    </button>
-
-                    <button
-                      onClick={restartStack}
-                      disabled={restartingFrontend || restartingBackend || restartingStack || clearingCache}
-                      className="dev-stack-btn btn-primary"
-                      style={{
-                        flex: 1,
-                        minWidth: '80px',
-                        padding: '6px 8px',
-                        background: 'var(--accent)',
-                        color: 'var(--accent-contrast)',
-                        border: 'none',
-                        borderRadius: '4px',
-                        fontSize: '10px',
-                        fontWeight: 600,
-                        cursor: restartingFrontend || restartingBackend || restartingStack || clearingCache ? 'wait' : 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        gap: '4px'
-                      }}
-                    >
-                      {restartingStack && <span className="loading-spinner" style={{ width: '10px', height: '10px', borderTopColor: 'var(--accent-contrast)' }} />}
-                      ↻ Full Stack
-                    </button>
-
-                    <button
-                      onClick={clearCacheAndRestart}
-                      disabled={restartingFrontend || restartingBackend || restartingStack || clearingCache}
-                      className="dev-stack-btn"
-                      style={{
-                        flex: 1,
-                        minWidth: '120px',
-                        padding: '6px 8px',
-                        background: 'var(--warn)',
-                        color: 'var(--bg)',
-                        border: 'none',
-                        borderRadius: '4px',
-                        fontSize: '10px',
-                        fontWeight: 600,
-                        cursor: restartingFrontend || restartingBackend || restartingStack || clearingCache ? 'wait' : 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        gap: '4px'
-                      }}
-                    >
-                      {clearingCache && <span className="loading-spinner" style={{ width: '10px', height: '10px', borderTopColor: 'var(--bg)' }} />}
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
-                        🗑 Clear Bytecode <TooltipIcon name="DEV_STACK_CLEAR_PYTHON_BYTECODE" />
-                      </span>
-                    </button>
-                  </div>
                 </div>
               </div>
             )}

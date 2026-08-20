@@ -1269,37 +1269,6 @@
       ]
     },
     {
-      "term": "Clear Python bytecode caches",
-      "key": "DEV_STACK_CLEAR_PYTHON_BYTECODE",
-      "definition": "Maintenance action that removes generated Python bytecode caches to force modules to be recompiled on next import. This helps resolve stale-module behavior after refactors, branch switches, or path changes where cached artifacts can mask current source behavior during local development. It is generally safe because only derived cache files are removed, not source files or dependency environments. In RAG service development, clearing bytecode is a practical reset step before retesting backend reload or import-related failures.",
-      "category": "general",
-      "related": [],
-      "links": [
-        {
-          "text": "Repo2Run reproducible repository environments (arXiv 2025)",
-          "href": "https://arxiv.org/abs/2502.13681"
-        },
-        {
-          "text": "Python compiled bytecode files",
-          "href": "https://docs.python.org/3/tutorial/modules.html#compiled-python-files"
-        },
-        {
-          "text": "PYTHONDONTWRITEBYTECODE env var",
-          "href": "https://docs.python.org/3/using/cmdline.html#envvar-PYTHONDONTWRITEBYTECODE"
-        },
-        {
-          "text": "importlib.invalidate_caches",
-          "href": "https://docs.python.org/3/library/importlib.html#importlib.invalidate_caches"
-        }
-      ],
-      "badges": [
-        {
-          "text": "Cache hygiene",
-          "class": "info"
-        }
-      ]
-    },
-    {
       "term": "CLI Channel Model",
       "key": "GEN_MODEL_CLI",
       "definition": "This override selects a model specifically for CLI sessions, which are usually iterative and speed-sensitive. Using a smaller or local model here can improve developer feedback loops while keeping production channels on a higher-capability model. Keep retrieval stack and system prompts aligned across channels so CLI debugging reflects real behavior. Log the active CLI model in run metadata to make test results reproducible. Use this for workflow optimization, not as an untracked fork of application behavior.",

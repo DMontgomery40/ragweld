@@ -1,5 +1,3 @@
-version: '3.8'
-
 # Development overrides for docker-compose.yml
 # Usage: docker compose -f docker-compose.yml -f infra/docker-compose.dev.yml up
 
@@ -21,12 +19,12 @@ services:
 
   api:
     build:
-      context: ..
+      context: .
       dockerfile: Dockerfile
     volumes:
-      - ../server:/app/server:ro
-      - ../models:/app/models
-      - ../data:/app/data
+      - ./server:/app/server:ro
+      - ./models:/app/models
+      - ./data:/app/data
     environment:
       - DEBUG=true
       - POSTGRES_HOST=postgres

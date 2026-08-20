@@ -219,7 +219,7 @@ dev_status_backend_url() {
   local root="$1"
   local status_path="$artifact_dir/dev_status_$(printf '%s' "$root" | tr ':/' '__').json"
   local code
-  code="$(curl -sS -o "$status_path" -w "%{http_code}" "${root}/__dev__/dev/status" 2>/dev/null || echo "000")"
+  code="$(curl -sS -o "$status_path" -w "%{http_code}" "${root}/api/dev/status" 2>/dev/null || echo "000")"
   if [ "$code" != "200" ]; then
     return 1
   fi
@@ -324,9 +324,10 @@ start_backend() {
   if command -v tmux >/dev/null 2>&1; then
     tmux kill-session -t "$session_name" 2>/dev/null || true
     tmux new-session -d -s "$session_name" \
-      "cd '$ROOT_DIR' && env POSTGRES_HOST='${POSTGRES_HOST:-127.0.0.1}' POSTGRES_PORT='${POSTGRES_PORT:-5432}' POSTGRES_DB='${POSTGRES_DB:-tribrid_rag}' POSTGRES_USER='${POSTGRES_USER:-postgres}' POSTGRES_PASSWORD='${POSTGRES_PASSWORD:-postgres}' NEO4J_URI='${NEO4J_URI:-bolt://127.0.0.1:7687}' NEO4J_USER='${NEO4J_USER:-neo4j}' NEO4J_PASSWORD='${NEO4J_PASSWORD:-password}' uv run uvicorn server.main:app --host '$BACKEND_HOST' --port '$port' --reload --log-level warning > '$log_path' 2>&1"
+      "cd '$ROOT_DIR' && env BACKEND_PORT='$port' POSTGRES_HOST='${POSTGRES_HOST:-127.0.0.1}' POSTGRES_PORT='${POSTGRES_PORT:-5432}' POSTGRES_DB='${POSTGRES_DB:-tribrid_rag}' POSTGRES_USER='${POSTGRES_USER:-postgres}' POSTGRES_PASSWORD='${POSTGRES_PASSWORD:-postgres}' NEO4J_URI='${NEO4J_URI:-bolt://127.0.0.1:7687}' NEO4J_USER='${NEO4J_USER:-neo4j}' NEO4J_PASSWORD='${NEO4J_PASSWORD:-password}' uv run uvicorn server.main:app --host '$BACKEND_HOST' --port '$port' --reload --log-level warning > '$log_path' 2>&1"
   else
     nohup env \
+      BACKEND_PORT="$port" \
       POSTGRES_HOST="${POSTGRES_HOST:-127.0.0.1}" \
       POSTGRES_PORT="${POSTGRES_PORT:-5432}" \
       POSTGRES_DB="${POSTGRES_DB:-tribrid_rag}" \
