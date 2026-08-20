@@ -2957,16 +2957,6 @@ async def clear_logs(
     return OkResponse(ok=True)
 
 
-@router.get("/reranker/triplets/{repo_id}", response_model=list[dict[str, Any]])
-async def get_triplets(repo_id: str, limit: int = 100) -> list[dict[str, Any]]:
-    raise HTTPException(status_code=501, detail="Triplets endpoint not implemented yet")
-
-
-@router.post("/reranker/triplets/{repo_id}")
-async def add_triplet(repo_id: str, query: str, positive: str, negative: str) -> dict[str, Any]:
-    raise HTTPException(status_code=501, detail="Triplets endpoint not implemented yet")
-
-
 @router.post("/reranker/promote")
 async def promote_model(run_id: str = Query(..., description="Training run id to promote")) -> OkResponse:
     """Legacy promote endpoint (use /reranker/train/run/{run_id}/promote)."""
