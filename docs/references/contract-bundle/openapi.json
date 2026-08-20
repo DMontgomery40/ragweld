@@ -4374,7 +4374,7 @@
                 "type": "null"
               }
             ],
-            "description": "Estimated semantic KG extraction cost (USD) when semantic_kg_mode='llm'.",
+            "description": "Estimated GraphRAG semantic extraction cost (USD) when enabled.",
             "title": "Semantic Kg Cost"
           },
           "total_cost": {
@@ -6815,6 +6815,10 @@
           },
           "semantic_kg_allowed_entity_types": {
             "default": [
+              "person",
+              "org",
+              "location",
+              "event",
               "concept"
             ],
             "description": "Allowed semantic KG entity types produced by extraction.",
@@ -6831,15 +6835,51 @@
             "title": "Semantic Kg Allowed Entity Types",
             "type": "array"
           },
+          "semantic_kg_allowed_relation_types": {
+            "default": [
+              "associated_with",
+              "met_with",
+              "communicated_with",
+              "works_for",
+              "member_of",
+              "founded",
+              "owns",
+              "funded",
+              "participated_in",
+              "located_in",
+              "references",
+              "related_to"
+            ],
+            "description": "Allowed semantic KG relationship types produced by extraction.",
+            "items": {
+              "enum": [
+                "associated_with",
+                "met_with",
+                "communicated_with",
+                "works_for",
+                "member_of",
+                "founded",
+                "owns",
+                "funded",
+                "participated_in",
+                "located_in",
+                "references",
+                "related_to"
+              ],
+              "type": "string"
+            },
+            "title": "Semantic Kg Allowed Relation Types",
+            "type": "array"
+          },
           "semantic_kg_enabled": {
             "default": false,
-            "description": "Build semantic knowledge graph (concept entities + relations) linked to chunks during indexing",
+            "description": "Build an official Neo4j GraphRAG semantic graph with typed entities and relationships linked to chunks during indexing",
             "title": "Semantic Kg Enabled",
             "type": "boolean"
           },
           "semantic_kg_llm_model": {
             "default": "",
-            "description": "LLM model name for semantic KG extraction when semantic_kg_mode='llm' (empty = use generation.enrich_model)",
+            "description": "LLM model name for GraphRAG semantic extraction (empty = use the catalog-preferred runtime-selectable GEN model; plain openai/gpt-5 is excluded)",
             "title": "Semantic Kg Llm Model",
             "type": "string"
           },
@@ -6852,7 +6892,7 @@
             "type": "integer"
           },
           "semantic_kg_max_chunks": {
-            "default": 200,
+            "default": 40000,
             "description": "Maximum chunks to process for semantic KG extraction per indexing run (0 = disabled)",
             "maximum": 100000.0,
             "minimum": 0.0,
@@ -6869,7 +6909,7 @@
           },
           "semantic_kg_max_relations_per_chunk": {
             "default": 12,
-            "description": "Maximum semantic relations to create per chunk (heuristic mode)",
+            "description": "Maximum semantic relations to retain per chunk during GraphRAG extraction",
             "maximum": 200.0,
             "minimum": 0.0,
             "title": "Semantic Kg Max Relations Per Chunk",
@@ -6884,8 +6924,8 @@
             "type": "integer"
           },
           "semantic_kg_mode": {
-            "default": "heuristic",
-            "description": "Semantic KG extraction mode. 'heuristic' is deterministic and test-friendly; 'llm' uses an LLM to extract entities + relations.",
+            "default": "llm",
+            "description": "Semantic KG extraction mode. This branch targets the official Neo4j GraphRAG LLM path; 'heuristic' is a stale legacy setting.",
             "enum": [
               "heuristic",
               "llm"
@@ -6924,13 +6964,13 @@
           },
           "semantic_kg_require_llm_success": {
             "default": false,
-            "description": "When true in LLM mode, fail semantic KG extraction for a chunk if LLM extraction fails instead of falling back.",
+            "description": "When true, fail the indexing run if GraphRAG semantic extraction fails for a chunk.",
             "title": "Semantic Kg Require Llm Success",
             "type": "boolean"
           },
           "semantic_kg_typed_entities_enabled": {
-            "default": false,
-            "description": "When true, semantic KG extraction preserves/uses typed entities (person, org, location, event, concept).",
+            "default": true,
+            "description": "When true, semantic KG extraction preserves typed entities (person, org, location, event, concept).",
             "title": "Semantic Kg Typed Entities Enabled",
             "type": "boolean"
           },
@@ -7445,7 +7485,7 @@
         "type": "object"
       },
       "IndexEstimate": {
-        "description": "Best-effort estimate for indexing cost/time before running the indexer.\n\nNotes:\n- Token count is an approximation (byte-based heuristic).\n- Time is an intentionally rough range (depends on machine, provider latency,\n  semantic KG mode, and local hardware throughput).",
+        "description": "Best-effort estimate for indexing cost/time before running the indexer.\n\nNotes:\n- Token count is an approximation (byte-based heuristic).\n- Time is an intentionally rough range (depends on machine, provider latency,\n  GraphRAG extraction scope, and local hardware throughput).",
         "properties": {
           "assumptions": {
             "description": "Human-readable assumptions used for the estimate",
@@ -7528,7 +7568,7 @@
                 "type": "null"
               }
             ],
-            "description": "Estimated semantic KG phase time (seconds) when semantic_kg_mode='llm'.",
+            "description": "Estimated GraphRAG semantic phase time (seconds) when enabled.",
             "title": "Estimated Seconds Semantic Kg"
           },
           "estimated_total_chunks": {
@@ -7558,7 +7598,7 @@
                 "type": "null"
               }
             ],
-            "description": "Estimated semantic KG extraction cost (USD) when semantic_kg_mode='llm' and pricing is available.",
+            "description": "Estimated GraphRAG semantic extraction cost (USD) when enabled and pricing data is available.",
             "title": "Semantic Kg Cost Usd"
           },
           "skip_dense": {
@@ -15457,7 +15497,7 @@
             "title": "Pairs Per Source"
           },
           "provider": {
-            "default": "internal_ragweld",
+            "default": "synthetic_data_kit",
             "enum": [
               "internal_ragweld",
               "synthetic_data_kit"
@@ -15584,7 +15624,7 @@
             "title": "Pairs Per Source"
           },
           "provider": {
-            "default": "internal_ragweld",
+            "default": "synthetic_data_kit",
             "enum": [
               "internal_ragweld",
               "synthetic_data_kit"
