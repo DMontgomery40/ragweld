@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 from server.synthetic.hf_epstein_emails import (
     build_eval_item,
+    materialize_epstein_email_rows,
     materialized_filename,
     render_materialized_email,
     strip_html_message,
@@ -46,7 +50,7 @@ def test_build_eval_item_generates_grounded_question_and_expected_path() -> None
     assert item.expected_answer == "Tonja Haddad Coleman"
 
 
-def test_render_materialized_email_includes_structured_fields() -> None:
+def test_render_materialized_email_is_body_first_with_compact_metadata_footer() -> None:
     row = {
         "id": 7,
         "document_id": "HOUSE_OVERSIGHT_012898",
@@ -62,6 +66,44 @@ def test_render_materialized_email_includes_structured_fields() -> None:
     }
 
     rendered = render_materialized_email(row)
-    assert "Source filename: HOUSE_OVERSIGHT_012898.txt" in rendered
-    assert "Subject: Farmer Jaffe is suing Donald Trump!" in rendered
-    assert "This is the message body." in rendered
+    assert rendered.startswith("This is the message body.\n\n")
+    assert 'Email metadata: Tonja Haddad Coleman emailed Jeffrey Epstein on 2013-05-13 22:28:30. Subject: "Farmer Jaffe is suing Donald Trump!".' in rendered
+    assert "Source filename:" not in rendered
+    assert "Document id:" not in rendered
+    assert "Message\n-------" not in rendered
+
+
+def test_materialize_epstein_email_rows_keeps_manifest_out_of_corpus_root(tmp_path: Path) -> None:
+    row = {
+        "id": 7,
+        "document_id": "HOUSE_OVERSIGHT_012898",
+        "source_filename": "HOUSE_OVERSIGHT_012898.txt",
+        "message_order": 1,
+        "subject": "Farmer Jaffe is suing Donald Trump!",
+        "from_address": "Tonja Haddad Coleman",
+        "to_address": "Jeffrey Epstein",
+        "other_recipients": [],
+        "timestamp_iso": "20130513222830",
+        "message_html": "<p>This is the message body.</p>",
+        "email_document_id": 1234,
+    }
+    output_dir = tmp_path / "corpus"
+    eval_output_path = tmp_path / "eval" / "epstein-files-1.json"
+    manifest_output_path = tmp_path / "metadata" / "hf-epstein-manifest.json"
+
+    manifest = materialize_epstein_email_rows(
+        rows=[row],
+        output_dir=output_dir,
+        eval_output_path=eval_output_path,
+        manifest_output_path=manifest_output_path,
+        max_eval_rows=1,
+    )
+
+    corpus_files = sorted(path.name for path in output_dir.iterdir())
+    assert corpus_files == ["HOUSE_OVERSIGHT_012898__msg_001__row_000007.txt"]
+    assert not (output_dir / "manifest.json").exists()
+    assert eval_output_path.exists()
+    assert manifest_output_path.exists()
+    assert manifest["written_files"] == 1
+    persisted_manifest = json.loads(manifest_output_path.read_text(encoding="utf-8"))
+    assert persisted_manifest["rows"][0]["materialized_filename"] == corpus_files[0]

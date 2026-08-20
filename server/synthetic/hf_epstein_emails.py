@@ -123,6 +123,72 @@ def strip_html_message(value: str | None) -> str:
     return text.strip()
 
 
+def _compact_text(value: Any) -> str:
+    raw = str(value or "").replace("\r", " ").replace("\n", " ").strip()
+    if not raw or raw in {"[]", "None", "null"}:
+        return ""
+    return _SPACE_RE.sub(" ", raw).strip(" ,")
+
+
+def _compact_recipient_text(value: Any) -> str:
+    if isinstance(value, (list, tuple, set)):
+        parts = [_compact_recipient_text(item) for item in value]
+        return ", ".join(part for part in parts if part)
+
+    raw = _compact_text(value)
+    if not raw:
+        return ""
+    if raw.startswith("[") and raw.endswith("]"):
+        try:
+            parsed = json.loads(raw)
+        except Exception:
+            parsed = None
+        if isinstance(parsed, list):
+            parts = [_compact_recipient_text(item) for item in parsed]
+            return ", ".join(part for part in parts if part)
+        trimmed = raw.strip("[]").strip()
+        if not trimmed:
+            return ""
+        return _compact_text(trimmed.strip("\"'"))
+    return raw
+
+
+def _display_timestamp(timestamp_iso: Any) -> str:
+    raw = _compact_text(timestamp_iso)
+    if len(raw) == 14 and raw.isdigit():
+        return f"{raw[0:4]}-{raw[4:6]}-{raw[6:8]} {raw[8:10]}:{raw[10:12]}:{raw[12:14]}"
+    if len(raw) == 8 and raw.isdigit():
+        return f"{raw[0:4]}-{raw[4:6]}-{raw[6:8]}"
+    return raw
+
+
+def _render_email_metadata(row: dict[str, Any]) -> str:
+    from_address = _compact_text(row.get("from_address"))
+    to_address = _compact_recipient_text(row.get("to_address"))
+    other_recipients = _compact_recipient_text(row.get("other_recipients"))
+    timestamp = _display_timestamp(row.get("timestamp_iso"))
+    subject = _compact_text(row.get("subject"))
+
+    if from_address and to_address:
+        summary = f"{from_address} emailed {to_address}"
+    elif from_address:
+        summary = f"{from_address} sent this email"
+    elif to_address:
+        summary = f"This email was sent to {to_address}"
+    else:
+        summary = "This email has limited envelope metadata"
+
+    if timestamp:
+        summary += f" on {timestamp}"
+
+    sentences = [summary + "."]
+    if subject and not _is_generic_subject(subject):
+        sentences.append(f'Subject: "{subject}".')
+    if other_recipients:
+        sentences.append(f"Other recipients: {other_recipients}.")
+    return "Email metadata: " + " ".join(sentences)
+
+
 def _safe_source_stem(row: dict[str, Any]) -> str:
     source_filename = str(row.get("source_filename") or "").strip()
     if source_filename:
@@ -141,23 +207,12 @@ def materialized_filename(row: dict[str, Any]) -> str:
 
 
 def render_materialized_email(row: dict[str, Any], *, dataset: str = HF_DATASET) -> str:
+    _ = dataset
     message_text = strip_html_message(str(row.get("message_html") or ""))
-    timestamp_iso = str(row.get("timestamp_iso") or "").strip()
     lines = [
-        f"Source dataset: {dataset}",
-        f"Source filename: {str(row.get('source_filename') or '').strip()}",
-        f"Document id: {str(row.get('document_id') or '').strip()}",
-        f"Email document id: {str(row.get('email_document_id') or '').strip()}",
-        f"Message order: {int(row.get('message_order') or 0)}",
-        f"Timestamp ISO: {timestamp_iso}",
-        f"From: {str(row.get('from_address') or '').strip()}",
-        f"To: {str(row.get('to_address') or '').strip()}",
-        f"Other recipients: {str(row.get('other_recipients') or '').strip()}",
-        f"Subject: {str(row.get('subject') or '').strip()}",
-        "",
-        "Message",
-        "-------",
         message_text or "(no extracted message body available)",
+        "",
+        _render_email_metadata(row),
         "",
     ]
     return "\n".join(lines)
@@ -209,16 +264,16 @@ def build_eval_item(
     )
 
 
-def materialize_epstein_email_dataset(
+def materialize_epstein_email_rows(
     *,
+    rows: Iterable[dict[str, Any]],
     output_dir: Path,
     eval_output_path: Path | None = None,
+    manifest_output_path: Path | None = None,
     dataset: str = HF_DATASET,
     config: str = HF_CONFIG,
     split: str = HF_SPLIT,
-    batch_size: int = 500,
     max_eval_rows: int = 200,
-    limit: int | None = None,
     replace: bool = False,
 ) -> dict[str, Any]:
     if replace and output_dir.exists():
@@ -226,18 +281,14 @@ def materialize_epstein_email_dataset(
     output_dir.mkdir(parents=True, exist_ok=True)
     if eval_output_path is not None:
         eval_output_path.parent.mkdir(parents=True, exist_ok=True)
+    if manifest_output_path is not None:
+        manifest_output_path.parent.mkdir(parents=True, exist_ok=True)
 
     eval_items: list[EvalDatasetItem] = []
     manifest_rows: list[dict[str, Any]] = []
     written = 0
 
-    for row in iter_dataset_rows(
-        dataset=dataset,
-        config=config,
-        split=split,
-        batch_size=batch_size,
-        limit=limit,
-    ):
+    for row in rows:
         filename = materialized_filename(row)
         output_path = output_dir / filename
         output_path.write_text(render_materialized_email(row, dataset=dataset), encoding="utf-8")
@@ -275,10 +326,11 @@ def materialize_epstein_email_dataset(
         "eval_rows": len(eval_items),
         "rows": manifest_rows,
     }
-    (output_dir / "manifest.json").write_text(
-        json.dumps(manifest, indent=2, sort_keys=True),
-        encoding="utf-8",
-    )
+    if manifest_output_path is not None:
+        manifest_output_path.write_text(
+            json.dumps(manifest, indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
 
     if eval_output_path is not None:
         eval_output_path.write_text(
@@ -287,3 +339,35 @@ def materialize_epstein_email_dataset(
         )
 
     return manifest
+
+
+def materialize_epstein_email_dataset(
+    *,
+    output_dir: Path,
+    eval_output_path: Path | None = None,
+    manifest_output_path: Path | None = None,
+    dataset: str = HF_DATASET,
+    config: str = HF_CONFIG,
+    split: str = HF_SPLIT,
+    batch_size: int = 500,
+    max_eval_rows: int = 200,
+    limit: int | None = None,
+    replace: bool = False,
+) -> dict[str, Any]:
+    return materialize_epstein_email_rows(
+        rows=iter_dataset_rows(
+            dataset=dataset,
+            config=config,
+            split=split,
+            batch_size=batch_size,
+            limit=limit,
+        ),
+        output_dir=output_dir,
+        eval_output_path=eval_output_path,
+        manifest_output_path=manifest_output_path,
+        dataset=dataset,
+        config=config,
+        split=split,
+        max_eval_rows=max_eval_rows,
+        replace=replace,
+    )

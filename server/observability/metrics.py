@@ -466,12 +466,8 @@ _INDEX_STAGES = (
     "postgres_upsert_embeddings",
     "postgres_upsert_fts",
     "neo4j_upsert_document_chunks",
-    "neo4j_upsert_semantic_entities",
-    "neo4j_upsert_semantic_relationships",
-    "neo4j_link_entities_to_chunks",
+    "neo4j_upsert_semantic_graph",
     "semantic_kg",
-    "graph_build",
-    "neo4j_rebuild_entity_chunk_links",
 )
 
 for _stage in _SEARCH_STAGES:

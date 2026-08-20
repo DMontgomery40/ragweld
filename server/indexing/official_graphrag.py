@@ -1,14 +1,14 @@
 from __future__ import annotations
 
-import re
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Any
+import re
 
 from neo4j_graphrag.experimental.components.entity_relation_extractor import (
     LLMEntityRelationExtractor,
     OnError,
 )
+from neo4j_graphrag.experimental.components.lexical_graph import LexicalGraphBuilder
 from neo4j_graphrag.experimental.components.schema import (
     GraphSchema,
     NodeType,
@@ -20,30 +20,33 @@ from neo4j_graphrag.experimental.components.types import (
     DocumentInfo,
     LexicalGraphConfig,
     Neo4jGraph,
-    Neo4jNode,
-    Neo4jRelationship,
     TextChunk,
     TextChunks,
 )
 from neo4j_graphrag.llm import OpenAILLM
 
-from server.models.graph import Entity, Relationship
 from server.models.index import Chunk
 from server.models.tribrid_config_model import GraphIndexingConfig, TriBridConfig
 
-GRAPH_RAG_CHUNK_LABEL = "GraphRAGChunk"
-GRAPH_RAG_DOCUMENT_LABEL = "GraphRAGDocument"
-GRAPH_RAG_FROM_CHUNK = "FROM_CHUNK"
+GRAPH_RAG_CHUNK_LABEL = "Chunk"
+GRAPH_RAG_DOCUMENT_LABEL = "Document"
+GRAPH_RAG_CHUNK_TO_DOCUMENT = "FROM_DOCUMENT"
+GRAPH_RAG_FROM_CHUNK = "IN_CHUNK"
 
-DEFAULT_GRAPH_ENTITY_TYPES: tuple[str, ...] = tuple(GraphIndexingConfig().semantic_kg_allowed_entity_types)
-DEFAULT_GRAPH_RELATION_TYPES: tuple[str, ...] = tuple(GraphIndexingConfig().semantic_kg_allowed_relation_types)
+DEFAULT_GRAPH_ENTITY_TYPES: tuple[str, ...] = tuple(
+    GraphIndexingConfig().semantic_kg_allowed_entity_types
+)
+DEFAULT_GRAPH_RELATION_TYPES: tuple[str, ...] = tuple(
+    GraphIndexingConfig().semantic_kg_allowed_relation_types
+)
 
 
 @dataclass
 class GraphRAGExtractionResult:
-    entities: list[Entity]
-    relationships: list[Relationship]
-    chunk_links: list[dict[str, str]]
+    graph: Neo4jGraph
+    lexical_graph_config: LexicalGraphConfig
+    entity_count: int
+    relationship_count: int
     processed_chunks: int
     empty_chunks: int
 
@@ -100,16 +103,6 @@ def _configured_relation_types(cfg: TriBridConfig | None = None) -> tuple[str, .
     return normalized or DEFAULT_GRAPH_RELATION_TYPES
 
 
-def _relation_type(value: str, *, allowed_relation_types: set[str]) -> str | None:
-    normalized = _normalize_relation_type(value)
-    return normalized if normalized in allowed_relation_types else None
-
-
-def _entity_type(value: str, *, allowed_entity_types: set[str]) -> str | None:
-    normalized = _normalize_entity_type(value)
-    return normalized if normalized in allowed_entity_types else None
-
-
 def _schema(
     *,
     allowed_entity_types: tuple[str, ...] | None = None,
@@ -123,7 +116,12 @@ def _schema(
             description=f"{entity_type} entity extracted by Neo4j GraphRAG.",
             properties=[
                 PropertyType(name="name", type="STRING", description="Canonical entity name", required=True),
-                PropertyType(name="description", type="STRING", description="Optional entity description", required=False),
+                PropertyType(
+                    name="description",
+                    type="STRING",
+                    description="Optional entity description",
+                    required=False,
+                ),
             ],
             additional_properties=True,
         )
@@ -157,7 +155,7 @@ def _lexical_graph_config() -> LexicalGraphConfig:
     return LexicalGraphConfig(
         document_node_label=GRAPH_RAG_DOCUMENT_LABEL,
         chunk_node_label=GRAPH_RAG_CHUNK_LABEL,
-        chunk_to_document_relationship_type="FROM_DOCUMENT",
+        chunk_to_document_relationship_type=GRAPH_RAG_CHUNK_TO_DOCUMENT,
         next_chunk_relationship_type="NEXT_CHUNK",
         node_to_chunk_relationship_type=GRAPH_RAG_FROM_CHUNK,
         chunk_id_property="chunk_id",
@@ -168,7 +166,7 @@ def _lexical_graph_config() -> LexicalGraphConfig:
 
 
 def _to_text_chunk(chunk: Chunk, index: int, *, repo_id: str) -> TextChunk:
-    metadata: dict[str, Any] = {
+    metadata: dict[str, object] = {
         "repo_id": repo_id,
         "chunk_id": chunk.chunk_id,
         "file_path": chunk.file_path,
@@ -185,95 +183,90 @@ def _to_text_chunk(chunk: Chunk, index: int, *, repo_id: str) -> TextChunk:
     )
 
 
-def _graph_node_to_entity(
-    node: Neo4jNode,
-    *,
-    run_id: str,
-    allowed_entity_types: set[str],
-) -> Entity | None:
-    entity_type = _entity_type(node.label, allowed_entity_types=allowed_entity_types)
-    if entity_type is None:
-        return None
-    name = str(node.properties.get("name") or "").strip() or str(node.id).split(":")[-1]
-    description_raw = node.properties.get("description")
-    description = str(description_raw).strip() if isinstance(description_raw, str) and description_raw.strip() else None
-    props = {k: v for k, v in dict(node.properties).items() if k not in {"name", "description"}}
-    props["source"] = "neo4j_graphrag"
-    props["run_id"] = run_id
-    props["graphrag_label"] = node.label
-    return Entity(
-        entity_id=str(node.id),
-        name=name,
-        entity_type=entity_type,  # type: ignore[arg-type]
-        file_path=None,
-        description=description,
-        properties=props,
-    )
-
-
-def adapt_graphrag_graph(
+def _annotate_graph(
     graph: Neo4jGraph,
     *,
+    repo_id: str,
     run_id: str,
-    allowed_entity_types: tuple[str, ...] | None = None,
-    allowed_relation_types: tuple[str, ...] | None = None,
-) -> GraphRAGExtractionResult:
-    entity_types = set(allowed_entity_types or DEFAULT_GRAPH_ENTITY_TYPES)
-    relation_types = set(allowed_relation_types or DEFAULT_GRAPH_RELATION_TYPES)
-    lexical_labels = {GRAPH_RAG_DOCUMENT_LABEL, GRAPH_RAG_CHUNK_LABEL}
-    entities: list[Entity] = []
-    entity_ids: set[str] = set()
-    chunk_ids: set[str] = set()
-
+    lexical_graph_config: LexicalGraphConfig,
+) -> Neo4jGraph:
+    lexical_labels = set(lexical_graph_config.lexical_graph_node_labels)
     for node in graph.nodes:
-        if node.label == GRAPH_RAG_CHUNK_LABEL:
-            chunk_ids.add(str(node.id))
-            continue
-        if node.label in lexical_labels:
-            continue
-        entity = _graph_node_to_entity(
-            node,
-            run_id=run_id,
-            allowed_entity_types=entity_types,
-        )
-        if entity is None:
-            continue
-        entities.append(entity)
-        entity_ids.add(entity.entity_id)
-
-    relationships: list[Relationship] = []
-    chunk_links: list[dict[str, str]] = []
-    for rel in graph.relationships:
-        rel_type = _relation_type(rel.type, allowed_relation_types=relation_types)
-        if rel.type == GRAPH_RAG_FROM_CHUNK:
-            if rel.start_node_id in entity_ids and rel.end_node_id in chunk_ids:
-                chunk_links.append({"entity_id": rel.start_node_id, "chunk_id": rel.end_node_id})
-            continue
-        if rel_type is None:
-            continue
-        if rel.start_node_id not in entity_ids or rel.end_node_id not in entity_ids:
-            continue
-        props = dict(rel.properties or {})
-        props["source"] = "neo4j_graphrag"
+        props = dict(node.properties or {})
+        props["repo_id"] = repo_id
         props["run_id"] = run_id
-        relationships.append(
-            Relationship(
-                source_id=str(rel.start_node_id),
-                target_id=str(rel.end_node_id),
-                relation_type=rel_type,  # type: ignore[arg-type]
-                weight=1.0,
-                properties=props,
-            )
-        )
+        if node.label == lexical_graph_config.document_node_label:
+            props["document_id"] = str(node.id)
+            props["file_path"] = str(props.get("file_path") or props.get("path") or "")
+        elif node.label == lexical_graph_config.chunk_node_label:
+            props["chunk_id"] = str(props.get("chunk_id") or node.id)
+        elif node.label not in lexical_labels:
+            props["entity_id"] = str(node.id)
+            props["entity_type"] = _normalize_entity_type(node.label)
+        node.properties = props
+    for relationship in graph.relationships:
+        rel_props = dict(relationship.properties or {})
+        rel_props["repo_id"] = repo_id
+        rel_props["run_id"] = run_id
+        relationship.properties = rel_props
+    return graph
 
-    linked_chunk_ids = {link["chunk_id"] for link in chunk_links}
-    return GraphRAGExtractionResult(
-        entities=entities,
-        relationships=relationships,
-        chunk_links=chunk_links,
-        processed_chunks=len(chunk_ids),
-        empty_chunks=max(0, len(chunk_ids - linked_chunk_ids)),
+async def write_lexical_graph_with_graphrag(
+    *,
+    repo_id: str,
+    run_id: str,
+    file_path: str,
+    chunks: list[Chunk],
+) -> tuple[Neo4jGraph, LexicalGraphConfig]:
+    lexical_graph_config = _lexical_graph_config()
+    builder = LexicalGraphBuilder(config=lexical_graph_config)
+    ordered_chunks = sorted(chunks, key=lambda ch: (int(ch.start_line or 0), str(ch.chunk_id)))
+    text_chunks = TextChunks(
+        chunks=[_to_text_chunk(chunk, idx, repo_id=repo_id) for idx, chunk in enumerate(ordered_chunks)]
     )
+    document_info = DocumentInfo(
+        path=file_path,
+        metadata={"repo_id": repo_id, "run_id": run_id, "file_path": file_path},
+        uid=f"{repo_id}:{file_path}",
+    )
+    graph_result = await builder.run(text_chunks=text_chunks, document_info=document_info)
+    graph = _annotate_graph(
+        graph_result.graph,
+        repo_id=repo_id,
+        run_id=run_id,
+        lexical_graph_config=lexical_graph_config,
+    )
+    return graph, lexical_graph_config
+
+
+def _count_semantic_edges(
+    graph: Neo4jGraph,
+    *,
+    lexical_graph_config: LexicalGraphConfig,
+) -> tuple[int, int, int]:
+    lexical_labels = set(lexical_graph_config.lexical_graph_node_labels)
+    chunk_ids = {
+        str(node.properties.get("chunk_id") or node.id)
+        for node in graph.nodes
+        if node.label == lexical_graph_config.chunk_node_label
+    }
+    entity_ids = {
+        str(node.properties.get("entity_id") or node.id)
+        for node in graph.nodes
+        if node.label not in lexical_labels
+    }
+    entity_count = len(entity_ids)
+    relationship_count = 0
+    linked_chunk_ids: set[str] = set()
+    for rel in graph.relationships:
+        if rel.type == lexical_graph_config.node_to_chunk_relationship_type:
+            if rel.start_node_id in entity_ids and rel.end_node_id in chunk_ids:
+                linked_chunk_ids.add(str(rel.end_node_id))
+            continue
+        if rel.start_node_id in entity_ids and rel.end_node_id in entity_ids:
+            relationship_count += 1
+    empty_chunks = max(0, len(chunk_ids - linked_chunk_ids))
+    return entity_count, relationship_count, empty_chunks
 
 
 async def extract_semantic_kg_with_graphrag(
@@ -294,6 +287,8 @@ async def extract_semantic_kg_with_graphrag(
     base_url = str(route_base_url or "").strip()
     if not base_url:
         raise RuntimeError("GraphRAG semantic extraction requires a resolved base URL.")
+
+    lexical_graph_config = _lexical_graph_config()
     extractor = LLMEntityRelationExtractor(
         llm=OpenAILLM(
             model_name=model_name,
@@ -313,61 +308,47 @@ async def extract_semantic_kg_with_graphrag(
     for chunk in chunks:
         grouped_chunks[str(chunk.file_path or "")].append(chunk)
 
-    entities: list[Entity] = []
-    relationships: list[Relationship] = []
-    chunk_links: list[dict[str, str]] = []
+    combined = Neo4jGraph(nodes=[], relationships=[])
     processed_chunks = 0
-    empty_chunks = 0
 
     for file_path, file_chunks in grouped_chunks.items():
         ordered_chunks = sorted(file_chunks, key=lambda ch: (int(ch.start_line or 0), str(ch.chunk_id)))
         text_chunks = TextChunks(
-            chunks=[
-                _to_text_chunk(chunk, idx, repo_id=repo_id)
-                for idx, chunk in enumerate(ordered_chunks)
-            ]
+            chunks=[_to_text_chunk(chunk, idx, repo_id=repo_id) for idx, chunk in enumerate(ordered_chunks)]
         )
         document_info = DocumentInfo(
             path=file_path,
-            metadata={"repo_id": repo_id, "run_id": run_id},
+            metadata={"repo_id": repo_id, "run_id": run_id, "file_path": file_path},
             uid=f"{repo_id}:{file_path}",
         )
         graph = await extractor.run(
             chunks=text_chunks,
             document_info=document_info,
-            lexical_graph_config=_lexical_graph_config(),
+            lexical_graph_config=lexical_graph_config,
             schema=_schema(
                 allowed_entity_types=allowed_entity_types,
                 allowed_relation_types=allowed_relation_types,
             ),
         )
-        adapted = adapt_graphrag_graph(
+        annotated = _annotate_graph(
             graph,
+            repo_id=repo_id,
             run_id=run_id,
-            allowed_entity_types=allowed_entity_types,
-            allowed_relation_types=allowed_relation_types,
+            lexical_graph_config=lexical_graph_config,
         )
-        entities.extend(adapted.entities)
-        relationships.extend(adapted.relationships)
-        chunk_links.extend(adapted.chunk_links)
-        processed_chunks += adapted.processed_chunks
-        empty_chunks += adapted.empty_chunks
+        combined.nodes.extend(annotated.nodes)
+        combined.relationships.extend(annotated.relationships)
+        processed_chunks += len(ordered_chunks)
 
-    deduped_entities = {entity.entity_id: entity for entity in entities}
-    deduped_relationships: dict[tuple[str, str, str], Relationship] = {}
-    for relationship in relationships:
-        deduped_relationships[
-            (relationship.source_id, relationship.target_id, relationship.relation_type)
-        ] = relationship
-    deduped_links = {
-        (link["entity_id"], link["chunk_id"]): link
-        for link in chunk_links
-    }
-
+    entity_count, relationship_count, empty_chunks = _count_semantic_edges(
+        combined,
+        lexical_graph_config=lexical_graph_config,
+    )
     return GraphRAGExtractionResult(
-        entities=list(deduped_entities.values()),
-        relationships=list(deduped_relationships.values()),
-        chunk_links=list(deduped_links.values()),
+        graph=combined,
+        lexical_graph_config=lexical_graph_config,
+        entity_count=entity_count,
+        relationship_count=relationship_count,
         processed_chunks=processed_chunks,
         empty_chunks=empty_chunks,
     )

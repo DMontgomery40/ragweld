@@ -83,8 +83,8 @@ async def test_get_graph_stats_uses_optional_match_and_parses_counts() -> None:
     session = client._driver.session_obj  # type: ignore[attr-defined]
     assert session.queries
     q0 = session.queries[0]
-    assert "OPTIONAL MATCH (e:Entity" in q0
-    assert "OPTIONAL MATCH (:Entity" in q0
+    assert "OPTIONAL MATCH (e:__Entity__" in q0
+    assert "OPTIONAL MATCH (:__Entity__" in q0
     assert "OPTIONAL MATCH (c:Community" in q0
 
 
@@ -108,4 +108,3 @@ async def test_detect_communities_normalizes_windows_paths_in_query() -> None:
     assert session.queries
     q0 = session.queries[0]
     assert "replace(coalesce(e.file_path, c.file_path), '\\\\', '/')" in q0
-

@@ -23,6 +23,11 @@ def main() -> None:
         default="data/eval_datasets/epstein-files-1.json",
         help="Eval dataset JSON to write from the same source rows.",
     )
+    parser.add_argument(
+        "--manifest-output",
+        default=None,
+        help="Optional sidecar manifest JSON path. If omitted, the manifest is only printed to stdout.",
+    )
     parser.add_argument("--dataset", default=HF_DATASET, help="HF dataset id.")
     parser.add_argument("--config", default=HF_CONFIG, help="HF dataset config.")
     parser.add_argument("--split", default=HF_SPLIT, help="HF dataset split.")
@@ -35,6 +40,7 @@ def main() -> None:
     manifest = materialize_epstein_email_dataset(
         output_dir=Path(args.output_dir).expanduser(),
         eval_output_path=Path(args.eval_output).expanduser() if args.eval_output else None,
+        manifest_output_path=Path(args.manifest_output).expanduser() if args.manifest_output else None,
         dataset=args.dataset,
         config=args.config,
         split=args.split,

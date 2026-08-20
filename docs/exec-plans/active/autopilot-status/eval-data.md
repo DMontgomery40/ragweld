@@ -53,6 +53,19 @@ That replacement path now assumes:
 - official Neo4j GraphRAG semantic extraction
 - no reuse of the old heuristic semantic-KG path
 
+Corpus materialization hygiene was tightened on 2026-03-26:
+
+- materialized HF emails are now body-first with a compact metadata footer
+  instead of header boilerplate at the top of every file
+- the HF manifest is now a sidecar artifact, not a file inside the indexed
+  corpus root
+
+Those fixes remove known graph pollution from the active replacement corpus, but
+they do not by themselves complete the GraphRAG replacement. The remaining
+blocker is still the live graph path: the execution lane must move off the
+custom low-level extractor and legacy `:Entity` storage assumptions rather than
+calling the current wrapper "official" just because it uses the Neo4j package.
+
 ## Replacement Path Default?
 
 Partially. The replacement corpus/materialization path is now the active target,

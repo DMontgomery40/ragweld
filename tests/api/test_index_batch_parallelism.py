@@ -50,7 +50,6 @@ def test_cross_file_chunk_batching_enabled_only_without_graph_or_semantic_work()
         index_api._allow_cross_file_chunk_batching(
             has_graph_upserts=False,
             semantic_kg_enabled=False,
-            has_graph_builder=False,
         )
         is True
     )
@@ -58,7 +57,6 @@ def test_cross_file_chunk_batching_enabled_only_without_graph_or_semantic_work()
         index_api._allow_cross_file_chunk_batching(
             has_graph_upserts=True,
             semantic_kg_enabled=False,
-            has_graph_builder=False,
         )
         is False
     )
@@ -66,42 +64,12 @@ def test_cross_file_chunk_batching_enabled_only_without_graph_or_semantic_work()
         index_api._allow_cross_file_chunk_batching(
             has_graph_upserts=False,
             semantic_kg_enabled=True,
-            has_graph_builder=False,
-        )
-        is False
-    )
-    assert (
-        index_api._allow_cross_file_chunk_batching(
-            has_graph_upserts=False,
-            semantic_kg_enabled=False,
-            has_graph_builder=True,
         )
         is False
     )
 
 
-def test_ast_graph_build_skips_when_no_graph_files() -> None:
-    assert (
-        index_api._should_run_ast_graph_build(
-            has_graph_builder=True,
-            graph_file_count=0,
-        )
-        is False
-    )
-    assert (
-        index_api._should_run_ast_graph_build(
-            has_graph_builder=False,
-            graph_file_count=10,
-        )
-        is False
-    )
-    assert (
-        index_api._should_run_ast_graph_build(
-            has_graph_builder=True,
-            graph_file_count=3,
-        )
-        is True
-    )
+def test_parallel_batches_still_require_multiple_batches() -> None:
     assert (
         index_api._allow_parallel_chunk_batches(
             indexing_workers=8,
@@ -203,7 +171,6 @@ async def test_run_index_body_batches_small_files_across_files_when_graph_work_i
         embedder=embedder,
         postgres=postgres,
         neo4j=None,
-        graph_builder=None,
         loader=loader,
         event_queue=None,
         write_repo_id="tiny-corpus",

@@ -2532,9 +2532,9 @@ export function IndexingSubtab() {
                     style={{ width: '18px', height: '18px' }}
                   />
                   <div>
-                    <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--fg)' }}>Official GraphRAG semantic graph</div>
+                    <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--fg)' }}>Neo4j GraphRAG semantic graph</div>
                     <div style={{ fontSize: '11px', color: 'var(--fg-muted)', marginTop: '2px' }}>
-                      Uses Neo4j GraphRAG to extract typed entities and relationships, then links them to Chunk nodes for graph expansion.
+                      Uses Neo4j GraphRAG over an OpenAI-compatible route to extract typed entities and relationships, then links them to chunk nodes for graph expansion.
                     </div>
                   </div>
                 </label>
@@ -2551,7 +2551,7 @@ export function IndexingSubtab() {
                           disabled
                           style={{ width: '100%' }}
                         >
-                          <option value="llm">Official GraphRAG (OpenAI)</option>
+                          <option value="llm">Neo4j GraphRAG (OpenAI-compatible)</option>
                         </select>
                       </div>
                       <div className="input-group">

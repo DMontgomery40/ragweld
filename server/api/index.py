@@ -25,9 +25,11 @@ from server.db.neo4j import Neo4jClient
 from server.db.postgres import PostgresClient
 from server.indexing.chunker import Chunker
 from server.indexing.embedder import Embedder, configure_postgres_embedding_cache_backend
-from server.indexing.graph_builder import GraphBuilder
 from server.indexing.loader import FileLoader
-from server.indexing.official_graphrag import extract_semantic_kg_with_graphrag
+from server.indexing.official_graphrag import (
+    extract_semantic_kg_with_graphrag,
+    write_lexical_graph_with_graphrag,
+)
 from server.indexing.oss_retrieval_pilot import (
     build_retrieval_pilot_status,
     export_retrieval_pilot,
@@ -36,7 +38,6 @@ from server.indexing.oss_retrieval_pilot import (
     search_retrieval_pilot_preview,
 )
 from server.indexing.text_extractors import extract_text_for_path
-from server.models.graph import Entity, Relationship
 from server.models.index import (
     Chunk,
     IndexRequest,
@@ -298,25 +299,17 @@ def _allow_cross_file_chunk_batching(
     *,
     has_graph_upserts: bool,
     semantic_kg_enabled: bool,
-    has_graph_builder: bool,
 ) -> bool:
     """Whether small-file chunks can be batched across files before embedding/upsert.
 
-    Cross-file batching is only safe when we do not need per-file graph writes,
-    per-file AST graph inputs, or per-file semantic KG extraction queues.
+    Cross-file batching is only safe when we do not need per-file graph writes
+    or per-file semantic KG extraction queues.
     """
     if has_graph_upserts:
         return False
     if semantic_kg_enabled:
         return False
-    if has_graph_builder:
-        return False
     return True
-
-
-def _should_run_ast_graph_build(*, has_graph_builder: bool, graph_file_count: int) -> bool:
-    """Whether the AST graph build pass should run."""
-    return bool(has_graph_builder and int(graph_file_count or 0) > 0)
 
 
 def _to_optional_int(value: Any) -> int | None:
@@ -1181,7 +1174,6 @@ async def _run_index(
     loader = FileLoader(ignore_patterns=ignore_patterns, extra_gitignore_patterns=extra_gitignore_patterns)
 
     neo4j: Neo4jClient | None = None
-    graph_builder: GraphBuilder | None = None
     try:
         if cfg.graph_indexing.enabled:
             db_name = cfg.graph_storage.resolve_database(repo_id)
@@ -1201,8 +1193,6 @@ async def _run_index(
                     guarantee=True,
                 )
                 raise RuntimeError(f"Neo4j schema initialization failed: {exc}") from exc
-            graph_builder = GraphBuilder(neo4j, cfg.graph_indexing)
-
             # Lexical chunk vector index (Neo4j native vector indexes)
             if cfg.graph_indexing.build_lexical_graph and cfg.graph_indexing.store_chunk_embeddings and not skip_dense:
                 try:
@@ -1253,7 +1243,6 @@ async def _run_index(
             embedder=embedder,
             postgres=postgres,
             neo4j=neo4j,
-            graph_builder=graph_builder,
             loader=loader,
             event_queue=event_queue,
             write_repo_id=target_repo_id,
@@ -1277,7 +1266,6 @@ async def _run_index_body(
     embedder: Embedder | None,
     postgres: PostgresClient,
     neo4j: Neo4jClient | None,
-    graph_builder: GraphBuilder | None,
     loader: FileLoader,
     event_queue: asyncio.Queue[dict[str, Any]] | None,
     write_repo_id: str,
@@ -1296,9 +1284,6 @@ async def _run_index_body(
     with INDEX_STAGE_LATENCY_SECONDS.labels(stage="collect_file_paths").time():
         file_entries = list(loader.iter_repo_files(repo_path))
     total_files = len(file_entries)
-
-    # GraphBuilder consumes (path, content) and currently only supports Python AST.
-    graph_files: list[tuple[str, str]] = []
 
     if force_reindex:
         await postgres.delete_chunks(write_repo_id)
@@ -1333,7 +1318,6 @@ async def _run_index_body(
     cross_file_chunk_batching = _allow_cross_file_chunk_batching(
         has_graph_upserts=has_graph_upserts,
         semantic_kg_enabled=bool(neo4j is not None and cfg.graph_indexing.semantic_kg_enabled),
-        has_graph_builder=graph_builder is not None,
     )
     pending_cross_file_chunks: list[Chunk] = []
     indexing_batch = max(10, int(getattr(cfg.indexing, "indexing_batch_size", 100) or 100))
@@ -1357,12 +1341,16 @@ async def _run_index_body(
                 if len(batch_paths) != 1:
                     raise RuntimeError("Lexical graph upserts require a single-file chunk batch")
                 with INDEX_STAGE_LATENCY_SECONDS.labels(stage="neo4j_upsert_document_chunks").time():
-                    await neo4j.upsert_document_and_chunks(
+                    graph, lexical_graph_config = await write_lexical_graph_with_graphrag(
+                        repo_id=write_repo_id,
+                        run_id=run_id,
+                        file_path=next(iter(batch_paths)),
+                        chunks=chunks,
+                    )
+                    await neo4j.upsert_graphrag_graph(
                         write_repo_id,
-                        next(iter(batch_paths)),
-                        chunks,
-                        store_embeddings=False,
-                        embedding_property=cfg.graph_indexing.chunk_embedding_property,
+                        graph,
+                        lexical_graph_config=lexical_graph_config,
                     )
             return chunks
 
@@ -1390,12 +1378,16 @@ async def _run_index_body(
             if len(batch_paths) != 1:
                 raise RuntimeError("Lexical graph upserts require a single-file chunk batch")
             with INDEX_STAGE_LATENCY_SECONDS.labels(stage="neo4j_upsert_document_chunks").time():
-                await neo4j.upsert_document_and_chunks(
+                graph, lexical_graph_config = await write_lexical_graph_with_graphrag(
+                    repo_id=write_repo_id,
+                    run_id=run_id,
+                    file_path=next(iter(batch_paths)),
+                    chunks=embedded,
+                )
+                await neo4j.upsert_graphrag_graph(
                     write_repo_id,
-                    next(iter(batch_paths)),
-                    embedded,
-                    store_embeddings=bool(cfg.graph_indexing.store_chunk_embeddings),
-                    embedding_property=cfg.graph_indexing.chunk_embedding_property,
+                    graph,
+                    lexical_graph_config=lexical_graph_config,
                 )
         return embedded
 
@@ -1616,9 +1608,6 @@ async def _run_index_body(
                     semantic_pending_chunks.extend(embedded_batches[:remaining])
                 continue
 
-            if graph_builder is not None and rel_path.lower().endswith(".py"):
-                graph_files.append((rel_path, content))
-
             with INDEX_STAGE_LATENCY_SECONDS.labels(stage="chunk").time():
                 chunks = chunker.chunk_file(rel_path, content)
             INDEX_FILES_PROCESSED_TOTAL.inc()
@@ -1661,18 +1650,15 @@ async def _run_index_body(
                         route_api_key=str(semantic_route.api_key or "").strip() or None,
                     )
 
-                    if graphrag_result.entities:
-                        with INDEX_STAGE_LATENCY_SECONDS.labels(stage="neo4j_upsert_semantic_entities").time():
-                            await neo4j.upsert_entities(write_repo_id, graphrag_result.entities)
-                    if graphrag_result.relationships:
-                        with INDEX_STAGE_LATENCY_SECONDS.labels(stage="neo4j_upsert_semantic_relationships").time():
-                            await neo4j.upsert_relationships(write_repo_id, graphrag_result.relationships)
-                    if graphrag_result.chunk_links:
-                        with INDEX_STAGE_LATENCY_SECONDS.labels(stage="neo4j_link_entities_to_chunks").time():
-                            await neo4j.link_entities_to_chunks(write_repo_id, graphrag_result.chunk_links)
+                    with INDEX_STAGE_LATENCY_SECONDS.labels(stage="neo4j_upsert_semantic_graph").time():
+                        await neo4j.upsert_graphrag_graph(
+                            write_repo_id,
+                            graphrag_result.graph,
+                            lexical_graph_config=graphrag_result.lexical_graph_config,
+                        )
 
-                    semantic_entities_total += len(graphrag_result.entities)
-                    semantic_relations_total += len(graphrag_result.relationships)
+                    semantic_entities_total += graphrag_result.entity_count
+                    semantic_relations_total += graphrag_result.relationship_count
                     semantic_empty_chunks += graphrag_result.empty_chunks
 
                     if event_queue is not None:
@@ -1681,12 +1667,12 @@ async def _run_index_body(
                             {
                                 "type": "log",
                                 "message": (
-                                    "🧠 GraphRAG semantic batch: "
-                                    f"chunks={graphrag_result.processed_chunks} "
-                                    f"entities={len(graphrag_result.entities)} "
-                                    f"relations={len(graphrag_result.relationships)} "
-                                    f"empty_chunks={graphrag_result.empty_chunks}"
-                                ),
+                                "🧠 GraphRAG semantic batch: "
+                                f"chunks={graphrag_result.processed_chunks} "
+                                f"entities={graphrag_result.entity_count} "
+                                f"relations={graphrag_result.relationship_count} "
+                                f"empty_chunks={graphrag_result.empty_chunks}"
+                            ),
                             },
                             drop_oldest=True,
                         )
@@ -1716,37 +1702,14 @@ async def _run_index_body(
 
     await _flush_pending_cross_file_chunks(force=True)
 
-    if graph_builder is not None:
+    if neo4j is not None and cfg.graph_indexing.semantic_kg_enabled:
         try:
-            if _should_run_ast_graph_build(has_graph_builder=True, graph_file_count=len(graph_files)):
-                if event_queue is not None:
-                    _emit_event(
-                        event_queue,
-                        {"type": "log", "message": "🧠 Building Neo4j graph (entities + relationships)..."},
-                        drop_oldest=True,
-                    )
-                with INDEX_STAGE_LATENCY_SECONDS.labels(stage="graph_build").time():
-                    await graph_builder.build_graph_for_files(
-                        write_repo_id,
-                        graph_files,
-                        batch_size=int(cfg.indexing.indexing_batch_size),
-                    )
-            elif event_queue is not None:
-                _emit_event(
-                    event_queue,
-                    {"type": "log", "message": "🧠 Skipping AST graph build (no code files matched)"},
-                    drop_oldest=True,
-                )
-            # Link entities to chunk_ids so the graph leg can hydrate deterministically.
-            if neo4j is not None and cfg.graph_indexing.build_lexical_graph:
-                with INDEX_STAGE_LATENCY_SECONDS.labels(stage="neo4j_rebuild_entity_chunk_links").time():
-                    await neo4j.rebuild_entity_chunk_links(write_repo_id)
+            await neo4j.detect_communities(write_repo_id)
         except Exception as exc:
-            INDEX_STAGE_ERRORS_TOTAL.labels(stage="graph_build").inc()
-            logger.warning("Graph AST build failed for repo_id=%s: %s", repo_id, exc, exc_info=True)
+            logger.warning("Graph community detection failed for repo_id=%s: %s", repo_id, exc, exc_info=True)
             _emit_event(
                 event_queue,
-                {"type": "warning", "message": f"Graph build incomplete: {exc}"},
+                {"type": "warning", "message": f"Graph community detection incomplete: {exc}"},
                 drop_oldest=True,
             )
 

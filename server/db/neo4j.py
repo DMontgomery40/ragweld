@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, Literal, TypeVar, cast
 
 from neo4j import AsyncDriver, AsyncGraphDatabase
+from neo4j_graphrag.experimental.components.types import LexicalGraphConfig, Neo4jGraph
 
 from server.models.graph import Community, Entity, GraphNeighborsResponse, GraphStats, Relationship
 from server.models.index import Chunk
@@ -54,7 +55,7 @@ SEMANTIC_RELATION_TYPES: set[str] = {
 ALL_RELATION_TYPES: set[str] = CODE_RELATION_TYPES | SEMANTIC_RELATION_TYPES
 
 _BATCH_SIZE_DEFAULT = 500
-_DEFAULT_REPO_SCOPED_NODE_LABELS: tuple[str, ...] = ("Document", "Chunk", "Entity", "Community")
+_DEFAULT_REPO_SCOPED_NODE_LABELS: tuple[str, ...] = ("Document", "Chunk", "__Entity__", "Community")
 
 
 class Neo4jClient:
@@ -168,7 +169,7 @@ class Neo4jClient:
             ),
             (
                 "CREATE CONSTRAINT rw_entity_repo_entity IF NOT EXISTS "
-                "FOR (e:Entity) REQUIRE (e.repo_id, e.entity_id) IS UNIQUE;"
+                "FOR (e:__Entity__) REQUIRE (e.repo_id, e.entity_id) IS UNIQUE;"
             ),
             (
                 "CREATE CONSTRAINT rw_community_repo_community IF NOT EXISTS "
@@ -367,6 +368,180 @@ class Neo4jClient:
             )
         return len(chunks)
 
+    async def upsert_graphrag_graph(
+        self,
+        repo_id: str,
+        graph: Neo4jGraph,
+        *,
+        lexical_graph_config: LexicalGraphConfig,
+    ) -> None:
+        if not graph.nodes and not graph.relationships:
+            return
+        await self._upsert_graphrag_nodes(repo_id, graph, lexical_graph_config=lexical_graph_config)
+        await self._upsert_graphrag_relationships(repo_id, graph, lexical_graph_config=lexical_graph_config)
+
+    async def _upsert_graphrag_nodes(
+        self,
+        repo_id: str,
+        graph: Neo4jGraph,
+        *,
+        lexical_graph_config: LexicalGraphConfig,
+    ) -> None:
+        driver = self._require_driver()
+        document_label = _sanitize_cypher_identifier(lexical_graph_config.document_node_label)
+        chunk_label = _sanitize_cypher_identifier(lexical_graph_config.chunk_node_label)
+        chunk_embedding_property = _sanitize_cypher_identifier(lexical_graph_config.chunk_embedding_property)
+        if not document_label or not chunk_label or not chunk_embedding_property:
+            raise ValueError("Invalid GraphRAG lexical graph configuration")
+
+        document_rows: list[dict[str, Any]] = []
+        chunk_rows: list[dict[str, Any]] = []
+        entity_rows_by_label: dict[str, list[dict[str, Any]]] = defaultdict(list)
+
+        lexical_labels = set(lexical_graph_config.lexical_graph_node_labels)
+        for node in graph.nodes:
+            label = str(node.label or "").strip()
+            props = dict(node.properties or {})
+            if label == lexical_graph_config.document_node_label:
+                file_path = str(props.get("file_path") or props.get("path") or "").strip()
+                if not file_path:
+                    continue
+                document_rows.append(
+                    {
+                        "document_id": str(props.get("document_id") or node.id),
+                        "file_path": file_path,
+                        "properties": props,
+                    }
+                )
+                continue
+            if label == lexical_graph_config.chunk_node_label:
+                chunk_rows.append(
+                    {
+                        "chunk_id": str(props.get("chunk_id") or node.id),
+                        "properties": props,
+                        "embedding": dict(node.embedding_properties or {}).get(
+                            lexical_graph_config.chunk_embedding_property
+                        ),
+                    }
+                )
+                continue
+            if label in lexical_labels:
+                continue
+            entity_label = _sanitize_cypher_identifier(label)
+            if not entity_label:
+                continue
+            entity_rows_by_label[entity_label].append(
+                {
+                    "entity_id": str(props.get("entity_id") or node.id),
+                    "entity_type": str(props.get("entity_type") or label).strip(),
+                    "properties": props,
+                }
+            )
+
+        async with driver.session(database=self.database) as session:
+            if document_rows:
+                query = f"""
+                UNWIND $rows AS row
+                MERGE (d:`{document_label}` {{repo_id: $repo_id, file_path: row.file_path}})
+                SET d += row.properties,
+                    d.repo_id = $repo_id,
+                    d.file_path = row.file_path,
+                    d.document_id = row.document_id;
+                """
+                for batch in _iter_batches(document_rows):
+                    await session.run(query, repo_id=repo_id, rows=batch)
+
+            if chunk_rows:
+                query = f"""
+                UNWIND $rows AS row
+                MERGE (c:`{chunk_label}` {{repo_id: $repo_id, chunk_id: row.chunk_id}})
+                SET c += row.properties,
+                    c.repo_id = $repo_id,
+                    c.chunk_id = row.chunk_id
+                FOREACH (_ IN CASE WHEN row.embedding IS NOT NULL THEN [1] ELSE [] END |
+                    SET c.`{chunk_embedding_property}` = row.embedding
+                );
+                """
+                for batch in _iter_batches(chunk_rows):
+                    await session.run(query, repo_id=repo_id, rows=batch)
+
+            for entity_label, rows in entity_rows_by_label.items():
+                query = f"""
+                UNWIND $rows AS row
+                MERGE (e:__Entity__:`{entity_label}` {{repo_id: $repo_id, entity_id: row.entity_id}})
+                SET e += row.properties,
+                    e.repo_id = $repo_id,
+                    e.entity_id = row.entity_id,
+                    e.entity_type = row.entity_type;
+                """
+                for batch in _iter_batches(rows):
+                    await session.run(query, repo_id=repo_id, rows=batch)
+
+    async def _upsert_graphrag_relationships(
+        self,
+        repo_id: str,
+        graph: Neo4jGraph,
+        *,
+        lexical_graph_config: LexicalGraphConfig,
+    ) -> None:
+        if not graph.relationships:
+            return
+        driver = self._require_driver()
+        document_label = _sanitize_cypher_identifier(lexical_graph_config.document_node_label)
+        chunk_label = _sanitize_cypher_identifier(lexical_graph_config.chunk_node_label)
+        if not document_label or not chunk_label:
+            raise ValueError("Invalid GraphRAG lexical graph configuration")
+
+        rel_rows_by_type: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for rel in graph.relationships:
+            rel_type = _sanitize_cypher_identifier(str(rel.type or ""))
+            if not rel_type:
+                continue
+            rel_rows_by_type[rel_type].append(
+                {
+                    "start_node_id": str(rel.start_node_id),
+                    "end_node_id": str(rel.end_node_id),
+                    "properties": dict(rel.properties or {}),
+                }
+            )
+
+        async with driver.session(database=self.database) as session:
+            for rel_type, rows in rel_rows_by_type.items():
+                if rel_type == _sanitize_cypher_identifier(lexical_graph_config.chunk_to_document_relationship_type):
+                    query = f"""
+                    UNWIND $rows AS row
+                    MATCH (c:`{chunk_label}` {{repo_id: $repo_id, chunk_id: row.start_node_id}})
+                    MATCH (d:`{document_label}` {{repo_id: $repo_id, document_id: row.end_node_id}})
+                    MERGE (c)-[rel:`{rel_type}`]->(d)
+                    SET rel += row.properties;
+                    """
+                elif rel_type == _sanitize_cypher_identifier(lexical_graph_config.next_chunk_relationship_type):
+                    query = f"""
+                    UNWIND $rows AS row
+                    MATCH (a:`{chunk_label}` {{repo_id: $repo_id, chunk_id: row.start_node_id}})
+                    MATCH (b:`{chunk_label}` {{repo_id: $repo_id, chunk_id: row.end_node_id}})
+                    MERGE (a)-[rel:`{rel_type}`]->(b)
+                    SET rel += row.properties;
+                    """
+                elif rel_type == _sanitize_cypher_identifier(lexical_graph_config.node_to_chunk_relationship_type):
+                    query = f"""
+                    UNWIND $rows AS row
+                    MATCH (e:__Entity__ {{repo_id: $repo_id, entity_id: row.start_node_id}})
+                    MATCH (c:`{chunk_label}` {{repo_id: $repo_id, chunk_id: row.end_node_id}})
+                    MERGE (e)-[rel:`{rel_type}`]->(c)
+                    SET rel += row.properties;
+                    """
+                else:
+                    query = f"""
+                    UNWIND $rows AS row
+                    MATCH (a:__Entity__ {{repo_id: $repo_id, entity_id: row.start_node_id}})
+                    MATCH (b:__Entity__ {{repo_id: $repo_id, entity_id: row.end_node_id}})
+                    MERGE (a)-[rel:`{rel_type}`]->(b)
+                    SET rel += row.properties;
+                    """
+                for batch in _iter_batches(rows):
+                    await session.run(query, repo_id=repo_id, rows=batch)
+
     async def chunk_vector_search(
         self,
         repo_id: str,
@@ -464,7 +639,7 @@ class Neo4jClient:
 
         query = """
         UNWIND $entities AS e
-        MERGE (n:Entity {repo_id: $repo_id, entity_id: e.entity_id})
+        MERGE (n:__Entity__ {repo_id: $repo_id, entity_id: e.entity_id})
         SET n.name = e.name,
             n.entity_type = e.entity_type,
             n.file_path = e.file_path,
@@ -484,14 +659,14 @@ class Neo4jClient:
         async with driver.session(database=self.database) as session:
             row = await session.run(
                 """
-                MATCH (n:Entity {entity_id: $entity_id})
+                MATCH (n:__Entity__ {entity_id: $entity_id})
                 RETURN n.repo_id AS repo_id,
                        n.entity_id AS entity_id,
                        n.name AS name,
                        n.entity_type AS entity_type,
                        n.file_path AS file_path,
                        n.description AS description,
-                       n.properties_json AS properties_json
+                       properties(n) AS properties
                 LIMIT 1;
                 """,
                 entity_id=entity_id,
@@ -518,7 +693,7 @@ class Neo4jClient:
             )
             params["q"] = q
         query = f"""
-        MATCH (n:Entity)
+        MATCH (n:__Entity__)
         {where}
         RETURN n.repo_id AS repo_id,
                n.entity_id AS entity_id,
@@ -526,7 +701,7 @@ class Neo4jClient:
                n.entity_type AS entity_type,
                n.file_path AS file_path,
                n.description AS description,
-               n.properties_json AS properties_json
+               properties(n) AS properties
         ORDER BY name ASC
         LIMIT $limit;
         """
@@ -540,7 +715,7 @@ class Neo4jClient:
         async with driver.session(database=self.database) as session:
             result = await session.run(
                 """
-                MATCH (n:Entity {repo_id: $repo_id})
+                MATCH (n:__Entity__ {repo_id: $repo_id})
                 WITH n, count(n) AS n_count
                 DETACH DELETE n
                 RETURN n_count AS n_count;
@@ -578,8 +753,8 @@ class Neo4jClient:
                 # Relationship type must be literal in Cypher; rel_type is validated against allowed.
                 query = f"""
                 UNWIND $rels AS r
-                MATCH (a:Entity {{repo_id: $repo_id, entity_id: r.source_id}})
-                MATCH (b:Entity {{repo_id: $repo_id, entity_id: r.target_id}})
+                MATCH (a:__Entity__ {{repo_id: $repo_id, entity_id: r.source_id}})
+                MATCH (b:__Entity__ {{repo_id: $repo_id, entity_id: r.target_id}})
                 MERGE (a)-[rel:{rel_type}]->(b)
                 SET rel.weight = r.weight,
                     rel.properties_json = r.properties_json;
@@ -593,12 +768,12 @@ class Neo4jClient:
         async with driver.session(database=self.database) as session:
             res = await session.run(
                 """
-                MATCH (a:Entity {entity_id: $entity_id})-[r]->(b:Entity)
+                MATCH (a:__Entity__ {entity_id: $entity_id})-[r]->(b:__Entity__)
                 RETURN a.entity_id AS source_id,
                        b.entity_id AS target_id,
                        type(r) AS relation_type,
                        coalesce(r.weight, 1.0) AS weight,
-                       r.properties_json AS properties_json;
+                       properties(r) AS properties;
                 """,
                 entity_id=entity_id,
             )
@@ -606,12 +781,6 @@ class Neo4jClient:
         out: list[Relationship] = []
         allowed: set[str] = set(ALL_RELATION_TYPES)
         for r in records:
-            props = {}
-            if r.get("properties_json"):
-                try:
-                    props = json.loads(r["properties_json"])
-                except Exception:
-                    props = {}
             rel_type = str(r.get("relation_type") or "")
             if rel_type not in allowed:
                 continue
@@ -621,7 +790,7 @@ class Neo4jClient:
                     target_id=str(r["target_id"]),
                     relation_type=cast(RelationshipType, rel_type),
                     weight=float(r.get("weight") or 1.0),
-                    properties=props,
+                    properties=_relationship_properties_from_mapping(r),
                 )
             )
         return out
@@ -650,9 +819,9 @@ class Neo4jClient:
         driver = self._require_driver()
 
         cypher = f"""
-        MATCH (center:Entity {{repo_id: $repo_id, entity_id: $entity_id}})
+        MATCH (center:__Entity__ {{repo_id: $repo_id, entity_id: $entity_id}})
 
-        OPTIONAL MATCH p = (center)-[rels*1..{hops}]-(n:Entity {{repo_id: $repo_id}})
+        OPTIONAL MATCH p = (center)-[rels*1..{hops}]-(n:__Entity__ {{repo_id: $repo_id}})
         WHERE ALL(r IN rels WHERE type(r) IN $allowed_rels)
         WITH center, n, min(length(p)) AS min_hops
         ORDER BY min_hops ASC, n.name ASC
@@ -674,7 +843,7 @@ class Neo4jClient:
               entity_type: n.entity_type,
               file_path: n.file_path,
               description: n.description,
-              properties_json: n.properties_json
+              properties: properties(n)
             }}
           ] AS entities,
           [r IN rels |
@@ -683,7 +852,7 @@ class Neo4jClient:
               target_id: endNode(r).entity_id,
               relation_type: type(r),
               weight: coalesce(r.weight, 1.0),
-              properties_json: r.properties_json
+              properties: properties(r)
             }}
           ] AS relationships;
         """
@@ -719,12 +888,6 @@ class Neo4jClient:
                 rel_type = str(r.get("relation_type") or "")
                 if rel_type not in allowed:
                     continue
-                props = {}
-                if r.get("properties_json"):
-                    try:
-                        props = json.loads(str(r["properties_json"]))
-                    except Exception:
-                        props = {}
                 raw_weight = float(r.get("weight") or 1.0)
                 weight = max(0.0, min(1.0, raw_weight))
                 rels.append(
@@ -733,7 +896,7 @@ class Neo4jClient:
                         target_id=str(r.get("target_id") or ""),
                         relation_type=cast(RelationshipType, rel_type),
                         weight=weight,
-                        properties=props,
+                        properties=_relationship_properties_from_mapping(r),
                     )
                 )
 
@@ -748,13 +911,13 @@ class Neo4jClient:
         driver = self._require_driver()
         query = """
         MATCH (c:Community {repo_id: $repo_id, community_id: $community_id})
-        MATCH (e:Entity {repo_id: $repo_id})-[:IN_COMMUNITY]->(c)
+        MATCH (e:__Entity__ {repo_id: $repo_id})-[:IN_COMMUNITY]->(c)
         RETURN e.entity_id AS entity_id,
                e.name AS name,
                e.entity_type AS entity_type,
                e.file_path AS file_path,
                e.description AS description,
-               e.properties_json AS properties_json
+               properties(e) AS properties
         ORDER BY name ASC
         LIMIT $limit;
         """
@@ -791,14 +954,14 @@ class Neo4jClient:
 
         cypher = """
         MATCH (c:Community {repo_id: $repo_id, community_id: $community_id})
-        MATCH (e:Entity {repo_id: $repo_id})-[:IN_COMMUNITY]->(c)
+        MATCH (e:__Entity__ {repo_id: $repo_id})-[:IN_COMMUNITY]->(c)
         WITH e
         ORDER BY e.name ASC
         LIMIT $limit
 
         WITH collect(e) AS nodes
         UNWIND nodes AS a
-        OPTIONAL MATCH (a)-[r]-(b:Entity {repo_id: $repo_id})
+        OPTIONAL MATCH (a)-[r]-(b:__Entity__ {repo_id: $repo_id})
         WHERE b IN nodes AND type(r) IN $allowed_rels
         WITH nodes, [x IN collect(DISTINCT r) WHERE x IS NOT NULL] AS rels
 
@@ -810,7 +973,7 @@ class Neo4jClient:
               entity_type: n.entity_type,
               file_path: n.file_path,
               description: n.description,
-              properties_json: n.properties_json
+              properties: properties(n)
             }
           ] AS entities,
           [r IN rels |
@@ -819,7 +982,7 @@ class Neo4jClient:
               target_id: endNode(r).entity_id,
               relation_type: type(r),
               weight: coalesce(r.weight, 1.0),
-              properties_json: r.properties_json
+              properties: properties(r)
             }
           ] AS relationships;
         """
@@ -855,12 +1018,6 @@ class Neo4jClient:
                 rel_type = str(r.get("relation_type") or "")
                 if rel_type not in allowed:
                     continue
-                props = {}
-                if r.get("properties_json"):
-                    try:
-                        props = json.loads(str(r["properties_json"]))
-                    except Exception:
-                        props = {}
                 raw_weight = float(r.get("weight") or 1.0)
                 weight = max(0.0, min(1.0, raw_weight))
                 rels.append(
@@ -869,7 +1026,7 @@ class Neo4jClient:
                         target_id=str(r.get("target_id") or ""),
                         relation_type=cast(RelationshipType, rel_type),
                         weight=weight,
-                        properties=props,
+                        properties=_relationship_properties_from_mapping(r),
                     )
                 )
 
@@ -889,7 +1046,7 @@ class Neo4jClient:
         async with driver.session(database=self.database) as session:
             res = await session.run(
                 """
-                MATCH (e:Entity {repo_id: $repo_id})
+                MATCH (e:__Entity__ {repo_id: $repo_id})
                 OPTIONAL MATCH (e)-[:IN_CHUNK]->(c:Chunk {repo_id: $repo_id})
                 WITH e, replace(coalesce(e.file_path, c.file_path), '\\\\', '/') AS fp
                 WITH
@@ -943,7 +1100,7 @@ class Neo4jClient:
         query = f"""
         MATCH (c:Community)
         {where}
-        OPTIONAL MATCH (e:Entity {{repo_id: $repo_id}})-[:IN_COMMUNITY]->(c)
+        OPTIONAL MATCH (e:__Entity__ {{repo_id: $repo_id}})-[:IN_COMMUNITY]->(c)
         WITH c, collect(e.entity_id) AS member_ids
         RETURN c.community_id AS community_id,
                c.name AS name,
@@ -987,9 +1144,9 @@ class Neo4jClient:
         # Neo4j does not allow parameterized variable-length patterns (*0..$max_hops),
         # so we safely inline the integer hop limit (validated + clamped above).
         cypher = f"""
-        MATCH (seed:Entity {{repo_id: $repo_id}})
+        MATCH (seed:__Entity__ {{repo_id: $repo_id}})
         WHERE any(tok IN $tokens WHERE toLower(seed.name) CONTAINS tok)
-        MATCH p = (seed)-[rels*0..{max_hops}]-(e:Entity {{repo_id: $repo_id}})
+        MATCH p = (seed)-[rels*0..{max_hops}]-(e:__Entity__ {{repo_id: $repo_id}})
         WHERE ALL(r IN rels WHERE type(r) IN $allowed_rels)
         WITH
           e,
@@ -998,7 +1155,7 @@ class Neo4jClient:
         RETURN DISTINCT
           e.entity_id AS entity_id,
           e.file_path AS file_path,
-          e.properties_json AS properties_json,
+          properties(e) AS properties,
           e.name AS name,
           hops AS hops,
           direct_match AS direct_match
@@ -1019,12 +1176,7 @@ class Neo4jClient:
         out: list[ChunkMatch] = []
         for r in records:
             fp = r.get("file_path")
-            props: dict[str, Any] = {}
-            if r.get("properties_json"):
-                try:
-                    props = json.loads(r["properties_json"])
-                except Exception:
-                    props = {}
+            props = _entity_properties_from_mapping(r)
             hops = int(r.get("hops") or 0)
             direct_match = bool(r.get("direct_match"))
             # Deterministic score: direct matches outrank neighbors; deeper hops decay.
@@ -1064,7 +1216,7 @@ class Neo4jClient:
             # Clear existing links for this corpus
             await session.run(
                 """
-                MATCH (e:Entity {repo_id: $repo_id})-[r:IN_CHUNK]->(c:Chunk {repo_id: $repo_id})
+                MATCH (e:__Entity__ {repo_id: $repo_id})-[r:IN_CHUNK]->(c:Chunk {repo_id: $repo_id})
                 WHERE e.file_path IS NOT NULL
                   AND e.start_line IS NOT NULL
                   AND e.end_line IS NOT NULL
@@ -1075,7 +1227,7 @@ class Neo4jClient:
             # Rebuild deterministically by line-overlap
             res = await session.run(
                 """
-                MATCH (e:Entity {repo_id: $repo_id})
+                MATCH (e:__Entity__ {repo_id: $repo_id})
                 WHERE e.file_path IS NOT NULL
                   AND e.start_line IS NOT NULL
                   AND e.end_line IS NOT NULL
@@ -1104,7 +1256,7 @@ class Neo4jClient:
                 await session.run(
                     """
                     UNWIND $links AS l
-                    MATCH (e:Entity {repo_id: $repo_id, entity_id: l.entity_id})
+                    MATCH (e:__Entity__ {repo_id: $repo_id, entity_id: l.entity_id})
                     MATCH (c:Chunk {repo_id: $repo_id, chunk_id: l.chunk_id})
                     MERGE (e)-[:IN_CHUNK]->(c);
                     """,
@@ -1139,8 +1291,8 @@ class Neo4jClient:
         UNWIND $seeds AS s
         MATCH (seed:Chunk {{repo_id: $repo_id, chunk_id: s.chunk_id}})
         WITH seed, toFloat(s.score) AS seed_score
-        MATCH (seed)<-[:IN_CHUNK]-(seed_e:Entity {{repo_id: $repo_id}})
-        MATCH p = (seed_e)-[rels*0..{hops}]-(e:Entity {{repo_id: $repo_id}})
+        MATCH (seed)<-[:IN_CHUNK]-(seed_e:__Entity__ {{repo_id: $repo_id}})
+        MATCH p = (seed_e)-[rels*0..{hops}]-(e:__Entity__ {{repo_id: $repo_id}})
         WHERE ALL(r IN rels WHERE type(r) IN $allowed_rels)
         WITH e, min(length(p)) AS hops, seed_score
         MATCH (e)-[:IN_CHUNK]->(c:Chunk {{repo_id: $repo_id}})
@@ -1187,9 +1339,9 @@ class Neo4jClient:
         # Neo4j does not allow parameterized variable-length patterns (*0..$max_hops),
         # so we safely inline the integer hop limit (validated + clamped above).
         cypher = f"""
-        MATCH (seed:Entity {{repo_id: $repo_id}})
+        MATCH (seed:__Entity__ {{repo_id: $repo_id}})
         WHERE any(tok IN $tokens WHERE toLower(seed.name) CONTAINS tok)
-        MATCH p = (seed)-[rels*0..{max_hops}]-(e:Entity {{repo_id: $repo_id}})
+        MATCH p = (seed)-[rels*0..{max_hops}]-(e:__Entity__ {{repo_id: $repo_id}})
         WHERE ALL(r IN rels WHERE type(r) IN $allowed_rels)
         WITH
           e,
@@ -1341,9 +1493,9 @@ class Neo4jClient:
         async with driver.session(database=self.database) as session:
             counts = await session.run(
                 """
-                OPTIONAL MATCH (e:Entity {repo_id: $repo_id})
+                OPTIONAL MATCH (e:__Entity__ {repo_id: $repo_id})
                 WITH count(e) AS total_entities
-                OPTIONAL MATCH (:Entity {repo_id: $repo_id})-[r]->(:Entity {repo_id: $repo_id})
+                OPTIONAL MATCH (:__Entity__ {repo_id: $repo_id})-[r]->(:__Entity__ {repo_id: $repo_id})
                 WITH total_entities, count(r) AS total_relationships
                 OPTIONAL MATCH (c:Community {repo_id: $repo_id})
                 WITH total_entities, total_relationships, count(c) AS total_communities
@@ -1358,7 +1510,7 @@ class Neo4jClient:
 
             entity_breakdown_res = await session.run(
                 """
-                MATCH (e:Entity {repo_id: $repo_id})
+                MATCH (e:__Entity__ {repo_id: $repo_id})
                 RETURN e.entity_type AS t, count(e) AS n;
                 """,
                 repo_id=repo_id,
@@ -1367,7 +1519,7 @@ class Neo4jClient:
 
             rel_breakdown_res = await session.run(
                 """
-                MATCH (:Entity {repo_id: $repo_id})-[r]->(:Entity {repo_id: $repo_id})
+                MATCH (:__Entity__ {repo_id: $repo_id})-[r]->(:__Entity__ {repo_id: $repo_id})
                 RETURN type(r) AS t, count(r) AS n;
                 """,
                 repo_id=repo_id,
@@ -1591,7 +1743,7 @@ class Neo4jClient:
                 UNWIND $communities AS c
                 MATCH (comm:Community {repo_id: $repo_id, community_id: c.community_id})
                 UNWIND c.member_ids AS mid
-                MATCH (e:Entity {repo_id: $repo_id, entity_id: mid})
+                MATCH (e:__Entity__ {repo_id: $repo_id, entity_id: mid})
                 MERGE (e)-[:IN_COMMUNITY]->(comm);
                 """,
                 repo_id=repo_id,
@@ -1600,12 +1752,7 @@ class Neo4jClient:
 
 
 def _entity_from_record(record: Any) -> Entity:
-    props = {}
-    if record.get("properties_json"):
-        try:
-            props = json.loads(record["properties_json"])
-        except Exception:
-            props = {}
+    props = _entity_properties_from_mapping(record)
     return Entity(
         entity_id=str(record["entity_id"]),
         name=str(record["name"]),
@@ -1617,12 +1764,7 @@ def _entity_from_record(record: Any) -> Entity:
 
 
 def _entity_from_mapping(mapping: dict[str, Any]) -> Entity:
-    props = {}
-    if mapping.get("properties_json"):
-        try:
-            props = json.loads(mapping["properties_json"])
-        except Exception:
-            props = {}
+    props = _entity_properties_from_mapping(mapping)
     return Entity(
         entity_id=str(mapping["entity_id"]),
         name=str(mapping["name"]),
@@ -1631,6 +1773,44 @@ def _entity_from_mapping(mapping: dict[str, Any]) -> Entity:
         description=str(mapping["description"]) if mapping.get("description") is not None else None,
         properties=props,
     )
+
+
+def _relationship_properties_from_mapping(mapping: dict[str, Any]) -> dict[str, Any]:
+    raw_properties = mapping.get("properties")
+    if isinstance(raw_properties, dict):
+        cleaned = dict(raw_properties)
+        cleaned.pop("repo_id", None)
+        cleaned.pop("run_id", None)
+        return cleaned
+    if mapping.get("properties_json"):
+        try:
+            return json.loads(mapping["properties_json"])
+        except Exception:
+            return {}
+    return {}
+
+
+def _entity_properties_from_mapping(mapping: dict[str, Any]) -> dict[str, Any]:
+    raw_properties = mapping.get("properties")
+    if isinstance(raw_properties, dict):
+        cleaned = dict(raw_properties)
+        for key in (
+            "repo_id",
+            "run_id",
+            "entity_id",
+            "entity_type",
+            "name",
+            "description",
+            "file_path",
+        ):
+            cleaned.pop(key, None)
+        return cleaned
+    if mapping.get("properties_json"):
+        try:
+            return json.loads(mapping["properties_json"])
+        except Exception:
+            return {}
+    return {}
 
 
 def _coerce_entity_type(value: str) -> EntityType:
