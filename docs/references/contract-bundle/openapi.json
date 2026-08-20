@@ -24724,25 +24724,6 @@
         ]
       }
     },
-    "/api/metrics": {
-      "get": {
-        "operationId": "prometheus_metrics_api_metrics_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "Prometheus Metrics",
-        "tags": [
-          "health"
-        ]
-      }
-    },
     "/api/models": {
       "get": {
         "description": "Return the full models.json catalog (metadata + models list).\n\nThe catalog is the pricing/candidate source of truth. Runtime-selectable rows\nare identified by ``selection_roles`` / ``selection_status`` metadata and the\nbackend runtime capabilities endpoint.",

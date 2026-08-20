@@ -78,7 +78,7 @@
     },
     "tracing": {
       "disposition": "runtime_effect",
-      "evidence": ["server/api/metrics.py"]
+      "evidence": ["server/observability/metrics.py"]
     },
     "training": {
       "disposition": "runtime_effect",

@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends
-from starlette.responses import JSONResponse, Response
+from starlette.responses import JSONResponse
 
 from server.config import load_config
 from server.db.neo4j import Neo4jClient
@@ -12,7 +12,6 @@ from server.models.tribrid_config_model import (
     ReadinessStatus,
     TriBridConfig,
 )
-from server.observability.metrics import render_latest
 from server.services.config_store import CorpusNotFoundError
 from server.services.config_store import get_config as load_scoped_config
 
@@ -121,11 +120,3 @@ async def readiness_check(scope: CorpusScope = _CORPUS_SCOPE_DEP) -> ReadinessSt
     if ready:
         return status
     return JSONResponse(status_code=503, content=status.model_dump(mode="json"))
-
-
-@router.get("/metrics")
-async def prometheus_metrics() -> Response:
-    # Backward-compatible alias for Prometheus scrape.
-    # Prefer scraping /metrics (no /api prefix).
-    body, content_type = render_latest()
-    return Response(content=body, media_type=content_type)
