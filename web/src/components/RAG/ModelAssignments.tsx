@@ -46,10 +46,10 @@ export function ModelAssignments() {
 
     const enrichModel = gen?.enrich_model || 'gpt-4o-mini';
 
-    // Resolve semantic_kg_llm_model with fallback to enrich_model
+    // Semantic KG is replacement-only: the operator must select a catalog model explicitly.
     const kgModel = graph?.semantic_kg_llm_model || '';
-    const effectiveKgModel = kgModel || enrichModel;
-    const kgFallback = kgModel ? undefined : 'fallback: enrich_model';
+    const kgCatalogRow = genModels.find((model) => String(model.model || '').trim() === kgModel);
+    const kgProvider = String(kgCatalogRow?.provider || '').trim() || 'unresolved';
 
     // Resolve embedding model based on type
     let embModel = '';
@@ -92,9 +92,8 @@ export function ModelAssignments() {
       },
       {
         task: 'Semantic KG LLM',
-        provider: enrichBackend,
-        model: effectiveKgModel,
-        fallbackNote: kgFallback,
+        provider: kgProvider,
+        model: kgModel || '(selection required)',
       },
       {
         task: 'Query Expansion',
@@ -160,7 +159,7 @@ export function ModelAssignments() {
     }
 
     return out;
-  }, [config]);
+  }, [config, genModels]);
 
   // Validate model against catalog
   const isInCatalog = useMemo(() => {

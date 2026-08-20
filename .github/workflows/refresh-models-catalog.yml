@@ -30,6 +30,9 @@ jobs:
       - name: Run banned checks
         run: uv run scripts/check_banned.py
 
+      - name: Validate runtime selection metadata
+        run: uv run python scripts/check_runtime_capabilities_catalog.py
+
       - name: Commit and push catalog updates
         run: |
           git config user.name "github-actions[bot]"

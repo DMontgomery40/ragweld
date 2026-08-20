@@ -949,7 +949,7 @@ export interface GraphIndexingConfig {
   semantic_kg_max_relations_per_chunk?: number; // default: 12
   /** Maximum chunks to process for semantic KG extraction per indexing run (0 = disabled) */
   semantic_kg_max_chunks?: number; // default: 40000
-  /** LLM model name for GraphRAG semantic extraction (empty = use the catalog-preferred runtime-selectable GEN model; plain openai/gpt-5 is excluded) */
+  /** Explicit runtime-selectable GEN catalog model for GraphRAG semantic extraction; required when semantic KG is enabled */
   semantic_kg_llm_model?: string; // default: ""
   /** Timeout (seconds) for semantic KG LLM extraction per chunk */
   semantic_kg_llm_timeout_s?: number; // default: 30

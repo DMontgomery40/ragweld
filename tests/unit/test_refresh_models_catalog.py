@@ -118,6 +118,9 @@ def test_new_model_with_pricing_is_added_as_gen() -> None:
     assert row["input_per_1k"] == 0.001
     assert row["output_per_1k"] == 0.004
     assert row["context"] == 256_000
+    assert row["selection_roles"] == ["generation"]
+    assert row["selection_status"] == "runtime_selectable"
+    assert row["selection_reason"] is None
 
 
 def test_new_model_missing_pricing_is_added_with_unknown_marker() -> None:
@@ -207,7 +210,12 @@ def test_unmanaged_provider_rows_remain_untouched() -> None:
     ]
 
     refreshed, _stats, _changed = build_refreshed_catalog(catalog, feed_rows, as_of_date="2026-02-26")
-    assert _find_model(refreshed, provider="voyage", model="voyage-3-large") == voyage_row
+    refreshed_voyage = _find_model(refreshed, provider="voyage", model="voyage-3-large")
+    for key, value in voyage_row.items():
+        assert refreshed_voyage[key] == value
+    assert refreshed_voyage["selection_roles"] == []
+    assert refreshed_voyage["selection_status"] == "catalog_only"
+    assert "Provider-backed embeddings currently execute only via" in refreshed_voyage["selection_reason"]
 
 
 def test_colon_suffix_and_non_text_models_are_ignored() -> None:

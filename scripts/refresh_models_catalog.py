@@ -16,6 +16,8 @@ from typing import Any
 
 import httpx
 
+from server.runtime_capabilities import apply_selection_metadata_to_catalog
+
 OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models"
 OPENROUTER_SOURCE_PREFIX = "https://openrouter.ai/api/v1/models"
 AUTO_DEPRECATED_PREFIX = "[auto-refresh] deprecated_on="
@@ -466,6 +468,7 @@ def build_refreshed_catalog(
 ) -> tuple[dict[str, Any], RefreshStats, bool]:
     normalized_by_family = normalize_openrouter_rows(feed_rows)
     merged, stats = _build_catalog_core(catalog, normalized_by_family, as_of_date=as_of_date)
+    merged = apply_selection_metadata_to_catalog(merged)
     stats.total_feed_rows = len(feed_rows)
 
     candidate = copy.deepcopy(merged)

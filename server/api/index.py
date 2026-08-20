@@ -503,7 +503,7 @@ def _semantic_kg_catalog_rows() -> list[dict[str, Any]]:
         if not _model_has_component(row, "GEN"):
             continue
         status = str(row.get("selection_status") or "").strip().lower()
-        if status and status != "runtime_selectable":
+        if status != "runtime_selectable":
             continue
         provider = _norm_key(row.get("provider"))
         model_name = str(row.get("model") or "").strip()
@@ -522,41 +522,22 @@ def _semantic_kg_row_matches_override(row: dict[str, Any], override: str) -> boo
     return candidate == model_name or candidate == f"{provider}/{model_name}"
 
 
-def _semantic_kg_default_row() -> dict[str, Any]:
-    rows = _semantic_kg_catalog_rows()
-    if not rows:
-        raise ValueError("No runtime-selectable GEN catalog models are available for GraphRAG semantic extraction.")
-
-    for row in rows:
-        if _norm_key(row.get("provider")) == "openai" and str(row.get("model") or "").strip() == "gpt-5.4":
-            return row
-
-    for row in rows:
-        if _norm_key(row.get("provider")) == "openai" and str(row.get("model") or "").strip().startswith("gpt-5.4"):
-            return row
-
-    return rows[0]
-
-
 def _semantic_kg_catalog_row(cfg: TriBridConfig) -> dict[str, Any]:
     explicit = str(cfg.graph_indexing.semantic_kg_llm_model or "").strip()
-    if explicit:
-        for row in _semantic_kg_catalog_rows():
-            if _semantic_kg_row_matches_override(row, explicit):
-                return row
-        raise ValueError(
-            "GraphRAG semantic model must be a runtime-selectable GEN catalog entry; plain openai/gpt-5 is intentionally excluded."
-        )
-    return _semantic_kg_default_row()
+    if not explicit:
+        raise ValueError("Select a runtime-selectable GEN catalog model for GraphRAG semantic extraction.")
+    for row in _semantic_kg_catalog_rows():
+        if _semantic_kg_row_matches_override(row, explicit):
+            return row
+    raise ValueError(
+        "GraphRAG semantic model must be a runtime-selectable GEN catalog entry; plain openai/gpt-5 is intentionally excluded."
+    )
 
 
 def _semantic_kg_model_override(cfg: TriBridConfig) -> str:
     explicit = str(cfg.graph_indexing.semantic_kg_llm_model or "").strip()
-    if explicit:
-        _semantic_kg_catalog_row(cfg)
-        return explicit
-    row = _semantic_kg_default_row()
-    return f"{str(row.get('provider') or '').strip()}/{str(row.get('model') or '').strip()}"
+    _semantic_kg_catalog_row(cfg)
+    return explicit
 
 
 def _resolve_semantic_kg_route(cfg: TriBridConfig) -> ProviderRoute:

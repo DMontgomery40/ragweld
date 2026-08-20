@@ -6879,7 +6879,7 @@
           },
           "semantic_kg_llm_model": {
             "default": "",
-            "description": "LLM model name for GraphRAG semantic extraction (empty = use the catalog-preferred runtime-selectable GEN model; plain openai/gpt-5 is excluded)",
+            "description": "Explicit runtime-selectable GEN catalog model for GraphRAG semantic extraction; required when semantic KG is enabled",
             "title": "Semantic Kg Llm Model",
             "type": "string"
           },

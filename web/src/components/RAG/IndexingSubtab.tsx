@@ -412,6 +412,9 @@ export function IndexingSubtab() {
   }, [embeddingBackend, normalizedEmbeddingType, runtimeCapabilities, skipDense, tokenizationStrategy]);
 
   const indexBlockingReason = useMemo(() => {
+    if (semanticKgEnabled && !String(semanticKgLlmModel || '').trim()) {
+      return 'Select a runtime-selectable KG LLM model before enabling Semantic KG indexing.';
+    }
     if (skipDense !== 1 && String(embeddingBackend || '').toLowerCase() === 'provider' && !supportedRuntimeProvider) {
       return `Embedding provider '${normalizedEmbeddingType}' is not supported by the current backend runtime.`;
     }
@@ -427,6 +430,8 @@ export function IndexingSubtab() {
     embeddingStatus?.isMismatched,
     forceReindex,
     normalizedEmbeddingType,
+    semanticKgEnabled,
+    semanticKgLlmModel,
     skipDense,
     supportedRuntimeProvider,
     tokenizationCompatibility,
@@ -2582,7 +2587,7 @@ export function IndexingSubtab() {
                       />
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                         <span style={{ fontSize: '11px', color: 'var(--fg-muted)' }}>
-                          Empty uses the catalog-preferred GraphRAG model. Plain OpenAI `gpt-5` is intentionally hidden here because it keeps being chosen as a worse default than the newer catalog entries.
+                          Choose an explicit runtime-selectable model. Plain OpenAI `gpt-5` is intentionally excluded.
                         </span>
                       </div>
                     </div>

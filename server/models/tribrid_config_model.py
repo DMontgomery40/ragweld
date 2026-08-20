@@ -4944,7 +4944,7 @@ class GraphIndexingConfig(BaseModel):
 
     semantic_kg_llm_model: str = Field(
         default="",
-        description="LLM model name for GraphRAG semantic extraction (empty = use the catalog-preferred runtime-selectable GEN model; plain openai/gpt-5 is excluded)",
+        description="Explicit runtime-selectable GEN catalog model for GraphRAG semantic extraction; required when semantic KG is enabled",
     )
 
     semantic_kg_llm_timeout_s: int = Field(
