@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import re
 from contextlib import suppress
 from datetime import UTC, datetime
@@ -25,6 +26,8 @@ from server.models.tribrid_config_model import (
     CorpusUpdateRequest,
     GraphStats,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["repos"], responses=DEPENDENCY_UNAVAILABLE_RESPONSES)
 
@@ -336,6 +339,17 @@ async def delete_repo(corpus_id: str) -> dict[str, Any]:
     except Exception as exc:
         raise_postgres_unavailable_if_applicable(exc, boundary="Corpus deletion API")
         raise
+
+    # Remove pilot-lane state owned by this corpus: Qdrant alias/collections
+    # and the sidecar export directory. Best-effort — an unreachable Qdrant
+    # must not block corpus deletion, but we do not hide the attempt.
+    try:
+        from server.indexing.oss_retrieval_pilot import delete_retrieval_pilot_state
+
+        await delete_retrieval_pilot_state(corpus_id=repo_id)
+    except Exception:
+        logger.warning("Pilot-lane cleanup failed for corpus %s", repo_id, exc_info=True)
+
     return {"ok": True}
 
 

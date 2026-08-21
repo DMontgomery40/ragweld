@@ -247,13 +247,15 @@ async def test_retrieval_pilot_ingest_and_real_search_return_qdrant_hits(client:
         assert drift_ingest.status_code == 409, drift_ingest.text
         manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
 
-        # A wiped/empty Qdrant collection with a "ready" manifest must read as
-        # not-ready (404), never as an empty 200.
+        # A wiped/empty Qdrant physical collection with a "ready" manifest must
+        # read as not-ready (404), never as an empty 200 — the canonical name
+        # is an alias over a staged physical generation.
         import httpx as _httpx
 
-        collection = body["status"]["collection_name"]
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        physical = manifest["physical_collection"]
         qdrant_url = body["status"]["qdrant_url"]
-        delete_res = _httpx.delete(f"{qdrant_url}/collections/{collection}", timeout=10.0)
+        delete_res = _httpx.delete(f"{qdrant_url}/collections/{physical}", timeout=10.0)
         assert delete_res.status_code in (200, 202), delete_res.text
         wiped_res = await client.post(
             f"/api/index/{corpus_id}/pilot/search",

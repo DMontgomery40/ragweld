@@ -3,21 +3,23 @@ from __future__ import annotations
 import importlib.util
 import json
 import re
+import shutil
+import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from server.chat.context_formatter import format_context_for_llm
+from server.chat.generation import generate_chat_text
+from server.chat.handler import ChatGenerationError
+from server.chat.prompt_builder import get_system_prompt
+from server.chat.provider_router import select_provider_route
 from server.config import load_config
 from server.dependency_errors import DependencyUnavailableError
 from server.indexing.chunker import Chunker
 from server.indexing.embedder import Embedder
 from server.indexing.loader import FileLoader
 from server.indexing.text_extractors import extract_text_for_path
-from server.chat.context_formatter import format_context_for_llm
-from server.chat.generation import generate_chat_text
-from server.chat.handler import ChatGenerationError
-from server.chat.prompt_builder import get_system_prompt
-from server.chat.provider_router import select_provider_route
 from server.models.retrieval import ChunkMatch
 from server.models.runtime_gateway import ChatProviderInfo
 from server.models.tribrid_config_model import (
@@ -152,6 +154,21 @@ def _pilot_document_store(cfg: TriBridConfig, corpus_id: str, *, embedding_dim: 
     )
 
 
+def _pilot_staging_store(cfg: TriBridConfig, staging: str, *, embedding_dim: int):
+    """Open a fresh staging collection for a full pilot hydration."""
+    from haystack_integrations.document_stores.qdrant import QdrantDocumentStore
+
+    return QdrantDocumentStore(
+        url=_qdrant_url(cfg),
+        index=staging,
+        embedding_dim=int(embedding_dim),
+        recreate_index=True,
+        use_sparse_embeddings=True,
+        sparse_idf=True,
+        progress_bar=False,
+    )
+
+
 def _raise_qdrant_unavailable(exc: Exception, *, operation: str) -> None:
     from qdrant_client.http.exceptions import ResponseHandlingException
 
@@ -162,6 +179,84 @@ def _raise_qdrant_unavailable(exc: Exception, *, operation: str) -> None:
 def _collection_name(corpus_id: str) -> str:
     safe = re.sub(r"[^A-Za-z0-9_]+", "_", str(corpus_id or "").strip()).strip("_") or "unknown"
     return f"pilot_chunks_{safe}".lower()
+
+
+def _qdrant_admin_client(cfg: TriBridConfig) -> Any:
+    from qdrant_client import QdrantClient
+
+    return QdrantClient(url=_qdrant_url(cfg))
+
+
+def _promote_staging_collection(cfg: TriBridConfig, *, alias: str, staging: str) -> None:
+    """Atomically point the canonical alias at the freshly built staging collection.
+
+    Handles the pre-alias era (a physical collection carrying the alias name),
+    switches the alias in one atomic operation batch, and removes superseded
+    physical collections afterwards.
+    """
+    from qdrant_client import models as qmodels
+
+    client = _qdrant_admin_client(cfg)
+    try:
+        try:
+            existing_aliases = {
+                a.alias_name: a.collection_name for a in client.get_aliases().aliases
+            }
+        except Exception:
+            existing_aliases = {}
+        previous_physical = existing_aliases.get(alias)
+
+        if previous_physical is None and client.collection_exists(alias):
+            # Pre-alias physical collection occupying the canonical name.
+            client.delete_collection(alias)
+
+        operations: list[Any] = []
+        if previous_physical is not None:
+            operations.append(
+                qmodels.DeleteAliasOperation(delete_alias=qmodels.DeleteAlias(alias_name=alias))
+            )
+        operations.append(
+            qmodels.CreateAliasOperation(
+                create_alias=qmodels.CreateAlias(collection_name=staging, alias_name=alias)
+            )
+        )
+        client.update_collection_aliases(change_aliases_operations=operations)
+
+        # Remove superseded physical generations of this corpus.
+        try:
+            for collection in client.get_collections().collections:
+                name = str(collection.name)
+                if name.startswith(f"{alias}__") and name != staging:
+                    client.delete_collection(name)
+        except Exception:
+            pass
+    finally:
+        client.close()
+
+
+def _delete_pilot_collections(cfg: TriBridConfig, corpus_id: str) -> None:
+    """Remove the pilot alias and every physical generation for a corpus."""
+    from qdrant_client import models as qmodels
+
+    alias = _collection_name(corpus_id)
+    client = _qdrant_admin_client(cfg)
+    try:
+        try:
+            aliases = {a.alias_name: a.collection_name for a in client.get_aliases().aliases}
+        except Exception:
+            aliases = {}
+        if alias in aliases:
+            client.update_collection_aliases(
+                change_aliases_operations=[
+                    qmodels.DeleteAliasOperation(delete_alias=qmodels.DeleteAlias(alias_name=alias))
+                ]
+            )
+        for collection in list(client.get_collections().collections):
+            name = str(collection.name)
+            if name == alias or name.startswith(f"{alias}__"):
+                client.delete_collection(name)
+    finally:
+        client.close()
 
 
 def _package_statuses() -> list[RetrievalPilotPackageStatus]:
@@ -478,7 +573,9 @@ async def ingest_retrieval_pilot_execution(*, corpus_id: str, repo_path: str, fo
                 },
             )
 
-    store = _pilot_document_store(cfg, corpus_id, embedding_dim=int(embedder.dim), recreate=bool(force_rebuild))
+    alias = _collection_name(corpus_id)
+    staging = f"{alias}__{uuid.uuid4().hex[:8]}"
+    store = _pilot_staging_store(cfg, staging, embedding_dim=int(embedder.dim))
 
     try:
         lines = [line for line in documents_path.read_text(encoding="utf-8").splitlines() if line.strip()]
@@ -527,6 +624,12 @@ async def ingest_retrieval_pilot_execution(*, corpus_id: str, repo_path: str, fo
     finally:
         _close_qdrant_document_store(store)
 
+    try:
+        _promote_staging_collection(cfg, alias=alias, staging=staging)
+    except Exception as exc:
+        _raise_qdrant_unavailable(exc, operation="Pilot Qdrant promote")
+        raise
+
     manifest = _parse_manifest(corpus_id)
     dense_contract = dense_contract_from_config(cfg)
     manifest.update(
@@ -538,6 +641,7 @@ async def ingest_retrieval_pilot_execution(*, corpus_id: str, repo_path: str, fo
             "dense_contract_hash": contract_hash(dense_contract),
             "sparse_contract": _sparse_contract(),
             "sparse_contract_hash": contract_hash(_sparse_contract()),
+            "physical_collection": staging,
         }
     )
     manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
@@ -721,6 +825,13 @@ async def search_retrieval_pilot_execution(
             stored_document_count = int(store.count_documents())
         except Exception as exc:
             _raise_qdrant_unavailable(exc, operation="Pilot Qdrant search")
+            from qdrant_client.http.exceptions import UnexpectedResponse
+
+            if isinstance(exc, UnexpectedResponse) and exc.status_code == 404:
+                # Dangling alias or wiped physical collection.
+                raise FileNotFoundError(
+                    "pilot execution lane not ready; Qdrant collection is empty or missing — re-ingest the pilot lane"
+                ) from exc
             raise
         expected_document_count = int(manifest.get("indexed_document_count") or 0)
         if stored_document_count <= 0 and expected_document_count > 0:
@@ -939,3 +1050,10 @@ async def answer_retrieval_pilot_execution(
         sparse_result_count=int(search.sparse_result_count),
         fusion_method=str(search.fusion_method or ""),
     )
+
+
+async def delete_retrieval_pilot_state(*, corpus_id: str) -> None:
+    """Delete the pilot export sidecar and Qdrant collections for a corpus."""
+    cfg = await _load_effective_config(corpus_id)
+    _delete_pilot_collections(cfg, corpus_id)
+    shutil.rmtree(_pilot_dir(corpus_id), ignore_errors=True)
