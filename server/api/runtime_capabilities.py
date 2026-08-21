@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Query
 
-from server.models.tribrid_config_model import RuntimeCapabilitiesResponse, TriBridConfig
+from server.models.tribrid_config_model import RuntimeCapabilitiesResponse
 from server.runtime_capabilities import build_runtime_capabilities_response_for_config
 from server.services.config_store import CorpusNotFoundError
 from server.services.config_store import get_config as load_scoped_config
@@ -19,7 +19,7 @@ async def get_runtime_capabilities(
     """Return the executable runtime capability matrix for selection and docs surfaces."""
     scope_id = (repo or corpus_id or repo_id or "").strip() or None
     try:
-        cfg = await load_scoped_config(repo_id=scope_id) if scope_id else TriBridConfig()
+        cfg = await load_scoped_config(repo_id=scope_id)
     except CorpusNotFoundError:
-        cfg = TriBridConfig()
+        cfg = await load_scoped_config(repo_id=None)
     return build_runtime_capabilities_response_for_config(cfg)

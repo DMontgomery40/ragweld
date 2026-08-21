@@ -68,14 +68,6 @@ logger = logging.getLogger(__name__)
 _config: TriBridConfig | None = None
 _fusion: FusionProtocol | None = None
 
-def get_config() -> TriBridConfig:
-    """Get the current config. Override with set_config() for testing."""
-    if _config is not None:
-        return _config
-    # Default config - LAW provides all defaults via default_factory
-    return TriBridConfig()
-
-
 def get_fusion() -> FusionProtocol:
     """Get the fusion retrieval service. Override with set_fusion() for testing."""
     if _fusion is not None:
@@ -171,7 +163,7 @@ async def _append_chat_query_log_entry(
     top_paths: list[str],
 ) -> None:
     """Best-effort query log append for triplet mining correlation."""
-    if int(getattr(config.tracing, "tracing_enabled", 1) or 0) != 1:
+    if not getattr(config.tracing, "tracing_enabled", True):
         return
 
     from server.observability.query_log import append_query_log
@@ -228,9 +220,9 @@ async def chat(request: ChatRequest, response: Response) -> ChatResponse:
         config = _config
     else:
         try:
-            config = await load_scoped_config(repo_id=primary) if primary else TriBridConfig()
+            config = await load_scoped_config(repo_id=primary)
         except CorpusNotFoundError:
-            config = TriBridConfig()
+            config = await load_scoped_config(repo_id=None)
         except Exception as e:
             raise_postgres_unavailable_if_applicable(e, boundary="Chat config load")
             raise
@@ -480,9 +472,9 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
         config = _config
     else:
         try:
-            config = await load_scoped_config(repo_id=primary) if primary else TriBridConfig()
+            config = await load_scoped_config(repo_id=primary)
         except CorpusNotFoundError:
-            config = TriBridConfig()
+            config = await load_scoped_config(repo_id=None)
         except Exception as e:
             raise_postgres_unavailable_if_applicable(e, boundary="Chat stream config load")
             raise
@@ -792,9 +784,9 @@ async def list_chat_models(
         cfg = _config
     else:
         try:
-            cfg = await load_scoped_config(repo_id=scope_id) if scope_id else TriBridConfig()
+            cfg = await load_scoped_config(repo_id=scope_id)
         except CorpusNotFoundError:
-            cfg = TriBridConfig()
+            cfg = await load_scoped_config(repo_id=None)
 
     try:
         discovered = await discover_litellm_models(cfg.chat.litellm)
@@ -835,9 +827,9 @@ async def chat_health(
         cfg = _config
     else:
         try:
-            cfg = await load_scoped_config(repo_id=scope_id) if scope_id else TriBridConfig()
+            cfg = await load_scoped_config(repo_id=scope_id)
         except CorpusNotFoundError:
-            cfg = TriBridConfig()
+            cfg = await load_scoped_config(repo_id=None)
 
     try:
         rows = await discover_litellm_models(cfg.chat.litellm)
@@ -863,7 +855,7 @@ async def chat_health(
 @router.post("/recall/index", response_model=RecallIndexResponse)
 async def recall_index(request: RecallIndexRequest) -> RecallIndexResponse:
     """Manually index a conversation into Recall."""
-    cfg = get_config()
+    cfg = _config if _config is not None else await load_scoped_config(repo_id=None)
     if not cfg.chat.recall.enabled:
         raise HTTPException(status_code=400, detail="Recall is disabled")
 
@@ -893,7 +885,7 @@ async def recall_index(request: RecallIndexRequest) -> RecallIndexResponse:
 @router.get("/recall/status", response_model=RecallStatusResponse)
 async def recall_status() -> RecallStatusResponse:
     """Return Recall corpus bootstrap/index status."""
-    cfg = get_config()
+    cfg = _config if _config is not None else await load_scoped_config(repo_id=None)
     corpus_id = str(cfg.chat.recall.default_corpus_id or "recall_default")
 
     pg = PostgresClient(cfg.indexing.postgres_url)
