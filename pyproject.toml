@@ -52,6 +52,7 @@ dependencies = [
     "qdrant-haystack>=10.3.0",
     "docling>=2.81.0",
     "neo4j-graphrag[openai]==1.14.1",
+    "fastembed-haystack>=2.6.0",
 ]
 
 [project.optional-dependencies]

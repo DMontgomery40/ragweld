@@ -181,8 +181,45 @@ async def test_retrieval_pilot_ingest_and_real_search_return_qdrant_hits(client:
         assert body["status"]["execution_ready"] is True
         # Citation-capable result shape: full content, leg discriminator, metadata.
         assert top["content"].strip()
-        assert top["source"] == "vector"
+        assert top["source"] in {"vector", "sparse"}
         assert top["metadata"].get("file_path") == top["file_path"]
+        # Hybrid truth: both legs ran and fusion followed the operator config.
+        assert int(body["vector_result_count"]) >= 1
+        assert int(body["sparse_result_count"]) >= 1
+        assert body["fusion_method"] in {"rrf", "weighted"}
+        assert top["metadata"].get("legs")
+
+        # Sparse-only leg returns keyword hits with sparse provenance.
+        sparse_res = await client.post(
+            f"/api/index/{corpus_id}/pilot/search",
+            params={"repo_path": str(repo)},
+            json={
+                "corpus_id": corpus_id,
+                "query": "retrieve_context",
+                "top_k": 3,
+                "include_vector": False,
+                "include_sparse": True,
+            },
+        )
+        assert sparse_res.status_code == 200, sparse_res.text
+        sparse_body = sparse_res.json()
+        assert sparse_body["fusion_method"] == "single_leg"
+        assert len(sparse_body["results"]) >= 1
+        assert all(r["source"] == "sparse" for r in sparse_body["results"])
+
+        # Requesting no legs at all is a client error, not an empty 200.
+        no_legs = await client.post(
+            f"/api/index/{corpus_id}/pilot/search",
+            params={"repo_path": str(repo)},
+            json={
+                "corpus_id": corpus_id,
+                "query": "retrieve_context",
+                "top_k": 3,
+                "include_vector": False,
+                "include_sparse": False,
+            },
+        )
+        assert no_legs.status_code == 422
 
         # A drifted stored contract must fail closed with the typed 409, not
         # silently search under a different embedding space.

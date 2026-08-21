@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from server.config import load_config
+from server.dependency_errors import DependencyUnavailableError
 from server.indexing.chunker import Chunker
 from server.indexing.embedder import Embedder
 from server.indexing.loader import FileLoader
@@ -16,16 +17,15 @@ from server.models.tribrid_config_model import (
     RetrievalPilotExportResponse,
     RetrievalPilotIngestResponse,
     RetrievalPilotPackageStatus,
-    RetrievalPilotSearchResponse,
-    RetrievalPilotSearchResult,
     RetrievalPilotSearchPreviewResponse,
     RetrievalPilotSearchPreviewResult,
+    RetrievalPilotSearchResponse,
+    RetrievalPilotSearchResult,
     RetrievalPilotStatusResponse,
     TriBridConfig,
 )
-from server.dependency_errors import DependencyUnavailableError
 from server.retrieval.contracts import contract_hash, dense_contract_from_config
-from server.retrieval.errors import EmbeddingContractMismatchError
+from server.retrieval.errors import EmbeddingContractMismatchError, SparseContractMismatchError
 from server.services.config_store import get_config as load_scoped_config
 
 _ROOT = Path(__file__).resolve().parents[2]
@@ -58,6 +58,38 @@ _PILOT_PACKAGES: tuple[tuple[str, str], ...] = (
 _DOCLING_SUFFIXES: frozenset[str] = frozenset({".pdf", ".docx", ".pptx", ".xlsx", ".html", ".htm"})
 
 _DOCLING_CONVERTER: Any = None
+
+_SPARSE_MODEL = "Qdrant/bm25"
+_SPARSE_DOC_EMBEDDER: Any = None
+_SPARSE_TEXT_EMBEDDER: Any = None
+
+
+def _sparse_doc_embedder() -> Any:
+    global _SPARSE_DOC_EMBEDDER
+    if _SPARSE_DOC_EMBEDDER is None:
+        from haystack_integrations.components.embedders.fastembed import (
+            FastembedSparseDocumentEmbedder,
+        )
+
+        embedder = FastembedSparseDocumentEmbedder(model=_SPARSE_MODEL)
+        embedder.warm_up()
+        _SPARSE_DOC_EMBEDDER = embedder
+    return _SPARSE_DOC_EMBEDDER
+
+
+def _sparse_text_embedder() -> Any:
+    global _SPARSE_TEXT_EMBEDDER
+    if _SPARSE_TEXT_EMBEDDER is None:
+        from haystack_integrations.components.embedders.fastembed import FastembedSparseTextEmbedder
+
+        embedder = FastembedSparseTextEmbedder(model=_SPARSE_MODEL)
+        embedder.warm_up()
+        _SPARSE_TEXT_EMBEDDER = embedder
+    return _SPARSE_TEXT_EMBEDDER
+
+
+def _sparse_contract() -> dict[str, Any]:
+    return {"engine": "qdrant_sparse_idf", "model": _SPARSE_MODEL, "idf": True}
 
 
 def _docling_converter() -> Any:
@@ -106,6 +138,8 @@ def _pilot_document_store(cfg: TriBridConfig, corpus_id: str, *, embedding_dim: 
         index=_collection_name(corpus_id),
         embedding_dim=int(embedding_dim),
         recreate_index=bool(recreate),
+        use_sparse_embeddings=True,
+        sparse_idf=True,
         progress_bar=False,
     )
 
@@ -470,6 +504,7 @@ async def ingest_retrieval_pilot_execution(*, corpus_id: str, repo_path: str, fo
                 )
                 for raw, emb in zip(parsed_batch, embeddings, strict=True)
             ]
+            docs = list(_sparse_doc_embedder().run(documents=docs)["documents"])
             try:
                 store.write_documents(docs, policy=DuplicatePolicy.OVERWRITE)
             except Exception as exc:
@@ -493,6 +528,8 @@ async def ingest_retrieval_pilot_execution(*, corpus_id: str, repo_path: str, fo
             "last_indexed_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
             "dense_contract": dense_contract,
             "dense_contract_hash": contract_hash(dense_contract),
+            "sparse_contract": _sparse_contract(),
+            "sparse_contract_hash": contract_hash(_sparse_contract()),
         }
     )
     manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
@@ -607,8 +644,12 @@ async def search_retrieval_pilot_execution(
     repo_path: str,
     query: str,
     top_k: int,
+    include_vector: bool = True,
+    include_sparse: bool = True,
 ) -> RetrievalPilotSearchResponse:
     _require_execution_packages()
+    if not include_vector and not include_sparse:
+        raise ValueError("at least one retrieval leg (vector or sparse) must be requested")
     terms = _query_terms(query)
     if not terms:
         raise ValueError("query must include at least one searchable term")
@@ -617,7 +658,10 @@ async def search_retrieval_pilot_execution(
     if not bool(manifest.get("execution_ready") or False):
         raise FileNotFoundError("pilot execution lane not ready; ingest the Haystack/Qdrant lane first")
 
-    from haystack_integrations.components.retrievers.qdrant import QdrantEmbeddingRetriever
+    from haystack_integrations.components.retrievers.qdrant import (
+        QdrantEmbeddingRetriever,
+        QdrantSparseEmbeddingRetriever,
+    )
 
     cfg = await _load_effective_config(corpus_id)
     stored_contract = manifest.get("dense_contract")
@@ -627,7 +671,19 @@ async def search_retrieval_pilot_execution(
         raise FileNotFoundError(
             "pilot execution lane has no recorded embedding contract; re-ingest with force_rebuild=true"
         )
-    if True:
+    if include_sparse:
+        stored_sparse = manifest.get("sparse_contract")
+        if not isinstance(stored_sparse, dict) or not stored_sparse:
+            raise FileNotFoundError(
+                "pilot execution lane has no recorded sparse contract; re-ingest with force_rebuild=true"
+            )
+        if contract_hash(stored_sparse) != contract_hash(_sparse_contract()):
+            raise SparseContractMismatchError(
+                corpus_id=corpus_id,
+                expected_contract=dict(stored_sparse),
+                current_contract=_sparse_contract(),
+            )
+    if include_vector:
         current_contract = dense_contract_from_config(cfg)
         if contract_hash(stored_contract) != contract_hash(current_contract):
             raise EmbeddingContractMismatchError(
@@ -647,6 +703,8 @@ async def search_retrieval_pilot_execution(
             )
     embedder = _pilot_embedder(cfg)
     store = _pilot_document_store(cfg, corpus_id, embedding_dim=int(embedder.dim), recreate=False)
+    vector_documents: list[Any] = []
+    sparse_documents: list[Any] = []
     try:
         # Fix truthfulness after a data-plane reset: Haystack auto-creates a
         # missing collection, so an empty store with a "ready" manifest must
@@ -661,19 +719,41 @@ async def search_retrieval_pilot_execution(
             raise FileNotFoundError(
                 "pilot execution lane not ready; Qdrant collection is empty or missing — re-ingest the pilot lane"
             )
-        retriever = QdrantEmbeddingRetriever(document_store=store, top_k=int(top_k))
-        try:
-            query_embedding = await embedder.embed(query)
-        except RuntimeError as exc:
-            raise DependencyUnavailableError("embedding_provider", "Pilot search embedding") from exc
-        try:
-            response = retriever.run(query_embedding=query_embedding, top_k=int(top_k))
-        except Exception as exc:
-            _raise_qdrant_unavailable(exc, operation="Pilot Qdrant search")
-            raise
-        documents = list(response.get("documents") or [])
+        if include_vector:
+            retriever = QdrantEmbeddingRetriever(document_store=store, top_k=int(top_k))
+            try:
+                query_embedding = await embedder.embed(query)
+            except RuntimeError as exc:
+                raise DependencyUnavailableError("embedding_provider", "Pilot search embedding") from exc
+            try:
+                response = retriever.run(query_embedding=query_embedding, top_k=int(top_k))
+            except Exception as exc:
+                _raise_qdrant_unavailable(exc, operation="Pilot Qdrant search")
+                raise
+            vector_documents = list(response.get("documents") or [])
+        if include_sparse:
+            sparse_retriever = QdrantSparseEmbeddingRetriever(document_store=store, top_k=int(top_k))
+            try:
+                sparse_query = _sparse_text_embedder().run(text=query)["sparse_embedding"]
+            except Exception as exc:
+                raise DependencyUnavailableError("embedding_provider", "Pilot sparse query embedding") from exc
+            try:
+                sparse_response = sparse_retriever.run(query_sparse_embedding=sparse_query, top_k=int(top_k))
+            except Exception as exc:
+                _raise_qdrant_unavailable(exc, operation="Pilot Qdrant sparse search")
+                raise
+            sparse_documents = list(sparse_response.get("documents") or [])
     finally:
         _close_qdrant_document_store(store)
+
+    fused, fusion_method = _fuse_pilot_legs(
+        cfg,
+        vector_documents=vector_documents,
+        sparse_documents=sparse_documents,
+        include_vector=include_vector,
+        include_sparse=include_sparse,
+        top_k=int(top_k),
+    )
 
     results = [
         RetrievalPilotSearchResult(
@@ -683,13 +763,13 @@ async def search_retrieval_pilot_execution(
             start_line=int((doc.meta or {}).get("start_line") or 1),
             end_line=int((doc.meta or {}).get("end_line") or 1),
             language=str((doc.meta or {}).get("language") or "") or None,
-            score=float(doc.score or 0.0),
+            score=float(score),
             excerpt=_excerpt(str(doc.content or ""), terms),
             content=str(doc.content or ""),
-            source="vector",
-            metadata=dict(doc.meta or {}),
+            source=source,
+            metadata={**dict(doc.meta or {}), "legs": legs},
         )
-        for doc in documents
+        for doc, score, source, legs in fused
     ]
 
     status = await build_retrieval_pilot_status(corpus_id=corpus_id, repo_path=repo_path)
@@ -698,4 +778,66 @@ async def search_retrieval_pilot_execution(
         query=query,
         results=results,
         status=status,
+        vector_result_count=len(vector_documents),
+        sparse_result_count=len(sparse_documents),
+        fusion_method=fusion_method,
     )
+
+
+def _fuse_pilot_legs(
+    cfg: TriBridConfig,
+    *,
+    vector_documents: list[Any],
+    sparse_documents: list[Any],
+    include_vector: bool,
+    include_sparse: bool,
+    top_k: int,
+) -> tuple[list[tuple[Any, float, str, list[str]]], str]:
+    """Fuse per-leg Qdrant results with the operator's fusion configuration.
+
+    Mirrors the native lane semantics: RRF over rank positions, or
+    weighted score fusion, honoring fusion.method/rrf_k/vector_weight/
+    sparse_weight. Returns (document, fused_score, primary_source, legs).
+    """
+
+    legs: list[tuple[str, list[Any]]] = []
+    if include_vector:
+        legs.append(("vector", vector_documents))
+    if include_sparse:
+        legs.append(("sparse", sparse_documents))
+
+    if len(legs) == 1:
+        source, docs = legs[0]
+        return [(doc, float(doc.score or 0.0), source, [source]) for doc in docs[:top_k]], "single_leg"
+
+    method = str(cfg.fusion.method or "rrf").strip().lower()
+    doc_map: dict[str, Any] = {}
+    leg_membership: dict[str, list[str]] = {}
+    scores: dict[str, float] = {}
+
+    if method == "weighted":
+        weights = {"vector": float(cfg.fusion.vector_weight), "sparse": float(cfg.fusion.sparse_weight)}
+        for source, docs in legs:
+            for doc in docs:
+                key = str(doc.id or "")
+                doc_map.setdefault(key, doc)
+                leg_membership.setdefault(key, []).append(source)
+                scores[key] = scores.get(key, 0.0) + float(doc.score or 0.0) * weights[source]
+        fusion_method = "weighted"
+    else:
+        k = int(cfg.fusion.rrf_k)
+        for source, docs in legs:
+            for rank, doc in enumerate(docs):
+                key = str(doc.id or "")
+                doc_map.setdefault(key, doc)
+                leg_membership.setdefault(key, []).append(source)
+                scores[key] = scores.get(key, 0.0) + 1.0 / (k + rank + 1)
+        fusion_method = "rrf"
+
+    ordered = sorted(scores, key=lambda key: scores[key], reverse=True)[:top_k]
+    fused: list[tuple[Any, float, str, list[str]]] = []
+    for key in ordered:
+        membership = leg_membership.get(key, [])
+        primary = membership[0] if membership else "vector"
+        fused.append((doc_map[key], scores[key], primary, membership))
+    return fused, fusion_method

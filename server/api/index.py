@@ -2245,6 +2245,8 @@ async def search_retrieval_pilot_execution_route(
             repo_path=resolved_repo_path,
             query=str(request.query or ""),
             top_k=int(request.top_k),
+            include_vector=bool(request.include_vector),
+            include_sparse=bool(request.include_sparse),
         )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

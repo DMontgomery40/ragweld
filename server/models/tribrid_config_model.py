@@ -359,6 +359,8 @@ class RetrievalPilotSearchRequest(BaseModel):
     )
     query: str = Field(description="Search query to execute against the real pilot lane.")
     top_k: int = Field(default=5, ge=1, le=20, description="Maximum hits to return.")
+    include_vector: bool = Field(default=True, description="Run the dense (vector) retrieval leg.")
+    include_sparse: bool = Field(default=True, description="Run the sparse (BM25/IDF) retrieval leg.")
 
 
 class RetrievalPilotSearchResult(BaseModel):
@@ -397,6 +399,9 @@ class RetrievalPilotSearchResponse(BaseModel):
     query: str = Field(description="Query executed against the real pilot lane.")
     results: list[RetrievalPilotSearchResult] = Field(default_factory=list)
     status: RetrievalPilotStatusResponse = Field(description="Pilot status snapshot used for the real search.")
+    vector_result_count: int = Field(default=0, ge=0, description="Hits returned by the dense leg before fusion.")
+    sparse_result_count: int = Field(default=0, ge=0, description="Hits returned by the sparse leg before fusion.")
+    fusion_method: str = Field(default="", description="Fusion applied across requested legs (rrf, weighted, single_leg).")
 
 
 # =============================================================================

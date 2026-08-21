@@ -4222,6 +4222,10 @@ export interface RetrievalPilotSearchRequest {
   query: string;
   /** Maximum hits to return. */
   top_k?: number;
+  /** Run the dense (vector) retrieval leg. */
+  include_vector?: boolean;
+  /** Run the sparse (BM25/IDF) retrieval leg. */
+  include_sparse?: boolean;
 }
 
 /** Response for real Haystack/Qdrant pilot search. */
@@ -4236,6 +4240,12 @@ export interface RetrievalPilotSearchResponse {
   results?: RetrievalPilotSearchResult[];
   /** Pilot status snapshot used for the real search. */
   status: RetrievalPilotStatusResponse;
+  /** Hits returned by the dense leg before fusion. */
+  vector_result_count?: number;
+  /** Hits returned by the sparse leg before fusion. */
+  sparse_result_count?: number;
+  /** Fusion applied across requested legs (rrf, weighted, single_leg). */
+  fusion_method?: string;
 }
 
 /** Response payload for GET /api/runtime-capabilities. */

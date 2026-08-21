@@ -13930,6 +13930,18 @@
       "RetrievalPilotSearchRequest": {
         "description": "Request to search the real Haystack/Qdrant execution lane.",
         "properties": {
+          "include_sparse": {
+            "default": true,
+            "description": "Run the sparse (BM25/IDF) retrieval leg.",
+            "title": "Include Sparse",
+            "type": "boolean"
+          },
+          "include_vector": {
+            "default": true,
+            "description": "Run the dense (vector) retrieval leg.",
+            "title": "Include Vector",
+            "type": "boolean"
+          },
           "query": {
             "description": "Search query to execute against the real pilot lane.",
             "title": "Query",
@@ -13971,6 +13983,12 @@
             "title": "Corpus Id",
             "type": "string"
           },
+          "fusion_method": {
+            "default": "",
+            "description": "Fusion applied across requested legs (rrf, weighted, single_leg).",
+            "title": "Fusion Method",
+            "type": "string"
+          },
           "ok": {
             "default": true,
             "title": "Ok",
@@ -13988,9 +14006,23 @@
             "title": "Results",
             "type": "array"
           },
+          "sparse_result_count": {
+            "default": 0,
+            "description": "Hits returned by the sparse leg before fusion.",
+            "minimum": 0.0,
+            "title": "Sparse Result Count",
+            "type": "integer"
+          },
           "status": {
             "$ref": "#/components/schemas/RetrievalPilotStatusResponse",
             "description": "Pilot status snapshot used for the real search."
+          },
+          "vector_result_count": {
+            "default": 0,
+            "description": "Hits returned by the dense leg before fusion.",
+            "minimum": 0.0,
+            "title": "Vector Result Count",
+            "type": "integer"
           }
         },
         "required": [
