@@ -24,16 +24,44 @@ from server.training.control_plane import build_agent_control_plane_status
 _CRITICAL_GROUPS = {"metrics", "traces", "gateway", "serving", "workflow", "retrieval", "cost", "frontend"}
 
 
-async def _check_url(url: str) -> tuple[bool | None, str | None]:
-    target = str(url or "").strip()
+_READINESS_PATHS: dict[str, str] = {
+    "tempo": "/ready",
+    "alloy": "/-/ready",
+    "mimir": "/ready",
+    "pyroscope": "/ready",
+    "opencost": "/healthz",
+    "alertmanager": "/-/ready",
+    "langfuse": "/api/public/health",
+    "grafana": "/api/health",
+}
+
+
+def readiness_probe_url(component_id: str, base_url: str) -> str:
+    """Functional readiness URL for a component base URL (base itself when unknown)."""
+    target = str(base_url or "").strip().rstrip("/")
+    if not target:
+        return ""
+    path = _READINESS_PATHS.get(component_id)
+    if not path or target.endswith(path):
+        return target
+    return target + path
+
+
+async def _check_url(url: str, *, component_id: str | None = None) -> tuple[bool | None, str | None]:
+    target = readiness_probe_url(component_id, url) if component_id else str(url or "").strip()
     if not target:
         return None, None
     try:
         async with httpx.AsyncClient(timeout=2.0, follow_redirects=True) as client:
             response = await client.get(target)
-        return response.status_code < 500, f"HTTP {response.status_code}"
     except Exception as exc:
         return False, str(exc)
+    status = response.status_code
+    if component_id in {"otlp_export", "faro"} and status in {405, 415}:
+        # OTLP/Faro intake endpoints are POST-only; a method rejection proves the listener.
+        return True, f"listener present (HTTP {status} to GET)"
+    # Readiness is a 2xx on the readiness path; 4xx means the path or service is wrong.
+    return status < 300, f"HTTP {status}"
 
 
 async def _check_model_api(url: str, *, api_key: str | None = None) -> tuple[bool, str]:
@@ -239,16 +267,16 @@ async def build_observability_status(config: TriBridConfig, *, repo_id: str | No
     else:
         vllm_url = str(config.chat.vllm.base_url or "").strip()
 
-    otlp_reachable, otlp_detail = await _check_url(otlp_url)
-    grafana_reachable, grafana_detail = await _check_url(grafana_url)
-    tempo_reachable, tempo_detail = await _check_url(tempo_url)
-    alloy_reachable, alloy_detail = await _check_url(alloy_url)
-    mimir_reachable, mimir_detail = await _check_url(mimir_url)
-    pyroscope_reachable, pyroscope_detail = await _check_url(pyroscope_url)
-    faro_reachable, faro_detail = await _check_url(faro_url)
-    opencost_reachable, opencost_detail = await _check_url(opencost_url)
-    alertmanager_reachable, alertmanager_detail = await _check_url(alertmanager_url)
-    langfuse_reachable, langfuse_detail = await _check_url(langfuse_url)
+    otlp_reachable, otlp_detail = await _check_url(otlp_url, component_id="otlp_export")
+    grafana_reachable, grafana_detail = await _check_url(grafana_url, component_id="grafana")
+    tempo_reachable, tempo_detail = await _check_url(tempo_url, component_id="tempo")
+    alloy_reachable, alloy_detail = await _check_url(alloy_url, component_id="alloy")
+    mimir_reachable, mimir_detail = await _check_url(mimir_url, component_id="mimir")
+    pyroscope_reachable, pyroscope_detail = await _check_url(pyroscope_url, component_id="pyroscope")
+    faro_reachable, faro_detail = await _check_url(faro_url, component_id="faro")
+    opencost_reachable, opencost_detail = await _check_url(opencost_url, component_id="opencost")
+    alertmanager_reachable, alertmanager_detail = await _check_url(alertmanager_url, component_id="alertmanager")
+    langfuse_reachable, langfuse_detail = await _check_url(langfuse_url, component_id="langfuse")
     if not litellm_enabled:
         litellm_reachable, litellm_detail = None, None
     elif litellm_resolution_error:
@@ -269,7 +297,7 @@ async def build_observability_status(config: TriBridConfig, *, repo_id: str | No
             enabled=config.tracing.tracing_enabled and mode != "off",
             configured=True,
             reachable=True,
-            detail="Fallback UI trace buffer used by the workbench.",
+            detail="In-process trace buffer feeding the workbench trace views.",
         ),
         _decorate_component(
             component_id="otlp_export",

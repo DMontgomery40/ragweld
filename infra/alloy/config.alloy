@@ -2,6 +2,7 @@ logging {
   level = "info"
 }
 
+// OTLP intake for the host API (traces + logs) and any OTLP-speaking service.
 otelcol.receiver.otlp "default" {
   grpc {
     endpoint = "0.0.0.0:4317"
@@ -13,6 +14,7 @@ otelcol.receiver.otlp "default" {
 
   output {
     traces = [otelcol.exporter.otlp.tempo.input]
+    logs   = [otelcol.exporter.loki.default.input]
   }
 }
 
@@ -23,5 +25,19 @@ otelcol.exporter.otlp "tempo" {
     tls {
       insecure = true
     }
+  }
+}
+
+// OTLP logs -> Loki. Resource attributes named in the `loki.resource.labels`
+// hint become Loki stream labels (service.name, ragweld.service,
+// deployment.runtime), which keeps host-process logs distinguishable from
+// container logs shipped by promtail.
+otelcol.exporter.loki "default" {
+  forward_to = [loki.write.default.receiver]
+}
+
+loki.write "default" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
   }
 }

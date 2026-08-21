@@ -121,14 +121,14 @@ export default function ChatTab() {
   const lokiQuery = useMemo(() => {
     switch (logService) {
       case 'api':
-        return '{compose_service="api"}';
+        return '{ragweld_service="api"}';
       case 'postgres':
-        return '{compose_service="postgres"}';
+        return '{ragweld_service="postgres"}';
       case 'neo4j':
-        return '{compose_service="neo4j"}';
+        return '{ragweld_service="neo4j"}';
       case 'all':
       default:
-        return '{compose_service=~"api|postgres|neo4j"}';
+        return '{ragweld_service=~"api|postgres|neo4j"}';
     }
   }, [logService]);
 

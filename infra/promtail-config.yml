@@ -30,6 +30,12 @@ scrape_configs:
         target_label: 'compose_project'
       - source_labels: ['__meta_docker_container_label_com_docker_compose_service']
         target_label: 'compose_service'
+      # Shared service label across container logs (promtail) and host-process
+      # logs (OTLP via Alloy) so one LogQL selector covers both runtimes.
+      - source_labels: ['__meta_docker_container_label_com_docker_compose_service']
+        target_label: 'ragweld_service'
+      - target_label: 'deployment_runtime'
+        replacement: 'container'
     pipeline_stages:
       - json:
           expressions:

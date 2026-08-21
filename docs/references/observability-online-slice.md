@@ -112,3 +112,23 @@ Suggested local config values:
 ## Deletion condition for the local trace bridge
 
 The in-memory trace store can be removed once the workbench renders request drilldown exclusively from canonical trace APIs plus Tempo/Langfuse deep links without loss of operator fidelity.
+
+## Host API logs and functional readiness probes (2026-08-21)
+
+- The host FastAPI process now exports its Python/uvicorn logs over OTLP
+  (`<otlp_endpoint>` with `/v1/traces` swapped for `/v1/logs`) to Alloy, which
+  forwards them to Loki (`otelcol.exporter.loki` -> `loki.write`). Resource
+  attributes `service.name`, `ragweld.service=api`, and
+  `deployment.runtime=host` become Loki labels via the `loki.resource.labels`
+  hint.
+- promtail adds `ragweld_service=<compose service>` and
+  `deployment_runtime=container` to container logs, so one LogQL selector
+  (`{ragweld_service=~"api|postgres|neo4j"}`) covers the host API and the
+  containers while `deployment_runtime` keeps them distinguishable. The Chat
+  log panel uses that selector.
+- Observability status probes now hit functional readiness paths (Tempo
+  `/ready`, Alloy `/-/ready`, Grafana `/api/health`, Mimir/Pyroscope `/ready`,
+  OpenCost `/healthz`, Alertmanager `/-/ready`, Langfuse
+  `/api/public/health`); a 4xx on a base URL no longer counts as healthy. For
+  POST-only intake endpoints (OTLP, Faro) a 405/415 to GET is reported as
+  "listener present", not as generic health.

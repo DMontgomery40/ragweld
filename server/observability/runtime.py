@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 import os
 import threading
 import uuid
@@ -9,7 +11,11 @@ from dataclasses import dataclass, field
 from typing import Any, Iterator
 
 from opentelemetry import trace
+from opentelemetry._logs import set_logger_provider
+from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
+from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
@@ -125,6 +131,37 @@ def _build_langfuse_client(tracing_cfg: TracingConfig, tracer_provider: TracerPr
         return None
 
 
+_LOG_EXPORT_INSTALLED: set[str] = set()
+
+
+def _logs_endpoint_from_traces(traces_endpoint: str) -> str:
+    target = str(traces_endpoint or "").strip().rstrip("/")
+    if target.endswith("/v1/traces"):
+        return target[: -len("/v1/traces")] + "/v1/logs"
+    return target + "/v1/logs"
+
+
+def _install_otlp_log_export(*, resource: Resource, traces_endpoint: str, headers: dict[str, str]) -> None:
+    """Ship the host API's Python logs over OTLP (Alloy -> Loki) alongside traces."""
+    endpoint = _logs_endpoint_from_traces(traces_endpoint)
+    if endpoint in _LOG_EXPORT_INSTALLED:
+        return
+    _LOG_EXPORT_INSTALLED.add(endpoint)
+    logger_provider = LoggerProvider(resource=resource)
+    logger_provider.add_log_record_processor(
+        BatchLogRecordProcessor(OTLPLogExporter(endpoint=endpoint, headers=headers))
+    )
+    set_logger_provider(logger_provider)
+    handler = LoggingHandler(level=logging.INFO, logger_provider=logger_provider)
+    root = logging.getLogger()
+    if not any(isinstance(existing, LoggingHandler) for existing in root.handlers):
+        root.addHandler(handler)
+    for name in ("uvicorn.access", "uvicorn.error", "uvicorn"):
+        uv_logger = logging.getLogger(name)
+        if not any(isinstance(existing, LoggingHandler) for existing in uv_logger.handlers):
+            uv_logger.addHandler(handler)
+
+
 def get_observability_manager(config: TriBridConfig) -> ObservabilityManager:
     tracing_cfg = config.tracing
     key = _manager_key(tracing_cfg)
@@ -137,15 +174,19 @@ def get_observability_manager(config: TriBridConfig) -> ObservabilityManager:
             {
                 ResourceAttributes.SERVICE_NAME: str(tracing_cfg.otel_service_name or "ragweld-api"),
                 "service.namespace": "ragweld",
+                # Shared log-stream labels with promtail-shipped container logs.
+                "ragweld.service": "api",
+                "deployment.runtime": "host",
+                "loki.resource.labels": "service.name,ragweld.service,deployment.runtime",
             }
         )
         provider = TracerProvider(resource=resource)
-        if tracing_cfg.otel_export_enabled and str(tracing_cfg.otlp_endpoint or "").strip():
-            exporter = OTLPSpanExporter(
-                endpoint=str(tracing_cfg.otlp_endpoint).strip(),
-                headers=_parse_headers(str(tracing_cfg.otlp_headers or "")),
-            )
+        otlp_endpoint = str(tracing_cfg.otlp_endpoint or "").strip()
+        if tracing_cfg.otel_export_enabled and otlp_endpoint:
+            headers = _parse_headers(str(tracing_cfg.otlp_headers or ""))
+            exporter = OTLPSpanExporter(endpoint=otlp_endpoint, headers=headers)
             provider.add_span_processor(BatchSpanProcessor(exporter))
+            _install_otlp_log_export(resource=resource, traces_endpoint=otlp_endpoint, headers=headers)
 
         tracer = provider.get_tracer("ragweld.observability")
         manager = ObservabilityManager(
