@@ -44,6 +44,7 @@ _PROVENANCE_FIELDS = [
     "parent_doc_id",
     "char_start",
     "char_end",
+    "extraction",
     "graph_parity_mode",
 ]
 _PILOT_PACKAGES: tuple[tuple[str, str], ...] = (
@@ -51,6 +52,32 @@ _PILOT_PACKAGES: tuple[tuple[str, str], ...] = (
     ("haystack", "Haystack"),
     ("qdrant_client", "Qdrant client"),
 )
+
+# Rich-document formats routed through Docling during pilot export. Code and
+# plain-text formats keep the direct extraction path by design.
+_DOCLING_SUFFIXES: frozenset[str] = frozenset({".pdf", ".docx", ".pptx", ".xlsx", ".html", ".htm"})
+
+_DOCLING_CONVERTER: Any = None
+
+
+def _docling_converter() -> Any:
+    global _DOCLING_CONVERTER
+    if _DOCLING_CONVERTER is None:
+        from docling.document_converter import DocumentConverter
+
+        _DOCLING_CONVERTER = DocumentConverter()
+    return _DOCLING_CONVERTER
+
+
+def _extract_with_docling(abs_path: Path) -> str | None:
+    """Convert a rich document to markdown via Docling; None when unparseable."""
+    try:
+        result = _docling_converter().convert(str(abs_path))
+        text = result.document.export_to_markdown()
+    except Exception:
+        return None
+    text = str(text or "")
+    return text if text.strip() else None
 
 
 def _pilot_dir(corpus_id: str) -> Path:
@@ -252,6 +279,7 @@ async def export_retrieval_pilot(*, corpus_id: str, repo_path: str, force_rebuil
     exported_chunk_count = 0
     skipped_large_files = 0
     skipped_unreadable_files = 0
+    docling_file_count = 0
 
     with documents_path.open("w", encoding="utf-8") as handle:
         for rel_path, abs_path in loader.iter_repo_files(str(root)):
@@ -263,14 +291,18 @@ async def export_retrieval_pilot(*, corpus_id: str, repo_path: str, force_rebuil
                 skipped_large_files += 1
                 continue
 
-            text = extract_text_for_path(
-                abs_path,
-                parquet_max_rows=int(cfg.indexing.parquet_extract_max_rows),
-                parquet_max_chars=int(cfg.indexing.parquet_extract_max_chars),
-                parquet_max_cell_chars=int(cfg.indexing.parquet_extract_max_cell_chars),
-                parquet_text_columns_only=cfg.indexing.parquet_extract_text_columns_only,
-                parquet_include_column_names=cfg.indexing.parquet_extract_include_column_names,
-            )
+            used_docling = abs_path.suffix.lower() in _DOCLING_SUFFIXES
+            if used_docling:
+                text = _extract_with_docling(abs_path)
+            else:
+                text = extract_text_for_path(
+                    abs_path,
+                    parquet_max_rows=int(cfg.indexing.parquet_extract_max_rows),
+                    parquet_max_chars=int(cfg.indexing.parquet_extract_max_chars),
+                    parquet_max_cell_chars=int(cfg.indexing.parquet_extract_max_cell_chars),
+                    parquet_text_columns_only=cfg.indexing.parquet_extract_text_columns_only,
+                    parquet_include_column_names=cfg.indexing.parquet_extract_include_column_names,
+                )
             if text is None or not text.strip():
                 skipped_unreadable_files += 1
                 continue
@@ -281,6 +313,8 @@ async def export_retrieval_pilot(*, corpus_id: str, repo_path: str, force_rebuil
                 continue
 
             exported_file_count += 1
+            if used_docling:
+                docling_file_count += 1
             for chunk in chunks:
                 metadata = dict(chunk.metadata or {})
                 payload = {
@@ -299,6 +333,7 @@ async def export_retrieval_pilot(*, corpus_id: str, repo_path: str, force_rebuil
                         "parent_doc_id": metadata.get("parent_doc_id"),
                         "char_start": metadata.get("char_start"),
                         "char_end": metadata.get("char_end"),
+                        "extraction": "docling" if used_docling else "direct",
                         "graph_parity_mode": "neo4j_v1",
                     },
                 }
@@ -316,6 +351,7 @@ async def export_retrieval_pilot(*, corpus_id: str, repo_path: str, force_rebuil
         "exported_chunk_count": exported_chunk_count,
         "skipped_large_files": skipped_large_files,
         "skipped_unreadable_files": skipped_unreadable_files,
+        "docling_file_count": docling_file_count,
         "provenance_fields": list(_PROVENANCE_FIELDS),
         "package_status": [pkg.model_dump(mode="json") for pkg in package_status],
         "execution_ready": False,

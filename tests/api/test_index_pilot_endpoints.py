@@ -28,6 +28,13 @@ async def test_retrieval_pilot_export_persists_manifest_and_status(client: Async
         encoding="utf-8",
     )
     (repo / "README.md").write_text("# Pilot corpus\n\nThis corpus validates provenance export.\n", encoding="utf-8")
+    (repo / "handbook.html").write_text(
+        "<html><body><h1>Calibration Handbook</h1>"
+        "<p>The salinity array is calibrated every 45 days.</p>"
+        "<table><tr><th>Sensor</th><th>Cycle</th></tr>"
+        "<tr><td>Salinity</td><td>45 days</td></tr></table></body></html>",
+        encoding="utf-8",
+    )
 
     export_dir = _pilot_dir(corpus_id)
     shutil.rmtree(export_dir, ignore_errors=True)
@@ -42,11 +49,29 @@ async def test_retrieval_pilot_export_persists_manifest_and_status(client: Async
         status = body["status"]
         assert status["backend"] == "haystack_qdrant_sidecar"
         assert status["export_exists"] is True
-        assert status["exported_file_count"] == 2
-        assert status["exported_chunk_count"] >= 2
+        assert status["exported_file_count"] == 3
+        assert status["exported_chunk_count"] >= 3
         assert "file_path" in status["provenance_fields"]
+        assert "extraction" in status["provenance_fields"]
         assert Path(status["documents_path"]).exists()
         assert Path(status["manifest_path"]).exists()
+
+        # The rich-document lane must actually run through Docling: the HTML
+        # handbook exports as converted markdown with docling provenance.
+        docling_chunks = []
+        for line in Path(status["documents_path"]).read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            payload = json.loads(line)
+            if payload["meta"].get("extraction") == "docling":
+                docling_chunks.append(payload)
+        assert docling_chunks, "expected docling-extracted chunks for handbook.html"
+        assert all(c["meta"]["file_path"] == "handbook.html" for c in docling_chunks)
+        joined = "\n".join(c["content"] for c in docling_chunks)
+        assert "calibrated every 45 days" in joined
+        assert "|" in joined  # table survived conversion to markdown
+        manifest = json.loads(Path(status["manifest_path"]).read_text(encoding="utf-8"))
+        assert int(manifest["docling_file_count"]) == 1
 
         status_res = await client.get(
             f"/api/index/{corpus_id}/pilot/status",
@@ -55,7 +80,7 @@ async def test_retrieval_pilot_export_persists_manifest_and_status(client: Async
         assert status_res.status_code == 200
         status_body = status_res.json()
         assert status_body["export_exists"] is True
-        assert status_body["exported_file_count"] == 2
+        assert status_body["exported_file_count"] == 3
         assert status_body["exported_chunk_count"] == status["exported_chunk_count"]
     finally:
         shutil.rmtree(export_dir, ignore_errors=True)
