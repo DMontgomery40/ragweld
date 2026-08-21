@@ -7,8 +7,72 @@ from server.indexing.embedder import Embedder
 from server.models.chat import Message
 from server.models.chat_config import RecallConfig
 from server.models.index import Chunk
+from server.retrieval.errors import EmbeddingContractMismatchError
 
 _SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
+
+
+async def _ensure_recall_dense_contract(
+    pg: PostgresClient,
+    *,
+    repo_id: str,
+    embedder: Embedder,
+    ts_config: str,
+) -> None:
+    """Record the dense contract on first write; refuse to mix incompatible vectors.
+
+    The file indexer records the corpus embedding contract at index time and the
+    retrieval path enforces it. Recall writes go around the file indexer, so they
+    must uphold the same contract instead of silently mixing dimensions.
+    """
+    corpus = await pg.get_corpus(repo_id)
+    if corpus is None:
+        return
+
+    current_backend = str(getattr(embedder.config, "embedding_backend", "") or "").strip().lower() or "deterministic"
+    current_provider = str(getattr(embedder.config, "embedding_type", "") or "").strip().lower()
+    current_model = str(getattr(embedder.config, "effective_model", "") or "").strip()
+    current_dim = int(getattr(embedder, "dim", 0) or 0)
+
+    stored_dim = int(corpus.get("embedding_dimensions") or 0)
+    if stored_dim == 0:
+        await pg.update_corpus_embedding_meta(
+            repo_id,
+            backend=current_backend,
+            provider=current_provider,
+            model=current_model,
+            dimensions=current_dim,
+            ts_config=ts_config,
+        )
+        return
+
+    stored_backend = str(corpus.get("embedding_backend") or "").strip().lower()
+    stored_provider = str(corpus.get("embedding_provider") or "").strip().lower()
+    stored_model = str(corpus.get("embedding_model") or "").strip()
+    both_deterministic = stored_backend == "deterministic" and current_backend == "deterministic"
+
+    mismatch = (
+        stored_dim != current_dim
+        or (bool(stored_backend) and stored_backend != current_backend)
+        or (not both_deterministic and bool(stored_provider) and stored_provider != current_provider)
+        or (not both_deterministic and bool(stored_model) and stored_model != current_model)
+    )
+    if mismatch:
+        raise EmbeddingContractMismatchError(
+            corpus_id=repo_id,
+            expected_contract={
+                "backend": stored_backend,
+                "provider": stored_provider,
+                "model": stored_model,
+                "dimensions": stored_dim,
+            },
+            current_contract={
+                "backend": current_backend,
+                "provider": current_provider,
+                "model": current_model,
+                "dimensions": current_dim,
+            },
+        )
 
 
 async def ensure_recall_corpus(pg: PostgresClient, config: RecallConfig) -> None:
@@ -88,6 +152,12 @@ async def index_recall_conversation(
 ) -> int:
     """Index a conversation into the Recall corpus (pgvector + FTS)."""
     await ensure_recall_corpus(pg, config)
+    await _ensure_recall_dense_contract(
+        pg,
+        repo_id=config.default_corpus_id,
+        embedder=embedder,
+        ts_config=ts_config,
+    )
 
     chunks = build_recall_chunks(conversation_id=conversation_id, messages=messages, config=config)
     embedded_chunks = await embedder.embed_chunks(chunks)
