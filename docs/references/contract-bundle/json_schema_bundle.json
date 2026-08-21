@@ -1,5 +1,5 @@
 {
-  "model_count": 260,
+  "model_count": 263,
   "module": "server.models.tribrid_config_model",
   "root_models": {
     "ActiveSources": {
@@ -9666,6 +9666,8 @@
             "neo4j",
             "qdrant",
             "embedding_provider",
+            "ragas",
+            "promptfoo",
             "feedback_log",
             "lineage_store"
           ],
@@ -9721,6 +9723,8 @@
                 "neo4j",
                 "qdrant",
                 "embedding_provider",
+                "ragas",
+                "promptfoo",
                 "feedback_log",
                 "lineage_store"
               ],
@@ -10823,6 +10827,14 @@
               "title": "Precision At 5",
               "type": "number"
             },
+            "ragas": {
+              "additionalProperties": {
+                "type": "number"
+              },
+              "description": "Mean Ragas scores by metric name when Ragas scoring ran for this run.",
+              "title": "Ragas",
+              "type": "object"
+            },
             "recall_at_10": {
               "description": "Recall at top 10",
               "maximum": 1.0,
@@ -11055,6 +11067,14 @@
           "minimum": 0.0,
           "title": "Precision At 5",
           "type": "number"
+        },
+        "ragas": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "description": "Mean Ragas scores by metric name when Ragas scoring ran for this run.",
+          "title": "Ragas",
+          "type": "object"
         },
         "recall_at_10": {
           "description": "Recall at top 10",
@@ -11515,6 +11535,19 @@
           "title": "Expected Paths",
           "type": "array"
         },
+        "generated_answer": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Gateway-generated answer scored by Ragas when Ragas scoring ran.",
+          "title": "Generated Answer"
+        },
         "latency_ms": {
           "description": "Latency for this query",
           "minimum": 0.0,
@@ -11525,6 +11558,14 @@
           "description": "The test question",
           "title": "Question",
           "type": "string"
+        },
+        "ragas": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "description": "Per-entry Ragas scores by metric name when Ragas scoring ran.",
+          "title": "Ragas",
+          "type": "object"
         },
         "recall": {
           "description": "Recall for this entry",
@@ -11674,6 +11715,14 @@
               "title": "Precision At 5",
               "type": "number"
             },
+            "ragas": {
+              "additionalProperties": {
+                "type": "number"
+              },
+              "description": "Mean Ragas scores by metric name when Ragas scoring ran for this run.",
+              "title": "Ragas",
+              "type": "object"
+            },
             "recall_at_10": {
               "description": "Recall at top 10",
               "maximum": 1.0,
@@ -11746,6 +11795,19 @@
               "title": "Expected Paths",
               "type": "array"
             },
+            "generated_answer": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Gateway-generated answer scored by Ragas when Ragas scoring ran.",
+              "title": "Generated Answer"
+            },
             "latency_ms": {
               "description": "Latency for this query",
               "minimum": 0.0,
@@ -11756,6 +11818,14 @@
               "description": "The test question",
               "title": "Question",
               "type": "string"
+            },
+            "ragas": {
+              "additionalProperties": {
+                "type": "number"
+              },
+              "description": "Per-entry Ragas scores by metric name when Ragas scoring ran.",
+              "title": "Ragas",
+              "type": "object"
             },
             "recall": {
               "description": "Recall for this entry",
@@ -12451,6 +12521,40 @@
           "minimum": 1,
           "title": "Precision At 5 K",
           "type": "integer"
+        },
+        "promptfoo_grader_model": {
+          "default": "",
+          "description": "LiteLLM alias used by Promptfoo llm-rubric assertions; empty uses the chat default alias.",
+          "title": "Promptfoo Grader Model",
+          "type": "string"
+        },
+        "ragas_enabled": {
+          "default": false,
+          "description": "Run Ragas generation-quality scoring (faithfulness, answer relevancy) during eval runs. Each entry is answered through the LiteLLM gateway and judged by the configured judge alias.",
+          "title": "Ragas Enabled",
+          "type": "boolean"
+        },
+        "ragas_judge_model": {
+          "default": "",
+          "description": "LiteLLM alias used as the Ragas judge; empty uses the chat default alias.",
+          "title": "Ragas Judge Model",
+          "type": "string"
+        },
+        "ragas_judge_timeout_s": {
+          "default": 600,
+          "description": "Per-request timeout for Ragas judge calls through LiteLLM. Local CPU serving needs minutes; a timeout fails the eval run closed rather than skipping scores.",
+          "maximum": 3600,
+          "minimum": 30,
+          "title": "Ragas Judge Timeout S",
+          "type": "integer"
+        },
+        "ragas_metrics": {
+          "description": "Ragas metrics to compute per eval entry (faithfulness, answer_relevancy).",
+          "items": {
+            "type": "string"
+          },
+          "title": "Ragas Metrics",
+          "type": "array"
         },
         "recall_at_10_k": {
           "default": 10,
@@ -20261,6 +20365,380 @@
         "message"
       ],
       "title": "PromptUpdateResponse",
+      "type": "object"
+    },
+    "PromptfooRun": {
+      "$defs": {
+        "PromptfooRunResult": {
+          "description": "One Promptfoo test outcome (a dataset entry answered through the gateway).",
+          "properties": {
+            "entry_id": {
+              "description": "Eval dataset entry id",
+              "title": "Entry Id",
+              "type": "string"
+            },
+            "expected_answer": {
+              "description": "Rubric the grader scored the response against",
+              "title": "Expected Answer",
+              "type": "string"
+            },
+            "latency_ms": {
+              "default": 0.0,
+              "description": "Provider latency reported by Promptfoo",
+              "minimum": 0.0,
+              "title": "Latency Ms",
+              "type": "number"
+            },
+            "passed": {
+              "description": "Whether every assertion passed",
+              "title": "Passed",
+              "type": "boolean"
+            },
+            "question": {
+              "description": "Prompt sent to the gateway alias",
+              "title": "Question",
+              "type": "string"
+            },
+            "reason": {
+              "default": "",
+              "description": "Grader reason for the first failing or passing assertion",
+              "title": "Reason",
+              "type": "string"
+            },
+            "response": {
+              "default": "",
+              "description": "Gateway response text",
+              "title": "Response",
+              "type": "string"
+            },
+            "score": {
+              "description": "Promptfoo aggregate score for this test",
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "title": "Score",
+              "type": "number"
+            }
+          },
+          "required": [
+            "entry_id",
+            "question",
+            "expected_answer",
+            "passed",
+            "score"
+          ],
+          "title": "PromptfooRunResult",
+          "type": "object"
+        }
+      },
+      "description": "A persisted Promptfoo regression run over the eval dataset.",
+      "properties": {
+        "completed_at": {
+          "description": "When the run completed",
+          "format": "date-time",
+          "title": "Completed At",
+          "type": "string"
+        },
+        "failed": {
+          "description": "Tests that failed",
+          "minimum": 0,
+          "title": "Failed",
+          "type": "integer"
+        },
+        "grader_alias": {
+          "description": "LiteLLM alias that graded llm-rubric assertions",
+          "title": "Grader Alias",
+          "type": "string"
+        },
+        "passed": {
+          "description": "Tests that passed",
+          "minimum": 0,
+          "title": "Passed",
+          "type": "integer"
+        },
+        "promptfoo_version": {
+          "description": "Promptfoo CLI version that produced the run",
+          "title": "Promptfoo Version",
+          "type": "string"
+        },
+        "provider_alias": {
+          "description": "LiteLLM alias that answered the prompts",
+          "title": "Provider Alias",
+          "type": "string"
+        },
+        "repo_id": {
+          "description": "Corpus identifier",
+          "title": "Repo Id",
+          "type": "string"
+        },
+        "results": {
+          "items": {
+            "$ref": "#/$defs/PromptfooRunResult"
+          },
+          "title": "Results",
+          "type": "array"
+        },
+        "run_id": {
+          "description": "Unique identifier for this run",
+          "title": "Run Id",
+          "type": "string"
+        },
+        "skipped_entries": {
+          "description": "Dataset entries skipped because they have no expected_answer",
+          "minimum": 0,
+          "title": "Skipped Entries",
+          "type": "integer"
+        },
+        "started_at": {
+          "description": "When the run started",
+          "format": "date-time",
+          "title": "Started At",
+          "type": "string"
+        },
+        "total": {
+          "description": "Tests executed",
+          "minimum": 0,
+          "title": "Total",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "run_id",
+        "repo_id",
+        "provider_alias",
+        "grader_alias",
+        "promptfoo_version",
+        "total",
+        "passed",
+        "failed",
+        "skipped_entries",
+        "started_at",
+        "completed_at"
+      ],
+      "title": "PromptfooRun",
+      "type": "object"
+    },
+    "PromptfooRunResult": {
+      "description": "One Promptfoo test outcome (a dataset entry answered through the gateway).",
+      "properties": {
+        "entry_id": {
+          "description": "Eval dataset entry id",
+          "title": "Entry Id",
+          "type": "string"
+        },
+        "expected_answer": {
+          "description": "Rubric the grader scored the response against",
+          "title": "Expected Answer",
+          "type": "string"
+        },
+        "latency_ms": {
+          "default": 0.0,
+          "description": "Provider latency reported by Promptfoo",
+          "minimum": 0.0,
+          "title": "Latency Ms",
+          "type": "number"
+        },
+        "passed": {
+          "description": "Whether every assertion passed",
+          "title": "Passed",
+          "type": "boolean"
+        },
+        "question": {
+          "description": "Prompt sent to the gateway alias",
+          "title": "Question",
+          "type": "string"
+        },
+        "reason": {
+          "default": "",
+          "description": "Grader reason for the first failing or passing assertion",
+          "title": "Reason",
+          "type": "string"
+        },
+        "response": {
+          "default": "",
+          "description": "Gateway response text",
+          "title": "Response",
+          "type": "string"
+        },
+        "score": {
+          "description": "Promptfoo aggregate score for this test",
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Score",
+          "type": "number"
+        }
+      },
+      "required": [
+        "entry_id",
+        "question",
+        "expected_answer",
+        "passed",
+        "score"
+      ],
+      "title": "PromptfooRunResult",
+      "type": "object"
+    },
+    "PromptfooRunsResponse": {
+      "$defs": {
+        "PromptfooRun": {
+          "description": "A persisted Promptfoo regression run over the eval dataset.",
+          "properties": {
+            "completed_at": {
+              "description": "When the run completed",
+              "format": "date-time",
+              "title": "Completed At",
+              "type": "string"
+            },
+            "failed": {
+              "description": "Tests that failed",
+              "minimum": 0,
+              "title": "Failed",
+              "type": "integer"
+            },
+            "grader_alias": {
+              "description": "LiteLLM alias that graded llm-rubric assertions",
+              "title": "Grader Alias",
+              "type": "string"
+            },
+            "passed": {
+              "description": "Tests that passed",
+              "minimum": 0,
+              "title": "Passed",
+              "type": "integer"
+            },
+            "promptfoo_version": {
+              "description": "Promptfoo CLI version that produced the run",
+              "title": "Promptfoo Version",
+              "type": "string"
+            },
+            "provider_alias": {
+              "description": "LiteLLM alias that answered the prompts",
+              "title": "Provider Alias",
+              "type": "string"
+            },
+            "repo_id": {
+              "description": "Corpus identifier",
+              "title": "Repo Id",
+              "type": "string"
+            },
+            "results": {
+              "items": {
+                "$ref": "#/$defs/PromptfooRunResult"
+              },
+              "title": "Results",
+              "type": "array"
+            },
+            "run_id": {
+              "description": "Unique identifier for this run",
+              "title": "Run Id",
+              "type": "string"
+            },
+            "skipped_entries": {
+              "description": "Dataset entries skipped because they have no expected_answer",
+              "minimum": 0,
+              "title": "Skipped Entries",
+              "type": "integer"
+            },
+            "started_at": {
+              "description": "When the run started",
+              "format": "date-time",
+              "title": "Started At",
+              "type": "string"
+            },
+            "total": {
+              "description": "Tests executed",
+              "minimum": 0,
+              "title": "Total",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "run_id",
+            "repo_id",
+            "provider_alias",
+            "grader_alias",
+            "promptfoo_version",
+            "total",
+            "passed",
+            "failed",
+            "skipped_entries",
+            "started_at",
+            "completed_at"
+          ],
+          "title": "PromptfooRun",
+          "type": "object"
+        },
+        "PromptfooRunResult": {
+          "description": "One Promptfoo test outcome (a dataset entry answered through the gateway).",
+          "properties": {
+            "entry_id": {
+              "description": "Eval dataset entry id",
+              "title": "Entry Id",
+              "type": "string"
+            },
+            "expected_answer": {
+              "description": "Rubric the grader scored the response against",
+              "title": "Expected Answer",
+              "type": "string"
+            },
+            "latency_ms": {
+              "default": 0.0,
+              "description": "Provider latency reported by Promptfoo",
+              "minimum": 0.0,
+              "title": "Latency Ms",
+              "type": "number"
+            },
+            "passed": {
+              "description": "Whether every assertion passed",
+              "title": "Passed",
+              "type": "boolean"
+            },
+            "question": {
+              "description": "Prompt sent to the gateway alias",
+              "title": "Question",
+              "type": "string"
+            },
+            "reason": {
+              "default": "",
+              "description": "Grader reason for the first failing or passing assertion",
+              "title": "Reason",
+              "type": "string"
+            },
+            "response": {
+              "default": "",
+              "description": "Gateway response text",
+              "title": "Response",
+              "type": "string"
+            },
+            "score": {
+              "description": "Promptfoo aggregate score for this test",
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "title": "Score",
+              "type": "number"
+            }
+          },
+          "required": [
+            "entry_id",
+            "question",
+            "expected_answer",
+            "passed",
+            "score"
+          ],
+          "title": "PromptfooRunResult",
+          "type": "object"
+        }
+      },
+      "description": "Listing of persisted Promptfoo runs for a corpus.",
+      "properties": {
+        "runs": {
+          "items": {
+            "$ref": "#/$defs/PromptfooRun"
+          },
+          "title": "Runs",
+          "type": "array"
+        }
+      },
+      "title": "PromptfooRunsResponse",
       "type": "object"
     },
     "PromptsResponse": {
@@ -33018,6 +33496,40 @@
               "minimum": 1,
               "title": "Precision At 5 K",
               "type": "integer"
+            },
+            "promptfoo_grader_model": {
+              "default": "",
+              "description": "LiteLLM alias used by Promptfoo llm-rubric assertions; empty uses the chat default alias.",
+              "title": "Promptfoo Grader Model",
+              "type": "string"
+            },
+            "ragas_enabled": {
+              "default": false,
+              "description": "Run Ragas generation-quality scoring (faithfulness, answer relevancy) during eval runs. Each entry is answered through the LiteLLM gateway and judged by the configured judge alias.",
+              "title": "Ragas Enabled",
+              "type": "boolean"
+            },
+            "ragas_judge_model": {
+              "default": "",
+              "description": "LiteLLM alias used as the Ragas judge; empty uses the chat default alias.",
+              "title": "Ragas Judge Model",
+              "type": "string"
+            },
+            "ragas_judge_timeout_s": {
+              "default": 600,
+              "description": "Per-request timeout for Ragas judge calls through LiteLLM. Local CPU serving needs minutes; a timeout fails the eval run closed rather than skipping scores.",
+              "maximum": 3600,
+              "minimum": 30,
+              "title": "Ragas Judge Timeout S",
+              "type": "integer"
+            },
+            "ragas_metrics": {
+              "description": "Ragas metrics to compute per eval entry (faithfulness, answer_relevancy).",
+              "items": {
+                "type": "string"
+              },
+              "title": "Ragas Metrics",
+              "type": "array"
             },
             "recall_at_10_k": {
               "default": 10,

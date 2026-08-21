@@ -542,7 +542,7 @@ export interface DashboardIndexStorageBreakdown {
 export interface DependencyUnavailableDetail {
   code?: "dependency_unavailable"; // default: "dependency_unavailable"
   /** Unavailable required dependency */
-  dependency: "postgres" | "neo4j" | "qdrant" | "embedding_provider" | "feedback_log" | "lineage_store";
+  dependency: "postgres" | "neo4j" | "qdrant" | "embedding_provider" | "ragas" | "promptfoo" | "feedback_log" | "lineage_store";
   /** API operation that could not complete */
   operation: string;
   /** Stable, non-sensitive failure summary */
@@ -740,6 +740,8 @@ export interface EvalMetrics {
   latency_p50_ms: number;
   /** 95th percentile latency in ms */
   latency_p95_ms: number;
+  /** Mean Ragas scores by metric name when Ragas scoring ran for this run. */
+  ragas?: Record<string, number>;
 }
 
 /** Per-entry evaluation result. */
@@ -772,6 +774,10 @@ export interface EvalResult {
   docs?: EvalDoc[];
   /** Per-query retrieval debug (best-effort, for explaining empty results). */
   debug?: Record<string, unknown>;
+  /** Gateway-generated answer scored by Ragas when Ragas scoring ran. */
+  generated_answer?: string | null; // default: None
+  /** Per-entry Ragas scores by metric name when Ragas scoring ran. */
+  ragas?: Record<string, number>;
 }
 
 /** Summary metadata for listing eval runs. */
@@ -814,6 +820,16 @@ export interface EvaluationConfig {
   ndcg_at_10_k?: number; // default: 10
   /** Multi-query variants for evaluation */
   eval_multi_m?: number; // default: 10
+  /** Run Ragas generation-quality scoring (faithfulness, answer relevancy) during eval runs. Each entry is answered through the LiteLLM gateway and judged by the configured judge alias. */
+  ragas_enabled?: boolean; // default: False
+  /** LiteLLM alias used as the Ragas judge; empty uses the chat default alias. */
+  ragas_judge_model?: string; // default: ""
+  /** Ragas metrics to compute per eval entry (faithfulness, answer_relevancy). */
+  ragas_metrics?: string[];
+  /** LiteLLM alias used by Promptfoo llm-rubric assertions; empty uses the chat default alias. */
+  promptfoo_grader_model?: string; // default: ""
+  /** Per-request timeout for Ragas judge calls through LiteLLM. Local CPU serving needs minutes; a timeout fails the eval run closed rather than skipping scores. */
+  ragas_judge_timeout_s?: number; // default: 600
 }
 
 /** Configuration for tri-brid fusion of vector + sparse + graph results. */
@@ -1566,6 +1582,53 @@ export interface PromptMetadata {
   link_route?: string | null; // default: None
   /** Label for the link button shown when editable=false */
   link_label?: string | null; // default: None
+}
+
+/** A persisted Promptfoo regression run over the eval dataset. */
+export interface PromptfooRun {
+  /** Unique identifier for this run */
+  run_id: string;
+  /** Corpus identifier */
+  corpus_id: string;
+  /** LiteLLM alias that answered the prompts */
+  provider_alias: string;
+  /** LiteLLM alias that graded llm-rubric assertions */
+  grader_alias: string;
+  /** Promptfoo CLI version that produced the run */
+  promptfoo_version: string;
+  /** Tests executed */
+  total: number;
+  /** Tests that passed */
+  passed: number;
+  /** Tests that failed */
+  failed: number;
+  /** Dataset entries skipped because they have no expected_answer */
+  skipped_entries: number;
+  /** When the run started */
+  started_at: string;
+  /** When the run completed */
+  completed_at: string;
+  results?: PromptfooRunResult[];
+}
+
+/** One Promptfoo test outcome (a dataset entry answered through the gateway). */
+export interface PromptfooRunResult {
+  /** Eval dataset entry id */
+  entry_id: string;
+  /** Prompt sent to the gateway alias */
+  question: string;
+  /** Rubric the grader scored the response against */
+  expected_answer: string;
+  /** Gateway response text */
+  response?: string; // default: ""
+  /** Whether every assertion passed */
+  passed: boolean;
+  /** Promptfoo aggregate score for this test */
+  score: number;
+  /** Grader reason for the first failing or passing assertion */
+  reason?: string; // default: ""
+  /** Provider latency reported by Promptfoo */
+  latency_ms?: number; // default: 0.0
 }
 
 /** Health status for a configured provider endpoint. */
@@ -3889,6 +3952,11 @@ export interface PromptUpdateResponse {
   bundle_id?: string | null;
 }
 
+/** Listing of persisted Promptfoo runs for a corpus. */
+export interface PromptfooRunsResponse {
+  runs?: PromptfooRun[];
+}
+
 /** Response containing prompt text and UI metadata. */
 export interface PromptsResponse {
   /** Prompt key -> value */
@@ -4154,6 +4222,49 @@ export interface RerankerTrainStartResponse {
 /** FastAPI response envelope for a retrieval contract mismatch (HTTP 409). */
 export interface RetrievalContractMismatchResponse {
   detail: RetrievalContractMismatchDetail;
+}
+
+/** Request a grounded answer produced entirely on the pilot retrieval lane. */
+export interface RetrievalPilotAnswerRequest {
+  /** Corpus identifier */
+  corpus_id: string;
+  /** Question to answer from pilot retrieval context. */
+  query: string;
+  /** Maximum chunks to ground the answer on. */
+  top_k?: number;
+  /** Run the dense (vector) retrieval leg. */
+  include_vector?: boolean;
+  /** Run the sparse (BM25/IDF) retrieval leg. */
+  include_sparse?: boolean;
+  /** Optional gateway alias override for generation. */
+  model_override?: string;
+}
+
+/** Grounded answer + citations produced by the pilot lane through the gateway. */
+export interface RetrievalPilotAnswerResponse {
+  ok?: boolean;
+  /** Corpus identifier */
+  corpus_id: string;
+  /** Question answered from pilot retrieval context. */
+  query: string;
+  /** Grounded answer generated through LiteLLM. */
+  answer: string;
+  /** Chunks that grounded the answer. */
+  citations?: ChunkMatch[];
+  /** Gateway provider route used for generation. */
+  provider?: ChatProviderInfo | null;
+  /** Model alias that produced the answer. */
+  model?: string;
+  /** Provider response identifier when available. */
+  provider_response_id?: string | null;
+  /** True when the answer came from real generation (never fallback). */
+  llm_used?: boolean;
+  /** Dense-leg hits before fusion. */
+  vector_result_count?: number;
+  /** Sparse-leg hits before fusion. */
+  sparse_result_count?: number;
+  /** Fusion applied across requested legs. */
+  fusion_method?: string;
 }
 
 /** Request to generate the OSS retrieval pilot sidecar export. */

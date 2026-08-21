@@ -932,7 +932,7 @@ class DependencyUnavailableDetail(BaseModel):
     """Public error detail returned when a required runtime dependency is unavailable."""
 
     code: Literal["dependency_unavailable"] = "dependency_unavailable"
-    dependency: Literal["postgres", "neo4j", "qdrant", "embedding_provider", "feedback_log", "lineage_store"] = Field(
+    dependency: Literal["postgres", "neo4j", "qdrant", "embedding_provider", "ragas", "promptfoo", "feedback_log", "lineage_store"] = Field(
         description="Unavailable required dependency"
     )
     operation: str = Field(description="API operation that could not complete")
@@ -2935,6 +2935,10 @@ class EvalMetrics(BaseModel):
     ndcg_at_10: float = Field(ge=0.0, le=1.0, description="NDCG at top 10")
     latency_p50_ms: float = Field(ge=0.0, description="50th percentile latency in ms")
     latency_p95_ms: float = Field(ge=0.0, description="95th percentile latency in ms")
+    ragas: dict[str, float] = Field(
+        default_factory=dict,
+        description="Mean Ragas scores by metric name when Ragas scoring ran for this run.",
+    )
 
 
 class EvalDoc(BaseModel):
@@ -2974,6 +2978,12 @@ class EvalResult(BaseModel):
         default_factory=dict,
         description="Per-query retrieval debug (best-effort, for explaining empty results).",
     )
+    generated_answer: str | None = Field(
+        default=None, description="Gateway-generated answer scored by Ragas when Ragas scoring ran."
+    )
+    ragas: dict[str, float] = Field(
+        default_factory=dict, description="Per-entry Ragas scores by metric name when Ragas scoring ran."
+    )
 
 
 class EvalRun(BaseModel):
@@ -3003,6 +3013,46 @@ class EvalRun(BaseModel):
     input_bundle_id: str | None = Field(default=None, description="Current bundle id captured before evaluation started.")
     bundle_id: str | None = Field(default=None, description="Bundle id after this run was attached to lineage.")
     lineage_ref: LineageRef | None = Field(default=None, description="Immutable eval run version reference.")
+
+
+class PromptfooRunResult(BaseModel):
+    """One Promptfoo test outcome (a dataset entry answered through the gateway)."""
+
+    entry_id: str = Field(description="Eval dataset entry id")
+    question: str = Field(description="Prompt sent to the gateway alias")
+    expected_answer: str = Field(description="Rubric the grader scored the response against")
+    response: str = Field(default="", description="Gateway response text")
+    passed: bool = Field(description="Whether every assertion passed")
+    score: float = Field(ge=0.0, le=1.0, description="Promptfoo aggregate score for this test")
+    reason: str = Field(default="", description="Grader reason for the first failing or passing assertion")
+    latency_ms: float = Field(default=0.0, ge=0.0, description="Provider latency reported by Promptfoo")
+
+
+class PromptfooRun(BaseModel):
+    """A persisted Promptfoo regression run over the eval dataset."""
+
+    run_id: str = Field(description="Unique identifier for this run")
+    repo_id: str = Field(
+        description="Corpus identifier",
+        validation_alias=AliasChoices("repo_id", "corpus_id"),
+        serialization_alias="corpus_id",
+    )
+    provider_alias: str = Field(description="LiteLLM alias that answered the prompts")
+    grader_alias: str = Field(description="LiteLLM alias that graded llm-rubric assertions")
+    promptfoo_version: str = Field(description="Promptfoo CLI version that produced the run")
+    total: int = Field(ge=0, description="Tests executed")
+    passed: int = Field(ge=0, description="Tests that passed")
+    failed: int = Field(ge=0, description="Tests that failed")
+    skipped_entries: int = Field(ge=0, description="Dataset entries skipped because they have no expected_answer")
+    started_at: datetime = Field(description="When the run started")
+    completed_at: datetime = Field(description="When the run completed")
+    results: list[PromptfooRunResult] = Field(default_factory=list)
+
+
+class PromptfooRunsResponse(BaseModel):
+    """Listing of persisted Promptfoo runs for a corpus."""
+
+    runs: list[PromptfooRun] = Field(default_factory=list)
 
 
 class EvalRunMeta(BaseModel):
@@ -6135,6 +6185,39 @@ class EvaluationConfig(BaseModel):
         ge=1,
         le=20,
         description="Multi-query variants for evaluation"
+    )
+
+    ragas_enabled: bool = Field(
+        default=False,
+        description=(
+            "Run Ragas generation-quality scoring (faithfulness, answer relevancy) during eval runs. "
+            "Each entry is answered through the LiteLLM gateway and judged by the configured judge alias."
+        ),
+    )
+
+    ragas_judge_model: str = Field(
+        default="",
+        description="LiteLLM alias used as the Ragas judge; empty uses the chat default alias.",
+    )
+
+    ragas_metrics: list[str] = Field(
+        default_factory=lambda: ["faithfulness", "answer_relevancy"],
+        description="Ragas metrics to compute per eval entry (faithfulness, answer_relevancy).",
+    )
+
+    promptfoo_grader_model: str = Field(
+        default="",
+        description="LiteLLM alias used by Promptfoo llm-rubric assertions; empty uses the chat default alias.",
+    )
+
+    ragas_judge_timeout_s: int = Field(
+        default=600,
+        ge=30,
+        le=3600,
+        description=(
+            "Per-request timeout for Ragas judge calls through LiteLLM. Local CPU serving needs minutes; "
+            "a timeout fails the eval run closed rather than skipping scores."
+        ),
     )
 
 

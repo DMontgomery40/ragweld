@@ -443,6 +443,31 @@ export const EvalDrillDown: React.FC<EvalDrillDownProps> = ({ runId, compareWith
           </div>
         </div>
 
+        {evalRun?.metrics?.ragas && Object.keys(evalRun.metrics.ragas).length > 0 ? (
+          <div
+            data-testid="eval-ragas-card"
+            style={{
+              background: 'var(--card-bg)',
+              border: '1px solid var(--line)',
+              borderRadius: '8px',
+              padding: '16px',
+            }}
+          >
+            <div style={{ fontSize: '12px', color: 'var(--fg-muted)', marginBottom: '8px' }}>
+              Ragas (gateway-generated answers)
+            </div>
+            {Object.entries(evalRun.metrics.ragas).map(([metric, value]) => (
+              <div key={metric} style={{ display: 'flex', justifyContent: 'space-between', gap: '12px' }}>
+                <span style={{ fontSize: '12px', color: 'var(--fg)' }}>{metric}</span>
+                <span style={{ fontSize: '18px', fontWeight: 700, color: 'var(--ok)' }}>{value.toFixed(4)}</span>
+              </div>
+            ))}
+            <div style={{ fontSize: '11px', color: 'var(--fg-muted)', marginTop: '6px' }}>
+              Mean over {evalRun.total} entries; judged through LiteLLM
+            </div>
+          </div>
+        ) : null}
+
         <div style={{
           background: 'var(--card-bg)',
           border: '1px solid var(--line)',

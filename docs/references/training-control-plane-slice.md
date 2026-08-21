@@ -40,11 +40,24 @@ Learning Agent lane.
 - Extends Learning Agent run models so future cutover work has typed fields for
   workflow/tracking truth instead of local-only filesystem assumptions.
 
-## What This Slice Does Not Yet Do
+## Current Execution Truth (2026-08-21)
 
-- It does not cut Learning Agent launch execution over to Flyte yet.
-- It does not make MLflow the live source of truth for started runs yet.
-- It does not replace the local MLX trainer for the active launch path yet.
+- MLflow tracking is real: when `training.ragweld_agent_tracking_backend=mlflow`,
+  `/api/agent/train/start` opens a run on the Compose-owned `mlflow` service
+  (`127.0.0.1:55500`), logs params and train/eval metrics, uploads
+  `ragweld_run_manifest.json`, and terminates the MLflow run
+  FINISHED/KILLED/FAILED in lockstep with the local run. The run record carries
+  `tracking_run_id`, `artifacts_uri`, and a deep link to the MLflow run.
+- Launch fails closed on configured-but-unavailable backends with typed 503
+  details: `workflow=flyte` (no wired Flyte execution path in this build),
+  `execution=unsloth` (requires an NVIDIA CUDA runtime; this host is
+  darwin/arm64), and `tracking=mlflow` with an unreachable server. The local
+  lane is never substituted silently.
 
-That cutover is the next bounded slice. This slice exists so the Training Center
-is no longer blind to the replacement target stack while that cutover is wired.
+## What Is Still Not Wired
+
+- Flyte orchestration: no Flyte deployment is provisioned or wired; the
+  workflow boundary refuses to fake orchestration.
+- Unsloth execution: blocked by hardware (CUDA) on Apple Silicon; the
+  execution boundary reports the exact blocker.
+- The active launch path still executes on the local MLX trainer.

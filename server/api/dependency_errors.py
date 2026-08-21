@@ -17,7 +17,7 @@ from server.models.tribrid_config_model import (
 
 logger = logging.getLogger(__name__)
 
-DependencyName = Literal["postgres", "neo4j", "qdrant", "embedding_provider", "feedback_log", "lineage_store"]
+DependencyName = Literal["postgres", "neo4j", "qdrant", "embedding_provider", "ragas", "promptfoo", "feedback_log", "lineage_store"]
 
 DEPENDENCY_UNAVAILABLE_RESPONSES = {
     503: {
@@ -56,6 +56,18 @@ def dependency_unavailable_http_exception(
             f"{boundary} could not produce embeddings from the configured provider; verify the embedding "
             "runtime/model and provider credentials, then retry."
         )
+    elif dependency == "ragas":
+        message = "Ragas evaluation substrate is unavailable."
+        operator_hint = (
+            f"{boundary} requires the ragas package, a local embedding model, and a reachable LiteLLM judge "
+            "alias; install/configure them or disable evaluation.ragas_enabled. Ragas scores are never faked."
+        )
+    elif dependency == "promptfoo":
+        message = "Promptfoo regression substrate is unavailable."
+        operator_hint = (
+            f"{boundary} requires the promptfoo CLI on a supported Node.js runtime, eval dataset entries with "
+            "expected_answer, and a reachable LiteLLM gateway exposing the provider/grader aliases. Results are never fabricated."
+        )
     elif dependency == "feedback_log":
         message = "Feedback log storage is unavailable."
         operator_hint = (
@@ -69,6 +81,9 @@ def dependency_unavailable_http_exception(
             "path and filesystem permissions, then retry."
         )
 
+    reason = str(getattr(exc, "reason", "") or "").strip()
+    if reason:
+        operator_hint = f"{operator_hint} Reason: {reason}"
     detail = DependencyUnavailableDetail(
         dependency=dependency,
         operation=boundary,

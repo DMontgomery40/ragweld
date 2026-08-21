@@ -20,6 +20,7 @@ This folder is for pointers and short notes that make external context discovera
 - `/Users/davidmontgomery/ragweld/docs/references/chat-assistant-ui-slice.md`
 - `/Users/davidmontgomery/ragweld/docs/references/training-control-plane-slice.md`
 - `/Users/davidmontgomery/ragweld/docs/references/retrieval-pilot.md`
+- `/Users/davidmontgomery/ragweld/docs/references/eval-substrates.md`
 - `/Users/davidmontgomery/ragweld/docs/references/codex-session-ingest.md`
 - `/Users/davidmontgomery/ragweld/docs/references/post-index-dense-retrieval.md`
 - `/Users/davidmontgomery/ragweld/docs/references/reranker-observability.md`

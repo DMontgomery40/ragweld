@@ -5,6 +5,8 @@ import type {
   EvalRequest,
   EvalRun,
   EvalRunsResponse,
+  PromptfooRun,
+  PromptfooRunsResponse,
 } from '@/types/generated';
 
 export const evalApi = {
@@ -17,6 +19,19 @@ export const evalApi = {
     const qs = new URLSearchParams({ corpus_id: corpusId });
     const { data } = await apiClient.get<EvalRunsResponse>(api(`/eval/runs?${qs.toString()}`), {
       // Equivalent of fetch({ cache: 'no-store' }) for axios.
+      headers: { 'Cache-Control': 'no-store' },
+    });
+    return data;
+  },
+
+  async runPromptfoo(request: EvalRequest): Promise<PromptfooRun> {
+    const { data } = await apiClient.post<PromptfooRun>(api('/eval/promptfoo/run'), request);
+    return data;
+  },
+
+  async listPromptfooRuns(corpusId: string): Promise<PromptfooRunsResponse> {
+    const qs = new URLSearchParams({ corpus_id: corpusId });
+    const { data } = await apiClient.get<PromptfooRunsResponse>(api(`/eval/promptfoo/runs?${qs.toString()}`), {
       headers: { 'Cache-Control': 'no-store' },
     });
     return data;

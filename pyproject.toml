@@ -53,6 +53,10 @@ dependencies = [
     "docling>=2.81.0",
     "neo4j-graphrag[openai]==1.14.1",
     "fastembed-haystack>=2.6.0",
+    "ragas>=0.3.1",
+    "langchain-community<1",
+    "langchain-core<1",
+    "langchain<1",
 ]
 
 [project.optional-dependencies]

@@ -12785,6 +12785,41 @@
           "class": "info"
         }
       ]
+    },
+    {
+      "term": "Ragas Enabled",
+      "key": "evaluation.ragas_enabled",
+      "definition": "Runs Ragas generation-quality scoring during eval runs. Each dataset question is answered through the LiteLLM gateway with the retrieved context, then Ragas judges faithfulness and answer relevancy using the configured judge alias and the local embedding model. When enabled, an unavailable judge, missing ragas package, or non-local embedding provider fails the run closed instead of skipping silently.",
+      "category": "evaluation",
+      "badges": []
+    },
+    {
+      "term": "Ragas Judge Model",
+      "key": "evaluation.ragas_judge_model",
+      "definition": "LiteLLM alias used as the Ragas judge for faithfulness and answer relevancy. Leave empty to use the chat default alias. The alias must be exposed by the authenticated gateway; the eval run refuses to start otherwise.",
+      "category": "evaluation",
+      "badges": []
+    },
+    {
+      "term": "Ragas Metrics",
+      "key": "evaluation.ragas_metrics",
+      "definition": "Ragas metrics computed per eval entry. Supported: faithfulness (claims grounded in retrieved context) and answer_relevancy (embedding similarity between the question and questions regenerated from the answer). Per-entry scores and run means are persisted on the eval run.",
+      "category": "evaluation",
+      "badges": []
+    },
+    {
+      "term": "Ragas Judge Timeout",
+      "key": "evaluation.ragas_judge_timeout_s",
+      "definition": "Per-request timeout in seconds for Ragas judge calls routed through LiteLLM. Ragas makes several judge calls per entry (claim extraction, NLI verdicts, question regeneration), and local CPU vLLM serving can take minutes per call, so this is deliberately generous. When a judge call exceeds it, the eval run fails closed with a typed 503 instead of silently dropping scores.",
+      "category": "evaluation",
+      "badges": []
+    },
+    {
+      "term": "Promptfoo Grader Model",
+      "key": "evaluation.promptfoo_grader_model",
+      "definition": "LiteLLM alias that grades Promptfoo llm-rubric assertions during a regression run. Leave empty to use the chat default alias. The grader must be exposed by the authenticated gateway; the run refuses to start otherwise and never reports fabricated pass/fail counts.",
+      "category": "evaluation",
+      "badges": []
     }
   ]
 }

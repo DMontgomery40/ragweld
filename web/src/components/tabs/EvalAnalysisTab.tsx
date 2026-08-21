@@ -6,6 +6,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useSubtab } from '@/hooks';
 import { EvalDrillDown } from '@/components/Evaluation/EvalDrillDown';
 import { EvalDatasetSubtab } from '@/components/Evaluation/EvalDatasetSubtab';
+import { PromptfooRegressionPanel } from '@/components/Evaluation/PromptfooRegressionPanel';
 import { SystemPromptsSubtab } from '@/components/Evaluation/SystemPromptsSubtab';
 import { TraceViewer } from '@/components/Evaluation/TraceViewer';
 import { LiveTerminal, LiveTerminalHandle } from '@/components/LiveTerminal/LiveTerminal';
@@ -914,7 +915,11 @@ export const EvalAnalysisTab: React.FC = () => {
           alignItems: 'flex-end',
           flexWrap: 'wrap'
         }}>
-          {showRunSelectors && (
+          {showAnalysisHeader && String(activeRepo || '').trim() ? (
+        <PromptfooRegressionPanel corpusId={String(activeRepo || '').trim()} />
+      ) : null}
+
+      {showRunSelectors && (
             <>
               {/* Primary Run Selector */}
               <div style={{ flex: '1', minWidth: '280px' }}>

@@ -26,16 +26,18 @@ _TRANSPORT_UNAVAILABLE = (
     TimeoutError,
 )
 
-DependencyName = Literal["postgres", "neo4j", "qdrant", "embedding_provider", "feedback_log", "lineage_store"]
+DependencyName = Literal["postgres", "neo4j", "qdrant", "embedding_provider", "ragas", "promptfoo", "feedback_log", "lineage_store"]
 
 
 class DependencyUnavailableError(RuntimeError):
     """Internal dependency failure with explicit provenance."""
 
-    def __init__(self, dependency: DependencyName, operation: str) -> None:
+    def __init__(self, dependency: DependencyName, operation: str, *, reason: str | None = None) -> None:
         self.dependency = dependency
         self.operation = operation
-        super().__init__(f"{dependency} unavailable during {operation}")
+        self.reason = str(reason or "").strip() or None
+        suffix = f": {self.reason}" if self.reason else ""
+        super().__init__(f"{dependency} unavailable during {operation}{suffix}")
 
 
 def _exception_chain(exc: BaseException) -> Iterator[BaseException]:

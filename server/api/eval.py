@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import math
 from collections.abc import AsyncIterator
@@ -15,8 +16,23 @@ from server.api.dataset import (  # shared file-backed persistence
     _dataset_path_for_corpus,
     _load_dataset,
 )
+from server.api.dependency_errors import dependency_unavailable_http_exception
+from server.api.generation_errors import generation_unavailable_http_exception
+from server.chat.context_formatter import format_context_for_llm
 from server.chat.generation import generate_chat_text
+from server.chat.handler import ChatGenerationError
+from server.chat.prompt_builder import get_system_prompt
 from server.chat.provider_router import select_provider_route
+from server.dependency_errors import DependencyUnavailableError
+from server.evaluation.promptfoo_runner import (
+    PromptfooTest,
+    PromptfooUnavailableError,
+)
+from server.evaluation.promptfoo_runner import (
+    run_regression as run_promptfoo_regression,
+)
+from server.evaluation.ragas_runner import RagasSample, RagasUnavailableError, score_samples
+from server.evaluation.ragas_runner import preflight as ragas_preflight
 from server.lineage import (
     attach_refs_to_current_bundle,
     capture_eval_run_version,
@@ -39,6 +55,8 @@ from server.models.tribrid_config_model import (
     CorpusScope,
     EvalAnalyzeComparisonRequest,
     EvalObservabilitySummaryResponse,
+    PromptfooRun,
+    PromptfooRunsResponse,
 )
 from server.observability.ml_quality import build_eval_observability_summary
 from server.retrieval.fusion import TriBridFusion
@@ -201,6 +219,16 @@ async def evaluate_dataset_entries(
     )
     fusion = TriBridFusion()
 
+    ragas_enabled = bool(cfg.evaluation.ragas_enabled)
+    ragas_samples: list[RagasSample] = []
+    answer_route = None
+    if ragas_enabled:
+        try:
+            await asyncio.to_thread(ragas_preflight, cfg)
+        except RagasUnavailableError as exc:
+            raise DependencyUnavailableError("ragas", "Eval run preflight", reason=str(exc)) from exc
+        answer_route = select_provider_route(config=cfg, model_override="")
+
     final_k = int(cfg.retrieval.eval_final_k)
     use_multi = cfg.retrieval.eval_multi
     k_recall5 = int(cfg.evaluation.recall_at_5_k)
@@ -268,6 +296,39 @@ async def evaluate_dataset_entries(
         prec5 = _precision_at_k(expected_paths, retrieved_paths, k=k_prec5)
         ndcg10 = _ndcg_at_k(expected_paths, retrieved_paths, k=k_ndcg10)
 
+        generated_answer: str | None = None
+        if ragas_enabled and answer_route is not None:
+            context_chunks = matches[: max(1, final_k)]
+            context_text = format_context_for_llm(rag_chunks=context_chunks, recall_chunks=[])
+            system_prompt = get_system_prompt(
+                has_rag_context=bool(context_chunks), has_recall_context=False, config=cfg.chat
+            )
+            try:
+                generation = await generate_chat_text(
+                    route=answer_route,
+                    system_prompt=system_prompt,
+                    user_message=entry.question,
+                    images=[],
+                    image_detail=str(cfg.chat.multimodal.image_detail or "auto"),
+                    temperature=float(cfg.chat.temperature),
+                    max_tokens=int(cfg.chat.max_tokens),
+                    context_text=context_text,
+                    context_chunks=context_chunks,
+                    timeout_s=float(getattr(cfg.ui, "chat_stream_timeout", 120) or 120),
+                )
+            except Exception as exc:
+                raise ChatGenerationError(str(exc)) from exc
+            generated_answer = str(getattr(generation, "text", "") or "").strip()
+            if not generated_answer:
+                raise ChatGenerationError("LLM returned an empty response during eval generation")
+            ragas_samples.append(
+                RagasSample(
+                    user_input=entry.question,
+                    retrieved_contexts=[str(m.content or "") for m in context_chunks if str(m.content or "").strip()],
+                    response=generated_answer,
+                )
+            )
+
         rr_vals.append(rr)
         recall5_vals.append(recall5)
         recall10_vals.append(recall10)
@@ -291,8 +352,22 @@ async def evaluate_dataset_entries(
                 duration_secs=latency_ms / 1000.0,
                 docs=docs,
                 debug=dict(getattr(fusion, "last_debug", None) or {}),
+                generated_answer=generated_answer,
             )
         )
+
+    ragas_means: dict[str, float] = {}
+    if ragas_enabled and ragas_samples:
+        try:
+            per_entry_scores = await asyncio.to_thread(score_samples, cfg, ragas_samples)
+        except RagasUnavailableError as exc:
+            raise DependencyUnavailableError("ragas", "Eval run scoring", reason=str(exc)) from exc
+        for result_item, scores in zip(results, per_entry_scores, strict=True):
+            result_item.ragas = dict(scores)
+        for metric_name in (cfg.evaluation.ragas_metrics or []):
+            values = [r.ragas[metric_name] for r in results if metric_name in r.ragas]
+            if values:
+                ragas_means[str(metric_name)] = float(sum(values) / len(values))
 
     metrics = EvalMetrics(
         mrr=float(sum(rr_vals) / len(rr_vals)) if rr_vals else 0.0,
@@ -303,6 +378,7 @@ async def evaluate_dataset_entries(
         ndcg_at_10=float(sum(ndcg10_vals) / len(ndcg10_vals)) if ndcg10_vals else 0.0,
         latency_p50_ms=_percentile(latencies, 0.50),
         latency_p95_ms=_percentile(latencies, 0.95),
+        ragas=ragas_means,
     )
 
     completed_at = datetime.now(UTC)
@@ -365,6 +441,10 @@ async def run_evaluation(request: EvalRequest) -> EvalRun:
             dataset_id=request.dataset_id or "default",
             persist_run=True,
         )
+    except DependencyUnavailableError as e:
+        raise dependency_unavailable_http_exception(e.dependency, boundary=e.operation, exc=e) from e
+    except ChatGenerationError as e:
+        raise generation_unavailable_http_exception(e, operation="Eval answer generation") from e
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
 
@@ -437,6 +517,74 @@ async def test_eval_entry(request: EvalTestRequest) -> EvalResult:
         duration_secs=latency_ms / 1000.0,
         docs=docs,
     )
+
+
+_PROMPTFOO_RUNS_DIR = _RUNS_DIR / "promptfoo"
+
+
+def _save_promptfoo_run(run: PromptfooRun) -> None:
+    _PROMPTFOO_RUNS_DIR.mkdir(parents=True, exist_ok=True)
+    (_PROMPTFOO_RUNS_DIR / f"{run.run_id}.json").write_text(
+        run.model_dump_json(by_alias=True, indent=2), encoding="utf-8"
+    )
+
+
+def _load_promptfoo_runs(repo_id: str) -> list[PromptfooRun]:
+    if not _PROMPTFOO_RUNS_DIR.exists():
+        return []
+    runs: list[PromptfooRun] = []
+    for path in sorted(_PROMPTFOO_RUNS_DIR.glob("*.json"), reverse=True):
+        try:
+            run = PromptfooRun.model_validate_json(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if run.repo_id == repo_id:
+            runs.append(run)
+    return runs
+
+
+@router.post("/eval/promptfoo/run", response_model=PromptfooRun)
+async def run_promptfoo(request: EvalRequest) -> PromptfooRun:
+    """Run a real Promptfoo llm-rubric regression over the corpus eval dataset."""
+    repo_id = request.repo_id
+    dataset = _load_dataset(corpus_id=repo_id)
+    if not dataset:
+        raise HTTPException(status_code=404, detail=f"No eval_dataset entries found for repo_id={repo_id}")
+    entries = dataset[: int(request.sample_size)] if request.sample_size else dataset
+    tests = [
+        PromptfooTest(
+            entry_id=entry.entry_id,
+            question=entry.question,
+            expected_answer=str(entry.expected_answer or "").strip(),
+        )
+        for entry in entries
+        if str(entry.expected_answer or "").strip()
+    ]
+    skipped = len(entries) - len(tests)
+    cfg = await load_scoped_config(repo_id=repo_id)
+    try:
+        run = await asyncio.to_thread(
+            run_promptfoo_regression, cfg, repo_id=repo_id, tests=tests, skipped_entries=skipped
+        )
+    except PromptfooUnavailableError as exc:
+        raise dependency_unavailable_http_exception(
+            "promptfoo",
+            boundary="Promptfoo regression",
+            exc=DependencyUnavailableError("promptfoo", "Promptfoo regression", reason=str(exc)),
+        ) from exc
+    _save_promptfoo_run(run)
+    return run
+
+
+@router.get("/eval/promptfoo/runs", response_model=PromptfooRunsResponse)
+async def list_promptfoo_runs(
+    corpus_id: str | None = Query(default=None),
+    repo_id: str | None = Query(default=None),
+) -> PromptfooRunsResponse:
+    resolved = str(corpus_id or repo_id or "").strip()
+    if not resolved:
+        raise HTTPException(status_code=422, detail="corpus_id is required")
+    return PromptfooRunsResponse(runs=_load_promptfoo_runs(resolved))
 
 
 @router.get("/eval/runs", response_model=EvalRunsResponse)
