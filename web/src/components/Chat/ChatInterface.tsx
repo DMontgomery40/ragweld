@@ -1,5 +1,5 @@
 import type React from 'react';
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
@@ -34,7 +34,9 @@ import {
   setMessageCustom,
   upsertChatSession,
 } from '@/components/Chat/chatSessions';
+import type { RagweldMessageCustom } from '@/components/Chat/chatSessions';
 import {
+  ChatRequestFailedError,
   sendRagweldChat,
   toAbortReason,
 } from '@/components/Chat/chatTransport';
@@ -501,6 +503,100 @@ function formatConfidence(value?: number | null): string | null {
   return `${percent.toFixed(1)}%`;
 }
 
+function StructuredErrorCard({ error }: { error: NonNullable<RagweldMessageCustom['structuredError']> }) {
+  const action = error.required_action || error.operator_hint || '';
+  const detailEntries: [string, unknown][] = [];
+  if (error.operation) detailEntries.push(['operation', error.operation]);
+  if (error.corpus_id) detailEntries.push(['corpus', error.corpus_id]);
+  if (error.dependency) detailEntries.push(['dependency', error.dependency]);
+  if (typeof error.http_status === 'number') detailEntries.push(['http status', error.http_status]);
+  if (typeof error.retryable === 'boolean') detailEntries.push(['retryable', String(error.retryable)]);
+  if (error.expected_contract) detailEntries.push(['expected contract', error.expected_contract]);
+  if (error.current_contract) detailEntries.push(['current contract', error.current_contract]);
+
+  return (
+    <div
+      data-testid="chat-structured-error-card"
+      style={{
+        marginTop: '10px',
+        padding: '12px 14px',
+        borderRadius: '10px',
+        background: 'rgba(214, 79, 79, 0.12)',
+        border: '1px solid rgba(214, 79, 79, 0.4)',
+        color: 'var(--fg)',
+        fontSize: '12.5px',
+        lineHeight: 1.55,
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginBottom: '6px' }}>
+        <span
+          style={{
+            fontFamily: 'var(--font-mono, monospace)',
+            fontWeight: 700,
+            color: 'var(--err)',
+            fontSize: '12px',
+          }}
+        >
+          {error.code}
+        </span>
+        {error.leg ? (
+          <span
+            data-testid="chat-structured-error-leg"
+            style={{
+              padding: '1px 8px',
+              borderRadius: '999px',
+              border: '1px solid rgba(214, 79, 79, 0.5)',
+              fontSize: '11px',
+              fontWeight: 700,
+              textTransform: 'uppercase',
+            }}
+          >
+            {error.leg} leg
+          </span>
+        ) : null}
+      </div>
+      {error.message ? <div style={{ marginBottom: action ? '6px' : 0 }}>{error.message}</div> : null}
+      {action ? (
+        <div data-testid="chat-structured-error-action" style={{ marginBottom: '6px' }}>
+          <span style={{ fontWeight: 700 }}>Required action: </span>
+          {action}
+        </div>
+      ) : null}
+      <div style={{ fontSize: '12px', color: 'var(--fg-muted)', marginBottom: detailEntries.length ? '6px' : 0 }}>
+        Generation did not run for this request.
+      </div>
+      {detailEntries.length > 0 ? (
+        <details>
+          <summary style={{ cursor: 'pointer', fontSize: '12px', color: 'var(--fg-muted)' }}>Details</summary>
+          <dl style={{ margin: '8px 0 0', display: 'grid', gridTemplateColumns: 'max-content 1fr', gap: '4px 12px' }}>
+            {detailEntries.map(([key, value]) => (
+              <Fragment key={key}>
+                <dt style={{ fontWeight: 600, whiteSpace: 'nowrap' }}>{key}</dt>
+                <dd style={{ margin: 0 }}>
+                  {typeof value === 'object' ? (
+                    <pre
+                      style={{
+                        margin: 0,
+                        fontSize: '11.5px',
+                        whiteSpace: 'pre-wrap',
+                        wordBreak: 'break-word',
+                      }}
+                    >
+                      {JSON.stringify(value, null, 2)}
+                    </pre>
+                  ) : (
+                    String(value)
+                  )}
+                </dd>
+              </Fragment>
+            ))}
+          </dl>
+        </details>
+      ) : null}
+    </div>
+  );
+}
+
 function AssistantThreadMessage(props: AssistantThreadMessageProps) {
   const message = useAuiState((state) => state.message) as ThreadMessage;
   const custom = getMessageCustom(message);
@@ -583,7 +679,9 @@ function AssistantThreadMessage(props: AssistantThreadMessageProps) {
         {message.role === 'assistant' ? (
           <>
             {props.renderAssistantContent(text)}
-            {isAssistantError ? (
+            {custom.structuredError ? (
+              <StructuredErrorCard error={custom.structuredError} />
+            ) : isAssistantError ? (
               <div
                 style={{
                   marginTop: '10px',
@@ -1367,8 +1465,26 @@ export function ChatInterface({ onTraceUpdate }: ChatInterfaceProps) {
           return;
         }
 
-        const errorMessage = `Error: ${error instanceof Error ? error.message : 'Failed to get response'}`;
         console.error('[ChatInterface] Failed to send message:', error);
+        if (error instanceof ChatRequestFailedError && error.detail) {
+          // Typed pre-generation failure: render a structured error card, not prose.
+          const structured = { ...error.detail, http_status: error.status };
+          const summary = error.detail.message || error.detail.code;
+          const failedMessages = updateAssistantMessage(assistantId, (assistant) =>
+            setMessageCustom(
+              {
+                ...assistant,
+                content: [],
+                status: buildAssistantStatus('error', summary),
+              },
+              { ...getMessageCustom(assistant), structuredError: structured },
+            ),
+          );
+          saveChatHistory(failedMessages);
+          showToast(summary, 'error');
+          return;
+        }
+        const errorMessage = `Error: ${error instanceof Error ? error.message : 'Failed to get response'}`;
         const failedMessages = updateAssistantMessage(assistantId, (assistant) =>
           setMessageCustom(
             {

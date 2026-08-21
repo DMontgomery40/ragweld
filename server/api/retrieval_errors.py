@@ -8,8 +8,10 @@ from server.models.tribrid_config_model import (
     DependencyUnavailableResponse,
     RequiredRetrievalLegFailureDetail,
     RequiredRetrievalLegFailureResponse,
+    RetrievalContractMismatchDetail,
+    RetrievalContractMismatchResponse,
 )
-from server.retrieval.errors import RequiredRetrievalLegError
+from server.retrieval.errors import RequiredRetrievalLegError, RetrievalContractMismatchError
 
 logger = logging.getLogger(__name__)
 
@@ -17,7 +19,11 @@ RETRIEVAL_RUNTIME_UNAVAILABLE_RESPONSES = {
     503: {
         "model": DependencyUnavailableResponse | RequiredRetrievalLegFailureResponse,
         "description": "A required storage dependency or requested retrieval leg is unavailable.",
-    }
+    },
+    409: {
+        "model": RetrievalContractMismatchResponse,
+        "description": "The stored index contract conflicts with the current runtime configuration.",
+    },
 }
 
 
@@ -34,3 +40,18 @@ def required_retrieval_leg_http_exception(exc: RequiredRetrievalLegError) -> HTT
         },
     )
     return HTTPException(status_code=503, detail=detail.model_dump(mode="json"))
+
+
+def retrieval_contract_mismatch_http_exception(exc: RetrievalContractMismatchError) -> HTTPException:
+    """Translate an index-contract mismatch into its validated 409 boundary shape."""
+
+    detail = RetrievalContractMismatchDetail.model_validate(exc.to_detail())
+    logger.error(
+        "Retrieval contract mismatch",
+        extra={
+            "code": detail.code,
+            "leg": detail.leg,
+            "corpus_id": detail.corpus_id,
+        },
+    )
+    return HTTPException(status_code=409, detail=detail.model_dump(mode="json"))

@@ -8705,32 +8705,6 @@
       ]
     },
     {
-      "term": "Prometheus Port",
-      "key": "PROMETHEUS_PORT",
-      "definition": "Port used to expose the metrics endpoint that Prometheus scrapes (typically `/metrics`). If this value is wrong, observability breaks quietly: the application can be healthy while dashboards, alerts, and SLO calculations go blind. Configure it together with scrape jobs, network policy, and service discovery labels so monitoring remains consistent across environments. In production, validate this by checking target health in Prometheus and ensuring metric cardinality and scrape intervals match system load.",
-      "category": "infrastructure",
-      "related": [],
-      "links": [
-        {
-          "text": "PromAssistant: Prompting for Time-Series Monitoring with PromQL (arXiv 2025)",
-          "href": "https://arxiv.org/abs/2503.03114"
-        },
-        {
-          "text": "Prometheus Configuration Reference",
-          "href": "https://prometheus.io/docs/prometheus/latest/configuration/configuration/"
-        },
-        {
-          "text": "Prometheus Exposition Formats",
-          "href": "https://prometheus.io/docs/instrumenting/exposition_formats/"
-        },
-        {
-          "text": "Prometheus Querying Basics",
-          "href": "https://prometheus.io/docs/prometheus/latest/querying/basics/"
-        }
-      ],
-      "badges": []
-    },
-    {
       "term": "Qdrant URL",
       "key": "QDRANT_URL",
       "definition": "Base endpoint for your Qdrant cluster, used by the retriever for collection management, upserts, and nearest-neighbor search queries. Correct URL and protocol selection (HTTP vs HTTPS, auth headers, cloud endpoint shape) is critical because retrieval latency and availability depend directly on this connection path. When running hybrid search, failures here can silently degrade system behavior to sparse-only retrieval unless you monitor fallback paths explicitly. Treat this as an infrastructure dependency: verify connectivity, TLS, and collection schema compatibility during startup and after deploys.",

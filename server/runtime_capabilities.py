@@ -49,7 +49,7 @@ EMBEDDING_PROVIDER_OPTIONS: tuple[EmbeddingRuntimeProviderCapability, ...] = (
     EmbeddingRuntimeProviderCapability(
         provider="local",
         label="Local",
-        description="Local Python embedding runtime using sentence-transformers and optional MLX fast-paths.",
+        description="Local Python embedding runtime executing the explicit sentence-transformers path.",
         badge="local",
         model_config_field="embedding.embedding_model_local",
         tokenizer_strategies=["huggingface"],

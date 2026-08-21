@@ -2,8 +2,12 @@ import type {
   ActiveSources,
   ChatDebugInfo,
   ChunkMatch,
+  DependencyUnavailableDetail,
+  GenerationUnavailableDetail,
   ImageAttachment,
   RecallIntensity,
+  RequiredRetrievalLegFailureDetail,
+  RetrievalContractMismatchDetail,
 } from '@/types/generated';
 import type { ThreadMessage, ThreadUserMessage } from '@assistant-ui/react';
 
@@ -63,6 +67,42 @@ export class ChatRequestAbortedError extends Error {
   }
 }
 
+/**
+ * A typed, structured failure detail returned by the chat API when a request
+ * fails before completion: retrieval contract mismatch (409), required-leg
+ * failure or dependency/generation-gateway unavailability (503), or an
+ * in-stream generation failure event.
+ *
+ * The shape is derived from the generated wire contracts so the frontend never
+ * hand-maintains these fields. `Partial` across the union lets one renderer
+ * narrow by presence; `code` is always present.
+ */
+export type ChatStructuredErrorDetail = Partial<
+  Omit<DependencyUnavailableDetail, 'code'> &
+    Omit<GenerationUnavailableDetail, 'code'> &
+    Omit<RequiredRetrievalLegFailureDetail, 'code'> &
+    Omit<RetrievalContractMismatchDetail, 'code'>
+> & { code: string };
+
+export class ChatRequestFailedError extends Error {
+  status: number;
+  detail: ChatStructuredErrorDetail | null;
+
+  constructor(message: string, status: number, detail: ChatStructuredErrorDetail | null) {
+    super(message);
+    this.name = 'ChatRequestFailedError';
+    this.status = status;
+    this.detail = detail;
+  }
+}
+
+function parseStructuredDetail(value: unknown): ChatStructuredErrorDetail | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  if (typeof record.code !== 'string' || !record.code.trim()) return null;
+  return record as ChatStructuredErrorDetail;
+}
+
 class ChatStreamEventError extends Error {
   constructor(message: string) {
     super(message);
@@ -89,22 +129,27 @@ function readTraceHeaders(response: Response): RagweldTraceHeaders {
   };
 }
 
-function readChatErrorDetail(resp: Response): Promise<string> {
-  return (async () => {
-    try {
-      const contentType = resp.headers.get('content-type') || '';
-      if (contentType.includes('application/json')) {
-        const body: Record<string, unknown> = await resp.json();
-        const detail = body?.detail ?? body?.message ?? body?.error ?? null;
-        if (typeof detail === 'string' && detail.trim()) return detail.trim();
-        return JSON.stringify(body).slice(0, 500);
+async function toChatRequestFailedError(resp: Response, fallback: string): Promise<ChatRequestFailedError> {
+  try {
+    const contentType = resp.headers.get('content-type') || '';
+    if (contentType.includes('application/json')) {
+      const body: Record<string, unknown> = await resp.json();
+      const detail = body?.detail ?? body?.message ?? body?.error ?? null;
+      const structured = parseStructuredDetail(detail);
+      if (structured) {
+        const summary = structured.message || structured.code;
+        return new ChatRequestFailedError(summary, resp.status, structured);
       }
-      const text = await resp.text();
-      return (text || '').trim().slice(0, 500);
-    } catch {
-      return '';
+      if (typeof detail === 'string' && detail.trim()) {
+        return new ChatRequestFailedError(detail.trim(), resp.status, null);
+      }
+      return new ChatRequestFailedError(JSON.stringify(body).slice(0, 500), resp.status, null);
     }
-  })();
+    const text = await resp.text();
+    return new ChatRequestFailedError((text || '').trim().slice(0, 500) || fallback, resp.status, null);
+  } catch {
+    return new ChatRequestFailedError(fallback, resp.status, null);
+  }
 }
 
 function getUserMessageText(message: ThreadMessage): string {
@@ -162,8 +207,7 @@ async function runRegularChat(args: SendRagweldChatArgs): Promise<RagweldChatRes
   }
 
   if (!response.ok) {
-    const detail = await readChatErrorDetail(response);
-    throw new Error(detail || 'Failed to get response');
+    throw await toChatRequestFailedError(response, 'Failed to get response');
   }
 
   const data = await response.json();
@@ -201,8 +245,7 @@ async function runStreamingChat(args: SendRagweldChatArgs): Promise<RagweldChatR
   }
 
   if (!response.ok) {
-    const detail = await readChatErrorDetail(response);
-    throw new Error(detail ? `Failed to start streaming: ${detail}` : 'Failed to start streaming');
+    throw await toChatRequestFailedError(response, 'Failed to start streaming');
   }
 
   const reader = response.body?.getReader();
@@ -269,6 +312,10 @@ async function runStreamingChat(args: SendRagweldChatArgs): Promise<RagweldChatR
         const message = typeof parsed.message === 'string' && parsed.message.trim()
           ? parsed.message.trim()
           : 'Chat request failed';
+        const structured = parseStructuredDetail(parsed.detail);
+        if (structured) {
+          throw new ChatRequestFailedError(structured.message || message, 200, structured);
+        }
         throw new ChatStreamEventError(message);
       }
       default:

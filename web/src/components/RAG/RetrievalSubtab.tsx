@@ -254,7 +254,6 @@ export function RetrievalSubtab() {
   // --- Tracing ------------------------------------------------------------
   const [tracingEnabled, setTracingEnabled] = useConfigField<number>('tracing.tracing_enabled', 1);
   const [traceSamplingRate, setTraceSamplingRate] = useConfigField<number>('tracing.trace_sampling_rate', 1.0);
-  const [prometheusPort, setPrometheusPort] = useConfigField<number>('tracing.prometheus_port', 9090);
   const [metricsEnabled, setMetricsEnabled] = useConfigField<number>('tracing.metrics_enabled', 1);
   const [alertIncludeResolved, setAlertIncludeResolved] = useConfigField<number>('tracing.alert_include_resolved', 1);
   const [alertWebhookTimeout, setAlertWebhookTimeout] = useConfigField<number>('tracing.alert_webhook_timeout', 5);
@@ -2083,18 +2082,6 @@ export function RetrievalSubtab() {
                         <option value={1}>Enabled</option>
                         <option value={0}>Disabled</option>
                       </select>
-                    </div>
-                    <div className="input-group">
-                      <label>
-                        Prometheus Port <TooltipIcon name="PROMETHEUS_PORT" />
-                      </label>
-                      <input
-                        type="number"
-                        min={1024}
-                        max={65535}
-                        value={prometheusPort}
-                        onChange={(e) => setPrometheusPort(snapNumber(e.target.value, 9090))}
-                      />
                     </div>
                     <div className="input-group">
                       <label>

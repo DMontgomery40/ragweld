@@ -916,6 +916,23 @@ class RequiredRetrievalLegFailureResponse(BaseModel):
     detail: RequiredRetrievalLegFailureDetail
 
 
+class RetrievalContractMismatchDetail(BaseModel):
+    """Public error detail returned when a stored index contract blocks a retrieval request."""
+
+    code: str = Field(description="Stable mismatch code, e.g. embedding_contract_mismatch")
+    corpus_id: str = Field(description="Corpus whose stored index contract conflicts with the current configuration")
+    leg: Literal["vector", "sparse", "graph"] = Field(description="Retrieval leg governed by the mismatched contract")
+    expected_contract: dict[str, Any] = Field(description="Contract recorded when the corpus was indexed")
+    current_contract: dict[str, Any] = Field(description="Contract implied by the current runtime configuration")
+    required_action: str = Field(description="Exact operator action required to resolve the mismatch")
+
+
+class RetrievalContractMismatchResponse(BaseModel):
+    """FastAPI response envelope for a retrieval contract mismatch (HTTP 409)."""
+
+    detail: RetrievalContractMismatchDetail
+
+
 class GenerationUnavailableDetail(BaseModel):
     """Public error detail returned when the generation gateway cannot complete."""
 
@@ -5325,13 +5342,6 @@ class TracingConfig(BaseModel):
         description="Trace sampling rate (0.0-1.0)"
     )
 
-    prometheus_port: int = Field(
-        default=9090,
-        ge=1024,
-        le=65535,
-        description="Prometheus metrics port"
-    )
-
     metrics_enabled: int = Field(
         default=1,
         ge=0,
@@ -6867,7 +6877,6 @@ class TriBridConfig(BaseModel):
     # Tracing params
             'TRACING_ENABLED': self.tracing.tracing_enabled,
             'TRACE_SAMPLING_RATE': self.tracing.trace_sampling_rate,
-            'PROMETHEUS_PORT': self.tracing.prometheus_port,
             'METRICS_ENABLED': self.tracing.metrics_enabled,
             'ALERT_INCLUDE_RESOLVED': self.tracing.alert_include_resolved,
             'ALERT_WEBHOOK_TIMEOUT': self.tracing.alert_webhook_timeout,
@@ -7241,7 +7250,6 @@ class TriBridConfig(BaseModel):
             tracing=TracingConfig(
                 tracing_enabled=data.get('TRACING_ENABLED', 1),
                 trace_sampling_rate=data.get('TRACE_SAMPLING_RATE', 1.0),
-                prometheus_port=data.get('PROMETHEUS_PORT', 9090),
                 metrics_enabled=data.get('METRICS_ENABLED', 1),
                 alert_include_resolved=data.get('ALERT_INCLUDE_RESOLVED', 1),
                 alert_webhook_timeout=data.get('ALERT_WEBHOOK_TIMEOUT', 5),
@@ -7572,7 +7580,6 @@ TRIBRID_CONFIG_KEYS = {
     # Tracing params
     'TRACING_ENABLED',
     'TRACE_SAMPLING_RATE',
-    'PROMETHEUS_PORT',
     'METRICS_ENABLED',
     'ALERT_INCLUDE_RESOLVED',
     'ALERT_WEBHOOK_TIMEOUT',

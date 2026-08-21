@@ -446,7 +446,7 @@ async def get_dev_stack_status() -> DevStackStatusResponse:
 
     details: list[str] = []
 
-    frontend_probe_urls = [f"http://{_url_host(h)}:{frontend_port}/web" for h in hosts]
+    frontend_probe_urls = [f"http://{_url_host(h)}:{frontend_port}/web/" for h in hosts]
     frontend_running, resolved_frontend_url, frontend_details = await _probe_first_ok(
         frontend_probe_urls, label="Frontend"
     )

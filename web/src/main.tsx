@@ -83,7 +83,10 @@ async function enableMockingIfConfigured(): Promise<void> {
 function renderApp() {
   ReactDOM.createRoot(document.getElementById('root')!).render(
     <React.StrictMode>
-      <BrowserRouter basename={ROUTER_BASENAME}>
+      <BrowserRouter
+        basename={ROUTER_BASENAME}
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
         <ErrorBoundary
           context="app-root"
           fallback={({ error, reset }) => (

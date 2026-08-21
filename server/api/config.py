@@ -16,6 +16,7 @@ from server.api.dependency_errors import (
 from server.api.retrieval_errors import (
     RETRIEVAL_RUNTIME_UNAVAILABLE_RESPONSES,
     required_retrieval_leg_http_exception,
+    retrieval_contract_mismatch_http_exception,
 )
 from server.config import load_config as load_global_config
 from server.config_control_plane import (
@@ -732,7 +733,7 @@ async def mcp_rag_search(
     except HTTPException:
         raise
     except RetrievalContractMismatchError as exc:
-        raise HTTPException(status_code=409, detail=exc.to_detail()) from exc
+        raise retrieval_contract_mismatch_http_exception(exc) from exc
     except RequiredRetrievalLegError as exc:
         raise required_retrieval_leg_http_exception(exc) from exc
     except Exception as exc:

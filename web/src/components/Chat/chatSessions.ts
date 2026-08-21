@@ -12,10 +12,14 @@ import type {
   ThreadUserMessage,
   ThreadUserMessagePart,
 } from '@assistant-ui/react';
+import type { ChatStructuredErrorDetail } from '@/components/Chat/chatTransport';
+
+export type RagweldStructuredError = ChatStructuredErrorDetail & { http_status?: number };
 
 export type RagweldMessageCustom = {
   confidence?: number;
   debug?: ChatDebugInfo | null;
+  structuredError?: RagweldStructuredError;
   endedAtMs?: number;
   eventId?: string;
   imagesStripped?: boolean;

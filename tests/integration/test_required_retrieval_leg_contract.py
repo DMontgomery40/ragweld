@@ -8,6 +8,7 @@ from httpx import AsyncClient
 
 from server.config import load_config
 from server.db.postgres import PostgresClient
+from server.models.tribrid_config_model import RetrievalContractMismatchDetail
 from server.services import config_store
 from server.services.conversation_store import get_conversation_store
 
@@ -94,6 +95,12 @@ async def test_requested_contract_mismatch_never_returns_partial_success(
             assert detail["code"] == expected_code, f"{label}: {response.text}"
             assert detail["leg"] == leg
             assert detail["corpus_id"] == corpus_id
+            # The 409 payload is a validated public boundary: it must round-trip
+            # through the registered model with actionable contract content.
+            parsed = RetrievalContractMismatchDetail.model_validate(detail)
+            assert parsed.required_action.strip(), f"{label}: missing required_action"
+            assert parsed.expected_contract, f"{label}: missing expected_contract"
+            assert parsed.current_contract, f"{label}: missing current_contract"
         assert get_conversation_store().get_messages(stream_conversation_id) == []
     finally:
         config_store._store = None

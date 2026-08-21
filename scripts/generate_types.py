@@ -297,6 +297,8 @@ def main(output_path: Path | None = None) -> None:
             DependencyUnavailableResponse,
             RequiredRetrievalLegFailureDetail,
             RequiredRetrievalLegFailureResponse,
+            RetrievalContractMismatchDetail,
+            RetrievalContractMismatchResponse,
             GenerationUnavailableDetail,
             GenerationUnavailableResponse,
             # Domain models - Index tooling
@@ -519,6 +521,8 @@ def main(output_path: Path | None = None) -> None:
         DependencyUnavailableResponse,
         RequiredRetrievalLegFailureDetail,
         RequiredRetrievalLegFailureResponse,
+        RetrievalContractMismatchDetail,
+        RetrievalContractMismatchResponse,
         GenerationUnavailableDetail,
         GenerationUnavailableResponse,
         VocabPreviewTerm,

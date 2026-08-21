@@ -4,7 +4,7 @@ import { TooltipIcon } from '@/components/ui/TooltipIcon';
 import { ProviderSetup } from '@/components/Chat/ProviderSetup';
 import type { ChatMultimodalConfig, RecallConfig, RecallGateConfig, RecallIntensity } from '@/types/generated';
 
-const TABS = ['Model', 'Sources', 'Recall', 'Multimodal', 'Local', 'OpenRouter', 'Benchmark', 'UI'];
+const TABS = ['Model', 'Sources', 'Recall', 'Multimodal', 'Providers', 'Benchmark', 'UI'];
 
 export function ChatSettings() {
   const { config, loading, error, saving } = useConfig();
@@ -611,23 +611,13 @@ export function ChatSettings() {
           </div>
         );
 
-      case 'Local':
-        return (
-          <div className="subtab-panel" style={{ padding: 24 }}>
-            <h3 style={{ marginTop: 0 }}>Local</h3>
-            <div style={{ color: 'var(--fg-muted)', fontSize: 13, marginBottom: 14 }}>
-              Configure local OpenAI-compatible provider endpoints (Ollama, llama.cpp, etc).
-            </div>
-            <ProviderSetup />
-          </div>
-        );
-
-      case 'OpenRouter':
+      case 'Providers':
         return (
           <div className="subtab-panel" style={{ padding: 24 }}>
             <h3 style={{ marginTop: 0 }}>Providers</h3>
             <div style={{ color: 'var(--fg-muted)', fontSize: 13, marginBottom: 14 }}>
-              Configure LiteLLM, OpenRouter, vLLM, and local provider routing from one place.
+              Generation routes through the LiteLLM gateway to managed vLLM serving. The app does
+              not route chat directly to any other provider.
             </div>
             <ProviderSetup />
           </div>

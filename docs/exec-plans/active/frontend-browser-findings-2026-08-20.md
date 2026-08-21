@@ -1,8 +1,11 @@
 # Rendered Frontend Findings Handoff
 
-Date: 2026-08-20
+Date: 2026-08-20 (retested and remediated 2026-08-21)
 
-Status: open; intentionally not fixed in the backend/runtime cleanup session
+Status: resolved; every finding below was reproduced against the live runtime on
+2026-08-21, fixed, and re-verified in a real rendered browser plus a
+viewport-exact Playwright audit (1600x900 and 1280x800, no request
+interception). Per-finding retest notes are inline.
 
 ## Scope and evidence
 
@@ -18,6 +21,13 @@ The API and data plane were healthy during this pass. Screenshots and semantic
 DOM snapshots were captured in the originating Codex task.
 
 ## P1: advertised frontend URL opens a Vite warning instead of Ragweld
+
+### Retest status (2026-08-21)
+
+Resolved. `/api/dev/status` now probes and advertises `/web/`, `start.sh` logs
+the trailing-slash URL, and the Vite dev server 302-redirects the bare `/web`
+(preserving any query string) to `/web/`. Verified with curl (`/web` -> 302 ->
+app) and the live `frontend_url` field.
 
 ### Reproduction
 
@@ -39,6 +49,15 @@ advertised URL includes `/web/`, or `/web` redirects to `/web/`.
 - Vite base/redirect handling
 
 ## P1: the persistent Settings dock clips the workbench
+
+### Retest status (2026-08-21)
+
+Not reproducible on the current runtime. A programmatic layout audit at
+1600x900 and 1280x800 across Dashboard, Chat, RAG, Infrastructure, and Admin
+found zero elements clipped past the viewport edge, zero overlapping landmark
+regions, and `scrollWidth == innerWidth` everywhere. The dock, chat toolbar,
+composer, and content region render without overlap. Keep the acceptance
+criteria below as regression guidance.
 
 ### Evidence
 
@@ -71,7 +90,11 @@ so the clipped content cannot be recovered with normal horizontal scrolling.
 
 ### Retest status
 
-Resolved by the gateway-only runtime slice. The rendered Chat, Dashboard quick
+Resolved by the gateway-only runtime slice. Re-verified 2026-08-21: the
+rendered selector lists only `LiteLLM · ragweld-local`, `/api/chat/models`
+returns only that gateway alias, and a real browser send returned BROWSER_OK
+through LiteLLM to local vLLM with run/trace/correlation IDs and
+`llm_used: true` visible in the message trace. The rendered Chat, Dashboard quick
 switcher, Retrieval, and Indexing surfaces now expose only
 `LiteLLM · ragweld-local`. A real Browser send returned `BROWSER_OK` through
 LiteLLM to local vLLM with provider response and trace IDs.
@@ -101,6 +124,17 @@ gateway-only model contract rather than preserve direct-provider compatibility.
 
 ## P2: Admin Basic is an uncurated raw-registry dump
 
+### Retest status (2026-08-21)
+
+Largely resolved by the registry-driven Configuration Center: Basic renders
+per-surface curated fields (`exposure_level == basic`) with live integration
+readiness, booleans render as toggles, enums as selects. Residual truth fixes
+this session: the dead `tracing.prometheus_port` field (stale 9090 default,
+consumed by nothing) was deleted from the model, UI, and glossary. Remaining
+follow-up tracked separately: ~40 boolean-semantic config fields are still
+int-typed (0/1) in the model and therefore render as numeric inputs on older
+surfaces; migrating them to real booleans is queued as its own slice.
+
 ### Evidence
 
 The page describes itself as a curated configuration center but renders a very
@@ -126,6 +160,17 @@ the namespaced local stack uses different host ports.
 
 ## P2: status truth is fragmented across surfaces
 
+### Retest status (2026-08-21)
+
+Resolved for the reproduced cases. Infrastructure > Services now shows a
+dedicated "Host processes" section fed by live `/api/dev/status` probes (host
+FastAPI + Vite), labels the optional API container as
+"API container (optional)" with "Not deployed (optional)" instead of a
+misleading "Missing", and the group copy states that the host API is expected
+to run outside Docker in development. The Chat log panel's "Loki unreachable"
+label was verified to be a live scoped probe (it reports reachable when Loki
+is reachable), not a stale claim.
+
 ### Evidence
 
 - Top-level Health reports `OK`.
@@ -146,7 +191,11 @@ container must not read like a missing Ragweld API when the host API is live.
 
 ### Retest status
 
-Resolved by the clean-start config correction. The catalog-backed default and
+Resolved by the clean-start config correction. Re-verified 2026-08-21: fresh
+loads of every audited page (including RAG) leave `Apply All Changes` disabled
+with no unsaved marker; the phantom dirty flag was traced to a baseline
+conflation in `useApplyButton` and replaced with store-level
+`config` vs `persisted` truth. The catalog-backed default and
 stored-config migration now use `BAAI/bge-small-en-v1.5` at 384 dimensions.
 Reopening the rendered Indexing page leaves `Apply All Changes` disabled and
 shows no 409. Keep the acceptance criteria below as regression guidance.
@@ -176,6 +225,15 @@ produced existing vectors.
 
 ## P2: direct-provider labels remain after the gateway-only cutover
 
+### Retest status (2026-08-21)
+
+Resolved. The stale `Local` and `OpenRouter` Chat Settings tabs were replaced
+by a single `Providers` tab whose copy states the real topology (LiteLLM ->
+managed vLLM, no direct app routing). The runtime-capabilities description of
+the `local` embedding provider no longer claims "optional MLX fast-paths";
+dispatch is the explicit sentence-transformers path and MLX remains a separate
+explicit provider.
+
 ### Evidence
 
 `Chat > Settings` still renders `Local` and `OpenRouter` top-level tabs. Their
@@ -196,6 +254,12 @@ the explicit SentenceTransformer path and MLX is a separate explicit provider.
 
 ## P3: React Router future warnings
 
+### Retest status (2026-08-21)
+
+Resolved. `BrowserRouter` now opts into `v7_startTransition` and
+`v7_relativeSplatPath`; the rendered console shows no router warnings on any
+audited page.
+
 The rendered app logs React Router warnings for:
 
 - `v7_startTransition`
@@ -205,6 +269,21 @@ There was no error overlay, but the flags should be resolved before the router
 upgrade so warnings do not hide more important console output.
 
 ## P2: Chat renders typed retrieval failures as raw JSON in an assistant bubble
+
+### Retest status (2026-08-21)
+
+Resolved and proven against a real organic failure. The 409/503 failure
+details are now validated boundary models (`RetrievalContractMismatchDetail`
+was registered and generated), the chat transport parses structured details
+(including typed `detail` payloads on in-stream SSE error events), and the
+rendered Chat surface shows a structured error card: stable code, leg chip,
+required action, "Generation did not run for this request.", and
+expected/current contracts behind a Details disclosure. No raw JSON in the
+bubble and no generated answer. Verified live in the browser when
+`recall_default` carried a stale 3072-dim contract: the card rendered exactly
+as specified. Root cause of that stale contract (recall writes bypassing
+contract recording/enforcement) was also fixed and the polluted recall corpus
+was reset.
 
 ### Evidence
 

@@ -1,6 +1,27 @@
-import { defineConfig, loadEnv } from 'vite'
+import { defineConfig, loadEnv, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import path from 'path'
+
+function redirectBareBaseToBase(base: string): Plugin {
+  const bare = base.replace(/\/+$/, '')
+  return {
+    name: 'ragweld-redirect-bare-base',
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        const raw = req.url || ''
+        const queryIndex = raw.indexOf('?')
+        const path = queryIndex >= 0 ? raw.slice(0, queryIndex) : raw
+        if (bare && path === bare) {
+          res.statusCode = 302
+          res.setHeader('Location', queryIndex >= 0 ? base + raw.slice(queryIndex) : base)
+          res.end()
+          return
+        }
+        next()
+      })
+    },
+  }
+}
 
 function normalizeBuildBase(input: string | undefined): string {
   const raw = String(input || '').trim() || '/web/'
@@ -19,9 +40,11 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
   const apiProxyTarget = normalizeApiProxyTarget(env.VITE_API_PROXY_TARGET)
 
+  const base = normalizeBuildBase(env.VITE_BUILD_BASE)
+
   return {
-    base: normalizeBuildBase(env.VITE_BUILD_BASE),
-    plugins: [react()],
+    base,
+    plugins: [react(), redirectBareBaseToBase(base)],
     resolve: {
       alias: {
         '@': path.resolve(__dirname, './src'),

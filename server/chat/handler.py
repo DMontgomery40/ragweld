@@ -17,7 +17,12 @@ from server.chat.source_router import resolve_sources
 from server.db.postgres import PostgresClient
 from server.models.chat_config import RecallConfig, RecallIntensity, RecallPlan
 from server.models.retrieval import ChunkMatch
-from server.models.tribrid_config_model import ChatProviderInfo, ChatRequest, TriBridConfig
+from server.models.tribrid_config_model import (
+    ChatProviderInfo,
+    ChatRequest,
+    GenerationUnavailableDetail,
+    TriBridConfig,
+)
 from server.retrieval.cache import CacheMode, SemanticCacheService
 from server.services.conversation_store import Conversation
 from server.services.rag import FusionProtocol
@@ -804,7 +809,25 @@ async def chat_stream(
     except Exception as e:
         llm_used = False
         llm_error = _safe_error_message(e)
-        yield f"data: {json.dumps({'type': 'error', 'message': llm_error})}\n\n"
+        error_detail = GenerationUnavailableDetail(
+            operation="Chat stream generation",
+            message="The generation gateway could not complete the chat request.",
+            operator_hint=(
+                "Verify the scoped LiteLLM gateway, client key, and selected model alias, then retry. "
+                "Ragweld did not substitute a direct provider fallback."
+            ),
+        )
+        yield (
+            "data: "
+            + json.dumps(
+                {
+                    "type": "error",
+                    "message": llm_error,
+                    "detail": error_detail.model_dump(mode="json"),
+                }
+            )
+            + "\n\n"
+        )
         ended_at_ms = int(time.time() * 1000)
         sources_json = [s.model_dump(mode="serialization", by_alias=True) for s in sources]
         done_event_payload: dict[str, Any] = {

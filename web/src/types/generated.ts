@@ -1985,6 +1985,22 @@ export interface RetrievalConfig {
   hydration_max_chars?: number; // default: 2000
 }
 
+/** Public error detail returned when a stored index contract blocks a retrieval request. */
+export interface RetrievalContractMismatchDetail {
+  /** Stable mismatch code, e.g. embedding_contract_mismatch */
+  code: string;
+  /** Corpus whose stored index contract conflicts with the current configuration */
+  corpus_id: string;
+  /** Retrieval leg governed by the mismatched contract */
+  leg: "vector" | "sparse" | "graph";
+  /** Contract recorded when the corpus was indexed */
+  expected_contract: Record<string, unknown>;
+  /** Contract implied by the current runtime configuration */
+  current_contract: Record<string, unknown>;
+  /** Exact operator action required to resolve the mismatch */
+  required_action: string;
+}
+
 /** Availability status for one OSS retrieval pilot dependency. */
 export interface RetrievalPilotPackageStatus {
   /** Import/package name checked by the pilot. */
@@ -2471,8 +2487,6 @@ export interface TracingConfig {
   tracing_enabled?: number; // default: 1
   /** Trace sampling rate (0.0-1.0) */
   trace_sampling_rate?: number; // default: 1.0
-  /** Prometheus metrics port */
-  prometheus_port?: number; // default: 9090
   /** Enable metrics collection */
   metrics_enabled?: number; // default: 1
   /** Include resolved alerts */
@@ -4123,6 +4137,11 @@ export interface RerankerTrainStartResponse {
   ok?: boolean;
   run_id: string;
   run: RerankerTrainRun;
+}
+
+/** FastAPI response envelope for a retrieval contract mismatch (HTTP 409). */
+export interface RetrievalContractMismatchResponse {
+  detail: RetrievalContractMismatchDetail;
 }
 
 /** Request to generate the OSS retrieval pilot sidecar export. */

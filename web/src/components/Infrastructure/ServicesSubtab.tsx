@@ -16,8 +16,9 @@ const SERVICE_GROUPS: Array<{
     services: ['postgres', 'neo4j'],
   },
   {
-    title: 'Application',
-    description: 'Optional containerized API and database metrics exporter.',
+    title: 'Application containers',
+    description:
+      'Optional containerized API and database metrics exporter. The Ragweld API normally runs as a host process (see Host processes above), so an absent API container is expected in development.',
     services: ['api', 'postgres-exporter'],
   },
   {
@@ -40,7 +41,7 @@ const SERVICE_LABELS: Record<RagweldDockerService, string> = {
   prometheus: 'Prometheus',
   loki: 'Loki',
   promtail: 'Promtail',
-  api: 'Ragweld API',
+  api: 'API container (optional)',
   tempo: 'Tempo',
   alloy: 'Grafana Alloy',
   litellm: 'LiteLLM Gateway',
@@ -51,12 +52,14 @@ function isKnownService(value: string | null | undefined): value is RagweldDocke
   return RAGWELD_DOCKER_SERVICES.includes(value as RagweldDockerService);
 }
 
+const OPTIONAL_SERVICES: ReadonlySet<RagweldDockerService> = new Set(['api', 'postgres-exporter']);
+
 export function ServicesSubtab() {
-  const { status, containers, loading, error, refreshDocker } = useDockerStore();
+  const { status, containers, loading, error, refreshDocker, devStackStatus, fetchDevStackStatus } = useDockerStore();
 
   const refresh = useCallback(async () => {
-    await refreshDocker();
-  }, [refreshDocker]);
+    await Promise.all([refreshDocker(), fetchDevStackStatus()]);
+  }, [refreshDocker, fetchDevStackStatus]);
 
   useEffect(() => {
     void refresh();
@@ -100,6 +103,42 @@ export function ServicesSubtab() {
         )}
       </section>
 
+      <section className="settings-section" aria-labelledby="host-processes-heading">
+        <h3 id="host-processes-heading" style={{ marginBottom: '4px' }}>Host processes</h3>
+        <p className="small" style={{ color: 'var(--fg-muted)', marginTop: 0 }}>
+          The FastAPI backend and Vite frontend run directly on the host in normal development. Status
+          comes from live process probes, not container state.
+        </p>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '12px' }}>
+          {[
+            {
+              key: 'backend',
+              label: 'Host API (FastAPI)',
+              running: devStackStatus?.backend_running === true,
+              detail: devStackStatus?.backend_url || `port ${devStackStatus?.backend_port ?? '58012'}`,
+            },
+            {
+              key: 'frontend',
+              label: 'Host frontend (Vite)',
+              running: devStackStatus?.frontend_running === true,
+              detail: devStackStatus?.frontend_url || `port ${devStackStatus?.frontend_port ?? '55173'}`,
+            },
+          ].map((proc) => (
+            <article key={proc.key} style={{ padding: '14px', border: '1px solid var(--line)', borderRadius: '6px', background: 'var(--bg-elev1)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px' }}>
+                <strong>{proc.label}</strong>
+                <span style={{ color: proc.running ? 'var(--ok)' : 'var(--err)' }}>
+                  {proc.running ? '● Running' : '○ Not running'}
+                </span>
+              </div>
+              <div className="small" style={{ color: 'var(--fg-muted)', marginTop: '8px' }}>
+                {devStackStatus ? proc.detail : 'Host process status not loaded yet.'}
+              </div>
+            </article>
+          ))}
+        </div>
+      </section>
+
       {SERVICE_GROUPS.map((group) => (
         <section key={group.title} className="settings-section" aria-labelledby={`service-group-${group.title.toLowerCase().replace(/\s+/g, '-')}`}>
           <h3 id={`service-group-${group.title.toLowerCase().replace(/\s+/g, '-')}`} style={{ marginBottom: '4px' }}>
@@ -110,16 +149,20 @@ export function ServicesSubtab() {
             {group.services.map((service) => {
               const container = containersByService.get(service);
               const running = container?.state === 'running';
+              const optional = OPTIONAL_SERVICES.has(service);
               return (
                 <article key={service} style={{ padding: '14px', border: '1px solid var(--line)', borderRadius: '6px', background: 'var(--bg-elev1)' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px' }}>
                     <strong>{SERVICE_LABELS[service]}</strong>
                     <span style={{ color: running ? 'var(--ok)' : container ? 'var(--warn)' : 'var(--fg-muted)' }}>
-                      {running ? '● Running' : container ? '○ Stopped' : '— Missing'}
+                      {running ? '● Running' : container ? '○ Stopped' : optional ? '— Not deployed (optional)' : '— Missing'}
                     </span>
                   </div>
                   <div className="small" style={{ color: 'var(--fg-muted)', marginTop: '8px' }}>
-                    {container?.status || 'No managed container exists for this service.'}
+                    {container?.status ||
+                      (optional
+                        ? 'Optional container; not part of the default development topology.'
+                        : 'No managed container exists for this service.')}
                   </div>
                 </article>
               );

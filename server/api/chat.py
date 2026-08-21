@@ -1,6 +1,7 @@
 """Chat API endpoints (Chat 2.0)."""
 import asyncio
 import json
+import logging
 import time
 import uuid
 from typing import Any
@@ -19,6 +20,7 @@ from server.api.generation_errors import (
 from server.api.retrieval_errors import (
     RETRIEVAL_RUNTIME_UNAVAILABLE_RESPONSES,
     required_retrieval_leg_http_exception,
+    retrieval_contract_mismatch_http_exception,
 )
 from server.chat.handler import ChatGenerationError, chat_once
 from server.chat.handler import chat_stream as chat_stream_handler
@@ -58,6 +60,8 @@ from server.services.rag import FusionProtocol, build_chat_debug_info
 from server.services.traces import get_trace_store
 
 router = APIRouter(tags=["chat"])
+
+logger = logging.getLogger(__name__)
 
 
 # Dependency holders (can be overridden for testing)
@@ -403,14 +407,19 @@ async def chat(request: ChatRequest, response: Response) -> ChatResponse:
                     await pg.connect()
                     embedder = Embedder(config.embedding)
                     configure_postgres_embedding_cache_backend(embedder, pg)
-                    await index_recall_conversation(
-                        pg,
-                        conversation_id=conv.id,
-                        messages=store.get_messages(conv.id),
-                        config=config.chat.recall,
-                        embedder=embedder,
-                        ts_config="english",
-                    )
+                    try:
+                        await index_recall_conversation(
+                            pg,
+                            conversation_id=conv.id,
+                            messages=store.get_messages(conv.id),
+                            config=config.chat.recall,
+                            embedder=embedder,
+                            ts_config="english",
+                        )
+                    except RetrievalContractMismatchError as e:
+                        logger.warning(
+                            "Recall auto-index blocked by embedding contract mismatch: %s", e
+                        )
 
                 asyncio.create_task(_do_index())
 
@@ -430,7 +439,7 @@ async def chat(request: ChatRequest, response: Response) -> ChatResponse:
                 await trace_store.add_event(run_id, kind="chat.error", msg=str(e), data={"code": e.code})
                 await trace_store.annotate(run_id, **current_trace_payload_fields())
                 await trace_store.end(run_id)
-            raise HTTPException(status_code=409, detail=e.to_detail()) from e
+            raise retrieval_contract_mismatch_http_exception(e) from e
         except RequiredRetrievalLegError as e:
             if trace_enabled:
                 await trace_store.add_event(run_id, kind="chat.error", msg=str(e), data={"kind": "retrieval"})
@@ -545,7 +554,7 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
             await trace_store.end(run_id)
         obs_cm.__exit__(type(e), e, e.__traceback__)
         if isinstance(e, RetrievalContractMismatchError):
-            raise HTTPException(status_code=409, detail=e.to_detail()) from e
+            raise retrieval_contract_mismatch_http_exception(e) from e
         if isinstance(e, RequiredRetrievalLegError):
             raise required_retrieval_leg_http_exception(e) from e
         raise_required_dependency_unavailable_if_applicable(e, boundary="Chat stream retrieval")
@@ -609,14 +618,19 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
                             await pg.connect()
                             embedder = Embedder(config.embedding)
                             configure_postgres_embedding_cache_backend(embedder, pg)
-                            await index_recall_conversation(
-                                pg,
-                                conversation_id=conv.id,
-                                messages=store.get_messages(conv.id),
-                                config=config.chat.recall,
-                                embedder=embedder,
-                                ts_config="english",
-                            )
+                            try:
+                                await index_recall_conversation(
+                                    pg,
+                                    conversation_id=conv.id,
+                                    messages=store.get_messages(conv.id),
+                                    config=config.chat.recall,
+                                    embedder=embedder,
+                                    ts_config="english",
+                                )
+                            except RetrievalContractMismatchError as e:
+                                logger.warning(
+                                    "Recall auto-index blocked by embedding contract mismatch: %s", e
+                                )
 
                         asyncio.create_task(_do_index())
 
@@ -862,14 +876,17 @@ async def recall_index(request: RecallIndexRequest) -> RecallIndexResponse:
     await pg.connect()
     embedder = Embedder(cfg.embedding)
     configure_postgres_embedding_cache_backend(embedder, pg)
-    n = await index_recall_conversation(
-        pg,
-        conversation_id=request.conversation_id,
-        messages=msgs,
-        config=cfg.chat.recall,
-        embedder=embedder,
-        ts_config="english",
-    )
+    try:
+        n = await index_recall_conversation(
+            pg,
+            conversation_id=request.conversation_id,
+            messages=msgs,
+            config=cfg.chat.recall,
+            embedder=embedder,
+            ts_config="english",
+        )
+    except RetrievalContractMismatchError as e:
+        raise retrieval_contract_mismatch_http_exception(e) from e
     return RecallIndexResponse(ok=True, conversation_id=request.conversation_id, chunks_indexed=int(n))
 
 

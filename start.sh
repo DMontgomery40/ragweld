@@ -336,7 +336,7 @@ if [[ "$START_FRONTEND" == "1" ]]; then
   have_cmd npm || die "npm is unavailable"
   [[ -d web ]] || die "web directory is missing"
   [[ -d web/node_modules || "$DRY_RUN" == "1" ]] || npm --prefix web install
-  log "UI: http://localhost:${FRONTEND_PORT}/web"
+  log "UI: http://localhost:${FRONTEND_PORT}/web/"
   if [[ "$DRY_RUN" == "1" ]]; then
     run env FRONTEND_PORT="$FRONTEND_PORT" web/node_modules/.bin/vite \
       --host "$FRONTEND_HOST" --port "$FRONTEND_PORT" --strictPort

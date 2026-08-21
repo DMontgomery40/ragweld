@@ -15,6 +15,7 @@ from server.api.dependency_errors import (
 from server.api.retrieval_errors import (
     RETRIEVAL_RUNTIME_UNAVAILABLE_RESPONSES,
     required_retrieval_leg_http_exception,
+    retrieval_contract_mismatch_http_exception,
 )
 from server.config import load_config
 from server.db.postgres import PostgresClient
@@ -138,7 +139,7 @@ async def search(request: SearchRequest, response: Response) -> SearchResponse:
                 await trace_store.add_event(run_id, kind="search.error", msg=str(e), data={"code": e.code})
                 await trace_store.annotate(run_id, **current_trace_payload_fields())
                 await trace_store.end(run_id)
-            raise HTTPException(status_code=409, detail=e.to_detail()) from e
+            raise retrieval_contract_mismatch_http_exception(e) from e
         except RequiredRetrievalLegError as e:
             raise required_retrieval_leg_http_exception(e) from e
         except Exception as e:
@@ -277,7 +278,7 @@ async def answer(request: AnswerRequest, response: Response) -> AnswerResponse:
                 await trace_store.add_event(run_id, kind="answer.error", msg=str(e), data={"code": e.code})
                 await trace_store.annotate(run_id, **current_trace_payload_fields())
                 await trace_store.end(run_id)
-            raise HTTPException(status_code=409, detail=e.to_detail()) from e
+            raise retrieval_contract_mismatch_http_exception(e) from e
         except RequiredRetrievalLegError as e:
             raise required_retrieval_leg_http_exception(e) from e
         except Exception as e:
@@ -395,7 +396,7 @@ async def answer_stream(request: AnswerRequest) -> StreamingResponse:
             await trace_store.annotate(run_id, **current_trace_payload_fields())
             await trace_store.end(run_id)
         obs_cm.__exit__(type(e), e, e.__traceback__)
-        raise HTTPException(status_code=409, detail=e.to_detail()) from e
+        raise retrieval_contract_mismatch_http_exception(e) from e
     except RequiredRetrievalLegError as e:
         raise required_retrieval_leg_http_exception(e) from e
     except Exception as e:

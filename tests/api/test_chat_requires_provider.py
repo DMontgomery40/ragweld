@@ -146,6 +146,14 @@ async def test_chat_stream_emits_error_event_without_providers(
         assert done_event.get("llm_used") is False
         assert isinstance(done_event.get("llm_error"), str) and str(done_event["llm_error"]).strip()
         assert "retrieval-only" not in body.lower()
+
+        # The in-stream error event carries the typed generation-failure detail
+        # so the UI can render a structured error card instead of raw prose.
+        error_detail = error_event.get("detail")
+        assert isinstance(error_detail, dict), body
+        assert error_detail.get("code") == "generation_unavailable"
+        assert str(error_detail.get("operator_hint") or "").strip()
+        assert str(error_detail.get("operation") or "").strip()
     finally:
         set_config(None)
         set_fusion(None)
