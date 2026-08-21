@@ -53,30 +53,30 @@ class _SectionDefaults:
 
 
 _SECTION_DEFAULTS: dict[str, _SectionDefaults] = {
-    "retrieval": _SectionDefaults("corpus", "haystack_docling_qdrant", "retrieval", "advanced", "live"),
-    "semantic_cache": _SectionDefaults("corpus", "haystack_docling_qdrant", "retrieval", "advanced", "live"),
-    "scoring": _SectionDefaults("corpus", "haystack_docling_qdrant", "retrieval", "advanced", "live"),
-    "layer_bonus": _SectionDefaults("corpus", "haystack_docling_qdrant", "retrieval", "advanced", "live"),
-    "embedding": _SectionDefaults("corpus", "haystack_docling_qdrant", "retrieval", "advanced", "reindex"),
-    "tokenization": _SectionDefaults("corpus", "haystack_docling_qdrant", "retrieval", "advanced", "reindex"),
-    "chunking": _SectionDefaults("corpus", "haystack_docling_qdrant", "retrieval", "advanced", "reindex"),
-    "indexing": _SectionDefaults("corpus", "haystack_docling_qdrant", "retrieval", "advanced", "reindex"),
+    "retrieval": _SectionDefaults("corpus", "tribrid_retrieval", "retrieval", "advanced", "live"),
+    "semantic_cache": _SectionDefaults("corpus", "tribrid_retrieval", "retrieval", "advanced", "live"),
+    "scoring": _SectionDefaults("corpus", "tribrid_retrieval", "retrieval", "advanced", "live"),
+    "layer_bonus": _SectionDefaults("corpus", "tribrid_retrieval", "retrieval", "advanced", "live"),
+    "embedding": _SectionDefaults("corpus", "tribrid_retrieval", "retrieval", "advanced", "reindex"),
+    "tokenization": _SectionDefaults("corpus", "tribrid_retrieval", "retrieval", "advanced", "reindex"),
+    "chunking": _SectionDefaults("corpus", "tribrid_retrieval", "retrieval", "advanced", "reindex"),
+    "indexing": _SectionDefaults("corpus", "tribrid_retrieval", "retrieval", "advanced", "reindex"),
     "graph_storage": _SectionDefaults("global", "neo4j", "graph", "basic", "restart"),
     "graph_indexing": _SectionDefaults("corpus", "neo4j", "graph", "advanced", "reindex"),
-    "fusion": _SectionDefaults("corpus", "haystack_docling_qdrant", "retrieval", "advanced", "live"),
-    "vector_search": _SectionDefaults("corpus", "haystack_docling_qdrant", "retrieval", "advanced", "live"),
-    "sparse_search": _SectionDefaults("corpus", "haystack_docling_qdrant", "retrieval", "advanced", "live"),
+    "fusion": _SectionDefaults("corpus", "tribrid_retrieval", "retrieval", "advanced", "live"),
+    "vector_search": _SectionDefaults("corpus", "tribrid_retrieval", "retrieval", "advanced", "live"),
+    "sparse_search": _SectionDefaults("corpus", "tribrid_retrieval", "retrieval", "advanced", "live"),
     "graph_search": _SectionDefaults("corpus", "neo4j", "graph", "advanced", "live"),
-    "reranking": _SectionDefaults("corpus", "haystack_docling_qdrant", "retrieval", "advanced", "live"),
+    "reranking": _SectionDefaults("corpus", "tribrid_retrieval", "retrieval", "advanced", "live"),
     "generation": _SectionDefaults("corpus", "litellm", "runtime", "basic", "live"),
-    "enrichment": _SectionDefaults("corpus", "haystack_docling_qdrant", "retrieval", "advanced", "reindex"),
-    "chunk_summaries": _SectionDefaults("corpus", "haystack_docling_qdrant", "retrieval", "expert", "reindex"),
-    "keywords": _SectionDefaults("corpus", "haystack_docling_qdrant", "retrieval", "advanced", "reindex"),
+    "enrichment": _SectionDefaults("corpus", "tribrid_retrieval", "retrieval", "advanced", "reindex"),
+    "chunk_summaries": _SectionDefaults("corpus", "tribrid_retrieval", "retrieval", "expert", "reindex"),
+    "keywords": _SectionDefaults("corpus", "tribrid_retrieval", "retrieval", "advanced", "reindex"),
     "tracing": _SectionDefaults("global", "otel_grafana_stack", "observability", "basic", "restart"),
     "training": _SectionDefaults("corpus", "unsloth", "training", "basic", "redeploy"),
     "ui": _SectionDefaults("global", "shell_ui", "shell", "basic", "live"),
     "chat": _SectionDefaults("corpus", "litellm", "runtime", "advanced", "live"),
-    "hydration": _SectionDefaults("corpus", "haystack_docling_qdrant", "retrieval", "advanced", "live"),
+    "hydration": _SectionDefaults("corpus", "tribrid_retrieval", "retrieval", "advanced", "live"),
     "evaluation": _SectionDefaults("corpus", "ragas", "eval", "basic", "live"),
     "system_prompts": _SectionDefaults("corpus", "promptfoo", "eval", "expert", "live"),
     "mcp": _SectionDefaults("global", "shell_ui", "shell", "advanced", "restart"),
@@ -94,13 +94,13 @@ _FIELD_OVERRIDES: dict[str, dict[str, Any]] = {
     "chat.litellm.enabled": {"integration": "litellm", "ui_surface": "runtime", "exposure_level": "basic"},
     "chat.litellm.base_url": {"integration": "litellm", "ui_surface": "runtime", "exposure_level": "basic"},
     "chat.litellm.default_model": {"integration": "litellm", "ui_surface": "runtime", "exposure_level": "basic"},
-    "retrieval.final_k": {"integration": "haystack_docling_qdrant", "ui_surface": "retrieval", "exposure_level": "basic"},
-    "retrieval.multi_query_m": {"integration": "haystack_docling_qdrant", "ui_surface": "retrieval", "exposure_level": "basic"},
-    "chunking.chunking_strategy": {"integration": "haystack_docling_qdrant", "ui_surface": "retrieval", "exposure_level": "basic"},
-    "embedding.embedding_backend": {"integration": "haystack_docling_qdrant", "ui_surface": "retrieval", "exposure_level": "basic"},
-    "reranking.reranker_mode": {"integration": "haystack_docling_qdrant", "ui_surface": "retrieval", "exposure_level": "basic"},
-    "vector_search.enabled": {"integration": "haystack_docling_qdrant", "ui_surface": "retrieval", "exposure_level": "basic"},
-    "sparse_search.enabled": {"integration": "haystack_docling_qdrant", "ui_surface": "retrieval", "exposure_level": "basic"},
+    "retrieval.final_k": {"integration": "tribrid_retrieval", "ui_surface": "retrieval", "exposure_level": "basic"},
+    "retrieval.multi_query_m": {"integration": "tribrid_retrieval", "ui_surface": "retrieval", "exposure_level": "basic"},
+    "chunking.chunking_strategy": {"integration": "tribrid_retrieval", "ui_surface": "retrieval", "exposure_level": "basic"},
+    "embedding.embedding_backend": {"integration": "tribrid_retrieval", "ui_surface": "retrieval", "exposure_level": "basic"},
+    "reranking.reranker_mode": {"integration": "tribrid_retrieval", "ui_surface": "retrieval", "exposure_level": "basic"},
+    "vector_search.enabled": {"integration": "tribrid_retrieval", "ui_surface": "retrieval", "exposure_level": "basic"},
+    "sparse_search.enabled": {"integration": "tribrid_retrieval", "ui_surface": "retrieval", "exposure_level": "basic"},
     "graph_search.enabled": {"integration": "neo4j", "ui_surface": "graph", "exposure_level": "basic"},
     "training.ragweld_agent_workflow_backend": {"integration": "flyte", "ui_surface": "training", "exposure_level": "basic"},
     "training.ragweld_agent_flyte_admin_base_url": {"integration": "flyte", "ui_surface": "training", "exposure_level": "basic"},
@@ -163,6 +163,16 @@ _LOCKED_INTEGRATION_CONTRACTS: tuple[ConfigIntegrationContract, ...] = (
         required_secret_ids=[],
         readiness_checks=["backend_selected", "required_fields_present", "admin_probe"],
         blocked_surfaces=["training"],
+    ),
+    ConfigIntegrationContract(
+        id="tribrid_retrieval",
+        label="Tri-brid Retrieval (Postgres + Neo4j)",
+        summary="Canonical retrieval/indexing lane: pgvector dense, Postgres FTS sparse, and Neo4j graph legs.",
+        ui_surface="retrieval",
+        required_config_paths=["indexing.postgres_url", "vector_search.enabled", "sparse_search.enabled"],
+        required_secret_ids=[],
+        readiness_checks=["postgres_probe", "graph_probe_when_enabled"],
+        blocked_surfaces=["retrieval", "chat"],
     ),
     ConfigIntegrationContract(
         id="haystack_docling_qdrant",
@@ -272,7 +282,7 @@ _SECRET_REQUIREMENTS: tuple[SecretRequirement, ...] = (
         env_var="OPENAI_API_KEY",
         label="OpenAI API Key",
         description="OpenAI access for the preserved provider-backed embedding boundary.",
-        integrations=["haystack_docling_qdrant"],
+        integrations=["tribrid_retrieval"],
         optional=True,
         ui_surface="retrieval",
     ),
@@ -299,7 +309,7 @@ _SECRET_REQUIREMENTS: tuple[SecretRequirement, ...] = (
         env_var="VOYAGE_API_KEY",
         label="Voyage API Key",
         description="Embedding provider credential for provider-backed indexing and retrieval.",
-        integrations=["haystack_docling_qdrant"],
+        integrations=["tribrid_retrieval"],
         optional=True,
         ui_surface="retrieval",
     ),
@@ -308,7 +318,7 @@ _SECRET_REQUIREMENTS: tuple[SecretRequirement, ...] = (
         env_var="JINA_API_KEY",
         label="Jina API Key",
         description="Optional retrieval/rerank provider credential when Jina-backed routes are selected.",
-        integrations=["haystack_docling_qdrant"],
+        integrations=["tribrid_retrieval"],
         optional=True,
         ui_surface="retrieval",
     ),
@@ -386,7 +396,7 @@ _SECRET_REQUIREMENTS: tuple[SecretRequirement, ...] = (
         env_var="POSTGRES_PASSWORD",
         label="Postgres Password",
         description="Local-dev password used when Postgres DSN is assembled from env vars.",
-        integrations=["haystack_docling_qdrant"],
+        integrations=["tribrid_retrieval"],
         optional=True,
         ui_surface="retrieval",
     ),
@@ -902,6 +912,66 @@ async def _build_training_integration_readiness(
     )
 
 
+async def _build_tribrid_retrieval_readiness(
+    config: TriBridConfig,
+    contract: ConfigIntegrationContract,
+    *,
+    scope_id: str | None,
+) -> IntegrationReadiness:
+    """Functional readiness for the canonical Postgres/Neo4j retrieval lane."""
+
+    failing_checks: list[str] = []
+    operator_hint: str | None = None
+
+    pg = PostgresClient(config.indexing.postgres_url, schema_mode="control")
+    postgres_ok = False
+    try:
+        await pg.connect()
+        postgres_ok = True
+    except Exception:
+        failing_checks.append("postgres_probe")
+        operator_hint = "Postgres is unreachable; dense and sparse retrieval legs cannot run."
+    finally:
+        try:
+            await pg.disconnect()
+        except Exception:
+            pass
+
+    graph_enabled = bool(config.graph_search.enabled)
+    neo4j_ok: bool | None = None
+    if graph_enabled:
+        neo4j = Neo4jClient(
+            config.graph_storage.neo4j_uri,
+            config.graph_storage.neo4j_user,
+            config.graph_storage.resolve_password(),
+            database=config.graph_storage.resolve_database(scope_id),
+        )
+        try:
+            await neo4j.connect()
+            neo4j_ok = True
+        except Exception:
+            neo4j_ok = False
+            failing_checks.append("graph_probe_when_enabled")
+            operator_hint = operator_hint or "Neo4j is unreachable; the graph retrieval leg cannot run."
+        finally:
+            try:
+                await neo4j.disconnect()
+            except Exception:
+                pass
+
+    ready = postgres_ok and (neo4j_ok is not False)
+    return _build_integration_readiness(
+        contract,
+        state="ready" if ready else "degraded",
+        enabled=True,
+        configured=True,
+        reachable=ready,
+        failing_checks=failing_checks,
+        operator_hint=operator_hint
+        or "Canonical tri-brid retrieval lane (pgvector dense, Postgres FTS sparse, Neo4j graph) is functional.",
+    )
+
+
 async def _build_retrieval_integration_readiness(
     config: TriBridConfig,
     contract: ConfigIntegrationContract,
@@ -1146,6 +1216,8 @@ async def build_config_readiness_response(config: TriBridConfig, *, scope_id: st
             integrations.append(await _build_runtime_integration_readiness(config, contract))
         elif contract.id in {"flyte", "mlflow", "unsloth"}:
             integrations.append(await _build_training_integration_readiness(config, contract, scope_id=scope_id))
+        elif contract.id == "tribrid_retrieval":
+            integrations.append(await _build_tribrid_retrieval_readiness(config, contract, scope_id=scope_id))
         elif contract.id == "haystack_docling_qdrant":
             integrations.append(await _build_retrieval_integration_readiness(config, contract, scope_id=scope_id))
         elif contract.id == "neo4j":

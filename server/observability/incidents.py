@@ -134,22 +134,24 @@ async def build_observability_incidents(
             pilot = await build_retrieval_pilot_status(corpus_id=repo_id, repo_path=repo_path)
         except Exception:
             pilot = None
-        if pilot is not None and not bool(pilot.execution_ready):
+        # An absent pilot export is expected while the pilot lane is optional;
+        # only a hydrated export that cannot execute is incident-worthy.
+        if pilot is not None and bool(pilot.export_exists) and not bool(pilot.execution_ready):
             incidents.append(
                 ObservabilityIncident(
                     id=f"retrieval:{repo_id}",
-                    title="Retrieval lane degraded",
-                    summary="Haystack/Docling/Qdrant pilot is not execution-ready for the active corpus.",
+                    title="Retrieval pilot lane degraded",
+                    summary="Haystack/Docling/Qdrant pilot export exists but is not execution-ready for the active corpus.",
                     source="retrieval",
-                    severity="warning" if pilot.export_exists else "critical",
+                    severity="warning",
                     status="firing",
                     started_at=datetime.now(UTC),
                     owner="retrieval-oncall",
                     component_ids=["haystack_docling_qdrant"],
                     dashboard_ids=["retrieval_indexing_graph", "oncall_overview"],
                     workbench_links=_component_workbench_links(workbench_by_path, "retrieval"),
-                    slo_state="at_risk" if pilot.export_exists else "breached",
-                    operator_hint="Re-export or re-ingest the pilot lane before relying on retrieval quality.",
+                    slo_state="at_risk",
+                    operator_hint="Re-export or re-ingest the pilot lane before relying on pilot retrieval quality.",
                     change_correlation=[
                         ObservabilityIncidentChange(
                             kind="retrieval_lane",

@@ -429,19 +429,28 @@ async def build_observability_status(config: TriBridConfig, *, repo_id: str | No
                 pilot_links = []
                 if pilot.search_preview_ready:
                     pilot_links.extend(_make_links("Retrieval Monitoring", "/infrastructure?subtab=monitoring", "Workbench monitoring surface."))
+                # The pilot lane is optional until promotion: an absent export is
+                # expected state (info), not a degraded component. Only a hydrated
+                # export that cannot execute is a real problem.
                 components.append(
                     _decorate_component(
                         component_id="haystack_docling_qdrant",
                         label="Haystack + Docling + Qdrant",
-                        enabled=True,
-                        configured=bool(pilot.export_exists or pilot.documents_path),
-                        reachable=True if pilot.execution_ready else None,
+                        enabled=bool(pilot.export_exists),
+                        configured=bool(pilot.export_exists),
+                        reachable=(
+                            True
+                            if pilot.execution_ready
+                            else False
+                            if pilot.export_exists
+                            else None
+                        ),
                         detail=(
                             "Retrieval pilot execution-ready for the active corpus."
                             if pilot.execution_ready
                             else "Retrieval pilot export exists but execution is not ready."
                             if pilot.export_exists
-                            else "No retrieval pilot export exists for the active corpus."
+                            else "Optional pilot lane not hydrated for the active corpus."
                         ),
                         url=None,
                         links=pilot_links,

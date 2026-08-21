@@ -38,6 +38,7 @@ async def test_get_config_registry_covers_all_leaf_paths(client: AsyncClient) ->
         "vllm",
         "flyte",
         "haystack_docling_qdrant",
+        "tribrid_retrieval",
         "neo4j",
         "unsloth",
         "mlflow",
