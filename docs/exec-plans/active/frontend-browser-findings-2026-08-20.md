@@ -146,9 +146,14 @@ Verified: full repo gates green (`check_docs_ownership`, `check_banned`,
 `validate_types`, `check_runtime_capabilities_catalog`,
 `validate_contract_bundle`, `pytest -q`, `npm run lint`, `npm run build`), plus
 unit tests asserting the declared types, the absence of 0/1 range bounds, and
-0/1-to-bool coercion of stored config. Not yet verified: no surface was rendered
-in a browser, so "booleans render consistently as switches/checkboxes" still
-needs a visual retest before this finding is marked resolved.
+0/1-to-bool coercion of stored config.
+
+Visual retest (2026-08-21, rendered browser): a programmatic control audit on
+the live app found zero remaining 0/1 `<select>` controls on RAG > Retrieval,
+RAG > Data Quality, RAG > Learning Agent Studio, and Admin > Basic; boolean
+fields render as toggle switches (143 on Admin Basic, driven by the registry's
+`boolean` type), and the only 0..1 numeric input left is Trace Sampling Rate,
+which is a genuine float. Finding resolved.
 
 ### Evidence
 
