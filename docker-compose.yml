@@ -139,6 +139,33 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
+  mlflow:
+    image: ${MLFLOW_IMAGE:-ghcr.io/mlflow/mlflow:v2.22.2}
+    labels:
+      io.ragweld.managed: "true"
+    command:
+      - mlflow
+      - server
+      - --backend-store-uri
+      - sqlite:////mlflow/mlflow.db
+      - --artifacts-destination
+      - /mlflow/artifacts
+      - --serve-artifacts
+      - --host
+      - 0.0.0.0
+      - --port
+      - "5000"
+    ports:
+      - "127.0.0.1:${MLFLOW_PORT:-55500}:5000"
+    volumes:
+      - mlflow_data:/mlflow
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5000/health', timeout=5)"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 20s
+
   qdrant:
     image: ${QDRANT_IMAGE:-qdrant/qdrant:v1.17.1}
     labels:
@@ -245,6 +272,7 @@ services:
 
 volumes:
   postgres_data:
+  mlflow_data:
   qdrant_data:
   neo4j_data:
   neo4j_logs:

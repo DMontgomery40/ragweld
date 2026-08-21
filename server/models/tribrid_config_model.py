@@ -5778,8 +5778,8 @@ class TrainingConfig(BaseModel):
     )
 
     ragweld_agent_mlflow_tracking_url: str = Field(
-        default="",
-        description="Base URL for MLflow Tracking/UI used by Learning Agent runs.",
+        default="http://127.0.0.1:55500",
+        description="Base URL of the Compose-owned MLflow Tracking server used by Learning Agent runs.",
     )
 
     ragweld_agent_mlflow_experiment_name: str = Field(

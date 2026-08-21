@@ -32,6 +32,11 @@ const SERVICE_GROUPS: Array<{
     services: ['qdrant'],
   },
   {
+    title: 'MLOps tracking',
+    description: 'MLflow records Learning Agent runs, metrics, and artifacts when tracking=mlflow is selected.',
+    services: ['mlflow'],
+  },
+  {
     title: 'Observability',
     description: 'Metrics, traces, logs, dashboards, and telemetry collection.',
     services: ['grafana', 'prometheus', 'loki', 'promtail', 'tempo', 'alloy'],
@@ -52,6 +57,7 @@ const SERVICE_LABELS: Record<RagweldDockerService, string> = {
   litellm: 'LiteLLM Gateway',
   vllm: 'vLLM Serving',
   qdrant: 'Qdrant Vector Store',
+  mlflow: 'MLflow Tracking',
 };
 
 function isKnownService(value: string | null | undefined): value is RagweldDockerService {

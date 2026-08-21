@@ -2635,8 +2635,8 @@ export interface TrainingConfig {
   ragweld_agent_flyte_domain?: string; // default: "development"
   /** Flyte launch plan name for the Learning Agent workflow lane. */
   ragweld_agent_flyte_launchplan?: string; // default: ""
-  /** Base URL for MLflow Tracking/UI used by Learning Agent runs. */
-  ragweld_agent_mlflow_tracking_url?: string; // default: ""
+  /** Base URL of the Compose-owned MLflow Tracking server used by Learning Agent runs. */
+  ragweld_agent_mlflow_tracking_url?: string; // default: "http://127.0.0.1:55500"
   /** MLflow experiment name for Learning Agent runs. */
   ragweld_agent_mlflow_experiment_name?: string; // default: "ragweld-learning-agent"
   /** Container image or artifact reference used by the Flyte task to run Unsloth training. */

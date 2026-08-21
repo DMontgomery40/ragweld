@@ -32031,8 +32031,8 @@
           "type": "string"
         },
         "ragweld_agent_mlflow_tracking_url": {
-          "default": "",
-          "description": "Base URL for MLflow Tracking/UI used by Learning Agent runs.",
+          "default": "http://127.0.0.1:55500",
+          "description": "Base URL of the Compose-owned MLflow Tracking server used by Learning Agent runs.",
           "title": "Ragweld Agent Mlflow Tracking Url",
           "type": "string"
         },
@@ -35447,8 +35447,8 @@
               "type": "string"
             },
             "ragweld_agent_mlflow_tracking_url": {
-              "default": "",
-              "description": "Base URL for MLflow Tracking/UI used by Learning Agent runs.",
+              "default": "http://127.0.0.1:55500",
+              "description": "Base URL of the Compose-owned MLflow Tracking server used by Learning Agent runs.",
               "title": "Ragweld Agent Mlflow Tracking Url",
               "type": "string"
             },

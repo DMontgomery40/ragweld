@@ -44,6 +44,7 @@ from server.models.tribrid_config_model import (
 )
 from server.retrieval.mlx_qwen3 import mlx_is_available
 from server.services.config_store import CorpusNotFoundError
+from server.training.mlflow_client import MlflowClient, MlflowRunHandle, MlflowUnavailableError
 from server.services.config_store import get_config as load_scoped_config
 from server.training.control_plane import (
     build_agent_control_plane_status,
@@ -643,9 +644,53 @@ async def _run_train_job(*, run_id: str, corpus_id: str, cancel_event: asyncio.E
     final_primary: float | None = None
 
     cfg: Any | None = None
+    mlflow_client: MlflowClient | None = None
+    mlflow_handle: MlflowRunHandle | None = None
+    mlflow_warned = False
+
+    def _mlflow_log_metrics(metrics: dict[str, float] | None, *, step: int | None) -> None:
+        nonlocal mlflow_warned
+        if mlflow_client is None or mlflow_handle is None or not metrics:
+            return
+        try:
+            for key, value in metrics.items():
+                if key in {"train_loss", "eval_loss"} and math.isfinite(float(value)):
+                    mlflow_client.log_metric(mlflow_handle.run_id, key, float(value), step=step)
+        except MlflowUnavailableError as exc:
+            if not mlflow_warned:
+                mlflow_warned = True
+                _emit_log(f"MLflow tracking degraded mid-run (metrics no longer forwarded): {exc}")
+
+    def _mlflow_finish(status: str, *, manifest: dict[str, Any] | None = None) -> None:
+        if mlflow_client is None or mlflow_handle is None:
+            return
+        try:
+            if manifest is not None:
+                mlflow_client.log_json_artifact(mlflow_handle, name="ragweld_run_manifest.json", payload=manifest)
+            mlflow_client.set_terminated(mlflow_handle.run_id, status=status)
+        except MlflowUnavailableError as exc:
+            _emit_log(f"MLflow run could not be finalized ({status}): {exc}")
+
     try:
         cfg = await load_scoped_config(repo_id=corpus_id)
         _raise_if_cancelled()
+
+        if str(run.tracking_backend or "local") == "mlflow" and str(run.tracking_run_id or "").strip():
+            try:
+                mlflow_client = MlflowClient(str(cfg.training.ragweld_agent_mlflow_tracking_url or ""))
+                experiment_id = mlflow_client.ensure_experiment(
+                    str(cfg.training.ragweld_agent_mlflow_experiment_name or "ragweld-learning-agent")
+                )
+                mlflow_handle = MlflowRunHandle(
+                    tracking_url=mlflow_client.tracking_url,
+                    experiment_id=experiment_id,
+                    run_id=str(run.tracking_run_id),
+                )
+                _emit_log(f"MLflow tracking active: {mlflow_handle.run_url}")
+            except MlflowUnavailableError as exc:
+                mlflow_client = None
+                mlflow_handle = None
+                _emit_log(f"MLflow tracking unavailable at job start: {exc}")
 
         if not mlx_is_available():
             raise RuntimeError("MLX is not available on this platform (install mlx + mlx-lm)")
@@ -766,6 +811,7 @@ async def _run_train_job(*, run_id: str, corpus_id: str, cancel_event: asyncio.E
                             continue
                     metrics_map = parsed_metrics or None
 
+                _mlflow_log_metrics(metrics_map, step=int(payload.get("step") or 0) or None)
                 pv = _primary_from_metrics(metrics_map)
                 if pv is not None:
                     primary_series.append(float(pv))
@@ -888,6 +934,25 @@ async def _run_train_job(*, run_id: str, corpus_id: str, cancel_event: asyncio.E
         run.completed_at = datetime.now(UTC)
         run = _attach_lineage(run, cfg, promoted=bool(active_dir is not None and should_promote))
         _save_run(run)
+        _mlflow_finish(
+            "FINISHED",
+            manifest={
+                "run_id": run.run_id,
+                "corpus_id": run.repo_id,
+                "status": run.status,
+                "primary_metric": run.primary_metric,
+                "primary_metric_best": run.summary.primary_metric_best,
+                "primary_metric_final": run.summary.primary_metric_final,
+                "model_artifact_ref": (
+                    run.model_artifact_ref.model_dump(mode="json", by_alias=True)
+                    if run.model_artifact_ref is not None
+                    else None
+                ),
+                "input_bundle_id": run.input_bundle_id,
+                "execution_backend": run.execution_backend,
+                "workflow_backend": run.workflow_backend,
+            },
+        )
         _append_event(run_id, AgentTrainMetricEvent(type="complete", ts=datetime.now(UTC), run_id=run_id, status=run.status))
     except TrainingCancelledError:
         try:
@@ -899,6 +964,7 @@ async def _run_train_job(*, run_id: str, corpus_id: str, cancel_event: asyncio.E
             _save_run(run)
         except Exception:
             pass
+        _mlflow_finish("KILLED")
         _append_event(
             run_id,
             AgentTrainMetricEvent(
@@ -920,6 +986,7 @@ async def _run_train_job(*, run_id: str, corpus_id: str, cancel_event: asyncio.E
             _save_run(run)
         except Exception:
             pass
+        _mlflow_finish("FAILED")
         _append_event(
             run_id,
             AgentTrainMetricEvent(
@@ -1020,6 +1087,71 @@ async def start_train_run(request: AgentTrainStartRequest) -> AgentTrainStartRes
         )
 
     cfg = await load_scoped_config(repo_id=corpus_id)
+
+    workflow_backend = str(cfg.training.ragweld_agent_workflow_backend or "local").strip().lower()
+    tracking_backend = str(cfg.training.ragweld_agent_tracking_backend or "local").strip().lower()
+    execution_backend = str(cfg.training.ragweld_agent_backend or "mlx_qwen3").strip().lower()
+
+    # Fail closed on configured-but-unavailable target backends. No silent
+    # substitution back to the local lane.
+    if workflow_backend != "local":
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "workflow_backend_unavailable",
+                "backend": workflow_backend,
+                "message": (
+                    "Flyte workflow orchestration is configured but this build has no wired Flyte "
+                    "execution path yet; refusing to fake orchestration."
+                ),
+                "operator_hint": (
+                    "Deploy and wire the Flyte control plane, or set "
+                    "training.ragweld_agent_workflow_backend back to 'local'."
+                ),
+            },
+        )
+    if execution_backend not in {"mlx_qwen3"}:
+        import platform as _platform
+
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "execution_backend_unavailable",
+                "backend": execution_backend,
+                "message": (
+                    "Unsloth execution requires an NVIDIA CUDA runtime; this host is "
+                    f"{_platform.system().lower()}/{_platform.machine()} (no CUDA device). "
+                    "Refusing to substitute the MLX lane silently."
+                ),
+                "operator_hint": (
+                    "Provision a CUDA-capable execution environment for Unsloth, or set "
+                    "training.ragweld_agent_backend back to 'mlx_qwen3'."
+                ),
+            },
+        )
+
+    mlflow_handle: MlflowRunHandle | None = None
+    if tracking_backend == "mlflow":
+        tracking_url = str(cfg.training.ragweld_agent_mlflow_tracking_url or "").strip()
+        experiment_name = str(cfg.training.ragweld_agent_mlflow_experiment_name or "").strip()
+        try:
+            mlflow = MlflowClient(tracking_url)
+            experiment_id = await asyncio.to_thread(mlflow.ensure_experiment, experiment_name)
+        except MlflowUnavailableError as exc:
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "code": "tracking_backend_unavailable",
+                    "backend": "mlflow",
+                    "message": str(exc),
+                    "operator_hint": (
+                        "Start the Compose-owned mlflow service (or fix "
+                        "training.ragweld_agent_mlflow_tracking_url), then retry. "
+                        "Ragweld does not fall back to local tracking silently."
+                    ),
+                },
+            ) from exc
+
     current_bundle = ensure_current_bundle(
         repo_id=corpus_id,
         cfg=cfg,
@@ -1048,11 +1180,45 @@ async def start_train_run(request: AgentTrainStartRequest) -> AgentTrainStartRes
         lr=float(request.lr) if request.lr is not None else float(cfg.training.reranker_train_lr),
         warmup_ratio=float(request.warmup_ratio) if request.warmup_ratio is not None else float(cfg.training.reranker_warmup_ratio),
         max_length=int(request.max_length) if request.max_length is not None else int(getattr(cfg.reranking, "tribrid_reranker_maxlen", 512) or 512),
-        workflow_backend="local",
-        tracking_backend="local",
-        execution_backend="mlx_qwen3",
+        workflow_backend=workflow_backend,  # type: ignore[arg-type]
+        tracking_backend=tracking_backend,  # type: ignore[arg-type]
+        execution_backend=execution_backend,
         input_bundle_id=current_bundle.bundle_id,
     )
+    if tracking_backend == "mlflow":
+        try:
+            mlflow_handle = await asyncio.to_thread(
+                mlflow.create_run,
+                experiment_id,
+                run_name=run_id,
+                tags={"ragweld.run_id": run_id, "ragweld.corpus_id": corpus_id},
+            )
+            await asyncio.to_thread(
+                mlflow.log_params,
+                mlflow_handle.run_id,
+                {
+                    "epochs": run.epochs,
+                    "batch_size": run.batch_size,
+                    "lr": run.lr,
+                    "warmup_ratio": run.warmup_ratio,
+                    "max_length": run.max_length,
+                    "execution_backend": run.execution_backend,
+                    "corpus_id": corpus_id,
+                },
+            )
+        except MlflowUnavailableError as exc:
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "code": "tracking_backend_unavailable",
+                    "backend": "mlflow",
+                    "message": str(exc),
+                    "operator_hint": "MLflow became unavailable while opening the run; retry once it is reachable.",
+                },
+            ) from exc
+        run.tracking_run_id = mlflow_handle.run_id
+        run.artifacts_uri = f"mlflow-artifacts:/{mlflow_handle.experiment_id}/{mlflow_handle.run_id}/artifacts"
+
     run = _apply_run_control_plane_metadata(run, cfg)
 
     # Persist request-level dataset override into the run snapshot so the background

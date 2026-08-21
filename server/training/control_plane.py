@@ -83,12 +83,15 @@ async def _probe_mlflow_experiment(tracking_url: str, experiment_name: str) -> t
         return False, "MLflow experiment name is empty."
     try:
         async with httpx.AsyncClient(timeout=_TIMEOUT, follow_redirects=True) as client:
-            response = await client.post(
+            response = await client.get(
                 _join_url(base, "/api/2.0/mlflow/experiments/get-by-name"),
-                json={"experiment_name": name},
+                params={"experiment_name": name},
             )
         if response.status_code < 400:
             return True, f"Experiment '{name}' reachable."
+        if response.status_code == 404:
+            # Server reachable; experiment will be created on first tracked run.
+            return True, f"MLflow reachable; experiment '{name}' will be created on first run."
         return False, f"HTTP {response.status_code} for experiment '{name}'."
     except Exception as exc:
         return False, f"{type(exc).__name__}: {exc}"
@@ -134,6 +137,14 @@ def build_agent_run_links(run: AgentTrainRun, cfg: TriBridConfig) -> list[TraceE
 
     mlflow_url = _clean_url(cfg.training.ragweld_agent_mlflow_tracking_url)
     if str(run.tracking_backend or "").strip() == "mlflow" and mlflow_url:
+        run_link_url = mlflow_url
+        tracking_run_id = str(run.tracking_run_id or "").strip()
+        artifacts_uri = str(run.artifacts_uri or "").strip()
+        if tracking_run_id and artifacts_uri.startswith("mlflow-artifacts:/"):
+            parts = artifacts_uri.split("/")
+            if len(parts) >= 3 and parts[1]:
+                run_link_url = f"{mlflow_url}/#/experiments/{parts[1]}/runs/{tracking_run_id}"
+        mlflow_url = run_link_url
         detail = (
             f"MLflow run {run.tracking_run_id}"
             if str(run.tracking_run_id or "").strip()
