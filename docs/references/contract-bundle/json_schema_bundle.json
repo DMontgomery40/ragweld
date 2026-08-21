@@ -1,5 +1,5 @@
 {
-  "model_count": 258,
+  "model_count": 260,
   "module": "server.models.tribrid_config_model",
   "root_models": {
     "ActiveSources": {
@@ -25057,6 +25057,268 @@
         "detail"
       ],
       "title": "RetrievalContractMismatchResponse",
+      "type": "object"
+    },
+    "RetrievalPilotAnswerRequest": {
+      "description": "Request a grounded answer produced entirely on the pilot retrieval lane.",
+      "properties": {
+        "include_sparse": {
+          "default": true,
+          "description": "Run the sparse (BM25/IDF) retrieval leg.",
+          "title": "Include Sparse",
+          "type": "boolean"
+        },
+        "include_vector": {
+          "default": true,
+          "description": "Run the dense (vector) retrieval leg.",
+          "title": "Include Vector",
+          "type": "boolean"
+        },
+        "model_override": {
+          "default": "",
+          "description": "Optional gateway alias override for generation.",
+          "title": "Model Override",
+          "type": "string"
+        },
+        "query": {
+          "description": "Question to answer from pilot retrieval context.",
+          "title": "Query",
+          "type": "string"
+        },
+        "repo_id": {
+          "description": "Corpus identifier",
+          "title": "Repo Id",
+          "type": "string"
+        },
+        "top_k": {
+          "default": 5,
+          "description": "Maximum chunks to ground the answer on.",
+          "maximum": 20,
+          "minimum": 1,
+          "title": "Top K",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "repo_id",
+        "query"
+      ],
+      "title": "RetrievalPilotAnswerRequest",
+      "type": "object"
+    },
+    "RetrievalPilotAnswerResponse": {
+      "$defs": {
+        "ChatProviderInfo": {
+          "description": "Selected provider route for a chat answer.",
+          "properties": {
+            "base_url": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "LiteLLM OpenAI-compatible base URL",
+              "title": "Base Url"
+            },
+            "kind": {
+              "const": "litellm",
+              "description": "Application-visible generation boundary",
+              "title": "Kind",
+              "type": "string"
+            },
+            "model": {
+              "description": "LiteLLM model alias",
+              "title": "Model",
+              "type": "string"
+            },
+            "provider_name": {
+              "description": "Gateway display name",
+              "title": "Provider Name",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "provider_name",
+            "model"
+          ],
+          "title": "ChatProviderInfo",
+          "type": "object"
+        },
+        "ChunkMatch": {
+          "description": "Unified result shape for vector/sparse/graph retrieval.",
+          "properties": {
+            "chunk_id": {
+              "description": "Unique identifier for matched chunk",
+              "title": "Chunk Id",
+              "type": "string"
+            },
+            "content": {
+              "description": "The matched code/text content",
+              "title": "Content",
+              "type": "string"
+            },
+            "end_line": {
+              "description": "Ending line number",
+              "title": "End Line",
+              "type": "integer"
+            },
+            "file_path": {
+              "description": "Path to the source file",
+              "title": "File Path",
+              "type": "string"
+            },
+            "language": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Programming language",
+              "title": "Language"
+            },
+            "metadata": {
+              "additionalProperties": true,
+              "description": "Additional match metadata",
+              "title": "Metadata",
+              "type": "object"
+            },
+            "score": {
+              "description": "Relevance score from retrieval",
+              "title": "Score",
+              "type": "number"
+            },
+            "source": {
+              "description": "Which retrieval leg found this",
+              "enum": [
+                "vector",
+                "sparse",
+                "graph"
+              ],
+              "title": "Source",
+              "type": "string"
+            },
+            "start_line": {
+              "description": "Starting line number",
+              "title": "Start Line",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "chunk_id",
+            "content",
+            "file_path",
+            "start_line",
+            "end_line",
+            "score",
+            "source"
+          ],
+          "title": "ChunkMatch",
+          "type": "object"
+        }
+      },
+      "description": "Grounded answer + citations produced by the pilot lane through the gateway.",
+      "properties": {
+        "answer": {
+          "description": "Grounded answer generated through LiteLLM.",
+          "title": "Answer",
+          "type": "string"
+        },
+        "citations": {
+          "description": "Chunks that grounded the answer.",
+          "items": {
+            "$ref": "#/$defs/ChunkMatch"
+          },
+          "title": "Citations",
+          "type": "array"
+        },
+        "fusion_method": {
+          "default": "",
+          "description": "Fusion applied across requested legs.",
+          "title": "Fusion Method",
+          "type": "string"
+        },
+        "llm_used": {
+          "default": true,
+          "description": "True when the answer came from real generation (never fallback).",
+          "title": "Llm Used",
+          "type": "boolean"
+        },
+        "model": {
+          "default": "",
+          "description": "Model alias that produced the answer.",
+          "title": "Model",
+          "type": "string"
+        },
+        "ok": {
+          "default": true,
+          "title": "Ok",
+          "type": "boolean"
+        },
+        "provider": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ChatProviderInfo"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Gateway provider route used for generation."
+        },
+        "provider_response_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Provider response identifier when available.",
+          "title": "Provider Response Id"
+        },
+        "query": {
+          "description": "Question answered from pilot retrieval context.",
+          "title": "Query",
+          "type": "string"
+        },
+        "repo_id": {
+          "description": "Corpus identifier",
+          "title": "Repo Id",
+          "type": "string"
+        },
+        "sparse_result_count": {
+          "default": 0,
+          "description": "Sparse-leg hits before fusion.",
+          "minimum": 0,
+          "title": "Sparse Result Count",
+          "type": "integer"
+        },
+        "vector_result_count": {
+          "default": 0,
+          "description": "Dense-leg hits before fusion.",
+          "minimum": 0,
+          "title": "Vector Result Count",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "repo_id",
+        "query",
+        "answer"
+      ],
+      "title": "RetrievalPilotAnswerResponse",
       "type": "object"
     },
     "RetrievalPilotExportRequest": {

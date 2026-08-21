@@ -13,7 +13,15 @@ from server.indexing.chunker import Chunker
 from server.indexing.embedder import Embedder
 from server.indexing.loader import FileLoader
 from server.indexing.text_extractors import extract_text_for_path
+from server.chat.context_formatter import format_context_for_llm
+from server.chat.generation import generate_chat_text
+from server.chat.handler import ChatGenerationError
+from server.chat.prompt_builder import get_system_prompt
+from server.chat.provider_router import select_provider_route
+from server.models.retrieval import ChunkMatch
+from server.models.runtime_gateway import ChatProviderInfo
 from server.models.tribrid_config_model import (
+    RetrievalPilotAnswerResponse,
     RetrievalPilotExportResponse,
     RetrievalPilotIngestResponse,
     RetrievalPilotPackageStatus,
@@ -841,3 +849,93 @@ def _fuse_pilot_legs(
         primary = membership[0] if membership else "vector"
         fused.append((doc_map[key], scores[key], primary, membership))
     return fused, fusion_method
+
+
+async def answer_retrieval_pilot_execution(
+    *,
+    corpus_id: str,
+    repo_path: str,
+    query: str,
+    top_k: int,
+    include_vector: bool = True,
+    include_sparse: bool = True,
+    model_override: str = "",
+) -> RetrievalPilotAnswerResponse:
+    """Grounded answer produced entirely on the pilot lane: hybrid Qdrant
+    retrieval, real gateway generation, citations from the retrieved chunks.
+
+    Fails closed: no retrieval-only fallback and no generation without context.
+    """
+
+    search = await search_retrieval_pilot_execution(
+        corpus_id=corpus_id,
+        repo_path=repo_path,
+        query=query,
+        top_k=top_k,
+        include_vector=include_vector,
+        include_sparse=include_sparse,
+    )
+    if not search.results:
+        raise ValueError("pilot retrieval returned no results; refusing to generate an ungrounded answer")
+
+    chunks = [
+        ChunkMatch(
+            chunk_id=result.chunk_id,
+            content=result.content,
+            file_path=result.file_path,
+            start_line=int(result.start_line),
+            end_line=int(result.end_line),
+            language=result.language,
+            score=float(result.score),
+            source=result.source,
+            metadata=dict(result.metadata or {}),
+        )
+        for result in search.results
+    ]
+
+    cfg = await _load_effective_config(corpus_id)
+    context_text = format_context_for_llm(rag_chunks=chunks, recall_chunks=[])
+    system_prompt = get_system_prompt(has_rag_context=True, has_recall_context=False, config=cfg.chat)
+    route = select_provider_route(config=cfg, model_override=(model_override or "").strip())
+    provider_info = ChatProviderInfo(
+        kind=route.kind,  # type: ignore[arg-type]
+        provider_name=str(route.provider_name),
+        model=str(route.model),
+        base_url=str(route.base_url) if getattr(route, "base_url", None) else None,
+    )
+
+    try:
+        generation = await generate_chat_text(
+            route=route,
+            system_prompt=system_prompt,
+            user_message=query,
+            images=[],
+            image_detail=str(cfg.chat.multimodal.image_detail or "auto"),
+            temperature=float(cfg.chat.temperature),
+            max_tokens=int(cfg.chat.max_tokens),
+            context_text=context_text,
+            context_chunks=chunks,
+            timeout_s=float(getattr(cfg.ui, "chat_stream_timeout", 120) or 120),
+        )
+    except Exception as exc:
+        raise ChatGenerationError(str(exc)) from exc
+
+    answer_text = str(getattr(generation, "text", "") or "").strip()
+    if not answer_text:
+        raise ChatGenerationError("LLM returned an empty response")
+
+    return RetrievalPilotAnswerResponse(
+        repo_id=corpus_id,
+        query=query,
+        answer=answer_text,
+        citations=chunks,
+        provider=provider_info,
+        model=str(route.model),
+        provider_response_id=(
+            str(getattr(generation, "provider_response_id", "") or "").strip() or None
+        ),
+        llm_used=True,
+        vector_result_count=int(search.vector_result_count),
+        sparse_result_count=int(search.sparse_result_count),
+        fusion_method=str(search.fusion_method or ""),
+    )

@@ -23,6 +23,8 @@ from starlette.responses import StreamingResponse
 from server.chat.provider_router import ProviderRoute, select_provider_route
 from server.db.neo4j import Neo4jClient
 from server.api.dependency_errors import dependency_unavailable_http_exception
+from server.api.generation_errors import generation_unavailable_http_exception
+from server.chat.handler import ChatGenerationError
 from server.dependency_errors import DependencyUnavailableError
 from server.api.retrieval_errors import retrieval_contract_mismatch_http_exception
 from server.retrieval.errors import RetrievalContractMismatchError
@@ -35,6 +37,7 @@ from server.indexing.official_graphrag import (
     write_lexical_graph_with_graphrag,
 )
 from server.indexing.oss_retrieval_pilot import (
+    answer_retrieval_pilot_execution,
     build_retrieval_pilot_status,
     export_retrieval_pilot,
     ingest_retrieval_pilot_execution,
@@ -51,6 +54,8 @@ from server.models.index import (
     IndexStatus,
 )
 from server.models.tribrid_config_model import (
+    RetrievalPilotAnswerRequest,
+    RetrievalPilotAnswerResponse,
     CorpusScope,
     DashboardEmbeddingConfigSummary,
     DashboardIndexCosts,
@@ -2257,6 +2262,40 @@ async def search_retrieval_pilot_execution_route(
     except RuntimeError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post("/index/{corpus_id}/pilot/answer", response_model=RetrievalPilotAnswerResponse)
+async def answer_retrieval_pilot_execution_route(
+    corpus_id: str,
+    request: RetrievalPilotAnswerRequest,
+    repo_path: str | None = Query(default=None, description="Optional corpus path override for status context."),
+) -> RetrievalPilotAnswerResponse:
+    if str(request.repo_id or "").strip() != str(corpus_id or "").strip():
+        raise HTTPException(status_code=422, detail="corpus_id path and payload must match")
+
+    resolved_repo_path = await _resolve_repo_path_from_request(corpus_id, repo_path)
+    try:
+        return await answer_retrieval_pilot_execution(
+            corpus_id=corpus_id,
+            repo_path=resolved_repo_path,
+            query=str(request.query or ""),
+            top_k=int(request.top_k),
+            include_vector=bool(request.include_vector),
+            include_sparse=bool(request.include_sparse),
+            model_override=str(request.model_override or ""),
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RetrievalContractMismatchError as exc:
+        raise retrieval_contract_mismatch_http_exception(exc) from exc
+    except DependencyUnavailableError as exc:
+        raise dependency_unavailable_http_exception(exc.dependency, boundary=exc.operation, exc=exc) from exc
+    except ChatGenerationError as exc:
+        raise generation_unavailable_http_exception(exc, operation="Pilot answer generation") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except RuntimeError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 

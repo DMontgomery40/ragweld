@@ -383,6 +383,42 @@ class RetrievalPilotSearchResult(BaseModel):
     )
 
 
+class RetrievalPilotAnswerRequest(BaseModel):
+    """Request a grounded answer produced entirely on the pilot retrieval lane."""
+
+    repo_id: str = Field(
+        description="Corpus identifier",
+        validation_alias=AliasChoices("repo_id", "corpus_id"),
+        serialization_alias="corpus_id",
+    )
+    query: str = Field(description="Question to answer from pilot retrieval context.")
+    top_k: int = Field(default=5, ge=1, le=20, description="Maximum chunks to ground the answer on.")
+    include_vector: bool = Field(default=True, description="Run the dense (vector) retrieval leg.")
+    include_sparse: bool = Field(default=True, description="Run the sparse (BM25/IDF) retrieval leg.")
+    model_override: str = Field(default="", description="Optional gateway alias override for generation.")
+
+
+class RetrievalPilotAnswerResponse(BaseModel):
+    """Grounded answer + citations produced by the pilot lane through the gateway."""
+
+    ok: bool = Field(default=True)
+    repo_id: str = Field(
+        description="Corpus identifier",
+        validation_alias=AliasChoices("repo_id", "corpus_id"),
+        serialization_alias="corpus_id",
+    )
+    query: str = Field(description="Question answered from pilot retrieval context.")
+    answer: str = Field(description="Grounded answer generated through LiteLLM.")
+    citations: list[ChunkMatch] = Field(default_factory=list, description="Chunks that grounded the answer.")
+    provider: ChatProviderInfo | None = Field(default=None, description="Gateway provider route used for generation.")
+    model: str = Field(default="", description="Model alias that produced the answer.")
+    provider_response_id: str | None = Field(default=None, description="Provider response identifier when available.")
+    llm_used: bool = Field(default=True, description="True when the answer came from real generation (never fallback).")
+    vector_result_count: int = Field(default=0, ge=0, description="Dense-leg hits before fusion.")
+    sparse_result_count: int = Field(default=0, ge=0, description="Sparse-leg hits before fusion.")
+    fusion_method: str = Field(default="", description="Fusion applied across requested legs.")
+
+
 class RetrievalPilotSearchResponse(BaseModel):
     """Response for real Haystack/Qdrant pilot search."""
 
