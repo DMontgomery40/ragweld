@@ -208,3 +208,39 @@ npm --prefix web run build
 ```
 
 CI is not authoritative until the GitHub billing lock is cleared; local verification remains mandatory.
+
+## Status as of 2026-08-21 (end of recovery session 3)
+
+Done with evidence (see commit history 317fbf7..feae789 and
+`docs/references/*` pages linked below):
+
+- Every open rendered-frontend finding resolved
+  (`frontend-browser-findings-2026-08-20.md`); typed 409/503 failure boundary
+  with a structured chat error card; recall dense-contract enforcement; the
+  stored-global-config fallback fix; 41 boolean config fields migrated.
+- Deterministic acceptance corpus (`tests/fixtures/acceptance_corpus`) proven
+  end to end through real services and the rendered browser (all three legs,
+  grounded LiteLLM→vLLM answer, citations, trace identity).
+- Haystack/Docling/Qdrant pilot: real contracts, service Qdrant, Docling
+  extraction, sparse + fusion, grounded answers with citations, staged atomic
+  promotion. Remaining atomic cutover is designed in
+  `retrieval-promotion-cutover-2026-08-21.md`; the native lane stays live
+  until that lands green.
+- MLOps: MLflow tracking is real (Compose service, runs/metrics/artifacts,
+  cancel → KILLED); Ragas and Promptfoo execute for real on eval runs
+  (`docs/references/eval-substrates.md`). Flyte and Unsloth fail closed with
+  exact blockers (no Flyte deployment wired; Unsloth needs CUDA, host is
+  Apple Silicon).
+- Observability: host API logs in Loki, functional readiness probes, all
+  dashboards provisioned and querying live metrics, traces discoverable.
+
+Remaining (honest blockers / next slices, in order):
+
+1. Retrieval promotion cutover (atomic; design doc above).
+2. Flyte orchestration: provision a Flyte control plane and wire
+   launch/status/cancel; until then `workflow=flyte` refuses with a typed 503.
+3. Unsloth execution: requires a CUDA host; no cloud GPU spend without
+   explicit authorization.
+4. Mimir, Pyroscope, Faro, OpenCost, Alertmanager, Langfuse: not deployed;
+   status surfaces report them `disabled`, never healthy.
+5. Residual dead-code removal and the full final acceptance matrix.
