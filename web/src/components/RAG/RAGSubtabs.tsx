@@ -9,19 +9,6 @@ type RAGSubtabsProps = {
   onSubtabChange: (subtab: string) => void;
 };
 
-/**
- * ---agentspec
- * what: |
- *   Renders tabbed navigation for RAG pipeline stages. Takes activeSubtab ID and onSubtabChange callback; renders 6 subtab buttons (Data Quality, Retrieval, Graph, Reranker, Learning Reranker, Indexing).
- *
- * why: |
- *   Centralizes RAG workflow UI into reusable component with consistent tab state management.
- *
- * guardrails:
- *   - DO NOT hardcode subtab list; accept as prop for extensibility
- *   - NOTE: Requires activeSubtab and onSubtabChange in parent state
- * ---/agentspec
- */
 export function RAGSubtabs({ activeSubtab, onSubtabChange }: RAGSubtabsProps) {
   const subtabs = [
     { id: 'data-quality', title: 'Data Quality' },

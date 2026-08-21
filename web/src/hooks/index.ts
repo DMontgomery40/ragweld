@@ -7,7 +7,6 @@
 
 // App lifecycle
 export { useAppInit } from './useAppInit';
-export { useEventBus } from './useEventBus';
 export { useApplyButton } from './useApplyButton';
 export { useNotification } from './useNotification';
 export { useErrorHandler } from './useErrorHandler';
@@ -35,11 +34,10 @@ export { useEmbeddingModel } from './useEmbeddingModel';
 
 // Feature hooks
 export { useIndexing } from './useIndexing';
-export { useModels, getRecommendedChunkSize } from './useModels';
+export { useModels } from './useModels';
 export type { Model } from './useModels';
 export { useRuntimeCapabilities } from './useRuntimeCapabilities';
 export { useReranker } from './useReranker';
-export { useKeywords } from './useKeywords';
 export { useMCPServer } from './useMCPServer';
 // useOnboarding removed - banned feature per CLAUDE.md
 // Evaluation hooks (using generated types from Pydantic)

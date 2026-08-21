@@ -262,3 +262,42 @@ details summary { cursor:pointer; color: var(--muted); }
   0%, 100% { opacity: 1; box-shadow: 0 0 4px var(--accent); }
   50% { opacity: 0.3; box-shadow: 0 0 0 var(--accent); }
 }
+
+/* PromptLink Component - Cross-tab navigation buttons (ported from the retired inline-gui-styles.css) */
+.prompt-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: transparent;
+    border: 1px solid var(--accent);
+    color: var(--accent);
+    padding: 4px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 500;
+    transition:
+        background var(--timing-fast) var(--ease-out),
+        transform var(--timing-fast) var(--ease-out),
+        box-shadow var(--timing-fast) var(--ease-out);
+}
+
+.prompt-link:hover {
+    background: color-mix(in oklch, var(--accent) 10%, transparent 90%);
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-sm);
+}
+
+.prompt-link:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+
+.prompt-link:active {
+    transform: translateY(0) scale(0.98);
+    transition-duration: var(--timing-instant);
+}
+
+.prompt-link-icon {
+    font-size: 12px;
+}

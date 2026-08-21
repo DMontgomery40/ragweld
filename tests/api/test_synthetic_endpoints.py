@@ -17,7 +17,7 @@ from server.models.tribrid_config_model import (
     SyntheticRunSummary,
     TriBridConfig,
 )
-from server.synthetic.recipes import resolve_available_synthetic_generation_model
+from server.synthetic.recipes import resolve_synthetic_route
 
 
 async def _wait_terminal(client, run_id: str, timeout_s: float = 20.0) -> dict:
@@ -33,16 +33,18 @@ async def _wait_terminal(client, run_id: str, timeout_s: float = 20.0) -> dict:
 
 
 def _provider_model_for_env() -> str | None:
+    """Test-local gate: the gateway alias is usable only if its route resolves for real."""
     cfg = TriBridConfig()
-    return resolve_available_synthetic_generation_model(cfg)
-
-
-def test_resolve_available_synthetic_generation_model_prefers_litellm_gateway_when_configured() -> None:
-    cfg = TriBridConfig()
-    cfg.chat.litellm.enabled = True
-    cfg.chat.litellm.base_url = "http://127.0.0.1:54000/v1"
-    cfg.chat.litellm.default_model = "synthetic-quality"
-    assert resolve_available_synthetic_generation_model(cfg) == "litellm:synthetic-quality"
+    litellm = cfg.chat.litellm
+    alias = str(litellm.default_model or "").strip()
+    if not (bool(litellm.enabled) and str(litellm.base_url or "").strip() and alias):
+        return None
+    model = f"litellm:{alias}"
+    try:
+        resolve_synthetic_route(cfg=cfg, model=model)
+    except Exception:
+        return None
+    return model
 
 
 def _write_gate_failed_run(*, root: Path, corpus_id: str, run_id: str) -> Path:

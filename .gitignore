@@ -103,13 +103,10 @@ web/dist/
 logs/
 
 # ===== Model Files =====
-models/cross-encoder-tribrid/model.safetensors
-models/cross-encoder-tribrid/pytorch_model.bin
 *.bin
 *.safetensors
 *.npz
 adapters/
-!models/cross-encoder-tribrid/*.json
 *.dmg
 
 # ===== Data =====

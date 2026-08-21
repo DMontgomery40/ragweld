@@ -155,12 +155,3 @@ export function useModels(component: ComponentType, options: UseModelsOptions = 
   };
 }
 
-/**
- * Get recommended chunk size based on model's context window
- * Returns 80% of context to leave headroom for safety
- */
-export function getRecommendedChunkSize(model: Model | undefined): number | null {
-  const context = Number(model?.context || 0);
-  if (context <= 0) return null;
-  return Math.floor(context * 0.8);
-}

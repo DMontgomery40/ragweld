@@ -13,26 +13,6 @@ import { useAPI } from './useAPI';
  * - Backend API search integration
  * - Auto-navigation to settings when clicked
  */
-/**
- * ---agentspec
- * what: |
- *   Custom React hook that manages global search functionality across the application.
- *   Accepts no parameters; returns an object containing: isOpen (boolean), query (string), results (SearchResult array), settingsIndex (SettingSearchItem array), loading (boolean), cursor (number for keyboard navigation), and control functions (setIsOpen, setQuery, setResults, setSettingsIndex, setLoading, setCursor).
- *   Maintains search state including query text, result list, settings index, loading state, and keyboard cursor position for result navigation.
- *   Handles in-flight request cancellation via AbortController to prevent race conditions when query changes rapidly; initializes empty results and cursor at 0.
- *
- * why: |
- *   Centralizes search state management into a reusable hook to avoid prop drilling and duplicate logic across components.
- *   AbortController pattern prevents stale results from overwriting newer queries when user types quickly.
- *   Separates search UI state (isOpen, cursor) from data state (query, results, settingsIndex) for cleaner component composition.
- *
- * guardrails:
- *   - DO NOT remove abortControllerRef without replacing with equivalent request cancellation mechanism; rapid queries will cause race conditions and display stale results
- *   - ALWAYS call abortControllerRef.current?.abort() before initiating new searches to cancel pending requests
- *   - NOTE: cursor state assumes results array is stable; if results are mutated externally, cursor may point to invalid indices
- *   - ASK USER: Confirm whether settingsIndex should be populated on hook initialization or lazily loaded on first search, as current implementation leaves it empty until explicitly set
- * ---/agentspec
- */
 export function useGlobalSearch() {
   const { api } = useAPI();
   const navigate = useNavigate();
@@ -122,27 +102,6 @@ export function useGlobalSearch() {
 
   // Keyboard shortcut: Ctrl+K or Cmd+K
   useEffect(() => {
-    /**
-     * ---agentspec
-     * what: |
-     *   Handles keyboard events for a command palette or search modal component.
-     *   Takes a KeyboardEvent parameter and checks for two specific key combinations: Ctrl/Cmd+K to open the modal, and Escape to close it.
-     *   Calls preventDefault() on Ctrl/Cmd+K to prevent default browser behavior, then sets isOpen state to true.
-     *   For Escape key, closes the modal by setting isOpen to false only if the modal is already open (isOpen === true).
-     *   No return value; operates entirely through side effects on component state and event handling.
-     *
-     * why: |
-     *   Centralizes keyboard interaction logic for a modal/command palette, providing a standard UX pattern (Cmd+K to open, Esc to close).
-     *   Prevents default browser behavior for Ctrl/Cmd+K to avoid conflicts with browser shortcuts (e.g., browser search).
-     *   The isOpen guard on Escape prevents unnecessary state updates and allows nested modals to handle Escape independently.
-     *
-     * guardrails:
-     *   - DO NOT remove the e.preventDefault() call on Ctrl/Cmd+K; without it, browser shortcuts will conflict and create confusing UX
-     *   - ALWAYS check isOpen before closing on Escape to allow event bubbling in nested modal scenarios and prevent unintended closures
-     *   - NOTE: This handler does not distinguish between Ctrl (Windows/Linux) and Cmd (Mac); both trigger the same behavior, which is intentional for cross-platform consistency
-     *   - ASK USER: Before adding additional keyboard shortcuts, confirm whether they should preventDefault() and whether they need isOpen guards for nested modal support
-     * ---/agentspec
-     */
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
         e.preventDefault();

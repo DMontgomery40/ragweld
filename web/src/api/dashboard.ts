@@ -359,15 +359,6 @@ export interface RepoInfo {
   [key: string]: any;
 }
 
-export async function getRepos(): Promise<RepoInfo[]> {
-  try {
-    const { data } = await apiClient.get<RepoInfo[]>(api('/repos'));
-    return data;
-  } catch {
-    return [];
-  }
-}
-
 // ============================================================================
 // Analytics APIs
 // ============================================================================

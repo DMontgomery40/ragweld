@@ -4,8 +4,8 @@
  * Cross-tab navigation component that links to the System Prompts subtab
  * in the Eval Analysis tab (/eval).
  *
- * Uses CSS classes from inline-gui-styles.css for styling with proper
- * hover/focus states and micro-interactions.
+ * Uses the `.prompt-link` classes from styles/style.css for styling with
+ * proper hover/focus states and micro-interactions.
  *
  * Usage:
  *   <PromptLink promptKey="main_rag_chat">Edit System Prompt</PromptLink>

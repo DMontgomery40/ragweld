@@ -8,27 +8,6 @@ type ThemeMode = 'light' | 'dark' | 'auto';
  * Manages theme mode (light/dark/auto) with system preference detection
  * Uses UIStore for persisted state, replaces legacy theme.js
  */
-/**
- * ---agentspec
- * what: |
- *   React hook that manages theme state with support for 'auto', 'light', and 'dark' modes.
- *   Takes no parameters; initializes theme to 'auto' and resolvedTheme to 'light'.
- *   Returns an object with theme (ThemeMode), setTheme (setter), and resolvedTheme ('light' | 'dark').
- *   The resolveTheme callback converts 'auto' mode to the actual system preference (light or dark).
- *   Handles edge cases: normalizes input to lowercase, defaults to 'auto' if mode is falsy, and gracefully falls back to 'light' for unrecognized values.
- *
- * why: |
- *   Separates user preference (theme) from computed system-aware value (resolvedTheme) to support both explicit and automatic theme selection.
- *   The resolveTheme callback enables lazy resolution of system preferences without requiring immediate DOM or window API access.
- *   This pattern allows components to read the current theme while deferring system detection to effect hooks or event listeners.
- *
- * guardrails:
- *   - DO NOT call resolveTheme directly in render; it should only be invoked in useEffect or event handlers to avoid unnecessary recalculations
- *   - ALWAYS normalize theme input to lowercase before comparison to prevent case-sensitivity bugs
- *   - NOTE: resolvedTheme defaults to 'light' but does not actually detect system preference; system detection logic must be implemented in a separate useEffect hook
- *   - ASK USER: Confirm whether system preference detection (via window.matchMedia or prefers-color-scheme) should be added to this hook or handled by a parent component
- * ---/agentspec
- */
 export function useTheme() {
   const [theme, setTheme] = useState<ThemeMode>('auto');
   const [resolvedTheme, setResolvedTheme] = useState<'light' | 'dark'>('light');
@@ -125,27 +104,6 @@ export function useTheme() {
 
     const mq = window.matchMedia('(prefers-color-scheme: dark)');
 
-    /**
-     * ---agentspec
-     * what: |
-     *   Registers a media query change listener that reapplies the theme when the system preference changes in 'auto' mode.
-     *   Takes no parameters; operates on closure variables `theme` and `mq` (MediaQueryList object).
-     *   Returns a cleanup function that removes the event listener.
-     *   Only triggers theme reapplication if `theme === 'auto'`; does nothing if theme is explicitly set to 'light' or 'dark'.
-     *   Edge case: If `mq` is undefined or `addEventListener` fails, the try-catch silently swallows the error without logging or fallback behavior.
-     *
-     * why: |
-     *   Enables responsive theme switching when the system toggles between light/dark mode, but only when the user has selected 'auto' mode.
-     *   The cleanup function ensures the listener is removed when the component unmounts, preventing memory leaks and stale closures.
-     *   Wrapping in try-catch prevents listener registration failures from crashing the component, though this masks potential bugs.
-     *
-     * guardrails:
-     *   - DO NOT remove the cleanup function return; it is essential for preventing duplicate listeners and memory leaks on re-renders
-     *   - ALWAYS verify that `mq` (MediaQueryList) is properly initialized before this code runs; undefined `mq` will silently fail
-     *   - NOTE: The try-catch silently fails without logging; consider adding console.error or error tracking for debugging listener registration failures
-     *   - ASK USER: Should explicit theme modes ('light'/'dark') also trigger a listener, or is 'auto'-only behavior intentional?
-     * ---/agentspec
-     */
     const onChange = () => {
       if (theme === 'auto') {
         applyThemeToDocument('auto');

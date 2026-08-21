@@ -184,6 +184,3 @@ export function getRouteByPath(path: string): RouteConfig | undefined {
 }
 
 // Get default route
-export function getDefaultRoute(): RouteConfig {
-  return routes.find(r => r.path === '/dashboard') || routes[0];
-}

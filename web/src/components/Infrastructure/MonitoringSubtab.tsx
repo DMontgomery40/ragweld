@@ -6,29 +6,6 @@ import { useAlertThresholdsStore, useAlertThresholdField } from '@/stores/useAle
 import { TooltipIcon } from '@/components/ui/TooltipIcon';
 import { ObservabilityOperatorDeck } from '@/components/Observability/OperatorDeck';
 
-/**
- * ---agentspec
- * what: |
- *   React component that renders a monitoring configuration subtab for alert threshold management.
- *   Accepts no props; uses Zustand hooks to access alert thresholds store (load, save, loaded, loading states) and tooltip context.
- *   Returns JSX displaying threshold input fields (error_rate_threshold_percent via useAlertThresholdField hook) with save/loading UI states.
- *   Manages local UI state: actionMessage (string | null) for user feedback, saving (boolean) for async save operations.
- *   Handles edge cases: loading state prevents premature renders, thresholdsLoaded gate prevents duplicate loads, error states surfaced via actionMessage.
- *
- * why: |
- *   Centralizes monitoring configuration UI in a reusable subtab component following React composition patterns.
- *   Uses Zustand store (useAlertThresholdsStore) for shared threshold state across the application, avoiding prop drilling.
- *   Custom hook useAlertThresholdField abstracts field binding logic, reducing boilerplate and keeping component focused on layout/UX.
- *   Separates loading (thresholdsLoading) from loaded (thresholdsLoaded) states to handle initial fetch vs. subsequent renders correctly.
- *
- * guardrails:
- *   - DO NOT convert Zustand store selectors to useState; the store is the source of truth and must remain the single state container for thresholds
- *   - ALWAYS check thresholdsLoaded before rendering threshold values to prevent stale or undefined data from displaying
- *   - ALWAYS call loadThresholds on mount or when thresholdsLoaded is false to ensure fresh data; use useEffect with proper dependency array
- *   - NOTE: useAlertThresholdField is a custom hook that must return [value, setValue] tuple compatible with Pydantic model validation on save
- *   - ASK USER: Confirm whether actionMessage should auto-clear after a timeout, or if manual dismissal is required; current implementation does not specify cleanup behavior
- * ---/agentspec
- */
 export function MonitoringSubtab() {
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);

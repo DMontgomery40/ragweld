@@ -39,23 +39,6 @@ interface RepoStore {
 }
 
 // Determine API base URL
-/**
- * ---agentspec
- * what: |
- *   Determines the API base URL for HTTP requests based on the current browser environment.
- *   Takes no parameters. Returns a string representing the API endpoint base URL.
- *   Delegates to the shared API resolver, which uses a query override or same-origin '/api'.
- *
- * why: |
- *   Centralizes API endpoint configuration to handle different deployment environments (local development vs. production).
- *   Vite development and production both use the same-origin API contract.
- *   Try-catch wrapper prevents crashes if window.location is inaccessible in edge cases (SSR, iframe restrictions).
- *
- * guardrails:
- *   - DO NOT hardcode backend URLs here; api/client.ts is the single source of truth
- *   - NOTE: start.sh and web/vite.config.ts own local port and proxy configuration
- * ---/agentspec
- */
 const getApiBase = (): string => {
   try {
     return resolveAPIBase();
@@ -332,70 +315,8 @@ export const useRepoStore = create<RepoStore>((set, get) => ({
 }));
 
 // Export selector hooks for convenience
-/**
- * ---agentspec
- * what: |
- *   Exports three custom React hooks that provide selectively-memoized access to repository state from a Zustand store.
- *   useActiveRepo() returns the currently active repository object; useRepos() returns the full array of repositories; useRepoLoading() returns a boolean indicating whether the store is in loading or switching state.
- *   Each hook uses Zustand's selector pattern to subscribe only to its specific state slice, preventing unnecessary re-renders when unrelated state changes.
- *   No parameters are required; hooks automatically connect to the global repoStore context.
- *
- * why: |
- *   Zustand selectors enable fine-grained subscriptions so components only re-render when their specific data changes, not on every store update.
- *   Exporting these as hooks provides a clean, composable API that follows React conventions and hides store implementation details from consumers.
- *   Combining loading and switching flags into a single useRepoLoading hook reduces boilerplate in components that need to show loading UI during either operation.
- *
- * guardrails:
- *   - DO NOT modify the selector logic without understanding Zustand's shallow equality checks; changing state shape may break memoization
- *   - ALWAYS use these hooks instead of direct store access to maintain consistent subscription behavior across the codebase
- *   - NOTE: useRepoLoading combines two separate boolean flags; if loading and switching need independent control, split into separate hooks
- *   - ASK USER: Before adding new repository-related hooks, confirm whether they should be selectors (fine-grained) or if a single useRepo hook returning the entire state object is preferred
- * ---/agentspec
- */
 export const useActiveRepo = () => useRepoStore(state => state.activeRepo);
-/**
- * ---agentspec
- * what: |
- *   Two custom React hooks that provide selector access to the repository store state.
- *   useRepos() returns the repos array from store state; useRepoLoading() returns a boolean indicating whether repos are currently loading or a repo switch is in progress.
- *   Both hooks use Zustand's selector pattern to subscribe only to their specific state slices, preventing unnecessary re-renders when unrelated store state changes.
- *   No parameters required; hooks automatically connect to the global useRepoStore context.
- *   Edge case: useRepoLoading returns true if either loading OR switching is true, combining two related loading states into a single boolean.
- *
- * why: |
- *   These hooks encapsulate store selectors to provide a clean, reusable API for components that need repo data or loading status.
- *   Zustand selectors enable fine-grained subscriptions, so components only re-render when their specific slice of state changes.
- *   Combining loading and switching into one hook simplifies component logic since both states represent "user should see a loading indicator."
- *
- * guardrails:
- *   - DO NOT add additional state slices to these hooks without updating all consuming components; selector changes are breaking changes
- *   - ALWAYS use these hooks instead of accessing useRepoStore directly in components to maintain selector consistency
- *   - NOTE: useRepoLoading combines two separate boolean flags; if you need to distinguish between loading and switching, create a separate hook
- *   - ASK USER: Before adding new repo-related selectors, confirm whether they should be separate hooks or combined with existing ones
- * ---/agentspec
- */
 export const useRepos = () => useRepoStore(state => state.repos);
-/**
- * ---agentspec
- * what: |
- *   Custom React hook that selects and returns a boolean indicating whether a repository is currently loading or switching.
- *   Takes no parameters; accesses the global repo store via useRepoStore.
- *   Returns a boolean: true if either state.loading or state.switching is true, false otherwise.
- *   Used to display loading indicators or disable UI interactions during repo operations.
- *   Combines two separate state flags into a single derived boolean for convenience.
- *
- * why: |
- *   Centralizes the logic for determining "is repo busy" so components don't need to know about both loading and switching states.
- *   Reduces boilerplate in components that need to show loading UI during either operation.
- *   Provides a single source of truth for the "repo is not ready" condition across the application.
- *
- * guardrails:
- *   - DO NOT add additional state flags to this selector without updating all dependent components; this hook is a contract
- *   - ALWAYS use this hook instead of accessing state.loading or state.switching directly in components to maintain consistency
- *   - NOTE: This is a synchronous selector; it does not trigger any state updates or side effects
- *   - ASK USER: Before adding conditional logic (e.g., prioritizing one flag over the other), confirm the intended behavior when both flags are true
- * ---/agentspec
- */
 export const useRepoLoading = () => useRepoStore(state => state.loading || state.switching);
 
 /** Returns true after first load attempt (success or failure) - use to prevent infinite load loops */

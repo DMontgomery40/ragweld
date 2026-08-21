@@ -49,26 +49,6 @@ interface UseEmbeddingStatusResult {
   refresh: () => Promise<void>;
 }
 
-/**
- * ---agentspec
- * what: |
- *   Custom React hook that manages embedding service status polling and state management.
- *   Takes no parameters; returns UseEmbeddingStatusResult object containing status (EmbeddingStatus | null), loading (boolean), and error (string | null).
- *   Initializes with loading=true, status=null, error=null. The checkStatus callback function fetches current embedding service status asynchronously.
- *   Handles async errors by catching exceptions and storing error messages in state. Does not automatically poll; checkStatus must be called explicitly by consuming components.
- *
- * why: |
- *   Centralizes embedding status logic into a reusable hook to avoid duplicating state management across multiple components.
- *   Separates concerns: hook manages state/loading/error lifecycle while consumers decide when to call checkStatus.
- *   Callback pattern allows flexible polling strategies (manual calls, useEffect intervals, or event-driven triggers) without coupling the hook to a specific polling mechanism.
- *
- * guardrails:
- *   - DO NOT add automatic polling inside this hook; polling strategy should be controlled by consuming components via useEffect to prevent unnecessary requests
- *   - ALWAYS reset error state to null before calling checkStatus to avoid stale error messages persisting after successful retries
- *   - NOTE: checkStatus implementation is incomplete in provided code; full async logic needed to determine actual error handling behavior
- *   - ASK USER: Confirm whether checkStatus should auto-retry on failure, what timeout duration is acceptable, and if status should be cached between calls
- * ---/agentspec
- */
 export function useEmbeddingStatus(): UseEmbeddingStatusResult {
   const { api } = useAPI();
   const { config } = useConfig();
@@ -179,26 +159,6 @@ export function useEmbeddingStatus(): UseEmbeddingStatusResult {
     checkStatus();
 
     // Re-check on config changes and index completion
-    /**
-     * ---agentspec
-     * what: |
-     *   Sets up event listeners that trigger a status check whenever configuration or dashboard state changes.
-     *   Registers three custom window event listeners ('config-updated', 'index-completed', 'dashboard-refresh') that all invoke the same checkStatus() callback.
-     *   Returns a cleanup function that removes all three listeners to prevent memory leaks when the component unmounts.
-     *   Handles no edge cases for malformed events; assumes events are dispatched correctly elsewhere in the application.
-     *
-     * why: |
-     *   Centralizes reactive status updates by coupling them to application-wide events rather than polling or prop changes.
-     *   Using a single handleConfigChange function for all three events reduces code duplication and ensures consistent behavior.
-     *   The cleanup function is essential in React to prevent duplicate listeners accumulating on re-renders and to free memory on unmount.
-     *
-     * guardrails:
-     *   - DO NOT add conditional logic inside handleConfigChange; keep it a simple pass-through to checkStatus() to maintain predictability
-     *   - ALWAYS call the cleanup function (return statement) to remove listeners; failure to do so causes memory leaks and duplicate event handlers
-     *   - NOTE: This pattern assumes checkStatus() is idempotent; if checkStatus() has side effects or state mutations, rapid event firing may cause race conditions
-     *   - ASK USER: Confirm whether checkStatus() should be debounced or throttled if 'index-completed' and 'dashboard-refresh' fire in quick succession
-     * ---/agentspec
-     */
     const handleConfigChange = () => checkStatus();
     window.addEventListener('config-updated', handleConfigChange);
     window.addEventListener('index-completed', handleConfigChange);

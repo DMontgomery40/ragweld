@@ -12,22 +12,6 @@ type RepositoryConfigProps = {
   onExcludePathsChange?: (paths: string[]) => void;
 };
 
-/**
- * ---agentspec
- * what: |
- *   Repository config using Zustand stores. Gets repos/activeRepo from useRepoStore,
- *   persists changes via useRepoStore.updateCorpus() which calls PATCH /api/corpora/{id}.
- *   Local state ONLY for debounced text inputs.
- *
- * why: |
- *   Single source of truth via Zustand; no duplicate state, fetch logic, or event listeners.
- *
- * guardrails:
- *   - DO NOT use local useState for config values - derive from store
- *   - NOTE: Local state ONLY for text input fields that need debouncing before save
- *   - DO NOT duplicate API calls - use store actions exclusively
- * ---/agentspec
- */
 export function RepositoryConfig({ onExcludePathsChange }: RepositoryConfigProps) {
   // Get repos and active repo from Zustand store
   const { activeRepo, loading: reposLoading, getRepoByName, loadRepos, initialized, updateCorpus } = useRepoStore();
@@ -85,18 +69,6 @@ export function RepositoryConfig({ onExcludePathsChange }: RepositoryConfigProps
   // NOTE: Path auto-save removed to prevent overwriting relative paths with absolute paths.
   // Path changes now require explicit save.
 
-  /**
-   * ---agentspec
-   * what: |
-   *   Debounced save for keywords. Parses comma-separated, sorts, compares to store.
-   *
-   * why: |
-   *   Sort + compare prevents redundant saves for reordered input.
-   *
-   * guardrails:
-   *   - DO NOT save if keywords unchanged after normalization
-   * ---/agentspec
-   */
   useEffect(() => {
     if (!repoData || isInitializing.current) return;
     
@@ -111,18 +83,6 @@ export function RepositoryConfig({ onExcludePathsChange }: RepositoryConfigProps
     return () => clearTimeout(timeoutId);
   }, [keywordsInput, repoData, activeRepo, handleUpdateCorpus]);
 
-  /**
-   * ---agentspec
-   * what: |
-   *   Debounced save for path_boosts. Parses comma-separated, sorts, compares to store.
-   *
-   * why: |
-   *   Sort + compare prevents redundant saves for reordered input.
-   *
-   * guardrails:
-   *   - DO NOT save if boosts unchanged after normalization
-   * ---/agentspec
-   */
   useEffect(() => {
     if (!repoData || isInitializing.current) return;
     
@@ -137,19 +97,6 @@ export function RepositoryConfig({ onExcludePathsChange }: RepositoryConfigProps
     return () => clearTimeout(timeoutId);
   }, [pathBoostsInput, repoData, activeRepo, handleUpdateCorpus]);
 
-  /**
-   * ---agentspec
-   * what: |
-   *   Debounced save for layer_bonuses JSON. Parses, validates, compares stringified.
-   *
-   * why: |
-   *   JSON parse validation prevents saving invalid data; stringify compare catches changes.
-   *
-   * guardrails:
-   *   - DO NOT save if JSON parse fails (silent skip)
-   *   - NOTE: Order-dependent equality check via stringify
-   * ---/agentspec
-   */
   useEffect(() => {
     if (!repoData || isInitializing.current) return;
     
@@ -173,18 +120,6 @@ export function RepositoryConfig({ onExcludePathsChange }: RepositoryConfigProps
   // Exclude paths - derive from store, save via store
   const excludePaths = repoData?.exclude_paths || [];
 
-  /**
-   * ---agentspec
-   * what: |
-   *   Adds exclude path to repo config via store. Clears input, calls parent callback.
-   *
-   * why: |
-   *   Centralized save through Zustand store; callback notifies parent for UI sync.
-   *
-   * guardrails:
-   *   - DO NOT add empty strings; trim + validate before save
-   * ---/agentspec
-   */
   const handleAddExcludePath = useCallback(() => {
     if (!excludePathInput.trim() || !activeRepo) return;
     const newPaths = [...excludePaths, excludePathInput.trim()];
@@ -193,18 +128,6 @@ export function RepositoryConfig({ onExcludePathsChange }: RepositoryConfigProps
     onExcludePathsChange?.(newPaths);
   }, [excludePathInput, excludePaths, activeRepo, handleUpdateCorpus, onExcludePathsChange]);
 
-  /**
-   * ---agentspec
-   * what: |
-   *   Removes exclude path from repo config via store. Calls parent callback.
-   *
-   * why: |
-   *   Centralized save through Zustand store; callback notifies parent for UI sync.
-   *
-   * guardrails:
-   *   - DO NOT mutate excludePaths directly; use filter to create new array
-   * ---/agentspec
-   */
   const handleRemoveExcludePath = useCallback((path: string) => {
     const newPaths = excludePaths.filter(p => p !== path);
     handleUpdateCorpus(activeRepo, { exclude_paths: newPaths });

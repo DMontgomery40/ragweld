@@ -29,13 +29,6 @@ export function formatCurrency(amount: number): string {
 }
 
 /**
- * Format percentage
- */
-export function formatPercent(value: number, decimals: number = 1): string {
-  return `${value.toFixed(decimals)}%`;
-}
-
-/**
  * Format duration in milliseconds to human readable
  */
 export function formatDuration(ms: number): string {

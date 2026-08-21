@@ -107,22 +107,6 @@ def append_event(run_id: str, event: SyntheticRunEvent) -> None:
         f.write(json.dumps(payload) + "\n")
 
 
-def load_events(run_id: str, limit: int | None = None) -> list[SyntheticRunEvent]:
-    path = events_path(run_id)
-    if not path.exists():
-        return []
-    lines = [ln for ln in path.read_text(encoding="utf-8").splitlines() if ln.strip()]
-    if limit is not None and limit > 0:
-        lines = lines[-limit:]
-    out: list[SyntheticRunEvent] = []
-    for line in lines:
-        try:
-            out.append(SyntheticRunEvent.model_validate(json.loads(line)))
-        except Exception:
-            continue
-    return out
-
-
 def list_runs(*, corpus_id: str | None = None, limit: int = 50) -> list[SyntheticRunMeta]:
     out: list[SyntheticRunMeta] = []
     for d in sorted(runs_dir().iterdir(), key=lambda p: p.name, reverse=True):

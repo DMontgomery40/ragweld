@@ -5,27 +5,6 @@ import type { ErrorHelperOptions } from '@web/types';
 /**
  * Hook for creating helpful error messages
  */
-/**
- * ---agentspec
- * what: |
- *   Custom React hook that provides error handling utilities for displaying and creating user-friendly error messages.
- *   Exports two memoized callback functions: showAlert (displays formatted error via browser alert) and createHelpful (creates structured error objects).
- *   showAlert takes a title string and optional ErrorHelperOptions object, calls createAlertError helper, and displays result via native alert().
- *   createHelpful takes ErrorHelperOptions and returns result from createHelpfulError helper for programmatic error object creation.
- *   No side effects beyond alert() display; relies on external helper functions (createAlertError, createHelpfulError) for actual error formatting logic.
- *
- * why: |
- *   Wraps error formatting helpers in a custom hook to provide consistent error handling across React components with memoized callbacks.
- *   useCallback prevents unnecessary re-renders of child components that depend on these error handlers as props or dependencies.
- *   Centralizes error UI patterns (alert-based display vs structured error objects) in one reusable hook rather than scattered throughout components.
- *
- * guardrails:
- *   - DO NOT call alert() directly in components; always use this hook's showAlert method to ensure consistent error formatting and messaging
- *   - ALWAYS verify that createAlertError and createHelpfulError helper functions are properly exported and tested before using this hook
- *   - NOTE: Browser alert() is blocking and poor UX; consider refactoring showAlert to use a toast/modal component instead of native alert()
- *   - ASK USER: Before modifying ErrorHelperOptions interface, confirm all consuming components and their error handling requirements to avoid breaking changes
- * ---/agentspec
- */
 export function useErrorHandler() {
   const showAlert = useCallback((title: string, options: Partial<ErrorHelperOptions> = {}) => {
     const message = createAlertError(title, options);

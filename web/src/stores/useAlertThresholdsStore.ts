@@ -52,27 +52,6 @@ interface AlertThresholdsState {
   reset: () => void;
 }
 
-/**
- * ---agentspec
- * what: |
- *   Normalizes a payload object into a ThresholdMap by converting all values to strings.
- *   Takes a Record with string keys and values that are numbers, strings, null, or undefined.
- *   Iterates over FIELD_META keys, retrieves corresponding payload values, and converts them to strings (null/undefined become empty strings).
- *   Returns a ThresholdMap object where all values are stringified.
- *   Handles missing keys gracefully by treating them as undefined and converting to empty strings.
- *
- * why: |
- *   Ensures consistent string representation of threshold values across the application, regardless of input type.
- *   Centralizes type coercion logic so downstream consumers always receive normalized string data.
- *   Iterating over FIELD_META keys (rather than payload keys) guarantees only expected fields are processed and prevents injection of unexpected keys.
- *
- * guardrails:
- *   - DO NOT modify the iteration to use Object.keys(payload) instead of Object.keys(FIELD_META) because it would allow arbitrary keys to bypass validation
- *   - ALWAYS cast keys to AlertThresholdKey type to maintain type safety and prevent runtime key mismatches
- *   - NOTE: Empty strings are used as the normalized representation for null/undefined; confirm this is the intended sentinel value for your use case
- *   - ASK USER: Before changing the string conversion logic, clarify whether numeric precision should be preserved (e.g., toFixed for decimals) or if simple String() coercion is sufficient
- * ---/agentspec
- */
 function normalizeResponse(payload: Record<string, number | string | null | undefined>): ThresholdMap {
   const entries: ThresholdMap = {};
   Object.keys(FIELD_META).forEach((key) => {
@@ -87,27 +66,6 @@ function normalizeResponse(payload: Record<string, number | string | null | unde
   return entries;
 }
 
-/**
- * ---agentspec
- * what: |
- *   Parses and validates a raw string value into a typed number (int or float) based on the alert threshold key.
- *   Takes two parameters: key (AlertThresholdKey) and rawValue (string). Returns a number after type conversion.
- *   Throws Error if rawValue is empty/null/undefined, or if parsing fails (NaN result).
- *   Uses FIELD_META lookup to determine target type; defaults to 'float' if key not found.
- *   Handles both integer parsing (base 10) and floating-point parsing with NaN validation.
- *
- * why: |
- *   Centralizes type conversion logic for alert threshold configuration to ensure consistent validation across all threshold keys.
- *   Separates parsing concerns from business logic, making it reusable for multiple threshold fields.
- *   The FIELD_META lookup pattern allows per-key type specification without hardcoding conversion rules.
- *
- * guardrails:
- *   - DO NOT remove the NaN check; parseFloat/parseInt return NaN on invalid input, which would silently pass invalid data
- *   - ALWAYS validate rawValue for empty/null/undefined before parsing to provide clear error messages
- *   - NOTE: Default type 'float' means missing FIELD_META entries will parse as floats; confirm this is intentional for all keys
- *   - ASK USER: Before modifying FIELD_META lookup or adding new AlertThresholdKey types, confirm the type mapping is complete and correct
- * ---/agentspec
- */
 function parseValue(key: AlertThresholdKey, rawValue: string): number {
   if (rawValue === '' || rawValue === null || rawValue === undefined) {
     throw new Error(`Value for ${key} is required`);
@@ -189,52 +147,9 @@ export const useAlertThresholdsStore = create<AlertThresholdsState>((set, get) =
   },
 }));
 
-/**
- * ---agentspec
- * what: |
- *   Custom React hook that provides reactive access to a single alert threshold field from Zustand store.
- *   Takes an AlertThresholdKey parameter (string enum identifying which threshold field to access).
- *   Returns a tuple: [currentValue: string, setValue: (value: string) => void].
- *   The hook subscribes to store changes for the specific key and re-renders only when that field updates.
- *   Handles missing/undefined values by defaulting to empty string.
- *
- * why: |
- *   Abstracts Zustand store subscription logic into a reusable hook following React conventions.
- *   Reduces boilerplate in components that need to read/write individual threshold fields.
- *   Selector pattern ensures components only re-render when their specific field changes, not on unrelated store updates.
- *   Provides a familiar useState-like API for developers familiar with React hooks.
- *
- * guardrails:
- *   - DO NOT call this hook conditionally or in loops; it must be called at the top level of a component
- *   - ALWAYS pass a valid AlertThresholdKey; invalid keys will silently return empty string with no error
- *   - NOTE: The hook does not validate the string value being set; validation must occur in updateField or at form submission
- *   - ASK USER: Before adding debouncing or async validation, confirm whether updates should be immediate or batched
- * ---/agentspec
- */
 export function useAlertThresholdField(key: AlertThresholdKey): [string, (value: string) => void] {
   const value = useAlertThresholdsStore((state) => state.data[key] ?? '');
   const updateField = useAlertThresholdsStore((state) => state.updateField);
-  /**
-   * ---agentspec
-   * what: |
-   *   Returns a tuple containing the current field value and a setter function for updating that field.
-   *   Takes a `key` parameter (string) identifying which field to manage and accesses `value` from closure/context.
-   *   Returns a two-element array: [currentValue: string, setterFunction: (next: string) => void].
-   *   The setter function calls `updateField(key, next)` to persist changes, delegating update logic to the parent scope.
-   *   No edge case handling; assumes `key` is valid and `updateField` is always available in closure.
-   *
-   * why: |
-   *   Provides a React-like hook pattern for field state management, abstracting the update mechanism behind a simple setter interface.
-   *   Centralizes the field key and update logic so callers only need to invoke the setter without knowing implementation details.
-   *   This pattern reduces boilerplate when managing multiple form fields or similar state containers.
-   *
-   * guardrails:
-   *   - DO NOT modify the return tuple structure without updating all call sites; the [value, setter] convention is relied upon by consumers
-   *   - ALWAYS ensure `updateField` is defined in the enclosing scope before calling this function; missing dependency will cause runtime error
-   *   - NOTE: No validation of `key` or `next` value; invalid keys will silently fail or update wrong fields if `updateField` lacks guards
-   *   - ASK USER: Confirm whether `value` should be validated (e.g., non-empty string) before returning, or if that responsibility belongs to `updateField`
-   * ---/agentspec
-   */
   const setValue = (next: string) => updateField(key, next);
   return [value, setValue];
 }

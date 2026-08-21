@@ -8,27 +8,6 @@ import { useAPI } from './useAPI';
  * React hook for reranker operations and status polling
  * Converted from /web/src/modules/reranker.js
  */
-/**
- * ---agentspec
- * what: |
- *   Custom React hook that initializes and manages a RerankService instance for document reranking operations.
- *   Takes no parameters; uses apiBase from the useAPI hook context to instantiate RerankService.
- *   Returns an object containing the service instance and a status state object with fields: running (boolean), progress (number 0-100), task (string), and message (string).
- *   Memoizes the service instance to prevent unnecessary reinstantiation when apiBase remains stable.
- *   Provides reactive status updates for UI components to display reranking progress and state.
- *
- * why: |
- *   Encapsulates RerankService initialization logic in a reusable hook to avoid repeated instantiation across components.
- *   Memoization ensures the service instance persists across re-renders unless apiBase changes, reducing memory churn.
- *   Status state enables real-time UI feedback during long-running reranking operations.
- *
- * guardrails:
- *   - DO NOT remove the useMemo dependency on apiBase; changes to apiBase must trigger service recreation to use the correct API endpoint
- *   - ALWAYS ensure RerankService is properly initialized before calling reranking methods; incomplete initialization will cause runtime errors
- *   - NOTE: Status state is initialized but the hook does not show how status updates are triggered; verify that RerankService or calling code properly invokes setStatus
- *   - ASK USER: Confirm whether status updates should be managed within this hook or delegated to the service; current implementation suggests status is managed externally
- * ---/agentspec
- */
 export function useReranker() {
   const { apiBase } = useAPI();
   const service = useMemo(() => new RerankService(apiBase), [apiBase]);

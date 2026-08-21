@@ -51,24 +51,6 @@ def resolve_synthetic_route(*, cfg: TriBridConfig, model: str) -> ProviderRoute:
         raise RuntimeError(f"Unable to resolve model route for {model_name!r} (category={category}): {e}") from e
 
 
-def resolve_available_synthetic_generation_model(cfg: TriBridConfig) -> str | None:
-    candidates: list[str] = []
-    litellm_default = str(getattr(cfg.chat.litellm, "default_model", "") or "").strip()
-    litellm_enabled = bool(getattr(cfg.chat.litellm, "enabled", False))
-    litellm_base = str(getattr(cfg.chat.litellm, "base_url", "") or "").strip()
-    if litellm_enabled and litellm_base and litellm_default and _is_allowed_branch_synthetic_model(litellm_default):
-        candidates.append(f"litellm:{litellm_default}")
-
-    for model in candidates:
-        if not _is_allowed_branch_synthetic_model(model):
-            continue
-        try:
-            _ = resolve_synthetic_route(cfg=cfg, model=model)
-            return model
-        except Exception:
-            continue
-    return None
-
 
 def _path_matches_any_pattern(file_path: str, patterns: list[str]) -> bool:
     fp = (file_path or "").replace("\\", "/")
