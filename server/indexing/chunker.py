@@ -221,7 +221,7 @@ class Chunker:
             # line_starts is sorted; bisect_right returns 1-based line number.
             return max(1, min(n_lines, bisect.bisect_right(line_starts, int(char_idx))))
 
-        preserve_imports = bool(int(getattr(self.config, "preserve_imports", 1) or 0) == 1)
+        preserve_imports = bool(getattr(self.config, "preserve_imports", True))
         overlap = int(getattr(self.config, "ast_overlap_lines", 0) or 0)
         target_tokens = int(getattr(self.config, "target_tokens", 512) or 512)
 

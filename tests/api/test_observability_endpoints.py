@@ -39,9 +39,9 @@ async def test_observability_status_reports_missing_otlp_endpoint(client: AsyncC
     cfg = baseline.json()
 
     cfg["tracing"]["tracing_mode"] = "otel"
-    cfg["tracing"]["otel_export_enabled"] = 1
+    cfg["tracing"]["otel_export_enabled"] = True
     cfg["tracing"]["otlp_endpoint"] = ""
-    cfg["tracing"]["langfuse_enabled"] = 0
+    cfg["tracing"]["langfuse_enabled"] = False
 
     saved = await client.put("/api/config", json=cfg)
     assert saved.status_code == 200
@@ -65,10 +65,10 @@ async def test_observability_status_reports_otlp_reachability_failures(client: A
     cfg = baseline.json()
 
     cfg["tracing"]["tracing_mode"] = "otel"
-    cfg["tracing"]["tracing_enabled"] = 0
-    cfg["tracing"]["otel_export_enabled"] = 1
+    cfg["tracing"]["tracing_enabled"] = False
+    cfg["tracing"]["otel_export_enabled"] = True
     cfg["tracing"]["otlp_endpoint"] = "http://127.0.0.1:9/v1/traces"
-    cfg["tracing"]["langfuse_enabled"] = 0
+    cfg["tracing"]["langfuse_enabled"] = False
 
     saved = await client.put("/api/config", json=cfg)
     assert saved.status_code == 200
@@ -92,8 +92,8 @@ async def test_observability_status_reports_langfuse_key_and_reachability_failur
     cfg = baseline.json()
 
     cfg["tracing"]["tracing_mode"] = "otel_langfuse"
-    cfg["tracing"]["otel_export_enabled"] = 0
-    cfg["tracing"]["langfuse_enabled"] = 1
+    cfg["tracing"]["otel_export_enabled"] = False
+    cfg["tracing"]["langfuse_enabled"] = True
     cfg["tracing"]["langfuse_base_url"] = "http://127.0.0.1:9"
 
     old_public = os.environ.pop("LANGFUSE_PUBLIC_KEY", None)

@@ -242,7 +242,7 @@ def _validate_model_capabilities(config: TriBridConfig) -> None:
     emb_model = _resolve_embedding_model(config)
     strict_unknown_embedding = (
         str(config.embedding.embedding_backend or "").strip().lower() == "provider"
-        and int(getattr(config.indexing, "skip_dense", 0) or 0) != 1
+        and not getattr(config.indexing, "skip_dense", False)
     )
     _validate_capability(
         catalog_models,
@@ -264,7 +264,7 @@ def _validate_model_capabilities(config: TriBridConfig) -> None:
 
 
 def _validate_embedding_runtime_support(config: TriBridConfig) -> None:
-    if int(getattr(config.indexing, "skip_dense", 0) or 0) == 1:
+    if getattr(config.indexing, "skip_dense", False):
         return
     backend = str(config.embedding.embedding_backend or "").strip().lower()
     provider = str(config.embedding.embedding_type or "").strip().lower()
@@ -283,7 +283,7 @@ def _validate_embedding_runtime_support(config: TriBridConfig) -> None:
 
 
 def _validate_embedding_tokenization_compat(config: TriBridConfig) -> None:
-    if int(getattr(config.indexing, "skip_dense", 0) or 0) == 1:
+    if getattr(config.indexing, "skip_dense", False):
         return
     backend = str(config.embedding.embedding_backend or "").strip().lower()
     if backend != "provider":
@@ -444,7 +444,7 @@ def _collect_model_warnings(config: TriBridConfig) -> list[ModelValidationWarnin
 
     if (
         str(config.embedding.embedding_backend or "").strip().lower() == "provider"
-        and int(getattr(config.indexing, "skip_dense", 0) or 0) != 1
+        and not getattr(config.indexing, "skip_dense", False)
     ):
         emb_provider = str(config.embedding.embedding_type or "").strip().lower()
         if emb_provider and emb_provider not in SUPPORTED_PROVIDER_BACKEND_EMBEDDING_PROVIDERS:

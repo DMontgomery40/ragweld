@@ -956,10 +956,10 @@ export function ChatInterface({ onTraceUpdate }: ChatInterfaceProps) {
   const [maxTokens, setMaxTokens] = useConfigField<number>('chat.max_tokens', 512);
   const [topK, setTopK] = useConfigField<number>('retrieval.final_k', 10);
 
-  const chatShowConfidence = Boolean(config?.ui?.chat_show_confidence ?? 0);
-  const chatShowCitations = Boolean(config?.ui?.chat_show_citations ?? 1);
-  const chatShowTrace = Boolean(config?.ui?.chat_show_trace ?? 1);
-  const chatShowDebugFooter = Boolean(config?.ui?.chat_show_debug_footer ?? 1);
+  const chatShowConfidence = config?.ui?.chat_show_confidence ?? false;
+  const chatShowCitations = config?.ui?.chat_show_citations ?? true;
+  const chatShowTrace = config?.ui?.chat_show_trace ?? true;
+  const chatShowDebugFooter = config?.ui?.chat_show_debug_footer ?? true;
   const recallGateShowDecision = Boolean(config?.chat?.recall_gate?.show_gate_decision ?? true);
   const recallGateShowSignals = Boolean(config?.chat?.recall_gate?.show_signals ?? false);
   const chatHistoryMax = Math.max(10, Math.min(500, Number(config?.ui?.chat_history_max ?? 50)));

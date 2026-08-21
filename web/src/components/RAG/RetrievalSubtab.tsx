@@ -125,7 +125,7 @@ export function RetrievalSubtab() {
   const [genMaxTokens, setGenMaxTokens] = useConfigField<number>('generation.gen_max_tokens', 512);
   const [genTopP, setGenTopP] = useConfigField<number>('generation.gen_top_p', 1.0);
   const [genTimeout, setGenTimeout] = useConfigField<number>('generation.gen_timeout', 60);
-  const [enrichDisabled, setEnrichDisabled] = useConfigField<number>('generation.enrich_disabled', 0);
+  const [enrichDisabled, setEnrichDisabled] = useConfigField<boolean>('generation.enrich_disabled', false);
   const [generationModels, setGenerationModels] = useState<ChatModelInfo[]>([]);
 
   useEffect(() => {
@@ -160,13 +160,13 @@ export function RetrievalSubtab() {
   const [confTop1, setConfTop1] = useConfigField<number>('retrieval.conf_top1', 0.62);
   const [confAvg5, setConfAvg5] = useConfigField<number>('retrieval.conf_avg5', 0.55);
   const [confAny, setConfAny] = useConfigField<number>('retrieval.conf_any', 0.55);
-  const [evalMulti, setEvalMulti] = useConfigField<number>('retrieval.eval_multi', 1);
-  const [queryExpansionEnabled, setQueryExpansionEnabled] = useConfigField<number>('retrieval.query_expansion_enabled', 1);
+  const [evalMulti, setEvalMulti] = useConfigField<boolean>('retrieval.eval_multi', true);
+  const [queryExpansionEnabled, setQueryExpansionEnabled] = useConfigField<boolean>('retrieval.query_expansion_enabled', true);
   const [retrievalBm25Weight, setRetrievalBm25Weight] = useConfigField<number>('retrieval.bm25_weight', 0.3);
   const [retrievalBm25K1, setRetrievalBm25K1] = useConfigField<number>('retrieval.bm25_k1', 1.2);
   const [retrievalBm25B, setRetrievalBm25B] = useConfigField<number>('retrieval.bm25_b', 0.4);
   const [retrievalVectorWeight, setRetrievalVectorWeight] = useConfigField<number>('retrieval.vector_weight', 0.7);
-  const [cardSearchEnabled, setCardSearchEnabled] = useConfigField<number>('retrieval.chunk_summary_search_enabled', 1);
+  const [cardSearchEnabled, setCardSearchEnabled] = useConfigField<boolean>('retrieval.chunk_summary_search_enabled', true);
   const [maxChunksPerFile, setMaxChunksPerFile] = useConfigField<number>('retrieval.max_chunks_per_file', 3);
   const [dedupBy, setDedupBy] = useConfigField<'chunk_id' | 'file_path'>('retrieval.dedup_by', 'chunk_id');
   const [neighborWindow, setNeighborWindow] = useConfigField<number>('retrieval.neighbor_window', 1);
@@ -176,7 +176,7 @@ export function RetrievalSubtab() {
   const [enableMmr, setEnableMmr] = useConfigField<boolean>('retrieval.enable_mmr', false);
   const [mmrLambda, setMmrLambda] = useConfigField<number>('retrieval.mmr_lambda', 0.7);
   const [multiQueryM, setMultiQueryM] = useConfigField<number>('retrieval.multi_query_m', 4);
-  const [useSemanticSynonyms, setUseSemanticSynonyms] = useConfigField<number>('retrieval.use_semantic_synonyms', 1);
+  const [useSemanticSynonyms, setUseSemanticSynonyms] = useConfigField<boolean>('retrieval.use_semantic_synonyms', true);
   const [synonymsPath, setSynonymsPath] = useConfigField<string>('retrieval.tribrid_synonyms_path', '');
   const [topkDense, setTopkDense] = useConfigField<number>('retrieval.topk_dense', 75);
   const [topkSparse, setTopkSparse] = useConfigField<number>('retrieval.topk_sparse', 75);
@@ -252,33 +252,33 @@ export function RetrievalSubtab() {
   void setLayerIntentMatrix;
 
   // --- Tracing ------------------------------------------------------------
-  const [tracingEnabled, setTracingEnabled] = useConfigField<number>('tracing.tracing_enabled', 1);
+  const [tracingEnabled, setTracingEnabled] = useConfigField<boolean>('tracing.tracing_enabled', true);
   const [traceSamplingRate, setTraceSamplingRate] = useConfigField<number>('tracing.trace_sampling_rate', 1.0);
-  const [metricsEnabled, setMetricsEnabled] = useConfigField<number>('tracing.metrics_enabled', 1);
-  const [alertIncludeResolved, setAlertIncludeResolved] = useConfigField<number>('tracing.alert_include_resolved', 1);
+  const [metricsEnabled, setMetricsEnabled] = useConfigField<boolean>('tracing.metrics_enabled', true);
+  const [alertIncludeResolved, setAlertIncludeResolved] = useConfigField<boolean>('tracing.alert_include_resolved', true);
   const [alertWebhookTimeout, setAlertWebhookTimeout] = useConfigField<number>('tracing.alert_webhook_timeout', 5);
   const [logLevel, setLogLevel] = useConfigField<string>('tracing.log_level', 'INFO');
   const [tracingMode, setTracingMode] = useConfigField<string>('tracing.tracing_mode', 'local');
   const [traceRetention, setTraceRetention] = useConfigField<number>('tracing.trace_retention', 50);
   const [tribridLogPath, setTribridLogPath] = useConfigField<string>('tracing.tribrid_log_path', 'data/logs/queries.jsonl');
   const [alertNotifySeverities, setAlertNotifySeverities] = useConfigField<string>('tracing.alert_notify_severities', 'critical,warning');
-  const [otelExportEnabled, setOtelExportEnabled] = useConfigField<number>('tracing.otel_export_enabled', 1);
+  const [otelExportEnabled, setOtelExportEnabled] = useConfigField<boolean>('tracing.otel_export_enabled', true);
   const [otlpEndpoint, setOtlpEndpoint] = useConfigField<string>('tracing.otlp_endpoint', '');
   const [otlpHeaders, setOtlpHeaders] = useConfigField<string>('tracing.otlp_headers', '');
   const [otelServiceName, setOtelServiceName] = useConfigField<string>('tracing.otel_service_name', 'ragweld-api');
-  const [langfuseEnabled, setLangfuseEnabled] = useConfigField<number>('tracing.langfuse_enabled', 0);
+  const [langfuseEnabled, setLangfuseEnabled] = useConfigField<boolean>('tracing.langfuse_enabled', false);
   const [langfuseBaseUrl, setLangfuseBaseUrl] = useConfigField<string>('tracing.langfuse_base_url', '');
   const [langfuseProject, setLangfuseProject] = useConfigField<string>('tracing.langfuse_project', 'ragweld');
   const [tempoBaseUrl, setTempoBaseUrl] = useConfigField<string>('tracing.tempo_base_url', '');
   const [alloyBaseUrl, setAlloyBaseUrl] = useConfigField<string>('tracing.alloy_base_url', '');
-  const [costTrackingEnabled, setCostTrackingEnabled] = useConfigField<number>('tracing.cost_tracking_enabled', 1);
+  const [costTrackingEnabled, setCostTrackingEnabled] = useConfigField<boolean>('tracing.cost_tracking_enabled', true);
 
   // --- Hydration ----------------------------------------------------------
   const [hydrationMode, setHydrationMode] = useConfigField<string>('hydration.hydration_mode', 'lazy');
   const [hydrationMaxChars, setHydrationMaxChars] = useConfigField<number>('hydration.hydration_max_chars', 2000);
 
   // --- Semantic cache -----------------------------------------------------
-  const [semanticCacheEnabled, setSemanticCacheEnabled] = useConfigField<number>('semantic_cache.enabled', 0);
+  const [semanticCacheEnabled, setSemanticCacheEnabled] = useConfigField<boolean>('semantic_cache.enabled', false);
   const [semanticCacheMode, setSemanticCacheMode] =
     useConfigField<'read_write' | 'read_only' | 'write_only'>('semantic_cache.mode', 'read_write');
   const [semanticCacheMaxEntries, setSemanticCacheMaxEntries] = useConfigField<number>('semantic_cache.max_entries', 5000);
@@ -296,7 +296,7 @@ export function RetrievalSubtab() {
   const [semanticCacheChatHistoryWindow, setSemanticCacheChatHistoryWindow] =
     useConfigField<number>('semantic_cache.chat_history_window', 6);
   const [semanticCacheBypassIfImages, setSemanticCacheBypassIfImages] =
-    useConfigField<number>('semantic_cache.bypass_if_images', 1);
+    useConfigField<boolean>('semantic_cache.bypass_if_images', true);
   const [semanticCacheMaxTemperatureForWrite, setSemanticCacheMaxTemperatureForWrite] =
     useConfigField<number>('semantic_cache.max_temperature_for_write', 0.5);
 
@@ -607,13 +607,19 @@ export function RetrievalSubtab() {
               </div>
               <div className="input-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 16 }}>
                 <div className="input-group">
-                  <label>
-                    Semantic Synonyms <TooltipIcon name="USE_SEMANTIC_SYNONYMS" />
+                  <label className="toggle">
+                    <input
+                      type="checkbox"
+                      checked={useSemanticSynonyms}
+                      onChange={(e) => setUseSemanticSynonyms(e.target.checked)}
+                    />
+                    <span className="toggle-track" aria-hidden="true">
+                      <span className="toggle-thumb"></span>
+                    </span>
+                    <span className="toggle-label">
+                      Semantic Synonyms <TooltipIcon name="USE_SEMANTIC_SYNONYMS" />
+                    </span>
                   </label>
-                  <select value={useSemanticSynonyms} onChange={(e) => setUseSemanticSynonyms(parseInt(e.target.value, 10))}>
-                    <option value={1}>On</option>
-                    <option value={0}>Off</option>
-                  </select>
                 </div>
                 <div className="input-group">
                   <label>
@@ -1388,13 +1394,19 @@ export function RetrievalSubtab() {
                   />
                 </div>
                 <div className="input-group">
-                  <label>
-                    Disable Enrichment <TooltipIcon name="ENRICH_DISABLED" />
+                  <label className="toggle">
+                    <input
+                      type="checkbox"
+                      checked={enrichDisabled}
+                      onChange={(e) => setEnrichDisabled(e.target.checked)}
+                    />
+                    <span className="toggle-track" aria-hidden="true">
+                      <span className="toggle-thumb"></span>
+                    </span>
+                    <span className="toggle-label">
+                      Disable Enrichment <TooltipIcon name="ENRICH_DISABLED" />
+                    </span>
                   </label>
-                  <select value={enrichDisabled} onChange={(e) => setEnrichDisabled(parseInt(e.target.value, 10))}>
-                    <option value={0}>Enabled</option>
-                    <option value={1}>Disabled</option>
-                  </select>
                 </div>
               </div>
             </div>
@@ -1601,37 +1613,49 @@ export function RetrievalSubtab() {
                       />
                     </div>
                     <div className="input-group">
-                      <label>
-                        Eval Multi <TooltipIcon name="EVAL_MULTI" />
+                      <label className="toggle">
+                        <input
+                          type="checkbox"
+                          checked={evalMulti}
+                          onChange={(e) => setEvalMulti(e.target.checked)}
+                        />
+                        <span className="toggle-track" aria-hidden="true">
+                          <span className="toggle-thumb"></span>
+                        </span>
+                        <span className="toggle-label">
+                          Eval Multi <TooltipIcon name="EVAL_MULTI" />
+                        </span>
                       </label>
-                      <select value={evalMulti} onChange={(e) => setEvalMulti(parseInt(e.target.value, 10))}>
-                        <option value={1}>Enabled</option>
-                        <option value={0}>Disabled</option>
-                      </select>
                     </div>
                     <div className="input-group">
-                      <label>
-                        Query Expansion <TooltipIcon name="QUERY_EXPANSION_ENABLED" />
+                      <label className="toggle">
+                        <input
+                          type="checkbox"
+                          checked={queryExpansionEnabled}
+                          onChange={(e) => setQueryExpansionEnabled(e.target.checked)}
+                        />
+                        <span className="toggle-track" aria-hidden="true">
+                          <span className="toggle-thumb"></span>
+                        </span>
+                        <span className="toggle-label">
+                          Query Expansion <TooltipIcon name="QUERY_EXPANSION_ENABLED" />
+                        </span>
                       </label>
-                      <select
-                        value={queryExpansionEnabled}
-                        onChange={(e) => setQueryExpansionEnabled(parseInt(e.target.value, 10))}
-                      >
-                        <option value={1}>Enabled</option>
-                        <option value={0}>Disabled</option>
-                      </select>
                     </div>
                     <div className="input-group">
-                      <label>
-                        Chunk Summary Search <TooltipIcon name="CHUNK_SUMMARY_SEARCH_ENABLED" />
+                      <label className="toggle">
+                        <input
+                          type="checkbox"
+                          checked={cardSearchEnabled}
+                          onChange={(e) => setCardSearchEnabled(e.target.checked)}
+                        />
+                        <span className="toggle-track" aria-hidden="true">
+                          <span className="toggle-thumb"></span>
+                        </span>
+                        <span className="toggle-label">
+                          Chunk Summary Search <TooltipIcon name="CHUNK_SUMMARY_SEARCH_ENABLED" />
+                        </span>
                       </label>
-                      <select
-                        value={cardSearchEnabled}
-                        onChange={(e) => setCardSearchEnabled(parseInt(e.target.value, 10))}
-                      >
-                        <option value={1}>Enabled</option>
-                        <option value={0}>Disabled</option>
-                      </select>
                     </div>
                   </div>
 
@@ -1810,18 +1834,26 @@ export function RetrievalSubtab() {
 
                   <div className="input-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 16 }}>
                     <div className="input-group">
-                      <label>Cache Enabled</label>
-                      <select value={semanticCacheEnabled} onChange={(e) => setSemanticCacheEnabled(parseInt(e.target.value, 10))}>
-                        <option value={1}>Enabled</option>
-                        <option value={0}>Disabled</option>
-                      </select>
+                      <label className="toggle">
+                        <input
+                          type="checkbox"
+                          checked={semanticCacheEnabled}
+                          onChange={(e) => setSemanticCacheEnabled(e.target.checked)}
+                        />
+                        <span className="toggle-track" aria-hidden="true">
+                          <span className="toggle-thumb"></span>
+                        </span>
+                        <span className="toggle-label">
+                          Cache Enabled
+                        </span>
+                      </label>
                     </div>
                     <div className="input-group">
                       <label>Cache Mode</label>
                       <select
                         value={semanticCacheMode}
                         onChange={(e) => setSemanticCacheMode(e.target.value as 'read_write' | 'read_only' | 'write_only')}
-                        disabled={semanticCacheEnabled === 0}
+                        disabled={!semanticCacheEnabled}
                       >
                         <option value="read_write">read_write</option>
                         <option value="read_only">read_only</option>
@@ -1836,7 +1868,7 @@ export function RetrievalSubtab() {
                         max={500000}
                         value={semanticCacheMaxEntries}
                         onChange={(e) => setSemanticCacheMaxEntries(snapNumber(e.target.value, 5000))}
-                        disabled={semanticCacheEnabled === 0}
+                        disabled={!semanticCacheEnabled}
                       />
                     </div>
                     <div className="input-group">
@@ -1847,7 +1879,7 @@ export function RetrievalSubtab() {
                         max={200}
                         value={semanticCacheMinQueryChars}
                         onChange={(e) => setSemanticCacheMinQueryChars(snapNumber(e.target.value, 3))}
-                        disabled={semanticCacheEnabled === 0}
+                        disabled={!semanticCacheEnabled}
                       />
                     </div>
                   </div>
@@ -1862,7 +1894,7 @@ export function RetrievalSubtab() {
                         step={0.01}
                         value={semanticCacheThresholdSearch}
                         onChange={(e) => setSemanticCacheThresholdSearch(snapNumber(e.target.value, 0.9))}
-                        disabled={semanticCacheEnabled === 0}
+                        disabled={!semanticCacheEnabled}
                       />
                     </div>
                     <div className="input-group">
@@ -1874,7 +1906,7 @@ export function RetrievalSubtab() {
                         step={0.01}
                         value={semanticCacheThresholdAnswer}
                         onChange={(e) => setSemanticCacheThresholdAnswer(snapNumber(e.target.value, 0.93))}
-                        disabled={semanticCacheEnabled === 0}
+                        disabled={!semanticCacheEnabled}
                       />
                     </div>
                     <div className="input-group">
@@ -1886,7 +1918,7 @@ export function RetrievalSubtab() {
                         step={0.01}
                         value={semanticCacheThresholdChat}
                         onChange={(e) => setSemanticCacheThresholdChat(snapNumber(e.target.value, 0.95))}
-                        disabled={semanticCacheEnabled === 0}
+                        disabled={!semanticCacheEnabled}
                       />
                     </div>
                   </div>
@@ -1900,7 +1932,7 @@ export function RetrievalSubtab() {
                         max={86400}
                         value={semanticCacheTtlSearch}
                         onChange={(e) => setSemanticCacheTtlSearch(snapNumber(e.target.value, 900))}
-                        disabled={semanticCacheEnabled === 0}
+                        disabled={!semanticCacheEnabled}
                       />
                     </div>
                     <div className="input-group">
@@ -1911,7 +1943,7 @@ export function RetrievalSubtab() {
                         max={86400}
                         value={semanticCacheTtlAnswer}
                         onChange={(e) => setSemanticCacheTtlAnswer(snapNumber(e.target.value, 1800))}
-                        disabled={semanticCacheEnabled === 0}
+                        disabled={!semanticCacheEnabled}
                       />
                     </div>
                     <div className="input-group">
@@ -1922,7 +1954,7 @@ export function RetrievalSubtab() {
                         max={86400}
                         value={semanticCacheTtlChat}
                         onChange={(e) => setSemanticCacheTtlChat(snapNumber(e.target.value, 600))}
-                        disabled={semanticCacheEnabled === 0}
+                        disabled={!semanticCacheEnabled}
                       />
                     </div>
                   </div>
@@ -1936,19 +1968,24 @@ export function RetrievalSubtab() {
                         max={50}
                         value={semanticCacheChatHistoryWindow}
                         onChange={(e) => setSemanticCacheChatHistoryWindow(snapNumber(e.target.value, 6))}
-                        disabled={semanticCacheEnabled === 0}
+                        disabled={!semanticCacheEnabled}
                       />
                     </div>
                     <div className="input-group">
-                      <label>Bypass if Images</label>
-                      <select
-                        value={semanticCacheBypassIfImages}
-                        onChange={(e) => setSemanticCacheBypassIfImages(parseInt(e.target.value, 10))}
-                        disabled={semanticCacheEnabled === 0}
-                      >
-                        <option value={1}>Enabled</option>
-                        <option value={0}>Disabled</option>
-                      </select>
+                      <label className="toggle">
+                        <input
+                          type="checkbox"
+                          checked={semanticCacheBypassIfImages}
+                          onChange={(e) => setSemanticCacheBypassIfImages(e.target.checked)}
+                          disabled={!semanticCacheEnabled}
+                        />
+                        <span className="toggle-track" aria-hidden="true">
+                          <span className="toggle-thumb"></span>
+                        </span>
+                        <span className="toggle-label">
+                          Bypass if Images
+                        </span>
+                      </label>
                     </div>
                     <div className="input-group">
                       <label>Max Temperature for Write</label>
@@ -1959,7 +1996,7 @@ export function RetrievalSubtab() {
                         step={0.05}
                         value={semanticCacheMaxTemperatureForWrite}
                         onChange={(e) => setSemanticCacheMaxTemperatureForWrite(snapNumber(e.target.value, 0.5))}
-                        disabled={semanticCacheEnabled === 0}
+                        disabled={!semanticCacheEnabled}
                       />
                     </div>
                   </div>
@@ -2029,13 +2066,19 @@ export function RetrievalSubtab() {
                       </select>
                     </div>
                     <div className="input-group">
-                      <label>
-                        Tracing Enabled <TooltipIcon name="TRACING_ENABLED" />
+                      <label className="toggle">
+                        <input
+                          type="checkbox"
+                          checked={tracingEnabled}
+                          onChange={(e) => setTracingEnabled(e.target.checked)}
+                        />
+                        <span className="toggle-track" aria-hidden="true">
+                          <span className="toggle-thumb"></span>
+                        </span>
+                        <span className="toggle-label">
+                          Tracing Enabled <TooltipIcon name="TRACING_ENABLED" />
+                        </span>
                       </label>
-                      <select value={tracingEnabled} onChange={(e) => setTracingEnabled(parseInt(e.target.value, 10))}>
-                        <option value={1}>Enabled</option>
-                        <option value={0}>Disabled</option>
-                      </select>
                     </div>
                     <div className="input-group">
                       <label>
@@ -2066,22 +2109,34 @@ export function RetrievalSubtab() {
 
                   <div className="input-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 16 }}>
                     <div className="input-group">
-                      <label>
-                        OTel Export
+                      <label className="toggle">
+                        <input
+                          type="checkbox"
+                          checked={otelExportEnabled}
+                          onChange={(e) => setOtelExportEnabled(e.target.checked)}
+                        />
+                        <span className="toggle-track" aria-hidden="true">
+                          <span className="toggle-thumb"></span>
+                        </span>
+                        <span className="toggle-label">
+                          OTel Export
+                        </span>
                       </label>
-                      <select value={otelExportEnabled} onChange={(e) => setOtelExportEnabled(parseInt(e.target.value, 10))}>
-                        <option value={1}>Enabled</option>
-                        <option value={0}>Disabled</option>
-                      </select>
                     </div>
                     <div className="input-group">
-                      <label>
-                        Metrics Enabled <TooltipIcon name="METRICS_ENABLED" />
+                      <label className="toggle">
+                        <input
+                          type="checkbox"
+                          checked={metricsEnabled}
+                          onChange={(e) => setMetricsEnabled(e.target.checked)}
+                        />
+                        <span className="toggle-track" aria-hidden="true">
+                          <span className="toggle-thumb"></span>
+                        </span>
+                        <span className="toggle-label">
+                          Metrics Enabled <TooltipIcon name="METRICS_ENABLED" />
+                        </span>
                       </label>
-                      <select value={metricsEnabled} onChange={(e) => setMetricsEnabled(parseInt(e.target.value, 10))}>
-                        <option value={1}>Enabled</option>
-                        <option value={0}>Disabled</option>
-                      </select>
                     </div>
                     <div className="input-group">
                       <label>
@@ -2105,16 +2160,19 @@ export function RetrievalSubtab() {
 
                   <div className="input-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 16 }}>
                     <div className="input-group">
-                      <label>
-                        Include Resolved Alerts <TooltipIcon name="ALERT_INCLUDE_RESOLVED" />
+                      <label className="toggle">
+                        <input
+                          type="checkbox"
+                          checked={alertIncludeResolved}
+                          onChange={(e) => setAlertIncludeResolved(e.target.checked)}
+                        />
+                        <span className="toggle-track" aria-hidden="true">
+                          <span className="toggle-thumb"></span>
+                        </span>
+                        <span className="toggle-label">
+                          Include Resolved Alerts <TooltipIcon name="ALERT_INCLUDE_RESOLVED" />
+                        </span>
                       </label>
-                      <select
-                        value={alertIncludeResolved}
-                        onChange={(e) => setAlertIncludeResolved(parseInt(e.target.value, 10))}
-                      >
-                        <option value={1}>Enabled</option>
-                        <option value={0}>Disabled</option>
-                      </select>
                     </div>
                     <div className="input-group">
                       <label>
@@ -2184,13 +2242,19 @@ export function RetrievalSubtab() {
                       />
                     </div>
                     <div className="input-group">
-                      <label>
-                        Cost Tracking
+                      <label className="toggle">
+                        <input
+                          type="checkbox"
+                          checked={costTrackingEnabled}
+                          onChange={(e) => setCostTrackingEnabled(e.target.checked)}
+                        />
+                        <span className="toggle-track" aria-hidden="true">
+                          <span className="toggle-thumb"></span>
+                        </span>
+                        <span className="toggle-label">
+                          Cost Tracking
+                        </span>
                       </label>
-                      <select value={costTrackingEnabled} onChange={(e) => setCostTrackingEnabled(parseInt(e.target.value, 10))}>
-                        <option value={1}>Enabled</option>
-                        <option value={0}>Disabled</option>
-                      </select>
                     </div>
                   </div>
                 </div>
@@ -2203,11 +2267,19 @@ export function RetrievalSubtab() {
 
                   <div className="input-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 16 }}>
                     <div className="input-group">
-                      <label>Langfuse Enabled</label>
-                      <select value={langfuseEnabled} onChange={(e) => setLangfuseEnabled(parseInt(e.target.value, 10))}>
-                        <option value={1}>Enabled</option>
-                        <option value={0}>Disabled</option>
-                      </select>
+                      <label className="toggle">
+                        <input
+                          type="checkbox"
+                          checked={langfuseEnabled}
+                          onChange={(e) => setLangfuseEnabled(e.target.checked)}
+                        />
+                        <span className="toggle-track" aria-hidden="true">
+                          <span className="toggle-thumb"></span>
+                        </span>
+                        <span className="toggle-label">
+                          Langfuse Enabled
+                        </span>
+                      </label>
                     </div>
                     <div className="input-group">
                       <label>Langfuse Base URL</label>

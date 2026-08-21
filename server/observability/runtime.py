@@ -93,11 +93,11 @@ def _manager_key(tracing_cfg: TracingConfig) -> str:
     return "|".join(
         [
             normalize_tracing_mode(tracing_cfg.tracing_mode),
-            str(int(tracing_cfg.otel_export_enabled or 0)),
+            str(tracing_cfg.otel_export_enabled),
             str(tracing_cfg.otlp_endpoint or ""),
             str(tracing_cfg.otlp_headers or ""),
             str(tracing_cfg.otel_service_name or ""),
-            str(int(tracing_cfg.langfuse_enabled or 0)),
+            str(tracing_cfg.langfuse_enabled),
             str(tracing_cfg.langfuse_base_url or ""),
             str(tracing_cfg.langfuse_project or ""),
         ]
@@ -107,7 +107,7 @@ def _manager_key(tracing_cfg: TracingConfig) -> str:
 def _build_langfuse_client(tracing_cfg: TracingConfig, tracer_provider: TracerProvider) -> Any | None:
     if Langfuse is None:
         return None
-    if int(tracing_cfg.langfuse_enabled or 0) != 1:
+    if not tracing_cfg.langfuse_enabled:
         return None
     public_key = str(os.getenv("LANGFUSE_PUBLIC_KEY") or "").strip()
     secret_key = str(os.getenv("LANGFUSE_SECRET_KEY") or "").strip()
@@ -140,7 +140,7 @@ def get_observability_manager(config: TriBridConfig) -> ObservabilityManager:
             }
         )
         provider = TracerProvider(resource=resource)
-        if int(tracing_cfg.otel_export_enabled or 0) == 1 and str(tracing_cfg.otlp_endpoint or "").strip():
+        if tracing_cfg.otel_export_enabled and str(tracing_cfg.otlp_endpoint or "").strip():
             exporter = OTLPSpanExporter(
                 endpoint=str(tracing_cfg.otlp_endpoint).strip(),
                 headers=_parse_headers(str(tracing_cfg.otlp_headers or "")),
@@ -216,7 +216,7 @@ def start_request_observation(
     run_id: str | None = None,
     repo_id: str | None = None,
 ) -> Iterator[RequestObservation | None]:
-    if int(getattr(config.tracing, "tracing_enabled", 1) or 0) != 1:
+    if not getattr(config.tracing, "tracing_enabled", True):
         yield None
         return
     if normalize_tracing_mode(config.tracing.tracing_mode) == "off":

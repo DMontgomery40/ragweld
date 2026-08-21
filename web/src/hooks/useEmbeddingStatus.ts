@@ -135,7 +135,7 @@ export function useEmbeddingStatus(): UseEmbeddingStatusResult {
       const indexModelRaw = String(data.embedding_model || '').trim();
       const indexDimRaw = Number(data.embedding_dimensions || 0);
 
-      // Treat empty/0 as “no dense embedding index” (e.g., skip_dense=1 runs).
+      // Treat empty/0 as “no dense embedding index” (e.g., skip-dense runs).
       const indexType = indexModelRaw ? indexModelRaw : null;
       const indexDim = indexDimRaw > 0 ? indexDimRaw : null;
       const indexProvider = indexProviderRaw ? indexProviderRaw : null;

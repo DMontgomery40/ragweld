@@ -419,7 +419,7 @@ async def chat_once(
     )
     cache_allowed = not (
         bool(request.images)
-        and int(config.semantic_cache.bypass_if_images or 0) == 1
+        and config.semantic_cache.bypass_if_images
     )
     if cache_allowed:
         hit = await cache_service.lookup(
@@ -706,7 +706,7 @@ async def chat_stream(
     )
     cache_allowed = not (
         bool(request.images)
-        and int(config.semantic_cache.bypass_if_images or 0) == 1
+        and config.semantic_cache.bypass_if_images
     )
     if cache_allowed:
         hit = await cache_service.lookup(

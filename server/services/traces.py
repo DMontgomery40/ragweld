@@ -28,7 +28,7 @@ def _now_ms() -> int:
 def _should_capture_local(config: TriBridConfig) -> bool:
     """Return True if we should store local traces for this request."""
     try:
-        if int(getattr(config.tracing, "tracing_enabled", 1) or 0) != 1:
+        if not getattr(config.tracing, "tracing_enabled", True):
             return False
     except Exception:
         return False

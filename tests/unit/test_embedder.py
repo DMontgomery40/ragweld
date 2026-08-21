@@ -80,7 +80,7 @@ async def test_embed_batch_persistent_cache_reuses_vectors() -> None:
             embedding_type="openai",
             embedding_model="text-embedding-3-small",
             embedding_dim=128,
-            embedding_cache_enabled=1,
+            embedding_cache_enabled=True,
         )
     )
 
@@ -146,7 +146,7 @@ def test_configure_postgres_embedding_cache_backend_clears_stale_backend_when_po
             embedding_type="local",
             embedding_model_local="all-MiniLM-L6-v2",
             embedding_dim=384,
-            embedding_cache_enabled=1,
+            embedding_cache_enabled=True,
         )
     )
 

@@ -30,7 +30,7 @@ export default function ChatTab() {
   const [logService, setLogService] = useState<'all' | 'api' | 'postgres' | 'neo4j'>('all');
   const [lokiStatus, setLokiStatus] = useState<{ reachable: boolean; status: string; url?: string } | null>(null);
 
-  const chatShowTraceDefault = Boolean(config?.ui?.chat_show_trace ?? 1);
+  const chatShowTraceDefault = config?.ui?.chat_show_trace ?? true;
   const traceRouteSummary = trace?.route_summary ?? null;
   const traceDurationMs =
     trace?.ended_at_ms != null && trace?.started_at_ms != null

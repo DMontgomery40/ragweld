@@ -301,7 +301,7 @@ test.describe.serial('chat reliability', () => {
   test('streaming reaches terminal state and clears spinner', async ({ page, request }) => {
     const corpusLabels = await ensureCorpusExists(request);
     const uiCfgResp = await request.patch(`${API_BASE}/config/ui?corpus_id=${encodeURIComponent(CORPUS_ID)}`, {
-      data: { chat_streaming_enabled: 1 },
+      data: { chat_streaming_enabled: true },
     });
     expect(uiCfgResp.ok()).toBeTruthy();
 
@@ -319,7 +319,7 @@ test.describe.serial('chat reliability', () => {
   test('new chat resets in-flight state and clears active stream UI', async ({ page, request }) => {
     const corpusLabels = await ensureCorpusExists(request);
     const uiCfgResp = await request.patch(`${API_BASE}/config/ui?corpus_id=${encodeURIComponent(CORPUS_ID)}`, {
-      data: { chat_streaming_enabled: 1 },
+      data: { chat_streaming_enabled: true },
     });
     expect(uiCfgResp.ok()).toBeTruthy();
 

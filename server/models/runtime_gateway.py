@@ -123,10 +123,8 @@ class GenerationConfig(BaseModel):
         description="LiteLLM alias for code enrichment",
     )
 
-    enrich_disabled: int = Field(
-        default=0,
-        ge=0,
-        le=1,
+    enrich_disabled: bool = Field(
+        default=False,
         description="Disable code enrichment",
     )
 

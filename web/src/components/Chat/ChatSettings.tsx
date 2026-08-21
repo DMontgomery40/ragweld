@@ -80,7 +80,7 @@ export function ChatSettings() {
   const [visionEnabled] = useConfigField('chat.multimodal.vision_enabled', true);
 
   // UI
-  const [chatStreamingEnabled, setChatStreamingEnabled] = useConfigField('ui.chat_streaming_enabled', 1);
+  const [chatStreamingEnabled, setChatStreamingEnabled] = useConfigField<boolean>('ui.chat_streaming_enabled', true);
 
   const panel = (() => {
     switch (activeTab) {
@@ -642,8 +642,8 @@ export function ChatSettings() {
                 <label className="toggle">
                   <input
                     type="checkbox"
-                    checked={chatStreamingEnabled === 1}
-                    onChange={(e) => setChatStreamingEnabled(e.target.checked ? 1 : 0)}
+                    checked={chatStreamingEnabled}
+                    onChange={(e) => setChatStreamingEnabled(e.target.checked)}
                   />
                   <span className="toggle-track" aria-hidden="true">
                     <span className="toggle-thumb"></span>

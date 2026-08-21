@@ -378,7 +378,7 @@ export interface ChunkingConfig {
   /** Chunking strategy (document + code) */
   chunking_strategy?: string; // default: "ast"
   /** Include imports in chunks */
-  preserve_imports?: number; // default: 1
+  preserve_imports?: boolean; // default: True
   /** Target tokens per chunk (token-based strategies) */
   target_tokens?: number; // default: 512
   /** Token overlap between chunks (token-based strategies) */
@@ -563,8 +563,8 @@ export interface DockerConfig {
   docker_container_action_timeout?: number; // default: 30
   /** Default number of log lines to tail from containers */
   docker_logs_tail?: number; // default: 100
-  /** Include timestamps in Docker logs (1=yes, 0=no) */
-  docker_logs_timestamps?: number; // default: 1
+  /** Include timestamps in Docker logs */
+  docker_logs_timestamps?: boolean; // default: True
   /** Port for dev frontend (Vite) */
   dev_frontend_port?: number; // default: 55173
   /** Port for dev backend (Uvicorn) */
@@ -628,7 +628,7 @@ export interface EmbeddingConfig {
   /** Max tokens per embedding chunk */
   embedding_max_tokens?: number; // default: 8000
   /** Enable embedding cache */
-  embedding_cache_enabled?: number; // default: 1
+  embedding_cache_enabled?: boolean; // default: True
   /** Embedding API timeout (seconds) */
   embedding_timeout?: number; // default: 30
   /** Max retries for embedding API */
@@ -662,11 +662,11 @@ export interface EmbeddingRuntimeProviderCapability {
 /** Code enrichment and chunk_summary generation configuration. */
 export interface EnrichmentConfig {
   /** Enable chunk_summary enrichment by default */
-  chunk_summaries_enrich_default?: number; // default: 1
+  chunk_summaries_enrich_default?: boolean; // default: True
   /** Max chunk_summaries to generate */
   chunk_summaries_max?: number; // default: 100
   /** Enable chunk enrichment */
-  enrich_code_chunks?: number; // default: 1
+  enrich_code_chunks?: boolean; // default: True
   /** Min chars for enrichment */
   enrich_min_chars?: number; // default: 50
   /** Max chars for enrichment prompt */
@@ -847,7 +847,7 @@ export interface GenerationConfig {
   /** LiteLLM alias for code enrichment */
   enrich_model?: string; // default: "ragweld-local"
   /** Disable code enrichment */
-  enrich_disabled?: number; // default: 0
+  enrich_disabled?: boolean; // default: False
   /** Optional LiteLLM alias for CLI requests */
   gen_model_cli?: string; // default: ""
   /** HTTP transport generation model override */
@@ -1124,11 +1124,11 @@ export interface IndexingConfig {
   /** Max characters per extracted Parquet cell (best-effort) */
   parquet_extract_max_cell_chars?: number; // default: 20000
   /** Extract only text/string-like columns from Parquet files when possible */
-  parquet_extract_text_columns_only?: number; // default: 1
+  parquet_extract_text_columns_only?: boolean; // default: True
   /** Include column headers when extracting Parquet text */
-  parquet_extract_include_column_names?: number; // default: 1
+  parquet_extract_include_column_names?: boolean; // default: True
   /** Skip dense vector indexing */
-  skip_dense?: number; // default: 0
+  skip_dense?: boolean; // default: False
   /** After a dense indexing run completes, automatically build the per-corpus pgvector HNSW index and warm representative query embeddings so first retrievals are not cold. */
   auto_prepare_dense_retrieval?: boolean; // default: True
   /** Optional local embedding throughput override for index-time estimates (tokens/sec). */
@@ -1182,7 +1182,7 @@ export interface KeywordsConfig {
   /** Score boost for keyword matches */
   keywords_boost?: number; // default: 1.3
   /** Auto-generate keywords */
-  keywords_auto_generate?: number; // default: 1
+  keywords_auto_generate?: boolean; // default: True
   /** Hours between keyword refresh */
   keywords_refresh_hours?: number; // default: 24
 }
@@ -1908,7 +1908,7 @@ export interface RerankingConfig {
   /** Max token length for reranker */
   tribrid_reranker_maxlen?: number; // default: 512
   /** Hot-reload on model change */
-  tribrid_reranker_reload_on_change?: number; // default: 0
+  tribrid_reranker_reload_on_change?: boolean; // default: False
   /** Reload check period (seconds) */
   tribrid_reranker_reload_period_sec?: number; // default: 60
   /** Reranker API timeout (seconds) */
@@ -1940,9 +1940,9 @@ export interface RetrievalConfig {
   /** Minimum confidence threshold */
   conf_any?: number; // default: 0.55
   /** Enable multi-query in eval */
-  eval_multi?: number; // default: 1
+  eval_multi?: boolean; // default: True
   /** Enable synonym expansion */
-  query_expansion_enabled?: number; // default: 1
+  query_expansion_enabled?: boolean; // default: True
   /** Weight for BM25 in hybrid search */
   bm25_weight?: number; // default: 0.3
   /** BM25 term frequency saturation parameter (higher = more weight to term frequency) */
@@ -1952,7 +1952,7 @@ export interface RetrievalConfig {
   /** Weight for vector search */
   vector_weight?: number; // default: 0.7
   /** Enable chunk_summary-based retrieval */
-  chunk_summary_search_enabled?: number; // default: 1
+  chunk_summary_search_enabled?: boolean; // default: True
   /** Max chunks to return per file_path (document-aware result shaping). */
   max_chunks_per_file?: number; // default: 3
   /** Dedup key for final results. */
@@ -1972,7 +1972,7 @@ export interface RetrievalConfig {
   /** Query variants for multi-query */
   multi_query_m?: number; // default: 4
   /** Enable semantic synonym expansion */
-  use_semantic_synonyms?: number; // default: 1
+  use_semantic_synonyms?: boolean; // default: True
   /** Custom path to semantic_synonyms.json (default: data/semantic_synonyms.json) */
   tribrid_synonyms_path?: string; // default: ""
   /** Top-K for dense vector search */
@@ -2166,8 +2166,8 @@ export interface SecretRequirementStatus {
 
 /** Configuration for semantic caching across search/answer/chat endpoints. */
 export interface SemanticCacheConfig {
-  /** Enable semantic cache reads/writes (0=off, 1=on). */
-  enabled?: number; // default: 0
+  /** Enable semantic cache reads/writes. */
+  enabled?: boolean; // default: False
   /** Cache mode when enabled. */
   mode?: "read_write" | "read_only" | "write_only"; // default: "read_write"
   /** Maximum cache rows to retain per scope/endpoint. */
@@ -2189,7 +2189,7 @@ export interface SemanticCacheConfig {
   /** Number of prior conversation turns included in chat cache fingerprint. */
   chat_history_window?: number; // default: 6
   /** Bypass chat generation cache when images are attached. */
-  bypass_if_images?: number; // default: 1
+  bypass_if_images?: boolean; // default: True
   /** Skip generation-cache writes when temperature exceeds this value. */
   max_temperature_for_write?: number; // default: 0.5
 }
@@ -2484,13 +2484,13 @@ export interface TraceRouteSummary {
 /** Observability and tracing configuration. */
 export interface TracingConfig {
   /** Enable distributed tracing */
-  tracing_enabled?: number; // default: 1
+  tracing_enabled?: boolean; // default: True
   /** Trace sampling rate (0.0-1.0) */
   trace_sampling_rate?: number; // default: 1.0
   /** Enable metrics collection */
-  metrics_enabled?: number; // default: 1
+  metrics_enabled?: boolean; // default: True
   /** Include resolved alerts */
-  alert_include_resolved?: number; // default: 1
+  alert_include_resolved?: boolean; // default: True
   /** Alert webhook timeout (seconds) */
   alert_webhook_timeout?: number; // default: 5
   /** Logging level */
@@ -2504,7 +2504,7 @@ export interface TracingConfig {
   /** Alert severities to notify */
   alert_notify_severities?: string; // default: "critical,warning"
   /** Enable OTLP export for traces */
-  otel_export_enabled?: number; // default: 1
+  otel_export_enabled?: boolean; // default: True
   /** OTLP HTTP endpoint for trace export */
   otlp_endpoint?: string; // default: ""
   /** Comma-separated OTLP headers (k=v) for the exporter */
@@ -2512,7 +2512,7 @@ export interface TracingConfig {
   /** Service name used for emitted OTel spans */
   otel_service_name?: string; // default: "ragweld-api"
   /** Enable Langfuse generation observations */
-  langfuse_enabled?: number; // default: 0
+  langfuse_enabled?: boolean; // default: False
   /** Langfuse base URL */
   langfuse_base_url?: string; // default: ""
   /** Langfuse project label for traces and generations */
@@ -2532,7 +2532,7 @@ export interface TracingConfig {
   /** Alertmanager base URL used for wake-up path status checks */
   alertmanager_base_url?: string; // default: ""
   /** Enable online request cost attribution in traces */
-  cost_tracking_enabled?: number; // default: 1
+  cost_tracking_enabled?: boolean; // default: True
 }
 
 /** Reranker training configuration. */
@@ -2554,7 +2554,7 @@ export interface TrainingConfig {
   /** Triplet mining mode */
   tribrid_reranker_mine_mode?: string; // default: "replace"
   /** Reset triplets file before mining */
-  tribrid_reranker_mine_reset?: number; // default: 0
+  tribrid_reranker_mine_reset?: boolean; // default: False
   /** Training triplets file path */
   tribrid_triplets_path?: string; // default: "data/training/triplets.jsonl"
   /** Learning reranker backend: auto (prefer MLX Qwen3 on Apple Silicon), mlx_qwen3 (force). Legacy values 'transformers'/'hf' normalize to 'auto'. */
@@ -2574,7 +2574,7 @@ export interface TrainingConfig {
   /** Gradient accumulation steps per optimizer update for MLX Qwen3 learning reranker training */
   learning_reranker_grad_accum_steps?: number; // default: 8
   /** Promote trained learning artifact to active path only if primary metric improves */
-  learning_reranker_promote_if_improves?: number; // default: 1
+  learning_reranker_promote_if_improves?: boolean; // default: True
   /** Minimum improvement required to auto-promote (primary metric delta) */
   learning_reranker_promote_epsilon?: number; // default: 0.0
   /** Unload MLX learning reranker model after idle seconds (0 = never) */
@@ -2610,7 +2610,7 @@ export interface TrainingConfig {
   /** Emit ragweld agent trainer telemetry every N optimizer steps (plus first/final). */
   ragweld_agent_telemetry_interval_steps?: number; // default: 2
   /** Auto-promote trained ragweld agent adapter only if eval_loss improves. */
-  ragweld_agent_promote_if_improves?: number; // default: 1
+  ragweld_agent_promote_if_improves?: boolean; // default: True
   /** Minimum eval_loss improvement required to auto-promote (baseline_loss - new_loss >= epsilon). */
   ragweld_agent_promote_epsilon?: number; // default: 0.0
   /** Base URL for Flyte Admin HTTP access (used for readiness checks and operator links). */
@@ -2651,19 +2651,19 @@ export interface TrainingControlPlaneComponentStatus {
 /** User interface configuration. */
 export interface UIConfig {
   /** Enable streaming responses */
-  chat_streaming_enabled?: number; // default: 1
+  chat_streaming_enabled?: boolean; // default: True
   /** Max chat history messages */
   chat_history_max?: number; // default: 50
   /** Include reasoning/thinking in streamed responses when supported by model */
-  chat_stream_include_thinking?: number; // default: 1
+  chat_stream_include_thinking?: boolean; // default: True
   /** Show confidence badge on chat answers */
-  chat_show_confidence?: number; // default: 0
+  chat_show_confidence?: boolean; // default: False
   /** Show citations list on chat answers */
-  chat_show_citations?: number; // default: 1
+  chat_show_citations?: boolean; // default: True
   /** Show routing trace panel by default */
-  chat_show_trace?: number; // default: 1
+  chat_show_trace?: boolean; // default: True
   /** Show dev/debug footer under chat answers */
-  chat_show_debug_footer?: number; // default: 1
+  chat_show_debug_footer?: boolean; // default: True
   /** Default model for chat if not specified in request */
   chat_default_model?: string; // default: "ragweld-local"
   /** Streaming response timeout in seconds */
@@ -2681,7 +2681,7 @@ export interface UIConfig {
   /** Grafana authentication mode */
   grafana_auth_mode?: string; // default: "anonymous"
   /** Enable Grafana embedding */
-  grafana_embed_enabled?: number; // default: 1
+  grafana_embed_enabled?: boolean; // default: True
   /** Grafana kiosk mode */
   grafana_kiosk?: string; // default: "tv"
   /** Grafana organization ID */
@@ -2691,27 +2691,27 @@ export interface UIConfig {
   /** Editor bind mode */
   editor_bind?: string; // default: "local"
   /** Enable editor embedding */
-  editor_embed_enabled?: number; // default: 1
+  editor_embed_enabled?: boolean; // default: True
   /** Enable embedded editor */
-  editor_enabled?: number; // default: 1
+  editor_enabled?: boolean; // default: True
   /** Editor Docker image */
   editor_image?: string; // default: "codercom/code-server:latest"
   /** UI theme mode */
   theme_mode?: string; // default: "dark"
   /** Auto-open browser on start */
-  open_browser?: number; // default: 1
+  open_browser?: boolean; // default: True
   /** Runtime environment mode (development uses localhost, production uses deployed URLs) */
   runtime_mode?: "development" | "production"; // default: "development"
   /** Enable Learning Reranker Studio V2 layout and controls */
-  learning_reranker_studio_v2_enabled?: number; // default: 1
+  learning_reranker_studio_v2_enabled?: boolean; // default: True
   /** Use immersive full-height studio mode for Learning Reranker */
-  learning_reranker_studio_immersive?: number; // default: 1
+  learning_reranker_studio_immersive?: boolean; // default: True
   /** Learning Reranker Studio layout engine selection */
   learning_reranker_layout_engine?: "dockview" | "panels"; // default: "dockview"
   /** Default pane layout preset applied when opening Learning Reranker Studio */
   learning_reranker_default_preset?: "balanced" | "focus_viz" | "focus_logs" | "focus_inspector"; // default: "balanced"
-  /** Show setup summary row above studio dock layout (1=show, 0=collapsed) */
-  learning_reranker_show_setup_row?: number; // default: 0
+  /** Show setup summary row above studio dock layout instead of collapsing it */
+  learning_reranker_show_setup_row?: boolean; // default: False
   /** Preferred logs renderer for Learning Reranker Studio */
   learning_reranker_logs_renderer?: "json" | "xterm"; // default: "xterm"
   /** Serialized Dockview layout JSON for Learning Reranker Studio pane persistence */
@@ -2737,9 +2737,9 @@ export interface UIConfig {
   /** Global motion intensity multiplier for Neural Visualizer effects */
   learning_reranker_visualizer_motion_intensity?: number; // default: 1.0
   /** Render animated vector field accents in Neural Visualizer */
-  learning_reranker_visualizer_show_vector_field?: number; // default: 1
+  learning_reranker_visualizer_show_vector_field?: boolean; // default: True
   /** Reduce Neural Visualizer motion for accessibility/performance */
-  learning_reranker_visualizer_reduce_motion?: number; // default: 0
+  learning_reranker_visualizer_reduce_motion?: boolean; // default: False
 }
 
 /** Reference configuration for the self-hosted vLLM serving layer. */
@@ -3536,7 +3536,7 @@ export interface IndexEstimate {
   embedding_provider: string;
   /** Embedding model used for indexing (effective model) */
   embedding_model: string;
-  /** Whether dense embeddings are skipped (indexing.skip_dense=1) */
+  /** Whether dense embeddings are skipped (indexing.skip_dense) */
   skip_dense: boolean;
   /** Estimated embedding cost (USD) when pricing data is available (0 for local/deterministic). */
   embedding_cost_usd?: number | null;

@@ -59,7 +59,7 @@ async def test_get_config_readiness_surfaces_langfuse_secret_blockers(client: As
         assert baseline.status_code == 200
         cfg = baseline.json()
         cfg["tracing"]["tracing_mode"] = "otel_langfuse"
-        cfg["tracing"]["langfuse_enabled"] = 1
+        cfg["tracing"]["langfuse_enabled"] = True
         cfg["tracing"]["langfuse_base_url"] = "http://127.0.0.1:3005"
         cfg["tracing"]["langfuse_project"] = "ragweld"
 

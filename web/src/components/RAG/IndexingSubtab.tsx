@@ -104,7 +104,7 @@ export function IndexingSubtab() {
   const [embeddingDim, setEmbeddingDim] = useConfigField<number>('embedding.embedding_dim', 0);
   const [embeddingBatchSize, setEmbeddingBatchSize] = useConfigField<number>('embedding.embedding_batch_size', 0);
   const [embeddingMaxTokens, setEmbeddingMaxTokens] = useConfigField<number>('embedding.embedding_max_tokens', 0);
-  const [embeddingCacheEnabled, setEmbeddingCacheEnabled] = useConfigField<number>('embedding.embedding_cache_enabled', 1);
+  const [embeddingCacheEnabled, setEmbeddingCacheEnabled] = useConfigField<boolean>('embedding.embedding_cache_enabled', true);
   const [embeddingTimeout, setEmbeddingTimeout] = useConfigField<number>('embedding.embedding_timeout', 0);
   const [embeddingRetryMax, setEmbeddingRetryMax] = useConfigField<number>('embedding.embedding_retry_max', 0);
   const [embeddingBackend, setEmbeddingBackend] =
@@ -144,7 +144,7 @@ export function IndexingSubtab() {
   const [maxIndexableFileSize, setMaxIndexableFileSize] = useConfigField<number>('chunking.max_indexable_file_size', 0);
   const [minChunkChars, setMinChunkChars] = useConfigField<number>('chunking.min_chunk_chars', 0);
   const [greedyFallbackTarget, setGreedyFallbackTarget] = useConfigField<number>('chunking.greedy_fallback_target', 0);
-  const [preserveImports, setPreserveImports] = useConfigField<number>('chunking.preserve_imports', 1);
+  const [preserveImports, setPreserveImports] = useConfigField<boolean>('chunking.preserve_imports', true);
   const [targetTokens, setTargetTokens] = useConfigField<number>('chunking.target_tokens', 512);
   const [overlapTokens, setOverlapTokens] = useConfigField<number>('chunking.overlap_tokens', 64);
   const [separators, setSeparators] = useConfigField<string[]>('chunking.separators', ['\n\n', '\n', '. ', ' ', '']);
@@ -187,16 +187,16 @@ export function IndexingSubtab() {
     'indexing.parquet_extract_max_cell_chars',
     20_000
   );
-  const [parquetExtractTextColumnsOnly, setParquetExtractTextColumnsOnly] = useConfigField<number>(
+  const [parquetExtractTextColumnsOnly, setParquetExtractTextColumnsOnly] = useConfigField<boolean>(
     'indexing.parquet_extract_text_columns_only',
-    1
+    true
   );
-  const [parquetExtractIncludeColumnNames, setParquetExtractIncludeColumnNames] = useConfigField<number>(
+  const [parquetExtractIncludeColumnNames, setParquetExtractIncludeColumnNames] = useConfigField<boolean>(
     'indexing.parquet_extract_include_column_names',
-    1
+    true
   );
 
-  const [skipDense, setSkipDense] = useConfigField<number>('indexing.skip_dense', 0);
+  const [skipDense, setSkipDense] = useConfigField<boolean>('indexing.skip_dense', false);
   const [autoPrepareDenseRetrieval, setAutoPrepareDenseRetrieval] = useConfigField<boolean>(
     'indexing.auto_prepare_dense_retrieval',
     true
@@ -410,7 +410,7 @@ export function IndexingSubtab() {
   );
 
   const tokenizationCompatibility = useMemo(() => {
-    if (skipDense === 1) return { ok: true as const, message: '' };
+    if (skipDense) return { ok: true as const, message: '' };
     if (String(embeddingBackend || '').toLowerCase() !== 'provider') return { ok: true as const, message: '' };
     const provider = normalizedEmbeddingType;
     const strategy = String(tokenizationStrategy || '').trim().toLowerCase();
@@ -435,7 +435,7 @@ export function IndexingSubtab() {
     ) {
       return `Semantic KG alias '${semanticAlias}' is not available from LiteLLM.`;
     }
-    if (skipDense !== 1 && String(embeddingBackend || '').toLowerCase() === 'provider' && !supportedRuntimeProvider) {
+    if (!skipDense && String(embeddingBackend || '').toLowerCase() === 'provider' && !supportedRuntimeProvider) {
       return `Embedding provider '${normalizedEmbeddingType}' is not supported by the current backend runtime.`;
     }
     if (!tokenizationCompatibility.ok) {
@@ -1036,7 +1036,7 @@ export function IndexingSubtab() {
       </details>
 
       {/* Compatibility / mode callouts */}
-      {skipDense === 1 && (
+      {skipDense && (
         <div
           style={{
             background: 'rgba(var(--warn-rgb), 0.1)',
@@ -1156,7 +1156,7 @@ export function IndexingSubtab() {
                 <div style={{ color: 'var(--fg-muted)', fontSize: '12px', marginTop: '4px' }}>{modelsError}</div>
               </div>
             )}
-            {!supportedRuntimeProvider && String(embeddingBackend || '').toLowerCase() === 'provider' && skipDense !== 1 && (
+            {!supportedRuntimeProvider && String(embeddingBackend || '').toLowerCase() === 'provider' && !skipDense && (
               <div
                 style={{
                   padding: '12px',
@@ -1540,8 +1540,8 @@ export function IndexingSubtab() {
                   <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
                     <input
                       type="checkbox"
-                      checked={embeddingCacheEnabled === 1}
-                      onChange={(e) => setEmbeddingCacheEnabled(e.target.checked ? 1 : 0)}
+                      checked={embeddingCacheEnabled}
+                      onChange={(e) => setEmbeddingCacheEnabled(e.target.checked)}
                     />
                     <span style={{ fontSize: '13px', color: 'var(--fg)' }}>Enable embedding cache</span>
                     <TooltipIcon name="EMBEDDING_CACHE_ENABLED" />
@@ -1949,7 +1949,7 @@ export function IndexingSubtab() {
                 </label>
               </div>
               <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
-                <input type="checkbox" checked={preserveImports === 1} onChange={(e) => setPreserveImports(e.target.checked ? 1 : 0)} />
+                <input type="checkbox" checked={preserveImports} onChange={(e) => setPreserveImports(e.target.checked)} />
                 <span style={{ fontSize: '13px', color: 'var(--fg)' }}>Preserve imports in chunks</span>
                 <TooltipIcon name="PRESERVE_IMPORTS" />
               </label>
@@ -2484,7 +2484,7 @@ export function IndexingSubtab() {
                     </div>
                   </div>
                 </label>
-                {skipDense === 1 && storeChunkEmbeddings && (
+                {skipDense && storeChunkEmbeddings && (
                   <div
                     style={{
                       marginTop: '10px',
@@ -2495,7 +2495,7 @@ export function IndexingSubtab() {
                       fontSize: '11px',
                     }}
                   >
-                    skip_dense=1 disables embeddings. Re-index with dense enabled to populate Neo4j vectors.
+                    Skip dense disables embeddings. Re-index with dense enabled to populate Neo4j vectors.
                   </div>
                 )}
               </div>
@@ -2527,13 +2527,13 @@ export function IndexingSubtab() {
                   style={{
                     marginTop: '10px',
                     padding: '8px 12px',
-                    background: skipDense === 1 ? 'rgba(var(--warn-rgb), 0.1)' : 'rgba(var(--accent-rgb), 0.08)',
+                    background: skipDense ? 'rgba(var(--warn-rgb), 0.1)' : 'rgba(var(--accent-rgb), 0.08)',
                     borderRadius: '6px',
-                    color: skipDense === 1 ? 'var(--warn)' : 'var(--fg-muted)',
+                    color: skipDense ? 'var(--warn)' : 'var(--fg-muted)',
                     fontSize: '11px',
                   }}
                 >
-                  {skipDense === 1
+                  {skipDense
                     ? 'Ignored while Skip dense is enabled.'
                     : 'Runs inside the normal index job, so you do not need a separate post-index step.'}
                 </div>
@@ -2620,11 +2620,11 @@ export function IndexingSubtab() {
                   padding: '16px',
                   background: 'var(--bg-elev2)',
                   borderRadius: '8px',
-                  border: skipDense === 1 ? '2px solid var(--warn)' : '1px solid var(--line)',
+                  border: skipDense ? '2px solid var(--warn)' : '1px solid var(--line)',
                 }}
               >
                 <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }}>
-                  <input type="checkbox" checked={skipDense === 1} onChange={(e) => setSkipDense(e.target.checked ? 1 : 0)} style={{ width: '18px', height: '18px' }} />
+                  <input type="checkbox" checked={skipDense} onChange={(e) => setSkipDense(e.target.checked)} style={{ width: '18px', height: '18px' }} />
                   <div>
                     <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--fg)' }}>Skip dense vectors</div>
                     <div style={{ fontSize: '11px', color: 'var(--fg-muted)', marginTop: '2px' }}>
@@ -2633,7 +2633,7 @@ export function IndexingSubtab() {
                   </div>
                   <TooltipIcon name="SKIP_DENSE" />
                 </label>
-                {skipDense === 1 && (
+                {skipDense && (
                   <div style={{ marginTop: '10px', padding: '8px 12px', background: 'rgba(var(--warn-rgb), 0.1)', borderRadius: '6px', color: 'var(--warn)', fontSize: '11px' }}>
                     Vector search will not work until you re-index with dense enabled.
                   </div>
@@ -2704,8 +2704,8 @@ export function IndexingSubtab() {
                   <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
                     <input
                       type="checkbox"
-                      checked={parquetExtractTextColumnsOnly === 1}
-                      onChange={(e) => setParquetExtractTextColumnsOnly(e.target.checked ? 1 : 0)}
+                      checked={parquetExtractTextColumnsOnly}
+                      onChange={(e) => setParquetExtractTextColumnsOnly(e.target.checked)}
                     />
                     <span style={{ fontSize: '12px', color: 'var(--fg)' }}>Text columns only</span>
                     <TooltipIcon name="PARQUET_EXTRACT_TEXT_COLUMNS_ONLY" />
@@ -2713,8 +2713,8 @@ export function IndexingSubtab() {
                   <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
                     <input
                       type="checkbox"
-                      checked={parquetExtractIncludeColumnNames === 1}
-                      onChange={(e) => setParquetExtractIncludeColumnNames(e.target.checked ? 1 : 0)}
+                      checked={parquetExtractIncludeColumnNames}
+                      onChange={(e) => setParquetExtractIncludeColumnNames(e.target.checked)}
                     />
                     <span style={{ fontSize: '12px', color: 'var(--fg)' }}>Include column names</span>
                     <TooltipIcon name="PARQUET_EXTRACT_INCLUDE_COLUMN_NAMES" />

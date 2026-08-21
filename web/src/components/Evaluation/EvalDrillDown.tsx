@@ -314,7 +314,7 @@ export const EvalDrillDown: React.FC<EvalDrillDownProps> = ({ runId, compareWith
     const cfg = { ...(run.config || {}) };
     if (run.use_multi !== undefined) {
       cfg['use_multi'] = run.use_multi;
-      cfg['eval_multi'] = run.use_multi ? 1 : 0;
+      cfg['eval_multi'] = Boolean(run.use_multi);
     }
     if (run.final_k !== undefined) {
       cfg['final_k'] = run.final_k;

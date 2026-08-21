@@ -130,10 +130,25 @@ Largely resolved by the registry-driven Configuration Center: Basic renders
 per-surface curated fields (`exposure_level == basic`) with live integration
 readiness, booleans render as toggles, enums as selects. Residual truth fixes
 this session: the dead `tracing.prometheus_port` field (stale 9090 default,
-consumed by nothing) was deleted from the model, UI, and glossary. Remaining
-follow-up tracked separately: ~40 boolean-semantic config fields are still
-int-typed (0/1) in the model and therefore render as numeric inputs on older
-surfaces; migrating them to real booleans is queued as its own slice.
+consumed by nothing) was deleted from the model, UI, and glossary.
+
+The boolean-typing follow-up has landed in code, with visual retest still
+pending. The 41 boolean-semantic config fields that were still int-typed (0/1)
+were migrated to real `bool` in `server/models/tribrid_config_model.py` and
+`server/models/runtime_gateway.py`. The config registry derives its UI type from
+the Pydantic annotation (`_normalized_field_type` checks `bool` before `int`),
+so those fields now report `boolean`, and the 23 legacy 0/1 `<select>` controls
+on the older RAG/Training/Eval surfaces were replaced with the shared `.toggle`
+checkbox pattern. Stored configs holding 0/1 still load, because Pydantic
+coerces them.
+
+Verified: full repo gates green (`check_docs_ownership`, `check_banned`,
+`validate_types`, `check_runtime_capabilities_catalog`,
+`validate_contract_bundle`, `pytest -q`, `npm run lint`, `npm run build`), plus
+unit tests asserting the declared types, the absence of 0/1 range bounds, and
+0/1-to-bool coercion of stored config. Not yet verified: no surface was rendered
+in a browser, so "booleans render consistently as switches/checkboxes" still
+needs a visual retest before this finding is marked resolved.
 
 ### Evidence
 

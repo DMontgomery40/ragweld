@@ -171,7 +171,7 @@ class IndexEstimate(BaseModel):
     )
     embedding_provider: str = Field(description="Embedding provider used for indexing (embedding.embedding_type)")
     embedding_model: str = Field(description="Embedding model used for indexing (effective model)")
-    skip_dense: bool = Field(description="Whether dense embeddings are skipped (indexing.skip_dense=1)")
+    skip_dense: bool = Field(description="Whether dense embeddings are skipped (indexing.skip_dense)")
     embedding_cost_usd: float | None = Field(
         default=None,
         ge=0.0,
@@ -3757,17 +3757,13 @@ class RetrievalConfig(BaseModel):
         description="Minimum confidence threshold"
     )
 
-    eval_multi: int = Field(
-        default=1,
-        ge=0,
-        le=1,
+    eval_multi: bool = Field(
+        default=True,
         description="Enable multi-query in eval"
     )
 
-    query_expansion_enabled: int = Field(
-        default=1,
-        ge=0,
-        le=1,
+    query_expansion_enabled: bool = Field(
+        default=True,
         description="Enable synonym expansion"
     )
 
@@ -3799,10 +3795,8 @@ class RetrievalConfig(BaseModel):
         description="Weight for vector search"
     )
 
-    chunk_summary_search_enabled: int = Field(
-        default=1,
-        ge=0,
-        le=1,
+    chunk_summary_search_enabled: bool = Field(
+        default=True,
         description="Enable chunk_summary-based retrieval"
     )
 
@@ -3858,10 +3852,8 @@ class RetrievalConfig(BaseModel):
         description="Query variants for multi-query"
     )
 
-    use_semantic_synonyms: int = Field(
-        default=1,
-        ge=0,
-        le=1,
+    use_semantic_synonyms: bool = Field(
+        default=True,
         description="Enable semantic synonym expansion"
     )
 
@@ -3939,11 +3931,9 @@ class RetrievalConfig(BaseModel):
 class SemanticCacheConfig(BaseModel):
     """Configuration for semantic caching across search/answer/chat endpoints."""
 
-    enabled: int = Field(
-        default=0,
-        ge=0,
-        le=1,
-        description="Enable semantic cache reads/writes (0=off, 1=on).",
+    enabled: bool = Field(
+        default=False,
+        description="Enable semantic cache reads/writes.",
     )
     mode: Literal["read_write", "read_only", "write_only"] = Field(
         default="read_write",
@@ -4003,10 +3993,8 @@ class SemanticCacheConfig(BaseModel):
         le=50,
         description="Number of prior conversation turns included in chat cache fingerprint.",
     )
-    bypass_if_images: int = Field(
-        default=1,
-        ge=0,
-        le=1,
+    bypass_if_images: bool = Field(
+        default=True,
         description="Bypass chat generation cache when images are attached.",
     )
     max_temperature_for_write: float = Field(
@@ -4205,10 +4193,8 @@ class EmbeddingConfig(BaseModel):
         le=8192,
         description="Max tokens per embedding chunk"
     )
-    embedding_cache_enabled: int = Field(
-        default=1,
-        ge=0,
-        le=1,
+    embedding_cache_enabled: bool = Field(
+        default=True,
         description="Enable embedding cache"
     )
     embedding_timeout: int = Field(
@@ -4346,10 +4332,8 @@ class ChunkingConfig(BaseModel):
         pattern="^(ast|hybrid|greedy|fixed_chars|fixed_tokens|recursive|markdown|sentence|qa_blocks)$",
         description="Chunking strategy (document + code)"
     )
-    preserve_imports: int = Field(
-        default=1,
-        ge=0,
-        le=1,
+    preserve_imports: bool = Field(
+        default=True,
         description="Include imports in chunks"
     )
     target_tokens: int = Field(
@@ -4485,22 +4469,16 @@ class IndexingConfig(BaseModel):
         le=200_000,
         description="Max characters per extracted Parquet cell (best-effort)",
     )
-    parquet_extract_text_columns_only: int = Field(
-        default=1,
-        ge=0,
-        le=1,
+    parquet_extract_text_columns_only: bool = Field(
+        default=True,
         description="Extract only text/string-like columns from Parquet files when possible",
     )
-    parquet_extract_include_column_names: int = Field(
-        default=1,
-        ge=0,
-        le=1,
+    parquet_extract_include_column_names: bool = Field(
+        default=True,
         description="Include column headers when extracting Parquet text",
     )
-    skip_dense: int = Field(
-        default=0,
-        ge=0,
-        le=1,
+    skip_dense: bool = Field(
+        default=False,
         description="Skip dense vector indexing"
     )
     auto_prepare_dense_retrieval: bool = Field(
@@ -5106,10 +5084,8 @@ class RerankingConfig(BaseModel):
         description="Max token length for reranker"
     )
 
-    tribrid_reranker_reload_on_change: int = Field(
-        default=0,
-        ge=0,
-        le=1,
+    tribrid_reranker_reload_on_change: bool = Field(
+        default=False,
         description="Hot-reload on model change"
     )
 
@@ -5167,10 +5143,8 @@ class RerankingConfig(BaseModel):
 class EnrichmentConfig(BaseModel):
     """Code enrichment and chunk_summary generation configuration."""
 
-    chunk_summaries_enrich_default: int = Field(
-        default=1,
-        ge=0,
-        le=1,
+    chunk_summaries_enrich_default: bool = Field(
+        default=True,
         description="Enable chunk_summary enrichment by default"
     )
 
@@ -5181,10 +5155,8 @@ class EnrichmentConfig(BaseModel):
         description="Max chunk_summaries to generate"
     )
 
-    enrich_code_chunks: int = Field(
-        default=1,
-        ge=0,
-        le=1,
+    enrich_code_chunks: bool = Field(
+        default=True,
         description="Enable chunk enrichment"
     )
 
@@ -5310,10 +5282,8 @@ class KeywordsConfig(BaseModel):
         description="Score boost for keyword matches"
     )
 
-    keywords_auto_generate: int = Field(
-        default=1,
-        ge=0,
-        le=1,
+    keywords_auto_generate: bool = Field(
+        default=True,
         description="Auto-generate keywords"
     )
 
@@ -5328,10 +5298,8 @@ class KeywordsConfig(BaseModel):
 class TracingConfig(BaseModel):
     """Observability and tracing configuration."""
 
-    tracing_enabled: int = Field(
-        default=1,
-        ge=0,
-        le=1,
+    tracing_enabled: bool = Field(
+        default=True,
         description="Enable distributed tracing"
     )
 
@@ -5342,17 +5310,13 @@ class TracingConfig(BaseModel):
         description="Trace sampling rate (0.0-1.0)"
     )
 
-    metrics_enabled: int = Field(
-        default=1,
-        ge=0,
-        le=1,
+    metrics_enabled: bool = Field(
+        default=True,
         description="Enable metrics collection"
     )
 
-    alert_include_resolved: int = Field(
-        default=1,
-        ge=0,
-        le=1,
+    alert_include_resolved: bool = Field(
+        default=True,
         description="Include resolved alerts"
     )
 
@@ -5392,10 +5356,8 @@ class TracingConfig(BaseModel):
         description="Alert severities to notify"
     )
 
-    otel_export_enabled: int = Field(
-        default=1,
-        ge=0,
-        le=1,
+    otel_export_enabled: bool = Field(
+        default=True,
         description="Enable OTLP export for traces"
     )
 
@@ -5414,10 +5376,8 @@ class TracingConfig(BaseModel):
         description="Service name used for emitted OTel spans"
     )
 
-    langfuse_enabled: int = Field(
-        default=0,
-        ge=0,
-        le=1,
+    langfuse_enabled: bool = Field(
+        default=False,
         description="Enable Langfuse generation observations"
     )
 
@@ -5466,10 +5426,8 @@ class TracingConfig(BaseModel):
         description="Alertmanager base URL used for wake-up path status checks"
     )
 
-    cost_tracking_enabled: int = Field(
-        default=1,
-        ge=0,
-        le=1,
+    cost_tracking_enabled: bool = Field(
+        default=True,
         description="Enable online request cost attribution in traces"
     )
 
@@ -5542,10 +5500,8 @@ class TrainingConfig(BaseModel):
         description="Triplet mining mode"
     )
 
-    tribrid_reranker_mine_reset: int = Field(
-        default=0,
-        ge=0,
-        le=1,
+    tribrid_reranker_mine_reset: bool = Field(
+        default=False,
         description="Reset triplets file before mining"
     )
 
@@ -5621,10 +5577,8 @@ class TrainingConfig(BaseModel):
         description="Gradient accumulation steps per optimizer update for MLX Qwen3 learning reranker training",
     )
 
-    learning_reranker_promote_if_improves: int = Field(
-        default=1,
-        ge=0,
-        le=1,
+    learning_reranker_promote_if_improves: bool = Field(
+        default=True,
         description="Promote trained learning artifact to active path only if primary metric improves",
     )
 
@@ -5738,10 +5692,8 @@ class TrainingConfig(BaseModel):
         description="Emit ragweld agent trainer telemetry every N optimizer steps (plus first/final).",
     )
 
-    ragweld_agent_promote_if_improves: int = Field(
-        default=1,
-        ge=0,
-        le=1,
+    ragweld_agent_promote_if_improves: bool = Field(
+        default=True,
         description="Auto-promote trained ragweld agent adapter only if eval_loss improves.",
     )
 
@@ -5796,10 +5748,8 @@ class TrainingConfig(BaseModel):
 class UIConfig(BaseModel):
     """User interface configuration."""
 
-    chat_streaming_enabled: int = Field(
-        default=1,
-        ge=0,
-        le=1,
+    chat_streaming_enabled: bool = Field(
+        default=True,
         description="Enable streaming responses"
     )
 
@@ -5810,38 +5760,28 @@ class UIConfig(BaseModel):
         description="Max chat history messages"
     )
 
-    chat_stream_include_thinking: int = Field(
-        default=1,
-        ge=0,
-        le=1,
+    chat_stream_include_thinking: bool = Field(
+        default=True,
         description="Include reasoning/thinking in streamed responses when supported by model"
     )
 
-    chat_show_confidence: int = Field(
-        default=0,
-        ge=0,
-        le=1,
+    chat_show_confidence: bool = Field(
+        default=False,
         description="Show confidence badge on chat answers"
     )
 
-    chat_show_citations: int = Field(
-        default=1,
-        ge=0,
-        le=1,
+    chat_show_citations: bool = Field(
+        default=True,
         description="Show citations list on chat answers"
     )
 
-    chat_show_trace: int = Field(
-        default=1,
-        ge=0,
-        le=1,
+    chat_show_trace: bool = Field(
+        default=True,
         description="Show routing trace panel by default"
     )
 
-    chat_show_debug_footer: int = Field(
-        default=1,
-        ge=0,
-        le=1,
+    chat_show_debug_footer: bool = Field(
+        default=True,
         description="Show dev/debug footer under chat answers"
     )
 
@@ -5891,10 +5831,8 @@ class UIConfig(BaseModel):
         description="Grafana authentication mode"
     )
 
-    grafana_embed_enabled: int = Field(
-        default=1,
-        ge=0,
-        le=1,
+    grafana_embed_enabled: bool = Field(
+        default=True,
         description="Enable Grafana embedding"
     )
 
@@ -5918,17 +5856,13 @@ class UIConfig(BaseModel):
         description="Editor bind mode"
     )
 
-    editor_embed_enabled: int = Field(
-        default=1,
-        ge=0,
-        le=1,
+    editor_embed_enabled: bool = Field(
+        default=True,
         description="Enable editor embedding"
     )
 
-    editor_enabled: int = Field(
-        default=1,
-        ge=0,
-        le=1,
+    editor_enabled: bool = Field(
+        default=True,
         description="Enable embedded editor"
     )
 
@@ -5943,10 +5877,8 @@ class UIConfig(BaseModel):
         description="UI theme mode"
     )
 
-    open_browser: int = Field(
-        default=1,
-        ge=0,
-        le=1,
+    open_browser: bool = Field(
+        default=True,
         description="Auto-open browser on start"
     )
 
@@ -5955,17 +5887,13 @@ class UIConfig(BaseModel):
         description="Runtime environment mode (development uses localhost, production uses deployed URLs)"
     )
 
-    learning_reranker_studio_v2_enabled: int = Field(
-        default=1,
-        ge=0,
-        le=1,
+    learning_reranker_studio_v2_enabled: bool = Field(
+        default=True,
         description="Enable Learning Reranker Studio V2 layout and controls",
     )
 
-    learning_reranker_studio_immersive: int = Field(
-        default=1,
-        ge=0,
-        le=1,
+    learning_reranker_studio_immersive: bool = Field(
+        default=True,
         description="Use immersive full-height studio mode for Learning Reranker",
     )
 
@@ -5979,11 +5907,9 @@ class UIConfig(BaseModel):
         description="Default pane layout preset applied when opening Learning Reranker Studio",
     )
 
-    learning_reranker_show_setup_row: int = Field(
-        default=0,
-        ge=0,
-        le=1,
-        description="Show setup summary row above studio dock layout (1=show, 0=collapsed)",
+    learning_reranker_show_setup_row: bool = Field(
+        default=False,
+        description="Show setup summary row above studio dock layout instead of collapsing it",
     )
 
     learning_reranker_logs_renderer: Literal["json", "xterm"] = Field(
@@ -6060,17 +5986,13 @@ class UIConfig(BaseModel):
         description="Global motion intensity multiplier for Neural Visualizer effects",
     )
 
-    learning_reranker_visualizer_show_vector_field: int = Field(
-        default=1,
-        ge=0,
-        le=1,
+    learning_reranker_visualizer_show_vector_field: bool = Field(
+        default=True,
         description="Render animated vector field accents in Neural Visualizer",
     )
 
-    learning_reranker_visualizer_reduce_motion: int = Field(
-        default=0,
-        ge=0,
-        le=1,
+    learning_reranker_visualizer_reduce_motion: bool = Field(
+        default=False,
         description="Reduce Neural Visualizer motion for accessibility/performance",
     )
 
@@ -6414,11 +6336,9 @@ class DockerConfig(BaseModel):
         description="Default number of log lines to tail from containers"
     )
 
-    docker_logs_timestamps: int = Field(
-        default=1,
-        ge=0,
-        le=1,
-        description="Include timestamps in Docker logs (1=yes, 0=no)"
+    docker_logs_timestamps: bool = Field(
+        default=True,
+        description="Include timestamps in Docker logs"
     )
 
     dev_frontend_port: int = Field(
@@ -7088,15 +7008,15 @@ class TriBridConfig(BaseModel):
                 conf_top1=data.get('CONF_TOP1', 0.62),
                 conf_avg5=data.get('CONF_AVG5', 0.55),
                 conf_any=data.get('CONF_ANY', 0.55),
-                eval_multi=data.get('EVAL_MULTI', 1),
-                query_expansion_enabled=data.get('QUERY_EXPANSION_ENABLED', 1),
+                eval_multi=data.get('EVAL_MULTI', True),
+                query_expansion_enabled=data.get('QUERY_EXPANSION_ENABLED', True),
                 bm25_weight=data.get('BM25_WEIGHT', 0.3),
                 bm25_k1=data.get('BM25_K1', 1.2),
                 bm25_b=data.get('BM25_B', 0.4),
                 vector_weight=data.get('VECTOR_WEIGHT', 0.7),
-                chunk_summary_search_enabled=data.get('CHUNK_SUMMARY_SEARCH_ENABLED', 1),
+                chunk_summary_search_enabled=data.get('CHUNK_SUMMARY_SEARCH_ENABLED', True),
                 multi_query_m=data.get('MULTI_QUERY_M', 4),
-                use_semantic_synonyms=data.get('USE_SEMANTIC_SYNONYMS', 1),
+                use_semantic_synonyms=data.get('USE_SEMANTIC_SYNONYMS', True),
                 tribrid_synonyms_path=data.get('TRIBRID_SYNONYMS_PATH', ''),
                 topk_dense=data.get('TOPK_DENSE', 75),
                 topk_sparse=data.get('TOPK_SPARSE', 75),
@@ -7105,7 +7025,7 @@ class TriBridConfig(BaseModel):
                 # REMOVED: disable_rerank - use RERANKER_MODE='none' instead
             ),
             semantic_cache=SemanticCacheConfig(
-                enabled=data.get('SEMANTIC_CACHE_ENABLED', 0),
+                enabled=data.get('SEMANTIC_CACHE_ENABLED', False),
                 mode=data.get('SEMANTIC_CACHE_MODE', 'read_write'),
                 max_entries=data.get('SEMANTIC_CACHE_MAX_ENTRIES', 5000),
                 min_query_chars=data.get('SEMANTIC_CACHE_MIN_QUERY_CHARS', 3),
@@ -7116,7 +7036,7 @@ class TriBridConfig(BaseModel):
                 ttl_seconds_answer=data.get('SEMANTIC_CACHE_TTL_ANSWER_SEC', 1800),
                 ttl_seconds_chat=data.get('SEMANTIC_CACHE_TTL_CHAT_SEC', 600),
                 chat_history_window=data.get('SEMANTIC_CACHE_CHAT_HISTORY_WINDOW', 6),
-                bypass_if_images=data.get('SEMANTIC_CACHE_BYPASS_IF_IMAGES', 1),
+                bypass_if_images=data.get('SEMANTIC_CACHE_BYPASS_IF_IMAGES', True),
                 max_temperature_for_write=data.get('SEMANTIC_CACHE_MAX_TEMPERATURE_FOR_WRITE', 0.5),
             ),
             scoring=ScoringConfig(
@@ -7143,7 +7063,7 @@ class TriBridConfig(BaseModel):
                 embedding_model_mlx=data.get('EMBEDDING_MODEL_MLX', 'mlx-community/all-MiniLM-L6-v2-4bit'),
                 embedding_batch_size=data.get('EMBEDDING_BATCH_SIZE', 64),
                 embedding_max_tokens=data.get('EMBEDDING_MAX_TOKENS', 8000),
-                embedding_cache_enabled=data.get('EMBEDDING_CACHE_ENABLED', 1),
+                embedding_cache_enabled=data.get('EMBEDDING_CACHE_ENABLED', True),
                 embedding_timeout=data.get('EMBEDDING_TIMEOUT', 30),
                 embedding_retry_max=data.get('EMBEDDING_RETRY_MAX', 3),
             ),
@@ -7156,7 +7076,7 @@ class TriBridConfig(BaseModel):
                 min_chunk_chars=data.get('MIN_CHUNK_CHARS', 50),
                 greedy_fallback_target=data.get('GREEDY_FALLBACK_TARGET', 800),
                 chunking_strategy=data.get('CHUNKING_STRATEGY', 'ast'),
-                preserve_imports=data.get('PRESERVE_IMPORTS', 1),
+                preserve_imports=data.get('PRESERVE_IMPORTS', True),
             ),
             indexing=IndexingConfig(
                 postgres_url=data.get('POSTGRES_URL', 'postgresql://postgres:postgres@localhost:5432/tribrid_rag'),
@@ -7169,9 +7089,9 @@ class TriBridConfig(BaseModel):
                 parquet_extract_max_rows=data.get('PARQUET_EXTRACT_MAX_ROWS', 5000),
                 parquet_extract_max_chars=data.get('PARQUET_EXTRACT_MAX_CHARS', 2_000_000),
                 parquet_extract_max_cell_chars=data.get('PARQUET_EXTRACT_MAX_CELL_CHARS', 20_000),
-                parquet_extract_text_columns_only=data.get('PARQUET_EXTRACT_TEXT_COLUMNS_ONLY', 1),
-                parquet_extract_include_column_names=data.get('PARQUET_EXTRACT_INCLUDE_COLUMN_NAMES', 1),
-                skip_dense=data.get('SKIP_DENSE', 0),
+                parquet_extract_text_columns_only=data.get('PARQUET_EXTRACT_TEXT_COLUMNS_ONLY', True),
+                parquet_extract_include_column_names=data.get('PARQUET_EXTRACT_INCLUDE_COLUMN_NAMES', True),
+                skip_dense=data.get('SKIP_DENSE', False),
                 auto_prepare_dense_retrieval=data.get('AUTO_PREPARE_DENSE_RETRIEVAL', True),
                 estimated_tokens_per_second_local=data.get('ESTIMATED_TOKENS_PER_SECOND_LOCAL', None),
             ),
@@ -7205,7 +7125,7 @@ class TriBridConfig(BaseModel):
                 reranker_cloud_top_n=data.get('RERANKER_CLOUD_TOP_N', 50),
                 tribrid_reranker_batch=data.get('TRIBRID_RERANKER_BATCH', 16),
                 tribrid_reranker_maxlen=data.get('TRIBRID_RERANKER_MAXLEN', 512),
-                tribrid_reranker_reload_on_change=data.get('TRIBRID_RERANKER_RELOAD_ON_CHANGE', 0),
+                tribrid_reranker_reload_on_change=data.get('TRIBRID_RERANKER_RELOAD_ON_CHANGE', False),
                 tribrid_reranker_reload_period_sec=data.get('TRIBRID_RERANKER_RELOAD_PERIOD_SEC', 60),
                 reranker_timeout=data.get('RERANKER_TIMEOUT', 10),
                 rerank_input_snippet_chars=data.get('RERANK_INPUT_SNIPPET_CHARS', 700),
@@ -7217,15 +7137,15 @@ class TriBridConfig(BaseModel):
                 gen_top_p=data.get('GEN_TOP_P', 1.0),
                 gen_timeout=data.get('GEN_TIMEOUT', 60),
                 enrich_model=data.get('ENRICH_MODEL', 'ragweld-local'),
-                enrich_disabled=data.get('ENRICH_DISABLED', 0),
+                enrich_disabled=data.get('ENRICH_DISABLED', False),
                 gen_model_cli=data.get('GEN_MODEL_CLI', ''),
                 gen_model_http=data.get('GEN_MODEL_HTTP', ''),
                 gen_model_mcp=data.get('GEN_MODEL_MCP', ''),
             ),
             enrichment=EnrichmentConfig(
-                chunk_summaries_enrich_default=data.get('CHUNK_SUMMARIES_ENRICH_DEFAULT', 1),
+                chunk_summaries_enrich_default=data.get('CHUNK_SUMMARIES_ENRICH_DEFAULT', True),
                 chunk_summaries_max=data.get('CHUNK_SUMMARIES_MAX', 100),
-                enrich_code_chunks=data.get('ENRICH_CODE_CHUNKS', 1),
+                enrich_code_chunks=data.get('ENRICH_CODE_CHUNKS', True),
                 enrich_min_chars=data.get('ENRICH_MIN_CHARS', 50),
                 enrich_max_chars=data.get('ENRICH_MAX_CHARS', 1000),
                 enrich_timeout=data.get('ENRICH_TIMEOUT', 30),
@@ -7244,25 +7164,25 @@ class TriBridConfig(BaseModel):
                 keywords_max_per_repo=data.get('KEYWORDS_MAX_PER_REPO', 50),
                 keywords_min_freq=data.get('KEYWORDS_MIN_FREQ', 3),
                 keywords_boost=data.get('KEYWORDS_BOOST', 1.3),
-                keywords_auto_generate=data.get('KEYWORDS_AUTO_GENERATE', 1),
+                keywords_auto_generate=data.get('KEYWORDS_AUTO_GENERATE', True),
                 keywords_refresh_hours=data.get('KEYWORDS_REFRESH_HOURS', 24),
             ),
             tracing=TracingConfig(
-                tracing_enabled=data.get('TRACING_ENABLED', 1),
+                tracing_enabled=data.get('TRACING_ENABLED', True),
                 trace_sampling_rate=data.get('TRACE_SAMPLING_RATE', 1.0),
-                metrics_enabled=data.get('METRICS_ENABLED', 1),
-                alert_include_resolved=data.get('ALERT_INCLUDE_RESOLVED', 1),
+                metrics_enabled=data.get('METRICS_ENABLED', True),
+                alert_include_resolved=data.get('ALERT_INCLUDE_RESOLVED', True),
                 alert_webhook_timeout=data.get('ALERT_WEBHOOK_TIMEOUT', 5),
                 log_level=data.get('LOG_LEVEL', 'INFO'),
                 tracing_mode=data.get('TRACING_MODE', 'local'),
                 trace_retention=data.get('TRACE_RETENTION', 50),
                 tribrid_log_path=data.get('TRIBRID_LOG_PATH', 'data/logs/queries.jsonl'),
                 alert_notify_severities=data.get('ALERT_NOTIFY_SEVERITIES', 'critical,warning'),
-                otel_export_enabled=data.get('OTEL_EXPORT_ENABLED', 1),
+                otel_export_enabled=data.get('OTEL_EXPORT_ENABLED', True),
                 otlp_endpoint=data.get('OTLP_ENDPOINT', ''),
                 otlp_headers=data.get('OTLP_HEADERS', ''),
                 otel_service_name=data.get('OTEL_SERVICE_NAME', 'ragweld-api'),
-                langfuse_enabled=data.get('LANGFUSE_ENABLED', 0),
+                langfuse_enabled=data.get('LANGFUSE_ENABLED', False),
                 langfuse_base_url=data.get('LANGFUSE_BASE_URL', ''),
                 langfuse_project=data.get('LANGFUSE_PROJECT', 'ragweld'),
                 tempo_base_url=data.get('TEMPO_BASE_URL', ''),
@@ -7272,7 +7192,7 @@ class TriBridConfig(BaseModel):
                 faro_base_url=data.get('FARO_BASE_URL', ''),
                 opencost_base_url=data.get('OPENCOST_BASE_URL', ''),
                 alertmanager_base_url=data.get('ALERTMANAGER_BASE_URL', ''),
-                cost_tracking_enabled=data.get('COST_TRACKING_ENABLED', 1),
+                cost_tracking_enabled=data.get('COST_TRACKING_ENABLED', True),
             ),
             training=TrainingConfig(
                 reranker_train_epochs=data.get('RERANKER_TRAIN_EPOCHS', 2),
@@ -7283,7 +7203,7 @@ class TriBridConfig(BaseModel):
                 triplets_mine_mode=data.get('TRIPLETS_MINE_MODE', 'replace'),
                 tribrid_reranker_model_path=data.get('TRIBRID_RERANKER_MODEL_PATH', 'models/learning-reranker-active'),
                 tribrid_reranker_mine_mode=data.get('TRIBRID_RERANKER_MINE_MODE', 'replace'),
-                tribrid_reranker_mine_reset=data.get('TRIBRID_RERANKER_MINE_RESET', 0),
+                tribrid_reranker_mine_reset=data.get('TRIBRID_RERANKER_MINE_RESET', False),
                 tribrid_triplets_path=data.get('TRIBRID_TRIPLETS_PATH', 'data/training/triplets.jsonl'),
                 learning_reranker_backend=data.get('LEARNING_RERANKER_BACKEND', 'auto'),
                 learning_reranker_base_model=data.get('LEARNING_RERANKER_BASE_MODEL', 'Qwen/Qwen3-Reranker-0.6B'),
@@ -7296,7 +7216,7 @@ class TriBridConfig(BaseModel):
                 ),
                 learning_reranker_negative_ratio=data.get('LEARNING_RERANKER_NEGATIVE_RATIO', 5),
                 learning_reranker_grad_accum_steps=data.get('LEARNING_RERANKER_GRAD_ACCUM_STEPS', 8),
-                learning_reranker_promote_if_improves=data.get('LEARNING_RERANKER_PROMOTE_IF_IMPROVES', 1),
+                learning_reranker_promote_if_improves=data.get('LEARNING_RERANKER_PROMOTE_IF_IMPROVES', True),
                 learning_reranker_promote_epsilon=data.get('LEARNING_RERANKER_PROMOTE_EPSILON', 0.0),
                 learning_reranker_unload_after_sec=data.get('LEARNING_RERANKER_UNLOAD_AFTER_SEC', 0),
                 learning_reranker_telemetry_interval_steps=data.get('LEARNING_RERANKER_TELEMETRY_INTERVAL_STEPS', 2),
@@ -7317,7 +7237,7 @@ class TriBridConfig(BaseModel):
                 ),
                 ragweld_agent_grad_accum_steps=data.get('RAGWELD_AGENT_GRAD_ACCUM_STEPS', 8),
                 ragweld_agent_telemetry_interval_steps=data.get('RAGWELD_AGENT_TELEMETRY_INTERVAL_STEPS', 2),
-                ragweld_agent_promote_if_improves=data.get('RAGWELD_AGENT_PROMOTE_IF_IMPROVES', 1),
+                ragweld_agent_promote_if_improves=data.get('RAGWELD_AGENT_PROMOTE_IF_IMPROVES', True),
                 ragweld_agent_promote_epsilon=data.get('RAGWELD_AGENT_PROMOTE_EPSILON', 0.0),
                 ragweld_agent_flyte_admin_base_url=data.get('RAGWELD_AGENT_FLYTE_ADMIN_BASE_URL', ''),
                 ragweld_agent_flyte_console_base_url=data.get('RAGWELD_AGENT_FLYTE_CONSOLE_BASE_URL', ''),
@@ -7329,13 +7249,13 @@ class TriBridConfig(BaseModel):
                 ragweld_agent_unsloth_image=data.get('RAGWELD_AGENT_UNSLOTH_IMAGE', ''),
             ),
             ui=UIConfig(
-                chat_streaming_enabled=data.get('CHAT_STREAMING_ENABLED', 1),
+                chat_streaming_enabled=data.get('CHAT_STREAMING_ENABLED', True),
                 chat_history_max=data.get('CHAT_HISTORY_MAX', 50),
-                chat_stream_include_thinking=data.get('CHAT_STREAM_INCLUDE_THINKING', 1),
-                chat_show_confidence=data.get('CHAT_SHOW_CONFIDENCE', 0),
-                chat_show_citations=data.get('CHAT_SHOW_CITATIONS', 1),
-                chat_show_trace=data.get('CHAT_SHOW_TRACE', 1),
-                chat_show_debug_footer=data.get('CHAT_SHOW_DEBUG_FOOTER', 1),
+                chat_stream_include_thinking=data.get('CHAT_STREAM_INCLUDE_THINKING', True),
+                chat_show_confidence=data.get('CHAT_SHOW_CONFIDENCE', False),
+                chat_show_citations=data.get('CHAT_SHOW_CITATIONS', True),
+                chat_show_trace=data.get('CHAT_SHOW_TRACE', True),
+                chat_show_debug_footer=data.get('CHAT_SHOW_DEBUG_FOOTER', True),
                 chat_default_model=data.get('CHAT_DEFAULT_MODEL', 'ragweld-local'),
                 chat_stream_timeout=data.get('CHAT_STREAM_TIMEOUT', 120),
                 chat_thinking_budget_tokens=data.get('CHAT_THINKING_BUDGET_TOKENS', 10000),
@@ -7344,22 +7264,22 @@ class TriBridConfig(BaseModel):
                 grafana_dashboard_slug=data.get('GRAFANA_DASHBOARD_SLUG', 'on-call-overview'),
                 grafana_base_url=data.get('GRAFANA_BASE_URL', 'http://127.0.0.1:3301'),
                 grafana_auth_mode=data.get('GRAFANA_AUTH_MODE', 'anonymous'),
-                grafana_embed_enabled=data.get('GRAFANA_EMBED_ENABLED', 1),
+                grafana_embed_enabled=data.get('GRAFANA_EMBED_ENABLED', True),
                 grafana_kiosk=data.get('GRAFANA_KIOSK', 'tv'),
                 grafana_org_id=data.get('GRAFANA_ORG_ID', 1),
                 grafana_refresh=data.get('GRAFANA_REFRESH', '10s'),
                 editor_bind=data.get('EDITOR_BIND', 'local'),
-                editor_embed_enabled=data.get('EDITOR_EMBED_ENABLED', 1),
-                editor_enabled=data.get('EDITOR_ENABLED', 1),
+                editor_embed_enabled=data.get('EDITOR_EMBED_ENABLED', True),
+                editor_enabled=data.get('EDITOR_ENABLED', True),
                 editor_image=data.get('EDITOR_IMAGE', 'codercom/code-server:latest'),
                 theme_mode=data.get('THEME_MODE', 'dark'),
-                open_browser=data.get('OPEN_BROWSER', 1),
+                open_browser=data.get('OPEN_BROWSER', True),
                 runtime_mode=data.get('RUNTIME_MODE', 'development'),
-                learning_reranker_studio_v2_enabled=data.get('LEARNING_RERANKER_STUDIO_V2_ENABLED', 1),
-                learning_reranker_studio_immersive=data.get('LEARNING_RERANKER_STUDIO_IMMERSIVE', 1),
+                learning_reranker_studio_v2_enabled=data.get('LEARNING_RERANKER_STUDIO_V2_ENABLED', True),
+                learning_reranker_studio_immersive=data.get('LEARNING_RERANKER_STUDIO_IMMERSIVE', True),
                 learning_reranker_layout_engine=data.get('LEARNING_RERANKER_LAYOUT_ENGINE', 'dockview'),
                 learning_reranker_default_preset=data.get('LEARNING_RERANKER_DEFAULT_PRESET', 'balanced'),
-                learning_reranker_show_setup_row=data.get('LEARNING_RERANKER_SHOW_SETUP_ROW', 0),
+                learning_reranker_show_setup_row=data.get('LEARNING_RERANKER_SHOW_SETUP_ROW', False),
                 learning_reranker_logs_renderer=data.get('LEARNING_RERANKER_LOGS_RENDERER', 'xterm'),
                 learning_reranker_dockview_layout_json=data.get('LEARNING_RERANKER_DOCKVIEW_LAYOUT_JSON', ''),
                 learning_reranker_studio_left_panel_pct=data.get('LEARNING_RERANKER_STUDIO_LEFT_PANEL_PCT', 20),
@@ -7375,10 +7295,10 @@ class TriBridConfig(BaseModel):
                     'LEARNING_RERANKER_VISUALIZER_MOTION_INTENSITY', 1.0
                 ),
                 learning_reranker_visualizer_show_vector_field=data.get(
-                    'LEARNING_RERANKER_VISUALIZER_SHOW_VECTOR_FIELD', 1
+                    'LEARNING_RERANKER_VISUALIZER_SHOW_VECTOR_FIELD', True
                 ),
                 learning_reranker_visualizer_reduce_motion=data.get(
-                    'LEARNING_RERANKER_VISUALIZER_REDUCE_MOTION', 0
+                    'LEARNING_RERANKER_VISUALIZER_REDUCE_MOTION', False
                 ),
             ),
             hydration=HydrationConfig(
@@ -7422,7 +7342,7 @@ class TriBridConfig(BaseModel):
                 docker_container_list_timeout=data.get('DOCKER_CONTAINER_LIST_TIMEOUT', 10),
                 docker_container_action_timeout=data.get('DOCKER_CONTAINER_ACTION_TIMEOUT', 30),
                 docker_logs_tail=data.get('DOCKER_LOGS_TAIL', 100),
-                docker_logs_timestamps=data.get('DOCKER_LOGS_TIMESTAMPS', 1),
+                docker_logs_timestamps=data.get('DOCKER_LOGS_TIMESTAMPS', True),
                 dev_frontend_port=data.get('DEV_FRONTEND_PORT', 55173),
                 dev_backend_port=data.get('DEV_BACKEND_PORT', 58012),
             ),

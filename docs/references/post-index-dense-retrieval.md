@@ -25,4 +25,4 @@ Why it exists:
 UI contract:
 
 - The Indexing tab exposes this as `Auto-prepare dense retrieval`.
-- If `indexing.skip_dense=1`, the toggle is effectively ignored and the UI says so.
+- If `indexing.skip_dense` is enabled, the toggle is effectively ignored and the UI says so.

@@ -800,7 +800,7 @@ async def _prepare_dense_retrieval_after_indexing(
 ) -> dict[str, Any]:
     if not bool(getattr(cfg.indexing, "auto_prepare_dense_retrieval", True)):
         return {"status": "disabled"}
-    if bool(int(getattr(cfg.indexing, "skip_dense", 0) or 0) == 1):
+    if getattr(cfg.indexing, "skip_dense", False):
         return {"status": "skip_dense"}
     if int(getattr(stats, "embedding_dimensions", 0) or 0) <= 0:
         return {"status": "no_dense_vectors"}
@@ -1005,7 +1005,7 @@ async def _run_index(
         int(cfg.chunking.max_indexable_file_size),
         int(cfg.indexing.index_max_file_size_mb) * 1024 * 1024,
     )
-    skip_dense = bool(int(cfg.indexing.skip_dense or 0) == 1)
+    skip_dense = cfg.indexing.skip_dense
     embedder = None if skip_dense else Embedder(cfg.embedding, cfg.tokenization)
     postgres = PostgresClient(cfg.indexing.postgres_url)
     await postgres.connect()
@@ -1475,12 +1475,8 @@ async def _run_index_body(
                         parquet_max_cell_chars=int(
                             getattr(cfg.indexing, "parquet_extract_max_cell_chars", 20_000) or 20_000
                         ),
-                        parquet_text_columns_only=bool(
-                            int(getattr(cfg.indexing, "parquet_extract_text_columns_only", 1) or 0) == 1
-                        ),
-                        parquet_include_column_names=bool(
-                            int(getattr(cfg.indexing, "parquet_extract_include_column_names", 1) or 0) == 1
-                        ),
+                        parquet_text_columns_only=bool(getattr(cfg.indexing, "parquet_extract_text_columns_only", True)),
+                        parquet_include_column_names=bool(getattr(cfg.indexing, "parquet_extract_include_column_names", True)),
                     )
                     if content is None:
                         content = abs_path.read_text(encoding="utf-8", errors="ignore")
@@ -2037,7 +2033,7 @@ async def estimate_index(request: IndexRequest) -> IndexEstimate:
         overlap_tokens=int(getattr(cfg.chunking, "overlap_tokens", 64) or 64),
     )
 
-    skip_dense = bool(int(getattr(cfg.indexing, "skip_dense", 0) or 0) == 1)
+    skip_dense = bool(getattr(cfg.indexing, "skip_dense", False))
     embedding_backend = str(getattr(cfg.embedding, "embedding_backend", "deterministic") or "deterministic").strip()
     embedding_provider = str(getattr(cfg.embedding, "embedding_type", "") or "").strip()
     embedding_model = str(getattr(cfg.embedding, "effective_model", "") or "").strip()
@@ -2364,7 +2360,7 @@ async def get_dashboard_index_status(scope: CorpusScope = _CORPUS_SCOPE_DEP) -> 
     embedding_model = cfg.embedding.effective_model
     embedding_provider = cfg.embedding.embedding_type
     embedding_dim = int(cfg.embedding.embedding_dim)
-    skip_dense = bool(int(getattr(cfg.indexing, "skip_dense", 0) or 0) == 1)
+    skip_dense = bool(getattr(cfg.indexing, "skip_dense", False))
     embedding_backend = str(getattr(cfg.embedding, "embedding_backend", "deterministic") or "deterministic").strip()
     total_tokens = 0
     total_chunks = 0

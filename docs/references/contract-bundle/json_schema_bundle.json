@@ -1,5 +1,5 @@
 {
-  "model_count": 255,
+  "model_count": 257,
   "module": "server.models.tribrid_config_model",
   "root_models": {
     "ActiveSources": {
@@ -7242,12 +7242,10 @@
           "type": "integer"
         },
         "preserve_imports": {
-          "default": 1,
+          "default": true,
           "description": "Include imports in chunks",
-          "maximum": 1,
-          "minimum": 0,
           "title": "Preserve Imports",
-          "type": "integer"
+          "type": "boolean"
         },
         "recursive_max_depth": {
           "default": 10,
@@ -9884,12 +9882,10 @@
           "type": "integer"
         },
         "docker_logs_timestamps": {
-          "default": 1,
-          "description": "Include timestamps in Docker logs (1=yes, 0=no)",
-          "maximum": 1,
-          "minimum": 0,
+          "default": true,
+          "description": "Include timestamps in Docker logs",
           "title": "Docker Logs Timestamps",
-          "type": "integer"
+          "type": "boolean"
         },
         "docker_status_timeout": {
           "default": 5,
@@ -10190,12 +10186,10 @@
           "type": "integer"
         },
         "embedding_cache_enabled": {
-          "default": 1,
+          "default": true,
           "description": "Enable embedding cache",
-          "maximum": 1,
-          "minimum": 0,
           "title": "Embedding Cache Enabled",
-          "type": "integer"
+          "type": "boolean"
         },
         "embedding_dim": {
           "default": 3072,
@@ -10440,12 +10434,10 @@
       "description": "Code enrichment and chunk_summary generation configuration.",
       "properties": {
         "chunk_summaries_enrich_default": {
-          "default": 1,
+          "default": true,
           "description": "Enable chunk_summary enrichment by default",
-          "maximum": 1,
-          "minimum": 0,
           "title": "Chunk Summaries Enrich Default",
-          "type": "integer"
+          "type": "boolean"
         },
         "chunk_summaries_max": {
           "default": 100,
@@ -10456,12 +10448,10 @@
           "type": "integer"
         },
         "enrich_code_chunks": {
-          "default": 1,
+          "default": true,
           "description": "Enable chunk enrichment",
-          "maximum": 1,
-          "minimum": 0,
           "title": "Enrich Code Chunks",
-          "type": "integer"
+          "type": "boolean"
         },
         "enrich_max_chars": {
           "default": 1000,
@@ -12674,12 +12664,10 @@
       "description": "LLM generation configuration.",
       "properties": {
         "enrich_disabled": {
-          "default": 0,
+          "default": false,
           "description": "Disable code enrichment",
-          "maximum": 1,
-          "minimum": 0,
           "title": "Enrich Disabled",
-          "type": "integer"
+          "type": "boolean"
         },
         "enrich_model": {
           "default": "ragweld-local",
@@ -14101,7 +14089,7 @@
           "title": "Semantic Kg Cost Usd"
         },
         "skip_dense": {
-          "description": "Whether dense embeddings are skipped (indexing.skip_dense=1)",
+          "description": "Whether dense embeddings are skipped (indexing.skip_dense)",
           "title": "Skip Dense",
           "type": "boolean"
         },
@@ -14641,12 +14629,10 @@
           "type": "integer"
         },
         "parquet_extract_include_column_names": {
-          "default": 1,
+          "default": true,
           "description": "Include column headers when extracting Parquet text",
-          "maximum": 1,
-          "minimum": 0,
           "title": "Parquet Extract Include Column Names",
-          "type": "integer"
+          "type": "boolean"
         },
         "parquet_extract_max_cell_chars": {
           "default": 20000,
@@ -14673,12 +14659,10 @@
           "type": "integer"
         },
         "parquet_extract_text_columns_only": {
-          "default": 1,
+          "default": true,
           "description": "Extract only text/string-like columns from Parquet files when possible",
-          "maximum": 1,
-          "minimum": 0,
           "title": "Parquet Extract Text Columns Only",
-          "type": "integer"
+          "type": "boolean"
         },
         "postgres_url": {
           "default": "postgresql://postgres:postgres@localhost:5432/tribrid_rag",
@@ -14687,12 +14671,10 @@
           "type": "string"
         },
         "skip_dense": {
-          "default": 0,
+          "default": false,
           "description": "Skip dense vector indexing",
-          "maximum": 1,
-          "minimum": 0,
           "title": "Skip Dense",
-          "type": "integer"
+          "type": "boolean"
         }
       },
       "title": "IndexingConfig",
@@ -14919,12 +14901,10 @@
       "description": "Discriminative keywords configuration.",
       "properties": {
         "keywords_auto_generate": {
-          "default": 1,
+          "default": true,
           "description": "Auto-generate keywords",
-          "maximum": 1,
-          "minimum": 0,
           "title": "Keywords Auto Generate",
-          "type": "integer"
+          "type": "boolean"
         },
         "keywords_boost": {
           "default": 1.3,
@@ -24666,12 +24646,10 @@
           "type": "integer"
         },
         "tribrid_reranker_reload_on_change": {
-          "default": 0,
+          "default": false,
           "description": "Hot-reload on model change",
-          "maximum": 1,
-          "minimum": 0,
           "title": "Tribrid Reranker Reload On Change",
-          "type": "integer"
+          "type": "boolean"
         },
         "tribrid_reranker_reload_period_sec": {
           "default": 60,
@@ -24721,12 +24699,10 @@
           "type": "number"
         },
         "chunk_summary_search_enabled": {
-          "default": 1,
+          "default": true,
           "description": "Enable chunk_summary-based retrieval",
-          "maximum": 1,
-          "minimum": 0,
           "title": "Chunk Summary Search Enabled",
-          "type": "integer"
+          "type": "boolean"
         },
         "conf_any": {
           "default": 0.55,
@@ -24777,12 +24753,10 @@
           "type": "integer"
         },
         "eval_multi": {
-          "default": 1,
+          "default": true,
           "description": "Enable multi-query in eval",
-          "maximum": 1,
-          "minimum": 0,
           "title": "Eval Multi",
-          "type": "integer"
+          "type": "boolean"
         },
         "fallback_confidence": {
           "default": 0.55,
@@ -24896,12 +24870,10 @@
           "type": "integer"
         },
         "query_expansion_enabled": {
-          "default": 1,
+          "default": true,
           "description": "Enable synonym expansion",
-          "maximum": 1,
-          "minimum": 0,
           "title": "Query Expansion Enabled",
-          "type": "integer"
+          "type": "boolean"
         },
         "rrf_k_div": {
           "default": 60,
@@ -24934,12 +24906,10 @@
           "type": "string"
         },
         "use_semantic_synonyms": {
-          "default": 1,
+          "default": true,
           "description": "Enable semantic synonym expansion",
-          "maximum": 1,
-          "minimum": 0,
           "title": "Use Semantic Synonyms",
-          "type": "integer"
+          "type": "boolean"
         },
         "vector_weight": {
           "default": 0.7,
@@ -24951,6 +24921,125 @@
         }
       },
       "title": "RetrievalConfig",
+      "type": "object"
+    },
+    "RetrievalContractMismatchDetail": {
+      "description": "Public error detail returned when a stored index contract blocks a retrieval request.",
+      "properties": {
+        "code": {
+          "description": "Stable mismatch code, e.g. embedding_contract_mismatch",
+          "title": "Code",
+          "type": "string"
+        },
+        "corpus_id": {
+          "description": "Corpus whose stored index contract conflicts with the current configuration",
+          "title": "Corpus Id",
+          "type": "string"
+        },
+        "current_contract": {
+          "additionalProperties": true,
+          "description": "Contract implied by the current runtime configuration",
+          "title": "Current Contract",
+          "type": "object"
+        },
+        "expected_contract": {
+          "additionalProperties": true,
+          "description": "Contract recorded when the corpus was indexed",
+          "title": "Expected Contract",
+          "type": "object"
+        },
+        "leg": {
+          "description": "Retrieval leg governed by the mismatched contract",
+          "enum": [
+            "vector",
+            "sparse",
+            "graph"
+          ],
+          "title": "Leg",
+          "type": "string"
+        },
+        "required_action": {
+          "description": "Exact operator action required to resolve the mismatch",
+          "title": "Required Action",
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "corpus_id",
+        "leg",
+        "expected_contract",
+        "current_contract",
+        "required_action"
+      ],
+      "title": "RetrievalContractMismatchDetail",
+      "type": "object"
+    },
+    "RetrievalContractMismatchResponse": {
+      "$defs": {
+        "RetrievalContractMismatchDetail": {
+          "description": "Public error detail returned when a stored index contract blocks a retrieval request.",
+          "properties": {
+            "code": {
+              "description": "Stable mismatch code, e.g. embedding_contract_mismatch",
+              "title": "Code",
+              "type": "string"
+            },
+            "corpus_id": {
+              "description": "Corpus whose stored index contract conflicts with the current configuration",
+              "title": "Corpus Id",
+              "type": "string"
+            },
+            "current_contract": {
+              "additionalProperties": true,
+              "description": "Contract implied by the current runtime configuration",
+              "title": "Current Contract",
+              "type": "object"
+            },
+            "expected_contract": {
+              "additionalProperties": true,
+              "description": "Contract recorded when the corpus was indexed",
+              "title": "Expected Contract",
+              "type": "object"
+            },
+            "leg": {
+              "description": "Retrieval leg governed by the mismatched contract",
+              "enum": [
+                "vector",
+                "sparse",
+                "graph"
+              ],
+              "title": "Leg",
+              "type": "string"
+            },
+            "required_action": {
+              "description": "Exact operator action required to resolve the mismatch",
+              "title": "Required Action",
+              "type": "string"
+            }
+          },
+          "required": [
+            "code",
+            "corpus_id",
+            "leg",
+            "expected_contract",
+            "current_contract",
+            "required_action"
+          ],
+          "title": "RetrievalContractMismatchDetail",
+          "type": "object"
+        }
+      },
+      "description": "FastAPI response envelope for a retrieval contract mismatch (HTTP 409).",
+      "properties": {
+        "detail": {
+          "$ref": "#/$defs/RetrievalContractMismatchDetail"
+        }
+      },
+      "required": [
+        "detail"
+      ],
+      "title": "RetrievalContractMismatchResponse",
       "type": "object"
     },
     "RetrievalPilotExportRequest": {
@@ -27394,12 +27483,10 @@
       "description": "Configuration for semantic caching across search/answer/chat endpoints.",
       "properties": {
         "bypass_if_images": {
-          "default": 1,
+          "default": true,
           "description": "Bypass chat generation cache when images are attached.",
-          "maximum": 1,
-          "minimum": 0,
           "title": "Bypass If Images",
-          "type": "integer"
+          "type": "boolean"
         },
         "chat_history_window": {
           "default": 6,
@@ -27410,12 +27497,10 @@
           "type": "integer"
         },
         "enabled": {
-          "default": 0,
-          "description": "Enable semantic cache reads/writes (0=off, 1=on).",
-          "maximum": 1,
-          "minimum": 0,
+          "default": false,
+          "description": "Enable semantic cache reads/writes.",
           "title": "Enabled",
-          "type": "integer"
+          "type": "boolean"
         },
         "max_entries": {
           "default": 5000,
@@ -31240,12 +31325,10 @@
       "description": "Observability and tracing configuration.",
       "properties": {
         "alert_include_resolved": {
-          "default": 1,
+          "default": true,
           "description": "Include resolved alerts",
-          "maximum": 1,
-          "minimum": 0,
           "title": "Alert Include Resolved",
-          "type": "integer"
+          "type": "boolean"
         },
         "alert_notify_severities": {
           "default": "critical,warning",
@@ -31274,12 +31357,10 @@
           "type": "string"
         },
         "cost_tracking_enabled": {
-          "default": 1,
+          "default": true,
           "description": "Enable online request cost attribution in traces",
-          "maximum": 1,
-          "minimum": 0,
           "title": "Cost Tracking Enabled",
-          "type": "integer"
+          "type": "boolean"
         },
         "faro_base_url": {
           "default": "",
@@ -31294,12 +31375,10 @@
           "type": "string"
         },
         "langfuse_enabled": {
-          "default": 0,
+          "default": false,
           "description": "Enable Langfuse generation observations",
-          "maximum": 1,
-          "minimum": 0,
           "title": "Langfuse Enabled",
-          "type": "integer"
+          "type": "boolean"
         },
         "langfuse_project": {
           "default": "ragweld",
@@ -31315,12 +31394,10 @@
           "type": "string"
         },
         "metrics_enabled": {
-          "default": 1,
+          "default": true,
           "description": "Enable metrics collection",
-          "maximum": 1,
-          "minimum": 0,
           "title": "Metrics Enabled",
-          "type": "integer"
+          "type": "boolean"
         },
         "mimir_base_url": {
           "default": "",
@@ -31335,12 +31412,10 @@
           "type": "string"
         },
         "otel_export_enabled": {
-          "default": 1,
+          "default": true,
           "description": "Enable OTLP export for traces",
-          "maximum": 1,
-          "minimum": 0,
           "title": "Otel Export Enabled",
-          "type": "integer"
+          "type": "boolean"
         },
         "otel_service_name": {
           "default": "ragweld-api",
@@ -31359,14 +31434,6 @@
           "description": "Comma-separated OTLP headers (k=v) for the exporter",
           "title": "Otlp Headers",
           "type": "string"
-        },
-        "prometheus_port": {
-          "default": 9090,
-          "description": "Prometheus metrics port",
-          "maximum": 65535,
-          "minimum": 1024,
-          "title": "Prometheus Port",
-          "type": "integer"
         },
         "pyroscope_base_url": {
           "default": "",
@@ -31397,12 +31464,10 @@
           "type": "number"
         },
         "tracing_enabled": {
-          "default": 1,
+          "default": true,
           "description": "Enable distributed tracing",
-          "maximum": 1,
-          "minimum": 0,
           "title": "Tracing Enabled",
-          "type": "integer"
+          "type": "boolean"
         },
         "tracing_mode": {
           "default": "local",
@@ -31498,12 +31563,10 @@
           "type": "number"
         },
         "learning_reranker_promote_if_improves": {
-          "default": 1,
+          "default": true,
           "description": "Promote trained learning artifact to active path only if primary metric improves",
-          "maximum": 1,
-          "minimum": 0,
           "title": "Learning Reranker Promote If Improves",
-          "type": "integer"
+          "type": "boolean"
         },
         "learning_reranker_telemetry_interval_steps": {
           "default": 2,
@@ -31631,12 +31694,10 @@
           "type": "number"
         },
         "ragweld_agent_promote_if_improves": {
-          "default": 1,
+          "default": true,
           "description": "Auto-promote trained ragweld agent adapter only if eval_loss improves.",
-          "maximum": 1,
-          "minimum": 0,
           "title": "Ragweld Agent Promote If Improves",
-          "type": "integer"
+          "type": "boolean"
         },
         "ragweld_agent_reload_period_sec": {
           "default": 60,
@@ -31734,12 +31795,10 @@
           "type": "string"
         },
         "tribrid_reranker_mine_reset": {
-          "default": 0,
+          "default": false,
           "description": "Reset triplets file before mining",
-          "maximum": 1,
-          "minimum": 0,
           "title": "Tribrid Reranker Mine Reset",
-          "type": "integer"
+          "type": "boolean"
         },
         "tribrid_reranker_model_path": {
           "default": "models/learning-reranker-active",
@@ -32267,12 +32326,10 @@
               "type": "integer"
             },
             "preserve_imports": {
-              "default": 1,
+              "default": true,
               "description": "Include imports in chunks",
-              "maximum": 1,
-              "minimum": 0,
               "title": "Preserve Imports",
-              "type": "integer"
+              "type": "boolean"
             },
             "recursive_max_depth": {
               "default": 10,
@@ -32357,12 +32414,10 @@
               "type": "integer"
             },
             "docker_logs_timestamps": {
-              "default": 1,
-              "description": "Include timestamps in Docker logs (1=yes, 0=no)",
-              "maximum": 1,
-              "minimum": 0,
+              "default": true,
+              "description": "Include timestamps in Docker logs",
               "title": "Docker Logs Timestamps",
-              "type": "integer"
+              "type": "boolean"
             },
             "docker_status_timeout": {
               "default": 5,
@@ -32427,12 +32482,10 @@
               "type": "integer"
             },
             "embedding_cache_enabled": {
-              "default": 1,
+              "default": true,
               "description": "Enable embedding cache",
-              "maximum": 1,
-              "minimum": 0,
               "title": "Embedding Cache Enabled",
-              "type": "integer"
+              "type": "boolean"
             },
             "embedding_dim": {
               "default": 3072,
@@ -32523,12 +32576,10 @@
           "description": "Code enrichment and chunk_summary generation configuration.",
           "properties": {
             "chunk_summaries_enrich_default": {
-              "default": 1,
+              "default": true,
               "description": "Enable chunk_summary enrichment by default",
-              "maximum": 1,
-              "minimum": 0,
               "title": "Chunk Summaries Enrich Default",
-              "type": "integer"
+              "type": "boolean"
             },
             "chunk_summaries_max": {
               "default": 100,
@@ -32539,12 +32590,10 @@
               "type": "integer"
             },
             "enrich_code_chunks": {
-              "default": 1,
+              "default": true,
               "description": "Enable chunk enrichment",
-              "maximum": 1,
-              "minimum": 0,
               "title": "Enrich Code Chunks",
-              "type": "integer"
+              "type": "boolean"
             },
             "enrich_max_chars": {
               "default": 1000,
@@ -32701,12 +32750,10 @@
           "description": "LLM generation configuration.",
           "properties": {
             "enrich_disabled": {
-              "default": 0,
+              "default": false,
               "description": "Disable code enrichment",
-              "maximum": 1,
-              "minimum": 0,
               "title": "Enrich Disabled",
-              "type": "integer"
+              "type": "boolean"
             },
             "enrich_model": {
               "default": "ragweld-local",
@@ -33387,12 +33434,10 @@
               "type": "integer"
             },
             "parquet_extract_include_column_names": {
-              "default": 1,
+              "default": true,
               "description": "Include column headers when extracting Parquet text",
-              "maximum": 1,
-              "minimum": 0,
               "title": "Parquet Extract Include Column Names",
-              "type": "integer"
+              "type": "boolean"
             },
             "parquet_extract_max_cell_chars": {
               "default": 20000,
@@ -33419,12 +33464,10 @@
               "type": "integer"
             },
             "parquet_extract_text_columns_only": {
-              "default": 1,
+              "default": true,
               "description": "Extract only text/string-like columns from Parquet files when possible",
-              "maximum": 1,
-              "minimum": 0,
               "title": "Parquet Extract Text Columns Only",
-              "type": "integer"
+              "type": "boolean"
             },
             "postgres_url": {
               "default": "postgresql://postgres:postgres@localhost:5432/tribrid_rag",
@@ -33433,12 +33476,10 @@
               "type": "string"
             },
             "skip_dense": {
-              "default": 0,
+              "default": false,
               "description": "Skip dense vector indexing",
-              "maximum": 1,
-              "minimum": 0,
               "title": "Skip Dense",
-              "type": "integer"
+              "type": "boolean"
             }
           },
           "title": "IndexingConfig",
@@ -33448,12 +33489,10 @@
           "description": "Discriminative keywords configuration.",
           "properties": {
             "keywords_auto_generate": {
-              "default": 1,
+              "default": true,
               "description": "Auto-generate keywords",
-              "maximum": 1,
-              "minimum": 0,
               "title": "Keywords Auto Generate",
-              "type": "integer"
+              "type": "boolean"
             },
             "keywords_boost": {
               "default": 1.3,
@@ -33913,12 +33952,10 @@
               "type": "integer"
             },
             "tribrid_reranker_reload_on_change": {
-              "default": 0,
+              "default": false,
               "description": "Hot-reload on model change",
-              "maximum": 1,
-              "minimum": 0,
               "title": "Tribrid Reranker Reload On Change",
-              "type": "integer"
+              "type": "boolean"
             },
             "tribrid_reranker_reload_period_sec": {
               "default": 60,
@@ -33968,12 +34005,10 @@
               "type": "number"
             },
             "chunk_summary_search_enabled": {
-              "default": 1,
+              "default": true,
               "description": "Enable chunk_summary-based retrieval",
-              "maximum": 1,
-              "minimum": 0,
               "title": "Chunk Summary Search Enabled",
-              "type": "integer"
+              "type": "boolean"
             },
             "conf_any": {
               "default": 0.55,
@@ -34024,12 +34059,10 @@
               "type": "integer"
             },
             "eval_multi": {
-              "default": 1,
+              "default": true,
               "description": "Enable multi-query in eval",
-              "maximum": 1,
-              "minimum": 0,
               "title": "Eval Multi",
-              "type": "integer"
+              "type": "boolean"
             },
             "fallback_confidence": {
               "default": 0.55,
@@ -34143,12 +34176,10 @@
               "type": "integer"
             },
             "query_expansion_enabled": {
-              "default": 1,
+              "default": true,
               "description": "Enable synonym expansion",
-              "maximum": 1,
-              "minimum": 0,
               "title": "Query Expansion Enabled",
-              "type": "integer"
+              "type": "boolean"
             },
             "rrf_k_div": {
               "default": 60,
@@ -34181,12 +34212,10 @@
               "type": "string"
             },
             "use_semantic_synonyms": {
-              "default": 1,
+              "default": true,
               "description": "Enable semantic synonym expansion",
-              "maximum": 1,
-              "minimum": 0,
               "title": "Use Semantic Synonyms",
-              "type": "integer"
+              "type": "boolean"
             },
             "vector_weight": {
               "default": 0.7,
@@ -34248,12 +34277,10 @@
           "description": "Configuration for semantic caching across search/answer/chat endpoints.",
           "properties": {
             "bypass_if_images": {
-              "default": 1,
+              "default": true,
               "description": "Bypass chat generation cache when images are attached.",
-              "maximum": 1,
-              "minimum": 0,
               "title": "Bypass If Images",
-              "type": "integer"
+              "type": "boolean"
             },
             "chat_history_window": {
               "default": 6,
@@ -34264,12 +34291,10 @@
               "type": "integer"
             },
             "enabled": {
-              "default": 0,
-              "description": "Enable semantic cache reads/writes (0=off, 1=on).",
-              "maximum": 1,
-              "minimum": 0,
+              "default": false,
+              "description": "Enable semantic cache reads/writes.",
               "title": "Enabled",
-              "type": "integer"
+              "type": "boolean"
             },
             "max_entries": {
               "default": 5000,
@@ -34703,12 +34728,10 @@
           "description": "Observability and tracing configuration.",
           "properties": {
             "alert_include_resolved": {
-              "default": 1,
+              "default": true,
               "description": "Include resolved alerts",
-              "maximum": 1,
-              "minimum": 0,
               "title": "Alert Include Resolved",
-              "type": "integer"
+              "type": "boolean"
             },
             "alert_notify_severities": {
               "default": "critical,warning",
@@ -34737,12 +34760,10 @@
               "type": "string"
             },
             "cost_tracking_enabled": {
-              "default": 1,
+              "default": true,
               "description": "Enable online request cost attribution in traces",
-              "maximum": 1,
-              "minimum": 0,
               "title": "Cost Tracking Enabled",
-              "type": "integer"
+              "type": "boolean"
             },
             "faro_base_url": {
               "default": "",
@@ -34757,12 +34778,10 @@
               "type": "string"
             },
             "langfuse_enabled": {
-              "default": 0,
+              "default": false,
               "description": "Enable Langfuse generation observations",
-              "maximum": 1,
-              "minimum": 0,
               "title": "Langfuse Enabled",
-              "type": "integer"
+              "type": "boolean"
             },
             "langfuse_project": {
               "default": "ragweld",
@@ -34778,12 +34797,10 @@
               "type": "string"
             },
             "metrics_enabled": {
-              "default": 1,
+              "default": true,
               "description": "Enable metrics collection",
-              "maximum": 1,
-              "minimum": 0,
               "title": "Metrics Enabled",
-              "type": "integer"
+              "type": "boolean"
             },
             "mimir_base_url": {
               "default": "",
@@ -34798,12 +34815,10 @@
               "type": "string"
             },
             "otel_export_enabled": {
-              "default": 1,
+              "default": true,
               "description": "Enable OTLP export for traces",
-              "maximum": 1,
-              "minimum": 0,
               "title": "Otel Export Enabled",
-              "type": "integer"
+              "type": "boolean"
             },
             "otel_service_name": {
               "default": "ragweld-api",
@@ -34822,14 +34837,6 @@
               "description": "Comma-separated OTLP headers (k=v) for the exporter",
               "title": "Otlp Headers",
               "type": "string"
-            },
-            "prometheus_port": {
-              "default": 9090,
-              "description": "Prometheus metrics port",
-              "maximum": 65535,
-              "minimum": 1024,
-              "title": "Prometheus Port",
-              "type": "integer"
             },
             "pyroscope_base_url": {
               "default": "",
@@ -34860,12 +34867,10 @@
               "type": "number"
             },
             "tracing_enabled": {
-              "default": 1,
+              "default": true,
               "description": "Enable distributed tracing",
-              "maximum": 1,
-              "minimum": 0,
               "title": "Tracing Enabled",
-              "type": "integer"
+              "type": "boolean"
             },
             "tracing_mode": {
               "default": "local",
@@ -34961,12 +34966,10 @@
               "type": "number"
             },
             "learning_reranker_promote_if_improves": {
-              "default": 1,
+              "default": true,
               "description": "Promote trained learning artifact to active path only if primary metric improves",
-              "maximum": 1,
-              "minimum": 0,
               "title": "Learning Reranker Promote If Improves",
-              "type": "integer"
+              "type": "boolean"
             },
             "learning_reranker_telemetry_interval_steps": {
               "default": 2,
@@ -35094,12 +35097,10 @@
               "type": "number"
             },
             "ragweld_agent_promote_if_improves": {
-              "default": 1,
+              "default": true,
               "description": "Auto-promote trained ragweld agent adapter only if eval_loss improves.",
-              "maximum": 1,
-              "minimum": 0,
               "title": "Ragweld Agent Promote If Improves",
-              "type": "integer"
+              "type": "boolean"
             },
             "ragweld_agent_reload_period_sec": {
               "default": 60,
@@ -35197,12 +35198,10 @@
               "type": "string"
             },
             "tribrid_reranker_mine_reset": {
-              "default": 0,
+              "default": false,
               "description": "Reset triplets file before mining",
-              "maximum": 1,
-              "minimum": 0,
               "title": "Tribrid Reranker Mine Reset",
-              "type": "integer"
+              "type": "boolean"
             },
             "tribrid_reranker_model_path": {
               "default": "models/learning-reranker-active",
@@ -35253,44 +35252,34 @@
               "type": "integer"
             },
             "chat_show_citations": {
-              "default": 1,
+              "default": true,
               "description": "Show citations list on chat answers",
-              "maximum": 1,
-              "minimum": 0,
               "title": "Chat Show Citations",
-              "type": "integer"
+              "type": "boolean"
             },
             "chat_show_confidence": {
-              "default": 0,
+              "default": false,
               "description": "Show confidence badge on chat answers",
-              "maximum": 1,
-              "minimum": 0,
               "title": "Chat Show Confidence",
-              "type": "integer"
+              "type": "boolean"
             },
             "chat_show_debug_footer": {
-              "default": 1,
+              "default": true,
               "description": "Show dev/debug footer under chat answers",
-              "maximum": 1,
-              "minimum": 0,
               "title": "Chat Show Debug Footer",
-              "type": "integer"
+              "type": "boolean"
             },
             "chat_show_trace": {
-              "default": 1,
+              "default": true,
               "description": "Show routing trace panel by default",
-              "maximum": 1,
-              "minimum": 0,
               "title": "Chat Show Trace",
-              "type": "integer"
+              "type": "boolean"
             },
             "chat_stream_include_thinking": {
-              "default": 1,
+              "default": true,
               "description": "Include reasoning/thinking in streamed responses when supported by model",
-              "maximum": 1,
-              "minimum": 0,
               "title": "Chat Stream Include Thinking",
-              "type": "integer"
+              "type": "boolean"
             },
             "chat_stream_timeout": {
               "default": 120,
@@ -35301,12 +35290,10 @@
               "type": "integer"
             },
             "chat_streaming_enabled": {
-              "default": 1,
+              "default": true,
               "description": "Enable streaming responses",
-              "maximum": 1,
-              "minimum": 0,
               "title": "Chat Streaming Enabled",
-              "type": "integer"
+              "type": "boolean"
             },
             "chat_thinking_budget_tokens": {
               "default": 10000,
@@ -35323,20 +35310,16 @@
               "type": "string"
             },
             "editor_embed_enabled": {
-              "default": 1,
+              "default": true,
               "description": "Enable editor embedding",
-              "maximum": 1,
-              "minimum": 0,
               "title": "Editor Embed Enabled",
-              "type": "integer"
+              "type": "boolean"
             },
             "editor_enabled": {
-              "default": 1,
+              "default": true,
               "description": "Enable embedded editor",
-              "maximum": 1,
-              "minimum": 0,
               "title": "Editor Enabled",
-              "type": "integer"
+              "type": "boolean"
             },
             "editor_image": {
               "default": "codercom/code-server:latest",
@@ -35377,12 +35360,10 @@
               "type": "string"
             },
             "grafana_embed_enabled": {
-              "default": 1,
+              "default": true,
               "description": "Enable Grafana embedding",
-              "maximum": 1,
-              "minimum": 0,
               "title": "Grafana Embed Enabled",
-              "type": "integer"
+              "type": "boolean"
             },
             "grafana_kiosk": {
               "default": "tv",
@@ -35441,12 +35422,10 @@
               "type": "string"
             },
             "learning_reranker_show_setup_row": {
-              "default": 0,
-              "description": "Show setup summary row above studio dock layout (1=show, 0=collapsed)",
-              "maximum": 1,
-              "minimum": 0,
+              "default": false,
+              "description": "Show setup summary row above studio dock layout instead of collapsing it",
               "title": "Learning Reranker Show Setup Row",
-              "type": "integer"
+              "type": "boolean"
             },
             "learning_reranker_studio_bottom_panel_pct": {
               "default": 28,
@@ -35457,12 +35436,10 @@
               "type": "integer"
             },
             "learning_reranker_studio_immersive": {
-              "default": 1,
+              "default": true,
               "description": "Use immersive full-height studio mode for Learning Reranker",
-              "maximum": 1,
-              "minimum": 0,
               "title": "Learning Reranker Studio Immersive",
-              "type": "integer"
+              "type": "boolean"
             },
             "learning_reranker_studio_left_panel_pct": {
               "default": 20,
@@ -35481,12 +35458,10 @@
               "type": "integer"
             },
             "learning_reranker_studio_v2_enabled": {
-              "default": 1,
+              "default": true,
               "description": "Enable Learning Reranker Studio V2 layout and controls",
-              "maximum": 1,
-              "minimum": 0,
               "title": "Learning Reranker Studio V2 Enabled",
-              "type": "integer"
+              "type": "boolean"
             },
             "learning_reranker_visualizer_color_mode": {
               "default": "absolute",
@@ -35526,12 +35501,10 @@
               "type": "string"
             },
             "learning_reranker_visualizer_reduce_motion": {
-              "default": 0,
+              "default": false,
               "description": "Reduce Neural Visualizer motion for accessibility/performance",
-              "maximum": 1,
-              "minimum": 0,
               "title": "Learning Reranker Visualizer Reduce Motion",
-              "type": "integer"
+              "type": "boolean"
             },
             "learning_reranker_visualizer_renderer": {
               "default": "auto",
@@ -35546,12 +35519,10 @@
               "type": "string"
             },
             "learning_reranker_visualizer_show_vector_field": {
-              "default": 1,
+              "default": true,
               "description": "Render animated vector field accents in Neural Visualizer",
-              "maximum": 1,
-              "minimum": 0,
               "title": "Learning Reranker Visualizer Show Vector Field",
-              "type": "integer"
+              "type": "boolean"
             },
             "learning_reranker_visualizer_tail_seconds": {
               "default": 8.0,
@@ -35570,12 +35541,10 @@
               "type": "integer"
             },
             "open_browser": {
-              "default": 1,
+              "default": true,
               "description": "Auto-open browser on start",
-              "maximum": 1,
-              "minimum": 0,
               "title": "Open Browser",
-              "type": "integer"
+              "type": "boolean"
             },
             "runtime_mode": {
               "default": "development",
@@ -35763,44 +35732,34 @@
           "type": "integer"
         },
         "chat_show_citations": {
-          "default": 1,
+          "default": true,
           "description": "Show citations list on chat answers",
-          "maximum": 1,
-          "minimum": 0,
           "title": "Chat Show Citations",
-          "type": "integer"
+          "type": "boolean"
         },
         "chat_show_confidence": {
-          "default": 0,
+          "default": false,
           "description": "Show confidence badge on chat answers",
-          "maximum": 1,
-          "minimum": 0,
           "title": "Chat Show Confidence",
-          "type": "integer"
+          "type": "boolean"
         },
         "chat_show_debug_footer": {
-          "default": 1,
+          "default": true,
           "description": "Show dev/debug footer under chat answers",
-          "maximum": 1,
-          "minimum": 0,
           "title": "Chat Show Debug Footer",
-          "type": "integer"
+          "type": "boolean"
         },
         "chat_show_trace": {
-          "default": 1,
+          "default": true,
           "description": "Show routing trace panel by default",
-          "maximum": 1,
-          "minimum": 0,
           "title": "Chat Show Trace",
-          "type": "integer"
+          "type": "boolean"
         },
         "chat_stream_include_thinking": {
-          "default": 1,
+          "default": true,
           "description": "Include reasoning/thinking in streamed responses when supported by model",
-          "maximum": 1,
-          "minimum": 0,
           "title": "Chat Stream Include Thinking",
-          "type": "integer"
+          "type": "boolean"
         },
         "chat_stream_timeout": {
           "default": 120,
@@ -35811,12 +35770,10 @@
           "type": "integer"
         },
         "chat_streaming_enabled": {
-          "default": 1,
+          "default": true,
           "description": "Enable streaming responses",
-          "maximum": 1,
-          "minimum": 0,
           "title": "Chat Streaming Enabled",
-          "type": "integer"
+          "type": "boolean"
         },
         "chat_thinking_budget_tokens": {
           "default": 10000,
@@ -35833,20 +35790,16 @@
           "type": "string"
         },
         "editor_embed_enabled": {
-          "default": 1,
+          "default": true,
           "description": "Enable editor embedding",
-          "maximum": 1,
-          "minimum": 0,
           "title": "Editor Embed Enabled",
-          "type": "integer"
+          "type": "boolean"
         },
         "editor_enabled": {
-          "default": 1,
+          "default": true,
           "description": "Enable embedded editor",
-          "maximum": 1,
-          "minimum": 0,
           "title": "Editor Enabled",
-          "type": "integer"
+          "type": "boolean"
         },
         "editor_image": {
           "default": "codercom/code-server:latest",
@@ -35887,12 +35840,10 @@
           "type": "string"
         },
         "grafana_embed_enabled": {
-          "default": 1,
+          "default": true,
           "description": "Enable Grafana embedding",
-          "maximum": 1,
-          "minimum": 0,
           "title": "Grafana Embed Enabled",
-          "type": "integer"
+          "type": "boolean"
         },
         "grafana_kiosk": {
           "default": "tv",
@@ -35951,12 +35902,10 @@
           "type": "string"
         },
         "learning_reranker_show_setup_row": {
-          "default": 0,
-          "description": "Show setup summary row above studio dock layout (1=show, 0=collapsed)",
-          "maximum": 1,
-          "minimum": 0,
+          "default": false,
+          "description": "Show setup summary row above studio dock layout instead of collapsing it",
           "title": "Learning Reranker Show Setup Row",
-          "type": "integer"
+          "type": "boolean"
         },
         "learning_reranker_studio_bottom_panel_pct": {
           "default": 28,
@@ -35967,12 +35916,10 @@
           "type": "integer"
         },
         "learning_reranker_studio_immersive": {
-          "default": 1,
+          "default": true,
           "description": "Use immersive full-height studio mode for Learning Reranker",
-          "maximum": 1,
-          "minimum": 0,
           "title": "Learning Reranker Studio Immersive",
-          "type": "integer"
+          "type": "boolean"
         },
         "learning_reranker_studio_left_panel_pct": {
           "default": 20,
@@ -35991,12 +35938,10 @@
           "type": "integer"
         },
         "learning_reranker_studio_v2_enabled": {
-          "default": 1,
+          "default": true,
           "description": "Enable Learning Reranker Studio V2 layout and controls",
-          "maximum": 1,
-          "minimum": 0,
           "title": "Learning Reranker Studio V2 Enabled",
-          "type": "integer"
+          "type": "boolean"
         },
         "learning_reranker_visualizer_color_mode": {
           "default": "absolute",
@@ -36036,12 +35981,10 @@
           "type": "string"
         },
         "learning_reranker_visualizer_reduce_motion": {
-          "default": 0,
+          "default": false,
           "description": "Reduce Neural Visualizer motion for accessibility/performance",
-          "maximum": 1,
-          "minimum": 0,
           "title": "Learning Reranker Visualizer Reduce Motion",
-          "type": "integer"
+          "type": "boolean"
         },
         "learning_reranker_visualizer_renderer": {
           "default": "auto",
@@ -36056,12 +35999,10 @@
           "type": "string"
         },
         "learning_reranker_visualizer_show_vector_field": {
-          "default": 1,
+          "default": true,
           "description": "Render animated vector field accents in Neural Visualizer",
-          "maximum": 1,
-          "minimum": 0,
           "title": "Learning Reranker Visualizer Show Vector Field",
-          "type": "integer"
+          "type": "boolean"
         },
         "learning_reranker_visualizer_tail_seconds": {
           "default": 8.0,
@@ -36080,12 +36021,10 @@
           "type": "integer"
         },
         "open_browser": {
-          "default": 1,
+          "default": true,
           "description": "Auto-open browser on start",
-          "maximum": 1,
-          "minimum": 0,
           "title": "Open Browser",
-          "type": "integer"
+          "type": "boolean"
         },
         "runtime_mode": {
           "default": "development",

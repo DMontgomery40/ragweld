@@ -135,32 +135,32 @@ async def test_put_config_persists_hard_cut_observability_fields(client: AsyncCl
     cfg = baseline.json()
 
     cfg["tracing"]["tracing_mode"] = "otel_langfuse"
-    cfg["tracing"]["otel_export_enabled"] = 1
+    cfg["tracing"]["otel_export_enabled"] = True
     cfg["tracing"]["otlp_endpoint"] = "http://localhost:4318/v1/traces"
     cfg["tracing"]["otlp_headers"] = "Authorization=Bearer test"
     cfg["tracing"]["otel_service_name"] = "ragweld-api-test"
-    cfg["tracing"]["langfuse_enabled"] = 1
+    cfg["tracing"]["langfuse_enabled"] = True
     cfg["tracing"]["langfuse_base_url"] = "http://localhost:3005"
     cfg["tracing"]["langfuse_project"] = "ragweld-test"
     cfg["tracing"]["tempo_base_url"] = "http://localhost:3200"
     cfg["tracing"]["alloy_base_url"] = "http://localhost:12345"
-    cfg["tracing"]["cost_tracking_enabled"] = 1
+    cfg["tracing"]["cost_tracking_enabled"] = True
 
     response = await client.put("/api/config", json=cfg)
     assert response.status_code == 200
 
     tracing = response.json()["tracing"]
     assert tracing["tracing_mode"] == "otel_langfuse"
-    assert tracing["otel_export_enabled"] == 1
+    assert tracing["otel_export_enabled"] is True
     assert tracing["otlp_endpoint"] == "http://localhost:4318/v1/traces"
     assert tracing["otlp_headers"] == "Authorization=Bearer test"
     assert tracing["otel_service_name"] == "ragweld-api-test"
-    assert tracing["langfuse_enabled"] == 1
+    assert tracing["langfuse_enabled"] is True
     assert tracing["langfuse_base_url"] == "http://localhost:3005"
     assert tracing["langfuse_project"] == "ragweld-test"
     assert tracing["tempo_base_url"] == "http://localhost:3200"
     assert tracing["alloy_base_url"] == "http://localhost:12345"
-    assert tracing["cost_tracking_enabled"] == 1
+    assert tracing["cost_tracking_enabled"] is True
 
 
 @pytest.mark.asyncio
@@ -295,7 +295,7 @@ async def test_put_config_rejects_unsupported_embedding_provider_runtime(client:
     assert baseline.status_code == 200
     cfg = baseline.json()
 
-    cfg["indexing"]["skip_dense"] = 0
+    cfg["indexing"]["skip_dense"] = False
     cfg["embedding"]["embedding_backend"] = "provider"
     cfg["embedding"]["embedding_type"] = "cohere"
 
@@ -327,7 +327,7 @@ async def test_put_config_rejects_embedding_tokenizer_mismatch(client: AsyncClie
     assert baseline.status_code == 200
     cfg = baseline.json()
 
-    cfg["indexing"]["skip_dense"] = 0
+    cfg["indexing"]["skip_dense"] = False
     cfg["embedding"]["embedding_backend"] = "provider"
     cfg["embedding"]["embedding_type"] = "openai"
     cfg["tokenization"]["strategy"] = "huggingface"
@@ -344,7 +344,7 @@ async def test_put_config_rejects_unknown_tiktoken_encoding(client: AsyncClient)
     assert baseline.status_code == 200
     cfg = baseline.json()
 
-    cfg["indexing"]["skip_dense"] = 0
+    cfg["indexing"]["skip_dense"] = False
     cfg["embedding"]["embedding_backend"] = "provider"
     cfg["embedding"]["embedding_type"] = "openai"
     cfg["tokenization"]["strategy"] = "tiktoken"
@@ -362,7 +362,7 @@ async def test_put_config_accepts_mlx_model_id_with_slash(client: AsyncClient) -
     assert baseline.status_code == 200
     cfg = baseline.json()
 
-    cfg["indexing"]["skip_dense"] = 0
+    cfg["indexing"]["skip_dense"] = False
     cfg["embedding"]["embedding_backend"] = "provider"
     cfg["embedding"]["embedding_type"] = "mlx"
     cfg["embedding"]["embedding_model_mlx"] = "mlx-community/all-MiniLM-L6-v2-4bit"

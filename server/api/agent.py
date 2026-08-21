@@ -697,7 +697,7 @@ async def _run_train_job(*, run_id: str, corpus_id: str, cancel_event: asyncio.E
         # Baseline eval (optional, used for auto-promote gating).
         active_dir_cfg = str(getattr(cfg.training, "ragweld_agent_model_path", "") or "").strip()
         active_dir = _resolve_path(active_dir_cfg) if active_dir_cfg else None
-        promote_if_improves = int(getattr(cfg.training, "ragweld_agent_promote_if_improves", 0) or 0) == 1
+        promote_if_improves = bool(getattr(cfg.training, "ragweld_agent_promote_if_improves", False))
         if promote_if_improves and dev_examples and active_dir is not None and active_dir.exists():
             try:
                 baseline_primary = await asyncio.to_thread(

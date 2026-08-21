@@ -247,8 +247,8 @@ async def export_retrieval_pilot(*, corpus_id: str, repo_path: str, force_rebuil
                 parquet_max_rows=int(cfg.indexing.parquet_extract_max_rows),
                 parquet_max_chars=int(cfg.indexing.parquet_extract_max_chars),
                 parquet_max_cell_chars=int(cfg.indexing.parquet_extract_max_cell_chars),
-                parquet_text_columns_only=bool(int(cfg.indexing.parquet_extract_text_columns_only) == 1),
-                parquet_include_column_names=bool(int(cfg.indexing.parquet_extract_include_column_names) == 1),
+                parquet_text_columns_only=cfg.indexing.parquet_extract_text_columns_only,
+                parquet_include_column_names=cfg.indexing.parquet_extract_include_column_names,
             )
             if text is None or not text.strip():
                 skipped_unreadable_files += 1

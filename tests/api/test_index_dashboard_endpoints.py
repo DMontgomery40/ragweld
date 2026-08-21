@@ -78,7 +78,7 @@ async def test_dashboard_index_status_and_stats_return_storage_breakdown(
         cfg.embedding.embedding_backend = "provider"
         cfg.embedding.embedding_type = "openai"
         cfg.embedding.embedding_model = "text-embedding-3-large"
-        cfg.indexing.skip_dense = 0
+        cfg.indexing.skip_dense = False
         return cfg
 
     # Pricing fixture: $0.10 per 1k tokens for embedding model

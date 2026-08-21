@@ -158,7 +158,7 @@ async def build_chunk_summaries(request: ChunkSummariesBuildRequest) -> ChunkSum
     enrich_enabled = (
         bool(request.enrich)
         if request.enrich is not None
-        else bool(int(cfg.enrichment.chunk_summaries_enrich_default))
+        else cfg.enrichment.chunk_summaries_enrich_default
     )
 
     purpose_max_len = int(cfg.chunk_summaries.purpose_max_length)

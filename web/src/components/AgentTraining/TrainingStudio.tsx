@@ -265,7 +265,7 @@ export function TrainingStudio() {
     'training.ragweld_agent_telemetry_interval_steps',
     2
   );
-  const [promoteIfImproves, setPromoteIfImproves] = useConfigField<number>('training.ragweld_agent_promote_if_improves', 1);
+  const [promoteIfImproves, setPromoteIfImproves] = useConfigField<boolean>('training.ragweld_agent_promote_if_improves', true);
   const [promoteEpsilon, setPromoteEpsilon] = useConfigField<number>('training.ragweld_agent_promote_epsilon', 0.0);
   const [flyteAdminBaseUrl, setFlyteAdminBaseUrl] = useConfigField<string>('training.ragweld_agent_flyte_admin_base_url', '');
   const [flyteConsoleBaseUrl, setFlyteConsoleBaseUrl] = useConfigField<string>(
@@ -288,7 +288,7 @@ export function TrainingStudio() {
   // Studio layout prefs (reuse the existing Learning Reranker Studio UI keys so the layout feels identical).
   const [layoutEngine, setLayoutEngine] = useConfigField<'dockview' | 'panels'>('ui.learning_reranker_layout_engine', 'dockview');
   const [defaultPreset, setDefaultPreset] = useConfigField<LayoutPreset>('ui.learning_reranker_default_preset', 'balanced');
-  const [showSetupRow, setShowSetupRow] = useConfigField<number>('ui.learning_reranker_show_setup_row', 0);
+  const [showSetupRow, setShowSetupRow] = useConfigField<boolean>('ui.learning_reranker_show_setup_row', false);
   const [logsRenderer, setLogsRenderer] = useConfigField<'json' | 'xterm'>('ui.learning_reranker_logs_renderer', 'xterm');
   const [dockviewLayoutJson, setDockviewLayoutJson] = useConfigField<string>('ui.learning_reranker_dockview_layout_json', '');
 
@@ -314,13 +314,13 @@ export function TrainingStudio() {
     'ui.learning_reranker_visualizer_motion_intensity',
     1
   );
-  const [visualizerShowVectorField, setVisualizerShowVectorField] = useConfigField<number>(
+  const [visualizerShowVectorField, setVisualizerShowVectorField] = useConfigField<boolean>(
     'ui.learning_reranker_visualizer_show_vector_field',
-    1
+    true
   );
-  const [visualizerReduceMotion, setVisualizerReduceMotion] = useConfigField<number>(
+  const [visualizerReduceMotion, setVisualizerReduceMotion] = useConfigField<boolean>(
     'ui.learning_reranker_visualizer_reduce_motion',
-    0
+    false
   );
 
   const ringLimit = clamp(Number(visualizerMaxPoints || 10000), 1000, 50000);
@@ -1047,8 +1047,8 @@ export function TrainingStudio() {
           targetFps={Number(visualizerTargetFps)}
           tailSeconds={Number(visualizerTailSeconds)}
           motionIntensity={Number(visualizerMotionIntensity)}
-          reduceMotion={Number(visualizerReduceMotion) === 1}
-          showVectorField={Number(visualizerShowVectorField) === 1}
+          reduceMotion={visualizerReduceMotion}
+          showVectorField={visualizerShowVectorField}
         />
       </section>
     );
@@ -1334,13 +1334,19 @@ export function TrainingStudio() {
                     <input type="number" min={1} max={20} value={telemetryIntervalSteps} onChange={(e) => setTelemetryIntervalSteps(parseInt(e.target.value || '2', 10))} />
                   </div>
                   <div className="input-group">
-                    <label>
-                      Promote if improves <TooltipIcon name="RAGWELD_AGENT_PROMOTE_IF_IMPROVES" />
+                    <label className="toggle">
+                      <input
+                        type="checkbox"
+                        checked={promoteIfImproves}
+                        onChange={(e) => setPromoteIfImproves(e.target.checked)}
+                      />
+                      <span className="toggle-track" aria-hidden="true">
+                        <span className="toggle-thumb"></span>
+                      </span>
+                      <span className="toggle-label">
+                        Promote if improves <TooltipIcon name="RAGWELD_AGENT_PROMOTE_IF_IMPROVES" />
+                      </span>
                     </label>
-                    <select value={String(promoteIfImproves)} onChange={(e) => setPromoteIfImproves(parseInt(e.target.value, 10))}>
-                      <option value="1">Yes</option>
-                      <option value="0">No</option>
-                    </select>
                   </div>
                   <div className="input-group">
                     <label>
@@ -1427,13 +1433,19 @@ export function TrainingStudio() {
                     </select>
                   </div>
                   <div className="input-group">
-                    <label>
-                      Show setup row <TooltipIcon name="LEARNING_RERANKER_SHOW_SETUP_ROW" />
+                    <label className="toggle">
+                      <input
+                        type="checkbox"
+                        checked={showSetupRow}
+                        onChange={(e) => setShowSetupRow(e.target.checked)}
+                      />
+                      <span className="toggle-track" aria-hidden="true">
+                        <span className="toggle-thumb"></span>
+                      </span>
+                      <span className="toggle-label">
+                        Show setup row <TooltipIcon name="LEARNING_RERANKER_SHOW_SETUP_ROW" />
+                      </span>
                     </label>
-                    <select value={String(showSetupRow)} onChange={(e) => setShowSetupRow(parseInt(e.target.value, 10))}>
-                      <option value="0">No</option>
-                      <option value="1">Yes</option>
-                    </select>
                   </div>
                   <div className="input-group">
                     <label>
@@ -1517,22 +1529,34 @@ export function TrainingStudio() {
                     <input type="number" min={0} max={2} step={0.05} value={visualizerMotionIntensity} onChange={(e) => setVisualizerMotionIntensity(parseFloat(e.target.value || '1'))} />
                   </div>
                   <div className="input-group">
-                    <label>
-                      Show vector field <TooltipIcon name="LEARNING_RERANKER_VISUALIZER_SHOW_VECTOR_FIELD" />
+                    <label className="toggle">
+                      <input
+                        type="checkbox"
+                        checked={visualizerShowVectorField}
+                        onChange={(e) => setVisualizerShowVectorField(e.target.checked)}
+                      />
+                      <span className="toggle-track" aria-hidden="true">
+                        <span className="toggle-thumb"></span>
+                      </span>
+                      <span className="toggle-label">
+                        Show vector field <TooltipIcon name="LEARNING_RERANKER_VISUALIZER_SHOW_VECTOR_FIELD" />
+                      </span>
                     </label>
-                    <select value={String(visualizerShowVectorField)} onChange={(e) => setVisualizerShowVectorField(parseInt(e.target.value, 10))}>
-                      <option value="1">Yes</option>
-                      <option value="0">No</option>
-                    </select>
                   </div>
                   <div className="input-group">
-                    <label>
-                      Reduce motion <TooltipIcon name="LEARNING_RERANKER_VISUALIZER_REDUCE_MOTION" />
+                    <label className="toggle">
+                      <input
+                        type="checkbox"
+                        checked={visualizerReduceMotion}
+                        onChange={(e) => setVisualizerReduceMotion(e.target.checked)}
+                      />
+                      <span className="toggle-track" aria-hidden="true">
+                        <span className="toggle-thumb"></span>
+                      </span>
+                      <span className="toggle-label">
+                        Reduce motion <TooltipIcon name="LEARNING_RERANKER_VISUALIZER_REDUCE_MOTION" />
+                      </span>
                     </label>
-                    <select value={String(visualizerReduceMotion)} onChange={(e) => setVisualizerReduceMotion(parseInt(e.target.value, 10))}>
-                      <option value="0">No</option>
-                      <option value="1">Yes</option>
-                    </select>
                   </div>
                 </div>
               </details>
@@ -1838,8 +1862,8 @@ export function TrainingStudio() {
           <button className="small-button" onClick={() => applyLayoutPreset('balanced')}>
             Reset View
           </button>
-          <button className="small-button" onClick={() => setShowSetupRow(showSetupRow === 1 ? 0 : 1)}>
-            {showSetupRow === 1 ? 'Hide Setup' : 'Show Setup'}
+          <button className="small-button" onClick={() => setShowSetupRow(!showSetupRow)}>
+            {showSetupRow ? 'Hide Setup' : 'Show Setup'}
           </button>
           <button className="small-button" onClick={() => void popoutPane('studio-visualizer')}>
             Pop Out Viz
@@ -1862,7 +1886,7 @@ export function TrainingStudio() {
         <span className="studio-help-anchor">Shortcuts: Ctrl/Cmd+Shift+1/2/3 (viz/logs/inspector)</span>
       </div>
 
-      {showSetupRow === 1 ? (
+      {showSetupRow ? (
         <div className="studio-run-setup">
           <div className="studio-run-setup-item">
             <span className="studio-label">Corpus</span>

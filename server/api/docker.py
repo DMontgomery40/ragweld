@@ -391,10 +391,10 @@ async def get_docker_service_logs(
         cfg = load_config()
         timeout = int(getattr(cfg.docker, "docker_container_list_timeout", 10))
         default_tail = int(getattr(cfg.docker, "docker_logs_tail", 100))
-        timestamps = int(getattr(cfg.docker, "docker_logs_timestamps", 1))
+        timestamps = bool(getattr(cfg.docker, "docker_logs_timestamps", True))
     except Exception:
         cfg = TriBridConfig()
-        timeout, default_tail, timestamps = 10, 100, 1
+        timeout, default_tail, timestamps = 10, 100, True
 
     env = _docker_env()
     await _ensure_local_docker_context(timeout_s=timeout, env=env)

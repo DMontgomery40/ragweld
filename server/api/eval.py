@@ -108,7 +108,7 @@ def _dedupe_preserve_order(items: list[str]) -> list[str]:
 
 def _vector_leg_enabled(cfg: Any) -> bool:
     # Respect corpus-level skip_dense so eval can run without dense embeddings.
-    return int(getattr(getattr(cfg, "indexing", None), "skip_dense", 0) or 0) != 1
+    return not getattr(getattr(cfg, "indexing", None), "skip_dense", False)
 
 
 def _recall_at_k(expected: list[str], retrieved: list[str], k: int) -> float:
@@ -202,7 +202,7 @@ async def evaluate_dataset_entries(
     fusion = TriBridFusion()
 
     final_k = int(cfg.retrieval.eval_final_k)
-    use_multi = bool(int(cfg.retrieval.eval_multi))
+    use_multi = cfg.retrieval.eval_multi
     k_recall5 = int(cfg.evaluation.recall_at_5_k)
     k_recall10 = int(cfg.evaluation.recall_at_10_k)
     k_recall20 = int(cfg.evaluation.recall_at_20_k)
@@ -517,7 +517,7 @@ async def eval_run_stream(
         )
         try:
             cfg = await load_scoped_config(repo_id=repo_id)
-            run_use_multi = bool(int(use_multi)) if use_multi is not None else bool(int(cfg.retrieval.eval_multi))
+            run_use_multi = bool(use_multi) if use_multi is not None else cfg.retrieval.eval_multi
             run_final_k = int(final_k) if final_k is not None else int(cfg.retrieval.eval_final_k)
             run_final_k = max(1, run_final_k)
 

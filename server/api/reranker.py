@@ -1237,7 +1237,7 @@ async def _run_train_job(*, run_id: str, corpus_id: str, cancel_event: asyncio.E
         )
 
         # Promote trained artifact to the active path (atomic), gated on improvement when configured.
-        promote_if_improves = int(cfg.training.learning_reranker_promote_if_improves or 0) == 1
+        promote_if_improves = cfg.training.learning_reranker_promote_if_improves
         eps = float(cfg.training.learning_reranker_promote_epsilon or 0.0)
         should_promote = True
         if promote_if_improves and baseline_primary is not None:
@@ -1490,7 +1490,7 @@ async def _run_mine_job(*, corpus_id: str) -> None:
             return
 
         mine_mode = str(cfg.training.triplets_mine_mode or "replace").strip().lower()
-        mine_reset = int(cfg.training.tribrid_reranker_mine_reset or 0) == 1
+        mine_reset = cfg.training.tribrid_reranker_mine_reset
         if mine_reset:
             mine_mode = "replace"
         if mine_mode not in {"replace", "append"}:
@@ -2030,7 +2030,7 @@ async def mine_triplets(
             return RerankerMineResponse(ok=True, output=msg, error=None, operator_hint=_operator_hint_for_stage("mine_triplets"))
 
         mine_mode = str(cfg.training.triplets_mine_mode or "replace").strip().lower()
-        mine_reset = int(cfg.training.tribrid_reranker_mine_reset or 0) == 1
+        mine_reset = cfg.training.tribrid_reranker_mine_reset
         if mine_reset:
             mine_mode = "replace"
         if mine_mode not in {"replace", "append"}:

@@ -26,7 +26,7 @@ export function GrafanaDashboard() {
   const [kiosk] = useConfigField<string>('ui.grafana_kiosk', 'tv');
   const [orgId] = useConfigField<number>('ui.grafana_org_id', 1);
   const [refresh] = useConfigField<string>('ui.grafana_refresh', '10s');
-  const [embedEnabledRaw] = useConfigField<number>('ui.grafana_embed_enabled', 1);
+  const [embedEnabled] = useConfigField<boolean>('ui.grafana_embed_enabled', true);
 
   const [catalog, setCatalog] = useState<ObservabilityCatalogResponse | null>(null);
 
@@ -68,7 +68,6 @@ export function GrafanaDashboard() {
     }));
   }, [catalog]);
 
-  const embedEnabled = Boolean(embedEnabledRaw);
   const activePreset =
     presetOptions.find((item) => item.uid === String(dashboardUid || '').trim() && item.slug === String(dashboardSlug || '').trim()) ||
     (() => {

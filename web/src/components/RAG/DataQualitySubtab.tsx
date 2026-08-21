@@ -41,9 +41,9 @@ export function DataQualitySubtab() {
     'enrichment.chunk_summaries_max',
     100
   );
-  const [chunkSummariesEnrichDefault, setChunkSummariesEnrichDefault] = useConfigField<number>(
+  const [chunkSummariesEnrichDefault, setChunkSummariesEnrichDefault] = useConfigField<boolean>(
     'enrichment.chunk_summaries_enrich_default',
-    1
+    true
   );
 
   const [keywordsMaxPerCorpus, setKeywordsMaxPerCorpus] = useConfigField<number>(
@@ -55,9 +55,9 @@ export function DataQualitySubtab() {
     3
   );
   const [keywordsBoost, setKeywordsBoost] = useConfigField<number>('keywords.keywords_boost', 1.3);
-  const [keywordsAutoGenerate, setKeywordsAutoGenerate] = useConfigField<number>(
+  const [keywordsAutoGenerate, setKeywordsAutoGenerate] = useConfigField<boolean>(
     'keywords.keywords_auto_generate',
-    1
+    true
   );
   const [keywordsRefreshHours, setKeywordsRefreshHours] = useConfigField<number>(
     'keywords.keywords_refresh_hours',
@@ -267,8 +267,8 @@ export function DataQualitySubtab() {
             <label>
               <input
                 type="checkbox"
-                checked={chunkSummariesEnrichDefault !== 0}
-                onChange={(e) => setChunkSummariesEnrichDefault(e.target.checked ? 1 : 0)}
+                checked={chunkSummariesEnrichDefault}
+                onChange={(e) => setChunkSummariesEnrichDefault(e.target.checked)}
               />{' '}
               Enrich by default
               <TooltipIcon name="CHUNK_SUMMARIES_ENRICH_DEFAULT" />
@@ -390,14 +390,19 @@ export function DataQualitySubtab() {
         </div>
         <div className="input-row">
           <div className="input-group">
-            <label>
-              Auto-generate
-              <TooltipIcon name="KEYWORDS_AUTO_GENERATE" />
+            <label className="toggle">
+              <input
+                type="checkbox"
+                checked={keywordsAutoGenerate}
+                onChange={(e) => setKeywordsAutoGenerate(e.target.checked)}
+              />
+              <span className="toggle-track" aria-hidden="true">
+                <span className="toggle-thumb"></span>
+              </span>
+              <span className="toggle-label">
+                Auto-generate <TooltipIcon name="KEYWORDS_AUTO_GENERATE" />
+              </span>
             </label>
-            <select value={keywordsAutoGenerate} onChange={(e) => setKeywordsAutoGenerate(parseInt(e.target.value, 10))}>
-              <option value={1}>Enabled</option>
-              <option value={0}>Disabled</option>
-            </select>
           </div>
           <div className="input-group">
             <label>

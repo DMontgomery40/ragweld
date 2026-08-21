@@ -171,7 +171,7 @@ async def search(request: SearchRequest, response: Response) -> SearchResponse:
         }
 
         try:
-            if int(getattr(cfg.tracing, "tracing_enabled", 1) or 0) == 1:
+            if getattr(cfg.tracing, "tracing_enabled", True):
                 from server.observability.query_log import append_query_log
 
                 await append_query_log(

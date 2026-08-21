@@ -215,7 +215,7 @@ def test_ast_chunking_python_preserves_top_level_blocks() -> None:
         target_tokens=64,
         overlap_tokens=0,
         ast_overlap_lines=0,
-        preserve_imports=0,  # imports merge into the first block chunk
+        preserve_imports=False,  # imports merge into the first block chunk
         min_chunk_chars=10,
     )
     tok_cfg = TokenizationConfig(strategy="whitespace", normalize_unicode=False, lowercase=False)
@@ -247,7 +247,7 @@ def test_ast_chunking_python_can_isolate_imports_when_enabled() -> None:
         target_tokens=64,
         overlap_tokens=0,
         ast_overlap_lines=0,
-        preserve_imports=1,
+        preserve_imports=True,
         min_chunk_chars=10,
     )
     tok_cfg = TokenizationConfig(strategy="whitespace", normalize_unicode=False, lowercase=False)

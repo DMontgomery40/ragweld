@@ -161,3 +161,106 @@ def test_evaluation_config_metric_k_validation() -> None:
         EvaluationConfig(recall_at_10_k=0)
     with pytest.raises(ValidationError):
         EvaluationConfig(ndcg_at_10_k=999)
+
+
+BOOLEAN_SEMANTIC_CONFIG_PATHS = (
+    "chunking.preserve_imports",
+    "docker.docker_logs_timestamps",
+    "embedding.embedding_cache_enabled",
+    "enrichment.chunk_summaries_enrich_default",
+    "enrichment.enrich_code_chunks",
+    "generation.enrich_disabled",
+    "indexing.parquet_extract_include_column_names",
+    "indexing.parquet_extract_text_columns_only",
+    "indexing.skip_dense",
+    "keywords.keywords_auto_generate",
+    "reranking.tribrid_reranker_reload_on_change",
+    "retrieval.chunk_summary_search_enabled",
+    "retrieval.eval_multi",
+    "retrieval.query_expansion_enabled",
+    "retrieval.use_semantic_synonyms",
+    "semantic_cache.bypass_if_images",
+    "semantic_cache.enabled",
+    "tracing.alert_include_resolved",
+    "tracing.cost_tracking_enabled",
+    "tracing.langfuse_enabled",
+    "tracing.metrics_enabled",
+    "tracing.otel_export_enabled",
+    "tracing.tracing_enabled",
+    "training.learning_reranker_promote_if_improves",
+    "training.ragweld_agent_promote_if_improves",
+    "training.tribrid_reranker_mine_reset",
+    "ui.chat_show_citations",
+    "ui.chat_show_confidence",
+    "ui.chat_show_debug_footer",
+    "ui.chat_show_trace",
+    "ui.chat_stream_include_thinking",
+    "ui.chat_streaming_enabled",
+    "ui.editor_embed_enabled",
+    "ui.editor_enabled",
+    "ui.grafana_embed_enabled",
+    "ui.learning_reranker_show_setup_row",
+    "ui.learning_reranker_studio_immersive",
+    "ui.learning_reranker_studio_v2_enabled",
+    "ui.learning_reranker_visualizer_reduce_motion",
+    "ui.learning_reranker_visualizer_show_vector_field",
+    "ui.open_browser",
+)
+
+
+@pytest.mark.parametrize("path", BOOLEAN_SEMANTIC_CONFIG_PATHS)
+def test_boolean_semantic_config_fields_are_declared_bool(path: str) -> None:
+    """Boolean operator switches must be typed `bool` so the UI renders toggles, not spinbuttons."""
+    section, field = path.split(".")
+    section_model = TriBridConfig.model_fields[section].annotation
+    annotation = section_model.model_fields[field].annotation
+    assert annotation is bool, f"{path} is {annotation!r}, expected bool"
+
+
+def test_boolean_semantic_config_fields_have_no_integer_range_bounds() -> None:
+    """A 0/1 `ge`/`le` pair is the int-boolean smell this slice replaced; it must not come back."""
+    offenders = []
+    for path in BOOLEAN_SEMANTIC_CONFIG_PATHS:
+        section, field = path.split(".")
+        section_model = TriBridConfig.model_fields[section].annotation
+        for meta in section_model.model_fields[field].metadata:
+            if hasattr(meta, "ge") or hasattr(meta, "le"):
+                offenders.append(path)
+    assert offenders == []
+
+
+def test_stored_config_with_integer_zero_one_loads_as_bool() -> None:
+    """Operator configs persisted before the bool migration still validate into real booleans."""
+    stored = {
+        "tracing": {"tracing_enabled": 1, "langfuse_enabled": 0},
+        "ui": {"open_browser": 0, "chat_show_citations": 1},
+        "indexing": {"skip_dense": 1},
+        "semantic_cache": {"enabled": 1},
+    }
+    cfg = TriBridConfig.model_validate(stored)
+
+    assert cfg.tracing.tracing_enabled is True
+    assert cfg.tracing.langfuse_enabled is False
+    assert cfg.ui.open_browser is False
+    assert cfg.ui.chat_show_citations is True
+    assert cfg.indexing.skip_dense is True
+    assert cfg.semantic_cache.enabled is True
+
+
+def test_stored_config_with_string_zero_one_loads_as_bool() -> None:
+    """Env-sourced flat values arrive as strings and must coerce to the same booleans."""
+    cfg = TriBridConfig.model_validate({"tracing": {"tracing_enabled": "0", "metrics_enabled": "1"}})
+
+    assert cfg.tracing.tracing_enabled is False
+    assert cfg.tracing.metrics_enabled is True
+
+
+def test_checked_in_global_config_stores_booleans_for_boolean_semantic_fields() -> None:
+    """The canonical tribrid_config.json must carry real booleans, not legacy 0/1 integers."""
+    import json
+
+    raw = json.loads(DEFAULT_CONFIG_PATH.read_text())
+    for path in BOOLEAN_SEMANTIC_CONFIG_PATHS:
+        section, field = path.split(".")
+        if section in raw and field in raw[section]:
+            assert isinstance(raw[section][field], bool), f"{path} is stored as {raw[section][field]!r}"

@@ -93,7 +93,7 @@
     {
       "term": "Alert Include Resolved",
       "key": "ALERT_INCLUDE_RESOLVED",
-      "definition": "`ALERT_INCLUDE_RESOLVED` controls whether the alert pipeline emits a second notification when an incident transitions from firing to resolved. In this stack, keeping it enabled (`1`, default) gives on-call responders explicit closure signals, which helps reconcile incident timelines and downstream ticket automation. Disabling it (`0`) reduces message volume but removes recovery-state visibility, so unresolved-looking alerts can persist in chat channels or incident tools even after the condition clears. Use `1` when you rely on auditability and MTTR measurement, and only disable it if notification fatigue is materially harming response quality.",
+      "definition": "`ALERT_INCLUDE_RESOLVED` controls whether the alert pipeline emits a second notification when an incident transitions from firing to resolved. In this stack, keeping it enabled (default) gives on-call responders explicit closure signals, which helps reconcile incident timelines and downstream ticket automation. Disabling it reduces message volume but removes recovery-state visibility, so unresolved-looking alerts can persist in chat channels or incident tools even after the condition clears. Enable it when you rely on auditability and MTTR measurement, and only disable it if notification fatigue is materially harming response quality.",
       "category": "general",
       "related": [],
       "links": [
@@ -6126,7 +6126,7 @@
     {
       "term": "Learning Reranker Promotion Gate",
       "key": "LEARNING_RERANKER_PROMOTE_IF_IMPROVES",
-      "definition": "`LEARNING_RERANKER_PROMOTE_IF_IMPROVES` is the hard promotion gate for learning-reranker training. When set to `1` (default), a successful training job promotes the candidate artifact only if the primary dev metric exceeds the current baseline by at least `LEARNING_RERANKER_PROMOTE_EPSILON`; when set to `0`, every successful run can overwrite the active path. Keeping this enabled is safer in continuous-training loops because it preserves model stability during noisy data windows and imperfect labeling periods. Disable it only for controlled experiments with manual review and explicit rollback procedures.",
+      "definition": "`LEARNING_RERANKER_PROMOTE_IF_IMPROVES` is the hard promotion gate for learning-reranker training. When enabled (default), a successful training job promotes the candidate artifact only if the primary dev metric exceeds the current baseline by at least `LEARNING_RERANKER_PROMOTE_EPSILON`; when disabled, every successful run can overwrite the active path. Keeping this enabled is safer in continuous-training loops because it preserves model stability during noisy data windows and imperfect labeling periods. Disable it only for controlled experiments with manual review and explicit rollback procedures.",
       "category": "reranking",
       "related": [
         "LEARNING_RERANKER_PROMOTE_EPSILON",
@@ -6160,7 +6160,7 @@
     {
       "term": "Learning Reranker Show Setup Row",
       "key": "LEARNING_RERANKER_SHOW_SETUP_ROW",
-      "definition": "`LEARNING_RERANKER_SHOW_SETUP_ROW` controls whether the setup summary row is visible above the training studio dock layout (`1` = shown, `0` = collapsed; default `0`). This row provides quick context about run configuration and can reduce navigation overhead when comparing experiments, especially in dense training sessions. Hiding it increases available workspace for logs, visualizer output, and inspection panels, which can be better on smaller displays. Use `1` when onboarding or debugging configuration drift, and `0` when users already know the setup and need maximal panel real estate.",
+      "definition": "`LEARNING_RERANKER_SHOW_SETUP_ROW` controls whether the setup summary row is visible above the training studio dock layout (enabled = shown, disabled = collapsed; default disabled). This row provides quick context about run configuration and can reduce navigation overhead when comparing experiments, especially in dense training sessions. Hiding it increases available workspace for logs, visualizer output, and inspection panels, which can be better on smaller displays. Enable it when onboarding or debugging configuration drift, and disable it when users already know the setup and need maximal panel real estate.",
       "category": "reranking",
       "related": [],
       "links": [

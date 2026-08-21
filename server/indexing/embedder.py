@@ -33,7 +33,7 @@ class Embedder:
         # Deterministic embeddings must match the configured dimensionality so that
         # Postgres pgvector storage and stats are consistent across the system.
         self.dim = max(32, int(getattr(config, "embedding_dim", 256) or 256))
-        self._cache_enabled = bool(int(getattr(config, "embedding_cache_enabled", 0) or 0) == 1)
+        self._cache_enabled = bool(getattr(config, "embedding_cache_enabled", False))
         self._cache_lookup_batch: Callable[[list[str]], Awaitable[dict[str, list[float]]]] | None = None
         self._cache_upsert_batch: Callable[[dict[str, tuple[str, list[float]]]], Awaitable[int | None]] | None = None
 
@@ -473,7 +473,7 @@ def configure_postgres_embedding_cache_backend(embedder: Embedder, postgres: Pos
             pass
         return
     cfg = embedder.config
-    if bool(int(getattr(cfg, "embedding_cache_enabled", 0) or 0) != 1):
+    if not getattr(cfg, "embedding_cache_enabled", False):
         embedder.clear_cache_backend()
         return
 

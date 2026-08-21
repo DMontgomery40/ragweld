@@ -12,7 +12,7 @@ import type { ObservabilityStatusResponse } from '@/types/generated';
 
 export function GrafanaConfig() {
   const { api } = useAPI();
-  const [embedEnabledRaw, setEmbedEnabled, embedMeta] = useConfigField<number>('ui.grafana_embed_enabled', 1);
+  const [embedEnabled, setEmbedEnabled, embedMeta] = useConfigField<boolean>('ui.grafana_embed_enabled', true);
   const [baseUrl, setBaseUrl] = useConfigField<string>('ui.grafana_base_url', 'http://127.0.0.1:3301');
   const [dashboardUid, setDashboardUid] = useConfigField<string>('ui.grafana_dashboard_uid', 'ragweld-oncall-overview');
   const [dashboardSlug, setDashboardSlug] = useConfigField<string>('ui.grafana_dashboard_slug', 'on-call-overview');
@@ -44,7 +44,6 @@ export function GrafanaConfig() {
     };
   }, [api]);
 
-  const embedEnabled = Boolean(embedEnabledRaw);
   const normalizedBase = String(baseUrl || '').replace(/\/$/, '');
   const normalizedUid = String(dashboardUid || '').trim();
   const normalizedSlug = String(dashboardSlug || normalizedUid).trim() || normalizedUid;
@@ -147,7 +146,7 @@ export function GrafanaConfig() {
             <input
               type="checkbox"
               checked={embedEnabled}
-              onChange={(e) => setEmbedEnabled(e.target.checked ? 1 : 0)}
+              onChange={(e) => setEmbedEnabled(e.target.checked)}
             />
             Enable embedded Grafana
           </label>

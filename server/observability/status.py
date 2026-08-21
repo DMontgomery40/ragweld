@@ -188,7 +188,7 @@ def _build_operator_hint(cfg: TriBridConfig, mode: str, components: list[Observa
         return "Turn observability on by setting tracing mode to local, OTel, or OTel + Langfuse."
     if (
         mode in {"otel", "otel_langfuse"}
-        and int(cfg.tracing.otel_export_enabled or 0) == 1
+        and cfg.tracing.otel_export_enabled
         and not str(cfg.tracing.otlp_endpoint or "").strip()
     ):
         return "Set an OTLP endpoint or switch tracing mode back to local until your collector path is ready."
@@ -266,7 +266,7 @@ async def build_observability_status(config: TriBridConfig, *, repo_id: str | No
         _decorate_component(
             component_id="local_trace_buffer",
             label="Local trace buffer",
-            enabled=int(config.tracing.tracing_enabled or 0) == 1 and mode != "off",
+            enabled=config.tracing.tracing_enabled and mode != "off",
             configured=True,
             reachable=True,
             detail="Fallback UI trace buffer used by the workbench.",
@@ -274,7 +274,7 @@ async def build_observability_status(config: TriBridConfig, *, repo_id: str | No
         _decorate_component(
             component_id="otlp_export",
             label="OTLP export",
-            enabled=int(config.tracing.otel_export_enabled or 0) == 1 and mode in {"otel", "otel_langfuse"},
+            enabled=config.tracing.otel_export_enabled and mode in {"otel", "otel_langfuse"},
             configured=bool(otlp_url),
             reachable=otlp_reachable,
             detail=otlp_detail or "Configure an OTLP HTTP endpoint so traces can leave the API process.",
@@ -354,7 +354,7 @@ async def build_observability_status(config: TriBridConfig, *, repo_id: str | No
         _decorate_component(
             component_id="langfuse",
             label="Langfuse",
-            enabled=int(config.tracing.langfuse_enabled or 0) == 1 and mode == "otel_langfuse",
+            enabled=config.tracing.langfuse_enabled and mode == "otel_langfuse",
             configured=bool(langfuse_url),
             reachable=langfuse_reachable,
             detail=langfuse_detail or "Generation trace drilldown substrate.",
@@ -364,7 +364,7 @@ async def build_observability_status(config: TriBridConfig, *, repo_id: str | No
         _decorate_component(
             component_id="grafana",
             label="Grafana",
-            enabled=int(config.ui.grafana_embed_enabled or 0) == 1,
+            enabled=config.ui.grafana_embed_enabled,
             configured=bool(grafana_url),
             reachable=grafana_reachable,
             detail=grafana_detail,
