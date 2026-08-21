@@ -22,6 +22,10 @@ from starlette.responses import StreamingResponse
 
 from server.chat.provider_router import ProviderRoute, select_provider_route
 from server.db.neo4j import Neo4jClient
+from server.api.dependency_errors import dependency_unavailable_http_exception
+from server.dependency_errors import DependencyUnavailableError
+from server.api.retrieval_errors import retrieval_contract_mismatch_http_exception
+from server.retrieval.errors import RetrievalContractMismatchError
 from server.db.postgres import PostgresClient
 from server.indexing.chunker import Chunker
 from server.indexing.embedder import Embedder, configure_postgres_embedding_cache_backend
@@ -2217,6 +2221,10 @@ async def ingest_retrieval_pilot(
         )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RetrievalContractMismatchError as exc:
+        raise retrieval_contract_mismatch_http_exception(exc) from exc
+    except DependencyUnavailableError as exc:
+        raise dependency_unavailable_http_exception(exc.dependency, boundary=exc.operation, exc=exc) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -2240,6 +2248,10 @@ async def search_retrieval_pilot_execution_route(
         )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RetrievalContractMismatchError as exc:
+        raise retrieval_contract_mismatch_http_exception(exc) from exc
+    except DependencyUnavailableError as exc:
+        raise dependency_unavailable_http_exception(exc.dependency, boundary=exc.operation, exc=exc) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except ValueError as exc:

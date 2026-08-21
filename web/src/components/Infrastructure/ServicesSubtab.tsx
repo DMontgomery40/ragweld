@@ -27,6 +27,11 @@ const SERVICE_GROUPS: Array<{
     services: ['litellm', 'vllm'],
   },
   {
+    title: 'Vector store (pilot lane)',
+    description: 'Qdrant backs the Haystack/Docling/Qdrant retrieval lane.',
+    services: ['qdrant'],
+  },
+  {
     title: 'Observability',
     description: 'Metrics, traces, logs, dashboards, and telemetry collection.',
     services: ['grafana', 'prometheus', 'loki', 'promtail', 'tempo', 'alloy'],
@@ -46,6 +51,7 @@ const SERVICE_LABELS: Record<RagweldDockerService, string> = {
   alloy: 'Grafana Alloy',
   litellm: 'LiteLLM Gateway',
   vllm: 'vLLM Serving',
+  qdrant: 'Qdrant Vector Store',
 };
 
 function isKnownService(value: string | null | undefined): value is RagweldDockerService {

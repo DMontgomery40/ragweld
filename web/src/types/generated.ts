@@ -542,7 +542,7 @@ export interface DashboardIndexStorageBreakdown {
 export interface DependencyUnavailableDetail {
   code?: "dependency_unavailable"; // default: "dependency_unavailable"
   /** Unavailable required dependency */
-  dependency: "postgres" | "neo4j" | "feedback_log" | "lineage_store";
+  dependency: "postgres" | "neo4j" | "qdrant" | "embedding_provider" | "feedback_log" | "lineage_store";
   /** API operation that could not complete */
   operation: string;
   /** Stable, non-sensitive failure summary */
@@ -1582,6 +1582,12 @@ export interface ProviderHealth {
   detail?: string | null; // default: None
 }
 
+/** Qdrant vector-store connection for the Haystack/Docling/Qdrant lane. */
+export interface QdrantConfig {
+  /** Base URL of the Compose-owned Qdrant service backing the pilot retrieval lane */
+  url?: string; // default: "http://127.0.0.1:56333"
+}
+
 /** Sanitized readiness state for one required runtime dependency. */
 export interface ReadinessDependencyStatus {
   ok?: boolean; // default: False
@@ -2051,6 +2057,12 @@ export interface RetrievalPilotSearchResult {
   score: number;
   /** Short excerpt centered on the first match when possible. */
   excerpt: string;
+  /** Full chunk content for grounding and citation checks. */
+  content?: string; // default: ""
+  /** Retrieval leg that produced this result. */
+  source?: "vector" | "sparse" | "graph"; // default: "vector"
+  /** Provenance metadata carried through the pilot lane. */
+  metadata?: Record<string, unknown>;
 }
 
 /** Operator status for the OSS retrieval/indexing sidecar pilot. */
@@ -2088,8 +2100,8 @@ export interface RetrievalPilotStatusResponse {
   execution_backend?: "haystack_qdrant_local"; // default: "haystack_qdrant_local"
   /** Whether the real Haystack/Qdrant execution lane is hydrated and ready to search. */
   execution_ready?: boolean; // default: False
-  /** Filesystem path for the local Qdrant store used by the pilot. */
-  qdrant_path: string;
+  /** Base URL of the Compose-owned Qdrant service used by the pilot. */
+  qdrant_url: string;
   /** Qdrant collection/index name for this pilot corpus. */
   collection_name: string;
   /** Number of documents currently ingested into the real pilot execution lane. */
@@ -4363,6 +4375,7 @@ export interface TriBridConfig {
   indexing?: IndexingConfig;
   graph_storage?: GraphStorageConfig;
   graph_indexing?: GraphIndexingConfig;
+  qdrant?: QdrantConfig;
   fusion?: FusionConfig;
   vector_search?: VectorSearchConfig;
   sparse_search?: SparseSearchConfig;

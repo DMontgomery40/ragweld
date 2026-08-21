@@ -182,12 +182,12 @@ export function RetrievalPilotPanel({ corpusId, repoPath }: RetrievalPilotPanelP
           </div>
         </div>
         <div style={{ border: '1px solid var(--line)', borderRadius: '10px', padding: '12px', background: 'var(--card-bg)' }}>
-          <div style={{ fontSize: '11px', color: 'var(--fg-muted)', marginBottom: '4px' }}>Local Store</div>
+          <div style={{ fontSize: '11px', color: 'var(--fg-muted)', marginBottom: '4px' }}>Qdrant Service</div>
           <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--fg)' }}>
             {status?.execution_backend || 'haystack_qdrant_local'}
           </div>
           <div style={{ fontSize: '11px', color: 'var(--fg-muted)', marginTop: '6px', fontFamily: 'var(--font-mono)' }}>
-            {status?.qdrant_path || 'No local Qdrant path yet'}
+            {status?.qdrant_url || 'Qdrant service URL not resolved yet'}
           </div>
         </div>
       </div>

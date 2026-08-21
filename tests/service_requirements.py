@@ -8,6 +8,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 
 import asyncpg
+import httpx
 import pytest
 from neo4j import GraphDatabase
 
@@ -121,24 +122,53 @@ def probe_neo4j(
     return ServiceCapability(service="Neo4j", available=True, reason=f"Neo4j is reachable at {uri}")
 
 
+def probe_qdrant(
+    env: Mapping[str, str] | None = None,
+    *,
+    timeout_seconds: float = 1.0,
+) -> ServiceCapability:
+    values = os.environ if env is None else env
+    url = str(values.get("QDRANT_URL") or "http://127.0.0.1:56333").rstrip("/")
+    try:
+        response = httpx.get(f"{url}/readyz", timeout=timeout_seconds)
+        ok = response.status_code < 500
+    except Exception as exc:
+        return ServiceCapability(
+            service="Qdrant",
+            available=False,
+            reason=f"Qdrant is unavailable at {url} ({type(exc).__name__})",
+        )
+    if not ok:
+        return ServiceCapability(
+            service="Qdrant",
+            available=False,
+            reason=f"Qdrant at {url} responded {response.status_code}",
+        )
+    return ServiceCapability(service="Qdrant", available=True, reason=f"Qdrant is reachable at {url}")
+
+
 def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line("markers", "requires_postgres: requires a live authenticated PostgreSQL connection")
     config.addinivalue_line("markers", "requires_neo4j: requires a live authenticated Neo4j connection")
     config.addinivalue_line("markers", "requires_pg_search: requires the optional ParadeDB pg_search extension")
+    config.addinivalue_line("markers", "requires_qdrant: requires a live Qdrant vector-store service")
 
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
     del config
-    required: dict[str, list[pytest.Item]] = {"postgres": [], "neo4j": []}
+    required: dict[str, list[pytest.Item]] = {"postgres": [], "neo4j": [], "qdrant": []}
     for item in items:
         if item.get_closest_marker("requires_postgres") is not None:
             required["postgres"].append(item)
         if item.get_closest_marker("requires_neo4j") is not None:
             required["neo4j"].append(item)
+        if item.get_closest_marker("requires_qdrant") is not None:
+            required["qdrant"].append(item)
 
     probes = {
         "postgres": probe_postgres,
         "neo4j": probe_neo4j,
+        "qdrant": probe_qdrant,
     }
     unavailable: dict[str, ServiceCapability] = {}
     for name, marked_items in required.items():

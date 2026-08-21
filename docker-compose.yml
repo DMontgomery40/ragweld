@@ -139,6 +139,21 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
+  qdrant:
+    image: ${QDRANT_IMAGE:-qdrant/qdrant:v1.17.1}
+    labels:
+      io.ragweld.managed: "true"
+    ports:
+      - "127.0.0.1:${QDRANT_PORT:-56333}:6333"
+      - "127.0.0.1:${QDRANT_GRPC_PORT:-56334}:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c ':> /dev/tcp/127.0.0.1/6333' || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
   vllm:
     image: vllm/vllm-openai-cpu:v0.26.0-arm64
     labels:
@@ -230,6 +245,7 @@ services:
 
 volumes:
   postgres_data:
+  qdrant_data:
   neo4j_data:
   neo4j_logs:
   grafana_data:

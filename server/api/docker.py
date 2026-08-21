@@ -44,6 +44,7 @@ _DOCKER_SERVICES = frozenset(
         "alloy",
         "litellm",
         "vllm",
+        "qdrant",
     }
 )
 _DOCKER_ACTIONS = frozenset({"start", "stop", "restart"})

@@ -61,6 +61,7 @@ _SECTION_DEFAULTS: dict[str, _SectionDefaults] = {
     "tokenization": _SectionDefaults("corpus", "tribrid_retrieval", "retrieval", "advanced", "reindex"),
     "chunking": _SectionDefaults("corpus", "tribrid_retrieval", "retrieval", "advanced", "reindex"),
     "indexing": _SectionDefaults("corpus", "tribrid_retrieval", "retrieval", "advanced", "reindex"),
+    "qdrant": _SectionDefaults("global", "haystack_docling_qdrant", "retrieval", "advanced", "restart"),
     "graph_storage": _SectionDefaults("global", "neo4j", "graph", "basic", "restart"),
     "graph_indexing": _SectionDefaults("corpus", "neo4j", "graph", "advanced", "reindex"),
     "fusion": _SectionDefaults("corpus", "tribrid_retrieval", "retrieval", "advanced", "live"),

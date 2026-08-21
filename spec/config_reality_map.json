@@ -174,6 +174,12 @@
       "evidence": [
         "server/api/docker.py"
       ]
+    },
+    "qdrant": {
+      "disposition": "runtime_effect",
+      "evidence": [
+        "server/indexing/oss_retrieval_pilot.py"
+      ]
     }
   },
   "overrides": {},

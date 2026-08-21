@@ -25,6 +25,8 @@ compose() {
     NEO4J_PASSWORD="$NEO4J_PASSWORD" \
     NEO4J_HTTP_PORT=0 \
     NEO4J_BOLT_PORT=0 \
+    QDRANT_PORT=0 \
+    QDRANT_GRPC_PORT=0 \
     NEO4J_HEAP_INIT=256M \
     NEO4J_HEAP_MAX=512M \
     NEO4J_PAGECACHE=256M \
@@ -55,13 +57,15 @@ docker info >/dev/null 2>&1 || {
   exit 1
 }
 
-echo "[integration] project=${COMPOSE_PROJECT_NAME} starting disposable PostgreSQL and Neo4j"
-compose up -d --wait --wait-timeout 120 postgres neo4j
+echo "[integration] project=${COMPOSE_PROJECT_NAME} starting disposable PostgreSQL, Neo4j, and Qdrant"
+compose up -d --wait --wait-timeout 120 postgres neo4j qdrant
 
 postgres_binding="$(compose port postgres 5432)"
 neo4j_binding="$(compose port neo4j 7687)"
+qdrant_binding="$(compose port qdrant 6333)"
 postgres_port="${postgres_binding##*:}"
 neo4j_port="${neo4j_binding##*:}"
+qdrant_port="${qdrant_binding##*:}"
 
 export POSTGRES_HOST="127.0.0.1"
 export POSTGRES_PORT="$postgres_port"
@@ -72,6 +76,7 @@ export POSTGRES_DSN="postgresql://postgres:${POSTGRES_PASSWORD}@127.0.0.1:${POST
 export NEO4J_URI="bolt://127.0.0.1:${neo4j_port}"
 export NEO4J_USER="neo4j"
 export NEO4J_PASSWORD
+export QDRANT_URL="http://127.0.0.1:${qdrant_port}"
 export RAGWELD_LOAD_DOTENV=0
 export RAGWELD_STRICT_INTEGRATION=1
 
@@ -91,6 +96,7 @@ target = Path(os.environ["RAGWELD_CONFIG_PATH"])
 payload = json.loads(source.read_text(encoding="utf-8"))
 payload["indexing"]["postgres_url"] = os.environ["POSTGRES_DSN"]
 payload["graph_storage"]["neo4j_uri"] = os.environ["NEO4J_URI"]
+payload.setdefault("qdrant", {})["url"] = os.environ["QDRANT_URL"]
 target.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 target.chmod(0o600)
 PY

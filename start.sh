@@ -286,8 +286,8 @@ if [[ "$START_DOCKER" == "1" ]]; then
     compose+=(-f infra/docker-compose.observability.yml)
   fi
 
-  services=(postgres neo4j vllm litellm)
-  [[ "$NATIVE_POSTGRES" == "1" ]] && services=(neo4j vllm litellm)
+  services=(postgres neo4j qdrant vllm litellm)
+  [[ "$NATIVE_POSTGRES" == "1" ]] && services=(neo4j qdrant vllm litellm)
   if [[ "$WITH_OBSERVABILITY" == "1" ]]; then
     services+=(postgres-exporter prometheus grafana loki promtail tempo alloy)
   fi

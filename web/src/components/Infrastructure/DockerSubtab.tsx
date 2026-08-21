@@ -19,6 +19,7 @@ const SERVICE_LABELS: Record<RagweldDockerService, string> = {
   alloy: 'Grafana Alloy',
   litellm: 'LiteLLM Gateway',
   vllm: 'vLLM Serving',
+  qdrant: 'Qdrant Vector Store',
 };
 
 function isRagweldService(value: string | null | undefined): value is RagweldDockerService {

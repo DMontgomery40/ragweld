@@ -4603,6 +4603,8 @@
             "enum": [
               "postgres",
               "neo4j",
+              "qdrant",
+              "embedding_provider",
               "feedback_log",
               "lineage_store"
             ],
@@ -10699,6 +10701,19 @@
         "title": "ProvidersHealthResponse",
         "type": "object"
       },
+      "QdrantConfig": {
+        "description": "Qdrant vector-store connection for the Haystack/Docling/Qdrant lane.",
+        "properties": {
+          "url": {
+            "default": "http://127.0.0.1:56333",
+            "description": "Base URL of the Compose-owned Qdrant service backing the pilot retrieval lane",
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "title": "QdrantConfig",
+        "type": "object"
+      },
       "ReadinessDependencyStatus": {
         "description": "Sanitized readiness state for one required runtime dependency.",
         "properties": {
@@ -13994,6 +14009,12 @@
             "title": "Chunk Id",
             "type": "string"
           },
+          "content": {
+            "default": "",
+            "description": "Full chunk content for grounding and citation checks.",
+            "title": "Content",
+            "type": "string"
+          },
           "end_line": {
             "description": "End line of the matched chunk.",
             "minimum": 1.0,
@@ -14022,11 +14043,28 @@
             "description": "Detected language for the chunk.",
             "title": "Language"
           },
+          "metadata": {
+            "additionalProperties": true,
+            "description": "Provenance metadata carried through the pilot lane.",
+            "title": "Metadata",
+            "type": "object"
+          },
           "score": {
             "description": "Haystack/Qdrant relevance score.",
             "minimum": 0.0,
             "title": "Score",
             "type": "number"
+          },
+          "source": {
+            "default": "vector",
+            "description": "Retrieval leg that produced this result.",
+            "enum": [
+              "vector",
+              "sparse",
+              "graph"
+            ],
+            "title": "Source",
+            "type": "string"
           },
           "source_path": {
             "description": "Absolute source path for the matched chunk.",
@@ -14185,9 +14223,9 @@
             "title": "Provenance Fields",
             "type": "array"
           },
-          "qdrant_path": {
-            "description": "Filesystem path for the local Qdrant store used by the pilot.",
-            "title": "Qdrant Path",
+          "qdrant_url": {
+            "description": "Base URL of the Compose-owned Qdrant service used by the pilot.",
+            "title": "Qdrant Url",
             "type": "string"
           },
           "repo_path": {
@@ -14223,7 +14261,7 @@
           "documents_path",
           "manifest_path",
           "export_exists",
-          "qdrant_path",
+          "qdrant_url",
           "collection_name"
         ],
         "title": "RetrievalPilotStatusResponse",
@@ -17069,6 +17107,9 @@
           "mcp": {
             "$ref": "#/components/schemas/MCPConfig"
           },
+          "qdrant": {
+            "$ref": "#/components/schemas/QdrantConfig"
+          },
           "reranking": {
             "$ref": "#/components/schemas/RerankingConfig"
           },
@@ -17163,6 +17204,9 @@
           },
           "mcp": {
             "$ref": "#/components/schemas/MCPConfig"
+          },
+          "qdrant": {
+            "$ref": "#/components/schemas/QdrantConfig"
           },
           "reranking": {
             "$ref": "#/components/schemas/RerankingConfig"

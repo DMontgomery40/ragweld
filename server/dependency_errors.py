@@ -26,7 +26,7 @@ _TRANSPORT_UNAVAILABLE = (
     TimeoutError,
 )
 
-DependencyName = Literal["postgres", "neo4j", "feedback_log", "lineage_store"]
+DependencyName = Literal["postgres", "neo4j", "qdrant", "embedding_provider", "feedback_log", "lineage_store"]
 
 
 class DependencyUnavailableError(RuntimeError):

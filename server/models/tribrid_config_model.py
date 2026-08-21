@@ -253,7 +253,7 @@ class RetrievalPilotStatusResponse(BaseModel):
         default=False,
         description="Whether the real Haystack/Qdrant execution lane is hydrated and ready to search.",
     )
-    qdrant_path: str = Field(description="Filesystem path for the local Qdrant store used by the pilot.")
+    qdrant_url: str = Field(description="Base URL of the Compose-owned Qdrant service used by the pilot.")
     collection_name: str = Field(description="Qdrant collection/index name for this pilot corpus.")
     indexed_document_count: int = Field(
         default=0,
@@ -372,6 +372,13 @@ class RetrievalPilotSearchResult(BaseModel):
     language: str | None = Field(default=None, description="Detected language for the chunk.")
     score: float = Field(ge=0.0, description="Haystack/Qdrant relevance score.")
     excerpt: str = Field(description="Short excerpt centered on the first match when possible.")
+    content: str = Field(default="", description="Full chunk content for grounding and citation checks.")
+    source: Literal["vector", "sparse", "graph"] = Field(
+        default="vector", description="Retrieval leg that produced this result."
+    )
+    metadata: dict[str, Any] = Field(
+        default_factory=dict, description="Provenance metadata carried through the pilot lane."
+    )
 
 
 class RetrievalPilotSearchResponse(BaseModel):
@@ -884,7 +891,7 @@ class DependencyUnavailableDetail(BaseModel):
     """Public error detail returned when a required runtime dependency is unavailable."""
 
     code: Literal["dependency_unavailable"] = "dependency_unavailable"
-    dependency: Literal["postgres", "neo4j", "feedback_log", "lineage_store"] = Field(
+    dependency: Literal["postgres", "neo4j", "qdrant", "embedding_provider", "feedback_log", "lineage_store"] = Field(
         description="Unavailable required dependency"
     )
     operation: str = Field(description="API operation that could not complete")
@@ -5997,6 +6004,15 @@ class UIConfig(BaseModel):
     )
 
 
+class QdrantConfig(BaseModel):
+    """Qdrant vector-store connection for the Haystack/Docling/Qdrant lane."""
+
+    url: str = Field(
+        default="http://127.0.0.1:56333",
+        description="Base URL of the Compose-owned Qdrant service backing the pilot retrieval lane",
+    )
+
+
 class HydrationConfig(BaseModel):
     """Context hydration configuration."""
 
@@ -6575,6 +6591,7 @@ class TriBridConfig(BaseModel):
     indexing: IndexingConfig = Field(default_factory=IndexingConfig)
     graph_storage: GraphStorageConfig = Field(default_factory=GraphStorageConfig)
     graph_indexing: GraphIndexingConfig = Field(default_factory=GraphIndexingConfig)
+    qdrant: QdrantConfig = Field(default_factory=QdrantConfig)
     fusion: FusionConfig = Field(default_factory=FusionConfig)
     vector_search: VectorSearchConfig = Field(default_factory=VectorSearchConfig)
     sparse_search: SparseSearchConfig = Field(default_factory=SparseSearchConfig)

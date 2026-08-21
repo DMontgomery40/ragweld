@@ -137,4 +137,5 @@ markers = [
     "requires_postgres: requires a live authenticated PostgreSQL connection",
     "requires_neo4j: requires a live authenticated Neo4j connection",
     "requires_pg_search: requires the optional ParadeDB pg_search extension",
+    "requires_qdrant: requires a live Qdrant vector-store service",
 ]

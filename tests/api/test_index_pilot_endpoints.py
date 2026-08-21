@@ -1,10 +1,13 @@
+import json
 import shutil
 import uuid
 from pathlib import Path
 
-import psutil
 import pytest
 from httpx import AsyncClient
+
+from server.config import load_config
+from server.retrieval.contracts import contract_hash, dense_contract_from_config
 
 
 def _repo_root() -> Path:
@@ -98,6 +101,7 @@ async def test_retrieval_pilot_search_preview_returns_provenance_hits(client: As
         shutil.rmtree(export_dir, ignore_errors=True)
 
 
+@pytest.mark.requires_qdrant
 @pytest.mark.asyncio
 async def test_retrieval_pilot_ingest_and_real_search_return_qdrant_hits(client: AsyncClient, tmp_path: Path) -> None:
     corpus_id = f"pytest_pilot_real_{uuid.uuid4().hex[:8]}"
@@ -128,7 +132,14 @@ async def test_retrieval_pilot_ingest_and_real_search_return_qdrant_hits(client:
         ingest_body = ingest_res.json()
         assert ingest_body["status"]["execution_ready"] is True
         assert ingest_body["status"]["indexed_document_count"] >= 1
-        assert Path(ingest_body["status"]["qdrant_path"]).exists()
+        assert ingest_body["status"]["qdrant_url"].startswith("http")
+
+        # The pilot must record the operator's real dense contract at ingest time.
+        manifest_path = _pilot_dir(corpus_id) / "manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        expected_contract = dense_contract_from_config(load_config())
+        assert manifest["dense_contract_hash"] == contract_hash(expected_contract)
+        assert manifest["dense_contract"]["dimensions"] == expected_contract["dimensions"]
 
         search_res = await client.post(
             f"/api/index/{corpus_id}/pilot/search",
@@ -143,9 +154,52 @@ async def test_retrieval_pilot_ingest_and_real_search_return_qdrant_hits(client:
         assert top["file_path"] in {"src/retrieval_target.py", "README.md"}
         assert float(top["score"]) >= 0.0
         assert body["status"]["execution_ready"] is True
+        # Citation-capable result shape: full content, leg discriminator, metadata.
+        assert top["content"].strip()
+        assert top["source"] == "vector"
+        assert top["metadata"].get("file_path") == top["file_path"]
 
-        qdrant_path = Path(body["status"]["qdrant_path"]).resolve()
-        open_files = [Path(item.path).resolve() for item in psutil.Process().open_files()]
-        assert not any(path == qdrant_path or qdrant_path in path.parents for path in open_files)
+        # A drifted stored contract must fail closed with the typed 409, not
+        # silently search under a different embedding space.
+        drifted = dict(manifest)
+        drifted["dense_contract"] = dict(manifest["dense_contract"], dimensions=9999)
+        manifest_path.write_text(json.dumps(drifted, indent=2, sort_keys=True), encoding="utf-8")
+        mismatch_res = await client.post(
+            f"/api/index/{corpus_id}/pilot/search",
+            params={"repo_path": str(repo)},
+            json={"corpus_id": corpus_id, "query": "retrieve_context", "top_k": 3},
+        )
+        assert mismatch_res.status_code == 409, mismatch_res.text
+        detail = mismatch_res.json()["detail"]
+        assert detail["code"] == "embedding_contract_mismatch"
+        assert detail["leg"] == "vector"
+        manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
+
+        # Re-ingesting under a drifted contract without force_rebuild is a 409.
+        manifest_path.write_text(json.dumps(drifted, indent=2, sort_keys=True), encoding="utf-8")
+        drift_ingest = await client.post(
+            f"/api/index/{corpus_id}/pilot/ingest",
+            params={"repo_path": str(repo)},
+            json={"corpus_id": corpus_id, "force_rebuild": False},
+        )
+        assert drift_ingest.status_code == 409, drift_ingest.text
+        manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
+
+        # A wiped/empty Qdrant collection with a "ready" manifest must read as
+        # not-ready (404), never as an empty 200.
+        import httpx as _httpx
+
+        collection = body["status"]["collection_name"]
+        qdrant_url = body["status"]["qdrant_url"]
+        delete_res = _httpx.delete(f"{qdrant_url}/collections/{collection}", timeout=10.0)
+        assert delete_res.status_code in (200, 202), delete_res.text
+        wiped_res = await client.post(
+            f"/api/index/{corpus_id}/pilot/search",
+            params={"repo_path": str(repo)},
+            json={"corpus_id": corpus_id, "query": "retrieve_context", "top_k": 3},
+        )
+        assert wiped_res.status_code == 404, wiped_res.text
+        assert "re-ingest" in wiped_res.json()["detail"]
+
     finally:
         shutil.rmtree(export_dir, ignore_errors=True)

@@ -56,14 +56,18 @@ Each JSONL row is chunk-oriented and preserves provenance-critical metadata:
   not lose file/line fidelity.
 - It keeps Neo4j parity explicit with `graph_parity_mode="neo4j_v1"` while graph
   cutover work is still pending.
-- It now proves a real local Haystack/Qdrant execution lane on top of the same
-  sidecar contract, instead of stopping at export-only plumbing.
+- It now proves a real Haystack execution lane against the Compose-owned Qdrant
+  service on top of the same sidecar contract, instead of stopping at
+  export-only plumbing.
 
 ## Current Limits
 
-- The real pilot lane currently uses deterministic embeddings to prove the
-  Haystack/Qdrant mechanics and provenance contract without coupling hydration to
-  provider-backed embedding availability.
+- The pilot lane embeds with the operator's real embedding configuration and
+  records the dense contract in its manifest; search and re-ingest fail closed
+  (typed 409) when the stored contract no longer matches the runtime
+  configuration.
+- Qdrant runs as the Compose-owned `qdrant` service (`qdrant.url` config);
+  the embedded on-disk store was removed.
 - Preview search still exists as a sidecar-debug tool, but the Retrieval tab now
   prefers the real Haystack/Qdrant lane.
 - Dependency status for `docling`, `haystack`, and `qdrant_client` is surfaced

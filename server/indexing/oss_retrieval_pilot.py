@@ -3,7 +3,6 @@ from __future__ import annotations
 import importlib.util
 import json
 import re
-import shutil
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -24,6 +23,9 @@ from server.models.tribrid_config_model import (
     RetrievalPilotStatusResponse,
     TriBridConfig,
 )
+from server.dependency_errors import DependencyUnavailableError
+from server.retrieval.contracts import contract_hash, dense_contract_from_config
+from server.retrieval.errors import EmbeddingContractMismatchError
 from server.services.config_store import get_config as load_scoped_config
 
 _ROOT = Path(__file__).resolve().parents[2]
@@ -64,8 +66,28 @@ def _manifest_path(corpus_id: str) -> Path:
     return _pilot_dir(corpus_id) / "manifest.json"
 
 
-def _qdrant_path(corpus_id: str) -> Path:
-    return _pilot_dir(corpus_id) / "qdrant"
+def _qdrant_url(cfg: TriBridConfig) -> str:
+    return str(cfg.qdrant.url or "").strip().rstrip("/")
+
+
+def _pilot_document_store(cfg: TriBridConfig, corpus_id: str, *, embedding_dim: int, recreate: bool):
+    """Open the pilot collection on the Compose-owned Qdrant service."""
+    from haystack_integrations.document_stores.qdrant import QdrantDocumentStore
+
+    return QdrantDocumentStore(
+        url=_qdrant_url(cfg),
+        index=_collection_name(corpus_id),
+        embedding_dim=int(embedding_dim),
+        recreate_index=bool(recreate),
+        progress_bar=False,
+    )
+
+
+def _raise_qdrant_unavailable(exc: Exception, *, operation: str) -> None:
+    from qdrant_client.http.exceptions import ResponseHandlingException
+
+    if isinstance(exc, (ConnectionError, TimeoutError, OSError, ResponseHandlingException)):
+        raise DependencyUnavailableError("qdrant", operation) from exc
 
 
 def _collection_name(corpus_id: str) -> str:
@@ -109,14 +131,13 @@ def _ignore_patterns(cfg: TriBridConfig) -> list[str]:
 
 
 def _pilot_embedder(cfg: TriBridConfig) -> Embedder:
-    """Use deterministic embeddings for the pilot execution lane.
+    """Build the pilot embedder from the operator's real embedding configuration.
 
-    The current goal is to prove the Haystack/Qdrant mechanics and provenance
-    contract without coupling pilot hydration to whichever provider-backed
-    embedding runtime happens to be configured on the machine.
+    The pilot lane must produce vectors under the same contract as the rest of
+    the system; it records that contract in its manifest at ingest time and
+    search fails closed on a mismatch.
     """
-    pilot_embedding_cfg = cfg.embedding.model_copy(update={"embedding_backend": "deterministic"})
-    return Embedder(pilot_embedding_cfg, cfg.tokenization)
+    return Embedder(cfg.embedding, cfg.tokenization)
 
 
 def _parse_manifest(corpus_id: str) -> dict[str, Any]:
@@ -150,7 +171,7 @@ def _operator_hint(
             f"Pilot export is ready. Install {joined} to advance from sidecar export/preview into the full OSS backend."
         )
     if not execution_ready:
-        return "Pilot export is ready. Hydrate the local Haystack/Qdrant lane before running real OSS retrieval."
+        return "Pilot export is ready. Hydrate the Haystack lane on the Compose-owned Qdrant service before running real OSS retrieval."
     return "Real Haystack/Qdrant pilot retrieval is ready in-product. Next step: promote this lane and retire preview-only pilot search."
 
 
@@ -192,7 +213,7 @@ async def build_retrieval_pilot_status(*, corpus_id: str, repo_path: str) -> Ret
         provenance_fields=list(_PROVENANCE_FIELDS),
         package_status=package_status,
         execution_ready=execution_ready,
-        qdrant_path=str(_qdrant_path(corpus_id)),
+        qdrant_url=_qdrant_url(await _load_effective_config(corpus_id)),
         collection_name=_collection_name(corpus_id),
         indexed_document_count=int(manifest.get("indexed_document_count") or 0),
         last_indexed_at=parsed_last_indexed_at,
@@ -327,11 +348,11 @@ def _require_execution_packages() -> None:
 
 
 def _close_qdrant_document_store(store: Any) -> None:
-    """Release the embedded Qdrant client owned by a Haystack document store.
+    """Release the Qdrant client session owned by a Haystack document store.
 
-    QdrantDocumentStore does not currently expose a public close method. Its
-    lazily-created sync client does, and must be closed before a local pilot
-    directory can be safely removed or rebuilt by a long-running API process.
+    QdrantDocumentStore does not expose a public close method; closing its
+    lazily-created sync client releases the HTTP session to the Compose-owned
+    Qdrant service in a long-running API process.
     """
     client = getattr(store, "_client", None)
     if client is not None:
@@ -348,23 +369,38 @@ async def ingest_retrieval_pilot_execution(*, corpus_id: str, repo_path: str, fo
 
     from haystack import Document
     from haystack.document_stores.types import DuplicatePolicy
-    from haystack_integrations.document_stores.qdrant import QdrantDocumentStore
 
     cfg = await _load_effective_config(corpus_id)
     embedder = _pilot_embedder(cfg)
-    qdrant_path = _qdrant_path(corpus_id)
-    if force_rebuild:
-        shutil.rmtree(qdrant_path, ignore_errors=True)
-    qdrant_path.mkdir(parents=True, exist_ok=True)
 
-    store = QdrantDocumentStore(
-        path=str(qdrant_path),
-        index=_collection_name(corpus_id),
-        embedding_dim=int(embedder.dim),
-        recreate_index=bool(force_rebuild),
-        on_disk=True,
-        progress_bar=False,
-    )
+    # Fail closed before touching the store: re-ingesting under a different
+    # embedding contract requires an explicit force_rebuild.
+    manifest_before = _parse_manifest(corpus_id)
+    stored_contract = manifest_before.get("dense_contract")
+    if (
+        not force_rebuild
+        and bool(manifest_before.get("execution_ready") or False)
+        and isinstance(stored_contract, dict)
+    ):
+        current_contract = dense_contract_from_config(cfg)
+        if not stored_contract or contract_hash(stored_contract) != contract_hash(current_contract):
+            raise EmbeddingContractMismatchError(
+                corpus_id=corpus_id,
+                expected_contract={
+                    "backend": str(stored_contract.get("backend") or ""),
+                    "provider": str(stored_contract.get("provider") or ""),
+                    "model": str(stored_contract.get("model") or ""),
+                    "dimensions": int(stored_contract.get("dimensions") or 0),
+                },
+                current_contract={
+                    "backend": str(current_contract.get("backend") or ""),
+                    "provider": str(current_contract.get("provider") or ""),
+                    "model": str(current_contract.get("model") or ""),
+                    "dimensions": int(current_contract.get("dimensions") or 0),
+                },
+            )
+
+    store = _pilot_document_store(cfg, corpus_id, embedding_dim=int(embedder.dim), recreate=bool(force_rebuild))
 
     try:
         lines = [line for line in documents_path.read_text(encoding="utf-8").splitlines() if line.strip()]
@@ -385,7 +421,10 @@ async def ingest_retrieval_pilot_execution(*, corpus_id: str, repo_path: str, fo
                 texts.append(str(raw.get("content") or ""))
             if not parsed_batch:
                 continue
-            embeddings = await embedder.embed_batch(texts)
+            try:
+                embeddings = await embedder.embed_batch(texts)
+            except RuntimeError as exc:
+                raise DependencyUnavailableError("embedding_provider", "Pilot ingest embedding") from exc
             docs = [
                 Document(
                     id=str(raw.get("id") or ""),
@@ -395,18 +434,29 @@ async def ingest_retrieval_pilot_execution(*, corpus_id: str, repo_path: str, fo
                 )
                 for raw, emb in zip(parsed_batch, embeddings, strict=True)
             ]
-            store.write_documents(docs, policy=DuplicatePolicy.OVERWRITE)
+            try:
+                store.write_documents(docs, policy=DuplicatePolicy.OVERWRITE)
+            except Exception as exc:
+                _raise_qdrant_unavailable(exc, operation="Pilot Qdrant ingest")
+                raise
             indexed_document_count += len(docs)
-        stored_document_count = int(store.count_documents())
+        try:
+            stored_document_count = int(store.count_documents())
+        except Exception as exc:
+            _raise_qdrant_unavailable(exc, operation="Pilot Qdrant ingest")
+            raise
     finally:
         _close_qdrant_document_store(store)
 
     manifest = _parse_manifest(corpus_id)
+    dense_contract = dense_contract_from_config(cfg)
     manifest.update(
         {
             "execution_ready": True,
             "indexed_document_count": stored_document_count,
             "last_indexed_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+            "dense_contract": dense_contract,
+            "dense_contract_hash": contract_hash(dense_contract),
         }
     )
     manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
@@ -531,27 +581,60 @@ async def search_retrieval_pilot_execution(
     if not bool(manifest.get("execution_ready") or False):
         raise FileNotFoundError("pilot execution lane not ready; ingest the Haystack/Qdrant lane first")
 
-    qdrant_path = _qdrant_path(corpus_id)
-    if not qdrant_path.exists():
-        raise FileNotFoundError("pilot execution lane not ready; local Qdrant store is missing")
-
     from haystack_integrations.components.retrievers.qdrant import QdrantEmbeddingRetriever
-    from haystack_integrations.document_stores.qdrant import QdrantDocumentStore
 
     cfg = await _load_effective_config(corpus_id)
+    stored_contract = manifest.get("dense_contract")
+    if not isinstance(stored_contract, dict) or not stored_contract:
+        # An execution-ready manifest without a recorded contract predates
+        # contract enforcement; its vectors are not trustworthy. Fail closed.
+        raise FileNotFoundError(
+            "pilot execution lane has no recorded embedding contract; re-ingest with force_rebuild=true"
+        )
+    if True:
+        current_contract = dense_contract_from_config(cfg)
+        if contract_hash(stored_contract) != contract_hash(current_contract):
+            raise EmbeddingContractMismatchError(
+                corpus_id=corpus_id,
+                expected_contract={
+                    "backend": str(stored_contract.get("backend") or ""),
+                    "provider": str(stored_contract.get("provider") or ""),
+                    "model": str(stored_contract.get("model") or ""),
+                    "dimensions": int(stored_contract.get("dimensions") or 0),
+                },
+                current_contract={
+                    "backend": str(current_contract.get("backend") or ""),
+                    "provider": str(current_contract.get("provider") or ""),
+                    "model": str(current_contract.get("model") or ""),
+                    "dimensions": int(current_contract.get("dimensions") or 0),
+                },
+            )
     embedder = _pilot_embedder(cfg)
-    store = QdrantDocumentStore(
-        path=str(qdrant_path),
-        index=_collection_name(corpus_id),
-        embedding_dim=int(embedder.dim),
-        recreate_index=False,
-        on_disk=True,
-        progress_bar=False,
-    )
+    store = _pilot_document_store(cfg, corpus_id, embedding_dim=int(embedder.dim), recreate=False)
     try:
+        # Fix truthfulness after a data-plane reset: Haystack auto-creates a
+        # missing collection, so an empty store with a "ready" manifest must
+        # read as not-ready instead of returning an empty 200.
+        try:
+            stored_document_count = int(store.count_documents())
+        except Exception as exc:
+            _raise_qdrant_unavailable(exc, operation="Pilot Qdrant search")
+            raise
+        expected_document_count = int(manifest.get("indexed_document_count") or 0)
+        if stored_document_count <= 0 and expected_document_count > 0:
+            raise FileNotFoundError(
+                "pilot execution lane not ready; Qdrant collection is empty or missing — re-ingest the pilot lane"
+            )
         retriever = QdrantEmbeddingRetriever(document_store=store, top_k=int(top_k))
-        query_embedding = await embedder.embed(query)
-        response = retriever.run(query_embedding=query_embedding, top_k=int(top_k))
+        try:
+            query_embedding = await embedder.embed(query)
+        except RuntimeError as exc:
+            raise DependencyUnavailableError("embedding_provider", "Pilot search embedding") from exc
+        try:
+            response = retriever.run(query_embedding=query_embedding, top_k=int(top_k))
+        except Exception as exc:
+            _raise_qdrant_unavailable(exc, operation="Pilot Qdrant search")
+            raise
         documents = list(response.get("documents") or [])
     finally:
         _close_qdrant_document_store(store)
@@ -566,6 +649,9 @@ async def search_retrieval_pilot_execution(
             language=str((doc.meta or {}).get("language") or "") or None,
             score=float(doc.score or 0.0),
             excerpt=_excerpt(str(doc.content or ""), terms),
+            content=str(doc.content or ""),
+            source="vector",
+            metadata=dict(doc.meta or {}),
         )
         for doc in documents
     ]

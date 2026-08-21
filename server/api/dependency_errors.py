@@ -17,7 +17,7 @@ from server.models.tribrid_config_model import (
 
 logger = logging.getLogger(__name__)
 
-DependencyName = Literal["postgres", "neo4j", "feedback_log", "lineage_store"]
+DependencyName = Literal["postgres", "neo4j", "qdrant", "embedding_provider", "feedback_log", "lineage_store"]
 
 DEPENDENCY_UNAVAILABLE_RESPONSES = {
     503: {
@@ -43,6 +43,18 @@ def dependency_unavailable_http_exception(
         operator_hint = (
             f"{boundary} reached graph storage but could not establish the corpus database connection; "
             "verify the scoped Ragweld Neo4j service and resolved database, then retry."
+        )
+    elif dependency == "qdrant":
+        message = "Qdrant vector store is unavailable."
+        operator_hint = (
+            f"{boundary} could not reach the Compose-owned Qdrant service; verify the ragweld qdrant "
+            "container and the configured qdrant.url, then retry."
+        )
+    elif dependency == "embedding_provider":
+        message = "The configured embedding provider is unavailable."
+        operator_hint = (
+            f"{boundary} could not produce embeddings from the configured provider; verify the embedding "
+            "runtime/model and provider credentials, then retry."
         )
     elif dependency == "feedback_log":
         message = "Feedback log storage is unavailable."

@@ -157,7 +157,7 @@ INDEXING_STORAGE_BACKEND_OPTIONS: tuple[RuntimeOption, ...] = (
     RuntimeOption(
         id="haystack_qdrant_local",
         label="Haystack/Qdrant local pilot",
-        description="Local Qdrant-backed OSS pilot lane hydrated from the sidecar export contract.",
+        description="Compose-owned Qdrant service backing the OSS pilot lane hydrated from the sidecar export contract.",
     ),
     RuntimeOption(
         id="postgres_pgvector",
@@ -190,7 +190,7 @@ SEARCH_VECTOR_BACKEND_OPTIONS: tuple[RuntimeOption, ...] = (
     RuntimeOption(
         id="haystack_qdrant_local",
         label="Haystack/Qdrant local pilot",
-        description="Local Qdrant vector retrieval driven through the Haystack pilot lane.",
+        description="Qdrant vector retrieval on the Compose-owned service, driven through the Haystack pilot lane.",
     ),
     RuntimeOption(
         id="postgres_pgvector",
