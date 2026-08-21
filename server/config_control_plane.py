@@ -1168,23 +1168,48 @@ async def _build_observability_integration_readiness(
     )
 
 
+def _eval_substrate_executable(contract_id: str) -> tuple[bool, str]:
+    """Functional presence check for the eval substrate binaries/packages."""
+    import importlib.util
+    import shutil as _shutil
+
+    if contract_id == "ragas":
+        if importlib.util.find_spec("ragas") is not None:
+            return True, "ragas package importable"
+        return False, "ragas package is not installed; evaluation runs the native retrieval scorer, not Ragas"
+    if contract_id == "promptfoo":
+        local_bin = _SERVER_ROOT.parent / "web" / "node_modules" / ".bin" / "promptfoo"
+        if _shutil.which("promptfoo") or local_bin.exists():
+            return True, "promptfoo binary present"
+        return False, "promptfoo CLI is not installed; no Promptfoo regression suite executes"
+    return True, ""
+
+
 def _build_eval_integration_readiness(config: TriBridConfig, contract: ConfigIntegrationContract) -> IntegrationReadiness:
     missing_config = [path for path in contract.required_config_paths if _is_missing(_config_value(config, path))]
+    executable, executable_detail = _eval_substrate_executable(contract.id)
+    failing_checks: list[str] = []
     state: Literal["ready", "degraded", "unconfigured", "disabled"] = "ready"
     if missing_config:
         state = "unconfigured"
+        failing_checks.extend(contract.readiness_checks)
+    if not executable:
+        state = "unconfigured"
+        failing_checks.append("substrate_executable")
+    hint: str | None = None
+    if missing_config:
+        hint = f"Populate {', '.join(missing_config)} before treating {contract.label} as an eval substrate."
+    elif not executable:
+        hint = executable_detail
     return _build_integration_readiness(
         contract,
         state=state,
         enabled=True,
-        configured=not missing_config,
+        configured=not missing_config and executable,
+        reachable=executable if not missing_config else None,
         missing_config_paths=missing_config,
-        failing_checks=[] if not missing_config else list(contract.readiness_checks),
-        operator_hint=(
-            None
-            if not missing_config
-            else f"Populate {', '.join(missing_config)} before treating {contract.label} as an eval substrate."
-        ),
+        failing_checks=failing_checks,
+        operator_hint=hint,
     )
 
 
