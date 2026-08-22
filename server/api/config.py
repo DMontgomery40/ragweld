@@ -52,6 +52,7 @@ from server.retrieval.qdrant_store import QdrantChunkStore
 from server.gateway_catalog import gateway_rows_snapshot
 from server.runtime_capabilities import SUPPORTED_RERANKER_CLOUD_PROVIDERS
 from server.services.config_store import CorpusNotFoundError
+from server.chat.prompt_budget import context_window_for_alias
 from server.services.config_store import get_config as load_scoped_config
 from server.services.config_store import reset_config as reset_scoped_config
 from server.services.config_store import save_config as save_scoped_config
@@ -497,6 +498,21 @@ def _collect_model_warnings(config: TriBridConfig) -> list[ModelValidationWarnin
                 field="reranking.reranker_cloud_provider",
                 model_value=rr_provider,
                 message=f"Reranker cloud provider '{rr_provider}' is not runtime-selectable today. Allowed providers: [{allowed}].",
+            ))
+
+    for field, alias, output_tokens in (
+        ("chat.max_tokens", str(config.chat.litellm.default_model or "").strip(), int(config.chat.max_tokens)),
+        ("generation.gen_max_tokens", str(config.generation.gen_model or "").strip(), int(config.generation.gen_max_tokens)),
+    ):
+        window = context_window_for_alias(alias) if alias else None
+        if window is not None and output_tokens >= window // 2:
+            warnings.append(ModelValidationWarning(
+                field=field,
+                model_value=str(output_tokens),
+                message=(
+                    f"{field}={output_tokens} reserves at least half of alias '{alias}' {window}-token context window; "
+                    "retrieved context will be trimmed aggressively and requests are refused once nothing fits."
+                ),
             ))
 
     return warnings

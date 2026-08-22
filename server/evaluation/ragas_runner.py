@@ -132,11 +132,8 @@ def score_samples(cfg: TriBridConfig, samples: list[RagasSample]) -> list[dict[s
             temperature=0,
             timeout=float(cfg.evaluation.ragas_judge_timeout_s),
             max_retries=0,
-            # Judges must return structured verdicts, not reasoning traces;
-            # cap output and disable chat-template thinking (ignored by models
-            # without that template kwarg).
+            # Judges must return structured verdicts; cap output.
             max_tokens=int(cfg.chat.max_tokens),
-            extra_body={"chat_template_kwargs": {"enable_thinking": False}},
         )
     )
     # Local serving is single-stream; serialize judge calls and honor the

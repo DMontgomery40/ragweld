@@ -122,10 +122,10 @@ class GenerationConfig(BaseModel):
     )
 
     gen_timeout: int = Field(
-        default=60,
+        default=600,
         ge=10,
-        le=300,
-        description="Generation timeout (seconds)",
+        le=900,
+        description="Generation timeout in seconds for non-chat generation calls (eval analysis, synthetic data); sized for single-stream CPU serving of the local model",
     )
 
     enrich_model: str = Field(
@@ -180,7 +180,7 @@ class VLLMConfig(BaseModel):
 
     enabled: bool = Field(default=True)
     base_url: str = Field(default="http://127.0.0.1:58080/v1")
-    default_model: str = Field(default="Qwen/Qwen3-0.6B")
+    default_model: str = Field(default="Qwen/Qwen3-4B-Instruct-2507")
 
 
 class BenchmarkConfig(BaseModel):

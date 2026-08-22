@@ -188,6 +188,11 @@ def gateway_rows(catalog: dict[str, Any]) -> list[GatewayRow]:
                 f"{identity}: gateway_upstream must be openrouter/<id> or the {LOCAL_GATEWAY_ALIAS} vLLM row"
             )
 
+        if entry.context is None or int(entry.context) <= 0:
+            raise GatewayCatalogError(
+                f"{identity}: gateway rows must carry a positive context window (prompt budgeting fails closed without it)"
+            )
+
         rows.append(
             GatewayRow(
                 alias=alias,

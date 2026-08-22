@@ -29,7 +29,10 @@ Browser picker <-- /api/chat/models <-- LiteLLM /v1/models (live) JOIN catalog r
   lockstep between the checked-in YAML, the catalog and its web mirror.
 - The local vLLM serving row is the `ragweld` provider row
   (`gateway_alias: ragweld-local`, `gateway_upstream: openai/ragweld-local`,
-  `base_url: http://vllm:8000/v1`). It is always rendered first.
+  `base_url: http://vllm:8000/v1`). It is always rendered first. Its `model`
+  (`Qwen/Qwen3-4B-Instruct-2507`) and `context` (8192) mirror the Compose
+  `VLLM_MODEL` default and `--max-model-len`; `tests/unit/test_runtime_launch_contract.py`
+  enforces that pairing.
 - `/api/chat/models` discovers aliases from LiteLLM (authenticated, fails 503
   when the gateway is down) and joins them to catalog rows so every surface
   (Chat picker, Sidepanel quick model, Benchmark, Synthetic Lab, Indexing

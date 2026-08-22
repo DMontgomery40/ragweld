@@ -320,6 +320,17 @@ def test_generation_gateway_topology_is_pinned_local_and_has_no_paid_fallback() 
     runtime_config = TriBridConfig()
     assert runtime_config.chat.max_tokens <= max_model_len // 2
     assert runtime_config.generation.gen_max_tokens <= max_model_len // 2
+    # The served model is the current CPU-runnable Qwen3 instruct checkpoint; the
+    # catalog's local serving row must name the same model and context window.
+    model_flag = vllm_command.index("--model")
+    assert vllm_command[model_flag + 1] == "Qwen/Qwen3-4B-Instruct-2507"
+    assert runtime_config.chat.vllm.default_model == "Qwen/Qwen3-4B-Instruct-2507"
+    assert str(vllm["environment"]["VLLM_CPU_KVCACHE_SPACE"]) == "4"
+    catalog = json.loads((ROOT / "data" / "models.json").read_text(encoding="utf-8"))
+    local_rows = [row for row in catalog["models"] if row.get("provider") == "ragweld"]
+    assert len(local_rows) == 1
+    assert local_rows[0]["model"] == "Qwen/Qwen3-4B-Instruct-2507"
+    assert local_rows[0]["context"] == max_model_len
 
     assert litellm["depends_on"]["vllm"]["condition"] == "service_healthy"
     assert api["depends_on"]["litellm"]["condition"] == "service_healthy"
@@ -352,7 +363,7 @@ def test_generation_gateway_topology_is_pinned_local_and_has_no_paid_fallback() 
 
     launcher = (ROOT / "start.sh").read_text(encoding="utf-8")
     assert "unset OPENROUTER_API_KEY ANTHROPIC_API_KEY GOOGLE_API_KEY" in launcher
-    assert "colima start --profile ragweld --vm-type vz --cpu 4 --memory 16" in launcher
+    assert "colima start --profile ragweld --vm-type vz --cpu 6 --memory 28" in launcher
     assert gateway["litellm_settings"]["num_retries"] == 0
     assert gateway["litellm_settings"].get("fallbacks", []) == []
     assert gateway["litellm_settings"].get("context_window_fallbacks", []) == []

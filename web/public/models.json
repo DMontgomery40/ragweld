@@ -7475,13 +7475,13 @@
     },
     {
       "provider": "ragweld",
-      "family": "Qwen3-0.6B",
-      "model": "Qwen/Qwen3-0.6B",
+      "family": "Qwen3-4B-Instruct-2507",
+      "model": "Qwen/Qwen3-4B-Instruct-2507",
       "components": [
         "GEN"
       ],
       "unit": "1k_tokens",
-      "context": 2048,
+      "context": 8192,
       "input_per_1k": 0.0,
       "output_per_1k": 0.0,
       "base_url": "http://vllm:8000/v1",
@@ -7489,7 +7489,7 @@
       "gateway_alias": "ragweld-local",
       "gateway_upstream": "openai/ragweld-local",
       "supports_vision": false,
-      "notes": "Self-hosted vLLM serving path (docker-compose.yml VLLM_MODEL). Served name ragweld-local.",
+      "notes": "Self-hosted vLLM serving path (docker-compose.yml VLLM_MODEL; CPU image, --max-model-len 8192, single stream). Served name ragweld-local. Non-thinking instruct model: no <think> traces in output.",
       "selection_roles": [],
       "selection_status": "catalog_only",
       "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."

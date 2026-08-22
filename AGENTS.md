@@ -170,4 +170,4 @@ npm --prefix web run build
 - Larger work plans: `/Users/davidmontgomery/ragweld/docs/exec-plans/active/`
 - Tech debt backlog: `/Users/davidmontgomery/ragweld/docs/exec-plans/tech-debt-tracker.md`
 - References (links, snippets, external context you want in-repo): `/Users/davidmontgomery/ragweld/docs/references/index.md`
-- Current branch handoff: `/Users/davidmontgomery/ragweld/docs/exec-plans/active/oss-composition-kickoff-handoff-2026-03-25.md`
+- Current branch handoff: `/Users/davidmontgomery/ragweld/docs/exec-plans/active/handoff-2026-08-22-session5.md`

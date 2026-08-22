@@ -121,7 +121,7 @@ export function RetrievalSubtab() {
   const [genModelCli, setGenModelCli] = useConfigField<string>('generation.gen_model_cli', '');
   const [genMaxTokens, setGenMaxTokens] = useConfigField<number>('generation.gen_max_tokens', 512);
   const [genTopP, setGenTopP] = useConfigField<number>('generation.gen_top_p', 1.0);
-  const [genTimeout, setGenTimeout] = useConfigField<number>('generation.gen_timeout', 60);
+  const [genTimeout, setGenTimeout] = useConfigField<number>('generation.gen_timeout', 600);
   const [enrichDisabled, setEnrichDisabled] = useConfigField<boolean>('generation.enrich_disabled', false);
   const [generationModels, setGenerationModels] = useState<ChatModelInfo[]>([]);
 
@@ -1362,9 +1362,9 @@ export function RetrievalSubtab() {
                   <input
                     type="number"
                     min={10}
-                    max={300}
+                    max={900}
                     value={genTimeout}
-                    onChange={(e) => setGenTimeout(snapNumber(e.target.value, 60))}
+                    onChange={(e) => setGenTimeout(snapNumber(e.target.value, 600))}
                   />
                 </div>
               </div>

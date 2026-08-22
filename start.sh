@@ -44,7 +44,7 @@ Docker/Colima ownership:
   This script never starts, stops, resets, or deletes Docker Desktop or Colima.
   Start the dedicated host profile yourself, then select its Docker context:
 
-    colima start --profile ragweld --vm-type vz --cpu 4 --memory 16
+    colima start --profile ragweld --vm-type vz --cpu 6 --memory 28
     docker context use colima-ragweld
 EOF
 }

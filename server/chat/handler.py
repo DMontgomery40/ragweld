@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 import hashlib
 import json
 import re
@@ -10,12 +12,19 @@ from typing import Any, cast
 
 from server.chat.context_formatter import format_context_for_llm
 from server.chat.generation import GenerationResult, generate_chat_text, stream_chat_text
+from server.chat.prompt_budget import (
+    PromptBudgetError,
+    fit_context_to_budget,
+    image_sizes_from_attachments,
+    plan_prompt_budget,
+)
 from server.chat.prompt_builder import get_system_prompt
 from server.chat.provider_router import select_provider_route
 from server.chat.retrieval_gate import classify_for_recall
 from server.chat.source_router import resolve_sources
 from server.db.postgres import PostgresClient
 from server.models.chat_config import RecallConfig, RecallIntensity, RecallPlan
+from server.models.chat_config import ImageAttachment
 from server.models.retrieval import ChunkMatch
 from server.models.tribrid_config_model import (
     ChatProviderInfo,
@@ -63,6 +72,41 @@ def _coerce_generation_result(result: Any) -> GenerationResult:
             if isinstance(getattr(result, "provider_response_id", None), str)
             else None
         ),
+    )
+
+
+def _fit_context_to_route(
+    *,
+    config: TriBridConfig,
+    route_model: str,
+    user_message: str,
+    images: list[ImageAttachment],
+    rag_chunks: list[ChunkMatch],
+    recall_chunks: list[ChunkMatch],
+) -> tuple[list[ChunkMatch], list[ChunkMatch], int]:
+    """Trim retrieved context so the assembled prompt fits the alias's catalog context window.
+
+    Blocking (tokenizes every chunk once); callers run it via `asyncio.to_thread`. An alias
+    without a known window raises `PromptBudgetError` (fail closed, never unlimited).
+    """
+
+    system_prompt = get_system_prompt(
+        has_rag_context=bool(rag_chunks),
+        has_recall_context=bool(recall_chunks),
+        config=config.chat,
+    )
+    budget = plan_prompt_budget(
+        alias=route_model,
+        system_prompt=system_prompt,
+        user_message=user_message,
+        max_tokens=int(config.chat.max_tokens),
+        image_sizes=image_sizes_from_attachments(images),
+    )
+    return fit_context_to_budget(
+        budget,
+        rag_chunks=rag_chunks,
+        recall_chunks=recall_chunks,
+        render=lambda rag, recall: format_context_for_llm(rag_chunks=rag, recall_chunks=recall),
     )
 
 
@@ -339,26 +383,14 @@ async def chat_once(
     except Exception:
         pass
 
-    sources: list[ChunkMatch] = [*rag_chunks, *recall_chunks]
-
-    # Provider + prompt
-    context_text = format_context_for_llm(rag_chunks=rag_chunks, recall_chunks=recall_chunks)
-    system_prompt = get_system_prompt(
-        has_rag_context=bool(rag_chunks),
-        has_recall_context=bool(recall_chunks),
-        config=config.chat,
-    )
+    # Provider + prompt. The route is resolved first so the retrieved context can be
+    # trimmed to the selected alias's context window (lowest-ranked chunks first).
     effective_model_override = (request.model_override or "").strip()
-    if (request.images or []) and not effective_model_override:
-        effective_model_override = str(config.chat.multimodal.vision_model_override or "").strip()
-
-    llm_used = True
-    llm_error: str | None = None
-    provider_info: ChatProviderInfo | None = None
-    provider_id: str | None = None
-    temperature = (
-        float(config.chat.temperature_no_retrieval) if not corpus_ids else float(config.chat.temperature)
-    )
+    if request.images or []:
+        # chat.multimodal.vision_model_override is "force model for vision": it wins over the picker.
+        vision_override = str(config.chat.multimodal.vision_model_override or "").strip()
+        if vision_override:
+            effective_model_override = vision_override
     resolved_route = None
     try:
         resolved_route = select_provider_route(
@@ -367,9 +399,52 @@ async def chat_once(
         )
     except Exception:
         resolved_route = None
+    context_dropped = 0
+    if resolved_route is not None:
+        # No route means generation fails closed with its own typed 503; nothing to budget.
+        rag_chunks, recall_chunks, context_dropped = await asyncio.to_thread(
+            _fit_context_to_route,
+            config=config,
+            route_model=str(resolved_route.model),
+            user_message=request.message,
+            images=list(request.images or []),
+            rag_chunks=rag_chunks,
+            recall_chunks=recall_chunks,
+        )
+    if context_dropped:
+        try:
+            dbg = dict(getattr(fusion, "last_debug", None) or {})
+            dbg["context_chunks_dropped_for_window"] = int(context_dropped)
+            cast(Any, fusion).last_debug = dbg
+        except Exception:
+            pass
+    sources: list[ChunkMatch] = [*rag_chunks, *recall_chunks]
+    context_text = format_context_for_llm(rag_chunks=rag_chunks, recall_chunks=recall_chunks)
+    system_prompt = get_system_prompt(
+        has_rag_context=bool(rag_chunks),
+        has_recall_context=bool(recall_chunks),
+        config=config.chat,
+    )
 
+    llm_used = True
+    llm_error: str | None = None
+    provider_info: ChatProviderInfo | None = None
+    provider_id: str | None = None
+    temperature = (
+        float(config.chat.temperature_no_retrieval) if not corpus_ids else float(config.chat.temperature)
+    )
     cache_service = SemanticCacheService(config)
     cache_scope_key = SemanticCacheService.scope_key(corpus_ids or ["direct_chat"])
+    cache_allowed = not (bool(request.images) and config.semantic_cache.bypass_if_images)
+    # Hashing up to five 20 MiB attachments is CPU work: do it off the loop, and only when the
+    # cache can be consulted at all.
+    images_fp = (
+        await asyncio.to_thread(
+            lambda: SemanticCacheService.context_fingerprint(_images_for_cache(list(request.images or [])))
+        )
+        if (cache_allowed and request.images)
+        else SemanticCacheService.context_fingerprint([])
+    )
     cache_request_fingerprint = SemanticCacheService.fingerprint(
         {
             "namespace": "chat_generation",
@@ -396,7 +471,7 @@ async def chat_once(
             "prompt": str(system_prompt),
             "temperature": float(temperature),
             "max_tokens": int(config.chat.max_tokens),
-            "images_fp": SemanticCacheService.context_fingerprint(_images_for_cache(list(request.images or []))),
+            "images_fp": images_fp,
             "history_fp": SemanticCacheService.context_fingerprint(
                 _history_for_cache(
                     conversation=conversation,
@@ -416,10 +491,6 @@ async def chat_once(
                 ]
             ),
         }
-    )
-    cache_allowed = not (
-        bool(request.images)
-        and config.semantic_cache.bypass_if_images
     )
     if cache_allowed:
         hit = await cache_service.lookup(
@@ -490,6 +561,9 @@ async def chat_once(
         provider_id = generation.provider_response_id
         if not str(text or "").strip():
             raise RuntimeError("LLM returned an empty response")
+    except PromptBudgetError:
+        # Typed, non-retryable request refusal; the API maps it to a 422 detail.
+        raise
     except Exception as e:
         llm_used = False
         llm_error = _safe_error_message(e)
@@ -626,17 +700,48 @@ async def chat_stream(
     except Exception:
         pass
 
+    # Provider + prompt. The route is resolved first so the retrieved context can be
+    # trimmed to the selected alias's context window (lowest-ranked chunks first).
+    effective_model_override = (request.model_override or "").strip()
+    if request.images or []:
+        # chat.multimodal.vision_model_override is "force model for vision": it wins over the picker.
+        vision_override = str(config.chat.multimodal.vision_model_override or "").strip()
+        if vision_override:
+            effective_model_override = vision_override
+    resolved_route = None
+    try:
+        resolved_route = select_provider_route(
+            config=config,
+            model_override=effective_model_override,
+        )
+    except Exception:
+        resolved_route = None
+    context_dropped = 0
+    if resolved_route is not None:
+        # No route means generation fails closed with its own typed 503; nothing to budget.
+        rag_chunks, recall_chunks, context_dropped = await asyncio.to_thread(
+            _fit_context_to_route,
+            config=config,
+            route_model=str(resolved_route.model),
+            user_message=request.message,
+            images=list(request.images or []),
+            rag_chunks=rag_chunks,
+            recall_chunks=recall_chunks,
+        )
+    if context_dropped:
+        try:
+            dbg = dict(getattr(fusion, "last_debug", None) or {})
+            dbg["context_chunks_dropped_for_window"] = int(context_dropped)
+            cast(Any, fusion).last_debug = dbg
+        except Exception:
+            pass
     sources: list[ChunkMatch] = [*rag_chunks, *recall_chunks]
-
     context_text = format_context_for_llm(rag_chunks=rag_chunks, recall_chunks=recall_chunks)
     system_prompt = get_system_prompt(
         has_rag_context=bool(rag_chunks),
         has_recall_context=bool(recall_chunks),
         config=config.chat,
     )
-    effective_model_override = (request.model_override or "").strip()
-    if (request.images or []) and not effective_model_override:
-        effective_model_override = str(config.chat.multimodal.vision_model_override or "").strip()
 
     llm_used = True
     llm_error: str | None = None
@@ -646,17 +751,18 @@ async def chat_stream(
     temperature = (
         float(config.chat.temperature_no_retrieval) if not corpus_ids else float(config.chat.temperature)
     )
-    resolved_route = None
-    try:
-        resolved_route = select_provider_route(
-            config=config,
-            model_override=effective_model_override,
-        )
-    except Exception:
-        resolved_route = None
-
     cache_service = SemanticCacheService(config)
     cache_scope_key = SemanticCacheService.scope_key(corpus_ids or ["direct_chat"])
+    cache_allowed = not (bool(request.images) and config.semantic_cache.bypass_if_images)
+    # Hashing up to five 20 MiB attachments is CPU work: do it off the loop, and only when the
+    # cache can be consulted at all.
+    images_fp = (
+        await asyncio.to_thread(
+            lambda: SemanticCacheService.context_fingerprint(_images_for_cache(list(request.images or [])))
+        )
+        if (cache_allowed and request.images)
+        else SemanticCacheService.context_fingerprint([])
+    )
     cache_request_fingerprint = SemanticCacheService.fingerprint(
         {
             "namespace": "chat_generation",
@@ -683,7 +789,7 @@ async def chat_stream(
             "prompt": str(system_prompt),
             "temperature": float(temperature),
             "max_tokens": int(config.chat.max_tokens),
-            "images_fp": SemanticCacheService.context_fingerprint(_images_for_cache(list(request.images or []))),
+            "images_fp": images_fp,
             "history_fp": SemanticCacheService.context_fingerprint(
                 _history_for_cache(
                     conversation=conversation,
@@ -703,10 +809,6 @@ async def chat_stream(
                 ]
             ),
         }
-    )
-    cache_allowed = not (
-        bool(request.images)
-        and config.semantic_cache.bypass_if_images
     )
     if cache_allowed:
         hit = await cache_service.lookup(
@@ -806,6 +908,10 @@ async def chat_stream(
             llm_used = False
             llm_error = "empty_stream"
             yield f"data: {json.dumps({'type': 'text', 'content': msg})}\n\n"
+    except PromptBudgetError:
+        # The transport refuses before any network I/O and before the first delta is
+        # yielded, so nothing has been streamed yet: let the API map it to the typed 413.
+        raise
     except Exception as e:
         llm_used = False
         llm_error = _safe_error_message(e)

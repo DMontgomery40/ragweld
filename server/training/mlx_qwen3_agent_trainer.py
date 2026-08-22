@@ -9,6 +9,12 @@ from pathlib import Path
 from typing import Any, TypeVar, cast
 
 from server.retrieval.mlx_qwen3 import apply_lora_layers, mlx_is_available
+from server.training.agent_artifact import (
+    RagweldAgentAdapterConfig,
+    RagweldAgentArtifactManifest,
+    write_agent_adapter_config,
+    write_agent_artifact_manifest,
+)
 from server.training.mlx_qwen3_trainer import TrainingCancelledError
 
 T = TypeVar("T")
@@ -793,27 +799,31 @@ def train_mlx_qwen3_agent(
             lora_weights[str(name)] = param
         mx.savez(str(output_dir / "adapter.npz"), **lora_weights)
 
-        adapter_cfg = {
-            "backend": "mlx_qwen3",
-            "artifact_kind": "ragweld_agent",
-            "base_model": str(base_model),
-            "run_id": str(run_id),
-            "lora_rank": int(lora_rank),
-            "lora_alpha": float(lora_alpha),
-            "lora_dropout": float(lora_dropout),
-            "target_modules": list(lora_target_modules),
-            "applied_modules": int(applied),
-        }
-        (output_dir / "adapter_config.json").write_text(json.dumps(adapter_cfg, indent=2) + "\n", encoding="utf-8")
+        write_agent_adapter_config(
+            output_dir,
+            RagweldAgentAdapterConfig(
+                backend="mlx_qwen3",
+                artifact_kind="ragweld_agent",
+                base_model=str(base_model),
+                run_id=str(run_id),
+                lora_rank=int(lora_rank),
+                lora_alpha=float(lora_alpha),
+                lora_dropout=float(lora_dropout),
+                target_modules=[str(x) for x in list(lora_target_modules)],
+                applied_modules=int(applied),
+            ),
+        )
 
-        manifest = {
-            "backend": "mlx_qwen3",
-            "artifact_kind": "ragweld_agent",
-            "base_model": str(base_model),
-            "run_id": str(run_id),
-            "created_at": int(time.time()),
-        }
-        (output_dir / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+        write_agent_artifact_manifest(
+            output_dir,
+            RagweldAgentArtifactManifest(
+                backend="mlx_qwen3",
+                artifact_kind="ragweld_agent",
+                base_model=str(base_model),
+                run_id=str(run_id),
+                created_at=int(time.time()),
+            ),
+        )
 
         return {"ok": True, "backend": "mlx_qwen3", "total_steps": int(total_steps)}
 

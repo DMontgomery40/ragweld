@@ -752,6 +752,26 @@ class GenerationUnavailableResponse(BaseModel):
     detail: GenerationUnavailableDetail
 
 
+class PromptBudgetExceededDetail(BaseModel):
+    """Public error detail (HTTP 413 / typed stream error) when a request cannot fit the alias's context window."""
+
+    code: Literal["prompt_budget_exceeded"] = "prompt_budget_exceeded"
+    operation: str = Field(description="Generation operation that was refused before reaching the gateway")
+    message: str = Field(description="Stable, non-sensitive failure summary")
+    retryable: bool = Field(default=False, description="Retrying without changing the request or config will fail again")
+    operator_hint: str = Field(description="High-signal next step for the operator")
+    alias: str = Field(description="Gateway alias whose context window was exceeded")
+    context_window: int = Field(ge=0, description="Catalog context window of the alias in tokens (0 = unknown, refused)")
+    max_tokens: int = Field(ge=0, description="Output allowance reserved for the response")
+    prompt_tokens: int = Field(ge=0, description="Counted prompt tokens (system prompt, context, message, template margin)")
+
+
+class PromptBudgetExceededResponse(BaseModel):
+    """FastAPI response envelope for a refused over-budget generation request."""
+
+    detail: PromptBudgetExceededDetail
+
+
 class ChunkSummary(BaseModel):
     """A short summary of an indexed chunk (chunk_summary)."""
 
@@ -5417,12 +5437,12 @@ class TrainingConfig(BaseModel):
     )
 
     # ---------------------------------------------------------------------
-    # Ragweld agent (in-process MLX chat model + LoRA adapters)
+    # Ragweld Learning Agent (MLX LoRA adapter training; training-only artifacts)
     # ---------------------------------------------------------------------
 
     ragweld_agent_backend: str = Field(
         default="mlx_qwen3",
-        description="Ragweld agent backend (in-process chat model). Currently: mlx_qwen3",
+        description="Learning Agent LoRA training backend (training-only artifact; chat generation is served through LiteLLM). Currently: mlx_qwen3",
     )
 
     ragweld_agent_workflow_backend: Literal["local", "flyte"] = Field(
@@ -5436,27 +5456,13 @@ class TrainingConfig(BaseModel):
     )
 
     ragweld_agent_base_model: str = Field(
-        default="mlx-community/Qwen3-1.7B-4bit",
-        description="Shipped base model for the ragweld agent (MLX).",
+        default="mlx-community/Qwen3-4B-Instruct-2507-4bit",
+        description="MLX base model the Learning Agent LoRA adapters are trained on. Artifacts trained for another base are not promotable.",
     )
 
     ragweld_agent_model_path: str = Field(
         default="models/learning-agent-active",
-        description="Active ragweld agent adapter artifact path (directory containing adapter.npz + adapter_config.json).",
-    )
-
-    ragweld_agent_unload_after_sec: int = Field(
-        default=0,
-        ge=0,
-        le=86400,
-        description="Unload ragweld agent model after idle seconds (0 = never).",
-    )
-
-    ragweld_agent_reload_period_sec: int = Field(
-        default=60,
-        ge=0,
-        le=600,
-        description="Adapter reload check period (seconds). 0 = check every request.",
+        description="Active Learning Agent adapter artifact path (adapter.npz + adapter_config.json + manifest.json). Training-only: the baseline for later runs and lineage; never served by the chat gateway.",
     )
 
     ragweld_agent_train_dataset_path: str = Field(
@@ -5613,10 +5619,10 @@ class UIConfig(BaseModel):
     )
 
     chat_stream_timeout: int = Field(
-        default=120,
+        default=600,
         ge=30,
         le=600,
-        description="Streaming response timeout in seconds"
+        description="Streaming response timeout in seconds (sized for single-stream CPU serving of the local model)"
     )
 
     chat_thinking_budget_tokens: int = Field(
@@ -6705,8 +6711,6 @@ class TriBridConfig(BaseModel):
             'RAGWELD_AGENT_TRACKING_BACKEND': self.training.ragweld_agent_tracking_backend,
             'RAGWELD_AGENT_BASE_MODEL': self.training.ragweld_agent_base_model,
             'RAGWELD_AGENT_MODEL_PATH': self.training.ragweld_agent_model_path,
-            'RAGWELD_AGENT_UNLOAD_AFTER_SEC': self.training.ragweld_agent_unload_after_sec,
-            'RAGWELD_AGENT_RELOAD_PERIOD_SEC': self.training.ragweld_agent_reload_period_sec,
             'RAGWELD_AGENT_TRAIN_DATASET_PATH': self.training.ragweld_agent_train_dataset_path,
             'RAGWELD_AGENT_LORA_RANK': self.training.ragweld_agent_lora_rank,
             'RAGWELD_AGENT_LORA_ALPHA': self.training.ragweld_agent_lora_alpha,
@@ -6990,7 +6994,7 @@ class TriBridConfig(BaseModel):
                 gen_temperature=data.get('GEN_TEMPERATURE', 0.0),
                 gen_max_tokens=data.get('GEN_MAX_TOKENS', 512),
                 gen_top_p=data.get('GEN_TOP_P', 1.0),
-                gen_timeout=data.get('GEN_TIMEOUT', 60),
+                gen_timeout=data.get('GEN_TIMEOUT', 600),
                 enrich_model=data.get('ENRICH_MODEL', 'ragweld-local'),
                 enrich_disabled=data.get('ENRICH_DISABLED', False),
                 gen_model_cli=data.get('GEN_MODEL_CLI', ''),
@@ -7078,10 +7082,8 @@ class TriBridConfig(BaseModel):
                 ragweld_agent_backend=data.get('RAGWELD_AGENT_BACKEND', 'mlx_qwen3'),
                 ragweld_agent_workflow_backend=data.get('RAGWELD_AGENT_WORKFLOW_BACKEND', 'local'),
                 ragweld_agent_tracking_backend=data.get('RAGWELD_AGENT_TRACKING_BACKEND', 'local'),
-                ragweld_agent_base_model=data.get('RAGWELD_AGENT_BASE_MODEL', 'mlx-community/Qwen3-1.7B-4bit'),
+                ragweld_agent_base_model=data.get('RAGWELD_AGENT_BASE_MODEL', 'mlx-community/Qwen3-4B-Instruct-2507-4bit'),
                 ragweld_agent_model_path=data.get('RAGWELD_AGENT_MODEL_PATH', 'models/learning-agent-active'),
-                ragweld_agent_unload_after_sec=data.get('RAGWELD_AGENT_UNLOAD_AFTER_SEC', 0),
-                ragweld_agent_reload_period_sec=data.get('RAGWELD_AGENT_RELOAD_PERIOD_SEC', 60),
                 ragweld_agent_train_dataset_path=data.get('RAGWELD_AGENT_TRAIN_DATASET_PATH', ''),
                 ragweld_agent_lora_rank=data.get('RAGWELD_AGENT_LORA_RANK', 16),
                 ragweld_agent_lora_alpha=data.get('RAGWELD_AGENT_LORA_ALPHA', 32.0),
@@ -7113,7 +7115,7 @@ class TriBridConfig(BaseModel):
                 chat_show_trace=data.get('CHAT_SHOW_TRACE', True),
                 chat_show_debug_footer=data.get('CHAT_SHOW_DEBUG_FOOTER', True),
                 chat_default_model=data.get('CHAT_DEFAULT_MODEL', 'ragweld-local'),
-                chat_stream_timeout=data.get('CHAT_STREAM_TIMEOUT', 120),
+                chat_stream_timeout=data.get('CHAT_STREAM_TIMEOUT', 600),
                 chat_thinking_budget_tokens=data.get('CHAT_THINKING_BUDGET_TOKENS', 10000),
                 editor_port=data.get('EDITOR_PORT', 4440),
                 grafana_dashboard_uid=data.get('GRAFANA_DASHBOARD_UID', 'ragweld-oncall-overview'),
@@ -7400,8 +7402,6 @@ TRIBRID_CONFIG_KEYS = {
     'RAGWELD_AGENT_BACKEND',
     'RAGWELD_AGENT_BASE_MODEL',
     'RAGWELD_AGENT_MODEL_PATH',
-    'RAGWELD_AGENT_UNLOAD_AFTER_SEC',
-    'RAGWELD_AGENT_RELOAD_PERIOD_SEC',
     'RAGWELD_AGENT_TRAIN_DATASET_PATH',
     'RAGWELD_AGENT_LORA_RANK',
     'RAGWELD_AGENT_LORA_ALPHA',

@@ -18,7 +18,11 @@ from starlette.responses import StreamingResponse
 from server.api.dataset import _dataset_path_for_corpus, _load_dataset
 from server.chat.context_formatter import format_context_for_llm
 from server.chat.prompt_builder import get_system_prompt
-from server.chat.ragweld_mlx import clear_cache as clear_ragweld_cache
+from server.training.agent_artifact import (
+    AgentArtifactError,
+    agent_artifact_incompatibility,
+    validate_agent_artifact_dir,
+)
 from server.db.postgres import PostgresClient
 from server.lineage import (
     attach_refs_to_current_bundle,
@@ -930,7 +934,30 @@ async def _run_train_job(*, run_id: str, corpus_id: str, cancel_event: asyncio.E
         active_dir_cfg = str(getattr(cfg.training, "ragweld_agent_model_path", "") or "").strip()
         active_dir = _resolve_path(active_dir_cfg) if active_dir_cfg else None
         promote_if_improves = bool(getattr(cfg.training, "ragweld_agent_promote_if_improves", False))
+        baseline_blocked: str | None = None
         if promote_if_improves and dev_examples and active_dir is not None and active_dir.exists():
+            # Never load an active adapter trained for another base/backend as the baseline.
+            try:
+                active_manifest = validate_agent_artifact_dir(active_dir)
+                baseline_blocked = agent_artifact_incompatibility(
+                    active_manifest,
+                    base_model=str(getattr(cfg.training, "ragweld_agent_base_model", "") or ""),
+                    backend=str(getattr(cfg.training, "ragweld_agent_backend", "") or ""),
+                )
+            except AgentArtifactError as exc:
+                baseline_blocked = str(exc)
+            if baseline_blocked:
+                _emit_log(
+                    f"Skipping baseline: active artifact at {active_dir_cfg} is not usable with the configured "
+                    f"Learning Agent ({baseline_blocked}); this run replaces it when it completes."
+                )
+        if (
+            promote_if_improves
+            and dev_examples
+            and active_dir is not None
+            and active_dir.exists()
+            and baseline_blocked is None
+        ):
             try:
                 baseline_primary = await asyncio.to_thread(
                     evaluate_mlx_qwen3_agent_loss,
@@ -1092,8 +1119,6 @@ async def _run_train_job(*, run_id: str, corpus_id: str, cancel_event: asyncio.E
 
         if active_dir is not None and should_promote:
             _atomic_copy_dir(model_artifact_dir, active_dir)
-            # Ensure in-process ragweld model reloads the adapter immediately.
-            await clear_ragweld_cache(adapter_dir=str(active_dir_cfg))
             _emit_log(
                 f"Promoted trained artifact to {active_dir_cfg} (backend=mlx_qwen3). "
                 f"Run artifact preserved at {model_artifact_dir}."
@@ -1793,8 +1818,28 @@ async def promote_train_run(run_id: str) -> OkResponse:
         raise HTTPException(status_code=500, detail="training.ragweld_agent_model_path is empty")
     dst = _resolve_path(dst_cfg)
 
+    # The active artifact is training-only (baseline for later runs + lineage); it is never
+    # served by the chat gateway. Refuse artifacts trained for another base or backend so a
+    # historical run cannot overwrite the active adapter with incompatible weights.
+    try:
+        manifest = validate_agent_artifact_dir(src, expected_run_id=run_id)
+    except AgentArtifactError as exc:
+        raise HTTPException(status_code=409, detail=f"Run artifact is not promotable: {exc}") from exc
+    mismatch = agent_artifact_incompatibility(
+        manifest,
+        base_model=str(getattr(cfg.training, "ragweld_agent_base_model", "") or ""),
+        backend=str(getattr(cfg.training, "ragweld_agent_backend", "") or ""),
+    )
+    if mismatch:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Run artifact is incompatible with the configured Learning Agent ({mismatch}); "
+                "retrain on the configured base before promoting."
+            ),
+        )
+
     _atomic_copy_dir(src, dst)
-    await clear_ragweld_cache(adapter_dir=str(dst_cfg))
     run = _attach_lineage(run, cfg, promoted=True)
     _save_run(run)
     return OkResponse(ok=True)

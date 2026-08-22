@@ -4,16 +4,22 @@ import logging
 
 from fastapi import HTTPException
 
+from server.chat.prompt_budget import PromptBudgetError, prompt_budget_exceeded_detail
 from server.models.tribrid_config_model import (
     DependencyUnavailableResponse,
     GenerationUnavailableDetail,
     GenerationUnavailableResponse,
+    PromptBudgetExceededResponse,
     RequiredRetrievalLegFailureResponse,
 )
 
 logger = logging.getLogger(__name__)
 
 CHAT_RUNTIME_UNAVAILABLE_RESPONSES = {
+    413: {
+        "model": PromptBudgetExceededResponse,
+        "description": "The request cannot fit the selected model alias's context window.",
+    },
     503: {
         "model": (
             DependencyUnavailableResponse
@@ -23,6 +29,15 @@ CHAT_RUNTIME_UNAVAILABLE_RESPONSES = {
         "description": "Chat storage, retrieval, or generation is unavailable.",
     }
 }
+
+
+def prompt_budget_http_exception(exc: PromptBudgetError, *, operation: str) -> HTTPException:
+    detail = prompt_budget_exceeded_detail(exc, operation=operation)
+    logger.warning(
+        "Generation request exceeds the alias context window",
+        extra={"operation": operation, "alias": exc.alias, "context_window": exc.context_window},
+    )
+    return HTTPException(status_code=413, detail=detail.model_dump(mode="json"))
 
 
 def generation_unavailable_http_exception(exc: BaseException, *, operation: str) -> HTTPException:

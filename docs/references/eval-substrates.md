@@ -13,7 +13,7 @@ fail closed with typed 503 details when the substrate cannot execute.
   context (same formatter/system prompts as chat), then Ragas scores
   `faithfulness` and `answer_relevancy` (`evaluation.ragas_metrics`).
 - Judge: the LiteLLM alias in `evaluation.ragas_judge_model` (empty = chat
-  default alias), called with reasoning disabled and capped at
+  default alias), capped at
   `chat.max_tokens`; per-call timeout `evaluation.ragas_judge_timeout_s`.
   Judge calls are serialized for single-stream local serving.
 - Embeddings for answer relevancy come from the operator's local
@@ -34,7 +34,13 @@ fail closed with typed 503 details when the substrate cannot execute.
   provider is ragweld's own `/api/answer` for that corpus (the grounded answer
   path is the system under test, not a bare model) and whose assertion is an
   `llm-rubric` graded by `evaluation.promptfoo_grader_model` (empty = chat
-  default alias) through LiteLLM with reasoning disabled.
+  default alias) through LiteLLM.
+- Judge and grader aliases must be non-thinking instruct models: they have
+  to emit the structured verdict / rubric JSON directly. The local
+  `ragweld-local` (`Qwen/Qwen3-4B-Instruct-2507`) is non-thinking; pointing
+  the judge at a `…-thinking` / R1-style alias is an operator error and can
+  break verdict parsing. No chat-template reasoning switch is sent (the
+  retired vLLM thinking-mode model was the only route that honored one).
 - The real CLI (`web/node_modules/.bin/promptfoo`) runs with caching off and
   concurrency 1; results are parsed into `PromptfooRun` and persisted under
   `data/eval_runs/promptfoo/`. `GET /api/eval/promptfoo/runs` lists them and

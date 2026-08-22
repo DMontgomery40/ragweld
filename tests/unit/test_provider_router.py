@@ -78,7 +78,7 @@ def test_every_catalog_alias_resolves_one_litellm_route(override: str, expected_
     [
         "openrouter:openai/gpt-5.4-mini",
         "local:qwen3:8b",
-        "ragweld:mlx-community/Qwen3-1.7B-4bit",
+        "ragweld:mlx-community/Qwen3-4B-Instruct-2507-4bit",
         "openai/gpt-5.4-mini",
         "anthropic/claude-sonnet-4",
     ],

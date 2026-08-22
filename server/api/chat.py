@@ -16,6 +16,7 @@ from server.api.dependency_errors import (
 from server.api.generation_errors import (
     CHAT_RUNTIME_UNAVAILABLE_RESPONSES,
     generation_unavailable_http_exception,
+    prompt_budget_http_exception,
 )
 from server.api.retrieval_errors import (
     RETRIEVAL_RUNTIME_UNAVAILABLE_RESPONSES,
@@ -23,6 +24,7 @@ from server.api.retrieval_errors import (
     retrieval_contract_mismatch_http_exception,
 )
 from server.chat.handler import ChatGenerationError, chat_once
+from server.chat.prompt_budget import PromptBudgetError
 from server.chat.handler import chat_stream as chat_stream_handler
 from server.chat.model_discovery import discover_litellm_models
 from server.gateway_catalog import gateway_rows_by_alias_cached
@@ -440,6 +442,12 @@ async def chat(request: ChatRequest, response: Response) -> ChatResponse:
                 await trace_store.annotate(run_id, **current_trace_payload_fields())
                 await trace_store.end(run_id)
             raise required_retrieval_leg_http_exception(e) from e
+        except PromptBudgetError as e:
+            if trace_enabled:
+                await trace_store.add_event(run_id, kind="chat.error", msg=str(e), data={"kind": "prompt_budget"})
+                await trace_store.annotate(run_id, **current_trace_payload_fields())
+                await trace_store.end(run_id)
+            raise prompt_budget_http_exception(e, operation="Chat generation") from e
         except ChatGenerationError as e:
             if trace_enabled:
                 await trace_store.add_event(run_id, kind="chat.error", msg=str(e), data={"kind": "generation"})
@@ -457,7 +465,7 @@ async def chat(request: ChatRequest, response: Response) -> ChatResponse:
 
 @router.post(
     "/chat/stream",
-    responses=RETRIEVAL_RUNTIME_UNAVAILABLE_RESPONSES,
+    responses={**RETRIEVAL_RUNTIME_UNAVAILABLE_RESPONSES, 413: CHAT_RUNTIME_UNAVAILABLE_RESPONSES[413]},
 )
 async def chat_stream(request: ChatRequest) -> StreamingResponse:
     """Stream a chat response using Server-Sent Events.
@@ -548,6 +556,8 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
             await trace_store.annotate(run_id, **current_trace_payload_fields())
             await trace_store.end(run_id)
         obs_cm.__exit__(type(e), e, e.__traceback__)
+        if isinstance(e, PromptBudgetError):
+            raise prompt_budget_http_exception(e, operation="Chat stream generation") from e
         if isinstance(e, RetrievalContractMismatchError):
             raise retrieval_contract_mismatch_http_exception(e) from e
         if isinstance(e, RequiredRetrievalLegError):

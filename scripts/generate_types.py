@@ -292,6 +292,8 @@ def main(output_path: Path | None = None) -> None:
             RetrievalContractMismatchResponse,
             GenerationUnavailableDetail,
             GenerationUnavailableResponse,
+            PromptBudgetExceededDetail,
+            PromptBudgetExceededResponse,
             # Domain models - Index tooling
             # Domain models - Chunk summaries + keywords
             ChunkSummary,
@@ -505,6 +507,8 @@ def main(output_path: Path | None = None) -> None:
         RetrievalContractMismatchResponse,
         GenerationUnavailableDetail,
         GenerationUnavailableResponse,
+        PromptBudgetExceededDetail,
+        PromptBudgetExceededResponse,
         ChunkSummary,
         ChunkSummariesLastBuild,
         ChunkSummariesResponse,

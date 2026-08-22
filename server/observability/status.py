@@ -3,8 +3,11 @@ from __future__ import annotations
 import os
 from datetime import UTC, datetime
 
+from typing import Any
+
 import httpx
 
+from server.gateway_catalog import LOCAL_GATEWAY_ALIAS, gateway_rows_snapshot
 from server.chat.gateway_runtime import (
     resolve_litellm_api_key,
     resolve_litellm_base_url,
@@ -73,6 +76,60 @@ async def _check_model_api(url: str, *, api_key: str | None = None) -> tuple[boo
         return response.status_code == 200, f"HTTP {response.status_code}"
     except Exception as exc:
         return False, type(exc).__name__
+
+
+def vllm_serving_mismatch(payload: Any, *, expected_model: str, expected_context: int | None) -> str | None:
+    """Compare vLLM's `/v1/models` card with the configured model and catalog context.
+
+    vLLM reports the loaded checkpoint as `root` and the context window as
+    `max_model_len`; `chat.vllm.default_model` and the catalog `ragweld-local`
+    row are expectations that readiness must verify, never assume.
+    """
+
+    rows = payload.get("data") if isinstance(payload, dict) else None
+    if not isinstance(rows, list) or not rows or not isinstance(rows[0], dict):
+        return "vLLM reports no served model"
+    served = rows[0]
+    root = str(served.get("root") or "").strip()
+    max_model_len = served.get("max_model_len")
+    problems: list[str] = []
+    expected = str(expected_model or "").strip()
+    if expected and root != expected:
+        problems.append(f"serving {root or '(unknown)'} but chat.vllm.default_model expects {expected}")
+    if expected_context is not None and max_model_len != expected_context:
+        problems.append(
+            f"max_model_len is {max_model_len} but the catalog {LOCAL_GATEWAY_ALIAS} row expects {expected_context}"
+        )
+    return "; ".join(problems) or None
+
+
+def _local_serving_context() -> int | None:
+    try:
+        row = gateway_rows_snapshot().get(LOCAL_GATEWAY_ALIAS)
+    except Exception:
+        return None
+    return int(row.context) if row is not None and row.context is not None else None
+
+
+async def _check_vllm_serving(url: str, *, expected_model: str, expected_context: int | None) -> tuple[bool, str]:
+    """Probe vLLM and verify it serves the configured model at the catalog context."""
+
+    try:
+        async with httpx.AsyncClient(timeout=2.0) as client:
+            response = await client.get(f"{url.rstrip('/')}/models")
+    except Exception as exc:
+        return False, type(exc).__name__
+    if response.status_code != 200:
+        return False, f"HTTP {response.status_code}"
+    try:
+        payload = response.json()
+    except ValueError:
+        return False, "HTTP 200 with a non-JSON model list"
+    mismatch = vllm_serving_mismatch(payload, expected_model=expected_model, expected_context=expected_context)
+    if mismatch:
+        return False, mismatch
+    served = payload["data"][0]
+    return True, f"HTTP 200; serving {served.get('root')} (max_model_len {served.get('max_model_len')})"
 
 
 def _append_link(links: list[TraceExternalLink], link: TraceExternalLink) -> None:
@@ -268,7 +325,11 @@ async def build_observability_status(config: TriBridConfig, *, repo_id: str | No
     elif vllm_resolution_error:
         vllm_reachable, vllm_detail = False, vllm_resolution_error
     else:
-        vllm_reachable, vllm_detail = await _check_model_api(vllm_url)
+        vllm_reachable, vllm_detail = await _check_vllm_serving(
+            vllm_url,
+            expected_model=str(config.chat.vllm.default_model or "").strip(),
+            expected_context=_local_serving_context(),
+        )
 
     components = [
         _decorate_component(

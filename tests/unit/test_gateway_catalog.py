@@ -269,3 +269,14 @@ def test_checked_in_catalog_serves_the_openrouter_route_set_through_the_gateway(
     assert not any(row.get("provider") in {"ollama", "local"} and row.get("components") == ["GEN"] for row in catalog_rows)
     for row in catalog_rows:
         ModelCatalogEntry.model_validate(row)
+
+
+@pytest.mark.parametrize("context", [None, 0])
+def test_gateway_rows_require_a_positive_context_window(context: int | None) -> None:
+    row = _openrouter_row("openai/gpt-5.4-mini")
+    if context is None:
+        row.pop("context", None)
+    else:
+        row["context"] = context
+    with pytest.raises(GatewayCatalogError, match="positive context window"):
+        gateway_rows({"models": [_local_row(), row]})

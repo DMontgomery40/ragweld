@@ -37,11 +37,21 @@ default, never a retry target, never a fallback. See
 - Host vLLM URL: `http://127.0.0.1:58080/v1`
 - Compose vLLM URL: `http://vllm:8000/v1`
 - Local alias and served name: `ragweld-local`
-- Clean-start bootstrap model: `Qwen/Qwen3-0.6B`
+- Served model: `Qwen/Qwen3-4B-Instruct-2507` (`Qwen3ForCausalLM`, non-thinking
+  instruct; bf16 on the CPU image, `--max-model-len 8192`, `--max-num-seqs 1`,
+  `VLLM_CPU_KVCACHE_SPACE=4`). Override with `VLLM_MODEL`; the catalog's
+  `ragweld` row (`data/models.json`) must name the same model and context.
 
-The bootstrap model proves an honest ARM/CPU topology inside the current
-approximately 8 GB Colima profile. It is not presented as the final-quality
-production model. Larger models require a larger local VM or remote GPU vLLM.
+The 4B bf16 weights (~8 GiB) plus the 4 GiB KV cache need the 28 GiB Colima
+profile (`colima start --profile ragweld --vm-type vz --cpu 6 --memory 28`);
+the 16 GiB profile could only hold the retired `Qwen3-0.6B` bootstrap model.
+Newer Qwen3.5/3.6/3.8 checkpoints are `Qwen3_5ForConditionalGeneration` (linear
+attention + multimodal) and do not run on the CPU vLLM image. Serving is
+single-stream and CPU-bound; vLLM reserves one vCPU and computes on the rest, so
+the profile is sized at 6 vCPUs (5 compute cores). Measured on the 4-vCPU profile:
+a 911-token grounded prompt plus a 143-token answer took 115 s, which is why the
+runtime config sets `ui.chat_stream_timeout` to its 600 s ceiling. It is the
+honest local path, not a throughput tier.
 
 ## Configuration and secrets
 

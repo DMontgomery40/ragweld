@@ -4,6 +4,7 @@ import type {
   ChunkMatch,
   DependencyUnavailableDetail,
   GenerationUnavailableDetail,
+  PromptBudgetExceededDetail,
   ImageAttachment,
   RecallIntensity,
   RequiredRetrievalLegFailureDetail,
@@ -80,6 +81,7 @@ export class ChatRequestAbortedError extends Error {
 export type ChatStructuredErrorDetail = Partial<
   Omit<DependencyUnavailableDetail, 'code'> &
     Omit<GenerationUnavailableDetail, 'code'> &
+    Omit<PromptBudgetExceededDetail, 'code'> &
     Omit<RequiredRetrievalLegFailureDetail, 'code'> &
     Omit<RetrievalContractMismatchDetail, 'code'>
 > & { code: string };

@@ -117,3 +117,17 @@ blocker. No cloud GPU spend without explicit authorization.
 - Operator acceptance (recorded in the recovery exec plan): full round trip
   Flyte task -> execute boundary -> MLX training -> `completed` -> Flyte
   `SUCCEEDED`, rendered in Training Center with the Flyte execution link.
+
+## Promotion semantics (training-only artifacts)
+
+- `POST /api/agent/train/run/{run_id}/promote` (and auto-promotion after a
+  run) copies the run's adapter to `training.ragweld_agent_model_path`. That
+  directory is a **training-only** artifact: the baseline for the next run's
+  promote-if-improves gate and the lineage `agent_model_artifact`. Chat
+  generation routes through LiteLLM to vLLM and never loads it.
+- The adapter `manifest.json` is validated as
+  `server/training/agent_artifact.py::RagweldAgentArtifactManifest`. Promotion
+  returns `409` when the artifact's `base_model`/`backend` differ from the
+  corpus' `training.ragweld_agent_base_model`/`ragweld_agent_backend`, so a
+  historical run trained on a retired base cannot overwrite the active adapter.
+  The baseline evaluation skips (and logs) an incompatible active artifact.

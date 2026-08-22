@@ -88,18 +88,40 @@ def _write_reranker_run(root: Path, corpus_id: str, run_id: str) -> Path:
     return run_dir
 
 
-def _write_agent_run(root: Path, corpus_id: str, run_id: str) -> Path:
+def _write_agent_run(
+    root: Path,
+    corpus_id: str,
+    run_id: str,
+    *,
+    base_model: str = "mlx-community/Qwen3-4B-Instruct-2507-4bit",
+) -> Path:
     run_dir = root / "data" / "agent_train_runs" / run_id
     model_dir = run_dir / "model"
     model_dir.mkdir(parents=True, exist_ok=True)
     (model_dir / "adapter.npz").write_bytes(b"adapter")
-    (model_dir / "adapter_config.json").write_text("{}", encoding="utf-8")
+    (model_dir / "adapter_config.json").write_text(
+        json.dumps(
+            {
+                "backend": "mlx_qwen3",
+                "artifact_kind": "ragweld_agent",
+                "base_model": base_model,
+                "run_id": run_id,
+                "lora_rank": 16,
+                "lora_alpha": 32.0,
+                "lora_dropout": 0.05,
+                "target_modules": ["q_proj", "k_proj", "v_proj", "o_proj"],
+                "applied_modules": 144,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
     (model_dir / "manifest.json").write_text(
         json.dumps(
             {
                 "backend": "mlx_qwen3",
                 "artifact_kind": "ragweld_agent",
-                "base_model": "mlx-community/Qwen3-1.7B-4bit",
+                "base_model": base_model,
                 "run_id": run_id,
             }
         )
@@ -224,4 +246,71 @@ async def test_agent_promote_moves_promoted_alias_and_updates_run_lineage(client
     finally:
         shutil.rmtree(run_dir, ignore_errors=True)
         shutil.rmtree(active_dir, ignore_errors=True)
+        await client.delete(f"/api/corpora/{corpus_id}")
+
+
+@pytest.mark.asyncio
+async def test_agent_promote_refuses_artifacts_trained_on_another_base(client: AsyncClient, tmp_path: Path) -> None:
+    """A historical run trained on the retired 1.7B base must never overwrite the active 4B adapter."""
+    corpus_id = f"pytest_agent_promote_mismatch_{uuid.uuid4().hex[:8]}"
+    await _create_corpus(client, corpus_id=corpus_id, path=tmp_path)
+
+    active_dir = tmp_path / "agent-active"
+    active_dir.mkdir()
+    sentinel = active_dir / "adapter.npz"
+    sentinel.write_bytes(b"current-adapter")
+    config_resp = await client.request(
+        "PATCH",
+        "/api/config/training",
+        params={"corpus_id": corpus_id},
+        json={"ragweld_agent_model_path": str(active_dir)},
+    )
+    assert config_resp.status_code == 200
+
+    root = _repo_root()
+    run_id = f"{corpus_id}__retired_base"
+    run_dir = _write_agent_run(root, corpus_id, run_id, base_model="mlx-community/Qwen3-1.7B-4bit")
+
+    try:
+        promote = await client.post(f"/api/agent/train/run/{run_id}/promote")
+        assert promote.status_code == 409
+        detail = promote.json()["detail"]
+        assert "mlx-community/Qwen3-1.7B-4bit" in detail
+        assert "mlx-community/Qwen3-4B-Instruct-2507-4bit" in detail
+
+        # The active artifact is untouched and the run was not marked promoted.
+        assert sentinel.read_bytes() == b"current-adapter"
+        run = await client.get(f"/api/agent/train/run/{run_id}")
+        assert run.status_code == 200
+        assert not run.json().get("promoted_bundle_id")
+
+        # A manifest that names another run (foreign artifact) is rejected.
+        foreign_manifest = json.loads((run_dir / "model" / "manifest.json").read_text(encoding="utf-8"))
+        foreign_manifest["base_model"] = "mlx-community/Qwen3-4B-Instruct-2507-4bit"
+        foreign_manifest["run_id"] = "some_other_run"
+        (run_dir / "model" / "manifest.json").write_text(json.dumps(foreign_manifest) + "\n", encoding="utf-8")
+        foreign = await client.post(f"/api/agent/train/run/{run_id}/promote")
+        assert foreign.status_code == 409
+        assert "not promotable" in foreign.json()["detail"]
+        assert sentinel.read_bytes() == b"current-adapter"
+
+        # Missing adapter weights are rejected even with a compatible manifest.
+        compatible_dir = _write_agent_run(root, corpus_id, f"{corpus_id}__no_weights")
+        try:
+            (compatible_dir / "model" / "adapter.npz").unlink()
+            no_weights = await client.post(f"/api/agent/train/run/{corpus_id}__no_weights/promote")
+            assert no_weights.status_code == 409
+            assert "adapter.npz" in no_weights.json()["detail"]
+            assert sentinel.read_bytes() == b"current-adapter"
+        finally:
+            shutil.rmtree(compatible_dir, ignore_errors=True)
+
+        # An artifact without a valid manifest is rejected the same way.
+        (run_dir / "model" / "manifest.json").write_text("{}", encoding="utf-8")
+        broken = await client.post(f"/api/agent/train/run/{run_id}/promote")
+        assert broken.status_code == 409
+        assert "not promotable" in broken.json()["detail"]
+        assert sentinel.read_bytes() == b"current-adapter"
+    finally:
+        shutil.rmtree(run_dir, ignore_errors=True)
         await client.delete(f"/api/corpora/{corpus_id}")

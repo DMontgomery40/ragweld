@@ -1,5 +1,5 @@
 {
-  "model_count": 249,
+  "model_count": 251,
   "module": "server.models.tribrid_config_model",
   "root_models": {
     "ActiveSources": {
@@ -4324,7 +4324,7 @@
               "type": "string"
             },
             "default_model": {
-              "default": "Qwen/Qwen3-0.6B",
+              "default": "Qwen/Qwen3-4B-Instruct-2507",
               "title": "Default Model",
               "type": "string"
             },
@@ -13020,9 +13020,9 @@
           "type": "number"
         },
         "gen_timeout": {
-          "default": 60,
-          "description": "Generation timeout (seconds)",
-          "maximum": 300,
+          "default": 600,
+          "description": "Generation timeout in seconds for non-chat generation calls (eval analysis, synthetic data); sized for single-stream CPU serving of the local model",
+          "maximum": 900,
           "minimum": 10,
           "title": "Gen Timeout",
           "type": "integer"
@@ -20305,6 +20305,153 @@
         "ok"
       ],
       "title": "OkResponse",
+      "type": "object"
+    },
+    "PromptBudgetExceededDetail": {
+      "description": "Public error detail (HTTP 413 / typed stream error) when a request cannot fit the alias's context window.",
+      "properties": {
+        "alias": {
+          "description": "Gateway alias whose context window was exceeded",
+          "title": "Alias",
+          "type": "string"
+        },
+        "code": {
+          "const": "prompt_budget_exceeded",
+          "default": "prompt_budget_exceeded",
+          "title": "Code",
+          "type": "string"
+        },
+        "context_window": {
+          "description": "Catalog context window of the alias in tokens (0 = unknown, refused)",
+          "minimum": 0,
+          "title": "Context Window",
+          "type": "integer"
+        },
+        "max_tokens": {
+          "description": "Output allowance reserved for the response",
+          "minimum": 0,
+          "title": "Max Tokens",
+          "type": "integer"
+        },
+        "message": {
+          "description": "Stable, non-sensitive failure summary",
+          "title": "Message",
+          "type": "string"
+        },
+        "operation": {
+          "description": "Generation operation that was refused before reaching the gateway",
+          "title": "Operation",
+          "type": "string"
+        },
+        "operator_hint": {
+          "description": "High-signal next step for the operator",
+          "title": "Operator Hint",
+          "type": "string"
+        },
+        "prompt_tokens": {
+          "description": "Counted prompt tokens (system prompt, context, message, template margin)",
+          "minimum": 0,
+          "title": "Prompt Tokens",
+          "type": "integer"
+        },
+        "retryable": {
+          "default": false,
+          "description": "Retrying without changing the request or config will fail again",
+          "title": "Retryable",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "operation",
+        "message",
+        "operator_hint",
+        "alias",
+        "context_window",
+        "max_tokens",
+        "prompt_tokens"
+      ],
+      "title": "PromptBudgetExceededDetail",
+      "type": "object"
+    },
+    "PromptBudgetExceededResponse": {
+      "$defs": {
+        "PromptBudgetExceededDetail": {
+          "description": "Public error detail (HTTP 413 / typed stream error) when a request cannot fit the alias's context window.",
+          "properties": {
+            "alias": {
+              "description": "Gateway alias whose context window was exceeded",
+              "title": "Alias",
+              "type": "string"
+            },
+            "code": {
+              "const": "prompt_budget_exceeded",
+              "default": "prompt_budget_exceeded",
+              "title": "Code",
+              "type": "string"
+            },
+            "context_window": {
+              "description": "Catalog context window of the alias in tokens (0 = unknown, refused)",
+              "minimum": 0,
+              "title": "Context Window",
+              "type": "integer"
+            },
+            "max_tokens": {
+              "description": "Output allowance reserved for the response",
+              "minimum": 0,
+              "title": "Max Tokens",
+              "type": "integer"
+            },
+            "message": {
+              "description": "Stable, non-sensitive failure summary",
+              "title": "Message",
+              "type": "string"
+            },
+            "operation": {
+              "description": "Generation operation that was refused before reaching the gateway",
+              "title": "Operation",
+              "type": "string"
+            },
+            "operator_hint": {
+              "description": "High-signal next step for the operator",
+              "title": "Operator Hint",
+              "type": "string"
+            },
+            "prompt_tokens": {
+              "description": "Counted prompt tokens (system prompt, context, message, template margin)",
+              "minimum": 0,
+              "title": "Prompt Tokens",
+              "type": "integer"
+            },
+            "retryable": {
+              "default": false,
+              "description": "Retrying without changing the request or config will fail again",
+              "title": "Retryable",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "operation",
+            "message",
+            "operator_hint",
+            "alias",
+            "context_window",
+            "max_tokens",
+            "prompt_tokens"
+          ],
+          "title": "PromptBudgetExceededDetail",
+          "type": "object"
+        }
+      },
+      "description": "FastAPI response envelope for a refused over-budget generation request.",
+      "properties": {
+        "detail": {
+          "$ref": "#/$defs/PromptBudgetExceededDetail"
+        }
+      },
+      "required": [
+        "detail"
+      ],
+      "title": "PromptBudgetExceededResponse",
       "type": "object"
     },
     "PromptMetadata": {
@@ -30667,13 +30814,13 @@
         },
         "ragweld_agent_backend": {
           "default": "mlx_qwen3",
-          "description": "Ragweld agent backend (in-process chat model). Currently: mlx_qwen3",
+          "description": "Learning Agent LoRA training backend (training-only artifact; chat generation is served through LiteLLM). Currently: mlx_qwen3",
           "title": "Ragweld Agent Backend",
           "type": "string"
         },
         "ragweld_agent_base_model": {
-          "default": "mlx-community/Qwen3-1.7B-4bit",
-          "description": "Shipped base model for the ragweld agent (MLX).",
+          "default": "mlx-community/Qwen3-4B-Instruct-2507-4bit",
+          "description": "MLX base model the Learning Agent LoRA adapters are trained on. Artifacts trained for another base are not promotable.",
           "title": "Ragweld Agent Base Model",
           "type": "string"
         },
@@ -30768,7 +30915,7 @@
         },
         "ragweld_agent_model_path": {
           "default": "models/learning-agent-active",
-          "description": "Active ragweld agent adapter artifact path (directory containing adapter.npz + adapter_config.json).",
+          "description": "Active Learning Agent adapter artifact path (adapter.npz + adapter_config.json + manifest.json). Training-only: the baseline for later runs and lineage; never served by the chat gateway.",
           "title": "Ragweld Agent Model Path",
           "type": "string"
         },
@@ -30785,14 +30932,6 @@
           "description": "Auto-promote trained ragweld agent adapter only if eval_loss improves.",
           "title": "Ragweld Agent Promote If Improves",
           "type": "boolean"
-        },
-        "ragweld_agent_reload_period_sec": {
-          "default": 60,
-          "description": "Adapter reload check period (seconds). 0 = check every request.",
-          "maximum": 600,
-          "minimum": 0,
-          "title": "Ragweld Agent Reload Period Sec",
-          "type": "integer"
         },
         "ragweld_agent_telemetry_interval_steps": {
           "default": 2,
@@ -30817,14 +30956,6 @@
           "description": "Training dataset path for the ragweld agent (empty = use evaluation.eval_dataset_path).",
           "title": "Ragweld Agent Train Dataset Path",
           "type": "string"
-        },
-        "ragweld_agent_unload_after_sec": {
-          "default": 0,
-          "description": "Unload ragweld agent model after idle seconds (0 = never).",
-          "maximum": 86400,
-          "minimum": 0,
-          "title": "Ragweld Agent Unload After Sec",
-          "type": "integer"
         },
         "ragweld_agent_unsloth_image": {
           "default": "",
@@ -31923,9 +32054,9 @@
               "type": "number"
             },
             "gen_timeout": {
-              "default": 60,
-              "description": "Generation timeout (seconds)",
-              "maximum": 300,
+              "default": 600,
+              "description": "Generation timeout in seconds for non-chat generation calls (eval analysis, synthetic data); sized for single-stream CPU serving of the local model",
+              "maximum": 900,
               "minimum": 10,
               "title": "Gen Timeout",
               "type": "integer"
@@ -34039,13 +34170,13 @@
             },
             "ragweld_agent_backend": {
               "default": "mlx_qwen3",
-              "description": "Ragweld agent backend (in-process chat model). Currently: mlx_qwen3",
+              "description": "Learning Agent LoRA training backend (training-only artifact; chat generation is served through LiteLLM). Currently: mlx_qwen3",
               "title": "Ragweld Agent Backend",
               "type": "string"
             },
             "ragweld_agent_base_model": {
-              "default": "mlx-community/Qwen3-1.7B-4bit",
-              "description": "Shipped base model for the ragweld agent (MLX).",
+              "default": "mlx-community/Qwen3-4B-Instruct-2507-4bit",
+              "description": "MLX base model the Learning Agent LoRA adapters are trained on. Artifacts trained for another base are not promotable.",
               "title": "Ragweld Agent Base Model",
               "type": "string"
             },
@@ -34140,7 +34271,7 @@
             },
             "ragweld_agent_model_path": {
               "default": "models/learning-agent-active",
-              "description": "Active ragweld agent adapter artifact path (directory containing adapter.npz + adapter_config.json).",
+              "description": "Active Learning Agent adapter artifact path (adapter.npz + adapter_config.json + manifest.json). Training-only: the baseline for later runs and lineage; never served by the chat gateway.",
               "title": "Ragweld Agent Model Path",
               "type": "string"
             },
@@ -34157,14 +34288,6 @@
               "description": "Auto-promote trained ragweld agent adapter only if eval_loss improves.",
               "title": "Ragweld Agent Promote If Improves",
               "type": "boolean"
-            },
-            "ragweld_agent_reload_period_sec": {
-              "default": 60,
-              "description": "Adapter reload check period (seconds). 0 = check every request.",
-              "maximum": 600,
-              "minimum": 0,
-              "title": "Ragweld Agent Reload Period Sec",
-              "type": "integer"
             },
             "ragweld_agent_telemetry_interval_steps": {
               "default": 2,
@@ -34189,14 +34312,6 @@
               "description": "Training dataset path for the ragweld agent (empty = use evaluation.eval_dataset_path).",
               "title": "Ragweld Agent Train Dataset Path",
               "type": "string"
-            },
-            "ragweld_agent_unload_after_sec": {
-              "default": 0,
-              "description": "Unload ragweld agent model after idle seconds (0 = never).",
-              "maximum": 86400,
-              "minimum": 0,
-              "title": "Ragweld Agent Unload After Sec",
-              "type": "integer"
             },
             "ragweld_agent_unsloth_image": {
               "default": "",
@@ -34338,8 +34453,8 @@
               "type": "boolean"
             },
             "chat_stream_timeout": {
-              "default": 120,
-              "description": "Streaming response timeout in seconds",
+              "default": 600,
+              "description": "Streaming response timeout in seconds (sized for single-stream CPU serving of the local model)",
               "maximum": 600,
               "minimum": 30,
               "title": "Chat Stream Timeout",
@@ -34633,7 +34748,7 @@
               "type": "string"
             },
             "default_model": {
-              "default": "Qwen/Qwen3-0.6B",
+              "default": "Qwen/Qwen3-4B-Instruct-2507",
               "title": "Default Model",
               "type": "string"
             },
@@ -34821,8 +34936,8 @@
           "type": "boolean"
         },
         "chat_stream_timeout": {
-          "default": 120,
-          "description": "Streaming response timeout in seconds",
+          "default": 600,
+          "description": "Streaming response timeout in seconds (sized for single-stream CPU serving of the local model)",
           "maximum": 600,
           "minimum": 30,
           "title": "Chat Stream Timeout",
@@ -35116,7 +35231,7 @@
           "type": "string"
         },
         "default_model": {
-          "default": "Qwen/Qwen3-0.6B",
+          "default": "Qwen/Qwen3-4B-Instruct-2507",
           "title": "Default Model",
           "type": "string"
         },

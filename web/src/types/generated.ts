@@ -867,8 +867,8 @@ export interface GenerationConfig {
   gen_max_tokens?: number; // default: 512
   /** Nucleus sampling threshold */
   gen_top_p?: number; // default: 1.0
-  /** Generation timeout (seconds) */
-  gen_timeout?: number; // default: 60
+  /** Generation timeout in seconds for non-chat generation calls (eval analysis, synthetic data); sized for single-stream CPU serving of the local model */
+  gen_timeout?: number; // default: 600
   /** LiteLLM alias for code enrichment */
   enrich_model?: string; // default: "ragweld-local"
   /** Disable code enrichment */
@@ -1581,6 +1581,27 @@ export interface ObservabilityWorkbenchLink {
   subtab?: string | null; // default: None
   /** Operator-facing explanation for the destination. */
   description?: string | null; // default: None
+}
+
+/** Public error detail (HTTP 413 / typed stream error) when a request cannot fit the alias's context window. */
+export interface PromptBudgetExceededDetail {
+  code?: "prompt_budget_exceeded"; // default: "prompt_budget_exceeded"
+  /** Generation operation that was refused before reaching the gateway */
+  operation: string;
+  /** Stable, non-sensitive failure summary */
+  message: string;
+  /** Retrying without changing the request or config will fail again */
+  retryable?: boolean; // default: False
+  /** High-signal next step for the operator */
+  operator_hint: string;
+  /** Gateway alias whose context window was exceeded */
+  alias: string;
+  /** Catalog context window of the alias in tokens (0 = unknown, refused) */
+  context_window: number;
+  /** Output allowance reserved for the response */
+  max_tokens: number;
+  /** Counted prompt tokens (system prompt, context, message, template margin) */
+  prompt_tokens: number;
 }
 
 /** Metadata describing how a prompt is used and edited in the UI. */
@@ -2544,20 +2565,16 @@ export interface TrainingConfig {
   learning_reranker_unload_after_sec?: number; // default: 0
   /** Emit trainer telemetry every N optimizer steps (plus first/final) */
   learning_reranker_telemetry_interval_steps?: number; // default: 2
-  /** Ragweld agent backend (in-process chat model). Currently: mlx_qwen3 */
+  /** Learning Agent LoRA training backend (training-only artifact; chat generation is served through LiteLLM). Currently: mlx_qwen3 */
   ragweld_agent_backend?: string; // default: "mlx_qwen3"
   /** Workflow/orchestration backend for Learning Agent runs. */
   ragweld_agent_workflow_backend?: "local" | "flyte"; // default: "local"
   /** Run/artifact tracking backend for Learning Agent runs. */
   ragweld_agent_tracking_backend?: "local" | "mlflow"; // default: "local"
-  /** Shipped base model for the ragweld agent (MLX). */
-  ragweld_agent_base_model?: string; // default: "mlx-community/Qwen3-1.7B-4bit"
-  /** Active ragweld agent adapter artifact path (directory containing adapter.npz + adapter_config.json). */
+  /** MLX base model the Learning Agent LoRA adapters are trained on. Artifacts trained for another base are not promotable. */
+  ragweld_agent_base_model?: string; // default: "mlx-community/Qwen3-4B-Instruct-2507-4bit"
+  /** Active Learning Agent adapter artifact path (adapter.npz + adapter_config.json + manifest.json). Training-only: the baseline for later runs and lineage; never served by the chat gateway. */
   ragweld_agent_model_path?: string; // default: "models/learning-agent-active"
-  /** Unload ragweld agent model after idle seconds (0 = never). */
-  ragweld_agent_unload_after_sec?: number; // default: 0
-  /** Adapter reload check period (seconds). 0 = check every request. */
-  ragweld_agent_reload_period_sec?: number; // default: 60
   /** Training dataset path for the ragweld agent (empty = use evaluation.eval_dataset_path). */
   ragweld_agent_train_dataset_path?: string; // default: ""
   /** LoRA rank for ragweld agent MLX fine-tuning. */
@@ -2631,8 +2648,8 @@ export interface UIConfig {
   chat_show_debug_footer?: boolean; // default: True
   /** Default model for chat if not specified in request */
   chat_default_model?: string; // default: "ragweld-local"
-  /** Streaming response timeout in seconds */
-  chat_stream_timeout?: number; // default: 120
+  /** Streaming response timeout in seconds (sized for single-stream CPU serving of the local model) */
+  chat_stream_timeout?: number; // default: 600
   /** Max thinking tokens for Anthropic extended thinking */
   chat_thinking_budget_tokens?: number; // default: 10000
   /** Embedded editor port */
@@ -2711,7 +2728,7 @@ export interface UIConfig {
 export interface VLLMConfig {
   enabled?: boolean; // default: True
   base_url?: string; // default: "http://127.0.0.1:58080/v1"
-  default_model?: string; // default: "Qwen/Qwen3-0.6B"
+  default_model?: string; // default: "Qwen/Qwen3-4B-Instruct-2507"
 }
 
 /** Configuration for the vector (dense) leg served by Qdrant. */
@@ -3783,6 +3800,11 @@ export interface ObservabilityStatusResponse {
 export interface OkResponse {
   /** Whether the operation succeeded */
   ok: boolean;
+}
+
+/** FastAPI response envelope for a refused over-budget generation request. */
+export interface PromptBudgetExceededResponse {
+  detail: PromptBudgetExceededDetail;
 }
 
 /** Prompt-set observability and change-correlation summary. */

@@ -1,6 +1,10 @@
 # Handoff Prompt — Ragweld Recovery, Session 5
 
-> Status 2026-08-22 (later, session 5): **P0-1 is DONE** — the LiteLLM gateway
+> Status 2026-08-22 (session 6): **P0-2 is DONE** — vLLM serves
+> `Qwen/Qwen3-4B-Instruct-2507` (8192 ctx) on a 6 vCPU / 28 GiB Colima profile,
+> the Learning Agent trains on `mlx-community/Qwen3-4B-Instruct-2507-4bit`, and
+> both were proven with real queries/runs through API, Chrome and Flyte/MLflow.
+> See §5 "P0-2 evidence". Session-5 status (kept): **P0-1 is DONE** — the LiteLLM gateway
 > now serves 404 catalog-backed aliases (403 OpenRouter routes + `ragweld-local`),
 > `infra/litellm-config.yaml` is generated from `data/models.json`, the Chat
 > picker reflects the real catalog grouped by provider, and a real grounded
@@ -50,10 +54,12 @@ rendered-browser proof.
 2. `/Users/davidmontgomery/ragweld/CLAUDE.md`
 3. `/Users/davidmontgomery/ragweld/.claude/rules/testing.md` (the two new rules)
 4. `/Users/davidmontgomery/.codex/projects/-Users-davidmontgomery-ragweld/MEMORY.md`
-   and the newest entries:
-   `memory/task-2026-08-22-flyte-orchestration.md`,
-   `memory/task-2026-08-21-qdrant-retrieval-cutover.md`,
-   `memory/recovery-findings-closure-and-acceptance-corpus-2026-08-21.md`
+   (its newest entry: `memory/recovery-findings-closure-and-acceptance-corpus-2026-08-21.md`)
+   and the Claude project memory
+   `/Users/davidmontgomery/.claude/projects/-Users-davidmontgomery-ragweld/memory/MEMORY.md`
+   with its task logs `task-2026-08-22-local-models-p0-2.md`,
+   `task-2026-08-22-gateway-catalog.md`, `task-2026-08-22-flyte-orchestration.md`,
+   `task-2026-08-21-qdrant-retrieval-cutover.md`
 5. `/Users/davidmontgomery/ragweld/docs/exec-plans/active/ragweld-recovery-foundation-2026-08-19.md`
    ("Status as of 2026-08-21" + session-4 updates)
 6. `/Users/davidmontgomery/ragweld/docs/references/training-control-plane-slice.md`,
@@ -64,8 +70,11 @@ rendered-browser proof.
 ## 2. Verified checkpoint at handoff
 
 - `/Users/davidmontgomery/ragweld`; branch `main` only; one worktree.
-  **Local `main` is at `bf34506` (P0-1 gateway catalog), 3 commits ahead of
+  **Local `main` carries P0-1 (`bf34506`) and P0-2 (session 6 commit), ahead of
   `origin/main` (`2c5dda6`); NOT pushed — the operator pushes.** Tree clean.
+  Gates at the P0-2 commit: full pytest 766 passed/63 skipped; all validators +
+  `generate_litellm_config.py --check` + web lint/build green; strict lane — see
+  §5 P0-2 evidence. Earlier:
   Gates at `bf34506`: full pytest 765 passed/63 skipped; strict lane 67
   passed (needs Flyte up); all validators + `generate_litellm_config.py
   --check` + web lint/build green; Playwright gateway spec 3/3.
@@ -78,6 +87,7 @@ rendered-browser proof.
 
 ## 3. Live runtime at handoff
 
+- Colima profile `ragweld` = `--vm-type vz --cpu 6 --memory 28` (session 6).
 - Docker context `colima-ragweld`; Compose project `ragweld`. Up: postgres,
   neo4j, qdrant (127.0.0.1:56333), mlflow (55500), litellm (54000), vllm
   (58080), grafana (3301), prometheus (59090), loki (53100), tempo (53200),
@@ -191,7 +201,104 @@ OpenRouter. The operator had ~370 models via OpenRouter and wants that back.
   browser. Spend money. This is a major feature → adversarial `codex exec`
   review before done (rule 0.2).
 
-**P0-2 — Replace the dead local models (no "legacy" retention).**
+**P0-2 — DONE 2026-08-22 (session 6): the dead local models are replaced.** Evidence:
+- Colima `ragweld` is now `--cpu 6 --memory 28` (host 48 GiB / 12 cores; vLLM
+  reserves one vCPU and computes on five). `start.sh` and
+  `tests/unit/test_runtime_launch_contract.py` carry that string.
+- vLLM serves `Qwen/Qwen3-4B-Instruct-2507` (`Qwen3ForCausalLM`, bf16,
+  `--max-model-len 8192`, `VLLM_CPU_KVCACHE_SPACE=4` = 29,056 KV tokens; ~15-17 GiB
+  container). The catalog `ragweld` row, `VLLMConfig.default_model`,
+  `tribrid_config.json`, the ProviderSetup placeholder and the docs moved with it;
+  the launch-contract test pins compose model == config default == catalog row and
+  catalog `context` == `--max-model-len`; `test_clean_start_defaults.py` sweeps 15
+  live surfaces for the retired ids. LiteLLM still serves 404 aliases.
+- Learning Agent base `training.ragweld_agent_base_model` =
+  `mlx-community/Qwen3-4B-Instruct-2507-4bit` (Pydantic default, env loader,
+  `tribrid_config.json`, TrainingStudio default, and the three stored per-corpus
+  configs updated through `PUT /api/config?corpus_id=…`). The 1.7B-trained adapter
+  in `models/learning-agent-active` was removed; run
+  `aurora_acceptance__20260822_190536` (workflow=flyte `ra36477bf94be50f9180`,
+  MLflow `22697a68…`) trained on the 4B base in 25 s, eval_loss 0.2332, and
+  promoted a fresh adapter (manifest base_model = new). The Studio HUD shows it.
+- `ui.chat_stream_timeout` is 600 (ceiling) in the runtime + stored configs:
+  measured CPU throughput is ~2 tok/s on 3 compute cores (911-token grounded
+  prompt + 143 tokens = 115 s); the Chrome chat on 5 cores took 81 s end to end.
+- The `chat_template_kwargs.enable_thinking=false` passthrough in the Ragas and
+  Promptfoo runners is deleted (workaround for the retired thinking-mode model).
+- Proof: API `POST /api/chat` with `litellm:ragweld-local` on `epstein-files-1`
+  and the Barry Cohen question -> 10 sources, trace provider LiteLLM/ragweld-local,
+  $0 catalog cost; Chrome (real mouse/keyboard, new chat, Epstein-only sources)
+  -> grounded answer naming the plane-management emails (Jet Aviation -> EJM,
+  depreciation rules, cushions/internet, business plan), `llm_used: true`,
+  `provider_response_id: chatcmpl-…` (vLLM, not OpenRouter), 1325 tokens, 81 s,
+  no console errors.
+- Adversarial review (`codex exec`, high): pass 1 REFUTED (1 blocker, 6 major,
+  1 minor) -> dead in-process MLX chat path deleted (training-only adapters, truthful
+  copy), validated adapter manifest + 409 on base/backend mismatch, timeout defaults
+  600/900, readiness verifies vLLM `root`/`max_model_len`, repo-wide retired-id scan.
+  Pass 2 REFUTED (4 major, 1 minor) -> whole-directory artifact validation (weights +
+  adapter_config + manifest cross-checked + run identity), a real prompt budget
+  (`server/chat/prompt_budget.py`: tiktoken counting, catalog window per alias,
+  lowest-rank trimming, fail-closed guard in both transports, typed 413
+  `prompt_budget_exceeded`, config-validate warning), frontend timeout literals tied
+  to the Pydantic contract, operator docs fixed. Deferred (documented): a catalog
+  capability flag to reject thinking-mode judge aliases; GraphRAG concurrency vs
+  `--max-num-seqs 1`. Pass 3 REFUTED (7 major, 1 minor) -> streaming refusals
+  are a typed 413 while priming (was an untyped 500), recall memory is trimmed
+  before RAG evidence and a request that would lose all evidence is refused
+  instead of silently answering without sources, trimming is linear and runs
+  off the event loop (tokenizer prewarmed in the lifespan), the handler no
+  longer imports `server.api` (fresh-process import test), text counts carry a
+  1.25x cross-family factor and images 1600 tokens each, every gateway catalog
+  row must carry a positive context (unknown windows fail closed), budget
+  refusals use 413 so FastAPI's 422 validation contract stays intact
+  (OpenAPI-vs-runtime test), stale operator docs/links fixed. Pass 4 REFUTED (2 P1,
+  1 P2) -> token counting is per upstream family (text factor and per-image
+  worst case from the catalog `provider`; Anthropic vision 4,784/image), the
+  `## Context` framing is assembled in one place so planner and guard count the
+  same text, stream refusals re-raise before any byte (413; registered on
+  `/api/chat/stream`), and trimming is a binary search over full renders (maximal
+  retention, O(log n)). Pass 5 REFUTED (1 P1, 1 P2) -> per-image accounting is
+  model-class-aware from documented OpenAI maxima (gpt-4o-mini 48,169; patch-based
+  3,778; tile-standard 1,445; Anthropic 4,784+), attachments are refused on rows
+  with `supports_vision=false` (incl. `ragweld-local`), other families keep a
+  labelled 4,800 heuristic; budget unit tests are snapshot-order independent.
+  Pass 6 REFUTED (1 P1, 1 P2) -> OpenAI image accounting is per documented
+  formula class (tile-mini 48,169; tile-standard 1,445; 1,536-patch 3,779;
+  gpt-5.5 24,600; gpt-5.6 costed from real inline pixels, URL images refused;
+  image-generation ids refused), every catalog OpenAI vision id is classified by
+  an explicit test table, and a configured `vision_model_override` now forces the
+  route for image requests over the picker's model. Pass 7 REFUTED (2 P2) ->
+  gpt-5.4 gets its 2,500-patch class, the unit test holds an independent per-id
+  table of documented maxima (bound >= documented for every catalog OpenAI vision
+  id; over-reservation is the accepted direction), and the final guard decodes
+  inline image sizes inside the worker thread. Pass 8 REFUTED (1 P3, 1 P2) ->
+  gpt-5/o-series classified tile-based with their own documented maxima and a
+  strict 3x over-reservation check; the semantic-cache image fingerprint runs off
+  the loop (and is skipped when `bypass_if_images` applies) and both transports
+  serialize image-bearing bodies in a worker, with an event-loop heartbeat
+  regression over five multi-MiB attachments. Pass 9 was stopped before it
+  produced a verdict; the pass-8 fix set (tile classification of gpt-5/o-series,
+  off-loop image fingerprint + body serialization, heartbeat regression) is the
+  only delta without an independent review. Known, documented residuals: image
+  bounds for families without a published maximum are a labelled 4,800 heuristic;
+  text factors are cl100k-based estimates (1.1 OpenAI/Qwen, 1.6 others); the
+  gateway's own context error remains the backstop for both.
+  Details: `~/.claude/projects/-Users-davidmontgomery-ragweld/memory/task-2026-08-22-local-models-p0-2.md`.
+- Stale model caches still on disk (the `dcg` hook refuses recursive force
+  deletes from the agent; nothing references them): host
+  `~/.cache/huggingface/hub/models--mlx-community--Qwen3-1.7B-4bit` (938 MB) and
+  volume `ragweld_hf_cache` path `/root/.cache/huggingface/hub/models--Qwen--Qwen3-0.6B`
+  (1.5 GB). Operator may purge.
+- Runtime notes: only loki/promtail have a restart policy — after a Colima bounce
+  run `docker compose --project-name ragweld -f docker-compose.yml -f
+  infra/docker-compose.observability.yml up -d postgres neo4j qdrant mlflow vllm
+  litellm flyte grafana prometheus loki tempo alloy promtail postgres-exporter`
+  (the Flyte launch plan survived two stop/start bounces); restart the host API
+  afterwards. The dead in-process MLX chat path (`server/chat/ragweld_mlx.py`)
+  was deleted in this session; Learning Agent adapters are training-only.
+
+**P0-2 (original text, kept for context) — Replace the dead local models (no "legacy" retention).**
 Session-5 findings: Qwen has shipped Qwen3.5 (2026-03), 3.6 (2026-04) and
 3.8 (2026-08), but those are `Qwen3_5ForConditionalGeneration` (linear
 attention + multimodal) and the CPU vLLM image (`vllm-openai-cpu:v0.26.0-arm64`)

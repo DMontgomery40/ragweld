@@ -161,8 +161,6 @@ def _build_config(cfg: TriBridConfig, tests: list[PromptfooTest], *, repo_id: st
             "apiBaseUrl": base_url,
             "temperature": 0,
             "max_tokens": int(cfg.chat.max_tokens),
-            # Graders must emit the rubric JSON, not reasoning traces.
-            "passthrough": {"chat_template_kwargs": {"enable_thinking": False}},
         },
     }
     return {

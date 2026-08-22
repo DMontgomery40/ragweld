@@ -214,7 +214,7 @@ services:
       io.ragweld.managed: "true"
     command:
       - --model
-      - ${VLLM_MODEL:-Qwen/Qwen3-0.6B}
+      - ${VLLM_MODEL:-Qwen/Qwen3-4B-Instruct-2507}
       - --served-model-name
       - ragweld-local
       - --host
@@ -222,11 +222,14 @@ services:
       - --port
       - "8000"
       - --max-model-len
-      - "2048"
+      - "8192"
       - --max-num-seqs
       - "1"
       - --gpu-memory-utilization
       - "0.32"
+    environment:
+      # CPU backend memory budget: ~8 GiB bf16 weights for the 4B model + this KV cache (GiB).
+      VLLM_CPU_KVCACHE_SPACE: "4"
     ports:
       - "127.0.0.1:${VLLM_PORT:-58080}:8000"
     volumes:

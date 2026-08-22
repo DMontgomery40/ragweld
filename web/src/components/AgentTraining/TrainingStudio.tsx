@@ -246,7 +246,7 @@ export function TrainingStudio() {
   );
   const [ragweldBaseModel, setRagweldBaseModel] = useConfigField<string>(
     'training.ragweld_agent_base_model',
-    'mlx-community/Qwen3-1.7B-4bit'
+    'mlx-community/Qwen3-4B-Instruct-2507-4bit'
   );
   const [ragweldModelPath, setRagweldModelPath] = useConfigField<string>(
     'training.ragweld_agent_model_path',
@@ -1831,8 +1831,9 @@ export function TrainingStudio() {
           <h2 className="studio-title">Learning Agent Studio</h2>
           <p className="studio-subtitle">
             Train local adapters for <span className="studio-mono">{String(ragweldBaseModel || '').trim() || 'ragweld'}</span>, promote them to{' '}
-            <span className="studio-mono">{String(ragweldModelPath || '').trim() || 'training.ragweld_agent_model_path'}</span>, and run them
-            through the Flyte / MLflow / Unsloth control plane.
+            <span className="studio-mono">{String(ragweldModelPath || '').trim() || 'training.ragweld_agent_model_path'}</span> (the
+            training-only baseline for later runs; never served by the chat gateway), and run them through the Flyte / MLflow /
+            Unsloth control plane. Only artifacts trained on the configured base can be promoted.
           </p>
         </div>
 

@@ -12,6 +12,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.responses import Response
 
+from server.chat.prompt_budget import warm_prompt_budget
 from server.gateway_catalog import warm_gateway_catalog
 from server.api.cost import warm_cost_catalog
 from server.observability.costing import warm_costing_catalog
@@ -129,6 +130,7 @@ def _warm_catalog_views() -> None:
     warm_gateway_catalog()
     warm_costing_catalog()
     warm_cost_catalog()
+    warm_prompt_budget()
 
 
 async def _catalog_refresh_loop() -> None:

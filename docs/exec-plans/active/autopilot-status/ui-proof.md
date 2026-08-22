@@ -24,13 +24,19 @@ Keep this file updated with the latest acceptance result, the first failing chec
 
 ## Latest Result
 
-- Bootstrap: passed via `output/automation/bootstrap/latest.json` on 2026-03-26, serving the current-worktree UI at `http://127.0.0.1:5173/web` and API at `http://127.0.0.1:8016/api`.
-- Acceptance: failed via `output/automation/acceptance/latest.json` with summary at `tmp/synthetic_acceptance_2026-03-26_0640/summary.json`.
-- First failing checkpoint: Generator model selection in Synthetic Lab.
-- Root cause: the UI-proof harness now fails closed on GPT-5-only synthetic selection, and the current `origin/main` Synthetic Lab exposes only `ragweld:mlx-community/Qwen3-1.7B-4bit` for `epstein-files-1`, so the real browser flow cannot select a compliant generator/judge model before a run starts.
-- Next smallest honest fix: restore the live Synthetic Lab policy path so the UI/API surface `synthetic_data_kit` plus runnable GPT-5 model options instead of the fallback Ragweld local model.
+- The acceptance harness (`./scripts/acceptance_epstein.sh`) has not been re-run
+  since 2026-03-26; the result recorded below is obsolete and must not drive work.
+- Generator/judge selection no longer involves a `ragweld:` local model: every
+  generation route is a LiteLLM alias (`litellm:ragweld-local` =
+  `Qwen/Qwen3-4B-Instruct-2507` on vLLM, plus the 403 OpenRouter routes). The
+  retired `ragweld:mlx-community/Qwen3-1.7B-4bit` selection cannot recur.
+- Current interactive proof (2026-08-22): Chrome drives of Chat on
+  `epstein-files-1` through `ragweld-local` and through `openai.gpt-5.4-mini`,
+  recorded in `docs/exec-plans/active/handoff-2026-08-22-session5.md` §5.
+- Next smallest honest fix: re-run the acceptance harness against the LiteLLM
+  catalog and record the first failing checkpoint here.
 
-## Latest Run (2026-03-26 MDT)
+## Last Recorded Run (2026-03-26 MDT, obsolete)
 
 - Branch: `codex/ui-proof-20260326-epstein-eval-seed`
 - Bootstrap command: `./scripts/automation_bootstrap.sh`

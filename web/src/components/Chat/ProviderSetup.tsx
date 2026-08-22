@@ -148,12 +148,13 @@ export function ProviderSetup() {
             <input value={String(vllm.base_url || '')} onChange={(event) => setVllm({ ...vllm, base_url: event.target.value })} placeholder="http://127.0.0.1:58080/v1" />
           </div>
           <div className="input-group">
-            <label>Served model</label>
-            <input value={String(vllm.default_model || '')} onChange={(event) => setVllm({ ...vllm, default_model: event.target.value })} placeholder="Qwen/Qwen3-0.6B" />
+            <label>Expected served model</label>
+            <input value={String(vllm.default_model || '')} onChange={(event) => setVllm({ ...vllm, default_model: event.target.value })} placeholder="Qwen/Qwen3-4B-Instruct-2507" />
           </div>
         </div>
         <div style={{ marginTop: 10, fontSize: 12, color: 'var(--fg-muted)' }}>
-          vLLM is not a direct application route. LiteLLM owns the alias that targets this serving endpoint.
+          vLLM is not a direct application route. LiteLLM owns the alias that targets this serving endpoint. Readiness verifies the
+          model vLLM reports (and its context window) against this value and the catalog&apos;s ragweld-local row.
         </div>
       </div>
     </div>

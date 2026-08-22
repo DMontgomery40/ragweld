@@ -64,7 +64,7 @@ import type {
 } from '@assistant-ui/react';
 
 const CHAT_REQUEST_ABORT_TIMEOUT = 'timeout';
-const DEFAULT_CHAT_REQUEST_TIMEOUT_MS = 120_000;
+const DEFAULT_CHAT_REQUEST_TIMEOUT_MS = 600_000;
 const MAX_CHAT_SESSIONS = 50;
 
 const WELCOME_PROMPTS = [
@@ -511,6 +511,10 @@ function StructuredErrorCard({ error }: { error: NonNullable<RagweldMessageCusto
   if (error.dependency) detailEntries.push(['dependency', error.dependency]);
   if (typeof error.http_status === 'number') detailEntries.push(['http status', error.http_status]);
   if (typeof error.retryable === 'boolean') detailEntries.push(['retryable', String(error.retryable)]);
+  if (error.alias) detailEntries.push(['alias', error.alias]);
+  if (typeof error.context_window === 'number') detailEntries.push(['context window', error.context_window]);
+  if (typeof error.max_tokens === 'number') detailEntries.push(['output allowance', error.max_tokens]);
+  if (typeof error.prompt_tokens === 'number') detailEntries.push(['prompt tokens', error.prompt_tokens]);
   if (error.expected_contract) detailEntries.push(['expected contract', error.expected_contract]);
   if (error.current_contract) detailEntries.push(['current contract', error.current_contract]);
 
@@ -964,7 +968,7 @@ export function ChatInterface({ onTraceUpdate }: ChatInterfaceProps) {
   const recallGateShowSignals = Boolean(config?.chat?.recall_gate?.show_signals ?? false);
   const chatHistoryMax = Math.max(10, Math.min(500, Number(config?.ui?.chat_history_max ?? 50)));
   const multimodalCfg = (config?.chat?.multimodal ?? null) as ChatMultimodalConfig | null;
-  const configuredChatTimeoutSeconds = Number(config?.ui?.chat_stream_timeout ?? 120);
+  const configuredChatTimeoutSeconds = Number(config?.ui?.chat_stream_timeout ?? 600);
   const chatRequestTimeoutMs = Number.isFinite(configuredChatTimeoutSeconds)
     ? Math.max(5, Math.min(600, configuredChatTimeoutSeconds)) * 1000
     : DEFAULT_CHAT_REQUEST_TIMEOUT_MS;

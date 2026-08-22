@@ -121,7 +121,8 @@ async def test_flyte_launch_creates_execution_and_cancel_aborts_both_sides(clien
         listed = await client.get(f"/api/agent/train/runs?corpus_id={corpus_id}")
         meta = next(item for item in listed.json()["runs"] if item["run_id"] == run_id)
         assert meta["workflow_run_id"] == execution_name
-        assert meta["workflow_phase"] in {"QUEUED", "RUNNING", "SUCCEEDING"}, meta
+        # flyteadmin reports UNDEFINED for a moment right after creation; the mirror may read it.
+        assert meta["workflow_phase"] in {"UNDEFINED", "QUEUED", "RUNNING", "SUCCEEDING"}, meta
 
         # Wait until propeller has picked the execution up so termination is a real abort.
         async def _running():

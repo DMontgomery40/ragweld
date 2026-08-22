@@ -300,7 +300,7 @@
     "gen_temperature": 0.0,
     "gen_max_tokens": 512,
     "gen_top_p": 1.0,
-    "gen_timeout": 60,
+    "gen_timeout": 600,
     "enrich_model": "ragweld-local",
     "enrich_disabled": false,
     "gen_model_cli": "",
@@ -411,10 +411,8 @@
     "ragweld_agent_backend": "mlx_qwen3",
     "ragweld_agent_workflow_backend": "local",
     "ragweld_agent_tracking_backend": "local",
-    "ragweld_agent_base_model": "mlx-community/Qwen3-1.7B-4bit",
+    "ragweld_agent_base_model": "mlx-community/Qwen3-4B-Instruct-2507-4bit",
     "ragweld_agent_model_path": "models/learning-agent-active",
-    "ragweld_agent_unload_after_sec": 0,
-    "ragweld_agent_reload_period_sec": 60,
     "ragweld_agent_train_dataset_path": "",
     "ragweld_agent_lora_rank": 16,
     "ragweld_agent_lora_alpha": 32.0,
@@ -447,7 +445,7 @@
     "chat_show_trace": true,
     "chat_show_debug_footer": true,
     "chat_default_model": "ragweld-local",
-    "chat_stream_timeout": 120,
+    "chat_stream_timeout": 600,
     "chat_thinking_budget_tokens": 10000,
     "editor_port": 4440,
     "grafana_dashboard_uid": "tribrid-overview",
@@ -552,7 +550,7 @@
     "vllm": {
       "enabled": true,
       "base_url": "http://127.0.0.1:58080/v1",
-      "default_model": "Qwen/Qwen3-0.6B"
+      "default_model": "Qwen/Qwen3-4B-Instruct-2507"
     },
     "litellm": {
       "enabled": true,

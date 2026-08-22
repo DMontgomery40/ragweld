@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
@@ -9,6 +10,7 @@ from typing import Any
 
 import httpx
 
+from server.chat.prompt_budget import assemble_system_prompt, assert_prompt_within_window, image_sizes_from_attachments
 from server.chat.provider_router import ProviderRoute
 from server.models.chat_config import ImageAttachment
 from server.models.retrieval import ChunkMatch
@@ -63,7 +65,21 @@ def _prompt_with_context(
     *, system_prompt: str, context_text: str | None, context_chunks: list[ChunkMatch]
 ) -> str:
     context = str(context_text or "").strip() if context_text is not None else _format_chunks_for_context(context_chunks)
-    return system_prompt if not context else f"{system_prompt}\n\n## Context\n{context}"
+    return assemble_system_prompt(system_prompt, context)
+
+
+def _guard_prompt_window(
+    *, alias: str, system_prompt: str, user_message: str, max_tokens: int, images: list[ImageAttachment]
+) -> int:
+    """Blocking: decode inline image sizes and run the fail-closed window guard (called via to_thread)."""
+
+    return assert_prompt_within_window(
+        alias=alias,
+        system_prompt=system_prompt,
+        user_message=user_message,
+        max_tokens=int(max_tokens),
+        image_sizes=image_sizes_from_attachments(images),
+    )
 
 
 def _headers(route: ProviderRoute) -> dict[str, str]:
@@ -157,6 +173,14 @@ async def generate_chat_text(
     prompt = _prompt_with_context(
         system_prompt=system_prompt, context_text=context_text, context_chunks=context_chunks
     )
+    await asyncio.to_thread(
+        _guard_prompt_window,
+        alias=route.model,
+        system_prompt=prompt,
+        user_message=user_message,
+        max_tokens=int(max_tokens),
+        images=images,
+    )
     payload = {
         "model": route.model,
         "messages": _build_messages(
@@ -174,7 +198,8 @@ async def generate_chat_text(
     ):
         async with httpx.AsyncClient(timeout=timeout_s) as client:
             try:
-                response = await client.post(_url(route), headers=_headers(route), json=payload)
+                body = await asyncio.to_thread(json.dumps, payload)
+                response = await client.post(_url(route), headers=_headers(route), content=body)
                 response.raise_for_status()
                 data: Any = response.json()
             except httpx.HTTPStatusError as error:
@@ -237,6 +262,14 @@ async def stream_chat_text(
     prompt = _prompt_with_context(
         system_prompt=system_prompt, context_text=context_text, context_chunks=context_chunks
     )
+    await asyncio.to_thread(
+        _guard_prompt_window,
+        alias=route.model,
+        system_prompt=prompt,
+        user_message=user_message,
+        max_tokens=int(max_tokens),
+        images=images,
+    )
     payload = {
         "model": route.model,
         "messages": _build_messages(
@@ -259,7 +292,8 @@ async def stream_chat_text(
     ):
         async with httpx.AsyncClient(timeout=timeout_s) as client:
             try:
-                async with client.stream("POST", _url(route), headers=_headers(route), json=payload) as response:
+                body = await asyncio.to_thread(json.dumps, payload)
+                async with client.stream("POST", _url(route), headers=_headers(route), content=body) as response:
                     if response.is_error:
                         await response.aread()
                     response.raise_for_status()
