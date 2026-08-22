@@ -125,10 +125,27 @@ OpenRouter. The operator had ~370 models via OpenRouter and wants that back.
   (`https://openrouter.ai/api/v1/models`) into `data/models.json` + the web
   mirror. `server/chat/provider_router.py` already has OpenRouter routing
   (`select_provider_route`, gated on gateway.enabled + key).
-- Wire LiteLLM so real aliases route through OpenRouter (replacement-only: no
-  dead provider-direct entries kept as "legacy"), refresh the catalog, prove a
-  real grounded answer on `epstein-files-1` end to end (LiteLLM → OpenRouter),
-  and prove the model picker in the UI reflects the real catalog. Spend money.
+- **Routing architecture (verified this session):** ALL generation goes
+  through LiteLLM by ALIAS. `server/chat/provider_router.py`
+  (`select_provider_route`) deliberately ignores provider/model identifiers and
+  direct credentials — it resolves a LiteLLM gateway alias
+  (`config.chat.litellm.default_model` or the picker's `model_override`) and
+  sends it to LiteLLM. `infra/litellm-config.yaml`'s `model_list` maps each
+  alias to the real upstream. So "serve ~370 OpenRouter models" is primarily a
+  **`model_list` generation task**: generate LiteLLM entries mapping aliases →
+  `openrouter/<provider>/<model>` for the catalog, and make those aliases the
+  same ones `data/models.json` (+ the model picker) exposes. Today
+  `model_list` has exactly two entries (`ragweld-local`,
+  `ragweld-openrouter-smoke`); that is the whole gap.
+- Wire it replacement-only (no dead provider-direct entries kept as "legacy"),
+  refresh `data/models.json` (`scripts/refresh_models_catalog.py` — run it as
+  `uv run python scripts/refresh_models_catalog.py ...`, it needs the repo on
+  `PYTHONPATH`; a bare `python3` import of `server` fails), keep the LiteLLM
+  `model_list` and the catalog aliases in lockstep, prove a real grounded
+  answer on `epstein-files-1` end to end (LiteLLM → OpenRouter) with a REAL
+  domain query, and prove the model picker reflects the real catalog in the
+  browser. Spend money. This is a major feature → adversarial `codex exec`
+  review before done (rule 0.2).
 
 **P0 — Replace the dead local models (no "legacy" retention).**
 vLLM `Qwen3-0.6B` and the MLX agent base `mlx-community/Qwen3-1.7B-4bit` are a
