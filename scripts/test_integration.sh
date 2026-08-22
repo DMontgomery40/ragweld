@@ -132,4 +132,4 @@ PY
 
 echo "[integration] schemas ready; running strict live-service tests"
 UV_CACHE_DIR="${UV_CACHE_DIR:-${TMPDIR:-/tmp}/ragweld-uv-cache}" \
-uv run --no-sync pytest -q -m "(requires_postgres or requires_neo4j) and not requires_pg_search" "$@"
+uv run --no-sync pytest -q -m "requires_postgres or requires_neo4j or requires_qdrant" "$@"

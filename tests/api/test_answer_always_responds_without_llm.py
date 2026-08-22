@@ -8,11 +8,13 @@ import uuid
 import pytest
 from httpx import AsyncClient
 
+from server.config import load_config
 from server.db.postgres import PostgresClient
 from server.models.index import Chunk
 from server.models.tribrid_config_model import TriBridConfig
+from server.retrieval.qdrant_store import QdrantChunkStore
 
-pytestmark = pytest.mark.requires_postgres
+pytestmark = [pytest.mark.requires_postgres, pytest.mark.requires_qdrant]
 
 
 def _disable_all_chat_providers(cfg: TriBridConfig) -> TriBridConfig:
@@ -33,8 +35,9 @@ async def test_answer_returns_200_without_any_llm_keys(client: AsyncClient) -> N
     try:
         await pg.upsert_corpus(repo_id, name=repo_id, root_path=".")
 
-        cfg = _disable_all_chat_providers(TriBridConfig())
-        await pg.upsert_corpus_config_json(repo_id, cfg.model_dump())
+        cfg = _disable_all_chat_providers(load_config())
+        await pg.upsert_corpus_config_json(repo_id, cfg.model_dump(mode="serialization"))
+        qdrant = QdrantChunkStore(cfg)
 
         ch = Chunk(
             chunk_id="c1",
@@ -48,7 +51,8 @@ async def test_answer_returns_200_without_any_llm_keys(client: AsyncClient) -> N
             summary=None,
             metadata={"kind": "unit_test"},
         )
-        await pg.upsert_fts(repo_id, [ch], ts_config="english")
+        await pg.upsert_chunks(repo_id, [ch])
+        await qdrant.upsert_chunks(repo_id, [ch], embedding_dim=int(cfg.embedding.embedding_dim))
 
         resp = await client.post(
             "/api/answer",
@@ -70,6 +74,10 @@ async def test_answer_returns_200_without_any_llm_keys(client: AsyncClient) -> N
         assert data.get("debug", {}).get("llm_used") is False
         assert isinstance(data.get("debug", {}).get("llm_error"), str)
     finally:
+        try:
+            await QdrantChunkStore(load_config()).delete_corpus(repo_id)
+        except Exception:
+            pass
         try:
             await pg.delete_corpus(repo_id)
         except Exception:

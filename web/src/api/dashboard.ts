@@ -19,7 +19,6 @@ import type {
   ObservabilityStatusResponse,
   PromptObservabilitySummaryResponse,
   RerankerLogsResponse,
-  RetrievalPilotStatusResponse,
   TriBridConfig,
   TracesLatestResponse,
 } from '@/types/generated';
@@ -37,7 +36,6 @@ export type {
   ObservabilityIncidentsResponse,
   ObservabilityStatusResponse,
   PromptObservabilitySummaryResponse,
-  RetrievalPilotStatusResponse,
   TracesLatestResponse,
   TriBridConfig,
 };
@@ -239,20 +237,6 @@ export async function getAgentControlPlaneStatus(
     const suffix = qs.toString() ? `?${qs.toString()}` : '';
     const { data } = await apiClient.get<AgentTrainControlPlaneStatusResponse>(
       api(`/agent/train/control-plane/status${suffix}`)
-    );
-    return data;
-  } catch {
-    return null;
-  }
-}
-
-export async function getRetrievalPilotStatus(
-  corpusId?: string
-): Promise<RetrievalPilotStatusResponse | null> {
-  if (!String(corpusId || '').trim()) return null;
-  try {
-    const { data } = await apiClient.get<RetrievalPilotStatusResponse>(
-      api(`/index/${encodeURIComponent(String(corpusId).trim())}/pilot/status`)
     );
     return data;
   } catch {

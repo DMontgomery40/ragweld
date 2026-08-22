@@ -106,9 +106,6 @@ const formatEvalEmptyDebug = (debug: any): string => {
     pushIf('results graph', d?.fusion_graph_hydrated_chunks);
 
     pushIf('sparse engine', d?.fusion_sparse_engine);
-    if (d?.fusion_sparse_file_path_fallback_used) {
-      lines.push('sparse file_path fallback: used');
-    }
 
     // Errors (best-effort, already redacted server-side)
     pushIf('config error', d?.fusion_config_error);

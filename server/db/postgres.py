@@ -1,10 +1,8 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import json
 import os
-import re
 import time
 from collections import defaultdict
 from datetime import UTC, datetime
@@ -14,11 +12,9 @@ import asyncpg
 from pgvector.asyncpg import register_vector
 
 from server.models.index import Chunk, IndexStats
-from server.models.retrieval import ChunkMatch
 from server.models.tribrid_config_model import (
     ChunkSummariesLastBuild,
     ChunkSummary,
-    VocabPreviewTerm,
 )
 
 # -----------------------------------------------------------------------------
@@ -34,79 +30,7 @@ _POOL_LOCKS_BY_DSN: dict[tuple[str, str], asyncio.Lock] = {}
 _VECTOR_AVAILABLE_BY_DSN: dict[tuple[str, str], bool] = {}
 
 
-_RELAXED_FTS_TERM_RE = re.compile(r"[A-Za-z0-9_]{3,64}")
-_FILE_PATH_TERM_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.\\-]{1,63}")
 _STAGING_REPO_PREFIX = "__staging__"
-
-# Intentionally small list: we only drop filler words that commonly appear in
-# natural-language queries and add noise to FTS OR fallbacks.
-_RELAXED_FTS_STOPWORDS = {
-    "about",
-    "also",
-    "and",
-    "are",
-    "but",
-    "can",
-    "code",
-    "does",
-    "document",
-    "documents",
-    "explain",
-    "file",
-    "files",
-    "find",
-    "for",
-    "from",
-    "how",
-    "i",
-    "in",
-    "is",
-    "it",
-    "me",
-    "of",
-    "on",
-    "or",
-    "related",
-    "show",
-    "the",
-    "this",
-    "to",
-    "what",
-    "where",
-    "which",
-    "why",
-    "with",
-}
-
-
-def _extract_terms(query: str, *, pattern: re.Pattern[str], max_terms: int, stopwords: set[str]) -> list[str]:
-    if not query.strip() or max_terms <= 0:
-        return []
-    terms: list[str] = []
-    seen: set[str] = set()
-    for m in pattern.finditer(query):
-        t = str(m.group(0)).lower()
-        if not t or t in stopwords or t in seen:
-            continue
-        seen.add(t)
-        terms.append(t)
-        if len(terms) >= max_terms:
-            break
-    return terms
-
-
-def _extract_relaxed_fts_terms(query: str, *, max_terms: int) -> list[str]:
-    return _extract_terms(
-        query,
-        pattern=_RELAXED_FTS_TERM_RE,
-        max_terms=max_terms,
-        stopwords=_RELAXED_FTS_STOPWORDS,
-    )
-
-
-def _extract_file_path_terms(query: str, *, max_terms: int) -> list[str]:
-    stop = _RELAXED_FTS_STOPWORDS | {"path", "paths", "src"}
-    return _extract_terms(query, pattern=_FILE_PATH_TERM_RE, max_terms=max_terms, stopwords=stop)
 
 
 def _coerce_jsonb_dict(value: Any) -> dict[str, Any]:
@@ -125,11 +49,6 @@ def _coerce_jsonb_dict(value: Any) -> dict[str, Any]:
         return dict(value)
     except Exception:
         return {}
-
-
-def _vector_index_name(repo_id: str) -> str:
-    digest = hashlib.sha1(str(repo_id or "").encode("utf-8")).hexdigest()[:12]
-    return f"idx_chunks_{digest}_embedding_hnsw"
 
 
 def _sql_literal_text(value: str) -> str:
@@ -181,14 +100,13 @@ def _sanitize_chunk_for_storage(chunk: Chunk) -> Chunk:
 
 
 class PostgresClient:
-    """Postgres index store (pgvector + FTS).
+    """Postgres control/state store for corpora.
 
-    Stores all indexed chunks in PostgreSQL and supports:
-    - Dense retrieval via pgvector
-    - Sparse retrieval via PostgreSQL full-text search (tsvector + tsquery)
-    - Corpus separation via repo_id partition key (repo_id == corpus_id)
-
-    NOTE: This is intentionally "real" storage: the source of truth is Postgres.
+    Stores the corpus registry, per-corpus config, chunk rows (content +
+    provenance, no vectors), chunk summaries, and the semantic/embedding caches.
+    Dense and sparse chunk vectors live in Qdrant (`server.retrieval.qdrant_store`);
+    the recorded dense/sparse contracts on the corpus row are the index truth
+    that retrieval enforces.
     """
 
     def __init__(self, connection_string: str, *, schema_mode: str = "full"):
@@ -196,7 +114,6 @@ class PostgresClient:
         self._schema_mode = "control" if str(schema_mode).strip().lower() == "control" else "full"
         self._pool: asyncpg.Pool | None = None
         self._resolved_dsn: str | None = None
-        self._pg_search_available: bool | None = None
         self._vector_available: bool | None = None
 
     # ---------------------------------------------------------------------
@@ -252,12 +169,6 @@ class PostgresClient:
                 _POOL_LOCKS_BY_DSN.pop(pool_key, None)
             raise
 
-        # Cache extension presence for this client instance (best-effort).
-        try:
-            self._pg_search_available = await self._detect_pg_search()
-        except Exception:
-            self._pg_search_available = False
-
     async def disconnect(self) -> None:
         # NOTE: Pools are shared per DSN. We intentionally do not close the
         # process-wide pool on per-instance disconnect; many request paths call
@@ -309,12 +220,6 @@ class PostgresClient:
                 vector_available = True
             except Exception:
                 vector_available = False
-        # Best-effort: ParadeDB pg_search extension (BM25). If unavailable, we fall back to built-in FTS.
-        try:
-            await conn.execute("CREATE EXTENSION IF NOT EXISTS pg_search;")
-        except Exception:
-            pass
-
         # Corpus registry (repo_id == corpus_id)
         await conn.execute(
             """
@@ -330,7 +235,7 @@ class PostgresClient:
               embedding_provider TEXT,
               embedding_model TEXT,
               embedding_dimensions INT,
-              ts_config TEXT
+              sparse_contract JSONB
             );
             """
         )
@@ -338,7 +243,9 @@ class PostgresClient:
         await conn.execute("ALTER TABLE corpora ADD COLUMN IF NOT EXISTS meta JSONB NOT NULL DEFAULT '{}'::jsonb;")
         await conn.execute("ALTER TABLE corpora ADD COLUMN IF NOT EXISTS embedding_backend TEXT;")
         await conn.execute("ALTER TABLE corpora ADD COLUMN IF NOT EXISTS embedding_provider TEXT;")
-        await conn.execute("ALTER TABLE corpora ADD COLUMN IF NOT EXISTS ts_config TEXT;")
+        await conn.execute("ALTER TABLE corpora ADD COLUMN IF NOT EXISTS sparse_contract JSONB;")
+        # The sparse contract used to be a Postgres FTS ts_config; sparse vectors now live in Qdrant.
+        await conn.execute("ALTER TABLE corpora DROP COLUMN IF EXISTS ts_config;")
 
         # Per-corpus config (TriBridConfig JSON)
         await conn.execute(
@@ -500,80 +407,23 @@ class PostgresClient:
             """
         )
 
-        # Chunk store
-        #
-        # pgvector supports both dimensioned and (in newer versions) undimensioned vector columns.
-        # Prefer undimensioned to support per-corpus embedding dims; fall back to a fixed dim when
-        # running against older pgvector versions that require an explicit dimension.
-        if not vector_available:
-            await conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS chunks (
-                  repo_id TEXT NOT NULL REFERENCES corpora(repo_id) ON DELETE CASCADE,
-                  chunk_id TEXT NOT NULL,
-                  file_path TEXT NOT NULL,
-                  start_line INT NOT NULL,
-                  end_line INT NOT NULL,
-                  language TEXT,
-                  content TEXT NOT NULL,
-                  token_count INT NOT NULL DEFAULT 0,
-                  metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
-                  embedding DOUBLE PRECISION[],
-                  tsv tsvector,
-                  PRIMARY KEY (repo_id, chunk_id)
-                );
-                """
-            )
-        else:
-            # Fallback: fixed dimension (matches THE LAW embedding.embedding_dim).
-            # NOTE: This fallback is only needed on older pgvector versions that require
-            # an explicit vector dimension in the schema.
-            try:
-                await conn.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS chunks (
-                      repo_id TEXT NOT NULL REFERENCES corpora(repo_id) ON DELETE CASCADE,
-                      chunk_id TEXT NOT NULL,
-                      file_path TEXT NOT NULL,
-                      start_line INT NOT NULL,
-                      end_line INT NOT NULL,
-                      language TEXT,
-                      content TEXT NOT NULL,
-                      token_count INT NOT NULL DEFAULT 0,
-                      metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
-                      embedding vector,
-                      tsv tsvector,
-                      PRIMARY KEY (repo_id, chunk_id)
-                    );
-                    """
-                )
-            except Exception:
-                try:
-                    from server.config import load_config as _load_global_config
-
-                    dim = int(_load_global_config().embedding.embedding_dim)
-                except Exception:
-                    from server.models.tribrid_config_model import TriBridConfig
-
-                    dim = int(TriBridConfig().embedding.embedding_dim)
-                await conn.execute(
-                    f"""
-                    CREATE TABLE IF NOT EXISTS chunks (
-                      repo_id TEXT NOT NULL REFERENCES corpora(repo_id) ON DELETE CASCADE,
-                      chunk_id TEXT NOT NULL,
-                      file_path TEXT NOT NULL,
-                      start_line INT NOT NULL,
-                      end_line INT NOT NULL,
-                      language TEXT,
-                      content TEXT NOT NULL,
-                      token_count INT NOT NULL DEFAULT 0,
-                      metadata JSONB NOT NULL DEFAULT '{{}}'::jsonb,
-                      embedding vector({dim}),
-                      tsv tsvector,
-                      PRIMARY KEY (repo_id, chunk_id)
-                    );
-                    """
-                )
+        # Chunk store: content + provenance rows only. Vectors live in Qdrant.
+        await conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS chunks (
+              repo_id TEXT NOT NULL REFERENCES corpora(repo_id) ON DELETE CASCADE,
+              chunk_id TEXT NOT NULL,
+              file_path TEXT NOT NULL,
+              start_line INT NOT NULL,
+              end_line INT NOT NULL,
+              language TEXT,
+              content TEXT NOT NULL,
+              token_count INT NOT NULL DEFAULT 0,
+              metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+              PRIMARY KEY (repo_id, chunk_id)
+            );
+            """
+        )
 
         # Schema upgrade: chat requires arbitrary chunk metadata (JSONB).
         # Must run every boot; idempotent for existing installs.
@@ -584,45 +434,49 @@ class PostgresClient:
         await conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_chunks_repo_file ON chunks (repo_id, file_path);"
         )
-        await conn.execute("CREATE INDEX IF NOT EXISTS idx_chunks_tsv ON chunks USING GIN (tsv);")
-
-        # Optional recall-only HNSW index for low-latency Recall vector search.
-        # Best-effort: do not block startup if the pgvector build lacks HNSW support.
-        if vector_available:
-            try:
-                await conn.execute(
-                    """
-                    CREATE INDEX IF NOT EXISTS idx_chunks_recall_embedding_hnsw
-                      ON chunks USING hnsw (embedding vector_cosine_ops)
-                      WITH (m = 16, ef_construction = 64)
-                      WHERE repo_id = 'recall_default' AND embedding IS NOT NULL;
-                    """
-                )
-            except Exception:
-                pass
-
-        # Optional BM25 index via ParadeDB pg_search.
-        #
-        # Best-effort: do not block startup if pg_search is not installed or not preload-enabled.
-        # Use a globally-unique key_field to avoid cross-corpus key collisions.
-        try:
+        # Vector/FTS columns and their indexes moved to Qdrant; remove them from upgraded installs.
+        await conn.execute("DROP INDEX IF EXISTS idx_chunks_tsv;")
+        await conn.execute("DROP INDEX IF EXISTS idx_chunks_bm25;")
+        await conn.execute("DROP INDEX IF EXISTS idx_chunks_recall_embedding_hnsw;")
+        stale_vector_indexes = await conn.fetch(
+            """
+            SELECT indexname
+            FROM pg_indexes
+            WHERE schemaname = current_schema()
+              AND tablename = 'chunks'
+              AND indexname LIKE 'idx_chunks_%_embedding_hnsw';
+            """
+        )
+        for row in stale_vector_indexes:
+            await conn.execute(f'DROP INDEX IF EXISTS "{row["indexname"]}";')
+        legacy_vector_columns = await conn.fetchval(
+            """
+            SELECT COUNT(*)
+            FROM information_schema.columns
+            WHERE table_schema = current_schema()
+              AND table_name = 'chunks'
+              AND column_name IN ('embedding', 'tsv');
+            """
+        )
+        await conn.execute("ALTER TABLE chunks DROP COLUMN IF EXISTS bm25_id;")
+        await conn.execute("ALTER TABLE chunks DROP COLUMN IF EXISTS tsv;")
+        await conn.execute("ALTER TABLE chunks DROP COLUMN IF EXISTS embedding;")
+        if int(legacy_vector_columns or 0) > 0:
+            # The vectors that made these corpora "indexed" no longer exist anywhere:
+            # they must read as never indexed (empty legs) until re-indexed, not as
+            # indexed corpora with a missing Qdrant generation (503 on every leg).
             await conn.execute(
                 """
-                ALTER TABLE chunks
-                ADD COLUMN IF NOT EXISTS bm25_id TEXT
-                GENERATED ALWAYS AS (repo_id || '::' || chunk_id) STORED;
+                UPDATE corpora
+                SET last_indexed = NULL,
+                    embedding_backend = NULL,
+                    embedding_provider = NULL,
+                    embedding_model = NULL,
+                    embedding_dimensions = NULL,
+                    sparse_contract = NULL,
+                    meta = COALESCE(meta, '{}'::jsonb) - 'embedding_backend';
                 """
             )
-            await conn.execute(
-                """
-                CREATE INDEX IF NOT EXISTS idx_chunks_bm25
-                  ON chunks
-                  USING bm25 (bm25_id, repo_id, content, file_path)
-                  WITH (key_field='bm25_id');
-                """
-            )
-        except Exception:
-            pass
 
         # Chunk summaries (data quality layer)
         await conn.execute(
@@ -677,347 +531,12 @@ class PostgresClient:
         )
         return vector_available
 
-    async def _detect_pg_search(self) -> bool:
-        await self._require_pool()
-        assert self._pool is not None
-        async with self._pool.acquire() as conn:
-            row = await conn.fetchrow(
-                "SELECT 1 AS ok FROM pg_extension WHERE extname = 'pg_search' LIMIT 1;"
-            )
-        return bool(row is not None)
+    # ---------------------------------------------------------------------
+    # Chunk rows (content + provenance; vectors live in Qdrant)
+    # ---------------------------------------------------------------------
 
-    async def pg_search_available(self) -> bool:
-        if self._pg_search_available is None:
-            try:
-                self._pg_search_available = await self._detect_pg_search()
-            except Exception:
-                self._pg_search_available = False
-        return bool(self._pg_search_available)
-
-    async def bm25_search_pg_search(
-        self,
-        repo_id: str,
-        query: str,
-        top_k: int,
-        *,
-        query_mode: str = "plain",
-    ) -> list[ChunkMatch]:
-        """BM25 search using ParadeDB pg_search (@@@ operator + paradedb.score).
-
-        Falls back by raising on missing extension; caller should handle.
-        """
-        if not query.strip() or top_k <= 0:
-            return []
-        await self._require_pool()
-        assert self._pool is not None
-
-        qm = str(query_mode or "plain").strip().lower()
-        q = query.strip()
-        if qm == "phrase":
-            # Ensure the entire query is treated as a phrase.
-            if not (q.startswith('"') and q.endswith('"')):
-                q = f"\"{q}\""
-
-        if not await self.pg_search_available():
-            raise RuntimeError("pg_search extension not available")
-
-        async with self._pool.acquire() as conn:
-            # Ensure the key + index exist (idempotent, best-effort).
-            try:
-                await conn.execute(
-                    """
-                    ALTER TABLE chunks
-                    ADD COLUMN IF NOT EXISTS bm25_id TEXT
-                    GENERATED ALWAYS AS (repo_id || '::' || chunk_id) STORED;
-                    """
-                )
-                await conn.execute(
-                    """
-                    CREATE INDEX IF NOT EXISTS idx_chunks_bm25
-                      ON chunks
-                      USING bm25 (bm25_id, repo_id, content, file_path)
-                      WITH (key_field='bm25_id');
-                    """
-                )
-            except Exception:
-                pass
-
-            rows = await conn.fetch(
-                """
-                SELECT chunk_id, content, file_path, start_line, end_line, language, metadata,
-                       paradedb.score(bm25_id)::float8 AS score
-                FROM chunks
-                WHERE repo_id = $2 AND chunks @@@ $1
-                ORDER BY score DESC
-                LIMIT $3;
-                """,
-                q,
-                repo_id,
-                int(top_k),
-            )
-
-        return [
-            ChunkMatch(
-                chunk_id=str(r["chunk_id"]),
-                content=str(r["content"]),
-                file_path=str(r["file_path"]),
-                start_line=int(r["start_line"]),
-                end_line=int(r["end_line"]),
-                language=str(r["language"]) if r["language"] is not None else None,
-                score=float(r["score"] or 0.0),
-                source="sparse",
-                metadata=_coerce_jsonb_dict(r.get("metadata")),
-            )
-            for r in rows
-        ]
-
-    # Vector operations
-    async def upsert_embeddings(self, repo_id: str, chunks: list[Chunk]) -> int:
-        if not chunks:
-            return 0
-        chunks = [_sanitize_chunk_for_storage(ch) for ch in chunks]
-        inferred_dimensions = 0
-        for chunk in chunks:
-            if not chunk.embedding:
-                continue
-            dims = len(chunk.embedding)
-            if dims <= 0:
-                continue
-            if inferred_dimensions == 0:
-                inferred_dimensions = dims
-            elif inferred_dimensions != dims:
-                raise ValueError("All embeddings in a batch must have the same dimensions")
-        await self._require_pool()
-        assert self._pool is not None
-
-        async with self._pool.acquire() as conn:
-            if self._vector_available is not False:
-                try:
-                    await register_vector(conn)
-                except Exception:
-                    pass
-            await self._ensure_corpus_row(conn, repo_id, name=repo_id, root_path=".")
-
-            stmt = """
-            INSERT INTO chunks (
-              repo_id, chunk_id, file_path, start_line, end_line, language, content, token_count, metadata, embedding
-            )
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10)
-            ON CONFLICT (repo_id, chunk_id) DO UPDATE SET
-              file_path = EXCLUDED.file_path,
-              start_line = EXCLUDED.start_line,
-              end_line = EXCLUDED.end_line,
-              language = EXCLUDED.language,
-              content = EXCLUDED.content,
-              token_count = EXCLUDED.token_count,
-              metadata = EXCLUDED.metadata,
-              embedding = EXCLUDED.embedding;
-            """
-
-            await conn.executemany(
-                stmt,
-                [
-                    (
-                        repo_id,
-                        ch.chunk_id,
-                        ch.file_path,
-                        int(ch.start_line),
-                        int(ch.end_line),
-                        ch.language,
-                        ch.content,
-                        int(ch.token_count or 0),
-                        _json_dumps_sanitized(ch.metadata or {}),
-                        ch.embedding,
-                    )
-                    for ch in chunks
-                ],
-            )
-            indexed_at = datetime.now(UTC)
-            if inferred_dimensions > 0:
-                await conn.execute(
-                    """
-                    UPDATE corpora
-                    SET last_indexed = $2,
-                        embedding_dimensions = CASE
-                            WHEN COALESCE(embedding_dimensions, 0) <= 0 THEN $3::int
-                            ELSE embedding_dimensions
-                        END
-                    WHERE repo_id = $1;
-                    """,
-                    repo_id,
-                    indexed_at,
-                    inferred_dimensions,
-                )
-            else:
-                await conn.execute(
-                    "UPDATE corpora SET last_indexed = $2 WHERE repo_id = $1;",
-                    repo_id,
-                    indexed_at,
-                )
-        return len(chunks)
-
-    async def vector_search(
-        self, repo_id: str, embedding: list[float], top_k: int, *, expected_dimensions: int = 0
-    ) -> list[ChunkMatch]:
-        if top_k <= 0:
-            return []
-        if expected_dimensions > 0 and len(embedding) != expected_dimensions:
-            raise ValueError(
-                f"Query embedding dimension ({len(embedding)}) does not match "
-                f"indexed dimension ({expected_dimensions}) for corpus '{repo_id}'. "
-                "Re-index with force_reindex=true after changing embedding config."
-            )
-        await self._require_pool()
-        assert self._pool is not None
-
-        async with self._pool.acquire() as conn:
-            if self._vector_available is False:
-                rows = await conn.fetch(
-                    """
-                    WITH q AS (
-                      SELECT $1::double precision[] AS qv
-                    ),
-                    candidates AS (
-                      SELECT chunk_id, content, file_path, start_line, end_line, language, metadata, embedding
-                      FROM chunks
-                      WHERE repo_id = $2
-                        AND embedding IS NOT NULL
-                        AND array_length(embedding, 1) = $4
-                    )
-                    SELECT c.chunk_id, c.content, c.file_path, c.start_line, c.end_line, c.language, c.metadata,
-                           CASE
-                             WHEN v.q_norm = 0 OR v.e_norm = 0 THEN 0::float8
-                             ELSE (v.dot / (v.q_norm * v.e_norm))::float8
-                           END AS score
-                    FROM candidates c
-                    CROSS JOIN LATERAL (
-                      SELECT
-                        COALESCE(SUM(qe.q_val * ee.e_val), 0::float8) AS dot,
-                        SQRT(COALESCE(SUM(qe.q_val * qe.q_val), 0::float8)) AS q_norm,
-                        SQRT(COALESCE(SUM(ee.e_val * ee.e_val), 0::float8)) AS e_norm
-                      FROM unnest((SELECT qv FROM q)) WITH ORDINALITY AS qe(q_val, idx)
-                      JOIN unnest(c.embedding) WITH ORDINALITY AS ee(e_val, idx)
-                        ON qe.idx = ee.idx
-                    ) AS v
-                    ORDER BY score DESC
-                    LIMIT $3;
-                    """,
-                    [float(x) for x in embedding],
-                    repo_id,
-                    int(top_k),
-                    int(len(embedding)),
-                )
-            else:
-                await register_vector(conn)
-                query_dim = int(expected_dimensions or len(embedding))
-                if query_dim > 0:
-                    rows = await conn.fetch(
-                        f"""
-                        SELECT chunk_id, content, file_path, start_line, end_line, language, metadata,
-                               (1 - ((embedding::vector({query_dim})) <=> ($1::vector({query_dim}))))::float8 AS score
-                        FROM chunks
-                        WHERE repo_id = $2 AND embedding IS NOT NULL
-                        ORDER BY (embedding::vector({query_dim})) <=> ($1::vector({query_dim}))
-                        LIMIT $3;
-                        """,
-                        embedding,
-                        repo_id,
-                        int(top_k),
-                    )
-                else:
-                    rows = await conn.fetch(
-                        """
-                        SELECT chunk_id, content, file_path, start_line, end_line, language, metadata,
-                               (1 - (embedding <=> $1))::float8 AS score
-                        FROM chunks
-                        WHERE repo_id = $2 AND embedding IS NOT NULL
-                        ORDER BY embedding <=> $1
-                        LIMIT $3;
-                        """,
-                        embedding,
-                        repo_id,
-                        int(top_k),
-                    )
-
-        return [
-            ChunkMatch(
-                chunk_id=str(r["chunk_id"]),
-                content=str(r["content"]),
-                file_path=str(r["file_path"]),
-                start_line=int(r["start_line"]),
-                end_line=int(r["end_line"]),
-                language=str(r["language"]) if r["language"] is not None else None,
-                score=float(r["score"] or 0.0),
-                source="vector",
-                metadata=_coerce_jsonb_dict(r.get("metadata")),
-            )
-            for r in rows
-        ]
-
-    async def ensure_vector_index(self, repo_id: str) -> str:
-        repo_id = str(repo_id or "").strip()
-        if not repo_id:
-            raise ValueError("repo_id is required")
-        await self._require_pool()
-        assert self._pool is not None
-
-        index_name = _vector_index_name(repo_id)
-        repo_literal = _sql_literal_text(repo_id)
-        async with self._pool.acquire() as conn:
-            try:
-                await register_vector(conn)
-            except Exception:
-                pass
-            row = await conn.fetchrow(
-                """
-                SELECT embedding_dimensions
-                FROM corpora
-                WHERE repo_id = $1
-                """,
-                repo_id,
-            )
-            dims = int(row["embedding_dimensions"] or 0) if row is not None else 0
-            if dims <= 0:
-                raise RuntimeError(f"Corpus '{repo_id}' does not have embedding_dimensions metadata")
-            await conn.execute(
-                f"""
-                CREATE INDEX IF NOT EXISTS {index_name}
-                  ON chunks USING hnsw ((embedding::vector({dims})) vector_cosine_ops)
-                  WHERE repo_id = '{repo_literal}' AND embedding IS NOT NULL;
-                """
-            )
-            self._vector_available = True
-            await conn.execute("ANALYZE chunks;")
-        return index_name
-
-    async def delete_embeddings(self, repo_id: str) -> int:
-        await self._require_pool()
-        assert self._pool is not None
-        async with self._pool.acquire() as conn:
-            result = await conn.execute(
-                "UPDATE chunks SET embedding = NULL WHERE repo_id = $1 AND embedding IS NOT NULL;",
-                repo_id,
-            )
-        # asyncpg returns "UPDATE <n>"
-        return int(result.split()[-1])
-
-    async def count_chunks_with_embeddings(self, repo_id: str) -> int:
-        await self._require_pool()
-        assert self._pool is not None
-        async with self._pool.acquire() as conn:
-            row = await conn.fetchrow(
-                """
-                SELECT COUNT(*)::int AS embedding_chunks
-                FROM chunks
-                WHERE repo_id = $1
-                  AND embedding IS NOT NULL;
-                """,
-                repo_id,
-            )
-        return int((row or {}).get("embedding_chunks") or 0)
-
-    # FTS operations
-    async def upsert_fts(self, repo_id: str, chunks: list[Chunk], *, ts_config: str) -> int:
+    async def upsert_chunks(self, repo_id: str, chunks: list[Chunk]) -> int:
+        """Upsert chunk rows for a corpus and stamp corpora.last_indexed."""
         if not chunks:
             return 0
         chunks = [_sanitize_chunk_for_storage(ch) for ch in chunks]
@@ -1026,12 +545,11 @@ class PostgresClient:
 
         async with self._pool.acquire() as conn:
             await self._ensure_corpus_row(conn, repo_id, name=repo_id, root_path=".")
-            # Update tsv for each chunk (ensure row exists first)
             stmt = """
             INSERT INTO chunks (
-              repo_id, chunk_id, file_path, start_line, end_line, language, content, token_count, metadata, tsv
+              repo_id, chunk_id, file_path, start_line, end_line, language, content, token_count, metadata
             )
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,to_tsvector($10::regconfig, $7))
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb)
             ON CONFLICT (repo_id, chunk_id) DO UPDATE SET
               file_path = EXCLUDED.file_path,
               start_line = EXCLUDED.start_line,
@@ -1039,8 +557,7 @@ class PostgresClient:
               language = EXCLUDED.language,
               content = EXCLUDED.content,
               token_count = EXCLUDED.token_count,
-              metadata = EXCLUDED.metadata,
-              tsv = to_tsvector($10::regconfig, EXCLUDED.content);
+              metadata = EXCLUDED.metadata;
             """
             await conn.executemany(
                 stmt,
@@ -1055,7 +572,6 @@ class PostgresClient:
                         ch.content,
                         int(ch.token_count or 0),
                         _json_dumps_sanitized(ch.metadata or {}),
-                        ts_config,
                     )
                     for ch in chunks
                 ],
@@ -1067,267 +583,38 @@ class PostgresClient:
             )
         return len(chunks)
 
-    async def sparse_search(self, repo_id: str, query: str, top_k: int, *, ts_config: str) -> list[ChunkMatch]:
-        """Back-compat sparse search (postgres_fts + plainto_tsquery)."""
-        return await self.fts_search(repo_id, query, top_k, ts_config=ts_config, query_mode="plain")
+    async def clear_corpus_index_state(self, repo_id: str) -> None:
+        """Reset index truth on the corpus row after its chunks and vectors were deleted.
 
-    async def fts_search(
-        self,
-        repo_id: str,
-        query: str,
-        top_k: int,
-        *,
-        ts_config: str,
-        query_mode: str = "plain",
-    ) -> list[ChunkMatch]:
-        if not query.strip() or top_k <= 0:
-            return []
-        await self._require_pool()
-        assert self._pool is not None
-
-        qm = str(query_mode or "plain").strip().lower()
-        if qm == "phrase":
-            tsquery = "phraseto_tsquery($4::regconfig, $1)"
-        elif qm == "boolean":
-            tsquery = "websearch_to_tsquery($4::regconfig, $1)"
-        else:
-            tsquery = "plainto_tsquery($4::regconfig, $1)"
-
-        async with self._pool.acquire() as conn:
-            rows = await conn.fetch(
-                f"""
-                SELECT chunk_id, content, file_path, start_line, end_line, language, metadata,
-                       ts_rank_cd(tsv, {tsquery})::float8 AS score
-                FROM chunks
-                WHERE repo_id = $2 AND tsv @@ {tsquery}
-                ORDER BY score DESC
-                LIMIT $3;
-                """,
-                query,
-                repo_id,
-                int(top_k),
-                ts_config,
-            )
-
-        return [
-            ChunkMatch(
-                chunk_id=str(r["chunk_id"]),
-                content=str(r["content"]),
-                file_path=str(r["file_path"]),
-                start_line=int(r["start_line"]),
-                end_line=int(r["end_line"]),
-                language=str(r["language"]) if r["language"] is not None else None,
-                score=float(r["score"] or 0.0),
-                source="sparse",
-                metadata={**_coerce_jsonb_dict(r.get("metadata")), "sparse_engine": "postgres_fts"},
-            )
-            for r in rows
-        ]
-
-    async def fts_search_relaxed_or(
-        self,
-        repo_id: str,
-        query: str,
-        top_k: int,
-        *,
-        ts_config: str,
-        max_terms: int,
-    ) -> list[ChunkMatch]:
-        if not query.strip() or top_k <= 0:
-            return []
-        max_terms = int(max_terms)
-        if max_terms <= 0:
-            return []
-
-        terms = _extract_relaxed_fts_terms(query, max_terms=max_terms)
-        if not terms:
-            return []
-        tsquery_text = " | ".join(f"{t}:*" for t in terms)
-
-        await self._require_pool()
-        assert self._pool is not None
-
-        async with self._pool.acquire() as conn:
-            rows = await conn.fetch(
-                """
-                SELECT chunk_id, content, file_path, start_line, end_line, language, metadata,
-                       ts_rank_cd(tsv, to_tsquery($4::regconfig, $1))::float8 AS score
-                FROM chunks
-                WHERE repo_id = $2 AND tsv @@ to_tsquery($4::regconfig, $1)
-                ORDER BY score DESC
-                LIMIT $3;
-                """,
-                tsquery_text,
-                repo_id,
-                int(top_k),
-                ts_config,
-            )
-
-        return [
-            ChunkMatch(
-                chunk_id=str(r["chunk_id"]),
-                content=str(r["content"]),
-                file_path=str(r["file_path"]),
-                start_line=int(r["start_line"]),
-                end_line=int(r["end_line"]),
-                language=str(r["language"]) if r["language"] is not None else None,
-                score=float(r["score"] or 0.0),
-                source="sparse",
-                metadata={
-                    **_coerce_jsonb_dict(r.get("metadata")),
-                    "sparse_engine": "postgres_fts_relaxed_or",
-                    "sparse_relaxed": True,
-                },
-            )
-            for r in rows
-        ]
-
-    async def file_path_search(self, repo_id: str, query: str, top_k: int, *, max_terms: int) -> list[ChunkMatch]:
-        if not query.strip() or top_k <= 0:
-            return []
-        max_terms = int(max_terms)
-        if max_terms <= 0:
-            return []
-
-        terms = _extract_file_path_terms(query, max_terms=max_terms)
-        if not terms:
-            return []
-
-        await self._require_pool()
-        assert self._pool is not None
-
-        async with self._pool.acquire() as conn:
-            rows = await conn.fetch(
-                """
-                WITH terms(term) AS (
-                  SELECT unnest($2::text[])
-                ),
-                matches AS (
-                  SELECT c.chunk_id, c.content, c.file_path, c.start_line, c.end_line, c.language, c.metadata,
-                         COUNT(DISTINCT t.term)::int AS match_count
-                  FROM chunks c
-                  JOIN terms t
-                    ON c.file_path ILIKE '%' || t.term || '%'
-                  WHERE c.repo_id = $1
-                  GROUP BY c.chunk_id, c.content, c.file_path, c.start_line, c.end_line, c.language, c.metadata
-                )
-                SELECT chunk_id, content, file_path, start_line, end_line, language, metadata,
-                       match_count::float8 AS score
-                FROM matches
-                ORDER BY match_count DESC, file_path ASC
-                LIMIT $3;
-                """,
-                repo_id,
-                list(terms),
-                int(top_k),
-            )
-
-        return [
-            ChunkMatch(
-                chunk_id=str(r["chunk_id"]),
-                content=str(r["content"]),
-                file_path=str(r["file_path"]),
-                start_line=int(r["start_line"]),
-                end_line=int(r["end_line"]),
-                language=str(r["language"]) if r["language"] is not None else None,
-                score=float(r["score"] or 0.0),
-                source="sparse",
-                metadata={**_coerce_jsonb_dict(r.get("metadata")), "sparse_engine": "file_path"},
-            )
-            for r in rows
-        ]
-
-    async def sparse_search_engine(
-        self,
-        repo_id: str,
-        query: str,
-        top_k: int,
-        *,
-        ts_config: str,
-        engine: str,
-        query_mode: str = "plain",
-        highlight: bool = False,
-        relax_on_empty: bool = True,
-        relax_max_terms: int = 8,
-    ) -> list[ChunkMatch]:
-        eng = str(engine or "postgres_fts").strip().lower()
-        qm = str(query_mode or "plain").strip().lower()
-        if eng == "pg_search_bm25":
-            try:
-                rows = await self.bm25_search_pg_search(repo_id, query, top_k, query_mode=qm)
-                # Tag engine in metadata for UI/debug.
-                results = [
-                    r.model_copy(update={"metadata": {**(r.metadata or {}), "sparse_engine": "pg_search_bm25"}})
-                    for r in rows
-                ]
-            except Exception:
-                # Clean fallback.
-                results = await self.fts_search(repo_id, query, top_k, ts_config=ts_config, query_mode=qm)
-        else:
-            results = await self.fts_search(repo_id, query, top_k, ts_config=ts_config, query_mode=qm)
-
-        _ = highlight
-        if results:
-            return results
-        if not bool(relax_on_empty):
-            return results
-        return await self.fts_search_relaxed_or(
-            repo_id, query, top_k, ts_config=ts_config, max_terms=int(relax_max_terms)
-        )
-
-    async def delete_fts(self, repo_id: str) -> int:
-        await self._require_pool()
-        assert self._pool is not None
-        async with self._pool.acquire() as conn:
-            result = await conn.execute(
-                "UPDATE chunks SET tsv = NULL WHERE repo_id = $1 AND tsv IS NOT NULL;",
-                repo_id,
-            )
-        return int(result.split()[-1])
-
-    async def vocab_preview(self, repo_id: str, top_n: int) -> tuple[list[VocabPreviewTerm], int]:
-        """Return top terms (by doc frequency) from the FTS vocabulary for a corpus.
-
-        NOTE: This reads from `chunks.tsv`, which is the source of truth for sparse retrieval.
+        A de-indexed corpus must read as never indexed (no last_indexed, no
+        recorded contracts) so retrieval reports empty legs instead of a
+        missing-generation failure, and the next index run records fresh contracts.
         """
-        top_n = int(top_n)
-        if top_n <= 0:
-            return ([], 0)
         await self._require_pool()
         assert self._pool is not None
-
         async with self._pool.acquire() as conn:
-            rows = await conn.fetch(
+            await conn.execute(
                 """
-                WITH per_term AS (
-                  SELECT term, COUNT(*)::int AS doc_count
-                  FROM (
-                    SELECT DISTINCT chunk_id, unnest(tsvector_to_array(tsv)) AS term
-                    FROM chunks
-                    WHERE repo_id = $1 AND tsv IS NOT NULL
-                  ) t
-                  GROUP BY term
-                )
-                SELECT term, doc_count, COUNT(*) OVER ()::int AS total_terms
-                FROM per_term
-                ORDER BY doc_count DESC, term ASC
-                LIMIT $2;
+                UPDATE corpora
+                SET last_indexed = NULL,
+                    embedding_backend = NULL,
+                    embedding_provider = NULL,
+                    embedding_model = NULL,
+                    embedding_dimensions = NULL,
+                    sparse_contract = NULL,
+                    meta = COALESCE(meta, '{}'::jsonb) - 'embedding_backend'
+                WHERE repo_id = $1;
                 """,
                 repo_id,
-                top_n,
             )
 
-        if not rows:
-            return ([], 0)
+    async def count_chunks(self, repo_id: str) -> int:
+        await self._require_pool()
+        assert self._pool is not None
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow("SELECT COUNT(*)::int AS n FROM chunks WHERE repo_id = $1;", repo_id)
+        return int((row or {}).get("n") or 0)
 
-        total_terms = int(rows[0]["total_terms"] or 0)
-        terms = [
-            VocabPreviewTerm(term=str(r["term"]), doc_count=int(r["doc_count"] or 0))
-            for r in rows
-        ]
-        return (terms, total_terms)
-
-    # Metadata
     async def get_chunk(self, repo_id: str, chunk_id: str) -> Chunk | None:
         await self._require_pool()
         assert self._pool is not None
@@ -1393,57 +680,6 @@ class PostgresClient:
             )
             for r in rows
         ]
-
-    async def get_embeddings(self, repo_id: str, chunk_ids: list[str]) -> dict[str, list[float]]:
-        """Fetch dense embeddings for a list of chunk_ids (best-effort).
-
-        Returns a mapping of chunk_id -> embedding vector. Missing/null embeddings are omitted.
-        """
-        if not chunk_ids:
-            return {}
-        await self._require_pool()
-        assert self._pool is not None
-
-        # De-dupe while preserving order for predictable query size.
-        ids = list(dict.fromkeys([str(cid) for cid in chunk_ids if str(cid).strip()]))
-        if not ids:
-            return {}
-
-        async with self._pool.acquire() as conn:
-            # Ensure pgvector codecs are registered for this connection (idempotent).
-            try:
-                await register_vector(conn)
-            except Exception:
-                pass
-
-            rows = await conn.fetch(
-                """
-                SELECT c.chunk_id, c.embedding
-                FROM unnest($2::text[]) AS u(chunk_id)
-                JOIN chunks c
-                  ON c.repo_id = $1
-                 AND c.chunk_id = u.chunk_id
-                WHERE c.embedding IS NOT NULL;
-                """,
-                repo_id,
-                ids,
-            )
-
-        out: dict[str, list[float]] = {}
-        for r in rows:
-            cid = str(r["chunk_id"])
-            emb = r["embedding"]
-            if emb is None:
-                continue
-            try:
-                # pgvector may decode to list[float] or a Vector wrapper.
-                out[cid] = [float(x) for x in list(emb)]
-            except Exception:
-                try:
-                    out[cid] = [float(x) for x in emb]
-                except Exception:
-                    continue
-        return out
 
     async def get_chunks_by_file_ordinals(self, repo_id: str, file_path: str, ordinals: list[int]) -> list[Chunk]:
         """Fetch chunks for a file by chunk_ordinal (stored in metadata)."""
@@ -1554,19 +790,13 @@ class PostgresClient:
     _dashboard_storage_ttl_s: float = 30.0
 
     async def get_dashboard_storage_breakdown(self, repo_id: str) -> dict[str, int]:
-        """Return a dashboard-oriented storage breakdown for a corpus (bytes).
+        """Return corpus-scoped Postgres storage (bytes) for the Dashboard.
 
         The Dashboard polls frequently; keep this best-effort and cached.
         """
         repo_id = (repo_id or "").strip()
         if not repo_id:
-            return {
-                "chunks_bytes": 0,
-                "embeddings_bytes": 0,
-                "pgvector_index_bytes": 0,
-                "bm25_index_bytes": 0,
-                "chunk_summaries_bytes": 0,
-            }
+            return {"chunks_bytes": 0, "chunk_summaries_bytes": 0}
 
         now = time.time()
         cached = self._dashboard_storage_cache.get(repo_id)
@@ -1579,13 +809,9 @@ class PostgresClient:
         assert self._pool is not None
 
         async with self._pool.acquire() as conn:
-            # Chunks table: estimate corpus-scoped storage for core columns.
-            # We intentionally split out tsv (BM25) and embedding (dense) so the UI can
-            # present them as separate components.
             chunks_row = await conn.fetchrow(
                 """
                 SELECT
-                  COUNT(*)::bigint AS chunk_rows,
                   COALESCE(SUM(
                     pg_column_size(chunk_id)
                     + pg_column_size(file_path)
@@ -1595,24 +821,12 @@ class PostgresClient:
                     + pg_column_size(token_count)
                     + pg_column_size(content)
                     + pg_column_size(metadata)
-                  ), 0)::bigint AS chunks_bytes,
-                  COUNT(*) FILTER (WHERE embedding IS NOT NULL)::bigint AS embedding_rows,
-                  COALESCE(SUM(pg_column_size(embedding)), 0)::bigint AS embeddings_bytes,
-                  COUNT(*) FILTER (WHERE tsv IS NOT NULL)::bigint AS tsv_rows,
-                  COALESCE(SUM(pg_column_size(tsv)), 0)::bigint AS tsv_bytes
+                  ), 0)::bigint AS chunks_bytes
                 FROM chunks
                 WHERE repo_id = $1;
                 """,
                 repo_id,
             )
-
-            chunks_bytes = int(chunks_row["chunks_bytes"] or 0) if chunks_row else 0
-            embeddings_bytes = int(chunks_row["embeddings_bytes"] or 0) if chunks_row else 0
-            embedding_rows = int(chunks_row["embedding_rows"] or 0) if chunks_row else 0
-            tsv_rows = int(chunks_row["tsv_rows"] or 0) if chunks_row else 0
-            tsv_bytes = int(chunks_row["tsv_bytes"] or 0) if chunks_row else 0
-
-            # Chunk summaries table: corpus-scoped bytes.
             summaries_row = await conn.fetchrow(
                 """
                 SELECT
@@ -1631,74 +845,10 @@ class PostgresClient:
                 """,
                 repo_id,
             )
-            chunk_summaries_bytes = int(summaries_row["chunk_summaries_bytes"] or 0) if summaries_row else 0
 
-            # Global counts for index allocation (shared indexes cannot be attributed directly per corpus).
-            totals_row = await conn.fetchrow(
-                """
-                SELECT
-                  COUNT(*) FILTER (WHERE embedding IS NOT NULL)::bigint AS embedding_rows_all,
-                  COUNT(*) FILTER (WHERE tsv IS NOT NULL)::bigint AS tsv_rows_all
-                FROM chunks;
-                """
-            )
-            embedding_rows_all = int(totals_row["embedding_rows_all"] or 0) if totals_row else 0
-            tsv_rows_all = int(totals_row["tsv_rows_all"] or 0) if totals_row else 0
-
-            # GIN FTS index size (shared). Allocate proportional to tsv rows.
-            gin_row = await conn.fetchrow(
-                """
-                SELECT COALESCE(pg_relation_size(c.oid), 0)::bigint AS bytes
-                FROM pg_class c
-                WHERE c.relname = 'idx_chunks_tsv'
-                LIMIT 1;
-                """
-            )
-            gin_total = int(gin_row["bytes"] or 0) if gin_row else 0
-            gin_alloc = 0
-            if gin_total > 0 and tsv_rows_all > 0 and tsv_rows > 0:
-                gin_alloc = int(round((gin_total * float(tsv_rows)) / float(tsv_rows_all)))
-
-            # Optional BM25 index size (pg_search). Allocate proportional to chunk rows.
-            bm25_row = await conn.fetchrow(
-                """
-                SELECT COALESCE(pg_relation_size(c.oid), 0)::bigint AS bytes
-                FROM pg_class c
-                WHERE c.relname = 'idx_chunks_bm25'
-                LIMIT 1;
-                """
-            )
-            bm25_total = int(bm25_row["bytes"] or 0) if bm25_row else 0
-            bm25_alloc = 0
-            chunk_rows = int(chunks_row["chunk_rows"] or 0) if chunks_row else 0
-            totals_all = await conn.fetchrow("SELECT COUNT(*)::bigint AS n FROM chunks;")
-            chunk_rows_all = int(totals_all["n"] or 0) if totals_all else 0
-            if bm25_total > 0 and chunk_rows_all > 0 and chunk_rows > 0:
-                bm25_alloc = int(round((bm25_total * float(chunk_rows)) / float(chunk_rows_all)))
-
-            # Vector index size (if present). Allocate proportional to embedding rows.
-            vec_idx_row = await conn.fetchrow(
-                """
-                SELECT COALESCE(SUM(pg_relation_size(i.indexrelid)), 0)::bigint AS bytes
-                FROM pg_index i
-                JOIN pg_class t ON t.oid = i.indrelid
-                WHERE t.relname = 'chunks'
-                  AND pg_get_indexdef(i.indexrelid) ILIKE '%embedding%';
-                """
-            )
-            vec_idx_total = int(vec_idx_row["bytes"] or 0) if vec_idx_row else 0
-            vec_idx_alloc = 0
-            if vec_idx_total > 0 and embedding_rows_all > 0 and embedding_rows > 0:
-                vec_idx_alloc = int(round((vec_idx_total * float(embedding_rows)) / float(embedding_rows_all)))
-
-        # Prefer pg_search BM25 index allocation when present; otherwise fall back to FTS storage estimate.
-        bm25_index_bytes = int(bm25_alloc) if int(bm25_alloc) > 0 else int(tsv_bytes + gin_alloc)
         out = {
-            "chunks_bytes": int(chunks_bytes),
-            "embeddings_bytes": int(embeddings_bytes),
-            "pgvector_index_bytes": int(vec_idx_alloc),
-            "bm25_index_bytes": int(bm25_index_bytes),
-            "chunk_summaries_bytes": int(chunk_summaries_bytes),
+            "chunks_bytes": int(chunks_row["chunks_bytes"] or 0) if chunks_row else 0,
+            "chunk_summaries_bytes": int(summaries_row["chunk_summaries_bytes"] or 0) if summaries_row else 0,
         }
         self._dashboard_storage_cache[repo_id] = (now, out)
         return dict(out)
@@ -1741,7 +891,7 @@ class PostgresClient:
             row = await conn.fetchrow(
                 """
                 SELECT repo_id, name, root_path, description, meta, created_at, last_indexed,
-                       embedding_backend, embedding_provider, embedding_model, embedding_dimensions, ts_config
+                       embedding_backend, embedding_provider, embedding_model, embedding_dimensions, sparse_contract
                 FROM corpora
                 WHERE repo_id = $1;
                 """,
@@ -1761,7 +911,7 @@ class PostgresClient:
             "embedding_provider": str(row["embedding_provider"] or ""),
             "embedding_model": str(row["embedding_model"] or ""),
             "embedding_dimensions": int(row["embedding_dimensions"] or 0),
-            "ts_config": str(row["ts_config"] or ""),
+            "sparse_contract": _coerce_jsonb_dict(row["sparse_contract"]) if row["sparse_contract"] else None,
         }
 
     async def upsert_corpus(
@@ -2255,7 +1405,7 @@ class PostgresClient:
         provider: str,
         model: str,
         dimensions: int,
-        ts_config: str = "",
+        sparse_contract: dict[str, Any] | None = None,
     ) -> None:
         await self._require_pool()
         assert self._pool is not None
@@ -2267,7 +1417,7 @@ class PostgresClient:
                     embedding_provider = $3::text,
                     embedding_model = $4::text,
                     embedding_dimensions = $5::int,
-                    ts_config = $6::text,
+                    sparse_contract = $6::jsonb,
                     meta = COALESCE(meta, '{}'::jsonb) || jsonb_build_object('embedding_backend', $2::text)
                 WHERE repo_id = $1;
                 """,
@@ -2276,7 +1426,7 @@ class PostgresClient:
                 _sanitize_pg_text(provider or ""),
                 _sanitize_pg_text(model),
                 int(dimensions),
-                _sanitize_pg_text(ts_config or ""),
+                _json_dumps_sanitized(sparse_contract) if sparse_contract else None,
             )
 
     async def get_chunks_for_file_span(
@@ -2647,7 +1797,7 @@ class PostgresClient:
                 staging = await conn.fetchrow(
                     """
                     SELECT repo_id, name, root_path, description, meta, last_indexed,
-                           embedding_backend, embedding_provider, embedding_model, embedding_dimensions, ts_config
+                           embedding_backend, embedding_provider, embedding_model, embedding_dimensions, sparse_contract
                     FROM corpora
                     WHERE repo_id = $1;
                     """,
@@ -2716,7 +1866,7 @@ class PostgresClient:
                         embedding_provider = $8,
                         embedding_model = $9,
                         embedding_dimensions = $10,
-                        ts_config = $11
+                        sparse_contract = $11::jsonb
                     WHERE repo_id = $1;
                     """,
                     active_repo_id,
@@ -2733,7 +1883,7 @@ class PostgresClient:
                     _sanitize_pg_text(staging["embedding_provider"] or ""),
                     _sanitize_pg_text(staging["embedding_model"] or ""),
                     int(staging["embedding_dimensions"] or 0),
-                    _sanitize_pg_text(staging["ts_config"] or ""),
+                    staging["sparse_contract"],
                 )
 
                 await conn.execute("DELETE FROM corpus_configs WHERE repo_id = $1;", staging_repo_id)

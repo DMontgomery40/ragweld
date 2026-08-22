@@ -41,19 +41,14 @@ export function StorageSubtab() {
           size: formatBytes(storage?.chunks_bytes || 0)
         },
         {
-          label: 'PGVECTOR VECTORS',
-          bytes: storage?.embeddings_bytes || 0,
-          size: formatBytes(storage?.embeddings_bytes || 0)
+          label: 'QDRANT POINTS',
+          bytes: storage?.qdrant_points || 0,
+          size: `${(storage?.qdrant_points || 0).toLocaleString()} points`
         },
         {
-          label: 'PGVECTOR INDEX (optional)',
-          bytes: storage?.pgvector_index_bytes || 0,
-          size: formatBytes(storage?.pgvector_index_bytes || 0)
-        },
-        {
-          label: 'BM25 INDEX',
-          bytes: storage?.bm25_index_bytes || 0,
-          size: formatBytes(storage?.bm25_index_bytes || 0)
+          label: 'QDRANT DENSE VECTORS (est.)',
+          bytes: storage?.qdrant_dense_vector_bytes || 0,
+          size: formatBytes(storage?.qdrant_dense_vector_bytes || 0)
         },
         {
           label: 'NEO4J STORE',
@@ -316,7 +311,7 @@ export function StorageSubtab() {
         >
           <ul style={{ margin: 0, paddingLeft: '20px', lineHeight: '1.8', fontSize: '13px', color: 'var(--fg)' }}>
             <li>
-              <strong>pgvector Index:</strong> HNSW index overhead is typically 10-20% of raw embeddings (lower than standalone vector DBs)
+              <strong>Qdrant dense vectors:</strong> reported as an estimate (points x dimensions x 4 bytes); Qdrant's HNSW index adds roughly 10-50% on top
             </li>
             <li>
               <strong>BM25 Index:</strong> Sparse retrieval index is compact but grows with unique terms

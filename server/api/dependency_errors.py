@@ -6,6 +6,8 @@ from typing import Literal
 from fastapi import HTTPException
 
 from server.dependency_errors import (
+    DependencyUnavailableError,
+    exception_chain,
     is_neo4j_unavailable,
     is_postgres_unavailable,
     is_transport_unavailable,
@@ -113,6 +115,11 @@ def raise_neo4j_unavailable_if_applicable(exc: BaseException, *, boundary: str) 
 
 
 def raise_required_dependency_unavailable_if_applicable(exc: BaseException, *, boundary: str) -> None:
+    # A typed DependencyUnavailableError names its dependency explicitly
+    # (qdrant, embedding_provider, ...); map it as-is.
+    for item in exception_chain(exc):
+        if isinstance(item, DependencyUnavailableError):
+            raise dependency_unavailable_http_exception(item.dependency, boundary=boundary, exc=item) from exc
     if is_neo4j_unavailable(exc) and not is_postgres_unavailable(exc):
         raise dependency_unavailable_http_exception("neo4j", boundary=boundary, exc=exc) from exc
     if is_postgres_unavailable(exc):

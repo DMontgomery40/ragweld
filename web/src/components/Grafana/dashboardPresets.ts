@@ -26,7 +26,7 @@ export const GRAFANA_DASHBOARD_PRESETS: GrafanaDashboardPreset[] = [
     label: 'Retrieval/Indexing/Graph',
     uid: 'ragweld-retrieval-indexing-graph',
     slug: 'retrieval-indexing-graph',
-    description: 'Retrieval pilot health, indexing export truth, and graph-parity signals.',
+    description: 'Qdrant vector-lane health, indexing generation truth, and graph-parity signals.',
   },
   {
     id: 'training-workflow',

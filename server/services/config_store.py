@@ -37,6 +37,17 @@ _REMOVED_NESTED_KEYS: tuple[str, ...] = (
     "indexing.rag_out_base",
     "indexing.repos_file",
     "indexing.bm25_stopwords_lang",
+    "indexing.auto_prepare_dense_retrieval",
+    "sparse_search.engine",
+    "sparse_search.query_mode",
+    "sparse_search.highlight",
+    "sparse_search.relax_on_empty",
+    "sparse_search.relax_max_terms",
+    "sparse_search.file_path_fallback",
+    "sparse_search.file_path_max_terms",
+    "retrieval.bm25_k1",
+    "retrieval.bm25_b",
+    "chat.recall.vector_backend",
     "graph_storage.neo4j_password",
     "chat.litellm.api_key",
 )
@@ -49,6 +60,9 @@ _REMOVED_FLAT_KEYS: tuple[str, ...] = (
     "RAG_OUT_BASE",
     "REPOS_FILE",
     "BM25_STOPWORDS_LANG",
+    "BM25_K1",
+    "BM25_B",
+    "AUTO_PREPARE_DENSE_RETRIEVAL",
     "NEO4J_PASSWORD",
 )
 

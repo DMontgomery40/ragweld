@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from server.indexing.text_extractors import extract_text_for_path
+from server.indexing.text_extractors import extract_text_for_path, extraction_method_for_path
 
 
 def test_extract_text_for_csv(tmp_path: Path) -> None:
@@ -28,50 +28,67 @@ def test_extract_text_for_xlsx(tmp_path: Path) -> None:
     wb.save(p)
     wb.close()
 
+    assert extraction_method_for_path(p) == "docling"
     out = extract_text_for_path(p)
     assert out is not None
-    assert "sheet Sheet1" in out
-    assert "name\tvalue" in out
-    assert "alpha\t1" in out
+    # Docling renders worksheets as markdown tables.
+    assert "|" in out
+    assert "name" in out and "value" in out
+    assert "alpha" in out and "beta" in out
+
+
+def _build_minimal_pdf(text: str) -> bytes:
+    """Hand-assemble a valid single-page PDF with a real text layer (no PDF writer dependency)."""
+    content = f"BT /F1 18 Tf 40 740 Td ({text}) Tj ET".encode("latin-1")
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+        b"<< /Length " + str(len(content)).encode() + b" >>\nstream\n" + content + b"\nendstream",
+    ]
+    out = bytearray(b"%PDF-1.4\n")
+    offsets: list[int] = []
+    for index, obj in enumerate(objects, start=1):
+        offsets.append(len(out))
+        out += f"{index} 0 obj\n".encode() + obj + b"\nendobj\n"
+    xref = len(out)
+    out += f"xref\n0 {len(objects) + 1}\n".encode() + b"0000000000 65535 f \n"
+    for offset in offsets:
+        out += f"{offset:010d} 00000 n \n".encode()
+    out += f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n".encode()
+    return bytes(out)
 
 
 def test_extract_text_for_pdf(tmp_path: Path) -> None:
-    # Create a tiny 1-page PDF with text using pypdf primitives.
-    from pypdf import PdfWriter
-    from pypdf.generic import DictionaryObject, NameObject, NumberObject, StreamObject
-
-    writer = PdfWriter()
-    page = writer.add_blank_page(width=300, height=300)
-
-    # Minimal font resource so the text operator can reference /F1.
-    page[NameObject("/Resources")] = DictionaryObject(
-        {
-            NameObject("/Font"): DictionaryObject(
-                {
-                    NameObject("/F1"): DictionaryObject(
-                        {
-                            NameObject("/Type"): NameObject("/Font"),
-                            NameObject("/Subtype"): NameObject("/Type1"),
-                            NameObject("/BaseFont"): NameObject("/Helvetica"),
-                        }
-                    )
-                }
-            )
-        }
-    )
-
-    stream = StreamObject()
-    stream._data = b"BT /F1 12 Tf 10 280 Td (Hello PDF) Tj ET"
-    stream[NameObject("/Length")] = NumberObject(len(stream._data))
-    page[NameObject("/Contents")] = stream
-
     p = tmp_path / "doc.pdf"
-    with p.open("wb") as f:
-        writer.write(f)
+    p.write_bytes(_build_minimal_pdf("Hello PDF from ragweld"))
 
+    assert extraction_method_for_path(p) == "docling"
     out = extract_text_for_path(p)
     assert out is not None
-    assert "hello" in out.lower()
+    assert "hello pdf from ragweld" in out.lower()
+
+
+def test_extract_text_for_html_uses_docling_and_keeps_tables(tmp_path: Path) -> None:
+    p = tmp_path / "handbook.html"
+    p.write_text(
+        "<html><body><h1>Calibration Handbook</h1>"
+        "<p>The salinity array is calibrated every 45 days.</p>"
+        "<table><tr><th>Sensor</th><th>Cycle</th></tr>"
+        "<tr><td>Salinity</td><td>45 days</td></tr></table></body></html>",
+        encoding="utf-8",
+    )
+    assert extraction_method_for_path(p) == "docling"
+    out = extract_text_for_path(p)
+    assert out is not None
+    assert "calibrated every 45 days" in out
+    assert "|" in out  # table survived conversion to markdown
+
+
+def test_extraction_method_is_direct_for_code_and_text(tmp_path: Path) -> None:
+    assert extraction_method_for_path(tmp_path / "module.py") == "direct"
+    assert extraction_method_for_path(tmp_path / "notes.md") == "direct"
 
 
 def test_extract_text_for_unknown_binary_returns_none(tmp_path: Path) -> None:

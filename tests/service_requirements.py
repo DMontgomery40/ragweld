@@ -150,7 +150,6 @@ def probe_qdrant(
 def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line("markers", "requires_postgres: requires a live authenticated PostgreSQL connection")
     config.addinivalue_line("markers", "requires_neo4j: requires a live authenticated Neo4j connection")
-    config.addinivalue_line("markers", "requires_pg_search: requires the optional ParadeDB pg_search extension")
     config.addinivalue_line("markers", "requires_qdrant: requires a live Qdrant vector-store service")
 
 

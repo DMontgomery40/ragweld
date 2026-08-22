@@ -7,23 +7,25 @@ from server.indexing.embedder import Embedder
 from server.models.chat import Message
 from server.models.chat_config import RecallConfig
 from server.models.index import Chunk
-from server.retrieval.errors import EmbeddingContractMismatchError
+from server.retrieval.contracts import contract_hash
+from server.retrieval.errors import EmbeddingContractMismatchError, SparseContractMismatchError
+from server.retrieval.qdrant_store import QdrantChunkStore
 
 _SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
 
 
-async def _ensure_recall_dense_contract(
+async def _ensure_recall_contracts(
     pg: PostgresClient,
     *,
     repo_id: str,
     embedder: Embedder,
-    ts_config: str,
+    qdrant: QdrantChunkStore,
 ) -> None:
-    """Record the dense contract on first write; refuse to mix incompatible vectors.
+    """Record the dense + sparse contracts on first write; refuse to mix incompatible vectors.
 
-    The file indexer records the corpus embedding contract at index time and the
-    retrieval path enforces it. Recall writes go around the file indexer, so they
-    must uphold the same contract instead of silently mixing dimensions.
+    The file indexer records the corpus contracts at index time and the
+    retrieval path enforces them. Recall writes go around the file indexer, so
+    they must uphold the same contracts instead of silently mixing vector spaces.
     """
     corpus = await pg.get_corpus(repo_id)
     if corpus is None:
@@ -42,7 +44,7 @@ async def _ensure_recall_dense_contract(
             provider=current_provider,
             model=current_model,
             dimensions=current_dim,
-            ts_config=ts_config,
+            sparse_contract=qdrant.sparse_contract,
         )
         return
 
@@ -74,12 +76,22 @@ async def _ensure_recall_dense_contract(
             },
         )
 
+    stored_sparse = corpus.get("sparse_contract")
+    stored_sparse = dict(stored_sparse) if isinstance(stored_sparse, dict) else {}
+    if contract_hash(stored_sparse) != contract_hash(qdrant.sparse_contract):
+        raise SparseContractMismatchError(
+            corpus_id=repo_id,
+            expected_contract=stored_sparse,
+            current_contract=dict(qdrant.sparse_contract),
+        )
+
 
 async def ensure_recall_corpus(pg: PostgresClient, config: RecallConfig) -> None:
     """Ensure the Recall corpus exists in Postgres.
 
     Recall is stored using the existing `corpora` + `chunks` tables under
-    repo_id == config.default_corpus_id.
+    repo_id == config.default_corpus_id; its vectors live in Qdrant like any
+    other corpus.
     """
     repo_id = config.default_corpus_id
     existing = await pg.get_corpus(repo_id)
@@ -143,27 +155,28 @@ def build_recall_chunks(*, conversation_id: str, messages: list[Message], config
 
 async def index_recall_conversation(
     pg: PostgresClient,
+    qdrant: QdrantChunkStore,
     *,
     conversation_id: str,
     messages: list[Message],
     config: RecallConfig,
     embedder: Embedder,
-    ts_config: str = "english",
 ) -> int:
-    """Index a conversation into the Recall corpus (pgvector + FTS)."""
+    """Index a conversation into the Recall corpus (chunk rows in Postgres, dense + sparse vectors in Qdrant)."""
     await ensure_recall_corpus(pg, config)
-    await _ensure_recall_dense_contract(
+    await _ensure_recall_contracts(
         pg,
         repo_id=config.default_corpus_id,
         embedder=embedder,
-        ts_config=ts_config,
+        qdrant=qdrant,
     )
 
     chunks = build_recall_chunks(conversation_id=conversation_id, messages=messages, config=config)
+    if not chunks:
+        return 0
     embedded_chunks = await embedder.embed_chunks(chunks)
 
-    await pg.upsert_embeddings(config.default_corpus_id, embedded_chunks)
-    await pg.upsert_fts(config.default_corpus_id, embedded_chunks, ts_config=ts_config)
+    await pg.upsert_chunks(config.default_corpus_id, embedded_chunks)
+    await qdrant.upsert_chunks(config.default_corpus_id, embedded_chunks, embedding_dim=int(embedder.dim))
 
     return len(chunks)
-

@@ -2,7 +2,6 @@ import { useState, useEffect, useCallback, useRef, type CSSProperties } from 're
 import { EmbeddingMismatchWarning } from '@/components/ui/EmbeddingMismatchWarning';
 import { LiveTerminal, type LiveTerminalHandle } from '@/components/LiveTerminal/LiveTerminal';
 import { IntentMatrixEditor } from '@/components/RAG/IntentMatrixEditor';
-import { RetrievalPilotPanel } from '@/components/RAG/RetrievalPilotPanel';
 import { SyntheticCallout } from '@/components/RAG/SyntheticCallout';
 import { ModelAssignments } from '@/components/RAG/ModelAssignments';
 import { ModelPicker as ChatModelPicker } from '@/components/Chat/ModelPicker';
@@ -112,8 +111,6 @@ export function RetrievalSubtab() {
   const traceTerminalRef = useRef<LiveTerminalHandle>(null);
 
   const { repos, activeRepo, setActiveRepo, loadRepos } = useRepoStore();
-  const activeCorpus = repos.find((repo) => repo.corpus_id === activeRepo || repo.slug === activeRepo || repo.name === activeRepo);
-  const activeRepoPath = String(activeCorpus?.path || '');
 
   // --- Generation ---------------------------------------------------------
   const [genModel, setGenModel] = useConfigField<string>('generation.gen_model', '');
@@ -163,8 +160,6 @@ export function RetrievalSubtab() {
   const [evalMulti, setEvalMulti] = useConfigField<boolean>('retrieval.eval_multi', true);
   const [queryExpansionEnabled, setQueryExpansionEnabled] = useConfigField<boolean>('retrieval.query_expansion_enabled', true);
   const [retrievalBm25Weight, setRetrievalBm25Weight] = useConfigField<number>('retrieval.bm25_weight', 0.3);
-  const [retrievalBm25K1, setRetrievalBm25K1] = useConfigField<number>('retrieval.bm25_k1', 1.2);
-  const [retrievalBm25B, setRetrievalBm25B] = useConfigField<number>('retrieval.bm25_b', 0.4);
   const [retrievalVectorWeight, setRetrievalVectorWeight] = useConfigField<number>('retrieval.vector_weight', 0.7);
   const [cardSearchEnabled, setCardSearchEnabled] = useConfigField<boolean>('retrieval.chunk_summary_search_enabled', true);
   const [maxChunksPerFile, setMaxChunksPerFile] = useConfigField<number>('retrieval.max_chunks_per_file', 3);
@@ -182,8 +177,6 @@ export function RetrievalSubtab() {
   const [topkSparse, setTopkSparse] = useConfigField<number>('retrieval.topk_sparse', 75);
   const [retrievalHydrationMode, setRetrievalHydrationMode] = useConfigField<string>('retrieval.hydration_mode', 'lazy');
   const [retrievalHydrationMaxChars, setRetrievalHydrationMaxChars] = useConfigField<number>('retrieval.hydration_max_chars', 2000);
-  void retrievalBm25K1;
-  void retrievalBm25B;
 
   // --- Vector search ------------------------------------------------------
   const [vectorSearchEnabled, setVectorSearchEnabled] = useConfigField<boolean>('vector_search.enabled', true);
@@ -191,19 +184,6 @@ export function RetrievalSubtab() {
   const [vectorSimilarityThreshold, setVectorSimilarityThreshold] = useConfigField<number>('vector_search.similarity_threshold', 0.0);
 
   // --- Sparse search ------------------------------------------------------
-  const [sparseSearchEngine, setSparseSearchEngine] = useConfigField<'postgres_fts' | 'pg_search_bm25'>(
-    'sparse_search.engine',
-    'postgres_fts',
-  );
-  const [sparseSearchQueryMode, setSparseSearchQueryMode] = useConfigField<'plain' | 'phrase' | 'boolean'>(
-    'sparse_search.query_mode',
-    'plain',
-  );
-  const [sparseSearchHighlight, setSparseSearchHighlight] = useConfigField<boolean>('sparse_search.highlight', false);
-  const [sparseRelaxOnEmpty, setSparseRelaxOnEmpty] = useConfigField<boolean>('sparse_search.relax_on_empty', true);
-  const [sparseRelaxMaxTerms, setSparseRelaxMaxTerms] = useConfigField<number>('sparse_search.relax_max_terms', 8);
-  const [sparseFilePathFallback, setSparseFilePathFallback] = useConfigField<boolean>('sparse_search.file_path_fallback', true);
-  const [sparseFilePathMaxTerms, setSparseFilePathMaxTerms] = useConfigField<number>('sparse_search.file_path_max_terms', 6);
   const [sparseSearchEnabled, setSparseSearchEnabled] = useConfigField<boolean>('sparse_search.enabled', true);
   const [sparseSearchTopK, setSparseSearchTopK] = useConfigField<number>('sparse_search.top_k', 50);
   const [sparseBm25K1, setSparseBm25K1] = useConfigField<number>('sparse_search.bm25_k1', 1.2);
@@ -350,7 +330,7 @@ export function RetrievalSubtab() {
     setTraceStatus(null);
     try {
       const data: TracesLatestResponse = await tracesApi.getLatest();
-      const formatted = formatTracePayload(data, 'pgvector').split('\n');
+      const formatted = formatTracePayload(data, 'qdrant').split('\n');
       traceTerminalRef.current?.setTitle(`Routing Trace • ${new Date().toLocaleTimeString()}`);
       traceTerminalRef.current?.setContent(formatted);
       setTraceStatus({
@@ -370,22 +350,6 @@ export function RetrievalSubtab() {
       setTraceLoading(false);
     }
   }, []);
-
-  const setUnifiedBm25K1 = useCallback(
-    (value: number) => {
-      setSparseBm25K1(value);
-      setRetrievalBm25K1(value);
-    },
-    [setSparseBm25K1, setRetrievalBm25K1],
-  );
-
-  const setUnifiedBm25B = useCallback(
-    (value: number) => {
-      setSparseBm25B(value);
-      setRetrievalBm25B(value);
-    },
-    [setSparseBm25B, setRetrievalBm25B],
-  );
 
   const setUnifiedHydrationMode = useCallback(
     (value: string) => {
@@ -441,7 +405,6 @@ export function RetrievalSubtab() {
 
       <EmbeddingMismatchWarning variant="inline" showActions />
       <SyntheticCallout context="retrieval" />
-      <RetrievalPilotPanel corpusId={String(activeRepo || '').trim()} repoPath={activeRepoPath.trim()} />
 
       {configError && (
         <div style={{ ...PANEL_STYLE, borderColor: 'var(--err)', marginBottom: 18 }}>
@@ -696,34 +659,6 @@ export function RetrievalSubtab() {
                   </div>
                   <div className="input-group">
                     <label>
-                      Sparse Engine <TooltipIcon name="SPARSE_SEARCH_ENGINE" />
-                    </label>
-                    <select
-                      data-testid="sparse-engine"
-                      value={sparseSearchEngine}
-                      onChange={(e) => setSparseSearchEngine(e.target.value as any)}
-                      disabled={!sparseSearchEnabled}
-                    >
-                      <option value="postgres_fts">postgres_fts</option>
-                      <option value="pg_search_bm25">pg_search_bm25</option>
-                    </select>
-                  </div>
-                  <div className="input-group">
-                    <label>
-                      Sparse Query Mode <TooltipIcon name="SPARSE_SEARCH_QUERY_MODE" />
-                    </label>
-                    <select
-                      value={sparseSearchQueryMode}
-                      onChange={(e) => setSparseSearchQueryMode(e.target.value as any)}
-                      disabled={!sparseSearchEnabled}
-                    >
-                      <option value="plain">plain</option>
-                      <option value="phrase">phrase</option>
-                      <option value="boolean">boolean</option>
-                    </select>
-                  </div>
-                  <div className="input-group">
-                    <label>
                       BM25 k1 <TooltipIcon name="BM25_K1" />
                     </label>
                     <input
@@ -732,7 +667,7 @@ export function RetrievalSubtab() {
                       max={3}
                       step={0.1}
                       value={sparseBm25K1}
-                      onChange={(e) => setUnifiedBm25K1(snapNumber(e.target.value, 1.2))}
+                      onChange={(e) => setSparseBm25K1(snapNumber(e.target.value, 1.2))}
                       disabled={!sparseSearchEnabled}
                     />
                   </div>
@@ -746,71 +681,8 @@ export function RetrievalSubtab() {
                       max={1}
                       step={0.05}
                       value={sparseBm25B}
-                      onChange={(e) => setUnifiedBm25B(snapNumber(e.target.value, 0.4))}
+                      onChange={(e) => setSparseBm25B(snapNumber(e.target.value, 0.4))}
                       disabled={!sparseSearchEnabled}
-                    />
-                  </div>
-                  <div className="input-group">
-                    <label>
-                      <input
-                        type="checkbox"
-                        checked={sparseSearchHighlight}
-                        onChange={(e) => setSparseSearchHighlight(e.target.checked)}
-                        disabled={!sparseSearchEnabled}
-                      />{' '}
-                      Highlight <TooltipIcon name="SPARSE_SEARCH_HIGHLIGHT" />
-                    </label>
-                  </div>
-                  <div className="input-group">
-                    <label>
-                      Relax on Empty <TooltipIcon name="SPARSE_SEARCH_RELAX_ON_EMPTY" />
-                    </label>
-                    <select
-                      value={sparseRelaxOnEmpty ? '1' : '0'}
-                      onChange={(e) => setSparseRelaxOnEmpty(e.target.value === '1')}
-                      disabled={!sparseSearchEnabled}
-                    >
-                      <option value="1">Enabled</option>
-                      <option value="0">Disabled</option>
-                    </select>
-                  </div>
-                  <div className="input-group">
-                    <label>
-                      Relax Max Terms <TooltipIcon name="SPARSE_SEARCH_RELAX_MAX_TERMS" />
-                    </label>
-                    <input
-                      type="number"
-                      min={1}
-                      max={32}
-                      value={sparseRelaxMaxTerms}
-                      onChange={(e) => setSparseRelaxMaxTerms(snapNumber(e.target.value, 8))}
-                      disabled={!sparseSearchEnabled || !sparseRelaxOnEmpty}
-                    />
-                  </div>
-                  <div className="input-group">
-                    <label>
-                      File Path Fallback <TooltipIcon name="SPARSE_SEARCH_FILE_PATH_FALLBACK" />
-                    </label>
-                    <select
-                      value={sparseFilePathFallback ? '1' : '0'}
-                      onChange={(e) => setSparseFilePathFallback(e.target.value === '1')}
-                      disabled={!sparseSearchEnabled}
-                    >
-                      <option value="1">Enabled</option>
-                      <option value="0">Disabled</option>
-                    </select>
-                  </div>
-                  <div className="input-group">
-                    <label>
-                      File Path Max Terms <TooltipIcon name="SPARSE_SEARCH_FILE_PATH_MAX_TERMS" />
-                    </label>
-                    <input
-                      type="number"
-                      min={1}
-                      max={32}
-                      value={sparseFilePathMaxTerms}
-                      onChange={(e) => setSparseFilePathMaxTerms(snapNumber(e.target.value, 6))}
-                      disabled={!sparseSearchEnabled || !sparseFilePathFallback}
                     />
                   </div>
                 </div>

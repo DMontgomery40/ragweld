@@ -40,7 +40,7 @@ class DependencyUnavailableError(RuntimeError):
         super().__init__(f"{dependency} unavailable during {operation}{suffix}")
 
 
-def _exception_chain(exc: BaseException) -> Iterator[BaseException]:
+def exception_chain(exc: BaseException) -> Iterator[BaseException]:
     pending = [exc]
     seen: set[int] = set()
     while pending:
@@ -61,7 +61,7 @@ def is_postgres_unavailable(exc: BaseException) -> bool:
     return any(
         (isinstance(item, DependencyUnavailableError) and item.dependency == "postgres")
         or isinstance(item, _POSTGRES_UNAVAILABLE)
-        for item in _exception_chain(exc)
+        for item in exception_chain(exc)
     )
 
 
@@ -69,17 +69,17 @@ def is_neo4j_unavailable(exc: BaseException) -> bool:
     return any(
         (isinstance(item, DependencyUnavailableError) and item.dependency == "neo4j")
         or isinstance(item, _NEO4J_UNAVAILABLE)
-        for item in _exception_chain(exc)
+        for item in exception_chain(exc)
     )
 
 
 def is_transport_unavailable(exc: BaseException) -> bool:
-    return any(isinstance(item, _TRANSPORT_UNAVAILABLE) for item in _exception_chain(exc))
+    return any(isinstance(item, _TRANSPORT_UNAVAILABLE) for item in exception_chain(exc))
 
 
 def is_required_dependency_unavailable(exc: BaseException) -> bool:
     return any(
         isinstance(item, DependencyUnavailableError)
         or isinstance(item, _POSTGRES_UNAVAILABLE + _NEO4J_UNAVAILABLE)
-        for item in _exception_chain(exc)
+        for item in exception_chain(exc)
     )

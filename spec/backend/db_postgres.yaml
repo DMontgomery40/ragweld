@@ -1,51 +1,51 @@
 name: Postgres Client
-description: PostgreSQL client for vectors and FTS
-version: "1.0"
+description: PostgreSQL control/state client (corpus registry, chunk rows, summaries, caches; vectors live in Qdrant)
+version: "2.0"
 
 class: PostgresClient
 
 methods:
   - name: connect
     async: true
-    description: Connect to PostgreSQL
+    description: Connect to PostgreSQL (ensures schema; drops legacy vector/FTS columns on upgrade)
 
   - name: disconnect
     async: true
     description: Disconnect from PostgreSQL
 
-  - name: upsert_embeddings
+  - name: upsert_chunks
     async: true
     params:
       - repo_id: str
       - chunks: list[Chunk]
     returns: int
-    description: Upsert chunk embeddings
+    description: Upsert chunk rows (content + provenance, no vectors) and stamp corpora.last_indexed
 
-  - name: vector_search
+  - name: count_chunks
     async: true
     params:
       - repo_id: str
-      - embedding: list[float]
-      - top_k: int
-    returns: list[ChunkMatch]
-    description: Vector similarity search
-
-  - name: upsert_fts
-    async: true
-    params:
-      - repo_id: str
-      - chunks: list[Chunk]
     returns: int
-    description: Upsert FTS documents
+    description: Number of chunk rows for a corpus
 
-  - name: sparse_search
+  - name: update_corpus_embedding_meta
     async: true
     params:
       - repo_id: str
-      - query: str
-      - top_k: int
-    returns: list[ChunkMatch]
-    description: Full-text search
+      - backend: str
+      - provider: str
+      - model: str
+      - dimensions: int
+      - sparse_contract: dict | None
+    returns: None
+    description: Record the dense and sparse index contracts on the corpus row
+
+  - name: clear_corpus_index_state
+    async: true
+    params:
+      - repo_id: str
+    returns: None
+    description: Reset last_indexed and contracts after chunks/vectors were deleted
 
   - name: get_chunk
     async: true

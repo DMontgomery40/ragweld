@@ -136,7 +136,8 @@ def test_integration_launcher_is_disposable_strict_and_host_owned() -> None:
     assert "neo4j_bolt_port=0" in source
     assert "down --volumes --remove-orphans" in source
     assert "ragweld_strict_integration=1" in source
-    assert "not requires_pg_search" in source
+    assert "qdrant_port=0" in source
+    assert "requires_qdrant" in source
 
 
 def test_base_compose_uses_project_scoped_names_and_named_database_volumes() -> None:

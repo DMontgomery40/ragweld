@@ -2,8 +2,10 @@
 
 Date: 2026-08-21
 
-Status: active — pilot parity gates proven; atomic cutover designed, not yet
-executed.
+Status: executed 2026-08-21 (recovery session 4). The canonical lane is now
+Postgres control rows + Qdrant dense/sparse vectors + Neo4j graph; the pilot
+lane and the pgvector/Postgres-FTS legs no longer exist. Reference:
+`docs/references/retrieval-lane.md`.
 
 ## Proven so far (all committed on main, each slice gate-verified)
 
@@ -74,3 +76,44 @@ Do NOT start this slice without the time to land it green atomically.
 - Neo4j remains the graph-parity substrate, including its chunk-vector index.
 - The reranker (`server/reranker/`, `server/retrieval/rerank.py`) and
   observability fabric are untouched by the cutover.
+
+## Execution record (2026-08-21, session 4)
+
+Landed in one commit on `main`, replacement-only:
+
+- `server/retrieval/qdrant_store.py` owns the per-corpus alias + staged
+  generations (Haystack `QdrantDocumentStore` writes, Qdrant-client reads);
+  `server/api/index.py` stages a generation per run, promotes Postgres then
+  the Qdrant alias, verifies `points == chunks`, and drops the generation on
+  cancel/error; `fusion.py` vector/sparse legs query Qdrant; recall and the
+  Codex session ingest worker write through the same store.
+- Deleted: `PostgresClient.vector_search/sparse_search*/fts_search*/
+  bm25_search_pg_search/pg_search_available/file_path_search/
+  ensure_vector_index/upsert_embeddings/upsert_fts/delete_embeddings/
+  delete_fts/count_chunks_with_embeddings/get_embeddings/vocab_preview`,
+  the `chunks.embedding/tsv/bm25_id` columns and their indexes (dropped on
+  upgrade), `corpora.ts_config` (replaced by `corpora.sparse_contract`),
+  `server/indexing/oss_retrieval_pilot.py` and every `/index/{id}/pilot/*`
+  endpoint, the pilot UI panels, the vocab-preview endpoint/UI, the pgvector
+  post-index prep, `sparse_search.engine/query_mode/highlight/relax_*/
+  file_path_*`, `indexing.auto_prepare_dense_retrieval`, `retrieval.bm25_k1/b`,
+  `chat.recall.vector_backend`, pypdf/openpyxl extraction (Docling replaces
+  them), and the `pilot_chunks_*` collections in the live Qdrant.
+- Sparse contract is now `{engine: qdrant_sparse_idf, model: Qdrant/bm25,
+  k1, b, language, stemmer}`; `bm25_k1/b` and `bm25_tokenizer/stemmer_lang`
+  are real fastembed tunables recorded on the corpus.
+- Evidence: `tests/integration/test_qdrant_chunk_store.py`,
+  `tests/integration/test_index_promoted_lane.py` (index -> three legs ->
+  metrics -> storage -> delete -> empty legs) and the updated
+  `test_required_retrieval_leg_contract.py` pass on the live Compose services
+  and in the strict lane (62 passed); full `pytest -q` 709 passed / 58
+  skipped; web lint + build green. Live: `aurora_acceptance` re-indexed on
+  the promoted lane (generation `ragweld_chunks_aurora_acceptance__*`, 4
+  points / 4 dense, 384-d), `/api/search` returned vector=4 sparse=1
+  graph=4, `/api/answer` produced a grounded LiteLLM->vLLM answer citing
+  `sensor-calibration.md`, and the rendered Chat surface (Claude-in-Chrome,
+  all three legs on) streamed "The salinity sensors are calibrated every 45
+  days using the Halcyon reference brine." with three source citations, no
+  console errors attributable to the app. Observability reports
+  `haystack_docling_qdrant` healthy with the live generation; no retrieval
+  incident.

@@ -98,7 +98,7 @@ class SparseContractMismatchError(RetrievalContractMismatchError):
             expected_contract=expected_contract,
             current_contract=current_contract,
             required_action=(
-                "Re-index this corpus with force_reindex=true or restore the sparse tokenization/ts_config "
-                "to match the existing index contract."
+                "Re-index this corpus with force_reindex=true or restore the sparse BM25 settings "
+                "(bm25_k1/bm25_b/bm25_tokenizer/bm25_stemmer_lang) to match the existing index contract."
             ),
         )

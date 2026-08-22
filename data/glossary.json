@@ -529,7 +529,7 @@
     {
       "term": "BM25 b (Length Normalization)",
       "key": "BM25_B",
-      "definition": "BM25_B is the length-normalization parameter in BM25 and controls how strongly long chunks are penalized compared with short chunks. Higher values increase normalization, which helps when long documents accumulate incidental term matches; lower values reduce that penalty and can help when key evidence naturally lives in larger files. In hybrid retrieval this parameter shapes sparse scores before fusion with dense vectors, so it directly affects which lexical results survive into reranking. Tune b with mixed query types, including exact identifiers and natural-language requests, to avoid overfitting one retrieval mode.",
+      "definition": "BM25_B is the length-normalization parameter for the sparse vectors built by fastembed `Qdrant/bm25` and controls how strongly long chunks are penalized relative to short ones (0 = no penalty, 1 = full penalty). Because b changes the stored sparse vectors, it is part of the corpus sparse contract and requires a re-index to change. Values around 0.3-0.5 suit code and mixed technical corpora where chunk lengths are already bounded by the chunker.",
       "category": "retrieval",
       "related": [
         "BM25 k1 (Term Saturation)",
@@ -565,7 +565,7 @@
     {
       "term": "BM25 k1 (Term Saturation)",
       "key": "BM25_K1",
-      "definition": "BM25_K1 controls term-frequency saturation, meaning how much repeated occurrences of a term continue to increase sparse relevance. Lower values make scoring closer to binary presence and reduce repetition bias; higher values reward repetition more strongly, which can help when repetition is genuinely informative. In code search, overly high k1 can over-rank boilerplate-heavy files, while very low k1 can under-rank dense implementation chunks. Tune k1 jointly with b and tokenizer configuration, then validate on both exact-match and intent-style queries.",
+      "definition": "BM25_K1 controls term-frequency saturation for the sparse vectors built by fastembed `Qdrant/bm25`: higher values let repeated occurrences of a term keep raising a chunk's score, lower values flatten repetition quickly. Because k1 changes the stored sparse vectors, it is part of the corpus sparse contract: changing it on an indexed corpus is refused until you re-index, and a drifted value at query time is a typed 409. Typical code/documentation corpora sit between 1.0 and 1.5.",
       "category": "retrieval",
       "related": [
         "BM25 b (Length Normalization)",
@@ -600,7 +600,7 @@
     {
       "term": "BM25 Stemmer Language",
       "key": "BM25_STEMMER_LANG",
-      "definition": "BM25_STEMMER_LANG chooses the stemming or morphological normalization profile applied before sparse indexing. Correct language normalization improves recall by unifying inflected word forms, while incorrect stemming can collapse distinct technical terms and reduce precision. Multilingual corpora often need language-aware analyzers by field rather than one global stemmer, especially when prose and code identifiers coexist. Any change here requires reindexing and targeted multilingual relevance checks because token statistics and BM25 behavior shift across the entire corpus.",
+      "definition": "BM25_STEMMER_LANG is the Snowball stemmer language applied when BM25_TOKENIZER is `stemmer`, for example `english` or `german`; fastembed's `Qdrant/bm25` model uses it to normalize inflected forms before building sparse vectors. It is part of the corpus sparse contract: the language used at index time must match the language used at query time, so changing it requires a re-index. Unsupported language names fail the sparse leg with an explicit error rather than silently falling back.",
       "category": "retrieval",
       "related": [],
       "links": [
@@ -631,7 +631,7 @@
     {
       "term": "BM25 Tokenizer",
       "key": "BM25_TOKENIZER",
-      "definition": "BM25_TOKENIZER determines how text is split into sparse terms, and this often has a larger impact than small parameter tweaks. Conservative tokenization preserves exact symbols and identifier fragments useful for code retrieval, while aggressive normalization helps natural-language matching. The right choice depends on corpus composition: APIs and filenames benefit from symbol-aware token boundaries, whereas narrative documents benefit from linguistic normalization. Because tokenizer behavior changes term frequencies and document lengths, retune BM25 parameters after tokenizer changes instead of carrying old values forward.",
+      "definition": "BM25_TOKENIZER chooses whether the sparse `Qdrant/bm25` vectors are built with Snowball stemming (`stemmer`, using BM25_STEMMER_LANG) or without stemming (`lowercase` and `whitespace` both disable the stemmer and keep exact tokens). Stemming helps narrative prose match inflected forms; exact tokens preserve identifiers, filenames, and error codes for code-heavy corpora. The choice is recorded in the corpus sparse contract, so changing it requires a re-index and is otherwise refused.",
       "category": "retrieval",
       "related": [],
       "links": [
@@ -656,45 +656,6 @@
         {
           "text": "Tokenization",
           "class": "info"
-        }
-      ]
-    },
-    {
-      "term": "BM25 Vocabulary Preview",
-      "key": "BM25_VOCAB_PREVIEW",
-      "definition": "Inspect tokenized vocabulary from BM25 sparse index. Shows term frequencies for debugging. Use cases: verify code identifiers preserved, check stemmer behavior, identify noise terms, debug zero-result queries. Vocabulary reflects tokenizer: whitespace (exact, best for code), stemmer (normalized, best for prose), standard (balanced). Large vocabularies (>100K) indicate insufficient stopword filtering.",
-      "category": "retrieval",
-      "related": [],
-      "links": [
-        {
-          "text": "BM25S: Eager Sparse Scoring (arXiv 2024)",
-          "href": "https://arxiv.org/abs/2407.03618"
-        },
-        {
-          "text": "BMX: Entropy-weighted BM25 Extension",
-          "href": "https://arxiv.org/abs/2408.06643"
-        },
-        {
-          "text": "Tokenization Foundations (ICLR 2025)",
-          "href": "https://arxiv.org/abs/2407.11606"
-        },
-        {
-          "text": "BM25 Algorithm",
-          "href": "https://en.wikipedia.org/wiki/Okapi_BM25"
-        },
-        {
-          "text": "Text Tokenization",
-          "href": "https://en.wikipedia.org/wiki/Lexical_analysis#Tokenization"
-        }
-      ],
-      "badges": [
-        {
-          "text": "DEBUGGING",
-          "class": "info"
-        },
-        {
-          "text": "REINDEX TO UPDATE",
-          "class": "warn"
         }
       ]
     },
@@ -5032,7 +4993,7 @@
       "definition": "Defined set of infrastructure containers that provide the core substrate for retrieval and operations: vector-capable storage, graph reasoning storage, metrics, logs, and alerting. Treat this as a dependency graph rather than a flat list, because failures in observability services can hide problems in retrieval services and vice versa. Healthy operation requires both data-plane services (for query/index workloads) and control-plane services (for telemetry and incident response). Managing this group consistently is essential for predictable RAG behavior in production.",
       "category": "infrastructure",
       "related": [
-        "PostgreSQL pgvector URL",
+        "PostgreSQL URL",
         "Neo4j Connection URI"
       ],
       "links": [
@@ -7817,7 +7778,7 @@
       "definition": "Neo4j URI config determines how clients connect, route, and secure graph queries in retrieval workflows. Use `neo4j://` for routed cluster-aware connections and `bolt://` for direct connections when routing is not needed. Misconfigured schemes can produce subtle behavior differences in failover, read routing, and TLS handling that only appear under load. Treat this value as infrastructure configuration: validate connectivity at startup, enforce encrypted transport in shared environments, and keep URI/auth settings externalized from source code.",
       "category": "infrastructure",
       "related": [
-        "PostgreSQL pgvector URL",
+        "PostgreSQL URL",
         "Graph Search",
         "Max Hops"
       ],
@@ -8513,9 +8474,9 @@
       ]
     },
     {
-      "term": "PostgreSQL pgvector URL",
+      "term": "PostgreSQL URL",
       "key": "POSTGRES_URL",
-      "definition": "Connection DSN used to reach PostgreSQL for relational storage and pgvector-backed similarity retrieval. This single string determines host, port, database, credentials, SSL behavior, and optional connection parameters, so parsing mistakes or stale credentials can break indexing and retrieval simultaneously. Keep secrets out of committed config and inject this value at runtime via environment management; then validate connectivity and extension availability (`pgvector`) during startup checks. If you operate multiple environments, treat DSN changes as deploy-time infrastructure changes with explicit migration and rollback plans.",
+      "definition": "Connection DSN for the PostgreSQL control/state store: the corpus registry and per-corpus config, chunk rows with provenance, chunk summaries, and the semantic/embedding caches. Chunk rows carry no vectors; dense and sparse vectors live in Qdrant and Postgres records the dense and sparse contracts they were built under. Retrieval hydrates graph hits and neighbor chunks from these rows, so Postgres must stay reachable for every leg even though it no longer executes vector or full-text search.",
       "category": "infrastructure",
       "related": [
         "Neo4j Connection URI",
@@ -8707,7 +8668,7 @@
     {
       "term": "Qdrant URL",
       "key": "QDRANT_URL",
-      "definition": "Base endpoint for your Qdrant cluster, used by the retriever for collection management, upserts, and nearest-neighbor search queries. Correct URL and protocol selection (HTTP vs HTTPS, auth headers, cloud endpoint shape) is critical because retrieval latency and availability depend directly on this connection path. When running hybrid search, failures here can silently degrade system behavior to sparse-only retrieval unless you monitor fallback paths explicitly. Treat this as an infrastructure dependency: verify connectivity, TLS, and collection schema compatibility during startup and after deploys.",
+      "definition": "Base URL of the Compose-owned Qdrant service that stores every corpus's dense and sparse chunk vectors. Each corpus is addressed through a stable alias pointing at one promoted generation; index runs build a staged generation and switch the alias atomically. Qdrant is a required retrieval dependency: when it is unreachable the vector and sparse legs fail closed with a typed 503 instead of degrading silently. The same URL is used by indexing, chat Recall writes, and the observability readiness probe, so verify connectivity and the collection aliases after deploys.",
       "category": "general",
       "related": [],
       "links": [
@@ -10073,37 +10034,6 @@
       "badges": []
     },
     {
-      "term": "Resolved Tokenizer",
-      "key": "BM25_TOKENIZER_RESOLVED",
-      "definition": "BM25_TOKENIZER_RESOLVED captures the effective tokenizer and analyzer configuration after defaults, overrides, and language settings are merged. This matters because the configured value may not match the analyzer actually used at index time. Use the resolved setting as ground truth when debugging unexpected retrieval shifts or mismatch between environments. When ranking changes after deploy, inspect this resolved configuration first and run analyzer explain checks on representative strings before deciding whether reindexing or parameter retuning is needed.",
-      "category": "retrieval",
-      "related": [],
-      "links": [
-        {
-          "text": "Rational Retrieval Acts for Sparse Retrieval (arXiv)",
-          "href": "https://arxiv.org/abs/2505.03676"
-        },
-        {
-          "text": "Elasticsearch Analyze API",
-          "href": "https://www.elastic.co/guide/en/elasticsearch/reference/current/indices-analyze.html"
-        },
-        {
-          "text": "Elasticsearch Tokenizers",
-          "href": "https://www.elastic.co/guide/en/elasticsearch/reference/current/analysis-tokenizers.html"
-        },
-        {
-          "text": "Lucene Analyzer API",
-          "href": "https://lucene.apache.org/core/10_3_1/core/org/apache/lucene/analysis/Analyzer.html"
-        }
-      ],
-      "badges": [
-        {
-          "text": "Diagnostics",
-          "class": "info"
-        }
-      ]
-    },
-    {
       "term": "Response Creativity (Chat)",
       "key": "CHAT_TEMPERATURE",
       "definition": "Controls sampling randomness during token generation. Lower values produce more deterministic, repeatable outputs that are usually preferable for factual QA, citations, and code generation; higher values increase variation and can help brainstorming but also raise hallucination risk. In RAG applications, temperature should be tuned with retrieval quality in mind: if retrieval is strong, low temperature usually yields the most grounded answers. For production support and search-heavy assistants, conservative settings are generally the safest default.",
@@ -10489,7 +10419,7 @@
     {
       "term": "Skip Dense Embeddings",
       "key": "SKIP_DENSE",
-      "definition": "When enabled, indexing skips dense embedding generation and vector-store writes, leaving retrieval fully lexical (BM25/FTS). This is useful for fast local iteration, constrained CI environments, or deployments where vector infrastructure is unavailable. The tradeoff is predictable: lower indexing cost and simpler ops, but weaker semantic recall for paraphrases and concept-level matches. Use this mode when exact term matching dominates your workload (file names, identifiers, error strings), and disable it for natural-language-heavy corpora where semantic expansion materially improves first-pass recall.",
+      "definition": "When enabled, indexing skips dense embedding generation and writes sparse-only points to the corpus Qdrant generation, leaving the vector leg empty for that corpus while sparse and graph retrieval still work. Use it for corpora where lexical matching is sufficient or when the embedding runtime is unavailable; the corpus records `embedding_dimensions = 0` so a later dense run must be a full re-index. Neo4j chunk vectors are also skipped, so chunk-mode graph search needs a dense run.",
       "category": "retrieval",
       "related": [],
       "links": [
@@ -10615,7 +10545,7 @@
     {
       "term": "Sparse Search Enabled",
       "key": "SPARSE_SEARCH_ENABLED",
-      "definition": "Master toggle for lexical retrieval. When enabled, keyword scoring (BM25/FTS) is available for exact-term matching and can run standalone or alongside dense retrieval in hybrid ranking. When disabled, the pipeline depends on non-lexical retrieval paths, which can miss exact symbols, file names, and rare identifiers. Keep this on for most code and technical corpora; turn it off only when you intentionally want dense-only behavior or are isolating retrieval regressions. Evaluate this setting with query sets containing both natural-language and exact-token intents.",
+      "definition": "Master toggle for the sparse (lexical) leg. When enabled, queries are embedded into IDF-modified BM25 sparse vectors with fastembed `Qdrant/bm25` and matched against the corpus generation in Qdrant; when disabled, fusion runs without lexical evidence. Sparse retrieval is what catches exact identifiers, error strings, and rare terms that dense embeddings blur, so disable it only for corpora where semantic matching alone is proven sufficient. The leg fails closed (typed 503) if the corpus generation is missing, and with a typed 409 if the recorded sparse contract drifted.",
       "category": "general",
       "related": [],
       "links": [
@@ -10642,188 +10572,6 @@
           "class": "info"
         }
       ]
-    },
-    {
-      "term": "Sparse search engine",
-      "key": "SPARSE_SEARCH_ENGINE",
-      "definition": "Selects which lexical backend executes sparse retrieval. In practice this governs tokenization behavior, ranking details, index build/maintenance cost, and query features available to the stack. Built-in Postgres FTS offers broad compatibility and simple operations; BM25-focused extensions such as pg_search can improve relevance control and performance for search-heavy workloads. Choose engine based on operational constraints first (extensions allowed, migration path, observability), then benchmark with your real query distribution because ranking differences can be substantial.",
-      "category": "retrieval",
-      "related": [],
-      "links": [
-        {
-          "text": "Mixture of Retrieval (MoR): Integrating Sparse and Dense Retrieval for RAG (arXiv 2025)",
-          "href": "https://arxiv.org/abs/2506.15862"
-        },
-        {
-          "text": "PostgreSQL Text Search Controls",
-          "href": "https://www.postgresql.org/docs/current/textsearch-controls.html"
-        },
-        {
-          "text": "pg_search Extension (PGXN)",
-          "href": "https://pgxn.org/dist/pg_search/0.20.5/"
-        },
-        {
-          "text": "Search in PostgreSQL: Full Text Search (ParadeDB)",
-          "href": "https://www.paradedb.com/learn/search-in-postgresql/full-text-search"
-        }
-      ],
-      "badges": []
-    },
-    {
-      "term": "Sparse Search File Path Fallback",
-      "key": "SPARSE_SEARCH_FILE_PATH_FALLBACK",
-      "definition": "Enables a path-oriented fallback when normal sparse matching underperforms. This fallback is useful for developer queries dominated by file names, module paths, package hierarchies, and extension filters where standard tokenization may fragment intent. A good fallback parses separators like '/', '.', '-', and '_' to recover high-signal path terms, then issues a targeted lexical query. Keep it enabled for codebases and monorepos; disable only if it introduces false positives in prose-heavy corpora.",
-      "category": "retrieval",
-      "related": [],
-      "links": [
-        {
-          "text": "Beyond Relevance: Evaluating Code Search Utility in Real Workflows (arXiv 2025)",
-          "href": "https://arxiv.org/abs/2510.08850"
-        },
-        {
-          "text": "Elasticsearch Analysis Tokenizers",
-          "href": "https://www.elastic.co/guide/en/elasticsearch/reference/current/analysis-tokenizers.html"
-        },
-        {
-          "text": "OpenSearch Query String Query",
-          "href": "https://docs.opensearch.org/3.1/query-dsl/full-text/query-string/"
-        },
-        {
-          "text": "ripgrep (GitHub)",
-          "href": "https://github.com/BurntSushi/ripgrep"
-        }
-      ],
-      "badges": []
-    },
-    {
-      "term": "Sparse Search File Path Max Terms",
-      "key": "SPARSE_SEARCH_FILE_PATH_MAX_TERMS",
-      "definition": "Upper bound on tokens included when building file-path fallback queries. This prevents overly long path-like inputs from exploding into broad lexical queries that hurt latency and precision. Lower values improve stability and reduce noisy matches in large repositories; higher values may recover deeper paths but can over-bias common directory names. Tune with realistic path queries and monitor both candidate set size and top-k relevance, not just hit counts.",
-      "category": "retrieval",
-      "related": [],
-      "links": [
-        {
-          "text": "Beyond Relevance: Evaluating Code Search Utility in Real Workflows (arXiv 2025)",
-          "href": "https://arxiv.org/abs/2510.08850"
-        },
-        {
-          "text": "OpenSearch Query String Query",
-          "href": "https://docs.opensearch.org/3.1/query-dsl/full-text/query-string/"
-        },
-        {
-          "text": "PostgreSQL Text Search Controls",
-          "href": "https://www.postgresql.org/docs/current/textsearch-controls.html"
-        },
-        {
-          "text": "Elasticsearch Analysis Tokenizers",
-          "href": "https://www.elastic.co/guide/en/elasticsearch/reference/current/analysis-tokenizers.html"
-        }
-      ],
-      "badges": []
-    },
-    {
-      "term": "Sparse search highlight",
-      "key": "SPARSE_SEARCH_HIGHLIGHT",
-      "definition": "Turns on lexical-match highlighting metadata (for example snippets or emphasized terms) in sparse retrieval results. This is mainly an observability feature: it helps you verify why a chunk matched, debug tokenizer behavior, and explain ranking decisions to users. Highlight generation can add query-time overhead, so many teams enable it in debug and evaluation environments, then gate it in production by route or role. Keep it on while tuning sparse relevance and parsing modes.",
-      "category": "retrieval",
-      "related": [],
-      "links": [
-        {
-          "text": "Graph-RAG with Lexical and Semantic Fusion for Explainable Retrieval (arXiv 2025)",
-          "href": "https://arxiv.org/abs/2506.08074"
-        },
-        {
-          "text": "PostgreSQL Text Search Controls (including ts_headline)",
-          "href": "https://www.postgresql.org/docs/current/textsearch-controls.html"
-        },
-        {
-          "text": "PostgreSQL Full Text Search",
-          "href": "https://www.postgresql.org/docs/current/textsearch.html"
-        },
-        {
-          "text": "Search in PostgreSQL: Full Text Search (ParadeDB)",
-          "href": "https://www.paradedb.com/learn/search-in-postgresql/full-text-search"
-        }
-      ],
-      "badges": []
-    },
-    {
-      "term": "Sparse search query mode",
-      "key": "SPARSE_SEARCH_QUERY_MODE",
-      "definition": "Determines how sparse queries are parsed before scoring. Typical modes map to plain-term parsing, phrase parsing, or boolean/operator-aware parsing, and each mode changes recall/precision behavior substantially. Plain mode is safest for general user input, phrase mode tightens precision for exact multi-token intent, and boolean mode provides expert control but can degrade results when syntax is malformed. Choose a default that matches user sophistication, then expose advanced modes for debugging and power workflows.",
-      "category": "retrieval",
-      "related": [],
-      "links": [
-        {
-          "text": "Query Understanding for Retrieval-Augmented Generation Systems (arXiv 2026)",
-          "href": "https://arxiv.org/abs/2602.11841"
-        },
-        {
-          "text": "PostgreSQL Text Search Controls",
-          "href": "https://www.postgresql.org/docs/current/textsearch-controls.html"
-        },
-        {
-          "text": "OpenSearch Query String Query",
-          "href": "https://docs.opensearch.org/3.1/query-dsl/full-text/query-string/"
-        },
-        {
-          "text": "pg_search Extension (PGXN)",
-          "href": "https://pgxn.org/dist/pg_search/0.20.5/"
-        }
-      ],
-      "badges": []
-    },
-    {
-      "term": "Sparse Search Relax Max Terms",
-      "key": "SPARSE_SEARCH_RELAX_MAX_TERMS",
-      "definition": "Caps how many lexical terms the relaxer is allowed to keep when strict sparse retrieval underperforms. In practice, this guardrail prevents fallback BM25 queries from ballooning into broad, low-precision searches that return mostly boilerplate. Lower values preserve precision and faster query plans; higher values improve zero-result recovery but increase latency and term-noise risk. Tune it together with `SPARSE_SEARCH_RELAX_ON_EMPTY`, `SPARSE_SEARCH_TOP_K`, and fusion weights so expanded sparse candidates still rerank cleanly against vector hits.",
-      "category": "retrieval",
-      "related": [],
-      "links": [
-        {
-          "text": "Topo-RAG: Adaptive Topology-Aware Retrieval for Multi-Source QA (arXiv 2026)",
-          "href": "https://arxiv.org/abs/2601.10215"
-        },
-        {
-          "text": "Elasticsearch: minimum_should_match",
-          "href": "https://www.elastic.co/guide/en/elasticsearch/reference/current/query-dsl-minimum-should-match.html"
-        },
-        {
-          "text": "Elasticsearch similarity and BM25 settings",
-          "href": "https://www.elastic.co/guide/en/elasticsearch/reference/current/index-modules-similarity.html"
-        },
-        {
-          "text": "Weaviate hybrid search",
-          "href": "https://docs.weaviate.io/weaviate/search/hybrid"
-        }
-      ],
-      "badges": []
-    },
-    {
-      "term": "Sparse Search Relax On Empty",
-      "key": "SPARSE_SEARCH_RELAX_ON_EMPTY",
-      "definition": "Enables automatic lexical fallback when the first sparse retrieval pass returns empty or unusably small results. This is a production safety valve for user-facing search: instead of failing hard on exact-term mismatch, the system broadens sparse matching and gives reranking another candidate pool to work with. Keep it on for interactive workloads unless you require strict deterministic matching for evaluation. The quality of this fallback depends on your relax limits, sparse top-k, and how aggressively sparse scores are weighted in hybrid fusion.",
-      "category": "retrieval",
-      "related": [],
-      "links": [
-        {
-          "text": "Mixture of Retrievals for Multi-Hop QA (arXiv 2025)",
-          "href": "https://arxiv.org/abs/2506.15862"
-        },
-        {
-          "text": "Elasticsearch: minimum_should_match",
-          "href": "https://www.elastic.co/guide/en/elasticsearch/reference/current/query-dsl-minimum-should-match.html"
-        },
-        {
-          "text": "Weaviate hybrid search",
-          "href": "https://docs.weaviate.io/weaviate/search/hybrid"
-        },
-        {
-          "text": "Elasticsearch reciprocal rank fusion (RRF)",
-          "href": "https://www.elastic.co/guide/en/elasticsearch/reference/current/rrf.html"
-        }
-      ],
-      "badges": []
     },
     {
       "term": "Sparse Search Top-K",
@@ -11358,34 +11106,6 @@
           "class": "success"
         }
       ]
-    },
-    {
-      "term": "Table Name",
-      "key": "TABLE_NAME",
-      "definition": "Overrides the default pgvector table target used for storing and querying embeddings. This is useful for profile isolation, A/B model comparisons, staged reindex rollouts, and parallel corpora that share one database. Naming must comply with PostgreSQL identifier rules, and schema/table design should stay consistent with index strategy (IVFFlat/HNSW settings, metadata columns, and migration plans). If you rotate this value without coordinated indexing, retrieval can silently point at empty or stale vectors.",
-      "category": "general",
-      "related": [
-        "PostgreSQL pgvector URL"
-      ],
-      "links": [
-        {
-          "text": "HetaRAG: Hybrid and Heterogeneous Retrieval-Augmented Generation (arXiv 2025)",
-          "href": "https://arxiv.org/abs/2509.21336"
-        },
-        {
-          "text": "PostgreSQL lexical structure (identifiers)",
-          "href": "https://www.postgresql.org/docs/current/sql-syntax-lexical.html"
-        },
-        {
-          "text": "PostgreSQL schemas",
-          "href": "https://www.postgresql.org/docs/current/ddl-schemas.html"
-        },
-        {
-          "text": "pgvector extension",
-          "href": "https://github.com/pgvector/pgvector"
-        }
-      ],
-      "badges": []
     },
     {
       "term": "Target tokens",
@@ -12368,7 +12088,7 @@
     {
       "term": "Vector Search Enabled",
       "key": "VECTOR_SEARCH_ENABLED",
-      "definition": "Master toggle for dense semantic retrieval. When enabled, the pipeline performs embedding-based nearest-neighbor search and contributes those candidates to fusion/reranking; when disabled, retrieval relies on non-vector channels (for example sparse lexical and graph signals). Disabling can be useful for controlled debugging, cost isolation, or outage mitigation, but it usually reduces semantic recall on paraphrased questions. Treat this flag as a diagnostic switch: compare answer grounding and recall metrics with and without vector search to quantify how much semantic retrieval contributes for your dataset.",
+      "definition": "Master toggle for the dense semantic leg. When enabled, the query is embedded under the corpus's recorded dense contract and searched against the `text-dense` vectors of the corpus generation in Qdrant (cosine similarity); when disabled, retrieval relies on the sparse and graph legs only. Dense retrieval finds paraphrases and conceptual matches that keyword scoring misses. The leg fails closed with a typed 409 when the embedding configuration no longer matches what the corpus was indexed with.",
       "category": "general",
       "related": [],
       "links": [

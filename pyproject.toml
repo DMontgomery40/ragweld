@@ -41,12 +41,10 @@ dependencies = [
     # Utilities
     "httpx>=0.26.0",
     "python-dotenv>=1.0.0",
-    # Document extraction (PDF/XLSX/Parquet ingestion)
-    "pypdf>=4.3.1",
-    "openpyxl>=3.1.5",
+    # Document extraction (Parquet ingestion; rich documents go through Docling)
     "pandas>=2.2.0",
     "pyarrow>=15.0.0",
-    # OSS retrieval/indexing pilot
+    # Retrieval/indexing lane: Haystack + Docling + Qdrant
     "haystack-ai>=2.26.0",
     "qdrant-client>=1.17.0",
     "qdrant-haystack>=10.3.0",
@@ -61,6 +59,8 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
+    # Test fixture that synthesizes XLSX inputs for the Docling extractor tests
+    "openpyxl>=3.1.5",
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
     "pytest-cov>=4.1.0",

@@ -1,5 +1,12 @@
 # Handoff Prompt — Ragweld Recovery, Session 4
 
+> Status 2026-08-21 (later in session 4): Phase A1 (retrieval promotion
+> cutover) landed on `main`; see the execution record in
+> `retrieval-promotion-cutover-2026-08-21.md` and `docs/references/retrieval-lane.md`.
+> Continue from A2. The transient dev-proxy 503s seen once in Chrome on
+> `/api/index/{id}/status|stats` and `/api/chat/models` (not present in the API
+> log, not reproducible) belong to B12.
+
 Paste everything below this line into the next agent's first message.
 
 ---
@@ -20,7 +27,7 @@ or HTTP 200s for real runtime and rendered-browser proof.
    (see "Status as of 2026-08-21")
 5. `/Users/davidmontgomery/ragweld/docs/exec-plans/active/retrieval-promotion-cutover-2026-08-21.md`
 6. `/Users/davidmontgomery/ragweld/docs/references/eval-substrates.md`,
-   `training-control-plane-slice.md`, `retrieval-pilot.md`,
+   `training-control-plane-slice.md`, `retrieval-lane.md`,
    `observability-online-slice.md`
 7. `/Users/davidmontgomery/ragweld/docs/exec-plans/active/frontend-browser-findings-2026-08-20.md`
    (all resolved; use as the regression checklist for the frontend phase)
@@ -50,8 +57,8 @@ or HTTP 200s for real runtime and rendered-browser proof.
   `RAGWELD_NODE_BIN` is required for Promptfoo: the system Node 22.14 is
   refused by promptfoo 0.122.0.
 - Corpora: `aurora_acceptance` (the deterministic acceptance corpus from
-  `tests/fixtures/acceptance_corpus`, indexed on the native lane AND hydrated
-  on the pilot lane; scoped config has `training.ragweld_agent_tracking_backend=mlflow`
+  `tests/fixtures/acceptance_corpus`, indexed on the promoted Postgres +
+  Qdrant + Neo4j lane; scoped config has `training.ragweld_agent_tracking_backend=mlflow`
   and `evaluation.ragas_enabled=true` from the live proofs) and
   `recall_default` (Recall chat memory; graph is never applied to it by design).
 

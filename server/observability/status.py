@@ -10,8 +10,6 @@ from server.chat.gateway_runtime import (
     resolve_litellm_base_url,
     resolve_vllm_base_url,
 )
-from server.db.postgres import PostgresClient
-from server.indexing.oss_retrieval_pilot import build_retrieval_pilot_status
 from server.models.tribrid_config_model import (
     ObservabilityComponentStatus,
     ObservabilityStatusResponse,
@@ -19,6 +17,7 @@ from server.models.tribrid_config_model import (
     TriBridConfig,
 )
 from server.observability.runtime import normalize_tracing_mode
+from server.retrieval.qdrant_store import QdrantChunkStore
 from server.training.control_plane import build_agent_control_plane_status
 
 _CRITICAL_GROUPS = {"metrics", "traces", "gateway", "serving", "workflow", "retrieval", "cost", "frontend"}
@@ -157,7 +156,7 @@ def _component_operator_hint(component_id: str, url: str | None, reachable: bool
     if component_id == "vllm":
         return "Serving failures will page the generation lane even if the rest of the UI looks healthy."
     if component_id == "haystack_docling_qdrant":
-        return "Retrieval pilot must be execution-ready before corpus-specific retrieval health is trustworthy."
+        return "Qdrant holds every corpus's dense and sparse vectors; an unreachable or empty collection fails the vector and sparse legs closed."
     if reachable is False and url:
         return f"Check the target at {url} and verify network reachability plus service health."
     return None
@@ -190,25 +189,6 @@ def _decorate_component(
         operator_hint=_component_operator_hint(component_id, url, reachable),
         links=list(links or []),
     )
-
-
-async def _resolve_repo_path(config: TriBridConfig, repo_id: str | None) -> str | None:
-    if not repo_id:
-        return None
-    pg = PostgresClient(str(config.indexing.postgres_url or ""))
-    try:
-        await pg.connect()
-        corpus = await pg.get_corpus(repo_id)
-    except Exception:
-        return None
-    finally:
-        try:
-            await pg.disconnect()
-        except Exception:
-            pass
-    if corpus is None:
-        return None
-    return str(corpus.get("path") or "").strip() or None
 
 
 def _build_operator_hint(cfg: TriBridConfig, mode: str, components: list[ObservabilityComponentStatus]) -> str:
@@ -446,44 +426,44 @@ async def build_observability_status(config: TriBridConfig, *, repo_id: str | No
         for component in control_plane.components
     )
 
-    if repo_id:
-        repo_path = await _resolve_repo_path(config, repo_id)
-        if repo_path:
-            try:
-                pilot = await build_retrieval_pilot_status(corpus_id=repo_id, repo_path=repo_path)
-            except Exception:
-                pilot = None
-            if pilot is not None:
-                pilot_links = []
-                if pilot.search_preview_ready:
-                    pilot_links.extend(_make_links("Retrieval Monitoring", "/infrastructure?subtab=monitoring", "Workbench monitoring surface."))
-                # The pilot lane is optional until promotion: an absent export is
-                # expected state (info), not a degraded component. Only a hydrated
-                # export that cannot execute is a real problem.
-                components.append(
-                    _decorate_component(
-                        component_id="haystack_docling_qdrant",
-                        label="Haystack + Docling + Qdrant",
-                        enabled=bool(pilot.export_exists),
-                        configured=bool(pilot.export_exists),
-                        reachable=(
-                            True
-                            if pilot.execution_ready
-                            else False
-                            if pilot.export_exists
-                            else None
-                        ),
-                        detail=(
-                            "Retrieval pilot execution-ready for the active corpus."
-                            if pilot.execution_ready
-                            else "Retrieval pilot export exists but execution is not ready."
-                            if pilot.export_exists
-                            else "Optional pilot lane not hydrated for the active corpus."
-                        ),
-                        url=None,
-                        links=pilot_links,
-                    )
-                )
+    qdrant_store = QdrantChunkStore(config)
+    qdrant_url = qdrant_store.url
+    qdrant_reachable = await qdrant_store.ping()
+    qdrant_detail = (
+        f"Qdrant reachable at {qdrant_url}."
+        if qdrant_reachable
+        else f"Qdrant unreachable at {qdrant_url}; vector and sparse retrieval legs cannot run."
+    )
+    corpus_reachable: bool | None = qdrant_reachable
+    if repo_id and qdrant_reachable:
+        try:
+            corpus_status = await qdrant_store.status(repo_id)
+        except Exception:
+            corpus_status = None
+        if corpus_status is None:
+            qdrant_detail = f"{qdrant_detail} Corpus '{repo_id}' has no vector generation yet (not indexed)."
+            corpus_reachable = None
+        elif corpus_status.points <= 0:
+            qdrant_detail = f"{qdrant_detail} Corpus '{repo_id}' alias is present but its generation is empty or wiped."
+            corpus_reachable = False
+        else:
+            qdrant_detail = (
+                f"{qdrant_detail} Corpus '{repo_id}': {corpus_status.points} points, "
+                f"{corpus_status.dense_points} dense ({corpus_status.dense_dimensions}-d), generation "
+                f"{corpus_status.physical_collection}."
+            )
+    components.append(
+        _decorate_component(
+            component_id="haystack_docling_qdrant",
+            label="Haystack + Docling + Qdrant",
+            enabled=True,
+            configured=bool(qdrant_url),
+            reachable=corpus_reachable,
+            detail=qdrant_detail,
+            url=qdrant_url or None,
+            links=_make_links("Qdrant", f"{qdrant_url}/dashboard" if qdrant_url else "", "Qdrant collections dashboard."),
+        )
+    )
 
     links: list[TraceExternalLink] = []
     for component in components:

@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from server.models.tribrid_config_model import (
+    ChatProviderInfo,
     ChunkingRuntimeCapabilities,
     EmbeddingRuntimeCapabilities,
     EmbeddingRuntimeProviderCapability,
@@ -10,10 +11,9 @@ from server.models.tribrid_config_model import (
     IndexingRuntimeCapabilities,
     RerankerRuntimeCapabilities,
     RuntimeCapabilitiesResponse,
-    TriBridConfig,
     RuntimeOption,
     SearchRuntimeCapabilities,
-    ChatProviderInfo,
+    TriBridConfig,
 )
 
 EMBEDDING_BACKEND_OPTIONS: tuple[RuntimeOption, ...] = (
@@ -155,19 +155,19 @@ INDEXING_DENSE_BACKEND_OPTIONS: tuple[RuntimeOption, ...] = (
 
 INDEXING_STORAGE_BACKEND_OPTIONS: tuple[RuntimeOption, ...] = (
     RuntimeOption(
-        id="haystack_qdrant_local",
-        label="Haystack/Qdrant local pilot",
-        description="Compose-owned Qdrant service backing the OSS pilot lane hydrated from the sidecar export contract.",
+        id="postgres_chunk_rows",
+        label="Postgres chunk rows",
+        description="Chunk content, provenance, summaries, and caches as corpus control/state rows in Postgres.",
     ),
     RuntimeOption(
-        id="postgres_pgvector",
-        label="Postgres pgvector",
-        description="Primary dense-vector storage and ANN search index in Postgres.",
+        id="qdrant_dense",
+        label="Qdrant dense vectors",
+        description="Dense chunk vectors in a per-corpus Qdrant generation written through the Haystack document store.",
     ),
     RuntimeOption(
-        id="postgres_fts",
-        label="Postgres FTS",
-        description="Sparse lexical indexing and BM25-style retrieval using Postgres full-text search.",
+        id="qdrant_sparse_idf",
+        label="Qdrant sparse (IDF BM25)",
+        description="IDF-modified BM25 sparse vectors (fastembed Qdrant/bm25) stored alongside the dense vectors in Qdrant.",
     ),
     RuntimeOption(
         id="neo4j_lexical_graph",
@@ -188,14 +188,9 @@ INDEXING_STORAGE_BACKEND_OPTIONS: tuple[RuntimeOption, ...] = (
 
 SEARCH_VECTOR_BACKEND_OPTIONS: tuple[RuntimeOption, ...] = (
     RuntimeOption(
-        id="haystack_qdrant_local",
-        label="Haystack/Qdrant local pilot",
-        description="Qdrant vector retrieval on the Compose-owned service, driven through the Haystack pilot lane.",
-    ),
-    RuntimeOption(
-        id="postgres_pgvector",
-        label="Postgres pgvector",
-        description="Dense vector retrieval against Postgres pgvector indexes.",
+        id="qdrant_dense",
+        label="Qdrant dense vectors",
+        description="Dense vector retrieval against the corpus Qdrant generation (cosine similarity).",
     ),
     RuntimeOption(
         id="neo4j_chunk_vector",
@@ -206,9 +201,9 @@ SEARCH_VECTOR_BACKEND_OPTIONS: tuple[RuntimeOption, ...] = (
 
 SEARCH_SPARSE_BACKEND_OPTIONS: tuple[RuntimeOption, ...] = (
     RuntimeOption(
-        id="postgres_fts",
-        label="Postgres FTS",
-        description="Sparse search using Postgres full-text indexes and configured ts_config/tokenizer settings.",
+        id="qdrant_sparse_idf",
+        label="Qdrant sparse (IDF BM25)",
+        description="Sparse retrieval over Qdrant/bm25 sparse vectors using the corpus-recorded BM25/stemming contract.",
     ),
 )
 

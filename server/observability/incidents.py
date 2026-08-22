@@ -3,7 +3,6 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from server.db.postgres import PostgresClient
-from server.indexing.oss_retrieval_pilot import build_retrieval_pilot_status
 from server.models.tribrid_config_model import (
     ObservabilityIncident,
     ObservabilityIncidentChange,
@@ -19,6 +18,7 @@ from server.observability.ml_quality import (
     build_prompt_observability_summary,
 )
 from server.observability.status import build_observability_status
+from server.retrieval.qdrant_store import QdrantChunkStore
 
 _GROUP_DASHBOARDS: dict[str, list[str]] = {
     "metrics": ["oncall_overview"],
@@ -54,25 +54,6 @@ def _component_workbench_links(
     group: str,
 ) -> list[ObservabilityWorkbenchLink]:
     return [workbench_by_path[path] for path in _GROUP_WORKBENCH_PATHS.get(group, []) if path in workbench_by_path]
-
-
-async def _resolve_repo_path(config: TriBridConfig, repo_id: str | None) -> str | None:
-    if not repo_id:
-        return None
-    pg = PostgresClient(str(config.indexing.postgres_url or ""))
-    try:
-        await pg.connect()
-        corpus = await pg.get_corpus(repo_id)
-    except Exception:
-        return None
-    finally:
-        try:
-            await pg.disconnect()
-        except Exception:
-            pass
-    if corpus is None:
-        return None
-    return str(corpus.get("path") or "").strip() or None
 
 
 def _link_from_component(label: str, url: str | None, detail: str | None = None) -> list[TraceExternalLink]:
@@ -128,37 +109,59 @@ async def build_observability_incidents(
             )
         )
 
-    repo_path = await _resolve_repo_path(config, repo_id)
-    if repo_id and repo_path:
+    if repo_id:
+        # A corpus with chunk rows in Postgres but no live Qdrant generation
+        # cannot serve the vector/sparse legs: that is an incident, not a warning.
+        chunk_rows = 0
         try:
-            pilot = await build_retrieval_pilot_status(corpus_id=repo_id, repo_path=repo_path)
+            pg = PostgresClient(config.indexing.postgres_url)
+            await pg.connect()
+            try:
+                chunk_rows = await pg.count_chunks(repo_id)
+            finally:
+                await pg.disconnect()
         except Exception:
-            pilot = None
-        # An absent pilot export is expected while the pilot lane is optional;
-        # only a hydrated export that cannot execute is incident-worthy.
-        if pilot is not None and bool(pilot.export_exists) and not bool(pilot.execution_ready):
+            chunk_rows = 0
+        vector_status = None
+        vector_probe_failed = False
+        if chunk_rows > 0:
+            try:
+                vector_status = await QdrantChunkStore(config).status(repo_id)
+            except Exception:
+                vector_probe_failed = True
+        if chunk_rows > 0 and (vector_probe_failed or vector_status is None or vector_status.points <= 0):
+            current_value = (
+                "qdrant_unreachable"
+                if vector_probe_failed
+                else "generation_missing"
+                if vector_status is None
+                else "generation_empty"
+            )
             incidents.append(
                 ObservabilityIncident(
                     id=f"retrieval:{repo_id}",
-                    title="Retrieval pilot lane degraded",
-                    summary="Haystack/Docling/Qdrant pilot export exists but is not execution-ready for the active corpus.",
+                    title="Retrieval vector lane degraded",
+                    summary=(
+                        f"Corpus '{repo_id}' has {chunk_rows} indexed chunk rows but no live Qdrant generation; "
+                        "vector and sparse retrieval fail closed."
+                    ),
                     source="retrieval",
-                    severity="warning",
+                    severity="critical",
                     status="firing",
                     started_at=datetime.now(UTC),
                     owner="retrieval-oncall",
                     component_ids=["haystack_docling_qdrant"],
                     dashboard_ids=["retrieval_indexing_graph", "oncall_overview"],
                     workbench_links=_component_workbench_links(workbench_by_path, "retrieval"),
-                    slo_state="at_risk",
-                    operator_hint="Re-export or re-ingest the pilot lane before relying on pilot retrieval quality.",
+                    slo_state="breached",
+                    operator_hint="Re-run indexing for the corpus (force_reindex) to rebuild and promote a Qdrant generation.",
                     change_correlation=[
                         ObservabilityIncidentChange(
                             kind="retrieval_lane",
-                            label="Pilot execution",
-                            previous_value="ready",
-                            current_value="degraded",
-                            detail=f"export_exists={pilot.export_exists}, search_preview_ready={pilot.search_preview_ready}",
+                            label="Qdrant generation",
+                            previous_value="promoted",
+                            current_value=current_value,
+                            detail=f"chunk_rows={chunk_rows}, points={int(vector_status.points) if vector_status else 0}",
                         )
                     ],
                 )

@@ -258,11 +258,24 @@ class _FakeArtifactPg:
     def __init__(self) -> None:
         self.successful_writes: list[list[str]] = []
 
-    async def upsert_fts(self, _repo_id: str, chunks: list[Chunk], *, ts_config: str) -> None:
-        _ = ts_config
+    async def upsert_chunks(self, _repo_id: str, chunks: list[Chunk]) -> int:
         if any(bool(chunk.metadata.get("poison")) for chunk in chunks):
             raise RuntimeError("poison chunk")
         self.successful_writes.append([chunk.chunk_id for chunk in chunks])
+        return len(chunks)
+
+
+class _FakeArtifactQdrant:
+    sparse_contract = {"engine": "qdrant_sparse_idf", "model": "Qdrant/bm25"}
+
+    def __init__(self) -> None:
+        self.successful_writes: list[list[str]] = []
+
+    async def upsert_chunks(self, _repo_id: str, chunks: list[Chunk], *, embedding_dim: int) -> int:
+        assert embedding_dim > 0
+        assert all(chunk.embedding is None for chunk in chunks)
+        self.successful_writes.append([chunk.chunk_id for chunk in chunks])
+        return len(chunks)
 
 
 class _UnusedEmbedder:
@@ -273,6 +286,7 @@ class _UnusedEmbedder:
 @pytest.mark.asyncio
 async def test_artifact_flush_isolates_bad_chunk_and_dead_letters_it(tmp_path: Path) -> None:
     pg = _FakeArtifactPg()
+    qdrant = _FakeArtifactQdrant()
     config = RunConfig(
         session_root=tmp_path,
         state_dir=tmp_path / "state",
@@ -293,6 +307,7 @@ async def test_artifact_flush_isolates_bad_chunk_and_dead_letters_it(tmp_path: P
         embedder=_UnusedEmbedder(),  # type: ignore[arg-type]
         logger=JsonLogger(tmp_path / "events.jsonl"),
         metrics=MetricsRegistry(),
+        qdrant=qdrant,  # type: ignore[arg-type]
     )
 
     good = Chunk(
@@ -318,6 +333,7 @@ async def test_artifact_flush_isolates_bad_chunk_and_dead_letters_it(tmp_path: P
 
     assert written == 1
     assert pg.successful_writes == [["good"]]
+    assert qdrant.successful_writes == [["good"]]
     assert current_dead_letter_count(config.dead_letter_path) == 1
     dead_letter = config.dead_letter_path.read_text(encoding="utf-8")
     assert "bad" in dead_letter

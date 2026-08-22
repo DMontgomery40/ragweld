@@ -6,7 +6,7 @@ import pytest
 
 from server.models.index import Chunk
 from server.models.retrieval import ChunkMatch
-from server.models.tribrid_config_model import TriBridConfig, VocabPreviewTerm
+from server.models.tribrid_config_model import TriBridConfig
 from server.retrieval.fusion import TriBridFusion
 
 
@@ -17,7 +17,6 @@ class _FakePostgres:
     summaries_by_repo: dict[str, list[dict[str, Any]]] = {}
     last_build_by_repo: dict[str, dict[str, Any] | None] = {}
     meta_by_repo: dict[str, dict[str, Any]] = {}
-    vocab_by_repo: dict[str, tuple[list[VocabPreviewTerm], int]] = {}
 
     def __init__(self, *_args: Any, **_kwargs: Any) -> None:
         pass
@@ -72,10 +71,6 @@ class _FakePostgres:
         cur = dict(self.meta_by_repo.get(corpus_id, {}))
         cur.update(meta)
         self.meta_by_repo[corpus_id] = cur
-
-    async def vocab_preview(self, repo_id: str, top_n: int) -> tuple[list[VocabPreviewTerm], int]:
-        terms, total = self.vocab_by_repo.get(repo_id, ([], 0))
-        return (terms[: int(top_n)], int(total))
 
 
 async def _fake_get_config(*_args: Any, **_kwargs: Any) -> TriBridConfig:
@@ -325,36 +320,4 @@ async def test_keywords_generate(client, monkeypatch):
     # Ensure persistence was invoked
     assert "keywords" in _FakePostgres.meta_by_repo.get(corpus_id, {})
 
-
-@pytest.mark.asyncio
-async def test_index_vocab_preview_accepts_corpus_aliases(client, monkeypatch):
-    import server.api.index as index_api
-
-    monkeypatch.setattr(index_api, "load_scoped_config", _fake_get_config, raising=True)
-    monkeypatch.setattr(index_api, "PostgresClient", _FakePostgres, raising=True)
-
-    corpus_id = "test_corpus"
-    _FakePostgres.vocab_by_repo[corpus_id] = ([VocabPreviewTerm(term="config", doc_count=3)], 42)
-
-    # Preferred param: corpus_id
-    r = await client.get("/api/index/vocab-preview", params={"corpus_id": corpus_id, "top_n": 10})
-    assert r.status_code == 200
-    data = r.json()
-    assert data["corpus_id"] == corpus_id
-    assert data["top_n"] == 10
-    assert data["total_terms"] == 42
-    assert data["terms"][0]["term"] == "config"
-    assert data["terms"][0]["doc_count"] == 3
-    assert data["tokenizer"]
-    assert data["ts_config"]
-
-    # Legacy param: repo_id
-    r = await client.get("/api/index/vocab-preview", params={"repo_id": corpus_id, "top_n": 10})
-    assert r.status_code == 200
-    assert r.json()["corpus_id"] == corpus_id
-
-    # Legacy param: repo
-    r = await client.get("/api/index/vocab-preview", params={"repo": corpus_id, "top_n": 10})
-    assert r.status_code == 200
-    assert r.json()["corpus_id"] == corpus_id
 

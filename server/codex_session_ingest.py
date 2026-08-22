@@ -42,7 +42,8 @@ from sentence_transformers import SentenceTransformer
 from server.db.postgres import PostgresClient
 from server.indexing.tokenizer import TextTokenizer
 from server.models.index import Chunk
-from server.models.tribrid_config_model import TokenizationConfig
+from server.models.tribrid_config_model import TokenizationConfig, TriBridConfig
+from server.retrieval.qdrant_store import QdrantChunkStore
 
 DEFAULT_POSTGRES_DSN = "postgresql://postgres:postgres@127.0.0.1:5432/tribrid_rag"
 DEFAULT_REMOTE_HOST = "192.168.68.173"
@@ -54,7 +55,7 @@ DEFAULT_STATE_DIR = Path("output/codex_session_ingest")
 DEFAULT_MODEL = "nomic-ai/nomic-embed-text-v1.5"
 DEFAULT_DIMENSIONS = 768
 DEFAULT_TOKENIZER_NAME = "sentence-transformers/all-MiniLM-L6-v2"
-DEFAULT_TS_CONFIG = "english"
+DEFAULT_QDRANT_URL = "http://127.0.0.1:56333"
 DEFAULT_JOB_NAME = "codex-session-ingest"
 DEFAULT_DASHBOARD_UID = "codex-session-ingest"
 TERMINAL_PHASES = {"complete", "error", "cancelled"}
@@ -106,7 +107,7 @@ class RunConfig:
     embedding_model: str = DEFAULT_MODEL
     embedding_dimensions: int = DEFAULT_DIMENSIONS
     tokenizer_name: str = DEFAULT_TOKENIZER_NAME
-    ts_config: str = DEFAULT_TS_CONFIG
+    qdrant_url: str = DEFAULT_QDRANT_URL
     max_semantic_tokens: int = 256
     max_artifact_tokens: int = 384
     overlap_tokens: int = 32
@@ -216,7 +217,7 @@ class VerifyConfig:
     embedding_model: str
     embedding_dimensions: int
     tokenizer_name: str
-    ts_config: str
+    qdrant_url: str
     top_k: int
     queries: list[VerifyQuery]
     output_path: Path
@@ -1270,6 +1271,13 @@ class SessionNormalizer:
         return out
 
 
+def qdrant_store_for_url(qdrant_url: str) -> QdrantChunkStore:
+    """Canonical chunk-vector store for this standalone worker (default sparse contract)."""
+    cfg = TriBridConfig()
+    cfg.qdrant.url = str(qdrant_url)
+    return QdrantChunkStore(cfg)
+
+
 class CorpusWriter:
     def __init__(
         self,
@@ -1279,8 +1287,10 @@ class CorpusWriter:
         embedder: SentenceTransformerEmbedder,
         logger: JsonLogger,
         metrics: MetricsRegistry,
+        qdrant: QdrantChunkStore | None = None,
     ):
         self.pg = pg
+        self.qdrant = qdrant if qdrant is not None else qdrant_store_for_url(config.qdrant_url)
         self.config = config
         self.embedder = embedder
         self.logger = logger
@@ -1309,15 +1319,15 @@ class CorpusWriter:
             provider="local",
             model=self.config.embedding_model,
             dimensions=self.config.embedding_dimensions,
-            ts_config=self.config.ts_config,
+            sparse_contract=self.qdrant.sparse_contract,
         )
         await self.pg.update_corpus_embedding_meta(
             self.config.artifact_repo_id,
-            backend="fts_only",
+            backend="sparse_only",
             provider="",
             model="",
             dimensions=0,
-            ts_config=self.config.ts_config,
+            sparse_contract=self.qdrant.sparse_contract,
         )
 
     async def flush_semantic(self, chunks: list[Chunk]) -> int:
@@ -1343,10 +1353,13 @@ class CorpusWriter:
             return 0
         try:
             with self.metrics.phase_seconds.labels("pg_upsert_semantic").time():
-                await self.pg.upsert_embeddings(self.config.semantic_repo_id, chunks)
-                self.metrics.db_writes_total.labels("semantic_embeddings").inc()
-                await self.pg.upsert_fts(self.config.semantic_repo_id, chunks, ts_config=self.config.ts_config)
-                self.metrics.db_writes_total.labels("semantic_fts").inc()
+                await self.pg.upsert_chunks(self.config.semantic_repo_id, chunks)
+                self.metrics.db_writes_total.labels("semantic_chunks").inc()
+            with self.metrics.phase_seconds.labels("qdrant_upsert_semantic").time():
+                await self.qdrant.upsert_chunks(
+                    self.config.semantic_repo_id, chunks, embedding_dim=self.config.embedding_dimensions
+                )
+                self.metrics.db_writes_total.labels("semantic_vectors").inc()
             self.metrics.chunks_written_total.labels("semantic").inc(len(chunks))
             return len(chunks)
         except Exception as exc:
@@ -1372,8 +1385,14 @@ class CorpusWriter:
             return 0
         try:
             with self.metrics.phase_seconds.labels("pg_upsert_artifact").time():
-                await self.pg.upsert_fts(self.config.artifact_repo_id, chunks, ts_config=self.config.ts_config)
-                self.metrics.db_writes_total.labels("artifact_fts").inc()
+                await self.pg.upsert_chunks(self.config.artifact_repo_id, chunks)
+                self.metrics.db_writes_total.labels("artifact_chunks").inc()
+            with self.metrics.phase_seconds.labels("qdrant_upsert_artifact").time():
+                # Artifact chunks carry no dense embedding: sparse-only points.
+                await self.qdrant.upsert_chunks(
+                    self.config.artifact_repo_id, chunks, embedding_dim=self.config.embedding_dimensions
+                )
+                self.metrics.db_writes_total.labels("artifact_vectors").inc()
             self.metrics.chunks_written_total.labels("artifact").inc(len(chunks))
             return len(chunks)
         except Exception as exc:
@@ -2527,7 +2546,7 @@ def dedupe_matches(*legs: list[Any], top_k: int) -> list[dict[str, Any]]:
 
 
 async def semantic_query_report(
-    pg: PostgresClient,
+    qdrant: QdrantChunkStore,
     embedder: SentenceTransformerEmbedder,
     cfg: VerifyConfig,
     query: VerifyQuery,
@@ -2535,18 +2554,17 @@ async def semantic_query_report(
     embed_started = time.perf_counter()
     embedding = (await embedder.encode([query.text]))[0]
     embed_ms = (time.perf_counter() - embed_started) * 1000.0
+    if len(embedding) != int(cfg.embedding_dimensions):
+        raise RuntimeError(
+            f"Query embedding dimension {len(embedding)} does not match configured {cfg.embedding_dimensions}"
+        )
 
     vector_started = time.perf_counter()
-    vector_hits = await pg.vector_search(
-        cfg.semantic_repo_id,
-        embedding,
-        cfg.top_k,
-        expected_dimensions=cfg.embedding_dimensions,
-    )
+    vector_hits = await qdrant.vector_search(cfg.semantic_repo_id, embedding, cfg.top_k)
     vector_search_ms = (time.perf_counter() - vector_started) * 1000.0
 
     sparse_started = time.perf_counter()
-    sparse_hits = await pg.sparse_search(cfg.semantic_repo_id, query.text, cfg.top_k, ts_config=cfg.ts_config)
+    sparse_hits = await qdrant.sparse_search(cfg.semantic_repo_id, query.text, cfg.top_k)
     sparse_ms = (time.perf_counter() - sparse_started) * 1000.0
 
     merged = dedupe_matches(vector_hits, sparse_hits, top_k=cfg.top_k)
@@ -2576,49 +2594,25 @@ async def semantic_query_report(
 
 
 async def artifact_query_report(
-    pg: PostgresClient,
+    qdrant: QdrantChunkStore,
     cfg: VerifyConfig,
     query: VerifyQuery,
 ) -> dict[str, Any]:
-    fts_started = time.perf_counter()
-    fts_hits = await pg.fts_search(cfg.artifact_repo_id, query.text, cfg.top_k, ts_config=cfg.ts_config, query_mode="plain")
-    fts_ms = (time.perf_counter() - fts_started) * 1000.0
+    sparse_started = time.perf_counter()
+    sparse_hits = await qdrant.sparse_search(cfg.artifact_repo_id, query.text, cfg.top_k)
+    sparse_ms = (time.perf_counter() - sparse_started) * 1000.0
 
-    relaxed_started = time.perf_counter()
-    relaxed_hits = await pg.fts_search_relaxed_or(
-        cfg.artifact_repo_id,
-        query.text,
-        cfg.top_k,
-        ts_config=cfg.ts_config,
-        max_terms=8,
-    )
-    relaxed_ms = (time.perf_counter() - relaxed_started) * 1000.0
-
-    path_started = time.perf_counter()
-    path_hits = await pg.file_path_search(cfg.artifact_repo_id, query.text, cfg.top_k, max_terms=8)
-    path_ms = (time.perf_counter() - path_started) * 1000.0
-
-    merged = dedupe_matches(fts_hits, relaxed_hits, path_hits, top_k=cfg.top_k)
+    merged = dedupe_matches(sparse_hits, top_k=cfg.top_k)
     return {
         "stream": query.stream,
         "text": query.text,
         "passed": bool(merged),
         "merged_hits": merged,
         "legs": {
-            "fts": {
-                "latency_ms": round(fts_ms, 3),
-                "hit_count": len(fts_hits),
-                "hits": [serialize_match(hit) for hit in fts_hits[: cfg.top_k]],
-            },
-            "relaxed_or": {
-                "latency_ms": round(relaxed_ms, 3),
-                "hit_count": len(relaxed_hits),
-                "hits": [serialize_match(hit) for hit in relaxed_hits[: cfg.top_k]],
-            },
-            "file_path": {
-                "latency_ms": round(path_ms, 3),
-                "hit_count": len(path_hits),
-                "hits": [serialize_match(hit) for hit in path_hits[: cfg.top_k]],
+            "sparse": {
+                "latency_ms": round(sparse_ms, 3),
+                "hit_count": len(sparse_hits),
+                "hits": [serialize_match(hit) for hit in sparse_hits[: cfg.top_k]],
             },
         },
     }
@@ -2627,6 +2621,7 @@ async def artifact_query_report(
 async def run_verification(cfg: VerifyConfig) -> dict[str, Any]:
     logger = JsonLogger(cfg.log_path)
     pg = PostgresClient(cfg.postgres_dsn)
+    qdrant = qdrant_store_for_url(cfg.qdrant_url)
     metrics = MetricsRegistry()
     status = read_status_file(cfg.state_dir / "status.json")
     embedder = SentenceTransformerEmbedder(
@@ -2668,9 +2663,9 @@ async def run_verification(cfg: VerifyConfig) -> dict[str, Any]:
         query_reports: list[dict[str, Any]] = []
         for query in cfg.queries:
             if query.stream == "semantic":
-                query_reports.append(await semantic_query_report(pg, embedder, cfg, query))
+                query_reports.append(await semantic_query_report(qdrant, embedder, cfg, query))
             else:
-                query_reports.append(await artifact_query_report(pg, cfg, query))
+                query_reports.append(await artifact_query_report(qdrant, cfg, query))
 
         passed_queries = sum(1 for item in query_reports if bool(item.get("passed")))
         overall_passed = (
@@ -2728,35 +2723,6 @@ async def run_verification(cfg: VerifyConfig) -> dict[str, Any]:
         await pg.disconnect()
 
 
-async def build_vector_index(postgres_dsn: str, repo_id: str, log_path: Path) -> dict[str, Any]:
-    logger = JsonLogger(log_path)
-    pg = PostgresClient(postgres_dsn)
-    await pg.connect()
-    try:
-        logger.log(
-            "info",
-            "vector_index_build_started",
-            repo_id=repo_id,
-            operatorHint="Vector index builds are worth doing after a major ingest completes; avoid building them mid-run unless retrieval speed matters more than write throughput.",
-        )
-        index_name = await pg.ensure_vector_index(repo_id)
-        storage = await pg.get_dashboard_storage_breakdown(repo_id)
-        result = {
-            "repo_id": repo_id,
-            "index_name": index_name,
-            "pgvector_index_bytes": int(storage.get("pgvector_index_bytes") or 0),
-        }
-        logger.log(
-            "info",
-            "vector_index_build_complete",
-            **result,
-            operatorHint="If vector probe latency is still high after the index builds, split embedding time from database time before changing the storage backend.",
-        )
-        return result
-    finally:
-        await pg.disconnect()
-
-
 def make_run_config(args: argparse.Namespace) -> RunConfig:
     state_dir = Path(args.state_dir or DEFAULT_STATE_DIR)
     year_filter = str(args.year or "2026")
@@ -2766,6 +2732,7 @@ def make_run_config(args: argparse.Namespace) -> RunConfig:
         session_root=Path(args.session_root).expanduser(),
         state_dir=state_dir,
         postgres_dsn=args.postgres_dsn,
+        qdrant_url=str(getattr(args, "qdrant_url", DEFAULT_QDRANT_URL) or DEFAULT_QDRANT_URL),
         year_filter=year_filter,
         semantic_repo_id=semantic_repo_id,
         artifact_repo_id=artifact_repo_id,
@@ -2825,7 +2792,7 @@ def make_verify_config(args: argparse.Namespace) -> VerifyConfig:
         embedding_model=str(args.embedding_model),
         embedding_dimensions=int(args.embedding_dimensions),
         tokenizer_name=str(args.tokenizer_name),
-        ts_config=str(args.ts_config),
+        qdrant_url=str(args.qdrant_url),
         top_k=int(args.top_k),
         queries=queries,
         output_path=Path(args.output_path or (state_dir / "verification.json")),
@@ -2851,6 +2818,7 @@ def build_parser() -> argparse.ArgumentParser:
     ingest.add_argument("--session-root", default=str(Path.home() / ".codex" / "sessions"))
     ingest.add_argument("--state-dir", default=str(DEFAULT_STATE_DIR))
     ingest.add_argument("--postgres-dsn", default=DEFAULT_POSTGRES_DSN)
+    ingest.add_argument("--qdrant-url", default=DEFAULT_QDRANT_URL)
     ingest.add_argument("--year", default="2026")
     ingest.add_argument("--semantic-repo-id", default="")
     ingest.add_argument("--artifact-repo-id", default="")
@@ -2895,16 +2863,10 @@ def build_parser() -> argparse.ArgumentParser:
     verify.add_argument("--embedding-model", default=DEFAULT_MODEL)
     verify.add_argument("--embedding-dimensions", type=int, default=DEFAULT_DIMENSIONS)
     verify.add_argument("--tokenizer-name", default=DEFAULT_TOKENIZER_NAME)
-    verify.add_argument("--ts-config", default=DEFAULT_TS_CONFIG)
+    verify.add_argument("--qdrant-url", default=DEFAULT_QDRANT_URL)
     verify.add_argument("--top-k", type=int, default=5)
     verify.add_argument("--query", action="append", type=parse_verify_query, default=[])
     verify.add_argument("--output-path", default="")
-
-    vector_index = sub.add_parser("build-vector-index", help="Build a pgvector HNSW index for a semantic corpus")
-    vector_index.add_argument("--state-dir", default=str(DEFAULT_STATE_DIR))
-    vector_index.add_argument("--postgres-dsn", default=DEFAULT_POSTGRES_DSN)
-    vector_index.add_argument("--year", default="2026")
-    vector_index.add_argument("--repo-id", default="")
 
     serve_status = sub.add_parser("serve-status", help="Serve persisted run status and verification metrics after the worker exits")
     serve_status.add_argument("--state-dir", default=str(DEFAULT_STATE_DIR))
@@ -2938,17 +2900,6 @@ async def main_async(argv: list[str] | None = None) -> int:
     if args.command == "verify":
         report = await run_verification(make_verify_config(args))
         return 0 if bool(report.get("overall_passed")) else 1
-
-    if args.command == "build-vector-index":
-        state_dir = Path(args.state_dir or DEFAULT_STATE_DIR)
-        year_filter = str(args.year or "2026")
-        repo_id = str(args.repo_id or f"codex-sessions-{year_filter}-semantic")
-        await build_vector_index(
-            str(args.postgres_dsn),
-            repo_id,
-            state_dir / "vector-index.jsonl",
-        )
-        return 0
 
     if args.command == "serve-status":
         PersistedStatusExporter(make_status_export_config(args)).run()

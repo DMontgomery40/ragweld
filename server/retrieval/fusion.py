@@ -35,11 +35,13 @@ from server.observability.metrics import (
 )
 from server.observability.runtime import stage_span
 from server.retrieval.cache import CacheEndpoint, CacheMode, SemanticCacheService
+from server.retrieval.contracts import contract_hash
 from server.retrieval.errors import (
     EmbeddingContractMismatchError,
     RequiredRetrievalLegError,
     SparseContractMismatchError,
 )
+from server.retrieval.qdrant_store import QdrantChunkStore, QdrantCollectionMissingError
 from server.retrieval.rerank import Reranker
 from server.retrieval.scoring_boosts import apply_scoring_boosts
 from server.services.config_store import get_config as load_scoped_config
@@ -58,6 +60,19 @@ def _raise_postgres_boundary_error(
     if leg is not None:
         raise RequiredRetrievalLegError(leg=leg, operation=operation) from exc
     raise exc
+
+
+def _raise_qdrant_boundary_error(
+    exc: Exception,
+    *,
+    operation: str,
+    leg: Literal["vector", "sparse"],
+) -> None:
+    if isinstance(exc, (DependencyUnavailableError, RequiredRetrievalLegError)):
+        raise exc
+    if is_transport_unavailable(exc):
+        raise DependencyUnavailableError("qdrant", operation) from exc
+    raise RequiredRetrievalLegError(leg=leg, operation=operation) from exc
 
 
 def _raise_neo4j_boundary_error(exc: Exception, *, operation: str) -> None:
@@ -260,12 +275,10 @@ class TriBridFusion:
                 "vector_similarity_threshold": float(getattr(primary_vector, "similarity_threshold", 0.0) or 0.0),
                 "sparse_enabled": bool(getattr(primary_sparse, "enabled", True)),
                 "sparse_top_k": int(getattr(primary_sparse, "top_k", 0) or 0),
-                "sparse_engine": str(getattr(primary_sparse, "engine", "") or ""),
-                "sparse_query_mode": str(getattr(primary_sparse, "query_mode", "") or ""),
                 "sparse_bm25_k1": float(getattr(primary_sparse, "bm25_k1", 0.0) or 0.0),
                 "sparse_bm25_b": float(getattr(primary_sparse, "bm25_b", 0.0) or 0.0),
-                "sparse_relax_on_empty": bool(getattr(primary_sparse, "relax_on_empty", False)),
-                "sparse_file_path_fallback": bool(getattr(primary_sparse, "file_path_fallback", False)),
+                "sparse_stemmer": str(getattr(primary_cfg.indexing, "bm25_tokenizer", "") or "") if primary_cfg else "",
+                "sparse_language": str(getattr(primary_cfg.indexing, "bm25_stemmer_lang", "") or "") if primary_cfg else "",
                 "graph_enabled": bool(getattr(primary_graph, "enabled", True)),
                 "graph_mode": str(getattr(primary_graph, "mode", "") or ""),
                 "graph_top_k": int(getattr(primary_graph, "top_k", 0) or 0),
@@ -343,14 +356,6 @@ class TriBridFusion:
                     SEARCH_RESULTS_FINAL_COUNT.observe(len(final_results))
                     return final_results
 
-        def _safe_error_message(e: Exception, *, max_len: int = 400) -> str:
-            # Best-effort redaction; keep debugging useful without leaking secrets.
-            msg = str(e) or type(e).__name__
-            msg = re.sub(r"(sk-[A-Za-z0-9_\\-]{10,})", "sk-REDACTED", msg)
-            msg = re.sub(r"(Bearer\\s+)[A-Za-z0-9_.\\-]{10,}", r"\\1REDACTED", msg)
-            msg = msg.replace("\\n", " ").replace("\\r", " ").strip()
-            return msg[: int(max_len)]
-
         async def _search_single_corpus(
             cid: str,
         ) -> tuple[
@@ -389,12 +394,6 @@ class TriBridFusion:
                 "fusion_sparse_error": None,
                 "fusion_sparse_error_kind": None,
                 "fusion_sparse_engine": None,
-                "fusion_sparse_file_path_fallback_enabled": bool(
-                    getattr(cfg.sparse_search, "file_path_fallback", True)
-                ),
-                "fusion_sparse_file_path_fallback_used": False,
-                "fusion_sparse_file_path_fallback_error": None,
-                "fusion_sparse_file_path_fallback_error_kind": None,
                 "fusion_graph_entity_hits": 0,
                 "fusion_graph_hydrated_chunks": 0,
                 "fusion_graph_attempted": False,
@@ -417,6 +416,7 @@ class TriBridFusion:
 
             embedder = Embedder(cfg.embedding, cfg.tokenization)
             configure_postgres_embedding_cache_backend(embedder, postgres)
+            qdrant = QdrantChunkStore(cfg)
 
             # ---- Query-time retrieval contract guards ----
             # Detect dense/sparse configuration drift against what the corpus
@@ -514,18 +514,20 @@ class TriBridFusion:
                             _raise_required_leg_error(e, leg="vector", operation="vector query embedding")
                             raise
                     try:
-                        with SEARCH_STAGE_LATENCY_SECONDS.labels(stage="postgres_vector_search").time():
-                            vector_results = await postgres.vector_search(
-                                cid, q_emb, int(top_k or cfg.vector_search.top_k),
-                                expected_dimensions=stored_dim,
+                        with SEARCH_STAGE_LATENCY_SECONDS.labels(stage="qdrant_vector_search").time():
+                            vector_results = await qdrant.vector_search(
+                                cid, q_emb, int(top_k or cfg.vector_search.top_k)
                             )
+                    except QdrantCollectionMissingError as e:
+                        if last_indexed_raw is None:
+                            # Never indexed: an empty leg is the truthful answer.
+                            vector_results = []
+                        else:
+                            SEARCH_STAGE_ERRORS_TOTAL.labels(stage="vector_leg").inc()
+                            raise RequiredRetrievalLegError(leg="vector", operation="Qdrant vector search") from e
                     except Exception as e:
                         SEARCH_STAGE_ERRORS_TOTAL.labels(stage="vector_leg").inc()
-                        _raise_postgres_boundary_error(
-                            e,
-                            operation="Postgres vector search",
-                            leg="vector",
-                        )
+                        _raise_qdrant_boundary_error(e, operation="Qdrant vector search", leg="vector")
                         raise
                     if cfg.vector_search.similarity_threshold > 0:
                         vector_results = [
@@ -536,72 +538,46 @@ class TriBridFusion:
                         vector_results = [r for r in vector_results if float(r.score) >= float(min_v)]
             debug["fusion_vector_results"] = len(vector_results)
 
-            stored_ts = str((corpus_meta or {}).get("ts_config") or "").strip()
-            current_ts = str(cfg.indexing.postgres_ts_config or "").strip()
-            sparse_contract_mismatch = bool(stored_ts and current_ts and stored_ts != current_ts)
+            stored_sparse = (corpus_meta or {}).get("sparse_contract")
+            stored_sparse = dict(stored_sparse) if isinstance(stored_sparse, dict) else {}
+            current_sparse = dict(qdrant.sparse_contract)
+            sparse_contract_mismatch = bool(
+                stored_sparse and contract_hash(stored_sparse) != contract_hash(current_sparse)
+            )
             if sparse_contract_mismatch:
                 logger.warning(
-                    "FTS ts_config mismatch for corpus '%s': "
-                    "indexed=%s, query=%s",
-                    cid, stored_ts, current_ts,
+                    "Sparse retrieval contract mismatch for corpus '%s': indexed=%s query=%s",
+                    cid, stored_sparse, current_sparse,
                 )
-                debug["fusion_sparse_ts_config_mismatch"] = True
-                debug["fusion_sparse_ts_config_stored"] = stored_ts
-                debug["fusion_sparse_ts_config_query"] = current_ts
+                debug["fusion_sparse_contract_mismatch"] = True
+                debug["fusion_sparse_contract_stored"] = stored_sparse
+                debug["fusion_sparse_contract_query"] = current_sparse
                 if include_sparse and cfg.sparse_search.enabled:
                     raise SparseContractMismatchError(
                         corpus_id=cid,
-                        expected_contract={"ts_config": stored_ts},
-                        current_contract={
-                            "ts_config": current_ts,
-                            "bm25_tokenizer": str(cfg.indexing.bm25_tokenizer or "").strip().lower(),
-                            "bm25_stemmer_lang": str(cfg.indexing.bm25_stemmer_lang or "").strip().lower(),
-                        },
+                        expected_contract=stored_sparse,
+                        current_contract=current_sparse,
                     )
 
             if include_sparse and cfg.sparse_search.enabled:
                 with stage_span("retrieval.sparse", ragweld_corpus_id=cid), SPARSE_LEG_LATENCY_SECONDS.time():
                     try:
-                        with SEARCH_STAGE_LATENCY_SECONDS.labels(stage="postgres_sparse_search").time():
-                            sparse_results = await postgres.sparse_search_engine(
+                        with SEARCH_STAGE_LATENCY_SECONDS.labels(stage="qdrant_sparse_search").time():
+                            sparse_results = await qdrant.sparse_search(
                                 cid,
                                 query,
                                 int(top_k or cfg.sparse_search.top_k),
-                                ts_config=cfg.indexing.postgres_ts_config,
-                                engine=str(getattr(cfg.sparse_search, "engine", "postgres_fts") or "postgres_fts"),
-                                query_mode=str(getattr(cfg.sparse_search, "query_mode", "plain") or "plain"),
-                                highlight=bool(getattr(cfg.sparse_search, "highlight", False)),
-                                relax_on_empty=bool(getattr(cfg.sparse_search, "relax_on_empty", True)),
-                                relax_max_terms=int(getattr(cfg.sparse_search, "relax_max_terms", 8) or 8),
                             )
+                    except QdrantCollectionMissingError as e:
+                        if last_indexed_raw is None:
+                            sparse_results = []
+                        else:
+                            SEARCH_STAGE_ERRORS_TOTAL.labels(stage="sparse_leg").inc()
+                            raise RequiredRetrievalLegError(leg="sparse", operation="Qdrant sparse search") from e
                     except Exception as e:
                         SEARCH_STAGE_ERRORS_TOTAL.labels(stage="sparse_leg").inc()
-                        _raise_postgres_boundary_error(
-                            e,
-                            operation="Postgres sparse search",
-                            leg="sparse",
-                        )
+                        _raise_qdrant_boundary_error(e, operation="Qdrant sparse search", leg="sparse")
                         raise
-
-                if not sparse_results and bool(getattr(cfg.sparse_search, "file_path_fallback", True)):
-                    try:
-                        with SEARCH_STAGE_LATENCY_SECONDS.labels(stage="postgres_file_path_search").time():
-                            sparse_results = await postgres.file_path_search(
-                                cid,
-                                query,
-                                int(top_k or cfg.sparse_search.top_k),
-                                max_terms=int(getattr(cfg.sparse_search, "file_path_max_terms", 6) or 6),
-                            )
-                        debug["fusion_sparse_file_path_fallback_used"] = bool(sparse_results)
-                    except Exception as e:
-                        if is_postgres_unavailable(e) or is_transport_unavailable(e):
-                            raise DependencyUnavailableError(
-                                "postgres",
-                                "Postgres sparse file-path fallback",
-                            ) from e
-                        debug["fusion_sparse_file_path_fallback_error"] = _safe_error_message(e)
-                        debug["fusion_sparse_file_path_fallback_error_kind"] = type(e).__name__
-                        SEARCH_STAGE_ERRORS_TOTAL.labels(stage="sparse_file_path_fallback").inc()
 
                 min_s = float(getattr(cfg.retrieval, "min_score_sparse", 0.0) or 0.0)
                 if min_s > 0:
@@ -1021,16 +997,16 @@ class TriBridFusion:
 
         # Retrieval shaping (document-RAG postprocessing; best-effort).
         shape_cfg = None
-        shape_pg_url: str | None = None
+        shape_qdrant: QdrantChunkStore | None = None
         try:
             shape_corpus_id = str(rerank_config_corpus_id or (corpus_ids[0] if corpus_ids else "")).strip()
             if shape_corpus_id:
                 shape_full = await load_scoped_config(repo_id=shape_corpus_id)
                 shape_cfg = shape_full.retrieval
-                shape_pg_url = str(getattr(shape_full.indexing, "postgres_url", "") or "").strip() or None
+                shape_qdrant = QdrantChunkStore(shape_full)
         except Exception:
             shape_cfg = None
-            shape_pg_url = None
+            shape_qdrant = None
 
         if shape_cfg is not None and results:
             try:
@@ -1050,7 +1026,7 @@ class TriBridFusion:
                     mmr_lambda=float(getattr(shape_cfg, "mmr_lambda", 0.7) or 0.7),
                     final_k=int(final_k or 0),
                     repo_id=str(shape_corpus_id or ""),
-                    postgres_url=shape_pg_url,
+                    qdrant=shape_qdrant,
                 )
 
                 # Neighbor hydration: include adjacent chunks within the same file for top seeds.
@@ -1302,7 +1278,7 @@ async def _apply_mmr_if_enabled(
     mmr_lambda: float,
     final_k: int,
     repo_id: str | None = None,
-    postgres_url: str | None = None,
+    qdrant: QdrantChunkStore | None = None,
 ) -> list[ChunkMatch]:
     if not enabled or not results:
         return results
@@ -1318,12 +1294,9 @@ async def _apply_mmr_if_enabled(
 
     # Prefer dense embeddings when available; fall back to content token sets.
     emb_by_id: dict[str, list[float]] = {}
-    if repo_id and postgres_url:
+    if repo_id and qdrant is not None:
         try:
-            pg = PostgresClient(str(postgres_url))
-            await pg.connect()
-            emb_by_id = await pg.get_embeddings(str(repo_id), [r.chunk_id for r in pool])
-            await pg.disconnect()
+            emb_by_id = await qdrant.get_embeddings(str(repo_id), [r.chunk_id for r in pool])
         except Exception:
             emb_by_id = {}
 

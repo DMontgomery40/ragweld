@@ -234,9 +234,15 @@ Done with evidence (see commit history 317fbf7..feae789 and
 - Observability: host API logs in Loki, functional readiness probes, all
   dashboards provisioned and querying live metrics, traces discoverable.
 
+Update 2026-08-21 (session 4): the retrieval promotion cutover landed.
+Postgres keeps chunk rows/contracts, Qdrant holds every corpus's dense +
+sparse vectors behind a promoted generation, Neo4j keeps the graph leg, and
+the pilot lane + pgvector/FTS legs are gone (`docs/references/retrieval-lane.md`,
+execution record in `retrieval-promotion-cutover-2026-08-21.md`).
+
 Remaining (honest blockers / next slices, in order):
 
-1. Retrieval promotion cutover (atomic; design doc above).
+1. ~~Retrieval promotion cutover~~ — done (session 4).
 2. Flyte orchestration: provision a Flyte control plane and wire
    launch/status/cancel; until then `workflow=flyte` refuses with a typed 503.
 3. Unsloth execution: requires a CUDA host; no cloud GPU spend without

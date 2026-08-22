@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from server.api.dependency_errors import (
     DEPENDENCY_UNAVAILABLE_RESPONSES,
+    dependency_unavailable_http_exception,
     raise_postgres_unavailable_if_applicable,
     raise_required_dependency_unavailable_if_applicable,
 )
@@ -47,6 +48,7 @@ from server.retrieval.contracts import (
 )
 from server.retrieval.errors import RequiredRetrievalLegError, RetrievalContractMismatchError
 from server.retrieval.fusion import TriBridFusion
+from server.retrieval.qdrant_store import QdrantChunkStore
 from server.runtime_capabilities import SUPPORTED_RERANKER_CLOUD_PROVIDERS
 from server.services.config_store import CorpusNotFoundError
 from server.services.config_store import get_config as load_scoped_config
@@ -364,8 +366,13 @@ async def _enforce_index_contract_lock(
         total_chunks = int(getattr(stats, "total_chunks", 0) or 0)
         if total_chunks <= 0:
             return
-        dense_chunks = await pg.count_chunks_with_embeddings(rid)
-        has_dense_index = dense_chunks > 0
+        try:
+            qdrant_status = await QdrantChunkStore(existing_config).status(rid)
+        except DependencyUnavailableError as exc:
+            # The lock cannot be evaluated without the vector store: refuse the
+            # contract change instead of silently accepting it.
+            raise dependency_unavailable_http_exception(exc.dependency, boundary="Config contract lock", exc=exc) from exc
+        has_dense_index = bool(qdrant_status is not None and qdrant_status.dense_points > 0)
 
         blocked_dense = bool(dense_changed and has_dense_index)
         blocked_sparse = bool(sparse_changed and total_chunks > 0)

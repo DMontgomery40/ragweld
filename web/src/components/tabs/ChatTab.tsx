@@ -337,7 +337,7 @@ export default function ChatTab() {
                   >
                     <option value="all">api + postgres + neo4j</option>
                     <option value="api">api</option>
-                    <option value="postgres">postgres (pgvector)</option>
+                    <option value="postgres">postgres</option>
                     <option value="neo4j">neo4j</option>
                   </select>
                   <button

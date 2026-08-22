@@ -11,12 +11,14 @@ from fastapi import APIRouter, HTTPException
 
 from server.api.dependency_errors import (
     DEPENDENCY_UNAVAILABLE_RESPONSES,
+    dependency_unavailable_http_exception,
     raise_neo4j_unavailable_if_applicable,
     raise_postgres_unavailable_if_applicable,
 )
 from server.config import load_config
 from server.db.neo4j import Neo4jClient
 from server.db.postgres import PostgresClient
+from server.dependency_errors import DependencyUnavailableError
 from server.indexing.loader import FileLoader
 from server.models.index import IndexStats
 from server.models.tribrid_config_model import (
@@ -26,6 +28,7 @@ from server.models.tribrid_config_model import (
     CorpusUpdateRequest,
     GraphStats,
 )
+from server.retrieval.qdrant_store import QdrantChunkStore
 
 logger = logging.getLogger(__name__)
 
@@ -325,6 +328,13 @@ async def delete_repo(corpus_id: str) -> dict[str, Any]:
     if row is None:
         raise HTTPException(status_code=404, detail=f"Corpus not found: {repo_id}")
 
+    # Vector generations first: if Qdrant is unreachable the corpus row stays
+    # (typed 503, retryable) instead of leaving orphaned collections behind.
+    try:
+        await QdrantChunkStore(load_config()).delete_corpus(repo_id)
+    except DependencyUnavailableError as exc:
+        raise dependency_unavailable_http_exception(exc.dependency, boundary="Corpus deletion API", exc=exc) from exc
+
     neo4j = await _get_neo4j(repo_id)
     try:
         await neo4j.delete_graph(repo_id)
@@ -339,16 +349,6 @@ async def delete_repo(corpus_id: str) -> dict[str, Any]:
     except Exception as exc:
         raise_postgres_unavailable_if_applicable(exc, boundary="Corpus deletion API")
         raise
-
-    # Remove pilot-lane state owned by this corpus: Qdrant alias/collections
-    # and the sidecar export directory. Best-effort — an unreachable Qdrant
-    # must not block corpus deletion, but we do not hide the attempt.
-    try:
-        from server.indexing.oss_retrieval_pilot import delete_retrieval_pilot_state
-
-        await delete_retrieval_pilot_state(corpus_id=repo_id)
-    except Exception:
-        logger.warning("Pilot-lane cleanup failed for corpus %s", repo_id, exc_info=True)
 
     return {"ok": True}
 

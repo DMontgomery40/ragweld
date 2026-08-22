@@ -59,7 +59,7 @@ Chat is explicitly **not** protected as an implementation. It should be rebuilt 
 ### What This Branch Already Replaced
 
 - Generation now has one application boundary: `Ragweld API -> LiteLLM -> vLLM`. Upstream paid credentials and routes remain private to LiteLLM; the application sees authenticated aliases only.
-- Retrieval/indexing has a real OSS pilot seam for `Docling + Haystack + Qdrant`, with in-product UI parity.
+- Retrieval/indexing runs on the `Docling + Haystack + Qdrant` lane: Docling extracts rich documents, every corpus's dense and sparse vectors live in a promoted Qdrant generation, Postgres keeps chunk rows as control/state, and Neo4j keeps the graph leg.
 - Online observability now has a hard-cut `OTel + Langfuse + Tempo + Alloy` control surface, canonical trace metadata, cost attribution, and workbench visibility.
 
 ### What Is Still Legacy And Still Needs Replacement
@@ -114,7 +114,7 @@ ragweld runs **three retrieval methods in parallel**, fuses their results, and o
 ```
                                     ┌─────────────────────┐
                                     │   Vector Search     │
-                                    │   (pgvector)        │
+                                    │   (Qdrant)          │
                                     │   Semantic similarity│
                               ┌────►│   "auth flow" →     │────┐
                               │     │   "token exchange"  │    │
@@ -159,8 +159,8 @@ Each search method compensates for the others' weaknesses. The result: **dramati
 - **Gateway Aliases + Model Catalog**: authenticated LiteLLM runtime aliases alongside a separate pricing/candidate catalog
 
 ### Tri-Brid Retrieval
-- **Vector Search**: pgvector in PostgreSQL with HNSW indexing
-- **Sparse Search**: PostgreSQL Full-Text Search with BM25-style ranking
+- **Vector Search**: dense chunk vectors in Qdrant (HNSW, cosine), one promoted generation per corpus
+- **Sparse Search**: IDF-modified BM25 sparse vectors (fastembed `Qdrant/bm25`) stored in the same Qdrant generation
 - **Graph Search**: Neo4j knowledge graph with entity extraction and relationship traversal
 - **Fusion**: Reciprocal Rank Fusion (RRF) or configurable weighted scoring
 - **Reranking**: Cloud APIs (Cohere/Voyage/Jina) or Qwen3 LoRA learning rerankers (MLX)
@@ -290,7 +290,8 @@ docker compose up -d postgres neo4j
 ```
 
 This starts:
-- **PostgreSQL** with pgvector extension (port 5432)
+- **PostgreSQL** for corpus control/state rows and caches (port 5432)
+- **Qdrant** vector store for dense + sparse chunk vectors (port 56333)
 - **Neo4j** graph database (ports 7474, 7687)
 
 ### 2a. Start The Observability Overlay For This Branch
@@ -659,7 +660,7 @@ ragweld/
 │   │   ├── server.py           # FastMCP server singleton
 │   │   └── tools.py            # MCP tool implementations
 │   ├── db/
-│   │   ├── postgres.py         # pgvector + FTS operations
+│   │   ├── postgres.py         # corpus registry, chunk rows, summaries, caches
 │   │   └── neo4j.py            # Graph database operations
 │   ├── indexing/
 │   │   ├── chunker.py          # Code-aware chunking

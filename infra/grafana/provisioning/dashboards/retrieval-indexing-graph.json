@@ -90,7 +90,7 @@
       "gridPos": { "h": 7, "w": 24, "x": 0, "y": 14 },
       "id": 5,
       "options": {
-        "content": "## Retrieval / Indexing / Graph\nUse this board with the ragweld retrieval pilot and indexing workbench tabs. The shared variables are there so the same corpus and run context can travel with you into Eval Analysis and Benchmark.",
+        "content": "## Retrieval / Indexing / Graph\nUse this board with the ragweld Retrieval and Indexing workbench tabs (Postgres control rows, Qdrant dense + sparse generations, Neo4j graph). The shared variables are there so the same corpus and run context can travel with you into Eval Analysis and Benchmark.",
         "mode": "markdown"
       },
       "title": "Operator Notes",

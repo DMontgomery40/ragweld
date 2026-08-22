@@ -435,8 +435,8 @@ GRAPH_RELATIONSHIPS_CURRENT = Gauge(
 
 _SEARCH_STAGES = (
     "embed_query",
-    "postgres_vector_search",
-    "postgres_sparse_search",
+    "qdrant_vector_search",
+    "qdrant_sparse_search",
     "neo4j_connect",
     "neo4j_chunk_vector_search",
     "neo4j_expand_chunks_via_entities",
@@ -463,8 +463,9 @@ _INDEX_STAGES = (
     "file_read",
     "chunk",
     "embed_chunks",
-    "postgres_upsert_embeddings",
-    "postgres_upsert_fts",
+    "postgres_upsert_chunks",
+    "qdrant_write_chunks",
+    "qdrant_promote_generation",
     "neo4j_upsert_document_chunks",
     "neo4j_upsert_semantic_graph",
     "semantic_kg",

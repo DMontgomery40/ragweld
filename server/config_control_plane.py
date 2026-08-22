@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 import os
 import re
 from dataclasses import dataclass
@@ -17,12 +18,6 @@ from server.chat.gateway_runtime import (
 )
 from server.db.neo4j import Neo4jClient
 from server.db.postgres import PostgresClient
-from server.dependency_errors import (
-    DependencyUnavailableError,
-    is_postgres_unavailable,
-    is_transport_unavailable,
-)
-from server.indexing.oss_retrieval_pilot import build_retrieval_pilot_status
 from server.models.tribrid_config_model import (
     ConfigFieldDescriptor,
     ConfigIntegrationContract,
@@ -36,6 +31,7 @@ from server.models.tribrid_config_model import (
     TriBridConfig,
 )
 from server.observability.status import build_observability_status
+from server.retrieval.qdrant_store import QdrantChunkStore
 from server.training.control_plane import build_agent_control_plane_status
 
 _TIMEOUT = httpx.Timeout(2.5, connect=1.5)
@@ -167,22 +163,22 @@ _LOCKED_INTEGRATION_CONTRACTS: tuple[ConfigIntegrationContract, ...] = (
     ),
     ConfigIntegrationContract(
         id="tribrid_retrieval",
-        label="Tri-brid Retrieval (Postgres + Neo4j)",
-        summary="Canonical retrieval/indexing lane: pgvector dense, Postgres FTS sparse, and Neo4j graph legs.",
+        label="Tri-brid Retrieval (Postgres + Qdrant + Neo4j)",
+        summary="Canonical retrieval/indexing lane: Postgres chunk control rows, Qdrant dense + sparse legs, Neo4j graph leg.",
         ui_surface="retrieval",
-        required_config_paths=["indexing.postgres_url", "vector_search.enabled", "sparse_search.enabled"],
+        required_config_paths=["indexing.postgres_url", "qdrant.url", "vector_search.enabled", "sparse_search.enabled"],
         required_secret_ids=[],
-        readiness_checks=["postgres_probe", "graph_probe_when_enabled"],
+        readiness_checks=["postgres_probe", "qdrant_probe", "graph_probe_when_enabled"],
         blocked_surfaces=["retrieval", "chat"],
     ),
     ConfigIntegrationContract(
         id="haystack_docling_qdrant",
         label="Haystack + Docling + Qdrant",
-        summary="Bounded OSS retrieval/indexing lane and its provenance-preserving pilot.",
+        summary="Docling extraction, Haystack Qdrant document store, and the corpus dense + sparse vector generation.",
         ui_surface="retrieval",
-        required_config_paths=["embedding.embedding_backend", "chunking.chunking_strategy", "indexing.skip_dense"],
+        required_config_paths=["qdrant.url", "embedding.embedding_backend", "chunking.chunking_strategy", "indexing.skip_dense"],
         required_secret_ids=[],
-        readiness_checks=["corpus_selected", "pilot_export_present", "pilot_packages_present", "pilot_execution_ready"],
+        readiness_checks=["packages_present", "qdrant_probe", "corpus_selected", "corpus_generation_present"],
         blocked_surfaces=["retrieval"],
     ),
     ConfigIntegrationContract(
@@ -738,29 +734,6 @@ def _build_integration_readiness(
     )
 
 
-async def _resolve_corpus_path(corpus_id: str | None, postgres_dsn: str) -> str | None:
-    target = str(corpus_id or "").strip()
-    if not target:
-        return None
-    pg = PostgresClient(postgres_dsn, schema_mode="control")
-    try:
-        await pg.connect()
-        corpus = await pg.get_corpus(target)
-    except Exception as exc:
-        if is_postgres_unavailable(exc) or is_transport_unavailable(exc):
-            raise DependencyUnavailableError("postgres", "Config retrieval readiness") from exc
-        return None
-    finally:
-        try:
-            await pg.disconnect()
-        except Exception:
-            pass
-    if not isinstance(corpus, dict):
-        return None
-    path = str(corpus.get("path") or "").strip()
-    return path or None
-
-
 def _component_map(items: list[ObservabilityComponentStatus]) -> dict[str, ObservabilityComponentStatus]:
     return {item.id: item for item in items}
 
@@ -969,7 +942,7 @@ async def _build_tribrid_retrieval_readiness(
         reachable=ready,
         failing_checks=failing_checks,
         operator_hint=operator_hint
-        or "Canonical tri-brid retrieval lane (pgvector dense, Postgres FTS sparse, Neo4j graph) is functional.",
+        or "Canonical tri-brid retrieval lane (Qdrant dense + sparse, Neo4j graph, Postgres control rows) is functional.",
     )
 
 
@@ -979,46 +952,88 @@ async def _build_retrieval_integration_readiness(
     *,
     scope_id: str | None,
 ) -> IntegrationReadiness:
-    repo_path = await _resolve_corpus_path(scope_id, config.indexing.postgres_url)
-    if not scope_id or not repo_path:
+    missing_packages = [
+        label
+        for module_name, label in (
+            ("docling", "Docling"),
+            ("haystack", "Haystack"),
+            ("haystack_integrations.document_stores.qdrant", "qdrant-haystack"),
+            ("qdrant_client", "Qdrant client"),
+        )
+        if importlib.util.find_spec(module_name) is None
+    ]
+    store = QdrantChunkStore(config)
+    failing_checks: list[str] = []
+    if missing_packages:
+        failing_checks.append("packages_present")
+    qdrant_ok = await store.ping()
+    if not qdrant_ok:
+        failing_checks.append("qdrant_probe")
+    links = [
+        TraceExternalLink(
+            label="Qdrant",
+            kind="custom",
+            url=f"{store.url}/dashboard",
+            detail="Qdrant collections dashboard",
+        )
+    ]
+    if missing_packages or not qdrant_ok:
+        return _build_integration_readiness(
+            contract,
+            state="degraded",
+            enabled=True,
+            configured=bool(store.url),
+            reachable=False,
+            failing_checks=failing_checks,
+            operator_hint=(
+                f"Install {', '.join(missing_packages)} to run the retrieval lane."
+                if missing_packages
+                else f"Qdrant is unreachable at {store.url}; vector and sparse retrieval cannot run."
+            ),
+            links=links,
+        )
+    if not scope_id:
         return _build_integration_readiness(
             contract,
             state="unconfigured",
             enabled=True,
-            configured=False,
-            missing_config_paths=["corpus.path"],
+            configured=True,
+            reachable=True,
             failing_checks=["corpus_selected"],
-            operator_hint="Select a corpus to inspect the Haystack/Docling/Qdrant pilot lane.",
+            operator_hint="Select a corpus to inspect its Qdrant vector generation.",
+            links=links,
         )
-    status = await build_retrieval_pilot_status(corpus_id=scope_id, repo_path=repo_path)
-    missing_packages = [item.label for item in status.package_status if not item.available]
-    failing_checks: list[str] = []
-    state: Literal["ready", "degraded", "unconfigured", "disabled"] = "ready"
-    if not status.export_exists:
-        state = "unconfigured"
-        failing_checks.append("pilot_export_present")
-    elif missing_packages or not status.execution_ready:
-        state = "degraded"
-        if missing_packages:
-            failing_checks.append("pilot_packages_present")
-        if not status.execution_ready:
-            failing_checks.append("pilot_execution_ready")
+    try:
+        status = await store.status(scope_id)
+    except Exception:
+        status = None
+    if status is None or status.points <= 0:
+        return _build_integration_readiness(
+            contract,
+            state="unconfigured" if status is None else "degraded",
+            enabled=True,
+            configured=True,
+            reachable=True if status is None else False,
+            failing_checks=["corpus_generation_present"],
+            operator_hint=(
+                f"Corpus '{scope_id}' has no Qdrant generation yet; run indexing to build and promote one."
+                if status is None
+                else f"Corpus '{scope_id}' alias points at an empty or wiped generation; re-run indexing."
+            ),
+            links=links,
+        )
     return _build_integration_readiness(
         contract,
-        state=state,
+        state="ready",
         enabled=True,
-        configured=status.export_exists,
-        reachable=True if status.execution_ready else None,
-        failing_checks=failing_checks,
-        operator_hint=status.operator_hint,
-        links=[
-            TraceExternalLink(
-                label="Pilot Export",
-                kind="custom",
-                url=f"file://{status.export_dir}",
-                detail="Local retrieval pilot artifacts",
-            )
-        ],
+        configured=True,
+        reachable=True,
+        failing_checks=[],
+        operator_hint=(
+            f"Corpus '{scope_id}': {status.points} points ({status.dense_points} dense, "
+            f"{status.dense_dimensions}-d) in generation {status.physical_collection}."
+        ),
+        links=links,
     )
 
 

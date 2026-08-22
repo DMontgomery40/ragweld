@@ -30,16 +30,15 @@ def test_runtime_capabilities_response_matches_backend_constants() -> None:
     assert {item.id for item in response.reranker.cloud_providers} == SUPPORTED_RERANKER_CLOUD_PROVIDERS
     assert {item.id for item in response.chunking.strategies} == SUPPORTED_CHUNKING_STRATEGIES
     assert {item.id for item in response.indexing.storage_backends} == {
-        "haystack_qdrant_local",
-        "postgres_pgvector",
-        "postgres_fts",
+        "postgres_chunk_rows",
+        "qdrant_dense",
+        "qdrant_sparse_idf",
         "neo4j_lexical_graph",
         "neo4j_chunk_vector",
         "neo4j_semantic_kg",
     }
     assert {item.id for item in response.search.vector_backends} == {
-        "haystack_qdrant_local",
-        "postgres_pgvector",
+        "qdrant_dense",
         "neo4j_chunk_vector",
     }
 

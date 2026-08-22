@@ -85,7 +85,7 @@ export const TraceViewer: React.FC<TraceViewerProps> = ({ className = '' }) => {
       `Policy: ${decideEvent?.data?.policy || '—'}`,
       `Intent: ${decideEvent?.data?.intent || '—'}`,
       `Final K: ${rerankEvent?.data?.output_topK || '—'}`,
-      `Vector: pgvector`
+      `Vector: qdrant`
     ];
 
     parts.push(

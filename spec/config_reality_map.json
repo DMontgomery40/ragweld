@@ -178,7 +178,9 @@
     "qdrant": {
       "disposition": "runtime_effect",
       "evidence": [
-        "server/indexing/oss_retrieval_pilot.py"
+        "server/retrieval/qdrant_store.py",
+        "server/api/index.py",
+        "server/retrieval/fusion.py"
       ]
     }
   },
@@ -336,6 +338,83 @@
       "evidence": [
         "server/models/tribrid_config_model.py",
         "tests/unit/test_gateway_config_contract.py"
+      ]
+    },
+    "indexing.auto_prepare_dense_retrieval": {
+      "disposition": "remove",
+      "evidence": [
+        "server/services/config_store.py",
+        "server/models/tribrid_config_model.py"
+      ]
+    },
+    "sparse_search.engine": {
+      "disposition": "remove",
+      "evidence": [
+        "server/services/config_store.py",
+        "server/models/tribrid_config_model.py"
+      ]
+    },
+    "sparse_search.query_mode": {
+      "disposition": "remove",
+      "evidence": [
+        "server/services/config_store.py",
+        "server/models/tribrid_config_model.py"
+      ]
+    },
+    "sparse_search.highlight": {
+      "disposition": "remove",
+      "evidence": [
+        "server/services/config_store.py",
+        "server/models/tribrid_config_model.py"
+      ]
+    },
+    "sparse_search.relax_on_empty": {
+      "disposition": "remove",
+      "evidence": [
+        "server/services/config_store.py",
+        "server/models/tribrid_config_model.py"
+      ]
+    },
+    "sparse_search.relax_max_terms": {
+      "disposition": "remove",
+      "evidence": [
+        "server/services/config_store.py",
+        "server/models/tribrid_config_model.py"
+      ]
+    },
+    "sparse_search.file_path_fallback": {
+      "disposition": "remove",
+      "evidence": [
+        "server/services/config_store.py",
+        "server/models/tribrid_config_model.py"
+      ]
+    },
+    "sparse_search.file_path_max_terms": {
+      "disposition": "remove",
+      "evidence": [
+        "server/services/config_store.py",
+        "server/models/tribrid_config_model.py"
+      ]
+    },
+    "retrieval.bm25_k1": {
+      "disposition": "remove",
+      "evidence": [
+        "server/services/config_store.py",
+        "server/models/tribrid_config_model.py"
+      ]
+    },
+    "retrieval.bm25_b": {
+      "disposition": "remove",
+      "evidence": [
+        "server/services/config_store.py",
+        "server/models/tribrid_config_model.py"
+      ]
+    },
+    "chat.recall.vector_backend": {
+      "disposition": "remove",
+      "evidence": [
+        "server/services/config_store.py",
+        "server/models/tribrid_config_model.py"
       ]
     }
   }

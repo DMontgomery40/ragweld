@@ -42,6 +42,6 @@ Aliases never point to mutable runtime state directly.
 This does **not** yet claim:
 
 - raw corpus versioning
-- Postgres/pgvector snapshot governance
+- Postgres/Qdrant snapshot governance
 - Neo4j graph snapshot governance
 - full end-to-end DSV compliance across every artifact in the platform

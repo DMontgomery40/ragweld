@@ -24,8 +24,6 @@ REQUIRED_SECTIONS: tuple[str, ...] = (
 
 USE_CONFIG_FIELD_RE = re.compile(r"useConfigField(?:<[^()]*>)?\(\s*['\"]([^'\"]+)['\"]", re.MULTILINE)
 MIRROR_SETTER_REQUIREMENTS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("setUnifiedBm25K1", ("setSparseBm25K1", "setRetrievalBm25K1")),
-    ("setUnifiedBm25B", ("setSparseBm25B", "setRetrievalBm25B")),
     ("setUnifiedHydrationMode", ("setHydrationMode", "setRetrievalHydrationMode")),
     ("setUnifiedHydrationMaxChars", ("setHydrationMaxChars", "setRetrievalHydrationMaxChars")),
 )

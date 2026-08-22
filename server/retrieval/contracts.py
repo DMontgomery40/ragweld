@@ -11,6 +11,8 @@ from server.runtime_capabilities import (
 )
 
 __all__ = [
+    "SPARSE_ENGINE",
+    "SPARSE_MODEL",
     "SUPPORTED_PROVIDER_BACKEND_EMBEDDING_PROVIDERS",
     "provider_requires_tokenizer",
     "canonical_contract_json",
@@ -18,6 +20,13 @@ __all__ = [
     "dense_contract_from_config",
     "sparse_contract_from_config",
 ]
+
+# The sparse leg is an IDF-modified BM25 sparse vector index in Qdrant, produced
+# by fastembed's `Qdrant/bm25` model. The engine and model are invariants of
+# the retrieval lane; the BM25 parameters and stemming choices are operator
+# tunables that change document vectors and therefore belong to the contract.
+SPARSE_ENGINE = "qdrant_sparse_idf"
+SPARSE_MODEL = "Qdrant/bm25"
 
 
 def _stable(obj: Any) -> Any:
@@ -63,9 +72,14 @@ def dense_contract_from_config(config: TriBridConfig) -> dict[str, Any]:
 
 
 def sparse_contract_from_config(config: TriBridConfig) -> dict[str, Any]:
+    """Sparse (BM25 sparse-vector) contract recorded at index time and enforced at query time."""
+    sparse = config.sparse_search
     idx = config.indexing
     return {
-        "ts_config": str(idx.postgres_ts_config or "").strip(),
-        "bm25_tokenizer": str(idx.bm25_tokenizer or "").strip().lower(),
-        "bm25_stemmer_lang": str(idx.bm25_stemmer_lang or "").strip().lower(),
+        "engine": SPARSE_ENGINE,
+        "model": SPARSE_MODEL,
+        "k1": float(sparse.bm25_k1),
+        "b": float(sparse.bm25_b),
+        "language": str(idx.bm25_stemmer_lang or "").strip().lower() or "english",
+        "stemmer": str(idx.bm25_tokenizer or "").strip().lower() == "stemmer",
     }

@@ -40,7 +40,6 @@ def test_generic_runtime_surfaces_do_not_embed_optional_epstein_lane_defaults() 
         "scripts/automation_bootstrap.sh",
         "web/tests/e2e/exhaustive/chat_reliability.spec.ts",
         "README.md",
-        "tests/integration/test_pg_search_bm25.py",
         "tests/unit/test_synthetic_sdkit_provider.py",
         "tests/unit/test_synthetic_storage_compat.py",
     ]

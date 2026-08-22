@@ -20,15 +20,11 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 from starlette.responses import StreamingResponse
 
+from server.api.dependency_errors import dependency_unavailable_http_exception
 from server.chat.provider_router import ProviderRoute, select_provider_route
 from server.db.neo4j import Neo4jClient
-from server.api.dependency_errors import dependency_unavailable_http_exception
-from server.api.generation_errors import generation_unavailable_http_exception
-from server.chat.handler import ChatGenerationError
-from server.dependency_errors import DependencyUnavailableError
-from server.api.retrieval_errors import retrieval_contract_mismatch_http_exception
-from server.retrieval.errors import RetrievalContractMismatchError
 from server.db.postgres import PostgresClient
+from server.dependency_errors import DependencyUnavailableError
 from server.indexing.chunker import Chunker
 from server.indexing.embedder import Embedder, configure_postgres_embedding_cache_backend
 from server.indexing.loader import FileLoader
@@ -36,15 +32,7 @@ from server.indexing.official_graphrag import (
     extract_semantic_kg_with_graphrag,
     write_lexical_graph_with_graphrag,
 )
-from server.indexing.oss_retrieval_pilot import (
-    answer_retrieval_pilot_execution,
-    build_retrieval_pilot_status,
-    export_retrieval_pilot,
-    ingest_retrieval_pilot_execution,
-    search_retrieval_pilot_execution,
-    search_retrieval_pilot_preview,
-)
-from server.indexing.text_extractors import extract_text_for_path
+from server.indexing.text_extractors import extract_text_for_path, extraction_method_for_path
 from server.models.index import (
     Chunk,
     IndexRequest,
@@ -54,8 +42,6 @@ from server.models.index import (
     IndexStatus,
 )
 from server.models.tribrid_config_model import (
-    RetrievalPilotAnswerRequest,
-    RetrievalPilotAnswerResponse,
     CorpusScope,
     DashboardEmbeddingConfigSummary,
     DashboardIndexCosts,
@@ -64,17 +50,7 @@ from server.models.tribrid_config_model import (
     DashboardIndexStatusResponse,
     DashboardIndexStorageBreakdown,
     IndexEstimate,
-    RetrievalPilotExportRequest,
-    RetrievalPilotExportResponse,
-    RetrievalPilotIngestRequest,
-    RetrievalPilotIngestResponse,
-    RetrievalPilotSearchRequest,
-    RetrievalPilotSearchResponse,
-    RetrievalPilotSearchPreviewRequest,
-    RetrievalPilotSearchPreviewResponse,
-    RetrievalPilotStatusResponse,
     TriBridConfig,
-    VocabPreviewResponse,
 )
 from server.observability.metrics import (
     CHUNKS_INDEXED_CURRENT,
@@ -89,6 +65,7 @@ from server.observability.metrics import (
     INDEX_STAGE_LATENCY_SECONDS,
     INDEX_TOKENS_TOTAL,
 )
+from server.retrieval.qdrant_store import QdrantChunkStore
 from server.services.config_store import get_config as load_scoped_config
 
 logger = logging.getLogger(__name__)
@@ -183,24 +160,6 @@ def _run_summary_path(repo_id: str, run_id: str) -> Path:
 
 def _run_events_path(repo_id: str, run_id: str) -> Path:
     return _run_dir(repo_id, run_id) / "events.jsonl"
-
-
-async def _resolve_repo_path_from_request(repo_id: str, repo_path: str | None) -> str:
-    resolved = str(repo_path or "").strip()
-    if resolved:
-        return resolved
-
-    cfg_global = await load_scoped_config(repo_id=None)
-    pg = PostgresClient(cfg_global.indexing.postgres_url)
-    await pg.connect()
-    try:
-        corpus = await pg.get_corpus(repo_id)
-        if corpus is not None:
-            resolved = str(corpus.get("path") or "").strip()
-    finally:
-        await pg.disconnect()
-
-    return resolved
 
 
 def _persist_run_summary(summary: IndexRunSummary) -> None:
@@ -690,13 +649,25 @@ async def _compute_dashboard_storage_breakdown(*, repo_id: str) -> DashboardInde
     """Compute a dashboard-friendly storage breakdown (bytes) for a corpus."""
     cfg = await load_scoped_config(repo_id=repo_id)
 
-    # Postgres (pgvector + FTS + chunk_summaries)
+    # Postgres (chunk rows + chunk_summaries)
     pg = PostgresClient(cfg.indexing.postgres_url)
     await pg.connect()
     try:
         breakdown = await pg.get_dashboard_storage_breakdown(repo_id)
     finally:
         await pg.disconnect()
+
+    # Qdrant (points + estimated dense bytes); unreachable Qdrant reads as zero, never as healthy.
+    qdrant_points = 0
+    qdrant_dense_vector_bytes = 0
+    try:
+        status = await QdrantChunkStore(cfg).status(repo_id)
+        if status is not None:
+            qdrant_points = int(status.points)
+            qdrant_dense_vector_bytes = int(status.dense_points) * int(status.dense_dimensions) * 4
+    except Exception:
+        qdrant_points = 0
+        qdrant_dense_vector_bytes = 0
 
     # Neo4j (store size via JMX)
     neo4j_store_bytes = 0
@@ -718,215 +689,19 @@ async def _compute_dashboard_storage_breakdown(*, repo_id: str) -> DashboardInde
         neo4j_store_bytes = 0
 
     chunks_bytes = int(breakdown.get("chunks_bytes") or 0)
-    embeddings_bytes = int(breakdown.get("embeddings_bytes") or 0)
-    pgvector_index_bytes = int(breakdown.get("pgvector_index_bytes") or 0)
-    bm25_index_bytes = int(breakdown.get("bm25_index_bytes") or 0)
     chunk_summaries_bytes = int(breakdown.get("chunk_summaries_bytes") or 0)
-
-    postgres_total = chunks_bytes + embeddings_bytes + pgvector_index_bytes + bm25_index_bytes + chunk_summaries_bytes
-    total_storage = postgres_total + int(neo4j_store_bytes or 0)
+    postgres_total = chunks_bytes + chunk_summaries_bytes
+    total_storage = postgres_total + qdrant_dense_vector_bytes + int(neo4j_store_bytes or 0)
 
     return DashboardIndexStorageBreakdown(
         chunks_bytes=chunks_bytes,
-        embeddings_bytes=embeddings_bytes,
-        pgvector_index_bytes=pgvector_index_bytes,
-        bm25_index_bytes=bm25_index_bytes,
         chunk_summaries_bytes=chunk_summaries_bytes,
+        qdrant_points=qdrant_points,
+        qdrant_dense_vector_bytes=qdrant_dense_vector_bytes,
         neo4j_store_bytes=int(neo4j_store_bytes or 0),
         postgres_total_bytes=postgres_total,
         total_storage_bytes=total_storage,
     )
-
-
-def _normalize_index_probe_text(value: str, *, max_chars: int) -> str:
-    text = re.sub(r"\s+", " ", str(value or "")).strip()
-    if len(text) <= max_chars:
-        return text
-    clipped = text[:max_chars].rstrip()
-    if " " in clipped:
-        clipped = clipped.rsplit(" ", 1)[0].rstrip()
-    return clipped.rstrip(" ,;:.")
-
-
-def _derive_post_index_dense_retrieval_queries(
-    *,
-    repo_id: str,
-    repo_path: str,
-    corpus_name: str,
-    corpus_description: str | None,
-    corpus_meta: dict[str, Any] | None,
-    sample_chunks: list[Chunk],
-    max_queries: int = 4,
-) -> list[str]:
-    queries: list[str] = []
-    seen: set[str] = set()
-
-    def _add(raw: str, *, max_chars: int = 220) -> None:
-        text = _normalize_index_probe_text(raw, max_chars=max_chars)
-        if not text:
-            return
-        key = text.lower()
-        if key in seen:
-            return
-        seen.add(key)
-        queries.append(text)
-
-    for chunk in sample_chunks:
-        _add(chunk.content, max_chars=220)
-        if len(queries) >= max_queries:
-            return queries[:max_queries]
-
-    keywords = (corpus_meta or {}).get("keywords") if isinstance(corpus_meta, dict) else None
-    if isinstance(keywords, list):
-        for item in keywords:
-            kw = str(item or "").strip()
-            if not kw:
-                continue
-            _add(kw, max_chars=120)
-            if len(queries) >= max_queries:
-                return queries[:max_queries]
-
-    _add(str(corpus_description or ""), max_chars=160)
-    if len(queries) >= max_queries:
-        return queries[:max_queries]
-
-    repo_tail = Path(repo_path).name.strip()
-    for candidate in (corpus_name, repo_id, repo_tail):
-        _add(str(candidate or ""), max_chars=96)
-        if len(queries) >= max_queries:
-            break
-
-    return queries[:max_queries]
-
-
-async def _prepare_dense_retrieval_after_indexing(
-    *,
-    repo_id: str,
-    repo_path: str,
-    cfg: TriBridConfig,
-    stats: IndexStats,
-    queue: asyncio.Queue[dict[str, Any]] | None,
-) -> dict[str, Any]:
-    if not bool(getattr(cfg.indexing, "auto_prepare_dense_retrieval", True)):
-        return {"status": "disabled"}
-    if getattr(cfg.indexing, "skip_dense", False):
-        return {"status": "skip_dense"}
-    if int(getattr(stats, "embedding_dimensions", 0) or 0) <= 0:
-        return {"status": "no_dense_vectors"}
-
-    postgres = PostgresClient(cfg.indexing.postgres_url)
-    await postgres.connect()
-    try:
-        embedded_chunks = await postgres.count_chunks_with_embeddings(repo_id)
-        if embedded_chunks <= 0:
-            return {"status": "no_embedded_chunks"}
-
-        corpus = await postgres.get_corpus(repo_id)
-        corpus_name = str((corpus or {}).get("name") or repo_id)
-        corpus_description = (corpus or {}).get("description")
-        corpus_meta = (corpus.get("meta") or {}) if corpus else {}
-
-        _emit_event(
-            queue,
-            {
-                "type": "progress",
-                "percent": 99,
-                "message": "Preparing dense retrieval",
-                "current_file": None,
-            },
-            drop_oldest=True,
-        )
-        _emit_event(
-            queue,
-            {
-                "type": "log",
-                "message": "⚙️ Post-index dense retrieval prep: building pgvector index and warming query embeddings",
-            },
-            drop_oldest=True,
-        )
-
-        with INDEX_STAGE_LATENCY_SECONDS.labels(stage="postgres_ensure_vector_index").time():
-            index_name = await postgres.ensure_vector_index(repo_id)
-
-        sample_chunks = await postgres.list_chunks_for_repo(repo_id, limit=3)
-        queries = _derive_post_index_dense_retrieval_queries(
-            repo_id=repo_id,
-            repo_path=repo_path,
-            corpus_name=corpus_name,
-            corpus_description=str(corpus_description) if corpus_description is not None else None,
-            corpus_meta=corpus_meta if isinstance(corpus_meta, dict) else {},
-            sample_chunks=sample_chunks,
-        )
-
-        embedder = Embedder(cfg.embedding, cfg.tokenization)
-        configure_postgres_embedding_cache_backend(embedder, postgres)
-        query_vectors: list[list[float]] = []
-        if queries:
-            with INDEX_STAGE_LATENCY_SECONDS.labels(stage="warm_query_embedding_cache").time():
-                query_vectors = await embedder.embed_batch(queries)
-
-        smoke_hits = 0
-        smoke_queries = min(len(queries), len(query_vectors), 3)
-        best_score = 0.0
-        if smoke_queries > 0:
-            with INDEX_STAGE_LATENCY_SECONDS.labels(stage="post_index_vector_smoke").time():
-                for query, vector in zip(queries[:smoke_queries], query_vectors[:smoke_queries], strict=True):
-                    results = await postgres.vector_search(
-                        repo_id,
-                        vector,
-                        1,
-                        expected_dimensions=int(embedder.dim),
-                    )
-                    if results:
-                        smoke_hits += 1
-                        best_score = max(best_score, float(results[0].score or 0.0))
-                    else:
-                        logger.warning("Dense retrieval smoke query returned no hits for corpus '%s': %s", repo_id, query)
-
-        _emit_event(
-            queue,
-            {
-                "type": "log",
-                "message": (
-                    "⚡ Dense retrieval prep complete: "
-                    f"index={index_name} "
-                    f"warmed_queries={len(queries)} "
-                    f"smoke_hits={smoke_hits}/{smoke_queries} "
-                    f"best_score={best_score:.3f}"
-                ),
-                "meta": {
-                    "stage": "post_index_dense_retrieval",
-                    "index_name": index_name,
-                    "warmed_queries": int(len(queries)),
-                    "smoke_hits": int(smoke_hits),
-                    "smoke_queries": int(smoke_queries),
-                    "best_score": float(best_score),
-                },
-            },
-            drop_oldest=True,
-        )
-        return {
-            "status": "ok",
-            "index_name": index_name,
-            "warmed_queries": int(len(queries)),
-            "smoke_hits": int(smoke_hits),
-            "smoke_queries": int(smoke_queries),
-            "best_score": float(best_score),
-        }
-    except Exception as exc:
-        logger.warning("Post-index dense retrieval prep failed for corpus '%s': %s", repo_id, exc, exc_info=True)
-        _emit_event(
-            queue,
-            {
-                "type": "warning",
-                "message": f"Dense retrieval prep incomplete: {exc}",
-            },
-            drop_oldest=True,
-        )
-        return {"status": "error", "error": str(exc)}
-    finally:
-        with contextlib.suppress(Exception):
-            await postgres.disconnect()
 
 
 def _emit_event(
@@ -987,6 +762,8 @@ async def _run_index(
     event_queue: asyncio.Queue[dict[str, Any]] | None = None,
     run_id: str,
     write_repo_id: str | None = None,
+    qdrant: QdrantChunkStore,
+    qdrant_generation: str,
 ) -> IndexStats:
     cfg = await load_scoped_config(repo_id=repo_id)
     target_repo_id = str(write_repo_id or repo_id)
@@ -1046,12 +823,10 @@ async def _run_index(
 
     # ---- Embedding mismatch guard ----
     # Detect when the current embedding config differs from what was used to
-    # build the existing index.  Mixed-dimension vectors in the same corpus
-    # cause pgvector query errors (unhandled 500s) and silently corrupt search
-    # results.  Block the run unless force_reindex is set.
-    # NOTE: Only guard when the corpus actually has non-null embeddings.
-    # After a delete operation, embedding metadata lingers on the corpora row
-    # even though vectors may be gone, so the guard must not block a fresh run.
+    # build the existing index and block the run unless force_reindex is set,
+    # so an operator never replaces a corpus under a different vector space by
+    # accident. Only guard when the corpus still has dense vectors in Qdrant:
+    # after a delete, embedding metadata lingers on the corpora row.
     if corpus and not force_reindex and not skip_dense and embedder is not None:
         meta = corpus.get("meta") if isinstance(corpus.get("meta"), dict) else {}
         stored_backend = str((meta or {}).get("embedding_backend") or "").strip().lower()
@@ -1068,8 +843,8 @@ async def _run_index(
         # metadata was not cleared, there is nothing to protect.
         has_embeddings = False
         if stored_model and stored_dim > 0:
-            embedding_chunks = await postgres.count_chunks_with_embeddings(repo_id)
-            has_embeddings = embedding_chunks > 0
+            live = await qdrant.status(repo_id)
+            has_embeddings = bool(live is not None and live.dense_points > 0)
         if stored_model and stored_dim > 0 and has_embeddings:
             current_model = str(cfg.embedding.effective_model or "").strip()
             current_dim = int(embedder.dim)
@@ -1178,6 +953,8 @@ async def _run_index(
             loader=loader,
             event_queue=event_queue,
             write_repo_id=target_repo_id,
+            qdrant=qdrant,
+            qdrant_generation=qdrant_generation,
         )
     finally:
         if neo4j is not None:
@@ -1201,8 +978,16 @@ async def _run_index_body(
     loader: FileLoader,
     event_queue: asyncio.Queue[dict[str, Any]] | None,
     write_repo_id: str,
+    qdrant: QdrantChunkStore,
+    qdrant_generation: str,
 ) -> IndexStats:
-    """Core indexing loop -- extracted to allow _run_index() to guarantee Neo4j cleanup via finally."""
+    """Core indexing loop -- extracted to allow _run_index() to guarantee Neo4j cleanup via finally.
+
+    Chunk rows go to Postgres under `write_repo_id`; dense + sparse vectors go
+    to the staged Qdrant generation `qdrant_generation`. Neither is visible to
+    retrieval until the caller promotes both.
+    """
+    vector_dim = int(embedder.dim) if embedder is not None else int(cfg.embedding.embedding_dim or 0)
     total_files = 0
     total_chunks = 0
     total_tokens = 0
@@ -1228,16 +1013,12 @@ async def _run_index_body(
                 drop_oldest=True,
             )
 
-    # If skip_dense is enabled, ensure no stale embeddings remain from previous runs.
-    # This makes graph-only / sparse-only workflows deterministic.
-    if skip_dense:
-        deleted = await postgres.delete_embeddings(write_repo_id)
-        if event_queue is not None:
-            _emit_event(
-                event_queue,
-                {"type": "log", "message": f"⚡ skip_dense=1 → skipping embeddings (cleared {deleted} existing vectors)"},
-                drop_oldest=True,
-            )
+    if skip_dense and event_queue is not None:
+        _emit_event(
+            event_queue,
+            {"type": "log", "message": "⚡ skip_dense=1 → sparse-only vectors; no dense embeddings this run"},
+            drop_oldest=True,
+        )
 
     semantic_budget = int(cfg.graph_indexing.semantic_kg_max_chunks) if cfg.graph_indexing.semantic_kg_enabled else 0
     semantic_processed = 0
@@ -1266,8 +1047,10 @@ async def _run_index_body(
         INDEX_TOKENS_TOTAL.inc(chunk_tokens)
 
         if skip_dense:
-            with INDEX_STAGE_LATENCY_SECONDS.labels(stage="postgres_upsert_fts").time():
-                await postgres.upsert_fts(write_repo_id, chunks, ts_config=cfg.indexing.postgres_ts_config)
+            with INDEX_STAGE_LATENCY_SECONDS.labels(stage="postgres_upsert_chunks").time():
+                await postgres.upsert_chunks(write_repo_id, chunks)
+            with INDEX_STAGE_LATENCY_SECONDS.labels(stage="qdrant_write_chunks").time():
+                await qdrant.write_chunks(repo_id, qdrant_generation, chunks, embedding_dim=vector_dim)
             if neo4j is not None and cfg.graph_indexing.build_lexical_graph:
                 batch_paths = {str(ch.file_path or "") for ch in chunks}
                 if len(batch_paths) != 1:
@@ -1301,10 +1084,10 @@ async def _run_index_body(
                 ]
             with INDEX_STAGE_LATENCY_SECONDS.labels(stage="embed_chunks").time():
                 embedded = await embedder.embed_chunks(chunks, embed_texts=contextual_inputs)
-        with INDEX_STAGE_LATENCY_SECONDS.labels(stage="postgres_upsert_embeddings").time():
-            await postgres.upsert_embeddings(write_repo_id, embedded)
-        with INDEX_STAGE_LATENCY_SECONDS.labels(stage="postgres_upsert_fts").time():
-            await postgres.upsert_fts(write_repo_id, embedded, ts_config=cfg.indexing.postgres_ts_config)
+        with INDEX_STAGE_LATENCY_SECONDS.labels(stage="postgres_upsert_chunks").time():
+            await postgres.upsert_chunks(write_repo_id, embedded)
+        with INDEX_STAGE_LATENCY_SECONDS.labels(stage="qdrant_write_chunks").time():
+            await qdrant.write_chunks(repo_id, qdrant_generation, embedded, embedding_dim=vector_dim)
         if neo4j is not None and cfg.graph_indexing.build_lexical_graph:
             batch_paths = {str(ch.file_path or "") for ch in embedded}
             if len(batch_paths) != 1:
@@ -1541,6 +1324,9 @@ async def _run_index_body(
             INDEX_FILES_PROCESSED_TOTAL.inc()
             if not chunks:
                 continue
+            extraction = extraction_method_for_path(abs_path)
+            for chunk in chunks:
+                chunk.metadata["extraction"] = extraction
             if cross_file_chunk_batching:
                 pending_cross_file_chunks.extend(chunks)
                 await _flush_pending_cross_file_chunks(force=False)
@@ -1648,7 +1434,7 @@ async def _run_index_body(
             provider="",
             model="",
             dimensions=0,
-            ts_config=str(cfg.indexing.postgres_ts_config or ""),
+            sparse_contract=qdrant.sparse_contract,
         )
     else:
         assert embedder is not None
@@ -1658,7 +1444,7 @@ async def _run_index_body(
             provider=str(cfg.embedding.embedding_type or ""),
             model=str(cfg.embedding.effective_model or ""),
             dimensions=int(embedder.dim),
-            ts_config=str(cfg.indexing.postgres_ts_config or ""),
+            sparse_contract=qdrant.sparse_contract,
         )
     # Invalidate semantic cache for this corpus after indexing to prevent stale
     # retrieval/generation payloads from pre-index content.
@@ -1725,11 +1511,26 @@ async def _background_index_job(request: IndexRequest, queue: asyncio.Queue[dict
     with contextlib.suppress(Exception):
         _persist_run_summary(summary)
 
+    qdrant: QdrantChunkStore | None = None
+    qdrant_generation: str | None = None
     try:
         INDEX_RUNS_TOTAL.inc()
         _emit_event(
             queue,
             {"type": "log", "message": f"🚀 Indexing started: {repo_id} (run_id={run_id})"},
+            drop_oldest=True,
+        )
+        cfg = await load_scoped_config(repo_id=repo_id)
+        qdrant = QdrantChunkStore(cfg)
+        vector_dim = (
+            int(cfg.embedding.embedding_dim or 0)
+            if cfg.indexing.skip_dense
+            else int(Embedder(cfg.embedding, cfg.tokenization).dim)
+        )
+        qdrant_generation = await qdrant.create_generation(repo_id, embedding_dim=vector_dim)
+        _emit_event(
+            queue,
+            {"type": "log", "message": f"📦 Staged Qdrant generation {qdrant_generation} (dense + sparse)"},
             drop_oldest=True,
         )
         with INDEX_DURATION_SECONDS.time():
@@ -1740,6 +1541,8 @@ async def _background_index_job(request: IndexRequest, queue: asyncio.Queue[dict
                 event_queue=queue,
                 run_id=run_id,
                 write_repo_id=staging_repo_id,
+                qdrant=qdrant,
+                qdrant_generation=qdrant_generation,
             )
         cfg = await load_scoped_config(repo_id=repo_id)
         postgres = PostgresClient(cfg.indexing.postgres_url)
@@ -1760,6 +1563,36 @@ async def _background_index_job(request: IndexRequest, queue: asyncio.Queue[dict
         finally:
             with contextlib.suppress(Exception):
                 await postgres.disconnect()
+        # Verify the STAGED generation before it becomes visible: a partial
+        # vector index must never replace the live one.
+        staged_points = await qdrant.count_points(qdrant_generation)
+        expected_points = int(getattr(stats, "total_chunks", 0) or 0)
+        if staged_points != expected_points:
+            raise RuntimeError(
+                f"Staged Qdrant generation {qdrant_generation} holds {staged_points} points but the run "
+                f"indexed {expected_points} chunks; refusing to promote a partial vector index"
+            )
+        with INDEX_STAGE_LATENCY_SECONDS.labels(stage="qdrant_promote_generation").time():
+            await qdrant.promote_generation(repo_id, qdrant_generation)
+        qdrant_generation = None
+        promoted = await qdrant.status(repo_id)
+        promoted_points = int(promoted.points) if promoted is not None else 0
+        _emit_event(
+            queue,
+            {
+                "type": "log",
+                "message": (
+                    f"⚡ Promoted Qdrant generation: points={promoted_points} "
+                    f"dense_points={int(promoted.dense_points) if promoted is not None else 0}"
+                ),
+                "meta": {
+                    "stage": "qdrant_promote",
+                    "points": promoted_points,
+                    "dense_points": int(promoted.dense_points) if promoted is not None else 0,
+                },
+            },
+            drop_oldest=True,
+        )
 
         if cfg.graph_indexing.enabled:
             db_name = cfg.graph_storage.resolve_database(repo_id)
@@ -1774,13 +1607,6 @@ async def _background_index_job(request: IndexRequest, queue: asyncio.Queue[dict
                 await neo4j.promote_repo_graph(active_repo_id=repo_id, staging_repo_id=staging_repo_id)
             finally:
                 await neo4j.disconnect()
-        await _prepare_dense_retrieval_after_indexing(
-            repo_id=repo_id,
-            repo_path=request.repo_path,
-            cfg=cfg,
-            stats=stats,
-            queue=queue,
-        )
         # Update process-level “size” gauges (best-effort; no per-corpus labels).
         try:
             CHUNKS_INDEXED_CURRENT.set(int(getattr(stats, "total_chunks", 0) or 0))
@@ -1836,6 +1662,9 @@ async def _background_index_job(request: IndexRequest, queue: asyncio.Queue[dict
             _persist_run_summary(summary)
         _emit_event(queue, {"type": "complete", "message": "✓ Indexing complete"}, guarantee=True)
     except asyncio.CancelledError:
+        if qdrant is not None and qdrant_generation is not None:
+            with contextlib.suppress(Exception):
+                await asyncio.shield(qdrant.drop_generation(qdrant_generation))
         with contextlib.suppress(Exception):
             cfg = await load_scoped_config(repo_id=repo_id)
             pg = PostgresClient(cfg.indexing.postgres_url)
@@ -1895,6 +1724,9 @@ async def _background_index_job(request: IndexRequest, queue: asyncio.Queue[dict
         _emit_event(queue, {"type": "cancelled", "message": "⚠ Indexing cancelled"}, guarantee=True)
         raise
     except Exception as e:
+        if qdrant is not None and qdrant_generation is not None:
+            with contextlib.suppress(Exception):
+                await qdrant.drop_generation(qdrant_generation)
         with contextlib.suppress(Exception):
             cfg = await load_scoped_config(repo_id=repo_id)
             pg = PostgresClient(cfg.indexing.postgres_url)
@@ -2152,151 +1984,6 @@ async def estimate_index(request: IndexRequest) -> IndexEstimate:
         estimated_seconds_semantic_kg=estimated_seconds_semantic_kg,
         assumptions=assumptions,
     )
-
-
-@router.get("/index/{corpus_id}/pilot/status", response_model=RetrievalPilotStatusResponse)
-async def get_retrieval_pilot_status(
-    corpus_id: str,
-    repo_path: str | None = Query(default=None, description="Optional corpus path override for the pilot."),
-) -> RetrievalPilotStatusResponse:
-    resolved_repo_path = await _resolve_repo_path_from_request(corpus_id, repo_path)
-    return await build_retrieval_pilot_status(corpus_id=corpus_id, repo_path=resolved_repo_path)
-
-
-@router.post("/index/{corpus_id}/pilot/export", response_model=RetrievalPilotExportResponse)
-async def run_retrieval_pilot_export(
-    corpus_id: str,
-    request: RetrievalPilotExportRequest,
-) -> RetrievalPilotExportResponse:
-    if str(request.repo_id or "").strip() != str(corpus_id or "").strip():
-        raise HTTPException(status_code=422, detail="corpus_id path and payload must match")
-
-    resolved_repo_path = await _resolve_repo_path_from_request(corpus_id, request.repo_path)
-    if not resolved_repo_path:
-        raise HTTPException(status_code=422, detail="repo_path is required (or create corpus first)")
-
-    try:
-        return await export_retrieval_pilot(
-            corpus_id=corpus_id,
-            repo_path=resolved_repo_path,
-            force_rebuild=bool(request.force_rebuild),
-        )
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-
-
-@router.post("/index/{corpus_id}/pilot/search-preview", response_model=RetrievalPilotSearchPreviewResponse)
-async def search_retrieval_pilot(
-    corpus_id: str,
-    request: RetrievalPilotSearchPreviewRequest,
-    repo_path: str | None = Query(default=None, description="Optional corpus path override for status context."),
-) -> RetrievalPilotSearchPreviewResponse:
-    if str(request.repo_id or "").strip() != str(corpus_id or "").strip():
-        raise HTTPException(status_code=422, detail="corpus_id path and payload must match")
-
-    resolved_repo_path = await _resolve_repo_path_from_request(corpus_id, repo_path)
-    try:
-        return await search_retrieval_pilot_preview(
-            corpus_id=corpus_id,
-            repo_path=resolved_repo_path,
-            query=str(request.query or ""),
-            top_k=int(request.top_k),
-        )
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-
-
-@router.post("/index/{corpus_id}/pilot/ingest", response_model=RetrievalPilotIngestResponse)
-async def ingest_retrieval_pilot(
-    corpus_id: str,
-    request: RetrievalPilotIngestRequest,
-    repo_path: str | None = Query(default=None, description="Optional corpus path override for status context."),
-) -> RetrievalPilotIngestResponse:
-    if str(request.repo_id or "").strip() != str(corpus_id or "").strip():
-        raise HTTPException(status_code=422, detail="corpus_id path and payload must match")
-
-    resolved_repo_path = await _resolve_repo_path_from_request(corpus_id, repo_path)
-    try:
-        return await ingest_retrieval_pilot_execution(
-            corpus_id=corpus_id,
-            repo_path=resolved_repo_path,
-            force_rebuild=bool(request.force_rebuild),
-        )
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except RetrievalContractMismatchError as exc:
-        raise retrieval_contract_mismatch_http_exception(exc) from exc
-    except DependencyUnavailableError as exc:
-        raise dependency_unavailable_http_exception(exc.dependency, boundary=exc.operation, exc=exc) from exc
-    except RuntimeError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-
-
-@router.post("/index/{corpus_id}/pilot/search", response_model=RetrievalPilotSearchResponse)
-async def search_retrieval_pilot_execution_route(
-    corpus_id: str,
-    request: RetrievalPilotSearchRequest,
-    repo_path: str | None = Query(default=None, description="Optional corpus path override for status context."),
-) -> RetrievalPilotSearchResponse:
-    if str(request.repo_id or "").strip() != str(corpus_id or "").strip():
-        raise HTTPException(status_code=422, detail="corpus_id path and payload must match")
-
-    resolved_repo_path = await _resolve_repo_path_from_request(corpus_id, repo_path)
-    try:
-        return await search_retrieval_pilot_execution(
-            corpus_id=corpus_id,
-            repo_path=resolved_repo_path,
-            query=str(request.query or ""),
-            top_k=int(request.top_k),
-            include_vector=bool(request.include_vector),
-            include_sparse=bool(request.include_sparse),
-        )
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except RetrievalContractMismatchError as exc:
-        raise retrieval_contract_mismatch_http_exception(exc) from exc
-    except DependencyUnavailableError as exc:
-        raise dependency_unavailable_http_exception(exc.dependency, boundary=exc.operation, exc=exc) from exc
-    except RuntimeError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-
-
-@router.post("/index/{corpus_id}/pilot/answer", response_model=RetrievalPilotAnswerResponse)
-async def answer_retrieval_pilot_execution_route(
-    corpus_id: str,
-    request: RetrievalPilotAnswerRequest,
-    repo_path: str | None = Query(default=None, description="Optional corpus path override for status context."),
-) -> RetrievalPilotAnswerResponse:
-    if str(request.repo_id or "").strip() != str(corpus_id or "").strip():
-        raise HTTPException(status_code=422, detail="corpus_id path and payload must match")
-
-    resolved_repo_path = await _resolve_repo_path_from_request(corpus_id, repo_path)
-    try:
-        return await answer_retrieval_pilot_execution(
-            corpus_id=corpus_id,
-            repo_path=resolved_repo_path,
-            query=str(request.query or ""),
-            top_k=int(request.top_k),
-            include_vector=bool(request.include_vector),
-            include_sparse=bool(request.include_sparse),
-            model_override=str(request.model_override or ""),
-        )
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except RetrievalContractMismatchError as exc:
-        raise retrieval_contract_mismatch_http_exception(exc) from exc
-    except DependencyUnavailableError as exc:
-        raise dependency_unavailable_http_exception(exc.dependency, boundary=exc.operation, exc=exc) from exc
-    except ChatGenerationError as exc:
-        raise generation_unavailable_http_exception(exc, operation="Pilot answer generation") from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    except RuntimeError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.post("/index", response_model=IndexStatus)
@@ -2626,9 +2313,12 @@ async def delete_index(corpus_id: str) -> dict[str, Any]:
     cfg = await load_scoped_config(repo_id=repo_id)
     postgres = PostgresClient(cfg.indexing.postgres_url)
     await postgres.connect()
-    deleted_vec = await postgres.delete_embeddings(repo_id)
-    deleted_fts = await postgres.delete_fts(repo_id)
     deleted_rows = await postgres.delete_chunks(repo_id)
+    try:
+        deleted_collections = await QdrantChunkStore(cfg).delete_corpus(repo_id)
+    except DependencyUnavailableError as exc:
+        raise dependency_unavailable_http_exception(exc.dependency, boundary=exc.operation, exc=exc) from exc
+    await postgres.clear_corpus_index_state(repo_id)
     try:
         await postgres.semantic_cache_clear_for_corpus(repo_id)
     except Exception:
@@ -2663,42 +2353,8 @@ async def delete_index(corpus_id: str) -> dict[str, Any]:
     return {
         "ok": True,
         "deleted_chunks": deleted_rows,
-        "deleted_embeddings": deleted_vec,
-        "deleted_fts": deleted_fts,
+        "deleted_vector_collections": deleted_collections,
     }
-
-
-@router.get("/index/vocab-preview", response_model=VocabPreviewResponse)
-async def get_vocab_preview(
-    scope: CorpusScope = _CORPUS_SCOPE_DEP,
-    top_n: int = Query(default=100, ge=10, le=500, description="Number of top terms to return"),
-) -> VocabPreviewResponse:
-    """Return a vocabulary preview from Postgres FTS (chunks.tsv).
-
-    This powers the Indexing tab “Vocabulary Preview” tooling.
-    """
-    repo_id = (scope.resolved_repo_id or "").strip()
-    if not repo_id:
-        raise HTTPException(status_code=400, detail="Missing corpus_id (or legacy repo/repo_id) query parameter")
-
-    cfg = await load_scoped_config(repo_id=repo_id)
-    postgres = PostgresClient(cfg.indexing.postgres_url)
-    await postgres.connect()
-    terms, total_terms = await postgres.vocab_preview(repo_id, top_n=top_n)
-
-    # Config-derived Postgres text search configuration label (LAW).
-    tokenizer = str(cfg.indexing.bm25_tokenizer or "").strip() or "stemmer"
-    ts_config = cfg.indexing.postgres_ts_config
-
-    return VocabPreviewResponse(
-        repo_id=repo_id,
-        top_n=int(top_n),
-        tokenizer=tokenizer,
-        stemmer_lang=str(cfg.indexing.bm25_stemmer_lang or "") or None,
-        ts_config=ts_config,
-        total_terms=int(total_terms),
-        terms=terms,
-    )
 
 
 @router.get("/stream/operations/index")

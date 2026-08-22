@@ -20,7 +20,6 @@ import {
 } from '@/hooks';
 import { useRepoStore } from '@/stores/useRepoStore';
 import { LiveTerminal, type LiveTerminalHandle } from '@/components/LiveTerminal/LiveTerminal';
-import { IndexingPilotPanel } from '@/components/RAG/IndexingPilotPanel';
 import { RepositoryConfig } from '@/components/RAG/RepositoryConfig';
 import { SyntheticCallout } from '@/components/RAG/SyntheticCallout';
 import { ModelPicker } from '@/components/RAG/ModelPicker';
@@ -39,8 +38,6 @@ import type {
   IndexRunSummary,
   IndexStats,
   IndexStatus,
-  VocabPreviewResponse,
-  VocabPreviewTerm,
 } from '@/types/generated';
 import { describeEmbeddingProviderStrategy } from '@/utils/embeddingStrategy';
 
@@ -197,10 +194,6 @@ export function IndexingSubtab() {
   );
 
   const [skipDense, setSkipDense] = useConfigField<boolean>('indexing.skip_dense', false);
-  const [autoPrepareDenseRetrieval, setAutoPrepareDenseRetrieval] = useConfigField<boolean>(
-    'indexing.auto_prepare_dense_retrieval',
-    true
-  );
   const [graphIndexingEnabled, setGraphIndexingEnabled] = useConfigField<boolean>('graph_indexing.enabled', true);
   const [lexicalGraphEnabled, setLexicalGraphEnabled] = useConfigField<boolean>('graph_indexing.build_lexical_graph', true);
   const [storeChunkEmbeddings, setStoreChunkEmbeddings] = useConfigField<boolean>('graph_indexing.store_chunk_embeddings', true);
@@ -245,12 +238,6 @@ export function IndexingSubtab() {
   const statusAbortRef = useRef<AbortController | null>(null);
   const statsAbortRef = useRef<AbortController | null>(null);
 
-  // Vocab preview state
-  const [vocabPreview, setVocabPreview] = useState<VocabPreviewTerm[]>([]);
-  const [vocabLoading, setVocabLoading] = useState(false);
-  const [vocabTopN, setVocabTopN] = useState(50);
-  const [vocabTotal, setVocabTotal] = useState(0);
-  const [vocabExpanded, setVocabExpanded] = useState(false);
 
   // Ensure corpora loaded
   useEffect(() => {
@@ -659,7 +646,6 @@ export function IndexingSubtab() {
           `Embedding: ${String(estimate.embedding_provider || '—')}/${String(estimate.embedding_model || '—')} (${
             estimate.embedding_backend
           }, skip_dense=${estimate.skip_dense ? 'yes' : 'no'})`,
-          `Post-index dense prep: ${estimate.skip_dense ? 'ignored (skip dense)' : autoPrepareDenseRetrieval ? 'enabled' : 'disabled'}`,
           `Cost (est): ${cost} • Time (est): ${time}`,
           ...(costBreakdown ? [`Cost breakdown: ${costBreakdown}`] : []),
           ...(semanticKgSeconds != null
@@ -687,9 +673,6 @@ export function IndexingSubtab() {
       terminalRef.current?.appendLine(`   Provider: ${String(embeddingType || '')}, Model: ${String(currentModel || '')}`);
       terminalRef.current?.appendLine(`   Chunk Size: ${chunkSize}, Strategy: ${chunkingStrategy}`);
       terminalRef.current?.appendLine(`   Graph indexing: ${graphIndexingEnabled ? 'enabled' : 'disabled'} • Skip dense: ${skipDense ? 'yes' : 'no'}`);
-      terminalRef.current?.appendLine(
-        `   Post-index dense prep: ${skipDense ? 'ignored (skip dense)' : autoPrepareDenseRetrieval ? 'enabled' : 'disabled'}`
-      );
 
       const st = await startAndStream(body, {
         terminalId: 'indexing_terminal',
@@ -737,7 +720,6 @@ export function IndexingSubtab() {
     currentModel,
     effectivePath,
     embeddingType,
-    autoPrepareDenseRetrieval,
     flushPendingPatches,
     forceReindex,
     graphIndexingEnabled,
@@ -773,31 +755,6 @@ export function IndexingSubtab() {
       setErrorBanner(e instanceof Error ? e.message : 'Delete failed');
     }
   }, [activeRepo, api, loadStats, refreshStatus]);
-
-  const loadVocabPreview = useCallback(async () => {
-    const rid = String(activeRepo || '').trim();
-    if (!rid) return;
-    setVocabLoading(true);
-    try {
-      const url = api(`/api/index/vocab-preview?corpus_id=${encodeURIComponent(rid)}&top_n=${encodeURIComponent(String(vocabTopN))}`);
-      const r = await fetch(url);
-      if (!r.ok) {
-        const text = await r.text().catch(() => '');
-        throw new Error(text || `Vocab preview failed (${r.status})`);
-      }
-      const data: VocabPreviewResponse = await r.json();
-      setVocabPreview(Array.isArray(data.terms) ? data.terms : []);
-      setVocabTotal(Number(data.total_terms || 0));
-    } catch (e) {
-      setVocabPreview([]);
-      setVocabTotal(0);
-      terminalRef.current?.appendLine?.(
-        `\x1b[33m⚠ Vocabulary preview unavailable: ${e instanceof Error ? e.message : 'unknown error'}\x1b[0m`
-      );
-    } finally {
-      setVocabLoading(false);
-    }
-  }, [activeRepo, api, vocabTopN]);
 
   // Avoid rendering “blank defaults” before config arrives
   if (!config) {
@@ -841,11 +798,6 @@ export function IndexingSubtab() {
       </div>
 
       <SyntheticCallout context="indexing" />
-
-      <IndexingPilotPanel
-        corpusId={String(activeRepo || '').trim()}
-        repoPath={String(effectivePath || '').trim()}
-      />
 
       {errorBanner && (
         <div
@@ -1960,7 +1912,7 @@ export function IndexingSubtab() {
           </div>
         )}
 
-        {/* TOKENIZER + VOCAB */}
+        {/* SPARSE TOKENIZATION */}
         {selectedComponent === 'bm25' && (
           <div>
             <h4
@@ -2231,7 +2183,7 @@ export function IndexingSubtab() {
             <div className="input-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '20px' }}>
               <div className="input-group">
                 <label style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px' }}>
-                  Postgres FTS tokenizer
+                  Sparse stemming (Qdrant/bm25)
                   <TooltipIcon name="BM25_TOKENIZER" />
                 </label>
                 <select
@@ -2282,109 +2234,11 @@ export function IndexingSubtab() {
             <div style={{ marginTop: '12px', fontSize: '12px', color: 'var(--fg-muted)', display: 'flex', alignItems: 'center', gap: '6px' }}>
               <strong style={{ color: 'var(--fg)' }}>Resolved:</strong> {resolvedTokenizerDesc}
             </div>
-
             <div style={{ marginTop: '10px', fontSize: '12px', color: 'var(--fg-muted)' }}>
-              Vocabulary Preview reads from Postgres built-in FTS (<code>chunks.tsv</code>). If you switch sparse retrieval to <code>pg_search_bm25</code>, this preview may not reflect the active BM25 index.
+              Sparse vectors are IDF-modified BM25 (<code>Qdrant/bm25</code> via fastembed) stored in Qdrant next to the dense
+              vectors. Stemming, language, k1, and b are part of the sparse index contract: changing them requires a re-index.
             </div>
 
-            <details open={vocabExpanded} onToggle={(e) => setVocabExpanded((e.target as HTMLDetailsElement).open)} style={{ marginTop: '20px' }}>
-              <summary style={{ cursor: 'pointer', fontSize: '13px', fontWeight: 700, color: 'var(--fg)' }}>
-                🔍 Vocabulary Preview
-                <TooltipIcon name="BM25_VOCAB_PREVIEW" />
-              </summary>
-
-              <div
-                style={{
-                  marginTop: '12px',
-                  padding: '16px',
-                  background: 'var(--bg-elev2)',
-                  borderRadius: '8px',
-                  border: '1px solid var(--line)',
-                }}
-              >
-                <div style={{ display: 'flex', gap: '12px', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap' }}>
-                  <label style={{ fontSize: '12px', color: 'var(--fg-muted)' }}>
-                    Top N:
-                    <input
-                      type="number"
-                      value={vocabTopN}
-                      onChange={(e) => setVocabTopN(Math.max(10, Math.min(500, parseInt(e.target.value || '50', 10))))}
-                      min={10}
-                      max={500}
-                      style={{
-                        width: '80px',
-                        marginLeft: '8px',
-                        padding: '4px 8px',
-                        background: 'var(--input-bg)',
-                        border: '1px solid var(--line)',
-                        borderRadius: '4px',
-                        color: 'var(--fg)',
-                        fontSize: '12px',
-                      }}
-                    />
-                  </label>
-                  <button
-                    onClick={loadVocabPreview}
-                    disabled={vocabLoading || !String(activeRepo || '').trim()}
-                    style={{
-                      padding: '6px 12px',
-                      fontSize: '12px',
-                      background: 'var(--accent)',
-                      color: 'var(--accent-contrast)',
-                      border: 'none',
-                      borderRadius: '4px',
-                      cursor: vocabLoading ? 'wait' : 'pointer',
-                      opacity: vocabLoading ? 0.7 : 1,
-                    }}
-                  >
-                    {vocabLoading ? 'Loading…' : 'Load Vocabulary'}
-                  </button>
-                </div>
-
-                {vocabPreview.length > 0 ? (
-                  <>
-                    <div
-                      style={{
-                        maxHeight: '280px',
-                        overflowY: 'auto',
-                        display: 'grid',
-                        gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))',
-                        gap: '6px',
-                        fontFamily: 'var(--font-mono)',
-                        fontSize: '11px',
-                      }}
-                    >
-                      {vocabPreview.map((item, idx) => (
-                        <div
-                          key={`${item.term}-${idx}`}
-                          style={{
-                            display: 'flex',
-                            justifyContent: 'space-between',
-                            padding: '6px 8px',
-                            background: 'var(--bg)',
-                            borderRadius: '6px',
-                            border: '1px solid var(--line)',
-                          }}
-                        >
-                          <span style={{ color: 'var(--fg)', overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.term}</span>
-                          <span style={{ color: 'var(--fg-muted)', marginLeft: '10px' }}>{item.doc_count}</span>
-                        </div>
-                      ))}
-                    </div>
-                    <div style={{ marginTop: '10px', fontSize: '11px', color: 'var(--fg-muted)', display: 'flex', justifyContent: 'space-between' }}>
-                      <span>Tokenizer: {bm25Tokenizer || '—'}</span>
-                      <span>
-                        Showing {vocabPreview.length} of {vocabTotal || '—'} terms
-                      </span>
-                    </div>
-                  </>
-                ) : (
-                  <div style={{ fontSize: '12px', color: 'var(--fg-muted)', textAlign: 'center', padding: '20px' }}>
-                    Click “Load Vocabulary” to inspect tokenized terms.
-                  </div>
-                )}
-              </div>
-            </details>
           </div>
         )}
 
@@ -2498,45 +2352,6 @@ export function IndexingSubtab() {
                     Skip dense disables embeddings. Re-index with dense enabled to populate Neo4j vectors.
                   </div>
                 )}
-              </div>
-
-              <div
-                style={{
-                  padding: '16px',
-                  background: 'var(--bg-elev2)',
-                  borderRadius: '8px',
-                  border: autoPrepareDenseRetrieval ? '2px solid rgba(var(--accent-rgb), 0.35)' : '1px solid var(--line)',
-                }}
-              >
-                <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }}>
-                  <input
-                    type="checkbox"
-                    checked={autoPrepareDenseRetrieval}
-                    onChange={(e) => setAutoPrepareDenseRetrieval(e.target.checked)}
-                    style={{ width: '18px', height: '18px' }}
-                  />
-                  <div>
-                    <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--fg)' }}>Auto-prepare dense retrieval</div>
-                    <div style={{ fontSize: '11px', color: 'var(--fg-muted)', marginTop: '2px' }}>
-                      After dense indexing, build the corpus pgvector HNSW index and warm representative query embeddings
-                      so the first retrievals are not cold.
-                    </div>
-                  </div>
-                </label>
-                <div
-                  style={{
-                    marginTop: '10px',
-                    padding: '8px 12px',
-                    background: skipDense ? 'rgba(var(--warn-rgb), 0.1)' : 'rgba(var(--accent-rgb), 0.08)',
-                    borderRadius: '6px',
-                    color: skipDense ? 'var(--warn)' : 'var(--fg-muted)',
-                    fontSize: '11px',
-                  }}
-                >
-                  {skipDense
-                    ? 'Ignored while Skip dense is enabled.'
-                    : 'Runs inside the normal index job, so you do not need a separate post-index step.'}
-                </div>
               </div>
 
               <div

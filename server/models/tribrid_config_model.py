@@ -201,245 +201,6 @@ class IndexEstimate(BaseModel):
     assumptions: list[str] = Field(default_factory=list, description="Human-readable assumptions used for the estimate")
 
 
-class RetrievalPilotPackageStatus(BaseModel):
-    """Availability status for one OSS retrieval pilot dependency."""
-
-    package: str = Field(description="Import/package name checked by the pilot.")
-    label: str = Field(description="Human-readable dependency label.")
-    available: bool = Field(description="Whether the package is importable in the current environment.")
-    detail: str | None = Field(default=None, description="Short operator-facing note about the dependency state.")
-
-
-class RetrievalPilotStatusResponse(BaseModel):
-    """Operator status for the OSS retrieval/indexing sidecar pilot."""
-
-    ok: bool = Field(default=True)
-    repo_id: str = Field(
-        description="Corpus identifier",
-        validation_alias=AliasChoices("repo_id", "corpus_id"),
-        serialization_alias="corpus_id",
-    )
-    repo_path: str = Field(description="Resolved corpus path used by the pilot.")
-    backend: Literal["haystack_qdrant_sidecar"] = Field(
-        default="haystack_qdrant_sidecar",
-        description="Current pilot backend target.",
-    )
-    export_dir: str = Field(description="Directory where pilot export artifacts are stored.")
-    documents_path: str = Field(description="JSONL export path for pilot-ready chunk documents.")
-    manifest_path: str = Field(description="Manifest JSON path for the most recent pilot export.")
-    export_exists: bool = Field(description="Whether a pilot export already exists on disk.")
-    exported_file_count: int = Field(default=0, ge=0, description="Files exported into the pilot sidecar.")
-    exported_chunk_count: int = Field(default=0, ge=0, description="Chunks exported into the pilot sidecar.")
-    skipped_large_files: int = Field(default=0, ge=0, description="Files skipped because they exceeded indexing size limits.")
-    skipped_unreadable_files: int = Field(
-        default=0,
-        ge=0,
-        description="Files seen by the loader but skipped because text extraction produced no usable content.",
-    )
-    last_exported_at: datetime | None = Field(default=None, description="When the current pilot export was generated.")
-    provenance_fields: list[str] = Field(
-        default_factory=list,
-        description="Metadata fields preserved for provenance-correct pilot chunks.",
-    )
-    package_status: list[RetrievalPilotPackageStatus] = Field(
-        default_factory=list,
-        description="Availability of Docling, Haystack, and Qdrant dependencies for the pilot.",
-    )
-    execution_backend: Literal["haystack_qdrant_local"] = Field(
-        default="haystack_qdrant_local",
-        description="Execution backend used by the real pilot ingest/search lane.",
-    )
-    execution_ready: bool = Field(
-        default=False,
-        description="Whether the real Haystack/Qdrant execution lane is hydrated and ready to search.",
-    )
-    qdrant_url: str = Field(description="Base URL of the Compose-owned Qdrant service used by the pilot.")
-    collection_name: str = Field(description="Qdrant collection/index name for this pilot corpus.")
-    indexed_document_count: int = Field(
-        default=0,
-        ge=0,
-        description="Number of documents currently ingested into the real pilot execution lane.",
-    )
-    last_indexed_at: datetime | None = Field(
-        default=None,
-        description="When the Haystack/Qdrant execution lane was last hydrated from the sidecar export.",
-    )
-    search_preview_ready: bool = Field(
-        default=False,
-        description="Whether preview search can run against the exported pilot sidecar.",
-    )
-    operator_hint: str | None = Field(default=None, description="High-signal next-step guidance for the operator.")
-
-
-class RetrievalPilotExportRequest(BaseModel):
-    """Request to generate the OSS retrieval pilot sidecar export."""
-
-    repo_id: str = Field(
-        description="Corpus identifier",
-        validation_alias=AliasChoices("repo_id", "corpus_id"),
-        serialization_alias="corpus_id",
-    )
-    repo_path: str = Field(description="Path to the corpus root on disk.")
-    force_rebuild: bool = Field(default=False, description="Rebuild the pilot export even if it already exists.")
-
-
-class RetrievalPilotExportResponse(BaseModel):
-    """Response for a retrieval pilot export request."""
-
-    ok: bool = Field(default=True)
-    status: RetrievalPilotStatusResponse = Field(description="Current pilot status after export.")
-    warnings: list[str] = Field(default_factory=list, description="Non-fatal export warnings.")
-
-
-class RetrievalPilotSearchPreviewRequest(BaseModel):
-    """Request to search over the exported retrieval pilot sidecar."""
-
-    repo_id: str = Field(
-        description="Corpus identifier",
-        validation_alias=AliasChoices("repo_id", "corpus_id"),
-        serialization_alias="corpus_id",
-    )
-    query: str = Field(description="Search query to run against the exported pilot documents.")
-    top_k: int = Field(default=5, ge=1, le=20, description="Maximum results to return.")
-
-
-class RetrievalPilotSearchPreviewResult(BaseModel):
-    """One preview-search hit from the retrieval pilot sidecar."""
-
-    chunk_id: str = Field(description="Exported chunk identifier.")
-    file_path: str = Field(description="Corpus-relative path for the matched chunk.")
-    source_path: str = Field(description="Absolute source path for the matched chunk.")
-    start_line: int = Field(ge=1, description="Start line of the matched chunk.")
-    end_line: int = Field(ge=1, description="End line of the matched chunk.")
-    language: str | None = Field(default=None, description="Detected language for the chunk.")
-    score: float = Field(ge=0.0, description="Preview relevance score.")
-    excerpt: str = Field(description="Short excerpt centered on the first match when possible.")
-
-
-class RetrievalPilotSearchPreviewResponse(BaseModel):
-    """Response for retrieval pilot preview search."""
-
-    ok: bool = Field(default=True)
-    repo_id: str = Field(
-        description="Corpus identifier",
-        validation_alias=AliasChoices("repo_id", "corpus_id"),
-        serialization_alias="corpus_id",
-    )
-    query: str = Field(description="Query executed against the pilot export.")
-    results: list[RetrievalPilotSearchPreviewResult] = Field(default_factory=list)
-    status: RetrievalPilotStatusResponse = Field(description="Pilot status snapshot used for the preview search.")
-
-
-class RetrievalPilotIngestRequest(BaseModel):
-    """Request to hydrate the real Haystack/Qdrant execution lane from the sidecar export."""
-
-    repo_id: str = Field(
-        description="Corpus identifier",
-        validation_alias=AliasChoices("repo_id", "corpus_id"),
-        serialization_alias="corpus_id",
-    )
-    force_rebuild: bool = Field(default=False, description="Rebuild the local Qdrant collection from scratch.")
-
-
-class RetrievalPilotIngestResponse(BaseModel):
-    """Response for retrieval pilot ingest."""
-
-    ok: bool = Field(default=True)
-    status: RetrievalPilotStatusResponse = Field(description="Pilot status snapshot after ingest.")
-    warnings: list[str] = Field(default_factory=list, description="Non-fatal ingest warnings.")
-
-
-class RetrievalPilotSearchRequest(BaseModel):
-    """Request to search the real Haystack/Qdrant execution lane."""
-
-    repo_id: str = Field(
-        description="Corpus identifier",
-        validation_alias=AliasChoices("repo_id", "corpus_id"),
-        serialization_alias="corpus_id",
-    )
-    query: str = Field(description="Search query to execute against the real pilot lane.")
-    top_k: int = Field(default=5, ge=1, le=20, description="Maximum hits to return.")
-    include_vector: bool = Field(default=True, description="Run the dense (vector) retrieval leg.")
-    include_sparse: bool = Field(default=True, description="Run the sparse (BM25/IDF) retrieval leg.")
-
-
-class RetrievalPilotSearchResult(BaseModel):
-    """One result from the real Haystack/Qdrant pilot lane."""
-
-    chunk_id: str = Field(description="Exported chunk identifier.")
-    file_path: str = Field(description="Corpus-relative path for the matched chunk.")
-    source_path: str = Field(description="Absolute source path for the matched chunk.")
-    start_line: int = Field(ge=1, description="Start line of the matched chunk.")
-    end_line: int = Field(ge=1, description="End line of the matched chunk.")
-    language: str | None = Field(default=None, description="Detected language for the chunk.")
-    score: float = Field(ge=0.0, description="Haystack/Qdrant relevance score.")
-    excerpt: str = Field(description="Short excerpt centered on the first match when possible.")
-    content: str = Field(default="", description="Full chunk content for grounding and citation checks.")
-    source: Literal["vector", "sparse", "graph"] = Field(
-        default="vector", description="Retrieval leg that produced this result."
-    )
-    metadata: dict[str, Any] = Field(
-        default_factory=dict, description="Provenance metadata carried through the pilot lane."
-    )
-
-
-class RetrievalPilotAnswerRequest(BaseModel):
-    """Request a grounded answer produced entirely on the pilot retrieval lane."""
-
-    repo_id: str = Field(
-        description="Corpus identifier",
-        validation_alias=AliasChoices("repo_id", "corpus_id"),
-        serialization_alias="corpus_id",
-    )
-    query: str = Field(description="Question to answer from pilot retrieval context.")
-    top_k: int = Field(default=5, ge=1, le=20, description="Maximum chunks to ground the answer on.")
-    include_vector: bool = Field(default=True, description="Run the dense (vector) retrieval leg.")
-    include_sparse: bool = Field(default=True, description="Run the sparse (BM25/IDF) retrieval leg.")
-    model_override: str = Field(default="", description="Optional gateway alias override for generation.")
-
-
-class RetrievalPilotAnswerResponse(BaseModel):
-    """Grounded answer + citations produced by the pilot lane through the gateway."""
-
-    ok: bool = Field(default=True)
-    repo_id: str = Field(
-        description="Corpus identifier",
-        validation_alias=AliasChoices("repo_id", "corpus_id"),
-        serialization_alias="corpus_id",
-    )
-    query: str = Field(description="Question answered from pilot retrieval context.")
-    answer: str = Field(description="Grounded answer generated through LiteLLM.")
-    citations: list[ChunkMatch] = Field(default_factory=list, description="Chunks that grounded the answer.")
-    provider: ChatProviderInfo | None = Field(default=None, description="Gateway provider route used for generation.")
-    model: str = Field(default="", description="Model alias that produced the answer.")
-    provider_response_id: str | None = Field(default=None, description="Provider response identifier when available.")
-    llm_used: bool = Field(default=True, description="True when the answer came from real generation (never fallback).")
-    vector_result_count: int = Field(default=0, ge=0, description="Dense-leg hits before fusion.")
-    sparse_result_count: int = Field(default=0, ge=0, description="Sparse-leg hits before fusion.")
-    fusion_method: str = Field(default="", description="Fusion applied across requested legs.")
-
-
-class RetrievalPilotSearchResponse(BaseModel):
-    """Response for real Haystack/Qdrant pilot search."""
-
-    ok: bool = Field(default=True)
-    repo_id: str = Field(
-        description="Corpus identifier",
-        validation_alias=AliasChoices("repo_id", "corpus_id"),
-        serialization_alias="corpus_id",
-    )
-    backend: Literal["haystack_qdrant_local"] = Field(
-        default="haystack_qdrant_local",
-        description="Search backend used for this response.",
-    )
-    query: str = Field(description="Query executed against the real pilot lane.")
-    results: list[RetrievalPilotSearchResult] = Field(default_factory=list)
-    status: RetrievalPilotStatusResponse = Field(description="Pilot status snapshot used for the real search.")
-    vector_result_count: int = Field(default=0, ge=0, description="Hits returned by the dense leg before fusion.")
-    sparse_result_count: int = Field(default=0, ge=0, description="Hits returned by the sparse leg before fusion.")
-    fusion_method: str = Field(default="", description="Fusion applied across requested legs (rrf, weighted, single_leg).")
-
-
 # =============================================================================
 # DASHBOARD MODELS - Index summary + storage breakdown
 # =============================================================================
@@ -449,35 +210,29 @@ class DashboardIndexStorageBreakdown(BaseModel):
     """Storage breakdown for the Dashboard index summary (bytes).
 
     NOTE:
-    - Values are best-effort and may be allocated/estimated when a storage
-      component cannot be attributed to a single corpus directly (e.g., shared
-      Postgres indexes).
+    - Postgres and Neo4j values are measured; the Qdrant dense-vector figure is
+      an estimate because Qdrant does not expose per-collection disk usage.
     """
 
     chunks_bytes: int = Field(
         default=0,
         ge=0,
-        description="Bytes used by chunk content + metadata in Postgres (corpus-scoped).",
-    )
-    embeddings_bytes: int = Field(
-        default=0,
-        ge=0,
-        description="Bytes used by stored embeddings in Postgres (corpus-scoped).",
-    )
-    pgvector_index_bytes: int = Field(
-        default=0,
-        ge=0,
-        description="Bytes used by pgvector index structures (0 if not created; may be allocated/estimated).",
-    )
-    bm25_index_bytes: int = Field(
-        default=0,
-        ge=0,
-        description="Allocated bytes for Postgres full-text (BM25/FTS) index (may be allocated/estimated).",
+        description="Bytes used by chunk content + metadata rows in Postgres (corpus-scoped).",
     )
     chunk_summaries_bytes: int = Field(
         default=0,
         ge=0,
         description="Bytes used by chunk_summaries in Postgres (corpus-scoped).",
+    )
+    qdrant_points: int = Field(
+        default=0,
+        ge=0,
+        description="Points in the corpus Qdrant generation (one per chunk; dense and/or sparse vectors).",
+    )
+    qdrant_dense_vector_bytes: int = Field(
+        default=0,
+        ge=0,
+        description="Estimated bytes of dense vectors in Qdrant (dense points x dimensions x 4 bytes).",
     )
     neo4j_store_bytes: int = Field(
         default=0,
@@ -488,12 +243,12 @@ class DashboardIndexStorageBreakdown(BaseModel):
     postgres_total_bytes: int = Field(
         default=0,
         ge=0,
-        description="Total Postgres bytes (sum of Postgres components, including allocations).",
+        description="Total Postgres bytes (chunk rows + chunk summaries).",
     )
     total_storage_bytes: int = Field(
         default=0,
         ge=0,
-        description="Total storage bytes across Postgres + Neo4j.",
+        description="Total storage bytes across Postgres + Qdrant (estimate) + Neo4j.",
     )
 
 
@@ -995,29 +750,6 @@ class GenerationUnavailableResponse(BaseModel):
     """FastAPI response envelope for a generation-gateway failure."""
 
     detail: GenerationUnavailableDetail
-
-
-class VocabPreviewTerm(BaseModel):
-    """A single term in the Postgres FTS vocabulary preview."""
-
-    term: str = Field(description="Tokenized lexeme")
-    doc_count: int = Field(ge=0, description="Number of chunks containing this term")
-
-
-class VocabPreviewResponse(BaseModel):
-    """Response payload for the vocab preview endpoint."""
-
-    repo_id: str = Field(
-        description="Corpus identifier",
-        validation_alias=AliasChoices("repo_id", "corpus_id"),
-        serialization_alias="corpus_id",
-    )
-    top_n: int = Field(ge=10, le=500, description="Number of top terms requested")
-    tokenizer: str = Field(description="BM25 tokenizer setting (indexing.bm25_tokenizer)")
-    stemmer_lang: str | None = Field(default=None, description="Stemmer language (indexing.bm25_stemmer_lang)")
-    ts_config: str = Field(description="Postgres text search configuration used for tsv + query parsing")
-    total_terms: int = Field(ge=0, description="Total unique terms in the corpus vocabulary")
-    terms: list[VocabPreviewTerm] = Field(default_factory=list, description="Top terms by document frequency")
 
 
 class ChunkSummary(BaseModel):
@@ -3872,20 +3604,6 @@ class RetrievalConfig(BaseModel):
         description="Weight for BM25 in hybrid search"
     )
 
-    bm25_k1: float = Field(
-        default=1.2,
-        ge=0.5,
-        le=3.0,
-        description="BM25 term frequency saturation parameter (higher = more weight to term frequency)"
-    )
-
-    bm25_b: float = Field(
-        default=0.4,
-        ge=0.0,
-        le=1.0,
-        description="BM25 length normalization (0=no penalty, 1=full penalty, 0.3-0.5 recommended for code)"
-    )
-
     vector_weight: float = Field(
         default=0.7,
         ge=0.0,
@@ -4505,7 +4223,7 @@ class IndexingConfig(BaseModel):
 
     postgres_url: str = Field(
         default="postgresql://postgres:postgres@localhost:5432/tribrid_rag",
-        description="PostgreSQL connection string (DSN) for pgvector + FTS storage"
+        description="PostgreSQL connection string (DSN) for corpus control/state storage (chunk rows, summaries, caches)"
     )
     indexing_batch_size: int = Field(
         default=100,
@@ -4522,11 +4240,14 @@ class IndexingConfig(BaseModel):
     bm25_tokenizer: str = Field(
         default="stemmer",
         pattern="^(stemmer|lowercase|whitespace)$",
-        description="BM25 tokenizer type"
+        description=(
+            "Sparse (Qdrant/bm25) tokenization: 'stemmer' applies the Snowball stemmer for bm25_stemmer_lang; "
+            "'lowercase' and 'whitespace' disable stemming. Part of the sparse index contract (re-index on change)."
+        ),
     )
     bm25_stemmer_lang: str = Field(
         default="english",
-        description="Stemmer language"
+        description="Snowball stemmer language for the sparse (Qdrant/bm25) index. Part of the sparse index contract.",
     )
     index_excluded_exts: str = Field(
         default=".png,.jpg,.gif,.ico,.svg,.woff,.ttf",
@@ -4579,32 +4300,12 @@ class IndexingConfig(BaseModel):
         default=False,
         description="Skip dense vector indexing"
     )
-    auto_prepare_dense_retrieval: bool = Field(
-        default=True,
-        description=(
-            "After a dense indexing run completes, automatically build the per-corpus pgvector HNSW index "
-            "and warm representative query embeddings so first retrievals are not cold."
-        ),
-    )
     estimated_tokens_per_second_local: int | None = Field(
         default=None,
         ge=100,
         le=500_000,
         description="Optional local embedding throughput override for index-time estimates (tokens/sec).",
     )
-
-    @property
-    def postgres_ts_config(self) -> str:
-        """Resolve Postgres FTS config name from TriBridConfig (LAW).
-
-        - tokenizer=stemmer → use bm25_stemmer_lang (e.g., 'english')
-        - tokenizer=lowercase/whitespace → use the built-in 'simple' config (no stemming)
-        """
-        tok = (self.bm25_tokenizer or "").strip().lower()
-        if tok == "stemmer":
-            lang = (self.bm25_stemmer_lang or "").strip()
-            return lang or "english"
-        return "simple"
 
 
 # =============================================================================
@@ -4723,14 +4424,14 @@ class FusionConfig(BaseModel):
         default=0.4,
         ge=0.0,
         le=1.0,
-        description="Weight for vector search results (pgvector)"
+        description="Weight for vector search results (Qdrant dense)"
     )
 
     sparse_weight: float = Field(
         default=0.3,
         ge=0.0,
         le=1.0,
-        description="Weight for sparse BM25/FTS search results"
+        description="Weight for sparse (Qdrant/bm25) search results"
     )
 
     graph_weight: float = Field(
@@ -4773,11 +4474,11 @@ class FusionConfig(BaseModel):
 # =============================================================================
 
 class VectorSearchConfig(BaseModel):
-    """Configuration for vector (dense) search using pgvector."""
+    """Configuration for the vector (dense) leg served by Qdrant."""
 
     enabled: bool = Field(
         default=True,
-        description="Enable vector search in tri-brid retrieval"
+        description="Enable the dense vector (Qdrant) leg in tri-brid retrieval"
     )
 
     top_k: int = Field(
@@ -4800,64 +4501,38 @@ class VectorSearchConfig(BaseModel):
 # =============================================================================
 
 class SparseSearchConfig(BaseModel):
-    """Configuration for sparse (BM25) search."""
+    """Configuration for the sparse (IDF-modified BM25 sparse vectors in Qdrant) leg."""
 
-    engine: Literal["postgres_fts", "pg_search_bm25"] = Field(
-        default="postgres_fts",
-        description="Sparse retrieval engine. 'postgres_fts' uses built-in FTS; 'pg_search_bm25' uses ParadeDB pg_search.",
-    )
-    query_mode: Literal["plain", "phrase", "boolean"] = Field(
-        default="plain",
-        description="How to interpret the sparse query string.",
-    )
-    highlight: bool = Field(
-        default=False,
-        description="Enable sparse highlight payloads when supported (UI later).",
-    )
-    relax_on_empty: bool = Field(
-        default=True,
-        description="If sparse retrieval returns empty, retry with a relaxed OR-style query (best-effort).",
-    )
-    relax_max_terms: int = Field(
-        default=8,
-        ge=1,
-        le=32,
-        description="Max extracted query terms used for relaxed sparse fallback.",
-    )
-    file_path_fallback: bool = Field(
-        default=True,
-        description="If sparse retrieval returns empty, run a file_path-based fallback ranking (best-effort).",
-    )
-    file_path_max_terms: int = Field(
-        default=6,
-        ge=1,
-        le=32,
-        description="Max extracted query terms used for file_path fallback.",
-    )
     enabled: bool = Field(
         default=True,
-        description="Enable sparse BM25 search in tri-brid retrieval"
+        description="Enable the sparse (Qdrant/bm25) leg in tri-brid retrieval"
     )
 
     top_k: int = Field(
         default=50,
         ge=10,
         le=200,
-        description="Number of results to retrieve from sparse search"
+        description="Number of results to retrieve from the sparse leg"
     )
 
     bm25_k1: float = Field(
         default=1.2,
         ge=0.5,
         le=3.0,
-        description="BM25 term frequency saturation (higher = more weight to term frequency)"
+        description=(
+            "BM25 term-frequency saturation for the Qdrant/bm25 sparse vectors (higher = more weight to term "
+            "frequency). Part of the sparse index contract (re-index on change)."
+        ),
     )
 
     bm25_b: float = Field(
         default=0.4,
         ge=0.0,
         le=1.0,
-        description="BM25 length normalization (0 = no penalty, 1 = full penalty)"
+        description=(
+            "BM25 length normalization for the Qdrant/bm25 sparse vectors (0 = no penalty, 1 = full penalty). "
+            "Part of the sparse index contract (re-index on change)."
+        ),
     )
 
 
@@ -6096,11 +5771,11 @@ class UIConfig(BaseModel):
 
 
 class QdrantConfig(BaseModel):
-    """Qdrant vector-store connection for the Haystack/Docling/Qdrant lane."""
+    """Qdrant vector-store connection for the canonical dense + sparse retrieval lane."""
 
     url: str = Field(
         default="http://127.0.0.1:56333",
-        description="Base URL of the Compose-owned Qdrant service backing the pilot retrieval lane",
+        description="Base URL of the Compose-owned Qdrant service that stores every corpus's dense and sparse chunk vectors",
     )
 
 
@@ -6498,16 +6173,11 @@ class DockerConfig(BaseModel):
 class RecallConfig(BaseModel):
     """Persistent chat memory. ON by default.
 
-    Indexes every conversation into a lightweight pgvector corpus.
-    Self-hosted, local, zero privacy risk, negligible storage.
+    Indexes every conversation into a lightweight corpus (chunk rows in Postgres,
+    dense + sparse vectors in Qdrant). Self-hosted, local, negligible storage.
     """
 
     enabled: bool = Field(default=True, description="Enable Recall. ON by default.")
-    vector_backend: str = Field(
-        default="pgvector",
-        pattern="^(pgvector|neo4j)$",
-        description="pgvector recommended (already running).",
-    )
     auto_index: bool = Field(default=True)
     index_delay_seconds: int = Field(default=5, ge=1, le=60)
     chunking_strategy: str = Field(
@@ -6796,8 +6466,6 @@ class TriBridConfig(BaseModel):
             'EVAL_MULTI': self.retrieval.eval_multi,
             'QUERY_EXPANSION_ENABLED': self.retrieval.query_expansion_enabled,
             'BM25_WEIGHT': self.retrieval.bm25_weight,
-            'BM25_K1': self.retrieval.bm25_k1,
-            'BM25_B': self.retrieval.bm25_b,
             'VECTOR_WEIGHT': self.retrieval.vector_weight,
             'CHUNK_SUMMARY_SEARCH_ENABLED': self.retrieval.chunk_summary_search_enabled,
             'MULTI_QUERY_M': self.retrieval.multi_query_m,
@@ -6869,7 +6537,6 @@ class TriBridConfig(BaseModel):
             'PARQUET_EXTRACT_TEXT_COLUMNS_ONLY': self.indexing.parquet_extract_text_columns_only,
             'PARQUET_EXTRACT_INCLUDE_COLUMN_NAMES': self.indexing.parquet_extract_include_column_names,
             'SKIP_DENSE': self.indexing.skip_dense,
-            'AUTO_PREPARE_DENSE_RETRIEVAL': self.indexing.auto_prepare_dense_retrieval,
             'ESTIMATED_TOKENS_PER_SECOND_LOCAL': self.indexing.estimated_tokens_per_second_local,
             # Graph storage params (Neo4j)
             'NEO4J_URI': self.graph_storage.neo4j_uri,
@@ -7152,8 +6819,6 @@ class TriBridConfig(BaseModel):
                 eval_multi=data.get('EVAL_MULTI', True),
                 query_expansion_enabled=data.get('QUERY_EXPANSION_ENABLED', True),
                 bm25_weight=data.get('BM25_WEIGHT', 0.3),
-                bm25_k1=data.get('BM25_K1', 1.2),
-                bm25_b=data.get('BM25_B', 0.4),
                 vector_weight=data.get('VECTOR_WEIGHT', 0.7),
                 chunk_summary_search_enabled=data.get('CHUNK_SUMMARY_SEARCH_ENABLED', True),
                 multi_query_m=data.get('MULTI_QUERY_M', 4),
@@ -7233,7 +6898,6 @@ class TriBridConfig(BaseModel):
                 parquet_extract_text_columns_only=data.get('PARQUET_EXTRACT_TEXT_COLUMNS_ONLY', True),
                 parquet_extract_include_column_names=data.get('PARQUET_EXTRACT_INCLUDE_COLUMN_NAMES', True),
                 skip_dense=data.get('SKIP_DENSE', False),
-                auto_prepare_dense_retrieval=data.get('AUTO_PREPARE_DENSE_RETRIEVAL', True),
                 estimated_tokens_per_second_local=data.get('ESTIMATED_TOKENS_PER_SECOND_LOCAL', None),
             ),
             graph_storage=GraphStorageConfig(

@@ -518,23 +518,21 @@ export interface DashboardIndexStatusMetadata {
   total_storage?: number; // default: 0
 }
 
-/** Storage breakdown for the Dashboard index summary (bytes).  NOTE: - Values are best-effort and may be allocated/estimated when a storage   component cannot be attributed to a single corpus directly (e.g., shared   Postgres indexes). */
+/** Storage breakdown for the Dashboard index summary (bytes).  NOTE: - Postgres and Neo4j values are measured; the Qdrant dense-vector figure is   an estimate because Qdrant does not expose per-collection disk usage. */
 export interface DashboardIndexStorageBreakdown {
-  /** Bytes used by chunk content + metadata in Postgres (corpus-scoped). */
+  /** Bytes used by chunk content + metadata rows in Postgres (corpus-scoped). */
   chunks_bytes?: number; // default: 0
-  /** Bytes used by stored embeddings in Postgres (corpus-scoped). */
-  embeddings_bytes?: number; // default: 0
-  /** Bytes used by pgvector index structures (0 if not created; may be allocated/estimated). */
-  pgvector_index_bytes?: number; // default: 0
-  /** Allocated bytes for Postgres full-text (BM25/FTS) index (may be allocated/estimated). */
-  bm25_index_bytes?: number; // default: 0
   /** Bytes used by chunk_summaries in Postgres (corpus-scoped). */
   chunk_summaries_bytes?: number; // default: 0
+  /** Points in the corpus Qdrant generation (one per chunk; dense and/or sparse vectors). */
+  qdrant_points?: number; // default: 0
+  /** Estimated bytes of dense vectors in Qdrant (dense points x dimensions x 4 bytes). */
+  qdrant_dense_vector_bytes?: number; // default: 0
   /** Total Neo4j store size for the resolved database (bytes). */
   neo4j_store_bytes?: number; // default: 0
-  /** Total Postgres bytes (sum of Postgres components, including allocations). */
+  /** Total Postgres bytes (chunk rows + chunk summaries). */
   postgres_total_bytes?: number; // default: 0
-  /** Total storage bytes across Postgres + Neo4j. */
+  /** Total storage bytes across Postgres + Qdrant (estimate) + Neo4j. */
   total_storage_bytes?: number; // default: 0
 }
 
@@ -836,9 +834,9 @@ export interface EvaluationConfig {
 export interface FusionConfig {
   /** Fusion method: 'rrf' (Reciprocal Rank Fusion) or 'weighted' (score-based) */
   method?: "rrf" | "weighted"; // default: "rrf"
-  /** Weight for vector search results (pgvector) */
+  /** Weight for vector search results (Qdrant dense) */
   vector_weight?: number; // default: 0.4
-  /** Weight for sparse BM25/FTS search results */
+  /** Weight for sparse (Qdrant/bm25) search results */
   sparse_weight?: number; // default: 0.3
   /** Weight for graph search results (Neo4j) */
   graph_weight?: number; // default: 0.3
@@ -1115,15 +1113,15 @@ export interface IndexStats {
 
 /** Indexing and vector storage configuration. */
 export interface IndexingConfig {
-  /** PostgreSQL connection string (DSN) for pgvector + FTS storage */
+  /** PostgreSQL connection string (DSN) for corpus control/state storage (chunk rows, summaries, caches) */
   postgres_url?: string; // default: "postgresql://postgres:postgres@localhost:5432/t..."
   /** Batch size for indexing */
   indexing_batch_size?: number; // default: 100
   /** Parallel workers for indexing */
   indexing_workers?: number; // default: 4
-  /** BM25 tokenizer type */
+  /** Sparse (Qdrant/bm25) tokenization: 'stemmer' applies the Snowball stemmer for bm25_stemmer_lang; 'lowercase' and 'whitespace' disable stemming. Part of the sparse index contract (re-index on change). */
   bm25_tokenizer?: string; // default: "stemmer"
-  /** Stemmer language */
+  /** Snowball stemmer language for the sparse (Qdrant/bm25) index. Part of the sparse index contract. */
   bm25_stemmer_lang?: string; // default: "english"
   /** Excluded file extensions (comma-separated) */
   index_excluded_exts?: string; // default: ".png,.jpg,.gif,.ico,.svg,.woff,.ttf"
@@ -1145,8 +1143,6 @@ export interface IndexingConfig {
   parquet_extract_include_column_names?: boolean; // default: True
   /** Skip dense vector indexing */
   skip_dense?: boolean; // default: False
-  /** After a dense indexing run completes, automatically build the per-corpus pgvector HNSW index and warm representative query embeddings so first retrievals are not cold. */
-  auto_prepare_dense_retrieval?: boolean; // default: True
   /** Optional local embedding throughput override for index-time estimates (tokens/sec). */
   estimated_tokens_per_second_local?: number | null; // default: None
 }
@@ -1645,9 +1641,9 @@ export interface ProviderHealth {
   detail?: string | null; // default: None
 }
 
-/** Qdrant vector-store connection for the Haystack/Docling/Qdrant lane. */
+/** Qdrant vector-store connection for the canonical dense + sparse retrieval lane. */
 export interface QdrantConfig {
-  /** Base URL of the Compose-owned Qdrant service backing the pilot retrieval lane */
+  /** Base URL of the Compose-owned Qdrant service that stores every corpus's dense and sparse chunk vectors */
   url?: string; // default: "http://127.0.0.1:56333"
 }
 
@@ -1665,12 +1661,10 @@ export interface ReadinessDependencyStatus {
   info?: Record<string, unknown> | null; // default: None
 }
 
-/** Persistent chat memory. ON by default.  Indexes every conversation into a lightweight pgvector corpus. Self-hosted, local, zero privacy risk, negligible storage. */
+/** Persistent chat memory. ON by default.  Indexes every conversation into a lightweight corpus (chunk rows in Postgres, dense + sparse vectors in Qdrant). Self-hosted, local, negligible storage. */
 export interface RecallConfig {
   /** Enable Recall. ON by default. */
   enabled?: boolean; // default: True
-  /** pgvector recommended (already running). */
-  vector_backend?: string; // default: "pgvector"
   auto_index?: boolean; // default: True
   index_delay_seconds?: number; // default: 5
   /** 'turn'=one chunk per message, 'sentence'=split by sentence. */
@@ -2014,10 +2008,6 @@ export interface RetrievalConfig {
   query_expansion_enabled?: boolean; // default: True
   /** Weight for BM25 in hybrid search */
   bm25_weight?: number; // default: 0.3
-  /** BM25 term frequency saturation parameter (higher = more weight to term frequency) */
-  bm25_k1?: number; // default: 1.2
-  /** BM25 length normalization (0=no penalty, 1=full penalty, 0.3-0.5 recommended for code) */
-  bm25_b?: number; // default: 0.4
   /** Weight for vector search */
   vector_weight?: number; // default: 0.7
   /** Enable chunk_summary-based retrieval */
@@ -2068,113 +2058,6 @@ export interface RetrievalContractMismatchDetail {
   current_contract: Record<string, unknown>;
   /** Exact operator action required to resolve the mismatch */
   required_action: string;
-}
-
-/** Availability status for one OSS retrieval pilot dependency. */
-export interface RetrievalPilotPackageStatus {
-  /** Import/package name checked by the pilot. */
-  package: string;
-  /** Human-readable dependency label. */
-  label: string;
-  /** Whether the package is importable in the current environment. */
-  available: boolean;
-  /** Short operator-facing note about the dependency state. */
-  detail?: string | null; // default: None
-}
-
-/** One preview-search hit from the retrieval pilot sidecar. */
-export interface RetrievalPilotSearchPreviewResult {
-  /** Exported chunk identifier. */
-  chunk_id: string;
-  /** Corpus-relative path for the matched chunk. */
-  file_path: string;
-  /** Absolute source path for the matched chunk. */
-  source_path: string;
-  /** Start line of the matched chunk. */
-  start_line: number;
-  /** End line of the matched chunk. */
-  end_line: number;
-  /** Detected language for the chunk. */
-  language?: string | null; // default: None
-  /** Preview relevance score. */
-  score: number;
-  /** Short excerpt centered on the first match when possible. */
-  excerpt: string;
-}
-
-/** One result from the real Haystack/Qdrant pilot lane. */
-export interface RetrievalPilotSearchResult {
-  /** Exported chunk identifier. */
-  chunk_id: string;
-  /** Corpus-relative path for the matched chunk. */
-  file_path: string;
-  /** Absolute source path for the matched chunk. */
-  source_path: string;
-  /** Start line of the matched chunk. */
-  start_line: number;
-  /** End line of the matched chunk. */
-  end_line: number;
-  /** Detected language for the chunk. */
-  language?: string | null; // default: None
-  /** Haystack/Qdrant relevance score. */
-  score: number;
-  /** Short excerpt centered on the first match when possible. */
-  excerpt: string;
-  /** Full chunk content for grounding and citation checks. */
-  content?: string; // default: ""
-  /** Retrieval leg that produced this result. */
-  source?: "vector" | "sparse" | "graph"; // default: "vector"
-  /** Provenance metadata carried through the pilot lane. */
-  metadata?: Record<string, unknown>;
-}
-
-/** Operator status for the OSS retrieval/indexing sidecar pilot. */
-export interface RetrievalPilotStatusResponse {
-  ok?: boolean; // default: True
-  /** Corpus identifier */
-  corpus_id: string;
-  /** Resolved corpus path used by the pilot. */
-  repo_path: string;
-  /** Current pilot backend target. */
-  backend?: "haystack_qdrant_sidecar"; // default: "haystack_qdrant_sidecar"
-  /** Directory where pilot export artifacts are stored. */
-  export_dir: string;
-  /** JSONL export path for pilot-ready chunk documents. */
-  documents_path: string;
-  /** Manifest JSON path for the most recent pilot export. */
-  manifest_path: string;
-  /** Whether a pilot export already exists on disk. */
-  export_exists: boolean;
-  /** Files exported into the pilot sidecar. */
-  exported_file_count?: number; // default: 0
-  /** Chunks exported into the pilot sidecar. */
-  exported_chunk_count?: number; // default: 0
-  /** Files skipped because they exceeded indexing size limits. */
-  skipped_large_files?: number; // default: 0
-  /** Files seen by the loader but skipped because text extraction produced no usable content. */
-  skipped_unreadable_files?: number; // default: 0
-  /** When the current pilot export was generated. */
-  last_exported_at?: string | null; // default: None
-  /** Metadata fields preserved for provenance-correct pilot chunks. */
-  provenance_fields?: string[];
-  /** Availability of Docling, Haystack, and Qdrant dependencies for the pilot. */
-  package_status?: RetrievalPilotPackageStatus[];
-  /** Execution backend used by the real pilot ingest/search lane. */
-  execution_backend?: "haystack_qdrant_local"; // default: "haystack_qdrant_local"
-  /** Whether the real Haystack/Qdrant execution lane is hydrated and ready to search. */
-  execution_ready?: boolean; // default: False
-  /** Base URL of the Compose-owned Qdrant service used by the pilot. */
-  qdrant_url: string;
-  /** Qdrant collection/index name for this pilot corpus. */
-  collection_name: string;
-  /** Number of documents currently ingested into the real pilot execution lane. */
-  indexed_document_count?: number; // default: 0
-  /** When the Haystack/Qdrant execution lane was last hydrated from the sidecar export. */
-  last_indexed_at?: string | null; // default: None
-  /** Whether preview search can run against the exported pilot sidecar. */
-  search_preview_ready?: boolean; // default: False
-  /** High-signal next-step guidance for the operator. */
-  operator_hint?: string | null; // default: None
 }
 
 /** Generic runtime capability option. */
@@ -2269,29 +2152,15 @@ export interface SemanticCacheConfig {
   max_temperature_for_write?: number; // default: 0.5
 }
 
-/** Configuration for sparse (BM25) search. */
+/** Configuration for the sparse (IDF-modified BM25 sparse vectors in Qdrant) leg. */
 export interface SparseSearchConfig {
-  /** Sparse retrieval engine. 'postgres_fts' uses built-in FTS; 'pg_search_bm25' uses ParadeDB pg_search. */
-  engine?: "postgres_fts" | "pg_search_bm25"; // default: "postgres_fts"
-  /** How to interpret the sparse query string. */
-  query_mode?: "plain" | "phrase" | "boolean"; // default: "plain"
-  /** Enable sparse highlight payloads when supported (UI later). */
-  highlight?: boolean; // default: False
-  /** If sparse retrieval returns empty, retry with a relaxed OR-style query (best-effort). */
-  relax_on_empty?: boolean; // default: True
-  /** Max extracted query terms used for relaxed sparse fallback. */
-  relax_max_terms?: number; // default: 8
-  /** If sparse retrieval returns empty, run a file_path-based fallback ranking (best-effort). */
-  file_path_fallback?: boolean; // default: True
-  /** Max extracted query terms used for file_path fallback. */
-  file_path_max_terms?: number; // default: 6
-  /** Enable sparse BM25 search in tri-brid retrieval */
+  /** Enable the sparse (Qdrant/bm25) leg in tri-brid retrieval */
   enabled?: boolean; // default: True
-  /** Number of results to retrieve from sparse search */
+  /** Number of results to retrieve from the sparse leg */
   top_k?: number; // default: 50
-  /** BM25 term frequency saturation (higher = more weight to term frequency) */
+  /** BM25 term-frequency saturation for the Qdrant/bm25 sparse vectors (higher = more weight to term frequency). Part of the sparse index contract (re-index on change). */
   bm25_k1?: number; // default: 1.2
-  /** BM25 length normalization (0 = no penalty, 1 = full penalty) */
+  /** BM25 length normalization for the Qdrant/bm25 sparse vectors (0 = no penalty, 1 = full penalty). Part of the sparse index contract (re-index on change). */
   bm25_b?: number; // default: 0.4
 }
 
@@ -2824,22 +2693,14 @@ export interface VLLMConfig {
   default_model?: string; // default: "Qwen/Qwen3-0.6B"
 }
 
-/** Configuration for vector (dense) search using pgvector. */
+/** Configuration for the vector (dense) leg served by Qdrant. */
 export interface VectorSearchConfig {
-  /** Enable vector search in tri-brid retrieval */
+  /** Enable the dense vector (Qdrant) leg in tri-brid retrieval */
   enabled?: boolean; // default: True
   /** Number of results to retrieve from vector search */
   top_k?: number; // default: 50
   /** Minimum similarity score threshold (0 = no threshold) */
   similarity_threshold?: number; // default: 0.0
-}
-
-/** A single term in the Postgres FTS vocabulary preview. */
-export interface VocabPreviewTerm {
-  /** Tokenized lexeme */
-  term: string;
-  /** Number of chunks containing this term */
-  doc_count: number;
 }
 
 export interface AgentTrainControlPlaneStatusResponse {
@@ -4224,141 +4085,6 @@ export interface RetrievalContractMismatchResponse {
   detail: RetrievalContractMismatchDetail;
 }
 
-/** Request a grounded answer produced entirely on the pilot retrieval lane. */
-export interface RetrievalPilotAnswerRequest {
-  /** Corpus identifier */
-  corpus_id: string;
-  /** Question to answer from pilot retrieval context. */
-  query: string;
-  /** Maximum chunks to ground the answer on. */
-  top_k?: number;
-  /** Run the dense (vector) retrieval leg. */
-  include_vector?: boolean;
-  /** Run the sparse (BM25/IDF) retrieval leg. */
-  include_sparse?: boolean;
-  /** Optional gateway alias override for generation. */
-  model_override?: string;
-}
-
-/** Grounded answer + citations produced by the pilot lane through the gateway. */
-export interface RetrievalPilotAnswerResponse {
-  ok?: boolean;
-  /** Corpus identifier */
-  corpus_id: string;
-  /** Question answered from pilot retrieval context. */
-  query: string;
-  /** Grounded answer generated through LiteLLM. */
-  answer: string;
-  /** Chunks that grounded the answer. */
-  citations?: ChunkMatch[];
-  /** Gateway provider route used for generation. */
-  provider?: ChatProviderInfo | null;
-  /** Model alias that produced the answer. */
-  model?: string;
-  /** Provider response identifier when available. */
-  provider_response_id?: string | null;
-  /** True when the answer came from real generation (never fallback). */
-  llm_used?: boolean;
-  /** Dense-leg hits before fusion. */
-  vector_result_count?: number;
-  /** Sparse-leg hits before fusion. */
-  sparse_result_count?: number;
-  /** Fusion applied across requested legs. */
-  fusion_method?: string;
-}
-
-/** Request to generate the OSS retrieval pilot sidecar export. */
-export interface RetrievalPilotExportRequest {
-  /** Corpus identifier */
-  corpus_id: string;
-  /** Path to the corpus root on disk. */
-  repo_path: string;
-  /** Rebuild the pilot export even if it already exists. */
-  force_rebuild?: boolean;
-}
-
-/** Response for a retrieval pilot export request. */
-export interface RetrievalPilotExportResponse {
-  ok?: boolean;
-  /** Current pilot status after export. */
-  status: RetrievalPilotStatusResponse;
-  /** Non-fatal export warnings. */
-  warnings?: string[];
-}
-
-/** Request to hydrate the real Haystack/Qdrant execution lane from the sidecar export. */
-export interface RetrievalPilotIngestRequest {
-  /** Corpus identifier */
-  corpus_id: string;
-  /** Rebuild the local Qdrant collection from scratch. */
-  force_rebuild?: boolean;
-}
-
-/** Response for retrieval pilot ingest. */
-export interface RetrievalPilotIngestResponse {
-  ok?: boolean;
-  /** Pilot status snapshot after ingest. */
-  status: RetrievalPilotStatusResponse;
-  /** Non-fatal ingest warnings. */
-  warnings?: string[];
-}
-
-/** Request to search over the exported retrieval pilot sidecar. */
-export interface RetrievalPilotSearchPreviewRequest {
-  /** Corpus identifier */
-  corpus_id: string;
-  /** Search query to run against the exported pilot documents. */
-  query: string;
-  /** Maximum results to return. */
-  top_k?: number;
-}
-
-/** Response for retrieval pilot preview search. */
-export interface RetrievalPilotSearchPreviewResponse {
-  ok?: boolean;
-  /** Corpus identifier */
-  corpus_id: string;
-  /** Query executed against the pilot export. */
-  query: string;
-  results?: RetrievalPilotSearchPreviewResult[];
-  /** Pilot status snapshot used for the preview search. */
-  status: RetrievalPilotStatusResponse;
-}
-
-/** Request to search the real Haystack/Qdrant execution lane. */
-export interface RetrievalPilotSearchRequest {
-  /** Corpus identifier */
-  corpus_id: string;
-  /** Search query to execute against the real pilot lane. */
-  query: string;
-  /** Maximum hits to return. */
-  top_k?: number;
-  /** Run the dense (vector) retrieval leg. */
-  include_vector?: boolean;
-  /** Run the sparse (BM25/IDF) retrieval leg. */
-  include_sparse?: boolean;
-}
-
-/** Response for real Haystack/Qdrant pilot search. */
-export interface RetrievalPilotSearchResponse {
-  ok?: boolean;
-  /** Corpus identifier */
-  corpus_id: string;
-  /** Search backend used for this response. */
-  backend?: "haystack_qdrant_local";
-  /** Query executed against the real pilot lane. */
-  query: string;
-  results?: RetrievalPilotSearchResult[];
-  /** Pilot status snapshot used for the real search. */
-  status: RetrievalPilotStatusResponse;
-  /** Hits returned by the dense leg before fusion. */
-  vector_result_count?: number;
-  /** Hits returned by the sparse leg before fusion. */
-  sparse_result_count?: number;
-  /** Fusion applied across requested legs (rrf, weighted, single_leg). */
-  fusion_method?: string;
-}
-
 /** Response payload for GET /api/runtime-capabilities. */
 export interface RuntimeCapabilitiesResponse {
   generation?: GenerationRuntimeCapabilities;
@@ -4516,22 +4242,4 @@ export interface TriBridConfig {
   mcp?: MCPConfig;
   synthetic?: SyntheticConfig;
   docker?: DockerConfig;
-}
-
-/** Response payload for the vocab preview endpoint. */
-export interface VocabPreviewResponse {
-  /** Corpus identifier */
-  corpus_id: string;
-  /** Number of top terms requested */
-  top_n: number;
-  /** BM25 tokenizer setting (indexing.bm25_tokenizer) */
-  tokenizer: string;
-  /** Stemmer language (indexing.bm25_stemmer_lang) */
-  stemmer_lang?: string | null;
-  /** Postgres text search configuration used for tsv + query parsing */
-  ts_config: string;
-  /** Total unique terms in the corpus vocabulary */
-  total_terms: number;
-  /** Top terms by document frequency */
-  terms?: VocabPreviewTerm[];
 }

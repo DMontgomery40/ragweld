@@ -99,9 +99,8 @@ export function IndexDisplayPanels() {
 
   const storageCards = [
     { label: 'Chunks', value: formatBytes(storage.chunks_bytes), accent: 'var(--link)' },
-    { label: 'pgvector vectors', value: formatBytes(storage.embeddings_bytes), accent: 'var(--link)' },
-    { label: 'pgvector index (optional)', value: formatBytes(storage.pgvector_index_bytes), accent: 'var(--warn)' },
-    { label: 'BM25 Index', value: formatBytes(storage.bm25_index_bytes), accent: 'var(--accent)' },
+    { label: 'Qdrant points', value: (storage.qdrant_points ?? 0).toLocaleString(), accent: 'var(--link)' },
+    { label: 'Qdrant dense vectors (est.)', value: formatBytes(storage.qdrant_dense_vector_bytes), accent: 'var(--accent)' },
     { label: 'Chunk Summaries', value: formatBytes(storage.chunk_summaries_bytes), accent: 'var(--accent)' },
     { label: 'Neo4j Store', value: formatBytes(storage.neo4j_store_bytes), accent: 'var(--warn)' },
     { label: 'Keywords', value: (metadata.keywords_count ?? 0).toLocaleString(), accent: 'var(--warn)' },

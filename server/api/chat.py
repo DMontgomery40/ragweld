@@ -53,6 +53,7 @@ from server.observability.runtime import (
 )
 from server.retrieval.errors import RequiredRetrievalLegError, RetrievalContractMismatchError
 from server.retrieval.fusion import TriBridFusion
+from server.retrieval.qdrant_store import QdrantChunkStore
 from server.services.config_store import CorpusNotFoundError
 from server.services.config_store import get_config as load_scoped_config
 from server.services.conversation_store import get_conversation_store
@@ -402,11 +403,11 @@ async def chat(request: ChatRequest, response: Response) -> ChatResponse:
                     try:
                         await index_recall_conversation(
                             pg,
+                            QdrantChunkStore(config),
                             conversation_id=conv.id,
                             messages=store.get_messages(conv.id),
                             config=config.chat.recall,
                             embedder=embedder,
-                            ts_config="english",
                         )
                     except RetrievalContractMismatchError as e:
                         logger.warning(
@@ -449,6 +450,7 @@ async def chat(request: ChatRequest, response: Response) -> ChatResponse:
                 await trace_store.add_event(run_id, kind="chat.error", msg=str(e), data={})
                 await trace_store.annotate(run_id, **current_trace_payload_fields())
                 await trace_store.end(run_id)
+            raise_required_dependency_unavailable_if_applicable(e, boundary="Chat retrieval")
             raise HTTPException(status_code=500, detail=str(e)) from e
 
 
@@ -613,11 +615,11 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
                             try:
                                 await index_recall_conversation(
                                     pg,
+                                    QdrantChunkStore(config),
                                     conversation_id=conv.id,
                                     messages=store.get_messages(conv.id),
                                     config=config.chat.recall,
                                     embedder=embedder,
-                                    ts_config="english",
                                 )
                             except RetrievalContractMismatchError as e:
                                 logger.warning(
@@ -871,11 +873,11 @@ async def recall_index(request: RecallIndexRequest) -> RecallIndexResponse:
     try:
         n = await index_recall_conversation(
             pg,
+            QdrantChunkStore(cfg),
             conversation_id=request.conversation_id,
             messages=msgs,
             config=cfg.chat.recall,
             embedder=embedder,
-            ts_config="english",
         )
     except RetrievalContractMismatchError as e:
         raise retrieval_contract_mismatch_http_exception(e) from e

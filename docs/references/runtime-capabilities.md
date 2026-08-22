@@ -14,9 +14,8 @@ This page defines the truth boundary between the broad model catalog and the run
   - embedding providers/backends
   - reranker providers/backends
   - chunking strategies
-  - indexing/search backends
-  - including the current `haystack_qdrant_local` pilot lane alongside the
-    primary Postgres/Neo4j backends
+  - indexing/search backends: Postgres chunk rows, Qdrant dense and
+    sparse (IDF BM25) vectors, and the Neo4j graph projections
 
 ## Selection metadata contract
 

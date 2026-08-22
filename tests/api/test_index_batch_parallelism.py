@@ -10,6 +10,7 @@ import server.api.index as index_api
 from server.indexing.chunker import Chunker
 from server.indexing.loader import FileLoader
 from server.models.tribrid_config_model import TriBridConfig
+from server.retrieval.contracts import sparse_contract_from_config
 
 
 def test_parallel_batches_disabled_when_neo4j_graph_upserts_enabled() -> None:
@@ -82,24 +83,16 @@ def test_parallel_batches_still_require_multiple_batches() -> None:
 
 class _RecordingPostgres:
     def __init__(self) -> None:
-        self.embedding_batch_sizes: list[int] = []
-        self.fts_batch_sizes: list[int] = []
+        self.chunk_batch_sizes: list[int] = []
         self.embedding_meta: dict[str, object] | None = None
         self.semantic_cache_cleared: list[str] = []
 
     async def delete_chunks(self, _repo_id: str) -> int:
         return 0
 
-    async def delete_embeddings(self, _repo_id: str) -> int:
-        return 0
-
-    async def upsert_embeddings(self, _repo_id: str, chunks) -> int:
-        self.embedding_batch_sizes.append(len(chunks))
-        return len(chunks)
-
-    async def upsert_fts(self, _repo_id: str, chunks, *, ts_config: str) -> int:
-        assert ts_config
-        self.fts_batch_sizes.append(len(chunks))
+    async def upsert_chunks(self, _repo_id: str, chunks) -> int:
+        assert all(ch.embedding is not None for ch in chunks)
+        self.chunk_batch_sizes.append(len(chunks))
         return len(chunks)
 
     async def update_corpus_embedding_meta(
@@ -110,18 +103,28 @@ class _RecordingPostgres:
         provider: str,
         model: str,
         dimensions: int,
-        ts_config: str,
+        sparse_contract: dict[str, object] | None = None,
     ) -> None:
         self.embedding_meta = {
             "backend": backend,
             "provider": provider,
             "model": model,
             "dimensions": dimensions,
-            "ts_config": ts_config,
+            "sparse_contract": sparse_contract,
         }
 
     async def semantic_cache_clear_for_corpus(self, repo_id: str) -> None:
         self.semantic_cache_cleared.append(repo_id)
+
+
+class _RecordingQdrant:
+    def __init__(self, sparse_contract: dict[str, object]) -> None:
+        self.sparse_contract = sparse_contract
+        self.writes: list[tuple[str, str, int, int]] = []
+
+    async def write_chunks(self, corpus_id: str, physical: str, chunks, *, embedding_dim: int) -> int:
+        self.writes.append((corpus_id, physical, len(chunks), int(embedding_dim)))
+        return len(chunks)
 
 
 class _RecordingEmbedder:
@@ -158,6 +161,7 @@ async def test_run_index_body_batches_small_files_across_files_when_graph_work_i
     loader = FileLoader()
     postgres = _RecordingPostgres()
     embedder = _RecordingEmbedder()
+    qdrant = _RecordingQdrant(sparse_contract_from_config(cfg))
 
     stats = await index_api._run_index_body(
         repo_id="tiny-corpus",
@@ -174,19 +178,21 @@ async def test_run_index_body_batches_small_files_across_files_when_graph_work_i
         loader=loader,
         event_queue=None,
         write_repo_id="tiny-corpus",
+        qdrant=qdrant,  # type: ignore[arg-type]
+        qdrant_generation="ragweld_chunks_tiny_corpus__test",
     )
 
     assert stats.total_files == 3
     assert stats.total_chunks >= 3
     assert len(embedder.calls) == 1
     assert set(embedder.calls[0]) == {"doc-0.txt", "doc-1.txt", "doc-2.txt"}
-    assert postgres.embedding_batch_sizes == [stats.total_chunks]
-    assert postgres.fts_batch_sizes == [stats.total_chunks]
+    assert postgres.chunk_batch_sizes == [stats.total_chunks]
+    assert qdrant.writes == [("tiny-corpus", "ragweld_chunks_tiny_corpus__test", stats.total_chunks, 2)]
     assert postgres.embedding_meta == {
         "backend": "provider",
         "provider": "openai",
         "model": "text-embedding-3-large",
         "dimensions": 2,
-        "ts_config": cfg.indexing.postgres_ts_config,
+        "sparse_contract": sparse_contract_from_config(cfg),
     }
     assert postgres.semantic_cache_cleared == ["tiny-corpus"]

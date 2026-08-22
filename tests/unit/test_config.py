@@ -7,10 +7,9 @@ from server.config import DEFAULT_CONFIG_PATH, load_config
 from server.models.tribrid_config_model import (
     ChunkingConfig,
     EmbeddingConfig,
+    EvaluationConfig,
     FusionConfig,
     GraphIndexingConfig,
-    EvaluationConfig,
-    IndexingConfig,
     RerankingConfig,
     TriBridConfig,
 )
@@ -135,11 +134,6 @@ def test_graph_indexing_config_weight_validation() -> None:
         GraphIndexingConfig(ast_contains_weight=-0.01)
     with pytest.raises(ValidationError):
         GraphIndexingConfig(ast_inherits_weight=1.01)
-
-
-def test_indexing_config_defaults_enable_post_index_dense_retrieval() -> None:
-    cfg = IndexingConfig()
-    assert cfg.auto_prepare_dense_retrieval is True
 
 
 def test_chunking_config_rejects_semantic_strategy() -> None:

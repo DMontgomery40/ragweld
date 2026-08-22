@@ -22,12 +22,12 @@ This reference describes the hard-cut observability slice for live online reques
   - `Faro`
   - `OpenCost`
   - `Alertmanager`
-  - corpus-scoped `Haystack + Docling + Qdrant` retrieval lane health
+  - corpus-scoped `Haystack + Docling + Qdrant` retrieval lane health (functional Qdrant probe + the active corpus generation)
 - Human-facing visual surfaces:
   - Grafana is now a four-surface operator workspace: `Overview`, `Dashboards`, `Incidents`, and `Config`
   - Infrastructure -> Monitoring now carries the same operator deck instead of a narrower readiness card
   - Benchmark is visible in top-level navigation so runtime regressions are not hidden behind a dark route
-  - the Grafana overview deck combines observability status, dashboard catalog links, recent incidents, latest trace evidence, Loki status, training control-plane truth, retrieval pilot health, and eval/benchmark/prompt regression summaries for the active corpus
+  - the Grafana overview deck combines observability status, dashboard catalog links, recent incidents, latest trace evidence, Loki status, training control-plane truth, retrieval vector-lane health, and eval/benchmark/prompt regression summaries for the active corpus
   - the dashboard workspace is now catalog-driven from the backend instead of a frontend-only hardcoded preset list
 - Local workbench trace cache stays as a short-term UI bridge for primary live request surfaces, not the long-term source of truth
 
@@ -71,7 +71,6 @@ This reference describes the hard-cut observability slice for live online reques
 - `GET /api/traces/latest`
 - `GET /api/agent/train/control-plane/status`
 - `GET /api/loki/status`
-- `GET /api/index/{corpus_id}/pilot/status`
 - `X-Correlation-ID`
 - `X-Trace-ID`
 - `X-Root-Span-ID`

@@ -11,7 +11,6 @@ import type {
   ObservabilityIncidentsResponse,
   ObservabilityStatusResponse,
   PromptObservabilitySummaryResponse,
-  RetrievalPilotStatusResponse,
   Trace,
   ObservabilityWorkbenchLink,
   TraceExternalLink,
@@ -44,13 +43,6 @@ function toneFromControlPlane(status: AgentTrainControlPlaneStatusResponse | nul
 function toneFromLoki(status: LokiStatus | null): SurfaceTone {
   if (!status) return 'dim';
   return status.reachable ? 'good' : 'warn';
-}
-
-function toneFromPilot(status: RetrievalPilotStatusResponse | null): SurfaceTone {
-  if (!status) return 'dim';
-  if (status.execution_ready) return 'good';
-  if (status.export_exists || status.search_preview_ready) return 'warn';
-  return 'dim';
 }
 
 function toneFromEval(summary: EvalObservabilitySummaryResponse | null): SurfaceTone {
@@ -142,7 +134,6 @@ export function ObservabilityOperatorDeck({
   const [latestTraceResponse, setLatestTraceResponse] = useState<TracesLatestResponse | null>(null);
   const [lokiStatus, setLokiStatus] = useState<LokiStatus | null>(null);
   const [controlPlane, setControlPlane] = useState<AgentTrainControlPlaneStatusResponse | null>(null);
-  const [pilotStatus, setPilotStatus] = useState<RetrievalPilotStatusResponse | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -161,7 +152,6 @@ export function ObservabilityOperatorDeck({
           nextTrace,
           nextLoki,
           nextControlPlane,
-          nextPilot,
         ] = await Promise.all([
           DashAPI.getObservabilityStatus(),
           DashAPI.getObservabilityCatalog(scopedCorpusId || undefined),
@@ -172,7 +162,6 @@ export function ObservabilityOperatorDeck({
           DashAPI.getLatestTrace(),
           DashAPI.getLokiStatus(),
           DashAPI.getAgentControlPlaneStatus(scopedCorpusId || undefined),
-          DashAPI.getRetrievalPilotStatus(scopedCorpusId || undefined),
         ]);
 
         if (cancelled) return;
@@ -186,10 +175,9 @@ export function ObservabilityOperatorDeck({
         setLatestTraceResponse(nextTrace);
         setLokiStatus(nextLoki);
         setControlPlane(nextControlPlane);
-        setPilotStatus(nextPilot);
         setLastUpdated(new Date().toISOString());
 
-        if (!nextObservability && !nextCatalog && !nextIncidents && !nextTrace && !nextControlPlane && !nextPilot) {
+        if (!nextObservability && !nextCatalog && !nextIncidents && !nextTrace && !nextControlPlane) {
           setError('No observability surfaces responded. Check the API and configured backends.');
         }
       } catch (loadError) {
@@ -224,7 +212,7 @@ export function ObservabilityOperatorDeck({
   const deckLinks = dedupeLinks(observability?.links, catalog?.external_links, trace?.external_links, controlPlane?.links);
   const workbenchLinks = dedupeWorkbenchLinks(catalog?.workbench_links);
   const recentIncidents = (incidents?.incidents || []).slice(0, 4);
-  const pilotPackages = pilotStatus?.package_status || [];
+  const retrievalComponent = componentMap.haystack_docling_qdrant || null;
 
   const metricsComponent = componentMap.grafana || componentMap.otlp_export || componentMap.alloy || null;
   const tracesComponent = componentMap.tempo || componentMap.langfuse || componentMap.local_trace_buffer || null;
@@ -359,17 +347,19 @@ export function ObservabilityOperatorDeck({
             </p>
           </article>
 
-          <article className={toneClassName(toneFromPilot(pilotStatus))}>
+          <article className={toneClassName(toneFromComponent(retrievalComponent))}>
             <div className="obs-card-heading">
               <span className="obs-card-kicker">Retrieval</span>
-              <span className="obs-card-status">{pilotStatus?.execution_ready ? 'Haystack live' : 'Pilot lane'}</span>
+              <span className="obs-card-status">
+                {retrievalComponent?.reachable === true
+                  ? 'Qdrant generation live'
+                  : retrievalComponent?.reachable === false
+                    ? 'Vector lane degraded'
+                    : 'Not indexed'}
+              </span>
             </div>
             <div className="obs-card-title">Haystack + Qdrant + Docling</div>
-            <div className="obs-card-metric">
-              {pilotStatus
-                ? `${pilotStatus.indexed_document_count} indexed docs · ${pilotStatus.exported_chunk_count} exported chunks`
-                : 'No corpus-scoped pilot selected'}
-            </div>
+            <div className="obs-card-metric">{retrievalComponent?.detail || 'No retrieval lane status yet'}</div>
             <p className="obs-card-detail">
               Retrieval health belongs in the same command surface as gateway and tracing, because operator pain rarely respects subsystem boundaries.
             </p>
@@ -531,26 +521,14 @@ export function ObservabilityOperatorDeck({
               </div>
 
               <div className="obs-evidence-card">
-                <div className="obs-evidence-title">Retrieval pilot</div>
-                {pilotStatus ? (
+                <div className="obs-evidence-title">Retrieval vector lane</div>
+                {retrievalComponent ? (
                   <>
-                    <div className="obs-evidence-mono">{pilotStatus.execution_backend}</div>
-                    <div className="obs-evidence-copy">
-                      export={pilotStatus.export_exists ? 'present' : 'missing'} · execution={pilotStatus.execution_ready ? 'ready' : 'not ready'}
-                    </div>
-                    <div className="obs-evidence-copy">
-                      packages=
-                      {pilotPackages.length
-                        ? ` ${pilotPackages
-                            .map((pkg) => `${pkg.label}:${pkg.available ? 'ok' : 'missing'}`)
-                            .join(' · ')}`
-                        : ' none'}
-                    </div>
+                    <div className="obs-evidence-mono">{retrievalComponent.url || 'qdrant'}</div>
+                    <div className="obs-evidence-copy">{retrievalComponent.detail}</div>
                   </>
                 ) : (
-                  <div className="obs-evidence-copy">
-                    No active corpus retrieval pilot status is available yet.
-                  </div>
+                  <div className="obs-evidence-copy">No retrieval lane status is available yet.</div>
                 )}
               </div>
             </div>

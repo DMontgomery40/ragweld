@@ -2,6 +2,28 @@ from __future__ import annotations
 
 import csv
 from pathlib import Path
+from typing import Any, Literal
+
+ExtractionMethod = Literal["docling", "direct"]
+
+# Rich-document formats are converted through Docling; code and plain-text
+# formats keep the direct read path by design.
+DOCLING_SUFFIXES: frozenset[str] = frozenset({".pdf", ".docx", ".pptx", ".xlsx", ".html", ".htm"})
+
+_DOCLING_CONVERTER: Any = None
+
+
+def extraction_method_for_path(path: Path) -> ExtractionMethod:
+    return "docling" if path.suffix.lower() in DOCLING_SUFFIXES else "direct"
+
+
+def _docling_converter() -> Any:
+    global _DOCLING_CONVERTER
+    if _DOCLING_CONVERTER is None:
+        from docling.document_converter import DocumentConverter
+
+        _DOCLING_CONVERTER = DocumentConverter()
+    return _DOCLING_CONVERTER
 
 
 def extract_text_for_path(
@@ -15,21 +37,18 @@ def extract_text_for_path(
 ) -> str | None:
     """Return extracted text for a file, or None if unsupported/unreadable.
 
-    This is intentionally best-effort and dependency-light:
-    - Text formats are read as UTF-8 (errors ignored)
-    - PDF extraction uses pypdf if installed
-    - XLSX extraction uses openpyxl if installed
-    - Parquet extraction uses pyarrow if installed (bounded by config)
+    - Text/code formats are read as UTF-8 (errors ignored)
+    - CSV/TSV are normalized into tab-separated rows
+    - PDF, DOCX, PPTX, XLSX, and HTML are converted to markdown by Docling
+    - Parquet extraction uses pyarrow, bounded by config
     """
     ext = path.suffix.lower()
     if ext in {".txt", ".md", ".rst", ".json", ".yaml", ".yml", ".toml", ".sql", ".py", ".js", ".jsx", ".ts", ".tsx"}:
         return _read_text(path)
     if ext in {".csv", ".tsv"}:
         return _read_delimited(path, delimiter="," if ext == ".csv" else "\t")
-    if ext == ".pdf":
-        return _read_pdf(path)
-    if ext == ".xlsx":
-        return _read_xlsx(path)
+    if ext in DOCLING_SUFFIXES:
+        return _read_with_docling(path)
     if ext == ".parquet":
         return _read_parquet(
             path,
@@ -68,64 +87,15 @@ def _read_delimited(path: Path, *, delimiter: str) -> str | None:
     return "\n".join(out_lines)
 
 
-def _read_pdf(path: Path) -> str | None:
+def _read_with_docling(path: Path) -> str | None:
+    """Convert a rich document to markdown via Docling; None when unparseable."""
     try:
-        from pypdf import PdfReader
+        result = _docling_converter().convert(str(path))
+        text = result.document.export_to_markdown()
     except Exception:
         return None
-
-    try:
-        reader = PdfReader(str(path))
-    except Exception:
-        return None
-
-    parts: list[str] = []
-    for i, page in enumerate(getattr(reader, "pages", []) or []):
-        try:
-            txt = page.extract_text() or ""
-        except Exception:
-            txt = ""
-        if not txt.strip():
-            continue
-        parts.append(f"\n\n--- page {i + 1} ---\n\n{txt.strip()}\n")
-    joined = "\n".join(parts).strip()
-    return joined or ""
-
-
-def _read_xlsx(path: Path) -> str | None:
-    try:
-        from openpyxl import load_workbook
-    except Exception:
-        return None
-
-    try:
-        wb = load_workbook(filename=str(path), read_only=True, data_only=True)
-    except Exception:
-        return None
-
-    out_lines: list[str] = []
-    try:
-        for ws in wb.worksheets:
-            title = str(getattr(ws, "title", "") or "").strip() or "Sheet"
-            out_lines.append(f"\n\n--- sheet {title} ---\n")
-            try:
-                for row in ws.iter_rows(values_only=True):
-                    if not row:
-                        continue
-                    cells = [("" if c is None else str(c)).strip() for c in row]
-                    if not any(cells):
-                        continue
-                    out_lines.append("\t".join(cells))
-            except Exception:
-                continue
-    finally:
-        try:
-            wb.close()
-        except Exception:
-            pass
-
-    joined = "\n".join(out_lines).strip()
-    return joined or ""
+    text = str(text or "")
+    return text if text.strip() else None
 
 
 def _read_parquet(

@@ -207,9 +207,9 @@ export function HelpSubtab() {
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
             <ExternalLink
-              title="pgvector Documentation"
-              href="https://github.com/pgvector/pgvector"
-              description="PostgreSQL vector similarity search extension"
+              title="Qdrant Documentation"
+              href="https://qdrant.tech/documentation/"
+              description="Vector store for the dense + sparse retrieval legs"
             />
             <ExternalLink
               title="Neo4j Graph Database"

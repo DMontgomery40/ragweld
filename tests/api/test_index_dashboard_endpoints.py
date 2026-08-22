@@ -53,9 +53,6 @@ async def test_dashboard_index_status_and_stats_return_storage_breakdown(
             assert repo_id == "test-corpus"
             return {
                 "chunks_bytes": 10,
-                "embeddings_bytes": 20,
-                "pgvector_index_bytes": 40,
-                "bm25_index_bytes": 30,
                 "chunk_summaries_bytes": 50,
             }
 
@@ -113,14 +110,14 @@ async def test_dashboard_index_status_and_stats_return_storage_breakdown(
 
     sb = payload["metadata"]["storage_breakdown"]
     assert sb["chunks_bytes"] == 10
-    assert sb["embeddings_bytes"] == 20
-    assert sb["pgvector_index_bytes"] == 40
-    assert sb["bm25_index_bytes"] == 30
     assert sb["chunk_summaries_bytes"] == 50
     assert sb["neo4j_store_bytes"] == 60
-    assert sb["postgres_total_bytes"] == 150
-    assert sb["total_storage_bytes"] == 210
-    assert payload["metadata"]["total_storage"] == 210
+    assert sb["postgres_total_bytes"] == 60
+    # No Qdrant generation exists for the fake corpus: zero points, zero estimated vector bytes.
+    assert sb["qdrant_points"] == 0
+    assert sb["qdrant_dense_vector_bytes"] == 0
+    assert sb["total_storage_bytes"] == 120
+    assert payload["metadata"]["total_storage"] == 120
 
     costs = payload["metadata"]["costs"]
     assert costs["total_tokens"] == 2000
@@ -131,8 +128,8 @@ async def test_dashboard_index_status_and_stats_return_storage_breakdown(
     payload2 = r_stats.json()
     assert payload2["corpus_id"] == "test-corpus"
     assert payload2["keywords_count"] == 2
-    assert payload2["total_storage"] == 210
-    assert payload2["storage_breakdown"]["total_storage_bytes"] == 210
+    assert payload2["total_storage"] == 120
+    assert payload2["storage_breakdown"]["total_storage_bytes"] == 120
 
 
 @pytest.mark.asyncio

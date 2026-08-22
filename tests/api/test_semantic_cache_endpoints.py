@@ -7,17 +7,28 @@ import uuid
 import pytest
 from httpx import AsyncClient
 
+from server.config import load_config
 from server.db.postgres import PostgresClient
 from server.models.index import Chunk
-from server.models.tribrid_config_model import TriBridConfig
+from server.retrieval.qdrant_store import QdrantChunkStore
 
-pytestmark = pytest.mark.requires_postgres
+pytestmark = [pytest.mark.requires_postgres, pytest.mark.requires_qdrant]
+
+
+async def _cleanup_repo(pg: PostgresClient, repo_id: str) -> None:
+    try:
+        await QdrantChunkStore(load_config()).delete_corpus(repo_id)
+    except Exception:
+        pass
+    await pg.delete_corpus(repo_id)
 
 
 async def _seed_repo(pg: PostgresClient, repo_id: str) -> None:
     await pg.upsert_corpus(repo_id, name=repo_id, root_path=".")
 
-    cfg = TriBridConfig()
+    cfg = load_config()
+    # Deterministic query embeddings keep the semantic-hit / miss expectations exact.
+    cfg.embedding.embedding_backend = "deterministic"
     cfg.semantic_cache.enabled = 1
     cfg.semantic_cache.mode = "read_write"
     cfg.semantic_cache.min_query_chars = 3
@@ -40,7 +51,8 @@ async def _seed_repo(pg: PostgresClient, repo_id: str) -> None:
             metadata={"kind": "semantic-cache-test"},
         )
     ]
-    await pg.upsert_fts(repo_id, chunks, ts_config="english")
+    await pg.upsert_chunks(repo_id, chunks)
+    await QdrantChunkStore(cfg).upsert_chunks(repo_id, chunks, embedding_dim=int(cfg.embedding.embedding_dim))
 
 
 @pytest.mark.asyncio
@@ -72,7 +84,7 @@ async def test_search_semantic_cache_exact_then_hit(client: AsyncClient) -> None
         assert d2.get("debug", {}).get("cache_match_type") == "exact"
     finally:
         try:
-            await pg.delete_corpus(repo_id)
+            await _cleanup_repo(pg, repo_id)
         except Exception:
             pass
 
@@ -140,6 +152,6 @@ async def test_search_semantic_cache_semantic_hit_and_bypass_mode(client: AsyncC
         assert d2.json().get("debug", {}).get("cache_hit") is True
     finally:
         try:
-            await pg.delete_corpus(repo_id)
+            await _cleanup_repo(pg, repo_id)
         except Exception:
             pass

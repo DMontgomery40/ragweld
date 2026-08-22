@@ -4527,15 +4527,8 @@
         "type": "object"
       },
       "DashboardIndexStorageBreakdown": {
-        "description": "Storage breakdown for the Dashboard index summary (bytes).\n\nNOTE:\n- Values are best-effort and may be allocated/estimated when a storage\n  component cannot be attributed to a single corpus directly (e.g., shared\n  Postgres indexes).",
+        "description": "Storage breakdown for the Dashboard index summary (bytes).\n\nNOTE:\n- Postgres and Neo4j values are measured; the Qdrant dense-vector figure is\n  an estimate because Qdrant does not expose per-collection disk usage.",
         "properties": {
-          "bm25_index_bytes": {
-            "default": 0,
-            "description": "Allocated bytes for Postgres full-text (BM25/FTS) index (may be allocated/estimated).",
-            "minimum": 0.0,
-            "title": "Bm25 Index Bytes",
-            "type": "integer"
-          },
           "chunk_summaries_bytes": {
             "default": 0,
             "description": "Bytes used by chunk_summaries in Postgres (corpus-scoped).",
@@ -4545,16 +4538,9 @@
           },
           "chunks_bytes": {
             "default": 0,
-            "description": "Bytes used by chunk content + metadata in Postgres (corpus-scoped).",
+            "description": "Bytes used by chunk content + metadata rows in Postgres (corpus-scoped).",
             "minimum": 0.0,
             "title": "Chunks Bytes",
-            "type": "integer"
-          },
-          "embeddings_bytes": {
-            "default": 0,
-            "description": "Bytes used by stored embeddings in Postgres (corpus-scoped).",
-            "minimum": 0.0,
-            "title": "Embeddings Bytes",
             "type": "integer"
           },
           "neo4j_store_bytes": {
@@ -4564,23 +4550,30 @@
             "title": "Neo4J Store Bytes",
             "type": "integer"
           },
-          "pgvector_index_bytes": {
-            "default": 0,
-            "description": "Bytes used by pgvector index structures (0 if not created; may be allocated/estimated).",
-            "minimum": 0.0,
-            "title": "Pgvector Index Bytes",
-            "type": "integer"
-          },
           "postgres_total_bytes": {
             "default": 0,
-            "description": "Total Postgres bytes (sum of Postgres components, including allocations).",
+            "description": "Total Postgres bytes (chunk rows + chunk summaries).",
             "minimum": 0.0,
             "title": "Postgres Total Bytes",
             "type": "integer"
           },
+          "qdrant_dense_vector_bytes": {
+            "default": 0,
+            "description": "Estimated bytes of dense vectors in Qdrant (dense points x dimensions x 4 bytes).",
+            "minimum": 0.0,
+            "title": "Qdrant Dense Vector Bytes",
+            "type": "integer"
+          },
+          "qdrant_points": {
+            "default": 0,
+            "description": "Points in the corpus Qdrant generation (one per chunk; dense and/or sparse vectors).",
+            "minimum": 0.0,
+            "title": "Qdrant Points",
+            "type": "integer"
+          },
           "total_storage_bytes": {
             "default": 0,
-            "description": "Total storage bytes across Postgres + Neo4j.",
+            "description": "Total storage bytes across Postgres + Qdrant (estimate) + Neo4j.",
             "minimum": 0.0,
             "title": "Total Storage Bytes",
             "type": "integer"
@@ -6562,7 +6555,7 @@
           },
           "sparse_weight": {
             "default": 0.3,
-            "description": "Weight for sparse BM25/FTS search results",
+            "description": "Weight for sparse (Qdrant/bm25) search results",
             "maximum": 1.0,
             "minimum": 0.0,
             "title": "Sparse Weight",
@@ -6570,7 +6563,7 @@
           },
           "vector_weight": {
             "default": 0.4,
-            "description": "Weight for vector search results (pgvector)",
+            "description": "Weight for vector search results (Qdrant dense)",
             "maximum": 1.0,
             "minimum": 0.0,
             "title": "Vector Weight",
@@ -8033,21 +8026,15 @@
       "IndexingConfig": {
         "description": "Indexing and vector storage configuration.",
         "properties": {
-          "auto_prepare_dense_retrieval": {
-            "default": true,
-            "description": "After a dense indexing run completes, automatically build the per-corpus pgvector HNSW index and warm representative query embeddings so first retrievals are not cold.",
-            "title": "Auto Prepare Dense Retrieval",
-            "type": "boolean"
-          },
           "bm25_stemmer_lang": {
             "default": "english",
-            "description": "Stemmer language",
+            "description": "Snowball stemmer language for the sparse (Qdrant/bm25) index. Part of the sparse index contract.",
             "title": "Bm25 Stemmer Lang",
             "type": "string"
           },
           "bm25_tokenizer": {
             "default": "stemmer",
-            "description": "BM25 tokenizer type",
+            "description": "Sparse (Qdrant/bm25) tokenization: 'stemmer' applies the Snowball stemmer for bm25_stemmer_lang; 'lowercase' and 'whitespace' disable stemming. Part of the sparse index contract (re-index on change).",
             "pattern": "^(stemmer|lowercase|whitespace)$",
             "title": "Bm25 Tokenizer",
             "type": "string"
@@ -8152,7 +8139,7 @@
           },
           "postgres_url": {
             "default": "postgresql://postgres:postgres@localhost:5432/tribrid_rag",
-            "description": "PostgreSQL connection string (DSN) for pgvector + FTS storage",
+            "description": "PostgreSQL connection string (DSN) for corpus control/state storage (chunk rows, summaries, caches)",
             "title": "Postgres Url",
             "type": "string"
           },
@@ -10928,11 +10915,11 @@
         "type": "object"
       },
       "QdrantConfig": {
-        "description": "Qdrant vector-store connection for the Haystack/Docling/Qdrant lane.",
+        "description": "Qdrant vector-store connection for the canonical dense + sparse retrieval lane.",
         "properties": {
           "url": {
             "default": "http://127.0.0.1:56333",
-            "description": "Base URL of the Compose-owned Qdrant service backing the pilot retrieval lane",
+            "description": "Base URL of the Compose-owned Qdrant service that stores every corpus's dense and sparse chunk vectors",
             "title": "Url",
             "type": "string"
           }
@@ -11065,7 +11052,7 @@
         "type": "object"
       },
       "RecallConfig": {
-        "description": "Persistent chat memory. ON by default.\n\nIndexes every conversation into a lightweight pgvector corpus.\nSelf-hosted, local, zero privacy risk, negligible storage.",
+        "description": "Persistent chat memory. ON by default.\n\nIndexes every conversation into a lightweight corpus (chunk rows in Postgres,\ndense + sparse vectors in Qdrant). Self-hosted, local, negligible storage.",
         "properties": {
           "auto_index": {
             "default": true,
@@ -11124,13 +11111,6 @@
             "minimum": 512.0,
             "title": "Max History Tokens",
             "type": "integer"
-          },
-          "vector_backend": {
-            "default": "pgvector",
-            "description": "pgvector recommended (already running).",
-            "pattern": "^(pgvector|neo4j)$",
-            "title": "Vector Backend",
-            "type": "string"
           }
         },
         "title": "RecallConfig",
@@ -13565,22 +13545,6 @@
       "RetrievalConfig": {
         "description": "Configuration for retrieval and search parameters.",
         "properties": {
-          "bm25_b": {
-            "default": 0.4,
-            "description": "BM25 length normalization (0=no penalty, 1=full penalty, 0.3-0.5 recommended for code)",
-            "maximum": 1.0,
-            "minimum": 0.0,
-            "title": "Bm25 B",
-            "type": "number"
-          },
-          "bm25_k1": {
-            "default": 1.2,
-            "description": "BM25 term frequency saturation parameter (higher = more weight to term frequency)",
-            "maximum": 3.0,
-            "minimum": 0.5,
-            "title": "Bm25 K1",
-            "type": "number"
-          },
           "bm25_weight": {
             "default": 0.3,
             "description": "Weight for BM25 in hybrid search",
@@ -13877,794 +13841,6 @@
           "detail"
         ],
         "title": "RetrievalContractMismatchResponse",
-        "type": "object"
-      },
-      "RetrievalPilotAnswerRequest": {
-        "description": "Request a grounded answer produced entirely on the pilot retrieval lane.",
-        "properties": {
-          "include_sparse": {
-            "default": true,
-            "description": "Run the sparse (BM25/IDF) retrieval leg.",
-            "title": "Include Sparse",
-            "type": "boolean"
-          },
-          "include_vector": {
-            "default": true,
-            "description": "Run the dense (vector) retrieval leg.",
-            "title": "Include Vector",
-            "type": "boolean"
-          },
-          "model_override": {
-            "default": "",
-            "description": "Optional gateway alias override for generation.",
-            "title": "Model Override",
-            "type": "string"
-          },
-          "query": {
-            "description": "Question to answer from pilot retrieval context.",
-            "title": "Query",
-            "type": "string"
-          },
-          "repo_id": {
-            "description": "Corpus identifier",
-            "title": "Repo Id",
-            "type": "string"
-          },
-          "top_k": {
-            "default": 5,
-            "description": "Maximum chunks to ground the answer on.",
-            "maximum": 20.0,
-            "minimum": 1.0,
-            "title": "Top K",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "repo_id",
-          "query"
-        ],
-        "title": "RetrievalPilotAnswerRequest",
-        "type": "object"
-      },
-      "RetrievalPilotAnswerResponse": {
-        "description": "Grounded answer + citations produced by the pilot lane through the gateway.",
-        "properties": {
-          "answer": {
-            "description": "Grounded answer generated through LiteLLM.",
-            "title": "Answer",
-            "type": "string"
-          },
-          "citations": {
-            "description": "Chunks that grounded the answer.",
-            "items": {
-              "$ref": "#/components/schemas/ChunkMatch"
-            },
-            "title": "Citations",
-            "type": "array"
-          },
-          "corpus_id": {
-            "description": "Corpus identifier",
-            "title": "Corpus Id",
-            "type": "string"
-          },
-          "fusion_method": {
-            "default": "",
-            "description": "Fusion applied across requested legs.",
-            "title": "Fusion Method",
-            "type": "string"
-          },
-          "llm_used": {
-            "default": true,
-            "description": "True when the answer came from real generation (never fallback).",
-            "title": "Llm Used",
-            "type": "boolean"
-          },
-          "model": {
-            "default": "",
-            "description": "Model alias that produced the answer.",
-            "title": "Model",
-            "type": "string"
-          },
-          "ok": {
-            "default": true,
-            "title": "Ok",
-            "type": "boolean"
-          },
-          "provider": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ChatProviderInfo"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Gateway provider route used for generation."
-          },
-          "provider_response_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Provider response identifier when available.",
-            "title": "Provider Response Id"
-          },
-          "query": {
-            "description": "Question answered from pilot retrieval context.",
-            "title": "Query",
-            "type": "string"
-          },
-          "sparse_result_count": {
-            "default": 0,
-            "description": "Sparse-leg hits before fusion.",
-            "minimum": 0.0,
-            "title": "Sparse Result Count",
-            "type": "integer"
-          },
-          "vector_result_count": {
-            "default": 0,
-            "description": "Dense-leg hits before fusion.",
-            "minimum": 0.0,
-            "title": "Vector Result Count",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "corpus_id",
-          "query",
-          "answer"
-        ],
-        "title": "RetrievalPilotAnswerResponse",
-        "type": "object"
-      },
-      "RetrievalPilotExportRequest": {
-        "description": "Request to generate the OSS retrieval pilot sidecar export.",
-        "properties": {
-          "force_rebuild": {
-            "default": false,
-            "description": "Rebuild the pilot export even if it already exists.",
-            "title": "Force Rebuild",
-            "type": "boolean"
-          },
-          "repo_id": {
-            "description": "Corpus identifier",
-            "title": "Repo Id",
-            "type": "string"
-          },
-          "repo_path": {
-            "description": "Path to the corpus root on disk.",
-            "title": "Repo Path",
-            "type": "string"
-          }
-        },
-        "required": [
-          "repo_id",
-          "repo_path"
-        ],
-        "title": "RetrievalPilotExportRequest",
-        "type": "object"
-      },
-      "RetrievalPilotExportResponse": {
-        "description": "Response for a retrieval pilot export request.",
-        "properties": {
-          "ok": {
-            "default": true,
-            "title": "Ok",
-            "type": "boolean"
-          },
-          "status": {
-            "$ref": "#/components/schemas/RetrievalPilotStatusResponse",
-            "description": "Current pilot status after export."
-          },
-          "warnings": {
-            "description": "Non-fatal export warnings.",
-            "items": {
-              "type": "string"
-            },
-            "title": "Warnings",
-            "type": "array"
-          }
-        },
-        "required": [
-          "status"
-        ],
-        "title": "RetrievalPilotExportResponse",
-        "type": "object"
-      },
-      "RetrievalPilotIngestRequest": {
-        "description": "Request to hydrate the real Haystack/Qdrant execution lane from the sidecar export.",
-        "properties": {
-          "force_rebuild": {
-            "default": false,
-            "description": "Rebuild the local Qdrant collection from scratch.",
-            "title": "Force Rebuild",
-            "type": "boolean"
-          },
-          "repo_id": {
-            "description": "Corpus identifier",
-            "title": "Repo Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "repo_id"
-        ],
-        "title": "RetrievalPilotIngestRequest",
-        "type": "object"
-      },
-      "RetrievalPilotIngestResponse": {
-        "description": "Response for retrieval pilot ingest.",
-        "properties": {
-          "ok": {
-            "default": true,
-            "title": "Ok",
-            "type": "boolean"
-          },
-          "status": {
-            "$ref": "#/components/schemas/RetrievalPilotStatusResponse",
-            "description": "Pilot status snapshot after ingest."
-          },
-          "warnings": {
-            "description": "Non-fatal ingest warnings.",
-            "items": {
-              "type": "string"
-            },
-            "title": "Warnings",
-            "type": "array"
-          }
-        },
-        "required": [
-          "status"
-        ],
-        "title": "RetrievalPilotIngestResponse",
-        "type": "object"
-      },
-      "RetrievalPilotPackageStatus": {
-        "description": "Availability status for one OSS retrieval pilot dependency.",
-        "properties": {
-          "available": {
-            "description": "Whether the package is importable in the current environment.",
-            "title": "Available",
-            "type": "boolean"
-          },
-          "detail": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Short operator-facing note about the dependency state.",
-            "title": "Detail"
-          },
-          "label": {
-            "description": "Human-readable dependency label.",
-            "title": "Label",
-            "type": "string"
-          },
-          "package": {
-            "description": "Import/package name checked by the pilot.",
-            "title": "Package",
-            "type": "string"
-          }
-        },
-        "required": [
-          "package",
-          "label",
-          "available"
-        ],
-        "title": "RetrievalPilotPackageStatus",
-        "type": "object"
-      },
-      "RetrievalPilotSearchPreviewRequest": {
-        "description": "Request to search over the exported retrieval pilot sidecar.",
-        "properties": {
-          "query": {
-            "description": "Search query to run against the exported pilot documents.",
-            "title": "Query",
-            "type": "string"
-          },
-          "repo_id": {
-            "description": "Corpus identifier",
-            "title": "Repo Id",
-            "type": "string"
-          },
-          "top_k": {
-            "default": 5,
-            "description": "Maximum results to return.",
-            "maximum": 20.0,
-            "minimum": 1.0,
-            "title": "Top K",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "repo_id",
-          "query"
-        ],
-        "title": "RetrievalPilotSearchPreviewRequest",
-        "type": "object"
-      },
-      "RetrievalPilotSearchPreviewResponse": {
-        "description": "Response for retrieval pilot preview search.",
-        "properties": {
-          "corpus_id": {
-            "description": "Corpus identifier",
-            "title": "Corpus Id",
-            "type": "string"
-          },
-          "ok": {
-            "default": true,
-            "title": "Ok",
-            "type": "boolean"
-          },
-          "query": {
-            "description": "Query executed against the pilot export.",
-            "title": "Query",
-            "type": "string"
-          },
-          "results": {
-            "items": {
-              "$ref": "#/components/schemas/RetrievalPilotSearchPreviewResult"
-            },
-            "title": "Results",
-            "type": "array"
-          },
-          "status": {
-            "$ref": "#/components/schemas/RetrievalPilotStatusResponse",
-            "description": "Pilot status snapshot used for the preview search."
-          }
-        },
-        "required": [
-          "corpus_id",
-          "query",
-          "status"
-        ],
-        "title": "RetrievalPilotSearchPreviewResponse",
-        "type": "object"
-      },
-      "RetrievalPilotSearchPreviewResult": {
-        "description": "One preview-search hit from the retrieval pilot sidecar.",
-        "properties": {
-          "chunk_id": {
-            "description": "Exported chunk identifier.",
-            "title": "Chunk Id",
-            "type": "string"
-          },
-          "end_line": {
-            "description": "End line of the matched chunk.",
-            "minimum": 1.0,
-            "title": "End Line",
-            "type": "integer"
-          },
-          "excerpt": {
-            "description": "Short excerpt centered on the first match when possible.",
-            "title": "Excerpt",
-            "type": "string"
-          },
-          "file_path": {
-            "description": "Corpus-relative path for the matched chunk.",
-            "title": "File Path",
-            "type": "string"
-          },
-          "language": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Detected language for the chunk.",
-            "title": "Language"
-          },
-          "score": {
-            "description": "Preview relevance score.",
-            "minimum": 0.0,
-            "title": "Score",
-            "type": "number"
-          },
-          "source_path": {
-            "description": "Absolute source path for the matched chunk.",
-            "title": "Source Path",
-            "type": "string"
-          },
-          "start_line": {
-            "description": "Start line of the matched chunk.",
-            "minimum": 1.0,
-            "title": "Start Line",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "chunk_id",
-          "file_path",
-          "source_path",
-          "start_line",
-          "end_line",
-          "score",
-          "excerpt"
-        ],
-        "title": "RetrievalPilotSearchPreviewResult",
-        "type": "object"
-      },
-      "RetrievalPilotSearchRequest": {
-        "description": "Request to search the real Haystack/Qdrant execution lane.",
-        "properties": {
-          "include_sparse": {
-            "default": true,
-            "description": "Run the sparse (BM25/IDF) retrieval leg.",
-            "title": "Include Sparse",
-            "type": "boolean"
-          },
-          "include_vector": {
-            "default": true,
-            "description": "Run the dense (vector) retrieval leg.",
-            "title": "Include Vector",
-            "type": "boolean"
-          },
-          "query": {
-            "description": "Search query to execute against the real pilot lane.",
-            "title": "Query",
-            "type": "string"
-          },
-          "repo_id": {
-            "description": "Corpus identifier",
-            "title": "Repo Id",
-            "type": "string"
-          },
-          "top_k": {
-            "default": 5,
-            "description": "Maximum hits to return.",
-            "maximum": 20.0,
-            "minimum": 1.0,
-            "title": "Top K",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "repo_id",
-          "query"
-        ],
-        "title": "RetrievalPilotSearchRequest",
-        "type": "object"
-      },
-      "RetrievalPilotSearchResponse": {
-        "description": "Response for real Haystack/Qdrant pilot search.",
-        "properties": {
-          "backend": {
-            "const": "haystack_qdrant_local",
-            "default": "haystack_qdrant_local",
-            "description": "Search backend used for this response.",
-            "title": "Backend",
-            "type": "string"
-          },
-          "corpus_id": {
-            "description": "Corpus identifier",
-            "title": "Corpus Id",
-            "type": "string"
-          },
-          "fusion_method": {
-            "default": "",
-            "description": "Fusion applied across requested legs (rrf, weighted, single_leg).",
-            "title": "Fusion Method",
-            "type": "string"
-          },
-          "ok": {
-            "default": true,
-            "title": "Ok",
-            "type": "boolean"
-          },
-          "query": {
-            "description": "Query executed against the real pilot lane.",
-            "title": "Query",
-            "type": "string"
-          },
-          "results": {
-            "items": {
-              "$ref": "#/components/schemas/RetrievalPilotSearchResult"
-            },
-            "title": "Results",
-            "type": "array"
-          },
-          "sparse_result_count": {
-            "default": 0,
-            "description": "Hits returned by the sparse leg before fusion.",
-            "minimum": 0.0,
-            "title": "Sparse Result Count",
-            "type": "integer"
-          },
-          "status": {
-            "$ref": "#/components/schemas/RetrievalPilotStatusResponse",
-            "description": "Pilot status snapshot used for the real search."
-          },
-          "vector_result_count": {
-            "default": 0,
-            "description": "Hits returned by the dense leg before fusion.",
-            "minimum": 0.0,
-            "title": "Vector Result Count",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "corpus_id",
-          "query",
-          "status"
-        ],
-        "title": "RetrievalPilotSearchResponse",
-        "type": "object"
-      },
-      "RetrievalPilotSearchResult": {
-        "description": "One result from the real Haystack/Qdrant pilot lane.",
-        "properties": {
-          "chunk_id": {
-            "description": "Exported chunk identifier.",
-            "title": "Chunk Id",
-            "type": "string"
-          },
-          "content": {
-            "default": "",
-            "description": "Full chunk content for grounding and citation checks.",
-            "title": "Content",
-            "type": "string"
-          },
-          "end_line": {
-            "description": "End line of the matched chunk.",
-            "minimum": 1.0,
-            "title": "End Line",
-            "type": "integer"
-          },
-          "excerpt": {
-            "description": "Short excerpt centered on the first match when possible.",
-            "title": "Excerpt",
-            "type": "string"
-          },
-          "file_path": {
-            "description": "Corpus-relative path for the matched chunk.",
-            "title": "File Path",
-            "type": "string"
-          },
-          "language": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Detected language for the chunk.",
-            "title": "Language"
-          },
-          "metadata": {
-            "additionalProperties": true,
-            "description": "Provenance metadata carried through the pilot lane.",
-            "title": "Metadata",
-            "type": "object"
-          },
-          "score": {
-            "description": "Haystack/Qdrant relevance score.",
-            "minimum": 0.0,
-            "title": "Score",
-            "type": "number"
-          },
-          "source": {
-            "default": "vector",
-            "description": "Retrieval leg that produced this result.",
-            "enum": [
-              "vector",
-              "sparse",
-              "graph"
-            ],
-            "title": "Source",
-            "type": "string"
-          },
-          "source_path": {
-            "description": "Absolute source path for the matched chunk.",
-            "title": "Source Path",
-            "type": "string"
-          },
-          "start_line": {
-            "description": "Start line of the matched chunk.",
-            "minimum": 1.0,
-            "title": "Start Line",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "chunk_id",
-          "file_path",
-          "source_path",
-          "start_line",
-          "end_line",
-          "score",
-          "excerpt"
-        ],
-        "title": "RetrievalPilotSearchResult",
-        "type": "object"
-      },
-      "RetrievalPilotStatusResponse": {
-        "description": "Operator status for the OSS retrieval/indexing sidecar pilot.",
-        "properties": {
-          "backend": {
-            "const": "haystack_qdrant_sidecar",
-            "default": "haystack_qdrant_sidecar",
-            "description": "Current pilot backend target.",
-            "title": "Backend",
-            "type": "string"
-          },
-          "collection_name": {
-            "description": "Qdrant collection/index name for this pilot corpus.",
-            "title": "Collection Name",
-            "type": "string"
-          },
-          "corpus_id": {
-            "description": "Corpus identifier",
-            "title": "Corpus Id",
-            "type": "string"
-          },
-          "documents_path": {
-            "description": "JSONL export path for pilot-ready chunk documents.",
-            "title": "Documents Path",
-            "type": "string"
-          },
-          "execution_backend": {
-            "const": "haystack_qdrant_local",
-            "default": "haystack_qdrant_local",
-            "description": "Execution backend used by the real pilot ingest/search lane.",
-            "title": "Execution Backend",
-            "type": "string"
-          },
-          "execution_ready": {
-            "default": false,
-            "description": "Whether the real Haystack/Qdrant execution lane is hydrated and ready to search.",
-            "title": "Execution Ready",
-            "type": "boolean"
-          },
-          "export_dir": {
-            "description": "Directory where pilot export artifacts are stored.",
-            "title": "Export Dir",
-            "type": "string"
-          },
-          "export_exists": {
-            "description": "Whether a pilot export already exists on disk.",
-            "title": "Export Exists",
-            "type": "boolean"
-          },
-          "exported_chunk_count": {
-            "default": 0,
-            "description": "Chunks exported into the pilot sidecar.",
-            "minimum": 0.0,
-            "title": "Exported Chunk Count",
-            "type": "integer"
-          },
-          "exported_file_count": {
-            "default": 0,
-            "description": "Files exported into the pilot sidecar.",
-            "minimum": 0.0,
-            "title": "Exported File Count",
-            "type": "integer"
-          },
-          "indexed_document_count": {
-            "default": 0,
-            "description": "Number of documents currently ingested into the real pilot execution lane.",
-            "minimum": 0.0,
-            "title": "Indexed Document Count",
-            "type": "integer"
-          },
-          "last_exported_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "When the current pilot export was generated.",
-            "title": "Last Exported At"
-          },
-          "last_indexed_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "When the Haystack/Qdrant execution lane was last hydrated from the sidecar export.",
-            "title": "Last Indexed At"
-          },
-          "manifest_path": {
-            "description": "Manifest JSON path for the most recent pilot export.",
-            "title": "Manifest Path",
-            "type": "string"
-          },
-          "ok": {
-            "default": true,
-            "title": "Ok",
-            "type": "boolean"
-          },
-          "operator_hint": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "High-signal next-step guidance for the operator.",
-            "title": "Operator Hint"
-          },
-          "package_status": {
-            "description": "Availability of Docling, Haystack, and Qdrant dependencies for the pilot.",
-            "items": {
-              "$ref": "#/components/schemas/RetrievalPilotPackageStatus"
-            },
-            "title": "Package Status",
-            "type": "array"
-          },
-          "provenance_fields": {
-            "description": "Metadata fields preserved for provenance-correct pilot chunks.",
-            "items": {
-              "type": "string"
-            },
-            "title": "Provenance Fields",
-            "type": "array"
-          },
-          "qdrant_url": {
-            "description": "Base URL of the Compose-owned Qdrant service used by the pilot.",
-            "title": "Qdrant Url",
-            "type": "string"
-          },
-          "repo_path": {
-            "description": "Resolved corpus path used by the pilot.",
-            "title": "Repo Path",
-            "type": "string"
-          },
-          "search_preview_ready": {
-            "default": false,
-            "description": "Whether preview search can run against the exported pilot sidecar.",
-            "title": "Search Preview Ready",
-            "type": "boolean"
-          },
-          "skipped_large_files": {
-            "default": 0,
-            "description": "Files skipped because they exceeded indexing size limits.",
-            "minimum": 0.0,
-            "title": "Skipped Large Files",
-            "type": "integer"
-          },
-          "skipped_unreadable_files": {
-            "default": 0,
-            "description": "Files seen by the loader but skipped because text extraction produced no usable content.",
-            "minimum": 0.0,
-            "title": "Skipped Unreadable Files",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "corpus_id",
-          "repo_path",
-          "export_dir",
-          "documents_path",
-          "manifest_path",
-          "export_exists",
-          "qdrant_url",
-          "collection_name"
-        ],
-        "title": "RetrievalPilotStatusResponse",
         "type": "object"
       },
       "RuntimeCapabilitiesResponse": {
@@ -15105,11 +14281,11 @@
         "type": "object"
       },
       "SparseSearchConfig": {
-        "description": "Configuration for sparse (BM25) search.",
+        "description": "Configuration for the sparse (IDF-modified BM25 sparse vectors in Qdrant) leg.",
         "properties": {
           "bm25_b": {
             "default": 0.4,
-            "description": "BM25 length normalization (0 = no penalty, 1 = full penalty)",
+            "description": "BM25 length normalization for the Qdrant/bm25 sparse vectors (0 = no penalty, 1 = full penalty). Part of the sparse index contract (re-index on change).",
             "maximum": 1.0,
             "minimum": 0.0,
             "title": "Bm25 B",
@@ -15117,7 +14293,7 @@
           },
           "bm25_k1": {
             "default": 1.2,
-            "description": "BM25 term frequency saturation (higher = more weight to term frequency)",
+            "description": "BM25 term-frequency saturation for the Qdrant/bm25 sparse vectors (higher = more weight to term frequency). Part of the sparse index contract (re-index on change).",
             "maximum": 3.0,
             "minimum": 0.5,
             "title": "Bm25 K1",
@@ -15125,68 +14301,13 @@
           },
           "enabled": {
             "default": true,
-            "description": "Enable sparse BM25 search in tri-brid retrieval",
+            "description": "Enable the sparse (Qdrant/bm25) leg in tri-brid retrieval",
             "title": "Enabled",
-            "type": "boolean"
-          },
-          "engine": {
-            "default": "postgres_fts",
-            "description": "Sparse retrieval engine. 'postgres_fts' uses built-in FTS; 'pg_search_bm25' uses ParadeDB pg_search.",
-            "enum": [
-              "postgres_fts",
-              "pg_search_bm25"
-            ],
-            "title": "Engine",
-            "type": "string"
-          },
-          "file_path_fallback": {
-            "default": true,
-            "description": "If sparse retrieval returns empty, run a file_path-based fallback ranking (best-effort).",
-            "title": "File Path Fallback",
-            "type": "boolean"
-          },
-          "file_path_max_terms": {
-            "default": 6,
-            "description": "Max extracted query terms used for file_path fallback.",
-            "maximum": 32.0,
-            "minimum": 1.0,
-            "title": "File Path Max Terms",
-            "type": "integer"
-          },
-          "highlight": {
-            "default": false,
-            "description": "Enable sparse highlight payloads when supported (UI later).",
-            "title": "Highlight",
-            "type": "boolean"
-          },
-          "query_mode": {
-            "default": "plain",
-            "description": "How to interpret the sparse query string.",
-            "enum": [
-              "plain",
-              "phrase",
-              "boolean"
-            ],
-            "title": "Query Mode",
-            "type": "string"
-          },
-          "relax_max_terms": {
-            "default": 8,
-            "description": "Max extracted query terms used for relaxed sparse fallback.",
-            "maximum": 32.0,
-            "minimum": 1.0,
-            "title": "Relax Max Terms",
-            "type": "integer"
-          },
-          "relax_on_empty": {
-            "default": true,
-            "description": "If sparse retrieval returns empty, retry with a relaxed OR-style query (best-effort).",
-            "title": "Relax On Empty",
             "type": "boolean"
           },
           "top_k": {
             "default": 50,
-            "description": "Number of results to retrieve from sparse search",
+            "description": "Number of results to retrieve from the sparse leg",
             "maximum": 200.0,
             "minimum": 10.0,
             "title": "Top K",
@@ -18038,11 +17159,11 @@
         "type": "object"
       },
       "VectorSearchConfig": {
-        "description": "Configuration for vector (dense) search using pgvector.",
+        "description": "Configuration for the vector (dense) leg served by Qdrant.",
         "properties": {
           "enabled": {
             "default": true,
-            "description": "Enable vector search in tri-brid retrieval",
+            "description": "Enable the dense vector (Qdrant) leg in tri-brid retrieval",
             "title": "Enabled",
             "type": "boolean"
           },
@@ -18064,90 +17185,6 @@
           }
         },
         "title": "VectorSearchConfig",
-        "type": "object"
-      },
-      "VocabPreviewResponse": {
-        "description": "Response payload for the vocab preview endpoint.",
-        "properties": {
-          "corpus_id": {
-            "description": "Corpus identifier",
-            "title": "Corpus Id",
-            "type": "string"
-          },
-          "stemmer_lang": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Stemmer language (indexing.bm25_stemmer_lang)",
-            "title": "Stemmer Lang"
-          },
-          "terms": {
-            "description": "Top terms by document frequency",
-            "items": {
-              "$ref": "#/components/schemas/VocabPreviewTerm"
-            },
-            "title": "Terms",
-            "type": "array"
-          },
-          "tokenizer": {
-            "description": "BM25 tokenizer setting (indexing.bm25_tokenizer)",
-            "title": "Tokenizer",
-            "type": "string"
-          },
-          "top_n": {
-            "description": "Number of top terms requested",
-            "maximum": 500.0,
-            "minimum": 10.0,
-            "title": "Top N",
-            "type": "integer"
-          },
-          "total_terms": {
-            "description": "Total unique terms in the corpus vocabulary",
-            "minimum": 0.0,
-            "title": "Total Terms",
-            "type": "integer"
-          },
-          "ts_config": {
-            "description": "Postgres text search configuration used for tsv + query parsing",
-            "title": "Ts Config",
-            "type": "string"
-          }
-        },
-        "required": [
-          "corpus_id",
-          "top_n",
-          "tokenizer",
-          "ts_config",
-          "total_terms"
-        ],
-        "title": "VocabPreviewResponse",
-        "type": "object"
-      },
-      "VocabPreviewTerm": {
-        "description": "A single term in the Postgres FTS vocabulary preview.",
-        "properties": {
-          "doc_count": {
-            "description": "Number of chunks containing this term",
-            "minimum": 0.0,
-            "title": "Doc Count",
-            "type": "integer"
-          },
-          "term": {
-            "description": "Tokenized lexeme",
-            "title": "Term",
-            "type": "string"
-          }
-        },
-        "required": [
-          "term",
-          "doc_count"
-        ],
-        "title": "VocabPreviewTerm",
         "type": "object"
       }
     }
@@ -23454,102 +22491,6 @@
         ]
       }
     },
-    "/api/index/vocab-preview": {
-      "get": {
-        "description": "Return a vocabulary preview from Postgres FTS (chunks.tsv).\n\nThis powers the Indexing tab \u201cVocabulary Preview\u201d tooling.",
-        "operationId": "get_vocab_preview_api_index_vocab_preview_get",
-        "parameters": [
-          {
-            "description": "Number of top terms to return",
-            "in": "query",
-            "name": "top_n",
-            "required": false,
-            "schema": {
-              "default": 100,
-              "description": "Number of top terms to return",
-              "maximum": 500,
-              "minimum": 10,
-              "title": "Top N",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "query",
-            "name": "corpus_id",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Corpus Id"
-            }
-          },
-          {
-            "in": "query",
-            "name": "repo_id",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Repo Id"
-            }
-          },
-          {
-            "in": "query",
-            "name": "repo",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Repo"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/VocabPreviewResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Get Vocab Preview",
-        "tags": [
-          "index"
-        ]
-      }
-    },
     "/api/index/{corpus_id}": {
       "delete": {
         "operationId": "delete_index_api_index__corpus_id__delete",
@@ -23589,398 +22530,6 @@
           }
         },
         "summary": "Delete Index",
-        "tags": [
-          "index"
-        ]
-      }
-    },
-    "/api/index/{corpus_id}/pilot/answer": {
-      "post": {
-        "operationId": "answer_retrieval_pilot_execution_route_api_index__corpus_id__pilot_answer_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "corpus_id",
-            "required": true,
-            "schema": {
-              "title": "Corpus Id",
-              "type": "string"
-            }
-          },
-          {
-            "description": "Optional corpus path override for status context.",
-            "in": "query",
-            "name": "repo_path",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Optional corpus path override for status context.",
-              "title": "Repo Path"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/RetrievalPilotAnswerRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RetrievalPilotAnswerResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Answer Retrieval Pilot Execution Route",
-        "tags": [
-          "index"
-        ]
-      }
-    },
-    "/api/index/{corpus_id}/pilot/export": {
-      "post": {
-        "operationId": "run_retrieval_pilot_export_api_index__corpus_id__pilot_export_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "corpus_id",
-            "required": true,
-            "schema": {
-              "title": "Corpus Id",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/RetrievalPilotExportRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RetrievalPilotExportResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Run Retrieval Pilot Export",
-        "tags": [
-          "index"
-        ]
-      }
-    },
-    "/api/index/{corpus_id}/pilot/ingest": {
-      "post": {
-        "operationId": "ingest_retrieval_pilot_api_index__corpus_id__pilot_ingest_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "corpus_id",
-            "required": true,
-            "schema": {
-              "title": "Corpus Id",
-              "type": "string"
-            }
-          },
-          {
-            "description": "Optional corpus path override for status context.",
-            "in": "query",
-            "name": "repo_path",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Optional corpus path override for status context.",
-              "title": "Repo Path"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/RetrievalPilotIngestRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RetrievalPilotIngestResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Ingest Retrieval Pilot",
-        "tags": [
-          "index"
-        ]
-      }
-    },
-    "/api/index/{corpus_id}/pilot/search": {
-      "post": {
-        "operationId": "search_retrieval_pilot_execution_route_api_index__corpus_id__pilot_search_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "corpus_id",
-            "required": true,
-            "schema": {
-              "title": "Corpus Id",
-              "type": "string"
-            }
-          },
-          {
-            "description": "Optional corpus path override for status context.",
-            "in": "query",
-            "name": "repo_path",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Optional corpus path override for status context.",
-              "title": "Repo Path"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/RetrievalPilotSearchRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RetrievalPilotSearchResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Search Retrieval Pilot Execution Route",
-        "tags": [
-          "index"
-        ]
-      }
-    },
-    "/api/index/{corpus_id}/pilot/search-preview": {
-      "post": {
-        "operationId": "search_retrieval_pilot_api_index__corpus_id__pilot_search_preview_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "corpus_id",
-            "required": true,
-            "schema": {
-              "title": "Corpus Id",
-              "type": "string"
-            }
-          },
-          {
-            "description": "Optional corpus path override for status context.",
-            "in": "query",
-            "name": "repo_path",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Optional corpus path override for status context.",
-              "title": "Repo Path"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/RetrievalPilotSearchPreviewRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RetrievalPilotSearchPreviewResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Search Retrieval Pilot",
-        "tags": [
-          "index"
-        ]
-      }
-    },
-    "/api/index/{corpus_id}/pilot/status": {
-      "get": {
-        "operationId": "get_retrieval_pilot_status_api_index__corpus_id__pilot_status_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "corpus_id",
-            "required": true,
-            "schema": {
-              "title": "Corpus Id",
-              "type": "string"
-            }
-          },
-          {
-            "description": "Optional corpus path override for the pilot.",
-            "in": "query",
-            "name": "repo_path",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Optional corpus path override for the pilot.",
-              "title": "Repo Path"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RetrievalPilotStatusResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Get Retrieval Pilot Status",
         "tags": [
           "index"
         ]

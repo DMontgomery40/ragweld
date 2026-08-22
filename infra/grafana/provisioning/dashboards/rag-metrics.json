@@ -214,12 +214,12 @@
           "legendFormat": "embed_query p50"
         },
         {
-          "expr": "histogram_quantile(0.50, sum(rate(tribrid_search_stage_latency_seconds_bucket{stage=\"postgres_vector_search\"}[5m])) by (le))",
-          "legendFormat": "postgres_vector_search p50"
+          "expr": "histogram_quantile(0.50, sum(rate(tribrid_search_stage_latency_seconds_bucket{stage=\"qdrant_vector_search\"}[5m])) by (le))",
+          "legendFormat": "qdrant_vector_search p50"
         },
         {
-          "expr": "histogram_quantile(0.50, sum(rate(tribrid_search_stage_latency_seconds_bucket{stage=\"postgres_sparse_search\"}[5m])) by (le))",
-          "legendFormat": "postgres_sparse_search p50"
+          "expr": "histogram_quantile(0.50, sum(rate(tribrid_search_stage_latency_seconds_bucket{stage=\"qdrant_sparse_search\"}[5m])) by (le))",
+          "legendFormat": "qdrant_sparse_search p50"
         },
         {
           "expr": "histogram_quantile(0.50, sum(rate(tribrid_search_stage_latency_seconds_bucket{stage=\"neo4j_chunk_vector_search\"}[5m])) by (le))",
@@ -362,12 +362,12 @@
           "legendFormat": "embed_chunks p50"
         },
         {
-          "expr": "histogram_quantile(0.50, sum(rate(tribrid_index_stage_latency_seconds_bucket{stage=\"postgres_upsert_embeddings\"}[5m])) by (le))",
-          "legendFormat": "postgres_upsert_embeddings p50"
+          "expr": "histogram_quantile(0.50, sum(rate(tribrid_index_stage_latency_seconds_bucket{stage=\"postgres_upsert_chunks\"}[5m])) by (le))",
+          "legendFormat": "postgres_upsert_chunks p50"
         },
         {
-          "expr": "histogram_quantile(0.50, sum(rate(tribrid_index_stage_latency_seconds_bucket{stage=\"postgres_upsert_fts\"}[5m])) by (le))",
-          "legendFormat": "postgres_upsert_fts p50"
+          "expr": "histogram_quantile(0.50, sum(rate(tribrid_index_stage_latency_seconds_bucket{stage=\"qdrant_write_chunks\"}[5m])) by (le))",
+          "legendFormat": "qdrant_write_chunks p50"
         },
         {
           "expr": "histogram_quantile(0.50, sum(rate(tribrid_index_stage_latency_seconds_bucket{stage=\"neo4j_upsert_document_chunks\"}[5m])) by (le))",

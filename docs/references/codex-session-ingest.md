@@ -10,7 +10,7 @@ large local CLI/Desktop history corpora.
 - Purpose:
   - stream `~/.codex/sessions/**/rollout-*.jsonl`
   - normalize high-value user/assistant/tool/error events
-  - write a semantic corpus and an artifact corpus into local pgvector/Postgres
+  - write a semantic corpus and an artifact corpus: chunk rows into Postgres, dense + sparse vectors into the Compose-owned Qdrant service
   - expose a standalone Prometheus `/metrics` endpoint and JSON `/status`
   - run retrieval verification against the currently indexed corpus, even mid-run
   - expose a post-run status exporter so Prometheus/Grafana can keep showing terminal-state metrics
@@ -22,7 +22,7 @@ large local CLI/Desktop history corpora.
 - It reuses ragweld-compatible indexing semantics:
   - local embedding model naming
   - HuggingFace tokenization
-  - pgvector/Postgres corpora via `PostgresClient`
+  - Postgres chunk rows via `PostgresClient` and Qdrant vectors via `QdrantChunkStore` (`--qdrant-url`)
 - It does **not** reuse ragweld's metric names, dashboard json, or app runtime.
 
 ## Output shape
@@ -43,7 +43,7 @@ large local CLI/Desktop history corpora.
 - The worker is resumable by file size + mtime.
 - Retrieval verification writes `output/codex_session_ingest/verification.json` and can be re-run while a long ingest is still active.
 - Retrieval verification records per-leg latency so you can separate embedding time from vector-search time on the semantic path.
-- `build-vector-index` creates a per-corpus HNSW pgvector index for semantic corpora after a large ingest finishes.
+- Qdrant builds its own HNSW index per generation; there is no separate post-ingest index build step.
 - `serve-status` reads the persisted status and verification files and re-exposes them on `/metrics` and `/status` after the ingest worker exits.
 - Remote telemetry bootstrap updates Prometheus in the Grafana LXC and imports a dedicated dashboard.
 - If throughput is poor, reduce embedding batch size before increasing concurrency.
