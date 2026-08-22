@@ -22,6 +22,7 @@ export const RAGWELD_DOCKER_SERVICES = [
   'vllm',
   'qdrant',
   'mlflow',
+  'flyte',
 ] as const;
 
 export type RagweldDockerService = (typeof RAGWELD_DOCKER_SERVICES)[number];

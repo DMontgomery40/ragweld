@@ -3148,6 +3148,10 @@ class AgentTrainRun(BaseModel):
         default=None,
         description="External workflow execution identifier when orchestration is delegated.",
     )
+    workflow_phase: str | None = Field(
+        default=None,
+        description="Last observed external workflow execution phase (for example Flyte RUNNING/SUCCEEDED/ABORTED).",
+    )
     tracking_run_id: str | None = Field(
         default=None,
         description="External run identifier in the tracking system when available.",
@@ -3191,6 +3195,7 @@ class AgentTrainRunMeta(BaseModel):
     tracking_backend: str = "local"
     execution_backend: str = "mlx_qwen3"
     workflow_run_id: str | None = None
+    workflow_phase: str | None = None
     tracking_run_id: str | None = None
     bundle_id: str | None = None
     lineage_ref: LineageRef | None = None
@@ -3230,6 +3235,22 @@ class AgentTrainMetricEvent(BaseModel):
 class AgentTrainStartResponse(BaseModel):
     ok: bool = Field(default=True)
     run_id: str
+
+
+class AgentTrainExecuteRequest(BaseModel):
+    """Workflow-side hand-off: the orchestrator asks this API to execute a queued run."""
+
+    workflow_run_id: str = Field(
+        min_length=1,
+        description="External workflow execution identifier that owns this run (must match the run record).",
+    )
+
+
+class AgentTrainExecuteResponse(BaseModel):
+    ok: bool = Field(default=True)
+    run_id: str
+    status: AgentTrainRunStatus
+    workflow_run_id: str | None = None
 
 
 class AgentTrainMetricsResponse(BaseModel):
@@ -5502,6 +5523,15 @@ class TrainingConfig(BaseModel):
         description="Flyte launch plan name for the Learning Agent workflow lane.",
     )
 
+    ragweld_agent_flyte_callback_base_url: str = Field(
+        default="",
+        description=(
+            "Base URL of this Ragweld API as reachable from Flyte task pods "
+            "(the workflow task hands the run to this API's execute boundary and tracks it). "
+            "On Colima the host is the VM gateway, for example http://192.168.5.2:58012."
+        ),
+    )
+
     ragweld_agent_mlflow_tracking_url: str = Field(
         default="http://127.0.0.1:55500",
         description="Base URL of the Compose-owned MLflow Tracking server used by Learning Agent runs.",
@@ -6672,6 +6702,7 @@ class TriBridConfig(BaseModel):
             'RAGWELD_AGENT_FLYTE_PROJECT': self.training.ragweld_agent_flyte_project,
             'RAGWELD_AGENT_FLYTE_DOMAIN': self.training.ragweld_agent_flyte_domain,
             'RAGWELD_AGENT_FLYTE_LAUNCHPLAN': self.training.ragweld_agent_flyte_launchplan,
+            'RAGWELD_AGENT_FLYTE_CALLBACK_BASE_URL': self.training.ragweld_agent_flyte_callback_base_url,
             'RAGWELD_AGENT_MLFLOW_TRACKING_URL': self.training.ragweld_agent_mlflow_tracking_url,
             'RAGWELD_AGENT_MLFLOW_EXPERIMENT_NAME': self.training.ragweld_agent_mlflow_experiment_name,
             'RAGWELD_AGENT_UNSLOTH_IMAGE': self.training.ragweld_agent_unsloth_image,
@@ -7049,6 +7080,7 @@ class TriBridConfig(BaseModel):
                 ragweld_agent_flyte_project=data.get('RAGWELD_AGENT_FLYTE_PROJECT', 'ragweld'),
                 ragweld_agent_flyte_domain=data.get('RAGWELD_AGENT_FLYTE_DOMAIN', 'development'),
                 ragweld_agent_flyte_launchplan=data.get('RAGWELD_AGENT_FLYTE_LAUNCHPLAN', ''),
+                ragweld_agent_flyte_callback_base_url=data.get('RAGWELD_AGENT_FLYTE_CALLBACK_BASE_URL', ''),
                 ragweld_agent_mlflow_tracking_url=data.get('RAGWELD_AGENT_MLFLOW_TRACKING_URL', ''),
                 ragweld_agent_mlflow_experiment_name=data.get('RAGWELD_AGENT_MLFLOW_EXPERIMENT_NAME', 'ragweld-learning-agent'),
                 ragweld_agent_unsloth_image=data.get('RAGWELD_AGENT_UNSLOTH_IMAGE', ''),

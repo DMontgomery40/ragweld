@@ -1,5 +1,5 @@
 {
-  "model_count": 247,
+  "model_count": 249,
   "module": "server.models.tribrid_config_model",
   "root_models": {
     "ActiveSources": {
@@ -402,6 +402,64 @@
         }
       },
       "title": "AgentTrainDiffResponse",
+      "type": "object"
+    },
+    "AgentTrainExecuteRequest": {
+      "description": "Workflow-side hand-off: the orchestrator asks this API to execute a queued run.",
+      "properties": {
+        "workflow_run_id": {
+          "description": "External workflow execution identifier that owns this run (must match the run record).",
+          "minLength": 1,
+          "title": "Workflow Run Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "workflow_run_id"
+      ],
+      "title": "AgentTrainExecuteRequest",
+      "type": "object"
+    },
+    "AgentTrainExecuteResponse": {
+      "properties": {
+        "ok": {
+          "default": true,
+          "title": "Ok",
+          "type": "boolean"
+        },
+        "run_id": {
+          "title": "Run Id",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "queued",
+            "running",
+            "completed",
+            "failed",
+            "cancelled"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "workflow_run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Workflow Run Id"
+        }
+      },
+      "required": [
+        "run_id",
+        "status"
+      ],
+      "title": "AgentTrainExecuteResponse",
       "type": "object"
     },
     "AgentTrainMetricEvent": {
@@ -1302,6 +1360,19 @@
           "title": "Workflow Backend",
           "type": "string"
         },
+        "workflow_phase": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Last observed external workflow execution phase (for example Flyte RUNNING/SUCCEEDED/ABORTED).",
+          "title": "Workflow Phase"
+        },
         "workflow_run_id": {
           "anyOf": [
             {
@@ -1495,6 +1566,18 @@
           "default": "local",
           "title": "Workflow Backend",
           "type": "string"
+        },
+        "workflow_phase": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Workflow Phase"
         },
         "workflow_run_id": {
           "anyOf": [
@@ -1713,6 +1796,18 @@
               "default": "local",
               "title": "Workflow Backend",
               "type": "string"
+            },
+            "workflow_phase": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Workflow Phase"
             },
             "workflow_run_id": {
               "anyOf": [
@@ -30317,6 +30412,12 @@
           "title": "Ragweld Agent Flyte Admin Base Url",
           "type": "string"
         },
+        "ragweld_agent_flyte_callback_base_url": {
+          "default": "",
+          "description": "Base URL of this Ragweld API as reachable from Flyte task pods (the workflow task hands the run to this API's execute boundary and tracks it). On Colima the host is the VM gateway, for example http://192.168.5.2:58012.",
+          "title": "Ragweld Agent Flyte Callback Base Url",
+          "type": "string"
+        },
         "ragweld_agent_flyte_console_base_url": {
           "default": "",
           "description": "Base URL for Flyte Console (used for operator deep links).",
@@ -33681,6 +33782,12 @@
               "default": "",
               "description": "Base URL for Flyte Admin HTTP access (used for readiness checks and operator links).",
               "title": "Ragweld Agent Flyte Admin Base Url",
+              "type": "string"
+            },
+            "ragweld_agent_flyte_callback_base_url": {
+              "default": "",
+              "description": "Base URL of this Ragweld API as reachable from Flyte task pods (the workflow task hands the run to this API's execute boundary and tracks it). On Colima the host is the VM gateway, for example http://192.168.5.2:58012.",
+              "title": "Ragweld Agent Flyte Callback Base Url",
               "type": "string"
             },
             "ragweld_agent_flyte_console_base_url": {

@@ -64,7 +64,7 @@ Chat is explicitly **not** protected as an implementation. It should be rebuilt 
 
 ### What Is Still Legacy And Still Needs Replacement
 
-- Training execution and operator flows are still dominated by the old custom / MLX-native stack instead of `Flyte + Unsloth + MLflow`.
+- Training execution still runs on the MLX-native backend: Flyte orchestrates Learning Agent runs and MLflow tracks them, but `Unsloth` needs a CUDA host.
 - Eval analysis/drilldown still needs its full `Langfuse + MLflow + Ragas/Promptfoo` substrate.
 - Chat is still hand-rolled and has not yet been rebuilt on `assistant-ui`.
 - Large parts of the repo still describe the mainline implementation below; treat the sections in this README as current-state context unless the fork status above says otherwise.
@@ -350,6 +350,7 @@ With full observability stack (Prometheus + Grafana + Loki + Promtail):
 
 ```bash
 ./start.sh --with-observability
+./start.sh --with-flyte            # adds the Flyte control plane for Learning Agent orchestration
 ```
 
 Stop only Ragweld-owned host processes and containers while preserving all data

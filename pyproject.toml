@@ -70,6 +70,11 @@ dev = [
     "datamodel-code-generator>=0.25.0",
 ]
 
+flyte = [
+    # Registration-time only: packages infra/flyte/workflows into the Flyte control plane
+    "flytekit>=1.16,<2",
+]
+
 mlx = [
     "mlx>=0.12.0",
     "mlx-lm>=0.17.0",
@@ -143,4 +148,5 @@ markers = [
     "requires_neo4j: requires a live authenticated Neo4j connection",
     "requires_pg_search: requires the optional ParadeDB pg_search extension",
     "requires_qdrant: requires a live Qdrant vector-store service",
+    "requires_flyte: requires the live Compose-owned Flyte control plane",
 ]

@@ -27,14 +27,15 @@ const SERVICE_GROUPS: Array<{
     services: ['litellm', 'vllm'],
   },
   {
-    title: 'Vector store (pilot lane)',
-    description: 'Qdrant backs the Haystack/Docling/Qdrant retrieval lane.',
+    title: 'Vector store',
+    description: 'Qdrant holds the dense + sparse vectors for every corpus on the Haystack/Docling/Qdrant retrieval lane.',
     services: ['qdrant'],
   },
   {
-    title: 'MLOps tracking',
-    description: 'MLflow records Learning Agent runs, metrics, and artifacts when tracking=mlflow is selected.',
-    services: ['mlflow'],
+    title: 'MLOps tracking and orchestration',
+    description:
+      'MLflow records Learning Agent runs, metrics, and artifacts when tracking=mlflow is selected; Flyte owns launch/status/cancel when workflow=flyte is selected (start with ./start.sh --with-flyte).',
+    services: ['mlflow', 'flyte'],
   },
   {
     title: 'Observability',
@@ -58,6 +59,7 @@ const SERVICE_LABELS: Record<RagweldDockerService, string> = {
   vllm: 'vLLM Serving',
   qdrant: 'Qdrant Vector Store',
   mlflow: 'MLflow Tracking',
+  flyte: 'Flyte Control Plane',
 };
 
 function isKnownService(value: string | null | undefined): value is RagweldDockerService {

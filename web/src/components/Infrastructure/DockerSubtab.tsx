@@ -21,6 +21,7 @@ const SERVICE_LABELS: Record<RagweldDockerService, string> = {
   vllm: 'vLLM Serving',
   qdrant: 'Qdrant Vector Store',
   mlflow: 'MLflow Tracking',
+  flyte: 'Flyte Control Plane',
 };
 
 function isRagweldService(value: string | null | undefined): value is RagweldDockerService {

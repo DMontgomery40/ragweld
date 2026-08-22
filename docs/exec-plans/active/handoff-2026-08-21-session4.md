@@ -3,7 +3,11 @@
 > Status 2026-08-21 (later in session 4): Phase A1 (retrieval promotion
 > cutover) landed on `main`; see the execution record in
 > `retrieval-promotion-cutover-2026-08-21.md` and `docs/references/retrieval-lane.md`.
-> Continue from A2. The transient dev-proxy 503s seen once in Chrome on
+> A2 (Flyte orchestration) landed later in session 4: Compose-owned `flyte`
+> service, `scripts/flyte_register_learning_agent.sh`, flyteadmin REST client,
+> launch/execute/status/cancel wiring; see
+> `docs/references/training-control-plane-slice.md`. Continue from A3.
+> The transient dev-proxy 503s seen once in Chrome on
 > `/api/index/{id}/status|stats` and `/api/chat/models` (not present in the API
 > log, not reproducible) belong to B12.
 

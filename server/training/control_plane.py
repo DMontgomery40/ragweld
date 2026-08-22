@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+import asyncio
 from urllib.parse import quote, urlsplit, urlunsplit
 
 import httpx
@@ -12,6 +12,7 @@ from server.models.tribrid_config_model import (
     TrainingControlPlaneComponentStatus,
     TriBridConfig,
 )
+from server.training.flyte_client import FlyteAdminClient, FlyteUnavailableError
 
 _TIMEOUT = httpx.Timeout(3.0, connect=2.0)
 
@@ -52,26 +53,20 @@ def _flyte_console_execution_url(console_base_url: str, project: str, domain: st
     )
 
 
-def _flyte_openapi_url(admin_base_url: str) -> str:
-    base = _clean_url(admin_base_url)
-    if not base:
-        return ""
-    if base.endswith("/api/v1"):
-        return f"{base}/openapi"
-    return f"{base}/api/v1/openapi"
+async def _probe_flyte_launch_plan(admin_base_url: str, project: str, domain: str, launchplan: str) -> tuple[bool, str]:
+    """Functional readiness: admin healthy AND the launch plan is registered."""
 
+    def _probe() -> str:
+        client = FlyteAdminClient(admin_base_url, timeout_s=3.0)
+        client.healthcheck()
+        return client.resolve_launch_plan(project, domain, launchplan).version
 
-async def _probe_get(url: str) -> tuple[bool, str]:
-    if not url:
-        return False, "URL is empty."
     try:
-        async with httpx.AsyncClient(timeout=_TIMEOUT, follow_redirects=True) as client:
-            response = await client.get(url, headers={"Accept": "application/json"})
-        if response.status_code < 400:
-            return True, f"HTTP {response.status_code}"
-        return False, f"HTTP {response.status_code}"
-    except Exception as exc:
-        return False, f"{type(exc).__name__}: {exc}"
+        version = await asyncio.to_thread(_probe)
+    except FlyteUnavailableError as exc:
+        return False, str(exc)
+    return True, f"Launch plan {launchplan} v{version} registered in {project}/{domain}."
+
 
 
 async def _probe_mlflow_experiment(tracking_url: str, experiment_name: str) -> tuple[bool, str]:
@@ -189,8 +184,17 @@ def build_agent_run_operator_hint(run: AgentTrainRun, cfg: TriBridConfig) -> str
             "Learning Agent target stack is configured for Flyte + MLflow + Unsloth, "
             "but this run still used the local training lane."
         )
+    if str(run.workflow_backend or "").strip() == "flyte":
+        phase = str(run.workflow_phase or "").strip()
+        execution = str(run.workflow_run_id or "").strip()
+        if phase and execution:
+            return (
+                f"Flyte execution {execution} owns this run's workflow state (phase {phase}); "
+                f"training executes on the host {run.execution_backend} backend through the execute boundary."
+            )
+        return "Flyte owns this run's workflow state; training executes on the host through the execute boundary."
     if str(run.workflow_backend or "").strip() == "local":
-        return "Local Learning Agent lane active; use the control-plane status surface to prepare the OSS cutover."
+        return "Local Learning Agent lane active; select workflow=flyte in Training Center to orchestrate runs through Flyte."
     return None
 
 
@@ -204,6 +208,7 @@ async def build_agent_control_plane_status(cfg: TriBridConfig) -> AgentTrainCont
     flyte_project = str(cfg.training.ragweld_agent_flyte_project or "").strip()
     flyte_domain = str(cfg.training.ragweld_agent_flyte_domain or "").strip()
     flyte_launchplan = str(cfg.training.ragweld_agent_flyte_launchplan or "").strip()
+    flyte_callback = _clean_url(cfg.training.ragweld_agent_flyte_callback_base_url)
     mlflow_tracking_url = _clean_url(cfg.training.ragweld_agent_mlflow_tracking_url)
     mlflow_experiment = str(cfg.training.ragweld_agent_mlflow_experiment_name or "").strip()
     unsloth_image = str(cfg.training.ragweld_agent_unsloth_image or "").strip()
@@ -237,6 +242,7 @@ async def build_agent_control_plane_status(cfg: TriBridConfig) -> AgentTrainCont
             ("project", flyte_project),
             ("domain", flyte_domain),
             ("launch plan", flyte_launchplan),
+            ("callback base URL", flyte_callback),
         )
         if not value
     ]
@@ -248,7 +254,7 @@ async def build_agent_control_plane_status(cfg: TriBridConfig) -> AgentTrainCont
                 enabled=False,
                 configured=bool(flyte_admin or flyte_console or flyte_launchplan),
                 state="disabled",
-                detail="Local workflow lane still active.",
+                detail="Local workflow lane active; runs execute in-process without an orchestrator.",
                 links=flyte_links,
             )
         )
@@ -265,7 +271,7 @@ async def build_agent_control_plane_status(cfg: TriBridConfig) -> AgentTrainCont
             )
         )
     else:
-        ok, detail = await _probe_get(_flyte_openapi_url(flyte_admin))
+        ok, detail = await _probe_flyte_launch_plan(flyte_admin, flyte_project, flyte_domain, flyte_launchplan)
         components.append(
             TrainingControlPlaneComponentStatus(
                 kind="flyte",
@@ -376,19 +382,33 @@ async def build_agent_control_plane_status(cfg: TriBridConfig) -> AgentTrainCont
         component.state == "ready" for component in components if component.enabled
     )
 
-    if lane == "legacy_local":
+    degraded = [component.label for component in components if component.enabled and component.state != "ready"]
+    if degraded:
         operator_hint = (
-            "Learning Agent runs still use the local training lane. "
-            "Set workflow=flyte, tracking=mlflow, and execution=unsloth in Training Center to prepare the replacement slice."
+            f"Resolve {', '.join(degraded)} readiness before launching Learning Agent runs; "
+            "launch refuses with a typed 503 until every selected backend is reachable."
+        )
+    elif lane == "flyte_mlflow_unsloth":
+        operator_hint = (
+            "Control plane is ready: Flyte orchestrates launch/status/cancel, MLflow records runs, "
+            "and Unsloth executes training."
         )
     else:
-        degraded = [component.label for component in components if component.enabled and component.state != "ready"]
-        if degraded:
-            operator_hint = f"Resolve {', '.join(degraded)} readiness before cutting Learning Agent launch/status over."
-        else:
-            operator_hint = (
-                "Control plane is ready. The next bounded slice can cut Learning Agent launch and status onto Flyte + MLflow + Unsloth."
-            )
+        workflow_text = (
+            "Flyte orchestrates launch/status/cancel"
+            if workflow_backend == "flyte"
+            else "runs use the local training lane without an orchestrator"
+        )
+        tracking_text = "MLflow records runs" if tracking_backend == "mlflow" else "run truth stays in local run files"
+        execution_text = (
+            f"training executes on the host {execution_backend} backend"
+            if execution_backend != "unsloth"
+            else "Unsloth executes training"
+        )
+        operator_hint = (
+            f"Learning Agent: {workflow_text}; {tracking_text}; {execution_text}. "
+            "The full target lane is workflow=flyte, tracking=mlflow, execution=unsloth (Unsloth needs a CUDA host)."
+        )
 
     return AgentTrainControlPlaneStatusResponse(
         ok=True,

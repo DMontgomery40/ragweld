@@ -40,7 +40,7 @@ async def _delete_corpus(client: AsyncClient, corpus_id: str) -> None:
 
 @pytest.mark.requires_postgres
 @pytest.mark.asyncio
-async def test_flyte_workflow_selection_fails_closed(client: AsyncClient) -> None:
+async def test_flyte_workflow_selection_fails_closed_without_required_config(client: AsyncClient) -> None:
     corpus_id = f"pytest_launch_flyte_{uuid.uuid4().hex[:8]}"
     await _create_corpus(client, corpus_id)
     try:
@@ -50,8 +50,45 @@ async def test_flyte_workflow_selection_fails_closed(client: AsyncClient) -> Non
         detail = response.json()["detail"]
         assert detail["code"] == "workflow_backend_unavailable"
         assert detail["backend"] == "flyte"
-        assert "refusing to fake orchestration" in detail["message"].lower()
-        assert detail["operator_hint"]
+        assert "required config is empty" in detail["message"].lower()
+        assert "ragweld_agent_flyte_admin_base_url" in detail["message"]
+        assert "ragweld_agent_flyte_callback_base_url" in detail["message"]
+        assert "does not fall back" in detail["operator_hint"].lower()
+    finally:
+        await _delete_corpus(client, corpus_id)
+
+
+@pytest.mark.requires_postgres
+@pytest.mark.asyncio
+async def test_flyte_workflow_selection_fails_closed_when_admin_unreachable(client: AsyncClient) -> None:
+    corpus_id = f"pytest_launch_flyte_{uuid.uuid4().hex[:8]}"
+    await _create_corpus(client, corpus_id)
+    try:
+        await _set_training_config(
+            client,
+            corpus_id,
+            {
+                "ragweld_agent_workflow_backend": "flyte",
+                # Real-but-closed local port: connection is refused.
+                "ragweld_agent_flyte_admin_base_url": "http://127.0.0.1:9",
+                "ragweld_agent_flyte_project": "ragweld",
+                "ragweld_agent_flyte_domain": "development",
+                "ragweld_agent_flyte_launchplan": "learning-agent-train",
+                "ragweld_agent_flyte_callback_base_url": "http://192.0.2.10:58012",
+            },
+        )
+        response = await client.post("/api/agent/train/start", json={"repo_id": corpus_id})
+        assert response.status_code == 503, response.text
+        detail = response.json()["detail"]
+        assert detail["code"] == "workflow_backend_unavailable"
+        assert detail["backend"] == "flyte"
+        assert "unreachable" in detail["message"].lower()
+        assert "flyte_register_learning_agent" in detail["operator_hint"]
+        assert "does not fall back" in detail["operator_hint"].lower()
+
+        runs = await client.get(f"/api/agent/train/runs?corpus_id={corpus_id}")
+        assert runs.status_code == 200
+        assert runs.json()["runs"] == []
     finally:
         await _delete_corpus(client, corpus_id)
 

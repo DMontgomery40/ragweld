@@ -15,6 +15,7 @@ START_BACKEND=1
 START_FRONTEND=1
 BACKEND_MODE="local"
 WITH_OBSERVABILITY=0
+WITH_FLYTE=0
 NATIVE_POSTGRES=0
 DRY_RUN=0
 BACKEND_PID=""
@@ -30,6 +31,7 @@ runs FastAPI plus Vite on the host.
 Options:
   --docker-backend       Run the API through Compose instead of on the host
   --with-observability   Add Prometheus, Grafana, Loki, Promtail, Tempo, and Alloy
+  --with-flyte           Add the Flyte control plane (Learning Agent orchestration)
   --native-postgres      Use an already-running host Postgres instead of Compose Postgres
   --lan                  Bind Vite to 0.0.0.0
   --no-docker            Do not start Compose services
@@ -200,6 +202,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --docker-backend) BACKEND_MODE="docker" ;;
     --with-observability) WITH_OBSERVABILITY=1 ;;
+    --with-flyte) WITH_FLYTE=1 ;;
     --native-postgres) NATIVE_POSTGRES=1 ;;
     --lan) FRONTEND_HOST="0.0.0.0" ;;
     --no-docker) START_DOCKER=0 ;;
@@ -290,6 +293,9 @@ if [[ "$START_DOCKER" == "1" ]]; then
   [[ "$NATIVE_POSTGRES" == "1" ]] && services=(neo4j qdrant mlflow vllm litellm)
   if [[ "$WITH_OBSERVABILITY" == "1" ]]; then
     services+=(postgres-exporter prometheus grafana loki promtail tempo alloy)
+  fi
+  if [[ "$WITH_FLYTE" == "1" ]]; then
+    services+=(flyte)
   fi
   if [[ "$BACKEND_MODE" == "docker" && "$START_BACKEND" == "1" ]]; then
     services+=(api)

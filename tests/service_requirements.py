@@ -147,15 +147,41 @@ def probe_qdrant(
     return ServiceCapability(service="Qdrant", available=True, reason=f"Qdrant is reachable at {url}")
 
 
+def probe_flyte(
+    env: Mapping[str, str] | None = None,
+    *,
+    timeout_seconds: float = 1.0,
+) -> ServiceCapability:
+    values = os.environ if env is None else env
+    url = str(values.get("FLYTE_ADMIN_URL") or "http://127.0.0.1:30080").rstrip("/")
+    try:
+        response = httpx.get(f"{url}/healthcheck", timeout=timeout_seconds)
+        ok = response.status_code < 400
+    except Exception as exc:
+        return ServiceCapability(
+            service="Flyte",
+            available=False,
+            reason=f"Flyte admin is unavailable at {url} ({type(exc).__name__}); start it with ./start.sh --with-flyte",
+        )
+    if not ok:
+        return ServiceCapability(
+            service="Flyte",
+            available=False,
+            reason=f"Flyte admin at {url} responded {response.status_code}",
+        )
+    return ServiceCapability(service="Flyte", available=True, reason=f"Flyte admin is reachable at {url}")
+
+
 def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line("markers", "requires_postgres: requires a live authenticated PostgreSQL connection")
     config.addinivalue_line("markers", "requires_neo4j: requires a live authenticated Neo4j connection")
     config.addinivalue_line("markers", "requires_qdrant: requires a live Qdrant vector-store service")
+    config.addinivalue_line("markers", "requires_flyte: requires the live Compose-owned Flyte control plane")
 
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
     del config
-    required: dict[str, list[pytest.Item]] = {"postgres": [], "neo4j": [], "qdrant": []}
+    required: dict[str, list[pytest.Item]] = {"postgres": [], "neo4j": [], "qdrant": [], "flyte": []}
     for item in items:
         if item.get_closest_marker("requires_postgres") is not None:
             required["postgres"].append(item)
@@ -163,11 +189,14 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
             required["neo4j"].append(item)
         if item.get_closest_marker("requires_qdrant") is not None:
             required["qdrant"].append(item)
+        if item.get_closest_marker("requires_flyte") is not None:
+            required["flyte"].append(item)
 
     probes = {
         "postgres": probe_postgres,
         "neo4j": probe_neo4j,
         "qdrant": probe_qdrant,
+        "flyte": probe_flyte,
     }
     unavailable: dict[str, ServiceCapability] = {}
     for name, marked_items in required.items():

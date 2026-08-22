@@ -1,0 +1,11 @@
+# flytectl / pyflyte configuration for the Compose-owned Flyte control plane
+# (service `flyte` in docker-compose.yml, published on 127.0.0.1:30080).
+admin:
+  endpoint: dns:///127.0.0.1:30080
+  authType: Pkce
+  insecure: true
+console:
+  endpoint: http://127.0.0.1:30080
+logger:
+  show-source: true
+  level: 0

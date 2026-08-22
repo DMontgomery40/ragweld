@@ -46,6 +46,7 @@ _DOCKER_SERVICES = frozenset(
         "vllm",
         "qdrant",
         "mlflow",
+        "flyte",
     }
 )
 _DOCKER_ACTIONS = frozenset({"start", "stop", "restart"})

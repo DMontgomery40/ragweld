@@ -271,6 +271,63 @@
         "title": "AgentTrainDiffResponse",
         "type": "object"
       },
+      "AgentTrainExecuteRequest": {
+        "description": "Workflow-side hand-off: the orchestrator asks this API to execute a queued run.",
+        "properties": {
+          "workflow_run_id": {
+            "description": "External workflow execution identifier that owns this run (must match the run record).",
+            "minLength": 1,
+            "title": "Workflow Run Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "workflow_run_id"
+        ],
+        "title": "AgentTrainExecuteRequest",
+        "type": "object"
+      },
+      "AgentTrainExecuteResponse": {
+        "properties": {
+          "ok": {
+            "default": true,
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "queued",
+              "running",
+              "completed",
+              "failed",
+              "cancelled"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "workflow_run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workflow Run Id"
+          }
+        },
+        "required": [
+          "run_id",
+          "status"
+        ],
+        "title": "AgentTrainExecuteResponse",
+        "type": "object"
+      },
       "AgentTrainMetricEvent": {
         "properties": {
           "epoch": {
@@ -734,6 +791,18 @@
             "title": "Workflow Backend",
             "type": "string"
           },
+          "workflow_phase": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Last observed external workflow execution phase (for example Flyte RUNNING/SUCCEEDED/ABORTED).",
+            "title": "Workflow Phase"
+          },
           "workflow_run_id": {
             "anyOf": [
               {
@@ -867,6 +936,17 @@
             "default": "local",
             "title": "Workflow Backend",
             "type": "string"
+          },
+          "workflow_phase": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workflow Phase"
           },
           "workflow_run_id": {
             "anyOf": [
@@ -16275,6 +16355,12 @@
             "title": "Ragweld Agent Flyte Admin Base Url",
             "type": "string"
           },
+          "ragweld_agent_flyte_callback_base_url": {
+            "default": "",
+            "description": "Base URL of this Ragweld API as reachable from Flyte task pods (the workflow task hands the run to this API's execute boundary and tracks it). On Colima the host is the VM gateway, for example http://192.168.5.2:58012.",
+            "title": "Ragweld Agent Flyte Callback Base Url",
+            "type": "string"
+          },
           "ragweld_agent_flyte_console_base_url": {
             "default": "",
             "description": "Base URL for Flyte Console (used for operator deep links).",
@@ -17434,6 +17520,59 @@
           }
         },
         "summary": "Diff Train Runs",
+        "tags": [
+          "agent"
+        ]
+      }
+    },
+    "/api/agent/train/run/{run_id}/execute": {
+      "post": {
+        "description": "Workflow-side hand-off: the Flyte task asks this API to execute a queued run.\n\nOnly a Flyte-owned run whose execution identifier matches may be executed\nhere; the call is idempotent while the run is running.",
+        "operationId": "execute_train_run_api_agent_train_run__run_id__execute_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentTrainExecuteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentTrainExecuteResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Execute Train Run",
         "tags": [
           "agent"
         ]

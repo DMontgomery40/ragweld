@@ -6,6 +6,7 @@ import math
 import os
 import shutil
 import tempfile
+import time
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -30,6 +31,8 @@ from server.models.tribrid_config_model import (
     AgentTrainControlPlaneStatusResponse,
     AgentTrainDiffRequest,
     AgentTrainDiffResponse,
+    AgentTrainExecuteRequest,
+    AgentTrainExecuteResponse,
     AgentTrainMetricEvent,
     AgentTrainMetricsResponse,
     AgentTrainRun,
@@ -49,6 +52,15 @@ from server.training.control_plane import (
     build_agent_control_plane_status,
     build_agent_run_links,
     build_agent_run_operator_hint,
+)
+from server.training.flyte_client import (
+    FLYTE_ABORT_PHASES,
+    FLYTE_FAILURE_PHASES,
+    FLYTE_TERMINAL_PHASES,
+    FlyteAdminClient,
+    FlyteLaunchPlanRef,
+    FlyteUnavailableError,
+    new_execution_name,
 )
 from server.training.mlflow_client import MlflowClient, MlflowRunHandle, MlflowUnavailableError
 from server.training.mlx_qwen3_agent_trainer import (
@@ -171,9 +183,184 @@ def _cfg_from_run_snapshot(run: AgentTrainRun) -> TriBridConfig | None:
 
 def _apply_run_control_plane_metadata(run: AgentTrainRun, cfg: TriBridConfig) -> AgentTrainRun:
     run.external_links = build_agent_run_links(run, cfg)
-    if not str(run.operator_hint or "").strip():
-        run.operator_hint = build_agent_run_operator_hint(run, cfg)
+    run.operator_hint = build_agent_run_operator_hint(run, cfg)
     return run
+
+
+_TERMINAL_RUN_STATUSES = frozenset({"completed", "failed", "cancelled"})
+_FLYTE_RECONCILE_INTERVAL_S = 5.0
+_FLYTE_RECONCILE_TERMINAL_INTERVAL_S = 60.0
+_flyte_reconcile_at: dict[str, float] = {}
+# Outcome a cancel-driven job must finalize with when the orchestrator (not the
+# operator) ended the run: run_id -> (status, message).
+_train_cancel_outcomes: dict[str, tuple[str, str]] = {}
+
+
+def _flyte_scope(cfg: TriBridConfig) -> tuple[str, str, str]:
+    return (
+        str(cfg.training.ragweld_agent_flyte_admin_base_url or "").strip(),
+        str(cfg.training.ragweld_agent_flyte_project or "").strip(),
+        str(cfg.training.ragweld_agent_flyte_domain or "").strip(),
+    )
+
+
+def _mlflow_terminate_for_run(run: AgentTrainRun, cfg: TriBridConfig | None, *, status: str) -> None:
+    """Terminate the MLflow run of a run that has no active training job."""
+    if cfg is None or str(run.tracking_backend or "") != "mlflow" or not str(run.tracking_run_id or "").strip():
+        return
+    try:
+        MlflowClient(str(cfg.training.ragweld_agent_mlflow_tracking_url or "")).set_terminated(
+            str(run.tracking_run_id), status=status
+        )
+    except MlflowUnavailableError as exc:
+        _append_event(
+            run.run_id,
+            AgentTrainMetricEvent(
+                type="log",
+                ts=datetime.now(UTC),
+                run_id=run.run_id,
+                message=f"MLflow run could not be finalized ({status}): {exc}",
+            ),
+        )
+
+
+def _finalize_run_without_job(run: AgentTrainRun, cfg: TriBridConfig | None, *, status: str, message: str) -> AgentTrainRun:
+    """Terminal transition for a run that never reached (or no longer has) an in-process job."""
+    now = datetime.now(UTC)
+    run.status = status  # type: ignore[assignment]
+    run.completed_at = now
+    if cfg is not None:
+        run = _attach_lineage(run, cfg)
+    _save_run(run)
+    _mlflow_terminate_for_run(run, cfg, status="KILLED" if status == "cancelled" else "FAILED")
+    _append_event(
+        run.run_id,
+        AgentTrainMetricEvent(
+            type="state" if status == "cancelled" else "error",
+            ts=now,
+            run_id=run.run_id,
+            status=run.status,
+            message=message,
+        ),
+    )
+    _append_event(run.run_id, AgentTrainMetricEvent(type="complete", ts=now, run_id=run.run_id, status=run.status))
+    _train_start_guard.pop(str(run.repo_id or "").strip(), None)
+    return run
+
+
+def _flyte_run_needs_reconcile(run: AgentTrainRun) -> bool:
+    if str(run.workflow_backend or "") != "flyte" or not str(run.workflow_run_id or "").strip():
+        return False
+    if str(run.status) in {"queued", "running"}:
+        return True
+    # Terminal locally: keep mirroring the Flyte phase until Flyte is terminal too.
+    return str(run.workflow_phase or "") not in FLYTE_TERMINAL_PHASES
+
+
+def _fetch_flyte_state(run: AgentTrainRun):
+    """Blocking flyteadmin probe for a Flyte-owned run. Call via asyncio.to_thread.
+
+    Returns the FlyteExecutionState, or None if config is missing or the admin
+    is transiently unreachable (never invents a phase).
+    """
+    execution_name = str(run.workflow_run_id or "").strip()
+    if not execution_name:
+        return None
+    cfg = _cfg_from_run_snapshot(run)
+    if cfg is None:
+        return None
+    admin_url, project, domain = _flyte_scope(cfg)
+    locally_terminal = str(run.status) in _TERMINAL_RUN_STATUSES
+    try:
+        return FlyteAdminClient(admin_url, timeout_s=1.0 if locally_terminal else 2.0).get_execution(
+            project, domain, execution_name
+        )
+    except FlyteUnavailableError:
+        return None
+
+
+async def _refresh_flyte_run(run: AgentTrainRun) -> AgentTrainRun:
+    """Mirror the live Flyte phase onto a Flyte-owned run without blocking the event loop.
+
+    The network probe runs in a worker thread; all run mutations (save, events,
+    cancel-event signalling, finalization) happen back on the loop thread so
+    asyncio.Event.set() stays loop-safe.
+    """
+    execution_name = str(run.workflow_run_id or "").strip()
+    if not execution_name:
+        return run
+    interval = (
+        _FLYTE_RECONCILE_TERMINAL_INTERVAL_S
+        if str(run.status) in _TERMINAL_RUN_STATUSES
+        else _FLYTE_RECONCILE_INTERVAL_S
+    )
+    now_mono = time.monotonic()
+    if now_mono - _flyte_reconcile_at.get(run.run_id, 0.0) < interval:
+        return run
+    _flyte_reconcile_at[run.run_id] = now_mono
+
+    state = await asyncio.to_thread(_fetch_flyte_state, run)
+    if state is None:
+        return run
+    return _apply_flyte_state(run, state)
+
+
+def _apply_flyte_state(run: AgentTrainRun, state) -> AgentTrainRun:
+    """Apply a fetched Flyte execution phase to a run. Loop-thread only."""
+    execution_name = str(run.workflow_run_id or "").strip()
+    locally_terminal = str(run.status) in _TERMINAL_RUN_STATUSES
+
+    if state.phase != str(run.workflow_phase or ""):
+        run.workflow_phase = state.phase
+        _save_run(run)
+        if not locally_terminal:
+            # The event log ends with the run's "complete" event; after that the
+            # phase is mirrored on the run record only.
+            _append_event(
+                run.run_id,
+                AgentTrainMetricEvent(
+                    type="log",
+                    ts=datetime.now(UTC),
+                    run_id=run.run_id,
+                    message=f"Flyte execution {execution_name} phase: {state.phase}",
+                ),
+            )
+    if locally_terminal:
+        return run
+
+    cfg = _cfg_from_run_snapshot(run)
+    ended_by_flyte: tuple[str, str] | None = None
+    if state.phase in FLYTE_ABORT_PHASES:
+        ended_by_flyte = (
+            "cancelled",
+            f"Flyte execution {execution_name} was aborted"
+            + (f": {state.abort_cause}" if state.abort_cause else "."),
+        )
+    elif state.phase in FLYTE_FAILURE_PHASES:
+        ended_by_flyte = (
+            "failed",
+            f"Flyte execution {execution_name} ended {state.phase}"
+            + (f": {state.error_message}" if state.error_message else "."),
+        )
+    elif state.phase == "SUCCEEDED":
+        # The task only succeeds after this API reported a completed run, so a
+        # non-terminal local record here is an inconsistency, not a success.
+        ended_by_flyte = (
+            "failed",
+            f"Flyte execution {execution_name} SUCCEEDED while the host run was still {run.status}; "
+            "refusing to infer a completed training run.",
+        )
+    if ended_by_flyte is None:
+        return run
+
+    status, message = ended_by_flyte
+    if run.run_id in _train_tasks:
+        _train_cancel_outcomes[run.run_id] = (status, message)
+        cancel_event = _train_cancel_events.get(run.run_id)
+        if cancel_event is not None:
+            cancel_event.set()
+        return run
+    return _finalize_run_without_job(run, cfg, status=status, message=message)
 
 
 def _attach_lineage(run: AgentTrainRun, cfg: Any, *, promoted: bool = False) -> AgentTrainRun:
@@ -395,7 +582,7 @@ def _active_run_id_for_corpus(corpus_id: str) -> str | None:
             run = _load_run(entry.name)
         except Exception:
             continue
-        if str(run.status) == "running":
+        if str(run.status) in {"queued", "running"}:
             return str(run.run_id)
     return None
 
@@ -955,27 +1142,31 @@ async def _run_train_job(*, run_id: str, corpus_id: str, cancel_event: asyncio.E
         )
         _append_event(run_id, AgentTrainMetricEvent(type="complete", ts=datetime.now(UTC), run_id=run_id, status=run.status))
     except TrainingCancelledError:
+        outcome_status, outcome_message = _train_cancel_outcomes.pop(run_id, ("cancelled", "Training cancelled."))
         try:
             run = _load_run(run_id)
-            run.status = "cancelled"
+            run.status = outcome_status  # type: ignore[assignment]
             run.completed_at = datetime.now(UTC)
             if cfg is not None:
                 run = _attach_lineage(run, cfg)
             _save_run(run)
         except Exception:
             pass
-        _mlflow_finish("KILLED")
+        _mlflow_finish("KILLED" if outcome_status == "cancelled" else "FAILED")
         _append_event(
             run_id,
             AgentTrainMetricEvent(
-                type="state",
+                type="state" if outcome_status == "cancelled" else "error",
                 ts=datetime.now(UTC),
                 run_id=run_id,
-                status="cancelled",
-                message="Training cancelled.",
+                status=outcome_status,  # type: ignore[arg-type]
+                message=outcome_message,
             ),
         )
-        _append_event(run_id, AgentTrainMetricEvent(type="complete", ts=datetime.now(UTC), run_id=run_id, status="cancelled"))
+        _append_event(
+            run_id,
+            AgentTrainMetricEvent(type="complete", ts=datetime.now(UTC), run_id=run_id, status=outcome_status),  # type: ignore[arg-type]
+        )
     except Exception as e:
         try:
             run = _load_run(run_id)
@@ -1001,7 +1192,16 @@ async def _run_train_job(*, run_id: str, corpus_id: str, cancel_event: asyncio.E
     finally:
         _train_tasks.pop(run_id, None)
         _train_cancel_events.pop(run_id, None)
+        _train_cancel_outcomes.pop(run_id, None)
         _train_start_guard.pop(str(corpus_id or "").strip(), None)
+
+
+def _start_train_job_task(run_id: str, corpus_id: str) -> None:
+    if run_id in _train_tasks:
+        return
+    cancel_event = asyncio.Event()
+    _train_cancel_events[run_id] = cancel_event
+    _train_tasks[run_id] = asyncio.create_task(_run_train_job(run_id=run_id, corpus_id=corpus_id, cancel_event=cancel_event))
 
 
 @router.get("/agent/train/profile", response_model=OkResponse)
@@ -1050,6 +1250,8 @@ async def list_train_runs(
             run = _maybe_reconcile_run(run)
         except Exception:
             continue
+        if _flyte_run_needs_reconcile(run):
+            run = await _refresh_flyte_run(run)
         metas.append(
             AgentTrainRunMeta(
                 run_id=run.run_id,
@@ -1063,6 +1265,7 @@ async def list_train_runs(
                 tracking_backend=run.tracking_backend,
                 execution_backend=run.execution_backend,
                 workflow_run_id=run.workflow_run_id,
+                workflow_phase=run.workflow_phase,
                 tracking_run_id=run.tracking_run_id,
                 bundle_id=run.bundle_id,
                 lineage_ref=run.lineage_ref,
@@ -1094,20 +1297,69 @@ async def start_train_run(request: AgentTrainStartRequest) -> AgentTrainStartRes
 
     # Fail closed on configured-but-unavailable target backends. No silent
     # substitution back to the local lane.
-    if workflow_backend != "local":
+    flyte_client: FlyteAdminClient | None = None
+    flyte_launch_plan: FlyteLaunchPlanRef | None = None
+    flyte_callback_url = ""
+    if workflow_backend == "flyte":
+        flyte_admin_url, flyte_project, flyte_domain = _flyte_scope(cfg)
+        flyte_launchplan_name = str(cfg.training.ragweld_agent_flyte_launchplan or "").strip()
+        flyte_callback_url = str(cfg.training.ragweld_agent_flyte_callback_base_url or "").strip().rstrip("/")
+        flyte_missing = [
+            name
+            for name, value in (
+                ("training.ragweld_agent_flyte_admin_base_url", flyte_admin_url),
+                ("training.ragweld_agent_flyte_project", flyte_project),
+                ("training.ragweld_agent_flyte_domain", flyte_domain),
+                ("training.ragweld_agent_flyte_launchplan", flyte_launchplan_name),
+                ("training.ragweld_agent_flyte_callback_base_url", flyte_callback_url),
+            )
+            if not value
+        ]
+        if flyte_missing:
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "code": "workflow_backend_unavailable",
+                    "backend": "flyte",
+                    "message": f"Flyte orchestration is selected but required config is empty: {', '.join(flyte_missing)}.",
+                    "operator_hint": (
+                        "Fill the Flyte fields in Training Center (the callback base URL is this API as "
+                        "reachable from Flyte task pods), then retry. Ragweld does not fall back to the "
+                        "local workflow lane silently."
+                    ),
+                },
+            )
+
+        def _resolve_flyte() -> FlyteLaunchPlanRef:
+            client = FlyteAdminClient(flyte_admin_url)
+            client.healthcheck()
+            return client.resolve_launch_plan(flyte_project, flyte_domain, flyte_launchplan_name)
+
+        try:
+            flyte_launch_plan = await asyncio.to_thread(_resolve_flyte)
+            flyte_client = FlyteAdminClient(flyte_admin_url)
+        except FlyteUnavailableError as exc:
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "code": "workflow_backend_unavailable",
+                    "backend": "flyte",
+                    "message": str(exc),
+                    "operator_hint": (
+                        "Start the Compose-owned flyte service (./start.sh --with-flyte) and register the "
+                        "launch plan with scripts/flyte_register_learning_agent.sh, then retry. Ragweld does "
+                        "not fall back to the local workflow lane silently."
+                    ),
+                },
+            ) from exc
+    elif workflow_backend != "local":
         raise HTTPException(
             status_code=503,
             detail={
                 "code": "workflow_backend_unavailable",
                 "backend": workflow_backend,
-                "message": (
-                    "Flyte workflow orchestration is configured but this build has no wired Flyte "
-                    "execution path yet; refusing to fake orchestration."
-                ),
-                "operator_hint": (
-                    "Deploy and wire the Flyte control plane, or set "
-                    "training.ragweld_agent_workflow_backend back to 'local'."
-                ),
+                "message": f"Unknown workflow backend {workflow_backend!r}.",
+                "operator_hint": "Set training.ragweld_agent_workflow_backend to 'local' or 'flyte'.",
             },
         )
     if execution_backend not in {"mlx_qwen3"}:
@@ -1167,7 +1419,7 @@ async def start_train_run(request: AgentTrainStartRequest) -> AgentTrainStartRes
     run = AgentTrainRun(
         run_id=run_id,
         repo_id=corpus_id,
-        status="running",
+        status="queued" if workflow_backend == "flyte" else "running",
         started_at=started_at,
         completed_at=None,
         config_snapshot=cfg.model_dump(mode="json"),
@@ -1247,6 +1499,58 @@ async def start_train_run(request: AgentTrainStartRequest) -> AgentTrainStartRes
             status=run.status,
         ),
     )
+    if workflow_backend == "flyte" and flyte_client is not None and flyte_launch_plan is not None:
+        # Flyte owns the execution lifecycle. The workflow task hands the run
+        # back to this API's execute boundary; no in-process job starts here.
+        execution_name = new_execution_name()
+        try:
+            execution_name = await asyncio.to_thread(
+                flyte_client.create_execution,
+                flyte_launch_plan,
+                inputs={
+                    "run_id": run_id,
+                    "corpus_id": corpus_id,
+                    "callback_base_url": flyte_callback_url,
+                    "execution_backend": execution_backend,
+                },
+                execution_name=execution_name,
+            )
+        except FlyteUnavailableError as exc:
+            _finalize_run_without_job(
+                run,
+                cfg,
+                status="failed",
+                message=f"Flyte refused to create the execution: {exc}",
+            )
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "code": "workflow_backend_unavailable",
+                    "backend": "flyte",
+                    "message": f"Flyte refused to create the execution: {exc}",
+                    "operator_hint": "Inspect the Flyte control plane (flyteadmin logs / console) and retry the launch.",
+                },
+            ) from exc
+        run.workflow_run_id = execution_name
+        run.workflow_phase = "QUEUED"
+        run = _apply_run_control_plane_metadata(run, cfg)
+        _save_run(run)
+        _append_event(
+            run_id,
+            AgentTrainMetricEvent(
+                type="log",
+                ts=datetime.now(UTC),
+                run_id=run_id,
+                message=(
+                    f"Flyte execution {execution_name} created in {flyte_launch_plan.project}/{flyte_launch_plan.domain} "
+                    f"(launch plan {flyte_launch_plan.name} v{flyte_launch_plan.version}); waiting for the workflow task "
+                    "to hand the run to the execute boundary."
+                ),
+            ),
+        )
+        _mark_train_start_guard(corpus_id, run_id)
+        return AgentTrainStartResponse(ok=True, run_id=run_id)
+
     _append_event(
         run_id,
         AgentTrainMetricEvent(
@@ -1257,10 +1561,7 @@ async def start_train_run(request: AgentTrainStartRequest) -> AgentTrainStartRes
         ),
     )
 
-    if run_id not in _train_tasks:
-        cancel_event = asyncio.Event()
-        _train_cancel_events[run_id] = cancel_event
-        _train_tasks[run_id] = asyncio.create_task(_run_train_job(run_id=run_id, corpus_id=corpus_id, cancel_event=cancel_event))
+    _start_train_job_task(run_id, corpus_id)
 
     # Refresh the guard at queue time so rapid follow-up requests still see an
     # active run even when the background task fails immediately after start.
@@ -1269,9 +1570,70 @@ async def start_train_run(request: AgentTrainStartRequest) -> AgentTrainStartRes
     return AgentTrainStartResponse(ok=True, run_id=run_id)
 
 
+@router.post("/agent/train/run/{run_id}/execute", response_model=AgentTrainExecuteResponse)
+async def execute_train_run(run_id: str, request: AgentTrainExecuteRequest) -> AgentTrainExecuteResponse:
+    """Workflow-side hand-off: the Flyte task asks this API to execute a queued run.
+
+    Only a Flyte-owned run whose execution identifier matches may be executed
+    here; the call is idempotent while the run is running.
+    """
+    run = _load_run(run_id)
+    if str(run.workflow_backend or "") != "flyte":
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "workflow_backend_mismatch",
+                "message": f"Run {run_id} is owned by the {run.workflow_backend} workflow lane, not Flyte.",
+            },
+        )
+    expected = str(run.workflow_run_id or "").strip()
+    if not expected or request.workflow_run_id.strip() != expected:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "workflow_run_mismatch",
+                "message": f"Run {run_id} belongs to Flyte execution {expected or '<none>'}, not {request.workflow_run_id}.",
+            },
+        )
+    if str(run.status) in _TERMINAL_RUN_STATUSES:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "run_terminal",
+                "status": str(run.status),
+                "message": f"Run {run_id} already ended with status={run.status}.",
+            },
+        )
+    if str(run.status) == "running" or run_id in _train_tasks:
+        return AgentTrainExecuteResponse(ok=True, run_id=run_id, status="running", workflow_run_id=expected)
+
+    now = datetime.now(UTC)
+    run.status = "running"
+    _save_run(run)
+    _append_event(
+        run_id,
+        AgentTrainMetricEvent(
+            type="state",
+            ts=now,
+            run_id=run_id,
+            status="running",
+            message=f"Flyte execution {expected} handed the run to the host execute boundary; training starts now.",
+        ),
+    )
+    _start_train_job_task(run_id, str(run.repo_id))
+    _mark_train_start_guard(str(run.repo_id), run_id)
+    return AgentTrainExecuteResponse(ok=True, run_id=run_id, status="running", workflow_run_id=expected)
+
+
 @router.get("/agent/train/run/{run_id}", response_model=AgentTrainRun)
 async def get_train_run(run_id: str) -> AgentTrainRun:
-    return _load_run(run_id)
+    run = _load_run(run_id)
+    if _flyte_run_needs_reconcile(run):
+        run = await _refresh_flyte_run(run)
+        cfg = _cfg_from_run_snapshot(run)
+        if cfg is not None:
+            run = _apply_run_control_plane_metadata(run, cfg)
+    return run
 
 
 @router.get("/agent/train/run/{run_id}/metrics", response_model=AgentTrainMetricsResponse)
@@ -1362,8 +1724,50 @@ async def stream_train_run(request: Request, run_id: str) -> StreamingResponse:
 @router.post("/agent/train/run/{run_id}/cancel", response_model=OkResponse)
 async def cancel_train_run(run_id: str) -> OkResponse:
     run = _load_run(run_id)
-    if str(run.status) in {"completed", "failed", "cancelled"}:
+    if str(run.status) in _TERMINAL_RUN_STATUSES:
         return OkResponse(ok=True)
+
+    if str(run.workflow_backend or "") == "flyte" and str(run.workflow_run_id or "").strip():
+        cfg = _cfg_from_run_snapshot(run)
+        execution_name = str(run.workflow_run_id)
+        if cfg is not None:
+            admin_url, project, domain = _flyte_scope(cfg)
+
+            def _terminate() -> None:
+                FlyteAdminClient(admin_url).terminate_execution(
+                    project, domain, execution_name, cause="Cancellation requested by the Ragweld operator."
+                )
+
+            try:
+                await asyncio.to_thread(_terminate)
+                _append_event(
+                    run_id,
+                    AgentTrainMetricEvent(
+                        type="log",
+                        ts=datetime.now(UTC),
+                        run_id=run_id,
+                        message=f"Flyte execution {execution_name} termination requested.",
+                    ),
+                )
+            except FlyteUnavailableError as exc:
+                _append_event(
+                    run_id,
+                    AgentTrainMetricEvent(
+                        type="log",
+                        ts=datetime.now(UTC),
+                        run_id=run_id,
+                        message=f"Flyte execution {execution_name} could not be terminated: {exc}",
+                    ),
+                )
+        if str(run.status) == "queued" and run_id not in _train_tasks:
+            _finalize_run_without_job(
+                run,
+                cfg,
+                status="cancelled",
+                message="Cancellation requested by user before the workflow task started training.",
+            )
+            return OkResponse(ok=True)
+
     _request_train_run_cancel(run_id=run_id, reason="Cancellation requested by user.")
     return OkResponse(ok=True)
 

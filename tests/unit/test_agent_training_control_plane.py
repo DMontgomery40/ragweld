@@ -17,16 +17,36 @@ from server.training.control_plane import (
 
 class _ControlPlaneHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802
-        if self.path == "/flyte/api/v1/openapi":
-            payload = json.dumps({"openapi": "3.0.0"}).encode("utf-8")
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(payload)))
+        path = self.path.split("?", 1)[0]
+        if path == "/flyte/healthcheck":
+            payload = b"{}"
+        elif path == "/flyte/api/v1/launch_plans/ragweld/development/learning-agent-train":
+            payload = json.dumps(
+                {
+                    "launchPlans": [
+                        {
+                            "id": {
+                                "project": "ragweld",
+                                "domain": "development",
+                                "name": "learning-agent-train",
+                                "version": "v42",
+                            }
+                        }
+                    ]
+                }
+            ).encode("utf-8")
+        elif path.startswith("/flyte/api/v1/launch_plans/"):
+            # flyteadmin lists an unknown launch plan name as an empty page, not a 404.
+            payload = b"{}"
+        else:
+            self.send_response(404)
             self.end_headers()
-            self.wfile.write(payload)
             return
-        self.send_response(404)
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(payload)))
         self.end_headers()
+        self.wfile.write(payload)
 
     def do_POST(self) -> None:  # noqa: N802
         if self.path == "/mlflow/api/2.0/mlflow/experiments/get-by-name":
@@ -94,6 +114,7 @@ async def test_agent_control_plane_status_reports_ready_flyte_mlflow_unsloth_lan
         cfg.training.ragweld_agent_flyte_project = "ragweld"
         cfg.training.ragweld_agent_flyte_domain = "development"
         cfg.training.ragweld_agent_flyte_launchplan = "learning-agent-train"
+        cfg.training.ragweld_agent_flyte_callback_base_url = "http://192.0.2.10:58012"
         cfg.training.ragweld_agent_mlflow_tracking_url = f"{server.base_url}/mlflow"
         cfg.training.ragweld_agent_mlflow_experiment_name = "ragweld-learning-agent"
         cfg.training.ragweld_agent_unsloth_image = "ghcr.io/ragweld/unsloth:latest"
@@ -104,6 +125,7 @@ async def test_agent_control_plane_status_reports_ready_flyte_mlflow_unsloth_lan
         assert status.lane == "flyte_mlflow_unsloth"
         assert status.ready is True
         assert components["flyte"].state == "ready"
+        assert "v42" in str(components["flyte"].detail)
         assert components["mlflow"].state == "ready"
         assert components["unsloth"].state == "ready"
         assert any(link.label == "Flyte Console" for link in status.links)
@@ -152,4 +174,43 @@ def test_agent_run_links_include_flyte_execution_and_mlflow_tracking() -> None:
 
     assert any(link.label == "Flyte Execution" and link.url.endswith("/executions/wf-123") for link in links)
     assert any(link.label == "MLflow Tracking" and link.url == "http://mlflow.example" for link in links)
-    assert operator_hint is None
+    assert "flyte owns this run" in str(operator_hint).lower()
+
+    run.workflow_phase = "RUNNING"
+    phased_hint = build_agent_run_operator_hint(run, cfg)
+    assert "wf-123" in str(phased_hint) and "RUNNING" in str(phased_hint)
+
+
+@pytest.mark.asyncio
+async def test_agent_control_plane_flyte_requires_callback_and_registered_launch_plan() -> None:
+    server = _ControlPlaneServer()
+    try:
+        cfg = TriBridConfig()
+        cfg.training.ragweld_agent_workflow_backend = "flyte"
+        cfg.training.ragweld_agent_flyte_admin_base_url = f"{server.base_url}/flyte"
+        cfg.training.ragweld_agent_flyte_project = "ragweld"
+        cfg.training.ragweld_agent_flyte_domain = "development"
+        cfg.training.ragweld_agent_flyte_launchplan = "learning-agent-train"
+
+        status = await build_agent_control_plane_status(cfg)
+        flyte = next(component for component in status.components if component.kind == "flyte")
+        assert flyte.state == "unconfigured"
+        assert "callback base URL" in str(flyte.detail)
+        assert "resolve flyte" in str(status.operator_hint).lower()
+
+        cfg.training.ragweld_agent_flyte_callback_base_url = "http://192.0.2.10:58012"
+        cfg.training.ragweld_agent_flyte_launchplan = "not-registered"
+        status = await build_agent_control_plane_status(cfg)
+        flyte = next(component for component in status.components if component.kind == "flyte")
+        assert flyte.state == "degraded"
+        assert "not registered" in str(flyte.detail)
+
+        cfg.training.ragweld_agent_flyte_launchplan = "learning-agent-train"
+        status = await build_agent_control_plane_status(cfg)
+        flyte = next(component for component in status.components if component.kind == "flyte")
+        assert flyte.state == "ready"
+        assert status.lane == "legacy_local"
+        assert "flyte orchestrates launch/status/cancel" in str(status.operator_hint).lower()
+        assert "mlx_qwen3" in str(status.operator_hint)
+    finally:
+        server.close()

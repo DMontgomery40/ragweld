@@ -275,6 +275,10 @@ export function TrainingStudio() {
   const [flyteProject, setFlyteProject] = useConfigField<string>('training.ragweld_agent_flyte_project', 'ragweld');
   const [flyteDomain, setFlyteDomain] = useConfigField<string>('training.ragweld_agent_flyte_domain', 'development');
   const [flyteLaunchplan, setFlyteLaunchplan] = useConfigField<string>('training.ragweld_agent_flyte_launchplan', '');
+  const [flyteCallbackBaseUrl, setFlyteCallbackBaseUrl] = useConfigField<string>(
+    'training.ragweld_agent_flyte_callback_base_url',
+    '',
+  );
   const [mlflowTrackingUrl, setMlflowTrackingUrl] = useConfigField<string>(
     'training.ragweld_agent_mlflow_tracking_url',
     ''
@@ -384,6 +388,7 @@ export function TrainingStudio() {
   }, [
     activeCorpus,
     flyteAdminBaseUrl,
+    flyteCallbackBaseUrl,
     flyteConsoleBaseUrl,
     flyteDomain,
     flyteLaunchplan,
@@ -1282,6 +1287,15 @@ export function TrainingStudio() {
                     <input type="text" value={flyteLaunchplan} onChange={(e) => setFlyteLaunchplan(e.target.value)} placeholder="learning-agent-train" />
                   </div>
                   <div className="input-group">
+                    <label>Flyte callback base URL (this API as seen from Flyte task pods)</label>
+                    <input
+                      type="text"
+                      value={flyteCallbackBaseUrl}
+                      onChange={(e) => setFlyteCallbackBaseUrl(e.target.value)}
+                      placeholder="http://192.168.5.2:58012"
+                    />
+                  </div>
+                  <div className="input-group">
                     <label>MLflow tracking URL</label>
                     <input type="text" value={mlflowTrackingUrl} onChange={(e) => setMlflowTrackingUrl(e.target.value)} placeholder="http://localhost:5000" />
                   </div>
@@ -1295,8 +1309,10 @@ export function TrainingStudio() {
                   </div>
                 </div>
                 <div className="studio-callout">
-                  Current Learning Agent runs still execute on the local MLX trainer. This target-lane section exists to make the
-                  Flyte + MLflow + Unsloth replacement concrete and visible in-product while the launch cutover is wired next.
+                  workflow=flyte launches every run as a Flyte execution (launch plan above, registered with
+                  scripts/flyte_register_learning_agent.sh); the workflow task hands the run back to this API at the callback
+                  URL and Flyte owns status/cancel. tracking=mlflow records runs in MLflow. execution=unsloth needs a CUDA host;
+                  on this host training executes on the MLX backend.
                 </div>
               </details>
 
@@ -1815,8 +1831,8 @@ export function TrainingStudio() {
           <h2 className="studio-title">Learning Agent Studio</h2>
           <p className="studio-subtitle">
             Train local adapters for <span className="studio-mono">{String(ragweldBaseModel || '').trim() || 'ragweld'}</span>, promote them to{' '}
-            <span className="studio-mono">{String(ragweldModelPath || '').trim() || 'training.ragweld_agent_model_path'}</span>, and expose the
-            Flyte / MLflow / Unsloth replacement lane in-product.
+            <span className="studio-mono">{String(ragweldModelPath || '').trim() || 'training.ragweld_agent_model_path'}</span>, and run them
+            through the Flyte / MLflow / Unsloth control plane.
           </p>
         </div>
 

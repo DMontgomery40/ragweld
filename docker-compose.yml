@@ -181,6 +181,33 @@ services:
       timeout: 5s
       retries: 12
 
+  flyte:
+    # Flyte control plane (flyteadmin + propeller + console + minio + postgres on an
+    # embedded k3s) for Learning Agent orchestration. Pinned to the Flyte v1.16.8
+    # sandbox bundle; the host API talks to flyteadmin over HTTP on FLYTE_PORT.
+    image: ${FLYTE_IMAGE:-cr.flyte.org/flyteorg/flyte-sandbox-bundled:sha-51877f899c9f95e0cb5efe90444eb0c6c6ea48a9}
+    labels:
+      io.ragweld.managed: "true"
+    privileged: true
+    environment:
+      SANDBOX: "1"
+      KUBERNETES_API_PORT: "30086"
+      FLYTE_HOST: "localhost:30081"
+      FLYTE_AWS_ENDPOINT: "http://localhost:30084"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "127.0.0.1:${FLYTE_PORT:-30080}:30080"
+      - "127.0.0.1:${FLYTE_MINIO_PORT:-30002}:30002"
+    volumes:
+      - flyte_storage:/var/lib/flyte/storage
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:30080/healthcheck >/dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 40
+      start_period: 60s
+
   vllm:
     image: vllm/vllm-openai-cpu:v0.26.0-arm64
     labels:
@@ -274,6 +301,7 @@ volumes:
   postgres_data:
   mlflow_data:
   qdrant_data:
+  flyte_storage:
   neo4j_data:
   neo4j_logs:
   grafana_data:

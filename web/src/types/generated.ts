@@ -56,6 +56,7 @@ export interface AgentTrainRunMeta {
   tracking_backend?: string; // default: "local"
   execution_backend?: string; // default: "mlx_qwen3"
   workflow_run_id?: string | null; // default: None
+  workflow_phase?: string | null; // default: None
   tracking_run_id?: string | null; // default: None
   bundle_id?: string | null; // default: None
   lineage_ref?: LineageRef | null; // default: None
@@ -2567,6 +2568,8 @@ export interface TrainingConfig {
   ragweld_agent_flyte_domain?: string; // default: "development"
   /** Flyte launch plan name for the Learning Agent workflow lane. */
   ragweld_agent_flyte_launchplan?: string; // default: ""
+  /** Base URL of this Ragweld API as reachable from Flyte task pods (the workflow task hands the run to this API's execute boundary and tracks it). On Colima the host is the VM gateway, for example http://192.168.5.2:58012. */
+  ragweld_agent_flyte_callback_base_url?: string; // default: ""
   /** Base URL of the Compose-owned MLflow Tracking server used by Learning Agent runs. */
   ragweld_agent_mlflow_tracking_url?: string; // default: "http://127.0.0.1:55500"
   /** MLflow experiment name for Learning Agent runs. */
@@ -2785,6 +2788,8 @@ export interface AgentTrainRun {
   execution_backend?: string;
   /** External workflow execution identifier when orchestration is delegated. */
   workflow_run_id?: string | null;
+  /** Last observed external workflow execution phase (for example Flyte RUNNING/SUCCEEDED/ABORTED). */
+  workflow_phase?: string | null;
   /** External run identifier in the tracking system when available. */
   tracking_run_id?: string | null;
   /** Artifact URI or storage path for the run outputs when available. */

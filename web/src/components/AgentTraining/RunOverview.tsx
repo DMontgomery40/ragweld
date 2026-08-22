@@ -58,6 +58,7 @@ export function RunOverview({ run, latestMetrics }: Props) {
 
       <div className="studio-chip-row">
         <span className="studio-chip">workflow={String(run.workflow_backend || 'local')}</span>
+        {run.workflow_phase ? <span className="studio-chip">flyte phase={String(run.workflow_phase)}</span> : null}
         <span className="studio-chip">tracking={String(run.tracking_backend || 'local')}</span>
         <span className="studio-chip">execution={String(run.execution_backend || 'mlx_qwen3')}</span>
         {run.workflow_run_id ? <span className="studio-chip">workflow_run={run.workflow_run_id}</span> : null}
