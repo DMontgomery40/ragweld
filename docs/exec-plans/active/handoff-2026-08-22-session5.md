@@ -70,11 +70,11 @@ rendered-browser proof.
 ## 2. Verified checkpoint at handoff
 
 - `/Users/davidmontgomery/ragweld`; branch `main` only; one worktree.
-  **Local `main` carries P0-1 (`bf34506`) and P0-2 (session 6 commit), ahead of
+  **Local `main` carries P0-1 (`bf34506`) and P0-2 (`8536e5e`), ahead of
   `origin/main` (`2c5dda6`); NOT pushed — the operator pushes.** Tree clean.
-  Gates at the P0-2 commit: full pytest 766 passed/63 skipped; all validators +
-  `generate_litellm_config.py --check` + web lint/build green; strict lane — see
-  §5 P0-2 evidence. Earlier:
+  Gates at `8536e5e`: full pytest 812 passed/65 skipped; strict lane 69 passed;
+  all validators + `generate_litellm_config.py --check` + web lint/build green;
+  Playwright gateway spec 3/3. Earlier:
   Gates at `bf34506`: full pytest 765 passed/63 skipped; strict lane 67
   passed (needs Flyte up); all validators + `generate_litellm_config.py
   --check` + web lint/build green; Playwright gateway spec 3/3.
