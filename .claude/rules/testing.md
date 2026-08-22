@@ -14,6 +14,37 @@ Every change MUST be tested before completion.
 - Temporary feature tests -> `.tests/` (gitignored)
 - Reusable permanent tests -> `tests/` (not gitignored)
 
+## Real Queries Only — NEVER "test" / "hello" (hard rule, 2026-08-22)
+
+Every retrieval, chat, eval, search, or answer exercise — in tests, manual
+probes, browser drives, and scripts — MUST use a **real domain question** about
+the indexed corpus. Placeholder inputs are banned outright:
+
+- BANNED as a query/message anywhere: `test`, `testing`, `hello`, `hi`, `foo`,
+  `ping`, `asdf`, lorem ipsum, or any content-free string.
+- REQUIRED: a genuine question a user of that corpus would ask (e.g. for the
+  Epstein corpus: "Which flights did Jeffrey Epstein arrange for Barry Cohen in
+  October 2017?"; for the acceptance corpus: a real sensor-calibration question).
+
+Why this is a hard rule: every real query/answer pair is a **triplet-mining
+signal for the reranker**. Placeholder queries poison the reranker training
+data and prove nothing about retrieval quality. A green test built on "test" or
+"hello" is a fake-green test and will be rejected in review.
+
+## Adversarial Review for Major Features (hard rule, 2026-08-22)
+
+Any **major feature or material slice** (new subsystem, new lane, a cutover, a
+new external integration, anything that changes a public boundary or the
+runtime topology) MUST be adversarially reviewed by an independent stronger
+model BEFORE it is considered done — not only self-verified.
+
+- Preferred: `codex exec` with **high reasoning effort**, pointed at the diff,
+  prompted to REFUTE the change (find correctness bugs, fake-green tests,
+  contract drift, hidden fallbacks, blocking-IO, race conditions).
+- Record the review outcome and any fixes in the slice's exec-plan/memory note.
+- Trivial mechanical edits (copy, formatting, a one-line fix with a test) do not
+  require this; use judgment, and when unsure, review.
+
 ## Zero-Mocked Tests (enforced for new/edited tests)
 
 **No Playwright API mocking:**

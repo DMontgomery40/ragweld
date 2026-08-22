@@ -99,6 +99,13 @@ Executable specs (structured, machine-checkable intent):
 - Tests must be real (no fake-green):
   - No Playwright request interception stubs for new/edited E2E tests.
   - No Python mocking (`unittest.mock`, `monkeypatch`) in new/edited tests.
+  - Real queries only: retrieval/chat/eval/search/answer exercises must use a
+    genuine domain question, never `test`/`hello`/placeholder input. Every
+    query/answer pair is reranker triplet-mining signal; placeholders are
+    fake-green. See `.claude/rules/testing.md`.
+- Major features/slices get an adversarial review by an independent stronger
+  model before "done" — preferred `codex exec` at high reasoning effort,
+  prompted to refute the change. See `.claude/rules/testing.md`.
 
 ## Product Positioning
 
