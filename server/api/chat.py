@@ -25,6 +25,7 @@ from server.api.retrieval_errors import (
 from server.chat.handler import ChatGenerationError, chat_once
 from server.chat.handler import chat_stream as chat_stream_handler
 from server.chat.model_discovery import discover_litellm_models
+from server.gateway_catalog import gateway_rows_by_alias_cached
 from server.chat.recall_indexer import index_recall_conversation
 from server.chat.source_router import resolve_sources
 from server.db.postgres import PostgresClient
@@ -795,10 +796,23 @@ async def list_chat_models(
     except RuntimeError as error:
         raise HTTPException(status_code=503, detail=str(error)) from error
 
+    try:
+        catalog_by_alias = await asyncio.to_thread(gateway_rows_by_alias_cached)
+    except (OSError, ValueError) as error:
+        raise HTTPException(status_code=503, detail=f"generation catalog unavailable: {error}") from error
+
     models: list[ChatModelInfo] = []
+    unknown_aliases: list[str] = []
     for row in discovered:
         model_id = str(row.get("id") or "").strip()
-        if not model_id or model_id == "ragweld-openrouter-smoke":
+        if not model_id:
+            continue
+        catalog_row = catalog_by_alias.get(model_id)
+        if catalog_row is None:
+            # The gateway config is generated from the catalog; an alias the
+            # catalog does not know is drift (stale container config or a
+            # hand edit) and is never published as a selectable route.
+            unknown_aliases.append(model_id)
             continue
         models.append(
             ChatModelInfo(
@@ -806,13 +820,24 @@ async def list_chat_models(
                 override=f"litellm:{model_id}",
                 provider="LiteLLM",
                 provider_key="litellm",
-                catalog_model=None,
+                catalog_model=catalog_row.model,
                 components=["GEN"],
                 source="litellm",
                 provider_type="litellm",
                 base_url=str(row.get("base_url") or "") or None,
-                supports_vision=False,
+                supports_vision=catalog_row.supports_vision,
+                catalog_provider=catalog_row.provider,
+                display_name=catalog_row.display_name,
+                context=catalog_row.context,
+                input_per_1k=catalog_row.input_per_1k,
+                output_per_1k=catalog_row.output_per_1k,
             )
+        )
+    if unknown_aliases:
+        logger.warning(
+            "LiteLLM serves %d alias(es) absent from data/models.json; not published: %s",
+            len(unknown_aliases),
+            ", ".join(sorted(unknown_aliases)),
         )
     return ChatModelsResponse(models=models)
 

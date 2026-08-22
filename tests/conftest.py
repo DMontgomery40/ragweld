@@ -11,6 +11,8 @@ import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
+from server.gateway_catalog import warm_gateway_catalog
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 _TEST_CONFIG_RUNTIME_DIR: str | None = None
 if os.environ.get("RAGWELD_STRICT_INTEGRATION", "").strip() == "1":
@@ -68,7 +70,8 @@ def event_loop() -> Generator[asyncio.AbstractEventLoop, None, None]:
 
 @pytest_asyncio.fixture
 async def client() -> AsyncGenerator[AsyncClient, None]:
-    """Create async test client."""
+    """Create async test client (ASGITransport does not run the lifespan, so warm the catalog here)."""
+    await asyncio.to_thread(warm_gateway_catalog)
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         yield ac

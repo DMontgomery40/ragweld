@@ -17,26 +17,31 @@ async def test_validate_config_returns_200(client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
-async def test_validate_config_accepts_gateway_alias_without_catalog_warning(client: AsyncClient) -> None:
-    """Gateway alias truth comes from LiteLLM discovery, not the provider catalog."""
+async def test_validate_config_warns_when_gen_alias_is_not_a_catalog_gateway_alias(client: AsyncClient) -> None:
+    """A syntactically valid alias the catalog does not serve is a warning: generation would fail closed."""
     baseline = await client.get("/api/config")
     assert baseline.status_code == 200
     cfg = baseline.json()
+    original = cfg["generation"]["gen_model"]
 
     cfg["generation"]["gen_model"] = "totally-fake-model-xyz-9999"
     put_resp = await client.put("/api/config", json=cfg)
     assert put_resp.status_code == 200
+    try:
+        validate_resp = await client.get("/api/config/validate")
+        assert validate_resp.status_code == 200
+        result = validate_resp.json()
+        gen_model_warnings = [w for w in result["warnings"] if w["field"] == "generation.gen_model"]
+        assert len(gen_model_warnings) == 1
+        assert "not a gateway alias in data/models.json" in gen_model_warnings[0]["message"]
 
-    validate_resp = await client.get("/api/config/validate")
-    assert validate_resp.status_code == 200
-    result = validate_resp.json()
-    assert result["valid"] is True
-
-    gen_model_warnings = [
-        w for w in result["warnings"]
-        if w["field"] == "generation.gen_model"
-    ]
-    assert gen_model_warnings == []
+        cfg["generation"]["gen_model"] = "openai.gpt-5.4-mini"
+        assert (await client.put("/api/config", json=cfg)).status_code == 200
+        result = (await client.get("/api/config/validate")).json()
+        assert [w for w in result["warnings"] if w["field"] == "generation.gen_model"] == []
+    finally:
+        cfg["generation"]["gen_model"] = original
+        await client.put("/api/config", json=cfg)
 
 
 @pytest.mark.asyncio

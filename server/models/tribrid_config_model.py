@@ -1770,6 +1770,25 @@ class ModelCatalogEntry(BaseModel):
     per_request: float | None = Field(default=None, ge=0.0, description="Cost per request")
     base_url: str | None = Field(default=None, description="Optional provider base URL")
     notes: str | None = Field(default=None, description="Freeform notes")
+    display_name: str | None = Field(default=None, description="Human-readable model name when the upstream feed provides one")
+    gateway_alias: str | None = Field(
+        default=None,
+        description=(
+            "LiteLLM gateway alias that serves this generation row. Set only on GEN rows that are rendered "
+            "into infra/litellm-config.yaml; selectable as litellm:<gateway_alias>."
+        ),
+    )
+    gateway_upstream: str | None = Field(
+        default=None,
+        description=(
+            "LiteLLM litellm_params.model for gateway_alias (for example openrouter/openai/gpt-5.4-mini "
+            "or openai/ragweld-local for the vLLM serving path)."
+        ),
+    )
+    supports_vision: bool = Field(
+        default=False,
+        description="Whether the upstream route accepts image inputs (OpenRouter input_modalities includes image).",
+    )
     selection_roles: list[Literal["embedding_provider", "reranker_cloud"]] = Field(
         default_factory=list,
         description="Runtime selection surfaces that should expose this row.",

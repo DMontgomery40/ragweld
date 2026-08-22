@@ -1,12 +1,19 @@
 #!/usr/bin/env python3
-"""Refresh data/models.json from the OpenRouter machine-readable models feed."""
+"""Refresh the generation rows of data/models.json from the OpenRouter models feed.
+
+Every text-output model OpenRouter serves becomes one GEN catalog row routed
+through the LiteLLM gateway (``gateway_alias`` + ``gateway_upstream``). Rows
+that leave the feed are removed. Embedding/reranker rows and the ``ragweld``
+vLLM serving row are never touched. ``--apply`` writes the catalog, its web
+mirror, and the generated infra/litellm-config.yaml together so the gateway and
+the catalog cannot drift.
+"""
 
 from __future__ import annotations
 
 import argparse
 import copy
 import json
-import re
 import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -16,39 +23,28 @@ from typing import Any
 
 import httpx
 
+from server.gateway_catalog import (
+    CATALOG_PATH,
+    LITELLM_CONFIG_PATH,
+    LOCAL_GATEWAY_PROVIDER,
+    OPENROUTER_BASE_URL,
+    OPENROUTER_UPSTREAM_PREFIX,
+    WEB_CATALOG_PATH,
+    GatewayCatalogError,
+    gateway_alias_for_openrouter_id,
+    gateway_rows,
+    load_catalog,
+    serialize_catalog,
+    write_catalog_trio,
+)
 from server.runtime_capabilities import apply_selection_metadata_to_catalog
 
 OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models"
 OPENROUTER_SOURCE_PREFIX = "https://openrouter.ai/api/v1/models"
-AUTO_DEPRECATED_PREFIX = "[auto-refresh] deprecated_on="
 AUTO_PRICING_UNKNOWN = "[auto-refresh] pricing_unknown=true"
-
-REPO_ROOT = Path(__file__).resolve().parents[1]
-CANONICAL_PATH = REPO_ROOT / "data" / "models.json"
-MIRROR_PATH = REPO_ROOT / "web" / "public" / "models.json"
-
-PROVIDER_ALIASES = {
-    "openai": "openai",
-    "anthropic": "anthropic",
-    "google": "google",
-    "cohere": "cohere",
-    "mistral": "mistral",
-    "mistralai": "mistral",
-    "deepseek": "deepseek",
-    "x-ai": "xai",
-    "xai": "xai",
-}
-MANAGED_PROVIDERS = set(PROVIDER_ALIASES.values())
-PROVIDER_DEFAULT_BASE_URL = {
-    "openai": "https://api.openai.com/v1",
-    "anthropic": "https://api.anthropic.com",
-    "google": "https://generativelanguage.googleapis.com",
-    "cohere": "https://api.cohere.ai/v2",
-    "mistral": "https://api.mistral.ai/v1",
-    "deepseek": "https://api.deepseek.com/v1",
-    "xai": "https://api.x.ai/v1",
-}
-NEW_FAMILY_MAX_AGE_DAYS = 180
+AUTO_PRICING_TIERED = "[auto-refresh] pricing_tiered=true"
+ROLLING_POINTER_PREFIX = "~"
+ROUTER_PROVIDER = "openrouter"  # openrouter/auto etc. pick another model at request time
 
 _DECIMAL_1K = Decimal("1000")
 _DECIMAL_ROUND_12 = Decimal("0.000000000001")
@@ -57,12 +53,13 @@ _DECIMAL_ROUND_12 = Decimal("0.000000000001")
 @dataclass(frozen=True)
 class FeedModel:
     provider: str
-    family: str
-    model: str
-    context: int | None
+    model_id: str
+    display_name: str | None
+    context: int
     input_per_1k: float | None
     output_per_1k: float | None
-    created_at: int | None
+    supports_vision: bool
+    pricing_tiered: bool
 
     @property
     def has_full_pricing(self) -> bool:
@@ -73,61 +70,56 @@ class FeedModel:
 class RefreshStats:
     total_feed_rows: int = 0
     normalized_feed_rows: int = 0
-    managed_existing_rows: int = 0
-    updated_existing_rows: int = 0
-    newly_deprecated_rows: int = 0
-    new_rows: int = 0
-    new_rows_missing_price: int = 0
+    skipped_malformed_id: int = 0
+    skipped_non_text: int = 0
+    skipped_rolling_pointer: int = 0
+    skipped_router: int = 0
+    skipped_missing_context: int = 0
+    skipped_invalid_alias: int = 0
+    duplicate_feed_ids: int = 0
+    rows_pricing_tiered: int = 0
+    previous_gateway_rows: int = 0
+    gateway_rows: int = 0
+    rows_missing_price: int = 0
+    removed_rows: int = 0
+    added_rows: int = 0
+    preserved_rows: int = 0
 
 
 def _today_iso() -> str:
     return datetime.now(UTC).date().isoformat()
 
 
-def _canonical_provider(provider: Any) -> str | None:
-    key = str(provider or "").strip().lower()
-    if not key:
-        return None
-    return PROVIDER_ALIASES.get(key)
-
-
-def _normalized_components(raw: Any) -> list[str]:
-    if not isinstance(raw, list):
-        return []
-    out: list[str] = []
-    for value in raw:
-        comp = str(value or "").strip().upper()
-        if comp:
-            out.append(comp)
-    return out
-
-
 def _is_text_output_model(row: dict[str, Any]) -> bool:
     architecture = row.get("architecture")
     if not isinstance(architecture, dict):
         return False
-
     output_modalities = architecture.get("output_modalities")
     if isinstance(output_modalities, list):
-        for modality in output_modalities:
-            if str(modality or "").strip().lower() == "text":
-                return True
-        return False
-
+        return any(str(modality or "").strip().lower() == "text" for modality in output_modalities)
     modality = str(architecture.get("modality") or "").strip().lower()
-    if not modality:
+    return bool(modality) and (modality.endswith("->text") or modality == "text")
+
+
+def _accepts_images(row: dict[str, Any]) -> bool:
+    architecture = row.get("architecture")
+    if not isinstance(architecture, dict):
         return False
-    return modality.endswith("->text") or modality == "text"
+    input_modalities = architecture.get("input_modalities")
+    if isinstance(input_modalities, list):
+        return any(str(modality or "").strip().lower() == "image" for modality in input_modalities)
+    modality = str(architecture.get("modality") or "").strip().lower()
+    return "image" in modality.split("->", 1)[0]
 
 
-def _parse_non_negative_int(value: Any) -> int | None:
+def _parse_positive_int(value: Any) -> int | None:
     if value is None:
         return None
     try:
         parsed = int(value)
     except (TypeError, ValueError):
         return None
-    return parsed if parsed >= 0 else None
+    return parsed if parsed > 0 else None
 
 
 def _parse_per_1k_pricing(value: Any) -> float | None:
@@ -142,167 +134,75 @@ def _parse_per_1k_pricing(value: Any) -> float | None:
         return None
     if per_token < 0:
         return None
-    per_1k = (per_token * _DECIMAL_1K).quantize(_DECIMAL_ROUND_12)
-    return float(per_1k)
+    return float((per_token * _DECIMAL_1K).quantize(_DECIMAL_ROUND_12))
 
 
-def _feed_model_score(model: FeedModel) -> tuple[int, int]:
-    return (
-        int(model.created_at or 0),
-        1 if model.has_full_pricing else 0,
-        1 if model.context is not None else 0,
-    )
+def normalize_openrouter_rows(rows: list[dict[str, Any]], stats: RefreshStats | None = None) -> dict[str, FeedModel]:
+    """Normalize feed rows into gateway candidates keyed by OpenRouter model id."""
 
-
-_SNAPSHOT_SUFFIX_RE = re.compile(
-    r"(?:-\d{4}-\d{2}-\d{2}|-\d{8}|-\d{2}-\d{4}|-\d{2}-\d{2}|-\d{4})$"
-)
-_SIZE_TOKEN_RE = re.compile(r"\d+b$|\d+x\d+b$")
-_VERSION_TOKEN_RE = re.compile(r"\d+(?:\.\d+)*")
-
-
-def _model_family(model: str) -> str:
-    """Normalize model id to a rolling family key for latest-version selection."""
-    cur = str(model or "").strip()
-    if not cur:
-        return cur
-    prev = None
-    while cur != prev:
-        prev = cur
-        cur = _SNAPSHOT_SUFFIX_RE.sub("", cur)
-    tokens = [tok for tok in cur.split("-") if tok]
-    normalized_tokens: list[str] = []
-    for token in tokens:
-        lowered = token.strip().lower()
-        if not lowered:
-            continue
-        # Keep size variants distinct (20b, 120b, 8x22b, etc.).
-        if _SIZE_TOKEN_RE.fullmatch(lowered):
-            normalized_tokens.append(lowered)
-            continue
-        stripped = _VERSION_TOKEN_RE.sub("", lowered)
-        if stripped:
-            normalized_tokens.append(stripped)
-    if not normalized_tokens:
-        return cur.lower()
-    return "-".join(normalized_tokens)
-
-
-def _parse_created_at(value: Any) -> int | None:
-    if value is None:
-        return None
-    try:
-        ts = int(value)
-    except (TypeError, ValueError):
-        return None
-    return ts if ts > 0 else None
-
-
-def _is_recent_family_candidate(*, feed: FeedModel, as_of_date: str) -> bool:
-    if feed.created_at is None:
-        return False
-    try:
-        as_of = datetime.fromisoformat(str(as_of_date)).date()
-    except Exception:
-        as_of = datetime.now(UTC).date()
-    created_date = datetime.fromtimestamp(feed.created_at, tz=UTC).date()
-    age_days = (as_of - created_date).days
-    return age_days <= NEW_FAMILY_MAX_AGE_DAYS
-
-
-def normalize_openrouter_rows(rows: list[dict[str, Any]]) -> dict[tuple[str, str], FeedModel]:
-    """Normalize OpenRouter feed rows into managed provider/family keys."""
-    normalized: dict[tuple[str, str], FeedModel] = {}
-
+    stats = stats or RefreshStats()
+    normalized: dict[str, FeedModel] = {}
     for row in rows:
         model_id = str(row.get("id") or "").strip()
-        if "/" not in model_id:
+        if model_id.startswith(ROLLING_POINTER_PREFIX):
+            stats.skipped_rolling_pointer += 1
             continue
-
-        raw_provider, model_slug = model_id.split("/", 1)
-        provider = _canonical_provider(raw_provider)
-        if provider is None:
+        provider_prefix, separator, slug = model_id.partition("/")
+        if not separator or not provider_prefix.strip() or not slug.strip():
+            stats.skipped_malformed_id += 1
             continue
-
-        model = model_slug.strip()
-        if not model:
+        if provider_prefix.strip().lower() == ROUTER_PROVIDER:
+            # Meta-routers resolve to a different model per request; the
+            # answer's lineage would not name the model that produced it.
+            stats.skipped_router += 1
             continue
-        if ":" in model:
-            # Skip alias/snapshot suffixes to reduce daily churn.
+        if model_id in normalized:
+            stats.duplicate_feed_ids += 1
             continue
         if not _is_text_output_model(row):
+            stats.skipped_non_text += 1
+            continue
+        context = _parse_positive_int(row.get("context_length"))
+        if context is None:
+            top_provider = row.get("top_provider")
+            if isinstance(top_provider, dict):
+                context = _parse_positive_int(top_provider.get("context_length"))
+        if context is None:
+            stats.skipped_missing_context += 1
+            continue
+        try:
+            gateway_alias_for_openrouter_id(model_id)
+        except GatewayCatalogError:
+            stats.skipped_invalid_alias += 1
             continue
 
         pricing = row.get("pricing")
-        prompt_per_1k = None
-        completion_per_1k = None
+        prompt_per_1k = completion_per_1k = None
+        pricing_tiered = False
         if isinstance(pricing, dict):
             prompt_per_1k = _parse_per_1k_pricing(pricing.get("prompt"))
             completion_per_1k = _parse_per_1k_pricing(pricing.get("completion"))
+            overrides = pricing.get("overrides")
+            pricing_tiered = isinstance(overrides, list) and len(overrides) > 0
         if prompt_per_1k is None or completion_per_1k is None:
-            prompt_per_1k = None
-            completion_per_1k = None
+            prompt_per_1k = completion_per_1k = None
+        if pricing_tiered:
+            stats.rows_pricing_tiered += 1
 
-        candidate = FeedModel(
-            provider=provider,
-            family=_model_family(model),
-            model=model,
-            context=_parse_non_negative_int(row.get("context_length")),
+        provider, _slug = model_id.split("/", 1)
+        display_name = str(row.get("name") or "").strip() or None
+        normalized[model_id] = FeedModel(
+            provider=provider.strip().lower(),
+            model_id=model_id,
+            display_name=display_name,
+            context=context,
             input_per_1k=prompt_per_1k,
             output_per_1k=completion_per_1k,
-            created_at=_parse_created_at(row.get("created")),
+            supports_vision=_accepts_images(row),
+            pricing_tiered=pricing_tiered,
         )
-        key = (provider, candidate.family)
-        existing = normalized.get(key)
-        if existing is None or _feed_model_score(candidate) > _feed_model_score(existing):
-            normalized[key] = candidate
-
+    stats.normalized_feed_rows = len(normalized)
     return normalized
-
-
-def _parse_notes(notes: str | None) -> tuple[list[str], str | None, bool]:
-    if not notes:
-        return [], None, False
-
-    manual_parts: list[str] = []
-    deprecated_on: str | None = None
-    pricing_unknown = False
-
-    for raw_part in str(notes).split("|"):
-        part = raw_part.strip()
-        if not part:
-            continue
-        if part.startswith(AUTO_DEPRECATED_PREFIX):
-            maybe_date = part[len(AUTO_DEPRECATED_PREFIX):].strip()
-            if maybe_date:
-                deprecated_on = maybe_date
-            continue
-        if part == AUTO_PRICING_UNKNOWN:
-            pricing_unknown = True
-            continue
-        manual_parts.append(part)
-
-    return manual_parts, deprecated_on, pricing_unknown
-
-
-def _compose_notes(
-    manual_parts: list[str], *, deprecated_on: str | None, pricing_unknown: bool
-) -> str | None:
-    parts = [part.strip() for part in manual_parts if part.strip()]
-    if deprecated_on:
-        parts.append(f"{AUTO_DEPRECATED_PREFIX}{deprecated_on}")
-    if pricing_unknown:
-        parts.append(AUTO_PRICING_UNKNOWN)
-    if not parts:
-        return None
-    return " | ".join(parts)
-
-
-def _set_or_pop(row: dict[str, Any], key: str, value: Any) -> None:
-    if value is None:
-        row.pop(key, None)
-        return
-    row[key] = value
 
 
 def _catalog_models(catalog: dict[str, Any]) -> list[dict[str, Any]]:
@@ -312,10 +212,60 @@ def _catalog_models(catalog: dict[str, Any]) -> list[dict[str, Any]]:
     return [dict(row) for row in models if isinstance(row, dict)]
 
 
+def _components(row: dict[str, Any]) -> set[str]:
+    raw = row.get("components")
+    if not isinstance(raw, list):
+        return set()
+    return {str(value or "").strip().upper() for value in raw if str(value or "").strip()}
+
+
+def _is_openrouter_gateway_row(row: dict[str, Any]) -> bool:
+    return str(row.get("gateway_upstream") or "").startswith(OPENROUTER_UPSTREAM_PREFIX)
+
+
+def _is_generation_only_row(row: dict[str, Any]) -> bool:
+    return _components(row) == {"GEN"}
+
+
+def _preserved_row(row: dict[str, Any]) -> bool:
+    """Rows the feed never owns: embeddings, rerankers, and the local vLLM serving row."""
+
+    if str(row.get("provider") or "").strip().lower() == LOCAL_GATEWAY_PROVIDER:
+        return True
+    return not _is_generation_only_row(row)
+
+
+def build_gateway_row(feed: FeedModel) -> dict[str, Any]:
+    row: dict[str, Any] = {
+        "provider": feed.provider,
+        "family": feed.model_id.split("/", 1)[1],
+        "model": feed.model_id,
+        "components": ["GEN"],
+        "unit": "1k_tokens",
+        "context": feed.context,
+    }
+    if feed.has_full_pricing:
+        row["input_per_1k"] = feed.input_per_1k
+        row["output_per_1k"] = feed.output_per_1k
+    row["base_url"] = OPENROUTER_BASE_URL
+    if feed.display_name:
+        row["display_name"] = feed.display_name
+    row["gateway_alias"] = gateway_alias_for_openrouter_id(feed.model_id)
+    row["gateway_upstream"] = f"{OPENROUTER_UPSTREAM_PREFIX}{feed.model_id}"
+    row["supports_vision"] = feed.supports_vision
+    notes: list[str] = []
+    if not feed.has_full_pricing:
+        notes.append(AUTO_PRICING_UNKNOWN)
+    if feed.pricing_tiered:
+        notes.append(AUTO_PRICING_TIERED)
+    if notes:
+        row["notes"] = " | ".join(notes)
+    return row
+
+
 def _merge_sources(existing: Any, as_of_date: str, *, refresh_stamp: bool) -> list[str]:
     out: list[str] = []
     existing_openrouter: str | None = None
-
     if isinstance(existing, list):
         for item in existing:
             source = str(item or "").strip()
@@ -326,132 +276,11 @@ def _merge_sources(existing: Any, as_of_date: str, *, refresh_stamp: bool) -> li
                     existing_openrouter = source
                 continue
             out.append(source)
-
     if refresh_stamp or existing_openrouter is None:
         out.append(f"{OPENROUTER_SOURCE_PREFIX} ({as_of_date})")
     else:
         out.append(existing_openrouter)
     return out
-
-
-def _build_catalog_core(
-    catalog: dict[str, Any],
-    feed_models_by_family: dict[tuple[str, str], FeedModel],
-    *,
-    as_of_date: str,
-) -> tuple[dict[str, Any], RefreshStats]:
-    stats = RefreshStats(normalized_feed_rows=len(feed_models_by_family))
-    existing_rows = _catalog_models(catalog)
-
-    result_rows: list[dict[str, Any]] = []
-    seen_feed_families: set[tuple[str, str]] = set()
-    emitted_model_keys: set[tuple[str, str]] = set()
-
-    for row in existing_rows:
-        provider = _canonical_provider(row.get("provider"))
-        model = str(row.get("model") or "").strip()
-        components = _normalized_components(row.get("components"))
-
-        if provider is None or provider not in MANAGED_PROVIDERS or "GEN" not in components or not model:
-            result_rows.append(row)
-            continue
-
-        stats.managed_existing_rows += 1
-        family_key = (provider, _model_family(model))
-        feed = feed_models_by_family.get(family_key)
-
-        manual_notes, deprecated_on, pricing_unknown = _parse_notes(
-            str(row.get("notes")) if row.get("notes") is not None else None
-        )
-
-        updated = dict(row)
-        updated["provider"] = provider
-        updated["model"] = model
-
-        if feed is None:
-            final_deprecated_on = deprecated_on or as_of_date
-            new_notes = _compose_notes(
-                manual_notes,
-                deprecated_on=final_deprecated_on,
-                pricing_unknown=pricing_unknown,
-            )
-            _set_or_pop(updated, "notes", new_notes)
-            if deprecated_on is None and updated != row:
-                stats.newly_deprecated_rows += 1
-            result_rows.append(updated)
-            continue
-
-        seen_feed_families.add(family_key)
-
-        updated["components"] = ["GEN"]
-        updated["model"] = feed.model
-        updated["unit"] = "1k_tokens"
-        _set_or_pop(updated, "context", feed.context)
-        _set_or_pop(updated, "input_per_1k", feed.input_per_1k)
-        _set_or_pop(updated, "output_per_1k", feed.output_per_1k)
-        _set_or_pop(updated, "base_url", PROVIDER_DEFAULT_BASE_URL.get(provider))
-
-        updated.pop("embed_per_1k", None)
-        updated.pop("rerank_per_1k", None)
-        updated.pop("per_request", None)
-
-        current_family_value = str(updated.get("family") or "").strip()
-        if not current_family_value or current_family_value == model:
-            updated["family"] = feed.model
-
-        new_notes = _compose_notes(
-            manual_notes,
-            deprecated_on=None,
-            pricing_unknown=not feed.has_full_pricing,
-        )
-        _set_or_pop(updated, "notes", new_notes)
-
-        if updated != row:
-            stats.updated_existing_rows += 1
-        output_key = (provider, str(updated.get("model") or "").strip())
-        if output_key in emitted_model_keys:
-            continue
-        emitted_model_keys.add(output_key)
-        result_rows.append(updated)
-
-    for key in sorted(feed_models_by_family.keys()):
-        if key in seen_feed_families:
-            continue
-        provider, _family = key
-        feed = feed_models_by_family[key]
-        if not _is_recent_family_candidate(feed=feed, as_of_date=as_of_date):
-            continue
-        model = feed.model
-        row = {
-            "provider": provider,
-            "family": model,
-            "model": model,
-            "components": ["GEN"],
-            "unit": "1k_tokens",
-        }
-        _set_or_pop(row, "context", feed.context)
-        _set_or_pop(row, "input_per_1k", feed.input_per_1k)
-        _set_or_pop(row, "output_per_1k", feed.output_per_1k)
-        _set_or_pop(row, "base_url", PROVIDER_DEFAULT_BASE_URL.get(provider))
-
-        note_parts = ["Added automatically from OpenRouter feed."]
-        row["notes"] = _compose_notes(
-            note_parts,
-            deprecated_on=None,
-            pricing_unknown=not feed.has_full_pricing,
-        )
-
-        stats.new_rows += 1
-        if not feed.has_full_pricing:
-            stats.new_rows_missing_price += 1
-        result_rows.append(row)
-
-    result_rows.sort(key=lambda item: (str(item.get("provider") or ""), str(item.get("model") or "")))
-
-    merged = copy.deepcopy(catalog)
-    merged["currency"] = str(merged.get("currency") or "USD")
-    merged["models"] = result_rows
-    return merged, stats
 
 
 def _catalog_without_last_updated(catalog: dict[str, Any]) -> dict[str, Any]:
@@ -466,42 +295,46 @@ def build_refreshed_catalog(
     *,
     as_of_date: str,
 ) -> tuple[dict[str, Any], RefreshStats, bool]:
-    normalized_by_family = normalize_openrouter_rows(feed_rows)
-    merged, stats = _build_catalog_core(catalog, normalized_by_family, as_of_date=as_of_date)
+    """Replace every feed-owned GEN row with the current OpenRouter routes."""
+
+    stats = RefreshStats(total_feed_rows=len(feed_rows))
+    feed_models = normalize_openrouter_rows(feed_rows, stats)
+
+    existing_rows = _catalog_models(catalog)
+    preserved = [row for row in existing_rows if _preserved_row(row)]
+    replaced = [row for row in existing_rows if not _preserved_row(row)]
+    previous_ids = {str(row.get("model") or "") for row in replaced if _is_openrouter_gateway_row(row)}
+    stats.previous_gateway_rows = len(previous_ids)
+    stats.preserved_rows = len(preserved)
+
+    gateway_rows_out = [build_gateway_row(feed_models[model_id]) for model_id in sorted(feed_models)]
+    current_ids = set(feed_models)
+    stats.gateway_rows = len(gateway_rows_out)
+    stats.rows_missing_price = sum(1 for row in gateway_rows_out if "input_per_1k" not in row)
+    stats.removed_rows = len(replaced) - len(previous_ids & current_ids)
+    stats.added_rows = len(current_ids - previous_ids)
+
+    result_rows = preserved + gateway_rows_out
+    result_rows.sort(key=lambda item: (str(item.get("provider") or ""), str(item.get("model") or "")))
+
+    merged = copy.deepcopy(catalog)
+    merged["currency"] = str(merged.get("currency") or "USD")
+    merged["models"] = result_rows
     merged = apply_selection_metadata_to_catalog(merged)
-    stats.total_feed_rows = len(feed_rows)
+    gateway_rows(merged)  # fail closed on alias collisions or a missing local serving row
 
     candidate = copy.deepcopy(merged)
     candidate["sources"] = copy.deepcopy(catalog.get("sources", []))
     changed_by_models = _catalog_without_last_updated(candidate) != _catalog_without_last_updated(catalog)
-
-    merged["sources"] = _merge_sources(
-        catalog.get("sources"),
-        as_of_date,
-        refresh_stamp=changed_by_models,
-    )
+    merged["sources"] = _merge_sources(catalog.get("sources"), as_of_date, refresh_stamp=changed_by_models)
     changed = _catalog_without_last_updated(merged) != _catalog_without_last_updated(catalog)
     if changed:
         merged["last_updated"] = as_of_date
+    elif "last_updated" in catalog:
+        merged["last_updated"] = catalog["last_updated"]
     else:
-        if "last_updated" in catalog:
-            merged["last_updated"] = catalog["last_updated"]
-        else:
-            merged.pop("last_updated", None)
-
+        merged.pop("last_updated", None)
     return merged, stats, changed
-
-
-def load_catalog(path: Path) -> dict[str, Any]:
-    raw: Any = json.loads(path.read_text(encoding="utf-8"))
-    if isinstance(raw, dict):
-        data = dict(raw)
-        if not isinstance(data.get("models"), list):
-            data["models"] = []
-        return data
-    if isinstance(raw, list):
-        return {"currency": "USD", "models": raw}
-    raise RuntimeError(f"Expected object/list JSON in {path}, got {type(raw).__name__}")
 
 
 def fetch_openrouter_rows() -> list[dict[str, Any]]:
@@ -510,39 +343,36 @@ def fetch_openrouter_rows() -> list[dict[str, Any]]:
         response.raise_for_status()
     except Exception as exc:
         raise RuntimeError(f"failed to fetch {OPENROUTER_MODELS_URL}: {exc}") from exc
-
     try:
         payload: Any = response.json()
     except Exception as exc:
         raise RuntimeError("failed to parse OpenRouter response as JSON") from exc
-
     if not isinstance(payload, dict):
         raise RuntimeError("OpenRouter response root must be an object")
     data = payload.get("data")
     if not isinstance(data, list):
         raise RuntimeError("OpenRouter response missing data[]")
-
     rows = [row for row in data if isinstance(row, dict)]
     if len(rows) != len(data):
         raise RuntimeError("OpenRouter response contained non-object rows in data[]")
     return rows
 
 
-def serialize_catalog(catalog: dict[str, Any]) -> str:
-    return json.dumps(catalog, ensure_ascii=False, indent=2) + "\n"
+def write_catalog_files(
+    canonical_path: Path,
+    mirror_path: Path,
+    catalog: dict[str, Any],
+    *,
+    litellm_config_path: Path,
+) -> None:
+    """Write catalog, mirror and generated YAML together (validated + rendered first, flock-guarded)."""
 
-
-def _atomic_write_text(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(text, encoding="utf-8")
-    tmp.replace(path)
-
-
-def write_catalog_files(canonical_path: Path, mirror_path: Path, catalog: dict[str, Any]) -> None:
-    text = serialize_catalog(catalog)
-    _atomic_write_text(canonical_path, text)
-    _atomic_write_text(mirror_path, text)
+    write_catalog_trio(
+        catalog,
+        canonical_path=canonical_path,
+        mirror_path=mirror_path,
+        litellm_config_path=litellm_config_path,
+    )
 
 
 def _parse_args(argv: list[str]) -> argparse.Namespace:
@@ -550,17 +380,17 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "--apply",
         action="store_true",
-        help="Write refreshed catalog to data/models.json and web/public/models.json.",
+        help="Write data/models.json, web/public/models.json and infra/litellm-config.yaml.",
     )
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = _parse_args(argv or sys.argv[1:])
+    args = _parse_args(argv if argv is not None else sys.argv[1:])
     as_of_date = _today_iso()
 
     try:
-        current_catalog = load_catalog(CANONICAL_PATH)
+        current_catalog = load_catalog(CATALOG_PATH)
         feed_rows = fetch_openrouter_rows()
         refreshed_catalog, stats, content_changed = build_refreshed_catalog(
             current_catalog,
@@ -572,17 +402,12 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     target_text = serialize_catalog(refreshed_catalog)
-    canonical_text = CANONICAL_PATH.read_text(encoding="utf-8")
-    mirror_text = MIRROR_PATH.read_text(encoding="utf-8") if MIRROR_PATH.exists() else ""
+    canonical_text = CATALOG_PATH.read_text(encoding="utf-8")
+    mirror_text = WEB_CATALOG_PATH.read_text(encoding="utf-8") if WEB_CATALOG_PATH.exists() else ""
     file_changed = canonical_text != target_text or mirror_text != target_text
 
-    print(f"feed_rows={stats.total_feed_rows}")
-    print(f"normalized_rows={stats.normalized_feed_rows}")
-    print(f"managed_existing_rows={stats.managed_existing_rows}")
-    print(f"updated_existing_rows={stats.updated_existing_rows}")
-    print(f"newly_deprecated_rows={stats.newly_deprecated_rows}")
-    print(f"new_rows={stats.new_rows}")
-    print(f"new_rows_missing_price={stats.new_rows_missing_price}")
+    for key, value in vars(stats).items():
+        print(f"{key}={value}")
     print(f"catalog_content_changed={str(content_changed).lower()}")
     print(f"catalog_files_need_write={str(file_changed).lower()}")
 
@@ -590,14 +415,9 @@ def main(argv: list[str] | None = None) -> int:
         print("dry_run=true")
         return 0
 
-    if not file_changed:
-        print("apply=true")
-        print("result=no_changes")
-        return 0
-
-    write_catalog_files(CANONICAL_PATH, MIRROR_PATH, refreshed_catalog)
+    write_catalog_files(CATALOG_PATH, WEB_CATALOG_PATH, refreshed_catalog, litellm_config_path=LITELLM_CONFIG_PATH)
     print("apply=true")
-    print("result=updated")
+    print("result=updated" if file_changed else "result=litellm_config_regenerated")
     return 0
 
 

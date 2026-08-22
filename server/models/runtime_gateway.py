@@ -24,6 +24,8 @@ def validate_litellm_alias(value: str, *, allow_empty: bool) -> str:
         return ""
     if not _LITELLM_ALIAS_PATTERN.fullmatch(alias):
         raise ValueError("must be a LiteLLM alias, not a provider or upstream model identifier")
+    if alias != alias.lower():
+        raise ValueError("must be a lowercase LiteLLM alias (gateway aliases are lowercase)")
     return alias
 
 
@@ -56,6 +58,14 @@ class ChatModelInfo(BaseModel):
     provider_type: str | None = Field(default=None, description="Gateway type")
     base_url: str | None = Field(default=None, description="LiteLLM base URL")
     supports_vision: bool = Field(default=False, description="Whether this model is expected to support vision inputs")
+    catalog_provider: str | None = Field(
+        default=None,
+        description="Upstream provider slug from the model catalog row behind this alias (for UI grouping).",
+    )
+    display_name: str | None = Field(default=None, description="Human-readable name from the catalog row, when known")
+    context: int | None = Field(default=None, ge=0, description="Maximum context tokens from the catalog row, when known")
+    input_per_1k: float | None = Field(default=None, ge=0.0, description="Input cost per 1k tokens from the catalog row")
+    output_per_1k: float | None = Field(default=None, ge=0.0, description="Output cost per 1k tokens from the catalog row")
 
 
 class ChatModelsResponse(BaseModel):

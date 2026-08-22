@@ -334,17 +334,21 @@ def test_generation_gateway_topology_is_pinned_local_and_has_no_paid_fallback() 
     assert hf_cache["type"] == "volume"
 
     gateway = yaml.safe_load((ROOT / "infra/litellm-config.yaml").read_text(encoding="utf-8"))
-    assert [row["model_name"] for row in gateway["model_list"]] == [
-        "ragweld-local",
-        "ragweld-openrouter-smoke",
-    ]
+    from server.gateway_catalog import build_model_list, load_catalog
+
+    assert gateway["model_list"] == build_model_list(load_catalog(ROOT / "data/models.json"))
+    assert gateway["model_list"][0]["model_name"] == "ragweld-local"
     assert gateway["model_list"][0]["litellm_params"] == {
         "model": "openai/ragweld-local",
         "api_base": "http://vllm:8000/v1",
         "api_key": "none",
     }
-    assert gateway["model_list"][1]["litellm_params"]["model"] == "openrouter/openai/gpt-5.4-mini"
-    assert gateway["model_list"][1]["litellm_params"]["api_key"] == "os.environ/OPENROUTER_API_KEY"
+    routed = gateway["model_list"][1:]
+    assert len(routed) >= 300
+    assert all(row["litellm_params"]["model"].startswith("openrouter/") for row in routed)
+    assert all(row["litellm_params"]["api_key"] == "os.environ/OPENROUTER_API_KEY" for row in routed)
+    assert all("api_base" not in row["litellm_params"] for row in routed)
+    assert "ragweld-openrouter-smoke" not in {row["model_name"] for row in gateway["model_list"]}
 
     launcher = (ROOT / "start.sh").read_text(encoding="utf-8")
     assert "unset OPENROUTER_API_KEY ANTHROPIC_API_KEY GOOGLE_API_KEY" in launcher

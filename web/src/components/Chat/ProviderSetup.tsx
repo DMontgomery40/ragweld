@@ -131,7 +131,7 @@ export function ProviderSetup() {
           </div>
         </div>
         <div style={{ marginTop: 10, fontSize: 12, color: litellmHealth?.reachable ? 'var(--ok)' : 'var(--warn)' }}>
-          {litellmHealth?.reachable ? `Authenticated and reachable (${models.length} ordinary alias${models.length === 1 ? '' : 'es'})` : `Unavailable${litellmHealth?.detail ? ` — ${litellmHealth.detail}` : ''}`}
+          {litellmHealth?.reachable ? `Authenticated and reachable (${models.length} catalog-backed gateway alias${models.length === 1 ? '' : 'es'})` : `Unavailable${litellmHealth?.detail ? ` — ${litellmHealth.detail}` : ''}`}
         </div>
       </div>
 

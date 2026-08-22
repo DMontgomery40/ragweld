@@ -18,13 +18,32 @@ import server.api.models as models_api
 def _temporary_catalog_paths(data_path: Path, web_path: Path):
     old_data_path = models_api.MODELS_PATH
     old_web_path = models_api.WEB_MODELS_PATH
+    old_gateway_path = models_api.LITELLM_CONFIG_PATH
     models_api.MODELS_PATH = data_path
     models_api.WEB_MODELS_PATH = web_path
+    models_api.LITELLM_CONFIG_PATH = data_path.parent / "litellm-config.yaml"
     try:
         yield
     finally:
         models_api.MODELS_PATH = old_data_path
         models_api.WEB_MODELS_PATH = old_web_path
+        models_api.LITELLM_CONFIG_PATH = old_gateway_path
+
+
+def _local_serving_row() -> dict:
+    return {
+        "provider": "ragweld",
+        "family": "Qwen3",
+        "model": "Qwen/Qwen3-4B-Instruct-2507",
+        "components": ["GEN"],
+        "unit": "1k_tokens",
+        "context": 8192,
+        "input_per_1k": 0.0,
+        "output_per_1k": 0.0,
+        "base_url": "http://vllm:8000/v1",
+        "gateway_alias": "ragweld-local",
+        "gateway_upstream": "openai/ragweld-local",
+    }
 
 
 @pytest.mark.asyncio
@@ -186,50 +205,59 @@ async def test_models_expose_truthful_selection_metadata(client: AsyncClient) ->
 
 
 @pytest.mark.asyncio
-async def test_models_upsert_creates_entry_and_autofills_provider_base_url(
+async def test_models_upsert_gen_row_becomes_gateway_route_and_regenerates_litellm_config(
     client: AsyncClient, tmp_path: Path
 ) -> None:
-    """POST /api/models/upsert should create a model and infer base_url from provider peers."""
+    """POST /api/models/upsert for a GEN row derives the gateway fields and rewrites the YAML."""
     data_path = tmp_path / "models.json"
     web_path = tmp_path / "models-web.json"
+    gateway_path = tmp_path / "litellm-config.yaml"
     seed = {
         "currency": "USD",
         "last_updated": "2026-01-01",
         "sources": ["test"],
         "models": [
+            _local_serving_row(),
             {
                 "provider": "openai",
-                "family": "gen",
-                "model": "gpt-seed",
+                "family": "gpt-seed",
+                "model": "openai/gpt-seed",
                 "components": ["GEN"],
                 "unit": "1k_tokens",
                 "input_per_1k": 0.001,
                 "output_per_1k": 0.002,
-                "base_url": "https://proxy.example/v1",
-            }
+                "context": 128000,
+                "base_url": "https://openrouter.ai/api/v1",
+                "gateway_alias": "openai.gpt-seed",
+                "gateway_upstream": "openrouter/openai/gpt-seed",
+            },
         ],
     }
     data_path.write_text(json.dumps(seed, indent=2) + "\n", encoding="utf-8")
     web_path.write_text(json.dumps(seed, indent=2) + "\n", encoding="utf-8")
+    gateway_path.write_text("stale: true\n", encoding="utf-8")
 
     payload = {
         "provider": "openai",
-        "model": "gpt-upserted",
+        "model": "openai/gpt-upserted",
         "family": "gen",
         "unit": "1k_tokens",
         "input_per_1k": 0.003,
         "output_per_1k": 0.004,
+        "context": 64000,
     }
 
     with _temporary_catalog_paths(data_path, web_path):
         response = await client.post("/api/models/upsert", json=payload)
-        assert response.status_code == 200
+        assert response.status_code == 200, response.text
         body = response.json()
         assert body["ok"] is True
         assert body["action"] == "created"
         assert body["model"]["provider"] == "openai"
-        assert body["model"]["model"] == "gpt-upserted"
-        assert body["model"]["base_url"] == "https://proxy.example/v1"
+        assert body["model"]["model"] == "openai/gpt-upserted"
+        assert body["model"]["gateway_alias"] == "openai.gpt-upserted"
+        assert body["model"]["gateway_upstream"] == "openrouter/openai/gpt-upserted"
+        assert body["model"]["base_url"] == "https://openrouter.ai/api/v1"
         assert "GEN" in body["model"]["components"]
         assert body["model"]["selection_status"] == "catalog_only"
         assert body["model"]["selection_roles"] == []
@@ -237,8 +265,52 @@ async def test_models_upsert_creates_entry_and_autofills_provider_base_url(
         data_catalog = json.loads(data_path.read_text(encoding="utf-8"))
         web_catalog = json.loads(web_path.read_text(encoding="utf-8"))
         assert data_catalog == web_catalog
-        created = [m for m in data_catalog["models"] if m.get("model") == "gpt-upserted"]
+        created = [m for m in data_catalog["models"] if m.get("model") == "openai/gpt-upserted"]
         assert len(created) == 1
+
+        import yaml
+
+        rendered = yaml.safe_load(gateway_path.read_text(encoding="utf-8"))
+        assert [row["model_name"] for row in rendered["model_list"]] == [
+            "ragweld-local",
+            "openai.gpt-seed",
+            "openai.gpt-upserted",
+        ]
+        assert rendered["model_list"][2]["litellm_params"] == {
+            "model": "openrouter/openai/gpt-upserted",
+            "api_key": "os.environ/OPENROUTER_API_KEY",
+        }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("payload", "match"),
+    [
+        (
+            {"provider": "openai", "model": "gpt-direct", "family": "gen", "unit": "1k_tokens", "input_per_1k": 0.1, "output_per_1k": 0.2},
+            "OpenRouter routes",
+        ),
+        (
+            {"provider": "anthropic", "model": "openai/gpt-5.4-mini", "family": "gen", "unit": "1k_tokens", "input_per_1k": 0.1, "output_per_1k": 0.2},
+            "provider to equal",
+        ),
+    ],
+)
+async def test_models_upsert_rejects_generation_rows_the_gateway_cannot_serve(
+    client: AsyncClient, tmp_path: Path, payload: dict, match: str
+) -> None:
+    data_path = tmp_path / "models.json"
+    web_path = tmp_path / "models-web.json"
+    seed = {"currency": "USD", "sources": [], "models": [_local_serving_row()]}
+    data_path.write_text(json.dumps(seed, indent=2) + "\n", encoding="utf-8")
+    web_path.write_text(json.dumps(seed, indent=2) + "\n", encoding="utf-8")
+
+    with _temporary_catalog_paths(data_path, web_path):
+        response = await client.post("/api/models/upsert", json=payload)
+
+    assert response.status_code == 422
+    assert match in str(response.json().get("detail") or "")
+    assert json.loads(data_path.read_text(encoding="utf-8")) == seed, "a rejected upsert never writes"
 
 
 @pytest.mark.asyncio

@@ -8,6 +8,7 @@ import { PipelineProfile } from '@/components/Benchmark/PipelineProfile';
 import { ResultsTable } from '@/components/Benchmark/ResultsTable';
 import { SplitScreen } from '@/components/Benchmark/SplitScreen';
 import type { ChatModelInfo, ChatModelsResponse, LineageRef } from '@/types/generated';
+import { chatModelDetail, chatModelLabel, chatModelName, groupChatModels } from '@/components/Chat/modelLabel';
 
 type BenchmarkRunRequest = {
   prompt: string;
@@ -32,19 +33,12 @@ type BenchmarkRunResponse = {
   results: BenchmarkRunResult[];
 };
 
-const SOURCE_LABELS: Record<ChatModelInfo['source'], string> = {
-  litellm: 'LiteLLM',
-} as const;
-
-const SOURCE_ORDER: Array<ChatModelInfo['source']> = ['litellm'] as const;
-
 function toModelValue(model: ChatModelInfo): string {
   return String(model.override || model.id || '').trim();
 }
 
 function toModelLabel(model: ChatModelInfo): string {
-  const name = String(model.catalog_model || model.id || '').trim();
-  return `${model.provider} · ${name}`;
+  return chatModelLabel(model);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -144,15 +138,15 @@ export default function BenchmarkTab() {
 
   const initSelectionRef = useRef(false);
 
-  const groupedModels = useMemo(() => {
-    const grouped = SOURCE_ORDER.map((source) => ({
-      source,
-      label: SOURCE_LABELS[source],
-      items: availableModels.filter((m) => m.source === source),
-    })).filter((g) => g.items.length > 0);
-
-    return grouped;
-  }, [availableModels]);
+  const groupedModels = useMemo(
+    () =>
+      groupChatModels(availableModels.filter((m) => m.source === 'litellm')).map(({ group, models }) => ({
+        source: group,
+        label: `${group} (${models.length})`,
+        items: models,
+      })),
+    [availableModels]
+  );
 
   const selectedCount = selectedModels.length;
   const selectionOk = selectedCount >= 2 && selectedCount <= 4;
@@ -347,12 +341,12 @@ export default function BenchmarkTab() {
                                 textOverflow: 'ellipsis',
                                 whiteSpace: 'nowrap',
                               }}
-                              title={toModelLabel(m)}
+                              title={chatModelDetail(m)}
                             >
-                              {toModelLabel(m)}
+                              {chatModelName(m)}
                             </div>
                             <div style={{ marginTop: 2, fontSize: 12, color: 'var(--fg-muted)' }}>
-                              {m.provider}
+                              {chatModelDetail(m)}
                             </div>
                           </div>
                         </label>

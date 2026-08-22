@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 from server.chat.gateway_runtime import resolve_litellm_api_key, resolve_litellm_base_url
+from server.gateway_catalog import gateway_rows_snapshot
 from server.models.tribrid_config_model import TriBridConfig
 
 
@@ -43,6 +44,8 @@ def select_provider_route(*, config: TriBridConfig, model_override: str = "") ->
 
     Direct provider credentials, local inference inventory, and provider/model
     identifiers are deliberately ignored. Upstream routing belongs to LiteLLM.
+    The alias must be a catalog-backed gateway alias (the in-memory snapshot of
+    data/models.json, warmed at startup); unknown aliases fail closed.
     """
 
     gateway = config.chat.litellm
@@ -50,6 +53,11 @@ def select_provider_route(*, config: TriBridConfig, model_override: str = "") ->
         raise RuntimeError("LiteLLM generation gateway is disabled")
 
     alias = _resolve_gateway_alias(model_override, gateway.default_model)
+    catalog = gateway_rows_snapshot()
+    if not catalog:
+        raise RuntimeError("Generation catalog is not loaded; gateway aliases cannot be verified")
+    if alias not in catalog:
+        raise RuntimeError(f"Generation model_override {alias!r} is not a gateway alias in data/models.json")
     return ProviderRoute(
         kind="litellm",
         provider_name="LiteLLM",

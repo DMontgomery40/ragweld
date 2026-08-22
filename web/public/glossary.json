@@ -12540,6 +12540,27 @@
       "definition": "LiteLLM alias that grades Promptfoo llm-rubric assertions during a regression run. Leave empty to use the chat default alias. The grader must be exposed by the authenticated gateway; the run refuses to start otherwise and never reports fabricated pass/fail counts.",
       "category": "evaluation",
       "badges": []
+    },
+    {
+      "term": "Gateway Alias",
+      "key": "GATEWAY_ALIAS",
+      "definition": "The application-visible name of one generation route through the LiteLLM gateway. Every GEN row in data/models.json carries a gateway_alias (for example openai.gpt-5.4-mini, derived from the OpenRouter id openai/gpt-5.4-mini by replacing / and : with .) and a gateway_upstream (the LiteLLM litellm_params.model, such as openrouter/openai/gpt-5.4-mini or openai/ragweld-local for the self-hosted vLLM path). infra/litellm-config.yaml is generated from those rows, so the gateway serves exactly the catalog and nothing else. Config fields such as chat.litellm.default_model, generation.gen_model and graph_indexing.semantic_kg_llm_model hold an alias, and a per-request override is written litellm:<alias>. Aliases never contain / or :, so a direct provider identifier can never be mistaken for a gateway route.",
+      "category": "Models & Providers",
+      "related": [
+        "LITELLM",
+        "OPENROUTER",
+        "VLLM"
+      ],
+      "links": [
+        {
+          "text": "LiteLLM proxy model_list configuration",
+          "href": "https://docs.litellm.ai/docs/proxy/configs"
+        },
+        {
+          "text": "OpenRouter models API",
+          "href": "https://openrouter.ai/docs/api-reference/list-available-models"
+        }
+      ]
     }
   ]
 }

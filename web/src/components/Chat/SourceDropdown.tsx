@@ -233,6 +233,7 @@ export function SourceDropdown(props: SourceDropdownProps) {
               <input
                 type="checkbox"
                 checked={isChecked(corpus.corpus_id)}
+                data-testid={`source-corpus-${corpus.corpus_id}`}
                 onChange={() => handleCorpusToggle(corpus.corpus_id)}
               />
               <span style={{ flex: 1 }}>{corpus.name}</span>

@@ -250,6 +250,16 @@ export interface ChatModelInfo {
   base_url?: string | null; // default: None
   /** Whether this model is expected to support vision inputs */
   supports_vision?: boolean; // default: False
+  /** Upstream provider slug from the model catalog row behind this alias (for UI grouping). */
+  catalog_provider?: string | null; // default: None
+  /** Human-readable name from the catalog row, when known */
+  display_name?: string | null; // default: None
+  /** Maximum context tokens from the catalog row, when known */
+  context?: number | null; // default: None
+  /** Input cost per 1k tokens from the catalog row */
+  input_per_1k?: number | null; // default: None
+  /** Output cost per 1k tokens from the catalog row */
+  output_per_1k?: number | null; // default: None
 }
 
 /** Image upload + vision model configuration. */
@@ -1401,6 +1411,14 @@ export interface ModelCatalogEntry {
   base_url?: string | null; // default: None
   /** Freeform notes */
   notes?: string | null; // default: None
+  /** Human-readable model name when the upstream feed provides one */
+  display_name?: string | null; // default: None
+  /** LiteLLM gateway alias that serves this generation row. Set only on GEN rows that are rendered into infra/litellm-config.yaml; selectable as litellm:<gateway_alias>. */
+  gateway_alias?: string | null; // default: None
+  /** LiteLLM litellm_params.model for gateway_alias (for example openrouter/openai/gpt-5.4-mini or openai/ragweld-local for the vLLM serving path). */
+  gateway_upstream?: string | null; // default: None
+  /** Whether the upstream route accepts image inputs (OpenRouter input_modalities includes image). */
+  supports_vision?: boolean; // default: False
   /** Runtime selection surfaces that should expose this row. */
   selection_roles?: ("embedding_provider" | "reranker_cloud")[];
   /** Whether this row is currently selectable in the runtime product surface. */

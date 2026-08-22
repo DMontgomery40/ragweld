@@ -9,8 +9,8 @@ Status: approved for implementation
 Ragweld has one generation egress:
 
 ```text
-Browser -> Ragweld API -> LiteLLM -> vLLM
-                               \-> OpenRouter smoke alias (explicit only)
+Browser -> Ragweld API -> LiteLLM -> vLLM            (alias ragweld-local, default)
+                               \-> OpenRouter       (one alias per catalog GEN row)
 ```
 
 The application knows LiteLLM's OpenAI-compatible endpoint, client key, and
@@ -18,10 +18,15 @@ model aliases. It does not select direct OpenAI, OpenRouter, Ollama, llama.cpp,
 or in-process MLX transports for generation. LiteLLM owns upstream translation.
 vLLM owns the default local model-serving path.
 
-The paid alias `ragweld-openrouter-smoke` is operator-only. It is never the
-default, never a retry target, never a fallback, and never published as the
-ordinary Chat choice. One separately invoked smoke request may use it after the
-local topology is green.
+Update 2026-08-22: the alias set is generated from `data/models.json`. Every
+GEN catalog row carries `gateway_alias` + `gateway_upstream`, and
+`infra/litellm-config.yaml` is rendered from those rows
+(`scripts/generate_litellm_config.py`; lockstep enforced by
+`tests/unit/test_gateway_catalog.py`). The former hand-written
+`ragweld-openrouter-smoke` alias is gone; paid OpenRouter routes are ordinary,
+catalog-backed aliases (for example `openai.gpt-5.4-mini`) and never the
+default, never a retry target, never a fallback. See
+`docs/references/generation-gateway-catalog.md`.
 
 ## Deployment topology
 
@@ -40,11 +45,13 @@ production model. Larger models require a larger local VM or remote GPU vLLM.
 
 ## Configuration and secrets
 
-`infra/litellm-config.yaml` is authoritative. LiteLLM database-backed config is
-disabled. The file declares exactly two aliases:
+`infra/litellm-config.yaml` is what LiteLLM loads, and it is generated output
+of the catalog (never hand-edited). LiteLLM database-backed config is disabled.
+The file declares:
 
-- `ragweld-local` -> the internal vLLM OpenAI-compatible endpoint
-- `ragweld-openrouter-smoke` -> `openrouter/openai/gpt-5.4-mini`
+- `ragweld-local` -> the internal vLLM OpenAI-compatible endpoint (always first)
+- one `<provider>.<model>` alias per OpenRouter route in the catalog ->
+  `openrouter/<provider>/<model>` with `os.environ/OPENROUTER_API_KEY`
 
 Retries are zero and all fallback lists are empty. Secrets use LiteLLM's
 `os.environ/NAME` indirection. `OPENROUTER_API_KEY` is loaded only into the
@@ -54,7 +61,8 @@ processes receive only `LITELLM_API_KEY`.
 ## Application contract
 
 - `ProviderRoute.kind` is only `litellm`.
-- A model override is either `ragweld-local` or `litellm:<alias>`.
+- A model override is either `ragweld-local` or `litellm:<alias>`, where
+  `<alias>` is a catalog `gateway_alias` (slash-free; `/` and `:` become `.`).
 - Direct prefixes are rejected; they do not silently normalize.
 - Non-stream and stream generation use one OpenAI Chat Completions wire path.
 - `/api/chat/models` is authenticated LiteLLM discovery, filtered to ordinary
@@ -81,8 +89,11 @@ No Python mocks or Playwright interception.
    generation through LiteLLM.
 5. The in-app Browser proves real Chat discovery and one send against the
    running application.
-6. One explicit paid OpenRouter request uses a fixed prompt, `max_tokens=8`,
-   `--retry 0`, and no gateway fallback.
+6. One explicit paid OpenRouter request through a catalog alias proves a
+   grounded answer on a real corpus with a real domain question, no retries,
+   no gateway fallback.
+7. The catalog, its web mirror and the generated gateway YAML are proven in
+   lockstep by a unit test and `scripts/generate_litellm_config.py --check`.
 
 ## Source basis
 

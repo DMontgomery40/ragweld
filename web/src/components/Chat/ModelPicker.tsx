@@ -1,4 +1,5 @@
 import type { ChatModelInfo } from '@/types/generated';
+import { chatModelDetail, chatModelName, groupChatModels } from '@/components/Chat/modelLabel';
 
 type ModelPickerProps = {
   value: string;
@@ -12,17 +13,13 @@ function toOptionValue(model: ChatModelInfo, valueMode: 'override' | 'id'): stri
   return String(valueMode === 'id' ? model.id : model.override || model.id || '');
 }
 
-function toOptionLabel(model: ChatModelInfo): string {
-  const name = String(model.catalog_model || model.id || '').trim();
-  return `${model.provider} · ${name}`;
-}
-
 export function ModelPicker({ value, onChange, models, valueMode = 'override', allowEmpty = false }: ModelPickerProps) {
   const gatewayModels = models.filter((model) => model.source === 'litellm');
   const hasModels = gatewayModels.length > 0;
   const currentValueAvailable = !value
     ? allowEmpty
     : gatewayModels.some((model) => toOptionValue(model, valueMode) === value);
+  const groups = groupChatModels(gatewayModels);
 
   return (
     <select
@@ -46,18 +43,18 @@ export function ModelPicker({ value, onChange, models, valueMode = 'override', a
         <option value={value} disabled>Unavailable alias: {value}</option>
       ) : null}
       {hasModels && allowEmpty ? <option value="">Use default alias</option> : null}
-      {hasModels ? (
-        <optgroup label="LiteLLM">
-          {gatewayModels.map((model) => {
+      {groups.map(({ group, models: groupModels }) => (
+        <optgroup key={group} label={`${group} (${groupModels.length})`} data-testid={`model-picker-group-${group}`}>
+          {groupModels.map((model) => {
             const optionValue = toOptionValue(model, valueMode);
             return (
-              <option key={optionValue} value={optionValue}>
-                {toOptionLabel(model)}
+              <option key={optionValue} value={optionValue} title={chatModelDetail(model)}>
+                {chatModelName(model)}
               </option>
             );
           })}
         </optgroup>
-      ) : null}
+      ))}
     </select>
   );
 }

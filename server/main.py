@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import logging
 import os
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
@@ -9,6 +11,10 @@ from typing import Any
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.responses import Response
+
+from server.gateway_catalog import warm_gateway_catalog
+from server.api.cost import warm_cost_catalog
+from server.observability.costing import warm_costing_catalog
 
 from server.api.agent import router as agent_router
 from server.api.benchmark import router as benchmark_router
@@ -111,8 +117,42 @@ async def _enter_lifecycle_cm(cm: Any) -> None:
         raise
 
 
+logger = logging.getLogger(__name__)
+
+
+GATEWAY_CATALOG_REFRESH_SECONDS = 15.0
+
+
+def _warm_catalog_views() -> None:
+    """Blocking: (re)load every in-memory view of data/models.json. Run off the loop."""
+
+    warm_gateway_catalog()
+    warm_costing_catalog()
+    warm_cost_catalog()
+
+
+async def _catalog_refresh_loop() -> None:
+    """Pick up catalog changes made by the refresh CLI without restarting the API.
+
+    `warm_gateway_catalog` is stamp-cached (stat only unless the file changed),
+    so this costs one stat per interval in a worker thread.
+    """
+
+    while True:
+        await asyncio.sleep(GATEWAY_CATALOG_REFRESH_SECONDS)
+        try:
+            await asyncio.to_thread(_warm_catalog_views)
+        except (OSError, ValueError) as error:
+            logger.warning("generation gateway catalog refresh failed; keeping the last good snapshot: %s", error)
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    try:
+        await asyncio.to_thread(_warm_catalog_views)
+    except (OSError, ValueError) as error:
+        logger.warning("generation gateway catalog not loaded at startup (generation fails closed): %s", error)
+    catalog_refresh_task = asyncio.create_task(_catalog_refresh_loop(), name="gateway-catalog-refresh")
     mcp_session_cm = None
     if _global_cfg.mcp.enabled:
         mcp_session_cm = _mcp.session_manager.run()
@@ -120,6 +160,11 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
+        catalog_refresh_task.cancel()
+        try:
+            await catalog_refresh_task
+        except (asyncio.CancelledError, Exception):
+            pass
         if mcp_session_cm is not None:
             await mcp_session_cm.__aexit__(None, None, None)
 

@@ -5,6 +5,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+from server.gateway_catalog import gateway_rows_snapshot
 from server.models.tribrid_config_model import TraceCostSummary
 
 _MODELS_PATH = Path(__file__).resolve().parents[2] / "data" / "models.json"
@@ -28,6 +29,16 @@ def _load_models_catalog() -> list[dict[str, Any]]:
     if isinstance(raw, list):
         return [item for item in raw if isinstance(item, dict)]
     return []
+
+
+def warm_costing_catalog() -> int:
+    """Load the pricing catalog into the process cache (blocking; call off the loop)."""
+
+    return len(_load_models_catalog())
+
+
+def reset_costing_catalog() -> None:
+    _load_models_catalog.cache_clear()
 
 
 def _find_model_spec(*, provider: str | None, model: str | None) -> dict[str, Any] | None:
@@ -138,14 +149,16 @@ def extract_provider_cost(data: dict[str, Any] | None) -> float | None:
     return None
 
 
-def _split_provider_model(provider: str | None, model: str | None) -> tuple[str | None, str | None]:
-    provider_name = str(provider or "").strip()
-    model_name = str(model or "").strip()
-    if "/" in model_name:
-        provider_slug, model_slug = model_name.split("/", 1)
-        if provider_name.lower() in {"litellm", "openrouter"}:
-            return provider_slug, model_slug
-    return provider_name, model_name
+def _find_gateway_spec(alias: str | None) -> dict[str, Any] | None:
+    """Resolve a LiteLLM gateway alias to the catalog row that carries its pricing."""
+
+    alias_key = _norm_key(alias)
+    if not alias_key:
+        return None
+    row = gateway_rows_snapshot().get(alias_key)
+    if row is None:
+        return None
+    return {"input_per_1k": row.input_per_1k, "output_per_1k": row.output_per_1k}
 
 
 def build_trace_cost_summary(
@@ -170,8 +183,7 @@ def build_trace_cost_summary(
             detail="Cost came from provider or gateway response metadata.",
         )
 
-    resolved_provider, resolved_model = _split_provider_model(provider, model)
-    spec = _find_model_spec(provider=resolved_provider, model=resolved_model)
+    spec = _find_gateway_spec(model) or _find_model_spec(provider=provider, model=model)
     if spec is None or (input_tokens is None and output_tokens is None):
         return TraceCostSummary(
             provider=provider,
@@ -210,5 +222,5 @@ def build_trace_cost_summary(
         estimated_cost_usd=float(round(estimate, 6)),
         cost_source="catalog",
         authoritative=False,
-        detail="Cost estimated from token usage and catalog pricing.",
+        detail="Cost estimated from token usage and base-tier catalog pricing (provider volume tiers may apply).",
     )

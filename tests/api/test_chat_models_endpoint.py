@@ -27,7 +27,13 @@ class _ModelsHandler(BaseHTTPRequestHandler):
             self.end_headers()
             return
         body = json.dumps(
-            {"data": [{"id": "ragweld-local"}, {"id": "ragweld-openrouter-smoke"}]}
+            {
+                "data": [
+                    {"id": "ragweld-local"},
+                    {"id": "openai.gpt-5.4-mini"},
+                    {"id": "hand-added-alias-not-in-catalog"},
+                ]
+            }
         ).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
@@ -76,16 +82,31 @@ def _gateway_models() -> Iterator[str]:
 
 
 @pytest.mark.asyncio
-async def test_chat_models_expose_only_normal_litellm_aliases(client: AsyncClient) -> None:
+async def test_chat_models_publish_only_catalog_backed_aliases(client: AsyncClient) -> None:
     with _gateway_models():
         response = await client.get("/api/chat/models")
 
     assert response.status_code == 200
     models = response.json()["models"]
-    assert [row["id"] for row in models] == ["ragweld-local"]
-    assert [row["override"] for row in models] == ["litellm:ragweld-local"]
+    assert [row["id"] for row in models] == ["ragweld-local", "openai.gpt-5.4-mini"]
+    assert [row["override"] for row in models] == ["litellm:ragweld-local", "litellm:openai.gpt-5.4-mini"]
     assert {row["source"] for row in models} == {"litellm"}
     assert {row["provider"] for row in models} == {"LiteLLM"}
+    assert all(row["catalog_provider"] and row["catalog_model"] for row in models)
+
+    local, paid = models
+    assert local["catalog_provider"] == "ragweld"
+    assert local["catalog_model"]
+    assert local["input_per_1k"] == 0.0 and local["output_per_1k"] == 0.0
+    assert local["supports_vision"] is False
+
+    assert paid["catalog_provider"] == "openai"
+    assert paid["catalog_model"] == "openai/gpt-5.4-mini"
+    assert paid["display_name"] == "OpenAI: GPT-5.4 Mini"
+    assert paid["context"] and paid["context"] > 0
+    assert paid["input_per_1k"] and paid["input_per_1k"] > 0
+    assert paid["output_per_1k"] and paid["output_per_1k"] > 0
+    assert paid["supports_vision"] is True
 
 
 @pytest.mark.asyncio

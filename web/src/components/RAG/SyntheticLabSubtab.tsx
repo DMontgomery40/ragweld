@@ -16,6 +16,7 @@ import type {
   SyntheticRunMeta,
   SyntheticRunStartRequest,
 } from '@/types/generated';
+import { chatModelDetail, chatModelName, groupChatModels } from '@/components/Chat/modelLabel';
 
 type SyntheticArtifactKind = SyntheticArtifactRef['kind'];
 type SyntheticProvider = NonNullable<SyntheticRunStartRequest['provider']>;
@@ -35,10 +36,6 @@ function toModelValue(model: ChatModelInfo): string {
   return String(model.override || model.id || '').trim();
 }
 
-function toModelLabel(model: ChatModelInfo): string {
-  const name = String(model.catalog_model || model.id || '').trim();
-  return `${model.provider} · ${name}`;
-}
 
 function SyntheticModelPicker({
   label,
@@ -55,10 +52,13 @@ function SyntheticModelPicker({
   loading: boolean;
   error: string | null;
 }) {
-  const groupedModels = useMemo(() => {
-    const items = models.filter((model) => model.source === 'litellm' && Boolean(toModelValue(model)));
-    return items.length > 0 ? [{ source: 'litellm', label: 'LiteLLM', items }] : [];
-  }, [models]);
+  const groupedModels = useMemo(
+    () =>
+      groupChatModels(models.filter((model) => model.source === 'litellm' && Boolean(toModelValue(model)))).map(
+        ({ group, models: items }) => ({ source: group, label: `${group} (${items.length})`, items })
+      ),
+    [models]
+  );
 
   return (
     <div className="setting-row">
@@ -75,8 +75,8 @@ function SyntheticModelPicker({
               {group.items.map((model) => {
                 const optionValue = toModelValue(model);
                 return (
-                  <option key={optionValue} value={optionValue}>
-                    {toModelLabel(model)}
+                  <option key={optionValue} value={optionValue} title={chatModelDetail(model)}>
+                    {chatModelName(model)}
                   </option>
                 );
               })}

@@ -8,6 +8,7 @@ from collections.abc import Iterator
 
 import pytest
 
+from server.gateway_catalog import warm_gateway_catalog
 from server.chat.provider_router import select_provider_route
 from server.models.chat_config import ChatConfig, LiteLLMConfig
 from server.models.tribrid_config_model import TriBridConfig
@@ -43,15 +44,20 @@ def _config(*, enabled: bool = True) -> TriBridConfig:
     )
 
 
+@pytest.fixture(autouse=True)
+def _catalog_snapshot() -> None:
+    warm_gateway_catalog()
+
+
 @pytest.mark.parametrize(
     ("override", "expected_model"),
     [
         ("", "ragweld-local"),
-        ("another-gateway-alias", "another-gateway-alias"),
-        ("litellm:another-gateway-alias", "another-gateway-alias"),
+        ("openai.gpt-5.4-mini", "openai.gpt-5.4-mini"),
+        ("litellm:openai.gpt-5.4-mini", "openai.gpt-5.4-mini"),
     ],
 )
-def test_every_valid_alias_resolves_one_litellm_route(override: str, expected_model: str) -> None:
+def test_every_catalog_alias_resolves_one_litellm_route(override: str, expected_model: str) -> None:
     with _environment(
         LITELLM_API_KEY="test-gateway-key",
         LITELLM_BASE_URL="http://127.0.0.1:54000/v1/",
@@ -81,6 +87,19 @@ def test_direct_provider_identifiers_are_rejected(override: str) -> None:
     with _environment(LITELLM_API_KEY="test-gateway-key"):
         with pytest.raises(RuntimeError, match="gateway alias"):
             select_provider_route(config=_config(), model_override=override)
+
+
+@pytest.mark.parametrize("override", ["another-gateway-alias", "litellm:ragweld-openrouter-smoke", "litellm:openrouter.auto"])
+def test_aliases_absent_from_the_catalog_fail_closed(override: str) -> None:
+    with _environment(LITELLM_API_KEY="test-gateway-key"):
+        with pytest.raises(RuntimeError, match="not a gateway alias in data/models.json"):
+            select_provider_route(config=_config(), model_override=override)
+
+
+def test_uppercase_aliases_are_rejected_not_normalized() -> None:
+    with _environment(LITELLM_API_KEY="test-gateway-key"):
+        with pytest.raises(RuntimeError, match="gateway alias"):
+            select_provider_route(config=_config(), model_override="litellm:OpenAI.GPT-5.4-Mini")
 
 
 def test_disabled_gateway_fails_closed_without_fallback() -> None:

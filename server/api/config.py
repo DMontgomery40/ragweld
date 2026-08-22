@@ -49,6 +49,7 @@ from server.retrieval.contracts import (
 from server.retrieval.errors import RequiredRetrievalLegError, RetrievalContractMismatchError
 from server.retrieval.fusion import TriBridFusion
 from server.retrieval.qdrant_store import QdrantChunkStore
+from server.gateway_catalog import gateway_rows_snapshot
 from server.runtime_capabilities import SUPPORTED_RERANKER_CLOUD_PROVIDERS
 from server.services.config_store import CorpusNotFoundError
 from server.services.config_store import get_config as load_scoped_config
@@ -425,9 +426,6 @@ def _collect_model_warnings(config: TriBridConfig) -> list[ModelValidationWarnin
     surface non-blocking advice.
     """
     catalog_models = _load_catalog_models_for_validation()
-    if not catalog_models:
-        return []
-
     warnings: list[ModelValidationWarning] = []
 
     def _check(field_name: str, model_value: str, required_component: str, provider_hint: str | None = None) -> None:
@@ -447,6 +445,35 @@ def _collect_model_warnings(config: TriBridConfig) -> list[ModelValidationWarnin
                 field=field_name,
                 model_value=raw,
                 message=f"Model '{raw}' supports [{found}] but this field requires [{required_component}].",
+            ))
+
+    gateway_aliases = gateway_rows_snapshot()
+    for field_name, value in (
+        ("chat.litellm.default_model", config.chat.litellm.default_model),
+        ("generation.gen_model", config.generation.gen_model),
+        ("generation.enrich_model", config.generation.enrich_model),
+        ("generation.gen_model_http", config.generation.gen_model_http),
+        ("generation.gen_model_mcp", config.generation.gen_model_mcp),
+        ("generation.gen_model_cli", config.generation.gen_model_cli),
+        ("chat.multimodal.vision_model_override", config.chat.multimodal.vision_model_override),
+        ("graph_indexing.semantic_kg_llm_model", getattr(config.graph_indexing, "semantic_kg_llm_model", "")),
+    ):
+        alias = str(value or "").strip()
+        if alias.startswith("litellm:"):
+            alias = alias.split(":", 1)[1].strip()
+        if not alias:
+            continue
+        if not gateway_aliases:
+            warnings.append(ModelValidationWarning(
+                field=field_name,
+                model_value=alias,
+                message="Generation catalog is not loaded; gateway aliases cannot be verified and generation fails closed.",
+            ))
+        elif alias not in gateway_aliases:
+            warnings.append(ModelValidationWarning(
+                field=field_name,
+                model_value=alias,
+                message=f"'{alias}' is not a gateway alias in data/models.json; generation with it fails closed.",
             ))
 
     if (

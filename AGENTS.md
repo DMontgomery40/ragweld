@@ -153,6 +153,7 @@ cd /Users/davidmontgomery/ragweld
 uv run python scripts/check_docs_ownership.py
 uv run scripts/check_banned.py
 uv run scripts/validate_types.py
+uv run python scripts/generate_litellm_config.py --check
 uv run pytest -q
 ```
 

@@ -31,6 +31,13 @@ def _load_models_catalog() -> dict[str, Any]:
     return {"models": []}
 
 
+def warm_cost_catalog() -> int:
+    """Load the pricing catalog into the process cache (blocking; call off the loop)."""
+
+    _load_models_catalog.cache_clear()
+    return len(_load_models_catalog().get("models") or [])
+
+
 def _catalog_models(catalog: dict[str, Any]) -> list[dict[str, Any]]:
     models = catalog.get("models")
     if isinstance(models, list):

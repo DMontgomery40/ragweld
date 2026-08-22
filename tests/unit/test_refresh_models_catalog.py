@@ -3,253 +3,194 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import pytest
+import yaml
+
 from scripts.refresh_models_catalog import (
-    AUTO_DEPRECATED_PREFIX,
+    AUTO_PRICING_TIERED,
     AUTO_PRICING_UNKNOWN,
     OPENROUTER_SOURCE_PREFIX,
+    RefreshStats,
+    build_gateway_row,
     build_refreshed_catalog,
+    normalize_openrouter_rows,
     serialize_catalog,
     write_catalog_files,
 )
+from server.gateway_catalog import GatewayCatalogError
 
 
-def _text_feed_row(
+def _feed_row(
     model_id: str,
     *,
-    prompt: str | None,
-    completion: str | None,
-    context: int,
-    created: int = 1_765_000_000,
+    prompt: str | None = "0.000001",
+    completion: str | None = "0.000002",
+    context: int | None = 128_000,
+    name: str | None = None,
+    output_modalities: list[str] | None = None,
+    input_modalities: list[str] | None = None,
 ) -> dict[str, Any]:
     pricing: dict[str, str] = {}
     if prompt is not None:
         pricing["prompt"] = prompt
     if completion is not None:
         pricing["completion"] = completion
-    return {
+    row: dict[str, Any] = {
         "id": model_id,
-        "context_length": context,
+        "name": name or f"Name {model_id}",
         "pricing": pricing,
-        "created": created,
         "architecture": {
-            "output_modalities": ["text"],
-            "modality": "text->text",
+            "output_modalities": output_modalities if output_modalities is not None else ["text"],
+            "input_modalities": input_modalities if input_modalities is not None else ["text"],
         },
     }
+    if context is not None:
+        row["context_length"] = context
+    return row
 
 
-def _find_model(catalog: dict[str, Any], *, provider: str, model: str) -> dict[str, Any]:
-    rows = catalog.get("models")
-    assert isinstance(rows, list)
-    for row in rows:
-        if not isinstance(row, dict):
-            continue
-        if str(row.get("provider") or "").strip().lower() != provider:
-            continue
-        if str(row.get("model") or "").strip() != model:
-            continue
-        return row
-    raise AssertionError(f"missing model row: {provider}/{model}")
-
-
-def test_existing_model_updates_prices_context_and_clears_deprecated_marker() -> None:
-    catalog = {
-        "currency": "USD",
-        "last_updated": "2026-02-01",
-        "sources": [f"{OPENROUTER_SOURCE_PREFIX} (2026-02-01)"],
-        "models": [
-            {
-                "provider": "openai",
-                "family": "gpt-4.1",
-                "model": "gpt-4.1",
-                "components": ["GEN"],
-                "unit": "1k_tokens",
-                "input_per_1k": 0.002,
-                "output_per_1k": 0.008,
-                "context": 1_000_000,
-                "base_url": "https://legacy.example/v1",
-                "notes": (
-                    "Manual note"
-                    f" | {AUTO_DEPRECATED_PREFIX}2026-01-31"
-                    f" | {AUTO_PRICING_UNKNOWN}"
-                ),
-            }
-        ],
+def _local_row() -> dict[str, Any]:
+    return {
+        "provider": "ragweld",
+        "family": "Qwen3",
+        "model": "Qwen/Qwen3-4B-Instruct-2507",
+        "components": ["GEN"],
+        "unit": "1k_tokens",
+        "context": 8192,
+        "input_per_1k": 0.0,
+        "output_per_1k": 0.0,
+        "base_url": "http://vllm:8000/v1",
+        "gateway_alias": "ragweld-local",
+        "gateway_upstream": "openai/ragweld-local",
     }
-    feed_rows = [
-        _text_feed_row(
-            "openai/gpt-4.1",
-            prompt="0.000003",
-            completion="0.000009",
-            context=900_000,
-        )
-    ]
-
-    refreshed, _stats, changed = build_refreshed_catalog(catalog, feed_rows, as_of_date="2026-02-26")
-    assert changed is True
-
-    row = _find_model(refreshed, provider="openai", model="gpt-4.1")
-    assert row["input_per_1k"] == 0.003
-    assert row["output_per_1k"] == 0.009
-    assert row["context"] == 900_000
-    assert row["base_url"] == "https://api.openai.com/v1"
-    assert row["notes"] == "Manual note"
-
-    assert refreshed["last_updated"] == "2026-02-26"
-    assert f"{OPENROUTER_SOURCE_PREFIX} (2026-02-26)" in refreshed["sources"]
 
 
-def test_new_model_with_pricing_is_added_as_gen() -> None:
-    catalog = {"currency": "USD", "last_updated": "2026-02-01", "sources": [], "models": []}
-    feed_rows = [
-        _text_feed_row(
-            "openai/gpt-new-hotness",
-            prompt="0.000001",
-            completion="0.000004",
-            context=256_000,
-        )
-    ]
-
-    refreshed, _stats, changed = build_refreshed_catalog(catalog, feed_rows, as_of_date="2026-02-26")
-    assert changed is True
-    row = _find_model(refreshed, provider="openai", model="gpt-new-hotness")
-    assert row["components"] == ["GEN"]
-    assert row["unit"] == "1k_tokens"
-    assert row["input_per_1k"] == 0.001
-    assert row["output_per_1k"] == 0.004
-    assert row["context"] == 256_000
-    assert row["selection_roles"] == []
-    assert row["selection_status"] == "catalog_only"
-    assert "LiteLLM aliases" in str(row["selection_reason"])
-
-
-def test_new_model_missing_pricing_is_added_with_unknown_marker() -> None:
-    catalog = {"currency": "USD", "last_updated": "2026-02-01", "sources": [], "models": []}
-    feed_rows = [
-        _text_feed_row(
-            "openai/gpt-without-pricing",
-            prompt=None,
-            completion=None,
-            context=128_000,
-        )
-    ]
-
-    refreshed, _stats, changed = build_refreshed_catalog(catalog, feed_rows, as_of_date="2026-02-26")
-    assert changed is True
-    row = _find_model(refreshed, provider="openai", model="gpt-without-pricing")
-    assert "input_per_1k" not in row
-    assert "output_per_1k" not in row
-    assert AUTO_PRICING_UNKNOWN in str(row.get("notes"))
-
-
-def test_removed_model_is_marked_deprecated_once_then_stabilizes() -> None:
-    catalog = {
-        "currency": "USD",
-        "last_updated": "2026-02-01",
-        "sources": [f"{OPENROUTER_SOURCE_PREFIX} (2026-02-01)"],
-        "models": [
-            {
-                "provider": "anthropic",
-                "family": "claude-sonnet-4.5",
-                "model": "claude-sonnet-4.5",
-                "components": ["GEN"],
-                "unit": "1k_tokens",
-                "input_per_1k": 0.003,
-                "output_per_1k": 0.006,
-                "context": 400_000,
-                "notes": "Manual note",
-            }
-        ],
-    }
-    feed_rows = [
-        _text_feed_row(
-            "openai/gpt-4.1",
-            prompt="0.000002",
-            completion="0.000008",
-            context=1_000_000,
-        )
-    ]
-
-    refreshed, _stats, changed = build_refreshed_catalog(catalog, feed_rows, as_of_date="2026-02-26")
-    assert changed is True
-    removed_row = _find_model(refreshed, provider="anthropic", model="claude-sonnet-4.5")
-    assert f"{AUTO_DEPRECATED_PREFIX}2026-02-26" in str(removed_row.get("notes"))
-
-    rerun, _stats2, changed2 = build_refreshed_catalog(refreshed, feed_rows, as_of_date="2026-02-27")
-    assert changed2 is False
-    removed_row_rerun = _find_model(rerun, provider="anthropic", model="claude-sonnet-4.5")
-    assert f"{AUTO_DEPRECATED_PREFIX}2026-02-26" in str(removed_row_rerun.get("notes"))
-    assert rerun["last_updated"] == "2026-02-26"
-    assert rerun["sources"] == refreshed["sources"]
-
-
-def test_unmanaged_provider_rows_remain_untouched() -> None:
-    voyage_row = {
-        "provider": "voyage",
-        "family": "voyage-3-large",
-        "model": "voyage-3-large",
+def _embedding_row() -> dict[str, Any]:
+    return {
+        "provider": "openai",
+        "family": "text-embedding-3",
+        "model": "text-embedding-3-small",
         "components": ["EMB"],
         "unit": "1k_tokens",
-        "embed_per_1k": 0.00018,
-        "dimensions": 1024,
-        "notes": "manual",
+        "embed_per_1k": 0.00002,
+        "dimensions": 1536,
+        "base_url": "https://api.openai.com/v1",
     }
+
+
+def _rows(catalog: dict[str, Any]) -> list[dict[str, Any]]:
+    rows = catalog.get("models")
+    assert isinstance(rows, list)
+    return [row for row in rows if isinstance(row, dict)]
+
+
+def _find(catalog: dict[str, Any], model: str) -> dict[str, Any]:
+    for row in _rows(catalog):
+        if row.get("model") == model:
+            return row
+    raise AssertionError(f"missing model row: {model}")
+
+
+def test_normalize_keeps_every_text_route_including_variants_and_counts_every_skip() -> None:
+    stats = RefreshStats()
+    normalized = normalize_openrouter_rows(
+        [
+            _feed_row("openai/gpt-5.4-mini", input_modalities=["text", "image"]),
+            _feed_row("qwen/qwen3-coder:free", prompt="0", completion="0"),
+            _feed_row("openai/gpt-5.4-mini", name="duplicate row"),
+            _feed_row("~openai/gpt-latest"),
+            _feed_row("openrouter/auto"),
+            _feed_row("openrouter/free"),
+            _feed_row("google/imagen-5", output_modalities=["image"]),
+            _feed_row("broken/no-context", context=None),
+            {"id": "not-a-route"},
+            {"id": "openai/"},
+        ],
+        stats,
+    )
+
+    assert sorted(normalized) == ["openai/gpt-5.4-mini", "qwen/qwen3-coder:free"]
+    assert normalized["openai/gpt-5.4-mini"].display_name == "Name openai/gpt-5.4-mini", "first row wins"
+    assert normalized["openai/gpt-5.4-mini"].supports_vision is True
+    assert normalized["openai/gpt-5.4-mini"].input_per_1k == 0.001
+    assert normalized["openai/gpt-5.4-mini"].output_per_1k == 0.002
+    assert normalized["qwen/qwen3-coder:free"].supports_vision is False
+    assert normalized["qwen/qwen3-coder:free"].has_full_pricing is True
+    assert stats.skipped_rolling_pointer == 1
+    assert stats.skipped_router == 2
+    assert stats.duplicate_feed_ids == 1
+    assert stats.skipped_malformed_id == 2
+    assert stats.skipped_non_text == 1
+    assert stats.skipped_missing_context == 1
+    assert stats.normalized_feed_rows == 2
+    accounted = (
+        stats.normalized_feed_rows
+        + stats.skipped_rolling_pointer
+        + stats.skipped_router
+        + stats.duplicate_feed_ids
+        + stats.skipped_malformed_id
+        + stats.skipped_non_text
+        + stats.skipped_missing_context
+        + stats.skipped_invalid_alias
+    )
+    assert accounted == 10, "every feed row is either normalized or counted as a skip"
+
+
+def test_tiered_feed_pricing_is_flagged_not_flattened_silently() -> None:
+    stats = RefreshStats()
+    row = _feed_row("x-ai/grok-4.6", prompt="0.000002", completion="0.000006")
+    row["pricing"]["overrides"] = [{"min_prompt_tokens": 200000, "prompt": "0.000004", "completion": "0.000012"}]
+    feed = normalize_openrouter_rows([row], stats)["x-ai/grok-4.6"]
+
+    assert feed.pricing_tiered is True
+    assert stats.rows_pricing_tiered == 1
+    built = build_gateway_row(feed)
+    assert built["input_per_1k"] == 0.002 and built["output_per_1k"] == 0.006
+    assert built["notes"] == AUTO_PRICING_TIERED
+
+
+def test_feed_ids_with_uppercase_get_lowercase_aliases() -> None:
+    feed = normalize_openrouter_rows([_feed_row("Qwen/Qwen3-4B")])["Qwen/Qwen3-4B"]
+    built = build_gateway_row(feed)
+    assert built["gateway_alias"] == "qwen.qwen3-4b"
+    assert built["provider"] == "qwen"
+    assert built["gateway_upstream"] == "openrouter/Qwen/Qwen3-4B"
+
+
+def test_gateway_row_carries_alias_upstream_pricing_and_vision() -> None:
+    feed = normalize_openrouter_rows([_feed_row("anthropic/claude-sonnet-4.5", name="Anthropic: Claude Sonnet 4.5")])
+    row = build_gateway_row(feed["anthropic/claude-sonnet-4.5"])
+
+    assert row == {
+        "provider": "anthropic",
+        "family": "claude-sonnet-4.5",
+        "model": "anthropic/claude-sonnet-4.5",
+        "components": ["GEN"],
+        "unit": "1k_tokens",
+        "context": 128_000,
+        "input_per_1k": 0.001,
+        "output_per_1k": 0.002,
+        "base_url": "https://openrouter.ai/api/v1",
+        "display_name": "Anthropic: Claude Sonnet 4.5",
+        "gateway_alias": "anthropic.claude-sonnet-4.5",
+        "gateway_upstream": "openrouter/anthropic/claude-sonnet-4.5",
+        "supports_vision": False,
+    }
+
+
+def test_gateway_row_marks_missing_pricing_instead_of_inventing_it() -> None:
+    feed = normalize_openrouter_rows([_feed_row("perplexity/sonar-deep-research", prompt="-1", completion="-1")])
+    row = build_gateway_row(feed["perplexity/sonar-deep-research"])
+
+    assert "input_per_1k" not in row and "output_per_1k" not in row
+    assert row["notes"] == AUTO_PRICING_UNKNOWN
+
+
+def test_refresh_replaces_provider_direct_generation_rows_and_preserves_embedding_and_local_rows() -> None:
     catalog = {
         "currency": "USD",
         "last_updated": "2026-02-01",
         "sources": [f"{OPENROUTER_SOURCE_PREFIX} (2026-02-01)"],
-        "models": [voyage_row],
-    }
-    feed_rows = [
-        _text_feed_row(
-            "openai/gpt-4.1",
-            prompt="0.000002",
-            completion="0.000008",
-            context=1_000_000,
-        )
-    ]
-
-    refreshed, _stats, _changed = build_refreshed_catalog(catalog, feed_rows, as_of_date="2026-02-26")
-    refreshed_voyage = _find_model(refreshed, provider="voyage", model="voyage-3-large")
-    for key, value in voyage_row.items():
-        assert refreshed_voyage[key] == value
-    assert refreshed_voyage["selection_roles"] == []
-    assert refreshed_voyage["selection_status"] == "catalog_only"
-    assert "Provider-backed embeddings currently execute only via" in refreshed_voyage["selection_reason"]
-
-
-def test_colon_suffix_and_non_text_models_are_ignored() -> None:
-    catalog = {
-        "currency": "USD",
-        "last_updated": "2026-02-01",
-        "sources": [f"{OPENROUTER_SOURCE_PREFIX} (2026-02-01)"],
-        "models": [],
-    }
-    feed_rows = [
-        _text_feed_row(
-            "openai/gpt-foo:free",
-            prompt="0.000001",
-            completion="0.000004",
-            context=100_000,
-        ),
-        {
-            "id": "openai/gpt-image-only",
-            "context_length": 100_000,
-            "pricing": {"prompt": "0.000001", "completion": "0.000004"},
-            "architecture": {"output_modalities": ["image"], "modality": "text->image"},
-        },
-    ]
-
-    refreshed, _stats, changed = build_refreshed_catalog(catalog, feed_rows, as_of_date="2026-02-26")
-    assert changed is False
-    assert refreshed["models"] == []
-
-
-def test_sources_added_once_without_daily_churn_when_catalog_is_unchanged() -> None:
-    catalog = {
-        "currency": "USD",
-        "last_updated": "2026-02-01",
-        "sources": [],
         "models": [
             {
                 "provider": "openai",
@@ -261,173 +202,115 @@ def test_sources_added_once_without_daily_churn_when_catalog_is_unchanged() -> N
                 "output_per_1k": 0.008,
                 "context": 1_000_000,
                 "base_url": "https://api.openai.com/v1",
-            }
-        ],
-    }
-    feed_rows = [
-        _text_feed_row(
-            "openai/gpt-4.1",
-            prompt="0.000002",
-            completion="0.000008",
-            context=1_000_000,
-        )
-    ]
-
-    refreshed, _stats, changed = build_refreshed_catalog(catalog, feed_rows, as_of_date="2026-02-26")
-    assert changed is True
-    assert refreshed["sources"] == [f"{OPENROUTER_SOURCE_PREFIX} (2026-02-26)"]
-
-    rerun, _stats2, changed2 = build_refreshed_catalog(refreshed, feed_rows, as_of_date="2026-02-27")
-    assert changed2 is False
-    assert rerun["sources"] == [f"{OPENROUTER_SOURCE_PREFIX} (2026-02-26)"]
-    assert rerun["last_updated"] == "2026-02-26"
-
-
-def test_write_catalog_files_makes_canonical_and_mirror_byte_identical(tmp_path: Path) -> None:
-    canonical = tmp_path / "models.json"
-    mirror = tmp_path / "models-mirror.json"
-    catalog = {
-        "currency": "USD",
-        "last_updated": "2026-02-26",
-        "sources": [f"{OPENROUTER_SOURCE_PREFIX} (2026-02-26)"],
-        "models": [],
-    }
-
-    write_catalog_files(canonical, mirror, catalog)
-
-    expected = serialize_catalog(catalog)
-    assert canonical.read_text(encoding="utf-8") == expected
-    assert mirror.read_text(encoding="utf-8") == expected
-
-
-def test_existing_snapshot_is_replaced_by_latest_family_variant() -> None:
-    catalog = {
-        "currency": "USD",
-        "last_updated": "2026-02-01",
-        "sources": [f"{OPENROUTER_SOURCE_PREFIX} (2026-02-01)"],
-        "models": [
+            },
             {
-                "provider": "openai",
-                "family": "gpt-4o-2024-08-06",
-                "model": "gpt-4o-2024-08-06",
+                "provider": "ollama",
+                "family": "llama3.2",
+                "model": "llama3.2:3b",
                 "components": ["GEN"],
                 "unit": "1k_tokens",
-                "input_per_1k": 0.003,
-                "output_per_1k": 0.012,
-                "context": 128_000,
-            }
+                "input_per_1k": 0.0,
+                "output_per_1k": 0.0,
+                "context": 8192,
+            },
+            _embedding_row(),
+            _local_row(),
         ],
     }
-    feed_rows = [
-        _text_feed_row(
-            "openai/gpt-4o-2024-08-06",
-            prompt="0.0000025",
-            completion="0.00001",
-            context=128_000,
-            created=1_722_975_600,
-        ),
-        _text_feed_row(
-            "openai/gpt-4o-2024-11-20",
-            prompt="0.0000025",
-            completion="0.00001",
-            context=128_000,
-            created=1_732_127_594,
-        ),
-    ]
 
-    refreshed, _stats, changed = build_refreshed_catalog(catalog, feed_rows, as_of_date="2026-02-26")
-    assert changed is True
-    replacement = _find_model(refreshed, provider="openai", model="gpt-4o-2024-11-20")
-    assert replacement["family"] == "gpt-4o-2024-11-20"
-    assert replacement["input_per_1k"] == 0.0025
-    assert replacement["output_per_1k"] == 0.01
-    models = refreshed.get("models")
-    assert isinstance(models, list)
-    assert sum(1 for row in models if isinstance(row, dict) and row.get("provider") == "openai") == 1
-
-
-def test_brand_new_old_family_is_not_auto_added() -> None:
-    catalog = {"currency": "USD", "last_updated": "2026-02-01", "sources": [], "models": []}
-    feed_rows = [
-        _text_feed_row(
-            "openai/gpt-legacy-2024-01-10",
-            prompt="0.000001",
-            completion="0.000004",
-            context=128_000,
-            created=1_704_844_800,  # 2024-01-10
-        ),
-        _text_feed_row(
-            "openai/gpt-fresh-2026-02-20",
-            prompt="0.0000015",
-            completion="0.000006",
-            context=256_000,
-            created=1_771_545_600,  # 2026-02-20
-        ),
-    ]
-
-    refreshed, _stats, changed = build_refreshed_catalog(catalog, feed_rows, as_of_date="2026-02-26")
-    assert changed is True
-    _find_model(refreshed, provider="openai", model="gpt-fresh-2026-02-20")
-    models = refreshed.get("models")
-    assert isinstance(models, list)
-    assert all(
-        not (
-            isinstance(row, dict)
-            and str(row.get("provider") or "").strip().lower() == "openai"
-            and str(row.get("model") or "").strip() == "gpt-legacy-2024-01-10"
-        )
-        for row in models
+    merged, stats, changed = build_refreshed_catalog(
+        catalog,
+        [_feed_row("openai/gpt-5.4-mini"), _feed_row("openai/gpt-4.1")],
+        as_of_date="2026-08-22",
     )
 
-
-def test_existing_version_line_moves_to_latest_model_in_same_family() -> None:
-    catalog = {
-        "currency": "USD",
-        "last_updated": "2026-02-01",
-        "sources": [f"{OPENROUTER_SOURCE_PREFIX} (2026-02-01)"],
-        "models": [
-            {
-                "provider": "openai",
-                "family": "gpt-5.1-codex",
-                "model": "gpt-5.1-codex",
-                "components": ["GEN"],
-                "unit": "1k_tokens",
-                "input_per_1k": 0.00125,
-                "output_per_1k": 0.01,
-                "context": 400_000,
-            }
-        ],
+    assert changed is True
+    models = [(row["provider"], row["model"]) for row in _rows(merged)]
+    assert models == [
+        ("openai", "openai/gpt-4.1"),
+        ("openai", "openai/gpt-5.4-mini"),
+        ("openai", "text-embedding-3-small"),
+        ("ragweld", "Qwen/Qwen3-4B-Instruct-2507"),
+    ]
+    assert _find(merged, "openai/gpt-4.1")["gateway_alias"] == "openai.gpt-4.1"
+    assert _find(merged, "openai/gpt-4.1")["base_url"] == "https://openrouter.ai/api/v1"
+    assert _find(merged, "text-embedding-3-small") == {
+        **_embedding_row(),
+        "selection_roles": ["embedding_provider"],
+        "selection_status": "runtime_selectable",
+        "selection_reason": None,
     }
-    feed_rows = [
-        _text_feed_row(
-            "openai/gpt-5.1-codex",
-            prompt="0.00000125",
-            completion="0.00001",
-            context=400_000,
-            created=1_763_060_298,
-        ),
-        _text_feed_row(
-            "openai/gpt-5.2-codex",
-            prompt="0.00000175",
-            completion="0.000014",
-            context=400_000,
-            created=1_768_409_315,
-        ),
-        _text_feed_row(
-            "openai/gpt-5.3-codex",
-            prompt="0.00000175",
-            completion="0.000014",
-            context=400_000,
-            created=1_771_959_164,
-        ),
+    assert _find(merged, "Qwen/Qwen3-4B-Instruct-2507")["gateway_alias"] == "ragweld-local"
+    assert stats.removed_rows == 2
+    assert stats.added_rows == 2
+    assert stats.preserved_rows == 2
+    assert stats.gateway_rows == 2
+    assert merged["last_updated"] == "2026-08-22"
+    assert merged["sources"] == [f"{OPENROUTER_SOURCE_PREFIX} (2026-08-22)"]
+
+
+def test_refresh_removes_routes_that_left_the_feed_and_is_idempotent() -> None:
+    base = {"currency": "USD", "sources": [], "models": [_local_row(), _embedding_row()]}
+    first, _stats, changed_first = build_refreshed_catalog(
+        base,
+        [_feed_row("openai/gpt-5.4-mini"), _feed_row("deepseek/deepseek-v4")],
+        as_of_date="2026-08-22",
+    )
+    assert changed_first is True
+    assert {row["model"] for row in _rows(first) if row.get("gateway_upstream", "").startswith("openrouter/")} == {
+        "openai/gpt-5.4-mini",
+        "deepseek/deepseek-v4",
+    }
+
+    second, stats, changed_second = build_refreshed_catalog(
+        first,
+        [_feed_row("openai/gpt-5.4-mini")],
+        as_of_date="2026-08-23",
+    )
+    assert changed_second is True
+    assert stats.removed_rows == 1
+    assert stats.added_rows == 0
+    assert [row["model"] for row in _rows(second) if row.get("components") == ["GEN"]] == [
+        "openai/gpt-5.4-mini",
+        "Qwen/Qwen3-4B-Instruct-2507",
     ]
 
-    refreshed, _stats, changed = build_refreshed_catalog(catalog, feed_rows, as_of_date="2026-02-27")
-    assert changed is True
-    latest = _find_model(refreshed, provider="openai", model="gpt-5.3-codex")
-    assert latest["family"] == "gpt-5.3-codex"
-    assert latest["input_per_1k"] == 0.00175
-    assert latest["output_per_1k"] == 0.014
-    models = refreshed.get("models")
-    assert isinstance(models, list)
-    assert sum(1 for row in models if isinstance(row, dict) and row.get("provider") == "openai") == 1
+    third, _stats, changed_third = build_refreshed_catalog(
+        second,
+        [_feed_row("openai/gpt-5.4-mini")],
+        as_of_date="2026-08-24",
+    )
+    assert changed_third is False
+    assert third["last_updated"] == second["last_updated"]
+    assert third["sources"] == second["sources"]
+
+
+def test_refresh_fails_closed_without_the_local_serving_row() -> None:
+    with pytest.raises(GatewayCatalogError, match="ragweld-local"):
+        build_refreshed_catalog(
+            {"currency": "USD", "sources": [], "models": [_embedding_row()]},
+            [_feed_row("openai/gpt-5.4-mini")],
+            as_of_date="2026-08-22",
+        )
+
+
+def test_write_catalog_files_writes_catalog_mirror_and_gateway_config_together(tmp_path: Path) -> None:
+    merged, _stats, _changed = build_refreshed_catalog(
+        {"currency": "USD", "sources": [], "models": [_local_row()]},
+        [_feed_row("openai/gpt-5.4-mini")],
+        as_of_date="2026-08-22",
+    )
+    canonical = tmp_path / "data" / "models.json"
+    mirror = tmp_path / "web" / "public" / "models.json"
+    gateway = tmp_path / "infra" / "litellm-config.yaml"
+
+    write_catalog_files(canonical, mirror, merged, litellm_config_path=gateway)
+
+    assert canonical.read_text(encoding="utf-8") == serialize_catalog(merged)
+    assert mirror.read_text(encoding="utf-8") == serialize_catalog(merged)
+    model_list = yaml.safe_load(gateway.read_text(encoding="utf-8"))["model_list"]
+    assert [row["model_name"] for row in model_list] == ["ragweld-local", "openai.gpt-5.4-mini"]
+    assert model_list[1]["litellm_params"] == {
+        "model": "openrouter/openai/gpt-5.4-mini",
+        "api_key": "os.environ/OPENROUTER_API_KEY",
+    }

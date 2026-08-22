@@ -20,6 +20,17 @@ from server.models.tribrid_config_model import (
     ModelCatalogUpsertRequest,
     ModelCatalogUpsertResponse,
 )
+from server.gateway_catalog import (
+    LITELLM_CONFIG_PATH as _DEFAULT_LITELLM_CONFIG_PATH,
+    OPENROUTER_BASE_URL,
+    GatewayCatalogError,
+    gateway_alias_for_openrouter_id,
+    gateway_rows,
+    openrouter_upstream_for_id,
+    warm_gateway_catalog,
+    write_catalog_trio,
+)
+from server.observability.costing import reset_costing_catalog, warm_costing_catalog
 from server.runtime_capabilities import (
     apply_selection_metadata_to_catalog,
     apply_selection_metadata_to_row,
@@ -29,6 +40,7 @@ router = APIRouter(prefix="/api/models", tags=["models"])
 
 MODELS_PATH = Path(__file__).parent.parent.parent / "data" / "models.json"
 WEB_MODELS_PATH = Path(__file__).parent.parent.parent / "web" / "public" / "models.json"
+LITELLM_CONFIG_PATH = _DEFAULT_LITELLM_CONFIG_PATH
 
 _CATALOG_WRITE_LOCK = asyncio.Lock()
 
@@ -45,8 +57,6 @@ def _provider_default_base_url(provider: str) -> str | None:
         "openrouter": "https://openrouter.ai/api/v1",
         "mistral": "https://api.mistral.ai/v1",
         "deepseek": "https://api.deepseek.com/v1",
-        "ollama": "http://127.0.0.1:11434",
-        "local": "http://127.0.0.1:11434",
     }
     return defaults.get(p)
 
@@ -157,32 +167,22 @@ def _provider_existing_base_url(catalog: dict[str, Any], provider: str) -> str |
     return None
 
 
-def _atomic_write_json(path: Path, data: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    tmp.replace(path)
-
-
 def _load_catalog() -> dict[str, Any]:
-    """Load the full models.json catalog."""
+    """Load the full models.json catalog (blocking; object root with a models list)."""
     if not MODELS_PATH.exists():
         raise HTTPException(status_code=500, detail=f"models.json not found at {MODELS_PATH}")
-    data: Any = json.loads(MODELS_PATH.read_text())
-    if isinstance(data, dict):
-        if not isinstance(data.get("models"), list):
-            data["models"] = []
-        return apply_selection_metadata_to_catalog(data)
-    if isinstance(data, list):
-        return apply_selection_metadata_to_catalog({"models": data})
-    return apply_selection_metadata_to_catalog({"models": []})
+    data: Any = json.loads(MODELS_PATH.read_text(encoding="utf-8"))
+    if not isinstance(data, dict) or not isinstance(data.get("models"), list):
+        raise HTTPException(status_code=500, detail=f"{MODELS_PATH} must be a JSON object with a 'models' list")
+    for index, row in enumerate(data["models"]):
+        if not isinstance(row, dict):
+            raise HTTPException(status_code=500, detail=f"{MODELS_PATH} models[{index}] is not an object")
+    return apply_selection_metadata_to_catalog(data)
 
 
 def _catalog_models(catalog: dict[str, Any]) -> list[dict[str, Any]]:
     models = catalog.get("models")
-    if isinstance(models, list):
-        return [m for m in models if isinstance(m, dict)]
-    return []
+    return list(models) if isinstance(models, list) else []
 
 
 @router.get("", response_model=ModelCatalogResponse)
@@ -194,7 +194,7 @@ async def get_all_models() -> ModelCatalogResponse:
     are identified by ``selection_roles`` / ``selection_status`` metadata and the
     backend runtime capabilities endpoint.
     """
-    catalog = _load_catalog()
+    catalog = await asyncio.to_thread(_load_catalog)
     return ModelCatalogResponse.model_validate(catalog)
 
 
@@ -204,7 +204,7 @@ async def get_models_by_type(component_type: str) -> list[ModelCatalogEntry]:
     comp = component_type.upper()
     if comp not in ("EMB", "GEN", "RERANK"):
         raise HTTPException(status_code=400, detail=f"Invalid component_type: {component_type}. Must be EMB, GEN, or RERANK")
-    catalog = _load_catalog()
+    catalog = await asyncio.to_thread(_load_catalog)
     models = _catalog_models(catalog)
     return [
         ModelCatalogEntry.model_validate(m)
@@ -216,7 +216,7 @@ async def get_models_by_type(component_type: str) -> list[ModelCatalogEntry]:
 @router.get("/providers", response_model=list[str])
 async def get_providers() -> list[str]:
     """Return unique list of providers, sorted alphabetically."""
-    catalog = _load_catalog()
+    catalog = await asyncio.to_thread(_load_catalog)
     models = _catalog_models(catalog)
     providers = sorted(set(str(m.get("provider", "unknown")) for m in models))
     return providers
@@ -225,7 +225,7 @@ async def get_providers() -> list[str]:
 @router.get("/providers/{provider}", response_model=list[ModelCatalogEntry])
 async def get_models_for_provider(provider: str) -> list[ModelCatalogEntry]:
     """Return all models for a specific provider."""
-    catalog = _load_catalog()
+    catalog = await asyncio.to_thread(_load_catalog)
     models = _catalog_models(catalog)
     p = provider.strip().lower()
     return [ModelCatalogEntry.model_validate(m) for m in models if str(m.get("provider", "")).strip().lower() == p]
@@ -241,7 +241,28 @@ async def upsert_model(payload: ModelCatalogUpsertRequest) -> ModelCatalogUpsert
     if not provider or not model:
         raise HTTPException(status_code=422, detail="provider and model are required")
 
-    async with _CATALOG_WRITE_LOCK:
+    gateway_fields: dict[str, Any] = {}
+    if payload.family == "gen":
+        # Generation rows are served only through the LiteLLM gateway as OpenRouter routes.
+        try:
+            alias = gateway_alias_for_openrouter_id(model)
+        except GatewayCatalogError as error:
+            raise HTTPException(
+                status_code=422,
+                detail=f"GEN models must be OpenRouter routes named <provider>/<model>: {error}",
+            ) from error
+        if provider != model.split("/", 1)[0].lower():
+            raise HTTPException(
+                status_code=422,
+                detail="GEN models require provider to equal the OpenRouter id prefix",
+            )
+        gateway_fields = {
+            "gateway_alias": alias,
+            "gateway_upstream": openrouter_upstream_for_id(model),
+            "base_url": OPENROUTER_BASE_URL,
+        }
+
+    def _apply_upsert() -> ModelCatalogUpsertResponse:
         catalog = _load_catalog()
         models = _catalog_models(catalog)
 
@@ -284,6 +305,7 @@ async def upsert_model(payload: ModelCatalogUpsertRequest) -> ModelCatalogUpsert
             merged["base_url"] = base_url
         else:
             merged.pop("base_url", None)
+        merged.update(gateway_fields)
 
         # Drop nulls so the serialized catalog remains compact and consistent.
         merged = {k: v for k, v in merged.items() if v is not None}
@@ -298,19 +320,32 @@ async def upsert_model(payload: ModelCatalogUpsertRequest) -> ModelCatalogUpsert
         catalog["models"] = models
         catalog["last_updated"] = datetime_now_iso()
 
-        _atomic_write_json(MODELS_PATH, catalog)
-        # Keep legacy static mirror in sync even though runtime should use /api/models.
-        _atomic_write_json(WEB_MODELS_PATH, catalog)
-
-        # Best-effort: clear cached cost catalog after mutation.
+        # Validate BEFORE touching disk so a contract violation never leaves a
+        # partially written trio behind (write_catalog_trio re-validates + renders first).
         try:
-            from server.api.cost import _load_models_catalog
+            gateway_rows(catalog)
+        except GatewayCatalogError as error:
+            raise HTTPException(status_code=422, detail=f"catalog would break the gateway contract: {error}") from error
 
-            _load_models_catalog.cache_clear()
-        except Exception:
-            pass
+        write_catalog_trio(
+            catalog,
+            canonical_path=MODELS_PATH,
+            mirror_path=WEB_MODELS_PATH,
+            litellm_config_path=LITELLM_CONFIG_PATH,
+        )
 
+        # Refresh (not merely clear) the in-memory catalog views that routing and
+        # costing read, so no later request reloads the file on the event loop.
+        warm_gateway_catalog(MODELS_PATH)
+        reset_costing_catalog()
+        warm_costing_catalog()
+        from server.api.cost import warm_cost_catalog
+
+        warm_cost_catalog()
         return ModelCatalogUpsertResponse(ok=True, action=action, model=validated)
+
+    async with _CATALOG_WRITE_LOCK:
+        return await asyncio.to_thread(_apply_upsert)
 
 
 def datetime_now_iso() -> str:

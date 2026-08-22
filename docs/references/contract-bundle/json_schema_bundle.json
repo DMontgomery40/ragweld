@@ -5193,6 +5193,19 @@
           "description": "Optional catalog identity",
           "title": "Catalog Model"
         },
+        "catalog_provider": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Upstream provider slug from the model catalog row behind this alias (for UI grouping).",
+          "title": "Catalog Provider"
+        },
         "components": {
           "description": "Capabilities for this model option",
           "items": {
@@ -5206,10 +5219,65 @@
           "title": "Components",
           "type": "array"
         },
+        "context": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Maximum context tokens from the catalog row, when known",
+          "title": "Context"
+        },
+        "display_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Human-readable name from the catalog row, when known",
+          "title": "Display Name"
+        },
         "id": {
           "description": "Model identifier",
           "title": "Id",
           "type": "string"
+        },
+        "input_per_1k": {
+          "anyOf": [
+            {
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Input cost per 1k tokens from the catalog row",
+          "title": "Input Per 1K"
+        },
+        "output_per_1k": {
+          "anyOf": [
+            {
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Output cost per 1k tokens from the catalog row",
+          "title": "Output Per 1K"
         },
         "override": {
           "description": "Canonical model_override value to send in chat requests",
@@ -5300,6 +5368,19 @@
               "description": "Optional catalog identity",
               "title": "Catalog Model"
             },
+            "catalog_provider": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Upstream provider slug from the model catalog row behind this alias (for UI grouping).",
+              "title": "Catalog Provider"
+            },
             "components": {
               "description": "Capabilities for this model option",
               "items": {
@@ -5313,10 +5394,65 @@
               "title": "Components",
               "type": "array"
             },
+            "context": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Maximum context tokens from the catalog row, when known",
+              "title": "Context"
+            },
+            "display_name": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Human-readable name from the catalog row, when known",
+              "title": "Display Name"
+            },
             "id": {
               "description": "Model identifier",
               "title": "Id",
               "type": "string"
+            },
+            "input_per_1k": {
+              "anyOf": [
+                {
+                  "minimum": 0.0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Input cost per 1k tokens from the catalog row",
+              "title": "Input Per 1K"
+            },
+            "output_per_1k": {
+              "anyOf": [
+                {
+                  "minimum": 0.0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Output cost per 1k tokens from the catalog row",
+              "title": "Output Per 1K"
             },
             "override": {
               "description": "Canonical model_override value to send in chat requests",
@@ -17181,6 +17317,19 @@
           "description": "Embedding dimensions when applicable",
           "title": "Dimensions"
         },
+        "display_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Human-readable model name when the upstream feed provides one",
+          "title": "Display Name"
+        },
         "embed_per_1k": {
           "anyOf": [
             {
@@ -17199,6 +17348,32 @@
           "description": "Model family",
           "title": "Family",
           "type": "string"
+        },
+        "gateway_alias": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "LiteLLM gateway alias that serves this generation row. Set only on GEN rows that are rendered into infra/litellm-config.yaml; selectable as litellm:<gateway_alias>.",
+          "title": "Gateway Alias"
+        },
+        "gateway_upstream": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "LiteLLM litellm_params.model for gateway_alias (for example openrouter/openai/gpt-5.4-mini or openai/ragweld-local for the vLLM serving path).",
+          "title": "Gateway Upstream"
         },
         "input_per_1k": {
           "anyOf": [
@@ -17314,6 +17489,12 @@
           "title": "Selection Status",
           "type": "string"
         },
+        "supports_vision": {
+          "default": false,
+          "description": "Whether the upstream route accepts image inputs (OpenRouter input_modalities includes image).",
+          "title": "Supports Vision",
+          "type": "boolean"
+        },
         "unit": {
           "anyOf": [
             {
@@ -17402,6 +17583,19 @@
               "description": "Embedding dimensions when applicable",
               "title": "Dimensions"
             },
+            "display_name": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Human-readable model name when the upstream feed provides one",
+              "title": "Display Name"
+            },
             "embed_per_1k": {
               "anyOf": [
                 {
@@ -17420,6 +17614,32 @@
               "description": "Model family",
               "title": "Family",
               "type": "string"
+            },
+            "gateway_alias": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "LiteLLM gateway alias that serves this generation row. Set only on GEN rows that are rendered into infra/litellm-config.yaml; selectable as litellm:<gateway_alias>.",
+              "title": "Gateway Alias"
+            },
+            "gateway_upstream": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "LiteLLM litellm_params.model for gateway_alias (for example openrouter/openai/gpt-5.4-mini or openai/ragweld-local for the vLLM serving path).",
+              "title": "Gateway Upstream"
             },
             "input_per_1k": {
               "anyOf": [
@@ -17534,6 +17754,12 @@
               ],
               "title": "Selection Status",
               "type": "string"
+            },
+            "supports_vision": {
+              "default": false,
+              "description": "Whether the upstream route accepts image inputs (OpenRouter input_modalities includes image).",
+              "title": "Supports Vision",
+              "type": "boolean"
             },
             "unit": {
               "anyOf": [
@@ -17827,6 +18053,19 @@
               "description": "Embedding dimensions when applicable",
               "title": "Dimensions"
             },
+            "display_name": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Human-readable model name when the upstream feed provides one",
+              "title": "Display Name"
+            },
             "embed_per_1k": {
               "anyOf": [
                 {
@@ -17845,6 +18084,32 @@
               "description": "Model family",
               "title": "Family",
               "type": "string"
+            },
+            "gateway_alias": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "LiteLLM gateway alias that serves this generation row. Set only on GEN rows that are rendered into infra/litellm-config.yaml; selectable as litellm:<gateway_alias>.",
+              "title": "Gateway Alias"
+            },
+            "gateway_upstream": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "LiteLLM litellm_params.model for gateway_alias (for example openrouter/openai/gpt-5.4-mini or openai/ragweld-local for the vLLM serving path).",
+              "title": "Gateway Upstream"
             },
             "input_per_1k": {
               "anyOf": [
@@ -17959,6 +18224,12 @@
               ],
               "title": "Selection Status",
               "type": "string"
+            },
+            "supports_vision": {
+              "default": false,
+              "description": "Whether the upstream route accepts image inputs (OpenRouter input_modalities includes image).",
+              "title": "Supports Vision",
+              "type": "boolean"
             },
             "unit": {
               "anyOf": [

@@ -136,3 +136,6 @@ Thumbs.db
 # Local scratch files
 cua.sh
 -
+
+# interprocess lock for catalog mutations (upsert + refresh CLI)
+data/models.json.lock
