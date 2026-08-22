@@ -63,9 +63,12 @@ rendered-browser proof.
 
 ## 2. Verified checkpoint at handoff
 
-- `/Users/davidmontgomery/ragweld`; branch `main` only; one worktree;
-  `main == origin/main == 2c5dda6`; tree clean except `.claude/settings.json`
-  (a pre-existing unrelated JSON-indent change — leave it or commit separately).
+- `/Users/davidmontgomery/ragweld`; branch `main` only; one worktree.
+  **Local `main` is at `bf34506` (P0-1 gateway catalog), 3 commits ahead of
+  `origin/main` (`2c5dda6`); NOT pushed — the operator pushes.** Tree clean.
+  Gates at `bf34506`: full pytest 765 passed/63 skipped; strict lane 67
+  passed (needs Flyte up); all validators + `generate_litellm_config.py
+  --check` + web lint/build green; Playwright gateway spec 3/3.
 - Phase A2 (Flyte orchestration) landed in `66986ed` + `2c5dda6`: full pytest
   719 passed/63 skipped; strict-lane Flyte suite 6 passed; all validators +
   web lint/build green; live-proven on `aurora_acceptance`.
@@ -86,9 +89,13 @@ rendered-browser proof.
   plan lives in an UNBOUND sandbox volume — `stop`/`start` keeps it, a container
   recreate/`down` drops it; re-run the register script if `workflow=flyte`
   starts 503-ing "not registered".
-- Host API 127.0.0.1:58012 + Vite 127.0.0.1:55173 started with
-  `RAGWELD_NODE_BIN="$HOME/.nvm/versions/node/v22.22.0/bin/node" ./start.sh --no-docker`.
-  `RAGWELD_NODE_BIN` is required for Promptfoo (system Node too old).
+- Host API 127.0.0.1:58012 + Vite 127.0.0.1:55173. Session 5 restarted them
+  by hand (`.venv/bin/uvicorn server.main:app --host 127.0.0.1 --port 58012`
+  and `web/node_modules/.bin/vite --host 127.0.0.1 --port 55173 --strictPort`,
+  both with `RAGWELD_NODE_BIN="$HOME/.nvm/versions/node/v22.22.0/bin/node"`)
+  because `start.sh`'s EXIT trap tears both down when its uvicorn child is
+  killed. `RAGWELD_NODE_BIN` is required for Promptfoo (system Node too old).
+  LiteLLM container was recreated on the generated config (404 aliases).
 - Corpora: `epstein-files-1` (§4), `aurora_acceptance` (deterministic acceptance
   corpus; its scoped config is now `workflow=flyte` + `tracking=mlflow`, so
   Learning Agent launch on aurora needs `./start.sh --with-flyte` or it fails
