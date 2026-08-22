@@ -1674,6 +1674,11 @@ async def stream_train_run(request: Request, run_id: str) -> StreamingResponse:
                 run = _load_run(run_id)
             except HTTPException:
                 run = None
+            # A Flyte-owned run may be terminated console-side while this stream
+            # is the only observer; the read-driven reconcile does not run for a
+            # queued run otherwise, so drive it here (throttled, off-loop).
+            if run is not None and _flyte_run_needs_reconcile(run):
+                run = await _refresh_flyte_run(run)
             if run is not None and run.status in {"completed", "failed", "cancelled"}:
                 complete_event = AgentTrainMetricEvent(
                     type="complete",

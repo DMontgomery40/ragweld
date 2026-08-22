@@ -107,9 +107,13 @@ blocker. No cloud GPU spend without explicit authorization.
   semantics including callback + launch-plan registration).
 - `tests/api/test_agent_train_launch_boundaries.py` (typed 503s for missing
   config / unreachable admin / unreachable MLflow / Unsloth).
+- `tests/unit/test_flyte_state_apply.py`: the Flyte-initiated direction
+  (ABORT->cancelled, FAILED->failed, SUCCEEDED-while-running->inconsistency,
+  and the running-job branch that signals the loop-thread cancel event).
 - `tests/api/test_agent_train_flyte_orchestration.py` (`requires_flyte`,
-  strict lane): real execution created, execute-boundary guards, cancel ->
-  Flyte ABORTED with cause -> phase mirrored onto the run.
+  strict lane): Ragweld-initiated cancel -> Flyte ABORTED with cause -> phase
+  mirrored; and a Flyte-side (console) abort of a queued run followed into
+  cancelled purely by the read-driven reconcile; execute-boundary guards.
 - Operator acceptance (recorded in the recovery exec plan): full round trip
   Flyte task -> execute boundary -> MLX training -> `completed` -> Flyte
   `SUCCEEDED`, rendered in Training Center with the Flyte execution link.

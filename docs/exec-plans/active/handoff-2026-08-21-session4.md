@@ -7,6 +7,12 @@
 > service, `scripts/flyte_register_learning_agent.sh`, flyteadmin REST client,
 > launch/execute/status/cancel wiring; see
 > `docs/references/training-control-plane-slice.md`. Continue from A3.
+> After A2, `aurora_acceptance` scoped config is `workflow=flyte` +
+> `tracking=mlflow`: Phase B needs `./start.sh --with-flyte` with the launch
+> plan registered (`scripts/flyte_register_learning_agent.sh`) before B8, or
+> Learning Agent launches on aurora fail closed with a typed 503. The Flyte
+> sandbox's launch plan lives in an unbound in-cluster volume — a container
+> recreate/`down` drops it (stop/start is safe); re-run the register script.
 > The transient dev-proxy 503s seen once in Chrome on
 > `/api/index/{id}/status|stats` and `/api/chat/models` (not present in the API
 > log, not reproducible) belong to B12.

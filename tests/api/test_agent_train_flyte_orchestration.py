@@ -173,6 +173,74 @@ async def test_flyte_launch_creates_execution_and_cancel_aborts_both_sides(clien
         await client.delete(f"/api/corpora/{corpus_id}")
 
 
+@pytest.mark.requires_postgres
+@pytest.mark.requires_flyte
+@pytest.mark.asyncio
+async def test_flyte_side_abort_of_queued_run_follows_into_cancelled(client: AsyncClient) -> None:
+    """Flyte terminates first (console/CLI); the queued host run must follow.
+
+    Drives the read-driven reconcile end to end: no /cancel is called on
+    Ragweld — the run only becomes cancelled because a GET observes the ABORTED
+    Flyte phase and finalizes it with Flyte's cause.
+    """
+    corpus_id = f"pytest_flyte_side_{uuid.uuid4().hex[:8]}"
+    await _create_corpus(client, corpus_id)
+    admin = FlyteAdminClient(FLYTE_ADMIN_URL)
+    run_id: str | None = None
+    execution_name: str | None = None
+    try:
+        await _set_training_config(
+            client,
+            corpus_id,
+            {
+                "ragweld_agent_workflow_backend": "flyte",
+                "ragweld_agent_flyte_admin_base_url": FLYTE_ADMIN_URL,
+                "ragweld_agent_flyte_project": FLYTE_PROJECT,
+                "ragweld_agent_flyte_domain": FLYTE_DOMAIN,
+                "ragweld_agent_flyte_launchplan": LAUNCH_PLAN,
+                "ragweld_agent_flyte_callback_base_url": UNROUTABLE_CALLBACK,
+            },
+        )
+        started = await client.post("/api/agent/train/start", json={"repo_id": corpus_id})
+        assert started.status_code == 200, started.text
+        run_id = started.json()["run_id"]
+        run = (await client.get(f"/api/agent/train/run/{run_id}")).json()
+        execution_name = run["workflow_run_id"]
+        assert run["status"] == "queued"
+
+        # Terminate out-of-band, as an operator would from the Flyte console/CLI.
+        admin.terminate_execution(FLYTE_PROJECT, FLYTE_DOMAIN, execution_name, cause="flyte-side operator abort")
+
+        async def _followed():
+            current = (await client.get(f"/api/agent/train/run/{run_id}")).json()
+            return current if current["status"] == "cancelled" else None
+
+        followed = await _wait_for(_followed, timeout_s=90, interval_s=2.0)
+        assert followed is not None, "queued run never followed the Flyte-side abort into cancelled"
+        assert followed["workflow_phase"] in FLYTE_ABORT_PHASES
+        assert followed["completed_at"]
+
+        events = (await client.get(f"/api/agent/train/run/{run_id}/metrics")).json()["events"]
+        messages = [str(e.get("message") or "") for e in events]
+        assert any("abort" in m.lower() for m in messages)
+        assert events[-1]["type"] == "complete" and events[-1]["status"] == "cancelled"
+
+        # No new run was started and the corpus is launchable again.
+        assert (await client.post("/api/agent/train/start", json={"repo_id": corpus_id})).status_code in {200, 503}
+    finally:
+        if execution_name:
+            try:
+                admin.terminate_execution(FLYTE_PROJECT, FLYTE_DOMAIN, execution_name, cause="pytest cleanup")
+            except Exception:
+                pass
+        if run_id:
+            shutil.rmtree(_RUNS_DIR / run_id, ignore_errors=True)
+        # A follow-up launch may have created a second run; clean the corpus's runs.
+        for extra in _RUNS_DIR.glob(f"{corpus_id}__*"):
+            shutil.rmtree(extra, ignore_errors=True)
+        await client.delete(f"/api/corpora/{corpus_id}")
+
+
 @pytest.mark.asyncio
 async def test_execute_boundary_refuses_runs_not_owned_by_flyte(client: AsyncClient) -> None:
     run_id = f"pytest_local_lane_{uuid.uuid4().hex[:8]}__20260821_000000"
