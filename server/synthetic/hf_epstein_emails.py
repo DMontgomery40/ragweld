@@ -3,10 +3,11 @@ from __future__ import annotations
 import json
 import re
 import shutil
+from collections.abc import Iterable
 from datetime import UTC, datetime
 from html import unescape
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 from urllib.parse import urlencode
 from urllib.request import urlopen
 

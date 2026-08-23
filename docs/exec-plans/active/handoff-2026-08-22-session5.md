@@ -1,5 +1,29 @@
 # Handoff Prompt — Ragweld Recovery, Session 5
 
+> Status 2026-08-23 (session 7): **P1 is DONE** — the Synthetic Lab generates
+> grounded eval rows through the gateway (`grounded_qa`; the old provider was a
+> package the repo never installed), reranker triplets are mined from real
+> retrieval traces, and `epstein-files-1` has a published 200-row dataset,
+> 998 triplets, a persisted Ragas eval (faithfulness 0.82 / relevancy 0.64),
+> a Promptfoo run (21/25) and a cloud reranker that lifts MRR 0.63 -> 0.78.
+> Record: `eval-data-lane-2026-08-22.md` (four adversarial codex passes, 52
+> findings, all acted on; the SSE eval route now shares the POST scoring
+> path and persists answer provenance, proven on a real index in
+> `tests/integration/test_eval_trace_mining.py`). **Two machine crashes happened this
+> session** (bf16 4B vLLM in the VM; then host MLX reranker training) and the
+> operator set rules: API models for all test/eval/judge traffic
+> (`openai.gpt-5.6-luna`), reranking on cloud models
+> (`reranker_cloud_provider=litellm`, `openai.gpt-4.1-nano`), no MLX/GPU
+> training or local model loads without the operator present, Colima VM at
+> `--memory 16`. **P0-2's model choice is rejected**: the local lane must move to
+> quantized Qwen 3.8 — the plan, the installed `vllm-metal` runtime and the
+> downloaded `mlx-community/Qwen3.8-27B-4bit` are in
+> `local-model-vllm-metal-2026-08-22.md` (cutover not landed; LiteLLM must be
+> started with `--no-deps` until the compose `vllm` service is removed).
+> Flyte-orchestrated Learning Agent training on the new dataset was NOT run
+> (host MLX). Next: land P0-3 with the operator present, then A3, then Phase B
+> (first defect already logged: Neural Visualizer `connect(null)`).
+>
 > Status 2026-08-22 (session 6): **P0-2 is DONE** — vLLM serves
 > `Qwen/Qwen3-4B-Instruct-2507` (8192 ctx) on a 6 vCPU / 28 GiB Colima profile,
 > the Learning Agent trains on `mlx-community/Qwen3-4B-Instruct-2507-4bit`, and

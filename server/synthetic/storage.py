@@ -11,6 +11,7 @@ from server.models.tribrid_config_model import (
     SyntheticRun,
     SyntheticRunEvent,
     SyntheticRunMeta,
+    SyntheticUnreadableRun,
 )
 
 _ROOT = Path(__file__).resolve().parents[2]
@@ -107,20 +108,40 @@ def append_event(run_id: str, event: SyntheticRunEvent) -> None:
         f.write(json.dumps(payload) + "\n")
 
 
-def list_runs(*, corpus_id: str | None = None, limit: int = 50) -> list[SyntheticRunMeta]:
+def list_runs(
+    *, corpus_id: str | None = None, limit: int = 50
+) -> tuple[list[SyntheticRunMeta], list[SyntheticUnreadableRun]]:
+    """Newest runs first, plus every run directory that could not be loaded.
+
+    An unreadable run.json (corrupt, or written by a provider that no longer exists)
+    is reported, not skipped: the operator must see that history is missing rather
+    than believe the corpus never had runs. When the raw payload still names a corpus
+    the entry is attributed to it (and filtered like a readable run); an entry whose
+    corpus cannot be read at all is returned under every corpus filter.
+    """
     out: list[SyntheticRunMeta] = []
+    unreadable: list[SyntheticUnreadableRun] = []
     for d in sorted(runs_dir().iterdir(), key=lambda p: p.name, reverse=True):
         if not d.is_dir():
             continue
         p = d / "run.json"
         if not p.exists():
+            # A crash between directory creation and run.json commit leaves an orphan; say so.
+            unreadable.append(SyntheticUnreadableRun(run_id=d.name, reason="run.json is missing", corpus_id=None))
             continue
+        raw: Any = None
         try:
             raw = json.loads(p.read_text(encoding="utf-8"))
             run = SyntheticRun.model_validate(raw)
-        except Exception:
+        except Exception as exc:
+            claimed = _claimed_corpus(raw)
+            if corpus_id and claimed and claimed != str(corpus_id):
+                continue
+            unreadable.append(SyntheticUnreadableRun(run_id=d.name, reason=_short_reason(exc), corpus_id=claimed))
             continue
         if corpus_id and str(run.repo_id) != str(corpus_id):
+            continue
+        if len(out) >= max(1, int(limit)):
             continue
         out.append(
             SyntheticRunMeta(
@@ -136,9 +157,23 @@ def list_runs(*, corpus_id: str | None = None, limit: int = 50) -> list[Syntheti
                 lineage_ref=run.lineage_ref,
             )
         )
-        if len(out) >= max(1, int(limit)):
-            break
-    return out
+    return out, unreadable
+
+
+def _claimed_corpus(raw: Any) -> str | None:
+    """The corpus a malformed run.json still names, when its payload is at least a JSON object."""
+    if not isinstance(raw, dict):
+        return None
+    for key in ("corpus_id", "repo_id"):
+        value = raw.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def _short_reason(exc: Exception) -> str:
+    text = " ".join(str(exc).split())
+    return text if len(text) <= 240 else text[:237] + "..."
 
 
 def allocate_run_id(repo_id: str, started_at: datetime) -> str:

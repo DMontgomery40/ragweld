@@ -50,7 +50,10 @@ Keep this file updated with the latest acceptance result, the first failing chec
 
 ## Next Smallest Honest Fix Target
 
-Cut Synthetic Lab back over to its live `synthetic_data_kit` + GPT-5 policy surface. The lane now boots a truthful current-worktree UI/API pair and the browser reaches the real Synthetic Lab, so the next blocker is the stale model/provider surface rather than stack startup or acceptance harness plumbing.
+Superseded 2026-08-22: the Synthetic Lab's provider is `grounded_qa` (gateway
+aliases for generator/judge, verbatim evidence checks); `synthetic_data_kit`
+was never an installable dependency and is deleted. UI proof for the lane is
+the Chrome drive recorded in `docs/exec-plans/active/eval-data-lane-2026-08-22.md`.
 
 ## Lane Notes
 

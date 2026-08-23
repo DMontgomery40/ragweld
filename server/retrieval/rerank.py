@@ -8,8 +8,9 @@ import platform
 import time
 from dataclasses import dataclass
 
+from server.chat.provider_router import ProviderRoute
 from server.models.retrieval import ChunkMatch
-from server.models.tribrid_config_model import RerankingConfig, TrainingConfig
+from server.models.tribrid_config_model import RerankingConfig, TrainingConfig, TriBridConfig
 from server.observability.metrics import (
     RERANKER_CANDIDATES_TOTAL,
     RERANKER_ERRORS_TOTAL,
@@ -18,6 +19,7 @@ from server.observability.metrics import (
     RERANKER_SKIPPED_TOTAL,
 )
 from server.reranker.artifacts import resolve_project_path
+from server.retrieval.gateway_reranker import resolve_rerank_route, score_candidates
 from server.retrieval.mlx_qwen3 import get_mlx_qwen3_reranker, mlx_is_available
 
 logger = logging.getLogger(__name__)
@@ -60,20 +62,8 @@ def _mlx_platform_supported() -> bool:
 
 
 def resolve_learning_backend(training_config: TrainingConfig | None, *, artifact_path: str | None = None) -> str:
-    del artifact_path  # kept for API compatibility
-    requested = "auto"
-    try:
-        if training_config is not None:
-            requested = str(training_config.learning_reranker_backend or "auto").strip().lower()
-    except Exception:
-        requested = "auto"
-
-    # Back-compat: 'transformers'/'hf' backends are deprecated; the learning reranker is MLX Qwen3.
-    if requested in {"transformers", "hf"}:
-        requested = "auto"
-    if requested not in {"auto", "mlx_qwen3", "mlx"}:
-        requested = "auto"
-
+    """The learning reranker has one execution backend (MLX Qwen3); the typed config field admits only auto/mlx_qwen3."""
+    del artifact_path, training_config
     if not _mlx_platform_supported():
         raise RuntimeError("learning reranker requires macOS arm64 (Apple Silicon)")
     if not mlx_is_available():
@@ -121,10 +111,15 @@ class Reranker:
         *,
         training_config: TrainingConfig | None = None,
         trained_model_path: str | None = None,
+        gateway_config: TriBridConfig | None = None,
     ):
         self.config = config
         self.training_config = training_config
         self.trained_model_path = trained_model_path
+        # Full config of the corpus whose reranking settings apply; the gateway
+        # provider resolves its LiteLLM route from it (chat.litellm + catalog).
+        self.gateway_config = gateway_config
+        self._gateway_route: ProviderRoute | None = None
 
     async def rerank(self, query: str, chunks: list[ChunkMatch]) -> list[ChunkMatch]:
         res = await self.try_rerank(query, chunks)
@@ -133,9 +128,6 @@ class Reranker:
     async def try_rerank(self, query: str, chunks: list[ChunkMatch]) -> RerankResult:
         q = str(query or "").strip()
         mode = str(self.config.reranker_mode or "none").strip().lower()
-        # Defensive back-compat: older configs may still supply 'local'/'hf'.
-        if mode in {"local", "hf"}:
-            mode = "learning"
         if mode == "none":
             _RUNTIME.last_attempt_ms = int(time.time() * 1000)
             _RUNTIME.last_mode = "none"
@@ -207,6 +199,31 @@ class Reranker:
                         return RerankResult(
                             chunks=chunks, ok=True, applied=False, skipped_reason="missing_api_key"
                         )
+                elif provider == "litellm":
+                    unavailable = self._resolve_gateway_route()
+                    if unavailable:
+                        RERANKER_SKIPPED_TOTAL.labels(mode=mode, reason="gateway_unavailable").inc()
+                        logger.warning(
+                            json.dumps(
+                                {
+                                    "event": "reranker_gateway_unavailable",
+                                    "message": unavailable,
+                                    "operatorHint": (
+                                        "reranking.reranker_cloud_provider=litellm needs an enabled chat.litellm "
+                                        "gateway, a catalog alias in reranking.reranker_cloud_model and LITELLM_API_KEY."
+                                    ),
+                                    "fields": {"alias": str(self.config.reranker_cloud_model or "").strip()},
+                                },
+                                sort_keys=True,
+                            )
+                        )
+                        _RUNTIME.last_ok = True
+                        _RUNTIME.last_applied = False
+                        _RUNTIME.last_candidates_reranked = 0
+                        _RUNTIME.last_skipped_reason = "gateway_unavailable"
+                        return RerankResult(
+                            chunks=chunks, ok=True, applied=False, skipped_reason="gateway_unavailable"
+                        )
 
                 with RERANKER_LATENCY_SECONDS.labels(mode=mode).time():
                     out = await self._rerank_api(q, chunks)
@@ -260,11 +277,117 @@ class Reranker:
             raise RuntimeError(f"unsupported learning reranker backend: {backend}")
         return await self._rerank_mlx_qwen3(query, chunks, adapter_dir=model_id)
 
+    def _resolve_gateway_route(self) -> str | None:
+        """Resolve the gateway route for the configured alias; return the reason when it cannot be used."""
+        alias = str(self.config.reranker_cloud_model or "").strip()
+        if not alias:
+            return "reranking.reranker_cloud_model is empty"
+        if self.gateway_config is None:
+            return "reranker was constructed without the corpus gateway config"
+        try:
+            self._gateway_route = resolve_rerank_route(self.gateway_config, alias)
+        except RuntimeError as exc:
+            self._gateway_route = None
+            return str(exc)
+        return None
+
     async def _rerank_api(self, query: str, chunks: list[ChunkMatch]) -> list[ChunkMatch]:
         provider = str(self.config.reranker_cloud_provider or "").strip().lower()
-        if provider in {"cohere"}:
+        if provider == "cohere":
             return await self._rerank_cohere(query, chunks)
+        if provider == "litellm":
+            return await self._rerank_gateway(query, chunks)
         raise ValueError(f"Unsupported cloud reranker provider: {provider}")
+
+    def _cloud_candidates(self, chunks: list[ChunkMatch]) -> tuple[list[ChunkMatch], list[ChunkMatch], list[str]]:
+        top_n = min(len(chunks), int(self.config.reranker_cloud_top_n))
+        if top_n <= 0:
+            return [], chunks, []
+        snippet_chars = int(self.config.rerank_input_snippet_chars)
+        candidates = chunks[:top_n]
+        return candidates, chunks[top_n:], [_snippet(c.content, max_chars=snippet_chars) for c in candidates]
+
+    def _apply_cloud_scores(
+        self,
+        *,
+        candidates: list[ChunkMatch],
+        remainder: list[ChunkMatch],
+        raw_scores: list[float],
+        provider: str,
+    ) -> list[ChunkMatch]:
+        """Blend normalized reranker scores with normalized fusion scores.
+
+        Uniform reranker scores (including a single candidate) carry no ordering
+        information: the fusion order and scores are preserved and the candidates are
+        stamped ``reranker_neutral``. Ties on the blended score fall back to the fusion
+        score, never to the chunk id.
+        """
+        model = str(self.config.reranker_cloud_model or "").strip()
+        orig_raw = [float(c.score) for c in candidates]
+        if not candidates:
+            return list(remainder)
+        if max(raw_scores) - min(raw_scores) <= 1e-12:
+            neutral: list[ChunkMatch] = []
+            for c, s_raw in zip(candidates, raw_scores, strict=True):
+                meta = dict(c.metadata or {})
+                meta.update(
+                    {
+                        "reranker_mode": "cloud",
+                        "reranker_cloud_provider": provider,
+                        "reranker_model": model,
+                        "reranker_score_raw": float(s_raw),
+                        "reranker_neutral": True,
+                        "fusion_score_raw": float(c.score),
+                    }
+                )
+                neutral.append(c.model_copy(update={"metadata": meta}))
+            return [*neutral, *remainder]
+
+        rerank_norm = _minmax_norm(raw_scores)
+        orig_norm = _minmax_norm(orig_raw)
+        alpha = float(self.config.tribrid_reranker_alpha)
+        blended = [((1.0 - alpha) * o) + (alpha * r) for o, r in zip(orig_norm, rerank_norm, strict=True)]
+
+        updated: list[ChunkMatch] = []
+        for c, s_raw, s_norm, f_raw, f_norm, s in zip(
+            candidates, raw_scores, rerank_norm, orig_raw, orig_norm, blended, strict=True
+        ):
+            meta = dict(c.metadata or {})
+            meta.update(
+                {
+                    "reranker_mode": "cloud",
+                    "reranker_cloud_provider": provider,
+                    "reranker_model": model,
+                    "reranker_score_raw": float(s_raw),
+                    "reranker_score": float(s_norm),
+                    "reranker_neutral": False,
+                    "fusion_score_raw": float(f_raw),
+                    "fusion_score": float(f_norm),
+                }
+            )
+            updated.append(c.model_copy(update={"score": float(s), "metadata": meta}))
+
+        updated.sort(
+            key=lambda c: (-float(c.score), -float(c.metadata.get("fusion_score_raw", 0.0)), _stable_chunk_key(c))
+        )
+        return [*updated, *remainder]
+
+    async def _rerank_gateway(self, query: str, chunks: list[ChunkMatch]) -> list[ChunkMatch]:
+        route = self._gateway_route
+        if route is None:
+            raise RuntimeError("gateway reranker route was not resolved")
+        candidates, remainder, docs = self._cloud_candidates(chunks)
+        if not candidates:
+            return chunks
+        system_prompt = str(self.gateway_config.system_prompts.gateway_rerank) if self.gateway_config else ""
+        raw_scores = await score_candidates(
+            route=route,
+            system_prompt=system_prompt,
+            query=query,
+            docs=docs,
+            timeout_s=float(self.config.reranker_timeout),
+        )
+        return self._apply_cloud_scores(candidates=candidates, remainder=remainder, raw_scores=raw_scores, provider="litellm")
 
     async def _rerank_cohere(self, query: str, chunks: list[ChunkMatch]) -> list[ChunkMatch]:
         api_key = os.getenv("COHERE_API_KEY")
@@ -272,14 +395,10 @@ class Reranker:
             return chunks
 
         provider = str(self.config.reranker_cloud_provider or "").strip()
-        top_n = min(len(chunks), int(self.config.reranker_cloud_top_n))
+        candidates, remainder, docs = self._cloud_candidates(chunks)
+        top_n = len(candidates)
         if top_n <= 0:
             return chunks
-
-        snippet_chars = int(self.config.rerank_input_snippet_chars)
-        candidates = chunks[:top_n]
-        remainder = chunks[top_n:]
-        docs = [_snippet(c.content, max_chars=snippet_chars) for c in candidates]
 
         model = str(self.config.reranker_cloud_model or "").strip() or None
         timeout_s = float(self.config.reranker_timeout)
@@ -304,32 +423,7 @@ class Reranker:
             raise RuntimeError("Cohere client does not support rerank()")
 
         raw_scores = await asyncio.wait_for(asyncio.to_thread(_run), timeout=timeout_s)
-        rerank_norm = _minmax_norm(raw_scores)
-        orig_raw = [float(c.score) for c in candidates]
-        orig_norm = _minmax_norm(orig_raw)
-        alpha = float(self.config.tribrid_reranker_alpha)
-        blended = [((1.0 - alpha) * o) + (alpha * r) for o, r in zip(orig_norm, rerank_norm, strict=False)]
-
-        updated: list[ChunkMatch] = []
-        for c, s_raw, s_norm, f_raw, f_norm, s in zip(
-            candidates, raw_scores, rerank_norm, orig_raw, orig_norm, blended, strict=False
-        ):
-            meta = dict(c.metadata or {})
-            meta.update(
-                {
-                    "reranker_mode": "cloud",
-                    "reranker_cloud_provider": provider,
-                    "reranker_model": str(self.config.reranker_cloud_model or "").strip(),
-                    "reranker_score_raw": float(s_raw),
-                    "reranker_score": float(s_norm),
-                    "fusion_score_raw": float(f_raw),
-                    "fusion_score": float(f_norm),
-                }
-            )
-            updated.append(c.model_copy(update={"score": float(s), "metadata": meta}))
-
-        updated.sort(key=lambda c: (-float(c.score), _stable_chunk_key(c)))
-        return [*updated, *remainder]
+        return self._apply_cloud_scores(candidates=candidates, remainder=remainder, raw_scores=raw_scores, provider=provider)
 
     async def _rerank_mlx_qwen3(self, query: str, chunks: list[ChunkMatch], *, adapter_dir: str) -> list[ChunkMatch]:
         if not mlx_is_available():

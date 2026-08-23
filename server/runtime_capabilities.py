@@ -88,9 +88,17 @@ RERANKER_MODE_OPTIONS: tuple[RuntimeOption, ...] = (
 
 RERANKER_CLOUD_PROVIDER_OPTIONS: tuple[RuntimeOption, ...] = (
     RuntimeOption(
+        id="litellm",
+        label="LiteLLM gateway",
+        description=(
+            "Listwise reranking through a LiteLLM gateway alias (server/retrieval/gateway_reranker.py); "
+            "uses the gateway credential, loads no local model."
+        ),
+    ),
+    RuntimeOption(
         id="cohere",
         label="Cohere",
-        description="Cloud reranking executed today by server/retrieval/rerank.py via the Cohere SDK.",
+        description="Cloud reranking executed by server/retrieval/rerank.py via the Cohere SDK (COHERE_API_KEY).",
     ),
 )
 
@@ -224,7 +232,7 @@ _EMBEDDING_CATALOG_ONLY_REASON = (
     "Catalog entry only. Provider-backed embeddings currently execute only via openai, mlx, local, or huggingface."
 )
 _RERANKER_CATALOG_ONLY_REASON = (
-    "Catalog entry only. Current cloud reranker runtime supports cohere only; the learning reranker is selected via training.* config rather than catalog rows."
+    "Catalog entry only. The cloud reranker runtime supports the LiteLLM gateway (litellm) and cohere; the learning reranker is selected via training.* config rather than catalog rows."
 )
 
 

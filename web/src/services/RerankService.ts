@@ -36,6 +36,36 @@ import type {
 
 import { withCorpusScope } from '@/api/client';
 
+/**
+ * Render the server's failure semantics for mining verbatim: the HTTP status, the
+ * typed detail (string, validation list, or dependency/operator-hint object) and
+ * its operator hint, so a 404 corpus, a 409 corrupt-file instruction or a typed
+ * 503 reaches the operator instead of a generic message.
+ */
+async function describeMineFailure(response: Response): Promise<string> {
+  let detail: unknown = null;
+  try {
+    detail = (await response.json())?.detail ?? null;
+  } catch {
+    detail = null;
+  }
+  const parts: string[] = [`Triplet mining failed (HTTP ${response.status})`];
+  if (typeof detail === 'string' && detail.trim()) {
+    parts.push(detail.trim());
+  } else if (Array.isArray(detail)) {
+    const messages = detail
+      .map((item) => (item && typeof item === 'object' && 'msg' in item ? String((item as { msg: unknown }).msg) : ''))
+      .filter(Boolean);
+    if (messages.length) parts.push(messages.join('; '));
+  } else if (detail && typeof detail === 'object') {
+    const record = detail as Record<string, unknown>;
+    const message = [record.code, record.message].filter((v) => typeof v === 'string' && v).join(': ');
+    if (message) parts.push(message);
+    if (typeof record.operator_hint === 'string' && record.operator_hint) parts.push(`Hint: ${record.operator_hint}`);
+  }
+  return parts.join(' — ');
+}
+
 export class RerankService {
   private apiBase: string;
 
@@ -95,7 +125,7 @@ export class RerankService {
     });
 
     if (!response.ok) {
-      throw new Error('Failed to start triplet mining');
+      throw new Error(await describeMineFailure(response));
     }
 
     return await response.json();

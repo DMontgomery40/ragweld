@@ -2,73 +2,48 @@
 
 ## Mission
 
-Replace the current brittle synthetic/eval lane with a better corpus and better data, not another compatibility bandage around a bad dataset.
+Produce real eval data and real reranker training signal from the indexed
+corpus, with one generation path and no compatibility bandages around a bad
+dataset.
 
 ## This Lane Owns
 
-- `server/synthetic`
-- eval dataset generation
-- replacement corpus sourcing and materialization
-- regression harnesses for eval quality
-- migration toward Distilabel, Ragas, and Promptfoo
+- `server/synthetic` (grounded QA provider, quality gate, publish)
+- eval dataset generation and publication (`data/eval_datasets/<corpus>.json`)
+- reranker triplet mining (`server/training/triplet_miner.py`)
+- regression harnesses for eval quality (Ragas, Promptfoo)
 
 ## Replacement Rule
 
-If the current dataset is bad, replace it and fresh-index the better one.
-
-- Do not preserve a bad dataset for continuity.
-- Do not treat corpus compatibility with the old House Oversight dump as a design goal.
-- On this branch, better source wins and the worse path should stop being the active truth.
+If the current dataset is bad, replace it and regenerate from the indexed
+corpus. Do not preserve a bad dataset for continuity and do not hydrate a
+failed generation run from whatever was published before.
 
 ## Gate
 
-- non-empty generated artifacts
-- eval run ids created successfully
+- a synthetic run that passes the quality gate (`top1 >= synthetic.quality_gate.top1_min`)
+- published eval dataset with expected answers, published triplets
+- eval run ids created successfully (retrieval metrics + Ragas), Promptfoo run
 - compare and drilldown still usable
 
-## Current Priority
+## Current State (2026-08-22)
 
-Keep this file updated with the replacement milestone, current blocker, and whether the new path is already default.
-
-## Active Milestone (2026-03-26)
-
-Replace the current `epstein-files-1` source dataset with a fresh Hugging Face
-Epstein corpus and regenerate eval data from that replacement source before any
-training continues.
-
-## Current Blocker
-
-The mounted 18-row synthetic artifact for `epstein-files-1` is garbage:
-
-- it only hits `top1_accuracy=0.0556` in real Eval Analysis
-- many rows are over-pinned to a single page/file identity
-- several rows are underspecified or semantically wrong
-
-The next honest move is to source a better Epstein dataset, materialize it as a
-fresh corpus, repoint the active corpus path, and reindex.
-
-That replacement path now assumes:
-
-- OpenAI dense embeddings
-- official Neo4j GraphRAG semantic extraction
-- no reuse of the old heuristic semantic-KG path
-
-Corpus materialization hygiene was tightened on 2026-03-26:
-
-- materialized HF emails are now body-first with a compact metadata footer
-  instead of header boilerplate at the top of every file
-- the HF manifest is now a sidecar artifact, not a file inside the indexed
-  corpus root
-
-Those fixes remove known graph pollution from the active replacement corpus, but
-they do not by themselves complete the GraphRAG replacement. The remaining
-blocker is still the live graph path: the execution lane must move off the
-custom low-level extractor and legacy `:Entity` storage assumptions rather than
-calling the current wrapper "official" just because it uses the Neo4j package.
+- Generation: the `synthetic_data_kit` provider (a package this repository
+  never declared or installed) and the seed-hydration fallback are deleted.
+  The only provider is `grounded_qa`: gateway-generated question/answer rows
+  with a verbatim `evidence_quote` that must be found in the source chunk,
+  self-contained-question checks, and the configured judge
+  (`docs/references/eval-substrates.md`).
+- Triplets: mined from real retrieval traces. Synthetic `triplets` /
+  `full_stack` runs retrieve every generated question through the fusion lane
+  and pair each expected path with the highest-ranked non-expected documents
+  (`learning_reranker_negative_ratio`); `POST /api/reranker/mine` does the
+  same from the corpus' latest persisted eval run plus feedback events. The
+  same-directory-negative heuristic is gone.
+- Execution record for the slice:
+  `docs/exec-plans/active/eval-data-lane-2026-08-22.md`.
 
 ## Replacement Path Default?
 
-Partially. The replacement corpus/materialization path is now the active target,
-and the graph/indexing target for that lane is OpenAI embeddings plus official
-Neo4j GraphRAG. Any remaining heuristic semantic-KG references should be treated
-as stale branch debt, not the desired end state.
+Yes. There is no other path: generation is gateway-backed and grounded, and
+triplets only come from retrieval results or explicit feedback.

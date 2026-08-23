@@ -29,37 +29,6 @@
       "badges": []
     },
     {
-      "term": "Active Reranker",
-      "key": "RERANKER_ACTIVE",
-      "definition": "Selects whether reranking is enabled and which execution path is used (local/learning, cloud, or off). Reranking usually improves top-k precision by re-scoring candidate passages with a stronger cross-encoder or specialized model, but it adds latency and cost. Local mode reduces network dependency and can enable adaptive training loops; cloud mode simplifies model management but depends on provider reliability and quotas; off is fastest but may reduce answer quality on ambiguous queries. Choose mode per SLA and workload profile.",
-      "category": "reranking",
-      "related": [],
-      "links": [
-        {
-          "text": "Adaptive Retrieval with Preference-guided Reranking (arXiv 2026)",
-          "href": "https://arxiv.org/abs/2601.04618"
-        },
-        {
-          "text": "Sentence-Transformers Cross-Encoder Applications",
-          "href": "https://www.sbert.net/examples/cross_encoder/applications/README.html"
-        },
-        {
-          "text": "Elasticsearch Reciprocal Rank Fusion (RRF)",
-          "href": "https://www.elastic.co/guide/en/elasticsearch/reference/current/rrf.html"
-        },
-        {
-          "text": "Cohere Rerank Overview",
-          "href": "https://docs.cohere.com/docs/rerank-overview"
-        }
-      ],
-      "badges": [
-        {
-          "text": "Required",
-          "class": "info"
-        }
-      ]
-    },
-    {
       "term": "Advanced Parameters",
       "key": "ADVANCED_RAG_TUNING",
       "definition": "Advanced RAG tuning controls how lexical, vector, reranker, and metadata signals are combined after initial retrieval. This is where you adjust fusion weights, score bonuses, candidate expansion, and iteration limits, so small changes can move hit-rate and latency in opposite directions. Treat these parameters as an evaluation loop: freeze a representative query set, change one knob at a time, and compare recall at k, ranking quality, grounded answer rate, and p95 latency against baseline. If weighting is too aggressive, one signal dominates and recall collapses on edge cases; if too weak, ranking becomes noisy and expensive.",
@@ -1263,7 +1232,7 @@
     {
       "term": "Cloud Model",
       "key": "RERANKER_CLOUD_MODEL",
-      "definition": "Specifies the provider model ID used for cloud reranking, such as a Cohere, Voyage, or Jina reranker family variant. This parameter directly controls tradeoffs between multilingual support, context length handling, pricing, and latency. Model IDs are provider-scoped, so the same string is not portable across providers; keep explicit provider-model pairing in configuration and tests. When changing models, re-baseline ranking metrics and failure behavior because score distributions and calibration can shift materially even when APIs look identical.",
+      "definition": "The model the cloud reranker calls: a LiteLLM gateway alias for provider `litellm` (a cheap non-reasoning instruct model such as openai.gpt-4.1-nano keeps the listwise scoring fast and deterministic), or a Cohere rerank model id for provider `cohere`. This parameter directly controls the quality/latency/cost tradeoff of the rerank stage; the scores it returns are min-max normalized and blended with the fusion score by the reranker alpha.",
       "category": "reranking",
       "related": [],
       "links": [
@@ -1292,40 +1261,9 @@
       ]
     },
     {
-      "term": "Cloud Provider (models.json)",
-      "key": "RERANKER_PROVIDER",
-      "definition": "Provider identifier used by the cloud reranker configuration layer (for example, values surfaced from `models.json`). Keep this value aligned with your model catalog so UI selections resolve to valid API credentials, base URLs, and model IDs at runtime. A provider mismatch often fails late (during request dispatch), so validate provider-model compatibility at config load time when possible. In multi-provider setups, this key is the routing pivot that determines which API semantics and reliability envelope apply to the same query workload.",
-      "category": "reranking",
-      "related": [],
-      "links": [
-        {
-          "text": "InsertRank: Reranker Behavior and Fairness (arXiv 2025)",
-          "href": "https://arxiv.org/abs/2506.14086"
-        },
-        {
-          "text": "Cohere Models Documentation",
-          "href": "https://docs.cohere.com/docs/models"
-        },
-        {
-          "text": "Voyage AI Reranker Docs",
-          "href": "https://docs.voyageai.com/docs/reranker"
-        },
-        {
-          "text": "Jina Reranker v2 Model Card",
-          "href": "https://huggingface.co/jinaai/jina-reranker-v2-base-multilingual"
-        }
-      ],
-      "badges": [
-        {
-          "text": "models.json-driven",
-          "class": "info"
-        }
-      ]
-    },
-    {
       "term": "Cloud Rerank Provider",
       "key": "RERANKER_CLOUD_PROVIDER",
-      "definition": "Determines which external vendor handles reranking when cloud mode is enabled. Provider choice affects auth, rate limits, billing units, token limits, and model availability, so swapping providers is a behavior change, not just a credential change. Keep provider-specific defaults explicit (timeouts, top-N caps, retry policy) and validate with provider-specific regression queries. For production stability, monitor provider error classes separately so fallback rules can distinguish auth/config issues from transient throttling.",
+      "definition": "Determines which remote service scores candidates when reranker mode is cloud. `litellm` (default) sends the query and the top-N candidate snippets in one request to a LiteLLM gateway alias and reads back a JSON array of 0-10 relevance scores in candidate order; it reuses the gateway credential, loads no local model, and is billed at the alias' token prices. `cohere` calls the Cohere rerank API with COHERE_API_KEY. Provider choice affects auth, rate limits, billing units and latency; a provider that cannot run (no gateway, unknown alias, missing key) is reported as a skipped rerank, never faked.",
       "category": "reranking",
       "related": [],
       "links": [
@@ -9778,7 +9716,7 @@
     {
       "term": "Reranker Mode",
       "key": "RERANKER_MODE",
-      "definition": "Global switch for reranking behavior, typically `none`, `learning`, or `cloud`. Use `none` for lowest latency baselines, `learning` for locally trainable behavior, and `cloud` for managed cross-encoder quality with external dependencies. Because this mode changes the scoring path after retrieval, it can change user-visible answers even when retrieval is identical. Lock this setting per environment and benchmark each mode against shared evaluation sets before promoting to production.",
+      "definition": "Global switch for reranking behavior: `none` passes retrieval order through, `cloud` rescores the top-N candidates through a remote service (the LiteLLM gateway alias or Cohere), and `learning` uses the locally trained MLX Qwen3 LoRA reranker. Use `none` for lowest-latency baselines and `cloud` when you want a stronger ordering without loading a model on the host; every search logs whether the rerank was applied, skipped (with the reason) or failed.",
       "category": "reranking",
       "related": [],
       "links": [
@@ -12511,35 +12449,40 @@
       "key": "evaluation.ragas_enabled",
       "definition": "Runs Ragas generation-quality scoring during eval runs. Each dataset question is answered through the LiteLLM gateway with the retrieved context, then Ragas judges faithfulness and answer relevancy using the configured judge alias and the local embedding model. When enabled, an unavailable judge, missing ragas package, or non-local embedding provider fails the run closed instead of skipping silently.",
       "category": "evaluation",
-      "badges": []
+      "badges": [],
+      "related": []
     },
     {
       "term": "Ragas Judge Model",
       "key": "evaluation.ragas_judge_model",
       "definition": "LiteLLM alias used as the Ragas judge for faithfulness and answer relevancy. Leave empty to use the chat default alias. The alias must be exposed by the authenticated gateway; the eval run refuses to start otherwise.",
       "category": "evaluation",
-      "badges": []
+      "badges": [],
+      "related": []
     },
     {
       "term": "Ragas Metrics",
       "key": "evaluation.ragas_metrics",
       "definition": "Ragas metrics computed per eval entry. Supported: faithfulness (claims grounded in retrieved context) and answer_relevancy (embedding similarity between the question and questions regenerated from the answer). Per-entry scores and run means are persisted on the eval run.",
       "category": "evaluation",
-      "badges": []
+      "badges": [],
+      "related": []
     },
     {
       "term": "Ragas Judge Timeout",
       "key": "evaluation.ragas_judge_timeout_s",
       "definition": "Per-request timeout in seconds for Ragas judge calls routed through LiteLLM. Ragas makes several judge calls per entry (claim extraction, NLI verdicts, question regeneration), and local CPU vLLM serving can take minutes per call, so this is deliberately generous. When a judge call exceeds it, the eval run fails closed with a typed 503 instead of silently dropping scores.",
       "category": "evaluation",
-      "badges": []
+      "badges": [],
+      "related": []
     },
     {
       "term": "Promptfoo Grader Model",
       "key": "evaluation.promptfoo_grader_model",
       "definition": "LiteLLM alias that grades Promptfoo llm-rubric assertions during a regression run. Leave empty to use the chat default alias. The grader must be exposed by the authenticated gateway; the run refuses to start otherwise and never reports fabricated pass/fail counts.",
       "category": "evaluation",
-      "badges": []
+      "badges": [],
+      "related": []
     },
     {
       "term": "Gateway Alias",
@@ -12561,6 +12504,63 @@
           "href": "https://openrouter.ai/docs/api-reference/list-available-models"
         }
       ]
+    },
+    {
+      "term": "Grounded QA Provider",
+      "key": "GROUNDED_QA",
+      "definition": "The Synthetic Lab's only generation provider. For every selected source chunk it asks the generator alias, through the LiteLLM gateway, for question/answer rows that each carry an evidence_quote; a row survives only when that quote appears verbatim in the source excerpt (whitespace-, case- and quote-mark-insensitive) and the question is self-contained, then the judge alias scores it against the curation threshold. Generator or judge failures fail the run; nothing is hydrated from a seed dataset and nothing falls back to heuristic extraction. The summary reports generated, ungrounded, malformed, judged and kept counts so you can see how much the model could actually anchor in the corpus.",
+      "category": "evaluation",
+      "related": [
+        "TRIPLETS_FROM_EVAL_RUN",
+        "SYNTHETIC_GENERATOR_CONCURRENCY"
+      ],
+      "links": [],
+      "badges": [
+        {
+          "text": "Gateway alias required",
+          "class": "info"
+        }
+      ]
+    },
+    {
+      "term": "Triplets From Eval Run",
+      "key": "TRIPLETS_FROM_EVAL_RUN",
+      "definition": "Reranker training triplets mined from a persisted eval run's retrieval results instead of from directory layout or feedback alone. Each eval entry is a real retrieval trace: its labelled expected paths become positives and the highest-ranked retrieved documents that are not expected become hard negatives, up to learning_reranker_negative_ratio per question. Synthetic triplets/full_stack runs mine the quality-gate retrieval pass this way, and POST /api/reranker/mine adds the corpus' latest eval run (or an explicit eval_run_id) to the feedback-event triplets. Rows carry a source field naming the eval run so lineage stays inspectable.",
+      "category": "reranking",
+      "related": [
+        "TRIPLETS_MINE_MODE",
+        "GROUNDED_QA"
+      ],
+      "links": [],
+      "badges": [
+        {
+          "text": "Hard negatives from real retrieval",
+          "class": "info"
+        }
+      ]
+    },
+    {
+      "term": "Synthetic Generator Concurrency",
+      "key": "SYNTHETIC_GENERATOR_CONCURRENCY",
+      "definition": "How many generator/judge requests a synthetic run sends to the LiteLLM gateway at once (synthetic.generator.concurrency). Paid upstream aliases can absorb several parallel requests, which shortens a 200-row run considerably; the local single-stream vLLM serving alias is serialized process-wide (one request at a time across every run in the API process), so two corpora generating concurrently still never queue the local engine against itself.",
+      "category": "evaluation",
+      "related": [
+        "GROUNDED_QA"
+      ],
+      "links": [],
+      "badges": []
+    },
+    {
+      "term": "Eval Judge Max Tokens",
+      "key": "evaluation.judge_max_tokens",
+      "definition": "Output token budget for the eval judges: the Ragas judge alias and the Promptfoo llm-rubric grader (evaluation.judge_max_tokens, default 4096). It is deliberately separate from chat.max_tokens: faithfulness scoring emits statement lists and reasoning-capable gateway aliases spend tokens before the verdict, so a chat-sized cap truncates the judge and the eval run fails closed with LLMDidNotFinishException instead of producing scores. Raise it when judges time out on length; lower it to bound cost on large datasets.",
+      "category": "evaluation",
+      "related": [
+        "evaluation.ragas_judge_model",
+        "evaluation.promptfoo_grader_model"
+      ],
+      "links": [],
+      "badges": []
     }
   ]
 }

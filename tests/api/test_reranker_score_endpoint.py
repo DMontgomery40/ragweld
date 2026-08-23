@@ -27,22 +27,18 @@ async def test_reranker_score_endpoint_shape_without_scoped_config(client: Async
 
 
 @pytest.mark.asyncio
-async def test_reranker_score_endpoint_accepts_legacy_local_mode(client: AsyncClient) -> None:
-    """Back-compat: legacy callers may still send mode='local' or 'hf'."""
+@pytest.mark.parametrize("legacy_mode", ["local", "hf"])
+async def test_reranker_score_endpoint_rejects_legacy_modes(client: AsyncClient, legacy_mode: str) -> None:
+    """Stale mode aliases are not normalized: the schema rejects them so callers migrate."""
     res = await client.post(
         "/api/reranker/score",
         json={
             "corpus_id": "does-not-exist",
-            "mode": "local",
-            "query": "auth flow",
-            "document": "OAuth2 authorization code exchange",
+            "mode": legacy_mode,
+            "query": "Which plane management company did Barry Cohen consider switching to from Jet Aviation?",
+            "document": "Thinking of switching from Jet Aviation to EJM. EJM is more expensive.",
             "include_logits": 0,
         },
     )
-    assert res.status_code == 200
-    body = res.json()
-    assert isinstance(body, dict)
-    assert "ok" in body
-    assert "backend" in body
-    assert "score" in body
-    assert "error" in body
+    assert res.status_code == 422
+    assert "mode" in str(res.json().get("detail", ""))

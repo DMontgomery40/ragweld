@@ -318,7 +318,10 @@ async def test_put_config_rejects_unsupported_reranker_cloud_provider_runtime(cl
     response = await client.put("/api/config", json=cfg)
     assert response.status_code == 422
     detail = str(response.json().get("detail") or "")
-    assert "Unsupported reranker cloud provider" in detail
+    # The Pydantic field pattern is the only contract: the rejection names the
+    # field and the offending value, and the runtime option set matches it.
+    assert "reranker_cloud_provider" in detail
+    assert "voyage" in detail
 
 
 @pytest.mark.asyncio

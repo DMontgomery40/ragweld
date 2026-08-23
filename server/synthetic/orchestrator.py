@@ -1,15 +1,13 @@
 from __future__ import annotations
 
 import asyncio
-import json
-import random
 import re
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote
 
 from server.api.eval import evaluate_dataset_entries
+from server.db.postgres import PostgresClient
 from server.lineage import (
     attach_refs_to_current_bundle,
     capture_synthetic_artifact_version,
@@ -19,6 +17,7 @@ from server.lineage import (
 )
 from server.models.tribrid_config_model import (
     EvalDatasetItem,
+    EvalRun,
     SyntheticArtifactRef,
     SyntheticRun,
     SyntheticRunEvent,
@@ -27,7 +26,7 @@ from server.models.tribrid_config_model import (
     TriBridConfig,
 )
 from server.services.config_store import get_config as load_scoped_config
-from server.synthetic.providers.sdkit_provider import run_sdkit_provider
+from server.synthetic.providers.grounded_qa_provider import run_grounded_qa_provider
 from server.synthetic.storage import (
     active_run_id_for_corpus,
     allocate_run_id,
@@ -37,14 +36,15 @@ from server.synthetic.storage import (
     save_run,
     write_artifact,
 )
+from server.training.triplet_miner import mine_triplets_from_eval_results
 
 _run_tasks: dict[str, asyncio.Task[None]] = {}
 _run_cancel_events: dict[str, asyncio.Event] = {}
-_CORPUS_ID_RE = re.compile(r"^[A-Za-z0-9._-]+$")
+_start_lock = asyncio.Lock()
 _ROOT = Path(__file__).resolve().parents[2]
-_DATASET_DIR = _ROOT / "data" / "eval_datasets"
-_LEGACY_DATASET_DIR = _ROOT / "data" / "eval_dataset"
+_CORPUS_ID_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 _RECIPES_REQUIRING_EVAL_DATASET = frozenset({"eval_dataset", "triplets", "autotune_retrieval", "full_stack"})
+_RECIPES_PRODUCING_TRIPLETS = frozenset({"triplets", "full_stack"})
 
 
 def _append_log(run_id: str, message: str) -> None:
@@ -55,6 +55,19 @@ def _append_log(run_id: str, message: str) -> None:
             ts=datetime.now(UTC),
             run_id=run_id,
             message=str(message),
+        ),
+    )
+
+
+def _append_progress(run_id: str, message: str, percent: float | None) -> None:
+    append_event(
+        run_id,
+        SyntheticRunEvent(
+            type="progress",
+            ts=datetime.now(UTC),
+            run_id=run_id,
+            message=str(message),
+            percent=None if percent is None else max(0.0, min(100.0, float(percent))),
         ),
     )
 
@@ -102,7 +115,7 @@ def get_run(run_id: str) -> SyntheticRun:
     return load_run(run_id)
 
 
-def get_runs(*, corpus_id: str | None, limit: int) -> list[Any]:
+def get_runs(*, corpus_id: str | None, limit: int) -> tuple[list[Any], list[Any]]:
     return list_runs(corpus_id=corpus_id, limit=limit)
 
 
@@ -111,6 +124,9 @@ def _coerce_eval_items(payload: Any) -> list[EvalDatasetItem]:
         return []
     out: list[EvalDatasetItem] = []
     for row in payload:
+        if isinstance(row, EvalDatasetItem):
+            out.append(row)
+            continue
         try:
             out.append(EvalDatasetItem.model_validate(row))
         except Exception:
@@ -129,52 +145,6 @@ def _validate_repo_id(repo_id: str) -> str:
     if rid in {".", ".."} or ".." in rid:
         raise ValueError("Invalid corpus_id: path traversal segments are not allowed")
     return rid
-
-
-def _safe_corpus_id(corpus_id: str) -> str:
-    safe = quote(str(corpus_id or "").strip(), safe="._-")
-    if not safe:
-        raise ValueError("Invalid corpus_id")
-    return safe
-
-
-def _legacy_safe_corpus_id(corpus_id: str) -> str:
-    safe = re.sub(r"[^A-Za-z0-9._-]+", "_", str(corpus_id or "").strip()).strip("._-")
-    if not safe:
-        raise ValueError("Invalid corpus_id")
-    return safe
-
-
-def _load_seed_eval_items(repo_id: str) -> tuple[list[EvalDatasetItem], Path | None]:
-    canonical = _DATASET_DIR / f"{_safe_corpus_id(repo_id)}.json"
-    path = canonical
-    if not canonical.exists():
-        legacy = _LEGACY_DATASET_DIR / f"{_legacy_safe_corpus_id(repo_id)}.json"
-        if legacy.exists():
-            try:
-                canonical.parent.mkdir(parents=True, exist_ok=True)
-                canonical.write_text(legacy.read_text(encoding="utf-8"), encoding="utf-8")
-                path = canonical
-            except Exception:
-                path = legacy
-
-    if not path.exists():
-        return [], None
-
-    try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return [], path
-    if not isinstance(raw, list):
-        return [], path
-
-    out: list[EvalDatasetItem] = []
-    for row in raw:
-        try:
-            out.append(EvalDatasetItem.model_validate(row))
-        except Exception:
-            continue
-    return out, path
 
 
 def _artifact_lineage_ref_map(
@@ -217,58 +187,30 @@ def _attach_lineage(run: SyntheticRun, cfg: Any) -> SyntheticRun:
     return run
 
 
-def _hydrate_eval_dataset_from_seed(
+def _record_gate_failure(
     *,
     run_id: str,
     repo_id: str,
-    request: SyntheticRunStartRequest,
-    artifacts_payloads: dict[Any, Any],
     summary: SyntheticRunSummary,
-) -> int:
-    if request.recipe not in _RECIPES_REQUIRING_EVAL_DATASET:
-        return 0
-    if _coerce_eval_items(artifacts_payloads.get("eval_dataset_json")):
-        return 0
-
-    seed_items, source_path = _load_seed_eval_items(repo_id)
-    if not seed_items:
-        return 0
-
-    max_items = len(seed_items)
-    if request.max_pairs is not None:
-        max_items = max(1, min(max_items, int(request.max_pairs)))
-
-    if len(seed_items) > max_items:
-        if request.seed is not None:
-            chosen = random.Random(int(request.seed)).sample(seed_items, k=max_items)
-        else:
-            chosen = seed_items[:max_items]
-    else:
-        chosen = seed_items
-
-    artifacts_payloads["eval_dataset_json"] = [row.model_dump(mode="json") for row in chosen]
-    summary.items_generated = int(summary.items_generated) + len(chosen)
-
-    summary.degradation.seed_hydration_used = True
-    summary.degradation.seed_hydration_count = len(chosen)
-    summary.degradation.degraded = True
-    summary.degradation.reasons.append(
-        f"Eval dataset hydrated from seed ({len(chosen)} rows) instead of LLM generation."
-    )
-
-    dataset_label = str(source_path) if source_path is not None else "seed dataset"
-    _append_log(
-        run_id,
-        f"Hydrated eval_dataset_json from {dataset_label} with {len(chosen)} seed rows "
-        f"(recipe={request.recipe}, max_pairs={request.max_pairs}).",
-    )
-    report = str(artifacts_payloads.get("report_md") or "").rstrip()
-    if report:
-        report += "\n"
-    artifacts_payloads["report_md"] = (
-        f"{report}Seed fallback hydrated {len(chosen)} eval rows from corpus dataset."
-    )
-    return len(chosen)
+    artifacts_payloads: dict[Any, Any],
+    top1_min: float,
+    sample_size: int,
+    reason: str,
+    error: str,
+) -> tuple[bool, str, None]:
+    summary.quality_gate_threshold = top1_min
+    summary.quality_sample_size = sample_size
+    summary.quality_gate_passed = False
+    summary.quality_failure_reason = reason
+    artifacts_payloads["quality_eval_json"] = {
+        "run_id": run_id,
+        "corpus_id": repo_id,
+        "sample_size": sample_size,
+        "threshold": top1_min,
+        "passed": False,
+        "error": error,
+    }
+    return False, reason, None
 
 
 async def _evaluate_quality_gate(
@@ -278,100 +220,133 @@ async def _evaluate_quality_gate(
     cfg: TriBridConfig,
     artifacts_payloads: dict[Any, Any],
     summary: SyntheticRunSummary,
-) -> tuple[bool | None, str | None]:
+    evaluate_all: bool = False,
+    cancel_event: asyncio.Event | None = None,
+) -> tuple[bool | None, str | None, EvalRun | None]:
+    """Run every gate entry through the real retrieval lane and score top-1 against the threshold.
+
+    The gate is judged on the first ``synthetic.quality_gate.sample_size`` entries. With
+    ``evaluate_all`` every generated entry is retrieved so the run's results can be mined
+    for reranker triplets; the gate subset is unchanged.
+    """
     gate = cfg.synthetic.quality_gate
     top1_min = float(gate.top1_min)
     sample_size = int(gate.sample_size)
 
     eval_items = _coerce_eval_items(artifacts_payloads.get("eval_dataset_json"))
     if not eval_items:
-        reason = "Quality gate evaluation failed: no eval items generated"
-        summary.quality_gate_threshold = top1_min
-        summary.quality_sample_size = 0
-        summary.quality_gate_passed = False
-        summary.quality_failure_reason = reason
-        artifacts_payloads["quality_eval_json"] = {
-            "run_id": run_id,
-            "corpus_id": repo_id,
-            "sample_size": 0,
-            "threshold": top1_min,
-            "passed": False,
-            "error": "no eval items generated",
-        }
-        return False, reason
+        return _record_gate_failure(
+            run_id=run_id,
+            repo_id=repo_id,
+            summary=summary,
+            artifacts_payloads=artifacts_payloads,
+            top1_min=top1_min,
+            sample_size=0,
+            reason="Quality gate evaluation failed: no eval items generated",
+            error="no eval items generated",
+        )
 
+    gate_size = int(min(len(eval_items), sample_size))
     try:
         eval_run = await evaluate_dataset_entries(
             repo_id=repo_id,
             dataset=eval_items,
-            sample_size=sample_size,
+            sample_size=None if evaluate_all else sample_size,
             dataset_id=f"synthetic:{run_id}",
             persist_run=False,
+            cancel_event=cancel_event,
         )
+    except asyncio.CancelledError:
+        raise
     except Exception as e:
-        reason = f"Quality gate evaluation failed: {e}"
-        summary.quality_gate_threshold = top1_min
-        summary.quality_sample_size = int(min(len(eval_items), sample_size))
-        summary.quality_gate_passed = False
-        summary.quality_failure_reason = reason
-        artifacts_payloads["quality_eval_json"] = {
-            "run_id": run_id,
-            "corpus_id": repo_id,
-            "sample_size": int(min(len(eval_items), sample_size)),
-            "threshold": top1_min,
-            "passed": False,
-            "error": str(e),
-        }
-        return False, reason
-    quality_payload = {
+        return _record_gate_failure(
+            run_id=run_id,
+            repo_id=repo_id,
+            summary=summary,
+            artifacts_payloads=artifacts_payloads,
+            top1_min=top1_min,
+            sample_size=gate_size,
+            reason=f"Quality gate evaluation failed: {e}",
+            error=str(e),
+        )
+
+    gate_results = eval_run.results[:gate_size]
+    total = max(1, len(gate_results))
+    top1_accuracy = sum(1 for r in gate_results if r.top1_hit) / total
+    topk_accuracy = sum(1 for r in gate_results if r.topk_hit) / total
+    mrr = sum(float(r.reciprocal_rank) for r in gate_results) / total
+    passed = bool(top1_accuracy >= top1_min)
+    artifacts_payloads["quality_eval_json"] = {
         "run_id": run_id,
         "corpus_id": repo_id,
-        "sample_size": int(min(len(eval_items), sample_size)),
-        "top1_accuracy": float(eval_run.top1_accuracy),
-        "topk_accuracy": float(eval_run.topk_accuracy),
-        "mrr": float(eval_run.metrics.mrr),
+        "sample_size": gate_size,
+        "entries_evaluated": len(eval_run.results),
+        "top1_accuracy": float(top1_accuracy),
+        "topk_accuracy": float(topk_accuracy),
+        "mrr": float(mrr),
         "threshold": top1_min,
-        "passed": bool(float(eval_run.top1_accuracy) >= top1_min),
+        "passed": passed,
     }
-    artifacts_payloads["quality_eval_json"] = quality_payload
 
-    summary.quality_top1_accuracy = float(eval_run.top1_accuracy)
-    summary.quality_topk_accuracy = float(eval_run.topk_accuracy)
-    summary.quality_mrr = float(eval_run.metrics.mrr)
-    summary.quality_sample_size = int(min(len(eval_items), sample_size))
+    summary.quality_top1_accuracy = float(top1_accuracy)
+    summary.quality_topk_accuracy = float(topk_accuracy)
+    summary.quality_mrr = float(mrr)
+    summary.quality_sample_size = gate_size
     summary.quality_gate_threshold = top1_min
-    passed = bool(float(eval_run.top1_accuracy) >= top1_min)
     summary.quality_gate_passed = passed
     if not passed:
         reason = (
-            f"Quality gate failed: top1={float(eval_run.top1_accuracy):.3f} "
+            f"Quality gate failed: top1={float(top1_accuracy):.3f} "
             f"< threshold={top1_min:.3f} "
-            f"(sample={summary.quality_sample_size})"
+            f"(sample={gate_size})"
         )
         summary.quality_failure_reason = reason
-        return False, reason
+        return False, reason, eval_run
 
     summary.quality_failure_reason = None
-    return True, None
+    return True, None, eval_run
+
+
+async def _corpus_root(cfg: TriBridConfig, repo_id: str) -> Path:
+    """Absolute on-disk root of the corpus (for reading candidate negatives); a missing corpus is an error."""
+    pg = PostgresClient(cfg.indexing.postgres_url)
+    await pg.connect()
+    try:
+        corpus = await pg.get_corpus(repo_id)
+    finally:
+        await pg.disconnect()
+    if corpus is None:
+        raise RuntimeError(f"Corpus not found: {repo_id}")
+    root = Path(str(corpus.get("path") or "")).expanduser()
+    return root if root.is_absolute() else _ROOT / root
 
 
 async def start_run(request: SyntheticRunStartRequest) -> SyntheticRun:
     repo_id = _validate_repo_id(request.repo_id)
+    cfg = await load_scoped_config(repo_id=repo_id)
 
-    active = active_run_id_for_corpus(repo_id)
-    if active:
-        raise RuntimeError(
-            f"A synthetic run is already active for corpus_id={repo_id}: run_id={active}. "
-            "Cancel it before starting another run."
-        )
+    async with _start_lock:
+        active = active_run_id_for_corpus(repo_id)
+        if active:
+            raise RuntimeError(
+                f"A synthetic run is already active for corpus_id={repo_id}: run_id={active}. "
+                "Cancel it before starting another run."
+            )
+        started_at = datetime.now(UTC)
+        run_id = allocate_run_id(repo_id, started_at)
+        run = _new_run(run_id=run_id, repo_id=repo_id, started_at=started_at, cfg=cfg, request=request)
+        save_run(run)
+        _append_state(run_id, "running", "Synthetic run started.")
+        cancel_event = asyncio.Event()
+        _run_cancel_events[run_id] = cancel_event
+        _run_tasks[run_id] = asyncio.create_task(_run_job(run_id=run_id, request=request, cancel_event=cancel_event))
+    return run
 
-    try:
-        cfg = await load_scoped_config(repo_id=repo_id)
-    except Exception:
-        cfg = await load_scoped_config(repo_id=None)
-    started_at = datetime.now(UTC)
-    run_id = allocate_run_id(repo_id, started_at)
-    run = SyntheticRun(
+
+def _new_run(
+    *, run_id: str, repo_id: str, started_at: datetime, cfg: TriBridConfig, request: SyntheticRunStartRequest
+) -> SyntheticRun:
+    return SyntheticRun(
         run_id=run_id,
         repo_id=repo_id,
         status="running",
@@ -387,13 +362,6 @@ async def start_run(request: SyntheticRunStartRequest) -> SyntheticRun:
         error=None,
         input_bundle_id=ensure_current_bundle(repo_id=repo_id, cfg=cfg).bundle_id,
     )
-    save_run(run)
-    _append_state(run_id, "running", "Synthetic run started.")
-
-    cancel_event = asyncio.Event()
-    _run_cancel_events[run_id] = cancel_event
-    _run_tasks[run_id] = asyncio.create_task(_run_job(run_id=run_id, request=request, cancel_event=cancel_event))
-    return run
 
 
 async def cancel_run(run_id: str) -> bool:
@@ -417,22 +385,25 @@ async def _run_job(*, run_id: str, request: SyntheticRunStartRequest, cancel_eve
     run = load_run(run_id)
     repo_id = str(run.repo_id)
     cfg: Any | None = None
+
+    async def _progress(message: str, percent: float | None) -> None:
+        await asyncio.to_thread(_append_progress, run_id, message, percent)
+
     try:
-        try:
-            cfg = await load_scoped_config(repo_id=repo_id)
-        except Exception:
-            cfg = await load_scoped_config(repo_id=None)
-        _append_log(run_id, f"Provider={request.provider} recipe={request.recipe}")
+        cfg = await load_scoped_config(repo_id=repo_id)
+        await asyncio.to_thread(_append_log, run_id, f"Provider={request.provider} recipe={request.recipe}")
 
         if cancel_event.is_set():
             raise asyncio.CancelledError()
 
-        if request.provider == "synthetic_data_kit":
-            artifacts_payloads, summary = await run_sdkit_provider(
+        if request.provider == "grounded_qa":
+            artifacts_payloads, summary, unpublished_items = await run_grounded_qa_provider(
                 run_id=run_id,
                 repo_id=repo_id,
                 cfg=cfg,
                 request=request,
+                cancel_event=cancel_event,
+                on_progress=_progress,
             )
         else:
             raise RuntimeError(f"Unsupported synthetic provider: {request.provider}")
@@ -440,28 +411,59 @@ async def _run_job(*, run_id: str, request: SyntheticRunStartRequest, cancel_eve
         if cancel_event.is_set():
             raise asyncio.CancelledError()
 
-        _hydrate_eval_dataset_from_seed(
-            run_id=run_id,
-            repo_id=repo_id,
-            request=request,
-            artifacts_payloads=artifacts_payloads,
-            summary=summary,
-        )
-
-        gate_passed, gate_reason = await _evaluate_quality_gate(
-            run_id=run_id,
-            repo_id=repo_id,
-            cfg=cfg,
-            artifacts_payloads=artifacts_payloads,
-            summary=summary,
-        )
+        produces_triplets = request.recipe in _RECIPES_PRODUCING_TRIPLETS
+        gate_passed: bool | None = None
+        gate_reason: str | None = None
+        eval_run: EvalRun | None = None
+        if request.recipe in _RECIPES_REQUIRING_EVAL_DATASET:
+            # The gate retrieves the unpublished rows (answers intact) so every EvalResult in
+            # the run carries its own expected_answer; the artifact is published afterwards.
+            gate_payloads: dict[Any, Any] = {"eval_dataset_json": unpublished_items}
+            gate_passed, gate_reason, eval_run = await _evaluate_quality_gate(
+                run_id=run_id,
+                repo_id=repo_id,
+                cfg=cfg,
+                artifacts_payloads=gate_payloads,
+                summary=summary,
+                evaluate_all=produces_triplets,
+                cancel_event=cancel_event,
+            )
+            if "quality_eval_json" in gate_payloads:
+                artifacts_payloads["quality_eval_json"] = gate_payloads["quality_eval_json"]
+        if cancel_event.is_set():
+            raise asyncio.CancelledError()
+        if produces_triplets:
+            triplets, mining_stats = await asyncio.to_thread(
+                mine_triplets_from_eval_results,
+                eval_run.results if eval_run is not None else [],
+                negative_ratio=int(cfg.training.learning_reranker_negative_ratio),
+                source=f"synthetic_run:{run_id}",
+                corpus_root=await _corpus_root(cfg, repo_id),
+                with_stats=True,
+            )
+            if cancel_event.is_set():
+                raise asyncio.CancelledError()
+            artifacts_payloads["triplets_jsonl"] = triplets
+            summary.triplets_mined = len(triplets)
+            await asyncio.to_thread(
+                _append_log,
+                run_id,
+                f"Mined {len(triplets)} reranker triplets from the retrieval results of "
+                f"{len(eval_run.results) if eval_run is not None else 0} generated questions "
+                f"({mining_stats.get('negatives_rejected_answer_leak', 0)} candidate negatives rejected for "
+                "containing the expected answer).",
+            )
 
         artifacts: list[SyntheticArtifactRef] = []
         for kind, payload in artifacts_payloads.items():
-            ref = write_artifact(run_id, kind, payload)
+            if cancel_event.is_set():
+                raise asyncio.CancelledError()
+            ref = await asyncio.to_thread(write_artifact, run_id, kind, payload)
             artifacts.append(ref)
-            _append_artifact(run_id, ref)
+            await asyncio.to_thread(_append_artifact, run_id, ref)
 
+        if cancel_event.is_set():
+            raise asyncio.CancelledError()
         run = load_run(run_id)
         run.summary = summary
         run.artifacts = artifacts

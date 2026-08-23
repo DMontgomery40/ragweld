@@ -1,11 +1,14 @@
 from __future__ import annotations
 
-import json
 import math
-from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+
+from server.training.triplet_rows import (
+    load_triplet_rows,
+    recover_parked_replacement,
+    triplets_lock,
+)
 
 
 @dataclass(frozen=True)
@@ -22,40 +25,17 @@ class MaterializedTriplet:
     negative_text: str
 
 
-def _iter_jsonl(path: Path) -> Iterable[dict[str, Any]]:
-    if not path.exists():
-        return []
-
-    def _gen() -> Iterable[dict[str, Any]]:
-        with path.open("r", encoding="utf-8") as f:
-            for line in f:
-                ln = line.strip()
-                if not ln:
-                    continue
-                try:
-                    obj = json.loads(ln)
-                except Exception:
-                    continue
-                if isinstance(obj, dict):
-                    yield obj
-
-    return _gen()
-
-
 def load_triplets(path: Path, *, limit: int | None = None) -> list[Triplet]:
+    """Load the validated triplets artifact (a corrupt row raises; nothing is skipped silently).
+
+    A publish that crashed mid-transaction is repaired first, under the artifact lock, so training
+    never reads a half-published state."""
+    with triplets_lock(path):
+        recover_parked_replacement(path)
+        rows = load_triplet_rows(path)
     out: list[Triplet] = []
-    for obj in _iter_jsonl(path):
-        q = obj.get("query")
-        p = obj.get("positive")
-        n = obj.get("negative")
-        if not isinstance(q, str) or not isinstance(p, str) or not isinstance(n, str):
-            continue
-        q = q.strip()
-        p = p.strip()
-        n = n.strip()
-        if not q or not p or not n:
-            continue
-        out.append(Triplet(query=q, positive=p, negative=n))
+    for row in rows:
+        out.append(Triplet(query=row.query, positive=row.positive, negative=row.negative))
         if limit is not None and limit > 0 and len(out) >= limit:
             break
     return out

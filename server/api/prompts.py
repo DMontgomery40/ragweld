@@ -72,6 +72,8 @@ def _build_prompts_payload(cfg: TriBridConfig) -> PromptsResponse:
         "code_enrichment": "Code Enrichment",
         "semantic_kg_extraction": "Semantic KG Extraction",
         "synthetic_judge": "Synthetic Judge",
+        "synthetic_generator": "Synthetic Generator",
+        "gateway_rerank": "Gateway Reranker",
     }
 
     # ALL SystemPromptsConfig fields (Pydantic is the source of truth).

@@ -338,7 +338,7 @@ async def test_lineage_dataset_and_synthetic_publish_refresh_current_bundle(clie
 
     request = SyntheticRunStartRequest(
         corpus_id=corpus_id,
-        provider="synthetic_data_kit",
+        provider="grounded_qa",
         recipe="eval_dataset",
         generator_model="ragweld-local",
         judge_model="ragweld-local",
@@ -349,7 +349,7 @@ async def test_lineage_dataset_and_synthetic_publish_refresh_current_bundle(clie
         status="completed",
         started_at=datetime.now(UTC),
         completed_at=datetime.now(UTC),
-        provider="synthetic_data_kit",
+        provider="grounded_qa",
         recipe="eval_dataset",
         config_snapshot={},
         config={},

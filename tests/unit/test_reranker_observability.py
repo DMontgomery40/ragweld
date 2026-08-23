@@ -1,11 +1,18 @@
 from __future__ import annotations
 
+import json
 import re
 import shutil
 import uuid
 from datetime import UTC, datetime
 
-from server.api.reranker import _append_diagnostic, _append_event, _load_diagnostics, _load_events, _run_dir
+from server.api.reranker import (
+    _append_diagnostic,
+    _append_event,
+    _load_diagnostics,
+    _load_events,
+    _run_dir,
+)
 from server.models.tribrid_config_model import RerankerTrainMetricEvent
 from server.observability.metrics import render_latest
 
@@ -61,9 +68,33 @@ def test_reranker_event_stream_updates_prometheus_training_metrics() -> None:
             ),
         )
 
-        events = _load_events(run_id, limit=10)
+        events, unreadable = _load_events(run_id, limit=10)
         assert len(events) == 1
+        assert unreadable.count == 0 and unreadable.first_reason is None
         assert events[0].operator_hint == "Inspect the MLX training loop if telemetry stalls."
+
+        # Codex pass 10: a record that no longer validates (NaN from an older build, a torn line)
+        # is counted and explained, never silently dropped from the trace.
+        metrics_path = _run_dir(run_id) / "metrics.jsonl"
+        with metrics_path.open("a", encoding="utf-8") as handle:
+            handle.write(f'{{"type": "metrics", "ts": "2026-08-23T00:00:00Z", "run_id": "{run_id}", "metrics": {{"mrr@10": NaN}}}}\n')
+            handle.write("{torn line\n")
+        events, unreadable = _load_events(run_id, limit=10)
+        assert len(events) == 1
+        assert unreadable.count == 2
+        assert unreadable.first_reason is not None and "line 2" in unreadable.first_reason
+        # Codex pass 12: a byte-corrupt line must not take the rest of the history with it, and
+        # corruption outside the requested tail window is still counted.
+        with metrics_path.open("ab") as handle:
+            handle.write(b"\xff\xfe not utf-8\n")
+            for _ in range(12):
+                handle.write(
+                    json.dumps({"type": "log", "ts": "2026-08-23T00:00:00Z", "run_id": run_id, "message": "step"}).encode("utf-8")
+                    + b"\n"
+                )
+        events, unreadable = _load_events(run_id, limit=5)
+        assert len(events) == 5 and all(e.type == "log" for e in events)
+        assert unreadable.count == 3
 
         after_text = render_latest()[0].decode("utf-8")
         after_events = _metric_value(after_text, 'tribrid_reranker_train_events_total{type="telemetry"}')

@@ -2,15 +2,15 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import math
-import os
-import shutil
 import tempfile
 import time
-from collections.abc import AsyncIterator
+import weakref
+from collections.abc import AsyncIterator, Callable, Mapping
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, NamedTuple
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from starlette.responses import StreamingResponse
@@ -18,11 +18,6 @@ from starlette.responses import StreamingResponse
 from server.api.dataset import _dataset_path_for_corpus, _load_dataset
 from server.chat.context_formatter import format_context_for_llm
 from server.chat.prompt_builder import get_system_prompt
-from server.training.agent_artifact import (
-    AgentArtifactError,
-    agent_artifact_incompatibility,
-    validate_agent_artifact_dir,
-)
 from server.db.postgres import PostgresClient
 from server.lineage import (
     attach_refs_to_current_bundle,
@@ -52,6 +47,12 @@ from server.models.tribrid_config_model import (
 from server.retrieval.mlx_qwen3 import mlx_is_available
 from server.services.config_store import CorpusNotFoundError
 from server.services.config_store import get_config as load_scoped_config
+from server.training.agent_artifact import (
+    AgentArtifactError,
+    agent_artifact_incompatibility,
+    validate_agent_artifact_dir,
+)
+from server.training.atomic_json import write_json_atomic
 from server.training.control_plane import (
     build_agent_control_plane_status,
     build_agent_run_links,
@@ -66,6 +67,13 @@ from server.training.flyte_client import (
     FlyteUnavailableError,
     new_execution_name,
 )
+from server.training.metric_values import (
+    finite_metrics,
+    finite_or_none,
+    non_negative_or_none,
+    stability_stddev,
+    step_or_none,
+)
 from server.training.mlflow_client import MlflowClient, MlflowRunHandle, MlflowUnavailableError
 from server.training.mlx_qwen3_agent_trainer import (
     deterministic_split,
@@ -73,6 +81,15 @@ from server.training.mlx_qwen3_agent_trainer import (
     train_mlx_qwen3_agent,
 )
 from server.training.mlx_qwen3_trainer import TrainingCancelledError
+from server.training.promotion import (
+    BaselineState,
+    PromotionSwap,
+    await_uncancellable,
+    decide_auto_promotion,
+    run_promotion_transaction,
+)
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["agent"])
 
@@ -136,21 +153,6 @@ def _resolve_training_dataset_path(
     return None, messages
 
 
-def _atomic_copy_dir(src: Path, dst: Path) -> None:
-    """Atomically replace dst with a copied version of src."""
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    stamp = f"{int(datetime.now(UTC).timestamp())}_{os.getpid()}"
-    tmp = dst.parent / f".tmp_{dst.name}_{stamp}"
-    bak = dst.parent / f".bak_{dst.name}_{stamp}"
-    shutil.rmtree(tmp, ignore_errors=True)
-    shutil.rmtree(bak, ignore_errors=True)
-    shutil.copytree(src, tmp, dirs_exist_ok=True)
-    if dst.exists():
-        dst.rename(bak)
-    tmp.rename(dst)
-    shutil.rmtree(bak, ignore_errors=True)
-
-
 def _run_dir(run_id: str) -> Path:
     _RUNS_DIR.mkdir(parents=True, exist_ok=True)
     return _RUNS_DIR / run_id
@@ -192,6 +194,7 @@ def _apply_run_control_plane_metadata(run: AgentTrainRun, cfg: TriBridConfig) ->
 
 
 _TERMINAL_RUN_STATUSES = frozenset({"completed", "failed", "cancelled"})
+_NON_TERMINAL_RUN_STATUSES = frozenset({"queued", "running"})
 _FLYTE_RECONCILE_INTERVAL_S = 5.0
 _FLYTE_RECONCILE_TERMINAL_INTERVAL_S = 60.0
 _flyte_reconcile_at: dict[str, float] = {}
@@ -228,14 +231,30 @@ def _mlflow_terminate_for_run(run: AgentTrainRun, cfg: TriBridConfig | None, *, 
         )
 
 
-def _finalize_run_without_job(run: AgentTrainRun, cfg: TriBridConfig | None, *, status: str, message: str) -> AgentTrainRun:
-    """Terminal transition for a run that never reached (or no longer has) an in-process job."""
+async def _finalize_run_without_job(run: AgentTrainRun, cfg: TriBridConfig | None, *, status: str, message: str) -> AgentTrainRun:
+    """Terminal transition for a run that never reached (or no longer has) an in-process job,
+    through the transition authority (lock + compare-and-set on the stored record)."""
+    result = await _transition_run(
+        run.run_id,
+        allowed_from=_NON_TERMINAL_RUN_STATUSES,
+        apply=lambda stored: _finalize_stored_run(stored, cfg, status=status, message=message),
+    )
+    if result is None:
+        try:
+            return await asyncio.to_thread(_load_run, run.run_id)
+        except HTTPException:
+            return run
+    return result
+
+
+def _finalize_stored_run(run: AgentTrainRun, cfg: TriBridConfig | None, *, status: str, message: str) -> AgentTrainRun:
+    """Mutate a stored, non-terminal run into its terminal state (caller holds the run lock)."""
     now = datetime.now(UTC)
     run.status = status  # type: ignore[assignment]
     run.completed_at = now
     if cfg is not None:
         run = _attach_lineage(run, cfg)
-    _save_run(run)
+    _save_run(run)  # durable before the terminal events below
     _mlflow_terminate_for_run(run, cfg, status="KILLED" if status == "cancelled" else "FAILED")
     _append_event(
         run.run_id,
@@ -306,21 +325,43 @@ async def _refresh_flyte_run(run: AgentTrainRun) -> AgentTrainRun:
     state = await asyncio.to_thread(_fetch_flyte_state, run)
     if state is None:
         return run
-    return _apply_flyte_state(run, state)
+    return await _apply_flyte_state(run, state)
 
 
-def _apply_flyte_state(run: AgentTrainRun, state) -> AgentTrainRun:
-    """Apply a fetched Flyte execution phase to a run. Loop-thread only."""
+async def _apply_flyte_state(run: AgentTrainRun, state) -> AgentTrainRun:
+    """Apply a fetched Flyte execution phase to a run.
+
+    Persistence (run record, events, lineage) runs in worker threads; the cancel-event
+    signalling stays on the loop so `asyncio.Event.set()` remains loop-safe. The per-run
+    state lock serializes this with the job's own terminal transition, and the stored record
+    is re-read after every off-loop step so a run that completed meanwhile is never
+    overwritten or appended to after its final event.
+    """
+    async with _run_state_lock(run.run_id):
+        return await _apply_flyte_state_locked(run, state)
+
+
+async def _apply_flyte_state_locked(run: AgentTrainRun, state) -> AgentTrainRun:
     execution_name = str(run.workflow_run_id or "").strip()
+    try:
+        run = await asyncio.to_thread(_load_run, run.run_id)  # the stored record is the truth
+    except HTTPException:
+        return run
     locally_terminal = str(run.status) in _TERMINAL_RUN_STATUSES
 
     if state.phase != str(run.workflow_phase or ""):
         run.workflow_phase = state.phase
-        _save_run(run)
+        await asyncio.to_thread(_save_run, run)
+        try:
+            run = await asyncio.to_thread(_load_run, run.run_id)
+        except HTTPException:
+            return run
+        locally_terminal = str(run.status) in _TERMINAL_RUN_STATUSES
         if not locally_terminal:
             # The event log ends with the run's "complete" event; after that the
             # phase is mirrored on the run record only.
-            _append_event(
+            await asyncio.to_thread(
+                _append_event,
                 run.run_id,
                 AgentTrainMetricEvent(
                     type="log",
@@ -364,7 +405,14 @@ def _apply_flyte_state(run: AgentTrainRun, state) -> AgentTrainRun:
         if cancel_event is not None:
             cancel_event.set()
         return run
-    return _finalize_run_without_job(run, cfg, status=status, message=message)
+    # the run lock is held by _apply_flyte_state: re-read and finalize the stored record directly
+    try:
+        stored = await asyncio.to_thread(_load_run, run.run_id)
+    except HTTPException:
+        return run
+    if str(stored.status) not in _NON_TERMINAL_RUN_STATUSES:
+        return stored
+    return await asyncio.to_thread(_finalize_stored_run, stored, cfg, status=status, message=message)
 
 
 def _attach_lineage(run: AgentTrainRun, cfg: Any, *, promoted: bool = False) -> AgentTrainRun:
@@ -446,6 +494,47 @@ def _read_last_event(run_id: str) -> AgentTrainMetricEvent | None:
 
 _train_tasks: dict[str, asyncio.Task[None]] = {}
 _train_cancel_events: dict[str, asyncio.Event] = {}
+# Serializes every status transition of one run (training job, Flyte reconciliation, execute
+# handoff, cancellation) inside this API process. Training jobs live in-process, so a
+# single-worker deployment is the contract; entries are weak so terminal runs do not pin a lock.
+_run_state_locks: weakref.WeakValueDictionary[str, asyncio.Lock] = weakref.WeakValueDictionary()
+
+
+def _run_state_lock(run_id: str) -> asyncio.Lock:
+    lock = _run_state_locks.get(run_id)
+    if lock is None:
+        lock = asyncio.Lock()
+        _run_state_locks[run_id] = lock
+    return lock
+
+
+async def _transition_run(
+    run_id: str,
+    *,
+    allowed_from: frozenset[str],
+    apply: Callable[[AgentTrainRun], AgentTrainRun | None],
+) -> AgentTrainRun | None:
+    """The one way a run record changes status.
+
+    Under the run's lock, the STORED record is re-read (never a caller's stale copy); when its
+    status is not in `allowed_from` nothing is written and None is returned (compare-and-set);
+    otherwise `apply` mutates the stored record in a worker thread (it may attach lineage) and
+    the result is saved atomically.
+    """
+    async with _run_state_lock(run_id):
+        try:
+            stored = await asyncio.to_thread(_load_run, run_id)
+        except HTTPException:
+            return None
+        if str(stored.status) not in allowed_from:
+            return None
+
+        def _apply_and_save() -> AgentTrainRun:
+            updated = apply(stored) or stored
+            _save_run(updated)
+            return updated
+
+        return await asyncio.to_thread(_apply_and_save)
 _train_start_guard: dict[str, tuple[str, datetime]] = {}
 _TRAIN_START_GRACE = timedelta(seconds=2)
 
@@ -524,10 +613,8 @@ def _load_run(run_id: str) -> AgentTrainRun:
 
 
 def _save_run(run: AgentTrainRun) -> None:
-    path = _run_json_path(run.run_id)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    payload = run.model_dump(mode="json", by_alias=True)
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    """Crash-safe: the previous run.json survives a failed write (see server/training/atomic_json.py)."""
+    write_json_atomic(_run_json_path(run.run_id), run.model_dump(mode="json", by_alias=True))
 
 
 def _append_event(run_id: str, event: AgentTrainMetricEvent) -> None:
@@ -538,23 +625,57 @@ def _append_event(run_id: str, event: AgentTrainMetricEvent) -> None:
         f.write(json.dumps(payload) + "\n")
 
 
-def _load_events(run_id: str, limit: int | None = None) -> list[AgentTrainMetricEvent]:
+class UnreadableEvents(NamedTuple):
+    count: int
+    first_reason: str | None
+
+
+def _load_events(run_id: str, limit: int | None = None) -> tuple[list[AgentTrainMetricEvent], UnreadableEvents]:
+    """Events of a run plus an honest count of records that no longer validate (never silently dropped)."""
     path = _metrics_path(run_id)
     if not path.exists():
-        return []
+        return [], UnreadableEvents(0, None)
     try:
-        lines = [ln for ln in path.read_text(encoding="utf-8").splitlines() if ln.strip()]
-    except Exception:
-        return []
-    if limit is not None and limit > 0:
-        lines = lines[-limit:]
+        raw_lines = path.read_bytes().split(b"\n")
+    except OSError as exc:
+        return [], UnreadableEvents(1, f"{path.name}: {exc}")
+    # Every physical line is decoded and validated on its own (one bad byte never hides the
+    # rest of the history), the whole file is counted, then the last `limit` valid events win.
     out: list[AgentTrainMetricEvent] = []
-    for line in lines:
-        try:
-            out.append(AgentTrainMetricEvent.model_validate(json.loads(line)))
-        except Exception:
+    unreadable = 0
+    first_reason: str | None = None
+    for number, raw_line in enumerate(raw_lines, start=1):
+        if not raw_line.strip():
             continue
-    return out
+        try:
+            out.append(AgentTrainMetricEvent.model_validate(json.loads(raw_line.decode("utf-8"))))
+        except Exception as exc:
+            unreadable += 1
+            if first_reason is None:
+                first_reason = f"line {number}: {' '.join(str(exc).split())[:200]}"
+    if limit is not None and limit > 0:
+        out = out[-limit:]
+    return out, UnreadableEvents(unreadable, first_reason)
+
+
+def _sse_payload_for_line(run_id: str, raw_line: bytes) -> str | None:
+    """The SSE data payload for one persisted metrics line: the validated event, or an `error`
+    event naming the corruption. Never a lossy decode, never silence."""
+    try:
+        line = raw_line.decode("utf-8").strip()
+    except UnicodeDecodeError as exc:
+        return json.dumps(
+            AgentTrainMetricEvent(type="error", ts=datetime.now(UTC), run_id=run_id, message=f"metrics record is not UTF-8: {exc}").model_dump(mode="json", by_alias=True)
+        )
+    if not line:
+        return None
+    try:
+        event = AgentTrainMetricEvent.model_validate(json.loads(line))
+    except Exception as exc:
+        return json.dumps(
+            AgentTrainMetricEvent(type="error", ts=datetime.now(UTC), run_id=run_id, message=f"metrics record could not be read: {' '.join(str(exc).split())[:200]}").model_dump(mode="json", by_alias=True)
+        )
+    return json.dumps(event.model_dump(mode="json", by_alias=True))
 
 
 def _active_run_id_for_corpus(corpus_id: str) -> str | None:
@@ -591,31 +712,41 @@ def _active_run_id_for_corpus(corpus_id: str) -> str | None:
     return None
 
 
-def _request_train_run_cancel(*, run_id: str, reason: str) -> bool:
-    cancel_event = _train_cancel_events.get(run_id)
-    if cancel_event is not None:
-        cancel_event.set()
+async def _request_train_run_cancel(*, run_id: str, reason: str) -> bool:
+    """Signal the in-process job (loop-side) and persist an orphan's cancellation off-loop.
 
-    if run_id in _train_tasks:
+    The event is set under the run's state lock, so a cancellation is linearized with the job's
+    terminal transition: either it lands before the in-lock cancellation check and wins, or the
+    job has already committed and the stored record is terminal (left exactly as it is).
+    """
+    async with _run_state_lock(run_id):
+        try:
+            stored = await asyncio.to_thread(_load_run, run_id)
+        except HTTPException:
+            return False
+        if str(stored.status) in _TERMINAL_RUN_STATUSES:
+            return True  # nothing to cancel; the terminal record is what the caller sees
+        cancel_event = _train_cancel_events.get(run_id)
+        if cancel_event is not None:
+            cancel_event.set()
+        if run_id in _train_tasks:
+            return True
+
+        # No in-memory task (orphan, or still queued while Flyte creates the execution): persist
+        # the cancellation from either non-terminal state, still under the lock.
+        def _cancel_orphan() -> None:
+            now = datetime.now(UTC)
+            stored.status = "cancelled"
+            stored.completed_at = now
+            _save_run(stored)
+            _append_event(
+                run_id,
+                AgentTrainMetricEvent(type="state", ts=now, run_id=run_id, status="cancelled", message=str(reason)),
+            )
+            _append_event(run_id, AgentTrainMetricEvent(type="complete", ts=now, run_id=run_id, status="cancelled"))
+
+        await asyncio.to_thread(_cancel_orphan)
         return True
-
-    try:
-        run = _load_run(run_id)
-    except HTTPException:
-        return False
-    if run.status != "running":
-        return True
-
-    now = datetime.now(UTC)
-    run.status = "cancelled"
-    run.completed_at = now
-    _save_run(run)
-    _append_event(
-        run_id,
-        AgentTrainMetricEvent(type="state", ts=now, run_id=run_id, status="cancelled", message=str(reason)),
-    )
-    _append_event(run_id, AgentTrainMetricEvent(type="complete", ts=now, run_id=run_id, status="cancelled"))
-    return True
 
 
 def _resolve_expected_path(*, corpus_root: Path, path_str: str) -> Path | None:
@@ -799,16 +930,54 @@ async def _load_training_messages(
     return examples
 
 
-def _primary_from_metrics(metrics: dict[str, float] | None) -> float | None:
+def build_agent_progress_event(
+    run_id: str, ts: datetime, payload: Mapping[str, Any]
+) -> tuple[AgentTrainMetricEvent, list[str]]:
+    """Progress payload -> event. Zero is a value (step 0, epoch 0.0, percent 0.0 survive);
+    only absent or non-finite scalars become None, and the dropped metric names are returned."""
+    dropped: list[str] = []
+    metrics: dict[str, float] | None = None
+    raw_metrics = payload.get("metrics")
+    if isinstance(raw_metrics, dict):
+        finite, dropped = finite_metrics(raw_metrics)
+        metrics = finite or None
+    event = AgentTrainMetricEvent(
+        type="progress",
+        ts=ts,
+        run_id=run_id,
+        step=step_or_none(payload.get("step")),
+        epoch=finite_or_none(payload.get("epoch")),
+        percent=finite_or_none(payload.get("percent")),
+        message=str(payload.get("message") or ""),
+        metrics=metrics,
+    )
+    return event, dropped
+
+
+def build_agent_telemetry_event(run_id: str, ts: datetime, payload: Mapping[str, Any]) -> AgentTrainMetricEvent:
+    return AgentTrainMetricEvent(
+        type="telemetry",
+        ts=ts,
+        run_id=run_id,
+        step=step_or_none(payload.get("step")),
+        epoch=finite_or_none(payload.get("epoch")),
+        proj_x=finite_or_none(payload.get("proj_x")),
+        proj_y=finite_or_none(payload.get("proj_y")),
+        loss=finite_or_none(payload.get("loss")),
+        lr=finite_or_none(payload.get("lr")),
+        grad_norm=finite_or_none(payload.get("grad_norm")),
+        param_norm=finite_or_none(payload.get("param_norm")),
+        update_norm=finite_or_none(payload.get("update_norm")),
+        step_time_ms=finite_or_none(payload.get("step_time_ms")),
+        sample_count=step_or_none(payload.get("sample_count")),
+    )
+
+
+def _primary_from_metrics(metrics: Mapping[str, object] | None) -> float | None:
+    """The finite eval_loss from a metrics mapping, or None when absent or NaN/inf."""
     if not metrics:
         return None
-    v = metrics.get("eval_loss")
-    if v is None:
-        return None
-    try:
-        return float(v)
-    except Exception:
-        return None
+    return finite_or_none(metrics.get("eval_loss"))
 
 
 async def _run_train_job(*, run_id: str, corpus_id: str, cancel_event: asyncio.Event | None = None) -> None:
@@ -833,6 +1002,7 @@ async def _run_train_job(*, run_id: str, corpus_id: str, cancel_event: asyncio.E
     best_ts: datetime | None = None
     primary_series: list[float] = []
     final_primary: float | None = None
+    final_primary_broken = False  # the last reported eval_loss existed but was NaN/inf
 
     cfg: Any | None = None
     mlflow_client: MlflowClient | None = None
@@ -935,6 +1105,7 @@ async def _run_train_job(*, run_id: str, corpus_id: str, cancel_event: asyncio.E
         active_dir = _resolve_path(active_dir_cfg) if active_dir_cfg else None
         promote_if_improves = bool(getattr(cfg.training, "ragweld_agent_promote_if_improves", False))
         baseline_blocked: str | None = None
+        baseline_state: BaselineState = "absent"
         if promote_if_improves and dev_examples and active_dir is not None and active_dir.exists():
             # Never load an active adapter trained for another base/backend as the baseline.
             try:
@@ -947,6 +1118,7 @@ async def _run_train_job(*, run_id: str, corpus_id: str, cancel_event: asyncio.E
             except AgentArtifactError as exc:
                 baseline_blocked = str(exc)
             if baseline_blocked:
+                baseline_state = "incompatible"
                 _emit_log(
                     f"Skipping baseline: active artifact at {active_dir_cfg} is not usable with the configured "
                     f"Learning Agent ({baseline_blocked}); this run replaces it when it completes."
@@ -972,16 +1144,27 @@ async def _run_train_job(*, run_id: str, corpus_id: str, cancel_event: asyncio.E
                     lora_target_modules=list(getattr(cfg.training, "ragweld_agent_lora_target_modules", []) or []),
                     should_stop=_is_cancel_requested,
                 )
-                if baseline_primary is not None and math.isfinite(float(baseline_primary)):
+                baseline_primary = non_negative_or_none(baseline_primary)  # a loss is finite and >= 0 or it is no measurement
+                if baseline_primary is not None:
+                    baseline_state = "measured"
                     _emit_log(f"Baseline eval_loss={baseline_primary:.6f} on held-out dev split.")
                 else:
                     baseline_primary = None
+                    baseline_state = "failed"
+                    _emit_log(
+                        "Baseline eval returned no finite loss; the active adapter's quality is unknown, "
+                        "so improvement-gated promotion is refused for this run."
+                    )
             except Exception as e:
-                _emit_log(f"Baseline eval failed; treating baseline as unknown. error={e}")
                 baseline_primary = None
+                baseline_state = "failed"
+                _emit_log(
+                    "Baseline eval failed; the active adapter's quality is unknown, so improvement-gated "
+                    f"promotion is refused for this run. error={e}"
+                )
 
         def _emit(event_type: str, payload: dict[str, Any]) -> None:
-            nonlocal best_primary, best_step, best_ts, primary_series, final_primary
+            nonlocal best_primary, best_step, best_ts, primary_series, final_primary, final_primary_broken
             ts = datetime.now(UTC)
             if event_type == "log":
                 msg = str(payload.get("message") or "").strip()
@@ -989,51 +1172,42 @@ async def _run_train_job(*, run_id: str, corpus_id: str, cancel_event: asyncio.E
                     _append_event(run_id, AgentTrainMetricEvent(type="log", ts=ts, run_id=run_id, message=msg))
                 return
             if event_type == "progress":
-                progress_metrics: dict[str, float] | None = None
-                raw_metrics = payload.get("metrics")
-                if isinstance(raw_metrics, dict):
-                    parsed_progress_metrics: dict[str, float] = {}
-                    for k, v in raw_metrics.items():
-                        try:
-                            parsed_progress_metrics[str(k)] = float(v)
-                        except Exception:
-                            continue
-                    progress_metrics = parsed_progress_metrics or None
-                _append_event(
-                    run_id,
-                    AgentTrainMetricEvent(
-                        type="progress",
-                        ts=ts,
-                        run_id=run_id,
-                        step=int(payload.get("step") or 0) or None,
-                        epoch=float(payload.get("epoch") or 0.0) or None,
-                        percent=float(payload.get("percent") or 0.0) or None,
-                        message=str(payload.get("message") or ""),
-                        metrics=progress_metrics,
-                    ),
-                )
+                event, dropped_progress = build_agent_progress_event(run_id, ts, payload)
+                if dropped_progress:
+                    _emit_log(
+                        f"Progress metrics at step {payload.get('step')} contained non-finite values "
+                        f"({', '.join(dropped_progress)}); they are excluded from the event stream."
+                    )
+                _append_event(run_id, event)
                 return
             if event_type == "metrics":
                 raw = payload.get("metrics") or {}
                 metrics_map: dict[str, float] | None = None
+                dropped: list[str] = []
                 if isinstance(raw, dict):
-                    parsed_metrics: dict[str, float] = {}
-                    for k, v in raw.items():
-                        try:
-                            parsed_metrics[str(k)] = float(v)
-                        except Exception:
-                            continue
+                    # Only finite numbers reach events, MLflow and the persisted summary; a NaN/inf
+                    # metric is recorded as a diagnostic and never coerced into a score.
+                    parsed_metrics, dropped = finite_metrics(raw)
                     metrics_map = parsed_metrics or None
+                if dropped:
+                    _emit_log(
+                        f"Training reported non-finite metrics at step {payload.get('step')}: {', '.join(dropped)}; "
+                        "they are excluded from the run record."
+                    )
 
-                _mlflow_log_metrics(metrics_map, step=int(payload.get("step") or 0) or None)
+                _mlflow_log_metrics(metrics_map, step=step_or_none(payload.get("step")))
                 pv = _primary_from_metrics(metrics_map)
                 if pv is not None:
-                    primary_series.append(float(pv))
-                    final_primary = float(pv)
+                    primary_series.append(pv)
+                    final_primary = pv
+                    final_primary_broken = False
                     if best_primary is None or pv < best_primary:
-                        best_primary = float(pv)
-                        best_step = int(payload.get("step") or 0) or None
+                        best_primary = pv
+                        best_step = step_or_none(payload.get("step"))
                         best_ts = ts
+                elif "eval_loss" in dropped:
+                    final_primary = None
+                    final_primary_broken = True
 
                 _append_event(
                     run_id,
@@ -1041,47 +1215,20 @@ async def _run_train_job(*, run_id: str, corpus_id: str, cancel_event: asyncio.E
                         type="metrics",
                         ts=ts,
                         run_id=run_id,
-                        step=int(payload.get("step") or 0) or None,
-                        epoch=float(payload.get("epoch") or 0.0) or None,
+                        step=step_or_none(payload.get("step")),
+                        epoch=finite_or_none(payload.get("epoch")),
                         metrics=metrics_map,
                     ),
                 )
                 return
             if event_type == "telemetry":
-                proj_x_raw = payload.get("proj_x")
-                proj_y_raw = payload.get("proj_y")
-                loss_raw = payload.get("loss")
-                lr_raw = payload.get("lr")
-                grad_norm_raw = payload.get("grad_norm")
-                param_norm_raw = payload.get("param_norm")
-                update_norm_raw = payload.get("update_norm")
-                step_time_ms_raw = payload.get("step_time_ms")
-                sample_count_raw = payload.get("sample_count")
-                _append_event(
-                    run_id,
-                    AgentTrainMetricEvent(
-                        type="telemetry",
-                        ts=ts,
-                        run_id=run_id,
-                        step=int(payload.get("step") or 0) or None,
-                        epoch=float(payload.get("epoch") or 0.0) or None,
-                        proj_x=float(proj_x_raw) if proj_x_raw is not None else None,
-                        proj_y=float(proj_y_raw) if proj_y_raw is not None else None,
-                        loss=float(loss_raw) if loss_raw is not None else None,
-                        lr=float(lr_raw) if lr_raw is not None else None,
-                        grad_norm=float(grad_norm_raw) if grad_norm_raw is not None else None,
-                        param_norm=float(param_norm_raw) if param_norm_raw is not None else None,
-                        update_norm=float(update_norm_raw) if update_norm_raw is not None else None,
-                        step_time_ms=float(step_time_ms_raw) if step_time_ms_raw is not None else None,
-                        sample_count=int(sample_count_raw) if sample_count_raw is not None else None,
-                    ),
-                )
+                _append_event(run_id, build_agent_telemetry_event(run_id, ts, payload))
                 return
 
         # Mark run as running (in case a previous partial state left it inconsistent).
         _raise_if_cancelled()
         run.status = "running"
-        _save_run(run)
+        await asyncio.to_thread(_save_run, run)
         _append_event(run_id, AgentTrainMetricEvent(type="state", ts=datetime.now(UTC), run_id=run_id, status=run.status))
 
         # Train (runs in thread; emits progress/metrics/telemetry into metrics.jsonl).
@@ -1113,68 +1260,124 @@ async def _run_train_job(*, run_id: str, corpus_id: str, cancel_event: asyncio.E
 
         # Auto-promote trained artifact to active ragweld agent path when configured.
         eps = float(getattr(cfg.training, "ragweld_agent_promote_epsilon", 0.0) or 0.0)
-        should_promote = True
-        if promote_if_improves and baseline_primary is not None and final_primary is not None:
-            should_promote = bool(final_primary < (baseline_primary - eps))
-
-        if active_dir is not None and should_promote:
-            _atomic_copy_dir(model_artifact_dir, active_dir)
-            _emit_log(
-                f"Promoted trained artifact to {active_dir_cfg} (backend=mlx_qwen3). "
-                f"Run artifact preserved at {model_artifact_dir}."
-            )
-        elif active_dir is not None and not should_promote:
-            _emit_log(
-                f"Did not promote: final_eval_loss={final_primary} baseline_eval_loss={baseline_primary} eps={eps}. "
-                f"Run artifact preserved at {model_artifact_dir}."
-            )
-
-        # Populate summary (minimize).
-        run.summary.primary_goal = "minimize"
-        run.summary.primary_metric_best = float(best_primary) if best_primary is not None else None
-        run.summary.primary_metric_final = float(final_primary) if final_primary is not None else None
-        run.summary.best_step = int(best_step or 0) or None
-        if best_ts is not None:
-            run.summary.time_to_best_secs = float((best_ts - run.started_at).total_seconds())
-        tail = primary_series[-5:]
-        if tail:
-            mean = sum(tail) / len(tail)
-            var = sum((x - mean) ** 2 for x in tail) / len(tail)
-            run.summary.stability_stddev = float(math.sqrt(var))
-
-        run.status = "completed"
-        run.completed_at = datetime.now(UTC)
-        run = _attach_lineage(run, cfg, promoted=bool(active_dir is not None and should_promote))
-        _save_run(run)
-        _mlflow_finish(
-            "FINISHED",
-            manifest={
-                "run_id": run.run_id,
-                "corpus_id": run.repo_id,
-                "status": run.status,
-                "primary_metric": run.primary_metric,
-                "primary_metric_best": run.summary.primary_metric_best,
-                "primary_metric_final": run.summary.primary_metric_final,
-                "model_artifact_ref": (
-                    run.model_artifact_ref.model_dump(mode="json", by_alias=True)
-                    if run.model_artifact_ref is not None
-                    else None
-                ),
-                "input_bundle_id": run.input_bundle_id,
-                "execution_backend": run.execution_backend,
-                "workflow_backend": run.workflow_backend,
-            },
+        decision = decide_auto_promotion(
+            # A NaN/inf last eval_loss is "broken" (never promoted), a never-reported one is "missing".
+            primary_value=math.nan if final_primary_broken else final_primary,
+            baseline_primary=baseline_primary,
+            baseline_state=baseline_state,
+            dev_examples=len(dev_examples),
+            promote_if_improves=promote_if_improves,
+            epsilon=eps,
+            backend="mlx_qwen3",
+            artifact_dir=str(model_artifact_dir),
+            goal="minimize",
+            metric_label="final_eval_loss",
         )
-        _append_event(run_id, AgentTrainMetricEvent(type="complete", ts=datetime.now(UTC), run_id=run_id, status=run.status))
+        should_promote = decision.promote
+        if active_dir is not None and decision.notice:
+            _emit_log(decision.notice)
+
+        # Populate (and validate) the summary BEFORE any artifact copy: an impossible value
+        # fails the run here, while the active adapter is still untouched.
+        run.summary.primary_goal = "minimize"
+        run.summary.primary_metric_best = best_primary
+        run.summary.primary_metric_final = final_primary
+        run.summary.best_step = best_step
+        if best_ts is not None:
+            run.summary.time_to_best_secs = non_negative_or_none((best_ts - run.started_at).total_seconds())
+        run.summary.stability_stddev = stability_stddev(primary_series)
+
+        def _complete_run(promoted: bool) -> None:
+            # Everything that must be durable before a promotion counts: status, lineage, run record.
+            # The STORED record is the one completed (compare-and-set): if reconciliation or a cancel
+            # already ended it, this raises and nothing (no promotion) happens.
+            nonlocal run
+            stored = _load_run(run_id)
+            if str(stored.status) not in _NON_TERMINAL_RUN_STATUSES:
+                raise TrainingCancelledError(f"run {run_id} was ended as {stored.status} before completion")
+            stored.summary = run.summary
+            stored.status = "completed"
+            stored.completed_at = datetime.now(UTC)
+            run = _attach_lineage(stored, cfg, promoted=promoted)
+            _save_run(run)
+
+        # The terminal transition is serialized with Flyte reconciliation for this run. The
+        # cancellation check is repeated INSIDE the lock: an abort that landed after the last
+        # check above must win over completion and promotion.
+        async with _run_state_lock(run_id):
+            _raise_if_cancelled()
+            if active_dir is not None and should_promote:
+
+                def _promotion_work() -> str | None:
+                    _complete_run(promoted=True)
+                    return run.bundle_id
+
+                leftover = await await_uncancellable(
+                    run_promotion_transaction,
+                    swap=PromotionSwap(model_artifact_dir, active_dir),
+                    repo_id=str(run.repo_id),
+                    work=_promotion_work,
+                )
+                promotion_message = (
+                    f"Promoted trained artifact to {active_dir_cfg} (backend=mlx_qwen3). "
+                    f"Run artifact preserved at {model_artifact_dir}."
+                    + (f" Previous artifact could not be removed and was left at {leftover}." if leftover is not None else "")
+                )
+            else:
+                await await_uncancellable(_complete_run, False)
+                promotion_message = decision.message if active_dir is not None else None
+
+        # The run is durably completed (and the promotion committed) from here on. Everything
+        # below is observability: a failure here must not turn a completed run into a failed one.
+        try:
+            if promotion_message:
+                _emit_log(promotion_message)
+            _mlflow_finish(
+                "FINISHED",
+                manifest={
+                    "run_id": run.run_id,
+                    "corpus_id": run.repo_id,
+                    "status": run.status,
+                    "primary_metric": run.primary_metric,
+                    "primary_metric_best": run.summary.primary_metric_best,
+                    "primary_metric_final": run.summary.primary_metric_final,
+                    "model_artifact_ref": (
+                        run.model_artifact_ref.model_dump(mode="json", by_alias=True)
+                        if run.model_artifact_ref is not None
+                        else None
+                    ),
+                    "input_bundle_id": run.input_bundle_id,
+                    "execution_backend": run.execution_backend,
+                    "workflow_backend": run.workflow_backend,
+                },
+            )
+            _append_event(run_id, AgentTrainMetricEvent(type="complete", ts=datetime.now(UTC), run_id=run_id, status=run.status))
+        except Exception as observability_failure:  # noqa: BLE001 - best-effort after the durable commit
+            logger.warning(
+                json.dumps(
+                    {
+                        "event": "agent_train_post_commit_observability_failed",
+                        "run_id": run_id,
+                        "message": str(observability_failure),
+                        "operatorHint": "The run completed and any promotion is committed; only its completion log/MLflow/complete event could not be written.",
+                    },
+                    sort_keys=True,
+                )
+            )
     except TrainingCancelledError:
         outcome_status, outcome_message = _train_cancel_outcomes.pop(run_id, ("cancelled", "Training cancelled."))
+
+        def _end(stored: AgentTrainRun) -> AgentTrainRun:
+            stored.status = outcome_status  # type: ignore[assignment]
+            stored.completed_at = datetime.now(UTC)
+            return _attach_lineage(stored, cfg) if cfg is not None else stored
+
         try:
-            run = _load_run(run_id)
-            run.status = outcome_status  # type: ignore[assignment]
-            run.completed_at = datetime.now(UTC)
-            if cfg is not None:
-                run = _attach_lineage(run, cfg)
-            _save_run(run)
+            # through the authority: a run already ended (completed, or finalized by reconciliation)
+            # is left exactly as it is
+            ended = await _transition_run(run_id, allowed_from=_NON_TERMINAL_RUN_STATUSES, apply=_end)
+            if ended is not None:
+                run = ended
         except Exception:
             pass
         _mlflow_finish("KILLED" if outcome_status == "cancelled" else "FAILED")
@@ -1193,13 +1396,17 @@ async def _run_train_job(*, run_id: str, corpus_id: str, cancel_event: asyncio.E
             AgentTrainMetricEvent(type="complete", ts=datetime.now(UTC), run_id=run_id, status=outcome_status),  # type: ignore[arg-type]
         )
     except Exception as e:
+
+        def _fail(stored: AgentTrainRun) -> AgentTrainRun:
+            stored.status = "failed"
+            stored.completed_at = datetime.now(UTC)
+            return _attach_lineage(stored, cfg) if cfg is not None else stored
+
         try:
-            run = _load_run(run_id)
-            run.status = "failed"
-            run.completed_at = datetime.now(UTC)
-            if cfg is not None:
-                run = _attach_lineage(run, cfg)
-            _save_run(run)
+            # never flips a run that is already terminal (durably completed, or ended by reconciliation)
+            failed = await _transition_run(run_id, allowed_from=_NON_TERMINAL_RUN_STATUSES, apply=_fail)
+            if failed is not None:
+                run = failed
         except Exception:
             pass
         _mlflow_finish("FAILED")
@@ -1505,7 +1712,7 @@ async def start_train_run(request: AgentTrainStartRequest) -> AgentTrainStartRes
         run.config["RAGWELD_AGENT_TRAIN_DATASET_PATH"] = ds_override
 
     # Persist immediately.
-    _save_run(run)
+    await asyncio.to_thread(_save_run, run)
 
     # Create empty metrics.jsonl.
     metrics_path = _metrics_path(run_id)
@@ -1541,7 +1748,7 @@ async def start_train_run(request: AgentTrainStartRequest) -> AgentTrainStartRes
                 execution_name=execution_name,
             )
         except FlyteUnavailableError as exc:
-            _finalize_run_without_job(
+            await _finalize_run_without_job(
                 run,
                 cfg,
                 status="failed",
@@ -1556,10 +1763,36 @@ async def start_train_run(request: AgentTrainStartRequest) -> AgentTrainStartRes
                     "operator_hint": "Inspect the Flyte control plane (flyteadmin logs / console) and retry the launch.",
                 },
             ) from exc
-        run.workflow_run_id = execution_name
-        run.workflow_phase = "QUEUED"
-        run = _apply_run_control_plane_metadata(run, cfg)
-        _save_run(run)
+        def _record_execution(stored: AgentTrainRun) -> AgentTrainRun:
+            stored.workflow_run_id = execution_name
+            stored.workflow_phase = "QUEUED"
+            return _apply_run_control_plane_metadata(stored, cfg)
+
+        recorded = await _transition_run(run_id, allowed_from=frozenset({"queued"}), apply=_record_execution)
+        if recorded is None:
+            # The run was cancelled while flyteadmin was creating the execution: the operator's
+            # cancellation wins, so the execution that was just created is terminated.
+            admin_url, project, domain = _flyte_scope(cfg)
+
+            def _terminate_created() -> None:
+                FlyteAdminClient(admin_url).terminate_execution(
+                    project, domain, execution_name, cause="Run was cancelled while the execution was being created."
+                )
+
+            try:
+                await asyncio.to_thread(_terminate_created)
+            except Exception as exc:  # noqa: BLE001 - reported, the run record is already terminal
+                _append_event(
+                    run_id,
+                    AgentTrainMetricEvent(
+                        type="log",
+                        ts=datetime.now(UTC),
+                        run_id=run_id,
+                        message=f"Flyte execution {execution_name} was created for a cancelled run and could not be terminated: {exc}",
+                    ),
+                )
+            return
+        run = recorded
         _append_event(
             run_id,
             AgentTrainMetricEvent(
@@ -1633,20 +1866,36 @@ async def execute_train_run(run_id: str, request: AgentTrainExecuteRequest) -> A
         return AgentTrainExecuteResponse(ok=True, run_id=run_id, status="running", workflow_run_id=expected)
 
     now = datetime.now(UTC)
-    run.status = "running"
-    _save_run(run)
-    _append_event(
-        run_id,
-        AgentTrainMetricEvent(
-            type="state",
-            ts=now,
-            run_id=run_id,
-            status="running",
-            message=f"Flyte execution {expected} handed the run to the host execute boundary; training starts now.",
-        ),
-    )
-    _start_train_job_task(run_id, str(run.repo_id))
-    _mark_train_start_guard(str(run.repo_id), run_id)
+    async with _run_state_lock(run_id):
+        # CAS on the stored record and task registration in one critical section: a cancel that
+        # ended the queued run meanwhile is honoured, and no task starts for an ended run.
+        stored = await asyncio.to_thread(_load_run, run_id)
+        if str(stored.status) in _TERMINAL_RUN_STATUSES:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "run_terminal",
+                    "status": str(stored.status),
+                    "message": f"Run {run_id} already ended with status={stored.status}.",
+                },
+            )
+        if str(stored.status) == "running" or run_id in _train_tasks:
+            return AgentTrainExecuteResponse(ok=True, run_id=run_id, status="running", workflow_run_id=expected)
+        stored.status = "running"
+        await asyncio.to_thread(_save_run, stored)
+        await asyncio.to_thread(
+            _append_event,
+            run_id,
+            AgentTrainMetricEvent(
+                type="state",
+                ts=now,
+                run_id=run_id,
+                status="running",
+                message=f"Flyte execution {expected} handed the run to the host execute boundary; training starts now.",
+            ),
+        )
+        _start_train_job_task(run_id, str(stored.repo_id))
+        _mark_train_start_guard(str(stored.repo_id), run_id)
     return AgentTrainExecuteResponse(ok=True, run_id=run_id, status="running", workflow_run_id=expected)
 
 
@@ -1664,8 +1913,8 @@ async def get_train_run(run_id: str) -> AgentTrainRun:
 @router.get("/agent/train/run/{run_id}/metrics", response_model=AgentTrainMetricsResponse)
 async def get_train_run_metrics(run_id: str, limit: int = Query(default=500, ge=1, le=5000)) -> AgentTrainMetricsResponse:
     _load_run(run_id)
-    events = _load_events(run_id, limit=int(limit))
-    return AgentTrainMetricsResponse(ok=True, events=events)
+    events, unreadable = await asyncio.to_thread(_load_events, run_id, int(limit))
+    return AgentTrainMetricsResponse(ok=True, events=events, unreadable_events=unreadable.count, unreadable_reason=unreadable.first_reason)
 
 
 @router.get("/agent/train/run/{run_id}/stream")
@@ -1677,12 +1926,19 @@ async def stream_train_run(request: Request, run_id: str) -> StreamingResponse:
         metrics_path.write_text("", encoding="utf-8")
 
     async def _gen() -> AsyncIterator[str]:
-        try:
-            lines = [ln for ln in metrics_path.read_text(encoding="utf-8").splitlines() if ln.strip()]
-        except Exception:
-            lines = []
-        for line in lines[-200:]:
-            yield f"data: {line}\n\n"
+        # Replay the last validated events so the UI can paint immediately; corruption in the
+        # persisted stream is announced as an error event instead of being dropped.
+        history, unreadable = await asyncio.to_thread(_load_events, run_id, 200)
+        if unreadable.count:
+            notice = AgentTrainMetricEvent(
+                type="error",
+                ts=datetime.now(UTC),
+                run_id=run_id,
+                message=f"{unreadable.count} persisted metric record(s) could not be read ({unreadable.first_reason}).",
+            )
+            yield f"data: {json.dumps(notice.model_dump(mode='json', by_alias=True))}\n\n"
+        for event in history:
+            yield f"data: {json.dumps(event.model_dump(mode='json', by_alias=True))}\n\n"
 
         offset = 0
         try:
@@ -1731,10 +1987,10 @@ async def stream_train_run(request: Request, run_id: str) -> StreamingResponse:
                     buf += chunk
                     while b"\n" in buf:
                         raw_line, buf = buf.split(b"\n", 1)
-                        line = raw_line.decode("utf-8", errors="ignore").strip()
-                        if not line:
+                        payload = _sse_payload_for_line(run_id, raw_line)
+                        if payload is None:
                             continue
-                        yield f"data: {line}\n\n"
+                        yield f"data: {payload}\n\n"
                 except Exception:
                     pass
 
@@ -1790,7 +2046,7 @@ async def cancel_train_run(run_id: str) -> OkResponse:
                     ),
                 )
         if str(run.status) == "queued" and run_id not in _train_tasks:
-            _finalize_run_without_job(
+            await _finalize_run_without_job(
                 run,
                 cfg,
                 status="cancelled",
@@ -1798,7 +2054,7 @@ async def cancel_train_run(run_id: str) -> OkResponse:
             )
             return OkResponse(ok=True)
 
-    _request_train_run_cancel(run_id=run_id, reason="Cancellation requested by user.")
+    await _request_train_run_cancel(run_id=run_id, reason="Cancellation requested by user.")
     return OkResponse(ok=True)
 
 
@@ -1839,9 +2095,29 @@ async def promote_train_run(run_id: str) -> OkResponse:
             ),
         )
 
-    _atomic_copy_dir(src, dst)
-    run = _attach_lineage(run, cfg, promoted=True)
-    _save_run(run)
+    def _finish_promotion() -> str | None:
+        nonlocal run
+        stored = _load_run(run_id)  # never the record loaded before the (long) copy
+        run = _attach_lineage(stored, cfg, promoted=True)
+        _save_run(run)
+        return run.bundle_id
+
+    async with _run_state_lock(run_id):
+        leftover = await await_uncancellable(
+            run_promotion_transaction, swap=PromotionSwap(src, dst), repo_id=str(run.repo_id), work=_finish_promotion
+        )
+    if leftover is not None:
+        logger.warning(
+            json.dumps(
+                {
+                    "event": "agent_manual_promotion_retained_tree_not_removed",
+                    "run_id": run_id,
+                    "path": str(leftover),
+                    "operatorHint": "The promotion is committed; remove the retained previous adapter by hand.",
+                },
+                sort_keys=True,
+            )
+        )
     return OkResponse(ok=True)
 
 
@@ -1865,8 +2141,8 @@ async def diff_train_runs(run_id: str, payload: AgentTrainDiffRequest) -> AgentT
     primary_metric = baseline.primary_metric
     primary_goal = baseline.primary_goal
 
-    baseline_events = _load_events(baseline.run_id)
-    current_events = _load_events(current.run_id)
+    baseline_events, baseline_unreadable = await asyncio.to_thread(_load_events, baseline.run_id)
+    current_events, current_unreadable = await asyncio.to_thread(_load_events, current.run_id)
 
     def _best(run: AgentTrainRun, events: list[AgentTrainMetricEvent]) -> float | None:
         if run.summary.primary_metric_best is not None:
@@ -1893,7 +2169,7 @@ async def diff_train_runs(run_id: str, payload: AgentTrainDiffRequest) -> AgentT
             if pv is None:
                 continue
             if float(pv) == float(best_val):
-                return float((ev.ts - run.started_at).total_seconds())
+                return non_negative_or_none((ev.ts - run.started_at).total_seconds())
         return None
 
     def _stability(run: AgentTrainRun, events: list[AgentTrainMetricEvent]) -> float | None:
@@ -1907,14 +2183,7 @@ async def diff_train_runs(run_id: str, payload: AgentTrainDiffRequest) -> AgentT
             if pv is None:
                 continue
             vals.append(float(pv))
-        if not vals:
-            return None
-        tail = vals[-5:]
-        if len(tail) == 1:
-            return 0.0
-        mean = sum(tail) / len(tail)
-        var = sum((x - mean) ** 2 for x in tail) / len(tail)
-        return float(math.sqrt(var))
+        return stability_stddev(vals)
 
     baseline_best = _best(baseline, baseline_events)
     current_best = _best(current, current_events)
@@ -1923,10 +2192,10 @@ async def diff_train_runs(run_id: str, payload: AgentTrainDiffRequest) -> AgentT
     baseline_stability = _stability(baseline, baseline_events)
     current_stability = _stability(current, current_events)
 
-    delta_best = (current_best - baseline_best) if (current_best is not None and baseline_best is not None) else None
-    delta_ttb = (current_ttb - baseline_ttb) if (current_ttb is not None and baseline_ttb is not None) else None
+    delta_best = finite_or_none(current_best - baseline_best) if (current_best is not None and baseline_best is not None) else None
+    delta_ttb = finite_or_none(current_ttb - baseline_ttb) if (current_ttb is not None and baseline_ttb is not None) else None
     delta_stability = (
-        (current_stability - baseline_stability)
+        finite_or_none(current_stability - baseline_stability)
         if (current_stability is not None and baseline_stability is not None)
         else None
     )
@@ -1950,5 +2219,7 @@ async def diff_train_runs(run_id: str, payload: AgentTrainDiffRequest) -> AgentT
         baseline_stability_stddev=baseline_stability,
         current_stability_stddev=current_stability,
         delta_stability_stddev=delta_stability,
+        baseline_unreadable_events=baseline_unreadable.count,
+        current_unreadable_events=current_unreadable.count,
         improved=improved,
     )

@@ -66,12 +66,13 @@ def _events(tmp_runs, run_id: str) -> list[dict]:
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
 
-def test_flyte_abort_finalizes_queued_run_as_cancelled(tmp_runs) -> None:
+@pytest.mark.asyncio
+async def test_flyte_abort_finalizes_queued_run_as_cancelled(tmp_runs) -> None:
     run = _write_run(tmp_runs, "abort_queued__1", status="queued", phase="RUNNING")
     state = FlyteExecutionState(
         project="ragweld", domain="development", name=run.workflow_run_id, phase="ABORTED", abort_cause="operator stop"
     )
-    result = agent._apply_flyte_state(run, state)
+    result = await agent._apply_flyte_state(run, state)
     assert result.status == "cancelled"
     assert result.completed_at is not None
     events = _events(tmp_runs, run.run_id)
@@ -79,24 +80,26 @@ def test_flyte_abort_finalizes_queued_run_as_cancelled(tmp_runs) -> None:
     assert events[-1]["type"] == "complete" and events[-1]["status"] == "cancelled"
 
 
-def test_flyte_failure_finalizes_queued_run_as_failed(tmp_runs) -> None:
+@pytest.mark.asyncio
+async def test_flyte_failure_finalizes_queued_run_as_failed(tmp_runs) -> None:
     run = _write_run(tmp_runs, "fail_queued__1", status="queued", phase="RUNNING")
     state = FlyteExecutionState(
         project="ragweld", domain="development", name=run.workflow_run_id, phase="FAILED", error_message="node crashed"
     )
-    result = agent._apply_flyte_state(run, state)
+    result = await agent._apply_flyte_state(run, state)
     assert result.status == "failed"
     events = _events(tmp_runs, run.run_id)
     assert any("node crashed" in str(e.get("message") or "") for e in events)
     assert events[-1]["type"] == "complete" and events[-1]["status"] == "failed"
 
 
-def test_flyte_succeeded_while_running_is_recorded_as_inconsistency(tmp_runs) -> None:
+@pytest.mark.asyncio
+async def test_flyte_succeeded_while_running_is_recorded_as_inconsistency(tmp_runs) -> None:
     run = _write_run(tmp_runs, "succeed_incon__1", status="running", phase="RUNNING")
     state = FlyteExecutionState(
         project="ragweld", domain="development", name=run.workflow_run_id, phase="SUCCEEDED"
     )
-    result = agent._apply_flyte_state(run, state)
+    result = await agent._apply_flyte_state(run, state)
     assert result.status == "failed"
     events = _events(tmp_runs, run.run_id)
     assert any("refusing to infer a completed training run" in str(e.get("message") or "") for e in events)
@@ -122,7 +125,7 @@ async def test_flyte_abort_of_running_job_signals_cancel_event_on_loop_thread(tm
             phase="ABORTED",
             abort_cause="console abort",
         )
-        result = agent._apply_flyte_state(run, state)
+        result = await agent._apply_flyte_state(run, state)
         # Job-owned finalization: status stays running here; the job will apply the outcome.
         assert result.status == "running"
         assert cancel_event.is_set()
@@ -134,7 +137,8 @@ async def test_flyte_abort_of_running_job_signals_cancel_event_on_loop_thread(tm
         agent._train_cancel_outcomes.pop(run.run_id, None)
 
 
-def test_phase_only_mirror_appends_no_event_after_terminal(tmp_runs) -> None:
+@pytest.mark.asyncio
+async def test_phase_only_mirror_appends_no_event_after_terminal(tmp_runs) -> None:
     run = _write_run(tmp_runs, "terminal_mirror__1", status="completed", phase="RUNNING")
     # Seed the run's own terminal complete event, as a finished run has.
     agent._append_event(
@@ -145,10 +149,66 @@ def test_phase_only_mirror_appends_no_event_after_terminal(tmp_runs) -> None:
     state = FlyteExecutionState(
         project="ragweld", domain="development", name=run.workflow_run_id, phase="SUCCEEDED"
     )
-    result = agent._apply_flyte_state(run, state)
+    result = await agent._apply_flyte_state(run, state)
     assert result.status == "completed"  # terminal status is never changed by a mirror
     assert result.workflow_phase == "SUCCEEDED"
     after = _events(tmp_runs, run.run_id)
     # No log event appended after the run's complete event.
     assert len(after) == len(before)
     assert after[-1]["type"] == "complete"
+
+
+@pytest.mark.asyncio
+async def test_flyte_reconcile_never_overwrites_a_run_that_completed_meanwhile(tmp_runs) -> None:
+    # Codex pass 17: the phase save yielded, the job completed durably, and reconciliation resumed
+    # with stale `running` state and finalized the completed run as cancelled. The stored record is
+    # re-read after every off-loop step and a terminal record is never overwritten.
+    stale = _write_run(tmp_runs, "race__1", status="running", phase="RUNNING")
+    completed = stale.model_copy(update={"status": "completed", "completed_at": datetime.now(UTC)})
+    agent._save_run(completed)  # the job finished between the Flyte fetch and the apply
+    state = FlyteExecutionState(
+        project="ragweld", domain="development", name=stale.workflow_run_id, phase="ABORTED", abort_cause="operator stop"
+    )
+    result = await agent._apply_flyte_state(stale, state)
+    assert result.status == "completed"
+    assert agent._load_run(stale.run_id).status == "completed"
+    events = _events(tmp_runs, stale.run_id)
+    assert not any(e.get("status") == "cancelled" for e in events)
+
+
+@pytest.mark.asyncio
+async def test_flyte_reconcile_waits_for_the_lock_and_then_honours_the_completed_record(tmp_runs) -> None:
+    # Codex pass 18: a real interleaving. Reconciliation starts while the job holds the run lock
+    # for its terminal transition; the job completes and releases; reconciliation then re-reads
+    # the stored record and must not finalize the completed run as cancelled.
+    stale = _write_run(tmp_runs, "race__2", status="running", phase="RUNNING")
+    state = FlyteExecutionState(
+        project="ragweld", domain="development", name=stale.workflow_run_id, phase="ABORTED", abort_cause="operator stop"
+    )
+    lock = agent._run_state_lock(stale.run_id)
+    await lock.acquire()  # the training job is inside its terminal critical section
+    reconcile = asyncio.create_task(agent._apply_flyte_state(stale, state))
+    await asyncio.sleep(0.05)
+    assert not reconcile.done()  # blocked on the lock, as intended
+    agent._save_run(stale.model_copy(update={"status": "completed", "completed_at": datetime.now(UTC)}))
+    lock.release()
+    result = await reconcile
+    assert result.status == "completed"
+    assert agent._load_run(stale.run_id).status == "completed"
+
+
+@pytest.mark.asyncio
+async def test_transition_authority_refuses_terminal_and_mutates_the_stored_record(tmp_runs) -> None:
+    # Codex pass 18: every status change goes through one compare-and-set authority that never
+    # writes a caller's stale object.
+    run = _write_run(tmp_runs, "authority__1", status="queued", phase=None)
+
+    def _to_running(stored):
+        stored.status = "running"
+        return stored
+
+    updated = await agent._transition_run(run.run_id, allowed_from=frozenset({"queued"}), apply=_to_running)
+    assert updated is not None and updated.status == "running"
+    refused = await agent._transition_run(run.run_id, allowed_from=frozenset({"queued"}), apply=_to_running)
+    assert refused is None  # CAS: the stored record is no longer queued
+    assert agent._load_run(run.run_id).status == "running"

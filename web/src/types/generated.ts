@@ -783,6 +783,8 @@ export interface EvalResult {
   docs?: EvalDoc[];
   /** Per-query retrieval debug (best-effort, for explaining empty results). */
   debug?: Record<string, unknown>;
+  /** The dataset entry's expected answer at evaluation time (kept with the trace for triplet mining). */
+  expected_answer?: string | null; // default: None
   /** Gateway-generated answer scored by Ragas when Ragas scoring ran. */
   generated_answer?: string | null; // default: None
   /** Per-entry Ragas scores by metric name when Ragas scoring ran. */
@@ -839,6 +841,8 @@ export interface EvaluationConfig {
   promptfoo_grader_model?: string; // default: ""
   /** Per-request timeout for Ragas judge calls through LiteLLM. Local CPU serving needs minutes; a timeout fails the eval run closed rather than skipping scores. */
   ragas_judge_timeout_s?: number; // default: 600
+  /** Output token budget for eval judges: the Ragas judge alias and the Promptfoo llm-rubric grader. Independent of chat.max_tokens because faithfulness statement lists and reasoning-capable aliases need more room than a chat answer; a truncated verdict fails the run closed. */
+  judge_max_tokens?: number; // default: 4096
 }
 
 /** Configuration for tri-brid fusion of vector + sparse + graph results. */
@@ -1994,12 +1998,12 @@ export interface RerankerTrainRunSummary {
 
 /** Reranking configuration for result refinement. */
 export interface RerankingConfig {
-  /** Reranker mode: 'cloud' (Cohere/Voyage/Jina API), 'learning' (MLX Qwen3 LoRA learning reranker), 'none' (disabled). Legacy values 'local'/'hf' normalize to 'learning'. */
+  /** Reranker mode: 'cloud' (LiteLLM gateway alias or Cohere API), 'learning' (MLX Qwen3 LoRA learning reranker), 'none' (disabled). Stale values such as 'local'/'hf' fail validation and must be migrated. */
   reranker_mode?: string; // default: "none"
-  /** Cloud reranker provider when mode=cloud. Runtime-selectable today: cohere. */
-  reranker_cloud_provider?: string; // default: "cohere"
-  /** Cloud reranker model name when mode=cloud (runtime-selectable today: Cohere models). */
-  reranker_cloud_model?: string; // default: "rerank-v3.5"
+  /** Cloud reranker provider when mode=cloud: 'litellm' scores candidates listwise through a LiteLLM gateway alias (no local model, no extra credential); 'cohere' calls the Cohere rerank API (COHERE_API_KEY). */
+  reranker_cloud_provider?: string; // default: "litellm"
+  /** Cloud reranker model when mode=cloud: a LiteLLM gateway alias for provider 'litellm' (a cheap non-reasoning instruct model is ideal), or a Cohere rerank model id for provider 'cohere'. */
+  reranker_cloud_model?: string; // default: "openai.gpt-4.1-nano"
   /** Blend weight for reranker scores */
   tribrid_reranker_alpha?: number; // default: 0.7
   /** Number of candidates to rerank (learning mode) */
@@ -2235,8 +2239,8 @@ export interface SyntheticGeneratorConfig {
   expected_answer_max_chars?: number; // default: 400
   /** Max lines of source chunk content sent as context to generator/judge */
   source_excerpt_max_lines?: number; // default: 80
-  /** If True, fail the run when generator LLM is unreachable instead of silently falling back to deterministic extraction. */
-  fail_on_error?: boolean; // default: True
+  /** Concurrent generator/judge requests sent to the LiteLLM gateway per synthetic run. Forced to 1 when the selected alias is the single-stream local vLLM serving row. */
+  concurrency?: number; // default: 4
 }
 
 /** LLM judge parameters for synthetic curation. */
@@ -2245,8 +2249,6 @@ export interface SyntheticJudgeConfig {
   temperature?: number; // default: 0.0
   /** Max tokens for judge LLM response */
   max_tokens?: number; // default: 400
-  /** If True, fail the run when judge LLM is unreachable instead of silently auto-passing all items. */
-  fail_on_error?: boolean; // default: True
 }
 
 /** Quality gate thresholds for synthetic data evaluation. */
@@ -2257,22 +2259,6 @@ export interface SyntheticQualityGateConfig {
   sample_size?: number; // default: 50
 }
 
-/** Degradation flags -- honest about what actually happened during a synthetic run. */
-export interface SyntheticRunDegradation {
-  /** True if generator LLM failed and deterministic fallback was used */
-  generator_fallback_used?: boolean; // default: False
-  /** True if judge LLM failed and all items were auto-passed */
-  judge_fallback_used?: boolean; // default: False
-  /** True if eval dataset was populated from seed dataset instead of generation */
-  seed_hydration_used?: boolean; // default: False
-  /** Number of items hydrated from seed dataset */
-  seed_hydration_count?: number; // default: 0
-  /** True if any fallback or degradation occurred during the run */
-  degraded?: boolean; // default: False
-  /** Human-readable list of degradation reasons */
-  reasons?: string[];
-}
-
 export interface SyntheticRunMeta {
   run_id: string;
   corpus_id: string;
@@ -2280,7 +2266,7 @@ export interface SyntheticRunMeta {
   started_at: string;
   completed_at?: string | null; // default: None
   recipe: "eval_dataset" | "semantic_cards" | "keywords" | "triplets" | "autotune_retrieval" | "full_stack";
-  provider: "synthetic_data_kit";
+  provider: "grounded_qa";
   items_generated?: number | null; // default: None
   bundle_id?: string | null; // default: None
   lineage_ref?: LineageRef | null; // default: None
@@ -2288,7 +2274,7 @@ export interface SyntheticRunMeta {
 
 export interface SyntheticRunStartRequest {
   corpus_id: string;
-  provider?: "synthetic_data_kit"; // default: "synthetic_data_kit"
+  provider?: "grounded_qa"; // default: "grounded_qa"
   recipe?: "eval_dataset" | "semantic_cards" | "keywords" | "triplets" | "autotune_retrieval" | "full_stack"; // default: "eval_dataset"
   max_source_chunks?: number | null; // default: 300
   max_pairs?: number | null; // default: 200
@@ -2304,9 +2290,18 @@ export interface SyntheticRunStartRequest {
 
 export interface SyntheticRunSummary {
   sources_used?: number; // default: 0
+  /** Rows the generator emitted before any check. */
   items_generated?: number; // default: 0
+  /** Rows dropped because their evidence_quote was not found verbatim in the source excerpt. */
+  items_rejected_ungrounded?: number; // default: 0
+  /** Rows dropped for unparseable output, self-referential questions, or exceeding configured limits. */
+  items_rejected_malformed?: number; // default: 0
+  /** Grounded rows handed to the judge. */
   items_curated_in?: number; // default: 0
+  /** Rows kept after the judge. */
   items_curated_out?: number; // default: 0
+  /** Reranker triplets mined from the quality-gate retrieval results (triplets/full_stack recipes). */
+  triplets_mined?: number; // default: 0
   avg_judge_score?: number | null; // default: None
   quality_top1_accuracy?: number | null; // default: None
   quality_topk_accuracy?: number | null; // default: None
@@ -2315,8 +2310,16 @@ export interface SyntheticRunSummary {
   quality_gate_threshold?: number | null; // default: None
   quality_gate_passed?: boolean | null; // default: None
   quality_failure_reason?: string | null; // default: None
-  /** Degradation flags -- honest about what actually happened during the run */
-  degradation?: SyntheticRunDegradation;
+}
+
+/** A run directory whose run.json no longer validates (e.g. produced by a provider that was replaced). */
+export interface SyntheticUnreadableRun {
+  /** Run directory name. */
+  run_id: string;
+  /** Why the run could not be loaded. */
+  reason: string;
+  /** The corpus the malformed payload still names, when readable; None when unknown. */
+  corpus_id?: string | null; // default: None
 }
 
 /** System prompts for LLM interactions - affects RAG pipeline behavior.  These prompts control how LLMs behave during query processing, code analysis, and result generation. Changes here can significantly impact RAG accuracy. */
@@ -2337,6 +2340,10 @@ export interface SystemPromptsConfig {
   eval_analysis?: string; // default: "You are an expert RAG (Retrieval-Augmented Gene..."
   /** Judge prompt for synthetic eval row curation and quality filtering */
   synthetic_judge?: string; // default: "You are a strict evaluator for synthetic retrie..."
+  /** Generator prompt for grounded synthetic eval rows. Tokens {num_pairs}, {question_max_chars}, {expected_answer_max_chars} and {evidence_quote_max_chars} are filled from the request and synthetic.generator. */
+  synthetic_generator?: string; // default: "You write retrieval-evaluation questions for a ..."
+  /** System prompt for the LiteLLM-gateway listwise reranker (reranking.reranker_cloud_provider=litellm). */
+  gateway_rerank?: string; // default: "You are a retrieval reranker.\n\nYou receive a ..."
   /** Lightweight chunk_summary generation prompt for faster indexing */
   lightweight_chunk_summaries?: string; // default: "Extract key information from this database: sym..."
 }
@@ -2541,7 +2548,7 @@ export interface TrainingConfig {
   tribrid_reranker_mine_reset?: boolean; // default: False
   /** Training triplets file path */
   tribrid_triplets_path?: string; // default: "data/training/triplets.jsonl"
-  /** Learning reranker backend: auto (prefer MLX Qwen3 on Apple Silicon), mlx_qwen3 (force). Legacy values 'transformers'/'hf' normalize to 'auto'. */
+  /** Learning reranker backend: auto (prefer MLX Qwen3 on Apple Silicon), mlx_qwen3 (force). Stale values such as 'transformers'/'hf'/'mlx' fail validation and must be migrated. */
   learning_reranker_backend?: "auto" | "mlx_qwen3"; // default: "auto"
   /** Base model to fine-tune for MLX Qwen3 learning reranker */
   learning_reranker_base_model?: string; // default: "Qwen/Qwen3-Reranker-0.6B"
@@ -2783,11 +2790,19 @@ export interface AgentTrainDiffResponse {
   delta_stability_stddev?: number | null;
   /** Whether the current run improved vs baseline (respects primary_goal). */
   improved?: boolean | null;
+  /** Baseline event records that no longer validate. */
+  baseline_unreadable_events?: number;
+  /** Current event records that no longer validate. */
+  current_unreadable_events?: number;
 }
 
 export interface AgentTrainMetricsResponse {
   ok?: boolean;
   events?: AgentTrainMetricEvent[];
+  /** Persisted event records that no longer validate (reported, never silently dropped). */
+  unreadable_events?: number;
+  /** Why the first unreadable record failed. */
+  unreadable_reason?: string | null;
 }
 
 export interface AgentTrainRun {
@@ -3315,6 +3330,8 @@ export interface EvalDatasetItem {
   expected_paths: string[];
   /** Expected answer if testing generation */
   expected_answer?: string | null;
+  /** Verbatim span of the expected document that supports the answer (grounding provenance written by the grounded_qa provider; empty for hand-written rows). */
+  evidence_quote?: string | null;
   /** Tags for filtering/grouping */
   tags?: string[];
   /** When this entry was created */
@@ -4004,6 +4021,26 @@ export interface RerankerMineResponse {
   error?: string | null;
   /** High-signal implementation hint for the next debugger. */
   operator_hint?: string | null;
+  /** Triplets written by this mining pass. */
+  triplets_mined?: number;
+  /** Triplets mined from positive feedback events on the query log. */
+  triplets_from_feedback?: number;
+  /** Triplets mined from the eval run's retrieval results (hard negatives). */
+  triplets_from_eval_run?: number;
+  /** Candidate rows not written because an identical row was already on disk. */
+  triplets_skipped_existing?: number;
+  /** Candidate rows rejected because their query was a placeholder, not a real question. */
+  triplets_rejected_placeholder?: number;
+  /** Retrieved candidates skipped as negatives because their text contains the expected answer. */
+  negatives_rejected_answer_leak?: number;
+  /** Retrieved candidates skipped because their document could not be read for the leak check. */
+  negatives_rejected_unverifiable?: number;
+  /** Eval results mined without a leak check because the run recorded no expected answer. */
+  entries_without_answer_provenance?: number;
+  /** Eval run whose retrieval results were mined, if any. */
+  eval_run_id?: string | null;
+  /** Validated rows in the triplets file after this pass. */
+  triplets_total?: number;
 }
 
 /** Response payload for GET /api/reranker/nohits. */
@@ -4020,7 +4057,7 @@ export interface RerankerScoreRequest {
   query: string;
   /** Document/passage text to score */
   document: string;
-  /** Scoring mode override. Only 'learning' is supported; legacy values normalize to 'learning'. */
+  /** Scoring mode override. Only 'learning' is supported; stale aliases such as 'local' fail validation. */
   mode?: "learning" | null;
   /** Include backend-specific raw logits when available (best-effort) */
   include_logits?: boolean;
@@ -4070,6 +4107,10 @@ export interface RerankerTrainDiffResponse {
   baseline_stability_stddev?: number | null;
   current_stability_stddev?: number | null;
   delta_stability_stddev?: number | null;
+  /** Baseline event records that no longer validate. */
+  baseline_unreadable_events?: number;
+  /** Current event records that no longer validate. */
+  current_unreadable_events?: number;
 }
 
 /** Request payload for POST /api/reranker/train (legacy UI). */
@@ -4098,6 +4139,10 @@ export interface RerankerTrainLegacyResponse {
 export interface RerankerTrainMetricsResponse {
   ok?: boolean;
   events?: RerankerTrainMetricEvent[];
+  /** Persisted event records that no longer validate (reported, never silently dropped). */
+  unreadable_events?: number;
+  /** Why the first unreadable record failed. */
+  unreadable_reason?: string | null;
 }
 
 export interface RerankerTrainRunsResponse {
@@ -4212,7 +4257,7 @@ export interface SyntheticRun {
   status?: "queued" | "running" | "completed" | "failed" | "cancelled";
   started_at: string;
   completed_at?: string | null;
-  provider: "synthetic_data_kit";
+  provider: "grounded_qa";
   recipe: "eval_dataset" | "semantic_cards" | "keywords" | "triplets" | "autotune_retrieval" | "full_stack";
   config_snapshot?: Record<string, unknown>;
   config?: Record<string, unknown>;
@@ -4243,6 +4288,8 @@ export interface SyntheticRunEvent {
 export interface SyntheticRunsResponse {
   ok?: boolean;
   runs?: SyntheticRunMeta[];
+  /** Run directories under data/synthetic_runs that could not be loaded; never silently hidden. */
+  unreadable?: SyntheticUnreadableRun[];
 }
 
 /** Response payload for /api/traces/latest. */

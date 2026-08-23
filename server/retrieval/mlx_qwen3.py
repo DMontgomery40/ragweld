@@ -11,6 +11,8 @@ from functools import cache
 from pathlib import Path
 from typing import Any, cast
 
+from server.reranker.artifacts import resolve_project_path
+
 
 @cache
 def mlx_is_available() -> bool:
@@ -429,7 +431,16 @@ class MLXQwen3Reranker:
 
             return (model, tokenizer, token_ids, fp)
 
-        model, tokenizer, token_ids, fp = await asyncio.to_thread(_load)
+        # The adapter files can be swapped by a promotion while this load reads them. The
+        # generation captured before the read must still hold when the weights are installed;
+        # otherwise the freshly promoted files are read again.
+        for _attempt in range(3):
+            generation = _MLX_CACHE_GENERATION
+            model, tokenizer, token_ids, fp = await asyncio.to_thread(_load)
+            if generation == _MLX_CACHE_GENERATION:
+                break
+        else:
+            raise RuntimeError("MLX Qwen3 reranker load kept overlapping artifact promotions; retry the request")
         self._model = model
         self._tokenizer = tokenizer
         self._token_ids = token_ids
@@ -456,20 +467,36 @@ class MLXQwen3Reranker:
         if new_fp == self._adapter_fp:
             return
 
-        def _reload() -> tuple[tuple[int, int] | None, MLXQwen3TokenIds]:
+        def _reload(fingerprint: tuple[int, int] | None) -> tuple[tuple[int, int] | None, MLXQwen3TokenIds]:
             import mlx.core as _mx
 
             mx: Any = _mx
 
             token_ids = resolve_yes_no_token_ids(tokenizer)
-            if new_fp is None:
+            if fingerprint is None:
                 # Adapter missing; keep LoRA layers but effectively revert to base weights.
                 return (None, token_ids)
             weights = mx.load(str(adapter_dir / "adapter.npz"))
             model.load_weights(list(cast(Any, weights).items()), strict=False)
-            return (new_fp, token_ids)
+            return (fingerprint, token_ids)
 
-        fp, token_ids = await asyncio.to_thread(_reload)
+        # The weights are loaded into the live model in place, so a promotion that overlaps the
+        # read must be followed by another read before this request scores anything.
+        for _attempt in range(3):
+            generation = _MLX_CACHE_GENERATION
+            fp, token_ids = await asyncio.to_thread(_reload, new_fp)
+            if generation == _MLX_CACHE_GENERATION:
+                break
+            new_fp = _adapter_fingerprint(adapter_dir)
+        else:
+            # The live model now holds weights of an uncommitted attempt: drop it entirely so the
+            # next request performs a full, generation-stable load instead of scoring with them.
+            self._model = None
+            self._tokenizer = None
+            self._token_ids = None
+            self._adapter_fp = None
+            self._last_reload_check_mono = 0.0
+            raise RuntimeError("MLX Qwen3 adapter reload kept overlapping artifact promotions; retry the request")
         self._adapter_fp = fp
         self._token_ids = token_ids
 
@@ -501,6 +528,31 @@ class MLXQwen3Reranker:
 
 _MLX_CACHE_LOCK = asyncio.Lock()
 _MLX_CACHE: dict[tuple[str, str, int, float, float, tuple[str, ...]], MLXQwen3Reranker] = {}
+# Bumped by every invalidation. A load that started before an invalidation (reading the
+# adapter files that were just swapped out) must not be cached afterwards.
+_MLX_CACHE_GENERATION = 0
+
+
+def invalidate_mlx_qwen3_cache_sync(adapter_dir: str | None = None) -> None:
+    """Drop cached rerankers for `adapter_dir` (all when None) from any thread, e.g. inside a
+    promotion transaction. Dict mutation is GIL-atomic; the generation bump keeps an in-flight
+    load from re-inserting a model built from the pre-swap files."""
+    global _MLX_CACHE_GENERATION
+    _MLX_CACHE_GENERATION += 1
+    target = canonical_adapter_path(adapter_dir) if str(adapter_dir or "").strip() else ""
+    for key in list(_MLX_CACHE.keys()):
+        if not target or str(key[1]) == target:
+            _MLX_CACHE.pop(key, None)
+
+
+def canonical_adapter_path(adapter_dir: str | Path | None) -> str:
+    """Cache keys and invalidations must agree on one spelling of the adapter path: the config
+    says `models/learning-reranker-active`, inference resolves it against the repository root
+    (never the process CWD), so both sides go through `resolve_project_path` first."""
+    text = str(adapter_dir or "").strip()
+    if not text:
+        return ""
+    return str(resolve_project_path(text).resolve())
 
 
 async def clear_mlx_qwen3_cache(adapter_dir: str | None = None) -> None:
@@ -508,14 +560,8 @@ async def clear_mlx_qwen3_cache(adapter_dir: str | None = None) -> None:
 
     If adapter_dir is set, only entries for that adapter path are removed.
     """
-    target = str(adapter_dir or "").strip()
     async with _MLX_CACHE_LOCK:
-        if not target:
-            _MLX_CACHE.clear()
-            return
-        keys = [k for k in _MLX_CACHE.keys() if str(k[1]) == target]
-        for key in keys:
-            _MLX_CACHE.pop(key, None)
+        invalidate_mlx_qwen3_cache_sync(adapter_dir)
 
 
 async def get_mlx_qwen3_reranker(
@@ -529,7 +575,7 @@ async def get_mlx_qwen3_reranker(
 ) -> MLXQwen3Reranker:
     key = (
         str(base_model).strip(),
-        str(adapter_dir).strip(),
+        canonical_adapter_path(adapter_dir),
         int(lora_rank),
         float(lora_alpha),
         float(lora_dropout),
@@ -539,6 +585,7 @@ async def get_mlx_qwen3_reranker(
         cached = _MLX_CACHE.get(key)
         if cached is not None:
             return cached
+        generation = _MLX_CACHE_GENERATION
         rr = MLXQwen3Reranker(
             base_model=key[0],
             adapter_dir=key[1],
@@ -547,7 +594,8 @@ async def get_mlx_qwen3_reranker(
             lora_dropout=key[4],
             lora_target_modules=list(key[5]),
         )
-        _MLX_CACHE[key] = rr
+        if generation == _MLX_CACHE_GENERATION:
+            _MLX_CACHE[key] = rr  # nothing was invalidated while this model loaded
         return rr
 
 

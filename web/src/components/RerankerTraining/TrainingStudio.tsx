@@ -194,7 +194,7 @@ function presetLabel(preset: LayoutPreset): string {
 }
 
 export function TrainingStudio() {
-  const { success, error: notifyError, info } = useNotification();
+  const { success, error: notifyError, info, notifications, removeNotification } = useNotification();
   const activeCorpus = useActiveRepo();
   const navigate = useNavigate();
   const config = useConfigStore((s) => s.config);
@@ -729,8 +729,21 @@ export function TrainingStudio() {
     try {
       info('Mining triplets…');
       const res = await mineTriplets();
-      if (res?.ok) success('Triplet mining complete');
-      else notifyError(res?.error || 'Triplet mining failed');
+      if (res?.ok) {
+        const evalSource = res.eval_run_id
+          ? `${res.triplets_from_eval_run ?? 0} from eval run ${res.eval_run_id}`
+          : 'no persisted eval run for this corpus';
+        const rejected = [
+          res.triplets_skipped_existing ? `${res.triplets_skipped_existing} already on disk` : '',
+          res.triplets_rejected_placeholder ? `${res.triplets_rejected_placeholder} placeholder queries rejected` : '',
+          res.negatives_rejected_answer_leak ? `${res.negatives_rejected_answer_leak} answer-leaking negatives rejected` : '',
+          res.negatives_rejected_unverifiable ? `${res.negatives_rejected_unverifiable} unreadable candidates rejected` : '',
+          res.entries_without_answer_provenance ? `${res.entries_without_answer_provenance} results without an expected answer` : '',
+        ].filter(Boolean);
+        success(
+          `Mined ${res.triplets_mined ?? 0} triplets (${res.triplets_from_feedback ?? 0} from feedback, ${evalSource}${rejected.length ? `; ${rejected.join(', ')}` : ''}); ${res.triplets_total ?? 0} rows on disk.`
+        );
+      } else notifyError(res?.error || 'Triplet mining failed');
       await refreshStats();
     } catch (e) {
       notifyError(e instanceof Error ? e.message : 'Triplet mining failed');
@@ -1932,6 +1945,14 @@ export function TrainingStudio() {
 
   return (
     <section className="training-studio-root" data-testid="reranker-training-studio">
+      <div className="notification-container" data-testid="reranker-studio-notifications">
+        {notifications.map((notification) => (
+          <div key={notification.id} className={`notification notification-${notification.type}`} role="status">
+            <span>{notification.message}</span>
+            <button onClick={() => removeNotification(notification.id)} aria-label="Dismiss notification">×</button>
+          </div>
+        ))}
+      </div>
       <header className="training-studio-header">
         <div>
           <h2 className="studio-title">Learning Reranker Training Studio</h2>

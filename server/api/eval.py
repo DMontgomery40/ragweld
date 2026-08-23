@@ -3,7 +3,9 @@ from __future__ import annotations
 import asyncio
 import json
 import math
+import re
 from collections.abc import AsyncIterator
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from time import perf_counter
@@ -24,6 +26,7 @@ from server.chat.handler import ChatGenerationError
 from server.chat.prompt_builder import get_system_prompt
 from server.chat.provider_router import select_provider_route
 from server.dependency_errors import DependencyUnavailableError
+from server.evaluation.path_match import path_matches
 from server.evaluation.promptfoo_runner import (
     PromptfooTest,
     PromptfooUnavailableError,
@@ -81,9 +84,21 @@ _EVAL_STATUS: dict[str, Any] = {
 }
 
 
+_EVAL_RUN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,200}$")
+
+
+def validate_eval_run_id(run_id: str) -> str:
+    """Eval run ids name files under data/eval_runs; reject anything that could escape it."""
+    text = str(run_id or "").strip()
+    if not text or ".." in text or not _EVAL_RUN_ID_RE.fullmatch(text):
+        raise ValueError(f"invalid eval run id: {run_id!r}")
+    return text
+
+
 def _run_path(run_id: str) -> Path:
+    rid = validate_eval_run_id(run_id)
     _RUNS_DIR.mkdir(parents=True, exist_ok=True)
-    return _RUNS_DIR / f"{run_id}.json"
+    return _RUNS_DIR / f"{rid}.json"
 
 
 def _latest_run_id(repo_id: str | None = None) -> str | None:
@@ -97,20 +112,30 @@ def _latest_run_id(repo_id: str | None = None) -> str | None:
     return None
 
 
-def _normalize_path(p: str) -> str:
-    return (p or "").replace("\\", "/").strip().lower()
+def latest_run_for_repo(repo_id: str) -> EvalRun | None:
+    """Most recently completed persisted eval run whose validated payload belongs to ``repo_id``.
+
+    Chronology comes from the run payload (``completed_at``, then ``run_id``), never from
+    file mtimes; a corrupt candidate file for the corpus raises instead of silently
+    shifting the selection to an older run.
+    """
+    _RUNS_DIR.mkdir(parents=True, exist_ok=True)
+    candidates: list[EvalRun] = []
+    for path in _RUNS_DIR.glob(f"{repo_id}__*.json"):
+        try:
+            run = EvalRun.model_validate(json.loads(path.read_text(encoding="utf-8")))
+        except Exception as exc:
+            raise ValueError(f"corrupt eval run artifact {path.name}: {exc}") from exc
+        if str(run.repo_id) == repo_id:
+            candidates.append(run)
+    if not candidates:
+        return None
+    candidates.sort(key=lambda run: (run.completed_at, run.run_id), reverse=True)
+    return candidates[0]
 
 
 def _path_matches(expected: str, actual: str) -> bool:
-    e = _normalize_path(expected)
-    a = _normalize_path(actual)
-    if not e or not a:
-        return False
-    if a == e:
-        return True
-    if a.endswith(e):
-        return True
-    return e in a
+    return path_matches(expected, actual)
 
 
 def _dedupe_preserve_order(items: list[str]) -> list[str]:
@@ -171,8 +196,82 @@ def _percentile(values: list[float], p: float) -> float:
     return float(xs[idx])
 
 
+@dataclass(frozen=True)
+class _EntryScores:
+    reciprocal_rank: float
+    recall5: float
+    recall10: float
+    recall20: float
+    prec5: float
+    ndcg10: float
+
+
+def _score_entry(
+    entry: EvalDatasetItem,
+    matches: list[Any],
+    *,
+    final_k: int,
+    eval_k: int,
+    cfg: Any,
+    latency_ms: float,
+    debug: dict[str, Any] | None = None,
+) -> tuple[EvalResult, _EntryScores]:
+    """Score one dataset entry against its retrieval results (shared by the POST and SSE eval paths)."""
+    k_recall5 = int(cfg.evaluation.recall_at_5_k)
+    k_recall10 = int(cfg.evaluation.recall_at_10_k)
+    k_recall20 = int(cfg.evaluation.recall_at_20_k)
+    k_prec5 = int(cfg.evaluation.precision_at_5_k)
+    k_ndcg10 = int(cfg.evaluation.ndcg_at_10_k)
+
+    retrieved_paths = _dedupe_preserve_order([m.file_path for m in matches if m.file_path])
+    expected_paths = list(entry.expected_paths or [])
+    top_paths = retrieved_paths[:final_k] if final_k > 0 else retrieved_paths
+    docs = [
+        EvalDoc(file_path=m.file_path, start_line=m.start_line, score=float(m.score), source=m.source)
+        for m in matches[: max(1, final_k)]
+        if m.file_path
+    ]
+
+    rr = 0.0
+    for i, rp in enumerate(retrieved_paths, start=1):
+        if any(_path_matches(exp, rp) for exp in expected_paths):
+            rr = 1.0 / float(i)
+            break
+    top1_hit = bool(top_paths) and any(_path_matches(exp, top_paths[0]) for exp in expected_paths)
+    topk_hit = any(any(_path_matches(exp, rp) for exp in expected_paths) for rp in top_paths)
+    scores = _EntryScores(
+        reciprocal_rank=rr,
+        recall5=_recall_at_k(expected_paths, retrieved_paths, k=k_recall5),
+        recall10=_recall_at_k(expected_paths, retrieved_paths, k=k_recall10),
+        recall20=_recall_at_k(expected_paths, retrieved_paths, k=k_recall20),
+        prec5=_precision_at_k(expected_paths, retrieved_paths, k=k_prec5),
+        ndcg10=_ndcg_at_k(expected_paths, retrieved_paths, k=k_ndcg10),
+    )
+    result = EvalResult(
+        entry_id=entry.entry_id,
+        question=entry.question,
+        retrieved_paths=retrieved_paths,
+        expected_paths=expected_paths,
+        top_paths=top_paths,
+        top1_path=top_paths[:1],
+        top1_hit=top1_hit,
+        topk_hit=topk_hit,
+        reciprocal_rank=rr,
+        recall=_recall_at_k(expected_paths, retrieved_paths, k=len(retrieved_paths) if retrieved_paths else eval_k),
+        latency_ms=latency_ms,
+        duration_secs=latency_ms / 1000.0,
+        docs=docs,
+        debug=dict(debug or {}),
+        expected_answer=(str(entry.expected_answer).strip() or None) if entry.expected_answer else None,
+    )
+    return result, scores
+
+
 def _load_run(run_id: str) -> EvalRun:
-    path = _run_path(run_id)
+    try:
+        path = _run_path(run_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     if not path.exists():
         raise HTTPException(status_code=404, detail=f"run_id={run_id} not found")
     try:
@@ -197,7 +296,9 @@ async def evaluate_dataset_entries(
     include_vector: bool = True,
     include_sparse: bool = True,
     include_graph: bool = True,
+    cancel_event: asyncio.Event | None = None,
 ) -> EvalRun:
+    """Retrieve every entry through the real fusion lane; ``cancel_event`` aborts between entries."""
     if not dataset:
         raise ValueError(f"No eval_dataset entries found for repo_id={repo_id}")
 
@@ -251,6 +352,8 @@ async def evaluate_dataset_entries(
     started_at = datetime.now(UTC)
 
     for entry in entries:
+        if cancel_event is not None and cancel_event.is_set():
+            raise asyncio.CancelledError()
         t0 = perf_counter()
         matches = await fusion.search(
             [repo_id],
@@ -263,38 +366,15 @@ async def evaluate_dataset_entries(
         )
         latency_ms = (perf_counter() - t0) * 1000.0
         latencies.append(latency_ms)
-
-        retrieved_paths = _dedupe_preserve_order([m.file_path for m in matches if m.file_path])
-        expected_paths = list(entry.expected_paths or [])
-        top_paths = retrieved_paths[:final_k] if final_k > 0 else retrieved_paths
-
-        docs = [
-            EvalDoc(
-                file_path=m.file_path,
-                start_line=m.start_line,
-                score=float(m.score),
-                source=m.source,
-            )
-            for m in matches[: max(1, final_k)]
-            if m.file_path
-        ]
-
-        # Reciprocal rank: first correct hit among retrieved paths
-        rr = 0.0
-        for i, rp in enumerate(retrieved_paths, start=1):
-            if any(_path_matches(exp, rp) for exp in expected_paths):
-                rr = 1.0 / float(i)
-                break
-
-        top1_hit = bool(top_paths) and any(_path_matches(exp, top_paths[0]) for exp in expected_paths)
-        topk_hit = any(any(_path_matches(exp, rp) for exp in expected_paths) for rp in top_paths)
-
-        recall = _recall_at_k(expected_paths, retrieved_paths, k=len(retrieved_paths) if retrieved_paths else eval_k)
-        recall5 = _recall_at_k(expected_paths, retrieved_paths, k=k_recall5)
-        recall10 = _recall_at_k(expected_paths, retrieved_paths, k=k_recall10)
-        recall20 = _recall_at_k(expected_paths, retrieved_paths, k=k_recall20)
-        prec5 = _precision_at_k(expected_paths, retrieved_paths, k=k_prec5)
-        ndcg10 = _ndcg_at_k(expected_paths, retrieved_paths, k=k_ndcg10)
+        result_item, scores = _score_entry(
+            entry,
+            matches,
+            final_k=final_k,
+            eval_k=eval_k,
+            cfg=cfg,
+            latency_ms=latency_ms,
+            debug=getattr(fusion, "last_debug", None) or {},
+        )
 
         generated_answer: str | None = None
         if ragas_enabled and answer_route is not None:
@@ -329,32 +409,13 @@ async def evaluate_dataset_entries(
                 )
             )
 
-        rr_vals.append(rr)
-        recall5_vals.append(recall5)
-        recall10_vals.append(recall10)
-        recall20_vals.append(recall20)
-        prec5_vals.append(prec5)
-        ndcg10_vals.append(ndcg10)
-
-        results.append(
-            EvalResult(
-                entry_id=entry.entry_id,
-                question=entry.question,
-                retrieved_paths=retrieved_paths,
-                expected_paths=expected_paths,
-                top_paths=top_paths,
-                top1_path=top_paths[:1],
-                top1_hit=top1_hit,
-                topk_hit=topk_hit,
-                reciprocal_rank=rr,
-                recall=recall,
-                latency_ms=latency_ms,
-                duration_secs=latency_ms / 1000.0,
-                docs=docs,
-                debug=dict(getattr(fusion, "last_debug", None) or {}),
-                generated_answer=generated_answer,
-            )
-        )
+        rr_vals.append(scores.reciprocal_rank)
+        recall5_vals.append(scores.recall5)
+        recall10_vals.append(scores.recall10)
+        recall20_vals.append(scores.recall20)
+        prec5_vals.append(scores.prec5)
+        ndcg10_vals.append(scores.ndcg10)
+        results.append(result_item.model_copy(update={"generated_answer": generated_answer}))
 
     ragas_means: dict[str, float] = {}
     if ragas_enabled and ragas_samples:
@@ -747,61 +808,22 @@ async def eval_run_stream(
                 )
                 latency_ms = (perf_counter() - t0) * 1000.0
                 latencies.append(latency_ms)
-
-                retrieved_paths = _dedupe_preserve_order([m.file_path for m in matches if m.file_path])
-                expected_paths = list(entry.expected_paths or [])
-                top_paths = retrieved_paths[:run_final_k]
-                docs = [
-                    EvalDoc(
-                        file_path=m.file_path,
-                        start_line=m.start_line,
-                        score=float(m.score),
-                        source=m.source,
-                    )
-                    for m in matches[:run_final_k]
-                    if m.file_path
-                ]
-
-                rr = 0.0
-                for i, rp in enumerate(retrieved_paths, start=1):
-                    if any(_path_matches(exp, rp) for exp in expected_paths):
-                        rr = 1.0 / float(i)
-                        break
-
-                top1_hit = bool(top_paths) and any(_path_matches(exp, top_paths[0]) for exp in expected_paths)
-                topk_hit = any(any(_path_matches(exp, rp) for exp in expected_paths) for rp in top_paths)
-
-                recall = _recall_at_k(expected_paths, retrieved_paths, k=len(retrieved_paths) if retrieved_paths else eval_k)
-                recall5 = _recall_at_k(expected_paths, retrieved_paths, k=k_recall5)
-                recall10 = _recall_at_k(expected_paths, retrieved_paths, k=k_recall10)
-                recall20 = _recall_at_k(expected_paths, retrieved_paths, k=k_recall20)
-                prec5 = _precision_at_k(expected_paths, retrieved_paths, k=k_prec5)
-                ndcg10 = _ndcg_at_k(expected_paths, retrieved_paths, k=k_ndcg10)
-
-                rr_vals.append(rr)
-                recall5_vals.append(recall5)
-                recall10_vals.append(recall10)
-                recall20_vals.append(recall20)
-                prec5_vals.append(prec5)
-                ndcg10_vals.append(ndcg10)
-
-                results.append(
-                    EvalResult(
-                        entry_id=entry.entry_id,
-                        question=entry.question,
-                        retrieved_paths=retrieved_paths,
-                        expected_paths=expected_paths,
-                        top_paths=top_paths,
-                        top1_path=top_paths[:1],
-                        top1_hit=top1_hit,
-                        topk_hit=topk_hit,
-                        reciprocal_rank=rr,
-                        recall=recall,
-                        latency_ms=latency_ms,
-                        duration_secs=latency_ms / 1000.0,
-                        docs=docs,
-                    )
+                result_item, scores = _score_entry(
+                    entry,
+                    matches,
+                    final_k=int(run_final_k),
+                    eval_k=eval_k,
+                    cfg=cfg,
+                    latency_ms=latency_ms,
+                    debug=getattr(fusion, "last_debug", None) or {},
                 )
+                rr_vals.append(scores.reciprocal_rank)
+                recall5_vals.append(scores.recall5)
+                recall10_vals.append(scores.recall10)
+                recall20_vals.append(scores.recall20)
+                prec5_vals.append(scores.prec5)
+                ndcg10_vals.append(scores.ndcg10)
+                results.append(result_item)
 
                 _EVAL_STATUS["progress"] = idx
                 percent = (idx / total) * 100.0 if total else 0.0
@@ -911,7 +933,10 @@ async def get_eval_run(run_id: str) -> EvalRun:
 
 @router.delete("/eval/run/{run_id}")
 async def delete_eval_run(run_id: str) -> dict[str, Any]:
-    path = _run_path(run_id)
+    try:
+        path = _run_path(run_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     if not path.exists():
         raise HTTPException(status_code=404, detail=f"run_id={run_id} not found")
     path.unlink()

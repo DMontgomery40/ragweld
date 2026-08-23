@@ -44,10 +44,9 @@ export function Sidepanel() {
     setEmbeddingProvider(configEmbeddingType || 'openai');
     setEmbeddingModel(configEmbeddingModel);
 
-    const rrModeRaw = String(config.reranking?.reranker_mode || '').toLowerCase();
-    const rrMode = rrModeRaw === 'local' ? 'learning' : rrModeRaw;
+    const rrMode = String(config.reranking?.reranker_mode || '').toLowerCase();
     if (rrMode === 'cloud') {
-      setRerankProvider(String(config.reranking?.reranker_cloud_provider || 'cohere'));
+      setRerankProvider(String(config.reranking?.reranker_cloud_provider || 'litellm'));
       setRerankModel(String(config.reranking?.reranker_cloud_model || ''));
     } else if (rrMode === 'learning') {
       setRerankProvider('learning');
@@ -151,10 +150,6 @@ export function Sidepanel() {
           rerankingUpdates.reranker_mode = 'none';
         } else if (p === 'learning') {
           rerankingUpdates.reranker_mode = 'learning';
-        } else if (p === 'cohere' || p === 'voyage' || p === 'jina') {
-          rerankingUpdates.reranker_mode = 'cloud';
-          rerankingUpdates.reranker_cloud_provider = p;
-          if (rerankModel) rerankingUpdates.reranker_cloud_model = rerankModel;
         } else {
           rerankingUpdates.reranker_mode = 'cloud';
           rerankingUpdates.reranker_cloud_provider = p;

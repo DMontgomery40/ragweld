@@ -65,18 +65,20 @@ from server.main import app
 REQUESTS = [
     ("GET", "/api/repos", None),
     ("GET", "/api/corpora", None),
-    ("POST", "/api/search", {"query": "status", "repo_id": "missing", "include_vector": False, "include_sparse": False, "include_graph": False}),
-    ("POST", "/api/answer", {"query": "status", "repo_id": "missing", "include_vector": False, "include_sparse": False, "include_graph": False}),
-    ("POST", "/api/answer/stream", {"query": "status", "repo_id": "missing", "include_vector": False, "include_sparse": False, "include_graph": False}),
-    ("POST", "/api/chat", {"message": "status", "sources": {"corpus_ids": ["missing"]}, "include_vector": False, "include_sparse": False, "include_graph": False}),
-    ("POST", "/api/chat/stream", {"message": "status", "sources": {"corpus_ids": ["missing"]}, "include_vector": False, "include_sparse": False, "include_graph": False}),
-    ("GET", "/api/mcp/rag_search?q=status&corpus_id=missing", None),
+    ("POST", "/api/search", {"query": "How often is the Aurora salinity sensor array calibrated?", "repo_id": "missing", "include_vector": False, "include_sparse": False, "include_graph": False}),
+    ("POST", "/api/answer", {"query": "How often is the Aurora salinity sensor array calibrated?", "repo_id": "missing", "include_vector": False, "include_sparse": False, "include_graph": False}),
+    ("POST", "/api/answer/stream", {"query": "How often is the Aurora salinity sensor array calibrated?", "repo_id": "missing", "include_vector": False, "include_sparse": False, "include_graph": False}),
+    ("POST", "/api/chat", {"message": "How often is the Aurora salinity sensor array calibrated?", "sources": {"corpus_ids": ["missing"]}, "include_vector": False, "include_sparse": False, "include_graph": False}),
+    ("POST", "/api/chat/stream", {"message": "How often is the Aurora salinity sensor array calibrated?", "sources": {"corpus_ids": ["missing"]}, "include_vector": False, "include_sparse": False, "include_graph": False}),
+    ("GET", "/api/mcp/rag_search?q=How%20often%20is%20the%20Aurora%20salinity%20sensor%20array%20calibrated%3F&corpus_id=missing", None),
     ("GET", "/api/config?corpus_id=missing", None),
     ("GET", "/api/config/validate?corpus_id=missing", None),
     ("GET", "/api/graph/missing/stats", None),
     ("GET", "/api/lineage/current?corpus_id=missing", None),
     ("POST", "/api/feedback?corpus_id=missing", {"event_id": "outage-test", "signal": "thumbsup"}),
     ("POST", "/api/reranker/click?corpus_id=missing", {"event_id": "outage-click", "doc_id": "missing.md"}),
+    ("POST", "/api/reranker/mine?corpus_id=missing", None),
+    ("POST", "/api/synthetic/run/start", {"corpus_id": "missing", "provider": "grounded_qa", "recipe": "eval_dataset", "generator_model": "litellm:openai.gpt-5.6-luna", "judge_model": "litellm:openai.gpt-5.6-luna"}),
 ]
 
 async def main():
@@ -110,7 +112,7 @@ asyncio.run(main())
 
     assert result.returncode == 0, result.stdout + result.stderr
     rows = json.loads(result.stdout.strip().splitlines()[-1])
-    assert len(rows) == 14
+    assert len(rows) == 16
     for row in rows:
         assert row["status"] == 503, row
         detail = row["body"].get("detail")
@@ -137,7 +139,7 @@ async def main():
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         response = await client.post(
             "/api/chat",
-            json={"message": "hello", "sources": {"corpus_ids": []}},
+            json={"message": "How often is the Aurora salinity sensor array calibrated?", "sources": {"corpus_ids": []}},
         )
     print(json.dumps({"status": response.status_code, "body": response.json()}))
 

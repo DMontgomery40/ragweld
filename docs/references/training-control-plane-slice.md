@@ -131,3 +131,12 @@ blocker. No cloud GPU spend without explicit authorization.
   corpus' `training.ragweld_agent_base_model`/`ragweld_agent_backend`, so a
   historical run trained on a retired base cannot overwrite the active adapter.
   The baseline evaluation skips (and logs) an incompatible active artifact.
+- Both trainers decide automatic promotion through
+  `server/training/promotion.py::decide_auto_promotion` (pure, tested in
+  `tests/unit/test_reranker_split.py`): no held-out split -> never automatic;
+  with `promote_if_improves`, a `measured` baseline must be beaten by the
+  epsilon in the metric's direction (MRR up, eval loss down), a `failed`
+  baseline evaluation or a missing final measurement refuses (unknown quality
+  is not absence), and only an `absent` or `incompatible` active artifact is
+  replaced unmeasured. The refusal reason is in the run log and, for the
+  reranker, in the `promotion_skipped` diagnostic (`baseline_state`).

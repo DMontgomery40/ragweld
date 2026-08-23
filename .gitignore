@@ -50,6 +50,11 @@ tmp/
 .tmp-pg/
 .ragweld-runtime/
 models/learning-agent-*/
+models/learning-reranker-*/
+# promotion transaction siblings (flock file, staged/retained trees) next to the active artifacts
+models/.*.promote.lock
+models/.tmp_*/
+models/.bak_*/
 site/
 mkdocs-docs-plan.md
 mkdocs-docs-llm.patch

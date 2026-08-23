@@ -368,7 +368,6 @@ def train_mlx_qwen3_agent(
             return
 
     def _train_sync() -> dict[str, object]:
-        import json
 
         import mlx.core as _mx
         import mlx.nn as _nn
@@ -774,7 +773,9 @@ def train_mlx_qwen3_agent(
 
             # End-of-epoch evaluation on dev set.
             ev = _eval_loss()
-            if ev is not None and math.isfinite(float(ev)):
+            if ev is not None:
+                # Emit the raw value: a NaN/inf eval loss is a *broken* evaluation that the control
+                # plane must see (it refuses promotion), not a silently missing one.
                 _emit("metrics", {"step": int(global_step), "epoch": float(epoch + 1), "metrics": {"eval_loss": float(ev)}})
 
         # Save adapter artifact.

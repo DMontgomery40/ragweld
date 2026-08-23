@@ -4,8 +4,8 @@ This module follows the `runtime_gateway.py` pattern: domain-specific Pydantic
 models defined here, re-exported through `tribrid_config_model.py` so the type
 generation chain stays intact.
 
-Covers: quality gate config, generator/judge LLM parameters, failure policy,
-run degradation tracking.
+Covers: quality gate config and generator/judge LLM parameters. Generator and
+judge failures fail the run; there is no fallback to record.
 """
 
 from __future__ import annotations
@@ -69,9 +69,14 @@ class SyntheticGeneratorConfig(BaseModel):
         le=500,
         description="Max lines of source chunk content sent as context to generator/judge",
     )
-    fail_on_error: bool = Field(
-        default=True,
-        description="If True, fail the run when generator LLM is unreachable instead of silently falling back to deterministic extraction.",
+    concurrency: int = Field(
+        default=4,
+        ge=1,
+        le=16,
+        description=(
+            "Concurrent generator/judge requests sent to the LiteLLM gateway per synthetic run. "
+            "Forced to 1 when the selected alias is the single-stream local vLLM serving row."
+        ),
     )
 
 
@@ -90,10 +95,6 @@ class SyntheticJudgeConfig(BaseModel):
         le=4000,
         description="Max tokens for judge LLM response",
     )
-    fail_on_error: bool = Field(
-        default=True,
-        description="If True, fail the run when judge LLM is unreachable instead of silently auto-passing all items.",
-    )
 
 
 class SyntheticConfig(BaseModel):
@@ -110,34 +111,4 @@ class SyntheticConfig(BaseModel):
     judge: SyntheticJudgeConfig = Field(
         default_factory=SyntheticJudgeConfig,
         description="LLM judge parameters for synthetic curation",
-    )
-
-
-class SyntheticRunDegradation(BaseModel):
-    """Degradation flags -- honest about what actually happened during a synthetic run."""
-
-    generator_fallback_used: bool = Field(
-        default=False,
-        description="True if generator LLM failed and deterministic fallback was used",
-    )
-    judge_fallback_used: bool = Field(
-        default=False,
-        description="True if judge LLM failed and all items were auto-passed",
-    )
-    seed_hydration_used: bool = Field(
-        default=False,
-        description="True if eval dataset was populated from seed dataset instead of generation",
-    )
-    seed_hydration_count: int = Field(
-        default=0,
-        ge=0,
-        description="Number of items hydrated from seed dataset",
-    )
-    degraded: bool = Field(
-        default=False,
-        description="True if any fallback or degradation occurred during the run",
-    )
-    reasons: list[str] = Field(
-        default_factory=list,
-        description="Human-readable list of degradation reasons",
     )

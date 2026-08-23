@@ -26,7 +26,7 @@ async def test_runtime_capabilities_endpoint_exposes_current_runtime_surface(cli
     assert embedding_providers == {"openai", "mlx", "local", "huggingface"}
 
     reranker_cloud_providers = {str(item.get("id") or "") for item in body["reranker"]["cloud_providers"]}
-    assert reranker_cloud_providers == {"cohere"}
+    assert reranker_cloud_providers == {"litellm", "cohere"}
 
     reranker_learning_backends = {str(item.get("id") or "") for item in body["reranker"]["learning_backends"]}
     assert reranker_learning_backends == {"mlx_qwen3"}

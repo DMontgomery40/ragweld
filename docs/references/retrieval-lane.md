@@ -71,6 +71,27 @@ write.
 - Rerank, scoring boosts, dedup/MMR/neighbor expansion and the semantic cache
   operate on `ChunkMatch` lists and are storage-agnostic. MMR reads dense
   vectors back from Qdrant.
+- Rerank (`server/retrieval/rerank.py`): `reranking.reranker_mode` is `none`,
+  `cloud` or `learning`. `cloud` with `reranker_cloud_provider=litellm`
+  (default) sends the query plus the top-`reranker_cloud_top_n` snippets in one
+  request to the gateway alias in `reranker_cloud_model`
+  (`server/retrieval/gateway_reranker.py`; prompt
+  `system_prompts.gateway_rerank`). Candidates are serialized as JSON data rows
+  with opaque per-request ids and the alias must answer with `{id, score}`
+  objects forming an exact bijection — a missing, unknown, duplicated or
+  non-numeric entry is a rerank failure, not a silent passthrough, and passage
+  text cannot impersonate a marker. `cohere` calls the Cohere rerank API. Both
+  blend min-max-normalized scores with the fusion score by
+  `tribrid_reranker_alpha`, break ties by the fusion score (never the chunk
+  id), treat uniform scores (including a single candidate) as neutral
+  (`reranker_neutral`, fusion order and scores preserved), and stamp
+  `reranker_*` metadata on every candidate. The config schema admits only
+  `cloud|learning|none` and `litellm|cohere`; stale aliases such as `local`
+  fail validation instead of being normalized. A gateway that cannot be
+  resolved (disabled, unknown alias, no credential) is reported as
+  `rerank_skipped_reason=gateway_unavailable` in the query log and trace. The
+  `learning` mode loads the MLX LoRA reranker on the host; after the 2026-08-22
+  crashes the operator rule is to keep reranking on cloud models.
 - Failure semantics: Qdrant unreachable -> typed 503 `dependency_unavailable`
   (`qdrant`); alias missing for a corpus that has been indexed -> typed 503
   `required_retrieval_leg_failed`; alias missing for a never-indexed corpus ->

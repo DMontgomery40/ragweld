@@ -1,22 +1,37 @@
+import asyncio
 import json
 import shutil
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+import pytest_asyncio
 from httpx import AsyncClient
 
-from server.models.tribrid_config_model import CorpusEvalProfile, RerankerTrainMetricEvent, RerankerTrainRun, TriBridConfig
+from server.models.tribrid_config_model import (
+    CorpusEvalProfile,
+    RerankerTrainMetricEvent,
+    RerankerTrainRun,
+    TriBridConfig,
+)
 
 
-@pytest.fixture
-def patch_scoped_config(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Avoid requiring a live Postgres for scoped config in API tests."""
+@pytest_asyncio.fixture
+async def real_corpus(client: AsyncClient, tmp_path: Path):
+    """Register real corpora (empty on-disk roots) so scoped config resolves through Postgres; no mocks."""
+    created: list[str] = []
 
-    async def _fake_load_scoped_config(repo_id: str | None = None) -> TriBridConfig:  # noqa: ARG001
-        return TriBridConfig()
+    async def _ensure(corpus_id: str) -> None:
+        root = tmp_path / corpus_id
+        root.mkdir(parents=True, exist_ok=True)
+        res = await client.post("/api/corpora", json={"corpus_id": corpus_id, "name": corpus_id, "path": str(root)})
+        assert res.status_code == 200, res.text
+        created.append(corpus_id)
 
-    monkeypatch.setattr("server.api.reranker.load_scoped_config", _fake_load_scoped_config)
+    yield _ensure
+
+    for corpus_id in created:
+        await client.delete(f"/api/corpora/{corpus_id}")
 
 
 def _repo_root() -> Path:
@@ -40,6 +55,19 @@ def _parse_dt(s: str) -> datetime:
 
 def _iso(dt: datetime) -> str:
     return dt.astimezone(UTC).isoformat().replace("+00:00", "Z")
+
+
+async def _wait_for_terminal_run(client: AsyncClient, run_id: str, *, timeout_s: float = 30.0) -> dict:
+    """Poll the real run endpoint until the background job is terminal (no rewriting a live run)."""
+    deadline = asyncio.get_event_loop().time() + timeout_s
+    while True:
+        r = await client.get(f"/api/reranker/train/run/{run_id}")
+        assert r.status_code == 200, r.text
+        body = r.json()
+        if str(body.get("status")) in {"completed", "failed", "cancelled"}:
+            return body
+        assert asyncio.get_event_loop().time() < deadline, f"run {run_id} still {body.get('status')}"
+        await asyncio.sleep(0.1)
 
 
 def _pstdev(values: list[float]) -> float:
@@ -66,15 +94,17 @@ async def test_reranker_train_stream_route_not_shadowed(client: AsyncClient) -> 
     assert any("run_id" in str(item.get("loc", "")) for item in body.get("detail", []))
 
 
+@pytest.mark.requires_postgres
 @pytest.mark.asyncio
-async def test_reranker_train_profile_deterministic(client: AsyncClient, patch_scoped_config: None) -> None:  # noqa: ARG001
+async def test_reranker_train_profile_deterministic(client: AsyncClient, real_corpus) -> None:
     corpus_id = "pytest_reranker_train_profile"
+    await real_corpus(corpus_id)
     path = _dataset_path(corpus_id)
     path.write_text(
         json.dumps(
             [
-                {"question": "q1", "expected_paths": ["a.py"]},
-                {"question": "q2", "expected_paths": ["b.py", "c.py"]},
+                {"question": "How often is the Aurora salinity sensor array calibrated?", "expected_paths": ["a.py"]},
+                {"question": "Which team owns the Aurora incident playbook escalation steps?", "expected_paths": ["b.py", "c.py"]},
             ],
             indent=2,
             sort_keys=True,
@@ -97,15 +127,17 @@ async def test_reranker_train_profile_deterministic(client: AsyncClient, patch_s
         path.unlink(missing_ok=True)
 
 
+@pytest.mark.requires_postgres
 @pytest.mark.asyncio
-async def test_reranker_train_start_persists_run_and_metrics(client: AsyncClient, patch_scoped_config: None) -> None:  # noqa: ARG001
+async def test_reranker_train_start_persists_run_and_metrics(client: AsyncClient, real_corpus) -> None:
     corpus_id = "pytest_reranker_train_start"
+    await real_corpus(corpus_id)
     dataset_path = _dataset_path(corpus_id)
     dataset_path.write_text(
         json.dumps(
             [
-                {"question": "q1", "expected_paths": ["a.py"]},
-                {"question": "q2", "expected_paths": ["b.py"]},
+                {"question": "How often is the Aurora salinity sensor array calibrated?", "expected_paths": ["a.py"]},
+                {"question": "Which team owns the Aurora incident playbook escalation steps?", "expected_paths": ["b.py"]},
             ],
             indent=2,
             sort_keys=True,
@@ -147,16 +179,18 @@ async def test_reranker_train_start_persists_run_and_metrics(client: AsyncClient
             shutil.rmtree(run_dir, ignore_errors=True)
 
 
+@pytest.mark.requires_postgres
 @pytest.mark.asyncio
-async def test_reranker_train_diff_computes_and_rejects_incompatible(client: AsyncClient, patch_scoped_config: None) -> None:  # noqa: ARG001
+async def test_reranker_train_diff_computes_and_rejects_incompatible(client: AsyncClient, real_corpus) -> None:
     corpus_id = "pytest_reranker_train_diff"
+    await real_corpus(corpus_id)
     dataset_path = _dataset_path(corpus_id)
     dataset_path.write_text(
         json.dumps(
             [
-                {"question": "q1", "expected_paths": ["a.py"]},
-                {"question": "q2", "expected_paths": ["b.py"]},
-                {"question": "q3", "expected_paths": ["c.py"]},
+                {"question": "How often is the Aurora salinity sensor array calibrated?", "expected_paths": ["a.py"]},
+                {"question": "Which team owns the Aurora incident playbook escalation steps?", "expected_paths": ["b.py"]},
+                {"question": "What does the Aurora data pipeline do with rejected sensor frames?", "expected_paths": ["c.py"]},
             ],
             indent=2,
             sort_keys=True,
@@ -175,6 +209,7 @@ async def test_reranker_train_diff_computes_and_rejects_incompatible(client: Asy
 
         baseline_dir = _runs_dir() / baseline_run_id
         run_dirs.append(baseline_dir)
+        await _wait_for_terminal_run(client, baseline_run_id)
 
         baseline_json = json.loads((baseline_dir / "run.json").read_text(encoding="utf-8"))
         baseline_json["status"] = "completed"
@@ -189,6 +224,7 @@ async def test_reranker_train_diff_computes_and_rejects_incompatible(client: Asy
         current_run_id = str(c.json()["run_id"])
         current_dir = _runs_dir() / current_run_id
         run_dirs.append(current_dir)
+        await _wait_for_terminal_run(client, current_run_id)
 
         current_json = json.loads((current_dir / "run.json").read_text(encoding="utf-8"))
         current_json["status"] = "completed"
@@ -284,17 +320,16 @@ async def test_reranker_train_diff_computes_and_rejects_incompatible(client: Asy
             shutil.rmtree(d, ignore_errors=True)
 
 
+@pytest.mark.requires_postgres
 @pytest.mark.asyncio
-async def test_reranker_train_start_blocks_parallel_runs_same_corpus(
-    client: AsyncClient,
-    patch_scoped_config: None,  # noqa: ARG001
-) -> None:
+async def test_reranker_train_start_blocks_parallel_runs_same_corpus(client: AsyncClient, real_corpus) -> None:
     corpus_id = "pytest_reranker_parallel_block"
+    await real_corpus(corpus_id)
     dataset_path = _dataset_path(corpus_id)
     dataset_path.write_text(
         json.dumps(
             [
-                {"question": "q1", "expected_paths": ["a.py"]},
+                {"question": "How often is the Aurora salinity sensor array calibrated?", "expected_paths": ["a.py"]},
             ],
             indent=2,
             sort_keys=True,
@@ -320,17 +355,16 @@ async def test_reranker_train_start_blocks_parallel_runs_same_corpus(
             shutil.rmtree(run_dir, ignore_errors=True)
 
 
+@pytest.mark.requires_postgres
 @pytest.mark.asyncio
-async def test_reranker_legacy_train_conflict_resets_status(
-    client: AsyncClient,
-    patch_scoped_config: None,  # noqa: ARG001
-) -> None:
+async def test_reranker_legacy_train_conflict_resets_status(client: AsyncClient, real_corpus) -> None:
     corpus_id = "pytest_reranker_legacy_conflict"
+    await real_corpus(corpus_id)
     dataset_path = _dataset_path(corpus_id)
     dataset_path.write_text(
         json.dumps(
             [
-                {"question": "q1", "expected_paths": ["a.py"]},
+                {"question": "How often is the Aurora salinity sensor array calibrated?", "expected_paths": ["a.py"]},
             ],
             indent=2,
             sort_keys=True,

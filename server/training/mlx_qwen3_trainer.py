@@ -99,42 +99,64 @@ def deterministic_split(items: list[T], *, dev_split: float = 0.1, seed: int = 0
     return (train, dev)
 
 
+def deterministic_split_by_query(
+    items: list[MaterializedTriplet], *, dev_split: float = 0.1, seed: int = 0
+) -> tuple[list[MaterializedTriplet], list[MaterializedTriplet]]:
+    """Split triplets into train/dev by *query* so a held-out question never appears in both halves.
+
+    Mining emits several rows per question (one per hard negative); splitting rows
+    would leak every dev question into training and inflate the dev metric.
+    """
+    groups: dict[str, list[MaterializedTriplet]] = {}
+    for item in items:
+        groups.setdefault(" ".join(str(item.query or "").split()).casefold(), []).append(item)
+    keys = list(groups.keys())
+    random.Random(int(seed)).shuffle(keys)
+
+    ds = max(0.0, min(0.5, float(dev_split)))
+    # At least one held-out question whenever two or more exist; a single question
+    # cannot be held out (the caller must refuse to promote without a dev set).
+    dev_n = min(max(1, int(round(len(keys) * ds))), max(0, len(keys) - 1)) if len(keys) >= 2 else 0
+    dev_keys = set(keys[:dev_n])
+    train = [row for key in keys if key not in dev_keys for row in groups[key]]
+    dev = [row for key in keys if key in dev_keys for row in groups[key]]
+    if not train:
+        return dev, []
+    return train, dev
+
+
 def triplets_to_pairs(
     triplets: list[MaterializedTriplet],
     *,
     negative_ratio: int = 5,
 ) -> list[LabeledPair]:
+    """One positive pair per (query, positive document) plus up to ``negative_ratio`` distinct negatives.
+
+    Mined rows share a positive across several hard negatives; grouping keeps the
+    positive from being duplicated once per negative and applies the ratio once.
+    Only negatives mined for that query are used — nothing is borrowed from other
+    queries, so every negative label comes from the query's own retrieval trace.
+    """
     # Product policy: cap generated negatives at 5:1 even if config allows larger.
-    nr = int(negative_ratio)
-    nr = max(1, min(5, nr))
-    out: list[LabeledPair] = []
-    r = random.Random(0)
-    global_neg_pool = [str(t.negative_text) for t in triplets if str(t.negative_text or "").strip()]
+    nr = max(1, min(5, int(negative_ratio)))
 
+    groups: dict[tuple[str, str], list[str]] = {}
+    order: list[tuple[str, str]] = []
     for t in triplets:
-        pos_doc = str(t.positive_text)
-        out.append(LabeledPair(query=t.query, document=t.positive_text, label=1))
+        key = (str(t.query), str(t.positive_text))
+        if key not in groups:
+            groups[key] = []
+            order.append(key)
+        neg = str(t.negative_text or "").strip()
+        if neg and neg not in groups[key]:
+            groups[key].append(neg)
 
-        negatives: list[str] = []
-        mined_neg = str(t.negative_text)
-        if mined_neg.strip():
-            negatives.append(mined_neg)
-
-        need = max(0, nr - len(negatives))
-        if need > 0:
-            pool = [x for x in global_neg_pool if x != pos_doc and x not in negatives]
-            if pool:
-                if len(pool) <= need:
-                    negatives.extend(pool)
-                else:
-                    negatives.extend(r.sample(pool, need))
-
-        # Backstop: if pool is exhausted, duplicate mined negative to honor ratio.
-        while negatives and len(negatives) < nr:
-            negatives.append(negatives[-1])
-
-        for neg_doc in negatives[:nr]:
-            out.append(LabeledPair(query=t.query, document=neg_doc, label=0))
+    out: list[LabeledPair] = []
+    for query, pos_doc in order:
+        out.append(LabeledPair(query=query, document=pos_doc, label=1))
+        negatives = [n for n in groups[(query, pos_doc)] if n != pos_doc][:nr]
+        for neg_doc in negatives:
+            out.append(LabeledPair(query=query, document=neg_doc, label=0))
     return out
 
 

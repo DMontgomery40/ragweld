@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import json
 import os
 import subprocess
+import threading
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
@@ -555,16 +557,133 @@ def list_aliases(*, repo_id: str, root: Path | None = None) -> list[LineageAlias
     return out
 
 
+class _RepoLineageLock:
+    """Reentrant (per thread) interprocess lock for one repository's aliases and bundles.
+
+    Every alias mutation (`create_or_update_bundle`, `set_alias`, `restore_aliases`) takes it, and a
+    promotion transaction holds it across snapshot -> write -> compensation, so compensation can
+    never overwrite an unrelated concurrent alias move: there are no concurrent alias writers for
+    the repository while it is held. Reentrancy lets the transaction's own lineage writes proceed.
+    """
+
+    def __init__(self, repo_id: str, root: Path | None) -> None:
+        self.path = lineage_root(root) / "locks" / f"{_safe_repo_id(repo_id)}.lock"
+        self._guard = threading.Lock()
+        self._owner: int | None = None
+        self._depth = 0
+        self._handle = None
+
+    def acquire(self) -> None:
+        me = threading.get_ident()
+        with self._guard:
+            if self._owner == me:
+                self._depth += 1
+                return
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        handle = self.path.open("a+", encoding="utf-8")
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        with self._guard:
+            self._handle = handle
+            self._owner = me
+            self._depth = 1
+
+    def release(self) -> None:
+        with self._guard:
+            if self._owner != threading.get_ident():
+                return
+            self._depth -= 1
+            if self._depth > 0:
+                return
+            handle, self._handle = self._handle, None
+            self._owner = None
+        if handle is not None:
+            try:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+            finally:
+                handle.close()
+
+    def __enter__(self) -> _RepoLineageLock:
+        self.acquire()
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        self.release()
+
+
+_REPO_LOCKS: dict[tuple[str, str], _RepoLineageLock] = {}
+_REPO_LOCKS_GUARD = threading.Lock()
+
+
+def repo_lineage_lock(repo_id: str, *, root: Path | None = None) -> _RepoLineageLock:
+    key = (str(lineage_root(root)), _safe_repo_id(repo_id))
+    with _REPO_LOCKS_GUARD:
+        lock = _REPO_LOCKS.get(key)
+        if lock is None:
+            lock = _RepoLineageLock(repo_id, root)
+            _REPO_LOCKS[key] = lock
+        return lock
+
+
+def snapshot_aliases(
+    *, repo_id: str, names: tuple[LineageAliasName, ...], root: Path | None = None
+) -> dict[LineageAliasName, str | None]:
+    """The bundle each alias points at right now (None when unset), for compensation on rollback."""
+    return {name: (alias.bundle_id if (alias := load_alias(repo_id, name, root=root)) is not None else None) for name in names}
+
+
+def restore_aliases(
+    *,
+    repo_id: str,
+    snapshot: dict[LineageAliasName, str | None],
+    only_if_pointing_at: str | None = None,
+    root: Path | None = None,
+) -> list[LineageAliasName]:
+    """Compensate a failed promotion's alias moves and return the aliases that were put back.
+
+    A promotion that is rolled back after `attach_refs_to_current_bundle(..., extra_aliases=("promoted",))`
+    must not leave lineage claiming the failed candidate is promoted. Compensation is
+    compare-and-swap: an alias is only moved back when it currently points at the failed
+    transaction's bundle (`only_if_pointing_at`), or — when that bundle id is unknown because
+    the failure happened mid-write — when it no longer matches the snapshot. An alias that a
+    concurrent, unrelated update moved elsewhere is left alone.
+    """
+    restored: list[LineageAliasName] = []
+    with repo_lineage_lock(repo_id, root=root):
+        for name, bundle_id in snapshot.items():
+            restored.extend(_restore_one_alias(repo_id, name, bundle_id, only_if_pointing_at, root))
+    return restored
+
+
+def _restore_one_alias(
+    repo_id: str, name: LineageAliasName, bundle_id: str | None, only_if_pointing_at: str | None, root: Path | None
+) -> list[LineageAliasName]:
+    current = load_alias(repo_id, name, root=root)
+    current_id = current.bundle_id if current is not None else None
+    if current_id == bundle_id:
+        return []  # untouched
+    if only_if_pointing_at is not None and current_id != only_if_pointing_at:
+        return []  # moved by someone else; not ours to undo
+    if bundle_id is not None:
+        # The snapshot pointer was valid when taken; compensation must not depend on a bundle
+        # re-read succeeding mid-failure, so the alias file is written back directly.
+        value = LineageAlias(alias=name, repo_id=repo_id, bundle_id=bundle_id, updated_at=datetime.now(UTC))
+        _atomic_write_json(_alias_path(repo_id, name, root=root), value.model_dump(mode="json", by_alias=True))
+    else:
+        _alias_path(repo_id, name, root=root).unlink(missing_ok=True)
+    return [name]
+
+
 def set_alias(*, repo_id: str, alias: LineageAliasName, bundle_id: str, root: Path | None = None) -> LineageAlias:
-    load_bundle(repo_id, bundle_id, root=root)
-    value = LineageAlias(
-        alias=alias,
-        repo_id=repo_id,
-        bundle_id=bundle_id,
-        updated_at=datetime.now(UTC),
-    )
-    _atomic_write_json(_alias_path(repo_id, alias, root=root), value.model_dump(mode="json", by_alias=True))
-    return value
+    with repo_lineage_lock(repo_id, root=root):
+        load_bundle(repo_id, bundle_id, root=root)
+        value = LineageAlias(
+            alias=alias,
+            repo_id=repo_id,
+            bundle_id=bundle_id,
+            updated_at=datetime.now(UTC),
+        )
+        _atomic_write_json(_alias_path(repo_id, alias, root=root), value.model_dump(mode="json", by_alias=True))
+        return value
 
 
 def _carry_ref(current: LineageBundle | None, attr: str, incoming: LineageRef | None) -> LineageRef | None:
@@ -574,6 +693,36 @@ def _carry_ref(current: LineageBundle | None, attr: str, incoming: LineageRef | 
 
 
 def create_or_update_bundle(
+    *,
+    repo_id: str,
+    prompt_set: LineageRef | None = None,
+    config_snapshot: LineageRef | None = None,
+    spec_snapshot: LineageRef | None = None,
+    model_catalog_snapshot: LineageRef | None = None,
+    runtime_model_set: LineageRef | None = None,
+    eval_dataset: LineageRef | None = None,
+    benchmark_runs: list[LineageRef] | None = None,
+    eval_runs: list[LineageRef] | None = None,
+    synthetic_runs: list[LineageRef] | None = None,
+    synthetic_artifacts: list[LineageRef] | None = None,
+    published_artifacts: list[LineageRef] | None = None,
+    reranker_train_runs: list[LineageRef] | None = None,
+    reranker_model_artifacts: list[LineageRef] | None = None,
+    agent_train_runs: list[LineageRef] | None = None,
+    agent_model_artifacts: list[LineageRef] | None = None,
+    metadata: dict[str, Any] | None = None,
+    preserve_current: bool = True,
+    preserve_attached_refs: bool = False,
+    set_aliases_to: tuple[LineageAliasName, ...] = (),
+    root: Path | None = None,
+) -> tuple[LineageBundle, list[LineageAlias]]:
+    # Bundle + alias writes for one repository are serialized with the promotion transactions that
+    # compensate them (see `repo_lineage_lock`); the lock is reentrant for the transaction's own writes.
+    with repo_lineage_lock(repo_id, root=root):
+        return _create_or_update_bundle_locked(repo_id=repo_id, prompt_set=prompt_set, config_snapshot=config_snapshot, spec_snapshot=spec_snapshot, model_catalog_snapshot=model_catalog_snapshot, runtime_model_set=runtime_model_set, eval_dataset=eval_dataset, benchmark_runs=benchmark_runs, eval_runs=eval_runs, synthetic_runs=synthetic_runs, synthetic_artifacts=synthetic_artifacts, published_artifacts=published_artifacts, reranker_train_runs=reranker_train_runs, reranker_model_artifacts=reranker_model_artifacts, agent_train_runs=agent_train_runs, agent_model_artifacts=agent_model_artifacts, metadata=metadata, preserve_current=preserve_current, preserve_attached_refs=preserve_attached_refs, set_aliases_to=set_aliases_to, root=root)
+
+
+def _create_or_update_bundle_locked(
     *,
     repo_id: str,
     prompt_set: LineageRef | None = None,

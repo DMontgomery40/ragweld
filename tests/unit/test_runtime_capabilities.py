@@ -7,9 +7,9 @@ from pathlib import Path
 from server.models.chat_config import ChatConfig, LiteLLMConfig
 from server.models.tribrid_config_model import TriBridConfig
 from server.runtime_capabilities import (
+    SUPPORTED_CHUNKING_STRATEGIES,
     SUPPORTED_PROVIDER_BACKEND_EMBEDDING_PROVIDERS,
     SUPPORTED_RERANKER_CLOUD_PROVIDERS,
-    SUPPORTED_CHUNKING_STRATEGIES,
     build_runtime_capabilities_response,
     build_runtime_capabilities_response_for_config,
     validate_catalog_selection_metadata,
@@ -78,3 +78,12 @@ def test_repo_catalog_selection_metadata_matches_runtime_rules() -> None:
 
     errors = validate_catalog_selection_metadata(models)
     assert not errors
+
+
+def test_reranker_cloud_provider_schema_pattern_matches_runtime_options() -> None:
+    """The config schema pattern and the runtime capability set must enumerate the same providers."""
+    from server.models.tribrid_config_model import RerankingConfig
+
+    pattern = str(RerankingConfig.model_fields["reranker_cloud_provider"].metadata[0].pattern)
+    alternatives = set(pattern.strip("^$()").split("|"))
+    assert alternatives == SUPPORTED_RERANKER_CLOUD_PROVIDERS

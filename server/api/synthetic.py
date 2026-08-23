@@ -9,6 +9,12 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, Query, Request
 from starlette.responses import StreamingResponse
 
+from server.api.dependency_errors import (
+    DEPENDENCY_UNAVAILABLE_RESPONSES,
+    dependency_unavailable_http_exception,
+    raise_postgres_unavailable_if_applicable,
+)
+from server.dependency_errors import DependencyUnavailableError
 from server.models.tribrid_config_model import (
     OkResponse,
     SyntheticArtifactKind,
@@ -20,8 +26,11 @@ from server.models.tribrid_config_model import (
     SyntheticRunsResponse,
     SyntheticRunStartRequest,
 )
+from server.services.config_store import CorpusNotFoundError
 from server.synthetic import orchestrator
 from server.synthetic.publish import (
+    PublishRollbackError,
+    PublishRolledBackError,
     publish_config_patch,
     publish_eval_dataset,
     publish_keywords,
@@ -29,14 +38,17 @@ from server.synthetic.publish import (
     publish_triplets,
 )
 from server.synthetic.storage import events_path
+from server.training.triplet_rows import TripletRowsCorruptError
 
 router = APIRouter(tags=["synthetic"])
 
 
-@router.post("/synthetic/run/start", response_model=SyntheticRun)
+@router.post("/synthetic/run/start", response_model=SyntheticRun, responses=DEPENDENCY_UNAVAILABLE_RESPONSES)
 async def synthetic_run_start(request: SyntheticRunStartRequest) -> SyntheticRun:
     try:
         return await orchestrator.start_run(request)
+    except CorpusNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
     except RuntimeError as e:
         detail = str(e)
         if "already active" in detail:
@@ -44,6 +56,9 @@ async def synthetic_run_start(request: SyntheticRunStartRequest) -> SyntheticRun
         raise HTTPException(status_code=400, detail=detail) from e
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
+    except Exception as e:
+        raise_postgres_unavailable_if_applicable(e, boundary="Synthetic run start")
+        raise
 
 
 @router.get("/synthetic/runs", response_model=SyntheticRunsResponse)
@@ -51,8 +66,8 @@ async def synthetic_runs(
     corpus_id: str | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=500),
 ) -> SyntheticRunsResponse:
-    runs = orchestrator.get_runs(corpus_id=corpus_id, limit=limit)
-    return SyntheticRunsResponse(ok=True, runs=runs)
+    runs, unreadable = await asyncio.to_thread(orchestrator.get_runs, corpus_id=corpus_id, limit=limit)
+    return SyntheticRunsResponse(ok=True, runs=runs, unreadable=unreadable)
 
 
 @router.get("/synthetic/run/stream")
@@ -273,13 +288,26 @@ async def synthetic_publish_keywords(run_id: str) -> SyntheticPublishResponse:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
 
-@router.post("/synthetic/run/{run_id}/publish/triplets", response_model=SyntheticPublishResponse)
+@router.post("/synthetic/run/{run_id}/publish/triplets", response_model=SyntheticPublishResponse, responses=DEPENDENCY_UNAVAILABLE_RESPONSES)
 async def synthetic_publish_triplets(run_id: str) -> SyntheticPublishResponse:
+    """Publish a run's triplets artifact. Status codes say what happened to the live file:
+    400 = refused before any change (empty artifact, gate), 409 = corrupt artifact / gate failure,
+    503 = the lineage store was unavailable and the previous file was put back, 500 = a
+    filesystem failure (body states whether the previous file was restored)."""
     try:
         run = orchestrator.get_run(run_id)
         return await publish_triplets(run)
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
+    except TripletRowsCorruptError as e:
+        raise HTTPException(status_code=409, detail=f"TRIPLETS_ARTIFACT_CORRUPT: {e}") from e
+    except PublishRollbackError as e:
+        raise HTTPException(status_code=500, detail=f"PUBLISH_ROLLBACK_FAILED: {e}") from e
+    except PublishRolledBackError as e:
+        cause = e.__cause__
+        if isinstance(cause, DependencyUnavailableError):
+            raise dependency_unavailable_http_exception(cause.dependency, boundary="Synthetic triplets publish", exc=cause) from e
+        raise HTTPException(status_code=500, detail=f"PUBLISH_ROLLED_BACK: the previous triplets file was put back; {e}") from e
     except Exception as e:
         if "QUALITY_GATE_FAILED" in str(e):
             raise HTTPException(status_code=409, detail=str(e)) from e

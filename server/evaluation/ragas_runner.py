@@ -132,8 +132,9 @@ def score_samples(cfg: TriBridConfig, samples: list[RagasSample]) -> list[dict[s
             temperature=0,
             timeout=float(cfg.evaluation.ragas_judge_timeout_s),
             max_retries=0,
-            # Judges must return structured verdicts; cap output.
-            max_tokens=int(cfg.chat.max_tokens),
+            # Judges must return structured verdicts; cap output at the eval judge budget
+            # (faithfulness statement lists outgrow a chat answer budget).
+            max_tokens=int(cfg.evaluation.judge_max_tokens),
         )
     )
     # Local serving is single-stream; serialize judge calls and honor the

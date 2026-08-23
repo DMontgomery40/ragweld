@@ -19,6 +19,7 @@ from server.api.retrieval_errors import (
     required_retrieval_leg_http_exception,
     retrieval_contract_mismatch_http_exception,
 )
+from server.chat.prompt_budget import context_window_for_alias
 from server.config import load_config as load_global_config
 from server.config_control_plane import (
     allowed_secret_env_vars,
@@ -27,6 +28,7 @@ from server.config_control_plane import (
 )
 from server.db.postgres import PostgresClient
 from server.dependency_errors import DependencyUnavailableError
+from server.gateway_catalog import gateway_rows_snapshot
 from server.lineage import ensure_current_bundle
 from server.models.tribrid_config_model import (
     ConfigReadinessResponse,
@@ -49,10 +51,7 @@ from server.retrieval.contracts import (
 from server.retrieval.errors import RequiredRetrievalLegError, RetrievalContractMismatchError
 from server.retrieval.fusion import TriBridFusion
 from server.retrieval.qdrant_store import QdrantChunkStore
-from server.gateway_catalog import gateway_rows_snapshot
-from server.runtime_capabilities import SUPPORTED_RERANKER_CLOUD_PROVIDERS
 from server.services.config_store import CorpusNotFoundError
-from server.chat.prompt_budget import context_window_for_alias
 from server.services.config_store import get_config as load_scoped_config
 from server.services.config_store import reset_config as reset_scoped_config
 from server.services.config_store import save_config as save_scoped_config
@@ -220,7 +219,6 @@ def _validate_capability(
 def _validate_model_capabilities(config: TriBridConfig) -> None:
     _validate_embedding_runtime_support(config)
     _validate_embedding_tokenization_compat(config)
-    _validate_reranker_runtime_support(config)
 
     for field_name, value in (
         ("generation.gen_model", config.generation.gen_model),
@@ -317,25 +315,6 @@ def _validate_embedding_tokenization_compat(config: TriBridConfig) -> None:
                 status_code=422,
                 detail=f"Unknown tiktoken encoding '{enc}': {e}",
             ) from e
-
-
-def _validate_reranker_runtime_support(config: TriBridConfig) -> None:
-    mode = str(config.reranking.reranker_mode or "").strip().lower()
-    if mode != "cloud":
-        return
-
-    provider = str(config.reranking.reranker_cloud_provider or "").strip().lower()
-    if provider in SUPPORTED_RERANKER_CLOUD_PROVIDERS:
-        return
-
-    allowed = ", ".join(sorted(SUPPORTED_RERANKER_CLOUD_PROVIDERS))
-    raise HTTPException(
-        status_code=422,
-        detail=(
-            "Unsupported reranker cloud provider for reranker_mode='cloud': "
-            f"'{provider}'. Allowed providers: [{allowed}]."
-        ),
-    )
 
 
 async def _enforce_index_contract_lock(
@@ -490,15 +469,6 @@ def _collect_model_warnings(config: TriBridConfig) -> list[ModelValidationWarnin
                 message=f"Embedding provider '{emb_provider}' is not runtime-selectable today. Allowed providers: [{allowed}].",
             ))
 
-    if str(config.reranking.reranker_mode or "").strip().lower() == "cloud":
-        rr_provider = str(config.reranking.reranker_cloud_provider or "").strip().lower()
-        if rr_provider and rr_provider not in SUPPORTED_RERANKER_CLOUD_PROVIDERS:
-            allowed = ", ".join(sorted(SUPPORTED_RERANKER_CLOUD_PROVIDERS))
-            warnings.append(ModelValidationWarning(
-                field="reranking.reranker_cloud_provider",
-                model_value=rr_provider,
-                message=f"Reranker cloud provider '{rr_provider}' is not runtime-selectable today. Allowed providers: [{allowed}].",
-            ))
 
     for field, alias, output_tokens in (
         ("chat.max_tokens", str(config.chat.litellm.default_model or "").strip(), int(config.chat.max_tokens)),

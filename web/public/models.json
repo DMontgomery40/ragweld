@@ -2406,7 +2406,7 @@
       "notes": "BGE-reranker-v2-m3 local",
       "selection_roles": [],
       "selection_status": "catalog_only",
-      "selection_reason": "Catalog entry only. Current cloud reranker runtime supports cohere only; the learning reranker is selected via training.* config rather than catalog rows."
+      "selection_reason": "Catalog entry only. The cloud reranker runtime supports the LiteLLM gateway (litellm) and cohere; the learning reranker is selected via training.* config rather than catalog rows."
     },
     {
       "provider": "huggingface",
@@ -2454,7 +2454,7 @@
       "notes": "Jina-reranker-v3 local",
       "selection_roles": [],
       "selection_status": "catalog_only",
-      "selection_reason": "Catalog entry only. Current cloud reranker runtime supports cohere only; the learning reranker is selected via training.* config rather than catalog rows."
+      "selection_reason": "Catalog entry only. The cloud reranker runtime supports the LiteLLM gateway (litellm) and cohere; the learning reranker is selected via training.* config rather than catalog rows."
     },
     {
       "provider": "huggingface",
@@ -2485,7 +2485,7 @@
       "notes": "MXBAI-rerank-v2-large local",
       "selection_roles": [],
       "selection_status": "catalog_only",
-      "selection_reason": "Catalog entry only. Current cloud reranker runtime supports cohere only; the learning reranker is selected via training.* config rather than catalog rows."
+      "selection_reason": "Catalog entry only. The cloud reranker runtime supports the LiteLLM gateway (litellm) and cohere; the learning reranker is selected via training.* config rather than catalog rows."
     },
     {
       "provider": "huggingface",
@@ -2703,7 +2703,7 @@
       "notes": "Jina Reranker v3 (source: ~$0.02 per 1M)",
       "selection_roles": [],
       "selection_status": "catalog_only",
-      "selection_reason": "Catalog entry only. Current cloud reranker runtime supports cohere only; the learning reranker is selected via training.* config rather than catalog rows."
+      "selection_reason": "Catalog entry only. The cloud reranker runtime supports the LiteLLM gateway (litellm) and cohere; the learning reranker is selected via training.* config rather than catalog rows."
     },
     {
       "provider": "kwaipilot",
@@ -2831,7 +2831,7 @@
       "notes": "NVIDIA NeMo Retriever Llama 3.2 reranking local",
       "selection_roles": [],
       "selection_status": "catalog_only",
-      "selection_reason": "Catalog entry only. Current cloud reranker runtime supports cohere only; the learning reranker is selected via training.* config rather than catalog rows."
+      "selection_reason": "Catalog entry only. The cloud reranker runtime supports the LiteLLM gateway (litellm) and cohere; the learning reranker is selected via training.* config rather than catalog rows."
     },
     {
       "provider": "mancer",
@@ -8087,7 +8087,7 @@
       "notes": "Voyage Rerank 2 (source: per 1M = $0.05)",
       "selection_roles": [],
       "selection_status": "catalog_only",
-      "selection_reason": "Catalog entry only. Current cloud reranker runtime supports cohere only; the learning reranker is selected via training.* config rather than catalog rows."
+      "selection_reason": "Catalog entry only. The cloud reranker runtime supports the LiteLLM gateway (litellm) and cohere; the learning reranker is selected via training.* config rather than catalog rows."
     },
     {
       "provider": "voyage",
@@ -8101,7 +8101,7 @@
       "notes": "Voyage Rerank 2 Lite (source: per 1M = $0.02)",
       "selection_roles": [],
       "selection_status": "catalog_only",
-      "selection_reason": "Catalog entry only. Current cloud reranker runtime supports cohere only; the learning reranker is selected via training.* config rather than catalog rows."
+      "selection_reason": "Catalog entry only. The cloud reranker runtime supports the LiteLLM gateway (litellm) and cohere; the learning reranker is selected via training.* config rather than catalog rows."
     },
     {
       "provider": "voyage",
@@ -8115,7 +8115,7 @@
       "notes": "Voyage Rerank 2.5 (source: per 1M = $0.05)",
       "selection_roles": [],
       "selection_status": "catalog_only",
-      "selection_reason": "Catalog entry only. Current cloud reranker runtime supports cohere only; the learning reranker is selected via training.* config rather than catalog rows."
+      "selection_reason": "Catalog entry only. The cloud reranker runtime supports the LiteLLM gateway (litellm) and cohere; the learning reranker is selected via training.* config rather than catalog rows."
     },
     {
       "provider": "voyage",
@@ -8129,7 +8129,7 @@
       "notes": "Voyage Rerank 2.5 Lite (source: per 1M = $0.02)",
       "selection_roles": [],
       "selection_status": "catalog_only",
-      "selection_reason": "Catalog entry only. Current cloud reranker runtime supports cohere only; the learning reranker is selected via training.* config rather than catalog rows."
+      "selection_reason": "Catalog entry only. The cloud reranker runtime supports the LiteLLM gateway (litellm) and cohere; the learning reranker is selected via training.* config rather than catalog rows."
     },
     {
       "provider": "voyage",
@@ -8751,6 +8751,44 @@
       "selection_roles": [],
       "selection_status": "catalog_only",
       "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
+    },
+    {
+      "provider": "litellm",
+      "family": "gpt-4.1-nano",
+      "model": "openai.gpt-4.1-nano",
+      "components": [
+        "RERANK"
+      ],
+      "unit": "1k_tokens",
+      "context": 1047576,
+      "input_per_1k": 0.0001,
+      "output_per_1k": 0.0004,
+      "display_name": "LiteLLM gateway: OpenAI: GPT-4.1 Nano (listwise rerank)",
+      "notes": "Listwise reranking through the LiteLLM gateway alias openai.gpt-4.1-nano: one request per query carrying the top-N candidate snippets; scores 0-10 in candidate order. Billed at the alias' token prices.",
+      "selection_roles": [
+        "reranker_cloud"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
+    },
+    {
+      "provider": "litellm",
+      "family": "gpt-5.6-luna",
+      "model": "openai.gpt-5.6-luna",
+      "components": [
+        "RERANK"
+      ],
+      "unit": "1k_tokens",
+      "context": 1050000,
+      "input_per_1k": 0.0002,
+      "output_per_1k": 0.0012,
+      "display_name": "LiteLLM gateway: OpenAI: GPT-5.6 Luna (listwise rerank)",
+      "notes": "Listwise reranking through the LiteLLM gateway alias openai.gpt-5.6-luna: one request per query carrying the top-N candidate snippets; scores 0-10 in candidate order. Billed at the alias' token prices.",
+      "selection_roles": [
+        "reranker_cloud"
+      ],
+      "selection_status": "runtime_selectable",
+      "selection_reason": null
     }
   ]
 }

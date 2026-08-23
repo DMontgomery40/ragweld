@@ -160,7 +160,7 @@ def _build_config(cfg: TriBridConfig, tests: list[PromptfooTest], *, repo_id: st
         "config": {
             "apiBaseUrl": base_url,
             "temperature": 0,
-            "max_tokens": int(cfg.chat.max_tokens),
+            "max_tokens": int(cfg.evaluation.judge_max_tokens),
         },
     }
     return {

@@ -5,7 +5,6 @@ from pathlib import Path
 
 from server.models.tribrid_config_model import ChatConfig, SystemPromptsConfig, TrainingConfig
 
-
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -40,7 +39,6 @@ def test_generic_runtime_surfaces_do_not_embed_optional_epstein_lane_defaults() 
         "scripts/automation_bootstrap.sh",
         "web/tests/e2e/exhaustive/chat_reliability.spec.ts",
         "README.md",
-        "tests/unit/test_synthetic_sdkit_provider.py",
         "tests/unit/test_synthetic_storage_compat.py",
     ]
 
@@ -131,8 +129,8 @@ def test_local_generation_models_are_current_everywhere() -> None:
     """
     import subprocess
 
-    from server.models.tribrid_config_model import UIConfig, VLLMConfig
     from server.models.runtime_gateway import GenerationConfig
+    from server.models.tribrid_config_model import UIConfig, VLLMConfig
 
     assert VLLMConfig().default_model == "Qwen/Qwen3-4B-Instruct-2507"
     assert TrainingConfig().ragweld_agent_base_model == "mlx-community/Qwen3-4B-Instruct-2507-4bit"

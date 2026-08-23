@@ -61,9 +61,9 @@ export function ModelAssignments() {
     let rrProvider = rrMode;
     let rrModel = '';
     if (rrMode === 'cloud') {
-      rrProvider = rr?.reranker_cloud_provider || 'cohere';
+      rrProvider = rr?.reranker_cloud_provider || 'litellm';
       rrModel = rr?.reranker_cloud_model || '';
-    } else if (rrMode === 'learning' || rrMode === 'local') {
+    } else if (rrMode === 'learning') {
       rrProvider = 'learning';
       rrModel = '(local LoRA)';
     } else {

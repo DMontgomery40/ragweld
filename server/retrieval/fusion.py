@@ -961,6 +961,7 @@ class TriBridFusion:
                         reranking_cfg,
                         training_config=training_cfg,
                         trained_model_path=trained_model_path,
+                        gateway_config=scoped_cfgs.get(rerank_config_corpus_id or "") or primary_cfg,
                     )
                     rr = await reranker.try_rerank(query, results)
                     results = rr.chunks

@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from server.api.dataset import _dataset_path_for_corpus, _load_dataset
+from server.evaluation.path_match import path_matches
 from server.lineage import current_bundle, ensure_current_bundle, list_bundles, load_bundle
 from server.models.eval import EvalRun
 from server.models.tribrid_config_model import (
@@ -24,16 +25,8 @@ _ROOT = Path(__file__).resolve().parents[2]
 _EVAL_RUNS_DIR = _ROOT / "data" / "eval_runs"
 
 
-def _normalize_path(value: str) -> str:
-    return (value or "").replace("\\", "/").strip().lower()
-
-
 def _path_matches(expected: str, actual: str) -> bool:
-    left = _normalize_path(expected)
-    right = _normalize_path(actual)
-    if not left or not right:
-        return False
-    return right == left or right.endswith(left) or left in right
+    return path_matches(expected, actual)
 
 
 def _metric_delta(current_value: float | None, previous_value: float | None) -> ObservabilityMetricDelta:

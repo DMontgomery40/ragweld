@@ -27,9 +27,9 @@ function toApiKeyName(provider: string): string {
 
 export function RerankerConfigSubtab() {
   // Config (LAW)
-  const [mode, setMode] = useConfigField<RerankerMode>('reranking.reranker_mode', 'learning');
-  const [cloudProvider, setCloudProvider] = useConfigField<string>('reranking.reranker_cloud_provider', 'cohere');
-  const [cloudModel, setCloudModel] = useConfigField<string>('reranking.reranker_cloud_model', 'rerank-v3.5');
+  const [mode, setMode] = useConfigField<RerankerMode>('reranking.reranker_mode', 'none');
+  const [cloudProvider, setCloudProvider] = useConfigField<string>('reranking.reranker_cloud_provider', 'litellm');
+  const [cloudModel, setCloudModel] = useConfigField<string>('reranking.reranker_cloud_model', 'openai.gpt-4.1-nano');
   const [cloudTopN, setCloudTopN] = useConfigField<number>('reranking.reranker_cloud_top_n', 50);
 
   // Learning reranker is configured under training + reranking
@@ -150,6 +150,7 @@ export function RerankerConfigSubtab() {
           <button
             key={m}
             className="small-button"
+            data-testid={`reranker-mode-${m}`}
             onClick={() => setMode(m)}
             style={{
               padding: '10px 12px',
@@ -199,6 +200,7 @@ export function RerankerConfigSubtab() {
                 Provider <TooltipIcon name="RERANKER_CLOUD_PROVIDER" />
               </label>
               <select
+                data-testid="reranker-cloud-provider"
                 value={cloudProvider}
                 onChange={(e) => setCloudProvider(e.target.value)}
                 disabled={modelsLoading || cloudProviders.length === 0}

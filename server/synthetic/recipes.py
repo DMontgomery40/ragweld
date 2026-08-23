@@ -115,18 +115,12 @@ async def select_source_chunks(
     max_source_chunks = int(request.max_source_chunks or 150)
     candidate_limit = min(max_source_chunks * 8, 50000)
 
-    chunks: list[Chunk] = []
     pg = PostgresClient(cfg.indexing.postgres_url)
+    await pg.connect()
     try:
-        await pg.connect()
-        chunks = await pg.list_chunks_for_repo(repo_id, limit=candidate_limit)
-    except Exception:
-        chunks = []
+        chunks: list[Chunk] = await pg.list_chunks_for_repo(repo_id, limit=candidate_limit)
     finally:
-        try:
-            await pg.disconnect()
-        except Exception:
-            pass
+        await pg.disconnect()
 
     filtered: list[Chunk] = []
     for ch in chunks:
@@ -233,31 +227,6 @@ def _derive_keywords(summaries: list[ChunkSummary], max_keywords: int = 80) -> l
             counter[stem] += 1
     items = sorted(counter.items(), key=lambda x: (-x[1], x[0]))
     return [tok for tok, _n in items[:max_keywords]]
-
-
-def _build_triplets(
-    *,
-    eval_items: list[EvalDatasetItem],
-    candidate_paths: list[str],
-    max_pairs: int,
-) -> list[dict[str, str]]:
-    all_paths = [str(p).strip() for p in candidate_paths if str(p).strip()]
-    out: list[dict[str, str]] = []
-    for item in eval_items:
-        positive = str((item.expected_paths or [""])[0]).strip()
-        if not positive:
-            continue
-        parent = str(Path(positive).parent)
-        expected = {str(p).strip() for p in (item.expected_paths or []) if str(p).strip()}
-        same_dir = [p for p in all_paths if p not in expected and str(Path(p).parent) == parent]
-        fallback = [p for p in all_paths if p not in expected]
-        negative = (same_dir[0] if same_dir else (fallback[0] if fallback else ""))
-        if not negative:
-            continue
-        out.append({"query": item.question, "positive": positive, "negative": negative})
-        if len(out) >= max_pairs:
-            break
-    return out
 
 
 def _autotune_patch(

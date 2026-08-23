@@ -55,9 +55,11 @@ def test_reranker_modes() -> None:
     assert RerankingConfig(reranker_mode="learning").reranker_mode == "learning"
     assert RerankingConfig(reranker_mode="cloud").reranker_mode == "cloud"
 
-    # Back-compat: legacy configs used 'local'/'hf' for the old CrossEncoder path.
-    assert RerankingConfig(reranker_mode="local").reranker_mode == "learning"
-    assert RerankingConfig(reranker_mode="hf").reranker_mode == "learning"
+    # Legacy aliases are not normalized: a stale stored value fails validation and
+    # must be migrated instead of silently running a different backend.
+    for legacy in ("local", "hf", "off", "cohere"):
+        with pytest.raises(ValidationError):
+            RerankingConfig(reranker_mode=legacy)
 
 
 def test_tribrid_config_defaults() -> None:

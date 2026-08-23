@@ -13,7 +13,10 @@ def test_synthetic_generation_model_category_accepts_gateway_aliases() -> None:
 
 
 @pytest.mark.asyncio
-async def test_quality_gate_fails_below_threshold() -> None:
+async def test_quality_gate_reports_the_retrieval_error_for_an_unregistered_corpus() -> None:
+    """Without a registered, indexed corpus the gate cannot measure anything: it fails closed
+    with the retrieval error as the reason and records no accuracy (this is the error path,
+    not a measured below-threshold result; the measured path is proven by live runs)."""
     cfg = TriBridConfig()
     summary = SyntheticRunSummary()
     artifacts_payloads = {
@@ -27,7 +30,7 @@ async def test_quality_gate_fails_below_threshold() -> None:
         ]
     }
 
-    passed, reason = await _evaluate_quality_gate(
+    passed, reason, _eval_run = await _evaluate_quality_gate(
         run_id="unit_synth_gate",
         repo_id="unit_synth_gate_repo",
         cfg=cfg,
@@ -36,12 +39,13 @@ async def test_quality_gate_fails_below_threshold() -> None:
     )
 
     assert passed is False
-    assert isinstance(reason, str)
+    assert isinstance(reason, str) and reason.startswith("Quality gate evaluation failed:")
     assert summary.quality_gate_passed is False
+    assert summary.quality_failure_reason == reason
+    assert summary.quality_top1_accuracy is None
     assert summary.quality_gate_threshold == pytest.approx(0.40)
-    assert "quality_eval_json" in artifacts_payloads
-    if summary.quality_top1_accuracy is not None:
-        assert summary.quality_top1_accuracy == pytest.approx(0.0)
+    assert artifacts_payloads["quality_eval_json"]["passed"] is False
+    assert artifacts_payloads["quality_eval_json"]["error"]
 
 
 @pytest.mark.asyncio
@@ -50,7 +54,7 @@ async def test_quality_gate_fails_when_no_eval_items() -> None:
     summary = SyntheticRunSummary()
     artifacts_payloads: dict[str, object] = {"eval_dataset_json": []}
 
-    passed, reason = await _evaluate_quality_gate(
+    passed, reason, _eval_run = await _evaluate_quality_gate(
         run_id="unit_synth_gate_empty",
         repo_id="unit_synth_gate_repo",
         cfg=cfg,
@@ -76,7 +80,7 @@ async def test_quality_gate_uses_custom_threshold_from_config() -> None:
     summary = SyntheticRunSummary()
     artifacts_payloads: dict[str, object] = {"eval_dataset_json": []}
 
-    passed, reason = await _evaluate_quality_gate(
+    passed, reason, _eval_run = await _evaluate_quality_gate(
         run_id="unit_synth_gate_custom",
         repo_id="unit_synth_gate_repo",
         cfg=cfg,
