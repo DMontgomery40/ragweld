@@ -21,6 +21,10 @@ jobs:
           python-version: '3.12'
 
       - name: Enforce docs ownership
+        env:
+          # check_docs_ownership.py diffs from this SHA on push events; GitHub
+          # does not export it by itself (PRs use GITHUB_BASE_REF instead).
+          GITHUB_EVENT_BEFORE: ${{ github.event.before }}
         run: python scripts/check_docs_ownership.py
 
   test-backend:

@@ -15,12 +15,15 @@ on:
   workflow_dispatch:
     inputs:
       base_ref:
-        description: "Base ref to diff against (default: previous push SHA). Use EMPTY for a full bootstrap (empty-tree → HEAD)."
+        description: "Base ref to diff against (default: head of the last successful run on this branch; EMPTY bootstrap when there is none). Use EMPTY for a full bootstrap (empty-tree → HEAD)."
         required: false
         default: ""
 
 permissions:
   contents: write
+  # Needed to dispatch `Publish MkDocs (mike)` after the autopilot pushes:
+  # commits pushed with GITHUB_TOKEN never fire that workflow's own `push` trigger.
+  actions: write
 
 concurrency:
   group: docs-autopilot-${{ github.ref }}
@@ -32,8 +35,10 @@ jobs:
     runs-on: ubuntu-latest
     env:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-      # OpenAI model used by scripts/docs_ai/generate_docs_from_diff.py (Responses API)
-      OPENAI_MODEL: ${{ vars.OPENAI_MODEL || 'gpt-5' }}
+      # OpenAI model used by scripts/docs_ai/generate_docs_from_diff.py (Responses API).
+      # GPT-5.6 Sol is the flagship tier; set the OPENAI_MODEL repo variable to
+      # gpt-5.6-terra (balanced) or gpt-5.6-luna (fast/cheap) to trade quality for cost.
+      OPENAI_MODEL: ${{ vars.OPENAI_MODEL || 'gpt-5.6-sol' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -60,8 +65,37 @@ jobs:
           pip install mkdocs-glightbox
 
       - name: Run docs autopilot
+        id: autopilot
+        env:
+          # run_ci_autopilot.py diffs from the head of the last successful run
+          # on this branch (`gh run list`), never from the push's `before` SHA,
+          # so a push whose run was cancelled by cancel-in-progress or failed
+          # is still covered by the next run. No successful run on record means
+          # the branch is undocumented: bootstrap on main, fork point elsewhere.
+          GH_TOKEN: ${{ github.token }}
         run: |
           python scripts/docs_ai/run_ci_autopilot.py --base "${{ github.event.inputs.base_ref }}"
+
+      - name: Check whether main's newest docs commit is published
+        id: publish_state
+        # Runs even when generation failed (missing key, LLM/build failure) so a
+        # docs commit stranded by an earlier run still gets published.
+        if: "!cancelled() && github.ref_name == 'main'"
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python scripts/docs_ai/run_ci_autopilot.py --publish-state
+
+      - name: Publish with mike
+        # A docs(ai) commit is pushed with GITHUB_TOKEN, which does not trigger
+        # deploy-docs.yml's `push` event; workflow_dispatch is the documented
+        # exception. Deciding from deploy history (not from this run's push)
+        # also publishes commits stranded by an earlier cancelled/failed run.
+        if: "!cancelled() && github.ref_name == 'main' && steps.publish_state.outputs.publish_needed == 'true'"
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run deploy-docs.yml --ref main --repo "$GITHUB_REPOSITORY"
 
       - name: Upload docs autopilot artifacts
         if: always()

@@ -2,12 +2,86 @@
 
 This folder contains the **documentation automation** tooling for the MkDocs + mike site in `mkdocs/`.
 
+## Who writes the docs (read this before touching `mkdocs/`)
+
+When repo notes say "docs are written by an agent", the agent is **this CI job**:
+a GitHub Actions run that diffs the code, sends the diff to the OpenAI
+Responses API, applies the returned patch to `mkdocs/docs/**` + `mkdocs.yml`,
+and commits it as `docs(ai): autopilot update`. It is **not** the interactive
+coding assistant (Claude Code, Codex, etc.) working in this checkout.
+
+Consequences for a coding assistant:
+
+- Never hand-write or hand-edit `mkdocs/**` or `mkdocs.yml`. The next autopilot
+  run regenerates from the real sources and your edits are overwritten or
+  clobbered (2026-03-02: a hand-rewritten `index.md` lost 247 lines this way).
+- To make a page exist or change, change the **inputs** and push to `main`:
+  code under `server/**` / `web/**` (including `server/models/**`, the Pydantic
+  source of truth), `data/models.json`, `data/glossary.json`,
+  `server/runtime_capabilities.py`, and `docs_prompt_base.md` (the style/scope
+  rules the LLM follows). The push triggers the autopilot, which writes the
+  page. That is what "do it without writing a single doc" means. The repo-local
+  KB under `docs/` is the agent-facing engineering record, not an autopilot
+  input: the generator drops `.md` files from its change context and the
+  workflow does not trigger on `docs/**`.
+- If the generated docs are badly behind (the autopilot did not run for a
+  while), the fix is a manual `Docs Autopilot (push)` dispatch with `base_ref`
+  set to the last `docs(ai)` commit (or `EMPTY` for a full rebuild), not a
+  hand-written catch-up. (Push runs diff from the last *successful* run's head
+  automatically, and bootstrap by themselves when there is none; runs before
+  2026-08-23 could be "successful" without processing anything, so the current
+  gap still wants the explicit base.)
+- The deterministic config reference (`mkdocs/docs/reference/config/**`) is
+  regenerated on every run from the Pydantic model + glossary; edit those.
+
 ## The one workflow that matters
 
 In GitHub Actions, the docs autopilot is driven by:
 
-- `.github/workflows/docs-automation.yml` — generates doc updates from code diffs using an LLM
+- `.github/workflows/docs-automation.yml` — generates doc updates from code diffs using an LLM,
+  pushes the `docs(ai)` commit, then dispatches the publish workflow
 - `.github/workflows/deploy-docs.yml` — builds and deploys the MkDocs site (versioned with `mike`) to `gh-pages`
+
+The dispatch step exists because a push made with the workflow's `GITHUB_TOKEN`
+never fires another workflow's `push` trigger: before it was added, every
+`docs(ai)` commit landed on `main` without a `mike deploy`, and the published
+site only refreshed when a human push happened to touch `mkdocs/**`. After the
+autopilot step, `run_ci_autopilot.py --publish-state` looks up the last
+successful `deploy-docs.yml` run (`gh run list`) and reports
+`publish_needed=true` when `main`'s newest commit touching `mkdocs/**` is not
+an ancestor of what that run built; the workflow then runs
+`gh workflow run deploy-docs.yml --ref main --repo "$GITHUB_REPOSITORY"`. Deciding from deploy history
+rather than from "did this run push" also publishes docs commits stranded by
+an earlier cancelled or failed run.
+
+Diff base on push events: the job runs with `cancel-in-progress`, so push B
+cancels the run for push A. `run_ci_autopilot.py` therefore diffs from the
+head of the last *successful* autopilot run on the branch (again via
+`gh run list`) when that commit is in the branch history. The push payload's
+`before` SHA is never used: it covers only the last push, which is exactly
+how A's changes would be lost. With no successful run on record the branch
+counts as undocumented — `main` bootstraps from the empty tree (`EMPTY`), any
+other branch diffs from its fork point with `origin/main`. If the run history
+cannot be read, the run fails closed. An explicit `base_ref` input always
+wins.
+
+Because that base is keyed on run *conclusion*, a run is "success" only when
+the LLM lane processed its range. An AI patch that fails to apply is dropped
+and the run still commits the deterministic config reference, but exits
+non-zero; a config reference generation failure or a strict-build failure
+leaves the branch unchanged and exits non-zero. Either way the next run
+re-covers the same range from the last real success. Expect red runs to mean
+exactly that.
+
+Two bounds worth knowing. The generator sends a capped context (changed-file
+list and a limited number of file diffs, chosen by its preferred-file list),
+so a very large range — a bootstrap or a long catch-up — is documented from
+that sample and the frontier still advances past the whole range; expanding
+coverage is a generator/prompt change (`docs-autopilot-expansion.md`), not a
+reason to hand-write pages. And a branch with no successful run re-attempts a
+bootstrap-sized LLM call on every qualifying push until one run succeeds; a
+red streak there is an operator signal, not something the job retries
+differently.
 
 ## Required GitHub secrets
 
@@ -17,7 +91,9 @@ The autopilot **will not write docs** unless you configure:
 
 Optional (Actions variables or secrets):
 
-- `OPENAI_MODEL` (default: `gpt-5`)
+- `OPENAI_MODEL` (default: `gpt-5.6-sol`, the flagship tier; `gpt-5.6-terra` is the
+  balanced tier and `gpt-5.6-luna` the fast/cheap one — all verified as direct
+  `api.openai.com` model ids on 2026-08-23)
 - `OPENAI_MAX_OUTPUT_TOKENS`
 - `OPENAI_REASONING_EFFORT`
 - `OPENAI_VERBOSITY`
@@ -32,6 +108,10 @@ Optional (Actions variables or secrets):
   - Regenerates deterministic config reference docs
   - Runs `mkdocs build --strict`
   - Commits and pushes only when the transactional worktree succeeds
+  - Writes `pushed=true|false` (+ `commit_sha`) to `$GITHUB_OUTPUT`; exits non-zero when
+    the LLM lane did not process the range (see "The one workflow that matters")
+  - `--publish-state` mode: writes `publish_needed=true|false` + `docs_commit` for the
+    branch tip so the workflow can dispatch `deploy-docs.yml`
 
 - `generate_docs_from_diff.py` (**authoritative**)  
   Diff-driven doc updates. It builds a context bundle from `git diff` + current docs tree and asks the LLM to output a **unified diff patch** that only edits:

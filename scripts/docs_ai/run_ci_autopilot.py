@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import shlex
 import shutil
@@ -23,7 +24,6 @@ LOG_FILE = ARTIFACT_DIR / "run.log"
 STATUS_FILE = ARTIFACT_DIR / "status.txt"
 STAGED_DIFF_FILE = ARTIFACT_DIR / "staged.diff"
 STAGED_STAT_FILE = ARTIFACT_DIR / "staged.stat"
-ZERO_SHA = "0" * 40
 
 
 @dataclass(frozen=True)
@@ -106,26 +106,100 @@ def _ref_exists(ref: str) -> bool:
     return _run(("git", "rev-parse", "--verify", ref), cwd=ROOT, check=False).returncode == 0
 
 
+def _is_ancestor(ancestor: str, descendant: str) -> bool:
+    return (
+        _run(("git", "merge-base", "--is-ancestor", ancestor, descendant), cwd=ROOT, check=False).returncode == 0
+    )
+
+
+def _gh_bin() -> str:
+    return (os.getenv("DOCS_AUTOPILOT_GH_BIN") or "").strip() or "gh"
+
+
+def _last_successful_run_head(workflow_file: str, branch: str) -> str:
+    """Head SHA of the newest successful GitHub Actions run of `workflow_file` on `branch`.
+
+    Empty only when GitHub reports no such run (first run ever). A lookup that
+    cannot be performed raises: silently degrading to the per-push base would
+    re-open the lost-push hole, so the run fails and the next one re-covers the
+    range. Requires `actions: read`, which the job's `actions: write` grants.
+    """
+    args = [
+        _gh_bin(),
+        "run",
+        "list",
+        "--workflow",
+        workflow_file,
+        "--branch",
+        branch,
+        "--status",
+        "success",
+        "--limit",
+        "1",
+        "--json",
+        "headSha",
+    ]
+    repository = (os.getenv("GITHUB_REPOSITORY") or "").strip()
+    if repository:
+        # Pin to this repository; an ambient GH_REPO must not redirect the lookup.
+        args += ["--repo", repository]
+    try:
+        result = _run(args, cwd=ROOT, check=False)
+    except FileNotFoundError as exc:
+        raise RuntimeError(f"{_gh_bin()} is required to read {workflow_file} run history: {exc}") from exc
+    if result.returncode != 0:
+        detail = result.stderr.strip() or result.stdout.strip() or "command failed"
+        raise RuntimeError(f"Unable to read {workflow_file} run history for {branch}: {detail}")
+    try:
+        runs = json.loads(result.stdout or "[]")
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"Malformed {workflow_file} run history for {branch}: {exc}") from exc
+    if not isinstance(runs, list):
+        raise RuntimeError(f"Malformed {workflow_file} run history for {branch}: expected a list")
+    if not runs:
+        return ""
+    head = runs[0].get("headSha") if isinstance(runs[0], dict) else None
+    if not isinstance(head, str) or not head.strip():
+        raise RuntimeError(f"Malformed {workflow_file} run history for {branch}: missing headSha")
+    return head.strip()
+
+
+def _branch_for_runs() -> str:
+    return (os.getenv("GITHUB_REF_NAME") or "").strip()
+
+
 def resolve_base_ref(explicit_base: str) -> str:
+    """Pick the commit the docs diff starts from.
+
+    Order: an explicit operator base; else the head of the last *successful*
+    autopilot run on this branch (the documented frontier — a run is only
+    "success" when its LLM lane processed its range, see main()); else the
+    branch counts as undocumented: `main` bootstraps from the empty tree and
+    any other branch diffs from its fork point with `origin/main`.
+
+    The push payload's `before` SHA is deliberately not used: it diffs only the
+    last push, so a run cancelled by `cancel-in-progress` or failed for any
+    reason would lose its changes for good.
+    """
     base = explicit_base.strip()
     if base:
         return base
 
-    before = (os.getenv("GITHUB_EVENT_BEFORE") or "").strip()
-    if before and before != ZERO_SHA:
-        return before
+    branch = _branch_for_runs()
+    if not branch:
+        raise RuntimeError("GITHUB_REF_NAME is required to resolve the docs-autopilot base from run history.")
 
-    ref_name = (os.getenv("GITHUB_REF_NAME") or "").strip()
-    if ref_name:
-        candidate = f"origin/{ref_name}"
-        if _ref_exists(candidate):
-            return candidate
+    last_head = _last_successful_run_head("docs-automation.yml", branch)
+    if last_head:
+        if _ref_exists(f"{last_head}^{{commit}}") and _is_ancestor(last_head, "HEAD"):
+            return last_head
+        _append_log(f"last successful run head {last_head} is not in {branch} history; treating the branch as undocumented")
 
-    for candidate in ("origin/main", "main", "HEAD~1"):
-        if _ref_exists(candidate):
-            return candidate
-
-    raise RuntimeError("Unable to resolve base ref for docs-autopilot.")
+    if branch == "main":
+        return "EMPTY"
+    if not _ref_exists("origin/main"):
+        raise RuntimeError(f"origin/main is required to resolve the docs-autopilot base for {branch}.")
+    return _run(("git", "merge-base", "origin/main", "HEAD"), cwd=ROOT).stdout.strip()
 
 
 def resolve_branch_name() -> str:
@@ -166,6 +240,24 @@ def _write_summary(lines: list[str]) -> None:
         with Path(summary_path).open("a", encoding="utf-8") as handle:
             handle.write(text)
     print(text, flush=True)
+
+
+def _write_github_output(*, pushed: bool, commit_sha: str | None = None) -> None:
+    """Expose whether this run pushed a docs commit.
+
+    A push made with the workflow's GITHUB_TOKEN never fires another workflow's
+    `push` trigger, so `Publish MkDocs (mike)` would not run for the autopilot
+    commit on its own. The workflow reads these outputs and dispatches the
+    publish explicitly when `pushed=true`.
+    """
+    output_path = (os.getenv("GITHUB_OUTPUT") or "").strip()
+    if not output_path:
+        return
+    lines = [f"pushed={'true' if pushed else 'false'}"]
+    if pushed and commit_sha:
+        lines.append(f"commit_sha={commit_sha}")
+    with Path(output_path).open("a", encoding="utf-8") as handle:
+        handle.write("\n".join(lines) + "\n")
 
 
 def _cli_python() -> str:
@@ -294,10 +386,61 @@ def _run_build(worktree: Path) -> tuple[bool, str]:
     return True, "mkdocs build --strict passed."
 
 
+def _latest_docs_commit(branch: str) -> str:
+    # The checkout predates the autopilot's push from its temporary worktree,
+    # so the branch tip must come from a live fetch; a stale tracking ref would
+    # name an older docs commit and could report it as already published.
+    fetch = _run(("git", "fetch", "--quiet", "origin", branch), cwd=ROOT, check=False)
+    if fetch.returncode != 0:
+        detail = fetch.stderr.strip() or fetch.stdout.strip() or "command failed"
+        raise RuntimeError(f"git fetch origin {branch} failed; cannot determine publish state: {detail}")
+    tip = f"origin/{branch}"
+    if not _ref_exists(tip):
+        raise RuntimeError(f"{tip} is missing after fetch; cannot determine publish state.")
+    return _run(
+        ("git", "log", "-1", "--format=%H", tip, "--", "mkdocs", "mkdocs.yml"),
+        cwd=ROOT,
+    ).stdout.strip()
+
+
+def publish_state() -> int:
+    """Report whether the branch tip's newest docs commit has been deployed.
+
+    A commit pushed with GITHUB_TOKEN never fires deploy-docs.yml's `push`
+    trigger, so the workflow dispatches the publish explicitly. Deciding from
+    deploy history (not from "did this run push") also publishes docs commits
+    stranded by an earlier cancelled or failed run.
+    """
+    branch = _branch_for_runs() or "main"
+    docs_commit = _latest_docs_commit(branch)
+    needed = False
+    if docs_commit:
+        deployed_head = _last_successful_run_head("deploy-docs.yml", branch)
+        published = bool(deployed_head) and _ref_exists(f"{deployed_head}^{{commit}}") and _is_ancestor(
+            docs_commit, deployed_head
+        )
+        needed = not published
+    output_path = (os.getenv("GITHUB_OUTPUT") or "").strip()
+    lines = [f"publish_needed={'true' if needed else 'false'}", f"docs_commit={docs_commit}"]
+    if output_path:
+        with Path(output_path).open("a", encoding="utf-8") as handle:
+            handle.write("\n".join(lines) + "\n")
+    print("\n".join(lines), flush=True)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--base", default="", help="Optional base ref override")
+    parser.add_argument(
+        "--publish-state",
+        action="store_true",
+        help="Only report publish_needed/docs_commit for the branch tip (no generation).",
+    )
     args = parser.parse_args(argv)
+
+    if args.publish_state:
+        return publish_state()
 
     _reset_artifacts()
     base_ref = resolve_base_ref(args.base)
@@ -316,49 +459,60 @@ def main(argv: list[str] | None = None) -> int:
         _run_generate_plan(worktree, base_ref)
         summary_lines.append(f"- Plan artifact: `{PLAN_FILE.name}`")
 
+        # The run's conclusion is the processed-range marker for the next run's
+        # base (see resolve_base_ref), so it must be "success" only when the LLM
+        # lane actually processed this range. Failures below still push what
+        # they can (the deterministic config reference) but exit non-zero.
         ai_ok, ai_message = _run_ai_patch(worktree, base_ref)
         summary_lines.append(f"- AI patch: {ai_message}")
         if not ai_ok:
-            _annotation("warning", f"AI patch skipped: {ai_message}")
+            _annotation("error", f"AI patch failed: {ai_message}")
             _reset_worktree(worktree)
 
         config_ok, config_message = _run_config_reference_generation(worktree)
         summary_lines.append(f"- Config reference: {config_message}")
         if not config_ok:
-            _annotation("warning", f"Config reference generation failed: {config_message}")
+            _annotation("error", f"Config reference generation failed: {config_message}")
             _capture_worktree_state(worktree)
             summary_lines.extend(
                 [
-                    "- Result: branch unchanged.",
+                    "- Result: branch unchanged; run marked failed so the next run re-covers this range.",
                     f"- Debug artifacts: `{ARTIFACT_DIR.relative_to(ROOT)}`",
                 ]
             )
             _write_summary(summary_lines)
-            return 0
+            _write_github_output(pushed=False)
+            return 1
 
         build_ok, build_message = _run_build(worktree)
         summary_lines.append(f"- Strict build: {build_message}")
         if not build_ok:
-            _annotation("warning", f"Strict build failed: {build_message}")
+            _annotation("error", f"Strict build failed: {build_message}")
             _capture_worktree_state(worktree)
             summary_lines.extend(
                 [
-                    "- Result: branch unchanged.",
+                    "- Result: branch unchanged; run marked failed so the next run re-covers this range.",
                     f"- Debug artifacts: `{ARTIFACT_DIR.relative_to(ROOT)}`",
                 ]
             )
             _write_summary(summary_lines)
-            return 0
+            _write_github_output(pushed=False)
+            return 1
 
-        if not _has_staged_changes(worktree):
+        pushed_sha: str | None = None
+        if _has_staged_changes(worktree):
+            pushed_sha = _commit_and_push(worktree, branch_name)
+            summary_lines.append(f"- Commit: pushed `docs(ai): autopilot update` at `{pushed_sha}`.")
+        else:
             summary_lines.append("- Commit: no generated docs changes to push.")
-            _write_summary(summary_lines)
-            return 0
 
-        commit_sha = _commit_and_push(worktree, branch_name)
-        summary_lines.append(f"- Commit: pushed `docs(ai): autopilot update` at `{commit_sha}`.")
+        if not ai_ok:
+            summary_lines.append(
+                "- Result: LLM lane did not process this range; run marked failed so the next run re-covers it."
+            )
         _write_summary(summary_lines)
-        return 0
+        _write_github_output(pushed=pushed_sha is not None, commit_sha=pushed_sha)
+        return 0 if ai_ok else 1
 
 
 if __name__ == "__main__":

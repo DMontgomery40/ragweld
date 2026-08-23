@@ -158,3 +158,31 @@ def test_failed_unified_diff_leaves_worktree_clean(tmp_path: Path) -> None:
     assert "patch does not apply" in err.lower()
     assert (repo / "mkdocs" / "docs" / "index.md").read_text(encoding="utf-8") == "# Old Title\n"
     assert _git(repo, "status", "--short").stdout.strip() == ""
+
+
+def test_change_context_keeps_pydantic_sources_and_drops_artifact_dirs() -> None:
+    """`models/` is the tracked model-artifact tree, not `server/models/`.
+
+    The substring exclusion used to drop the config composition root — the
+    primary documented autopilot input — from every LLM context.
+    """
+    module = _load_module()
+    included = [
+        "server/models/tribrid_config_model.py",
+        "server/models/synthetic.py",
+        "server/api/models.py",
+        "data/models.json",
+        "web/src/api/models.ts",
+        "server/runtime_capabilities.py",
+    ]
+    excluded = [
+        "models/learning-agent-active/adapter_config.json",
+        "models/reranker/manifest.json",
+        "web/node_modules/foo/index.js",
+        "data/eval_runs/run.json",
+        "mkdocs/docs/index.md",
+        "docs/references/retrieval-lane.md",
+        "README.md",
+    ]
+    assert [p for p in included if not module.should_include_file(p)] == []
+    assert [p for p in excluded if module.should_include_file(p)] == []

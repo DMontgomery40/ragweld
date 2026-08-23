@@ -127,6 +127,7 @@ Executable specs (structured, machine-checkable intent):
 ## Docs Ownership
 
 - Docs-autopilot is essential infrastructure in this repo. Published MkDocs output must track the literal code and config that exist.
+- "Docs are written by an agent" means the docs-autopilot **CI job** (`scripts/docs_ai/run_ci_autopilot.py`, OpenAI via GitHub Actions), never the coding assistant in this checkout. To get a page written, change the generator's inputs (code, `data/models.json`, `data/glossary.json`, `scripts/docs_ai/docs_prompt_base.md`) and push; do not write the page. Read `scripts/docs_ai/README.md` ("Who writes the docs") before touching anything under `mkdocs/`.
 - Treat `mkdocs/**` and `mkdocs.yml` as generated/published output, not as source-of-truth engineering docs.
 - If docs behavior/content needs to change, edit the real sources instead:
   - code and API/config sources

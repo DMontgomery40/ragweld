@@ -655,8 +655,8 @@ class EnhancedDocsAutopilot:
         }
 
         # Primary and fallback models (GPT-5 only)
-        primary_model = os.getenv("OPENAI_MODEL", "gpt-5")
-        fallback_model = os.getenv("OPENAI_FALLBACK_MODEL", "gpt-5-2025-08-07")
+        primary_model = os.getenv("OPENAI_MODEL", "gpt-5.6-sol")
+        fallback_model = os.getenv("OPENAI_FALLBACK_MODEL", "gpt-5.6-terra")
         if not primary_model.startswith("gpt-5"):
             raise ValueError(f"OPENAI_MODEL must be GPT-5 (got: {primary_model})")
         if fallback_model and not fallback_model.startswith("gpt-5"):

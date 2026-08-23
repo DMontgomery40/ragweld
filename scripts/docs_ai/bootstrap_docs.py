@@ -9,7 +9,7 @@ Usage:
     python scripts/docs_ai/bootstrap_docs.py --list
     python scripts/docs_ai/bootstrap_docs.py --dry-run --page index
     python scripts/docs_ai/bootstrap_docs.py --page index --page retrieval/overview
-    python scripts/docs_ai/bootstrap_docs.py --all --model gpt-5 --verbosity high --reasoning-effort high
+    python scripts/docs_ai/bootstrap_docs.py --all --model gpt-5.6-sol --verbosity high --reasoning-effort high
 """
 import argparse
 import os
@@ -352,7 +352,7 @@ class DocBootstrapper:
 
     def __init__(
         self,
-        model: str = "gpt-5",
+        model: str = "gpt-5.6-sol",
         max_tokens: int = 32000,
         *,
         verbosity: str = "high",
@@ -362,7 +362,7 @@ class DocBootstrapper:
         """Initialize with OpenAI client.
 
         Args:
-            model: OpenAI model to use (default: gpt-5)
+            model: OpenAI model to use (default: gpt-5.6-sol)
             max_tokens: Maximum tokens for response (default: 32000)
             verbosity: GPT-5 text verbosity hint (low|medium|high)
             reasoning_effort: GPT-5 reasoning effort (minimal|low|medium|high)
@@ -617,7 +617,7 @@ Examples:
   %(prog)s --page index                    # Generate index page
   %(prog)s --page index --page retrieval/overview       # Generate multiple
   %(prog)s --all                           # Generate all pages
-  %(prog)s --all --model gpt-5             # Use specific model
+  %(prog)s --all --model gpt-5.6-terra     # Use specific model
         """
     )
 
@@ -645,8 +645,8 @@ Examples:
     )
     parser.add_argument(
         "--model",
-        default="gpt-5",
-        help="OpenAI model to use (default: gpt-5). Use GPT-5 series only."
+        default="gpt-5.6-sol",
+        help="OpenAI model to use (default: gpt-5.6-sol). Use GPT-5 series only."
     )
     parser.add_argument(
         "--max-tokens",

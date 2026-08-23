@@ -70,8 +70,16 @@ EXCLUDE_SUBSTRINGS = (
     "data/reranker_train_runs/",
     "data/eval_dataset/",
     "data/benchmarks/",
-    "models/",
     "CLEANUP_PLANS/",
+)
+
+# Tracked model artifacts live in the top-level `models/` tree. Matched as a
+# path prefix only: `server/models/**` is the Pydantic source of truth and must
+# stay in the change context.
+EXCLUDE_PREFIXES = (
+    "mkdocs/",
+    "site/",
+    "models/",
 )
 
 EXCLUDE_SUFFIXES = (
@@ -166,7 +174,7 @@ def _maybe_load_dotenv() -> None:
 def should_include_file(path: str) -> bool:
     p = (path or "").replace("\\", "/")
     p_lower = p.lower()
-    if p_lower.startswith("mkdocs/") or p_lower.startswith("site/"):
+    if any(p_lower.startswith(prefix) for prefix in EXCLUDE_PREFIXES):
         return False
     if any(seg in p_lower for seg in EXCLUDE_SUBSTRINGS):
         return False
@@ -677,8 +685,9 @@ def call_openai_unified_diff(prompt: str) -> str:
     if not api_key:
         raise RuntimeError("OPENAI_API_KEY not set")
 
-    # Default to the latest flagship model (override via OPENAI_MODEL).
-    model = os.getenv("OPENAI_MODEL", "gpt-5.2")
+    # Default to the latest flagship tier (override via OPENAI_MODEL, e.g.
+    # gpt-5.6-terra for balanced cost or gpt-5.6-luna for fast/cheap runs).
+    model = os.getenv("OPENAI_MODEL", "gpt-5.6-sol")
     url = (os.getenv("OPENAI_API_BASE", "https://api.openai.com/v1").rstrip("/") + "/responses")
     max_output_tokens = int(os.getenv("OPENAI_MAX_OUTPUT_TOKENS", "14000"))
 
