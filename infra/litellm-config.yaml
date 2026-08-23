@@ -5,7 +5,7 @@ model_list:
 - model_name: ragweld-local
   litellm_params:
     model: openai/ragweld-local
-    api_base: http://vllm:8000/v1
+    api_base: http://host.docker.internal:58080/v1
     api_key: none
 - model_name: aion-labs.aion-2.0
   litellm_params:

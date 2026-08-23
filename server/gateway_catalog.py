@@ -50,7 +50,9 @@ META_ROUTER_PROVIDER = "openrouter"  # openrouter/auto, openrouter/free, ... res
 LOCAL_GATEWAY_ALIAS = "ragweld-local"
 LOCAL_GATEWAY_PROVIDER = "ragweld"
 LOCAL_GATEWAY_UPSTREAM = "openai/ragweld-local"
-LOCAL_GATEWAY_BASE_URL = "http://vllm:8000/v1"
+# The LiteLLM container reaches the host vllm-metal `local-model` process
+# (started by ./start.sh) through the Docker host gateway.
+LOCAL_GATEWAY_BASE_URL = "http://host.docker.internal:58080/v1"
 
 GENERATED_HEADER = (
     "# GENERATED from data/models.json by scripts/generate_litellm_config.py. DO NOT HAND-EDIT.\n"

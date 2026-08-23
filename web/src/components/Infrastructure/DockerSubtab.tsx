@@ -18,7 +18,6 @@ const SERVICE_LABELS: Record<RagweldDockerService, string> = {
   tempo: 'Tempo',
   alloy: 'Grafana Alloy',
   litellm: 'LiteLLM Gateway',
-  vllm: 'vLLM Serving',
   qdrant: 'Qdrant Vector Store',
   mlflow: 'MLflow Tracking',
   flyte: 'Flyte Control Plane',

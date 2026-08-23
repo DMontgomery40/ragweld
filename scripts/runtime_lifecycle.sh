@@ -106,10 +106,54 @@ owned_pid() {
   printf '%s\n' "$pid"
 }
 
+descendant_pids() {
+  local parent="$1" child
+  for child in $(pgrep -P "$parent" 2>/dev/null); do
+    printf '%s\n' "$child"
+    descendant_pids "$child"
+  done
+}
+
+# A force-KILLed parent (e.g. the vllm API server) can leave reparented
+# children behind (the memory-heavy EngineCore). Descendants are collected
+# while the owned parent is alive and swept afterwards, each one revalidated
+# against the expected working directory before it is signaled.
+stop_process_descendants() {
+  local kind="$1"
+  local expected_cwd="$2"
+  local descendants="$3"
+  local pid i alive
+  [[ -n "$descendants" ]] || return 0
+  for pid in $descendants; do
+    kill -0 "$pid" 2>/dev/null || continue
+    [[ "$(process_cwd "$pid")" == "$expected_cwd" ]] || continue
+    echo "Stopping Ragweld ${kind} child pid=${pid}" >&2
+    kill -TERM "$pid" >/dev/null 2>&1 || true
+  done
+  i=0
+  while [[ "$i" -lt 50 ]]; do
+    alive=0
+    for pid in $descendants; do
+      if kill -0 "$pid" 2>/dev/null && [[ "$(process_cwd "$pid")" == "$expected_cwd" ]]; then
+        alive=1
+      fi
+    done
+    [[ "$alive" == "0" ]] && return 0
+    sleep 0.1
+    i=$((i + 1))
+  done
+  for pid in $descendants; do
+    if kill -0 "$pid" 2>/dev/null && [[ "$(process_cwd "$pid")" == "$expected_cwd" ]]; then
+      echo "Ragweld ${kind} child did not stop after TERM; sending KILL to validated pid=${pid}" >&2
+      kill -KILL "$pid" >/dev/null 2>&1 || true
+    fi
+  done
+}
+
 stop_owned_process() {
   local kind="$1"
   local expected_cwd="$2"
-  local pid i
+  local pid i descendants
   if pid="$(owned_pid "$kind" "$expected_cwd")"; then
     :
   else
@@ -117,6 +161,7 @@ stop_owned_process() {
     [[ "$status" == "1" ]] && return 0
     return "$status"
   fi
+  descendants="$(descendant_pids "$pid")"
   echo "Stopping Ragweld ${kind} pid=${pid}"
   if ! kill -TERM "$pid" >/dev/null 2>&1; then
     echo "ERROR: unable to signal owned Ragweld ${kind} pid=${pid}; ownership metadata was preserved." >&2
@@ -134,6 +179,7 @@ stop_owned_process() {
       return 2
     fi
   fi
+  stop_process_descendants "$kind" "$expected_cwd" "$descendants"
   rm -f "$(runtime_pid_file "$kind")"
 }
 
@@ -141,7 +187,7 @@ stop_owned_process_exact() {
   local kind="$1"
   local expected_cwd="$2"
   local expected_pid="$3"
-  local pid_file record recorded_pid cwd i
+  local pid_file record recorded_pid cwd i descendants
   pid_file="$(runtime_pid_file "$kind")"
   record="$(sed -n '1p' "$pid_file" 2>/dev/null || true)"
   recorded_pid="${record%%|*}"
@@ -153,6 +199,7 @@ stop_owned_process_exact() {
     rm -f "$pid_file"
     return 0
   fi
+  descendants="$(descendant_pids "$expected_pid")"
   echo "Stopping Ragweld ${kind} pid=${expected_pid}"
   if ! kill -TERM "$expected_pid" >/dev/null 2>&1; then
     echo "ERROR: unable to signal owned Ragweld ${kind} pid=${expected_pid}; ownership metadata was preserved." >&2
@@ -170,6 +217,7 @@ stop_owned_process_exact() {
       return 2
     fi
   fi
+  stop_process_descendants "$kind" "$expected_cwd" "$descendants"
   rm -f "$pid_file"
 }
 
@@ -188,13 +236,18 @@ ragweld_repo_process_pids() {
 owned_host_records_released() {
   local expected_backend_pid="$1"
   local expected_frontend_pid="$2"
-  local backend_record frontend_record
+  local expected_local_model_pid="${3:-}"
+  local backend_record frontend_record local_model_record
   backend_record="$(sed -n '1p' "$(runtime_pid_file backend)" 2>/dev/null || true)"
   frontend_record="$(sed -n '1p' "$(runtime_pid_file frontend)" 2>/dev/null || true)"
+  local_model_record="$(sed -n '1p' "$(runtime_pid_file local-model)" 2>/dev/null || true)"
   if [[ -n "$expected_backend_pid" && "${backend_record%%|*}" == "$expected_backend_pid" ]]; then
     return 1
   fi
   if [[ -n "$expected_frontend_pid" && "${frontend_record%%|*}" == "$expected_frontend_pid" ]]; then
+    return 1
+  fi
+  if [[ -n "$expected_local_model_pid" && "${local_model_record%%|*}" == "$expected_local_model_pid" ]]; then
     return 1
   fi
   return 0
@@ -214,7 +267,7 @@ validate_reset_docker_scope() {
       "$id")"
     service="${labels##*|}"
     case "$service" in
-      postgres|postgres-exporter|neo4j|grafana|prometheus|loki|promtail|api|tempo|alloy|litellm|vllm) ;;
+      postgres|postgres-exporter|neo4j|grafana|prometheus|loki|promtail|api|tempo|alloy|litellm) ;;
       *) echo "ERROR: refusing reset with unexpected Ragweld container service: ${service:-unknown}" >&2; return 1 ;;
     esac
     [[ "$labels" == "ragweld|true|${service}" ]] || {
@@ -232,6 +285,8 @@ validate_reset_docker_scope() {
   while IFS= read -r volume; do
     [[ -n "$volume" ]] || continue
     case "$volume" in
+      # ragweld_hf_cache is the retired in-VM vLLM weight cache; it stays
+      # deletable here so reset can purge the leftover volume.
       ragweld_postgres_data|ragweld_neo4j_data|ragweld_neo4j_logs|ragweld_grafana_data|ragweld_prometheus_data|ragweld_loki_data|ragweld_tempo_data|ragweld_hf_cache) ;;
       *) echo "ERROR: refusing reset with unexpected Ragweld project volume: ${volume}" >&2; return 1 ;;
     esac

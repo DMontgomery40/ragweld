@@ -33,14 +33,14 @@ def _temporary_catalog_paths(data_path: Path, web_path: Path):
 def _local_serving_row() -> dict:
     return {
         "provider": "ragweld",
-        "family": "Qwen3",
-        "model": "Qwen/Qwen3-4B-Instruct-2507",
+        "family": "Qwen3.8-27B",
+        "model": "mlx-community/Qwen3.8-27B-4bit",
         "components": ["GEN"],
         "unit": "1k_tokens",
-        "context": 8192,
+        "context": 32768,
         "input_per_1k": 0.0,
         "output_per_1k": 0.0,
-        "base_url": "http://vllm:8000/v1",
+        "base_url": "http://host.docker.internal:58080/v1",
         "gateway_alias": "ragweld-local",
         "gateway_upstream": "openai/ragweld-local",
     }

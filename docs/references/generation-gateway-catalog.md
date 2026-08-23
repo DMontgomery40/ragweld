@@ -27,12 +27,13 @@ Browser picker <-- /api/chat/models <-- LiteLLM /v1/models (live) JOIN catalog r
   hand-edit it; regenerate with `uv run python scripts/generate_litellm_config.py`
   (`--check` fails when stale). `tests/unit/test_gateway_catalog.py` enforces
   lockstep between the checked-in YAML, the catalog and its web mirror.
-- The local vLLM serving row is the `ragweld` provider row
+- The local serving row is the `ragweld` provider row
   (`gateway_alias: ragweld-local`, `gateway_upstream: openai/ragweld-local`,
-  `base_url: http://vllm:8000/v1`). It is always rendered first. Its `model`
-  (`Qwen/Qwen3-4B-Instruct-2507`) and `context` (8192) mirror the Compose
-  `VLLM_MODEL` default and `--max-model-len`; `tests/unit/test_runtime_launch_contract.py`
-  enforces that pairing.
+  `base_url: http://host.docker.internal:58080/v1` — the LiteLLM container's
+  route to the host `local-model` process). It is always rendered first. Its
+  `model` (`mlx-community/Qwen3.8-27B-4bit`) and `context` (32768) mirror
+  `start.sh`'s `LOCAL_MODEL_ID` and `LOCAL_MODEL_MAX_LEN`;
+  `tests/unit/test_runtime_launch_contract.py` enforces that pairing.
 - `/api/chat/models` discovers aliases from LiteLLM (authenticated, fails 503
   when the gateway is down) and joins them to catalog rows so every surface
   (Chat picker, Sidepanel quick model, Benchmark, Synthetic Lab, Indexing

@@ -92,7 +92,7 @@ export function ProviderSetup() {
       <div style={{ marginBottom: 18 }}>
         <h3 style={{ margin: 0, fontSize: 18, fontWeight: 600, color: 'var(--fg)' }}>Generation Gateway</h3>
         <div style={{ marginTop: 6, fontSize: 13, color: 'var(--fg-muted)' }}>
-          Ragweld sends every generation request through LiteLLM. vLLM is the managed local serving backend.
+          Ragweld sends every generation request through LiteLLM. The local serving backend is the host local-model server (vllm-metal), started by ./start.sh.
         </div>
       </div>
 
@@ -149,7 +149,7 @@ export function ProviderSetup() {
           </div>
           <div className="input-group">
             <label>Expected served model</label>
-            <input value={String(vllm.default_model || '')} onChange={(event) => setVllm({ ...vllm, default_model: event.target.value })} placeholder="Qwen/Qwen3-4B-Instruct-2507" />
+            <input value={String(vllm.default_model || '')} onChange={(event) => setVllm({ ...vllm, default_model: event.target.value })} placeholder="mlx-community/Qwen3.8-27B-4bit" />
           </div>
         </div>
         <div style={{ marginTop: 10, fontSize: 12, color: 'var(--fg-muted)' }}>

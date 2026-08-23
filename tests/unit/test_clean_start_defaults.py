@@ -122,9 +122,11 @@ def test_generic_automation_uses_a_stable_generated_fixture_and_explicit_lane_is
 def test_local_generation_models_are_current_everywhere() -> None:
     """The retired local generation models must not survive anywhere the runtime reads.
 
-    vLLM serves Qwen/Qwen3-4B-Instruct-2507 and the Learning Agent trains on its MLX
-    4-bit build; the 0.6B/1.7B predecessors were replaced, not kept as fallbacks. Every
-    tracked code/config/UI/script/test file is scanned; only historical records (lineage,
+    The host vllm-metal local-model server serves mlx-community/Qwen3.8-27B-4bit; the
+    Learning Agent still trains on the Qwen3-4B MLX build (training-only artifact, base
+    decision tracked separately). The 0.6B/1.7B predecessors and the in-VM bf16 4B
+    serving path were replaced, not kept as fallbacks. Every tracked
+    code/config/UI/script/test file is scanned; only historical records (lineage,
     run artifacts, exec-plan history, docs that describe the retirement) are excluded.
     """
     import subprocess
@@ -132,7 +134,7 @@ def test_local_generation_models_are_current_everywhere() -> None:
     from server.models.runtime_gateway import GenerationConfig
     from server.models.tribrid_config_model import UIConfig, VLLMConfig
 
-    assert VLLMConfig().default_model == "Qwen/Qwen3-4B-Instruct-2507"
+    assert VLLMConfig().default_model == "mlx-community/Qwen3.8-27B-4bit"
     assert TrainingConfig().ragweld_agent_base_model == "mlx-community/Qwen3-4B-Instruct-2507-4bit"
     # The in-process MLX chat path is gone; its idle-unload/reload tunables went with it.
     assert "ragweld_agent_unload_after_sec" not in TrainingConfig.model_fields
@@ -142,13 +144,16 @@ def test_local_generation_models_are_current_everywhere() -> None:
     assert GenerationConfig().gen_timeout == 600
 
     runtime_config = json.loads((ROOT / "tribrid_config.json").read_text(encoding="utf-8"))
-    assert runtime_config["chat"]["vllm"]["default_model"] == "Qwen/Qwen3-4B-Instruct-2507"
+    assert runtime_config["chat"]["vllm"]["default_model"] == "mlx-community/Qwen3.8-27B-4bit"
     assert runtime_config["training"]["ragweld_agent_base_model"] == "mlx-community/Qwen3-4B-Instruct-2507-4bit"
     assert runtime_config["ui"]["chat_stream_timeout"] == 600
     assert runtime_config["generation"]["gen_timeout"] == 600
     assert "ragweld_agent_unload_after_sec" not in runtime_config["training"]
 
-    retired = ("Qwen/Qwen3-0.6B", "Qwen3-1.7B-4bit")
+    # "Qwen/Qwen3-4B-Instruct-2507" (with the Qwen/ prefix) is the retired bf16
+    # SERVING id; the mlx-community 4-bit build of the same family remains the
+    # Learning Agent training base and does not match this needle.
+    retired = ("Qwen/Qwen3-0.6B", "Qwen3-1.7B-4bit", "Qwen/Qwen3-4B-Instruct-2507")
     live_prefixes = ("server/", "web/src/", "web/public/", "web/tests/", "scripts/", "infra/", "tests/", "spec/")
     live_files = {"docker-compose.yml", "start.sh", "tribrid_config.json", "data/models.json", "data/glossary.json", "README.md"}
     historical_exclusions = {

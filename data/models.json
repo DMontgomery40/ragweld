@@ -7475,21 +7475,21 @@
     },
     {
       "provider": "ragweld",
-      "family": "Qwen3-4B-Instruct-2507",
-      "model": "Qwen/Qwen3-4B-Instruct-2507",
+      "family": "Qwen3.8-27B",
+      "model": "mlx-community/Qwen3.8-27B-4bit",
       "components": [
         "GEN"
       ],
       "unit": "1k_tokens",
-      "context": 8192,
+      "context": 32768,
       "input_per_1k": 0.0,
       "output_per_1k": 0.0,
-      "base_url": "http://vllm:8000/v1",
-      "display_name": "Ragweld local (vLLM)",
+      "base_url": "http://host.docker.internal:58080/v1",
+      "display_name": "Ragweld local (vLLM Metal)",
       "gateway_alias": "ragweld-local",
       "gateway_upstream": "openai/ragweld-local",
       "supports_vision": false,
-      "notes": "Self-hosted vLLM serving path (docker-compose.yml VLLM_MODEL; CPU image, --max-model-len 8192, single stream). Served name ragweld-local. Non-thinking instruct model: no <think> traces in output.",
+      "notes": "Self-hosted vllm-metal serving path: the host `local-model` process started by ./start.sh (Apple Silicon Metal/MLX, --max-model-len 32768, single stream, thinking disabled via --default-chat-template-kwargs). Served name ragweld-local; containers reach it at host.docker.internal:58080.",
       "selection_roles": [],
       "selection_status": "catalog_only",
       "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."

@@ -208,39 +208,9 @@ services:
       retries: 40
       start_period: 60s
 
-  vllm:
-    image: vllm/vllm-openai-cpu:v0.26.0-arm64
-    labels:
-      io.ragweld.managed: "true"
-    command:
-      - --model
-      - ${VLLM_MODEL:-Qwen/Qwen3-4B-Instruct-2507}
-      - --served-model-name
-      - ragweld-local
-      - --host
-      - 0.0.0.0
-      - --port
-      - "8000"
-      - --max-model-len
-      - "8192"
-      - --max-num-seqs
-      - "1"
-      - --gpu-memory-utilization
-      - "0.32"
-    environment:
-      # CPU backend memory budget: ~8 GiB bf16 weights for the 4B model + this KV cache (GiB).
-      VLLM_CPU_KVCACHE_SPACE: "4"
-    ports:
-      - "127.0.0.1:${VLLM_PORT:-58080}:8000"
-    volumes:
-      - hf_cache:/root/.cache/huggingface
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)"]
-      interval: 10s
-      timeout: 10s
-      retries: 60
-      start_period: 30s
-
+  # Local generation is served by the host `local-model` process (vllm-metal on
+  # Apple Silicon, started by ./start.sh); containers reach it via
+  # host.docker.internal:58080. There is no in-VM vLLM service.
   litellm:
     image: ghcr.io/berriai/litellm:v1.94.0
     labels:
@@ -256,9 +226,8 @@ services:
       - "127.0.0.1:${LITELLM_PORT:-54000}:4000"
     volumes:
       - ./infra/litellm-config.yaml:/app/config.yaml:ro
-    depends_on:
-      vllm:
-        condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     healthcheck:
       test: ["CMD", "python", "-c", "import os, urllib.request; request = urllib.request.Request('http://127.0.0.1:4000/v1/models', headers={'Authorization': 'Bearer ' + os.environ['LITELLM_MASTER_KEY']}); urllib.request.urlopen(request, timeout=5)"]
       interval: 10s
@@ -278,10 +247,12 @@ services:
       - NEO4J_URI=bolt://neo4j:7687
       - LITELLM_BASE_URL=http://litellm:4000/v1
       - LITELLM_API_KEY=${LITELLM_API_KEY:-sk-ragweld-local}
-      - VLLM_BASE_URL=http://vllm:8000/v1
+      - VLLM_BASE_URL=http://host.docker.internal:58080/v1
       - OPENROUTER_API_KEY=
     env_file:
       - .env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "127.0.0.1:${SERVER_PORT:-58012}:8000"
     volumes:
@@ -299,6 +270,8 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+      # /api/ready needs the host local-model server; allow for its load time.
+      start_period: 150s
 
 volumes:
   postgres_data:
@@ -310,4 +283,3 @@ volumes:
   grafana_data:
   prometheus_data:
   loki_data:
-  hf_cache:

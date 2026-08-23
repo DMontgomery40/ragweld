@@ -31,27 +31,32 @@ default, never a retry target, never a fallback. See
 ## Deployment topology
 
 - LiteLLM image: `ghcr.io/berriai/litellm:v1.94.0`
-- vLLM image: `vllm/vllm-openai-cpu:v0.26.0-arm64`
+- Local serving: the HOST `local-model` process (vllm-metal / MLX on Apple
+  Silicon, started by `./start.sh`, venv `~/.venv-vllm-metal`) — there is no
+  in-VM vLLM container.
 - Host LiteLLM URL: `http://127.0.0.1:54000/v1`
 - Compose LiteLLM URL: `http://litellm:4000/v1`
-- Host vLLM URL: `http://127.0.0.1:58080/v1`
-- Compose vLLM URL: `http://vllm:8000/v1`
+- Host local-model URL: `http://127.0.0.1:58080/v1`
+- Container view of the local model: `http://host.docker.internal:58080/v1`
+  (`extra_hosts: host-gateway` on `litellm` and `api`)
 - Local alias and served name: `ragweld-local`
-- Served model: `Qwen/Qwen3-4B-Instruct-2507` (`Qwen3ForCausalLM`, non-thinking
-  instruct; bf16 on the CPU image, `--max-model-len 8192`, `--max-num-seqs 1`,
-  `VLLM_CPU_KVCACHE_SPACE=4`). Override with `VLLM_MODEL`; the catalog's
-  `ragweld` row (`data/models.json`) must name the same model and context.
+- Served model: `mlx-community/Qwen3.8-27B-4bit` (Qwen3.8 hybrid
+  SDPA + Gated DeltaNet; 4-bit MLX weights, `--max-model-len 32768`,
+  `--max-num-seqs 1`, `--gpu-memory-utilization 0.50`, thinking disabled with
+  `--default-chat-template-kwargs '{"enable_thinking": false}'`). The catalog's
+  `ragweld` row (`data/models.json`) must name the same model and context;
+  `tests/unit/test_runtime_launch_contract.py` pins the pairing against
+  `start.sh`.
 
-The 4B bf16 weights (~8 GiB) plus the 4 GiB KV cache need the 28 GiB Colima
-profile (`colima start --profile ragweld --vm-type vz --cpu 6 --memory 28`);
-the 16 GiB profile could only hold the retired `Qwen3-0.6B` bootstrap model.
-Newer Qwen3.5/3.6/3.8 checkpoints are `Qwen3_5ForConditionalGeneration` (linear
-attention + multimodal) and do not run on the CPU vLLM image. Serving is
-single-stream and CPU-bound; vLLM reserves one vCPU and computes on the rest, so
-the profile is sized at 6 vCPUs (5 compute cores). Measured on the 4-vCPU profile:
-a 911-token grounded prompt plus a 143-token answer took 115 s, which is why the
-runtime config sets `ui.chat_stream_timeout` to its 600 s ceiling. It is the
-honest local path, not a throughput tier.
+The 15 GiB 4-bit weights plus KV cache live in host unified memory (M4 Pro,
+48 GiB): `--gpu-memory-utilization 0.50` budgets 24 GiB, which fits the 32k
+window with headroom. The Colima VM no longer serves models and is sized down
+(`colima start --profile ragweld --vm-type vz --cpu 6 --memory 16`). The
+retired path — `Qwen/Qwen3-4B-Instruct-2507` bf16 on
+`vllm/vllm-openai-cpu:v0.26.0-arm64` in the VM — ran at ~2 tok/s and needed a
+28 GiB VM; the host Metal path serves the 27B at ~12 tok/s measured on the
+Barry Cohen probe (200 tokens in 16.2 s wall, prefill included). Serving stays
+single-stream; it is the honest local path, not a throughput tier.
 
 ## Configuration and secrets
 

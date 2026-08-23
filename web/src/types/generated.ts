@@ -2735,7 +2735,7 @@ export interface UIConfig {
 export interface VLLMConfig {
   enabled?: boolean; // default: True
   base_url?: string; // default: "http://127.0.0.1:58080/v1"
-  default_model?: string; // default: "Qwen/Qwen3-4B-Instruct-2507"
+  default_model?: string; // default: "mlx-community/Qwen3.8-27B-4bit"
 }
 
 /** Configuration for the vector (dense) leg served by Qdrant. */

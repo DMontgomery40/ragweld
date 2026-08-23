@@ -87,6 +87,7 @@ def test_start_check_treats_docker_runtime_as_host_owned() -> None:
         "--check",
         "--no-backend",
         "--no-frontend",
+        "--no-local-model",
         env={
             "DOCKER_HOST": "tcp://127.0.0.1:1",
             "DOCKER_CONTEXT": "foreign-context",
@@ -256,7 +257,9 @@ def test_prometheus_scrapes_clean_start_data_and_generation_targets() -> None:
     assert jobs["litellm"]["metrics_path"] == "/metrics"
     assert jobs["litellm"]["static_configs"][0]["targets"] == ["litellm:4000"]
     assert jobs["vllm"]["metrics_path"] == "/metrics"
-    assert jobs["vllm"]["static_configs"][0]["targets"] == ["vllm:8000"]
+    # The local-model server is a host process; Prometheus (in the VM) scrapes
+    # it through the Docker host gateway.
+    assert jobs["vllm"]["static_configs"][0]["targets"] == ["host.docker.internal:58080"]
 
     compose = _compose_config("docker-compose.yml")
     assert "--web.enable-remote-write-receiver" in compose["services"]["prometheus"]["command"]
@@ -302,47 +305,73 @@ def test_generation_gateway_topology_is_pinned_local_and_has_no_paid_fallback() 
     config = _compose_config("docker-compose.yml", "infra/docker-compose.observability.yml")
     services = config["services"]
 
-    vllm = services["vllm"]
+    # Local generation is a HOST process (vllm-metal on Apple Silicon); the
+    # in-VM vLLM service and its weight-cache volume are gone.
+    assert "vllm" not in services
+    assert "hf_cache" not in config.get("volumes", {})
+
     litellm = services["litellm"]
     api = services["api"]
 
-    assert vllm["image"] == "vllm/vllm-openai-cpu:v0.26.0-arm64"
     assert litellm["image"] == "ghcr.io/berriai/litellm:v1.94.0"
-    assert _published_ports(vllm) == {58080}
     assert _published_ports(litellm) == {54000}
-    assert all(port.get("host_ip") == "127.0.0.1" for port in vllm["ports"])
     assert all(port.get("host_ip") == "127.0.0.1" for port in litellm["ports"])
-    vllm_command = [str(part) for part in vllm["command"]]
-    memory_flag = vllm_command.index("--gpu-memory-utilization")
-    assert vllm_command[memory_flag + 1] == "0.32"
-    context_flag = vllm_command.index("--max-model-len")
-    max_model_len = int(vllm_command[context_flag + 1])
+
+    launcher = (ROOT / "start.sh").read_text(encoding="utf-8")
+    local_model_id = "mlx-community/Qwen3.8-27B-4bit"
+    assert f'LOCAL_MODEL_ID="{local_model_id}"' in launcher
+    max_len_match = re.search(r"^LOCAL_MODEL_MAX_LEN=(\d+)$", launcher, re.MULTILINE)
+    assert max_len_match is not None
+    max_model_len = int(max_len_match.group(1))
+    assert max_model_len == 32768
+    # Measured on this host (M4 Pro 48 GiB, VM at 16 GiB): 0.50 of unified
+    # memory fits the 15 GiB 4-bit weights plus a 32k-token KV cache.
+    assert 'LOCAL_MODEL_MEMORY_FRACTION="0.50"' in launcher
+    assert "--served-model-name ragweld-local" in launcher
+    assert '--default-chat-template-kwargs \'{"enable_thinking": false}\'' in launcher
+    assert "--no-local-model" in launcher
+    assert "pip install vllm-metal" in launcher  # fail-closed missing-venv hint
+    # The port is pinned: LiteLLM's generated config, the Compose api service,
+    # and Prometheus all target 58080; an env override would split-brain them.
+    assert re.search(r"^LOCAL_MODEL_PORT=58080$", launcher, re.MULTILINE)
+    # The readiness gate verifies the served identity, not just a listener.
+    assert '"\\"root\\":\\"${LOCAL_MODEL_ID}\\""' in launcher
+    assert '"\\"max_model_len\\":${LOCAL_MODEL_MAX_LEN}[,}]"' in launcher
+    # --docker-backend must not race the containerized API healthcheck against
+    # the model load.
+    assert 'BACKEND_MODE" == "docker" && "$START_LOCAL_MODEL" == "1"' in launcher
+    stopper = (ROOT / "stop.sh").read_text(encoding="utf-8")
+    assert 'stop_owned_process "local-model" "$ROOT_DIR"' in stopper
+    lifecycle = (ROOT / "scripts" / "runtime_lifecycle.sh").read_text(encoding="utf-8")
+    # Force-stopping the owned parent must sweep validated descendants (the
+    # memory-heavy EngineCore child) instead of orphaning them.
+    assert "descendant_pids()" in lifecycle
+    assert lifecycle.count("stop_process_descendants ") >= 2
+
     runtime_config = TriBridConfig()
     assert runtime_config.chat.max_tokens <= max_model_len // 2
     assert runtime_config.generation.gen_max_tokens <= max_model_len // 2
-    # The served model is the current CPU-runnable Qwen3 instruct checkpoint; the
-    # catalog's local serving row must name the same model and context window.
-    model_flag = vllm_command.index("--model")
-    assert vllm_command[model_flag + 1] == "Qwen/Qwen3-4B-Instruct-2507"
-    assert runtime_config.chat.vllm.default_model == "Qwen/Qwen3-4B-Instruct-2507"
-    assert str(vllm["environment"]["VLLM_CPU_KVCACHE_SPACE"]) == "4"
+    assert runtime_config.chat.vllm.default_model == local_model_id
+    assert runtime_config.chat.vllm.base_url == "http://127.0.0.1:58080/v1"
     catalog = json.loads((ROOT / "data" / "models.json").read_text(encoding="utf-8"))
     local_rows = [row for row in catalog["models"] if row.get("provider") == "ragweld"]
     assert len(local_rows) == 1
-    assert local_rows[0]["model"] == "Qwen/Qwen3-4B-Instruct-2507"
+    assert local_rows[0]["model"] == local_model_id
     assert local_rows[0]["context"] == max_model_len
+    assert local_rows[0]["base_url"] == "http://host.docker.internal:58080/v1"
 
-    assert litellm["depends_on"]["vllm"]["condition"] == "service_healthy"
+    # Containers reach the host process through the Docker host gateway.
+    assert "host.docker.internal=host-gateway" in litellm["extra_hosts"]
+    assert "host.docker.internal=host-gateway" in api["extra_hosts"]
+    assert "depends_on" not in litellm
     assert api["depends_on"]["litellm"]["condition"] == "service_healthy"
     assert api["environment"]["LITELLM_BASE_URL"] == "http://litellm:4000/v1"
+    assert api["environment"]["VLLM_BASE_URL"] == "http://host.docker.internal:58080/v1"
     assert api["environment"]["OPENROUTER_API_KEY"] == ""
-    assert "OPENROUTER_API_KEY" not in vllm.get("environment", {})
 
     config_mount = _volume_for_target(litellm, "/app/config.yaml")
     assert config_mount["read_only"] is True
     assert Path(config_mount["source"]).resolve() == (ROOT / "infra/litellm-config.yaml").resolve()
-    hf_cache = _volume_for_target(vllm, "/root/.cache/huggingface")
-    assert hf_cache["type"] == "volume"
 
     gateway = yaml.safe_load((ROOT / "infra/litellm-config.yaml").read_text(encoding="utf-8"))
     from server.gateway_catalog import build_model_list, load_catalog
@@ -351,7 +380,7 @@ def test_generation_gateway_topology_is_pinned_local_and_has_no_paid_fallback() 
     assert gateway["model_list"][0]["model_name"] == "ragweld-local"
     assert gateway["model_list"][0]["litellm_params"] == {
         "model": "openai/ragweld-local",
-        "api_base": "http://vllm:8000/v1",
+        "api_base": "http://host.docker.internal:58080/v1",
         "api_key": "none",
     }
     routed = gateway["model_list"][1:]
@@ -361,9 +390,8 @@ def test_generation_gateway_topology_is_pinned_local_and_has_no_paid_fallback() 
     assert all("api_base" not in row["litellm_params"] for row in routed)
     assert "ragweld-openrouter-smoke" not in {row["model_name"] for row in gateway["model_list"]}
 
-    launcher = (ROOT / "start.sh").read_text(encoding="utf-8")
     assert "unset OPENROUTER_API_KEY ANTHROPIC_API_KEY GOOGLE_API_KEY" in launcher
-    assert "colima start --profile ragweld --vm-type vz --cpu 6 --memory 28" in launcher
+    assert "colima start --profile ragweld --vm-type vz --cpu 6 --memory 16" in launcher
     assert gateway["litellm_settings"]["num_retries"] == 0
     assert gateway["litellm_settings"].get("fallbacks", []) == []
     assert gateway["litellm_settings"].get("context_window_fallbacks", []) == []
@@ -376,6 +404,9 @@ def test_generation_gateway_topology_is_pinned_local_and_has_no_paid_fallback() 
     assert "Authorization" in litellm_health
     api_health = " ".join(str(part) for part in api["healthcheck"]["test"])
     assert "/api/ready" in api_health
+    # /api/ready needs the host local model; the healthcheck start period must
+    # cover its measured ~100 s load time.
+    assert api["healthcheck"]["start_period"] == "2m30s"
     dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
     assert "http://localhost:8000/api/ready" in dockerfile
     assert "http://localhost:8000/health" not in dockerfile

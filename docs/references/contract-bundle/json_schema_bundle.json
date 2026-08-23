@@ -4374,7 +4374,7 @@
               "type": "string"
             },
             "default_model": {
-              "default": "Qwen/Qwen3-4B-Instruct-2507",
+              "default": "mlx-community/Qwen3.8-27B-4bit",
               "title": "Default Model",
               "type": "string"
             },
@@ -34974,7 +34974,7 @@
               "type": "string"
             },
             "default_model": {
-              "default": "Qwen/Qwen3-4B-Instruct-2507",
+              "default": "mlx-community/Qwen3.8-27B-4bit",
               "title": "Default Model",
               "type": "string"
             },
@@ -35457,7 +35457,7 @@
           "type": "string"
         },
         "default_model": {
-          "default": "Qwen/Qwen3-4B-Instruct-2507",
+          "default": "mlx-community/Qwen3.8-27B-4bit",
           "title": "Default Model",
           "type": "string"
         },

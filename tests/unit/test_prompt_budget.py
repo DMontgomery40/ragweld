@@ -31,10 +31,10 @@ from server.chat.prompt_budget import (
 )
 from server.models.retrieval import ChunkMatch
 from server.models.runtime_gateway import GenerationConfig
-from server.models.tribrid_config_model import ChatConfig, TriBridConfig
+from server.models.tribrid_config_model import TriBridConfig
 
 ROOT = Path(__file__).resolve().parents[2]
-LOCAL_WINDOW = 8192  # docker-compose.yml --max-model-len for ragweld-local
+LOCAL_WINDOW = 32768  # start.sh LOCAL_MODEL_MAX_LEN for ragweld-local
 # An alias the catalog does not know: the window is passed explicitly and the family defaults
 # (largest factors) apply whether or not another test warmed the catalog snapshot.
 ALIAS = "unit-test-alias"
@@ -80,7 +80,7 @@ def test_default_config_fits_the_local_window_with_room_for_context() -> None:
     assert GenerationConfig().gen_max_tokens <= LOCAL_WINDOW // 2
 
 
-@pytest.mark.parametrize("max_tokens", [LOCAL_WINDOW, ChatConfig.model_fields["max_tokens"].metadata[-1].le])
+@pytest.mark.parametrize("max_tokens", [LOCAL_WINDOW, LOCAL_WINDOW + 1])
 def test_output_allowance_at_or_above_the_window_is_rejected(max_tokens: int) -> None:
     with pytest.raises(PromptBudgetError, match="leaves no room for input") as info:
         plan_prompt_budget(
@@ -91,7 +91,7 @@ def test_output_allowance_at_or_above_the_window_is_rejected(max_tokens: int) ->
 
 
 def test_fixed_prompt_parts_that_exceed_the_remaining_window_are_rejected() -> None:
-    huge_system = " ".join(["ground every claim"] * 4000)
+    huge_system = " ".join(["ground every claim"] * (LOCAL_WINDOW // 2))
     with pytest.raises(PromptBudgetError, match="system prompt \\+ message \\(\\+ images\\) need"):
         plan_prompt_budget(alias=ALIAS, system_prompt=huge_system, user_message=QUESTION, max_tokens=512, context_window=LOCAL_WINDOW)
 
@@ -111,9 +111,17 @@ def test_images_are_charged_at_the_family_worst_case() -> None:
     # Unknown family (alias not in the catalog): the labelled heuristic applies per attachment.
     with_images = plan_prompt_budget(alias=ALIAS, system_prompt="s", user_message=QUESTION, max_tokens=512, image_sizes=[None], context_window=LOCAL_WINDOW)
     assert with_images.fixed_tokens - no_images.fixed_tokens == IMAGE_TOKENS_DEFAULT == 4800
-    # Two worst-case images alone exceed the local window once output is reserved.
+    # Enough worst-case images alone exceed the local window once output is reserved.
+    over_window_images = (LOCAL_WINDOW - 512) // IMAGE_TOKENS_DEFAULT + 1
     with pytest.raises(PromptBudgetError, match="\\(\\+ images\\)"):
-        plan_prompt_budget(alias=ALIAS, system_prompt="s", user_message=QUESTION, max_tokens=512, image_sizes=[None, None], context_window=LOCAL_WINDOW)
+        plan_prompt_budget(
+            alias=ALIAS,
+            system_prompt="s",
+            user_message=QUESTION,
+            max_tokens=512,
+            image_sizes=[None] * over_window_images,
+            context_window=LOCAL_WINDOW,
+        )
 
 
 # Documented per-image maxima (high/auto detail) per catalog id, from OpenAI's image-sizing rules:
@@ -211,7 +219,7 @@ def test_uncapped_openai_models_are_costed_from_real_pixels_and_refuse_url_image
     with pytest.raises(ImageBoundError, match="no published finite image token bound"):
         image_tokens_for_attachment("openai", "openai/gpt-chat-latest", supports_vision=True, size=(64, 64))
     with pytest.raises(ImageBoundError, match="does not accept image attachments"):
-        image_tokens_for_attachment("ragweld", "Qwen/Qwen3-4B-Instruct-2507", supports_vision=False, size=(64, 64))
+        image_tokens_for_attachment("ragweld", "mlx-community/Qwen3.8-27B-4bit", supports_vision=False, size=(64, 64))
 
 
 def test_inline_image_sizes_are_decoded_and_urls_have_none() -> None:
@@ -361,7 +369,7 @@ def test_planner_and_final_guard_count_the_same_assembled_prompt() -> None:
 
 
 def test_request_is_refused_when_no_retrieved_evidence_fits() -> None:
-    budget = plan_prompt_budget(alias=ALIAS, system_prompt="Answer from the sources.", user_message=QUESTION, max_tokens=7900, context_window=LOCAL_WINDOW)
+    budget = plan_prompt_budget(alias=ALIAS, system_prompt="Answer from the sources.", user_message=QUESTION, max_tokens=LOCAL_WINDOW - 292, context_window=LOCAL_WINDOW)
     assert 0 <= budget.available_for_context < 200
     with pytest.raises(PromptBudgetError, match="none of the retrieved evidence fits"):
         fit_context_to_budget(budget, rag_chunks=[_chunk(0, 2000)], recall_chunks=[_chunk(1, 400, recall=True)], render=_render)
@@ -370,13 +378,13 @@ def test_request_is_refused_when_no_retrieved_evidence_fits() -> None:
     assert (kept_rag, kept_recall, dropped) == ([], [], 1)
     # Evidence survives while the memory that would not fit is dropped.
     roomy = plan_prompt_budget(alias=ALIAS, system_prompt="Answer from the sources.", user_message=QUESTION, max_tokens=512, context_window=LOCAL_WINDOW)
-    kept_rag, kept_recall, dropped = fit_context_to_budget(roomy, rag_chunks=[_chunk(0, 2000)], recall_chunks=[_chunk(1, 8000, recall=True)], render=_render)
+    kept_rag, kept_recall, dropped = fit_context_to_budget(roomy, rag_chunks=[_chunk(0, 2000)], recall_chunks=[_chunk(1, LOCAL_WINDOW, recall=True)], render=_render)
     assert len(kept_rag) == 1 and kept_recall == [] and dropped == 1
 
 
 def test_final_guard_fails_closed_on_an_oversized_assembled_prompt() -> None:
-    oversized = "## Context\n" + " ".join(["plane"] * 9000)
-    with pytest.raises(PromptBudgetError, match="exceeding the 8192-token window of unit-test-alias") as info:
+    oversized = "## Context\n" + " ".join(["plane"] * (LOCAL_WINDOW + 1000))
+    with pytest.raises(PromptBudgetError, match=f"exceeding the {LOCAL_WINDOW}-token window of unit-test-alias") as info:
         assert_prompt_within_window(alias=ALIAS, system_prompt=oversized, user_message=QUESTION, max_tokens=512, context_window=LOCAL_WINDOW)
     assert info.value.prompt_tokens > LOCAL_WINDOW - 512
     counted = assert_prompt_within_window(alias=ALIAS, system_prompt="Answer from the sources.", user_message=QUESTION, max_tokens=512, context_window=LOCAL_WINDOW)

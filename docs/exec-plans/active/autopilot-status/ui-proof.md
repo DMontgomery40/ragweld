@@ -28,11 +28,14 @@ Keep this file updated with the latest acceptance result, the first failing chec
   since 2026-03-26; the result recorded below is obsolete and must not drive work.
 - Generator/judge selection no longer involves a `ragweld:` local model: every
   generation route is a LiteLLM alias (`litellm:ragweld-local` =
-  `Qwen/Qwen3-4B-Instruct-2507` on vLLM, plus the 403 OpenRouter routes). The
-  retired `ragweld:mlx-community/Qwen3-1.7B-4bit` selection cannot recur.
-- Current interactive proof (2026-08-22): Chrome drives of Chat on
-  `epstein-files-1` through `ragweld-local` and through `openai.gpt-5.4-mini`,
-  recorded in `docs/exec-plans/active/handoff-2026-08-22-session5.md` §5.
+  `mlx-community/Qwen3.8-27B-4bit` on the host vllm-metal `local-model`
+  process since 2026-08-23, plus the 403 OpenRouter routes). The retired
+  `ragweld:mlx-community/Qwen3-1.7B-4bit` selection cannot recur.
+- Current interactive proof (2026-08-23): Chrome drive of Chat on
+  `epstein-files-1` through `ragweld-local` (Qwen3.8-27B on Metal, streamed
+  grounded cited answer, 73 s), recorded in
+  `docs/exec-plans/active/local-model-vllm-metal-2026-08-22.md`; earlier
+  2026-08-22 drives in `handoff-2026-08-22-session5.md` §5.
 - Next smallest honest fix: re-run the acceptance harness against the LiteLLM
   catalog and record the first failing checkpoint here.
 

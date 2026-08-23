@@ -1,5 +1,30 @@
 # Handoff Prompt — Ragweld Recovery, Session 5
 
+> Checkpoint 2026-08-23 (session 8): **P0-3 is DONE** — local generation runs
+> on the HOST via vllm-metal (`~/.venv-vllm-metal`) serving
+> `mlx-community/Qwen3.8-27B-4bit` as `ragweld-local` on 127.0.0.1:58080
+> (32k ctx, fraction 0.50, single stream, thinking disabled at the serving
+> layer, ~12 tok/s). `./start.sh` owns the `local-model` process; the Compose
+> `vllm` service is DELETED and LiteLLM/api/Prometheus reach the host through
+> `host.docker.internal` — **older runtime notes below that name a Compose
+> `vllm` service or `--no-deps litellm` workarounds are obsolete**; after a
+> Colima bounce just run `./start.sh --with-observability` (add `--with-flyte`
+> when needed). Colima stays at `--cpu 6 --memory 16`. Full record + measured
+> parameters: `local-model-vllm-metal-2026-08-22.md`. Adversarial codex pass
+> REFUTED the first cut (2 P1, 5 P2, 1 P3): the orphaned-EngineCore stop path,
+> identity-blind readiness, docker-backend healthcheck race, port split-brain,
+> and stale docs are fixed; the "APIServer survives engine death" P1 was
+> empirically refuted (EngineCore kill → APIServer exits in ~3 s and the
+> supervised stack tears down cleanly, observed live). Residual: the lifecycle
+> lock still serializes `stop.sh` against a `start.sh` that is mid-startup
+> (pre-existing; Ctrl-C on the launcher is the recourse). Gates at commit:
+> full pytest 1101/78 skipped, strict lane 82 (with Flyte up), web lint/build,
+> gateway Playwright 7/7, all validators; proofs: LiteLLM→host chat
+> completion, grounded API chat (78 s, 10 sources), Chrome real-mouse drive
+> (73 s, cited answer, zero console errors). Next: the run-state follow-up
+> slice (`training-run-state-authority-2026-08-23.md`), then A3 observability,
+> then Phase B Chrome drives.
+>
 > Checkpoint 2026-08-23 (session 7, landed at `04dff27`): the P1 slice below is
 > committed locally (not pushed) after nineteen adversarial codex passes; the
 > two remaining structural items are a planned follow-up slice,

@@ -73,3 +73,54 @@ async def test_ready_unknown_corpus_reports_not_ready(client: AsyncClient) -> No
     assert data.get("ready") is False
     assert "corpus_error" in data
     assert "Corpus not found" in str(data.get("corpus_error"))
+
+
+@pytest.mark.asyncio
+async def test_ready_fails_closed_when_the_local_server_serves_the_wrong_model(client: AsyncClient) -> None:
+    """A listener on the vLLM URL is not enough: the served identity must match.
+
+    A real throwaway HTTP server answers /v1/models with a stale model card; the
+    readiness probe must refuse it with the serving-mismatch reason instead of
+    reporting the dependency healthy.
+    """
+    import http.server
+    import json as _json
+    import threading
+
+    stale_card = {
+        "object": "list",
+        "data": [{"id": "ragweld-local", "object": "model", "root": "Qwen/stale-model", "max_model_len": 2048}],
+    }
+
+    class _StaleModelHandler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self) -> None:  # noqa: N802 - http.server API
+            body = _json.dumps(stale_card).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args: object) -> None:
+            return
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _StaleModelHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    old_vllm = os.environ.get("VLLM_BASE_URL")
+    os.environ["VLLM_BASE_URL"] = f"http://127.0.0.1:{server.server_address[1]}/v1"
+    try:
+        response = await client.get("/api/ready")
+    finally:
+        server.shutdown()
+        server.server_close()
+        if old_vllm is None:
+            os.environ.pop("VLLM_BASE_URL", None)
+        else:
+            os.environ["VLLM_BASE_URL"] = old_vllm
+
+    assert response.status_code == 503
+    vllm_dependency = response.json()["dependencies"]["vllm"]
+    assert vllm_dependency["ok"] is False
+    assert "mismatch" in vllm_dependency["error"]
+    assert "serving Qwen/stale-model" in vllm_dependency["error"]

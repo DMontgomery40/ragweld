@@ -1068,7 +1068,7 @@ async def analyze_eval_comparison(
         extra = [
             "",
             "Generation setup checklist:",
-            "1) Start the managed vLLM serving backend and wait for its model to load.",
+            "1) Start the host local-model serving backend (./start.sh) and wait for its model to load.",
             "2) Start the managed LiteLLM gateway and set the API-to-gateway `LITELLM_API_KEY`.",
             "3) Select a LiteLLM model alias; upstream provider credentials remain gateway-owned.",
             "",

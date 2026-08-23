@@ -2,15 +2,84 @@
 
 Date: 2026-08-22 (recovery session 7, supersedes P0-2's model choice)
 
-Status: runtime installed (`~/.venv-vllm-metal`, vllm 0.27.1 + mlx 0.32) and
-weights downloaded (`mlx-community/Qwen3.8-27B-4bit`, 15 GiB); cutover NOT
-landed and the model has NOT been loaded. Two machine crashes on 2026-08-22/23
-(bf16 4B vLLM in the VM; then host MLX reranker training) mean the first load
-of the 27B happens only with the operator present, the Colima VM at 16 GiB,
+Status: **LANDED 2026-08-23 (session 8)** — cutover executed with the operator
+present. Execution record:
+
+- First supervised load: fraction 0.45 failed clean (vLLM refused: 1.53 GiB KV
+  available < 2.15 GiB needed for one 32k sequence; est. max len 21952). The
+  landed serving parameters, measured on this host (M4 Pro 48 GiB, VM at 16):
+  `--gpu-memory-utilization 0.50` (24 GiB budget, ~3.9 GiB KV), `--max-num-seqs 1`,
+  `--max-model-len 32768`. Host memory bottomed at 31% free under load; no
+  pressure events, no crash. MLX weight load: 8 s; full serve-ready ~100 s.
+- Qwen3.8 is a thinking-mode hybrid: with no switch the content stream opens
+  with raw chain-of-thought. Disabled at the SERVING layer with
+  `--default-chat-template-kwargs '{"enable_thinking": false}'` (vllm 0.27.1
+  flag) so no per-caller kwargs return; the Ragas/Promptfoo runners stay clean.
+- Throughput on the Barry Cohen probe: ~12 tok/s wall (200 tokens in 16.2 s,
+  prefill included) vs ~2 tok/s on the retired CPU 4B path.
+- `start.sh` owns the `local-model` host process (launched before Compose so
+  the weight load overlaps the container wait; readiness enforced before the
+  backend starts; `--no-local-model` opt-out; missing venv fails closed with
+  the install commands; output in `.ragweld-runtime/local-model.log`);
+  `stop.sh` and the lifecycle helpers own stop/supervise; the Compose `vllm`
+  service, its `hf_cache` mount, `VLLM_CPU_KVCACHE_SPACE`, and the litellm
+  `depends_on` are deleted; `litellm`/`api` reach the host via
+  `host.docker.internal` (`extra_hosts: host-gateway`); Prometheus scrapes the
+  host process; the stale `ragweld-vllm-1` container was removed
+  (`ragweld_hf_cache` volume left for the operator to purge; reset keeps it
+  deletable).
+- Contracts moved together: catalog row (model/context 32768/base_url/notes),
+  `VLLMConfig.default_model`, `tribrid_config.json`, the three stored corpus
+  configs (PUT /api/config), regenerated LiteLLM YAML + generated.ts +
+  contract bundle, readiness expectations, ProviderSetup copy, docker-service
+  allowlists (server + web), launch-contract/clean-start/readiness/gateway/
+  refresh/prompt-budget tests, design + reference docs, Colima 16 GiB strings.
+  `Qwen/Qwen3-4B-Instruct-2507` joined the retired-serving-id sweep (the
+  mlx-community 4-bit agent TRAINING base remains, per §5 below).
+- Proof: host `/v1/models` reports `ragweld-local`, root
+  `mlx-community/Qwen3.8-27B-4bit`, `max_model_len 32768`; `/api/ready` green
+  on all four dependencies through the new `./start.sh --with-observability`;
+  LiteLLM→host chat completion (`chatcmpl-…`); grounded API chat on
+  `epstein-files-1` (Barry Cohen question, 10 sources, `llm_used: true`, 78 s);
+  Chrome real-mouse drive (Epstein-only sources, "Ragweld local (vLLM Metal)"
+  picker, streamed grounded cited answer, `provider_response_id: chatcmpl-…`,
+  73 s, zero console errors); `./start.sh --check` prints the local-model
+  serve command; gateway Playwright 7/7.
+- Adversarial review (`codex exec`, high effort, prompted to refute): REFUTED
+  the first cut with 2 P1 / 5 P2 / 1 P3. Outcomes:
+  - P1 "EngineCore death invisible to supervision/readiness": empirically
+    refuted — `kill -9` of the live EngineCore made the APIServer exit within
+    ~3 s (`EngineDeadError` → clean shutdown) and the supervised stack tore
+    down through the owned lifecycle, observed live. Readiness additionally
+    hardened (below).
+  - P1 "force-KILL orphans EngineCore": fixed — both lifecycle stop paths
+    collect validated descendants before signaling and sweep survivors
+    (`stop_process_descendants`), re-checking each pid's cwd ownership.
+  - P2 identity-blind readiness: fixed — `wait_for_local_model` verifies
+    `root` and `max_model_len`, and `/api/ready` runs `vllm_serving_mismatch`
+    against `chat.vllm.default_model` + the catalog row (real wrong-model
+    HTTP-server regression test in `tests/api/test_health_endpoints.py`).
+  - P2 docker-backend healthcheck race: fixed — the model wait is serialized
+    before Compose in `--docker-backend` mode and the api healthcheck carries
+    `start_period: 150s`.
+  - P2 `LOCAL_MODEL_PORT` split-brain: fixed — the port is pinned to 58080
+    (no env override) with backend/frontend collision checks.
+  - P2 stale docs: the session-8 handoff checkpoint supersedes the retired
+    topology notes; `autopilot-status/ui-proof.md` updated.
+  - P3 HTTP budget coverage off the local alias: the vision-refusal test now
+    asserts the refusal carries the ragweld-local 32768 window (live catalog
+    resolution on the HTTP path).
+- Residuals: the lifecycle lock still serializes `stop.sh` against a
+  `start.sh` that is mid-startup (pre-existing semantics; the recourse during
+  a model load is Ctrl-C on the launcher or signaling the pid in
+  `.ragweld-runtime/local-model.pid`). Pre-existing, not this slice: OTel
+  "Failed to detach context" ERROR log lines during streaming responses.
+
+Original context: runtime installed (`~/.venv-vllm-metal`, vllm 0.27.1 + mlx
+0.32), weights downloaded (15 GiB). Two machine crashes on 2026-08-22/23
+(bf16 4B vLLM in the VM; then host MLX reranker training) meant the first load
+of the 27B happened only with the operator present, the Colima VM at 16 GiB,
 nothing else heavy running, and a conservative `--gpu-memory-utilization`.
-The Colima profile was restarted at `--memory 16` on 2026-08-23; `start.sh`
-and the launch-contract test still carry the 28 GiB string until this slice
-lands.
 
 ## Operator mandate
 

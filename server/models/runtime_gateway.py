@@ -180,7 +180,7 @@ class VLLMConfig(BaseModel):
 
     enabled: bool = Field(default=True)
     base_url: str = Field(default="http://127.0.0.1:58080/v1")
-    default_model: str = Field(default="Qwen/Qwen3-4B-Instruct-2507")
+    default_model: str = Field(default="mlx-community/Qwen3.8-27B-4bit")
 
 
 class BenchmarkConfig(BaseModel):

@@ -52,14 +52,14 @@ def _feed_row(
 def _local_row() -> dict[str, Any]:
     return {
         "provider": "ragweld",
-        "family": "Qwen3",
-        "model": "Qwen/Qwen3-4B-Instruct-2507",
+        "family": "Qwen3.8-27B",
+        "model": "mlx-community/Qwen3.8-27B-4bit",
         "components": ["GEN"],
         "unit": "1k_tokens",
-        "context": 8192,
+        "context": 32768,
         "input_per_1k": 0.0,
         "output_per_1k": 0.0,
-        "base_url": "http://vllm:8000/v1",
+        "base_url": "http://host.docker.internal:58080/v1",
         "gateway_alias": "ragweld-local",
         "gateway_upstream": "openai/ragweld-local",
     }
@@ -230,7 +230,7 @@ def test_refresh_replaces_provider_direct_generation_rows_and_preserves_embeddin
         ("openai", "openai/gpt-4.1"),
         ("openai", "openai/gpt-5.4-mini"),
         ("openai", "text-embedding-3-small"),
-        ("ragweld", "Qwen/Qwen3-4B-Instruct-2507"),
+        ("ragweld", "mlx-community/Qwen3.8-27B-4bit"),
     ]
     assert _find(merged, "openai/gpt-4.1")["gateway_alias"] == "openai.gpt-4.1"
     assert _find(merged, "openai/gpt-4.1")["base_url"] == "https://openrouter.ai/api/v1"
@@ -240,7 +240,7 @@ def test_refresh_replaces_provider_direct_generation_rows_and_preserves_embeddin
         "selection_status": "runtime_selectable",
         "selection_reason": None,
     }
-    assert _find(merged, "Qwen/Qwen3-4B-Instruct-2507")["gateway_alias"] == "ragweld-local"
+    assert _find(merged, "mlx-community/Qwen3.8-27B-4bit")["gateway_alias"] == "ragweld-local"
     assert stats.removed_rows == 2
     assert stats.added_rows == 2
     assert stats.preserved_rows == 2
@@ -272,7 +272,7 @@ def test_refresh_removes_routes_that_left_the_feed_and_is_idempotent() -> None:
     assert stats.added_rows == 0
     assert [row["model"] for row in _rows(second) if row.get("components") == ["GEN"]] == [
         "openai/gpt-5.4-mini",
-        "Qwen/Qwen3-4B-Instruct-2507",
+        "mlx-community/Qwen3.8-27B-4bit",
     ]
 
     third, _stats, changed_third = build_refreshed_catalog(

@@ -13,7 +13,11 @@ from server.chat.prompt_builder import get_system_prompt
 from server.models.retrieval import ChunkMatch
 from server.models.tribrid_config_model import FusionConfig, TriBridConfig
 
-LOCAL_WINDOW = 8192
+# The local row's 32k window now exceeds the chat.max_tokens boundary ceiling
+# (16384), so window-saturation scenarios use a catalog alias whose window the
+# config can actually reach: rekaai.reka-edge (16,384-token window).
+BUDGET_ALIAS = "rekaai.reka-edge"
+BUDGET_WINDOW = 16384
 QUESTION = "Which flights or plane management did Jeffrey Epstein discuss with Barry Cohen in October 2017?"
 EVIDENCE = (
     "Thinking of switching from Jet Aviation to EJM. EJM is more expensive. Do you have a point of view?\n\n"
@@ -55,11 +59,11 @@ class _RetrievedEvidence:
         ]
 
 
-def _config(max_tokens: int, *, vision_override: str = "") -> TriBridConfig:
+def _config(max_tokens: int, *, alias: str = "ragweld-local", vision_override: str = "") -> TriBridConfig:
     cfg = TriBridConfig()
     cfg.chat.max_tokens = max_tokens
     cfg.chat.recall.enabled = False
-    cfg.chat.litellm.default_model = "ragweld-local"
+    cfg.chat.litellm.default_model = alias
     cfg.chat.multimodal.vision_model_override = vision_override
     return cfg
 
@@ -82,7 +86,7 @@ def _events(body: str) -> list[dict[str, object]]:
 @pytest.mark.asyncio
 async def test_output_allowance_at_the_window_is_refused_with_413_on_both_transports(client: AsyncClient) -> None:
     try:
-        set_config(_config(LOCAL_WINDOW))
+        set_config(_config(BUDGET_WINDOW, alias=BUDGET_ALIAS))
         set_fusion(_RetrievedEvidence())
         payload = {"message": QUESTION, "sources": {"corpus_ids": ["epstein-files-1"]}}
 
@@ -90,9 +94,9 @@ async def test_output_allowance_at_the_window_is_refused_with_413_on_both_transp
         assert response.status_code == 413
         detail = response.json()["detail"]
         assert detail["code"] == "prompt_budget_exceeded"
-        assert detail["alias"] == "ragweld-local"
-        assert detail["context_window"] == LOCAL_WINDOW
-        assert detail["max_tokens"] == LOCAL_WINDOW
+        assert detail["alias"] == BUDGET_ALIAS
+        assert detail["context_window"] == BUDGET_WINDOW
+        assert detail["max_tokens"] == BUDGET_WINDOW
         assert detail["retryable"] is False
         assert "leaves no room for input" in detail["message"]
 
@@ -110,12 +114,12 @@ async def test_request_is_refused_instead_of_dropping_all_retrieved_evidence(cli
     probe = _config(512)
     system_prompt = get_system_prompt(has_rag_context=True, has_recall_context=False, config=probe.chat)
     fixed = plan_prompt_budget(
-        alias="ragweld-local", system_prompt=system_prompt, user_message=QUESTION, max_tokens=512, context_window=LOCAL_WINDOW
+        alias=BUDGET_ALIAS, system_prompt=system_prompt, user_message=QUESTION, max_tokens=512, context_window=BUDGET_WINDOW
     ).fixed_tokens
     # Leave ~20 tokens for context: the evidence chunk needs more than that.
-    max_tokens = LOCAL_WINDOW - fixed - 20
+    max_tokens = BUDGET_WINDOW - fixed - 20
     try:
-        set_config(_config(max_tokens))
+        set_config(_config(max_tokens, alias=BUDGET_ALIAS))
         set_fusion(_RetrievedEvidence())
         payload = {"message": QUESTION, "sources": {"corpus_ids": ["epstein-files-1"]}}
 
@@ -167,6 +171,9 @@ async def test_images_are_refused_when_the_selected_alias_has_no_vision_route(cl
             detail = response.json()["detail"]
             assert detail["code"] == "prompt_budget_exceeded"
             assert detail["alias"] == "ragweld-local"
+            # The HTTP path resolved the local alias against the live catalog:
+            # the refusal carries the ragweld-local 32k context window.
+            assert detail["context_window"] == 32768
             assert "does not accept image attachments" in detail["message"]
     finally:
         set_config(None)

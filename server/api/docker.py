@@ -43,7 +43,6 @@ _DOCKER_SERVICES = frozenset(
         "tempo",
         "alloy",
         "litellm",
-        "vllm",
         "qdrant",
         "mlflow",
         "flyte",

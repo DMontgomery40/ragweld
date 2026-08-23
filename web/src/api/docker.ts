@@ -19,7 +19,6 @@ export const RAGWELD_DOCKER_SERVICES = [
   'tempo',
   'alloy',
   'litellm',
-  'vllm',
   'qdrant',
   'mlflow',
   'flyte',

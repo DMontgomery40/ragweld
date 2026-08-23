@@ -38,12 +38,13 @@ fail closed with typed 503 details when the substrate cannot execute.
   path is the system under test, not a bare model) and whose assertion is an
   `llm-rubric` graded by `evaluation.promptfoo_grader_model` (empty = chat
   default alias) through LiteLLM.
-- Judge and grader aliases must be non-thinking instruct models: they have
-  to emit the structured verdict / rubric JSON directly. The local
-  `ragweld-local` (`Qwen/Qwen3-4B-Instruct-2507`) is non-thinking; pointing
-  the judge at a `…-thinking` / R1-style alias is an operator error and can
-  break verdict parsing. No chat-template reasoning switch is sent (the
-  retired vLLM thinking-mode model was the only route that honored one).
+- Judge and grader aliases must emit the structured verdict / rubric JSON
+  directly (no reasoning traces in content). The local `ragweld-local`
+  (`mlx-community/Qwen3.8-27B-4bit`) serves with thinking disabled at the
+  serving layer (`--default-chat-template-kwargs '{"enable_thinking": false}'`
+  in `start.sh`), so no per-request reasoning switch is sent; pointing the
+  judge at a `…-thinking` / R1-style cloud alias is an operator error and can
+  break verdict parsing.
 - The real CLI (`web/node_modules/.bin/promptfoo`) runs with caching off and
   concurrency 1; results are parsed into `PromptfooRun` and persisted under
   `data/eval_runs/promptfoo/`. `GET /api/eval/promptfoo/runs` lists them and

@@ -23,8 +23,9 @@ const SERVICE_GROUPS: Array<{
   },
   {
     title: 'Gateway and serving',
-    description: 'The only supported generation path: LiteLLM routes model aliases to vLLM.',
-    services: ['litellm', 'vllm'],
+    description:
+      'The only supported generation path: LiteLLM routes model aliases upstream. The local alias targets the host local-model server (vllm-metal on 127.0.0.1:58080, started by ./start.sh), not a container.',
+    services: ['litellm'],
   },
   {
     title: 'Vector store',
@@ -56,7 +57,6 @@ const SERVICE_LABELS: Record<RagweldDockerService, string> = {
   tempo: 'Tempo',
   alloy: 'Grafana Alloy',
   litellm: 'LiteLLM Gateway',
-  vllm: 'vLLM Serving',
   qdrant: 'Qdrant Vector Store',
   mlflow: 'MLflow Tracking',
   flyte: 'Flyte Control Plane',
