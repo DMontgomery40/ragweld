@@ -1,5 +1,13 @@
 # Handoff Prompt — Ragweld Recovery, Session 5
 
+> Checkpoint 2026-08-23 (session 7, landed at `04dff27`): the P1 slice below is
+> committed locally (not pushed) after nineteen adversarial codex passes; the
+> two remaining structural items are a planned follow-up slice,
+> `training-run-state-authority-2026-08-23.md` (read-only `_load_run`,
+> reader-atomic versioned artifact cutover). Next in order: P0-3 local model
+> cutover with the operator present (`local-model-vllm-metal-2026-08-22.md`),
+> the run-state follow-up, A3 observability, Phase B Chrome drives.
+>
 > Status 2026-08-23 (session 7): **P1 is DONE** — the Synthetic Lab generates
 > grounded eval rows through the gateway (`grounded_qa`; the old provider was a
 > package the repo never installed), reranker triplets are mined from real
