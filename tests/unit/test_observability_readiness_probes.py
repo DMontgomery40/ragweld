@@ -31,6 +31,44 @@ def test_logs_endpoint_is_derived_from_the_traces_endpoint() -> None:
     assert _logs_endpoint_from_traces("http://alloy:4318") == "http://alloy:4318/v1/logs"
 
 
+def test_tempo_trace_link_targets_grafana_explore_not_the_bare_tempo_port() -> None:
+    """Tempo has no UI; the operator link must open Grafana Explore on the
+    provisioned Tempo datasource with the canonical trace id, never the dead
+    ``{tempo_base}/trace/{id}`` path (which 404s)."""
+    import urllib.parse
+
+    from server.models.tribrid_config_model import TriBridConfig
+    from server.observability.runtime import (
+        apply_default_links,
+        current_observation,
+        start_request_observation,
+    )
+
+    config = TriBridConfig()
+    config.tracing.tracing_enabled = True
+    config.tracing.tracing_mode = "local"
+    config.tracing.tempo_base_url = "http://127.0.0.1:53200"
+    config.ui.grafana_base_url = "http://127.0.0.1:3301"
+
+    with start_request_observation(
+        config=config,
+        route_name="unit_trace_links",
+        path="/api/unit",
+        method="GET",
+    ) as obs:
+        assert obs is not None
+        apply_default_links(config)
+        links = {link.label: link.url for link in current_observation().links}
+
+    tempo_url = links["Tempo trace"]
+    assert tempo_url.startswith("http://127.0.0.1:3301/explore?"), tempo_url
+    assert "/trace/" not in tempo_url
+    decoded = urllib.parse.unquote(tempo_url)
+    assert obs.trace_id in decoded
+    assert '"uid":"tempo"' in decoded
+    assert '"queryType":"traceql"' in decoded
+
+
 _VLLM_MODEL_CARD = {
     "object": "list",
     "data": [{"id": "ragweld-local", "object": "model", "owned_by": "vllm", "root": "mlx-community/Qwen3.8-27B-4bit", "max_model_len": 32768}],

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
 import logging
 import os
 import threading
+import urllib.parse
 import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -236,12 +238,34 @@ def apply_default_links(config: TriBridConfig) -> None:
                 url=f"{base}/d/{uid}/{slug}",
                 detail="Provisioned dashboard for request metrics and logs.",
             )
-    if str(config.tracing.tempo_base_url or "").strip() and obs.trace_id:
+    # Tempo has no UI of its own; traces are viewed through Grafana Explore
+    # against the in-repo provisioned Tempo datasource (uid "tempo").
+    if (
+        str(config.tracing.tempo_base_url or "").strip()
+        and str(config.ui.grafana_base_url or "").strip()
+        and obs.trace_id
+    ):
+        explore_state = json.dumps(
+            {
+                "datasource": "tempo",
+                "queries": [
+                    {
+                        "refId": "A",
+                        "queryType": "traceql",
+                        "query": obs.trace_id,
+                        "datasource": {"type": "tempo", "uid": "tempo"},
+                    }
+                ],
+                "range": {"from": "now-1h", "to": "now"},
+            },
+            separators=(",", ":"),
+        )
+        grafana_base = str(config.ui.grafana_base_url).rstrip("/")
         add_external_link(
             label="Tempo trace",
             kind="tempo",
-            url=f"{str(config.tracing.tempo_base_url).rstrip('/')}/trace/{obs.trace_id}",
-            detail="Trace lookup for the current canonical trace id.",
+            url=f"{grafana_base}/explore?orgId=1&left={urllib.parse.quote(explore_state)}",
+            detail="Grafana Explore (Tempo datasource) lookup for the current canonical trace id.",
         )
 
 

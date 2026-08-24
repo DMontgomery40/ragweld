@@ -136,6 +136,82 @@ pinning the regression.
   transport failure when the stream simply ended with the run error. Cosmetic
   truthfulness nit on the dashboard log surface only.
 
-## Flow drives (B2, B4–B12)
+## Defect 4: "Tempo trace" link 404s (Tempo has no UI) — FIXED
+
+Found driving B4: the chat trace block's "Tempo trace" link pointed at
+`{tempo_base_url}/trace/{id}` (`apply_default_links`,
+`server/observability/runtime.py`), which returns 404 — Tempo is API-only.
+GitNexus impact: CRITICAL (all chat/search/answer paths + middleware), but the
+change is confined to the emitted URL string.
+
+### Fix
+
+The link now opens Grafana Explore on the in-repo provisioned Tempo
+datasource (uid `tempo`) with a TraceQL query for the canonical trace id,
+gated on BOTH `tracing.tempo_base_url` and `ui.grafana_base_url`. Grafana's
+anonymous Viewer role cannot use Explore, so the compose Grafana env gains
+`GF_USERS_VIEWERS_CAN_EDIT: "true"` (viewers get Explore + temporary panel
+edits; nothing saveable; 127.0.0.1-bound).
+
+### Evidence
+
+- Unit test `test_tempo_trace_link_targets_grafana_explore_not_the_bare_tempo_port`
+  (real request observation, tracing_mode=local) pins the URL shape; suite
+  28 passed.
+- Chrome (real click): the link opens "Explore - Tempo - Grafana" rendering
+  the full `ragweld.chat_stream` span waterfall (14.93s, 10 spans):
+  retrieval.vector 7.31s / retrieval.sparse 258.8ms / retrieval.graph 45.77ms
+  / generation.gateway_call 4.31s (reranker.generation inside) /
+  generation.gateway_stream 2.73s — per-leg provenance visible in the trace.
+- Grafana dashboard link 200; Langfuse trace page 200 for the same trace id.
+
+## B2 drive: Retrieval config auto-save + persistence — PASS
+
+- Opening RAG → Retrieval mutates nothing (Apply All Changes disabled).
+- Vector weight 0.4 → 0.45 via real input: the UI auto-normalized all three
+  weights to sum 1 (0.4286/0.2857/0.2857) and auto-saved server-side with no
+  Apply click (verified via `GET /api/config?corpus_id=epstein-files-1`).
+- Enable MMR toggled on, page reloaded: checkbox stayed checked and
+  `retrieval.enable_mmr=true` persisted.
+- Original values restored exactly afterwards via `PUT /api/config`.
+- Nits (logged, not fixed): normalized weights render as raw 17-digit floats
+  in the inputs; exact-value restoration through the UI is awkward because
+  every edit renormalizes. The standalone "canonical search" surface no
+  longer exists — per-leg provenance is proven through Chat's trace (B4).
+
+## B4 drive: Chat end-to-end — PASS (with defect 4 fixed)
+
+- Sources: epstein-files-1 selected alongside Recall; all three legs enabled
+  (pills flip to On Vector/On Sparse/On Graph).
+- Real question "Which flights or plane management did Jeffrey Epstein
+  discuss with Barry Cohen in October 2017?" on `OpenAI: GPT-5.6 Luna` →
+  grounded answer naming the Jet Aviation → EJM management switch, with
+  HOUSE_OVERSIGHT citations + recall citations and scores, trace block
+  (run_id, OpenRouter provider_response_id, trace_id, correlation_id,
+  llm_used: true).
+- Second question (Jet Aviation vs EJM comparison) after the API restart:
+  Routing Trace panel shows canonical trace, POST /api/chat/stream 14920ms,
+  real cost $0.000322 (1203 tokens), and all three link chips resolve.
+- Recall intensity: dropdown auto → light for one message; footer flipped
+  from "standard 5 matches" to "light 3 matches" (7705ms).
+- History lists sessions with counts; New chat creates and activates a fresh
+  session; Delete chat raises the new in-app danger dialog (truthful copy)
+  and deletes on accept.
+- Export: the handler is a standard blob-anchor download and executed
+  without error, but Brave under CDP automation silently drops
+  script-initiated downloads (a probe blob download also never landed), so
+  the resulting file could not be observed in this environment. Not an app
+  defect; re-verify manually when the operator is present.
+
+## B5 drive: Chat failure UX — PASS
+
+Stopped `ragweld-neo4j-1` with the graph leg on and asked a real question:
+the assistant rendered the structured error card — code
+`dependency_unavailable`, "Neo4j graph store is unavailable.", the exact
+required action, "Generation did not run for this request.", contract
+details behind a Details disclosure — no raw JSON, no fabricated answer.
+Neo4j restarted (healthy) and `/api/ready` reports ready.
+
+## Flow drives (B6–B12)
 
 Pending below; updated as each flow completes.

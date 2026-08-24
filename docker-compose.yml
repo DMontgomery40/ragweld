@@ -80,6 +80,9 @@ services:
       # Anonymous auth for out-of-the-box, per-user-login-free embedding.
       GF_AUTH_ANONYMOUS_ENABLED: "true"
       GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      # Anonymous viewers need Explore for the workbench's "Tempo trace" deep
+      # links (temporary edits only; nothing is saveable). Local-only bind.
+      GF_USERS_VIEWERS_CAN_EDIT: "true"
       # Consistent dark mode in embeds.
       GF_USERS_DEFAULT_THEME: dark
       # Required for cross-origin iframe cookies in some browsers.
