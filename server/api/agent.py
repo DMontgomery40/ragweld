@@ -81,9 +81,13 @@ from server.training.mlx_qwen3_agent_trainer import (
     train_mlx_qwen3_agent,
 )
 from server.training.mlx_qwen3_trainer import TrainingCancelledError
+from server.training.artifact_store import (
+    ArtifactStoreError,
+    VersionedArtifactSwap,
+    resolve_active_artifact_dir,
+)
 from server.training.promotion import (
     BaselineState,
-    PromotionSwap,
     await_uncancellable,
     decide_auto_promotion,
     run_promotion_transaction,
@@ -247,26 +251,41 @@ async def _finalize_run_without_job(run: AgentTrainRun, cfg: TriBridConfig | Non
     return result
 
 
-def _finalize_stored_run(run: AgentTrainRun, cfg: TriBridConfig | None, *, status: str, message: str) -> AgentTrainRun:
-    """Mutate a stored, non-terminal run into its terminal state (caller holds the run lock)."""
+def _finalize_stored_run(
+    run: AgentTrainRun,
+    cfg: TriBridConfig | None,
+    *,
+    status: str,
+    message: str,
+    completed_at: datetime | None = None,
+    append_events: bool = True,
+) -> AgentTrainRun:
+    """Mutate a stored, non-terminal run into its terminal state (caller holds the run lock).
+
+    Reconciliation of a record whose metrics stream already carries the terminal `complete`
+    event passes `append_events=False` (the events exist) and the event's timestamp as
+    `completed_at`; every finalization still attaches lineage and terminates MLflow.
+    """
     now = datetime.now(UTC)
     run.status = status  # type: ignore[assignment]
-    run.completed_at = now
+    run.completed_at = completed_at or now
     if cfg is not None:
         run = _attach_lineage(run, cfg)
     _save_run(run)  # durable before the terminal events below
-    _mlflow_terminate_for_run(run, cfg, status="KILLED" if status == "cancelled" else "FAILED")
-    _append_event(
-        run.run_id,
-        AgentTrainMetricEvent(
-            type="state" if status == "cancelled" else "error",
-            ts=now,
-            run_id=run.run_id,
-            status=run.status,
-            message=message,
-        ),
-    )
-    _append_event(run.run_id, AgentTrainMetricEvent(type="complete", ts=now, run_id=run.run_id, status=run.status))
+    mlflow_status = "FINISHED" if status == "completed" else ("KILLED" if status == "cancelled" else "FAILED")
+    _mlflow_terminate_for_run(run, cfg, status=mlflow_status)
+    if append_events:
+        _append_event(
+            run.run_id,
+            AgentTrainMetricEvent(
+                type="error" if status == "failed" else "state",
+                ts=now,
+                run_id=run.run_id,
+                status=run.status,
+                message=message,
+            ),
+        )
+        _append_event(run.run_id, AgentTrainMetricEvent(type="complete", ts=now, run_id=run.run_id, status=run.status))
     _train_start_guard.pop(str(run.repo_id or "").strip(), None)
     return run
 
@@ -555,20 +574,34 @@ def _allocate_run_id(repo_id: str, started_at: datetime) -> str:
     return run_id
 
 
-def _maybe_reconcile_run(run: AgentTrainRun) -> AgentTrainRun:
+class _ReconcileDecision(NamedTuple):
+    status: str
+    message: str
+    completed_at: datetime | None
+    append_events: bool
+
+
+def _reconcile_decision(run: AgentTrainRun) -> _ReconcileDecision | None:
+    """What (if anything) an explicit reconciliation should do to a stale `running` record.
+
+    Pure with respect to persisted state: it reads the metrics tail and in-process task table
+    only. The actual repair goes through `_transition_run` + `_finalize_stored_run`.
+    """
     if run.status != "running":
-        return run
+        return None
 
     last = _read_last_event(run.run_id)
     now = datetime.now(UTC)
 
     terminal = str(getattr(last, "status", "") or "").strip().lower()
     if getattr(last, "type", None) == "complete" and terminal in {"completed", "failed", "cancelled"}:
-        run.status = terminal  # type: ignore[assignment]
-        if run.completed_at is None:
-            run.completed_at = getattr(last, "ts", None) or now
-        _save_run(run)
-        return run
+        # The metrics stream already carries the terminal events; only the record lags.
+        return _ReconcileDecision(
+            status=terminal,
+            message="Reconciled run record with its terminal metrics stream.",
+            completed_at=getattr(last, "ts", None) or now,
+            append_events=False,
+        )
 
     # Orphaned run after backend restart: mark cancelled after long inactivity.
     if run.run_id not in _train_tasks:
@@ -579,24 +612,61 @@ def _maybe_reconcile_run(run: AgentTrainRun) -> AgentTrainRun:
         except Exception:
             idle_secs = 0.0
         if idle_secs >= 2 * 60 * 60:
-            run.status = "cancelled"
-            run.completed_at = now
-            _save_run(run)
-            _append_event(
-                run.run_id,
-                AgentTrainMetricEvent(
-                    type="error",
-                    ts=now,
-                    run_id=run.run_id,
-                    status=run.status,
-                    message="Reconciled orphaned run (no active task; likely backend restart).",
-                ),
+            return _ReconcileDecision(
+                status="cancelled",
+                message="Reconciled orphaned run (no active task; likely backend restart).",
+                completed_at=None,
+                append_events=True,
             )
-            _append_event(run.run_id, AgentTrainMetricEvent(type="complete", ts=now, run_id=run.run_id, status=run.status))
-    return run
+    return None
+
+
+async def reconcile_run(run_id: str) -> AgentTrainRun:
+    """Explicit reconciliation of a persisted run: loading stays read-only, and any repair is
+    a transition through the authority, finalized by `_finalize_stored_run` (lineage attached,
+    MLflow terminated). Endpoints that list or get runs call this; nothing reconciles on load."""
+    run = await asyncio.to_thread(_load_run, run_id)
+    decision = await asyncio.to_thread(_reconcile_decision, run)
+    if decision is None:
+        return run
+    cfg = _cfg_from_run_snapshot(run)
+    result = await _transition_run(
+        run_id,
+        allowed_from=frozenset({"running"}),
+        apply=lambda stored: _finalize_stored_run(
+            stored,
+            cfg,
+            status=decision.status,
+            message=decision.message,
+            completed_at=decision.completed_at,
+            append_events=decision.append_events,
+        ),
+    )
+    if result is not None:
+        return result
+    try:
+        return await asyncio.to_thread(_load_run, run_id)
+    except HTTPException:
+        return run
+
+
+def _promotion_recorded(run_id: str) -> bool:
+    """Artifact-store recovery's truth for a crashed promotion: did the run record commit?
+
+    A promoted run carries `promoted_bundle_id` (written durably inside the promotion
+    transaction's work step). Read-only; an unreadable record means unrecorded, so recovery
+    stays conservative and rolls the pointer back.
+    """
+    try:
+        run = _load_run(run_id)
+    except Exception:
+        return False
+    return bool(run.promoted_bundle_id)
 
 
 def _load_run(run_id: str) -> AgentTrainRun:
+    """Read-only load of the persisted record: no reconciliation, no writes. Status repairs
+    happen only through `reconcile_run` / `_transition_run` (the transition authority)."""
     path = _run_json_path(run_id)
     if not path.exists():
         raise HTTPException(status_code=404, detail=f"run_id={run_id} not found")
@@ -605,7 +675,6 @@ def _load_run(run_id: str) -> AgentTrainRun:
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to read agent train run: {e}") from e
     run = AgentTrainRun.model_validate(raw)
-    run = _maybe_reconcile_run(run)
     cfg = _cfg_from_run_snapshot(run)
     if cfg is not None:
         run = _apply_run_control_plane_metadata(run, cfg)
@@ -678,7 +747,9 @@ def _sse_payload_for_line(run_id: str, raw_line: bytes) -> str | None:
     return json.dumps(event.model_dump(mode="json", by_alias=True))
 
 
-def _active_run_id_for_corpus(corpus_id: str) -> str | None:
+async def _active_run_id_for_corpus(corpus_id: str) -> str | None:
+    """The queued/running run gating a new start. Candidates are reconciled first (through the
+    authority) so an orphaned record left `running` by a restart cannot block starts forever."""
     cid = str(corpus_id or "").strip()
     if not cid:
         return None
@@ -686,7 +757,7 @@ def _active_run_id_for_corpus(corpus_id: str) -> str | None:
     if guard:
         run_id, started_at = guard
         try:
-            run = _load_run(run_id)
+            run = await asyncio.to_thread(_load_run, run_id)
             if str(run.status) == "completed":
                 _train_start_guard.pop(cid, None)
             elif datetime.now(UTC) - started_at <= _TRAIN_START_GRACE:
@@ -704,7 +775,7 @@ def _active_run_id_for_corpus(corpus_id: str) -> str | None:
     entries.sort(key=lambda p: p.name, reverse=True)
     for entry in entries:
         try:
-            run = _load_run(entry.name)
+            run = await reconcile_run(entry.name)
         except Exception:
             continue
         if str(run.status) in {"queued", "running"}:
@@ -733,19 +804,11 @@ async def _request_train_run_cancel(*, run_id: str, reason: str) -> bool:
             return True
 
         # No in-memory task (orphan, or still queued while Flyte creates the execution): persist
-        # the cancellation from either non-terminal state, still under the lock.
-        def _cancel_orphan() -> None:
-            now = datetime.now(UTC)
-            stored.status = "cancelled"
-            stored.completed_at = now
-            _save_run(stored)
-            _append_event(
-                run_id,
-                AgentTrainMetricEvent(type="state", ts=now, run_id=run_id, status="cancelled", message=str(reason)),
-            )
-            _append_event(run_id, AgentTrainMetricEvent(type="complete", ts=now, run_id=run_id, status="cancelled"))
-
-        await asyncio.to_thread(_cancel_orphan)
+        # the cancellation through the shared finalizer, still under the lock.
+        cfg = _cfg_from_run_snapshot(stored)
+        await asyncio.to_thread(
+            _finalize_stored_run, stored, cfg, status="cancelled", message=str(reason)
+        )
         return True
 
 
@@ -1100,16 +1163,29 @@ async def _run_train_job(*, run_id: str, corpus_id: str, cancel_event: asyncio.E
         model_artifact_dir = _run_dir(run_id) / "model"
         model_artifact_dir.parent.mkdir(parents=True, exist_ok=True)
 
-        # Baseline eval (optional, used for auto-promote gating).
+        # Baseline eval (optional, used for auto-promote gating). The active adapter lives in a
+        # versioned store under training.ragweld_agent_model_path; resolve the pointer once and
+        # read the pinned, immutable version for the whole baseline.
         active_dir_cfg = str(getattr(cfg.training, "ragweld_agent_model_path", "") or "").strip()
-        active_dir = _resolve_path(active_dir_cfg) if active_dir_cfg else None
+        active_root = _resolve_path(active_dir_cfg) if active_dir_cfg else None
         promote_if_improves = bool(getattr(cfg.training, "ragweld_agent_promote_if_improves", False))
         baseline_blocked: str | None = None
         baseline_state: BaselineState = "absent"
-        if promote_if_improves and dev_examples and active_dir is not None and active_dir.exists():
+        active_version_dir: Path | None = None
+        if active_root is not None:
+            try:
+                active_version_dir = await asyncio.to_thread(resolve_active_artifact_dir, active_root)
+            except ArtifactStoreError as exc:
+                # Unknown quality is not absence: an unreadable store refuses gated promotion.
+                baseline_state = "failed"
+                _emit_log(
+                    f"Active-artifact store at {active_dir_cfg} is unreadable ({exc}); improvement-gated "
+                    "promotion is refused until the operator repairs it."
+                )
+        if promote_if_improves and dev_examples and active_version_dir is not None:
             # Never load an active adapter trained for another base/backend as the baseline.
             try:
-                active_manifest = validate_agent_artifact_dir(active_dir)
+                active_manifest = validate_agent_artifact_dir(active_version_dir)
                 baseline_blocked = agent_artifact_incompatibility(
                     active_manifest,
                     base_model=str(getattr(cfg.training, "ragweld_agent_base_model", "") or ""),
@@ -1126,15 +1202,14 @@ async def _run_train_job(*, run_id: str, corpus_id: str, cancel_event: asyncio.E
         if (
             promote_if_improves
             and dev_examples
-            and active_dir is not None
-            and active_dir.exists()
+            and active_version_dir is not None
             and baseline_blocked is None
         ):
             try:
                 baseline_primary = await asyncio.to_thread(
                     evaluate_mlx_qwen3_agent_loss,
                     base_model=str(getattr(cfg.training, "ragweld_agent_base_model", "") or ""),
-                    adapter_dir=active_dir,
+                    adapter_dir=active_version_dir,
                     messages=dev_examples,
                     batch_size=max(1, int(run.batch_size)),
                     max_length=int(run.max_length),
@@ -1225,10 +1300,19 @@ async def _run_train_job(*, run_id: str, corpus_id: str, cancel_event: asyncio.E
                 _append_event(run_id, build_agent_telemetry_event(run_id, ts, payload))
                 return
 
-        # Mark run as running (in case a previous partial state left it inconsistent).
+        # Mark run as running through the authority: the stored record is re-read under the
+        # run lock (never this coroutine's stale object, which predates the long dataset and
+        # baseline work above) and a run that was cancelled meanwhile is honoured.
         _raise_if_cancelled()
-        run.status = "running"
-        await asyncio.to_thread(_save_run, run)
+
+        def _to_running(stored: AgentTrainRun) -> AgentTrainRun:
+            stored.status = "running"
+            return stored
+
+        transitioned = await _transition_run(run_id, allowed_from=frozenset({"queued", "running"}), apply=_to_running)
+        if transitioned is None:
+            raise TrainingCancelledError(f"run {run_id} was ended before training could start")
+        run = transitioned
         _append_event(run_id, AgentTrainMetricEvent(type="state", ts=datetime.now(UTC), run_id=run_id, status=run.status))
 
         # Train (runs in thread; emits progress/metrics/telemetry into metrics.jsonl).
@@ -1274,7 +1358,7 @@ async def _run_train_job(*, run_id: str, corpus_id: str, cancel_event: asyncio.E
             metric_label="final_eval_loss",
         )
         should_promote = decision.promote
-        if active_dir is not None and decision.notice:
+        if active_root is not None and decision.notice:
             _emit_log(decision.notice)
 
         # Populate (and validate) the summary BEFORE any artifact copy: an impossible value
@@ -1306,7 +1390,7 @@ async def _run_train_job(*, run_id: str, corpus_id: str, cancel_event: asyncio.E
         # check above must win over completion and promotion.
         async with _run_state_lock(run_id):
             _raise_if_cancelled()
-            if active_dir is not None and should_promote:
+            if active_root is not None and should_promote:
 
                 def _promotion_work() -> str | None:
                     _complete_run(promoted=True)
@@ -1314,18 +1398,20 @@ async def _run_train_job(*, run_id: str, corpus_id: str, cancel_event: asyncio.E
 
                 leftover = await await_uncancellable(
                     run_promotion_transaction,
-                    swap=PromotionSwap(model_artifact_dir, active_dir),
+                    swap=VersionedArtifactSwap(
+                        model_artifact_dir, active_root, run_id=run_id, promotion_recorded=_promotion_recorded
+                    ),
                     repo_id=str(run.repo_id),
                     work=_promotion_work,
                 )
                 promotion_message = (
                     f"Promoted trained artifact to {active_dir_cfg} (backend=mlx_qwen3). "
                     f"Run artifact preserved at {model_artifact_dir}."
-                    + (f" Previous artifact could not be removed and was left at {leftover}." if leftover is not None else "")
+                    + (f" A retired version could not be pruned and was left at {leftover}." if leftover is not None else "")
                 )
             else:
                 await await_uncancellable(_complete_run, False)
-                promotion_message = decision.message if active_dir is not None else None
+                promotion_message = decision.message if active_root is not None else None
 
         # The run is durably completed (and the promotion committed) from here on. Everything
         # below is observability: a failure here must not turn a completed run into a failed one.
@@ -1478,8 +1564,7 @@ async def list_train_runs(
         if not path.exists():
             continue
         try:
-            run = AgentTrainRun.model_validate(json.loads(path.read_text(encoding="utf-8")))
-            run = _maybe_reconcile_run(run)
+            run = await reconcile_run(run_dir.name)
         except Exception:
             continue
         if _flyte_run_needs_reconcile(run):
@@ -1511,7 +1596,7 @@ async def list_train_runs(
 @router.post("/agent/train/start", response_model=AgentTrainStartResponse)
 async def start_train_run(request: AgentTrainStartRequest) -> AgentTrainStartResponse:
     corpus_id = request.repo_id
-    active_run_id = _active_run_id_for_corpus(corpus_id)
+    active_run_id = await _active_run_id_for_corpus(corpus_id)
     if active_run_id:
         raise HTTPException(
             status_code=409,
@@ -1901,7 +1986,7 @@ async def execute_train_run(run_id: str, request: AgentTrainExecuteRequest) -> A
 
 @router.get("/agent/train/run/{run_id}", response_model=AgentTrainRun)
 async def get_train_run(run_id: str) -> AgentTrainRun:
-    run = _load_run(run_id)
+    run = await reconcile_run(run_id)
     if _flyte_run_needs_reconcile(run):
         run = await _refresh_flyte_run(run)
         cfg = _cfg_from_run_snapshot(run)
@@ -1952,7 +2037,7 @@ async def stream_train_run(request: Request, run_id: str) -> StreamingResponse:
                 return
 
             try:
-                run = _load_run(run_id)
+                run = await reconcile_run(run_id)
             except HTTPException:
                 run = None
             # A Flyte-owned run may be terminated console-side while this stream
@@ -2009,9 +2094,10 @@ async def stream_train_run(request: Request, run_id: str) -> StreamingResponse:
 
 @router.post("/agent/train/run/{run_id}/cancel", response_model=OkResponse)
 async def cancel_train_run(run_id: str) -> OkResponse:
-    run = _load_run(run_id)
+    run = await reconcile_run(run_id)
     if str(run.status) in _TERMINAL_RUN_STATUSES:
-        return OkResponse(ok=True)
+        # Explicitly a no-op, not a fresh cancellation: the run already ended.
+        return OkResponse(ok=True, message=f"Run already ended with status={run.status}; nothing to cancel.")
 
     if str(run.workflow_backend or "") == "flyte" and str(run.workflow_run_id or "").strip():
         cfg = _cfg_from_run_snapshot(run)
@@ -2060,7 +2146,7 @@ async def cancel_train_run(run_id: str) -> OkResponse:
 
 @router.post("/agent/train/run/{run_id}/promote", response_model=OkResponse)
 async def promote_train_run(run_id: str) -> OkResponse:
-    run = _load_run(run_id)
+    run = await reconcile_run(run_id)
     if run.status != "completed":
         raise HTTPException(status_code=409, detail=f"Run is not finished (status={run.status})")
 
@@ -2104,16 +2190,19 @@ async def promote_train_run(run_id: str) -> OkResponse:
 
     async with _run_state_lock(run_id):
         leftover = await await_uncancellable(
-            run_promotion_transaction, swap=PromotionSwap(src, dst), repo_id=str(run.repo_id), work=_finish_promotion
+            run_promotion_transaction,
+            swap=VersionedArtifactSwap(src, dst, run_id=run_id, promotion_recorded=_promotion_recorded),
+            repo_id=str(run.repo_id),
+            work=_finish_promotion,
         )
     if leftover is not None:
         logger.warning(
             json.dumps(
                 {
-                    "event": "agent_manual_promotion_retained_tree_not_removed",
+                    "event": "agent_manual_promotion_retired_version_not_pruned",
                     "run_id": run_id,
                     "path": str(leftover),
-                    "operatorHint": "The promotion is committed; remove the retained previous adapter by hand.",
+                    "operatorHint": "The promotion is committed; remove the retired version directory by hand.",
                 },
                 sort_keys=True,
             )

@@ -6,7 +6,7 @@ import logging
 import tempfile
 import time
 import weakref
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncIterator, Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -66,6 +66,7 @@ from server.models.tribrid_config_model import (
     RerankerTrainLegacyResponse,
     RerankerTrainMetricsResponse,
     RerankerTrainStartResponse,
+    TriBridConfig,
 )
 from server.observability.metrics import (
     RERANKER_DIAGNOSTIC_EVENTS_TOTAL,
@@ -117,9 +118,13 @@ from server.training.mlx_qwen3_trainer import (
     evaluate_mlx_qwen3_reranker,
     train_qwen3_lora_reranker,
 )
+from server.training.artifact_store import (
+    ArtifactStoreError,
+    VersionedArtifactSwap,
+    resolve_active_artifact_dir,
+)
 from server.training.promotion import (
     BaselineState,
-    PromotionSwap,
     await_uncancellable,
     decide_auto_promotion,
     run_promotion_transaction,
@@ -558,15 +563,90 @@ def _read_last_event(run_id: str) -> RerankerTrainMetricEvent | None:
     return None
 
 
-def _maybe_reconcile_run(run: RerankerTrainRun) -> RerankerTrainRun:
-    """Reconcile persisted run.json with metrics.jsonl and in-process task state.
+async def _transition_run(
+    run_id: str,
+    *,
+    allowed_from: frozenset[str],
+    apply: Callable[[RerankerTrainRun], RerankerTrainRun | None],
+) -> RerankerTrainRun | None:
+    """The one way a run record changes status.
 
-    This is intentionally conservative: it fixes known "stub" runs and obvious
-    orphaned runs (e.g. server restart) so the UI doesn't show them as running
-    forever.
+    Under the run's lock, the STORED record is re-read (never a caller's stale copy); when its
+    status is not in `allowed_from` nothing is written and None is returned (compare-and-set);
+    otherwise `apply` mutates the stored record in a worker thread (it may attach lineage) and
+    the result is saved atomically.
+    """
+    async with _run_state_lock(run_id):
+        try:
+            stored = await asyncio.to_thread(_load_run, run_id)
+        except HTTPException:
+            return None
+        if str(stored.status) not in allowed_from:
+            return None
+
+        def _apply_and_save() -> RerankerTrainRun:
+            updated = apply(stored) or stored
+            _save_run(updated)
+            return updated
+
+        return await asyncio.to_thread(_apply_and_save)
+
+
+def _finalize_stored_run(
+    run: RerankerTrainRun,
+    cfg: Any | None,
+    *,
+    status: str,
+    message: str,
+    completed_at: datetime | None = None,
+    append_events: bool = True,
+) -> RerankerTrainRun:
+    """Mutate a stored, non-terminal run into its terminal state (caller holds the run lock).
+
+    Reconciliation of a record whose metrics stream already carries the terminal `complete`
+    event passes `append_events=False` (the events exist) and the event's timestamp as
+    `completed_at`; every finalization still attaches lineage when a config is available.
+    """
+    now = datetime.now(UTC)
+    run.status = status  # type: ignore[assignment]
+    run.completed_at = completed_at or now
+    if cfg is not None:
+        run = _attach_lineage(run, cfg)
+    _save_run(run)  # durable before the terminal events below
+    if append_events:
+        _append_event(
+            run.run_id,
+            RerankerTrainMetricEvent(
+                type="error" if status == "failed" else "state",
+                ts=now,
+                run_id=run.run_id,
+                status=run.status,  # type: ignore[arg-type]
+                message=message,
+            ),
+        )
+        _append_event(
+            run.run_id,
+            RerankerTrainMetricEvent(type="complete", ts=now, run_id=run.run_id, status=run.status),  # type: ignore[arg-type]
+        )
+    _train_start_guard.pop(str(run.repo_id or "").strip(), None)
+    return run
+
+
+class _ReconcileDecision(NamedTuple):
+    status: str
+    message: str
+    completed_at: datetime | None
+    append_events: bool
+
+
+def _reconcile_decision(run: RerankerTrainRun) -> _ReconcileDecision | None:
+    """What (if anything) an explicit reconciliation should do to a stale `running` record.
+
+    Pure with respect to persisted state: it reads the metrics tail and in-process task table
+    only. The actual repair goes through `_transition_run` + `_finalize_stored_run`.
     """
     if run.status != "running":
-        return run
+        return None
 
     last = _read_last_event(run.run_id)
     msg = str(getattr(last, "message", "") or "")
@@ -574,34 +654,24 @@ def _maybe_reconcile_run(run: RerankerTrainRun) -> RerankerTrainRun:
 
     # 1) Legacy stub runs: never actually trained, but were persisted as running.
     if "Training task is a stub" in msg:
-        run.status = "cancelled"
-        run.completed_at = now
-        _save_run(run)
-        _append_event(
-            run.run_id,
-            RerankerTrainMetricEvent(
-                type="state",
-                ts=now,
-                run_id=run.run_id,
-                status=run.status,
-                message="Reconciled legacy stub run (no training ever started).",
-            ),
+        return _ReconcileDecision(
+            status="cancelled",
+            message="Reconciled legacy stub run (no training ever started).",
+            completed_at=None,
+            append_events=True,
         )
-        _append_event(run.run_id, RerankerTrainMetricEvent(type="complete", ts=now, run_id=run.run_id, status=run.status))
-        return run
 
-    # 2) If the metrics stream already has a terminal status, persist it.
+    # 2) The metrics stream already carries the terminal events; only the record lags.
     terminal = str(getattr(last, "status", "") or "").strip().lower()
     if getattr(last, "type", None) == "complete" and terminal in {"completed", "failed", "cancelled"}:
-        run.status = terminal  # type: ignore[assignment]
-        if run.completed_at is None:
-            run.completed_at = getattr(last, "ts", None) or now
-        _save_run(run)
-        return run
+        return _ReconcileDecision(
+            status=terminal,
+            message="Reconciled run record with its terminal metrics stream.",
+            completed_at=getattr(last, "ts", None) or now,
+            append_events=False,
+        )
 
-    # 3) Orphaned runs: marked running, but no in-process task is tracking them.
-    #    This commonly happens after a server restart (tasks are in-memory only).
-    #    Avoid false positives by requiring long inactivity in metrics.
+    # 3) Orphaned run after backend restart: mark cancelled after long inactivity.
     if run.run_id not in _train_tasks:
         last_ts = getattr(last, "ts", None) if last is not None else None
         anchor = last_ts or run.started_at
@@ -609,30 +679,71 @@ def _maybe_reconcile_run(run: RerankerTrainRun) -> RerankerTrainRun:
             idle_secs = float((now - anchor).total_seconds())
         except Exception:
             idle_secs = 0.0
-
-        # If there's been no event for a long time, treat this as orphaned.
         if idle_secs >= 2 * 60 * 60:
-            run.status = "cancelled"
-            run.completed_at = now
-            _save_run(run)
-            _append_event(
-                run.run_id,
-                RerankerTrainMetricEvent(
-                    type="error",
-                    ts=now,
-                    run_id=run.run_id,
-                    status=run.status,
-                    message="Reconciled orphaned run (no active task; likely backend restart).",
-                ),
+            return _ReconcileDecision(
+                status="cancelled",
+                message="Reconciled orphaned run (no active task; likely backend restart).",
+                completed_at=None,
+                append_events=True,
             )
-            _append_event(
-                run.run_id, RerankerTrainMetricEvent(type="complete", ts=now, run_id=run.run_id, status=run.status)
-            )
+    return None
 
-    return run
+
+def _cfg_from_run_snapshot(run: RerankerTrainRun) -> TriBridConfig | None:
+    try:
+        return TriBridConfig.model_validate(run.config_snapshot)
+    except Exception:
+        return None
+
+
+async def reconcile_run(run_id: str) -> RerankerTrainRun:
+    """Explicit reconciliation of a persisted run: loading stays read-only, and any repair is
+    a transition through the authority, finalized by `_finalize_stored_run`. Lineage is
+    attached from the run's own `config_snapshot` (the configuration that governed the run),
+    never today's corpus config. Endpoints that list or get runs call this; nothing
+    reconciles on load."""
+    run = await asyncio.to_thread(_load_run, run_id)
+    decision = await asyncio.to_thread(_reconcile_decision, run)
+    if decision is None:
+        return run
+    cfg = _cfg_from_run_snapshot(run)
+    result = await _transition_run(
+        run_id,
+        allowed_from=frozenset({"running"}),
+        apply=lambda stored: _finalize_stored_run(
+            stored,
+            cfg,
+            status=decision.status,
+            message=decision.message,
+            completed_at=decision.completed_at,
+            append_events=decision.append_events,
+        ),
+    )
+    if result is not None:
+        return result
+    try:
+        return await asyncio.to_thread(_load_run, run_id)
+    except HTTPException:
+        return run
+
+
+def _promotion_recorded(run_id: str) -> bool:
+    """Artifact-store recovery's truth for a crashed promotion: did the run record commit?
+
+    A promoted run carries `promoted_bundle_id` (written durably inside the promotion
+    transaction's work step). Read-only; an unreadable record means unrecorded, so recovery
+    stays conservative and rolls the pointer back.
+    """
+    try:
+        run = _load_run(run_id)
+    except Exception:
+        return False
+    return bool(run.promoted_bundle_id)
 
 
 def _load_run(run_id: str) -> RerankerTrainRun:
+    """Read-only load of the persisted record: no reconciliation, no writes. Status repairs
+    happen only through `reconcile_run` / `_transition_run` (the transition authority)."""
     path = _run_json_path(run_id)
     if not path.exists():
         raise HTTPException(status_code=404, detail=f"run_id={run_id} not found")
@@ -640,8 +751,7 @@ def _load_run(run_id: str) -> RerankerTrainRun:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to read train run: {e}") from e
-    run = RerankerTrainRun.model_validate(raw)
-    return _maybe_reconcile_run(run)
+    return RerankerTrainRun.model_validate(raw)
 
 
 def _save_run(run: RerankerTrainRun) -> None:
@@ -1017,7 +1127,15 @@ async def _run_train_job(*, run_id: str, corpus_id: str, cancel_event: asyncio.E
         train_triplets, dev_triplets = deterministic_split_by_query(mats, dev_split=0.1, seed=0)
         RERANKER_TRIPLETS_TOTAL.labels(kind="train_split").inc(len(train_triplets))
         RERANKER_TRIPLETS_TOTAL.labels(kind="dev_split").inc(len(dev_triplets))
-        active_dir = _resolve_path(cfg.training.tribrid_reranker_model_path)
+        # The active adapter lives in a versioned store under tribrid_reranker_model_path;
+        # resolve the pointer once and read the pinned, immutable version for the baseline.
+        active_root = _resolve_path(cfg.training.tribrid_reranker_model_path)
+        store_unreadable: str | None = None
+        try:
+            active_version_dir = await asyncio.to_thread(resolve_active_artifact_dir, active_root)
+        except ArtifactStoreError as exc:
+            active_version_dir = None
+            store_unreadable = str(exc)
         train_batch_size = int(run.batch_size)
         train_grad_accum_steps = int(cfg.training.learning_reranker_grad_accum_steps)
         train_max_length = int(run.max_length)
@@ -1064,9 +1182,16 @@ async def _run_train_job(*, run_id: str, corpus_id: str, cancel_event: asyncio.E
 
         baseline_primary: float | None = None
         baseline_state: BaselineState = "absent"
-        if dev_triplets and active_dir.exists():
+        if store_unreadable is not None:
+            # Unknown quality is not absence: an unreadable store refuses gated promotion.
+            baseline_state = "failed"
+            _emit_log(
+                f"Active-artifact store at {cfg.training.tribrid_reranker_model_path} is unreadable "
+                f"({store_unreadable}); improvement-gated promotion is refused until the operator repairs it."
+            )
+        elif dev_triplets and active_version_dir is not None:
             _raise_if_cancelled()
-            manifest_backend = read_manifest_backend(active_dir)
+            manifest_backend = read_manifest_backend(active_version_dir)
             if not manifest_backend:
                 _emit_log("Baseline eval skipped (active artifact manifest missing; treating as no baseline).")
             elif str(manifest_backend) != str(backend):
@@ -1075,7 +1200,7 @@ async def _run_train_job(*, run_id: str, corpus_id: str, cancel_event: asyncio.E
                     f"Baseline eval skipped (active manifest backend={manifest_backend} != resolved backend={backend})."
                 )
             elif backend == "mlx_qwen3":
-                if not is_mlx_qwen3_artifact_compatible(artifact_dir=active_dir, base_model=str(base_model)):
+                if not is_mlx_qwen3_artifact_compatible(artifact_dir=active_version_dir, base_model=str(base_model)):
                     baseline_state = "incompatible"
                     _emit_log("Baseline eval skipped (active artifact is missing or incompatible with mlx_qwen3).")
                 else:
@@ -1085,7 +1210,7 @@ async def _run_train_job(*, run_id: str, corpus_id: str, cancel_event: asyncio.E
                         raw_baseline = await asyncio.to_thread(
                             evaluate_mlx_qwen3_reranker,
                             base_model=str(base_model),
-                            adapter_dir=active_dir,
+                            adapter_dir=active_version_dir,
                             triplets=dev_triplets,
                             max_length=int(train_max_length),
                             lora_rank=int(cfg.training.learning_reranker_lora_rank),
@@ -1225,10 +1350,19 @@ async def _run_train_job(*, run_id: str, corpus_id: str, cancel_event: asyncio.E
                 _append_event(run_id, build_reranker_telemetry_event(run_id, ts, payload))
                 return
 
-        # Mark run as running (in case a previous stub left it inconsistent).
+        # Mark run as running through the authority: the stored record is re-read under the
+        # run lock (never this coroutine's stale object, which predates the long triplet and
+        # baseline work above) and a run that was cancelled meanwhile is honoured.
         _raise_if_cancelled()
-        run.status = "running"
-        await asyncio.to_thread(_save_run, run)
+
+        def _to_running(stored: RerankerTrainRun) -> RerankerTrainRun:
+            stored.status = "running"
+            return stored
+
+        transitioned = await _transition_run(run_id, allowed_from=frozenset({"queued", "running"}), apply=_to_running)
+        if transitioned is None:
+            raise TrainingCancelledError(f"run {run_id} was ended before training could start")
+        run = transitioned
         _append_event(
             run_id,
             RerankerTrainMetricEvent(type="state", ts=datetime.now(UTC), run_id=run_id, status=run.status),
@@ -1387,7 +1521,9 @@ async def _run_train_job(*, run_id: str, corpus_id: str, cancel_event: asyncio.E
             _raise_if_cancelled()
             if should_promote:
                 current_stage = "promote"
-                swap = PromotionSwap(model_artifact_dir, active_dir)
+                swap = VersionedArtifactSwap(
+                    model_artifact_dir, active_root, run_id=run_id, promotion_recorded=_promotion_recorded
+                )
 
                 def _promotion_work() -> str | None:
                     _complete_run(promoted=True)
@@ -1400,10 +1536,10 @@ async def _run_train_job(*, run_id: str, corpus_id: str, cancel_event: asyncio.E
                         repo_id=str(run.repo_id),
                         work=_promotion_work,
                         # the in-process model cache is invalidated INSIDE the transaction (and again on rollback)
-                        invalidate=lambda: invalidate_mlx_qwen3_cache_sync(str(active_dir)),
+                        invalidate=lambda: invalidate_mlx_qwen3_cache_sync(str(active_root)),
                     )
                 promotion_fields = {
-                    "active_path": str(active_dir),
+                    "active_path": str(active_root),
                     "artifact_path": str(model_artifact_dir),
                     "backend": str(backend),
                     "primary_value": pv,
@@ -1481,14 +1617,16 @@ async def _run_train_job(*, run_id: str, corpus_id: str, cancel_event: asyncio.E
             )
 
     except TrainingCancelledError as e:
+
+        def _end_cancelled(stored: RerankerTrainRun) -> RerankerTrainRun:
+            stored.status = "cancelled"
+            stored.completed_at = datetime.now(UTC)
+            return _attach_lineage(stored, cfg) if cfg is not None else stored
+
         try:
-            run = _load_run(run_id)
-            if run.status != "completed":  # a cancellation that lands after the durable commit changes nothing
-                run.status = "cancelled"
-                run.completed_at = datetime.now(UTC)
-                if cfg is not None:
-                    run = _attach_lineage(run, cfg)
-                await asyncio.to_thread(_save_run, run)
+            # through the authority: a run already terminal (completed, or finalized by
+            # reconciliation/cancel) is left exactly as it is
+            await _transition_run(run_id, allowed_from=frozenset({"queued", "running"}), apply=_end_cancelled)
         except Exception:
             pass
 
@@ -1529,14 +1667,14 @@ async def _run_train_job(*, run_id: str, corpus_id: str, cancel_event: asyncio.E
                 )
     except Exception as e:
         if _is_cancel_requested():
+
+            def _end_cancelled(stored: RerankerTrainRun) -> RerankerTrainRun:
+                stored.status = "cancelled"
+                stored.completed_at = datetime.now(UTC)
+                return _attach_lineage(stored, cfg) if cfg is not None else stored
+
             try:
-                run = _load_run(run_id)
-                if run.status != "completed":
-                    run.status = "cancelled"
-                    run.completed_at = datetime.now(UTC)
-                    if cfg is not None:
-                        run = _attach_lineage(run, cfg)
-                    await asyncio.to_thread(_save_run, run)
+                await _transition_run(run_id, allowed_from=frozenset({"queued", "running"}), apply=_end_cancelled)
             except Exception:
                 pass
 
@@ -1576,14 +1714,16 @@ async def _run_train_job(*, run_id: str, corpus_id: str, cancel_event: asyncio.E
                         operator_hint=_operator_hint_for_stage(current_stage),
                     )
         else:
+
+            def _end_failed(stored: RerankerTrainRun) -> RerankerTrainRun:
+                stored.status = "failed"
+                stored.completed_at = datetime.now(UTC)
+                return _attach_lineage(stored, cfg) if cfg is not None else stored
+
             try:
-                run = _load_run(run_id)
-                if run.status != "completed":  # never flip a durably completed run (post-commit observability failures are logged)
-                    run.status = "failed"
-                    run.completed_at = datetime.now(UTC)
-                    if cfg is not None:
-                        run = _attach_lineage(run, cfg)
-                    await asyncio.to_thread(_save_run, run)
+                # never flips a run that is already terminal (durably completed, or ended by
+                # reconciliation/cancel)
+                await _transition_run(run_id, allowed_from=frozenset({"queued", "running"}), apply=_end_failed)
             except Exception:
                 pass
             RERANKER_TRAIN_RUNS_TOTAL.labels(outcome="failed").inc()
@@ -1658,7 +1798,13 @@ async def _run_eval_job(*, corpus_id: str) -> None:
             cfg.training,
             artifact_path=str(getattr(cfg.training, "tribrid_reranker_model_path", "") or ""),
         )
-        model_dir = _resolve_path(cfg.training.tribrid_reranker_model_path)
+        model_dir = await asyncio.to_thread(
+            resolve_active_artifact_dir, _resolve_path(cfg.training.tribrid_reranker_model_path)
+        )
+        if model_dir is None:
+            raise RuntimeError(
+                f"No active reranker artifact is promoted under {cfg.training.tribrid_reranker_model_path}."
+            )
         if backend != "mlx_qwen3":
             raise RuntimeError(f"unsupported learning reranker backend: {backend}")
         if not mlx_is_available():
@@ -1716,8 +1862,9 @@ def _latest_run_id_for_corpus(corpus_id: str) -> str | None:
     return str(entries[0].name)
 
 
-def _active_run_id_for_corpus(corpus_id: str) -> str | None:
-    """Return a currently-running run_id for a corpus (best-effort)."""
+async def _active_run_id_for_corpus(corpus_id: str) -> str | None:
+    """The currently-running run gating a new start. Candidates are reconciled first (through
+    the authority) so an orphaned record left `running` by a restart cannot block starts forever."""
     cid = str(corpus_id or "").strip()
     if not cid:
         return None
@@ -1725,7 +1872,7 @@ def _active_run_id_for_corpus(corpus_id: str) -> str | None:
     if guard:
         run_id, started_at = guard
         try:
-            run = _load_run(run_id)
+            run = await asyncio.to_thread(_load_run, run_id)
             if str(run.status) == "completed":
                 _train_start_guard.pop(cid, None)
             elif datetime.now(UTC) - started_at <= _TRAIN_START_GRACE:
@@ -1744,7 +1891,7 @@ def _active_run_id_for_corpus(corpus_id: str) -> str | None:
     entries.sort(key=lambda p: p.name, reverse=True)
     for entry in entries:
         try:
-            run = _load_run(entry.name)
+            run = await reconcile_run(entry.name)
         except Exception:
             continue
         if str(run.status) == "running":
@@ -1752,7 +1899,7 @@ def _active_run_id_for_corpus(corpus_id: str) -> str | None:
     return None
 
 
-def _status_from_persisted_run(*, corpus_id: str) -> RerankerLegacyStatus | None:
+async def _status_from_persisted_run(*, corpus_id: str) -> RerankerLegacyStatus | None:
     """Synthesize a legacy polling status from persisted training run files.
 
     This avoids process-local drift under multi-worker servers: the UI polls
@@ -1764,7 +1911,7 @@ def _status_from_persisted_run(*, corpus_id: str) -> RerankerLegacyStatus | None
         return None
 
     try:
-        run = _load_run(run_id)
+        run = await reconcile_run(run_id)
     except Exception:
         return None
 
@@ -1881,7 +2028,7 @@ async def get_reranker_status(
     # If the UI supplies corpus_id (it does), synthesize from persisted training
     # runs so the status doesn't depend on process-local memory.
     if corpus_id and str(corpus_id).strip():
-        derived = _status_from_persisted_run(corpus_id=str(corpus_id).strip())
+        derived = await _status_from_persisted_run(corpus_id=str(corpus_id).strip())
         if derived is not None:
             return derived
 
@@ -1938,13 +2085,23 @@ async def get_reranker_info() -> RerankerInfoResponse:
     else:
         path = ""
 
+    resolved = str(path or "")
+    if mode == "learning" and path:
+        # The resolved path is the pinned active version, or empty when nothing is promoted
+        # or the store is broken — never the root pretending to be an adapter.
+        try:
+            active = await asyncio.to_thread(resolve_active_artifact_dir, _resolve_path(str(path)))
+        except ArtifactStoreError:
+            active = None
+        resolved = str(active) if active is not None else ""
+
     return RerankerInfoResponse(
         enabled=enabled,
         reranker_mode=mode,
         reranker_cloud_provider=cfg.reranking.reranker_cloud_provider,
         reranker_cloud_model=cfg.reranking.reranker_cloud_model,
         path=str(path or ""),
-        resolved_path=str(path or ""),
+        resolved_path=resolved,
         device="mlx" if (mode == "learning" and mlx_is_available()) else "cpu",
         alpha=cfg.reranking.tribrid_reranker_alpha,
         topn=cfg.reranking.tribrid_reranker_topn,
@@ -2017,12 +2174,23 @@ async def score_reranker(payload: RerankerScoreRequest) -> RerankerScoreResponse
         read_manifest,
     )
 
-    adapter_dir = _resolve_path(cfg.training.tribrid_reranker_model_path)
-    if not adapter_dir.exists():
+    try:
+        adapter_dir = await asyncio.to_thread(
+            resolve_active_artifact_dir, _resolve_path(cfg.training.tribrid_reranker_model_path)
+        )
+    except ArtifactStoreError as e:
         return RerankerScoreResponse(
             ok=False,
             backend="mlx_qwen3",
-            error=f"active adapter dir not found: {cfg.training.tribrid_reranker_model_path}",
+            error=f"active-artifact store is unreadable: {e}",
+            operator_hint=_operator_hint_for_stage("score_pair"),
+            score=0.0,
+        )
+    if adapter_dir is None:
+        return RerankerScoreResponse(
+            ok=False,
+            backend="mlx_qwen3",
+            error=f"no active adapter promoted under: {cfg.training.tribrid_reranker_model_path}",
             operator_hint=_operator_hint_for_stage("score_pair"),
             score=0.0,
         )
@@ -2416,7 +2584,13 @@ async def evaluate_reranker(
             cfg.training,
             artifact_path=str(getattr(cfg.training, "tribrid_reranker_model_path", "") or ""),
         )
-        model_dir = _resolve_path(cfg.training.tribrid_reranker_model_path)
+        model_dir = await asyncio.to_thread(
+            resolve_active_artifact_dir, _resolve_path(cfg.training.tribrid_reranker_model_path)
+        )
+        if model_dir is None:
+            raise RuntimeError(
+                f"No active reranker artifact is promoted under {cfg.training.tribrid_reranker_model_path}."
+            )
         if backend != "mlx_qwen3":
             raise RuntimeError(f"unsupported learning reranker backend: {backend}")
         if not mlx_is_available():
@@ -2527,8 +2701,7 @@ async def list_train_runs(
         if not path.exists():
             continue
         try:
-            run = RerankerTrainRun.model_validate(json.loads(path.read_text(encoding="utf-8")))
-            run = _maybe_reconcile_run(run)
+            run = await reconcile_run(run_dir.name)
         except Exception:
             continue
         metas.append(
@@ -2555,7 +2728,7 @@ async def list_train_runs(
 async def start_train_run(request: RerankerTrainStartRequest) -> RerankerTrainStartResponse:
     corpus_id = request.repo_id
 
-    active_run_id = _active_run_id_for_corpus(corpus_id)
+    active_run_id = await _active_run_id_for_corpus(corpus_id)
     if active_run_id:
         raise HTTPException(
             status_code=409,
@@ -2719,49 +2892,21 @@ async def _request_train_run_cancel(*, run_id: str, reason: str) -> bool:
         if run_id in _train_tasks:
             return True
 
-        return await asyncio.to_thread(_persist_orphan_cancel, run_id, reason)
-
-
-def _persist_orphan_cancel(run_id: str, reason: str) -> bool:
-    """No in-memory task (orphan / already stopped): persist the cancellation so the UI does not
-    stay on running forever (caller holds the run's state lock)."""
-    try:
-        run = _load_run(run_id)
-    except HTTPException:
-        return False
-    if run.status not in {"running", "queued"}:
+        # No in-memory task (orphan, or already stopped): persist the cancellation through the
+        # shared finalizer, still under the lock, so the UI does not stay on running forever.
+        cfg = _cfg_from_run_snapshot(stored)
+        await asyncio.to_thread(
+            _finalize_stored_run, stored, cfg, status="cancelled", message=str(reason)
+        )
         return True
-    now = datetime.now(UTC)
-    run.status = "cancelled"
-    run.completed_at = now
-    _save_run(run)
-    _append_event(
-        run_id,
-        RerankerTrainMetricEvent(
-            type="state",
-            ts=now,
-            run_id=run_id,
-            status="cancelled",
-            message=str(reason),
-        ),
-    )
-    _append_event(
-        run_id,
-        RerankerTrainMetricEvent(
-            type="complete",
-            ts=now,
-            run_id=run_id,
-            status="cancelled",
-        ),
-    )
-    return True
 
 
 @router.post("/reranker/train/run/{run_id}/cancel", response_model=OkResponse)
 async def cancel_train_run(run_id: str) -> OkResponse:
-    run = _load_run(run_id)
+    run = await reconcile_run(run_id)
     if str(run.status) in {"completed", "failed", "cancelled"}:
-        return OkResponse(ok=True)
+        # Explicitly a no-op, not a fresh cancellation: the run already ended.
+        return OkResponse(ok=True, message=f"Run already ended with status={run.status}; nothing to cancel.")
 
     await _request_train_run_cancel(
         run_id=run_id,
@@ -2775,7 +2920,7 @@ async def stop_reranker(
     corpus_id: str | None = Query(default=None, description="Optional corpus_id scope (required when multiple corpora)"),
 ) -> RerankerTrainLegacyResponse:
     cid = await _resolve_corpus_id(corpus_id)
-    active_run_id = _active_run_id_for_corpus(cid)
+    active_run_id = await _active_run_id_for_corpus(cid)
     if not active_run_id:
         return RerankerTrainLegacyResponse(ok=True, output="No active training run to stop.", run_id=None, error=None)
 
@@ -2850,9 +2995,9 @@ async def stream_train_run(
             if await request.is_disconnected():
                 return
 
-            # Close when run completes
+            # Close when run completes (reconciled through the authority, never on load)
             try:
-                run = _load_run(run_id)
+                run = await reconcile_run(run_id)
             except HTTPException:
                 run = None
             if run is not None and run.status in {"completed", "failed", "cancelled"}:
@@ -2937,13 +3082,13 @@ async def download_train_run_diagnostics(run_id: str) -> FileResponse:
 
 @router.get("/reranker/train/run/{run_id}", response_model=RerankerTrainRun)
 async def get_train_run(run_id: str) -> RerankerTrainRun:
-    return _load_run(run_id)
+    return await reconcile_run(run_id)
 
 
 @router.post("/reranker/train/run/{run_id}/promote", response_model=OkResponse)
 async def promote_train_run(run_id: str) -> OkResponse:
     """Atomically promote a run artifact to the active learning reranker path."""
-    run = _load_run(run_id)
+    run = await reconcile_run(run_id)
     if run.status != "completed":
         raise HTTPException(status_code=409, detail=f"Run is not finished (status={run.status})")
 
@@ -2961,31 +3106,39 @@ async def promote_train_run(run_id: str) -> OkResponse:
             detail=f"Unsupported reranker artifact backend for promotion: {backend or 'unknown'} (expected mlx_qwen3).",
         )
 
-    def _finish_promotion() -> str | None:
-        nonlocal run
+    def _prepare_staged(staged_dir: Path) -> None:
+        # Versions are immutable once visible: refresh the manifest on the staged copy,
+        # before the pointer switch, never on the published version.
         yes_token_id = src_manifest.get("yes_token_id")
         no_token_id = src_manifest.get("no_token_id")
         if isinstance(yes_token_id, int) and isinstance(no_token_id, int):
             write_mlx_manifest(
-                out_dir=dst,
+                out_dir=staged_dir,
                 base_model=str(src_manifest.get("base_model") or cfg.training.learning_reranker_base_model),
                 run_id=run_id,
                 yes_token_id=int(yes_token_id),
                 no_token_id=int(no_token_id),
             )
-        run = _attach_lineage(run, cfg, promoted=True)
+
+    def _finish_promotion() -> str | None:
+        nonlocal run
+        stored = _load_run(run_id)  # never the record loaded before the (long) copy
+        run = _attach_lineage(stored, cfg, promoted=True)
         _save_run(run)
         return run.bundle_id
 
     try:
         with RERANKER_PROMOTION_LATENCY_SECONDS.time():
-            leftover = await await_uncancellable(
-                run_promotion_transaction,
-                swap=PromotionSwap(src, dst),
-                repo_id=str(run.repo_id),
-                work=_finish_promotion,
-                invalidate=lambda: invalidate_mlx_qwen3_cache_sync(str(cfg.training.tribrid_reranker_model_path)),
-            )
+            async with _run_state_lock(run_id):
+                leftover = await await_uncancellable(
+                    run_promotion_transaction,
+                    swap=VersionedArtifactSwap(
+                        src, dst, run_id=run_id, prepare=_prepare_staged, promotion_recorded=_promotion_recorded
+                    ),
+                    repo_id=str(run.repo_id),
+                    work=_finish_promotion,
+                    invalidate=lambda: invalidate_mlx_qwen3_cache_sync(str(cfg.training.tribrid_reranker_model_path)),
+                )
     except Exception as e:
         RERANKER_PROMOTIONS_TOTAL.labels(outcome="error").inc()
         RERANKER_TRAIN_STAGE_ERRORS_TOTAL.labels(stage="promote").inc()

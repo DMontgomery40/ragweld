@@ -8,17 +8,14 @@ active one without an operator.
 from __future__ import annotations
 
 import asyncio
-import fcntl
 import math
-import os
-import shutil
-import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
 from server.lineage.registry import repo_lineage_lock, restore_aliases, snapshot_aliases
+from server.training.artifact_store import VersionedArtifactSwap
 
 BaselineState = Literal["absent", "incompatible", "measured", "failed"]
 """Why the active artifact's held-out score is or is not available.
@@ -132,149 +129,9 @@ class PromotionRollbackError(RuntimeError):
     """Rolling a promotion back failed; the original failure is chained as __cause__/__context__."""
 
 
-class PromotionSwap:
-    """A two-phase, interprocess-locked swap of the active artifact directory.
-
-    `begin` takes an exclusive `flock` on a sibling lock file of the active directory (held
-    until commit/rollback, so overlapping promotions — other jobs, other workers, manual
-    promotes — serialize instead of undoing each other), copies the run artifact next to the
-    active directory and swaps it in while keeping the previous active tree as a retained
-    rollback directory. The caller then does the fallible post-swap work (cache clear,
-    lineage, run record). `commit` discards the retained tree; `rollback` puts the previous
-    active tree back (or removes the new one when there was none). Every step is
-    exception-safe: a failure inside `begin` leaves the active directory as it was, and
-    cleanup errors are raised (never ignored) so nothing is silently stranded.
-
-    All methods do blocking filesystem work: call them through `asyncio.to_thread` from
-    async code (the flock is bound to the descriptor, not the thread).
-    """
-
-    def __init__(self, artifact_dir: Path, active_dir: Path) -> None:
-        self.artifact_dir = artifact_dir
-        self.active_dir = active_dir
-        self.previous: Path | None = None
-        self._lock_handle = None
-        self._open = False
-
-    # -- locking -------------------------------------------------------------------------
-    def _acquire(self) -> None:
-        self.active_dir.parent.mkdir(parents=True, exist_ok=True)
-        lock_path = self.active_dir.parent / f".{self.active_dir.name}.promote.lock"
-        handle = lock_path.open("a+", encoding="utf-8")
-        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
-        self._lock_handle = handle
-
-    def _release(self) -> None:
-        handle, self._lock_handle = self._lock_handle, None
-        if handle is not None:
-            try:
-                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
-            finally:
-                handle.close()
-
-    # -- phases --------------------------------------------------------------------------
-    def begin(self) -> PromotionSwap:
-        self._acquire()
-        stamp = f"{os.getpid()}_{uuid.uuid4().hex[:8]}"
-        staged = self.active_dir.parent / f".tmp_{self.active_dir.name}_{stamp}"
-        retained = self.active_dir.parent / f".bak_{self.active_dir.name}_{stamp}"
-        try:
-            shutil.copytree(self.artifact_dir, staged)
-        except BaseException:
-            shutil.rmtree(staged, ignore_errors=True)  # the staging copy is ours alone
-            self._release()
-            raise
-        self._open = True
-        try:
-            if self.active_dir.exists():
-                self.active_dir.rename(retained)
-                self.previous = retained
-            staged.rename(self.active_dir)
-        except BaseException as failure:
-            # Put things back exactly: the staged copy goes away, the previous tree returns. The
-            # lock and state are always released; a failed restore is reported, never swallowed.
-            try:
-                shutil.rmtree(staged, ignore_errors=True)
-                if self.previous is not None and self.previous.exists() and not self.active_dir.exists():
-                    try:
-                        self.previous.rename(self.active_dir)
-                    except OSError as restore_failure:
-                        raise PromotionRollbackError(
-                            f"begin failed and the previous artifact could not be restored from {self.previous}: {restore_failure}"
-                        ) from failure
-            finally:
-                self.previous = None
-                self._open = False
-                self._release()
-            raise
-        return self
-
-    def commit(self) -> Path | None:
-        """Discard the retained tree. Returns a path only when it could not be removed (reported, not hidden)."""
-        if not self._open:
-            return None
-        leftover: Path | None = None
-        try:
-            if self.previous is not None and self.previous.exists():
-                try:
-                    shutil.rmtree(self.previous)
-                except OSError:
-                    leftover = self.previous
-        finally:
-            self.previous = None
-            self._open = False
-            self._release()
-        return leftover
-
-    def rollback(self) -> None:
-        """Put the previous artifact back. The candidate is parked (renamed aside), the previous
-        tree restored, and only then is the candidate deleted — a failed restore therefore never
-        leaves the active path empty: the candidate returns and both trees are reported."""
-        if not self._open:
-            return
-        errors: list[str] = []
-        try:
-            if self.previous is None:
-                # first promotion ever: nothing to restore, the candidate simply goes away
-                if self.active_dir.exists():
-                    try:
-                        shutil.rmtree(self.active_dir)
-                    except OSError as exc:
-                        errors.append(f"could not remove the candidate at {self.active_dir}: {exc}")
-            elif not self.previous.exists():
-                errors.append(
-                    f"retained previous artifact missing at {self.previous}; the candidate was left in place at {self.active_dir}"
-                )
-            else:
-                parked = self.active_dir.parent / f".rollback_{self.active_dir.name}_{os.getpid()}_{uuid.uuid4().hex[:8]}"
-                try:
-                    if self.active_dir.exists():
-                        self.active_dir.rename(parked)
-                    self.previous.rename(self.active_dir)
-                except OSError as exc:
-                    errors.append(f"could not restore {self.previous} to {self.active_dir}: {exc}")
-                    if parked.exists() and not self.active_dir.exists():
-                        try:
-                            parked.rename(self.active_dir)  # better the candidate than nothing
-                        except OSError as back:
-                            errors.append(f"candidate parked at {parked} could not be put back either: {back}")
-                else:
-                    try:
-                        if parked.exists():
-                            shutil.rmtree(parked)
-                    except OSError as exc:
-                        errors.append(f"previous artifact restored; the candidate is left at {parked}: {exc}")
-        finally:
-            self.previous = None
-            self._open = False
-            self._release()
-        if errors:
-            raise PromotionRollbackError("; ".join(errors))
-
-
 def run_promotion_transaction(
     *,
-    swap: PromotionSwap,
+    swap: VersionedArtifactSwap,
     repo_id: str,
     work: Callable[[], str | None],
     invalidate: Callable[[], None] | None = None,
@@ -282,12 +139,13 @@ def run_promotion_transaction(
 ) -> Path | None:
     """The whole promotion as one synchronous unit (run it in a worker thread):
 
-    begin (locked swap) -> repository lineage lock -> alias snapshot -> `invalidate()` (drop any
-    in-process copy of the artifact being replaced) -> `work()` (lineage + run record; returns
-    the bundle id it wrote, or None) -> commit. On ANY failure in between, alias compensation
-    and artifact rollback are attempted independently (one failing never skips the other), both
-    are reported in a `PromotionRollbackError` chained to the original failure, and every lock
-    is released. Returns the retained tree that could not be removed on commit, if any.
+    begin (locked, recovery-first versioned publish + atomic pointer switch) -> repository
+    lineage lock -> alias snapshot -> `invalidate()` (drop any in-process copy of the artifact
+    being replaced) -> `work()` (lineage + run record; returns the bundle id it wrote, or None)
+    -> commit (prune retired versions). On ANY failure in between, alias compensation and the
+    pointer rollback are attempted independently (one failing never skips the other), both are
+    reported in a `PromotionRollbackError` chained to the original failure, and every lock is
+    released. Returns a retired version that could not be pruned on commit, if any.
     """
     lineage_lock = repo_lineage_lock(repo_id)  # resolved (and its root created) before anything changes
     swap.begin()

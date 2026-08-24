@@ -2267,6 +2267,10 @@ class OkResponse(BaseModel):
     """Generic ok response used by several endpoints."""
 
     ok: bool = Field(description="Whether the operation succeeded")
+    message: str | None = Field(
+        default=None,
+        description="Optional human-readable detail, e.g. why the call was an explicit no-op.",
+    )
 
 
 LineageAliasName = Literal["current", "promoted", "baseline", "canary"]
@@ -5410,7 +5414,7 @@ class TrainingConfig(BaseModel):
 
     tribrid_reranker_model_path: str = Field(
         default="models/learning-reranker-active",
-        description="Active learning reranker artifact path (MLX adapter directory)."
+        description="Root of the learning reranker's versioned artifact store (versions/ + ACTIVE.json pointer). Readers resolve the pointer to the active immutable MLX adapter version; promotions switch it atomically."
     )
 
     tribrid_reranker_mine_mode: str = Field(
@@ -5535,7 +5539,7 @@ class TrainingConfig(BaseModel):
 
     ragweld_agent_model_path: str = Field(
         default="models/learning-agent-active",
-        description="Active Learning Agent adapter artifact path (adapter.npz + adapter_config.json + manifest.json). Training-only: the baseline for later runs and lineage; never served by the chat gateway.",
+        description="Root of the Learning Agent's versioned adapter store (versions/ + ACTIVE.json pointer); each version holds adapter.npz + adapter_config.json + manifest.json. Training-only: the baseline for later runs and lineage; never served by the chat gateway.",
     )
 
     ragweld_agent_train_dataset_path: str = Field(

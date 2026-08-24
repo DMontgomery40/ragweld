@@ -453,6 +453,16 @@ async def test_reranker_train_run_cancel_endpoint_marks_orphan_running_run(clien
         last = json.loads(events[-1])
         assert last["type"] == "complete"
         assert last["status"] == "cancelled"
+
+        # Cancelling a run that already ended is an explicit no-op, not a silent one.
+        events_before = (run_dir / "metrics.jsonl").read_text(encoding="utf-8")
+        res = await client.post(f"/api/reranker/train/run/{run_id}/cancel")
+        assert res.status_code == 200
+        body = res.json()
+        assert body.get("ok") is True
+        assert "nothing to cancel" in str(body.get("message") or "")
+        assert "cancelled" in str(body.get("message") or "")
+        assert (run_dir / "metrics.jsonl").read_text(encoding="utf-8") == events_before
     finally:
         shutil.rmtree(run_dir, ignore_errors=True)
 

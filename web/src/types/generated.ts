@@ -2540,7 +2540,7 @@ export interface TrainingConfig {
   triplets_min_count?: number; // default: 100
   /** Triplet mining mode */
   triplets_mine_mode?: string; // default: "replace"
-  /** Active learning reranker artifact path (MLX adapter directory). */
+  /** Root of the learning reranker's versioned artifact store (versions/ + ACTIVE.json pointer). Readers resolve the pointer to the active immutable MLX adapter version; promotions switch it atomically. */
   tribrid_reranker_model_path?: string; // default: "models/learning-reranker-active"
   /** Triplet mining mode */
   tribrid_reranker_mine_mode?: string; // default: "replace"
@@ -2580,7 +2580,7 @@ export interface TrainingConfig {
   ragweld_agent_tracking_backend?: "local" | "mlflow"; // default: "local"
   /** MLX base model the Learning Agent LoRA adapters are trained on. Artifacts trained for another base are not promotable. */
   ragweld_agent_base_model?: string; // default: "mlx-community/Qwen3-4B-Instruct-2507-4bit"
-  /** Active Learning Agent adapter artifact path (adapter.npz + adapter_config.json + manifest.json). Training-only: the baseline for later runs and lineage; never served by the chat gateway. */
+  /** Root of the Learning Agent's versioned adapter store (versions/ + ACTIVE.json pointer); each version holds adapter.npz + adapter_config.json + manifest.json. Training-only: the baseline for later runs and lineage; never served by the chat gateway. */
   ragweld_agent_model_path?: string; // default: "models/learning-agent-active"
   /** Training dataset path for the ragweld agent (empty = use evaluation.eval_dataset_path). */
   ragweld_agent_train_dataset_path?: string; // default: ""
@@ -3817,6 +3817,8 @@ export interface ObservabilityStatusResponse {
 export interface OkResponse {
   /** Whether the operation succeeded */
   ok: boolean;
+  /** Optional human-readable detail, e.g. why the call was an explicit no-op. */
+  message?: string | null;
 }
 
 /** FastAPI response envelope for a refused over-budget generation request. */

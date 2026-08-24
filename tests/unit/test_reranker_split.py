@@ -368,72 +368,94 @@ def test_persisted_event_boundary_rejects_out_of_domain_metrics_and_telemetry() 
     assert ok.metrics == {"mrr@10": 0.7, "custom": -3.0}  # unknown families carry no domain
 
 
+def _versions_debris(root) -> list[str]:
+    from server.training.artifact_store import versions_dir
+
+    directory = versions_dir(root)
+    if not directory.is_dir():
+        return []
+    return [p.name for p in directory.iterdir() if p.name.startswith(".staging_")]
+
+
+def _active_text(root) -> str | None:
+    from server.training.artifact_store import resolve_active_artifact_dir
+
+    active = resolve_active_artifact_dir(root)
+    if active is None:
+        return None
+    return (active / "adapter.safetensors").read_text(encoding="utf-8")
+
+
 def test_promotion_swap_restores_the_previous_artifact_when_post_swap_work_fails(tmp_path) -> None:
-    # Codex pass 11 P1: the active artifact was replaced before lineage/run-record writes; a
-    # failure there left a new artifact serving while the run was not durably completed.
+    # Codex pass 11 P1 (rebuilt on the versioned store): the pointer switches before
+    # lineage/run-record writes; a failure there must switch the pointer back so an
+    # unrecorded candidate never stays active.
     import pytest
 
-    from server.training.promotion import PromotionSwap
+    from server.training.artifact_store import VersionedArtifactSwap
 
-    active = tmp_path / "active"
-    active.mkdir()
-    (active / "adapter.safetensors").write_text("v1", encoding="utf-8")
-    artifact = tmp_path / "runs" / "r2" / "model"
-    artifact.mkdir(parents=True)
-    (artifact / "adapter.safetensors").write_text("v2", encoding="utf-8")
+    root = tmp_path / "active"
+    artifact1 = tmp_path / "runs" / "r1" / "model"
+    artifact1.mkdir(parents=True)
+    (artifact1 / "adapter.safetensors").write_text("v1", encoding="utf-8")
+    artifact2 = tmp_path / "runs" / "r2" / "model"
+    artifact2.mkdir(parents=True)
+    (artifact2 / "adapter.safetensors").write_text("v2", encoding="utf-8")
 
-    swap = PromotionSwap(artifact, active).begin()
-    assert (active / "adapter.safetensors").read_text(encoding="utf-8") == "v2"  # serving the candidate
+    VersionedArtifactSwap(artifact1, root, run_id="r1").begin().commit()
+    swap = VersionedArtifactSwap(artifact2, root, run_id="r2").begin()
+    assert _active_text(root) == "v2"  # serving the candidate
     with pytest.raises(OSError):
         try:
-            raise OSError(28, "No space left on device")  # lineage write fails after the swap
+            raise OSError(28, "No space left on device")  # lineage write fails after the switch
         except OSError:
             swap.rollback()
             raise
-    assert (active / "adapter.safetensors").read_text(encoding="utf-8") == "v1"
-    assert not [p for p in tmp_path.iterdir() if p.name.startswith(".bak_") or p.name.startswith(".tmp_")]
+    assert _active_text(root) == "v1"
+    assert _versions_debris(root) == []
 
-    swap = PromotionSwap(artifact, active).begin()
+    swap = VersionedArtifactSwap(artifact2, root, run_id="r2").begin()
     assert swap.commit() is None
-    assert (active / "adapter.safetensors").read_text(encoding="utf-8") == "v2"
-    assert not [p for p in tmp_path.iterdir() if p.name.startswith(".bak_") or p.name.startswith(".tmp_")]
+    assert _active_text(root) == "v2"
+    assert _versions_debris(root) == []
 
-    # first promotion ever: nothing to restore, rollback removes the candidate
+    # first promotion ever: nothing to restore, rollback removes the pointer
     fresh = tmp_path / "fresh_active"
-    swap = PromotionSwap(artifact, fresh).begin()
-    assert fresh.exists()
+    swap = VersionedArtifactSwap(artifact2, fresh, run_id="r2").begin()
+    assert _active_text(fresh) == "v2"
     swap.rollback()
-    assert not fresh.exists()
+    assert _active_text(fresh) is None
 
 
 def test_promotion_swap_serializes_overlapping_promotions_across_processes(tmp_path) -> None:
-    # Codex pass 12 P1: two unlocked swaps could undo each other (A rolls back after B begins and
-    # deletes B's candidate). The flock on the active path serializes them, so the last committed
-    # promotion is what serves.
+    # Codex pass 12 P1 (rebuilt on the versioned store): two unlocked swaps could undo each
+    # other (A rolls back after B begins and deletes B's candidate). The store's flock
+    # serializes them, so the last committed promotion is what serves.
     import subprocess
     import sys
     import textwrap
     from pathlib import Path
 
-    from server.training.promotion import PromotionSwap
+    from server.training.artifact_store import VersionedArtifactSwap
 
-    active = tmp_path / "active"
-    active.mkdir()
-    (active / "adapter.safetensors").write_text("v0", encoding="utf-8")
+    root = tmp_path / "active"
     artifacts = {}
-    for tag in ("alpha", "beta", "gamma"):
+    for tag in ("base", "alpha", "beta", "gamma"):
         d = tmp_path / "runs" / tag / "model"
         d.mkdir(parents=True)
         (d / "adapter.safetensors").write_text(tag, encoding="utf-8")
         artifacts[tag] = d
+    VersionedArtifactSwap(artifacts["base"], root, run_id="base").begin().commit()
     script = textwrap.dedent(
         f"""
         import sys, time
         from pathlib import Path
         sys.path.insert(0, {str(Path(__file__).resolve().parents[2])!r})
-        from server.training.promotion import PromotionSwap
+        from server.training.artifact_store import VersionedArtifactSwap
         tag, outcome = sys.argv[1], sys.argv[2]
-        swap = PromotionSwap(Path({str(tmp_path)!r}) / "runs" / tag / "model", Path({str(active)!r})).begin()
+        swap = VersionedArtifactSwap(
+            Path({str(tmp_path)!r}) / "runs" / tag / "model", Path({str(root)!r}), run_id=tag
+        ).begin()
         time.sleep(0.3)  # widen the window: without the lock another process would begin here
         if outcome == "rollback":
             swap.rollback()
@@ -449,36 +471,39 @@ def test_promotion_swap_serializes_overlapping_promotions_across_processes(tmp_p
     for proc in procs:
         assert proc.wait(timeout=60) == 0
     # beta is the only committed promotion: whatever the interleaving, it is what serves
-    assert (active / "adapter.safetensors").read_text(encoding="utf-8") == "beta"
-    assert not [p for p in tmp_path.iterdir() if p.name.startswith(".bak_") or p.name.startswith(".tmp_")]
-    lock = tmp_path / ".active.promote.lock"
-    assert lock.exists()
+    assert _active_text(root) == "beta"
+    assert _versions_debris(root) == []
+    assert (root / ".promote.lock").exists()
     # and a same-process second swap still works after the lock was released
-    PromotionSwap(artifacts["gamma"], active).begin().commit()
-    assert (active / "adapter.safetensors").read_text(encoding="utf-8") == "gamma"
+    VersionedArtifactSwap(artifacts["gamma"], root, run_id="gamma").begin().commit()
+    assert _active_text(root) == "gamma"
 
 
 def test_promotion_swap_begin_failure_leaves_the_active_artifact_untouched(tmp_path) -> None:
-    # Codex pass 12 P1: a failed begin (unreadable artifact, failed rename) must not strand the
-    # previous tree under .bak_ with the active path missing.
+    # Codex pass 12 P1 (rebuilt on the versioned store): a failed begin (unreadable artifact,
+    # failed copy) must leave the pointer and versions exactly as they were.
     import pytest
 
-    from server.training.promotion import PromotionSwap
+    from server.training.artifact_store import VersionedArtifactSwap
 
-    active = tmp_path / "active"
-    active.mkdir()
-    (active / "adapter.safetensors").write_text("v1", encoding="utf-8")
+    root = tmp_path / "active"
+    artifact1 = tmp_path / "runs" / "r1" / "model"
+    artifact1.mkdir(parents=True)
+    (artifact1 / "adapter.safetensors").write_text("v1", encoding="utf-8")
+    VersionedArtifactSwap(artifact1, root, run_id="r1").begin().commit()
+
     missing_artifact = tmp_path / "runs" / "nope" / "model"
     with pytest.raises(FileNotFoundError):
-        PromotionSwap(missing_artifact, active).begin()
-    assert (active / "adapter.safetensors").read_text(encoding="utf-8") == "v1"
-    assert not [p for p in tmp_path.iterdir() if p.name.startswith(".bak_") or p.name.startswith(".tmp_")]
+        VersionedArtifactSwap(missing_artifact, root, run_id="nope").begin()
+    assert _active_text(root) == "v1"
+    assert _versions_debris(root) == []
+    assert not (root / ".promote.json").exists()
     # the lock was released: a later promotion proceeds
     good = tmp_path / "runs" / "good" / "model"
     good.mkdir(parents=True)
     (good / "adapter.safetensors").write_text("v2", encoding="utf-8")
-    PromotionSwap(good, active).begin().commit()
-    assert (active / "adapter.safetensors").read_text(encoding="utf-8") == "v2"
+    VersionedArtifactSwap(good, root, run_id="good").begin().commit()
+    assert _active_text(root) == "v2"
 
 
 def test_lineage_alias_compensation_is_compare_and_swap(tmp_path) -> None:
@@ -526,19 +551,25 @@ def test_lineage_alias_compensation_is_compare_and_swap(tmp_path) -> None:
 
 
 def test_promotion_transaction_compensates_aliases_and_artifact_independently(tmp_path) -> None:
-    # Codex pass 13 P1: alias compensation and artifact rollback ran in one try; a failing alias
-    # write skipped the artifact rollback and left the candidate active with the lock held.
+    # Codex pass 13 P1 (rebuilt on the versioned store): alias compensation and pointer rollback
+    # ran in one try; a failing alias write skipped the rollback and left the candidate active.
+    import shutil
+
     import pytest
 
-    from server.training.promotion import (
-        PromotionRollbackError,
-        PromotionSwap,
-        run_promotion_transaction,
+    from server.training.artifact_store import (
+        ArtifactStoreError,
+        VersionedArtifactSwap,
+        recover_artifact_store,
+        resolve_active_artifact_dir,
     )
+    from server.training.promotion import run_promotion_transaction
 
-    active = tmp_path / "active"
-    active.mkdir()
-    (active / "adapter.safetensors").write_text("v1", encoding="utf-8")
+    root = tmp_path / "active"
+    artifact1 = tmp_path / "runs" / "r1" / "model"
+    artifact1.mkdir(parents=True)
+    (artifact1 / "adapter.safetensors").write_text("v1", encoding="utf-8")
+    VersionedArtifactSwap(artifact1, root, run_id="r1").begin().commit()
     artifact = tmp_path / "runs" / "r2" / "model"
     artifact.mkdir(parents=True)
     (artifact / "adapter.safetensors").write_text("v2", encoding="utf-8")
@@ -546,36 +577,33 @@ def test_promotion_transaction_compensates_aliases_and_artifact_independently(tm
     def failing_work() -> str | None:
         raise OSError(28, "No space left on device")
 
-    swap = PromotionSwap(artifact, active)
+    swap = VersionedArtifactSwap(artifact, root, run_id="r2")
     with pytest.raises(OSError):
         run_promotion_transaction(swap=swap, repo_id="txn-corpus", work=failing_work)
-    assert (active / "adapter.safetensors").read_text(encoding="utf-8") == "v1"
-    assert not [p for p in tmp_path.iterdir() if p.name.startswith(".bak_") or p.name.startswith(".tmp_")]
+    assert _active_text(root) == "v1"
+    assert _versions_debris(root) == []
     # the lock was released: the next transaction proceeds and commits
-    assert run_promotion_transaction(swap=PromotionSwap(artifact, active), repo_id="txn-corpus", work=lambda: None) is None
-    assert (active / "adapter.safetensors").read_text(encoding="utf-8") == "v2"
+    assert (
+        run_promotion_transaction(
+            swap=VersionedArtifactSwap(artifact, root, run_id="r2"), repo_id="txn-corpus", work=lambda: None
+        )
+        is None
+    )
+    assert _active_text(root) == "v2"
 
-    # a rollback that cannot restore is reported, never hidden: the retained tree vanished
-    swap = PromotionSwap(artifact, active)
+    # a rollback that cannot restore is reported, never hidden: the previous version vanished,
+    # so the complete candidate stays active instead of a pointer at nothing
+    swap = VersionedArtifactSwap(artifact, root, run_id="r3")
     swap.begin()
     assert swap.previous is not None
-    import shutil
-
-    shutil.rmtree(swap.previous)
-    with pytest.raises(PromotionRollbackError, match="retained previous artifact missing"):
+    shutil.rmtree(swap.previous.path)
+    with pytest.raises(ArtifactStoreError, match="previous version missing"):
         swap.rollback()
-    assert active.exists()  # the candidate was deliberately left in place rather than leaving nothing
-
-    # Codex pass 14 P1: the candidate is parked before the previous tree is restored, so a failed
-    # restore rename never leaves the active path empty. Make the previous tree unrenamable by
-    # turning it into a file in a read-only parent is not portable; instead prove the order: the
-    # previous tree is restored while the candidate still exists on disk (parked), then removed.
-    (active / "adapter.safetensors").write_text("candidate", encoding="utf-8")
-    swap = PromotionSwap(artifact, active)
-    swap.begin()
-    swap.rollback()
-    assert (active / "adapter.safetensors").read_text(encoding="utf-8") == "candidate"
-    assert not [p for p in tmp_path.iterdir() if p.name.startswith((".bak_", ".tmp_", ".rollback_"))]
+    active_dir = resolve_active_artifact_dir(root)
+    assert active_dir is not None and (active_dir / "adapter.safetensors").read_text(encoding="utf-8") == "v2"
+    # the marker was dropped with the rollback: recovery does not undo the kept candidate
+    assert recover_artifact_store(root) in {None, "swept_staging"}
+    assert _active_text(root) == "v2"
 
 
 def test_await_uncancellable_reraises_cancellation_even_when_the_worker_later_fails() -> None:
@@ -652,6 +680,13 @@ def test_sync_cache_invalidation_keeps_an_in_flight_load_from_caching_stale_weig
     # the same directory spelled through a symlink-free but non-canonical path still matches
     mlx.invalidate_mlx_qwen3_cache_sync(str(tmp_path / "models" / "." / "learning-reranker-active"))
     assert key not in mlx._MLX_CACHE
+    # versioned store: invalidating the root drops keys pinned to version dirs under it
+    version_dir = active / "versions" / "epstein-files-1__20260823_090000"
+    version_dir.mkdir(parents=True)
+    version_key = ("base", mlx.canonical_adapter_path(str(version_dir)), 16, 32.0, 0.05, ("q_proj",))
+    mlx._MLX_CACHE[version_key] = object()  # type: ignore[assignment]
+    mlx.invalidate_mlx_qwen3_cache_sync(str(active))
+    assert version_key not in mlx._MLX_CACHE
     del os
 
 
@@ -662,11 +697,14 @@ def test_promotion_transaction_compensates_when_the_lineage_lock_cannot_be_taken
 
     import pytest
 
-    from server.training.promotion import PromotionSwap, run_promotion_transaction
+    from server.training.artifact_store import VersionedArtifactSwap
+    from server.training.promotion import run_promotion_transaction
 
-    active = tmp_path / "active"
-    active.mkdir()
-    (active / "adapter.safetensors").write_text("v1", encoding="utf-8")
+    root = tmp_path / "active"
+    artifact1 = tmp_path / "runs" / "r1" / "model"
+    artifact1.mkdir(parents=True)
+    (artifact1 / "adapter.safetensors").write_text("v1", encoding="utf-8")
+    VersionedArtifactSwap(artifact1, root, run_id="r1").begin().commit()
     artifact = tmp_path / "runs" / "r2" / "model"
     artifact.mkdir(parents=True)
     (artifact / "adapter.safetensors").write_text("v2", encoding="utf-8")
@@ -678,15 +716,17 @@ def test_promotion_transaction_compensates_when_the_lineage_lock_cannot_be_taken
         from server.dependency_errors import DependencyUnavailableError
 
         with pytest.raises((DependencyUnavailableError, OSError)):
-            run_promotion_transaction(swap=PromotionSwap(artifact, active), repo_id="lock-corpus", work=lambda: None)
+            run_promotion_transaction(
+                swap=VersionedArtifactSwap(artifact, root, run_id="r2"), repo_id="lock-corpus", work=lambda: None
+            )
     finally:
         if previous_env is None:
             os.environ.pop("RAGWELD_LINEAGE_ROOT", None)
         else:
             os.environ["RAGWELD_LINEAGE_ROOT"] = previous_env
     # nothing changed: the lineage store was resolved before the swap began
-    assert (active / "adapter.safetensors").read_text(encoding="utf-8") == "v1"
-    assert not [p for p in tmp_path.iterdir() if p.name.startswith((".bak_", ".tmp_", ".rollback_"))]
+    assert _active_text(root) == "v1"
+    assert _versions_debris(root) == []
 
 
 def test_await_uncancellable_lets_the_transaction_settle_before_propagating_cancellation() -> None:

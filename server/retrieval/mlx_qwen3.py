@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import importlib.util
+import os
 import subprocess
 import sys
 import time
@@ -536,12 +537,16 @@ _MLX_CACHE_GENERATION = 0
 def invalidate_mlx_qwen3_cache_sync(adapter_dir: str | None = None) -> None:
     """Drop cached rerankers for `adapter_dir` (all when None) from any thread, e.g. inside a
     promotion transaction. Dict mutation is GIL-atomic; the generation bump keeps an in-flight
-    load from re-inserting a model built from the pre-swap files."""
+    load from re-inserting a model built from the pre-swap files.
+
+    `adapter_dir` may be the versioned artifact store's root: cache keys hold the pinned
+    version directories under it, so the match covers the path itself and everything below."""
     global _MLX_CACHE_GENERATION
     _MLX_CACHE_GENERATION += 1
     target = canonical_adapter_path(adapter_dir) if str(adapter_dir or "").strip() else ""
+    prefix = target + os.sep if target else ""
     for key in list(_MLX_CACHE.keys()):
-        if not target or str(key[1]) == target:
+        if not target or str(key[1]) == target or str(key[1]).startswith(prefix):
             _MLX_CACHE.pop(key, None)
 
 

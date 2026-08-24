@@ -1,3 +1,4 @@
+import asyncio
 import shutil
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -52,11 +53,11 @@ def test_reranker_active_guard_blocks_recent_failed_run_but_expires_after_grace(
         reranker_api._save_run(run)
 
         reranker_api._mark_train_start_guard(corpus_id, run_id, at=datetime.now(UTC))
-        assert reranker_api._active_run_id_for_corpus(corpus_id) == run_id
+        assert asyncio.run(reranker_api._active_run_id_for_corpus(corpus_id)) == run_id
 
         expired = datetime.now(UTC) - reranker_api._TRAIN_START_GRACE - timedelta(milliseconds=1)
         reranker_api._mark_train_start_guard(corpus_id, run_id, at=expired)
-        assert reranker_api._active_run_id_for_corpus(corpus_id) is None
+        assert asyncio.run(reranker_api._active_run_id_for_corpus(corpus_id)) is None
     finally:
         reranker_api._train_start_guard.pop(corpus_id, None)
         _cleanup_run_dir(run_dir)
@@ -90,11 +91,11 @@ def test_agent_active_guard_blocks_recent_failed_run_but_expires_after_grace() -
         agent_api._save_run(run)
 
         agent_api._mark_train_start_guard(corpus_id, run_id, at=datetime.now(UTC))
-        assert agent_api._active_run_id_for_corpus(corpus_id) == run_id
+        assert asyncio.run(agent_api._active_run_id_for_corpus(corpus_id)) == run_id
 
         expired = datetime.now(UTC) - agent_api._TRAIN_START_GRACE - timedelta(milliseconds=1)
         agent_api._mark_train_start_guard(corpus_id, run_id, at=expired)
-        assert agent_api._active_run_id_for_corpus(corpus_id) is None
+        assert asyncio.run(agent_api._active_run_id_for_corpus(corpus_id)) is None
     finally:
         agent_api._train_start_guard.pop(corpus_id, None)
         _cleanup_run_dir(run_dir)

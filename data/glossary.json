@@ -8840,7 +8840,7 @@
     {
       "term": "RAGWELD_AGENT_MODEL_PATH",
       "key": "RAGWELD_AGENT_MODEL_PATH",
-      "definition": "Points to the model artifact location used by the agent pipeline (local directory, checkpoint file, or hub identifier). This path determines what tokenizer/config/weights are loaded and where resumed training continues from. Use immutable, versioned paths for reproducibility and avoid ambiguous symlinks in production pipelines. For LoRA workflows, clearly separate base-model path from adapter output path so promotion and rollback do not accidentally mix incompatible artifacts.",
+      "definition": "Root directory of the Learning Agent's versioned adapter store. Promotions publish each trained LoRA adapter as an immutable version under `versions/<run_id>/` and switch a fsynced `ACTIVE.json` pointer atomically, so readers resolve the pointer once and never observe a half-written or missing artifact; a crashed promotion is repaired at startup. The store retains the current version plus the one it just retired, and the full history stays in each run's artifact directory. Training-only: it provides the baseline for later runs and lineage capture, and is never served by the chat gateway.",
       "category": "general",
       "related": [],
       "links": [
@@ -9747,7 +9747,7 @@
     {
       "term": "Reranker Model Path",
       "key": "TRIBRID_RERANKER_MODEL_PATH",
-      "definition": "Filesystem location of the active reranker checkpoint or adapter bundle used at inference time. This path is effectively a deployment control: whichever artifact is loaded here defines live ranking behavior. Use stable, versioned directories and atomically swap symlinks or folder names to avoid partial reads during update windows. In adapter-based pipelines, keep base model version and adapter metadata aligned so path changes do not silently load incompatible weights.",
+      "definition": "Root directory of the learning reranker's versioned artifact store, and effectively a deployment control: inference resolves the store's fsynced `ACTIVE.json` pointer to an immutable version directory under `versions/<run_id>/`, so whichever version the pointer names defines live ranking behavior. Promotions publish a new version and switch the pointer atomically (no partial reads during update windows), a crashed promotion is repaired at startup, and the adapter's manifest keeps base-model metadata aligned so a pointer switch cannot silently load incompatible weights.",
       "category": "general",
       "related": [],
       "links": [

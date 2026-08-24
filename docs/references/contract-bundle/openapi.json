@@ -10650,6 +10650,18 @@
       "OkResponse": {
         "description": "Generic ok response used by several endpoints.",
         "properties": {
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional human-readable detail, e.g. why the call was an explicit no-op.",
+            "title": "Message"
+          },
           "ok": {
             "description": "Whether the operation succeeded",
             "title": "Ok",
@@ -16842,7 +16854,7 @@
           },
           "ragweld_agent_model_path": {
             "default": "models/learning-agent-active",
-            "description": "Active Learning Agent adapter artifact path (adapter.npz + adapter_config.json + manifest.json). Training-only: the baseline for later runs and lineage; never served by the chat gateway.",
+            "description": "Root of the Learning Agent's versioned adapter store (versions/ + ACTIVE.json pointer); each version holds adapter.npz + adapter_config.json + manifest.json. Training-only: the baseline for later runs and lineage; never served by the chat gateway.",
             "title": "Ragweld Agent Model Path",
             "type": "string"
           },
@@ -16947,7 +16959,7 @@
           },
           "tribrid_reranker_model_path": {
             "default": "models/learning-reranker-active",
-            "description": "Active learning reranker artifact path (MLX adapter directory).",
+            "description": "Root of the learning reranker's versioned artifact store (versions/ + ACTIVE.json pointer). Readers resolve the pointer to the active immutable MLX adapter version; promotions switch it atomically.",
             "title": "Tribrid Reranker Model Path",
             "type": "string"
           },

@@ -133,6 +133,50 @@ def _warm_catalog_views() -> None:
     warm_prompt_budget()
 
 
+def _recover_artifact_stores() -> None:
+    """Blocking: repair trained-artifact promotions that crashed mid-flight. Run off the loop.
+
+    Uses the global config's store roots (per-corpus overrides of these paths are additionally
+    recovered at the start of every promotion against that root). Each trainer's run records
+    are the truth for whether a stranded promotion's work committed. A store whose marker or
+    pointer is unreadable is reported loudly and left untouched (fail closed): readers and
+    promotions raise the same error until the operator repairs it.
+    """
+    from server.api.agent import _promotion_recorded as agent_promotion_recorded
+    from server.api.reranker import _promotion_recorded as reranker_promotion_recorded
+    from server.reranker.artifacts import resolve_project_path
+    from server.training.artifact_store import ArtifactStoreError, recover_artifact_store
+
+    training = _global_cfg.training
+    for label, raw, recorded in (
+        (
+            "learning reranker",
+            str(getattr(training, "tribrid_reranker_model_path", "") or ""),
+            reranker_promotion_recorded,
+        ),
+        (
+            "learning agent",
+            str(getattr(training, "ragweld_agent_model_path", "") or ""),
+            agent_promotion_recorded,
+        ),
+    ):
+        if not raw.strip():
+            continue
+        root = resolve_project_path(raw)
+        try:
+            action = recover_artifact_store(root, promotion_recorded=recorded)
+        except ArtifactStoreError as error:
+            logger.error(
+                "artifact store for the %s at %s needs operator repair (nothing was touched): %s",
+                label,
+                root,
+                error,
+            )
+            continue
+        if action is not None:
+            logger.warning("artifact store for the %s at %s recovered at startup: %s", label, root, action)
+
+
 async def _catalog_refresh_loop() -> None:
     """Pick up catalog changes made by the refresh CLI without restarting the API.
 
@@ -154,6 +198,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         await asyncio.to_thread(_warm_catalog_views)
     except (OSError, ValueError) as error:
         logger.warning("generation gateway catalog not loaded at startup (generation fails closed): %s", error)
+    await asyncio.to_thread(_recover_artifact_stores)
     catalog_refresh_task = asyncio.create_task(_catalog_refresh_loop(), name="gateway-catalog-refresh")
     mcp_session_cm = None
     if _global_cfg.mcp.enabled:

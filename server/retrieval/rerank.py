@@ -21,6 +21,7 @@ from server.observability.metrics import (
 from server.reranker.artifacts import resolve_project_path
 from server.retrieval.gateway_reranker import resolve_rerank_route, score_candidates
 from server.retrieval.mlx_qwen3 import get_mlx_qwen3_reranker, mlx_is_available
+from server.training.artifact_store import resolve_active_artifact_dir
 
 logger = logging.getLogger(__name__)
 
@@ -445,12 +446,23 @@ class Reranker:
 
         from server.retrieval.mlx_qwen3 import read_adapter_config, read_manifest
 
-        adapter_path = resolve_project_path(str(adapter_dir)).resolve()
-        manifest = read_manifest(adapter_path) or {}
+        # The config path names the versioned artifact store; pin the active immutable
+        # version once for this whole rerank so a concurrent promotion cannot swap the
+        # files underneath the load. All metadata reads run off the event loop.
+        def _pin_and_read_metadata() -> tuple[Path, dict, dict]:
+            pinned = resolve_active_artifact_dir(resolve_project_path(str(adapter_dir)))
+            if pinned is None:
+                raise RuntimeError(
+                    f"no active learning-reranker artifact is promoted under {adapter_dir}; "
+                    "train and promote one, or switch reranker_mode."
+                )
+            pinned = pinned.resolve()
+            return pinned, read_manifest(pinned) or {}, read_adapter_config(pinned) or {}
+
+        adapter_path, manifest, adapter_cfg = await asyncio.to_thread(_pin_and_read_metadata)
         manifest_base_model = str(manifest.get("base_model") or "").strip()
         base_model = manifest_base_model or str(self.training_config.learning_reranker_base_model)
 
-        adapter_cfg = read_adapter_config(adapter_path) or {}
         lora_rank = int(adapter_cfg.get("lora_rank") or self.training_config.learning_reranker_lora_rank)
         lora_alpha = float(adapter_cfg.get("lora_alpha") or self.training_config.learning_reranker_lora_alpha)
         lora_dropout = float(adapter_cfg.get("lora_dropout") or self.training_config.learning_reranker_lora_dropout)

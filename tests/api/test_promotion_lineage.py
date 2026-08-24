@@ -10,6 +10,7 @@ import pytest
 from httpx import AsyncClient
 
 from server.lineage import load_asset
+from server.training.artifact_store import resolve_active_artifact_dir
 from server.models.tribrid_config_model import (
     AgentTrainRun,
     CorpusEvalProfile,
@@ -195,7 +196,10 @@ async def test_reranker_promote_moves_promoted_alias_and_updates_run_lineage(cli
         alias_rows = aliases.json()["aliases"]
         assert any(row["alias"] == "promoted" and row["bundle_id"] == body["promoted_bundle_id"] for row in alias_rows)
         assert any(row["alias"] == "current" and row["bundle_id"] == body["promoted_bundle_id"] for row in alias_rows)
-        assert (active_dir / "adapter.npz").exists()
+        active_version = resolve_active_artifact_dir(active_dir)
+        assert active_version is not None
+        assert active_version.name == run_id  # the pointer names the promoted run's version
+        assert (active_version / "adapter.npz").exists()
     finally:
         shutil.rmtree(run_dir, ignore_errors=True)
         shutil.rmtree(active_dir, ignore_errors=True)
@@ -242,7 +246,10 @@ async def test_agent_promote_moves_promoted_alias_and_updates_run_lineage(client
         alias_rows = aliases.json()["aliases"]
         assert any(row["alias"] == "promoted" and row["bundle_id"] == body["promoted_bundle_id"] for row in alias_rows)
         assert any(row["alias"] == "current" and row["bundle_id"] == body["promoted_bundle_id"] for row in alias_rows)
-        assert (active_dir / "adapter.npz").exists()
+        active_version = resolve_active_artifact_dir(active_dir)
+        assert active_version is not None
+        assert active_version.name == run_id  # the pointer names the promoted run's version
+        assert (active_version / "adapter.npz").exists()
     finally:
         shutil.rmtree(run_dir, ignore_errors=True)
         shutil.rmtree(active_dir, ignore_errors=True)

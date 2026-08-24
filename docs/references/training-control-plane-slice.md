@@ -120,9 +120,25 @@ blocker. No cloud GPU spend without explicit authorization.
 
 ## Promotion semantics (training-only artifacts)
 
+- `training.ragweld_agent_model_path` (and the reranker's
+  `training.tribrid_reranker_model_path`) name the root of a **versioned
+  artifact store** (`server/training/artifact_store.py`): immutable versions
+  under `versions/<run_id>/`, a fsynced `ACTIVE.json` pointer that promotions
+  switch atomically, a durable `.promote.json` marker, and startup recovery
+  (`server/main.py::_recover_artifact_stores`) that rolls back a promotion
+  which died before its run record committed and finishes one that died
+  mid-prune. Readers (`resolve_active_artifact_dir`) pin the pointer once and
+  read an immutable version, so a concurrent promotion never makes the active
+  path disappear; the store retains the current version plus the one it just
+  retired. Run-record status changes go only through each trainer's
+  `_transition_run` authority (per-run lock, compare-and-set on the stored
+  record); `_load_run` is read-only and endpoints reconcile stale records via
+  the explicit `reconcile_run` step. Covered by
+  `tests/unit/test_artifact_store.py` and
+  `tests/unit/test_run_state_authority.py`.
 - `POST /api/agent/train/run/{run_id}/promote` (and auto-promotion after a
-  run) copies the run's adapter to `training.ragweld_agent_model_path`. That
-  directory is a **training-only** artifact: the baseline for the next run's
+  run) publishes the run's adapter as a new version in that store. The store
+  is a **training-only** artifact: the baseline for the next run's
   promote-if-improves gate and the lineage `agent_model_artifact`. Chat
   generation routes through LiteLLM to vLLM and never loads it.
 - The adapter `manifest.json` is validated as

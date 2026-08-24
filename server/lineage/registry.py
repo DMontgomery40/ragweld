@@ -373,9 +373,30 @@ def build_prompt_set_payload(cfg: TriBridConfig) -> dict[str, Any]:
     }
 
 
+def _active_artifact_path(root: Path) -> Path:
+    """The pinned active version under a versioned artifact store root, for identity capture.
+
+    Nothing promoted — or a store the operator must repair — snapshots the store's pointer
+    file instead: absent it records `exists: False`, corrupt it records the corrupt bytes.
+    Neither case ever snapshots the root tree as if it were an artifact (no flat-layout
+    fallback: the store is the only read path).
+    """
+    from server.training.artifact_store import ArtifactStoreError, pointer_path, resolve_active_artifact_dir
+
+    try:
+        active = resolve_active_artifact_dir(root)
+    except ArtifactStoreError:
+        return pointer_path(root)
+    return active if active is not None else pointer_path(root)
+
+
 def build_runtime_model_set_payload(cfg: TriBridConfig) -> dict[str, Any]:
-    reranker_path = resolve_project_path(str(getattr(cfg.training, "tribrid_reranker_model_path", "") or ""))
-    agent_path = resolve_project_path(str(getattr(cfg.training, "ragweld_agent_model_path", "") or ""))
+    reranker_path = _active_artifact_path(
+        resolve_project_path(str(getattr(cfg.training, "tribrid_reranker_model_path", "") or ""))
+    )
+    agent_path = _active_artifact_path(
+        resolve_project_path(str(getattr(cfg.training, "ragweld_agent_model_path", "") or ""))
+    )
     return {
         "generation": {
             "gen_model": str(getattr(cfg.generation, "gen_model", "") or ""),
