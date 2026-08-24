@@ -1,5 +1,31 @@
 # Handoff Prompt — Ragweld Recovery, Session 5
 
+> Checkpoint 2026-08-23 (session 9, landed at `7daf62f`): the **run-state
+> authority slice is DONE**
+> (`training-run-state-authority-2026-08-23.md`, execution record + codex
+> outcome inside). `_load_run` is read-only in BOTH trainers; reconciliation
+> is the explicit `reconcile_run` through the per-run CAS authority; the
+> reranker gained its own `_transition_run`/`_finalize_stored_run` and every
+> terminal/orphan/start status write goes through the authority. The active
+> adapters live in a **versioned artifact store**
+> (`server/training/artifact_store.py`: `versions/<run_id>/` + atomic fsynced
+> `ACTIVE.json` pointer + durable marker + startup/begin-time recovery that
+> uses the trainer's run record to decide a stranded promotion; retention =
+> current + just-retired + parked rollbacks until the next commit);
+> `PromotionSwap` is deleted and all readers resolve the pointer. The live
+> `models/learning-*-active` dirs were migrated one-time (gitignored); an
+> unmigrated flat layout now fails closed. Adversarial codex pass REFUTED the
+> first cut (4 P1 / 5 P2 / 1 P3): eight fixed (recovery-vs-recorded-work,
+> reader-safe rollback parking, pointer-restore on failed begin, flat-layout
+> fail-closed, snapshot-config lineage in reranker reconcile, two hidden
+> root-fallbacks, stale queued->running writes, on-loop metadata reads), two
+> documented as pre-existing residuals (terminal-finalize observability tail;
+> startup recovery covers global roots, begin-time recovery covers corpus
+> overrides). Gates at commit: six validators, pytest 1131/78, strict lane
+> 82, web lint/build, live endpoint proof on a temp API on :58013 (no model
+> loads). NOT pushed — the operator pushes. Next: A3 observability
+> (Mimir/Pyroscope/Faro/Alertmanager/Langfuse), then Phase B Chrome drives.
+>
 > Checkpoint 2026-08-23 (session 8): **P0-3 is DONE** — local generation runs
 > on the HOST via vllm-metal (`~/.venv-vllm-metal`) serving
 > `mlx-community/Qwen3.8-27B-4bit` as `ragweld-local` on 127.0.0.1:58080
