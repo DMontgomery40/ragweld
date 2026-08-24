@@ -16,6 +16,11 @@ function StudioEnvironment() {
   const scene = useThree((s) => s.scene);
 
   useEffect(() => {
+    // THREE.PMREMGenerator is a WebGL API. TrajectoryScene is also mounted
+    // under the explicit WebGPU renderer preference, where running it would
+    // throw mid-frame; that renderer lights the scene from the point/ambient
+    // lights alone until a WebGPU environment path exists.
+    if ((gl as unknown as { isWebGPURenderer?: boolean }).isWebGPURenderer) return;
     const pmrem = new THREE.PMREMGenerator(gl);
     const room = new RoomEnvironment();
     const envTarget = pmrem.fromScene(room, 0.04);

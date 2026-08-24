@@ -1,5 +1,53 @@
 # Handoff Prompt — Ragweld Recovery, Session 5
 
+> Checkpoint 2026-08-24 (session 11): **Phase B Chrome drives are DONE except
+> the MLX-gated B8 run-start** (execution record:
+> `phase-b-chrome-findings-2026-08-24.md`). Every flow was driven with the
+> Claude-in-Chrome extension, real input, real domain queries. Six defects
+> found and FIXED, each with a real no-interception test and a Chrome
+> re-drive: (1) the Neural Visualizer blank/`connect(null)` — drei
+> `<Environment preset>` fetched an HDR from raw.githack.com and suspended
+> the R3F tree, whose 500ms-delayed root disposal then killed the remounted
+> root (identical code in fiber 9.7.0; replaced with procedural
+> RoomEnvironment via PMREMGenerator — covers both studios); (2) all nine
+> native `window.confirm/alert` call sites (renderer-freezing) replaced by a
+> shared promise-based `confirmDialog` + `showToast`; (3) nested `<button>`
+> in the Index Stats header; (4) the dead `Tempo trace` link now opens
+> Grafana Explore on the provisioned tempo datasource
+> (GF_USERS_VIEWERS_CAN_EDIT=true added; proven rendering the full
+> chat_stream span waterfall); (5) the SSE eval route silently skipped Ragas
+> — shared `_resolve_ragas_answer_route`/`_generate_ragas_answer`/
+> `_apply_ragas_scores` now used by BOTH routes, AST contract test pins the
+> seam, and a UI-run 10-question eval persisted real Ragas (faithfulness
+> 0.8, answer_relevancy 0.656, run `epstein-files-1__20260824_214736`);
+> (6) the exhaustive coverage spec could never load the app (absolute
+> `goto('/dashboard')` vs the `/web/` base — the documented trap) and
+> carried pre-cutover model taxonomy; paths + preflight fixed, but the full
+> mutation loop was deliberately NOT run (needs a modernization slice:
+> real domain questions, isolated corpus — it leaked `ragweld-exhaustive`
+> into the live registry again this session; cleaned). Also driven green:
+> B1/B3 (aurora force reindex through the mismatch guard — its live index
+> now carries the provider contract, 4 points), B2 (auto-save +
+> persistence; weights auto-normalize), B4 (grounded chat with citations,
+> per-leg provenance, all three trace links live incl. Langfuse, recall
+> intensity, history/new/delete; Export blob download unverifiable under
+> automation — Brave drops script downloads without user activation),
+> B5 (structured `dependency_unavailable` card with Neo4j stopped; no fake
+> answer), B6 (per-field scoped PATCH auto-save + Raw agreement), B7
+> (qdrant stop/logs/start from the UI), B9 (dataset add/delete, sampled
+> eval runs, full-dataset Promptfoo `...__20260824_214257` 175/200 with
+> honest failing-card verdicts), B10 (dashboards render real series under
+> load), B11 (1200px reflow clean), B12 (console clean everywhere).
+> Incidentals: GitNexus CLI upgraded to 1.6.9 (nvm prefix; the MCP server
+> needs a Claude Code restart to read the v42 index), Grafana anonymous
+> viewers can use Explore, aurora's stale deterministic embedding contract
+> replaced, promptfoo runs the full 200-row dataset from one click with no
+> sample control (cost finding, logged). Nits logged in the findings doc.
+> NOT pushed — the operator pushes. B8 run-start/cancel needs the operator
+> present (MLX rule). Next: A5 residual dead-code removal + the final
+> acceptance matrix, the exhaustive-suite modernization slice, and the
+> pytest corpus-registry-pollution root cause.
+>
 > Checkpoint 2026-08-24 (session 10): **A3 is DONE** — the observability
 > fabric is complete
 > (`a3-observability-fabric-2026-08-24.md` is the execution record). Mimir

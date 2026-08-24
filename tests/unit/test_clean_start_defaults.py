@@ -90,6 +90,9 @@ def test_epstein_source_code_is_confined_to_the_explicit_domain_allowlist() -> N
         "scripts/materialize_hf_epstein_emails.py",
         "scripts/acceptance_epstein.sh",
         "scripts/automation_stop_gate.py",
+        # Pins the corpus that owns the completed reranker run its assertions
+        # need (the Neural Visualizer regression spec).
+        "web/tests/e2e/exhaustive/learning_reranker_visualizer.spec.ts",
     }
     roots = [ROOT / "server", ROOT / "web/src", ROOT / "web/tests/e2e/exhaustive", ROOT / "scripts"]
     code_suffixes = {".py", ".sh", ".js", ".mjs", ".ts", ".tsx"}

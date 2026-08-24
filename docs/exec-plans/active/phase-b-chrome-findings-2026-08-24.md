@@ -212,6 +212,193 @@ required action, "Generation did not run for this request.", contract
 details behind a Details disclosure — no raw JSON, no fabricated answer.
 Neo4j restarted (healthy) and `/api/ready` reports ready.
 
-## Flow drives (B6–B12)
+## B6 drive: Admin Basic/Raw — PASS
 
-Pending below; updated as each flow completes.
+- Runtime readiness chips render live (LiteLLM: ready, vLLM: ready), and
+  every field save triggers a readiness + registry refresh (observed
+  `GET /api/config/readiness` after each PATCH).
+- Boolean toggle `chat.image_gen.enabled`: each click auto-saves via
+  `PATCH /api/config/chat?corpus_id=epstein-files-1` (scoped to the active
+  corpus, 200). The Raw section editor's `chat` JSON showed the same
+  `image_gen.enabled: true` the toggle saved; value restored to `false`
+  afterwards. Enum selects ride the same per-field PATCH path.
+- The visible selects on Basic are surface filters (integration/scope/
+  category), not config fields — noted for clarity.
+
+## B7 drive: Infrastructure Services + Docker — PASS
+
+- Services subtab keeps the truthful taxonomy: "Host processes" (FastAPI +
+  Vite from live process probes, both Running), Container State read-only
+  with lifecycle in Docker subtab, Data plane cards; Neo4j honestly showed
+  "Up 6 minutes" right after the B5 drill.
+- Docker subtab: stopped Qdrant with a real click → card flipped to
+  "Stopped — Exited (143)" with a START control; LOGS opened a modal with
+  the real container log (actix lines from this session's retrievals);
+  START brought it back ("Up 4 seconds (health: starting)" → healthy).
+- Nit: the logs modal renders at the top of the page — clicking LOGS while
+  scrolled down means the modal opens above the viewport.
+
+## Defect 5: SSE eval route silently skips Ragas — FIXED
+
+Found driving B9: the UI's "Run Eval" uses `GET /api/eval/run/stream`, which
+had its own metrics assembly with NO Ragas leg — with `ragas_enabled: true`
+a 10-question run persisted `metrics.ragas == {}` and no generated answers
+(run `epstein-files-1__20260824_211830`), while `POST /api/eval/run` did
+full generation + judging. A forbidden dual-path divergence (the P1 fix had
+unified retrieval scoring but not the Ragas leg).
+
+### Fix
+
+Extracted shared helpers in `server/api/eval.py` —
+`_resolve_ragas_answer_route` (preflight + gateway route),
+`_generate_ragas_answer` (grounded answer + RagasSample per entry),
+`_apply_ragas_scores` (judging + per-entry and mean scores) — used by BOTH
+`evaluate_dataset_entries` (POST core, also the synthetic quality gate) and
+`eval_run_stream`. The stream route now emits Ragas progress log events,
+persists `generated_answer` per entry, and carries `ragas=` means into
+`EvalMetrics`. A failed Ragas preflight now fails the SSE run with an error
+event instead of silently skipping.
+
+### Evidence
+
+- `tests/unit/test_eval_ragas_shared_path.py`: AST contract pinning that
+  both routes reference all three shared helpers and that the stream route's
+  `EvalMetrics` carries `ragas` — the exact divergence class fails loudly.
+- Eval unit/API suites green.
+- Live post-fix UI re-drive: a fresh 10-question eval from the UI (run
+  `epstein-files-1__20260824_214736`) persisted real Ragas —
+  faithfulness mean 0.8, answer_relevancy mean 0.656, per-entry
+  generated answers and per-entry scores — and the Ragas card renders the
+  values (0.8000 / 0.6560) beside MRR 0.6886 in Eval Analysis.
+
+## B9 drive: Eval Analysis — PASS (with defect 5 fixed)
+
+- Eval Dataset UI: added a real entry (Barry Cohen aircraft-management
+  question + expected HOUSE_OVERSIGHT path) → "Entry added" toast, count
+  201; deleted it through the in-app danger dialog → count exactly 200.
+- Run Settings exposes corpus/sample-size/final-k; a real 10-question eval
+  ran from the UI (run `epstein-files-1__20260824_211830`): MRR 0.688,
+  recall@5 0.8, recall@20 0.9, ndcg@10 0.71, latency p50 4.9s/p95 10.2s.
+  (This run exposed defect 5; post-fix Ragas re-drive recorded below.)
+- Promptfoo regression launched from the UI (real promptfoo CLI 0.122.0
+  via the gateway, luna grader) completed over the FULL published dataset:
+  run `epstein-files-1__promptfoo__20260824_214257`, 175/200 passed.
+  Failing cards render honest grader verdicts (mostly retrieval misses:
+  the expected email absent from retrieved context). Cost-control finding
+  (logged, not fixed): the dataset now carries expected answers on all 200
+  rows, so one click runs a ~30-minute, several-hundred-LLM-call regression
+  with NO sample-size control (the eval runner has one; Promptfoo doesn't).
+- Trace Viewer shows the latest trace (canonical id, correlation, root
+  span, Grafana/Tempo chips, events). Nits: Policy/Intent/Final-K render
+  as em-dashes on an /api/answer trace and Request Cost reads
+  "Unavailable" for retrieval-only requests.
+- Route nit: `/web/evaluation` (an unknown route) renders an empty "Home"
+  shell rather than a not-found redirect.
+
+## B10 drive: Grafana tab — PASS
+
+- Overview: Grafana Command Center with truthful cross-stack chips/cards
+  (mode=otel_langfuse, live trace present, Loki reachable, gateway on,
+  workflow=legacy_local for the global lane).
+- Dashboards: all seven provisioned families listed; embedded TriBrid
+  Overview renders live stats; Gateway & Serving renders real series under
+  real load (LiteLLM traffic 0.193 req/s with the eval spike, p95 8.75s,
+  0% errors). Note: TriBrid Overview's Search Latency p95 stat shows NaN
+  when the immediate window has no search traffic (histogram_quantile over
+  an empty rate window) — cosmetic, not "No data" during load.
+
+## B11 drive: responsive pass — PASS
+
+At a 1200px window (1333 CSS px at the operator zoom): Chat and Admin both
+reflow with `scrollWidth == innerWidth` (no horizontal overflow), the chat
+toolbar wraps to two rows, the Settings dock fits, no clipped or overlapped
+regions.
+
+## B12: console/network hygiene
+
+Console checked after every flow above (only intentional B5 failures
+produced API errors; the fixed nested-button warning was the one app
+warning found and is now pinned by a spec). Final sweep across Dashboard,
+Retrieval, and Infrastructure loads: zero app console errors.
+
+## Defect 6: exhaustive coverage spec could never load the app — FIXED (suite modernization remains)
+
+Running the full exhaustive Playwright suite (not part of the standard gates;
+last exercised before the gateway cutover) found
+`coverage.spec.ts` timing out on `.topbar`: every `page.goto` in the spec and
+its harness used ABSOLUTE paths (`/dashboard`), which resolve to the origin
+root — not the `/web/`-based app — so the spec waited 90s on a 404 page (the
+documented `/web/` trap). Fixed: `surfacePath` strips the leading slash and
+the three hardcoded gotos are relative. The spec then reached its runtime
+preflight, which still carried the PRE-CUTOVER model taxonomy
+(`source: local/cloud_direct/openrouter`); updated to the gateway contract
+(`ragweld-local` = local lane, any other LiteLLM alias = cloud, providers
+derived from alias prefixes).
+
+Reproduced during the suite run: the passing specs leaked a
+`ragweld-exhaustive` corpus into the LIVE registry (path pointing at a
+deleted temp dir) and left it as the active corpus — the same pollution
+class the A3 session cleaned (root cause still an open follow-up). Deleted
+via `DELETE /api/corpora/ragweld-exhaustive`; registry back to exactly
+epstein-files-1 / recall_default / aurora_acceptance.
+
+Deliberately NOT run: the spec's full mutation loop and its provider-coverage
+chat probes — the probe questions are generic meta-questions that predate the
+real-queries hard rule, and the loop mutates every control against the live
+registry (the suspected source of past test-corpus leakage). The suite needs
+a dedicated modernization slice (real domain questions, bounded runtime,
+isolated corpus). The other 8 exhaustive specs pass (6 re-verified after the
+harness edits).
+
+## Adversarial review (rule 0.2): codex REFUTED the first cut — 2 P1 / 6 P2 / 1 P3
+
+`codex exec` (high effort) reviewed the full session diff. Findings and
+outcomes:
+
+- P1 provider-coverage fake-green (harness dropped the API's `override`
+  select value; failed probes only logged to the sink) — FIXED:
+  `listChatModels` carries `override`, `toModelOverrideValue` uses it, and
+  required-provider failures now throw and fail the coverage spec.
+- P1 Enter-on-Cancel confirmed destructive dialogs (document-level Enter
+  handler) — FIXED: Enter is no longer intercepted; the focused button
+  activates natively (confirm is autofocused; Tab/Shift+Tab reaches
+  Cancel). Proven interactively: Index Now → Shift+Tab → Enter closed the
+  dialog and started no run.
+- P2 PMREMGenerator under the explicit WebGPU renderer preference — FIXED:
+  the environment effect skips `isWebGPURenderer` (lights still light the
+  scene); the WebGL fallback renderer path keeps the environment.
+- P2 concurrent confirm dialogs — FIXED: module-level promise queue; one
+  dialog at a time, later requests wait.
+- P2 role=button still wrapping the Refresh button — FIXED: toggle and
+  Refresh are sibling real `<button>`s.
+- P2 dialog spec null-swallowing — FIXED: the runs/latest baseline and
+  recheck are hard assertions.
+- P2 SSE eval silence/cancellation — HARDENED: a log event precedes every
+  generation, Ragas judging is per-sample with a progress event and a
+  disconnect check between samples (a disconnect abandons at most one paid
+  judge call), and attachment flows through the single shared
+  `_attach_ragas_scores`. Accepted residual: one in-flight generation or
+  judge call itself emits nothing until it returns (bounded by its own
+  timeout), and a worker-thread call cannot be interrupted mid-flight.
+- P2 AST tests are syntactic — PARTIALLY ACCEPTED: assertions were
+  strengthened to pin the single scoring/attachment implementation, but
+  they remain divergence guards, not behavior proofs. The behavior proof is
+  the live UI run (`epstein-files-1__20260824_214736`, real Ragas means);
+  a mock-free automated behavioral test would need the paid judge on every
+  test run and is deliberately not added.
+- P3 toast accessibility — FIXED: `role=alert`/`aria-live=assertive` for
+  errors (8s), `role=status`/polite for the rest.
+
+All fixes re-verified: eval unit/API suites, both regression specs, tsc,
+and the interactive keyboard drive above.
+
+## B8 drive: Training Center — PARTIAL (operator constraint)
+
+The Learning Agent Studio renders truthful control-plane state (Flyte
+Console and MLflow Tracking links both live/200, run history with the P0-2
+run's HUD: mlx_qwen3, Qwen3-4B base, 24.7s, promoted artifact lineage), and
+the Neural Visualizer fix covers this studio too (trajectory renders).
+NOT driven: starting/cancelling training runs — training executes on the
+host MLX backend and the operator's hard rule (2026-08-23, after two
+machine crashes) forbids MLX training runs or local model loads without the
+operator present. Re-drive run-start/cancel in an operator-present session.

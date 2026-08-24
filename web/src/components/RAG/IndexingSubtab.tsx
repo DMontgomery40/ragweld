@@ -2608,53 +2608,57 @@ export function IndexingSubtab() {
           marginBottom: '24px',
         }}
       >
-        {/* role=button div instead of <button>: the header hosts a real
-            Refresh <button>, and button-in-button is invalid HTML. */}
+        {/* Toggle and Refresh are SIBLING buttons: nesting an interactive
+            control inside another (button-in-button or role=button) is
+            invalid and steals keyboard activation. */}
         <div
-          role="button"
-          tabIndex={0}
-          aria-expanded={statsExpanded}
-          onClick={() => setStatsExpanded(!statsExpanded)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' || e.key === ' ') {
-              e.preventDefault();
-              setStatsExpanded(!statsExpanded);
-            }
-          }}
           style={{
             width: '100%',
             padding: '16px',
-            background: 'transparent',
-            border: 'none',
-            cursor: 'pointer',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
+            gap: '10px',
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <span style={{ fontSize: '16px' }}>📊</span>
-            <span style={{ fontSize: '14px', fontWeight: 700, color: 'var(--fg)' }}>Index Stats</span>
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                void loadStats();
-                void refreshStatus();
-              }}
-              style={{
-                padding: '4px 8px',
-                fontSize: '11px',
-                background: 'var(--bg-elev2)',
-                border: '1px solid var(--line)',
-                borderRadius: '6px',
-                color: 'var(--fg-muted)',
-                cursor: 'pointer',
-              }}
-            >
-              ↻ Refresh
-            </button>
-          </div>
-          <span style={{ fontSize: '12px', color: 'var(--fg-muted)' }}>{statsExpanded ? '▼' : '▶'}</span>
+          <button
+            aria-expanded={statsExpanded}
+            onClick={() => setStatsExpanded(!statsExpanded)}
+            style={{
+              flex: 1,
+              background: 'transparent',
+              border: 'none',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: '10px',
+              padding: 0,
+            }}
+          >
+            <span style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <span style={{ fontSize: '16px' }}>📊</span>
+              <span style={{ fontSize: '14px', fontWeight: 700, color: 'var(--fg)' }}>Index Stats</span>
+            </span>
+            <span style={{ fontSize: '12px', color: 'var(--fg-muted)' }}>{statsExpanded ? '▼' : '▶'}</span>
+          </button>
+          <button
+            onClick={() => {
+              void loadStats();
+              void refreshStatus();
+            }}
+            style={{
+              padding: '4px 8px',
+              fontSize: '11px',
+              background: 'var(--bg-elev2)',
+              border: '1px solid var(--line)',
+              borderRadius: '6px',
+              color: 'var(--fg-muted)',
+              cursor: 'pointer',
+            }}
+          >
+            ↻ Refresh
+          </button>
         </div>
 
         {statsExpanded && (

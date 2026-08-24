@@ -28,10 +28,12 @@ test('Index Now confirmation is an in-app dialog and cancel starts no run', asyn
   });
   page.on('pageerror', (err) => consoleErrors.push(String(err)));
 
-  const runBefore = await request
-    .get(`${API_BASE}/api/index/aurora_acceptance/runs/latest`)
-    .then((r) => (r.ok() ? r.json() : null))
-    .catch(() => null);
+  // The run-baseline probe is part of the proof: a broken endpoint must fail
+  // the test, not degrade both sides to null and vacuously pass.
+  const beforeResp = await request.get(`${API_BASE}/api/index/aurora_acceptance/runs/latest`);
+  expect(beforeResp.ok(), `runs/latest baseline failed: ${beforeResp.status()}`).toBeTruthy();
+  const runBefore = await beforeResp.json();
+  expect(runBefore?.run_id, 'baseline run_id missing').toBeTruthy();
 
   await page.goto(new URL('rag?subtab=indexing&corpus=aurora_acceptance', baseURL).toString());
 
@@ -49,11 +51,10 @@ test('Index Now confirmation is an in-app dialog and cancel starts no run', asyn
   await expect(dialog).not.toBeVisible();
 
   await page.waitForTimeout(1_500);
-  const runAfter = await request
-    .get(`${API_BASE}/api/index/aurora_acceptance/runs/latest`)
-    .then((r) => (r.ok() ? r.json() : null))
-    .catch(() => null);
-  expect(runAfter?.run_id ?? null).toEqual(runBefore?.run_id ?? null);
+  const afterResp = await request.get(`${API_BASE}/api/index/aurora_acceptance/runs/latest`);
+  expect(afterResp.ok(), `runs/latest recheck failed: ${afterResp.status()}`).toBeTruthy();
+  const runAfter = await afterResp.json();
+  expect(runAfter?.run_id).toEqual(runBefore.run_id);
 
   // The throwing native stubs prove nothing fell back to window.confirm/alert.
   expect(consoleErrors.filter((e) => e.includes('native window.'))).toEqual([]);

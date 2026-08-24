@@ -48,7 +48,9 @@ test('exhaustive ui mutation + persistence + probe loop', async ({ page }) => {
   };
 
   try {
-    await page.goto('/dashboard', { waitUntil: 'domcontentloaded' });
+    // Relative path: the app is served under /web/, so an absolute
+    // '/dashboard' resolves to the origin root (404) against the baseURL.
+    await page.goto('dashboard', { waitUntil: 'domcontentloaded' });
     await ensureAppReady(page);
     const preflight = await assertRuntimePreflight(page);
     await sink.add({
@@ -83,6 +85,16 @@ test('exhaustive ui mutation + persistence + probe loop', async ({ page }) => {
         detail: row.detail,
         retrieval_probe_feedback: row.feedback,
       });
+    }
+    // Required-provider probes are a hard gate, not sink telemetry: a probe
+    // that could not run must fail the suite instead of passing silently.
+    const brokenProviders = providerCoverage.filter((row) => !(row.available && row.tested));
+    if (brokenProviders.length > 0) {
+      throw new Error(
+        `Required provider coverage failed: ${brokenProviders
+          .map((row) => `${row.provider} (${row.detail})`)
+          .join('; ')}`
+      );
     }
 
     for (const surface of UI_SURFACES) {

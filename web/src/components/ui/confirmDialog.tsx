@@ -24,14 +24,14 @@ function ConfirmDialogView({
   const confirmRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
+    // Focus the confirm button so a bare Enter activates it NATIVELY; never
+    // intercept Enter globally — a keyboard user who tabs to Cancel must get
+    // Cancel, not a document-level confirm.
     confirmRef.current?.focus();
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.preventDefault();
         onResolve(false);
-      } else if (e.key === 'Enter') {
-        e.preventDefault();
-        onResolve(true);
       }
     };
     document.addEventListener('keydown', onKey);
@@ -117,23 +117,33 @@ function ConfirmDialogView({
   );
 }
 
+// One dialog at a time: concurrent requests queue behind the open one so a
+// double-triggered action can never present two stacked overlays that a
+// single keypress could resolve together.
+let dialogQueue: Promise<unknown> = Promise.resolve();
+
 export function confirmDialog(options: ConfirmDialogOptions): Promise<boolean> {
-  return new Promise((resolve) => {
-    const host = document.createElement('div');
-    document.body.appendChild(host);
-    const root = createRoot(host);
-    let settled = false;
-    const done = (accepted: boolean) => {
-      if (settled) return;
-      settled = true;
-      // Defer unmount out of the dispatching event so React never unmounts a
-      // root from inside its own event handler.
-      setTimeout(() => {
-        root.unmount();
-        host.remove();
-      }, 0);
-      resolve(accepted);
-    };
-    root.render(<ConfirmDialogView options={options} onResolve={done} />);
-  });
+  const request = dialogQueue.then(
+    () =>
+      new Promise<boolean>((resolve) => {
+        const host = document.createElement('div');
+        document.body.appendChild(host);
+        const root = createRoot(host);
+        let settled = false;
+        const done = (accepted: boolean) => {
+          if (settled) return;
+          settled = true;
+          // Defer unmount out of the dispatching event so React never
+          // unmounts a root from inside its own event handler.
+          setTimeout(() => {
+            root.unmount();
+            host.remove();
+          }, 0);
+          resolve(accepted);
+        };
+        root.render(<ConfirmDialogView options={options} onResolve={done} />);
+      })
+  );
+  dialogQueue = request.catch(() => undefined);
+  return request;
 }

@@ -20,6 +20,7 @@ type ChatModel = {
   id: string;
   provider: string;
   source: string;
+  override: string;
 };
 
 export type ProviderCoverageResult = {
@@ -31,9 +32,12 @@ export type ProviderCoverageResult = {
 };
 
 function surfacePath(surface: UISurface): string {
-  if (!surface.subtab) return surface.route;
-  const sep = surface.route.includes('?') ? '&' : '?';
-  return `${surface.route}${sep}subtab=${encodeURIComponent(surface.subtab)}`;
+  // The app is served under /web/, so routes must resolve RELATIVE to the
+  // baseURL: an absolute '/dashboard' would hit the origin root and 404.
+  const route = surface.route.replace(/^\//, '');
+  if (!surface.subtab) return route;
+  const sep = route.includes('?') ? '&' : '?';
+  return `${route}${sep}subtab=${encodeURIComponent(surface.subtab)}`;
 }
 
 function normalize(str: string): string {
@@ -95,15 +99,20 @@ export async function assertRuntimePreflight(page: Page): Promise<{
   }
   const payload = await modelsResp.json();
   const models = Array.isArray((payload as any)?.models) ? (payload as any).models : [];
-  const hasLocal = models.some((m: any) => String(m?.source || '').toLowerCase() === 'local');
-  const hasCloud = models.some((m: any) => {
-    const s = String(m?.source || '').toLowerCase();
-    return s === 'cloud_direct' || s === 'openrouter' || s === 'ragweld';
-  });
+  // Post gateway cutover every model is a LiteLLM alias: `ragweld-local` is
+  // the host-served local lane and every other alias routes to a cloud
+  // upstream. Alias prefixes (`openai.gpt-...`) carry the upstream provider.
+  const hasLocal = models.some((m: any) => String(m?.id || '') === 'ragweld-local');
+  const hasCloud = models.some(
+    (m: any) => String(m?.id || '').length > 0 && String(m?.id || '') !== 'ragweld-local'
+  );
   const providers = Array.from(
     new Set(
       models
-        .map((m: any) => String(m?.provider || '').trim().toLowerCase())
+        .map((m: any) => {
+          const id = String(m?.id || '');
+          return id.includes('.') ? id.split('.')[0].trim().toLowerCase() : '';
+        })
         .filter((v: string) => v.length > 0)
     )
   );
@@ -284,6 +293,7 @@ async function listChatModels(page: Page): Promise<ChatModel[]> {
     id: String(m?.id || ''),
     provider: String(m?.provider || ''),
     source: String(m?.source || ''),
+    override: String(m?.override || ''),
   }));
 }
 
@@ -292,20 +302,20 @@ function normalizeProvider(s: string): string {
 }
 
 function toModelOverrideValue(model: ChatModel): string {
-  const source = normalizeProvider(model.source);
-  if (source === 'local') return `local:${model.id}`;
-  if (source === 'openrouter') return `openrouter:${model.id}`;
-  if (source === 'ragweld') return `ragweld:${model.id}`;
-  return model.id;
+  // The picker's option values are the backend's `override` strings
+  // (`litellm:<alias>`); selecting the bare id fails.
+  return model.override || model.id;
 }
 
 function pickProviderCandidate(models: ChatModel[], providerSlug: string): ChatModel | null {
+  // Aliases are `<upstream>.<model>` (all routed through LiteLLM); every
+  // non-local alias reaches its upstream via OpenRouter after the cutover.
   const p = normalizeProvider(providerSlug);
   if (p === 'openrouter') {
-    const match = models.find((m) => normalizeProvider(m.source) === 'openrouter');
+    const match = models.find((m) => String(m.id || '') !== 'ragweld-local' && String(m.id || '').includes('.'));
     return match || null;
   }
-  const exact = models.filter((m) => normalizeProvider(m.provider) === p);
+  const exact = models.filter((m) => String(m.id || '').toLowerCase().startsWith(`${p}.`));
   if (exact.length > 0) return exact[0];
   return null;
 }
@@ -429,7 +439,7 @@ export async function runChatProbe(
   page: Page,
   question: string
 ): Promise<{ feedback: 'thumbsup' | 'thumbsdown'; detail: string }> {
-  await page.goto('/chat?subtab=ui', { waitUntil: 'domcontentloaded' });
+  await page.goto('chat?subtab=ui', { waitUntil: 'domcontentloaded' });
   await page.waitForSelector('#chat-input', { timeout: 60_000 });
 
   const assistantMessages = page.locator('#chat-messages [data-role="assistant"]');
@@ -473,7 +483,7 @@ export async function runRequiredProviderCoverage(
       continue;
     }
 
-    await page.goto('/chat?subtab=ui', { waitUntil: 'domcontentloaded' });
+    await page.goto('chat?subtab=ui', { waitUntil: 'domcontentloaded' });
     await page.waitForSelector('[data-testid="model-picker"]', { timeout: 60_000 });
     const picker = page.locator('[data-testid="model-picker"]').first();
     const override = toModelOverrideValue(candidate);
@@ -526,14 +536,14 @@ export async function runMetricsBudgetCheck(
 }
 
 export async function runEvalAndMcpSmoke(page: Page): Promise<void> {
-  await page.goto('/eval?subtab=analysis', { waitUntil: 'domcontentloaded' });
+  await page.goto('eval?subtab=analysis', { waitUntil: 'domcontentloaded' });
   await page.waitForTimeout(EXTRA_WAIT_MS);
   const evalSettings = page.locator('#eval-run-settings-final-k');
   if ((await safeCount(evalSettings)) > 0) {
     await expect(evalSettings).toBeVisible();
   }
 
-  await page.goto('/infrastructure?subtab=mcp', { waitUntil: 'domcontentloaded' });
+  await page.goto('infrastructure?subtab=mcp', { waitUntil: 'domcontentloaded' });
   await page.waitForTimeout(EXTRA_WAIT_MS);
   const body = page.locator('#tab-infrastructure-mcp');
   if ((await safeCount(body)) > 0) {

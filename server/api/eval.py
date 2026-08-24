@@ -60,6 +60,7 @@ from server.models.tribrid_config_model import (
     EvalObservabilitySummaryResponse,
     PromptfooRun,
     PromptfooRunsResponse,
+    TriBridConfig,
 )
 from server.observability.ml_quality import build_eval_observability_summary
 from server.retrieval.fusion import TriBridFusion
@@ -286,6 +287,97 @@ def _save_run(run: EvalRun) -> None:
     path.write_text(json.dumps(run.model_dump(mode="json"), indent=2, sort_keys=True), encoding="utf-8")
 
 
+async def _resolve_ragas_answer_route(cfg: TriBridConfig) -> Any:
+    """Preflight Ragas and resolve the gateway route used to generate eval answers.
+
+    Shared by the POST eval route and the SSE stream route so `ragas_enabled`
+    means the same thing on both paths; a failed preflight fails the run
+    instead of silently skipping judging.
+    """
+    try:
+        await asyncio.to_thread(ragas_preflight, cfg)
+    except RagasUnavailableError as exc:
+        raise DependencyUnavailableError("ragas", "Eval run preflight", reason=str(exc)) from exc
+    return select_provider_route(config=cfg, model_override="")
+
+
+async def _generate_ragas_answer(
+    *,
+    entry: EvalDatasetItem,
+    matches: list[Any],
+    cfg: TriBridConfig,
+    answer_route: Any,
+    final_k: int,
+) -> tuple[str, RagasSample]:
+    """Generate the grounded eval answer for one entry and build its Ragas sample."""
+    context_chunks = matches[: max(1, final_k)]
+    context_text = format_context_for_llm(rag_chunks=context_chunks, recall_chunks=[])
+    system_prompt = get_system_prompt(
+        has_rag_context=bool(context_chunks), has_recall_context=False, config=cfg.chat
+    )
+    try:
+        generation = await generate_chat_text(
+            route=answer_route,
+            system_prompt=system_prompt,
+            user_message=entry.question,
+            observation_name="eval.answer.generation",
+            images=[],
+            image_detail=str(cfg.chat.multimodal.image_detail or "auto"),
+            temperature=float(cfg.chat.temperature),
+            max_tokens=int(cfg.chat.max_tokens),
+            context_text=context_text,
+            context_chunks=context_chunks,
+            timeout_s=float(getattr(cfg.ui, "chat_stream_timeout", 120) or 120),
+        )
+    except Exception as exc:
+        raise ChatGenerationError(str(exc)) from exc
+    generated_answer = str(getattr(generation, "text", "") or "").strip()
+    if not generated_answer:
+        raise ChatGenerationError("LLM returned an empty response during eval generation")
+    sample = RagasSample(
+        user_input=entry.question,
+        retrieved_contexts=[str(m.content or "") for m in context_chunks if str(m.content or "").strip()],
+        response=generated_answer,
+    )
+    return generated_answer, sample
+
+
+def _attach_ragas_scores(
+    cfg: TriBridConfig,
+    results: list[EvalResult],
+    per_entry_scores: list[dict[str, float]],
+) -> dict[str, float]:
+    """Attach per-entry Ragas scores to their results and compute the means.
+
+    The single assignment/aggregation implementation for BOTH eval routes.
+    """
+    ragas_means: dict[str, float] = {}
+    if not per_entry_scores:
+        return ragas_means
+    for result_item, scores in zip(results, per_entry_scores, strict=True):
+        result_item.ragas = dict(scores)
+    for metric_name in (cfg.evaluation.ragas_metrics or []):
+        values = [r.ragas[metric_name] for r in results if metric_name in r.ragas]
+        if values:
+            ragas_means[str(metric_name)] = float(sum(values) / len(values))
+    return ragas_means
+
+
+async def _apply_ragas_scores(
+    cfg: TriBridConfig,
+    results: list[EvalResult],
+    ragas_samples: list[RagasSample],
+) -> dict[str, float]:
+    """Judge the collected samples in one batch and attach scores (POST path)."""
+    if not ragas_samples:
+        return {}
+    try:
+        per_entry_scores = await asyncio.to_thread(score_samples, cfg, ragas_samples)
+    except RagasUnavailableError as exc:
+        raise DependencyUnavailableError("ragas", "Eval run scoring", reason=str(exc)) from exc
+    return _attach_ragas_scores(cfg, results, per_entry_scores)
+
+
 async def evaluate_dataset_entries(
     *,
     repo_id: str,
@@ -324,11 +416,7 @@ async def evaluate_dataset_entries(
     ragas_samples: list[RagasSample] = []
     answer_route = None
     if ragas_enabled:
-        try:
-            await asyncio.to_thread(ragas_preflight, cfg)
-        except RagasUnavailableError as exc:
-            raise DependencyUnavailableError("ragas", "Eval run preflight", reason=str(exc)) from exc
-        answer_route = select_provider_route(config=cfg, model_override="")
+        answer_route = await _resolve_ragas_answer_route(cfg)
 
     final_k = int(cfg.retrieval.eval_final_k)
     use_multi = cfg.retrieval.eval_multi
@@ -378,37 +466,14 @@ async def evaluate_dataset_entries(
 
         generated_answer: str | None = None
         if ragas_enabled and answer_route is not None:
-            context_chunks = matches[: max(1, final_k)]
-            context_text = format_context_for_llm(rag_chunks=context_chunks, recall_chunks=[])
-            system_prompt = get_system_prompt(
-                has_rag_context=bool(context_chunks), has_recall_context=False, config=cfg.chat
+            generated_answer, sample = await _generate_ragas_answer(
+                entry=entry,
+                matches=matches,
+                cfg=cfg,
+                answer_route=answer_route,
+                final_k=final_k,
             )
-            try:
-                generation = await generate_chat_text(
-                    route=answer_route,
-                    system_prompt=system_prompt,
-                    user_message=entry.question,
-                    observation_name="eval.answer.generation",
-                    images=[],
-                    image_detail=str(cfg.chat.multimodal.image_detail or "auto"),
-                    temperature=float(cfg.chat.temperature),
-                    max_tokens=int(cfg.chat.max_tokens),
-                    context_text=context_text,
-                    context_chunks=context_chunks,
-                    timeout_s=float(getattr(cfg.ui, "chat_stream_timeout", 120) or 120),
-                )
-            except Exception as exc:
-                raise ChatGenerationError(str(exc)) from exc
-            generated_answer = str(getattr(generation, "text", "") or "").strip()
-            if not generated_answer:
-                raise ChatGenerationError("LLM returned an empty response during eval generation")
-            ragas_samples.append(
-                RagasSample(
-                    user_input=entry.question,
-                    retrieved_contexts=[str(m.content or "") for m in context_chunks if str(m.content or "").strip()],
-                    response=generated_answer,
-                )
-            )
+            ragas_samples.append(sample)
 
         rr_vals.append(scores.reciprocal_rank)
         recall5_vals.append(scores.recall5)
@@ -419,17 +484,8 @@ async def evaluate_dataset_entries(
         results.append(result_item.model_copy(update={"generated_answer": generated_answer}))
 
     ragas_means: dict[str, float] = {}
-    if ragas_enabled and ragas_samples:
-        try:
-            per_entry_scores = await asyncio.to_thread(score_samples, cfg, ragas_samples)
-        except RagasUnavailableError as exc:
-            raise DependencyUnavailableError("ragas", "Eval run scoring", reason=str(exc)) from exc
-        for result_item, scores in zip(results, per_entry_scores, strict=True):
-            result_item.ragas = dict(scores)
-        for metric_name in (cfg.evaluation.ragas_metrics or []):
-            values = [r.ragas[metric_name] for r in results if metric_name in r.ragas]
-            if values:
-                ragas_means[str(metric_name)] = float(sum(values) / len(values))
+    if ragas_enabled:
+        ragas_means = await _apply_ragas_scores(cfg, results, ragas_samples)
 
     metrics = EvalMetrics(
         mrr=float(sum(rr_vals) / len(rr_vals)) if rr_vals else 0.0,
@@ -765,6 +821,27 @@ async def eval_run_stream(
             )
             yield "data: " + json.dumps({"type": "log", "message": f"Loaded {total} eval_dataset entries"}) + "\n\n"
 
+            # Ragas rides the SSE route exactly like the POST route: preflight
+            # up front, grounded answer per entry, judged after the loop.
+            ragas_enabled = bool(cfg.evaluation.ragas_enabled)
+            ragas_samples: list[RagasSample] = []
+            answer_route = None
+            if ragas_enabled:
+                answer_route = await _resolve_ragas_answer_route(cfg)
+                yield (
+                    "data: "
+                    + json.dumps(
+                        {
+                            "type": "log",
+                            "message": (
+                                "Ragas enabled: generating a grounded answer per entry "
+                                f"and judging with {cfg.evaluation.ragas_judge_model}"
+                            ),
+                        }
+                    )
+                    + "\n\n"
+                )
+
             fusion = TriBridFusion()
 
             rr_vals: list[float] = []
@@ -818,13 +895,33 @@ async def eval_run_stream(
                     latency_ms=latency_ms,
                     debug=getattr(fusion, "last_debug", None) or {},
                 )
+                generated_answer: str | None = None
+                if ragas_enabled and answer_route is not None:
+                    # Emit before the (long) generation so the stream never
+                    # goes silent past one model call.
+                    yield (
+                        "data: "
+                        + json.dumps(
+                            {"type": "log", "message": f"[{idx}/{total}] generating grounded answer"}
+                        )
+                        + "\n\n"
+                    )
+                    generated_answer, sample = await _generate_ragas_answer(
+                        entry=entry,
+                        matches=matches,
+                        cfg=cfg,
+                        answer_route=answer_route,
+                        final_k=int(run_final_k),
+                    )
+                    ragas_samples.append(sample)
+
                 rr_vals.append(scores.reciprocal_rank)
                 recall5_vals.append(scores.recall5)
                 recall10_vals.append(scores.recall10)
                 recall20_vals.append(scores.recall20)
                 prec5_vals.append(scores.prec5)
                 ndcg10_vals.append(scores.ndcg10)
-                results.append(result_item)
+                results.append(result_item.model_copy(update={"generated_answer": generated_answer}))
 
                 _EVAL_STATUS["progress"] = idx
                 percent = (idx / total) * 100.0 if total else 0.0
@@ -836,6 +933,34 @@ async def eval_run_stream(
                     + "\n\n"
                 )
 
+            ragas_means: dict[str, float] = {}
+            if ragas_enabled:
+                # Judge per sample so the stream emits progress between judge
+                # calls, a disconnect abandons at most one paid call, and the
+                # scores still flow through the shared attach implementation.
+                per_entry_scores: list[dict[str, float]] = []
+                for sample_idx, sample in enumerate(ragas_samples, start=1):
+                    if await request.is_disconnected():
+                        yield "data: " + json.dumps({"type": "error", "message": "Client disconnected"}) + "\n\n"
+                        return
+                    yield (
+                        "data: "
+                        + json.dumps(
+                            {
+                                "type": "log",
+                                "message": f"Judging answer {sample_idx}/{len(ragas_samples)} with Ragas",
+                            }
+                        )
+                        + "\n\n"
+                    )
+                    try:
+                        per_entry_scores.extend(await asyncio.to_thread(score_samples, cfg, [sample]))
+                    except RagasUnavailableError as exc:
+                        raise DependencyUnavailableError(
+                            "ragas", "Eval run scoring", reason=str(exc)
+                        ) from exc
+                ragas_means = _attach_ragas_scores(cfg, results, per_entry_scores)
+
             metrics = EvalMetrics(
                 mrr=float(sum(rr_vals) / len(rr_vals)) if rr_vals else 0.0,
                 recall_at_5=float(sum(recall5_vals) / len(recall5_vals)) if recall5_vals else 0.0,
@@ -845,6 +970,7 @@ async def eval_run_stream(
                 ndcg_at_10=float(sum(ndcg10_vals) / len(ndcg10_vals)) if ndcg10_vals else 0.0,
                 latency_p50_ms=_percentile(latencies, 0.50),
                 latency_p95_ms=_percentile(latencies, 0.95),
+                ragas=ragas_means,
             )
 
             completed_at = datetime.now(UTC)
