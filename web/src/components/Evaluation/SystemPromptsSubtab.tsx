@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useActiveRepo } from '@/stores';
 import { useUIHelpers } from '@/hooks/useUIHelpers';
+import { confirmDialog } from '@/components/ui/confirmDialog';
 import { promptsApi } from '@/api';
 import type { PromptMetadata, PromptsResponse } from '@/types/generated';
 
@@ -104,7 +105,12 @@ export const SystemPromptsSubtab: React.FC<SystemPromptsSubtabProps> = ({ classN
       showToast('This prompt is edited elsewhere', 'error');
       return;
     }
-    if (!confirm(`Reset "${metadata[promptKey]?.label || promptKey}" to default?`)) {
+    const proceed = await confirmDialog({
+      title: 'Reset prompt',
+      message: `Reset "${metadata[promptKey]?.label || promptKey}" to default?`,
+      confirmLabel: 'Reset',
+    });
+    if (!proceed) {
       return;
     }
 

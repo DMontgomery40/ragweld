@@ -41,6 +41,7 @@ import {
   toAbortReason,
 } from '@/components/Chat/chatTransport';
 import { EmbeddingMismatchWarning } from '@/components/ui/EmbeddingMismatchWarning';
+import { confirmDialog } from '@/components/ui/confirmDialog';
 import { useAPI, useConfig, useConfigField, useEmbeddingStatus } from '@/hooks';
 import { useUIHelpers } from '@/hooks/useUIHelpers';
 import { useRepoStore } from '@/stores/useRepoStore';
@@ -1619,10 +1620,16 @@ export function ChatInterface({ onTraceUpdate }: ChatInterfaceProps) {
     activateSession(session);
   }, [activateSession, chatHistoryMax, persistSessions]);
 
-  const handleClear = useCallback(() => {
+  const handleClear = useCallback(async () => {
     const activeId = String(conversationIdRef.current || '').trim();
     const activeTitle = chatSessions.find((session) => String(session.conversation_id || '').trim() === activeId)?.title || 'this chat';
-    if (!confirm(`Delete "${activeTitle}"?\n\nThis removes it from the local chat history. Recall memory is not deleted.`)) {
+    const proceed = await confirmDialog({
+      title: 'Delete chat',
+      message: `Delete "${activeTitle}"?\n\nThis removes it from the local chat history. Recall memory is not deleted.`,
+      confirmLabel: 'Delete chat',
+      danger: true,
+    });
+    if (!proceed) {
       return;
     }
 

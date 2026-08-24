@@ -27,6 +27,7 @@ import { ModelPicker as ChatModelPicker } from '@/components/Chat/ModelPicker';
 import { PromptLink } from '@/components/ui/PromptLink';
 import { EmbeddingMismatchWarning } from '@/components/ui/EmbeddingMismatchWarning';
 import { TooltipIcon } from '@/components/ui/TooltipIcon';
+import { confirmDialog } from '@/components/ui/confirmDialog';
 import { indexingApi } from '@/api';
 import { formatBytes, formatCurrency, formatDuration, formatNumber } from '@/utils/formatters';
 import type {
@@ -655,11 +656,14 @@ export function IndexingSubtab() {
                 } + Semantic KG ~${formatDuration(Number(semanticKgSeconds) * 1000)}`,
               ]
             : []),
-          '',
-          'Start indexing now?',
         ].join('\n');
 
-        if (!window.confirm(msg)) {
+        const proceed = await confirmDialog({
+          title: 'Start indexing?',
+          message: msg,
+          confirmLabel: 'Start indexing',
+        });
+        if (!proceed) {
           return;
         }
       }
@@ -734,7 +738,13 @@ export function IndexingSubtab() {
   const handleDeleteIndex = useCallback(async () => {
     const rid = String(activeRepo || '').trim();
     if (!rid) return;
-    if (!confirm(`Delete index for corpus "${rid}"?`)) return;
+    const proceed = await confirmDialog({
+      title: 'Delete index',
+      message: `Delete index for corpus "${rid}"?`,
+      confirmLabel: 'Delete index',
+      danger: true,
+    });
+    if (!proceed) return;
 
     setErrorBanner(null);
     setIsIndexing(false);
@@ -2598,8 +2608,19 @@ export function IndexingSubtab() {
           marginBottom: '24px',
         }}
       >
-        <button
+        {/* role=button div instead of <button>: the header hosts a real
+            Refresh <button>, and button-in-button is invalid HTML. */}
+        <div
+          role="button"
+          tabIndex={0}
+          aria-expanded={statsExpanded}
           onClick={() => setStatsExpanded(!statsExpanded)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              setStatsExpanded(!statsExpanded);
+            }
+          }}
           style={{
             width: '100%',
             padding: '16px',
@@ -2634,7 +2655,7 @@ export function IndexingSubtab() {
             </button>
           </div>
           <span style={{ fontSize: '12px', color: 'var(--fg-muted)' }}>{statsExpanded ? '▼' : '▶'}</span>
-        </button>
+        </div>
 
         {statsExpanded && (
           <div style={{ padding: '0 16px 16px' }}>

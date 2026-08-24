@@ -6,11 +6,6 @@ import type { ErrorHelperOptions } from '@web/types';
  * Hook for creating helpful error messages
  */
 export function useErrorHandler() {
-  const showAlert = useCallback((title: string, options: Partial<ErrorHelperOptions> = {}) => {
-    const message = createAlertError(title, options);
-    alert(message);
-  }, []);
-
   const createHelpful = useCallback((options: ErrorHelperOptions) => {
     return createHelpfulError(options);
   }, []);
@@ -43,7 +38,6 @@ export function useErrorHandler() {
   }, []);
 
   return {
-    showAlert,
     createHelpful,
     createInline,
     handleApiError,

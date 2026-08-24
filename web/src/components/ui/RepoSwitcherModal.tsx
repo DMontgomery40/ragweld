@@ -9,6 +9,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRepoStore } from '@/stores/useRepoStore';
+import { confirmDialog } from '@/components/ui/confirmDialog';
 
 type RepoSwitcherModalProps = {
   isOpen: boolean;
@@ -76,9 +77,12 @@ export function RepoSwitcherModal({ isOpen, onClose }: RepoSwitcherModalProps) {
   const handleDelete = async (repoId: string, repoName: string) => {
     setDeleteError(null);
     if (!repoId.trim()) return;
-    const ok = confirm(
-      `Delete corpus "${repoName}" (${repoId})?\n\nThis will remove the corpus from the registry. Index data and graph data may also be removed depending on backend configuration.`
-    );
+    const ok = await confirmDialog({
+      title: 'Delete corpus',
+      message: `Delete corpus "${repoName}" (${repoId})?\n\nThis will remove the corpus from the registry. Index data and graph data may also be removed depending on backend configuration.`,
+      confirmLabel: 'Delete corpus',
+      danger: true,
+    });
     if (!ok) return;
     try {
       await deleteCorpus(repoId);

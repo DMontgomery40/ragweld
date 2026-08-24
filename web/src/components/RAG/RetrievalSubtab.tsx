@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef, type CSSProperties } from 'react';
 import { EmbeddingMismatchWarning } from '@/components/ui/EmbeddingMismatchWarning';
+import { showToast } from '@/utils/toast';
 import { LiveTerminal, type LiveTerminalHandle } from '@/components/LiveTerminal/LiveTerminal';
 import { IntentMatrixEditor } from '@/components/RAG/IntentMatrixEditor';
 import { SyntheticCallout } from '@/components/RAG/SyntheticCallout';
@@ -320,7 +321,7 @@ export function RetrievalSubtab() {
       await reload();
     } catch (error) {
       console.error('Failed to reload configuration:', error);
-      alert(error instanceof Error ? error.message : 'Failed to reload configuration');
+      showToast(error instanceof Error ? error.message : 'Failed to reload configuration', 'error');
       setHydrating(false);
     }
   }, [reload, clearError]);

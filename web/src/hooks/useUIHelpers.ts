@@ -1,4 +1,5 @@
 import { useCallback } from 'react';
+import { showToast as showToastFn } from '../utils/toast';
 
 /**
  * useUIHelpers Hook
@@ -199,29 +200,9 @@ export function useUIHelpers() {
     recalc();
   }, [getNum, setNum]);
 
-  // Toast notification helper
+  // Toast notification helper (single implementation lives in utils/toast)
   const showToast = useCallback((message: string, type: 'success' | 'error' | 'info' = 'info') => {
-    // Create toast element
-    const toast = document.createElement('div');
-    toast.className = `toast toast-${type}`;
-    toast.textContent = message;
-    toast.style.cssText = `
-      position: fixed;
-      bottom: 20px;
-      right: 20px;
-      padding: 12px 24px;
-      border-radius: 6px;
-      background: var(--card-bg);
-      border: 1px solid var(--line);
-      color: var(--fg);
-      z-index: 9999;
-      animation: fadeIn 0.2s ease-out;
-    `;
-    document.body.appendChild(toast);
-    setTimeout(() => {
-      toast.style.opacity = '0';
-      setTimeout(() => toast.remove(), 200);
-    }, 3000);
+    showToastFn(message, type);
   }, []);
 
   return {

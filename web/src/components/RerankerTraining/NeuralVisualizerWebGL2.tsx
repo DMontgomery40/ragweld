@@ -1,9 +1,35 @@
-import { useLayoutEffect, useMemo, useRef } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import { Canvas, extend, useThree, type ThreeElement } from '@react-three/fiber';
 import { Bloom, ChromaticAberration, EffectComposer, Noise } from '@react-three/postprocessing';
-import { Environment, Grid, OrbitControls, Stars } from '@react-three/drei';
+import { Grid, OrbitControls, Stars } from '@react-three/drei';
 import * as THREE from 'three';
 import { Vector2 } from 'three';
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
+
+// Procedural IBL instead of drei's <Environment preset>: the preset fetches an HDR
+// from an external CDN at runtime and suspends the R3F tree while it loads. That
+// suspend/reveal cycle re-runs CanvasImpl's unmount effect, and R3F's delayed root
+// disposal then kills the remounted root (dead frameloop, disconnected controls,
+// forced context loss) — the canvas renders blank forever.
+function StudioEnvironment() {
+  const gl = useThree((s) => s.gl);
+  const scene = useThree((s) => s.scene);
+
+  useEffect(() => {
+    const pmrem = new THREE.PMREMGenerator(gl);
+    const room = new RoomEnvironment();
+    const envTarget = pmrem.fromScene(room, 0.04);
+    scene.environment = envTarget.texture;
+    return () => {
+      if (scene.environment === envTarget.texture) scene.environment = null;
+      envTarget.dispose();
+      room.dispose();
+      pmrem.dispose();
+    };
+  }, [gl, scene]);
+
+  return null;
+}
 
 class TrajectoryMaterial extends THREE.ShaderMaterial {
   constructor() {
@@ -347,7 +373,7 @@ export function TrajectoryScene({
 
   return (
     <>
-      <Environment preset="city" blur={0.8} background={false} />
+      <StudioEnvironment />
 
       <ambientLight intensity={0.18} />
       <pointLight position={[2.2, 2.0, 2.1]} intensity={1.15} color="#00d5ff" />

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useConfigStore } from '@/stores';
+import { showToast } from '@/utils/toast';
 import { EmbeddingMismatchWarning } from './ui/EmbeddingMismatchWarning';
 import { ModelPicker as ChatModelPicker } from './Chat/ModelPicker';
 import { useAPI, useEmbeddingModel, useModels } from '@/hooks';
@@ -175,10 +176,10 @@ export function Sidepanel() {
         })
       );
 
-      alert('Changes applied successfully');
+      showToast('Changes applied successfully', 'success');
     } catch (e) {
       console.error('[Sidepanel] Apply changes error:', e);
-      alert(e instanceof Error ? e.message : 'Error applying changes');
+      showToast(e instanceof Error ? e.message : 'Error applying changes', 'error');
     }
   };
 

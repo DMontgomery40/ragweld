@@ -8,6 +8,7 @@
 import { useState, useEffect } from 'react';
 import { useEvalDataset } from '@/hooks/useEvalDataset';
 import { useUIHelpers } from '@/hooks/useUIHelpers';
+import { confirmDialog } from '@/components/ui/confirmDialog';
 import { useActiveRepo } from '@/stores';
 import type { EvalDatasetItem } from '@/types/generated';
 
@@ -85,7 +86,13 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({ className = ''
   };
 
   const handleDeleteEntry = async (entryId: string) => {
-    if (!confirm('Delete this eval entry?')) return;
+    const proceed = await confirmDialog({
+      title: 'Delete eval entry',
+      message: 'Delete this eval entry?',
+      confirmLabel: 'Delete',
+      danger: true,
+    });
+    if (!proceed) return;
 
     const success = await deleteEntry(entryId);
     if (success) {
