@@ -1,0 +1,55 @@
+groups:
+  - name: ragweld-pipeline
+    rules:
+      # Always firing (severity none). Its presence in Alertmanager proves the
+      # Prometheus -> Alertmanager delivery pipe without destabilizing anything;
+      # its absence means rule evaluation or delivery is broken.
+      - alert: RagweldWatchdog
+        expr: vector(1)
+        labels:
+          severity: none
+        annotations:
+          summary: Alerting pipeline watchdog
+          description: >-
+            This alert is always firing. If it is missing from Alertmanager,
+            Prometheus rule evaluation or alert delivery is broken.
+
+  - name: ragweld-targets
+    rules:
+      - alert: RagweldApiDown
+        expr: up{job="ragweld-api-host"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: Ragweld API is not being scraped
+          description: The host FastAPI process has been down for 2 minutes.
+
+      - alert: RagweldGatewayDown
+        expr: up{job="litellm"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: LiteLLM gateway is not being scraped
+          description: The generation gateway has been down for 2 minutes.
+
+      - alert: RagweldLocalModelDown
+        expr: up{job="vllm"} == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Local model server is not being scraped
+          description: >-
+            The host vllm-metal server has been down for 5 minutes. Local
+            generation requests will fail until it is restarted.
+
+      - alert: RagweldPostgresDown
+        expr: up{job="postgres"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: Postgres exporter is not being scraped
+          description: The Postgres metrics exporter has been down for 2 minutes.

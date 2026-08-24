@@ -40,8 +40,15 @@ const SERVICE_GROUPS: Array<{
   },
   {
     title: 'Observability',
-    description: 'Metrics, traces, logs, dashboards, and telemetry collection.',
-    services: ['grafana', 'prometheus', 'loki', 'promtail', 'tempo', 'alloy'],
+    description:
+      'Metrics, traces, logs, dashboards, and telemetry collection. Mimir keeps long-range metrics (Prometheus remote-writes into it), Pyroscope receives host-API CPU profiles, Alertmanager receives Prometheus alert rules, and Alloy also hosts the Faro RUM collector for the workbench frontend.',
+    services: ['grafana', 'prometheus', 'loki', 'promtail', 'tempo', 'alloy', 'mimir', 'pyroscope', 'alertmanager'],
+  },
+  {
+    title: 'LLM trace drilldown (Langfuse)',
+    description:
+      'Langfuse v4 records generation-level traces (prompt, output, usage, cost) for chat, reranker, eval, benchmark, and synthetic generations. The web UI publishes 127.0.0.1:53000; Postgres, ClickHouse, Redis, and MinIO are its private dependency plane inside the VM.',
+    services: ['langfuse', 'langfuse-worker', 'langfuse-postgres', 'langfuse-clickhouse', 'langfuse-redis', 'langfuse-minio'],
   },
 ];
 
@@ -60,6 +67,15 @@ const SERVICE_LABELS: Record<RagweldDockerService, string> = {
   qdrant: 'Qdrant Vector Store',
   mlflow: 'MLflow Tracking',
   flyte: 'Flyte Control Plane',
+  mimir: 'Mimir Metrics Store',
+  pyroscope: 'Pyroscope Profiling',
+  alertmanager: 'Alertmanager',
+  langfuse: 'Langfuse',
+  'langfuse-worker': 'Langfuse Worker',
+  'langfuse-postgres': 'Langfuse Postgres',
+  'langfuse-clickhouse': 'Langfuse ClickHouse',
+  'langfuse-redis': 'Langfuse Redis',
+  'langfuse-minio': 'Langfuse MinIO',
 };
 
 function isKnownService(value: string | null | undefined): value is RagweldDockerService {

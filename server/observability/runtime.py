@@ -110,14 +110,13 @@ def _manager_key(tracing_cfg: TracingConfig) -> str:
 
 
 def _build_langfuse_client(tracing_cfg: TracingConfig, tracer_provider: TracerProvider) -> Any | None:
-    if Langfuse is None:
-        return None
-    if not tracing_cfg.langfuse_enabled:
+    blockers = langfuse_client_blockers(tracing_cfg)
+    if blockers:
+        if tracing_cfg.langfuse_enabled:
+            _set_langfuse_ingestion_state(f"client not built ({'; '.join(blockers)})")
         return None
     public_key = str(os.getenv("LANGFUSE_PUBLIC_KEY") or "").strip()
     secret_key = str(os.getenv("LANGFUSE_SECRET_KEY") or "").strip()
-    if not public_key or not secret_key or not str(tracing_cfg.langfuse_base_url or "").strip():
-        return None
     try:
         return Langfuse(
             public_key=public_key,
@@ -126,7 +125,8 @@ def _build_langfuse_client(tracing_cfg: TracingConfig, tracer_provider: TracerPr
             tracing_enabled=True,
             tracer_provider=tracer_provider,
         )
-    except Exception:
+    except Exception as exc:
+        _set_langfuse_ingestion_state(f"client construction failed ({type(exc).__name__}: {exc})")
         return None
 
 
@@ -384,6 +384,53 @@ def current_trace_payload_fields() -> dict[str, Any]:
     }
 
 
+def langfuse_cost_details(cost: TraceCostSummary | None) -> dict[str, float]:
+    """Map the trace cost summary onto Langfuse's cost_details shape (USD)."""
+    if cost is None or cost.estimated_cost_usd is None:
+        return {}
+    return {"total": float(cost.estimated_cost_usd)}
+
+
+_LANGFUSE_INGESTION_LOCK = threading.Lock()
+_LANGFUSE_INGESTION_STATE = "no generation recorded yet"
+
+
+def _set_langfuse_ingestion_state(state: str) -> None:
+    global _LANGFUSE_INGESTION_STATE
+    with _LANGFUSE_INGESTION_LOCK:
+        _LANGFUSE_INGESTION_STATE = state
+
+
+def langfuse_ingestion_state() -> str:
+    """Truthful in-process recording state for the Langfuse component status."""
+    return _LANGFUSE_INGESTION_STATE
+
+
+def langfuse_client_blockers(tracing_cfg: TracingConfig) -> list[str]:
+    """Why this process cannot build a Langfuse client (empty when it can)."""
+    blockers: list[str] = []
+    if Langfuse is None:
+        blockers.append("langfuse SDK not importable")
+    if not tracing_cfg.langfuse_enabled:
+        blockers.append("langfuse_enabled is false")
+    if not str(tracing_cfg.langfuse_base_url or "").strip():
+        blockers.append("langfuse_base_url is empty")
+    if not str(os.getenv("LANGFUSE_PUBLIC_KEY") or "").strip():
+        blockers.append("LANGFUSE_PUBLIC_KEY missing from the API environment")
+    if not str(os.getenv("LANGFUSE_SECRET_KEY") or "").strip():
+        blockers.append("LANGFUSE_SECRET_KEY missing from the API environment")
+    return blockers
+
+
+def langfuse_trace_url(tracing_cfg: TracingConfig, trace_id: str | None) -> str | None:
+    """Deterministic Langfuse UI deep link — no network lookup on the request path."""
+    base = str(tracing_cfg.langfuse_base_url or "").strip().rstrip("/")
+    project = str(tracing_cfg.langfuse_project or "").strip()
+    if not base or not project or not trace_id:
+        return None
+    return f"{base}/project/{project}/traces/{trace_id}"
+
+
 def record_langfuse_generation(
     *,
     name: str,
@@ -395,10 +442,23 @@ def record_langfuse_generation(
     metadata: dict[str, Any] | None = None,
 ) -> None:
     obs = current_observation()
-    if obs is None or obs.manager.langfuse_client is None:
+    if obs is None:
+        return
+    if obs.manager.langfuse_client is None:
+        blockers = langfuse_client_blockers(obs.manager.tracing_config)
+        if blockers:
+            _set_langfuse_ingestion_state(f"client not built ({'; '.join(blockers)})")
         return
     try:
-        obs.manager.langfuse_client.update_current_generation(
+        # Create a real generation observation. The Langfuse client shares the
+        # manager's TracerProvider, so this observation parents under the
+        # active request span and carries the canonical trace id. Span
+        # creation/end only enqueues to the SDK's batch exporter thread —
+        # nothing here performs network IO on the event loop.
+        # (`update_current_generation` only works inside a Langfuse-created
+        # generation context, which this post-hoc recording path never has.)
+        with obs.manager.langfuse_client.start_as_current_observation(
+            as_type="generation",
             name=name,
             model=model,
             input=input_payload,
@@ -406,22 +466,19 @@ def record_langfuse_generation(
             usage_details=usage_details or {},
             cost_details=cost_details or {},
             metadata=metadata or {},
-        )
-        trace_id = obs.trace_id or None
-        current_trace_id_fn = getattr(obs.manager.langfuse_client, "get_current_trace_id", None)
-        if callable(current_trace_id_fn):
-            current_trace_id = current_trace_id_fn()
-            if isinstance(current_trace_id, str) and current_trace_id.strip():
-                trace_id = current_trace_id.strip()
-        trace_url_fn = getattr(obs.manager.langfuse_client, "get_trace_url", None)
-        if callable(trace_url_fn):
-            trace_url = trace_url_fn(trace_id=trace_id)
-            if isinstance(trace_url, str) and trace_url.strip():
-                add_external_link(
-                    label="Langfuse trace",
-                    kind="langfuse",
-                    url=trace_url.strip(),
-                    detail="LLM-native generation trace for this request.",
-                )
-    except Exception:
+        ):
+            pass
+        _set_langfuse_ingestion_state(f"recording (last generation: {name})")
+        # The deep link is built from config, never via the SDK's synchronous
+        # project lookup (which is blocking HTTP and uncached on failure).
+        trace_url = langfuse_trace_url(obs.manager.tracing_config, obs.trace_id or None)
+        if trace_url:
+            add_external_link(
+                label="Langfuse trace",
+                kind="langfuse",
+                url=trace_url,
+                detail="LLM-native generation trace for this request.",
+            )
+    except Exception as exc:
+        _set_langfuse_ingestion_state(f"last record failed ({type(exc).__name__}: {exc})")
         return

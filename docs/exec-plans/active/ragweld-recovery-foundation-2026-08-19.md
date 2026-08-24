@@ -254,6 +254,10 @@ Remaining (honest blockers / next slices, in order):
    because Unsloth needs CUDA.
 3. Unsloth execution: requires a CUDA host; no cloud GPU spend without
    explicit authorization.
-4. Mimir, Pyroscope, Faro, OpenCost, Alertmanager, Langfuse: not deployed;
-   status surfaces report them `disabled`, never healthy.
+4. ~~Mimir, Pyroscope, Faro, Alertmanager, Langfuse~~ — done (session 10,
+   2026-08-24): all five are Compose services with functional readiness,
+   wired data paths, and live proof
+   (`a3-observability-fabric-2026-08-24.md`). OpenCost stays `disabled`
+   honestly: it requires a Kubernetes API server and the Colima profile runs
+   the plain Docker runtime.
 5. Residual dead-code removal and the full final acceptance matrix.

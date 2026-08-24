@@ -1,76 +1,247 @@
 {
-  "annotations": { "list": [] },
-  "editable": true,
-  "fiscalYearStartMonth": 0,
-  "graphTooltip": 1,
-  "id": null,
-  "links": [],
-  "liveNow": false,
-  "panels": [
-    {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "unit": "reqps" } },
-      "gridPos": { "h": 6, "w": 12, "x": 0, "y": 0 },
-      "id": 1,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
-        "textMode": "auto"
-      },
-      "targets": [{ "expr": "sum(rate(tribrid_search_requests_total[5m]))", "legendFormat": "requests/s" }],
-      "title": "Frontend Throughput Proxy",
-      "type": "stat"
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "unit": "s" } },
-      "gridPos": { "h": 6, "w": 12, "x": 12, "y": 0 },
-      "id": 2,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
-        "textMode": "auto"
-      },
-      "targets": [{ "expr": "histogram_quantile(0.95, rate(tribrid_search_latency_seconds_bucket[5m]))", "legendFormat": "p95" }],
-      "title": "Browser-to-Backend Latency Proxy",
-      "type": "stat"
-    },
-    {
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 6 },
-      "id": 3,
-      "options": {
-        "content": "## Frontend / RUM\nThis board is the Grafana home for Faro and browser telemetry.\n\nThe current slice keeps the operator surface explicit even before dedicated Faro production streams are fully lit up. Use it with Grafana Overview and Chat for end-to-end journey debugging.",
-        "mode": "markdown"
-      },
-      "title": "Operator Notes",
-      "type": "text"
+ "annotations": {
+  "list": []
+ },
+ "editable": true,
+ "fiscalYearStartMonth": 0,
+ "graphTooltip": 1,
+ "id": null,
+ "links": [],
+ "liveNow": false,
+ "panels": [
+  {
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "reqps"
     }
-  ],
-  "refresh": "10s",
-  "schemaVersion": 38,
-  "style": "dark",
-  "tags": ["ragweld", "observability", "frontend", "rum"],
-  "templating": {
-    "list": [
-      { "name": "corpus_id", "label": "Corpus", "type": "textbox", "query": "*", "current": { "text": "*", "value": "*" } },
-      { "name": "run_id", "label": "Run", "type": "textbox", "query": "*", "current": { "text": "*", "value": "*" } },
-      { "name": "model", "label": "Model", "type": "textbox", "query": "*", "current": { "text": "*", "value": "*" } },
-      { "name": "provider", "label": "Provider", "type": "textbox", "query": "*", "current": { "text": "*", "value": "*" } },
-      { "name": "prompt_set", "label": "Prompt Set", "type": "textbox", "query": "current", "current": { "text": "current", "value": "current" } },
-      { "name": "workflow_id", "label": "Workflow", "type": "textbox", "query": "*", "current": { "text": "*", "value": "*" } }
-    ]
+   },
+   "gridPos": {
+    "h": 6,
+    "w": 12,
+    "x": 0,
+    "y": 0
+   },
+   "id": 1,
+   "options": {
+    "colorMode": "value",
+    "graphMode": "area",
+    "justifyMode": "auto",
+    "orientation": "auto",
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "textMode": "auto"
+   },
+   "targets": [
+    {
+     "expr": "sum(rate(tribrid_search_requests_total[5m]))",
+     "legendFormat": "requests/s"
+    }
+   ],
+   "title": "Frontend Throughput Proxy",
+   "type": "stat"
   },
-  "time": { "from": "now-6h", "to": "now" },
-  "timepicker": {},
-  "timezone": "",
-  "title": "Frontend/RUM",
-  "uid": "ragweld-frontend-rum",
-  "version": 1,
-  "weekStart": ""
+  {
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "s"
+    }
+   },
+   "gridPos": {
+    "h": 6,
+    "w": 12,
+    "x": 12,
+    "y": 0
+   },
+   "id": 2,
+   "options": {
+    "colorMode": "value",
+    "graphMode": "area",
+    "justifyMode": "auto",
+    "orientation": "auto",
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "textMode": "auto"
+   },
+   "targets": [
+    {
+     "expr": "histogram_quantile(0.95, rate(tribrid_search_latency_seconds_bucket[5m]))",
+     "legendFormat": "p95"
+    }
+   ],
+   "title": "Browser-to-Backend Latency Proxy",
+   "type": "stat"
+  },
+  {
+   "gridPos": {
+    "h": 4,
+    "w": 24,
+    "x": 0,
+    "y": 6
+   },
+   "id": 3,
+   "options": {
+    "content": "## Frontend / RUM\nLive browser telemetry from the workbench: the Faro Web SDK ships errors, web vitals, and session events to the Alloy `faro.receiver`, which labels them `ragweld_service=web` / `deployment_runtime=browser` and forwards logs to Loki and traces to Tempo. The panels below read that real stream.",
+    "mode": "markdown"
+   },
+   "title": "Operator Notes",
+   "type": "text"
+  },
+  {
+   "datasource": {
+    "type": "loki",
+    "uid": "loki"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "none"
+    }
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 12,
+    "x": 0,
+    "y": 10
+   },
+   "id": 4,
+   "targets": [
+    {
+     "expr": "sum by (kind) (count_over_time({ragweld_service=\"web\"} | logfmt [1m]))",
+     "legendFormat": "{{kind}}"
+    }
+   ],
+   "title": "RUM events/min by kind (Faro via Loki)",
+   "type": "timeseries"
+  },
+  {
+   "datasource": {
+    "type": "loki",
+    "uid": "loki"
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 12,
+    "x": 12,
+    "y": 10
+   },
+   "id": 5,
+   "options": {
+    "showTime": true,
+    "sortOrder": "Descending",
+    "wrapLogMessage": true,
+    "enableLogDetails": true,
+    "dedupStrategy": "none",
+    "prettifyLogMessage": false,
+    "showCommonLabels": false,
+    "showLabels": false
+   },
+   "targets": [
+    {
+     "expr": "{ragweld_service=\"web\"}"
+    }
+   ],
+   "title": "Live RUM stream",
+   "type": "logs"
+  }
+ ],
+ "refresh": "10s",
+ "schemaVersion": 38,
+ "style": "dark",
+ "tags": [
+  "ragweld",
+  "observability",
+  "frontend",
+  "rum"
+ ],
+ "templating": {
+  "list": [
+   {
+    "name": "corpus_id",
+    "label": "Corpus",
+    "type": "textbox",
+    "query": "*",
+    "current": {
+     "text": "*",
+     "value": "*"
+    }
+   },
+   {
+    "name": "run_id",
+    "label": "Run",
+    "type": "textbox",
+    "query": "*",
+    "current": {
+     "text": "*",
+     "value": "*"
+    }
+   },
+   {
+    "name": "model",
+    "label": "Model",
+    "type": "textbox",
+    "query": "*",
+    "current": {
+     "text": "*",
+     "value": "*"
+    }
+   },
+   {
+    "name": "provider",
+    "label": "Provider",
+    "type": "textbox",
+    "query": "*",
+    "current": {
+     "text": "*",
+     "value": "*"
+    }
+   },
+   {
+    "name": "prompt_set",
+    "label": "Prompt Set",
+    "type": "textbox",
+    "query": "current",
+    "current": {
+     "text": "current",
+     "value": "current"
+    }
+   },
+   {
+    "name": "workflow_id",
+    "label": "Workflow",
+    "type": "textbox",
+    "query": "*",
+    "current": {
+     "text": "*",
+     "value": "*"
+    }
+   }
+  ]
+ },
+ "time": {
+  "from": "now-6h",
+  "to": "now"
+ },
+ "timepicker": {},
+ "timezone": "",
+ "title": "Frontend/RUM",
+ "uid": "ragweld-frontend-rum",
+ "version": 1,
+ "weekStart": ""
 }

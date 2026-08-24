@@ -39,7 +39,8 @@ runs FastAPI, Vite, and the local-model server (vllm-metal) on the host.
 
 Options:
   --docker-backend       Run the API through Compose instead of on the host
-  --with-observability   Add Prometheus, Grafana, Loki, Promtail, Tempo, and Alloy
+  --with-observability   Add Prometheus, Grafana, Loki, Promtail, Tempo, Alloy,
+                         Mimir, Pyroscope, Alertmanager, and Langfuse
   --with-flyte           Add the Flyte control plane (Learning Agent orchestration)
   --native-postgres      Use an already-running host Postgres instead of Compose Postgres
   --lan                  Bind Vite to 0.0.0.0
@@ -290,6 +291,41 @@ if [[ ! -f .env && -f .env.example ]]; then
   fi
 fi
 
+# Langfuse: provision per-machine secrets so a fresh clone never runs on the
+# committed dev defaults, and give the host API matching ingestion keys.
+if [[ ! -f infra/langfuse.env ]]; then
+  if [[ "$DRY_RUN" == "1" ]]; then
+    log "Would generate infra/langfuse.env with per-machine Langfuse secrets"
+  else
+    lf_pk="pk-lf-$(openssl rand -hex 12)"
+    lf_sk="sk-lf-$(openssl rand -hex 12)"
+    {
+      echo "# Per-machine Langfuse secrets (gitignored; overrides langfuse.env.example)."
+      echo "SALT=$(openssl rand -hex 16)"
+      echo "ENCRYPTION_KEY=$(openssl rand -hex 32)"
+      echo "NEXTAUTH_SECRET=$(openssl rand -hex 24)"
+      echo "LANGFUSE_INIT_PROJECT_PUBLIC_KEY=${lf_pk}"
+      echo "LANGFUSE_INIT_PROJECT_SECRET_KEY=${lf_sk}"
+      echo "LANGFUSE_INIT_USER_PASSWORD=$(openssl rand -hex 12)"
+    } > infra/langfuse.env
+    chmod 600 infra/langfuse.env
+    log "Generated infra/langfuse.env with per-machine Langfuse secrets"
+  fi
+fi
+if [[ -f infra/langfuse.env && -f .env && "$DRY_RUN" == "0" ]] && ! grep -q '^LANGFUSE_PUBLIC_KEY=' .env; then
+  lf_pk="$(grep '^LANGFUSE_INIT_PROJECT_PUBLIC_KEY=' infra/langfuse.env | cut -d= -f2)"
+  lf_sk="$(grep '^LANGFUSE_INIT_PROJECT_SECRET_KEY=' infra/langfuse.env | cut -d= -f2)"
+  if [[ -n "$lf_pk" && -n "$lf_sk" ]]; then
+    {
+      echo ""
+      echo "# Langfuse ingestion keys for the host API (provisioned via infra/langfuse.env)"
+      echo "LANGFUSE_PUBLIC_KEY=${lf_pk}"
+      echo "LANGFUSE_SECRET_KEY=${lf_sk}"
+    } >> .env
+    log "Added Langfuse ingestion keys to .env"
+  fi
+fi
+
 if [[ -f .env ]]; then
   log "Loading environment from .env"
   set -a
@@ -407,7 +443,7 @@ if [[ "$START_DOCKER" == "1" ]]; then
   services=(postgres neo4j qdrant mlflow litellm)
   [[ "$NATIVE_POSTGRES" == "1" ]] && services=(neo4j qdrant mlflow litellm)
   if [[ "$WITH_OBSERVABILITY" == "1" ]]; then
-    services+=(postgres-exporter prometheus grafana loki promtail tempo alloy)
+    services+=(postgres-exporter prometheus grafana loki promtail tempo alloy mimir pyroscope alertmanager langfuse langfuse-worker langfuse-postgres langfuse-clickhouse langfuse-redis langfuse-minio)
   fi
   if [[ "$WITH_FLYTE" == "1" ]]; then
     services+=(flyte)
@@ -418,9 +454,27 @@ if [[ "$START_DOCKER" == "1" ]]; then
 
   log "Compose project=${RAGWELD_COMPOSE_PROJECT}; services=${services[*]}"
   if [[ "$DRY_RUN" == "1" ]]; then
-    run env SERVER_PORT="$BACKEND_PORT" "${compose[@]}" up -d --wait "${services[@]}"
+    run env SERVER_PORT="$BACKEND_PORT" FRONTEND_PORT="$FRONTEND_PORT" "${compose[@]}" up -d --wait "${services[@]}"
   else
-    env SERVER_PORT="$BACKEND_PORT" "${compose[@]}" up -d --wait "${services[@]}"
+    env SERVER_PORT="$BACKEND_PORT" FRONTEND_PORT="$FRONTEND_PORT" "${compose[@]}" up -d --wait "${services[@]}"
+  fi
+
+  # Mimir and Pyroscope ship distroless images (no shell), so Compose --wait
+  # only proves "running" for them; probe their functional readiness paths
+  # from the host before declaring the observability fabric up.
+  if [[ "$WITH_OBSERVABILITY" == "1" && "$DRY_RUN" == "0" ]]; then
+    for probe in "mimir|http://127.0.0.1:${MIMIR_HTTP_PORT:-59009}/ready" "pyroscope|http://127.0.0.1:${PYROSCOPE_HTTP_PORT:-54040}/ready"; do
+      probe_name="${probe%%|*}"
+      probe_url="${probe#*|}"
+      probe_deadline=$((SECONDS + 90))
+      until curl -sf -m 2 "$probe_url" >/dev/null 2>&1; do
+        if (( SECONDS >= probe_deadline )); then
+          die "${probe_name} did not become ready at ${probe_url} within 90s"
+        fi
+        sleep 2
+      done
+      log "${probe_name} ready at ${probe_url}"
+    done
   fi
 fi
 

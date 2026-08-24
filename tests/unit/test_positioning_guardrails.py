@@ -11,10 +11,14 @@ def _read(path: Path) -> str:
 
 
 def test_readme_uses_safe_positioning_claims() -> None:
+    # The 2026-08-24 operator repositioning ("one complete, self-hosted AI
+    # platform") moved the safe claims from the tagline into the reliability
+    # section; the claims themselves must stay present and DSV claims banned.
     readme = _read(ROOT / "README.md")
-    assert "Versioned config, prompts, and specs" in readme
+    assert "Versioned source-of-truth config" in readme
     assert "Manifest-backed training artifacts" in readme
-    assert "provenance-minded eval and training workflows" in readme.lower()
+    assert "provenance-minded workflows" in readme.lower()
+    assert "without claiming full end-to-end DSV governance" in readme
     assert "full dsv compliance" not in readme.lower()
 
 

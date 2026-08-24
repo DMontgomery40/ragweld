@@ -41,3 +41,33 @@ loki.write "default" {
     url = "http://loki:3100/loki/api/v1/push"
   }
 }
+
+// Faro collector for frontend RUM (errors, web vitals, session events) from
+// the ragweld workbench. Events join the shared streams: logs -> Loki,
+// traces -> Tempo, labelled so LogQL can select them next to API logs.
+faro.receiver "web" {
+  server {
+    listen_address = "0.0.0.0"
+    listen_port    = 12347
+    // The Vite origins come from Compose (default http://127.0.0.1:55173)
+    // so a FRONTEND_PORT override keeps beacons accepted.
+    cors_allowed_origins = [
+      sys.env("ALLOY_FARO_CORS_ORIGIN"),
+      sys.env("ALLOY_FARO_CORS_ORIGIN_LOCALHOST"),
+      "http://127.0.0.1:58012",
+    ]
+  }
+
+  extra_log_labels = {
+    // This receiver serves exactly one app (the ragweld workbench), so the
+    // service identity is pinned here rather than trusted from the beacon.
+    service_name       = "ragweld-web",
+    ragweld_service    = "web",
+    deployment_runtime = "browser",
+  }
+
+  output {
+    logs   = [loki.write.default.receiver]
+    traces = [otelcol.exporter.otlp.tempo.input]
+  }
+}

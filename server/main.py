@@ -199,6 +199,9 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     except (OSError, ValueError) as error:
         logger.warning("generation gateway catalog not loaded at startup (generation fails closed): %s", error)
     await asyncio.to_thread(_recover_artifact_stores)
+    from server.observability.profiling import start_profiling
+
+    await asyncio.to_thread(start_profiling, _global_cfg)
     catalog_refresh_task = asyncio.create_task(_catalog_refresh_loop(), name="gateway-catalog-refresh")
     mcp_session_cm = None
     if _global_cfg.mcp.enabled:

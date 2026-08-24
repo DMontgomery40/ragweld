@@ -7,8 +7,8 @@
 <h1 align="center">ragweld</h1>
 
 <p align="center">
-  <strong>Open-source MLOps Platform for API-first RAG and agent systems (API / MCP)</strong><br />
-  Versioned config, prompts, and specs; manifest-backed training artifacts; provenance-minded eval and training workflows.
+  <strong>One complete, self-hosted AI platform for retrieval and agent systems</strong><br />
+  Model routing, multimodal indexing and retrieval, evals, training, tracing, and operations—assembled into one opinionated workbench instead of a dozen disconnected tools.
 </p>
 
 <p align="center">
@@ -18,6 +18,30 @@
   <a href="#api-first-integration"><img src="https://img.shields.io/badge/API-first-1d4ed8" alt="API First"></a>
   <a href="#mcp-integration"><img src="https://img.shields.io/badge/MCP-enabled-purple" alt="MCP Enabled"></a>
 </p>
+
+---
+
+## Why ragweld
+
+Building a serious AI stack usually means researching overlapping model gateways,
+document pipelines, vector and graph stores, evaluation systems, training tools,
+trace platforms, and observability products—and then owning every integration
+between them. Ragweld makes those choices, wires the components together, and
+exposes the result as one platform with shared configuration, provenance, health,
+and operator workflows.
+
+It is built for two closely related users:
+
+- **AI consultancies and technical teams serving SMBs** that need a complete,
+  repeatable platform without rebuilding the stack for every deployment.
+- **RAG and agent power users** who want the full retrieval, evaluation,
+  training, tracing, cost, and infrastructure picture without connecting every
+  subsystem themselves.
+
+The underlying open-source systems remain inspectable and replaceable, but the
+product value is the integration: sane defaults, one operational surface, and a
+quality loop that connects real queries and traces to evals, training, promotion,
+and rollback.
 
 ---
 

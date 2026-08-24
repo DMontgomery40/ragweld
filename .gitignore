@@ -127,6 +127,7 @@ repos.json
 # ===== Docker =====
 .docker/
 infra/litellm.env
+infra/langfuse.env
 
 # ===== OS =====
 .DS_Store

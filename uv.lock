@@ -1951,12 +1951,11 @@ wheels = [
 
 [[package]]
 name = "langfuse"
-version = "4.0.1"
+version = "4.14.5"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "backoff" },
     { name = "httpx" },
-    { name = "openai" },
     { name = "opentelemetry-api" },
     { name = "opentelemetry-exporter-otlp-proto-http" },
     { name = "opentelemetry-sdk" },
@@ -1964,9 +1963,9 @@ dependencies = [
     { name = "pydantic" },
     { name = "wrapt" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/c9/94/ab00e21fa5977d6b9c68fb3a95de2aa1a1e586964ff2af3e37405bf65d9f/langfuse-4.0.1.tar.gz", hash = "sha256:40a6daf3ab505945c314246d5b577d48fcfde0a47e8c05267ea6bd494ae9608e", size = 272749 }
+sdist = { url = "https://files.pythonhosted.org/packages/d3/5c/f316b31abda2aab6ebadf69de99ea39df8d22ca743ac429284c0c1e12921/langfuse-4.14.5.tar.gz", hash = "sha256:75ccf86523ee87945bf9a853d4de65195376f9be5bda7178dd3d138b66fc670f", size = 391893 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/27/8f/3145ef00940f9c29d7e0200fd040f35616eac21c6ab4610a1ba14f3a04c1/langfuse-4.0.1-py3-none-any.whl", hash = "sha256:e22f49ea31304f97fc31a97c014ba63baa8802d9568295d54f06b00b43c30524", size = 465049 },
+    { url = "https://files.pythonhosted.org/packages/94/d4/914a654c3af7792f02394d93e0cbb052927b3e1e727416c62740cc49490d/langfuse-4.14.5-py3-none-any.whl", hash = "sha256:29e710b9b06adb30094e69af0034d10a47193bfb9c233296fe96b235cf1a377c", size = 695395 },
 ]
 
 [[package]]
@@ -3686,6 +3685,26 @@ wheels = [
 ]
 
 [[package]]
+name = "pyroscope-io"
+version = "1.2.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/33/d2/5fc44302f861eb2fd19bf7e56423c93e8867199c647337bb9849bc6d2929/pyroscope_io-1.2.1.tar.gz", hash = "sha256:c3236136dc086845d283fbeb434f5e22f5a7ddc0ff5a5b328752335d61ee1aaf", size = 74584 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/5f/f3/0b8c4906c6622c1c1451b52cacc192db41e197d3c6db60b235909e558c94/pyroscope_io-1.2.1-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:8387470016135a590f43da21a4dfcd47c238e4dfacabccc3e527da6cf61898f7", size = 2116130 },
+    { url = "https://files.pythonhosted.org/packages/3f/5c/c925b3a127071d0d06cffb0152db9c452f375d711d77b942f08e77d27d37/pyroscope_io-1.2.1-cp311-cp311-macosx_11_0_x86_64.whl", hash = "sha256:0c8eb803eed4ae7247adb18999afcfb82894c28d67c0b99c63c16fc6443c63cc", size = 2195008 },
+    { url = "https://files.pythonhosted.org/packages/85/56/832ab29d946c5b94a1ced1f4547964318c2dc82bb06c8b8501c883dfce2d/pyroscope_io-1.2.1-cp311-cp311-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:bebcccb717abddeb59b7df12e693fd0f85b946a20a38bdcfef3491fbac7d827c", size = 5583871 },
+    { url = "https://files.pythonhosted.org/packages/7b/7d/9ff9223852965390fb17a6548f129fd73e038584d8d4b5c3e65ba83d8815/pyroscope_io-1.2.1-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:4327785c6087afc084a230aa27107b53070c67555438caf3fce3ac73f821c787", size = 5127972 },
+    { url = "https://files.pythonhosted.org/packages/60/e6/fa8917594d1a3cb06e4400b49f95a4760e59e890de48360f9bcc29ca26e9/pyroscope_io-1.2.1-cp311-cp311-musllinux_1_2_aarch64.whl", hash = "sha256:d18f843ef60503f15c9d189dc1aa7f06d8edac9760f252ae6e825805fc7d21e3", size = 5513939 },
+    { url = "https://files.pythonhosted.org/packages/b7/ab/d9b6d65f954e6d0d9f95e8468ec61b526c4e2aa3c0332d5b609cd89ad6eb/pyroscope_io-1.2.1-cp311-cp311-musllinux_1_2_x86_64.whl", hash = "sha256:736d569a465edafc5c271d702bfef24e9afd25c06e5ea2e6746bd01ef622e62e", size = 5244667 },
+    { url = "https://files.pythonhosted.org/packages/1a/2c/cfaddac31c80b471cc896d3d09ee88d99779861a6b6dc3a7f7d43f12e39e/pyroscope_io-1.2.1-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:692091ae7d020ee76a16d9da2e213b69c20367d20032ecb643c23e3a5831f87d", size = 2113014 },
+    { url = "https://files.pythonhosted.org/packages/5b/d5/188f433e9ab08973948fac72e6aacf2a641a69c45885bed982cc8a768e64/pyroscope_io-1.2.1-cp312-cp312-macosx_11_0_x86_64.whl", hash = "sha256:ceabd42b2d61876eb81668cb76bb04b911d62369645c1c4eb63c9d4ed5106b3c", size = 2196053 },
+    { url = "https://files.pythonhosted.org/packages/96/86/fa0bca1756f881b9960c460cef7604e9044bb84a68d9d76cbd3e39372cf3/pyroscope_io-1.2.1-cp312-cp312-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:e64e2f34f340b163013b2942017d98bb0a4584e26ae64dfdba3f85304eea8efe", size = 5579568 },
+    { url = "https://files.pythonhosted.org/packages/de/1c/a7dac80341fe67ae775a33f9d0da2c04445479be3ce8a96e4b62df210c6e/pyroscope_io-1.2.1-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:16a39b80e5032fe978eaac6abf907e7b79128357adc0f0d8e7921e68bd57c4ea", size = 5123015 },
+    { url = "https://files.pythonhosted.org/packages/6d/90/049e9fda943f6fd01f035783c633d3e83a1a34aa00b1ef1eb325f0b0aa86/pyroscope_io-1.2.1-cp312-cp312-musllinux_1_2_aarch64.whl", hash = "sha256:45f5d7ed4a7a158732d3c1634846011c382309720d891200f64aee3a11173418", size = 5510537 },
+    { url = "https://files.pythonhosted.org/packages/1c/9b/f35ccd7935f87aa67a60e158b45f992e2e08243c5c6b432567cf7b1ef194/pyroscope_io-1.2.1-cp312-cp312-musllinux_1_2_x86_64.whl", hash = "sha256:7bc01f8b5c49efca59987194c28667559b1fbded965943d020d12aadc40d0c5c", size = 5239529 },
+]
+
+[[package]]
 name = "pytest"
 version = "9.0.2"
 source = { registry = "https://pypi.org/simple" }
@@ -4829,6 +4848,7 @@ dependencies = [
     { name = "pyarrow" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
+    { name = "pyroscope-io" },
     { name = "python-dotenv" },
     { name = "python-multipart" },
     { name = "qdrant-client" },
@@ -4891,7 +4911,7 @@ requires-dist = [
     { name = "langchain", specifier = "<1" },
     { name = "langchain-community", specifier = "<1" },
     { name = "langchain-core", specifier = "<1" },
-    { name = "langfuse", specifier = ">=3.10.1" },
+    { name = "langfuse", specifier = ">=4.7.0" },
     { name = "mcp", specifier = ">=1.26.0" },
     { name = "mlx", marker = "extra == 'mlx'", specifier = ">=0.12.0" },
     { name = "mlx-data", marker = "extra == 'mlx'", specifier = ">=0.0.6" },
@@ -4912,6 +4932,7 @@ requires-dist = [
     { name = "pyarrow", specifier = ">=15.0.0" },
     { name = "pydantic", specifier = ">=2.5.0" },
     { name = "pydantic-settings", specifier = ">=2.1.0" },
+    { name = "pyroscope-io", specifier = ">=1.2.1" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23.0" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=4.1.0" },

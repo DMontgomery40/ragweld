@@ -1,3 +1,9 @@
+# Receivers are intentionally EMPTY in the dev overlay: alerts are aggregated,
+# grouped, and inhibited here (and visible via /api/v2/alerts + the workbench
+# incident feed), but no webhook/email/pager delivery is configured. Wiring a
+# real notification channel is an operator decision that needs credentials —
+# add them to the receivers below; do not assume paging exists because this
+# service is healthy.
 global:
   resolve_timeout: 5m
 

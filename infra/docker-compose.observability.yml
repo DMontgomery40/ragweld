@@ -29,10 +29,187 @@ services:
       - "127.0.0.1:${ALLOY_HTTP_PORT:-52345}:12345"
       - "127.0.0.1:${ALLOY_OTLP_GRPC_PORT:-54319}:4317"
       - "127.0.0.1:${ALLOY_OTLP_HTTP_PORT:-54320}:4318"
+      # Faro (frontend RUM) collector endpoint.
+      - "127.0.0.1:${ALLOY_FARO_PORT:-52347}:12347"
+    environment:
+      # Faro CORS follows the Vite port so a FRONTEND_PORT override cannot
+      # silently reject beacons (start.sh forwards FRONTEND_PORT).
+      ALLOY_FARO_CORS_ORIGIN: "http://127.0.0.1:${FRONTEND_PORT:-55173}"
+      ALLOY_FARO_CORS_ORIGIN_LOCALHOST: "http://localhost:${FRONTEND_PORT:-55173}"
     volumes:
       - ./infra/alloy/config.alloy:/etc/alloy/config.alloy:ro
     depends_on:
       - tempo
 
+  mimir:
+    image: ${MIMIR_IMAGE:-grafana/mimir:2.13.0}
+    labels:
+      io.ragweld.managed: "true"
+    command: ["-config.file=/etc/mimir/mimir.yaml"]
+    ports:
+      - "127.0.0.1:${MIMIR_HTTP_PORT:-59009}:9009"
+    volumes:
+      - ./infra/mimir.yaml:/etc/mimir/mimir.yaml:ro
+      - mimir_data:/data
+
+  pyroscope:
+    image: ${PYROSCOPE_IMAGE:-grafana/pyroscope:1.7.1}
+    labels:
+      io.ragweld.managed: "true"
+    ports:
+      - "127.0.0.1:${PYROSCOPE_HTTP_PORT:-54040}:4040"
+    volumes:
+      - pyroscope_data:/data
+
+  alertmanager:
+    image: ${ALERTMANAGER_IMAGE:-prom/alertmanager:v0.27.0}
+    labels:
+      io.ragweld.managed: "true"
+    command:
+      - '--config.file=/etc/alertmanager/alertmanager.yml'
+      - '--storage.path=/alertmanager'
+    ports:
+      - "127.0.0.1:${ALERTMANAGER_PORT:-59093}:9093"
+    volumes:
+      - ./infra/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager_data:/alertmanager
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:9093/-/ready"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  # ------------------------------------------------------------------
+  # Langfuse v4 (LLM trace drilldown) and its private dependency plane.
+  # Only the web UI publishes a host port; Postgres/ClickHouse/Redis/MinIO
+  # stay VM-internal. Secrets follow the LiteLLM pattern: the committed
+  # example env works out of the box for the loopback-only dev stack, and
+  # the gitignored infra/langfuse.env overrides it.
+  # ------------------------------------------------------------------
+  langfuse:
+    image: ${LANGFUSE_IMAGE:-langfuse/langfuse:4}
+    labels:
+      io.ragweld.managed: "true"
+    env_file:
+      - ./infra/langfuse.env.example
+      - path: ./infra/langfuse.env
+        required: false
+    environment:
+      # Tied to the published port so a LANGFUSE_PORT override cannot break
+      # auth redirects while readiness stays green.
+      NEXTAUTH_URL: "http://127.0.0.1:${LANGFUSE_PORT:-53000}"
+    ports:
+      - "127.0.0.1:${LANGFUSE_PORT:-53000}:3000"
+    depends_on:
+      langfuse-postgres:
+        condition: service_healthy
+      langfuse-clickhouse:
+        condition: service_healthy
+      langfuse-redis:
+        condition: service_healthy
+      langfuse-minio:
+        condition: service_healthy
+    healthcheck:
+      # Next.js standalone binds to the container hostname (eth0), not loopback.
+      test: ["CMD-SHELL", "wget -qO- http://$(hostname):3000/api/public/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+
+  langfuse-worker:
+    image: ${LANGFUSE_WORKER_IMAGE:-langfuse/langfuse-worker:4}
+    labels:
+      io.ragweld.managed: "true"
+    env_file:
+      - ./infra/langfuse.env.example
+      - path: ./infra/langfuse.env
+        required: false
+    healthcheck:
+      # The worker binds the container hostname, not loopback.
+      test: ["CMD-SHELL", "wget -qO- http://$$(hostname):3030/api/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 30s
+    depends_on:
+      langfuse-postgres:
+        condition: service_healthy
+      langfuse-clickhouse:
+        condition: service_healthy
+      langfuse-redis:
+        condition: service_healthy
+      langfuse-minio:
+        condition: service_healthy
+
+  langfuse-postgres:
+    image: ${LANGFUSE_POSTGRES_IMAGE:-postgres:16-alpine}
+    labels:
+      io.ragweld.managed: "true"
+    environment:
+      POSTGRES_USER: langfuse
+      POSTGRES_PASSWORD: langfuse
+      POSTGRES_DB: langfuse
+    volumes:
+      - langfuse_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U langfuse -d langfuse"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  langfuse-clickhouse:
+    image: ${LANGFUSE_CLICKHOUSE_IMAGE:-clickhouse/clickhouse-server:25.12}
+    labels:
+      io.ragweld.managed: "true"
+    environment:
+      CLICKHOUSE_DB: default
+      CLICKHOUSE_USER: langfuse
+      CLICKHOUSE_PASSWORD: langfuse
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    volumes:
+      - langfuse_clickhouse_data:/var/lib/clickhouse
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8123/ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 24
+
+  langfuse-redis:
+    image: ${LANGFUSE_REDIS_IMAGE:-redis:7-alpine}
+    labels:
+      io.ragweld.managed: "true"
+    command: ["redis-server", "--requirepass", "langfuse"]
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a langfuse ping | grep PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  langfuse-minio:
+    image: ${LANGFUSE_MINIO_IMAGE:-minio/minio:latest}
+    labels:
+      io.ragweld.managed: "true"
+    entrypoint: ["sh", "-c", "mkdir -p /data/langfuse && exec minio server /data --address ':9000'"]
+    environment:
+      MINIO_ROOT_USER: langfuse
+      MINIO_ROOT_PASSWORD: langfuse-minio
+    volumes:
+      - langfuse_minio_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:9000/minio/health/live || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
 volumes:
   tempo_data:
+  mimir_data:
+  pyroscope_data:
+  alertmanager_data:
+  langfuse_postgres_data:
+  langfuse_clickhouse_data:
+  langfuse_minio_data:

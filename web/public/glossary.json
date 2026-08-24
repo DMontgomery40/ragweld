@@ -12561,6 +12561,92 @@
       ],
       "links": [],
       "badges": []
+    },
+    {
+      "term": "Mimir Base URL",
+      "key": "MIMIR_BASE_URL",
+      "definition": "MIMIR_BASE_URL points ragweld at the Grafana Mimir deployment that keeps long-range metrics. Prometheus forwards every sample it ingests to Mimir over remote write, so Mimir answers PromQL for retention windows Prometheus itself no longer holds. Readiness is probed at /ready; when the URL is empty the component reports disabled, never healthy.",
+      "category": "infrastructure",
+      "related": [
+        "Alertmanager Base URL",
+        "Pyroscope Base URL"
+      ],
+      "links": [
+        {
+          "text": "Grafana Mimir",
+          "href": "https://grafana.com/oss/mimir/"
+        }
+      ],
+      "badges": [
+        {
+          "text": "metrics",
+          "class": "info"
+        }
+      ]
+    },
+    {
+      "term": "Pyroscope Base URL",
+      "key": "PYROSCOPE_BASE_URL",
+      "definition": "PYROSCOPE_BASE_URL points ragweld at the Grafana Pyroscope server used for continuous profiling. When set, the host API attaches the Pyroscope agent at startup and pushes ragweld-api CPU profiles; the component status reports both server readiness (/ready) and the truthful host-agent state. Empty means profiling is off and the component reports disabled.",
+      "category": "infrastructure",
+      "related": [
+        "Mimir Base URL"
+      ],
+      "links": [
+        {
+          "text": "Grafana Pyroscope",
+          "href": "https://grafana.com/oss/pyroscope/"
+        }
+      ],
+      "badges": [
+        {
+          "text": "profiling",
+          "class": "info"
+        }
+      ]
+    },
+    {
+      "term": "Faro Base URL",
+      "key": "FARO_BASE_URL",
+      "definition": "FARO_BASE_URL is the frontend RUM collector endpoint (the Alloy faro.receiver /collect URL). When set, the workbench initializes the Faro Web SDK on boot and ships browser errors, web vitals, and session events; Alloy labels them service_name=ragweld-web and forwards logs to Loki. The status probe treats an HTTP 405/415 to GET as listener-present because the intake is POST-only.",
+      "category": "infrastructure",
+      "related": [
+        "Alloy Base URL",
+        "Loki"
+      ],
+      "links": [
+        {
+          "text": "Grafana Faro",
+          "href": "https://grafana.com/oss/faro/"
+        }
+      ],
+      "badges": [
+        {
+          "text": "RUM",
+          "class": "info"
+        }
+      ]
+    },
+    {
+      "term": "Alertmanager Base URL",
+      "key": "ALERTMANAGER_BASE_URL",
+      "definition": "ALERTMANAGER_BASE_URL points ragweld at the Prometheus Alertmanager that receives alert rules fired by Prometheus (infra/prometheus-rules.yml). The always-firing RagweldWatchdog alert proves the delivery pipe end to end; its absence from Alertmanager means rule evaluation or routing is broken. Readiness is probed at /-/ready.",
+      "category": "infrastructure",
+      "related": [
+        "Mimir Base URL"
+      ],
+      "links": [
+        {
+          "text": "Alertmanager",
+          "href": "https://prometheus.io/docs/alerting/latest/alertmanager/"
+        }
+      ],
+      "badges": [
+        {
+          "text": "alerting",
+          "class": "info"
+        }
+      ]
     }
   ]
 }

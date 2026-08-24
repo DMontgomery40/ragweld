@@ -14,6 +14,11 @@ from httpx import ASGITransport, AsyncClient
 from server.gateway_catalog import warm_gateway_catalog
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+# Test processes never attach the continuous-profiling agent, even when the
+# copied runtime config carries a Pyroscope server URL.
+os.environ.setdefault("RAGWELD_DISABLE_PROFILING", "1")
+
 _TEST_CONFIG_RUNTIME_DIR: str | None = None
 if os.environ.get("RAGWELD_STRICT_INTEGRATION", "").strip() == "1":
     strict_config_raw = os.environ.get("RAGWELD_CONFIG_PATH", "").strip()

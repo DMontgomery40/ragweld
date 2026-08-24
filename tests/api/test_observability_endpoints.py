@@ -111,8 +111,11 @@ async def test_observability_status_reports_langfuse_key_and_reachability_failur
         assert "LANGFUSE_PUBLIC_KEY" in str(data.get("operator_hint") or "")
         langfuse = next(component for component in data["components"] if component["id"] == "langfuse")
         assert langfuse["enabled"] is True
-        assert langfuse["configured"] is True
+        # A URL alone is not "configured": without ingestion keys this process
+        # would silently drop generations while the web UI stays green.
+        assert langfuse["configured"] is False
         assert langfuse["reachable"] is False
+        assert "LANGFUSE_PUBLIC_KEY" in str(langfuse.get("detail") or "")
     finally:
         if old_public is not None:
             os.environ["LANGFUSE_PUBLIC_KEY"] = old_public

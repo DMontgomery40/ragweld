@@ -16,7 +16,12 @@ from server.models.chat_config import ImageAttachment
 from server.models.retrieval import ChunkMatch
 from server.models.tribrid_config_model import TraceCostSummary
 from server.observability.costing import build_trace_cost_summary, extract_provider_cost
-from server.observability.runtime import record_langfuse_generation, set_cost_summary, stage_span
+from server.observability.runtime import (
+    langfuse_cost_details,
+    record_langfuse_generation,
+    set_cost_summary,
+    stage_span,
+)
 
 
 @dataclass(slots=True)
@@ -167,6 +172,7 @@ async def generate_chat_text(
     context_text: str | None = None,
     context_chunks: list[ChunkMatch],
     timeout_s: float = 120.0,
+    observation_name: str = "chat.generation",
 ) -> GenerationResult:
     """Generate one non-streaming response through LiteLLM."""
 
@@ -222,13 +228,20 @@ async def generate_chat_text(
         trace_id = _debug_trace_id(response)
         set_cost_summary(cost)
         record_langfuse_generation(
-            name="chat.generation",
+            name=observation_name,
             model=route.model,
             input_payload={"system_prompt": prompt, "user_message": user_message},
             output_text=text,
             usage_details=usage,
-            cost_details=cost.model_dump(mode="json", by_alias=True),
-            metadata={"provider_kind": "litellm", "provider_name": "LiteLLM", "debug_trace_id": trace_id},
+            cost_details=langfuse_cost_details(cost),
+            # Langfuse v4 does not yet surface the OTel model attribute as
+            # providedModelName, so the model rides in metadata too.
+            metadata={
+                "provider_kind": "litellm",
+                "provider_name": "LiteLLM",
+                "model": route.model,
+                "debug_trace_id": trace_id,
+            },
         )
 
     response_id = data.get("id") if isinstance(data.get("id"), str) else None
@@ -357,10 +370,11 @@ async def stream_chat_text(
             input_payload={"system_prompt": prompt, "user_message": user_message},
             output_text=streamed_text,
             usage_details=captured_usage,
-            cost_details=cost.model_dump(mode="json", by_alias=True),
+            cost_details=langfuse_cost_details(cost),
             metadata={
                 "provider_kind": "litellm",
                 "provider_name": "LiteLLM",
+                "model": route.model,
                 "debug_trace_id": captured_trace_id,
             },
         )

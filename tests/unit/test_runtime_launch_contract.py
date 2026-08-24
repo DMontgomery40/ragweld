@@ -265,16 +265,139 @@ def test_prometheus_scrapes_clean_start_data_and_generation_targets() -> None:
     assert "--web.enable-remote-write-receiver" in compose["services"]["prometheus"]["command"]
 
 
+def test_prometheus_forwards_to_mimir_and_routes_alerts_to_alertmanager() -> None:
+    import yaml
+
+    payload = yaml.safe_load((ROOT / "infra" / "prometheus.yml").read_text(encoding="utf-8"))
+
+    # Long-range retention: every WAL sample (scrapes + Tempo span metrics
+    # received over remote write) is forwarded to Mimir.
+    remote_write = payload["remote_write"]
+    assert remote_write == [{"url": "http://mimir:9009/api/v1/push"}]
+
+    alert_targets = [
+        target
+        for manager in payload["alerting"]["alertmanagers"]
+        for static in manager["static_configs"]
+        for target in static["targets"]
+    ]
+    assert alert_targets == ["alertmanager:9093"]
+    assert payload["rule_files"] == ["/etc/prometheus/prometheus-rules.yml"]
+
+    rules = yaml.safe_load((ROOT / "infra" / "prometheus-rules.yml").read_text(encoding="utf-8"))
+    alert_names = {
+        rule["alert"]
+        for group in rules["groups"]
+        for rule in group["rules"]
+        if "alert" in rule
+    }
+    # The watchdog proves the Prometheus -> Alertmanager delivery pipe end to
+    # end; the target-down rules cover the serving/data-plane jobs.
+    assert "RagweldWatchdog" in alert_names
+    assert {"RagweldApiDown", "RagweldGatewayDown", "RagweldLocalModelDown", "RagweldPostgresDown"} <= alert_names
+
+    compose = _compose_config("docker-compose.yml", "infra/docker-compose.observability.yml")
+    prometheus = compose["services"]["prometheus"]
+    rules_mount = _volume_for_target(prometheus, "/etc/prometheus/prometheus-rules.yml")
+    assert Path(rules_mount["source"]).resolve() == (ROOT / "infra" / "prometheus-rules.yml").resolve()
+
+
+def test_a3_fabric_services_are_managed_loopback_and_volume_backed() -> None:
+    config = _compose_config("docker-compose.yml", "infra/docker-compose.observability.yml")
+    services = config["services"]
+
+    fabric = {
+        "mimir",
+        "pyroscope",
+        "alertmanager",
+        "langfuse",
+        "langfuse-worker",
+        "langfuse-postgres",
+        "langfuse-clickhouse",
+        "langfuse-redis",
+        "langfuse-minio",
+    }
+    assert fabric <= set(services)
+
+    for name in fabric:
+        service = services[name]
+        assert "container_name" not in service
+        assert service["labels"]["io.ragweld.managed"] == "true"
+        for port in service.get("ports", []):
+            assert port.get("host_ip") == "127.0.0.1"
+
+    # Only the operator-facing surfaces publish host ports; the Langfuse
+    # dependency plane stays VM-internal.
+    assert _published_ports(services["mimir"]) == {59009}
+    assert _published_ports(services["pyroscope"]) == {54040}
+    assert _published_ports(services["alertmanager"]) == {59093}
+    assert _published_ports(services["langfuse"]) == {53000}
+    for internal in ("langfuse-worker", "langfuse-postgres", "langfuse-clickhouse", "langfuse-redis", "langfuse-minio"):
+        assert _published_ports(services[internal]) == set()
+
+    # Durable state lives in project-scoped named volumes.
+    assert _volume_for_target(services["mimir"], "/data")["type"] == "volume"
+    assert _volume_for_target(services["pyroscope"], "/data")["type"] == "volume"
+    assert _volume_for_target(services["alertmanager"], "/alertmanager")["type"] == "volume"
+    assert _volume_for_target(services["langfuse-postgres"], "/var/lib/postgresql/data")["type"] == "volume"
+    assert _volume_for_target(services["langfuse-clickhouse"], "/var/lib/clickhouse")["type"] == "volume"
+    assert _volume_for_target(services["langfuse-minio"], "/data")["type"] == "volume"
+
+    mimir_config = _volume_for_target(services["mimir"], "/etc/mimir/mimir.yaml")
+    assert Path(mimir_config["source"]).resolve() == (ROOT / "infra" / "mimir.yaml").resolve()
+    alertmanager_config = _volume_for_target(services["alertmanager"], "/etc/alertmanager/alertmanager.yml")
+    assert Path(alertmanager_config["source"]).resolve() == (ROOT / "infra" / "alertmanager.yml").resolve()
+
+    # Native default ports stay unpublished so foreign local listeners are
+    # never mistaken for Ragweld services.
+    published = set().union(*(_published_ports(services[name]) for name in fabric))
+    assert published.isdisjoint({9009, 4040, 9093, 3000, 8123, 6379, 9000, 12347})
+
+    launcher = (ROOT / "start.sh").read_text(encoding="utf-8")
+    observability_line = re.search(r"services\+=\(([^)]*)\)\s*\n\s*fi\s*\n\s*if \[\[ \"\$WITH_FLYTE\"", launcher)
+    assert observability_line is not None
+    started = set(observability_line.group(1).split())
+    assert fabric <= started
+
+
+def test_alloy_faro_receiver_feeds_loki_and_tempo() -> None:
+    config = _compose_config("docker-compose.yml", "infra/docker-compose.observability.yml")
+    alloy = config["services"]["alloy"]
+    assert 52347 in _published_ports(alloy)
+    # CORS follows the Vite port through Compose so a FRONTEND_PORT override
+    # cannot silently reject beacons.
+    assert alloy["environment"]["ALLOY_FARO_CORS_ORIGIN"] == "http://127.0.0.1:55173"
+    assert alloy["environment"]["ALLOY_FARO_CORS_ORIGIN_LOCALHOST"] == "http://localhost:55173"
+
+    source = (ROOT / "infra" / "alloy" / "config.alloy").read_text(encoding="utf-8")
+    assert 'faro.receiver "web"' in source
+    assert "listen_port    = 12347" in source
+    assert 'sys.env("ALLOY_FARO_CORS_ORIGIN")' in source
+    # Faro events join the shared streams: logs to Loki, traces to Tempo.
+    faro_block = source.split('faro.receiver "web"', 1)[1]
+    assert "loki.write.default.receiver" in faro_block
+    assert "otelcol.exporter.otlp.tempo.input" in faro_block
+
+
 def test_active_observability_urls_match_namespaced_loopback_ports() -> None:
     from server.api.docker import _loki_candidate_urls
     from server.models.tribrid_config_model import TriBridConfig
 
     active = json.loads((ROOT / "tribrid_config.json").read_text(encoding="utf-8"))
-    assert active["tracing"]["tracing_mode"] == "otel"
+    assert active["tracing"]["tracing_mode"] == "otel_langfuse"
     assert active["ui"]["grafana_base_url"] == "http://127.0.0.1:3301"
     assert active["tracing"]["tempo_base_url"] == "http://127.0.0.1:53200"
     assert active["tracing"]["alloy_base_url"] == "http://127.0.0.1:52345"
     assert active["tracing"]["otlp_endpoint"] == "http://127.0.0.1:54320/v1/traces"
+    # A3 fabric: every deployed component is configured at its namespaced
+    # loopback port; OpenCost stays empty (needs a Kubernetes runtime).
+    assert active["tracing"]["mimir_base_url"] == "http://127.0.0.1:59009"
+    assert active["tracing"]["pyroscope_base_url"] == "http://127.0.0.1:54040"
+    assert active["tracing"]["faro_base_url"] == "http://127.0.0.1:52347/collect"
+    assert active["tracing"]["alertmanager_base_url"] == "http://127.0.0.1:59093"
+    assert active["tracing"]["langfuse_enabled"] is True
+    assert active["tracing"]["langfuse_base_url"] == "http://127.0.0.1:53000"
+    assert active["tracing"]["opencost_base_url"] == ""
     assert TriBridConfig().ui.grafana_base_url == "http://127.0.0.1:3301"
     assert "http://127.0.0.1:53100" in _loki_candidate_urls()
     assert "http://127.0.0.1:3100" not in _loki_candidate_urls()

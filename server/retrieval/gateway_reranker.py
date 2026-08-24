@@ -124,6 +124,7 @@ async def score_candidates(
         user_message=user_message,
         images=[],
         image_detail="auto",
+        observation_name="reranker.generation",
         temperature=0.0,
         max_tokens=max(256, 24 * len(docs) + 64),
         context_text="",

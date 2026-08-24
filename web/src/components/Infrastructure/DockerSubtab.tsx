@@ -21,6 +21,15 @@ const SERVICE_LABELS: Record<RagweldDockerService, string> = {
   qdrant: 'Qdrant Vector Store',
   mlflow: 'MLflow Tracking',
   flyte: 'Flyte Control Plane',
+  mimir: 'Mimir Metrics Store',
+  pyroscope: 'Pyroscope Profiling',
+  alertmanager: 'Alertmanager',
+  langfuse: 'Langfuse',
+  'langfuse-worker': 'Langfuse Worker',
+  'langfuse-postgres': 'Langfuse Postgres',
+  'langfuse-clickhouse': 'Langfuse ClickHouse',
+  'langfuse-redis': 'Langfuse Redis',
+  'langfuse-minio': 'Langfuse MinIO',
 };
 
 function isRagweldService(value: string | null | undefined): value is RagweldDockerService {

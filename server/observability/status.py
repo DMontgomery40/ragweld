@@ -19,7 +19,19 @@ from server.models.tribrid_config_model import (
     TraceExternalLink,
     TriBridConfig,
 )
-from server.observability.runtime import normalize_tracing_mode
+from server.observability.profiling import profiling_state
+from server.observability.runtime import (
+    langfuse_client_blockers,
+    langfuse_ingestion_state,
+    normalize_tracing_mode,
+)
+
+
+def _langfuse_ingestion_detail(config: TriBridConfig) -> str:
+    blockers = langfuse_client_blockers(config.tracing)
+    if blockers:
+        return f"blocked ({'; '.join(blockers)})"
+    return langfuse_ingestion_state()
 from server.retrieval.qdrant_store import QdrantChunkStore
 from server.training.control_plane import build_agent_control_plane_status
 
@@ -384,9 +396,15 @@ async def build_observability_status(config: TriBridConfig, *, repo_id: str | No
             component_id="pyroscope",
             label="Pyroscope",
             enabled=bool(pyroscope_url),
-            configured=bool(pyroscope_url),
+            # A failed host agent degrades the component (severity=warning)
+            # even when the server itself answers /ready — a reachable server
+            # receiving nothing is not healthy profiling.
+            configured=bool(pyroscope_url) and not profiling_state().startswith("failed"),
             reachable=pyroscope_reachable,
-            detail=pyroscope_detail or "Continuous profiling backend for hot-path investigation.",
+            detail=(
+                f"{pyroscope_detail or 'Continuous profiling backend for hot-path investigation.'}"
+                f"; host agent: {profiling_state()}"
+            ),
             url=pyroscope_url or None,
             links=_make_links("Pyroscope", pyroscope_url, "Continuous profiling surface."),
         ),
@@ -416,17 +434,26 @@ async def build_observability_status(config: TriBridConfig, *, repo_id: str | No
             enabled=bool(alertmanager_url),
             configured=bool(alertmanager_url),
             reachable=alertmanager_reachable,
-            detail=alertmanager_detail or "Primary routing hub for wake-up paging and incident fanout.",
+            detail=(
+                f"{alertmanager_detail or 'Alert aggregation and routing for Prometheus rules.'}"
+                "; delivery receivers (webhook/email/pager) are operator-configured in infra/alertmanager.yml"
+            ),
             url=alertmanager_url or None,
-            links=_make_links("Alertmanager", alertmanager_url, "Wake-up routing path."),
+            links=_make_links("Alertmanager", alertmanager_url, "Alert routing surface."),
         ),
         _decorate_component(
             component_id="langfuse",
             label="Langfuse",
             enabled=config.tracing.langfuse_enabled and mode == "otel_langfuse",
-            configured=bool(langfuse_url),
+            # A reachable web UI is not enough: this process must also be able
+            # to build an ingestion client (keys + SDK), or generations are
+            # silently dropped while the health endpoint stays green.
+            configured=bool(langfuse_url) and not langfuse_client_blockers(config.tracing),
             reachable=langfuse_reachable,
-            detail=langfuse_detail or "Generation trace drilldown substrate.",
+            detail=(
+                f"{langfuse_detail or 'Generation trace drilldown substrate.'}"
+                f"; ingestion: {_langfuse_ingestion_detail(config)}"
+            ),
             url=langfuse_url or None,
             links=_make_links("Langfuse", langfuse_url, "Langfuse base URL.", kind="langfuse"),
         ),

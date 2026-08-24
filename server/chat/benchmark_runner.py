@@ -60,6 +60,7 @@ async def _run_one(
                 route=route,
                 system_prompt=config.chat.system_prompt_base,
                 user_message=prompt,
+                observation_name="benchmark.generation",
                 images=[],
                 temperature=config.chat.temperature_no_retrieval,
                 max_tokens=config.chat.max_tokens,

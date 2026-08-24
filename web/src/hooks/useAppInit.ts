@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useRepoStore } from '@/stores/useRepoStore';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { modelsApi } from '@/api';
+import { initFaroFromConfig } from '@/observability/faro';
 import { UiHelpers } from '@/utils/uiHelpers';
 
 /**
@@ -33,6 +34,20 @@ export function useAppInit() {
             .then(() => {})
             .catch((err: unknown) => console.warn('Failed to load models:', err)),
         ]);
+
+        // Frontend RUM: ships errors/web-vitals to the Alloy Faro collector
+        // when the loaded config carries a collector endpoint. If the config
+        // load failed transiently, retry when the store recovers instead of
+        // silently losing RUM for the whole session.
+        if (!initFaroFromConfig(useConfigStore.getState().config?.tracing?.faro_base_url)) {
+          const unsubscribe = useConfigStore.subscribe((state) => {
+            if (!state.config) return;
+            initFaroFromConfig(state.config.tracing?.faro_base_url);
+            // A loaded config settles the decision either way (an empty
+            // collector URL means RUM is intentionally off).
+            unsubscribe();
+          });
+        }
 
         UiHelpers.wireDayConverters();
 

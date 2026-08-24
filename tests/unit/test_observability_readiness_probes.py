@@ -65,3 +65,81 @@ def test_vllm_readiness_reports_every_drift_at_once() -> None:
     mismatch = vllm_serving_mismatch(_VLLM_MODEL_CARD, expected_model="Qwen/Qwen3-8B", expected_context=2048)
     assert mismatch is not None
     assert mismatch.count(";") == 1
+
+
+def test_profiling_stays_off_for_test_processes_and_without_a_server() -> None:
+    """The agent gate is deterministic: no server configured -> off; test lane -> off."""
+    import os
+
+    from server.models.tribrid_config_model import TriBridConfig
+    from server.observability import profiling
+
+    assert os.environ.get("RAGWELD_DISABLE_PROFILING") == "1"  # set by conftest
+
+    no_server = TriBridConfig()
+    no_server.tracing.pyroscope_base_url = ""
+    assert profiling.start_profiling(no_server) is False
+    assert "no pyroscope_base_url" in profiling.profiling_state()
+
+    configured = TriBridConfig()
+    configured.tracing.pyroscope_base_url = "http://127.0.0.1:54040"
+    assert profiling.start_profiling(configured) is False
+    assert "RAGWELD_DISABLE_PROFILING" in profiling.profiling_state()
+
+
+def test_langfuse_cost_details_maps_the_trace_summary_to_usd_totals() -> None:
+    from server.models.tribrid_config_model import TraceCostSummary
+    from server.observability.runtime import langfuse_cost_details
+
+    assert langfuse_cost_details(None) == {}
+    assert langfuse_cost_details(TraceCostSummary()) == {}
+    summary = TraceCostSummary(estimated_cost_usd=0.000844, cost_source="provider")
+    assert langfuse_cost_details(summary) == {"total": 0.000844}
+
+
+def test_langfuse_client_blockers_name_every_missing_precondition() -> None:
+    import os
+
+    from server.models.tribrid_config_model import TriBridConfig
+    from server.observability.runtime import langfuse_client_blockers
+
+    disabled = TriBridConfig()
+    disabled.tracing.langfuse_enabled = False
+    assert any("langfuse_enabled" in blocker for blocker in langfuse_client_blockers(disabled.tracing))
+
+    enabled = TriBridConfig()
+    enabled.tracing.langfuse_enabled = True
+    enabled.tracing.langfuse_base_url = ""
+    assert any("langfuse_base_url" in blocker for blocker in langfuse_client_blockers(enabled.tracing))
+
+    enabled.tracing.langfuse_base_url = "http://127.0.0.1:53000"
+    saved = {key: os.environ.pop(key, None) for key in ("LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY")}
+    try:
+        blockers = langfuse_client_blockers(enabled.tracing)
+        assert any("LANGFUSE_PUBLIC_KEY" in blocker for blocker in blockers)
+        assert any("LANGFUSE_SECRET_KEY" in blocker for blocker in blockers)
+        os.environ["LANGFUSE_PUBLIC_KEY"] = "pk-lf-unit"
+        os.environ["LANGFUSE_SECRET_KEY"] = "sk-lf-unit"
+        assert langfuse_client_blockers(enabled.tracing) == []
+    finally:
+        for key, value in saved.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+
+def test_langfuse_trace_url_is_built_from_config_without_network() -> None:
+    from server.models.tribrid_config_model import TriBridConfig
+    from server.observability.runtime import langfuse_trace_url
+
+    cfg = TriBridConfig()
+    cfg.tracing.langfuse_base_url = "http://127.0.0.1:53000/"
+    cfg.tracing.langfuse_project = "ragweld"
+    assert (
+        langfuse_trace_url(cfg.tracing, "a659c9939466c50f4a1158c586673388")
+        == "http://127.0.0.1:53000/project/ragweld/traces/a659c9939466c50f4a1158c586673388"
+    )
+    assert langfuse_trace_url(cfg.tracing, None) is None
+    cfg.tracing.langfuse_base_url = ""
+    assert langfuse_trace_url(cfg.tracing, "abc") is None

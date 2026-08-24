@@ -106,6 +106,7 @@ services:
       - "127.0.0.1:${PROMETHEUS_PORT:-59090}:9090"
     volumes:
       - ./infra/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./infra/prometheus-rules.yml:/etc/prometheus/prometheus-rules.yml:ro
       - prometheus_data:/prometheus
     depends_on:
       - postgres-exporter

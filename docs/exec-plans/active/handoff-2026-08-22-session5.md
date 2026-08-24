@@ -1,5 +1,45 @@
 # Handoff Prompt — Ragweld Recovery, Session 5
 
+> Checkpoint 2026-08-24 (session 10): **A3 is DONE** — the observability
+> fabric is complete
+> (`a3-observability-fabric-2026-08-24.md` is the execution record). Mimir
+> (59009, Prometheus remote_write), Pyroscope (54040, host-API `pyroscope-io`
+> agent with server-confirmed profile verification), Faro (Alloy receiver on
+> 52347 + `@grafana/faro-web-sdk` in the workbench, events land in Loki as
+> `service_name=ragweld-web`), Alertmanager (59093, rules in
+> `infra/prometheus-rules.yml`, always-firing `RagweldWatchdog` proves
+> delivery; receivers intentionally empty/operator-owned), and **Langfuse v4**
+> (53000; worker + own Postgres/ClickHouse 25.12/Redis/MinIO; fresh-install
+> `events_only` mode — read via `GET /api/public/v2/observations`). The
+> previously-dead Langfuse ingestion is FIXED: `record_langfuse_generation`
+> creates a real generation observation on the shared TracerProvider (same
+> trace id as `X-Trace-ID`), with per-path observation names
+> (chat/reranker/benchmark/eval/synthetic), Langfuse-shaped cost details, and
+> a config-built deep link (no SDK network call on the request path).
+> `start.sh` provisions per-machine Langfuse secrets into
+> `infra/langfuse.env` + `.env` and probes Mimir/Pyroscope `/ready` after
+> `up --wait` (distroless images, no container healthchecks). Component
+> status is truthful: Langfuse `configured` requires buildable ingestion
+> (keys+SDK) and shows live ingestion state; Pyroscope degrades on a failed
+> host agent. OpenCost stays disabled (needs Kubernetes; Colima runs plain
+> Docker). Adversarial codex pass REFUTED the first cut (2 P1 / 8 P2) — all
+> ten acted on (see the slice doc). Colima stays at `--memory 16` (operator:
+> the crashes were local-model RAM, not the VM; ~9.4 GiB free held). Gates on
+> the final tree: six validators, full pytest 1138/78, strict lane 82, web
+> lint/build, Faro Playwright E2E (beacon accepted + events land in Loki),
+> live status all-green with real proof (Langfuse trace
+> `61b0ef1f787034c02339de3d3230b0d1`: chat.generation $0.000896 gpt-5.6-luna
+> + reranker.generation $0.00033 gpt-4.1-nano). Incidental fixes: 12
+> pytest-leftover corpora deleted from the live registry (boot 404 noise);
+> the positioning guardrail test now pins the operator's 2026-08-24 README
+> repositioning (safe claims kept, DSV claims still banned). GitNexus
+> detect_changes is BLOCKED by a reader/index version mismatch (storage 42 vs
+> reader 40) — run a gitnexus upgrade/re-analyze. NOT pushed — the operator
+> pushes. Next: Phase B Chrome drives
+> (`frontend-browser-findings-2026-08-20.md` checklist; first defect already
+> logged: Neural Visualizer `connect(null)`), then A5 residual dead-code +
+> final acceptance matrix.
+>
 > Checkpoint 2026-08-23 (session 9, landed at `7daf62f`): the **run-state
 > authority slice is DONE**
 > (`training-run-state-authority-2026-08-23.md`, execution record + codex
