@@ -392,6 +392,72 @@ outcomes:
 All fixes re-verified: eval unit/API suites, both regression specs, tsc,
 and the interactive keyboard drive above.
 
+## Defect 7 (operator-reported, session 12): Eval Analysis unscrollable + Promptfoo cost trap — FIXED
+
+Reported by the operator after B9's full-dataset run landed: "the whole eval
+analysis screen is screwed up you can't scroll down, and those prompts should
+be collapsable".
+
+### Root cause
+
+`PromptfooRegressionPanel` rendered every result of the latest run fully
+expanded (200 cards ≈ 29,900 px after B9) and was mounted inside the FIXED
+header region of `EvalAnalysisTab` — above the `overflow:auto` content area,
+inside the tab root's `overflow:hidden`. Measured live: 36,467 px of content
+clipped to a 499 px root; the content area got nothing and the clipped header
+cannot scroll. The same clipping class also fired on short viewports whenever
+the header grew (the 400 px eval LiveTerminal lives there), independent of
+Promptfoo.
+
+### Fix
+
+- Only the subtab nav stays pinned; the whole analysis header (title, run
+  selectors, Run Settings, terminal, progress) now scrolls with the content.
+- The Promptfoo panel moved into the scrollable content flow; per-entry
+  results sit in a `CollapsibleSection` (collapsed by default) and each card
+  is a closed `<details>` — entry id, verdict, and question scannable,
+  response + grader prose behind the disclosure.
+- Sample-size dropdown (10/25/50/100/All, default 25) rides the existing
+  `EvalRequest.sample_size` field — closes the B9 cost finding where one
+  click ran the full 200-row, ~30-minute, several-hundred-LLM-call
+  regression. `run_promptfoo` already honored the field; the UI never sent it.
+- The promptfoo POST uses `timeout: 0` (the shared axios client's 30 s
+  timeout aborted healthy multi-minute runs client-side), and a transport
+  failure now starts a bounded recovery poll (15 s cadence, 30 min cap) so a
+  server-side run that finishes after an abort still surfaces.
+
+### Evidence
+
+- Regression spec `web/tests/e2e/exhaustive/eval_analysis_layout.spec.ts`
+  (no interception): fails on the pre-fix tree (offender: 36,467 px clipped
+  into 499), passes post-fix — clipping invariant (no overflow:hidden
+  ancestor of the panel may hold overflowing content), reachability of Run
+  Eval via real hit-testing, collapse-by-default, per-card `<details>`,
+  sample-size control presence/default. Collapse assertions skip loudly (not
+  silently pass) when the environment has no recorded run.
+- Chrome re-drive with real input: expand section, expand card, all four
+  eval subtabs render, zero console errors.
+- Sample control proven end-to-end from the UI: run
+  `epstein-files-1__promptfoo__20260824_233808`, total 10, 7/3 pass/fail,
+  58 s real gateway traffic.
+- Full closeout gate green (validators, LiteLLM lockstep, lint, build,
+  pytest 1141 passed / 78 skipped).
+
+### Adversarial review (rule 0.2)
+
+codex (high effort) REQUEST CHANGES: 3 P2 / 2 P3. Fixed: stale-corpus
+`setRuns` race (current-corpus guard), hidden-run-after-transport-failure
+(bounded recovery poll), silent-pass collapse test (explicit `test.skip`
+with exact reason), spec type annotation. Refuted with rationale: persisted
+collapse-state hermeticity (Playwright runs each test in a fresh context, so
+`useUIStore` starts empty). Not refuted by codex: the layout topology and
+the sample-size wire path.
+
+Unrelated observation from the drive: a full-dataset promptfoo run started
+at 23:15:06Z (before any automation in the session touched the panel) —
+consistent with a one-click launch on the old panel; exactly the trap the
+default-25 dropdown closes.
+
 ## B8 drive: Training Center — PARTIAL (operator constraint)
 
 The Learning Agent Studio renders truthful control-plane state (Flyte

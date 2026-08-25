@@ -25,7 +25,10 @@ export const evalApi = {
   },
 
   async runPromptfoo(request: EvalRequest): Promise<PromptfooRun> {
-    const { data } = await apiClient.post<PromptfooRun>(api('/eval/promptfoo/run'), request);
+    // The route blocks until the real promptfoo CLI finishes (minutes for a
+    // sampled run, ~30 min for the full dataset) — the client's default 30s
+    // timeout would abort a healthy run mid-flight.
+    const { data } = await apiClient.post<PromptfooRun>(api('/eval/promptfoo/run'), request, { timeout: 0 });
     return data;
   },
 

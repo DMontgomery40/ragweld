@@ -1,6 +1,13 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { evalApi } from '@/api/eval';
+import { CollapsibleSection } from '@/components/ui/CollapsibleSection';
 import type { PromptfooRun, PromptfooRunResult } from '@/types/generated';
+
+// After a transport-level launch failure the server-side promptfoo run may
+// still be executing; poll this often, for at most this long, so a recorded
+// run never stays hidden until the next visit.
+const RECOVERY_POLL_INTERVAL_MS = 15_000;
+const RECOVERY_POLL_MAX_MS = 30 * 60_000;
 
 type Props = {
   corpusId: string;
@@ -23,35 +30,89 @@ function readDetail(error: unknown): StructuredDetail | null {
 export function PromptfooRegressionPanel({ corpusId }: Props) {
   const [runs, setRuns] = useState<PromptfooRun[]>([]);
   const [running, setRunning] = useState(false);
+  const [sampleSize, setSampleSize] = useState<string>('25');
   const [failure, setFailure] = useState<StructuredDetail | null>(null);
   const [plainError, setPlainError] = useState<string | null>(null);
 
-  const refresh = useCallback(async () => {
-    if (!corpusId) return;
+  // The panel does not remount on corpus switch: a slow response for the old
+  // corpus must never overwrite the new corpus's list.
+  const activeCorpusRef = useRef(corpusId);
+  useEffect(() => {
+    activeCorpusRef.current = corpusId;
+  }, [corpusId]);
+  const recoveryPollRef = useRef<number | null>(null);
+
+  const refresh = useCallback(async (): Promise<PromptfooRun[]> => {
+    if (!corpusId) return [];
     try {
       const data = await evalApi.listPromptfooRuns(corpusId);
-      setRuns(data.runs || []);
+      const next = data.runs || [];
+      if (activeCorpusRef.current === corpusId) setRuns(next);
+      return next;
     } catch (error) {
-      setPlainError(error instanceof Error ? error.message : 'Failed to load Promptfoo runs');
+      if (activeCorpusRef.current === corpusId) {
+        setPlainError(error instanceof Error ? error.message : 'Failed to load Promptfoo runs');
+      }
+      return [];
     }
   }, [corpusId]);
 
+  const stopRecoveryPoll = useCallback(() => {
+    if (recoveryPollRef.current !== null) {
+      window.clearInterval(recoveryPollRef.current);
+      recoveryPollRef.current = null;
+    }
+  }, []);
+
+  const startRecoveryPoll = useCallback(
+    (lastKnownRunId: string | null) => {
+      stopRecoveryPoll();
+      const startedAt = Date.now();
+      const pollCorpus = corpusId;
+      recoveryPollRef.current = window.setInterval(() => {
+        if (activeCorpusRef.current !== pollCorpus || Date.now() - startedAt > RECOVERY_POLL_MAX_MS) {
+          stopRecoveryPoll();
+          return;
+        }
+        void refresh().then((next) => {
+          if (next.length && next[0].run_id !== lastKnownRunId) {
+            stopRecoveryPoll();
+            if (activeCorpusRef.current === pollCorpus) setPlainError(null);
+          }
+        });
+      }, RECOVERY_POLL_INTERVAL_MS);
+    },
+    [corpusId, refresh, stopRecoveryPoll],
+  );
+
   useEffect(() => {
     void refresh();
-  }, [refresh]);
+    return stopRecoveryPoll;
+  }, [refresh, stopRecoveryPoll]);
 
   const launch = async () => {
     setRunning(true);
     setFailure(null);
     setPlainError(null);
+    const lastKnownRunId = runs[0]?.run_id ?? null;
     try {
-      await evalApi.runPromptfoo({ corpus_id: corpusId });
-      await refresh();
+      await evalApi.runPromptfoo({
+        corpus_id: corpusId,
+        sample_size: sampleSize ? parseInt(sampleSize, 10) : undefined,
+      });
     } catch (error) {
       const detail = readDetail(error);
-      if (detail) setFailure(detail);
-      else setPlainError(error instanceof Error ? error.message : 'Promptfoo run failed');
+      if (detail) {
+        setFailure(detail);
+      } else {
+        // Transport-level failure: the server-side run may still be executing
+        // and will be saved when it finishes — keep polling so the recorded
+        // run never stays hidden until the next visit.
+        setPlainError(error instanceof Error ? error.message : 'Promptfoo run failed');
+        startRecoveryPoll(lastKnownRunId);
+      }
     } finally {
+      await refresh();
       setRunning(false);
     }
   };
@@ -62,7 +123,7 @@ export function PromptfooRegressionPanel({ corpusId }: Props) {
     <section
       data-testid="promptfoo-regression-panel"
       style={{
-        margin: '0 24px 16px',
+        margin: '16px 24px',
         padding: '16px',
         border: '1px solid var(--line)',
         borderRadius: '10px',
@@ -73,14 +134,49 @@ export function PromptfooRegressionPanel({ corpusId }: Props) {
         <div>
           <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--fg)' }}>Promptfoo regression</div>
           <div style={{ fontSize: '12px', color: 'var(--fg-muted)', marginTop: '4px' }}>
-            Answers every eval entry with an expected answer through the LiteLLM gateway and grades it with an
+            Answers sampled eval entries with an expected answer through the LiteLLM gateway and grades each with an
             llm-rubric assertion. Runs execute the real promptfoo CLI; nothing is simulated.
           </div>
         </div>
-        <button type="button" className="small-button" onClick={() => void launch()} disabled={running || !corpusId}>
-          {running ? 'Running promptfoo…' : 'Run Promptfoo regression'}
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+          <label
+            htmlFor="promptfoo-sample-size"
+            style={{ fontSize: '12px', color: 'var(--fg-muted)' }}
+          >
+            Sample size
+          </label>
+          <select
+            id="promptfoo-sample-size"
+            data-testid="promptfoo-sample-size"
+            value={sampleSize}
+            disabled={running}
+            onChange={(e) => setSampleSize(e.target.value)}
+            style={{
+              background: 'var(--input-bg)',
+              border: '1px solid var(--line)',
+              color: 'var(--fg)',
+              padding: '8px 10px',
+              borderRadius: '8px',
+              fontSize: '12.5px',
+              cursor: running ? 'not-allowed' : 'pointer',
+            }}
+          >
+            <option value="10">10 entries</option>
+            <option value="25">25 entries</option>
+            <option value="50">50 entries</option>
+            <option value="100">100 entries</option>
+            <option value="">All entries (full dataset)</option>
+          </select>
+          <button type="button" className="small-button" onClick={() => void launch()} disabled={running || !corpusId}>
+            {running ? 'Running promptfoo…' : 'Run Promptfoo regression'}
+          </button>
+        </div>
       </div>
+      {!sampleSize ? (
+        <div style={{ marginTop: '8px', fontSize: '12px', color: 'var(--warn, var(--fg-muted))' }}>
+          Full-dataset runs answer and grade every entry with an expected answer — expect a long run and real LLM cost.
+        </div>
+      ) : null}
 
       {failure ? (
         <div
@@ -122,33 +218,80 @@ export function PromptfooRegressionPanel({ corpusId }: Props) {
               provider {latest.provider_alias} · grader {latest.grader_alias} · promptfoo {latest.promptfoo_version}
             </span>
           </div>
-          <div style={{ marginTop: '10px', display: 'grid', gap: '8px' }}>
-            {(latest.results as PromptfooRunResult[]).map((result: PromptfooRunResult) => (
-              <div
-                key={result.entry_id}
-                style={{
-                  padding: '10px 12px',
-                  borderRadius: '8px',
-                  border: '1px solid var(--line)',
-                  background: 'var(--bg)',
-                  fontSize: '12.5px',
-                }}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px' }}>
-                  <strong>{result.entry_id}</strong>
-                  <span style={{ color: result.passed ? 'var(--ok)' : 'var(--err)', fontWeight: 700 }}>
-                    {result.passed ? 'PASS' : 'FAIL'} · {result.score.toFixed(2)}
-                  </span>
-                </div>
-                <div style={{ color: 'var(--fg-muted)', marginTop: '4px' }}>{result.question}</div>
-                {result.response ? (
-                  <div style={{ marginTop: '6px', whiteSpace: 'pre-wrap' }}>{result.response.split('</think>').pop()?.trim()}</div>
-                ) : null}
-                {result.reason ? (
-                  <div style={{ marginTop: '6px', fontSize: '11.5px', color: 'var(--fg-muted)' }}>grader: {result.reason}</div>
-                ) : null}
+          <div style={{ marginTop: '12px' }}>
+            <CollapsibleSection
+              title={`Run results (${(latest.results as PromptfooRunResult[]).length})`}
+              description="Per-entry verdicts. Expand a card for the generated answer and the grader's reasoning."
+              defaultExpanded={false}
+              storageKey="promptfoo_run_results"
+            >
+              <div style={{ display: 'grid', gap: '8px' }}>
+                {(latest.results as PromptfooRunResult[]).map((result: PromptfooRunResult) => (
+                  <details
+                    key={result.entry_id}
+                    data-testid="promptfoo-result-card"
+                    style={{
+                      borderRadius: '8px',
+                      border: '1px solid var(--line)',
+                      background: 'var(--bg)',
+                      fontSize: '12.5px',
+                    }}
+                  >
+                    <summary
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'baseline',
+                        gap: '12px',
+                        padding: '10px 12px',
+                        cursor: 'pointer',
+                        listStyle: 'none',
+                      }}
+                    >
+                      <span style={{ minWidth: 0 }}>
+                        <strong style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: '11.5px' }}>
+                          {result.entry_id}
+                        </strong>
+                        <span
+                          style={{
+                            display: 'block',
+                            color: 'var(--fg-muted)',
+                            marginTop: '2px',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          {result.question}
+                        </span>
+                      </span>
+                      <span
+                        style={{
+                          color: result.passed ? 'var(--ok)' : 'var(--err)',
+                          fontWeight: 700,
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {result.passed ? 'PASS' : 'FAIL'} · {result.score.toFixed(2)}
+                      </span>
+                    </summary>
+                    <div style={{ padding: '0 12px 10px', borderTop: '1px solid var(--line)' }}>
+                      <div style={{ color: 'var(--fg-muted)', marginTop: '8px' }}>{result.question}</div>
+                      {result.response ? (
+                        <div style={{ marginTop: '6px', whiteSpace: 'pre-wrap' }}>
+                          {result.response.split('</think>').pop()?.trim()}
+                        </div>
+                      ) : null}
+                      {result.reason ? (
+                        <div style={{ marginTop: '6px', fontSize: '11.5px', color: 'var(--fg-muted)' }}>
+                          grader: {result.reason}
+                        </div>
+                      ) : null}
+                    </div>
+                  </details>
+                ))}
               </div>
-            ))}
+            </CollapsibleSection>
           </div>
         </div>
       ) : (
