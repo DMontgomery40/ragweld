@@ -195,7 +195,18 @@ def test_active_docker_config_has_no_remote_daemon_or_dead_infra_authority() -> 
 
 
 def test_removed_docker_controls_are_absent_from_glossary_mirrors() -> None:
-    removed_keys = {"DOCKER_INFRA_UP_TIMEOUT", "DOCKER_INFRA_DOWN_TIMEOUT"}
+    removed_keys = {
+        "DOCKER_INFRA_UP_TIMEOUT",
+        "DOCKER_INFRA_DOWN_TIMEOUT",
+        # Tooltips of the alert-thresholds form that posted to a route which never
+        # existed (2026-08-25 drive finding M10); the form and its store are gone.
+        "COHERE_RERANK_CALLS",
+        "ENDPOINT_CALL_FREQUENCY",
+        "ENDPOINT_SUSTAINED_DURATION",
+        "ERROR_RATE_THRESHOLD",
+        "RATE_LIMIT_ERRORS_THRESHOLD",
+        "TIMEOUT_ERRORS_THRESHOLD",
+    }
     source = json.loads((ROOT / "data" / "glossary.json").read_text(encoding="utf-8"))
     public = json.loads((ROOT / "web" / "public" / "glossary.json").read_text(encoding="utf-8"))
 

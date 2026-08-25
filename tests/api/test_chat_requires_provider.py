@@ -28,6 +28,8 @@ class _FakeFusion:
         include_sparse: bool = True,
         include_graph: bool = True,
         top_k: int | None = None,
+        cache_mode: str = "default",
+        cache_namespace: str = "search",
     ) -> list[ChunkMatch]:
         _ = (corpus_ids, query, config, include_vector, include_sparse, include_graph, top_k)
         self.last_debug = {

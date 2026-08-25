@@ -452,20 +452,30 @@ class LokiStatus(BaseModel):
     status: str = Field(default="unreachable", description="Human-readable status label (best-effort).")
 
 
-class MCPRagSearchResult(BaseModel):
-    """Compact result shape for legacy /api/mcp/rag_search (debug UI)."""
+class MCPProbeRequest(BaseModel):
+    """Run one real MCP tool call through the mounted Streamable HTTP transport."""
 
-    file_path: str = Field(description="Matched file path.")
-    start_line: int = Field(description="Start line for the matched span.")
-    end_line: int = Field(description="End line for the matched span.")
-    rerank_score: float = Field(description="Legacy field: score for the match (post-fusion).")
+    question: str = Field(min_length=1, description="A real question about the corpus (never a placeholder).")
+    corpus_id: str | None = Field(
+        default=None,
+        description="Corpus to search; required unless the request carries corpus_id in its scope.",
+    )
+    mode: Literal["tribrid", "dense_only", "sparse_only", "graph_only"] | None = Field(
+        default=None,
+        description="Retrieval mode passed to the MCP search tool; null uses mcp.default_mode exactly like an MCP client.",
+    )
+    top_k: int | None = Field(default=None, ge=1, le=100, description="Result count passed to the tool; null uses mcp.default_top_k.")
 
 
-class MCPRagSearchResponse(BaseModel):
-    """Response payload for legacy /api/mcp/rag_search (debug UI)."""
+class MCPProbeResponse(BaseModel):
+    """Result of invoking the MCP `search` tool over the mounted transport."""
 
-    results: list[MCPRagSearchResult] = Field(default_factory=list, description="Compact match list.")
-    error: str | None = Field(default=None, description="Error message when the search fails.")
+    tool: str = Field(default="search", description="Tool that was invoked.")
+    transport_url: str = Field(description="Streamable HTTP endpoint the client session connected to.")
+    corpus_id: str = Field(description="Corpus the tool searched.")
+    mode: str = Field(description="Retrieval mode the tool resolved (request override or mcp.default_mode).")
+    top_k: int = Field(ge=1, description="Result count the tool resolved.")
+    results: list[ChunkMatch] = Field(default_factory=list, description="Structured tool output, validated as ChunkMatch rows.")
 
 
 class MCPHTTPTransportStatus(BaseModel):
@@ -1628,7 +1638,9 @@ class ObservabilityAlertRule(BaseModel):
 
     group: str = Field(description="Rule group name from the Prometheus rules file.")
     name: str = Field(description="Alert name.")
-    state: str = Field(description="Prometheus rule state: inactive, pending, or firing.")
+    state: Literal["inactive", "pending", "firing", "unknown"] = Field(
+        description="Prometheus rule state; 'unknown' when Prometheus reported a state this build does not model."
+    )
     severity: str | None = Field(default=None, description="severity label on the rule, when set.")
     query: str = Field(description="PromQL expression the rule evaluates.")
     duration_seconds: float = Field(default=0.0, ge=0.0, description="'for' duration before the alert fires.")
@@ -4713,10 +4725,12 @@ class FusionConfig(BaseModel):
         their sum at fusion time (``TriBridFusion.weighted_fusion``), so a
         single-field edit never rewrites the other two fields.
         """
+        if self.method != "weighted":
+            return self  # RRF never reads the weights
         total = self.vector_weight + self.sparse_weight + self.graph_weight
         if total <= 0:
             raise ValueError(
-                "fusion weights must not all be zero: vector_weight + sparse_weight + graph_weight must be > 0"
+                "weighted fusion needs at least one positive weight: vector_weight + sparse_weight + graph_weight must be > 0"
             )
         return self
 

@@ -6,7 +6,7 @@ datasources:
     uid: mimir
     access: proxy
     url: http://mimir:9009/prometheus
-    isDefault: false
+    isDefault: true
     editable: false
     jsonData:
       timeInterval: 5s

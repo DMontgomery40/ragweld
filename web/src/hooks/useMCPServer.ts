@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAPI } from '@/hooks/useAPI';
 import { MCPServerService } from '@/services/MCPServerService';
-import type { MCPRagSearchResponse, MCPStatusResponse } from '@/types/generated';
+import type { MCPProbeResponse, MCPStatusResponse } from '@/types/generated';
 
 type MCPServerState = {
   status: MCPStatusResponse | null;
-  probe: MCPRagSearchResponse | null;
+  probe: MCPProbeResponse | null;
   probeQuestion: string | null;
   loading: boolean;
   probing: boolean;
@@ -43,7 +43,7 @@ export function useMCPServer() {
     async (question: string, corpusId: string) => {
       setState((s) => ({ ...s, probing: true, error: null }));
       try {
-        const probe = await service.probeSearch(question, corpusId);
+        const probe = await service.probeSearch({ question, corpus_id: corpusId, top_k: 5 });
         setState((s) => ({ ...s, probe, probeQuestion: question, probing: false }));
         return probe;
       } catch (e) {

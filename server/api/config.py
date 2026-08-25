@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import importlib.util
 import os
 import re
@@ -16,8 +17,6 @@ from server.api.dependency_errors import (
 )
 from server.api.retrieval_errors import (
     RETRIEVAL_RUNTIME_UNAVAILABLE_RESPONSES,
-    required_retrieval_leg_http_exception,
-    retrieval_contract_mismatch_http_exception,
 )
 from server.chat.prompt_budget import context_window_for_alias
 from server.config import load_config as load_global_config
@@ -30,14 +29,15 @@ from server.db.postgres import PostgresClient
 from server.dependency_errors import DependencyUnavailableError
 from server.gateway_catalog import gateway_rows_snapshot
 from server.lineage import ensure_current_bundle
+from server.models.retrieval import ChunkMatch
 from server.models.tribrid_config_model import (
     ConfigReadinessResponse,
     ConfigRegistryResponse,
     CorpusScope,
     MCPHTTPTransportStatus,
     MCPToolInfo,
-    MCPRagSearchResponse,
-    MCPRagSearchResult,
+    MCPProbeRequest,
+    MCPProbeResponse,
     MCPStatusResponse,
     ModelValidationResult,
     ModelValidationWarning,
@@ -49,8 +49,6 @@ from server.retrieval.contracts import (
     provider_requires_tokenizer,
     sparse_contract_from_config,
 )
-from server.retrieval.errors import RequiredRetrievalLegError, RetrievalContractMismatchError
-from server.retrieval.fusion import TriBridFusion
 from server.retrieval.qdrant_store import QdrantChunkStore
 from server.services.config_store import CorpusNotFoundError
 from server.services.config_store import get_config as load_scoped_config
@@ -704,67 +702,108 @@ async def mcp_status(request: Request) -> MCPStatusResponse:
     )
 
 
-@router.get(
-    "/mcp/rag_search",
-    response_model=MCPRagSearchResponse,
+def _describe_exception(exc: BaseException) -> str:
+    """Flatten anyio ExceptionGroups so the operator sees the real failure, not 'unhandled errors in a TaskGroup'."""
+    if isinstance(exc, BaseExceptionGroup):
+        parts = [_describe_exception(sub) for sub in exc.exceptions]
+        return "; ".join(dict.fromkeys(p for p in parts if p))
+    message = str(exc).strip()
+    return f"{type(exc).__name__}: {message}" if message else type(exc).__name__
+
+
+@router.post(
+    "/mcp/probe",
+    response_model=MCPProbeResponse,
     responses=RETRIEVAL_RUNTIME_UNAVAILABLE_RESPONSES,
 )
-async def mcp_rag_search(
-    q: str = Query(..., description="Search query"),
-    top_k: int | None = Query(default=None, ge=1, le=100, description="Number of results to return"),
+async def mcp_probe(
+    payload: MCPProbeRequest,
+    request: Request,
     scope: CorpusScope = _CORPUS_SCOPE_DEP,
-) -> MCPRagSearchResponse:
-    """Run tri-brid search and return compact results for MCP/debug tooling."""
-    repo_id = scope.resolved_repo_id
-    if not repo_id:
-        raise HTTPException(status_code=422, detail="Missing corpus_id (or legacy repo_id)")
-    if not q.strip():
-        raise HTTPException(status_code=400, detail="Query must not be empty")
+) -> MCPProbeResponse:
+    """Invoke the MCP `search` tool the way an MCP client does: a real ClientSession over the mounted transport.
 
+    This is the only search path the MCP subtab probes; there is no HTTP shortcut
+    that bypasses the tool (the former /api/mcp/rag_search always enabled every
+    retrieval leg and ignored mcp.default_mode).
+    """
+    from mcp import ClientSession
+    from mcp.client.streamable_http import streamable_http_client
+    from mcp.types import TextContent
+
+    import httpx
+
+    from server.mcp.server import mounted_state
+
+    corpus_id = str(payload.corpus_id or scope.resolved_repo_id or "").strip()
+    if not corpus_id:
+        raise HTTPException(status_code=422, detail="corpus_id is required")
+    question = str(payload.question or "").strip()
+    if not question:
+        raise HTTPException(status_code=400, detail="Question must not be empty")
+    enabled, mount_path = mounted_state()
+    if not enabled:
+        raise HTTPException(status_code=503, detail="The MCP Streamable HTTP transport is not mounted in this process")
+
+    cfg = load_global_config()
+    # Same typed boundary as every stateful route: a reachable store proves the
+    # corpus exists (404) and an unreachable one is the structured 503, before a
+    # tool session is opened.
     try:
-        # Validate corpus exists (avoid implicitly creating new corpora/configs).
+        pg = PostgresClient(cfg.indexing.postgres_url)
+        await pg.connect()
         try:
-            global_cfg = load_global_config()
-            pg = PostgresClient(global_cfg.indexing.postgres_url)
-            await pg.connect()
-            corpus = await pg.get_corpus(repo_id)
-            if corpus is None:
-                raise HTTPException(status_code=404, detail=f"Corpus not found: {repo_id}")
-            cfg = await load_scoped_config(repo_id=repo_id)
+            corpus = await pg.get_corpus(corpus_id)
+        finally:
+            with contextlib.suppress(Exception):
+                await pg.disconnect()
+    except Exception as exc:
+        raise_postgres_unavailable_if_applicable(exc, boundary="MCP probe corpus validation")
+        raise
+    if corpus is None:
+        raise HTTPException(status_code=404, detail=f"Corpus not found: {corpus_id}")
+    resolved_mode = str(payload.mode or cfg.mcp.default_mode)
+    resolved_top_k = int(payload.top_k or cfg.mcp.default_top_k)
+    host = request.url.hostname or "127.0.0.1"
+    port = request.url.port or (443 if request.url.scheme == "https" else 80)
+    transport_url = f"http://{host}:{port}{mount_path.rstrip('/')}/"
+
+    # Same process, real transport: the MCP session manager runs in this app's lifespan.
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=request.app), base_url=f"http://{host}:{port}") as http_client:
+        try:
+            async with streamable_http_client(transport_url, http_client=http_client) as (read, write, _):
+                async with ClientSession(read, write) as session:
+                    await session.initialize()
+                    arguments: dict[str, Any] = {"query": question, "corpus_id": corpus_id}
+                    if payload.mode:
+                        arguments["mode"] = payload.mode
+                    if payload.top_k:
+                        arguments["top_k"] = int(payload.top_k)
+                    result = await session.call_tool("search", arguments)
         except HTTPException:
             raise
         except Exception as exc:
-            raise_postgres_unavailable_if_applicable(exc, boundary="MCP corpus validation")
-            raise
+            raise_required_dependency_unavailable_if_applicable(exc, boundary="MCP probe")
+            raise HTTPException(
+                status_code=503,
+                detail=f"MCP probe failed on the mounted transport: {_describe_exception(exc)}",
+            ) from exc
 
-        fusion = TriBridFusion()
-        effective_top_k = int(top_k or cfg.mcp.default_top_k)
-        matches = await fusion.search(
-            [repo_id],
-            q,
-            cfg.fusion,
-            include_vector=True,
-            include_sparse=True,
-            include_graph=True,
-            top_k=effective_top_k,
-        )
-
-        results = [
-            MCPRagSearchResult(
-                file_path=m.file_path,
-                start_line=int(m.start_line),
-                end_line=int(m.end_line),
-                rerank_score=float(m.score),
-            )
-            for m in matches
-        ]
-        return MCPRagSearchResponse(results=results, error=None)
-    except HTTPException:
-        raise
-    except RetrievalContractMismatchError as exc:
-        raise retrieval_contract_mismatch_http_exception(exc) from exc
-    except RequiredRetrievalLegError as exc:
-        raise required_retrieval_leg_http_exception(exc) from exc
-    except Exception as exc:
-        raise_required_dependency_unavailable_if_applicable(exc, boundary="MCP RAG search API")
-        raise
+    if result.isError:
+        text = " ".join(c.text for c in result.content if isinstance(c, TextContent)).strip()
+        lowered = text.lower()
+        if "corpus not found" in lowered or "not found" in lowered:
+            raise HTTPException(status_code=404, detail=text or f"Corpus not found: {corpus_id}")
+        raise HTTPException(status_code=502, detail=f"MCP search tool returned an error: {text or 'no detail'}")
+    structured = result.structuredContent
+    rows = structured.get("result") if isinstance(structured, dict) else structured
+    if not isinstance(rows, list):
+        raise HTTPException(status_code=502, detail="MCP search tool returned no structured result")
+    return MCPProbeResponse(
+        tool="search",
+        transport_url=transport_url,
+        corpus_id=corpus_id,
+        mode=resolved_mode,
+        top_k=resolved_top_k,
+        results=[ChunkMatch.model_validate(row) for row in rows],
+    )

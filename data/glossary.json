@@ -1456,37 +1456,6 @@
       ]
     },
     {
-      "term": "Cohere Rerank Calls (calls/min)",
-      "key": "COHERE_RERANK_CALLS",
-      "definition": "Per-minute call-rate guardrail for Cohere reranking. This threshold is mainly a cost and stability control: rerankers are high-value but can become the most expensive or latency-sensitive part of the retrieval pipeline if invoked on every request and every rewrite iteration. Alerts at this layer help detect loops, duplicated calls, and missing cache reuse before bills spike or tail latency grows. Tune the limit against expected traffic, candidate set size, and cache hit rate, then review it after any retrieval strategy changes.",
-      "category": "reranking",
-      "related": [],
-      "links": [
-        {
-          "text": "REARANK: reasoning-based reranking (arXiv 2025)",
-          "href": "https://arxiv.org/abs/2505.20046"
-        },
-        {
-          "text": "Cohere Rerank API reference",
-          "href": "https://docs.cohere.com/v2/reference/rerank"
-        },
-        {
-          "text": "Cohere rate limits",
-          "href": "https://docs.cohere.com/docs/rate-limits"
-        },
-        {
-          "text": "Cohere pricing",
-          "href": "https://cohere.com/pricing"
-        }
-      ],
-      "badges": [
-        {
-          "text": "Cost control",
-          "class": "info"
-        }
-      ]
-    },
-    {
       "term": "Cohere Rerank Model",
       "key": "COHERE_RERANK_MODEL",
       "definition": "Model identifier used for Cohere reranking, determining ranking quality, latency, context limits, and price profile. Different rerank models can reorder the same candidate set very differently, so this setting directly affects answer precision even when retrieval inputs are unchanged. Keep model choice explicit and version-aware, and validate on representative queries whenever you switch models. In production pipelines, model changes should be treated like relevance changes and rolled out with A/B or offline evaluation rather than ad hoc edits.",
@@ -3192,37 +3161,6 @@
       "badges": []
     },
     {
-      "term": "Endpoint Call Frequency (calls/min)",
-      "key": "ENDPOINT_CALL_FREQUENCY",
-      "definition": "This threshold defines how many calls per minute to a single endpoint are considered anomalous. It is a practical control for catching retry storms, broken client loops, traffic abuse, and accidental hot paths that can degrade retrieval services. Set it from historical percentiles per endpoint instead of one global number, because normal traffic patterns differ widely. If set too low you create alert fatigue; too high and incidents are detected late. Pair this metric with labels like status code and caller identity to speed root-cause analysis after alerts fire.",
-      "category": "general",
-      "related": [],
-      "links": [
-        {
-          "text": "MINES: Web API Invariant Anomaly Detection (arXiv 2025)",
-          "href": "https://arxiv.org/abs/2512.06906"
-        },
-        {
-          "text": "Prometheus Alerting Rules",
-          "href": "https://prometheus.io/docs/prometheus/latest/configuration/alerting_rules/"
-        },
-        {
-          "text": "Grafana Alerting Fundamentals",
-          "href": "https://grafana.com/docs/grafana/latest/alerting/fundamentals/"
-        },
-        {
-          "text": "OpenTelemetry Metrics Concepts",
-          "href": "https://opentelemetry.io/docs/concepts/signals/metrics/"
-        }
-      ],
-      "badges": [
-        {
-          "text": "Anomaly detection",
-          "class": "warn"
-        }
-      ]
-    },
-    {
       "term": "Enrich Code Chunks",
       "key": "ENRICH_CODE_CHUNKS",
       "definition": "When enabled, each code chunk is augmented with model-generated summaries or semantic descriptors during indexing. This often improves conceptual retrieval because rerankers can match intent signals beyond literal token overlap. The tradeoff is extra indexing time, compute cost, and the risk of noisy metadata if prompts or models are weak. Chunk size and model selection both matter: oversized chunks produce vague summaries, while tiny chunks lose architectural context. Evaluate this feature with task-based retrieval metrics to confirm the added metadata improves real query outcomes.",
@@ -3315,37 +3253,6 @@
       "badges": [
         {
           "text": "Graph schema control",
-          "class": "info"
-        }
-      ]
-    },
-    {
-      "term": "Error Rate Threshold (%)",
-      "key": "ERROR_RATE_THRESHOLD",
-      "definition": "Sets the error percentage that triggers retrieval or API reliability alerts over your configured observation window. Use this as an SLO guardrail, not just a raw alarm, by pairing it with minimum request volume so low-traffic spikes do not page unnecessarily. Lower thresholds catch regressions earlier but can increase alert fatigue during transient failures; higher thresholds reduce noise but delay incident response. A practical pattern is warning and critical tiers with different windows, then tuning against historical error bursts and on-call outcomes.",
-      "category": "general",
-      "related": [],
-      "links": [
-        {
-          "text": "ML Monitoring and Observability (arXiv)",
-          "href": "https://arxiv.org/abs/2510.24142"
-        },
-        {
-          "text": "Grafana Alerting",
-          "href": "https://grafana.com/docs/grafana/latest/alerting/"
-        },
-        {
-          "text": "Prometheus Alerting Rules",
-          "href": "https://prometheus.io/docs/prometheus/latest/configuration/alerting_rules/"
-        },
-        {
-          "text": "SRE Workbook Alerting on SLOs",
-          "href": "https://sre.google/workbook/alerting-on-slos/"
-        }
-      ],
-      "badges": [
-        {
-          "text": "Reliability guardrail",
           "class": "info"
         }
       ]
@@ -8968,37 +8875,6 @@
       "badges": []
     },
     {
-      "term": "Rate Limit Errors (per 5 min)",
-      "key": "RATE_LIMIT_ERRORS_THRESHOLD",
-      "definition": "Sets the alerting threshold for HTTP 429 (rate-limit) errors over a rolling 5-minute window. This is an early-pressure signal for provider throttling, client burstiness, or missing retry/jitter controls. If set too low, alerts become noisy during normal traffic spikes; if set too high, sustained throttling can degrade latency and throughput before operators are notified. Calibrate from baseline traffic percentiles and combine with retry success-rate metrics so you distinguish transient spikes from persistent quota exhaustion.",
-      "category": "general",
-      "related": [],
-      "links": [
-        {
-          "text": "Advanced Black-box Prompt Optimization with Fewer API Calls (arXiv 2025)",
-          "href": "https://arxiv.org/abs/2511.10210"
-        },
-        {
-          "text": "AWS Backoff and Jitter Guidance",
-          "href": "https://aws.amazon.com/builders-library/timeouts-retries-and-backoff-with-jitter/"
-        },
-        {
-          "text": "RFC 6585: Additional HTTP Status Codes (429)",
-          "href": "https://www.rfc-editor.org/rfc/rfc6585"
-        },
-        {
-          "text": "Cloudflare WAF Rate Limiting Rules",
-          "href": "https://developers.cloudflare.com/waf/rate-limiting-rules/"
-        }
-      ],
-      "badges": [
-        {
-          "text": "Cost Control",
-          "class": "warn"
-        }
-      ]
-    },
-    {
       "term": "Recall intensity (next message)",
       "key": "chat_recall_intensity",
       "definition": "Recall intensity is a one-message control that changes how aggressively memory retrieval runs before the next model call, then resets to auto. Operationally, it trades retrieval depth for latency and memory noise: lighter modes reduce cost and over-fetching, while deeper modes increase recall probability for long-running conversations with sparse cues. This knob is most useful when users explicitly signal intent (for example, \"use what I told you last week\") or when you need to skip memory for isolated tasks. Treat this as part of retrieval orchestration, not generation style; measure its impact using hit-rate on known memory facts, response latency, and the rate of irrelevant memory insertion.",
@@ -10723,37 +10599,6 @@
       "badges": []
     },
     {
-      "term": "Sustained Frequency Duration (minutes)",
-      "key": "ENDPOINT_SUSTAINED_DURATION",
-      "definition": "This sets how long elevated endpoint call frequency must persist before an alert is triggered. It acts as a temporal noise filter that separates transient bursts from real incidents such as infinite loops or sustained abuse traffic. Short durations improve detection speed but can increase false positives; longer durations reduce noise but delay response. Tune duration together with frequency threshold using historical traffic playback, not one setting in isolation. Many teams use staged alerting windows so warnings arrive quickly while critical pages require longer persistence.",
-      "category": "general",
-      "related": [],
-      "links": [
-        {
-          "text": "LO2: Microservice API Anomaly Dataset (arXiv 2025)",
-          "href": "https://arxiv.org/abs/2504.12067"
-        },
-        {
-          "text": "Prometheus Alerting Rules",
-          "href": "https://prometheus.io/docs/prometheus/latest/configuration/alerting_rules/"
-        },
-        {
-          "text": "Grafana Alerting Fundamentals",
-          "href": "https://grafana.com/docs/grafana/latest/alerting/fundamentals/"
-        },
-        {
-          "text": "OpenTelemetry Metrics Concepts",
-          "href": "https://opentelemetry.io/docs/concepts/signals/metrics/"
-        }
-      ],
-      "badges": [
-        {
-          "text": "Noise filtering",
-          "class": "warn"
-        }
-      ]
-    },
-    {
       "term": "Synonyms File Path",
       "key": "TRIBRID_SYNONYMS_PATH",
       "definition": "Path to the synonyms dictionary used for controlled query expansion and lexical normalization. This file can materially change retrieval behavior, especially for domain acronyms, aliases, and product-specific terminology that embeddings may underrepresent. Keep the synonym set versioned and scoped: broad global replacements can hurt precision by over-expanding ambiguous terms. Treat updates as relevance experiments, not static configuration, and validate with representative query buckets before rollout.",
@@ -11227,37 +11072,6 @@
         }
       ],
       "badges": []
-    },
-    {
-      "term": "Timeout Errors (per 5 min)",
-      "key": "TIMEOUT_ERRORS_THRESHOLD",
-      "definition": "Defines how many timeout failures are tolerated inside a rolling 5-minute window before paging or incident workflows trigger. This threshold should align with your SLO budget: too low causes alert storms during normal jitter, too high delays detection of real saturation. Tune it together with upstream timeouts, retry policy, and queue depth so alerts represent sustained user-impacting latency rather than transient spikes. Revisit after infrastructure or model-provider changes, since timeout baselines can shift quickly.",
-      "category": "general",
-      "related": [],
-      "links": [
-        {
-          "text": "SRE Agentics: Intelligent Alerting and Incident Management (arXiv 2026)",
-          "href": "https://arxiv.org/abs/2602.03965"
-        },
-        {
-          "text": "Prometheus: Alerting Rules",
-          "href": "https://prometheus.io/docs/prometheus/latest/configuration/alerting_rules/"
-        },
-        {
-          "text": "AWS Builders Library: Timeouts, retries, and backoff with jitter",
-          "href": "https://aws.amazon.com/builders-library/timeouts-retries-and-backoff-with-jitter/"
-        },
-        {
-          "text": "Google SRE Book: Handling Overload",
-          "href": "https://sre.google/sre-book/handling-overload/"
-        }
-      ],
-      "badges": [
-        {
-          "text": "Reliability",
-          "class": "err"
-        }
-      ]
     },
     {
       "term": "Tokenization estimate-only",

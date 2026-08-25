@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query
 
 from server.models.tribrid_config_model import (
     ObservabilityAlertRulesResponse,
@@ -57,12 +57,17 @@ async def observability_alert_rules(
     corpus_id: str | None = Query(default=None, description="Alias for repo"),
     repo_id: str | None = Query(default=None, description="Alias for corpus_id"),
 ) -> ObservabilityAlertRulesResponse:
-    """Alerting rules as Prometheus evaluates them right now (the real alert configuration)."""
+    """Alerting rules as Prometheus evaluates them right now (the real alert configuration).
+
+    Reads ``tracing.prometheus_base_url`` from the same config scope the
+    Monitoring page saves it to; an unknown corpus is a 404, never a silent
+    fall-back to the global config.
+    """
     scope_id = (repo or corpus_id or repo_id or "").strip() or None
     try:
         cfg = await load_scoped_config(repo_id=scope_id)
-    except CorpusNotFoundError:
-        cfg = await load_scoped_config(repo_id=None)
+    except CorpusNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     return await build_alert_rules(cfg)
 
 

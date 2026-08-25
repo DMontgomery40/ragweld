@@ -263,29 +263,17 @@ async def _fusion_search_with_cache(
     cache_mode: str | CacheMode,
     cache_namespace: str,
 ) -> list[ChunkMatch]:
-    try:
-        return await fusion.search(
-            corpus_ids,
-            query,
-            config.fusion,
-            include_vector=include_vector,
-            include_sparse=include_sparse,
-            include_graph=include_graph,
-            top_k=top_k,
-            cache_mode=_normalize_cache_mode(cache_mode),
-            cache_namespace=str(cache_namespace or "search"),
-        )
-    except TypeError:
-        # Compatibility for injected test doubles that predate cache kwargs.
-        return await fusion.search(
-            corpus_ids,
-            query,
-            config.fusion,
-            include_vector=include_vector,
-            include_sparse=include_sparse,
-            include_graph=include_graph,
-            top_k=top_k,
-        )
+    return await fusion.search(
+        corpus_ids,
+        query,
+        config.fusion,
+        include_vector=include_vector,
+        include_sparse=include_sparse,
+        include_graph=include_graph,
+        top_k=top_k,
+        cache_mode=_normalize_cache_mode(cache_mode),
+        cache_namespace=str(cache_namespace or "search"),
+    )
 
 
 async def chat_once(

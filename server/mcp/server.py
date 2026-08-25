@@ -11,6 +11,20 @@ from server.config import load_config
 from server.mcp.tools import register_mcp_tools
 
 
+_MOUNTED: dict[str, object] = {"enabled": False, "mount_path": ""}
+
+
+def record_mounted_state(*, enabled: bool, mount_path: str) -> None:
+    """Record what the running process actually mounted (set once by server.main at startup)."""
+    _MOUNTED["enabled"] = bool(enabled)
+    _MOUNTED["mount_path"] = str(mount_path or "")
+
+
+def mounted_state() -> tuple[bool, str]:
+    """The MCP transport this process serves right now, independent of persisted config edits."""
+    return bool(_MOUNTED["enabled"]), str(_MOUNTED["mount_path"])
+
+
 @lru_cache(maxsize=1)
 def get_mcp_server() -> FastMCP:
     """Return the process-wide FastMCP server singleton."""

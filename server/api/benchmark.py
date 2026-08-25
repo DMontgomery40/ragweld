@@ -5,7 +5,13 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from server.api.dependency_errors import raise_postgres_unavailable_if_applicable
+from server.api.dependency_errors import raise_required_dependency_unavailable_if_applicable
+from server.api.retrieval_errors import (
+    RETRIEVAL_RUNTIME_UNAVAILABLE_RESPONSES,
+    required_retrieval_leg_http_exception,
+    retrieval_contract_mismatch_http_exception,
+)
+from server.retrieval.errors import RequiredRetrievalLegError, RetrievalContractMismatchError
 from server.chat.benchmark_runner import run_benchmark
 from server.config import load_config
 from server.lineage import (
@@ -66,7 +72,7 @@ def _load_benchmark_run(path: Path) -> BenchmarkRun | None:
         return None
 
 
-@router.post("/benchmark/run", response_model=BenchmarkRun)
+@router.post("/benchmark/run", response_model=BenchmarkRun, responses=RETRIEVAL_RUNTIME_UNAVAILABLE_RESPONSES)
 async def benchmark_run(
     payload: BenchmarkRunRequest,
     scope: CorpusScope = _CORPUS_SCOPE_DEP,
@@ -122,9 +128,13 @@ async def benchmark_run(
             )
         except HTTPException:
             raise
+        except RetrievalContractMismatchError as exc:
+            raise retrieval_contract_mismatch_http_exception(exc) from exc
+        except RequiredRetrievalLegError as exc:
+            raise required_retrieval_leg_http_exception(exc) from exc
         except Exception as exc:
-            raise_postgres_unavailable_if_applicable(exc, boundary="Benchmark retrieval")
-            raise HTTPException(status_code=503, detail=f"Benchmark retrieval failed: {exc}") from exc
+            raise_required_dependency_unavailable_if_applicable(exc, boundary="Benchmark retrieval")
+            raise
         retrieval = BenchmarkRetrieval(
             corpus_id=repo_id,
             grounded=bool(context_chunks),

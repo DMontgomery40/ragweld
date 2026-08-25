@@ -115,6 +115,8 @@ _FIELD_OVERRIDES: dict[str, dict[str, Any]] = {
     "tracing.langfuse_base_url": {"integration": "langfuse", "ui_surface": "observability", "exposure_level": "basic"},
     "tracing.langfuse_project": {"integration": "langfuse", "ui_surface": "observability", "exposure_level": "basic"},
     "ui.grafana_base_url": {"integration": "otel_grafana_stack", "ui_surface": "observability", "exposure_level": "basic"},
+    # Read per request by /api/observability/alert-rules and the Monitoring links: no restart involved.
+    "tracing.prometheus_base_url": {"integration": "otel_grafana_stack", "ui_surface": "observability", "exposure_level": "basic", "impact": "live"},
     "ui.grafana_embed_enabled": {"integration": "otel_grafana_stack", "ui_surface": "observability", "exposure_level": "basic"},
     "ui.grafana_dashboard_uid": {"integration": "otel_grafana_stack", "ui_surface": "observability", "exposure_level": "basic"},
     "ui.grafana_dashboard_slug": {"integration": "otel_grafana_stack", "ui_surface": "observability", "exposure_level": "basic"},
@@ -588,6 +590,8 @@ def _apply_field_overrides(path: str, metadata: dict[str, Any]) -> dict[str, Any
     secret_deps = _secret_dependencies_for_path(path)
     if secret_deps:
         metadata["secret_dependency_ids"] = secret_deps
+    if overrides and "impact" in overrides:
+        return metadata  # an explicit per-field impact wins over the section prefix rules
     if path.startswith("tracing.langfuse_"):
         metadata["impact"] = "restart"
     elif path.startswith("tracing.") or path.startswith("graph_storage.") or path.startswith("mcp.") or path.startswith("docker."):

@@ -8,7 +8,7 @@
   "liveNow": false,
   "panels": [
     {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "datasource": { "type": "prometheus", "uid": "mimir" },
       "fieldConfig": {
         "defaults": {
           "thresholds": {
@@ -39,7 +39,7 @@
       "type": "stat"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "datasource": { "type": "prometheus", "uid": "mimir" },
       "fieldConfig": {
         "defaults": {
           "thresholds": {
@@ -73,7 +73,7 @@
       "type": "stat"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "datasource": { "type": "prometheus", "uid": "mimir" },
       "fieldConfig": {
         "defaults": {
           "thresholds": {
@@ -104,7 +104,7 @@
       "type": "stat"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "datasource": { "type": "prometheus", "uid": "mimir" },
       "fieldConfig": {
         "defaults": {
           "custom": {

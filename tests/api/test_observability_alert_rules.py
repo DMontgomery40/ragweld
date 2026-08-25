@@ -15,7 +15,7 @@ import pytest
 from httpx import AsyncClient
 
 from server.models.tribrid_config_model import TriBridConfig
-from server.observability.alert_rules import build_alert_rules
+from server.observability.alert_rules import MalformedRulesPayload, build_alert_rules, parse_rules_payload
 
 _LIVE_PROMETHEUS = os.environ.get("PROMETHEUS_BASE_URL", "http://127.0.0.1:59090")
 
@@ -39,6 +39,31 @@ async def test_alert_rules_unreachable_prometheus_fails_closed() -> None:
     assert out.source_url == "http://127.0.0.1:9"
     assert out.rules == []
     assert "http://127.0.0.1:9" in str(out.error)
+
+
+def test_rules_parser_rejects_non_rules_payloads_and_normalizes_states() -> None:
+    for bad in ({"status": "error", "errorType": "bad_data"}, {"status": "success", "data": {}}, {"status": "success", "data": {"groups": "nope"}}, [], "html"):
+        with pytest.raises(MalformedRulesPayload):
+            parse_rules_payload(bad)
+    rules = parse_rules_payload(
+        {
+            "status": "success",
+            "data": {
+                "groups": [
+                    {
+                        "name": "g",
+                        "rules": [
+                            {"type": "alerting", "name": "Odd", "state": "weird", "query": "up", "health": "err", "alerts": []},
+                            {"type": "recording", "name": "rec", "query": "1"},
+                            {"type": "alerting", "name": "Hot", "state": "FIRING", "query": "up == 0", "labels": {"severity": "critical"}, "alerts": [{}]},
+                        ],
+                    }
+                ]
+            },
+        }
+    )
+    assert [(r.name, r.state, r.health, r.active_alerts) for r in rules] == [("Hot", "firing", "unknown", 1), ("Odd", "unknown", "err", 0)]
+    assert rules[0].severity == "critical"
 
 
 async def _prometheus_answers(base: str) -> bool:

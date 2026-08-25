@@ -7,43 +7,8 @@ import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { PipelineProfile } from '@/components/Benchmark/PipelineProfile';
 import { ResultsTable } from '@/components/Benchmark/ResultsTable';
 import { SplitScreen } from '@/components/Benchmark/SplitScreen';
-import type { BenchmarkRetrieval, ChatModelInfo, ChatModelsResponse, LineageRef } from '@/types/generated';
+import type { BenchmarkRun, BenchmarkRunRequest, ChatModelInfo, ChatModelsResponse } from '@/types/generated';
 import { chatModelDetail, chatModelLabel, chatModelName, groupChatModels } from '@/components/Chat/modelLabel';
-
-type BenchmarkRunRequest = {
-  prompt: string;
-  models: string[];
-};
-
-type BenchmarkRunResult = {
-  model: string;
-  response: string;
-  latency_ms?: number;
-  error?: string;
-  breakdown_ms?: Record<string, number>;
-  model_id?: string;
-  model_name?: string;
-};
-
-type BenchmarkRunResponse = {
-  run_id?: string;
-  input_bundle_id?: string;
-  bundle_id?: string;
-  lineage_ref?: LineageRef | null;
-  retrieval?: BenchmarkRetrieval | null;
-  results: BenchmarkRunResult[];
-};
-
-function toBenchmarkRetrieval(value: unknown): BenchmarkRetrieval | null {
-  if (!isRecord(value) || typeof value.grounded !== 'boolean') return null;
-  return {
-    corpus_id: typeof value.corpus_id === 'string' ? value.corpus_id : null,
-    grounded: value.grounded,
-    chunk_count: typeof value.chunk_count === 'number' ? value.chunk_count : 0,
-    reason: typeof value.reason === 'string' ? value.reason : null,
-    source_paths: Array.isArray(value.source_paths) ? value.source_paths.map((p) => String(p)) : [],
-  };
-}
 
 function toModelValue(model: ChatModelInfo): string {
   return String(model.override || model.id || '').trim();
@@ -53,86 +18,12 @@ function toModelLabel(model: ChatModelInfo): string {
   return chatModelLabel(model);
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-}
-
-function isNumberRecord(value: unknown): value is Record<string, number> {
-  if (!isRecord(value)) return false;
-  for (const v of Object.values(value)) {
-    if (typeof v !== 'number' || !Number.isFinite(v)) return false;
-  }
-  return true;
-}
-
-function normalizeBenchmarkRunResponse(payload: unknown): BenchmarkRunResponse {
-  const record = isRecord(payload) ? payload : null;
-  const resultsRaw = record ? record.results : payload;
-  if (!Array.isArray(resultsRaw)) return { results: [] };
-
-  const results: BenchmarkRunResult[] = [];
-  for (const item of resultsRaw) {
-    if (!isRecord(item)) continue;
-
-    const model =
-      typeof item.model === 'string'
-        ? item.model
-        : typeof item.model_name === 'string'
-          ? item.model_name
-          : typeof item.model_id === 'string'
-            ? item.model_id
-            : '';
-    if (!model) continue;
-
-    const response =
-      typeof item.response === 'string'
-        ? item.response
-        : typeof item.output === 'string'
-          ? item.output
-          : typeof item.text === 'string'
-            ? item.text
-            : '';
-
-    const latency_ms =
-      typeof item.latency_ms === 'number' && Number.isFinite(item.latency_ms) ? item.latency_ms : undefined;
-
-    const error =
-      typeof item.error === 'string'
-        ? item.error
-        : item.error !== undefined && item.error !== null
-          ? String(item.error)
-          : undefined;
-
-    const breakdown_ms = isNumberRecord(item.breakdown_ms) ? item.breakdown_ms : undefined;
-
-    const model_id = typeof item.model_id === 'string' ? item.model_id : undefined;
-    const model_name = typeof item.model_name === 'string' ? item.model_name : undefined;
-
-    results.push({
-      model,
-      response,
-      latency_ms,
-      error,
-      breakdown_ms,
-      model_id,
-      model_name,
-    });
-  }
-
-  return {
-    run_id: typeof record?.run_id === 'string' ? record.run_id : undefined,
-    input_bundle_id: typeof record?.input_bundle_id === 'string' ? record.input_bundle_id : undefined,
-    bundle_id: typeof record?.bundle_id === 'string' ? record.bundle_id : undefined,
-    lineage_ref: isRecord(record?.lineage_ref)
-      ? ({
-          kind: String(record?.lineage_ref.kind || ''),
-          version_id: String(record?.lineage_ref.version_id || ''),
-          label: typeof record?.lineage_ref.label === 'string' ? record.lineage_ref.label : undefined,
-        } as LineageRef)
-      : undefined,
-    retrieval: toBenchmarkRetrieval(record?.retrieval),
-    results,
-  };
+/** Run-level grounding truth derived from the rows: every model that answered used corpus context. */
+function groundingState(run: BenchmarkRun): { grounded: boolean; ungroundedModels: string[] } {
+  const answered = (run.results || []).filter((r) => !r.error);
+  const ungroundedModels = answered.filter((r) => (r.context_chunks_used ?? 0) === 0).map((r) => r.model);
+  const retrievalGrounded = Boolean(run.retrieval?.grounded);
+  return { grounded: retrievalGrounded && answered.length > 0 && ungroundedModels.length === 0, ungroundedModels };
 }
 
 export default function BenchmarkTab() {
@@ -147,7 +38,7 @@ export default function BenchmarkTab() {
 
   const [runLoading, setRunLoading] = useState(false);
   const [runError, setRunError] = useState<string | null>(null);
-  const [runResult, setRunResult] = useState<BenchmarkRunResponse | null>(null);
+  const [runResult, setRunResult] = useState<BenchmarkRun | null>(null);
 
   const initSelectionRef = useRef(false);
 
@@ -195,17 +86,18 @@ export default function BenchmarkTab() {
   const splitResults = useMemo(() => {
     return (runResult?.results || []).map((r) => ({
       model: r.model,
-      response: r.response,
+      response: r.response ?? '',
       latency_ms: r.latency_ms,
-      error: r.error,
+      error: r.error ?? undefined,
+      context_chunks_used: r.context_chunks_used ?? 0,
     }));
   }, [runResult]);
 
   const pipelineResults = useMemo(() => {
     return (runResult?.results || []).map((r) => ({
       model: r.model,
-      model_id: r.model_id,
-      model_name: r.model_name,
+      model_id: r.model_id ?? undefined,
+      model_name: r.model_name ?? undefined,
       breakdown_ms: r.breakdown_ms,
     }));
   }, [runResult]);
@@ -253,7 +145,7 @@ export default function BenchmarkTab() {
         throw new Error(typeof payload === 'string' ? payload : `${scopedResponse.status} ${scopedResponse.statusText}`);
       }
 
-      setRunResult(normalizeBenchmarkRunResponse(payload));
+      setRunResult(payload as BenchmarkRun);
     } catch (e) {
       setRunError(e instanceof Error ? e.message : String(e));
       setRunResult(null);
@@ -427,47 +319,55 @@ export default function BenchmarkTab() {
             <div style={{ fontSize: 12, color: 'var(--fg-muted)' }}>{promptOk ? `${prompt.trim().length} chars` : ''}</div>
           </div>
 
-          {runResult?.retrieval ? (
-            <div
-              data-testid="benchmark-grounding"
-              data-grounded={runResult.retrieval.grounded ? 'true' : 'false'}
-              role="status"
-              style={{
-                marginTop: 12,
-                padding: '10px 12px',
-                borderRadius: 10,
-                border: runResult.retrieval.grounded
-                  ? '1px solid rgba(var(--ok-rgb), 0.35)'
-                  : '1px solid rgba(var(--warn-rgb), 0.45)',
-                background: runResult.retrieval.grounded
-                  ? 'rgba(var(--ok-rgb), 0.10)'
-                  : 'rgba(var(--warn-rgb), 0.12)',
-                color: 'var(--fg)',
-                fontSize: 13,
-                lineHeight: 1.5,
-              }}
-            >
-              {runResult.retrieval.grounded ? (
-                <>
-                  <strong>Grounded:</strong> every model received the same {runResult.retrieval.chunk_count} retrieved chunk
-                  {runResult.retrieval.chunk_count === 1 ? '' : 's'} from{' '}
-                  <code>{runResult.retrieval.corpus_id}</code>
-                  {(runResult.retrieval.source_paths ?? []).length > 0 ? (
-                    <span style={{ color: 'var(--fg-muted)' }}>
-                      {' '}
-                      ({(runResult.retrieval.source_paths ?? []).slice(0, 4).join(', ')}
-                      {(runResult.retrieval.source_paths ?? []).length > 4 ? ', …' : ''})
-                    </span>
-                  ) : null}
-                </>
-              ) : (
-                <>
-                  <strong>Not grounded:</strong> the answers below were generated without retrieval —{' '}
-                  {runResult.retrieval.reason || 'no retrieval context'}.
-                </>
-              )}
-            </div>
-          ) : null}
+          {runResult?.retrieval ? (() => {
+            const grounding = groundingState(runResult);
+            const retrieval = runResult.retrieval;
+            const paths = retrieval.source_paths ?? [];
+            return (
+              <div
+                data-testid="benchmark-grounding"
+                data-grounded={grounding.grounded ? 'true' : 'false'}
+                role="status"
+                style={{
+                  marginTop: 12,
+                  padding: '10px 12px',
+                  borderRadius: 10,
+                  border: grounding.grounded ? '1px solid rgba(var(--ok-rgb), 0.35)' : '1px solid rgba(var(--warn-rgb), 0.45)',
+                  background: grounding.grounded ? 'rgba(var(--ok-rgb), 0.10)' : 'rgba(var(--warn-rgb), 0.12)',
+                  color: 'var(--fg)',
+                  fontSize: 13,
+                  lineHeight: 1.5,
+                }}
+              >
+                {grounding.grounded ? (
+                  <>
+                    <strong>Grounded:</strong> {retrieval.chunk_count} chunk{retrieval.chunk_count === 1 ? '' : 's'} retrieved from{' '}
+                    <code>{retrieval.corpus_id}</code>; every answering model used corpus context (see the Context column).
+                    {paths.length > 0 ? (
+                      <span style={{ color: 'var(--fg-muted)' }}>
+                        {' '}
+                        ({paths.slice(0, 4).join(', ')}
+                        {paths.length > 4 ? ', …' : ''})
+                      </span>
+                    ) : null}
+                  </>
+                ) : retrieval.grounded ? (
+                  <>
+                    <strong>Partially grounded:</strong> {retrieval.chunk_count} chunk{retrieval.chunk_count === 1 ? '' : 's'} were retrieved, but{' '}
+                    {grounding.ungroundedModels.length > 0
+                      ? `${grounding.ungroundedModels.join(', ')} answered with no corpus context (nothing fit the context window)`
+                      : 'no model produced an answer'}
+                    .
+                  </>
+                ) : (
+                  <>
+                    <strong>Not grounded:</strong> the answers below were generated without retrieval —{' '}
+                    {retrieval.reason || 'no retrieval context'}.
+                  </>
+                )}
+              </div>
+            );
+          })() : null}
 
           {runResult ? (
             <div style={{ marginTop: 12 }}>

@@ -931,7 +931,7 @@ class Neo4jClient:
 
     # Community operations
     async def detect_communities(self, repo_id: str) -> list[Community]:
-        """Detect entity communities by deterministic label propagation over entity relationships.
+        """Detect entity communities by deterministic Louvain partitioning over entity relationships.
 
         Communities are groups of entities that are actually linked to each other
         (``associated_with``, ``located_in``, ``owns``, ...). Entities with no
@@ -978,7 +978,9 @@ class Neo4jClient:
                 adjacency[b].add(a)
 
         communities: list[Community] = []
-        for members in _label_propagation_groups(adjacency):
+        # CPU-bound partitioning stays off the event loop.
+        groups = await asyncio.to_thread(_modularity_groups, adjacency)
+        for members in groups:
             ranked = sorted(members, key=lambda eid: (-len(adjacency[eid]), names[eid], eid))
             hub = ranked[0]
             digest = hashlib.sha1("\n".join(sorted(members)).encode("utf-8")).hexdigest()[:12]
@@ -1600,34 +1602,29 @@ class Neo4jClient:
             )
 
 
-def _label_propagation_groups(adjacency: dict[str, set[str]], *, max_iterations: int = 50) -> list[list[str]]:
-    """Deterministic asynchronous label propagation.
+def _modularity_groups(adjacency: dict[str, set[str]]) -> list[list[str]]:
+    """Deterministic Louvain communities over an undirected entity graph.
 
-    Nodes are visited in sorted order; each adopts the label most common among its
-    neighbours (ties -> the lexically smallest label). Isolated nodes keep their own
-    label and are dropped, so every returned group has at least two members.
+    Label propagation with lexical tie-breaks collapsed two dense cliques joined
+    by one bridge into a single group (adversarial review, 2026-08-25); Louvain
+    maximizes modularity and keeps them apart. ``seed=0`` makes the partition
+    reproducible for identical graphs. Isolated entities are dropped and every
+    returned group has at least two members; groups and members are sorted so
+    downstream ids are stable.
     """
-    order = sorted(adjacency)
-    labels: dict[str, str] = {node: node for node in order}
-    for _ in range(max_iterations):
-        changed = False
-        for node in order:
-            neighbours = adjacency.get(node) or ()
-            if not neighbours:
-                continue
-            counts: dict[str, int] = defaultdict(int)
-            for other in neighbours:
-                counts[labels[other]] += 1
-            best = min(counts.items(), key=lambda item: (-item[1], item[0]))[0]
-            if best != labels[node]:
-                labels[node] = best
-                changed = True
-        if not changed:
-            break
-    groups: dict[str, list[str]] = defaultdict(list)
-    for node in order:
-        groups[labels[node]].append(node)
-    return [members for _, members in sorted(groups.items()) if len(members) >= 2]
+    import networkx as nx
+
+    graph = nx.Graph()
+    graph.add_nodes_from(sorted(adjacency))
+    for node in sorted(adjacency):
+        for other in sorted(adjacency[node]):
+            if node < other:
+                graph.add_edge(node, other)
+    if graph.number_of_edges() == 0:
+        return []
+    partition = nx.community.louvain_communities(graph, seed=0)
+    groups = [sorted(members) for members in partition if len(members) >= 2]
+    return sorted(groups)
 
 
 def _entity_from_record(record: Any) -> Entity:

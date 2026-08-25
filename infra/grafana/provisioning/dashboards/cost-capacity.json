@@ -8,7 +8,7 @@
   "liveNow": false,
   "panels": [
     {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "datasource": { "type": "prometheus", "uid": "mimir" },
       "fieldConfig": { "defaults": { "unit": "reqps" } },
       "gridPos": { "h": 6, "w": 8, "x": 0, "y": 0 },
       "id": 1,
@@ -25,7 +25,7 @@
       "type": "stat"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "datasource": { "type": "prometheus", "uid": "mimir" },
       "fieldConfig": { "defaults": { "unit": "short" } },
       "gridPos": { "h": 6, "w": 8, "x": 8, "y": 0 },
       "id": 2,
@@ -42,7 +42,7 @@
       "type": "stat"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "datasource": { "type": "prometheus", "uid": "mimir" },
       "fieldConfig": { "defaults": { "unit": "s" } },
       "gridPos": { "h": 6, "w": 8, "x": 16, "y": 0 },
       "id": 3,

@@ -33,6 +33,8 @@ class _DeterministicFusion:
         include_sparse: bool = True,  # noqa: ARG002
         include_graph: bool = True,  # noqa: ARG002
         top_k: int | None = None,  # noqa: ARG002
+        cache_mode: str = "default",  # noqa: ARG002
+        cache_namespace: str = "search",  # noqa: ARG002
     ) -> list[ChunkMatch]:
         cid = str(corpus_ids[0] if corpus_ids else "unknown")
         q = str(query or "").strip()

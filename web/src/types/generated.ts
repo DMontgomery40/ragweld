@@ -1381,18 +1381,6 @@ export interface MCPHTTPTransportStatus {
   running: boolean;
 }
 
-/** Compact result shape for legacy /api/mcp/rag_search (debug UI). */
-export interface MCPRagSearchResult {
-  /** Matched file path. */
-  file_path: string;
-  /** Start line for the matched span. */
-  start_line: number;
-  /** End line for the matched span. */
-  end_line: number;
-  /** Legacy field: score for the match (post-fusion). */
-  rerank_score: number;
-}
-
 /** One tool registered on the embedded MCP server. */
 export interface MCPToolInfo {
   /** Tool name as advertised to MCP clients. */
@@ -1473,8 +1461,8 @@ export interface ObservabilityAlertRule {
   group: string;
   /** Alert name. */
   name: string;
-  /** Prometheus rule state: inactive, pending, or firing. */
-  state: string;
+  /** Prometheus rule state; 'unknown' when Prometheus reported a state this build does not model. */
+  state: "inactive" | "pending" | "firing" | "unknown";
   /** severity label on the rule, when set. */
   severity?: string | null; // default: None
   /** PromQL expression the rule evaluates. */
@@ -3747,12 +3735,32 @@ export interface LokiStatus {
   status?: string;
 }
 
-/** Response payload for legacy /api/mcp/rag_search (debug UI). */
-export interface MCPRagSearchResponse {
-  /** Compact match list. */
-  results?: MCPRagSearchResult[];
-  /** Error message when the search fails. */
-  error?: string | null;
+/** Run one real MCP tool call through the mounted Streamable HTTP transport. */
+export interface MCPProbeRequest {
+  /** A real question about the corpus (never a placeholder). */
+  question: string;
+  /** Corpus to search; required unless the request carries corpus_id in its scope. */
+  corpus_id?: string | null;
+  /** Retrieval mode passed to the MCP search tool; null uses mcp.default_mode exactly like an MCP client. */
+  mode?: "tribrid" | "dense_only" | "sparse_only" | "graph_only" | null;
+  /** Result count passed to the tool; null uses mcp.default_top_k. */
+  top_k?: number | null;
+}
+
+/** Result of invoking the MCP `search` tool over the mounted transport. */
+export interface MCPProbeResponse {
+  /** Tool that was invoked. */
+  tool?: string;
+  /** Streamable HTTP endpoint the client session connected to. */
+  transport_url: string;
+  /** Corpus the tool searched. */
+  corpus_id: string;
+  /** Retrieval mode the tool resolved (request override or mcp.default_mode). */
+  mode: string;
+  /** Result count the tool resolved. */
+  top_k: number;
+  /** Structured tool output, validated as ChunkMatch rows. */
+  results?: ChunkMatch[];
 }
 
 /** Status of MCP transports built into TriBridRAG. */

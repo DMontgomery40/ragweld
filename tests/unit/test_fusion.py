@@ -103,7 +103,7 @@ async def test_search_empty_corpus_ids_returns_empty() -> None:
     fusion = TriBridFusion()
     out = await fusion.search(
         corpus_ids=[],
-        query="foo",
+        query="How often is the salinity sensor calibrated?",
         config=FusionConfig(),
         include_vector=True,
         include_sparse=True,
@@ -211,7 +211,7 @@ async def test_search_graph_chunk_mode_hydrates_by_chunk_id(monkeypatch) -> None
     fusion = TriBridFusion()
     out = await fusion.search(
         corpus_ids=["test-corpus"],
-        query="foo",
+        query="How often is the salinity sensor calibrated?",
         config=FusionConfig(),
         include_vector=False,
         include_sparse=False,
@@ -320,7 +320,7 @@ async def test_search_graph_chunk_mode_entity_expansion_adds_chunks(monkeypatch)
     fusion = TriBridFusion()
     out = await fusion.search(
         corpus_ids=["test-corpus"],
-        query="foo",
+        query="How often is the salinity sensor calibrated?",
         config=FusionConfig(),
         include_vector=False,
         include_sparse=False,
@@ -400,7 +400,7 @@ async def test_search_graph_entity_mode_hydrates_by_chunk_id(monkeypatch) -> Non
     fusion = TriBridFusion()
     out = await fusion.search(
         corpus_ids=["test-corpus"],
-        query="foo",
+        query="How often is the salinity sensor calibrated?",
         config=FusionConfig(),
         include_vector=False,
         include_sparse=False,

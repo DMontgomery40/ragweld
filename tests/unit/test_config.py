@@ -60,9 +60,13 @@ def test_fusion_config_weights_are_stored_as_typed() -> None:
     assert restored.vector_weight == 0.5
 
 
-def test_fusion_config_rejects_all_zero_weights() -> None:
+def test_fusion_config_rejects_all_zero_weights_only_for_weighted() -> None:
     with pytest.raises(ValidationError):
         FusionConfig(method="weighted", vector_weight=0.0, sparse_weight=0.0, graph_weight=0.0)
+    # RRF never reads the weights, so an all-zero set is a valid RRF config.
+    rrf = FusionConfig(method="rrf", vector_weight=0.0, sparse_weight=0.0, graph_weight=0.0)
+    assert (rrf.vector_weight, rrf.sparse_weight, rrf.graph_weight) == (0.0, 0.0, 0.0)
+    assert FusionConfig(method="weighted", vector_weight=0.0, sparse_weight=0.0, graph_weight=0.2).graph_weight == 0.2
 
 
 def test_reranker_modes() -> None:

@@ -178,15 +178,23 @@ export function useGlobalSearch() {
         const tabId = tabContent ? tabContent.id.replace('tab-', '') : '';
         const elementId = el.id || '';
         const elementName = (el as HTMLInputElement).name || '';
-        let nextPath = tabId ? `/${tabId}` : location.pathname;
+        // A control found on the current page is already on the right route: keep
+        // the corpus/subtab/query params and only correct the path if it differs.
+        const params = new URLSearchParams(location.search);
+        let nextPathname = tabId ? `/${tabId}` : location.pathname;
         if (tabId === 'rag') {
           const subtabEl = el.closest('.rag-subtab-content') as HTMLElement | null;
           const subtabId =
             subtabEl && typeof subtabEl.id === 'string' && subtabEl.id.startsWith('tab-rag-')
               ? subtabEl.id.replace('tab-rag-', '')
               : '';
-          if (subtabId) nextPath = `/rag?subtab=${encodeURIComponent(subtabId)}`;
+          if (subtabId) {
+            nextPathname = '/rag';
+            params.set('subtab', subtabId);
+          }
         }
+        const nextSearch = params.toString();
+        const nextPath = nextSearch ? `${nextPathname}?${nextSearch}` : nextPathname;
         if (nextPath !== location.pathname + location.search) navigate(nextPath);
         window.setTimeout(() => {
           let target: HTMLElement | null = null;
@@ -201,8 +209,13 @@ export function useGlobalSearch() {
           window.setTimeout(() => target?.classList.remove('search-hit'), 1200);
         }, 200);
       } else {
-        // Config field on another page: open it in the Admin explorer, filtered to the path.
-        navigate(`/admin?subtab=advanced&q=${encodeURIComponent(result.path)}`);
+        // Config field on another page: open it in the Admin explorer, filtered to
+        // the path, keeping the active corpus in the URL.
+        const params = new URLSearchParams(location.search);
+        const corpus = params.get('corpus') || params.get('repo');
+        const target = new URLSearchParams({ subtab: 'advanced', q: result.path });
+        if (corpus) target.set('corpus', corpus);
+        navigate(`/admin?${target.toString()}`);
       }
       setIsOpen(false);
       setQuery('');
@@ -227,6 +240,13 @@ export function useGlobalSearch() {
     },
     [results, cursor, navigateToResult]
   );
+
+  // Re-run the active query when either index arrives after the operator typed
+  // (the registry can finish loading after the first keystrokes).
+  useEffect(() => {
+    if (isOpen && query.trim()) search(query);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [configIndex, controlIndex]);
 
   const settingsCount = useMemo(() => configIndex.length, [configIndex]);
 

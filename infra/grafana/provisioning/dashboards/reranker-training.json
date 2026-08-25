@@ -10,7 +10,7 @@
   "liveNow": false,
   "panels": [
     {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "datasource": { "type": "prometheus", "uid": "mimir" },
       "fieldConfig": {
         "defaults": {
           "color": { "fixedColor": "#22c55e", "mode": "fixed" },
@@ -34,7 +34,7 @@
       "type": "stat"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "datasource": { "type": "prometheus", "uid": "mimir" },
       "fieldConfig": {
         "defaults": {
           "color": { "fixedColor": "#38bdf8", "mode": "fixed" },
@@ -58,7 +58,7 @@
       "type": "stat"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "datasource": { "type": "prometheus", "uid": "mimir" },
       "fieldConfig": {
         "defaults": {
           "color": { "fixedColor": "#ef4444", "mode": "fixed" },
@@ -82,7 +82,7 @@
       "type": "stat"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "datasource": { "type": "prometheus", "uid": "mimir" },
       "fieldConfig": {
         "defaults": {
           "color": { "fixedColor": "#f59e0b", "mode": "fixed" },
@@ -106,7 +106,7 @@
       "type": "stat"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "datasource": { "type": "prometheus", "uid": "mimir" },
       "fieldConfig": {
         "defaults": {
           "color": { "fixedColor": "#fb923c", "mode": "fixed" },
@@ -130,7 +130,7 @@
       "type": "stat"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "datasource": { "type": "prometheus", "uid": "mimir" },
       "fieldConfig": {
         "defaults": {
           "color": { "fixedColor": "#a78bfa", "mode": "fixed" },
@@ -154,7 +154,7 @@
       "type": "stat"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "datasource": { "type": "prometheus", "uid": "mimir" },
       "fieldConfig": { "defaults": { "unit": "none", "custom": { "drawStyle": "line", "fillOpacity": 16, "lineWidth": 2, "showPoints": "never", "spanNulls": false } } },
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
       "id": 7,
@@ -168,7 +168,7 @@
       "type": "timeseries"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "datasource": { "type": "prometheus", "uid": "mimir" },
       "fieldConfig": { "defaults": { "unit": "ms", "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 2, "showPoints": "never", "spanNulls": false } } },
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
       "id": 8,
@@ -187,7 +187,7 @@
       "type": "timeseries"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "datasource": { "type": "prometheus", "uid": "mimir" },
       "fieldConfig": { "defaults": { "unit": "ms", "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 2, "showPoints": "never", "spanNulls": false } } },
       "gridPos": { "h": 8, "w": 8, "x": 0, "y": 12 },
       "id": 9,
@@ -206,7 +206,7 @@
       "type": "timeseries"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "datasource": { "type": "prometheus", "uid": "mimir" },
       "fieldConfig": { "defaults": { "unit": "none", "custom": { "drawStyle": "bars", "fillOpacity": 20, "lineWidth": 1, "showPoints": "never", "spanNulls": false } } },
       "gridPos": { "h": 8, "w": 8, "x": 8, "y": 12 },
       "id": 10,
@@ -222,7 +222,7 @@
       "type": "timeseries"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "datasource": { "type": "prometheus", "uid": "mimir" },
       "fieldConfig": { "defaults": { "unit": "none", "custom": { "drawStyle": "bars", "fillOpacity": 20, "lineWidth": 1, "showPoints": "never", "spanNulls": false } } },
       "gridPos": { "h": 8, "w": 8, "x": 16, "y": 12 },
       "id": 11,
@@ -238,7 +238,7 @@
       "type": "timeseries"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "datasource": { "type": "prometheus", "uid": "mimir" },
       "fieldConfig": { "defaults": { "unit": "ms", "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 2, "showPoints": "never", "spanNulls": false } } },
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 20 },
       "id": 12,
@@ -257,7 +257,7 @@
       "type": "timeseries"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "datasource": { "type": "prometheus", "uid": "mimir" },
       "fieldConfig": { "defaults": { "unit": "none", "custom": { "drawStyle": "line", "fillOpacity": 12, "lineWidth": 2, "showPoints": "never", "spanNulls": false } } },
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 20 },
       "id": 13,
@@ -276,7 +276,7 @@
       "type": "timeseries"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "datasource": { "type": "prometheus", "uid": "mimir" },
       "fieldConfig": { "defaults": { "unit": "none", "custom": { "drawStyle": "bars", "fillOpacity": 18, "lineWidth": 1, "showPoints": "never", "spanNulls": false } } },
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 28 },
       "id": 14,
@@ -295,7 +295,7 @@
       "type": "timeseries"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "datasource": { "type": "prometheus", "uid": "mimir" },
       "fieldConfig": { "defaults": { "unit": "ms", "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 2, "showPoints": "never", "spanNulls": false } } },
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 28 },
       "id": 15,
@@ -314,7 +314,7 @@
       "type": "timeseries"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "datasource": { "type": "prometheus", "uid": "mimir" },
       "fieldConfig": { "defaults": { "unit": "none", "custom": { "drawStyle": "bars", "fillOpacity": 18, "lineWidth": 1, "showPoints": "never", "spanNulls": false } } },
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 36 },
       "id": 16,
@@ -337,7 +337,7 @@
       "type": "timeseries"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "datasource": { "type": "prometheus", "uid": "mimir" },
       "fieldConfig": { "defaults": { "unit": "none", "custom": { "drawStyle": "bars", "fillOpacity": 18, "lineWidth": 1, "showPoints": "never", "spanNulls": false } } },
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 36 },
       "id": 17,

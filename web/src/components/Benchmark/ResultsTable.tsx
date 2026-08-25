@@ -3,6 +3,8 @@ type BenchmarkResult = {
   response: string;
   latency_ms?: number;
   error?: string;
+  /** Retrieved chunks that fit this model's context window and were sent with the prompt. */
+  context_chunks_used?: number;
 };
 
 type ResultsTableProps = {
@@ -66,6 +68,9 @@ export function ResultsTable({ results }: ResultsTableProps) {
               Latency (ms)
             </th>
             <th scope="col" style={thStyle}>
+              Context
+            </th>
+            <th scope="col" style={thStyle}>
               Response
             </th>
             <th scope="col" style={thStyle}>
@@ -76,7 +81,7 @@ export function ResultsTable({ results }: ResultsTableProps) {
         <tbody>
           {results.length === 0 ? (
             <tr>
-              <td style={{ ...tdStyle, color: 'var(--fg-muted)' }} colSpan={4}>
+              <td style={{ ...tdStyle, color: 'var(--fg-muted)' }} colSpan={5}>
                 No results yet.
               </td>
             </tr>
@@ -85,6 +90,12 @@ export function ResultsTable({ results }: ResultsTableProps) {
               <tr key={`${r.model}:${idx}`}>
                 <td style={monoCellStyle}>{r.model || '—'}</td>
                 <td style={tdStyle}>{formatLatencyMs(r.latency_ms)}</td>
+                <td
+                  style={{ ...tdStyle, color: r.error ? 'var(--fg-muted)' : (r.context_chunks_used ?? 0) > 0 ? 'var(--fg)' : 'var(--warn)' }}
+                  data-testid="benchmark-context-chunks"
+                >
+                  {r.error ? '—' : `${r.context_chunks_used ?? 0} chunk${(r.context_chunks_used ?? 0) === 1 ? '' : 's'}`}
+                </td>
                 <td style={monoCellStyle}>{r.response || '—'}</td>
                 <td
                   style={{

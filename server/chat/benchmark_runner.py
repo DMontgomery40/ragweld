@@ -43,6 +43,7 @@ async def _run_one(
     config: TriBridConfig,
     sem: asyncio.Semaphore,
     context_chunks: list[ChunkMatch],
+    corpus_scoped: bool,
 ) -> BenchmarkResult:
     async with sem:
         try:
@@ -78,7 +79,9 @@ async def _run_one(
                 config=config.chat,
             )
             context_text = format_context_for_llm(rag_chunks=rag_chunks, recall_chunks=[]) if rag_chunks else None
-            temperature = float(config.chat.temperature) if rag_chunks else float(config.chat.temperature_no_retrieval)
+            # Same policy as chat_once: the retrieval temperature applies whenever
+            # a corpus was selected, whether or not chunks survived the budget.
+            temperature = float(config.chat.temperature) if corpus_scoped else float(config.chat.temperature_no_retrieval)
             result = await generate_chat_text(
                 route=route,
                 system_prompt=system_prompt,
@@ -147,7 +150,16 @@ async def run_benchmark(
     sem = asyncio.Semaphore(max_concurrent)
 
     tasks = [
-        asyncio.create_task(_run_one(prompt=prompt, model=m, config=config, sem=sem, context_chunks=chunks))
+        asyncio.create_task(
+            _run_one(
+                prompt=prompt,
+                model=m,
+                config=config,
+                sem=sem,
+                context_chunks=chunks,
+                corpus_scoped=bool(retrieval.corpus_id),
+            )
+        )
         for m in models
     ]
     results = await asyncio.gather(*tasks) if tasks else []

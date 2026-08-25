@@ -82,7 +82,17 @@ async def test_label_propagation_communities_survive_promotion_and_feed_the_subg
                 _entity("b3", "Sensor ingest pipeline", "concept", "Concept"),
                 _entity("z1", "Unlinked footnote", "concept", "Concept"),
             ],
-            relationships=[_rel("a1", "a2"), _rel("a2", "a3"), _rel("a1", "a3"), _rel("b1", "b2"), _rel("b2", "b3")],
+            # One bridge (a3 -> b1) joins the groups: community detection must still
+            # separate them (connected-component grouping would not).
+            relationships=[
+                _rel("a1", "a2"),
+                _rel("a2", "a3"),
+                _rel("a1", "a3"),
+                _rel("b1", "b2"),
+                _rel("b2", "b3"),
+                _rel("b1", "b3"),
+                _rel("a3", "b1"),
+            ],
         )
         await neo.upsert_graphrag_graph(staging, entities, lexical_graph_config=lexical_cfg)
 
@@ -93,7 +103,7 @@ async def test_label_propagation_communities_survive_promotion_and_feed_the_subg
         for community in detected:
             assert community.community_id.startswith("c-")
             assert staging not in community.community_id and active not in community.community_id
-            assert community.name in {"Aurora Tidal Observatory", "Pelican gateway"}, community.name
+            assert community.name in {"Tidal calibration campaign", "KestrelDB"}, community.name  # the bridge endpoints are the hubs
             assert "linked entities around" in community.summary
         assert all("z1" not in c.member_ids for c in detected)
 
@@ -114,15 +124,14 @@ async def test_label_propagation_communities_survive_promotion_and_feed_the_subg
         payload = subgraph.json()
         assert {e["entity_id"] for e in payload["entities"]} == {"a1", "a2", "a3", "b1", "b2", "b3", "z1"}
         edges = {tuple(sorted((r["source_id"], r["target_id"]))) for r in payload["relationships"]}
-        assert edges == {("a1", "a2"), ("a2", "a3"), ("a1", "a3"), ("b1", "b2"), ("b2", "b3")}
+        assert edges == {("a1", "a2"), ("a2", "a3"), ("a1", "a3"), ("b1", "b2"), ("b2", "b3"), ("b1", "b3"), ("a3", "b1")}
         assert all(r["relation_type"] == "associated_with" for r in payload["relationships"])
-        # A capped view keeps the best-connected entities: a1/a2/a3/b2 all have
-        # degree 2, and the deterministic name tie-break keeps "Aurora Tidal
-        # Observatory", "Dr. Mireille Okafor" and "Pelican gateway".
+        # A capped view keeps the best-connected entities: a3 and b1 (degree 3)
+        # come first, then the degree-2 entities by name ("Aurora Tidal Observatory").
         capped = await client.get(f"/api/graph/{active}/subgraph", params={"limit": 3})
         assert capped.status_code == 200
-        assert {e["entity_id"] for e in capped.json()["entities"]} == {"a1", "a2", "b2"}
-        assert {tuple(sorted((r["source_id"], r["target_id"]))) for r in capped.json()["relationships"]} == {("a1", "a2")}
+        assert {e["entity_id"] for e in capped.json()["entities"]} == {"a3", "b1", "a1"}
+        assert {tuple(sorted((r["source_id"], r["target_id"]))) for r in capped.json()["relationships"]} == {("a1", "a3"), ("a3", "b1")}
     finally:
         for repo_id in (active, staging):
             try:

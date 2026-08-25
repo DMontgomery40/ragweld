@@ -1201,7 +1201,7 @@ no request interception, real Aurora questions). Status per finding:
 | M8 | FIXED | `benchmark_runner` called generation with `context_chunks=[]`. The API now retrieves through the same fusion lane as chat, the runner fits chunks to each alias's window (`fit_context_to_route`, now public) and uses the RAG prompt; `BenchmarkRun.retrieval` (`BenchmarkRetrieval`) and `BenchmarkResult.context_chunks_used` record grounding; retrieval failures fail the run (503) instead of degrading; the Benchmark tab shows a grounded / not-grounded banner. | `tests/integration/test_benchmark_grounding.py` (paid, two cheap aliases; grounded, `context_chunks_used>0`, persisted record) + spec "M8". |
 | M9 | FIXED | `tribrid_search_requests_total` / `_latency_seconds` / `_errors_total` lived in `/api/search` and an HTTP middleware. Moved into `TriBridFusion.search`, so chat, benchmark and MCP retrieval count on the same panels; middleware and endpoint counter removed. The mocked `test_metrics_increment_on_search` was deleted (its replacement runs on the real lane). | `test_index_promoted_lane.py` (search + chat retrieval each increment by one). |
 | M10 | FIXED | `/api/monitoring/alert-thresholds` never existed. The thresholds form and `useAlertThresholdsStore` are gone; Monitoring now reads the live Prometheus rules through `GET /api/observability/alert-rules` (`ObservabilityAlertRulesResponse`, fails closed when unconfigured/unreachable). New config field `tracing.prometheus_base_url` (+ glossary `PROMETHEUS_BASE_URL`), set on the operator's global config and on the drive corpus. | `tests/api/test_observability_alert_rules.py` (unconfigured, dead port, live Prometheus with `RagweldWatchdog` firing) + spec "M10/M11". |
-| M11 | FIXED | Hardcoded `:3000` / `:9090`. Links resolve from `ui.grafana_base_url` / `tracing.prometheus_base_url` / `tracing.alertmanager_base_url` and grey out when unset; Grafana Config gained a Prometheus URL input. Grafana's default datasource is still Prometheus: 64 panels bind `uid: prometheus` and Prometheus remote-writes to Mimir, so switching the default is a dashboards migration, not a P1 (residual). | spec "M10/M11". |
+| M11 | FIXED | Hardcoded `:3000` / `:9090`. Links resolve from `ui.grafana_base_url` / `tracing.prometheus_base_url` / `tracing.alertmanager_base_url` and grey out when unset; Grafana Config gained a Prometheus URL input. Grafana's default datasource is now **Mimir** (`infra/grafana/provisioning/datasources/mimir.yml` `isDefault: true`, Prometheus `false`) and all 82 dashboard datasource references (`uid: prometheus` and the stale `fetlt404vh7nka`) are rebound to `mimir`; verified after a Grafana restart with `/api/datasources` (Mimir default) and a `/api/ds/query` through the Mimir datasource (Prometheus remote-writes every sample to Mimir). | spec "M10/M11"; Grafana API check. |
 | M12 | FIXED | `/api/mcp/http/*` and `/api/mcp/test` never existed (the transport is mounted inside the API). Dead lifecycle controls and service methods removed; `MCPStatusResponse.tools` lists the registered tools; the subtab shows the mounted URL, the tools, and a real search probe (`/api/mcp/rag_search`) with a real question. | `tests/api/test_mcp_endpoints.py` + spec "M12". |
 | M55 (G1) | FIXED | `detect_communities` was a top-level-directory heuristic (`(root)` on flat corpora) whose ids embedded the staging repo id. Replaced by deterministic label propagation over entity relationships; ids are content hashes (`c-<sha1[:12]>`), members ranked by degree, summary names the hub; isolated entities belong to no community and the UI says why when there are none. Drive corpus after re-index: 6 communities (KestrelDB 12, Salinity sensor calibration 10, …). | `tests/integration/test_graph_communities_live.py` (seeded graph, promotion keeps ids) + spec "G1/G2/G3". |
 | M56 (G2) | FIXED | The whole-corpus view fetched `/entities` only. New `GET /api/graph/{corpus}/subgraph?limit=` returns the induced graph over the best-connected entities; `useGraph.loadSubgraph` feeds the visualizer (drive corpus: 47 nodes • 46 edges). | same. |
@@ -1216,3 +1216,71 @@ fallback in `server/chat/handler.py` is a compatibility seam for test doubles;
 placeholder messages, and two of its tests fail at HEAD without a matching
 gateway key; four API tests are order-dependent in the full unit+api lane
 (pass in isolation). M13–M54 remain OPEN as inventoried.
+
+### Adversarial review (codex exec, high effort) — pass 1 REFUTED (9 P1 / 7 P2), all acted on
+
+Prompted to refute `c562881` against the full diff. Every finding was checked
+against the code before acting; outcome per finding:
+
+1. **G1 label propagation collapsed two bridged cliques** — reproduced with the
+   helper (one group for a 6+6 clique pair joined by one edge). Replaced by
+   deterministic Louvain (`networkx`, `seed=0`) run in a worker thread; community
+   detection failure now fails the semantic-KG run instead of a warning. Unit test
+   for the bridged pair + the live test now bridges its two groups.
+2. **M5 cutover order** — the staged Qdrant count is verified before Postgres is
+   promoted, and `_STATS` is published only after Postgres, Qdrant and Neo4j are all
+   promoted (a failed run never reports staging numbers). Live test: a run over a
+   missing path errors and leaves `/stats`, chunk rows and search untouched.
+   Residual (documented, not P1): promotion is still three sequential store
+   swaps, not one atomic selector record.
+3. **M8 hand-written benchmark wire types / run-level banner** — `BenchmarkTab` now
+   uses generated `BenchmarkRun`/`BenchmarkResult`/`BenchmarkRunRequest`, the
+   payload-guessing normalizer is gone, the Context column shows each row's
+   `context_chunks_used`, and the banner is "Grounded" only when every answering
+   model used corpus context (otherwise "Partially grounded" names the models).
+4. **M12 probe bypassed MCP** — the probe is now `POST /api/mcp/probe`, which opens
+   a real `ClientSession` over the mounted Streamable HTTP transport and calls the
+   registered `search` tool (honouring `mcp.default_mode` / `top_k`); the legacy
+   `/api/mcp/rag_search` route and its DTOs are deleted. Live test covers default
+   and `sparse_only` modes.
+5. **M10 three config scopes** — the Monitoring page requests alert rules with the
+   same corpus scope it reads `tracing.prometheus_base_url` from; the route 404s on
+   an unknown corpus instead of falling back to global; the field is classified
+   `impact=live` (explicit per-field overrides now take precedence over the
+   section prefix rule). The two pre-existing observability routes keep their
+   corpus-not-found fallback (out of scope; noted as residual).
+6. **M9 TypeError compatibility retry** — deleted from `_fusion_search_with_cache`;
+   the four `FusionProtocol` test doubles accept the cache kwargs.
+7. **M1 hidden safe lane** — the wizard now calls `/api/index/estimate` and shows the
+   files/tokens/chunks/cost/time estimate in the in-app confirm dialog before any
+   index POST (the E2E asserts no POST before confirmation and that cancel starts
+   nothing); the test-lane config patches remain, documented as cost isolation.
+8. **M11 half-fixed** — the Mimir datasource migration is done (see M11 row).
+9. **Test-policy** — placeholder queries in `tests/unit/test_fusion.py` replaced
+   with a real question; the `monkeypatch` index-error test in
+   `test_metrics_endpoint.py` converted to a real `requires_postgres` test; the
+   graph Playwright test provisions its own semantic-KG corpus instead of skipping.
+   Residual, explicit: `test_fusion.py`'s three graph-hydration-mode tests still use
+   fake Postgres/Neo4j/Embedder doubles and stay on the `check_banned` allowlist —
+   converting them needs seeded chunk-vector/entity graphs per mode and is tracked
+   as debt, not claimed.
+10. Benchmark temperature policy mirrors chat (corpus scope, not chunk count);
+    Qdrant/Neo4j/contract failures map to the same typed 503/409 as search.
+11. Prometheus payload validation (`status == "success"`, `data.groups` list), rule
+    state as a literal with `unknown`, UI renders unknown/health≠ok distinctly.
+12. Global search keeps `corpus`/`subtab` params on control hits and re-runs the
+    query when an index arrives after typing.
+13. Contract bundle regenerated (`scripts/export_contract_bundle.py`).
+14. `FusionConfig` all-zero check applies to `weighted` only (RRF matrix test).
+15. `/api/mcp/status` reports the mounted runtime (`server.mcp.server.mounted_state`).
+16. Wizard links use React Router `Link` (base-path safe).
+
+Found while proving finding 2: a `POST /api/index` over a path the API cannot
+read "completed" with zero files, and an empty directory would have staged and
+promoted an empty index over a populated one. Now: a missing/non-directory
+`repo_path` is a 400 at the boundary, and a run that finds no files or produces
+no chunks fails (staging cleaned up) instead of promoting. Covered by the
+promoted-lane live test (400 for the missing path, `status=error` with
+"No indexable files" for an empty directory, active stats/chunks/search
+unchanged).
+

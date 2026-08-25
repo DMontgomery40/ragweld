@@ -41,7 +41,7 @@ from server.api.runtime_capabilities import router as runtime_capabilities_route
 from server.api.search import router as search_router
 from server.api.synthetic import router as synthetic_router
 from server.config import load_config
-from server.mcp.server import get_mcp_server
+from server.mcp.server import get_mcp_server, record_mounted_state
 from server.observability.metrics import render_latest
 from server.observability.runtime import (
     apply_default_links,
@@ -235,6 +235,7 @@ app.add_middleware(
 
 if _global_cfg.mcp.enabled:
     app.mount(_global_cfg.mcp.mount_path, _mcp.streamable_http_app())
+record_mounted_state(enabled=bool(_global_cfg.mcp.enabled), mount_path=str(_global_cfg.mcp.mount_path))
 
 
 @app.get("/metrics")

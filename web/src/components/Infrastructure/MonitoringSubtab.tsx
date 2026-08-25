@@ -6,7 +6,7 @@
 // configuration is infra/prometheus-rules.yml, read back here from Prometheus.
 
 import { useCallback, useEffect, useState } from 'react';
-import { apiClient, api } from '@/api/client';
+import { apiClient, api, withCorpusScope } from '@/api/client';
 import { useConfigField } from '@/hooks/useConfig';
 import { TooltipIcon } from '@/components/ui/TooltipIcon';
 import { ObservabilityOperatorDeck } from '@/components/Observability/OperatorDeck';
@@ -15,7 +15,8 @@ import type { ObservabilityAlertRule, ObservabilityAlertRulesResponse } from '@/
 function stateTone(state: string): { fg: string; label: string } {
   if (state === 'firing') return { fg: 'var(--err)', label: 'FIRING' };
   if (state === 'pending') return { fg: 'var(--warn)', label: 'PENDING' };
-  return { fg: 'var(--ok)', label: 'OK' };
+  if (state === 'inactive') return { fg: 'var(--ok)', label: 'OK' };
+  return { fg: 'var(--fg-muted)', label: 'UNKNOWN' };
 }
 
 function formatDuration(seconds: number): string {
@@ -37,6 +38,11 @@ function AlertRuleRow({ rule }: { rule: ObservabilityAlertRule }) {
         <span style={{ color: tone.fg, fontWeight: 700, fontSize: '12px' }}>{tone.label}</span>
         {(rule.active_alerts ?? 0) > 0 ? (
           <span style={{ marginLeft: 6, fontSize: '11.5px', color: 'var(--fg-muted)' }}>×{rule.active_alerts}</span>
+        ) : null}
+        {rule.health && rule.health !== 'ok' ? (
+          <span style={{ marginLeft: 6, fontSize: '11.5px', color: 'var(--err)' }} data-testid="alert-rule-health">
+            health: {rule.health}
+          </span>
         ) : null}
       </td>
       <td style={{ padding: '8px 10px' }}>
@@ -66,7 +72,8 @@ export function MonitoringSubtab() {
     setRulesLoading(true);
     setRulesError(null);
     try {
-      const { data } = await apiClient.get<ObservabilityAlertRulesResponse>(api('/observability/alert-rules'));
+      // Same scope the page reads tracing.prometheus_base_url from (the active corpus config).
+      const { data } = await apiClient.get<ObservabilityAlertRulesResponse>(withCorpusScope(api('/observability/alert-rules')));
       setRules(data);
       setLastLoaded(new Date());
     } catch (error) {

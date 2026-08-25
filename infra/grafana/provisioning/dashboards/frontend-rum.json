@@ -12,7 +12,7 @@
   {
    "datasource": {
     "type": "prometheus",
-    "uid": "prometheus"
+    "uid": "mimir"
    },
    "fieldConfig": {
     "defaults": {
@@ -52,7 +52,7 @@
   {
    "datasource": {
     "type": "prometheus",
-    "uid": "prometheus"
+    "uid": "mimir"
    },
    "fieldConfig": {
     "defaults": {

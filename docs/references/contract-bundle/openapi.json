@@ -1614,6 +1614,13 @@
             "title": "Breakdown Ms",
             "type": "object"
           },
+          "context_chunks_used": {
+            "default": 0,
+            "description": "Retrieved chunks that fit this model's context window and were sent with the prompt.",
+            "minimum": 0.0,
+            "title": "Context Chunks Used",
+            "type": "integer"
+          },
           "error": {
             "anyOf": [
               {
@@ -1673,6 +1680,60 @@
           "model"
         ],
         "title": "BenchmarkResult",
+        "type": "object"
+      },
+      "BenchmarkRetrieval": {
+        "description": "How a benchmark run grounded its prompt before generation.",
+        "properties": {
+          "chunk_count": {
+            "default": 0,
+            "description": "Chunks retrieved through the tri-brid lane for this prompt.",
+            "minimum": 0.0,
+            "title": "Chunk Count",
+            "type": "integer"
+          },
+          "corpus_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Corpus the prompt was retrieved against; null when the run had no corpus scope.",
+            "title": "Corpus Id"
+          },
+          "grounded": {
+            "description": "True when at least one retrieved chunk was offered to every model.",
+            "title": "Grounded",
+            "type": "boolean"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why no retrieval context was available (no corpus scope, no matches); null when grounded.",
+            "title": "Reason"
+          },
+          "source_paths": {
+            "description": "Distinct source file paths of the retrieved chunks, best rank first.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Source Paths",
+            "type": "array"
+          }
+        },
+        "required": [
+          "grounded"
+        ],
+        "title": "BenchmarkRetrieval",
         "type": "object"
       },
       "BenchmarkRun": {
@@ -1752,6 +1813,17 @@
             },
             "title": "Results",
             "type": "array"
+          },
+          "retrieval": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BenchmarkRetrieval"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Grounding used for this run; null on records persisted before retrieval-backed benchmarks."
           },
           "run_id": {
             "description": "Unique benchmark run identifier.",
@@ -9200,10 +9272,10 @@
         "title": "MCPHTTPTransportStatus",
         "type": "object"
       },
-      "MCPRagSearchResponse": {
-        "description": "Response payload for legacy /api/mcp/rag_search (debug UI).",
+      "MCPProbeRequest": {
+        "description": "Run one real MCP tool call through the mounted Streamable HTTP transport.",
         "properties": {
-          "error": {
+          "corpus_id": {
             "anyOf": [
               {
                 "type": "string"
@@ -9212,52 +9284,100 @@
                 "type": "null"
               }
             ],
-            "description": "Error message when the search fails.",
-            "title": "Error"
+            "description": "Corpus to search; required unless the request carries corpus_id in its scope.",
+            "title": "Corpus Id"
           },
-          "results": {
-            "description": "Compact match list.",
-            "items": {
-              "$ref": "#/components/schemas/MCPRagSearchResult"
-            },
-            "title": "Results",
-            "type": "array"
-          }
-        },
-        "title": "MCPRagSearchResponse",
-        "type": "object"
-      },
-      "MCPRagSearchResult": {
-        "description": "Compact result shape for legacy /api/mcp/rag_search (debug UI).",
-        "properties": {
-          "end_line": {
-            "description": "End line for the matched span.",
-            "title": "End Line",
-            "type": "integer"
+          "mode": {
+            "anyOf": [
+              {
+                "enum": [
+                  "tribrid",
+                  "dense_only",
+                  "sparse_only",
+                  "graph_only"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Retrieval mode passed to the MCP search tool; null uses mcp.default_mode exactly like an MCP client.",
+            "title": "Mode"
           },
-          "file_path": {
-            "description": "Matched file path.",
-            "title": "File Path",
+          "question": {
+            "description": "A real question about the corpus (never a placeholder).",
+            "minLength": 1,
+            "title": "Question",
             "type": "string"
           },
-          "rerank_score": {
-            "description": "Legacy field: score for the match (post-fusion).",
-            "title": "Rerank Score",
-            "type": "number"
-          },
-          "start_line": {
-            "description": "Start line for the matched span.",
-            "title": "Start Line",
-            "type": "integer"
+          "top_k": {
+            "anyOf": [
+              {
+                "maximum": 100.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Result count passed to the tool; null uses mcp.default_top_k.",
+            "title": "Top K"
           }
         },
         "required": [
-          "file_path",
-          "start_line",
-          "end_line",
-          "rerank_score"
+          "question"
         ],
-        "title": "MCPRagSearchResult",
+        "title": "MCPProbeRequest",
+        "type": "object"
+      },
+      "MCPProbeResponse": {
+        "description": "Result of invoking the MCP `search` tool over the mounted transport.",
+        "properties": {
+          "corpus_id": {
+            "description": "Corpus the tool searched.",
+            "title": "Corpus Id",
+            "type": "string"
+          },
+          "mode": {
+            "description": "Retrieval mode the tool resolved (request override or mcp.default_mode).",
+            "title": "Mode",
+            "type": "string"
+          },
+          "results": {
+            "description": "Structured tool output, validated as ChunkMatch rows.",
+            "items": {
+              "$ref": "#/components/schemas/ChunkMatch"
+            },
+            "title": "Results",
+            "type": "array"
+          },
+          "tool": {
+            "default": "search",
+            "description": "Tool that was invoked.",
+            "title": "Tool",
+            "type": "string"
+          },
+          "top_k": {
+            "description": "Result count the tool resolved.",
+            "minimum": 1.0,
+            "title": "Top K",
+            "type": "integer"
+          },
+          "transport_url": {
+            "description": "Streamable HTTP endpoint the client session connected to.",
+            "title": "Transport Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "transport_url",
+          "corpus_id",
+          "mode",
+          "top_k"
+        ],
+        "title": "MCPProbeResponse",
         "type": "object"
       },
       "MCPStatusResponse": {
@@ -9298,9 +9418,38 @@
             "description": "Whether the Python stdio MCP transport is available (client-spawned).",
             "title": "Python Stdio Available",
             "type": "boolean"
+          },
+          "tools": {
+            "description": "Tools registered on the embedded Streamable HTTP server (empty when the transport is disabled).",
+            "items": {
+              "$ref": "#/components/schemas/MCPToolInfo"
+            },
+            "title": "Tools",
+            "type": "array"
           }
         },
         "title": "MCPStatusResponse",
+        "type": "object"
+      },
+      "MCPToolInfo": {
+        "description": "One tool registered on the embedded MCP server.",
+        "properties": {
+          "description": {
+            "default": "",
+            "description": "Tool description as advertised to MCP clients.",
+            "title": "Description",
+            "type": "string"
+          },
+          "name": {
+            "description": "Tool name as advertised to MCP clients.",
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "MCPToolInfo",
         "type": "object"
       },
       "Message": {
@@ -9856,6 +10005,164 @@
           "message"
         ],
         "title": "ModelValidationWarning",
+        "type": "object"
+      },
+      "ObservabilityAlertRule": {
+        "description": "One alerting rule as Prometheus currently evaluates it.",
+        "properties": {
+          "active_alerts": {
+            "default": 0,
+            "description": "Alert instances currently pending or firing for this rule.",
+            "minimum": 0.0,
+            "title": "Active Alerts",
+            "type": "integer"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "description annotation, when set.",
+            "title": "Description"
+          },
+          "duration_seconds": {
+            "default": 0.0,
+            "description": "'for' duration before the alert fires.",
+            "minimum": 0.0,
+            "title": "Duration Seconds",
+            "type": "number"
+          },
+          "group": {
+            "description": "Rule group name from the Prometheus rules file.",
+            "title": "Group",
+            "type": "string"
+          },
+          "health": {
+            "default": "unknown",
+            "description": "Prometheus rule health: ok, err, or unknown.",
+            "title": "Health",
+            "type": "string"
+          },
+          "name": {
+            "description": "Alert name.",
+            "title": "Name",
+            "type": "string"
+          },
+          "query": {
+            "description": "PromQL expression the rule evaluates.",
+            "title": "Query",
+            "type": "string"
+          },
+          "severity": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "severity label on the rule, when set.",
+            "title": "Severity"
+          },
+          "state": {
+            "description": "Prometheus rule state; 'unknown' when Prometheus reported a state this build does not model.",
+            "enum": [
+              "inactive",
+              "pending",
+              "firing",
+              "unknown"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "summary annotation, when set.",
+            "title": "Summary"
+          }
+        },
+        "required": [
+          "group",
+          "name",
+          "state",
+          "query"
+        ],
+        "title": "ObservabilityAlertRule",
+        "type": "object"
+      },
+      "ObservabilityAlertRulesResponse": {
+        "description": "Alerting rules read live from Prometheus for the Monitoring surface.",
+        "properties": {
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Operator-facing reason when rules could not be read.",
+            "title": "Error"
+          },
+          "firing_count": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Firing Count",
+            "type": "integer"
+          },
+          "ok": {
+            "default": true,
+            "description": "False when Prometheus is unconfigured or unreachable.",
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "pending_count": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Pending Count",
+            "type": "integer"
+          },
+          "reachable": {
+            "default": false,
+            "description": "Whether the Prometheus rules API answered.",
+            "title": "Reachable",
+            "type": "boolean"
+          },
+          "rules": {
+            "description": "Alerting rules, firing first.",
+            "items": {
+              "$ref": "#/components/schemas/ObservabilityAlertRule"
+            },
+            "title": "Rules",
+            "type": "array"
+          },
+          "source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Prometheus base URL the rules were read from.",
+            "title": "Source Url"
+          }
+        },
+        "title": "ObservabilityAlertRulesResponse",
         "type": "object"
       },
       "ObservabilityCatalogResponse": {
@@ -16602,6 +16909,12 @@
             "title": "Otlp Headers",
             "type": "string"
           },
+          "prometheus_base_url": {
+            "default": "",
+            "description": "Prometheus base URL used for the alert-rule feed and operator deep links (Prometheus scrapes and remote-writes to Mimir)",
+            "title": "Prometheus Base Url",
+            "type": "string"
+          },
           "pyroscope_base_url": {
             "default": "",
             "description": "Grafana Pyroscope base URL used for profiling status checks",
@@ -18616,6 +18929,16 @@
             },
             "description": "Successful Response"
           },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RetrievalContractMismatchResponse"
+                }
+              }
+            },
+            "description": "The stored index contract conflicts with the current runtime configuration."
+          },
           "422": {
             "content": {
               "application/json": {
@@ -18625,6 +18948,24 @@
               }
             },
             "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/DependencyUnavailableResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/RequiredRetrievalLegFailureResponse"
+                    }
+                  ],
+                  "title": "Response 503 Benchmark Run Api Benchmark Run Post"
+                }
+              }
+            },
+            "description": "A required storage dependency or requested retrieval leg is unavailable."
           }
         },
         "summary": "Benchmark Run",
@@ -22630,6 +22971,69 @@
         ]
       }
     },
+    "/api/graph/{corpus_id}/subgraph": {
+      "get": {
+        "description": "Induced subgraph over the best-connected entities of the corpus (whole-corpus visualizer).",
+        "operationId": "get_repo_subgraph_api_graph__corpus_id__subgraph_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "corpus_id",
+            "required": true,
+            "schema": {
+              "title": "Corpus Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 200,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GraphNeighborsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DependencyUnavailableResponse"
+                }
+              }
+            },
+            "description": "A required runtime dependency is unavailable."
+          }
+        },
+        "summary": "Get Repo Subgraph",
+        "tags": [
+          "graph"
+        ]
+      }
+    },
     "/api/health": {
       "get": {
         "operationId": "health_check_api_health_get",
@@ -24000,42 +24404,11 @@
         ]
       }
     },
-    "/api/mcp/rag_search": {
-      "get": {
-        "description": "Run tri-brid search and return compact results for MCP/debug tooling.",
-        "operationId": "mcp_rag_search_api_mcp_rag_search_get",
+    "/api/mcp/probe": {
+      "post": {
+        "description": "Invoke the MCP `search` tool the way an MCP client does: a real ClientSession over the mounted transport.\n\nThis is the only search path the MCP subtab probes; there is no HTTP shortcut\nthat bypasses the tool (the former /api/mcp/rag_search always enabled every\nretrieval leg and ignored mcp.default_mode).",
+        "operationId": "mcp_probe_api_mcp_probe_post",
         "parameters": [
-          {
-            "description": "Search query",
-            "in": "query",
-            "name": "q",
-            "required": true,
-            "schema": {
-              "description": "Search query",
-              "title": "Q",
-              "type": "string"
-            }
-          },
-          {
-            "description": "Number of results to return",
-            "in": "query",
-            "name": "top_k",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "maximum": 100,
-                  "minimum": 1,
-                  "type": "integer"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Number of results to return",
-              "title": "Top K"
-            }
-          },
           {
             "in": "query",
             "name": "corpus_id",
@@ -24085,12 +24458,22 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MCPProbeRequest"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/MCPRagSearchResponse"
+                  "$ref": "#/components/schemas/MCPProbeResponse"
                 }
               }
             },
@@ -24128,14 +24511,14 @@
                       "$ref": "#/components/schemas/RequiredRetrievalLegFailureResponse"
                     }
                   ],
-                  "title": "Response 503 Mcp Rag Search Api Mcp Rag Search Get"
+                  "title": "Response 503 Mcp Probe Api Mcp Probe Post"
                 }
               }
             },
             "description": "A required storage dependency or requested retrieval leg is unavailable."
           }
         },
-        "summary": "Mcp Rag Search",
+        "summary": "Mcp Probe",
         "tags": [
           "config"
         ]
@@ -24354,6 +24737,94 @@
         "summary": "Upsert Model",
         "tags": [
           "models"
+        ]
+      }
+    },
+    "/api/observability/alert-rules": {
+      "get": {
+        "description": "Alerting rules as Prometheus evaluates them right now (the real alert configuration).\n\nReads ``tracing.prometheus_base_url`` from the same config scope the\nMonitoring page saves it to; an unknown corpus is a 404, never a silent\nfall-back to the global config.",
+        "operationId": "observability_alert_rules_api_observability_alert_rules_get",
+        "parameters": [
+          {
+            "description": "Optional corpus_id to scope config",
+            "in": "query",
+            "name": "repo",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional corpus_id to scope config",
+              "title": "Repo"
+            }
+          },
+          {
+            "description": "Alias for repo",
+            "in": "query",
+            "name": "corpus_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Alias for repo",
+              "title": "Corpus Id"
+            }
+          },
+          {
+            "description": "Alias for corpus_id",
+            "in": "query",
+            "name": "repo_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Alias for corpus_id",
+              "title": "Repo Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ObservabilityAlertRulesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Observability Alert Rules",
+        "tags": [
+          "observability"
         ]
       }
     },

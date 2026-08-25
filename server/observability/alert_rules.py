@@ -12,7 +12,33 @@ from server.models.tribrid_config_model import (
     TriBridConfig,
 )
 
-_STATE_ORDER = {"firing": 0, "pending": 1, "inactive": 2}
+_STATE_ORDER = {"firing": 0, "pending": 1, "inactive": 2, "unknown": 3}
+_KNOWN_STATES = frozenset({"firing", "pending", "inactive"})
+
+
+class MalformedRulesPayload(ValueError):
+    """Prometheus answered, but not with a rules payload."""
+
+
+def parse_rules_payload(payload: Any) -> list[ObservabilityAlertRule]:
+    """Turn a Prometheus ``/api/v1/rules`` body into alert rules; reject anything that is not one."""
+    if not isinstance(payload, dict) or payload.get("status") != "success":
+        raise MalformedRulesPayload(f"unexpected rules payload: status={payload.get('status') if isinstance(payload, dict) else type(payload).__name__!r}")
+    data = payload.get("data")
+    groups = data.get("groups") if isinstance(data, dict) else None
+    if not isinstance(groups, list):
+        raise MalformedRulesPayload("unexpected rules payload: data.groups is not a list")
+    rules: list[ObservabilityAlertRule] = []
+    for group in groups:
+        if not isinstance(group, dict):
+            raise MalformedRulesPayload("unexpected rules payload: group is not an object")
+        for raw in group.get("rules") or []:
+            if isinstance(raw, dict):
+                rule = _rule_from_payload(str(group.get("name") or ""), raw)
+                if rule is not None:
+                    rules.append(rule)
+    rules.sort(key=lambda r: (_STATE_ORDER.get(r.state, 3), r.group, r.name))
+    return rules
 
 
 def _rule_from_payload(group_name: str, raw: dict[str, Any]) -> ObservabilityAlertRule | None:
@@ -22,10 +48,11 @@ def _rule_from_payload(group_name: str, raw: dict[str, Any]) -> ObservabilityAle
     annotations = raw.get("annotations") if isinstance(raw.get("annotations"), dict) else {}
     alerts = raw.get("alerts") if isinstance(raw.get("alerts"), list) else []
     severity = labels.get("severity")
+    raw_state = str(raw.get("state") or "").strip().lower()
     return ObservabilityAlertRule(
         group=str(group_name),
         name=str(raw.get("name") or ""),
-        state=str(raw.get("state") or "inactive"),
+        state=raw_state if raw_state in _KNOWN_STATES else "unknown",
         severity=str(severity) if severity is not None else None,
         query=str(raw.get("query") or ""),
         duration_seconds=float(raw.get("duration") or 0.0),
@@ -58,17 +85,15 @@ async def build_alert_rules(config: TriBridConfig) -> ObservabilityAlertRulesRes
             reachable=False,
             error=f"Prometheus rules API unavailable at {base}: {exc}",
         )
-    groups = (payload.get("data") or {}).get("groups") if isinstance(payload, dict) else None
-    rules: list[ObservabilityAlertRule] = []
-    for group in groups or []:
-        if not isinstance(group, dict):
-            continue
-        for raw in group.get("rules") or []:
-            if isinstance(raw, dict):
-                rule = _rule_from_payload(str(group.get("name") or ""), raw)
-                if rule is not None:
-                    rules.append(rule)
-    rules.sort(key=lambda r: (_STATE_ORDER.get(r.state, 3), r.group, r.name))
+    try:
+        rules = parse_rules_payload(payload)
+    except MalformedRulesPayload as exc:
+        return ObservabilityAlertRulesResponse(
+            ok=False,
+            source_url=base,
+            reachable=True,
+            error=f"{base}/api/v1/rules answered, but not with a Prometheus rules payload: {exc}",
+        )
     return ObservabilityAlertRulesResponse(
         ok=True,
         source_url=base,

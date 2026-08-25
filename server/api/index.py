@@ -1003,6 +1003,13 @@ async def _run_index_body(
     with INDEX_STAGE_LATENCY_SECONDS.labels(stage="collect_file_paths").time():
         file_entries = list(loader.iter_repo_files(repo_path))
     total_files = len(file_entries)
+    if total_files == 0:
+        # An index with nothing in it must never be staged and promoted over a
+        # populated one; tell the operator what was scanned.
+        raise RuntimeError(
+            f"No indexable files under {repo_path} (check exclude patterns, file size limits and the path itself); "
+            "refusing to build an empty index"
+        )
 
     if force_reindex:
         await postgres.delete_chunks(write_repo_id)
@@ -1419,13 +1426,13 @@ async def _run_index_body(
     await _flush_pending_cross_file_chunks(force=True)
 
     if neo4j is not None and cfg.graph_indexing.semantic_kg_enabled:
-        try:
-            await neo4j.detect_communities(write_repo_id)
-        except Exception as exc:
-            logger.warning("Graph community detection failed for repo_id=%s: %s", repo_id, exc, exc_info=True)
+        # A semantic-KG build without communities is an incomplete graph; fail the
+        # run (the staging resources are cleaned up) instead of promoting it.
+        communities = await neo4j.detect_communities(write_repo_id)
+        if event_queue is not None:
             _emit_event(
                 event_queue,
-                {"type": "warning", "message": f"Graph community detection incomplete: {exc}"},
+                {"type": "log", "message": f"🧩 Graph communities detected: {len(communities)}"},
                 drop_oldest=True,
             )
 
@@ -1471,6 +1478,10 @@ async def _run_index_body(
             drop_oldest=True,
         )
 
+    if total_chunks == 0:
+        raise RuntimeError(
+            f"{total_files} files were scanned under {repo_path} but produced no chunks; refusing to build an empty index"
+        )
     stats = IndexStats(
         repo_id=repo_id,
         total_files=total_files,
@@ -1482,7 +1493,9 @@ async def _run_index_body(
         last_indexed=datetime.now(UTC),
         file_breakdown=dict(file_breakdown),
     )
-    _STATS[repo_id] = stats
+    # Not published to _STATS here: the caller publishes after the staged
+    # Postgres/Qdrant/Neo4j resources have all been promoted, so a failed run
+    # never reports staging numbers as the active index.
     return stats
 
 
@@ -1546,6 +1559,15 @@ async def _background_index_job(request: IndexRequest, queue: asyncio.Queue[dict
                 qdrant=qdrant,
                 qdrant_generation=qdrant_generation,
             )
+        # Verify every staged resource BEFORE any active store changes: a partial
+        # vector index must never be paired with promoted chunk rows.
+        staged_points = await qdrant.count_points(qdrant_generation)
+        expected_points = int(getattr(stats, "total_chunks", 0) or 0)
+        if staged_points != expected_points:
+            raise RuntimeError(
+                f"Staged Qdrant generation {qdrant_generation} holds {staged_points} points but the run "
+                f"indexed {expected_points} chunks; refusing to promote a partial vector index"
+            )
         cfg = await load_scoped_config(repo_id=repo_id)
         postgres = PostgresClient(cfg.indexing.postgres_url)
         await postgres.connect()
@@ -1565,15 +1587,6 @@ async def _background_index_job(request: IndexRequest, queue: asyncio.Queue[dict
         finally:
             with contextlib.suppress(Exception):
                 await postgres.disconnect()
-        # Verify the STAGED generation before it becomes visible: a partial
-        # vector index must never replace the live one.
-        staged_points = await qdrant.count_points(qdrant_generation)
-        expected_points = int(getattr(stats, "total_chunks", 0) or 0)
-        if staged_points != expected_points:
-            raise RuntimeError(
-                f"Staged Qdrant generation {qdrant_generation} holds {staged_points} points but the run "
-                f"indexed {expected_points} chunks; refusing to promote a partial vector index"
-            )
         with INDEX_STAGE_LATENCY_SECONDS.labels(stage="qdrant_promote_generation").time():
             await qdrant.promote_generation(repo_id, qdrant_generation)
         qdrant_generation = None
@@ -1609,6 +1622,9 @@ async def _background_index_job(request: IndexRequest, queue: asyncio.Queue[dict
                 await neo4j.promote_repo_graph(active_repo_id=repo_id, staging_repo_id=staging_repo_id)
             finally:
                 await neo4j.disconnect()
+        # The cutover is complete on every store; only now do the process-level
+        # stats describe the active index.
+        _STATS[repo_id] = stats
         # Update process-level “size” gauges (best-effort; no per-corpus labels).
         try:
             CHUNKS_INDEXED_CURRENT.set(int(getattr(stats, "total_chunks", 0) or 0))
@@ -1990,6 +2006,11 @@ async def estimate_index(request: IndexRequest) -> IndexEstimate:
 
 @router.post("/index", response_model=IndexStatus)
 async def start_index(request: IndexRequest) -> IndexStatus:
+    # Fail closed on a path the API cannot read: the loader yields nothing for a
+    # missing root and the run would otherwise "complete" with zero files.
+    root = Path(str(request.repo_path or "")).expanduser()
+    if not str(request.repo_path or "").strip() or not root.is_dir():
+        raise HTTPException(status_code=400, detail=f"repo_path is not a readable directory: {request.repo_path}")
     global _LAST_STARTED_REPO
 
     # If already running, return current status.

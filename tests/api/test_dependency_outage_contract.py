@@ -32,7 +32,7 @@ def test_stateful_api_openapi_documents_typed_dependency_503() -> None:
             "DependencyUnavailableResponse",
             "RequiredRetrievalLegFailureResponse",
         },
-        ("/api/mcp/rag_search", "get"): {
+        ("/api/mcp/probe", "post"): {
             "DependencyUnavailableResponse",
             "RequiredRetrievalLegFailureResponse",
         },
@@ -70,7 +70,7 @@ REQUESTS = [
     ("POST", "/api/answer/stream", {"query": "How often is the Aurora salinity sensor array calibrated?", "repo_id": "missing", "include_vector": False, "include_sparse": False, "include_graph": False}),
     ("POST", "/api/chat", {"message": "How often is the Aurora salinity sensor array calibrated?", "sources": {"corpus_ids": ["missing"]}, "include_vector": False, "include_sparse": False, "include_graph": False}),
     ("POST", "/api/chat/stream", {"message": "How often is the Aurora salinity sensor array calibrated?", "sources": {"corpus_ids": ["missing"]}, "include_vector": False, "include_sparse": False, "include_graph": False}),
-    ("GET", "/api/mcp/rag_search?q=How%20often%20is%20the%20Aurora%20salinity%20sensor%20array%20calibrated%3F&corpus_id=missing", None),
+    ("POST", "/api/mcp/probe?corpus_id=missing", {"question": "How often is the Aurora salinity sensor array calibrated?"}),
     ("GET", "/api/config?corpus_id=missing", None),
     ("GET", "/api/config/validate?corpus_id=missing", None),
     ("GET", "/api/graph/missing/stats", None),

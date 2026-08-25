@@ -12,15 +12,13 @@ import {
   EXHAUSTIVE_CHAT_MODEL,
   acceptanceCorpusPath,
   activateCorpusInBrowser,
+  indexCorpus,
   patchCorpusConfigSection,
   provisionExhaustiveCorpus,
   type ExhaustiveCorpus,
 } from './corpus_fixture';
 
 const REAL_QUESTION = 'How often is the salinity sensor calibrated?';
-// Semantic-KG graph corpus used read-only for the graph assertions (indexed with
-// the semantic knowledge graph on; the drive's isolated corpus).
-const GRAPH_CORPUS_ID = process.env.P1_GRAPH_CORPUS_ID ?? 'ragweld-drive-81854';
 const BENCHMARK_MODELS = [
   process.env.BENCHMARK_E2E_MODEL_A ?? 'openai.gpt-5.6-luna',
   process.env.BENCHMARK_E2E_MODEL_B ?? 'openai.gpt-5.4-mini',
@@ -164,6 +162,8 @@ test.describe.serial('curious-user drive P1 fixes on an isolated corpus', () => 
     expect(prometheus).toMatch(/^https?:\/\//);
     await expect(page.getByTestId('open-grafana')).toHaveAttribute('href', grafana);
     await expect(page.getByTestId('open-prometheus')).toHaveAttribute('href', prometheus);
+    // The table and the link resolve from the same authoritative (corpus-scoped) value.
+    await expect(page.getByTestId('alert-rules-summary')).toContainText(prometheus);
     expect(grafana).not.toMatch(/:3000$/);
     expect(prometheus).not.toMatch(/:9090$/);
     expect(deadCalls()).toEqual([]);
@@ -171,7 +171,7 @@ test.describe.serial('curious-user drive P1 fixes on an isolated corpus', () => 
 
   test('M12: the MCP subtab lists registered tools and probes real retrieval', async ({ page, baseURL }) => {
     await activateCorpusInBrowser(page, corpus.corpusId);
-    const deadCalls = trackRequests(page, (url) => /\/api\/mcp\/(http\/|test)/.test(url));
+    const deadCalls = trackRequests(page, (url) => /\/api\/mcp\/(http\/|test|rag_search)/.test(url));
     await gotoWeb(page, baseURL, 'infrastructure?subtab=mcp');
     await expect(page.getByTestId('mcp-tool-search')).toBeVisible({ timeout: 60_000 });
     await expect(page.getByTestId('mcp-tool-answer')).toBeVisible();
@@ -183,6 +183,9 @@ test.describe.serial('curious-user drive P1 fixes on an isolated corpus', () => 
     const results = page.getByTestId('mcp-probe-results');
     await expect(results).toBeVisible({ timeout: 60_000 });
     await expect(results).toContainText('sensor-calibration.md');
+    await expect(results).toContainText('/mcp/');
+    await expect(results).toContainText('tool search');
+    await expect(results).toContainText('mode tribrid');
     expect(deadCalls()).toEqual([]);
   });
 
@@ -206,18 +209,42 @@ test.describe.serial('curious-user drive P1 fixes on an isolated corpus', () => 
     await expect(grounding).toHaveAttribute('data-grounded', 'true');
     await expect(grounding).toContainText('Grounded');
     await expect(grounding).toContainText('sensor-calibration');
+    const contextCells = page.getByTestId('benchmark-context-chunks');
+    await expect(contextCells).toHaveCount(BENCHMARK_MODELS.length);
+    for (let i = 0; i < BENCHMARK_MODELS.length; i += 1) {
+      await expect(contextCells.nth(i)).toContainText(/^[1-9]\d* chunks?$/);
+    }
   });
 });
 
-test.describe.serial('G1/G2/G3 on the semantic-KG graph corpus', () => {
+test.describe.serial('G1/G2/G3 on a semantic-KG graph corpus provisioned by the suite', () => {
+  // The acceptance corpus indexed with the semantic knowledge graph on (four
+  // paid extraction calls through the cheap alias); no dependency on any
+  // pre-existing corpus, so the graph assertions can never skip.
+  let graphCorpus: ExhaustiveCorpus;
+  let graphCorpusId = '';
+
   test.beforeAll(async ({ request }) => {
-    const stats = await request.get(`${API_BASE}/graph/${encodeURIComponent(GRAPH_CORPUS_ID)}/stats`);
-    if (!stats.ok()) test.skip(true, `graph corpus ${GRAPH_CORPUS_ID} is not available (${stats.status()})`);
-    const payload = await stats.json();
-    if (!payload.total_entities) test.skip(true, `graph corpus ${GRAPH_CORPUS_ID} has no entities; force re-index it with the semantic KG on`);
+    test.setTimeout(10 * 60 * 1000);
+    graphCorpus = await provisionExhaustiveCorpus(request, { index: false });
+    graphCorpusId = graphCorpus.corpusId;
+    await patchCorpusConfigSection(request, graphCorpusId, 'graph_indexing', {
+      semantic_kg_enabled: true,
+      semantic_kg_mode: 'llm',
+      semantic_kg_llm_model: EXHAUSTIVE_CHAT_MODEL,
+    });
+    await indexCorpus(request, graphCorpusId, graphCorpus.corpusPath);
+    const stats = await (await request.get(`${API_BASE}/graph/${encodeURIComponent(graphCorpusId)}/stats`)).json();
+    expect(stats.total_entities, 'semantic extraction must produce entities').toBeGreaterThan(0);
+    expect(stats.total_relationships, 'semantic extraction must produce relationships').toBeGreaterThan(0);
+  });
+
+  test.afterAll(async ({ request }) => {
+    if (graphCorpus) await graphCorpus.dispose(request);
   });
 
   test('communities are relationship-based, the full view has edges, fullscreen fills the modal', async ({ page, baseURL }) => {
+    const GRAPH_CORPUS_ID = graphCorpusId;
     await activateCorpusInBrowser(page, GRAPH_CORPUS_ID);
     await gotoWeb(page, baseURL, `rag?subtab=graph&corpus=${encodeURIComponent(GRAPH_CORPUS_ID)}`);
     await expect(page.getByTestId('graph-subtab')).toBeVisible({ timeout: 60_000 });
@@ -361,7 +388,8 @@ test.describe.serial('M1/M5: onboarding runs on the real corpus, index and chat 
     const corpora = (await (await request.get(`${API_BASE}/corpora`)).json()) as Array<{ corpus_id: string; name: string }>;
     createdCorpusId = corpora.find((c) => c.name === corpusName)?.corpus_id || '';
     expect(createdCorpusId, 'the wizard registered the corpus through the API').toBeTruthy();
-    // Scope the new corpus to cost-free embeddings and the cheap probe alias before indexing/asking.
+    // Test-lane cost isolation only (deterministic embeddings, cheap alias); the
+    // wizard's own gate is the estimate + confirmation asserted below.
     await patchCorpusConfigSection(request, createdCorpusId, 'embedding', { embedding_backend: 'deterministic' });
     await patchCorpusConfigSection(request, createdCorpusId, 'generation', { enrich_disabled: true });
     await patchCorpusConfigSection(request, createdCorpusId, 'graph_indexing', { semantic_kg_enabled: false });
@@ -369,7 +397,21 @@ test.describe.serial('M1/M5: onboarding runs on the real corpus, index and chat 
     await patchCorpusConfigSection(request, createdCorpusId, 'chat', { litellm: { default_model: EXHAUSTIVE_CHAT_MODEL } });
     await patchCorpusConfigSection(request, createdCorpusId, 'ui', { chat_default_model: EXHAUSTIVE_CHAT_MODEL });
 
+    // No index POST may happen before the operator sees the estimate and confirms.
+    const indexPosts = trackRequests(page, (url) => /\/api\/index(\?|$)/.test(url));
     await page.getByTestId('onboarding-index-start').click();
+    const estimateDialog = page.getByTestId('confirm-dialog');
+    await expect(estimateDialog).toBeVisible({ timeout: 60_000 });
+    await expect(page.getByTestId('confirm-dialog-message')).toContainText('Index estimate');
+    await expect(page.getByTestId('confirm-dialog-message')).toContainText(/Files: \d+/);
+    await expect(page.getByTestId('confirm-dialog-message')).toContainText(/Estimated cost/);
+    expect(indexPosts(), 'no run starts before confirmation').toEqual([]);
+    await page.getByTestId('confirm-dialog-cancel').click();
+    await expect(estimateDialog).toHaveCount(0);
+    expect(indexPosts(), 'cancel starts no run').toEqual([]);
+    await page.getByTestId('onboarding-index-start').click();
+    await expect(page.getByTestId('confirm-dialog')).toBeVisible({ timeout: 60_000 });
+    await page.getByTestId('confirm-dialog-accept').click();
     const status = page.getByTestId('onboarding-index-status');
     await expect(status).toContainText(/Indexed \d+ files into \d+ chunks/, { timeout: 5 * 60 * 1000 });
     await expect(page.getByTestId('onboarding-index-error')).toHaveCount(0);
@@ -381,6 +423,8 @@ test.describe.serial('M1/M5: onboarding runs on the real corpus, index and chat 
     const rebuild = page.getByTestId('onboarding-index-start');
     await expect(rebuild).toHaveText('Rebuild indexes');
     await rebuild.click();
+    await expect(page.getByTestId('confirm-dialog')).toBeVisible({ timeout: 60_000 });
+    await page.getByTestId('confirm-dialog-accept').click();
     await expect(status).toContainText(/Starting|Indexing|%|chunk/i, { timeout: 30_000 });
     await expect(status).toContainText(/Indexed \d+ files into \d+ chunks/, { timeout: 5 * 60 * 1000 });
     await expect(page.getByTestId('onboarding-index-error')).toHaveCount(0);

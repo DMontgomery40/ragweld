@@ -3,7 +3,9 @@
 // wizard was a vanilla-JS-era mock whose folder/GitHub cards, sliders, eval and
 // help controls had no code behind them (2026-08-25 drive finding M1).
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
+import { indexingApi } from '@/api/indexing';
+import { confirmDialog } from '@/components/ui/confirmDialog';
 import { useAPI } from '@/hooks/useAPI';
 import { useIndexing } from '@/hooks/useIndexing';
 import { useOnboarding } from '@/hooks/useOnboarding';
@@ -119,14 +121,41 @@ export default function StartTab() {
 
   const handleStartIndex = useCallback(async () => {
     if (!corpus) return;
-    setIndexing(true);
     setIndexError(null);
+    // The same estimate + confirmation gate as RAG → Indexing: no index run
+    // (and no embedding/GraphRAG spend) starts before the operator sees the
+    // file/chunk/cost/time estimate and agrees.
+    const request = { corpus_id: corpus.corpus_id, repo_path: corpus.path, force_reindex: false };
+    let estimate;
+    try {
+      estimate = await indexingApi.estimate(request);
+    } catch (error) {
+      setIndexError(`Index estimate failed: ${error instanceof Error ? error.message : 'unknown error'}`);
+      return;
+    }
+    const cost = estimate.total_cost_usd ?? estimate.embedding_cost_usd;
+    const proceed = await confirmDialog({
+      title: 'Build indexes?',
+      message: [
+        `Index estimate for "${corpus.name}"`,
+        `Files: ${estimate.total_files} (${estimate.skipped_large_files ?? 0} skipped as too large)`,
+        `Estimated tokens: ${estimate.estimated_total_tokens.toLocaleString()} → ~${estimate.estimated_total_chunks.toLocaleString()} chunks`,
+        `Embeddings: ${estimate.embedding_backend} (${estimate.embedding_provider || 'n/a'} / ${estimate.embedding_model || 'n/a'})${estimate.skip_dense ? ' — dense skipped' : ''}`,
+        `Estimated cost: ${cost == null ? 'N/A' : `$${Number(cost).toFixed(4)}`}`,
+        estimate.estimated_seconds_low != null && estimate.estimated_seconds_high != null
+          ? `Estimated time: ${Math.round(Number(estimate.estimated_seconds_low))}–${Math.round(Number(estimate.estimated_seconds_high))} s`
+          : 'Estimated time: N/A',
+      ].join('\n'),
+      confirmLabel: 'Build indexes',
+    });
+    if (!proceed) return;
+    setIndexing(true);
     setIndexProgress(0);
     setIndexLog([]);
     setIndexStatusText('Starting…');
     try {
       await startAndStream(
-        { corpus_id: corpus.corpus_id, repo_path: corpus.path, force_reindex: false },
+        request,
         {
           terminalId: INDEX_TERMINAL_ID,
           onLine: (line) => setIndexLog((prev) => [...prev.slice(-199), line]),
@@ -255,12 +284,12 @@ export default function StartTab() {
               <div className="ob-links">
                 <h4>Where things live</h4>
                 <div className="ob-link-grid">
-                  <a href="/rag?subtab=indexing">Indexing controls</a>
-                  <a href="/rag?subtab=retrieval">Retrieval &amp; fusion</a>
-                  <a href="/chat">Chat</a>
-                  <a href="/eval?subtab=dataset">Eval dataset</a>
-                  <a href="/admin?subtab=advanced">Every config field</a>
-                  <a href="/infrastructure?subtab=mcp">MCP server</a>
+                  <Link to="/rag?subtab=indexing">Indexing controls</Link>
+                  <Link to="/rag?subtab=retrieval">Retrieval &amp; fusion</Link>
+                  <Link to="/chat">Chat</Link>
+                  <Link to="/eval?subtab=dataset">Eval dataset</Link>
+                  <Link to="/admin?subtab=advanced">Every config field</Link>
+                  <Link to="/infrastructure?subtab=mcp">MCP server</Link>
                 </div>
               </div>
             </div>

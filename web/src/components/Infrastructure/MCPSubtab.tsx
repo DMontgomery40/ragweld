@@ -143,7 +143,8 @@ export function MCPSubtab() {
       <div style={{ background: 'var(--bg-elev1)', border: '1px solid var(--line)', borderRadius: '8px', padding: '14px' }} data-testid="mcp-probe">
         <div style={{ fontSize: '13px', fontWeight: 800, color: 'var(--fg)', marginBottom: '6px' }}>Probe the search tool</div>
         <div style={{ fontSize: '13px', color: 'var(--fg-muted)', marginBottom: '10px' }}>
-          Runs the same tri-brid retrieval the MCP <span className="mono">search</span> tool performs, against the active corpus
+          Calls the MCP <span className="mono">search</span> tool through a real client session on the mounted transport
+          (<span className="mono">mcp.default_mode</span>, <span className="mono">top_k=5</span>), against the active corpus
           {activeRepo ? <> (<span className="mono">{activeRepo}</span>)</> : ' (select a corpus first)'}. Ask a real question about the
           corpus — every query is reranker training signal.
         </div>
@@ -174,20 +175,24 @@ export function MCPSubtab() {
         {probe ? (
           <div style={{ marginTop: '12px' }} data-testid="mcp-probe-results">
             <div style={{ fontSize: '12.5px', color: 'var(--fg-muted)', marginBottom: '6px' }}>
-              {probe.error
-                ? `Search error: ${probe.error}`
-                : `${probe.results?.length ?? 0} result${(probe.results?.length ?? 0) === 1 ? '' : 's'} for “${probeQuestion}”`}
+              {probe.results?.length ?? 0} result{(probe.results?.length ?? 0) === 1 ? '' : 's'} for “{probeQuestion}” via{' '}
+              <span className="mono">{probe.transport_url}</span> · tool <span className="mono">{probe.tool}</span> · mode{' '}
+              <span className="mono">{probe.mode}</span> · top_k {probe.top_k}
             </div>
             {probe.results?.length ? (
               <ol style={{ margin: 0, paddingLeft: '18px', display: 'grid', gap: '4px' }}>
                 {probe.results.map((r, idx) => (
-                  <li key={`${r.file_path}:${r.start_line}:${idx}`} style={{ fontSize: '13px', color: 'var(--fg)', fontFamily: 'var(--font-mono)' }}>
+                  <li key={`${r.chunk_id}:${idx}`} style={{ fontSize: '13px', color: 'var(--fg)', fontFamily: 'var(--font-mono)' }}>
                     {r.file_path}:{r.start_line}-{r.end_line}
-                    <span style={{ color: 'var(--fg-muted)' }}> · score {r.rerank_score.toFixed(3)}</span>
+                    <span style={{ color: 'var(--fg-muted)' }}>
+                      {' '}· {r.source} · score {r.score.toFixed(3)}
+                    </span>
                   </li>
                 ))}
               </ol>
-            ) : null}
+            ) : (
+              <div style={{ fontSize: '13px', color: 'var(--fg-muted)' }}>The tool returned no chunks for this question.</div>
+            )}
           </div>
         ) : null}
       </div>
