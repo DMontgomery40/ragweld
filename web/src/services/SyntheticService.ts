@@ -1,6 +1,5 @@
 import { syntheticApi } from '@/api/synthetic';
 import type {
-  SyntheticArtifactPreviewResponse,
   SyntheticConfigPatchResponse,
   SyntheticPublishResponse,
   SyntheticRun,
@@ -53,10 +52,6 @@ export class SyntheticService {
     return syntheticApi.getRun(runId);
   }
 
-  async cancelRun(runId: string): Promise<{ ok: boolean }> {
-    return syntheticApi.cancelRun(runId);
-  }
-
   async publishEvalDataset(runId: string): Promise<SyntheticPublishResponse> {
     return syntheticApi.publishEvalDataset(runId);
   }
@@ -75,10 +70,6 @@ export class SyntheticService {
 
   async publishConfigPatch(runId: string): Promise<SyntheticConfigPatchResponse> {
     return syntheticApi.publishConfigPatch(runId);
-  }
-
-  async previewArtifact(runId: string, kind: string, limit = 5): Promise<SyntheticArtifactPreviewResponse> {
-    return syntheticApi.previewArtifact(runId, kind, limit);
   }
 
   streamRun(

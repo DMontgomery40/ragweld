@@ -1,6 +1,5 @@
 import { apiClient, api, withCorpusScope } from './client';
 import type {
-  ModelCatalogEntry,
   ModelCatalogResponse,
   ModelCatalogUpsertRequest,
   ModelCatalogUpsertResponse,
@@ -13,16 +12,6 @@ export const modelsApi = {
   async listAll(): Promise<ModelCatalogResponse> {
     const { data } = await apiClient.get<ModelCatalogResponse>(withCorpusScope(api('/models')));
     return data;
-  },
-
-  /**
-   * Filtered model catalog endpoint by component type.
-   */
-  async listByType(type: string): Promise<ModelCatalogEntry[]> {
-    const { data } = await apiClient.get<ModelCatalogEntry[]>(
-      withCorpusScope(api(`/models/by-type/${encodeURIComponent(type)}`))
-    );
-    return Array.isArray(data) ? data : [];
   },
 
   /**

@@ -67,8 +67,8 @@ Knowledge base (repo-local, versioned):
 - `/Users/davidmontgomery/ragweld/docs/index.md` (entrypoint)
 - `/Users/davidmontgomery/ragweld/scripts/docs_ai/README.md` (docs-autopilot ownership + CI contract)
 
-Executable specs (structured, machine-checkable intent):
-- `/Users/davidmontgomery/ragweld/spec/README.md`
+Config reality map (machine-checked by `scripts/check_config_reality.py`):
+- `/Users/davidmontgomery/ragweld/spec/config_reality_map.json`
 
 ## Operating Model (Agent-First)
 

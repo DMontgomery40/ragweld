@@ -550,7 +550,6 @@ When running with the observability stack, ragweld proxies Loki queries for unif
 | Endpoint | Description |
 |----------|-------------|
 | `GET /api/loki/status` | Check Loki reachability |
-| `GET /api/loki/query_range` | Query logs (LogQL) |
 | `GET /api/stream/loki/tail` | SSE stream of live logs |
 
 ### Chat UI Integration
@@ -818,7 +817,6 @@ curl -X PUT "http://localhost:58012/api/config" \
 |----------|--------|-------------|
 | `/api/traces/latest` | GET | Get latest trace (optional `run_id` or `repo` filter) |
 | `/api/loki/status` | GET | Check Loki reachability |
-| `/api/loki/query_range` | GET | Query Loki logs (LogQL) |
 | `/api/stream/loki/tail` | GET | SSE stream of live logs |
 
 ### MCP

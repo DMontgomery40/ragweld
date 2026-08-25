@@ -31,15 +31,6 @@ def synthetic_generation_model_category(model: str) -> str:
     return "litellm" if raw.startswith("litellm:") else "litellm_alias"
 
 
-def _is_allowed_branch_synthetic_model(model: str) -> bool:
-    raw = str(model or "").strip().lower()
-    if not raw:
-        return False
-    if raw.startswith("litellm:"):
-        raw = raw[len("litellm:") :]
-    return re.fullmatch(r"[a-z0-9._-]+", raw) is not None
-
-
 def resolve_synthetic_route(*, cfg: TriBridConfig, model: str) -> ProviderRoute:
     model_name = str(model or "").strip()
     if not model_name:
