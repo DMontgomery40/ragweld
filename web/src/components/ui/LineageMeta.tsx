@@ -1,8 +1,10 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { lineageService } from '@/services/LineageService';
-import { useNotification } from '@/hooks';
+import { showToast } from '@/utils/toast';
 import type { LineageRef } from '@/types/generated';
 import type { LineageAliasName } from '@/services/LineageService';
+
+const ALIASES: LineageAliasName[] = ['baseline', 'canary', 'current', 'promoted'];
 
 function shortId(value: string | null | undefined): string {
   const text = String(value || '').trim();
@@ -24,18 +26,41 @@ export function LineageMeta({
   modelArtifactRef?: LineageRef | null;
   corpusId?: string | null;
 }) {
-  const { success, error } = useNotification();
   const [savingAlias, setSavingAlias] = useState<LineageAliasName | null>(null);
+  // alias name -> bundle id it currently points at (for this corpus)
+  const [aliasTargets, setAliasTargets] = useState<Record<string, string>>({});
+  // Distinguish "no aliases exist" from "the lookup failed" — the empty-state
+  // copy must never paper over an unreachable alias store.
+  const [aliasLookupFailed, setAliasLookupFailed] = useState(false);
   const canAlias = Boolean(bundleId);
+
+  const refreshAliases = useCallback(async () => {
+    try {
+      const data = await lineageService.listAliases(corpusId || undefined);
+      const next: Record<string, string> = {};
+      for (const entry of data.aliases || []) {
+        next[entry.alias] = entry.bundle_id;
+      }
+      setAliasTargets(next);
+      setAliasLookupFailed(false);
+    } catch {
+      setAliasLookupFailed(true);
+    }
+  }, [corpusId]);
+
+  useEffect(() => {
+    if (canAlias) void refreshAliases();
+  }, [canAlias, refreshAliases]);
 
   const setAlias = async (alias: LineageAliasName) => {
     if (!bundleId) return;
     setSavingAlias(alias);
     try {
       await lineageService.setAlias(alias, bundleId, corpusId || undefined);
-      success(`Lineage alias updated: ${alias}`);
+      showToast(`Lineage alias "${alias}" now points at ${shortId(bundleId)}`, 'success');
+      await refreshAliases();
     } catch (e) {
-      error(e instanceof Error ? e.message : `Failed to set ${alias}`);
+      showToast(e instanceof Error ? e.message : `Failed to set ${alias}`, 'error');
     } finally {
       setSavingAlias(null);
     }
@@ -80,17 +105,53 @@ export function LineageMeta({
         </div>
       ) : null}
       {canAlias ? (
-        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-          {(['baseline', 'canary', 'current', 'promoted'] as LineageAliasName[]).map((alias) => (
-            <button
-              key={alias}
-              className="small-button"
-              onClick={() => void setAlias(alias)}
-              disabled={savingAlias !== null}
-            >
-              {savingAlias === alias ? `Saving ${alias}...` : `Set ${alias}`}
-            </button>
-          ))}
+        <div style={{ display: 'grid', gap: '6px' }}>
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+            {ALIASES.map((alias) => {
+              const pointsHere = Boolean(bundleId) && aliasTargets[alias] === bundleId;
+              return (
+                <button
+                  key={alias}
+                  className="small-button"
+                  data-testid={`lineage-set-${alias}`}
+                  onClick={() => void setAlias(alias)}
+                  disabled={savingAlias !== null || pointsHere}
+                  aria-pressed={pointsHere}
+                  title={
+                    pointsHere
+                      ? `"${alias}" already points at this bundle`
+                      : aliasTargets[alias]
+                        ? `"${alias}" currently points at ${shortId(aliasTargets[alias])}; click to move it here`
+                        : `"${alias}" is unset; click to point it at this bundle`
+                  }
+                  style={
+                    pointsHere
+                      ? { borderColor: 'var(--ok)', color: 'var(--ok)', fontWeight: 700 }
+                      : undefined
+                  }
+                >
+                  {savingAlias === alias ? `Saving ${alias}...` : pointsHere ? `✓ ${alias}` : `Set ${alias}`}
+                </button>
+              );
+            })}
+          </div>
+          {aliasLookupFailed ? (
+            <div style={{ fontSize: '11.5px', color: 'var(--warn, var(--fg-muted))' }}>
+              Alias state unavailable — the lineage alias lookup failed; buttons still write.
+            </div>
+          ) : Object.keys(aliasTargets).length ? (
+            <div style={{ fontSize: '11.5px', color: 'var(--fg-muted)' }}>
+              {ALIASES.filter((a) => aliasTargets[a]).map((a) => (
+                <span key={a} style={{ marginRight: '12px' }}>
+                  {a} → <span className="studio-mono">{shortId(aliasTargets[a])}</span>
+                </span>
+              ))}
+            </div>
+          ) : (
+            <div style={{ fontSize: '11.5px', color: 'var(--fg-muted)' }}>
+              No aliases set for this corpus yet.
+            </div>
+          )}
         </div>
       ) : null}
     </div>

@@ -4,6 +4,13 @@ import type { LineageAliasesResponse } from '@/types/generated';
 export type LineageAliasName = 'baseline' | 'canary' | 'current' | 'promoted';
 
 export class LineageService {
+  async listAliases(corpusId?: string): Promise<LineageAliasesResponse> {
+    const { data } = await apiClient.get<LineageAliasesResponse>(withCorpusScope(api('/lineage/aliases'), corpusId), {
+      headers: { 'Cache-Control': 'no-store' },
+    });
+    return data;
+  }
+
   async setAlias(alias: LineageAliasName, bundleId: string, corpusId?: string): Promise<LineageAliasesResponse> {
     const { data } = await apiClient.post<LineageAliasesResponse>(
       withCorpusScope(api(`/lineage/aliases/${encodeURIComponent(alias)}`), corpusId),

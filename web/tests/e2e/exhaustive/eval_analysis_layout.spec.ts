@@ -136,4 +136,89 @@ test('Promptfoo results are collapsed by default; sample-size control is present
   }));
   expect(cardState.tag).toBe('DETAILS');
   expect(cardState.open).toBe(false);
+
+  // Results group failures-first: the failed group (when failures exist) is
+  // open, the passed group starts collapsed.
+  if (latest.failed > 0) {
+    const failedGroup = panel.getByTestId('promptfoo-failed-group');
+    await expect(failedGroup).toBeAttached();
+    expect(await failedGroup.evaluate((d) => (d as HTMLDetailsElement).open)).toBe(true);
+  }
+  const passedGroup = panel.getByTestId('promptfoo-passed-group');
+  await expect(passedGroup).toBeAttached();
+  expect(await passedGroup.evaluate((d) => (d as HTMLDetailsElement).open)).toBe(false);
+});
+
+test('System Prompts render as collapsed disclosures that expand per card', async ({ page, baseURL }) => {
+  await page.goto(new URL('eval?subtab=prompts', baseURL).toString());
+
+  const cards = page.getByTestId('system-prompt-card');
+  await expect(cards.first(), 'no system prompt cards rendered').toBeAttached();
+  const count = await cards.count();
+
+  // Every card is a <details> and starts closed — the subtab must scan as a
+  // compact list, not a wall of expanded prompt bodies (2026-08-24 finding).
+  for (let i = 0; i < count; i++) {
+    const state = await cards.nth(i).evaluate((el) => ({
+      tag: el.tagName,
+      open: (el as HTMLDetailsElement).open,
+    }));
+    expect(state.tag).toBe('DETAILS');
+    expect(state.open, `prompt card ${i} started expanded`).toBe(false);
+  }
+
+  // A real click on the first summary opens exactly that card.
+  await cards.first().locator('summary').click();
+  expect(await cards.first().evaluate((d) => (d as HTMLDetailsElement).open)).toBe(true);
+  if (count > 1) {
+    expect(await cards.nth(1).evaluate((d) => (d as HTMLDetailsElement).open)).toBe(false);
+  }
+});
+
+test('Run Configuration groups keys into response and operational tiers', async ({ page, baseURL, request }) => {
+  await page.goto(new URL('eval?subtab=analysis', baseURL).toString());
+
+  // The corpus store writes this key once corpora resolve; the panel renders
+  // at the same point, so wait for it before reading.
+  await expect(page.getByTestId('promptfoo-regression-panel')).toBeAttached();
+  const activeCorpus = await page.evaluate(() => window.localStorage.getItem('tribrid_active_corpus'));
+  test.skip(!activeCorpus, 'no active corpus resolved — config-tier assertions need a corpus with eval runs');
+  const runsResp = await request.get(`${API_BASE}/api/eval/runs?corpus_id=${activeCorpus}`);
+  expect(runsResp.ok(), `eval runs probe failed: ${runsResp.status()}`).toBeTruthy();
+  const runs = (await runsResp.json())?.runs ?? [];
+  test.skip(runs.length === 0, `corpus ${activeCorpus} has no eval runs — config-tier assertions cannot execute`);
+
+  // Expand the Run Configuration section and assert the two-tier layout: the
+  // response-affecting tier renders its category cards, the operational tier
+  // exists, is labeled honestly, and starts collapsed.
+  const configToggle = page.getByRole('button', { name: /Run Configuration/ });
+  await expect(configToggle).toBeVisible();
+  await expect(configToggle).toContainText('config keys');
+  await expect(configToggle).not.toContainText('retrieval keys');
+  await configToggle.click();
+
+  const responseTier = page.getByTestId('config-tier-response');
+  await expect(responseTier).toBeVisible();
+  await expect(responseTier).toContainText('Affects retrieval & answers');
+  // Real retrieval knobs land in the response tier…
+  await expect(responseTier).toContainText('BM25_WEIGHT');
+  await expect(responseTier).toContainText('VECTOR_WEIGHT');
+  // …and no Grafana/observability key may leak into it.
+  const responseText = await responseTier.innerText();
+  expect(responseText).not.toContain('GRAFANA_');
+  expect(responseText).not.toContain('ALERTMANAGER_');
+
+  const operationalTier = page.getByTestId('config-tier-operational');
+  await expect(operationalTier).toBeVisible();
+  const tierToggle = operationalTier.getByRole('button', { name: /Operational \/ UI/ });
+  await expect(tierToggle).toHaveAttribute('aria-expanded', 'false');
+  await tierToggle.click();
+  await expect(tierToggle).toHaveAttribute('aria-expanded', 'true');
+  // Observability keys must land in the operational tier, not "Other".
+  await expect(operationalTier).toContainText('Observability & Alerts');
+  await expect(operationalTier).toContainText('GRAFANA_DASHBOARD_SLUG');
+  // Data-store wiring is operational but must not be filed as ignorable noise:
+  // it renders under Infra & Data Stores, outside the result-safe categories.
+  await expect(operationalTier).toContainText('Infra & Data Stores');
+  await expect(operationalTier).toContainText('POSTGRES_URL');
 });

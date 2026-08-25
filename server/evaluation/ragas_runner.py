@@ -124,14 +124,25 @@ def score_samples(cfg: TriBridConfig, samples: list[RagasSample]) -> list[dict[s
             return self.embed_documents(texts)
 
     base_url, api_key = _gateway(cfg)
+    # langchain-openai lru_caches one async httpx client per (base_url, timeout)
+    # PROCESS-WIDE (_client_utils._cached_async_httpx_client). Ragas runs each
+    # scoring call on its own event loop, so a cached client born on an earlier
+    # loop fails with "Event is bound to a different event loop" surfaced as
+    # APIConnectionError. Explicit per-call clients bypass the cache and die
+    # with this call's loop.
+    judge_timeout = float(cfg.evaluation.ragas_judge_timeout_s)
+    http_client = httpx.Client(timeout=judge_timeout)
+    http_async_client = httpx.AsyncClient(timeout=judge_timeout)
     judge = LangchainLLMWrapper(
         ChatOpenAI(
             base_url=base_url,
             api_key=api_key,
             model=_judge_alias(cfg),
             temperature=0,
-            timeout=float(cfg.evaluation.ragas_judge_timeout_s),
+            timeout=judge_timeout,
             max_retries=0,
+            http_client=http_client,
+            http_async_client=http_async_client,
             # Judges must return structured verdicts; cap output at the eval judge budget
             # (faithfulness statement lists outgrow a chat answer budget).
             max_tokens=int(cfg.evaluation.judge_max_tokens),
@@ -172,6 +183,12 @@ def score_samples(cfg: TriBridConfig, samples: list[RagasSample]) -> list[dict[s
         frame = result.to_pandas()
     except Exception as exc:
         raise RagasUnavailableError(f"ragas evaluation failed: {type(exc).__name__}: {str(exc)[:200]}") from exc
+    finally:
+        http_client.close()
+        # The async client's pool is bound to the event loop ragas just tore
+        # down; aclose() on a new loop would trip the same cross-loop error.
+        # Dropping the reference lets GC reclaim the sockets.
+        del http_async_client
 
     rows: list[dict[str, float]] = []
     for _, row in frame.iterrows():

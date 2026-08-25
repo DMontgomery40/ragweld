@@ -356,6 +356,50 @@ RERANKER_DIAGNOSTIC_EVENTS_TOTAL = Counter(
 )
 
 # --------------------------------------------------------------------------------------
+# ML-quality metrics (eval / promptfoo / benchmark runs)
+# --------------------------------------------------------------------------------------
+
+# Unlabeled by design: the module's no-high-cardinality contract forbids
+# corpus_id labels, and label-less instruments expose real zeros from process
+# start so 24h increase() windows never miss the first run. Per-corpus
+# drill-down lives in the ML-quality summary APIs, not Prometheus.
+
+EVAL_RUNS_TOTAL = Counter(
+    "tribrid_eval_runs_total",
+    "Total number of persisted Eval Analysis runs.",
+)
+
+EVAL_LAST_TOP1_ACCURACY = Gauge(
+    "tribrid_eval_last_top1_accuracy",
+    "Top-1 accuracy of the most recently persisted eval run.",
+)
+
+EVAL_LAST_TOPK_ACCURACY = Gauge(
+    "tribrid_eval_last_topk_accuracy",
+    "Top-K accuracy of the most recently persisted eval run.",
+)
+
+PROMPTFOO_RUNS_TOTAL = Counter(
+    "tribrid_promptfoo_runs_total",
+    "Total number of persisted Promptfoo regression runs.",
+)
+
+PROMPTFOO_LAST_PASS_RATIO = Gauge(
+    "tribrid_promptfoo_last_pass_ratio",
+    "Pass ratio (passed/total) of the most recent Promptfoo run.",
+)
+
+BENCHMARK_RUNS_TOTAL = Counter(
+    "tribrid_benchmark_runs_total",
+    "Total number of persisted Benchmark comparison runs.",
+)
+
+BENCHMARK_LAST_AVG_LATENCY_MS = Gauge(
+    "tribrid_benchmark_last_avg_latency_ms",
+    "Mean per-model latency (ms) of the most recent benchmark run.",
+)
+
+# --------------------------------------------------------------------------------------
 # Indexing metrics
 # --------------------------------------------------------------------------------------
 

@@ -1,5 +1,7 @@
 {
-  "annotations": { "list": [] },
+  "annotations": {
+    "list": []
+  },
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
@@ -8,61 +10,339 @@
   "liveNow": false,
   "panels": [
     {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "unit": "none" } },
-      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 0 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none"
+        }
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 0,
+        "y": 0
+      },
       "id": 1,
       "options": {
         "colorMode": "value",
         "graphMode": "none",
         "justifyMode": "auto",
         "orientation": "auto",
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
         "textMode": "auto"
       },
-      "targets": [{ "expr": "increase(tribrid_reranker_eval_runs_total[24h])", "legendFormat": "eval runs" }],
-      "title": "Evaluation Runs (24h)",
+      "targets": [
+        {
+          "expr": "sum(increase(tribrid_eval_runs_total[24h])) or vector(0)",
+          "legendFormat": "eval runs"
+        }
+      ],
+      "title": "Eval Runs (24h)",
       "type": "stat"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "unit": "none" } },
-      "gridPos": { "h": 6, "w": 8, "x": 8, "y": 0 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none"
+        }
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 8,
+        "y": 0
+      },
       "id": 2,
       "options": {
         "colorMode": "value",
         "graphMode": "none",
         "justifyMode": "auto",
         "orientation": "auto",
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
         "textMode": "auto"
       },
-      "targets": [{ "expr": "sum by (outcome) (increase(tribrid_reranker_promotions_total[24h]))", "legendFormat": "{{outcome}}" }],
-      "title": "Promotion Outcomes (24h)",
+      "targets": [
+        {
+          "expr": "sum(increase(tribrid_promptfoo_runs_total[24h])) or vector(0)",
+          "legendFormat": "promptfoo runs"
+        }
+      ],
+      "title": "Promptfoo Runs (24h)",
       "type": "stat"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "unit": "s" } },
-      "gridPos": { "h": 6, "w": 8, "x": 16, "y": 0 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none"
+        }
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 16,
+        "y": 0
+      },
       "id": 3,
       "options": {
         "colorMode": "value",
-        "graphMode": "area",
+        "graphMode": "none",
         "justifyMode": "auto",
         "orientation": "auto",
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
         "textMode": "auto"
       },
-      "targets": [{ "expr": "histogram_quantile(0.95, rate(tribrid_search_latency_seconds_bucket[5m]))", "legendFormat": "p95" }],
-      "title": "Benchmark Latency Proxy (p95)",
+      "targets": [
+        {
+          "expr": "sum(increase(tribrid_benchmark_runs_total[24h])) or vector(0)",
+          "legendFormat": "benchmark runs"
+        }
+      ],
+      "title": "Benchmark Runs (24h)",
       "type": "stat"
     },
     {
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 6 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "max": 1,
+          "min": 0
+        }
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 0,
+        "y": 6
+      },
+      "id": 5,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "expr": "tribrid_eval_last_top1_accuracy",
+          "legendFormat": "top-1"
+        }
+      ],
+      "title": "Latest Eval Top-1 Accuracy",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "max": 1,
+          "min": 0
+        }
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 8,
+        "y": 6
+      },
+      "id": 6,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "expr": "tribrid_promptfoo_last_pass_ratio",
+          "legendFormat": "pass ratio"
+        }
+      ],
+      "title": "Latest Promptfoo Pass Ratio",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms"
+        }
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 16,
+        "y": 6
+      },
+      "id": 7,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "expr": "tribrid_benchmark_last_avg_latency_ms",
+          "legendFormat": "avg latency"
+        }
+      ],
+      "title": "Latest Benchmark Avg Latency",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none"
+        }
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 0,
+        "y": 12
+      },
+      "id": 8,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(tribrid_reranker_eval_runs_total[24h])) or vector(0)",
+          "legendFormat": "reranker training evals"
+        }
+      ],
+      "title": "Reranker Training Evals (24h)",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none"
+        }
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 12,
+        "y": 12
+      },
+      "id": 9,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "expr": "sum by (outcome) (increase(tribrid_reranker_promotions_total[24h])) or vector(0)",
+          "legendFormat": "{{outcome}}"
+        }
+      ],
+      "title": "Reranker Promotions (24h)",
+      "type": "stat"
+    },
+    {
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 18
+      },
       "id": 4,
       "options": {
-        "content": "## Eval / Benchmark / Prompt Regressions\nThis dashboard pairs with ragweld's in-product incident feed and summary APIs.\n\n- Use it as the Grafana family anchor for ML-quality triage.\n- Jump into Eval Analysis, Benchmark, and System Prompts with the same corpus/run/prompt-set context.\n- Treat prompt changes as first-class change correlation, not as a notes-only afterthought.",
+        "content": "## Eval / Benchmark / Prompt Regressions\nThis dashboard pairs with ragweld's in-product incident feed and summary APIs.\n\n- Run counters cover Eval Analysis, Promptfoo, and Benchmark runs persisted by the API (24h windows).\n- \"Latest\" gauges reflect the most recent persisted run per corpus and reset on API restart until the next run lands.\n- Reranker training evals/promotions are the Learning Ranker training lane, not Eval Analysis runs.\n- Jump into Eval Analysis, Benchmark, and System Prompts with the same corpus/run/prompt-set context.",
         "mode": "markdown"
       },
       "title": "Quality Workflow",
@@ -72,18 +352,82 @@
   "refresh": "10s",
   "schemaVersion": 38,
   "style": "dark",
-  "tags": ["ragweld", "observability", "quality", "eval", "benchmark", "prompts"],
+  "tags": [
+    "ragweld",
+    "observability",
+    "quality",
+    "eval",
+    "benchmark",
+    "prompts"
+  ],
   "templating": {
     "list": [
-      { "name": "corpus_id", "label": "Corpus", "type": "textbox", "query": "*", "current": { "text": "*", "value": "*" } },
-      { "name": "run_id", "label": "Run", "type": "textbox", "query": "*", "current": { "text": "*", "value": "*" } },
-      { "name": "model", "label": "Model", "type": "textbox", "query": "*", "current": { "text": "*", "value": "*" } },
-      { "name": "provider", "label": "Provider", "type": "textbox", "query": "*", "current": { "text": "*", "value": "*" } },
-      { "name": "prompt_set", "label": "Prompt Set", "type": "textbox", "query": "current", "current": { "text": "current", "value": "current" } },
-      { "name": "workflow_id", "label": "Workflow", "type": "textbox", "query": "*", "current": { "text": "*", "value": "*" } }
+      {
+        "name": "corpus_id",
+        "label": "Corpus",
+        "type": "textbox",
+        "query": "*",
+        "current": {
+          "text": "*",
+          "value": "*"
+        }
+      },
+      {
+        "name": "run_id",
+        "label": "Run",
+        "type": "textbox",
+        "query": "*",
+        "current": {
+          "text": "*",
+          "value": "*"
+        }
+      },
+      {
+        "name": "model",
+        "label": "Model",
+        "type": "textbox",
+        "query": "*",
+        "current": {
+          "text": "*",
+          "value": "*"
+        }
+      },
+      {
+        "name": "provider",
+        "label": "Provider",
+        "type": "textbox",
+        "query": "*",
+        "current": {
+          "text": "*",
+          "value": "*"
+        }
+      },
+      {
+        "name": "prompt_set",
+        "label": "Prompt Set",
+        "type": "textbox",
+        "query": "current",
+        "current": {
+          "text": "current",
+          "value": "current"
+        }
+      },
+      {
+        "name": "workflow_id",
+        "label": "Workflow",
+        "type": "textbox",
+        "query": "*",
+        "current": {
+          "text": "*",
+          "value": "*"
+        }
+      }
     ]
   },
-  "time": { "from": "now-24h", "to": "now" },
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
   "timepicker": {},
   "timezone": "",
   "title": "Eval/Benchmark/Prompt Regressions",

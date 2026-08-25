@@ -9,12 +9,6 @@ interface ConfigStore {
   loading: boolean;
   error: string | null;
   saving: boolean;
-  /**
-   * Optional mapping of flat config keys -> UI categories.
-   * Used by Eval drill-down to group config snapshots.
-   */
-  evalKeyCategories: Record<string, string>;
-
   // Actions
   loadConfig: () => Promise<void>;
   saveConfig: (config: TriBridConfig) => Promise<void>;
@@ -29,7 +23,6 @@ interface ConfigStore {
   /** Immediately flush all pending debounced patches for the active corpus. */
   flushPendingPatches: () => Promise<void>;
   resetConfig: () => Promise<void>;
-  loadEvalKeyCategories: () => void;
 
   reset: () => void;
 }
@@ -165,7 +158,6 @@ export const useConfigStore = create<ConfigStore>((set) => {
   loading: false,
   error: null,
   saving: false,
-  evalKeyCategories: {},
 
   loadConfig: async () => {
     // Critical: do NOT cancel optimistic patches here. Flush them before loading so
@@ -276,13 +268,6 @@ export const useConfigStore = create<ConfigStore>((set) => {
     }
   },
 
-  loadEvalKeyCategories: () => {
-    // Minimal implementation: keep empty mapping (everything groups as "Other").
-    // If/when we want richer grouping, we can populate this deterministically from
-    // `TriBridConfig.to_flat_dict()` key prefixes.
-    set({ evalKeyCategories: {} });
-  },
-
   reset: () =>
     (() => {
       cancelPendingPatches();
@@ -292,7 +277,6 @@ export const useConfigStore = create<ConfigStore>((set) => {
       loading: false,
       error: null,
       saving: false,
-      evalKeyCategories: {},
       })
     })(),
 });

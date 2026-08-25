@@ -458,6 +458,126 @@ at 23:15:06Z (before any automation in the session touched the panel) —
 consistent with a one-click launch on the old panel; exactly the trap the
 default-25 dropdown closes.
 
+## Defects 8–12 (operator-reported, session 12 continuation): five "done" surfaces that weren't
+
+Operator report after the defect-7 fix landed: "grafana benchmarks - empty
+0s. set baseline - user cant tell if it does anything. promptfoo prompts -
+still not collapsable like i asked. parameters, 290 listed, half of which
+don't impact the actual response at all, AND all in one long horrible ux
+list. ai analysis - timeout." All five reproduced by driving the real UI
+before fixing.
+
+### Defect 8: ML-quality Grafana dashboard was structurally miswired — FIXED
+
+"Eval/Benchmark/Prompt Regressions" queried reranker-TRAINING counters
+(`tribrid_reranker_eval_runs_total`, six identical "eval runs" 0-tiles) and
+a search-latency histogram "proxy" (NaN on quiet windows). No eval-analysis,
+promptfoo, or benchmark metric existed at all. Fix: seven new label-less
+metrics (module contract forbids corpus labels) emitted at the three save
+points — eval runs counter + last top1/topk gauges (via a
+`_record_eval_run_metrics` called once per run; `_save_run` runs twice per
+run for lineage attachment, which double-counted in the first cut — codex
+P1), promptfoo counter + pass-ratio gauge, benchmark counter + avg-latency
+gauge. Label-less instruments expose real zeros from process start so 24h
+`increase()` windows can't miss the first run. Dashboard rewired to those
+metrics; reranker panels kept under honest titles.
+
+### Defect 9: "Set baseline" wrote lineage aliases with zero feedback — FIXED
+
+`useNotification` stores messages in component-local state; `LineageMeta`
+(and AgentTraining's TrainingStudio) never rendered that list, so alias
+writes, run starts, cancels, and promotions all reported into the void.
+Proven live: the operator's own baseline/current clicks (00:29/00:31Z) had
+silently succeeded, and an automation misclick on SET PROMOTED silently
+created an alias (deleted; store restored). Fix: both components use the
+global `showToast`; `LineageMeta` now loads alias targets, marks the alias
+pointing at the current bundle (`✓ current`, aria-pressed, disabled), lists
+`alias → bundle` assignments, and distinguishes "no aliases set" from
+"alias lookup failed" (codex P2).
+
+### Defect 10: 290-key config snapshot rendered as one flat "OTHER" list — FIXED
+
+`loadEvalKeyCategories` was a stub returning `{}` ("everything groups as
+Other" was literally its comment) and the badge called them "retrieval
+keys" while including `GRAFANA_DASHBOARD_SLUG` and alert settings; the diff
+view attributed "performance change" to Grafana dashboard picks. Fix:
+deterministic prefix classifier (`web/src/utils/configKeyCategories.ts`,
+first-match rules, unmatched keys land in the response tier so a new
+retrieval knob is never filed as ignorable) rendering two tiers — "Affects
+retrieval & answers" grouped by domain, and a collapsed "Operational / UI"
+tier. "Cannot affect results" claims are restricted to observability/UI/
+training categories; data-store wiring (`POSTGRES_URL`, Neo4j) is labeled
+"infra wiring" and never waved off (codex P2). Diff rows in both scalar and
+array branches carry the tier chip.
+
+### Defect 11: AI Analysis died at the shared 30s axios timeout — FIXED
+
+Reproduced live ("Error: timeout of 30000ms exceeded"). The backend bounds
+the LLM call at `generation.gen_timeout` (600s) and the local lane
+routinely needs minutes. Client timeout raised to the server budget plus
+margin (660s; bounded, not infinite, so a dead connection still fails —
+codex P3). Same class fixed for the promptfoo POST (60 min bound).
+
+### Defect 12: prompts still not collapsible — FIXED (correct surface this time)
+
+The defect-7 fix collapsed Promptfoo result cards; the operator's "those
+prompts" also meant the System Prompts subtab — 18 fully-expanded prompt
+bodies. Every prompt card is now a collapsed `<details>` (label,
+description, char count in the summary; body holds Edit/Reset + content;
+summary toggle suppressed while editing; deep links open the card before
+scrolling). Promptfoo results additionally group failures-first (Failed
+open, Passed collapsed).
+
+### Verification
+
+- Extended `eval_analysis_layout.spec.ts` (no interception): prompt-card
+  collapse/expand via real click, failures-first grouping, config-tier
+  layout with named-key assertions (BM25/VECTOR under response, GRAFANA
+  under operational, POSTGRES_URL under infra — never "ignorable").
+- Chrome drives with real input on every fixed surface; live post-restart
+  metric proof for benchmark/eval/promptfoo tiles.
+- codex (high effort) REQUEST CHANGES on the first cut: 2 P1 / 5 P2 / 3 P3
+  — all acted on (double-count, label contract, false "cannot affect
+  results" for infra keys, alias-error masking, spec depth, bounded
+  timeouts, array-row chips, deep-link reveal) except one accepted
+  residual: the tier spec still skips loudly on corpora without eval runs,
+  and `or vector(0)` still renders 0 when the scrape pipeline itself is
+  dead (documented in the dashboard's text panel).
+
+### Defect 13 (found while verifying 8–12): Ragas scoring died on langchain's process-wide client cache — FIXED
+
+Eval runs in restarted API processes failed at scoring with
+`APIConnectionError: Connection error`; the buried cause was
+`RuntimeError: <asyncio.locks.Event> is bound to a different event loop`.
+`langchain_openai` lru_caches ONE async httpx client per (base_url, timeout)
+process-wide (`_client_utils._cached_async_httpx_client`); ragas runs each
+scoring call on its own event loop, so a cached client born on an earlier
+loop poisons every later call. Fix: `score_samples` builds explicit per-call
+`http_client`/`http_async_client` for the judge, bypassing the cache; the
+sync client is closed in a finally (the async pool dies with ragas's loop).
+Proven: two sequential cross-loop scorings in isolation, then a full
+in-server UI-path eval run (`epstein-files-1__20260825_013817`, top1 0.6,
+topk 0.8, faithfulness 0.717, answer_relevancy 0.752) with
+`tribrid_eval_runs_total` at exactly 1.0 (single-increment fix live).
+
+### Final live proof (dashboard)
+
+Eval Runs (24h) 1.00, Promptfoo Runs 2.00, Benchmark Runs 3.02 (increase()
+across counter resets), Latest Top-1 60%, Pass Ratio 90%, Benchmark Avg
+Latency 28.6 s, reranker training panels honestly at 0 — all real runs, all
+rendered in the embedded Grafana dashboard. AI Analysis generated a real
+comparison summary via ragweld-local (the >30 s generation that always died
+at the old client timeout).
+
+### Process notes (for future drives)
+
+- Navigating the tab or triggering Vite HMR (editing frontend files) while
+  an eval stream runs disconnects the SSE and the disconnect hardening
+  abandons the run — two paid runs lost that way this session.
+- A backend relaunched outside `start.sh` must replicate its env: sourced
+  `.env`, gateway exports, and a node ≥22.22 PATH — promptfoo and the
+  Ragas judge both fail closed (honestly) without them.
+
 ## B8 drive: Training Center — PARTIAL (operator constraint)
 
 The Learning Agent Studio renders truthful control-plane state (Flyte

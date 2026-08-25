@@ -225,8 +225,11 @@ export function PromptfooRegressionPanel({ corpusId }: Props) {
               defaultExpanded={false}
               storageKey="promptfoo_run_results"
             >
-              <div style={{ display: 'grid', gap: '8px' }}>
-                {(latest.results as PromptfooRunResult[]).map((result: PromptfooRunResult) => (
+              {(() => {
+                const results = latest.results as PromptfooRunResult[];
+                const failed = results.filter((r) => !r.passed);
+                const passed = results.filter((r) => r.passed);
+                const renderCard = (result: PromptfooRunResult) => (
                   <details
                     key={result.entry_id}
                     data-testid="promptfoo-result-card"
@@ -289,8 +292,32 @@ export function PromptfooRegressionPanel({ corpusId }: Props) {
                       ) : null}
                     </div>
                   </details>
-                ))}
-              </div>
+                );
+                const groupSummaryStyle = {
+                  cursor: 'pointer',
+                  fontSize: '12.5px',
+                  fontWeight: 700,
+                  padding: '6px 2px',
+                } as const;
+                return (
+                  <div style={{ display: 'grid', gap: '10px' }}>
+                    {failed.length > 0 ? (
+                      <details open data-testid="promptfoo-failed-group">
+                        <summary style={{ ...groupSummaryStyle, color: 'var(--err)' }}>
+                          Failed ({failed.length})
+                        </summary>
+                        <div style={{ display: 'grid', gap: '8px', marginTop: '6px' }}>{failed.map(renderCard)}</div>
+                      </details>
+                    ) : null}
+                    <details data-testid="promptfoo-passed-group">
+                      <summary style={{ ...groupSummaryStyle, color: 'var(--ok)' }}>
+                        Passed ({passed.length})
+                      </summary>
+                      <div style={{ display: 'grid', gap: '8px', marginTop: '6px' }}>{passed.map(renderCard)}</div>
+                    </details>
+                  </div>
+                );
+              })()}
             </CollapsibleSection>
           </div>
         </div>
