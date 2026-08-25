@@ -71,17 +71,14 @@ async def ensure_generation_manifests(config: TriBridConfig) -> int:
         qdrant = QdrantChunkStore(config)
         for row in await pg.list_corpora():
             repo_id = str(row.get("repo_id") or "").strip()
-            if not repo_id or generation_from_corpus_row(row) is not None:
+            if not repo_id or repo_id.startswith("__staging__") or generation_from_corpus_row(row) is not None:
                 continue
-            if row.get("last_indexed") is None and not (row.get("meta") or {}).get("internal_staging"):
-                # Never indexed; nothing to point at (incremental corpora get a
-                # manifest on their first write).
-                legacy = await qdrant.legacy_alias_target(repo_id)
-                if legacy is None:
-                    continue
-            else:
-                legacy = await qdrant.legacy_alias_target(repo_id)
-            if str(row.get("repo_id", "")).startswith("__staging__"):
+            # A pre-manifest corpus is live iff its Qdrant alias still points at a
+            # collection (an indexed corpus, or an incremental one that wrote
+            # before the manifest existed). Anything else has nothing to point at:
+            # it reads as unpromoted until it is indexed or written to.
+            legacy = await qdrant.legacy_alias_target(repo_id)
+            if legacy is None:
                 continue
             await pg.set_generation(
                 repo_id,

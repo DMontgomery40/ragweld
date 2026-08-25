@@ -8513,7 +8513,7 @@
     {
       "term": "Qdrant URL",
       "key": "QDRANT_URL",
-      "definition": "Base URL of the Compose-owned Qdrant service that stores every corpus's dense and sparse chunk vectors. Each corpus is addressed through a stable alias pointing at one promoted generation; index runs build a staged generation and switch the alias atomically. Qdrant is a required retrieval dependency: when it is unreachable the vector and sparse legs fail closed with a typed 503 instead of degrading silently. The same URL is used by indexing, chat Recall writes, and the observability readiness probe, so verify connectivity and the collection aliases after deploys.",
+      "definition": "Base URL of the Compose-owned Qdrant service that stores every corpus's dense and sparse chunk vectors. Each corpus's live collection is named by its generation manifest in Postgres (written by the same transaction that promotes the chunk rows); index runs build a staged generation collection and the manifest commit makes it live, with superseded generations retired afterwards. Qdrant is a required retrieval dependency: when it is unreachable the vector and sparse legs fail closed with a typed 503 instead of degrading silently. The same URL is used by indexing, chat Recall writes, and the observability readiness probe, so verify connectivity and the generation collections after deploys.",
       "category": "general",
       "related": [],
       "links": [

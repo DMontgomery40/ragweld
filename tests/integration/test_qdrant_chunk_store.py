@@ -257,3 +257,51 @@ async def test_fusion_keeps_same_chunk_id_distinct_across_corpora() -> None:
             except Exception:
                 pass
         await pg.disconnect()
+
+
+@pytest.mark.requires_postgres
+async def test_startup_upgrade_records_manifests_for_pre_manifest_corpora() -> None:
+    """A corpus that still routes through a legacy Qdrant alias gets a manifest once; others are untouched."""
+    from qdrant_client import models as qmodels
+    from qdrant_client import QdrantClient
+
+    from server.indexing.generations import ensure_generation_manifests
+
+    cfg = load_config()
+    store = QdrantChunkStore(cfg)
+    legacy_id = f"legacy-alias-{uuid.uuid4().hex[:8]}"
+    fresh_id = f"never-indexed-{uuid.uuid4().hex[:8]}"
+    pg = PostgresClient(os.environ["POSTGRES_DSN"])
+    await pg.connect()
+    try:
+        for cid in (legacy_id, fresh_id):
+            await pg.upsert_corpus(cid, name=cid, root_path=".")
+        physical = await store.create_generation(legacy_id, embedding_dim=2)
+        await store.write_chunks(legacy_id, physical, [_chunk("l", "legacy alias content", embedding=[1.0, 0.0], ordinal=0)], embedding_dim=2)
+        client = QdrantClient(url=store.url)
+        try:  # the pre-manifest world: a corpus alias pointing at its live generation
+            client.update_collection_aliases(
+                change_aliases_operations=[
+                    qmodels.CreateAliasOperation(
+                        create_alias=qmodels.CreateAlias(collection_name=physical, alias_name=corpus_collection_prefix(legacy_id))
+                    )
+                ]
+            )
+        finally:
+            client.close()
+
+        assert await ensure_generation_manifests(cfg) >= 1
+        legacy = await pg.get_generation(legacy_id)
+        assert legacy and legacy["qdrant_collection"] == physical and legacy["graph_repo_id"] == legacy_id
+        assert await pg.get_generation(fresh_id) is None, "a corpus with nothing to point at stays unpromoted"
+        # Idempotent: a second run changes nothing.
+        before = dict(legacy)
+        await ensure_generation_manifests(cfg)
+        assert await pg.get_generation(legacy_id) == before
+        assert (await store.status(legacy_id, physical=physical)).points == 1
+    finally:
+        for cid in (legacy_id, fresh_id):
+            await store.delete_corpus(cid)
+            await pg.delete_corpus_with_data(cid)
+        await pg.disconnect()
+
