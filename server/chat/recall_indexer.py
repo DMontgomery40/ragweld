@@ -177,6 +177,6 @@ async def index_recall_conversation(
     embedded_chunks = await embedder.embed_chunks(chunks)
 
     await pg.upsert_chunks(config.default_corpus_id, embedded_chunks)
-    await qdrant.upsert_chunks(config.default_corpus_id, embedded_chunks, embedding_dim=int(embedder.dim))
+    await qdrant.upsert_chunks(config.default_corpus_id, embedded_chunks, embedding_dim=int(embedder.dim), pg=pg)
 
     return len(chunks)

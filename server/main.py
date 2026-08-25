@@ -199,6 +199,14 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     except (OSError, ValueError) as error:
         logger.warning("generation gateway catalog not loaded at startup (generation fails closed): %s", error)
     await asyncio.to_thread(_recover_artifact_stores)
+    try:
+        from server.indexing.generations import ensure_generation_manifests
+
+        upgraded = await ensure_generation_manifests(_global_cfg)
+        if upgraded:
+            logger.info("recorded generation manifests for %d pre-manifest corpora", upgraded)
+    except Exception as error:  # Postgres down at startup: liveness stays dependency-free
+        logger.warning("generation manifest upgrade skipped (will read as unpromoted until it runs): %s", error)
     from server.observability.profiling import start_profiling
 
     await asyncio.to_thread(start_profiling, _global_cfg)

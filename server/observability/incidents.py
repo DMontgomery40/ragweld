@@ -18,6 +18,7 @@ from server.observability.ml_quality import (
     build_prompt_observability_summary,
 )
 from server.observability.status import build_observability_status
+from server.indexing.generations import qdrant_collection_of
 from server.retrieval.qdrant_store import QdrantChunkStore
 
 _GROUP_DASHBOARDS: dict[str, list[str]] = {
@@ -118,15 +119,17 @@ async def build_observability_incidents(
             await pg.connect()
             try:
                 chunk_rows = await pg.count_chunks(repo_id)
+                vector_collection = qdrant_collection_of(await pg.get_generation(repo_id))
             finally:
                 await pg.disconnect()
         except Exception:
             chunk_rows = 0
+            vector_collection = None
         vector_status = None
         vector_probe_failed = False
         if chunk_rows > 0:
             try:
-                vector_status = await QdrantChunkStore(config).status(repo_id)
+                vector_status = await QdrantChunkStore(config).status(repo_id, physical=vector_collection)
             except Exception:
                 vector_probe_failed = True
         if chunk_rows > 0 and (vector_probe_failed or vector_status is None or vector_status.points <= 0):

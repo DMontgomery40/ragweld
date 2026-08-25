@@ -18,6 +18,7 @@ from server.api.dependency_errors import (
 )
 from server.config import load_config
 from server.db.neo4j import Neo4jClient
+from server.indexing.generations import graph_repo_id_of
 from server.db.postgres import PostgresClient
 from server.dependency_errors import DependencyUnavailableError
 from server.indexing.loader import FileLoader
@@ -339,6 +340,10 @@ async def delete_repo(corpus_id: str) -> dict[str, Any]:
 
     neo4j = await _get_neo4j(repo_id)
     try:
+        generation_graph_id = graph_repo_id_of(await pg.get_generation(repo_id))
+        if generation_graph_id:
+            await neo4j.delete_graph(generation_graph_id)
+        await neo4j.delete_graphs_with_prefix(f"__staging__{repo_id}__")
         await neo4j.delete_graph(repo_id)
     except Exception as exc:
         raise_neo4j_unavailable_if_applicable(exc, boundary="Corpus deletion API")

@@ -44,6 +44,7 @@ from server.retrieval.errors import (
     RequiredRetrievalLegError,
     SparseContractMismatchError,
 )
+from server.indexing.generations import generation_from_corpus_row, graph_repo_id_of, qdrant_collection_of
 from server.retrieval.qdrant_store import QdrantChunkStore, QdrantCollectionMissingError
 from server.retrieval.rerank import Reranker
 from server.retrieval.scoring_boosts import apply_scoring_boosts
@@ -183,6 +184,7 @@ class TriBridFusion:
         cache_lookup_enabled = False
         cache_fingerprint_enabled = False
         scoped_cfgs: dict[str, TriBridConfig] = {}
+        collections_by_corpus: dict[str, str | None] = {}
         for cid in corpus_ids:
             try:
                 scoped_cfgs[cid] = await load_scoped_config(repo_id=cid)
@@ -465,6 +467,14 @@ class TriBridFusion:
                 _raise_postgres_boundary_error(e, operation="retrieval corpus metadata")
                 raise
 
+            # The generation manifest names the physical Qdrant collection and the
+            # Neo4j graph id that are live for this corpus (promotion is that one
+            # Postgres write; the stores are never swapped independently).
+            corpus_generation = generation_from_corpus_row(corpus_meta)
+            corpus_collection = qdrant_collection_of(corpus_generation)
+            corpus_graph_id = graph_repo_id_of(corpus_generation)
+            collections_by_corpus[cid] = corpus_collection
+            debug["fusion_generation_run_id"] = str((corpus_generation or {}).get("run_id") or "")
             stored_backend = str((corpus_meta or {}).get("embedding_backend") or "").strip().lower()
             stored_provider = str((corpus_meta or {}).get("embedding_provider") or "").strip().lower()
             stored_model = str((corpus_meta or {}).get("embedding_model") or "").strip()
@@ -553,7 +563,7 @@ class TriBridFusion:
                     try:
                         with SEARCH_STAGE_LATENCY_SECONDS.labels(stage="qdrant_vector_search").time():
                             vector_results = await qdrant.vector_search(
-                                cid, q_emb, int(top_k or cfg.vector_search.top_k)
+                                cid, q_emb, int(top_k or cfg.vector_search.top_k), physical=corpus_collection
                             )
                     except QdrantCollectionMissingError as e:
                         if last_indexed_raw is None:
@@ -604,6 +614,7 @@ class TriBridFusion:
                                 cid,
                                 query,
                                 int(top_k or cfg.sparse_search.top_k),
+                                physical=corpus_collection,
                             )
                     except QdrantCollectionMissingError as e:
                         if last_indexed_raw is None:
@@ -631,7 +642,12 @@ class TriBridFusion:
             debug["fusion_sparse_results"] = len(sparse_results)
 
             # Graph retrieval: query Neo4j for relevant entities, then hydrate to chunks from Postgres.
-            if include_graph and cfg.graph_search.enabled:
+            if include_graph and cfg.graph_search.enabled and not corpus_graph_id:
+                # No promoted graph generation (graph indexing off for this corpus,
+                # or never indexed): an empty graph leg is the truthful answer.
+                debug["fusion_graph_attempted"] = False
+                debug["fusion_graph_skipped_reason"] = "no promoted graph generation"
+            if include_graph and cfg.graph_search.enabled and corpus_graph_id:
                 debug["fusion_graph_attempted"] = True
                 graph_k = int(top_k or cfg.graph_search.top_k)
                 db_name = cfg.graph_storage.resolve_database(cid)
@@ -671,7 +687,7 @@ class TriBridFusion:
                             with SEARCH_STAGE_LATENCY_SECONDS.labels(stage="neo4j_chunk_vector_search").time():
                                 try:
                                     hits = await neo4j.chunk_vector_search(
-                                        cid,
+                                        corpus_graph_id,
                                         q_emb,
                                         index_name=cfg.graph_indexing.chunk_vector_index_name,
                                         top_k=graph_k,
@@ -688,7 +704,7 @@ class TriBridFusion:
                                         raise
                                     try:
                                         hits = await neo4j.chunk_vector_search(
-                                            cid,
+                                            corpus_graph_id,
                                             q_emb,
                                             index_name=cfg.graph_indexing.chunk_vector_index_name,
                                             top_k=graph_k,
@@ -719,7 +735,7 @@ class TriBridFusion:
                                 ).time():
                                     try:
                                         exp_hits = await neo4j.expand_chunks_via_entities(
-                                            cid,
+                                            corpus_graph_id,
                                             hits,
                                             max_hops=int(cfg.graph_search.max_hops),
                                             top_k=graph_k,
@@ -776,7 +792,7 @@ class TriBridFusion:
                             with SEARCH_STAGE_LATENCY_SECONDS.labels(stage="neo4j_entity_chunk_search").time():
                                 try:
                                     hits = await neo4j.entity_chunk_search(
-                                        cid,
+                                        corpus_graph_id,
                                         query,
                                         cfg.graph_search.max_hops,
                                         graph_k,
@@ -1036,12 +1052,14 @@ class TriBridFusion:
         # Retrieval shaping (document-RAG postprocessing; best-effort).
         shape_cfg = None
         shape_qdrant: QdrantChunkStore | None = None
+        shape_collection: str | None = None
         try:
             shape_corpus_id = str(rerank_config_corpus_id or (corpus_ids[0] if corpus_ids else "")).strip()
             if shape_corpus_id:
                 shape_full = await load_scoped_config(repo_id=shape_corpus_id)
                 shape_cfg = shape_full.retrieval
                 shape_qdrant = QdrantChunkStore(shape_full)
+                shape_collection = collections_by_corpus.get(shape_corpus_id)
         except Exception:
             shape_cfg = None
             shape_qdrant = None
@@ -1065,6 +1083,7 @@ class TriBridFusion:
                     final_k=int(final_k or 0),
                     repo_id=str(shape_corpus_id or ""),
                     qdrant=shape_qdrant,
+                    physical=shape_collection,
                 )
 
                 # Neighbor hydration: include adjacent chunks within the same file for top seeds.
@@ -1323,6 +1342,7 @@ async def _apply_mmr_if_enabled(
     final_k: int,
     repo_id: str | None = None,
     qdrant: QdrantChunkStore | None = None,
+    physical: str | None = None,
 ) -> list[ChunkMatch]:
     if not enabled or not results:
         return results
@@ -1340,7 +1360,7 @@ async def _apply_mmr_if_enabled(
     emb_by_id: dict[str, list[float]] = {}
     if repo_id and qdrant is not None:
         try:
-            emb_by_id = await qdrant.get_embeddings(str(repo_id), [r.chunk_id for r in pool])
+            emb_by_id = await qdrant.get_embeddings(str(repo_id), [r.chunk_id for r in pool], physical=physical)
         except Exception:
             emb_by_id = {}
 

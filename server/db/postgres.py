@@ -602,7 +602,7 @@ class PostgresClient:
                     embedding_model = NULL,
                     embedding_dimensions = NULL,
                     sparse_contract = NULL,
-                    meta = COALESCE(meta, '{}'::jsonb) - 'embedding_backend'
+                    meta = (COALESCE(meta, '{}'::jsonb) - 'embedding_backend') - 'generation'
                 WHERE repo_id = $1;
                 """,
                 repo_id,
@@ -792,7 +792,9 @@ class PostgresClient:
     async def get_dashboard_storage_breakdown(self, repo_id: str) -> dict[str, int]:
         """Return corpus-scoped Postgres storage (bytes) for the Dashboard.
 
-        The Dashboard polls frequently; keep this best-effort and cached.
+        The Dashboard polls frequently; keep this best-effort and cached. Every
+        column is COALESCEd: a single NULL column (language on prose chunks) used
+        to null the whole row's sum and the tiles read 0 B (drive finding M22).
         """
         repo_id = (repo_id or "").strip()
         if not repo_id:
@@ -813,14 +815,14 @@ class PostgresClient:
                 """
                 SELECT
                   COALESCE(SUM(
-                    pg_column_size(chunk_id)
-                    + pg_column_size(file_path)
-                    + pg_column_size(start_line)
-                    + pg_column_size(end_line)
-                    + pg_column_size(language)
-                    + pg_column_size(token_count)
-                    + pg_column_size(content)
-                    + pg_column_size(metadata)
+                    COALESCE(pg_column_size(chunk_id), 0)
+                    + COALESCE(pg_column_size(file_path), 0)
+                    + COALESCE(pg_column_size(start_line), 0)
+                    + COALESCE(pg_column_size(end_line), 0)
+                    + COALESCE(pg_column_size(language), 0)
+                    + COALESCE(pg_column_size(token_count), 0)
+                    + COALESCE(pg_column_size(content), 0)
+                    + COALESCE(pg_column_size(metadata), 0)
                   ), 0)::bigint AS chunks_bytes
                 FROM chunks
                 WHERE repo_id = $1;
@@ -831,14 +833,14 @@ class PostgresClient:
                 """
                 SELECT
                   COALESCE(SUM(
-                    pg_column_size(chunk_id)
-                    + pg_column_size(file_path)
-                    + pg_column_size(start_line)
-                    + pg_column_size(end_line)
-                    + pg_column_size(purpose)
-                    + pg_column_size(symbols)
-                    + pg_column_size(technical_details)
-                    + pg_column_size(domain_concepts)
+                    COALESCE(pg_column_size(chunk_id), 0)
+                    + COALESCE(pg_column_size(file_path), 0)
+                    + COALESCE(pg_column_size(start_line), 0)
+                    + COALESCE(pg_column_size(end_line), 0)
+                    + COALESCE(pg_column_size(purpose), 0)
+                    + COALESCE(pg_column_size(symbols), 0)
+                    + COALESCE(pg_column_size(technical_details), 0)
+                    + COALESCE(pg_column_size(domain_concepts), 0)
                   ), 0)::bigint AS chunk_summaries_bytes
                 FROM chunk_summaries
                 WHERE repo_id = $1;
@@ -1693,6 +1695,21 @@ class PostgresClient:
                 result = await conn.execute("DELETE FROM chunk_summaries WHERE chunk_id = $1;", chunk_id)
         return int(result.split()[-1])
 
+    async def get_generation(self, repo_id: str) -> dict[str, Any] | None:
+        """The active-generation manifest of a corpus (None when nothing is promoted)."""
+        row = await self.get_corpus(repo_id)
+        if row is None:
+            return None
+        meta = row.get("meta") if isinstance(row.get("meta"), dict) else {}
+        generation = meta.get("generation")
+        if isinstance(generation, dict) and str(generation.get("run_id") or "").strip():
+            return dict(generation)
+        return None
+
+    async def set_generation(self, repo_id: str, generation: dict[str, Any]) -> None:
+        """Point a corpus at a generation outside a full index run (incremental corpora, upgrades)."""
+        await self.update_corpus_meta(repo_id, {"generation": dict(generation)})
+
     async def update_corpus_meta(self, repo_id: str, meta: dict[str, Any]) -> None:
         await self._require_pool()
         assert self._pool is not None
@@ -1787,8 +1804,16 @@ class PostgresClient:
         active_root_path: str,
         active_description: str | None = None,
         active_meta: dict[str, Any] | None = None,
-    ) -> None:
-        """Atomically promote staged chunks/stats into the active corpus id."""
+        generation: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        """Atomically promote staged chunks/stats into the active corpus id.
+
+        The same transaction records ``generation`` (the Qdrant collection and
+        Neo4j graph id of this run) on the corpus row; readers of those stores
+        resolve their physical targets from it, which is what makes the cutover
+        atomic across all three stores. Returns the previous generation manifest
+        so the caller can retire it after the commit.
+        """
         await self._require_pool()
         assert self._pool is not None
 
@@ -1832,6 +1857,10 @@ class PostgresClient:
                 )
                 if active_meta:
                     merged_meta = {**merged_meta, **active_meta}
+                previous_generation = merged_meta.get("generation")
+                previous_generation = dict(previous_generation) if isinstance(previous_generation, dict) else None
+                merged_meta["generation"] = dict(generation)
+                merged_meta.pop("internal_staging", None)
 
                 await conn.execute("DELETE FROM chunks WHERE repo_id = $1;", active_repo_id)
                 await conn.execute(
@@ -1888,6 +1917,7 @@ class PostgresClient:
 
                 await conn.execute("DELETE FROM corpus_configs WHERE repo_id = $1;", staging_repo_id)
                 await conn.execute("DELETE FROM corpora WHERE repo_id = $1;", staging_repo_id)
+        return previous_generation
 
     async def _ensure_corpus_row(
         self,

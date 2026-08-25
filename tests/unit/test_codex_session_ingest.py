@@ -271,7 +271,7 @@ class _FakeArtifactQdrant:
     def __init__(self) -> None:
         self.successful_writes: list[list[str]] = []
 
-    async def upsert_chunks(self, _repo_id: str, chunks: list[Chunk], *, embedding_dim: int) -> int:
+    async def upsert_chunks(self, _repo_id: str, chunks: list[Chunk], *, embedding_dim: int, pg: object = None) -> int:
         assert embedding_dim > 0
         assert all(chunk.embedding is None for chunk in chunks)
         self.successful_writes.append([chunk.chunk_id for chunk in chunks])

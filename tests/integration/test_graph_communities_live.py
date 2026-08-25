@@ -16,6 +16,8 @@ from httpx import AsyncClient
 from neo4j_graphrag.experimental.components.types import Neo4jGraph, Neo4jNode, Neo4jRelationship
 
 from server.db.neo4j import Neo4jClient
+from server.db.postgres import PostgresClient
+from server.indexing.generations import build_generation
 from server.indexing.official_graphrag import write_lexical_graph_with_graphrag
 from server.models.index import Chunk
 
@@ -107,8 +109,16 @@ async def test_label_propagation_communities_survive_promotion_and_feed_the_subg
             assert "linked entities around" in community.summary
         assert all("z1" not in c.member_ids for c in detected)
 
-        # Staging -> active promotion rewrites repo_id only; community ids stay valid.
-        await neo.promote_repo_graph(active_repo_id=active, staging_repo_id=staging)
+        # Promotion is the manifest write on the corpus row (no relabel); the API
+        # resolves the graph generation id from it and community ids stay valid.
+        pg = PostgresClient(os.environ["POSTGRES_DSN"])
+        await pg.connect()
+        try:
+            await pg.set_generation(
+                active, build_generation(run_id="communities-live", qdrant_collection=None, graph_repo_id=staging)
+            )
+        finally:
+            await pg.disconnect()
         listed = await client.get(f"/api/graph/{active}/communities")
         assert listed.status_code == 200, listed.text
         promoted = listed.json()

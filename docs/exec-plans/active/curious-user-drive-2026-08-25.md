@@ -1284,3 +1284,42 @@ promoted-lane live test (400 for the missing path, `status=error` with
 "No indexable files" for an empty directory, active stats/chunks/search
 unchanged).
 
+### Residuals closed (session 14, operator instruction: no fake stuff, promotion must be real)
+
+- **Atomic promotion (generation manifest).** Promotion is now one Postgres
+  transaction: it swaps the chunk rows and writes
+  `corpora.meta.generation = {run_id, qdrant_collection, graph_repo_id}`
+  (`server/indexing/generations.py`). Every reader of Qdrant and Neo4j — the
+  fusion legs, MMR embeddings, graph API, index stats, incidents/status, the
+  incremental writers (recall, Codex ingest) — resolves the physical collection
+  and graph id from that manifest. Qdrant aliases and the Neo4j staging→active
+  relabel are gone; staged resources are verified (point count, lexical-graph
+  chunk nodes) before the commit, superseded generations are retired after it,
+  and the cancel/error paths never touch staged resources once the manifest is
+  written. Corpora indexed before the manifest existed are upgraded once at API
+  startup from their alias target (`ensure_generation_manifests`). Proof:
+  `test_qdrant_chunk_store.py` (manifest-named generations, retirement, wiped
+  reads), `test_index_promoted_lane.py` (manifest per run, superseded
+  generation retired, failed run leaves the manifest), the drive corpus and
+  `epstein-files-1` searching after the startup upgrade.
+- **Graph hydration tests are real.** The three fake-Postgres/Neo4j/Embedder
+  unit tests are deleted; `tests/integration/test_graph_hydration_live.py`
+  seeds the graph through a real index run (lexical graph + chunk vector index,
+  then the semantic KG through the cheap gateway alias) and proves chunk-mode
+  hydration by chunk_id, entity expansion adding chunks beyond the vector
+  seeds, and entity-mode hydration. `test_fusion.py` and
+  `test_metrics_endpoint.py` left the `check_banned` allowlist; the fake-Postgres
+  dashboard stats test became live assertions in the promoted-lane test.
+- **Observability routes fail closed and are observed with real queries.**
+  `/api/observability/{status,catalog,incidents,alert-rules}` return 404 for an
+  unknown corpus (no global-config fallback).
+  `tests/integration/test_observability_live_queries.py` runs real searches on
+  an indexed corpus, checks the retrieval component reports that corpus's live
+  generation and point count with no retrieval incident, wipes the live Qdrant
+  generation and checks the incident fires (critical, firing) while search
+  fails closed.
+- **M22 (storage tiles 0 B) fixed on the way.** `get_dashboard_storage_breakdown`
+  summed `pg_column_size` per column without COALESCE, so a NULL `language` on
+  prose chunks nulled every row and the tiles read 0 B; the live dashboard
+  assertions in the promoted-lane test now require real byte counts.
+

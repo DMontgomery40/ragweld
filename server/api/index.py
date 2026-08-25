@@ -65,6 +65,12 @@ from server.observability.metrics import (
     INDEX_STAGE_LATENCY_SECONDS,
     INDEX_TOKENS_TOTAL,
 )
+from server.indexing.generations import (
+    build_generation,
+    generation_from_corpus_row,
+    graph_repo_id_of,
+    qdrant_collection_of,
+)
 from server.retrieval.qdrant_store import QdrantChunkStore
 from server.services.config_store import get_config as load_scoped_config
 
@@ -654,6 +660,7 @@ async def _compute_dashboard_storage_breakdown(*, repo_id: str) -> DashboardInde
     await pg.connect()
     try:
         breakdown = await pg.get_dashboard_storage_breakdown(repo_id)
+        generation = await pg.get_generation(repo_id)
     finally:
         await pg.disconnect()
 
@@ -661,7 +668,7 @@ async def _compute_dashboard_storage_breakdown(*, repo_id: str) -> DashboardInde
     qdrant_points = 0
     qdrant_dense_vector_bytes = 0
     try:
-        status = await QdrantChunkStore(cfg).status(repo_id)
+        status = await QdrantChunkStore(cfg).status(repo_id, physical=qdrant_collection_of(generation))
         if status is not None:
             qdrant_points = int(status.points)
             qdrant_dense_vector_bytes = int(status.dense_points) * int(status.dense_dimensions) * 4
@@ -845,7 +852,7 @@ async def _run_index(
         # metadata was not cleared, there is nothing to protect.
         has_embeddings = False
         if stored_model and stored_dim > 0:
-            live = await qdrant.status(repo_id)
+            live = await qdrant.status(repo_id, physical=qdrant_collection_of(generation_from_corpus_row(corpus)))
             has_embeddings = bool(live is not None and live.dense_points > 0)
         if stored_model and stored_dim > 0 and has_embeddings:
             current_model = str(cfg.embedding.effective_model or "").strip()
@@ -1528,6 +1535,7 @@ async def _background_index_job(request: IndexRequest, queue: asyncio.Queue[dict
 
     qdrant: QdrantChunkStore | None = None
     qdrant_generation: str | None = None
+    committed = False  # once the manifest is written, staged resources are the live ones
     try:
         INDEX_RUNS_TOTAL.inc()
         _emit_event(
@@ -1559,8 +1567,8 @@ async def _background_index_job(request: IndexRequest, queue: asyncio.Queue[dict
                 qdrant=qdrant,
                 qdrant_generation=qdrant_generation,
             )
-        # Verify every staged resource BEFORE any active store changes: a partial
-        # vector index must never be paired with promoted chunk rows.
+        # Verify every staged resource BEFORE the commit: a partial vector index
+        # or an empty staged graph must never become the active generation.
         staged_points = await qdrant.count_points(qdrant_generation)
         expected_points = int(getattr(stats, "total_chunks", 0) or 0)
         if staged_points != expected_points:
@@ -1569,6 +1577,33 @@ async def _background_index_job(request: IndexRequest, queue: asyncio.Queue[dict
                 f"indexed {expected_points} chunks; refusing to promote a partial vector index"
             )
         cfg = await load_scoped_config(repo_id=repo_id)
+        graph_generation_id: str | None = None
+        if cfg.graph_indexing.enabled:
+            neo4j_verify = Neo4jClient(
+                cfg.graph_storage.neo4j_uri,
+                cfg.graph_storage.neo4j_user,
+                cfg.graph_storage.resolve_password(),
+                database=cfg.graph_storage.resolve_database(repo_id),
+            )
+            await neo4j_verify.connect()
+            try:
+                staged_graph = await neo4j_verify.get_graph_stats(staging_repo_id)
+            finally:
+                await neo4j_verify.disconnect()
+            if cfg.graph_indexing.build_lexical_graph and int(staged_graph.total_chunks or 0) != expected_points:
+                raise RuntimeError(
+                    f"Staged graph {staging_repo_id} holds {staged_graph.total_chunks} chunk nodes but the run "
+                    f"indexed {expected_points} chunks; refusing to promote a partial graph"
+                )
+            graph_generation_id = staging_repo_id
+
+        # THE commit: one Postgres transaction swaps the chunk rows and writes
+        # the generation manifest (Qdrant collection + Neo4j graph id). Readers
+        # resolve both stores from the manifest, so there is no per-store swap
+        # and no window where new chunk rows pair with old vectors or graph.
+        generation = build_generation(
+            run_id=run_id, qdrant_collection=qdrant_generation, graph_repo_id=graph_generation_id
+        )
         postgres = PostgresClient(cfg.indexing.postgres_url)
         await postgres.connect()
         try:
@@ -1576,52 +1611,61 @@ async def _background_index_job(request: IndexRequest, queue: asyncio.Queue[dict
             active_name = str((active_corpus or {}).get("name") or repo_id)
             active_description = (active_corpus or {}).get("description")
             active_meta = (active_corpus.get("meta") or {}) if active_corpus else {}
-            await postgres.promote_staging_index(
-                active_repo_id=repo_id,
-                staging_repo_id=staging_repo_id,
-                active_name=active_name,
-                active_root_path=request.repo_path,
-                active_description=str(active_description) if active_description is not None else None,
-                active_meta=active_meta,
-            )
+            with INDEX_STAGE_LATENCY_SECONDS.labels(stage="generation_commit").time():
+                previous_generation = await postgres.promote_staging_index(
+                    active_repo_id=repo_id,
+                    staging_repo_id=staging_repo_id,
+                    active_name=active_name,
+                    active_root_path=request.repo_path,
+                    active_description=str(active_description) if active_description is not None else None,
+                    active_meta=active_meta,
+                    generation=generation,
+                )
         finally:
             with contextlib.suppress(Exception):
                 await postgres.disconnect()
-        with INDEX_STAGE_LATENCY_SECONDS.labels(stage="qdrant_promote_generation").time():
-            await qdrant.promote_generation(repo_id, qdrant_generation)
-        qdrant_generation = None
-        promoted = await qdrant.status(repo_id)
-        promoted_points = int(promoted.points) if promoted is not None else 0
+        committed = True
+        promoted_collection = qdrant_generation
+        qdrant_generation = None  # owned by the manifest now; never dropped as "staged"
         _emit_event(
             queue,
             {
                 "type": "log",
                 "message": (
-                    f"⚡ Promoted Qdrant generation: points={promoted_points} "
-                    f"dense_points={int(promoted.dense_points) if promoted is not None else 0}"
+                    f"⚡ Generation {run_id} committed: chunks={expected_points} "
+                    f"qdrant={promoted_collection} graph={graph_generation_id or 'off'}"
                 ),
-                "meta": {
-                    "stage": "qdrant_promote",
-                    "points": promoted_points,
-                    "dense_points": int(promoted.dense_points) if promoted is not None else 0,
-                },
+                "meta": {"stage": "generation_commit", "points": expected_points},
             },
             drop_oldest=True,
         )
 
+        # Retire superseded generations after the commit (best-effort: a
+        # failure here leaves orphans to sweep, never an inconsistent index).
+        try:
+            retired = await qdrant.retire_generations(repo_id, keep=promoted_collection)
+            if retired:
+                _emit_event(queue, {"type": "log", "message": f"🧹 Retired {retired} superseded Qdrant generation(s)"}, drop_oldest=True)
+        except Exception as exc:
+            logger.warning("retiring Qdrant generations for %s failed: %s", repo_id, exc)
         if cfg.graph_indexing.enabled:
-            db_name = cfg.graph_storage.resolve_database(repo_id)
-            neo4j = Neo4jClient(
-                cfg.graph_storage.neo4j_uri,
-                cfg.graph_storage.neo4j_user,
-                cfg.graph_storage.resolve_password(),
-                database=db_name,
-            )
-            await neo4j.connect()
+            previous_graph = graph_repo_id_of(previous_generation)
+            retire_ids = {gid for gid in (previous_graph, repo_id) if gid and gid != graph_generation_id}
             try:
-                await neo4j.promote_repo_graph(active_repo_id=repo_id, staging_repo_id=staging_repo_id)
-            finally:
-                await neo4j.disconnect()
+                neo4j_retire = Neo4jClient(
+                    cfg.graph_storage.neo4j_uri,
+                    cfg.graph_storage.neo4j_user,
+                    cfg.graph_storage.resolve_password(),
+                    database=cfg.graph_storage.resolve_database(repo_id),
+                )
+                await neo4j_retire.connect()
+                try:
+                    for gid in sorted(retire_ids):
+                        await neo4j_retire.delete_graph(gid)
+                finally:
+                    await neo4j_retire.disconnect()
+            except Exception as exc:
+                logger.warning("retiring previous graph generation(s) %s for %s failed: %s", sorted(retire_ids), repo_id, exc)
         # The cutover is complete on every store; only now do the process-level
         # stats describe the active index.
         _STATS[repo_id] = stats
@@ -1645,7 +1689,7 @@ async def _background_index_job(request: IndexRequest, queue: asyncio.Queue[dict
                 )
                 await neo4j.connect()
                 try:
-                    gstats = await neo4j.get_graph_stats(repo_id)
+                    gstats = await neo4j.get_graph_stats(graph_generation_id or repo_id)
                     GRAPH_ENTITIES_CURRENT.set(int(getattr(gstats, "total_entities", 0) or 0))
                     GRAPH_RELATIONSHIPS_CURRENT.set(int(getattr(gstats, "total_relationships", 0) or 0))
                 finally:
@@ -1680,7 +1724,7 @@ async def _background_index_job(request: IndexRequest, queue: asyncio.Queue[dict
             _persist_run_summary(summary)
         _emit_event(queue, {"type": "complete", "message": "✓ Indexing complete"}, guarantee=True)
     except asyncio.CancelledError:
-        if qdrant is not None and qdrant_generation is not None:
+        if qdrant is not None and qdrant_generation is not None and not committed:
             with contextlib.suppress(Exception):
                 await asyncio.shield(qdrant.drop_generation(qdrant_generation))
         with contextlib.suppress(Exception):
@@ -1688,10 +1732,11 @@ async def _background_index_job(request: IndexRequest, queue: asyncio.Queue[dict
             pg = PostgresClient(cfg.indexing.postgres_url)
             await pg.connect()
             try:
-                await pg.delete_corpus_with_data(staging_repo_id)
+                if not committed:
+                    await pg.delete_corpus_with_data(staging_repo_id)
             finally:
                 await pg.disconnect()
-            if cfg.graph_indexing.enabled:
+            if cfg.graph_indexing.enabled and not committed:
                 db_name = cfg.graph_storage.resolve_database(repo_id)
                 neo4j = Neo4jClient(
                     cfg.graph_storage.neo4j_uri,
@@ -1742,7 +1787,7 @@ async def _background_index_job(request: IndexRequest, queue: asyncio.Queue[dict
         _emit_event(queue, {"type": "cancelled", "message": "⚠ Indexing cancelled"}, guarantee=True)
         raise
     except Exception as e:
-        if qdrant is not None and qdrant_generation is not None:
+        if qdrant is not None and qdrant_generation is not None and not committed:
             with contextlib.suppress(Exception):
                 await qdrant.drop_generation(qdrant_generation)
         with contextlib.suppress(Exception):
@@ -1750,10 +1795,11 @@ async def _background_index_job(request: IndexRequest, queue: asyncio.Queue[dict
             pg = PostgresClient(cfg.indexing.postgres_url)
             await pg.connect()
             try:
-                await pg.delete_corpus_with_data(staging_repo_id)
+                if not committed:
+                    await pg.delete_corpus_with_data(staging_repo_id)
             finally:
                 await pg.disconnect()
-            if cfg.graph_indexing.enabled:
+            if cfg.graph_indexing.enabled and not committed:
                 db_name = cfg.graph_storage.resolve_database(repo_id)
                 neo4j = Neo4jClient(
                     cfg.graph_storage.neo4j_uri,
@@ -2336,6 +2382,7 @@ async def delete_index(corpus_id: str) -> dict[str, Any]:
     cfg = await load_scoped_config(repo_id=repo_id)
     postgres = PostgresClient(cfg.indexing.postgres_url)
     await postgres.connect()
+    generation_graph_id = graph_repo_id_of(await postgres.get_generation(repo_id))
     deleted_rows = await postgres.delete_chunks(repo_id)
     try:
         deleted_collections = await QdrantChunkStore(cfg).delete_corpus(repo_id)
@@ -2356,8 +2403,13 @@ async def delete_index(corpus_id: str) -> dict[str, Any]:
             database=db_name,
         )
         await neo4j.connect()
-        await neo4j.delete_graph(repo_id)
-        await neo4j.disconnect()
+        try:
+            if generation_graph_id:
+                await neo4j.delete_graph(generation_graph_id)
+            await neo4j.delete_graphs_with_prefix(_build_staging_repo_id(repo_id, ""))
+            await neo4j.delete_graph(repo_id)
+        finally:
+            await neo4j.disconnect()
     except Exception:
         # Graph layer optional
         pass

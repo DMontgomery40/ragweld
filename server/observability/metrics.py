@@ -510,7 +510,7 @@ _INDEX_STAGES = (
     "embed_chunks",
     "postgres_upsert_chunks",
     "qdrant_write_chunks",
-    "qdrant_promote_generation",
+    "generation_commit",
     "neo4j_upsert_document_chunks",
     "neo4j_upsert_semantic_graph",
     "semantic_kg",

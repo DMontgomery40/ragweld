@@ -32,6 +32,8 @@ def _langfuse_ingestion_detail(config: TriBridConfig) -> str:
     if blockers:
         return f"blocked ({'; '.join(blockers)})"
     return langfuse_ingestion_state()
+from server.db.postgres import PostgresClient
+from server.indexing.generations import qdrant_collection_of
 from server.retrieval.qdrant_store import QdrantChunkStore
 from server.training.control_plane import build_agent_control_plane_status
 
@@ -525,14 +527,20 @@ async def build_observability_status(config: TriBridConfig, *, repo_id: str | No
     corpus_reachable: bool | None = qdrant_reachable
     if repo_id and qdrant_reachable:
         try:
-            corpus_status = await qdrant_store.status(repo_id)
+            pg = PostgresClient(config.indexing.postgres_url)
+            await pg.connect()
+            try:
+                corpus_collection = qdrant_collection_of(await pg.get_generation(repo_id))
+            finally:
+                await pg.disconnect()
+            corpus_status = await qdrant_store.status(repo_id, physical=corpus_collection)
         except Exception:
             corpus_status = None
         if corpus_status is None:
             qdrant_detail = f"{qdrant_detail} Corpus '{repo_id}' has no vector generation yet (not indexed)."
             corpus_reachable = None
         elif corpus_status.points <= 0:
-            qdrant_detail = f"{qdrant_detail} Corpus '{repo_id}' alias is present but its generation is empty or wiped."
+            qdrant_detail = f"{qdrant_detail} Corpus '{repo_id}' has a generation manifest but its collection is empty or wiped."
             corpus_reachable = False
         else:
             qdrant_detail = (

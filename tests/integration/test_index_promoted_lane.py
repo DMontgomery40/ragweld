@@ -99,7 +99,9 @@ async def test_index_search_and_delete_on_promoted_lane(client: AsyncClient) -> 
         assert corpus["sparse_contract"] == sparse_contract_from_config(cfg)
         chunk_rows = await pg.count_chunks(corpus_id)
         assert chunk_rows > 0
-        status = await qdrant.status(corpus_id)
+        generation = await pg.get_generation(corpus_id)
+        assert generation and generation["qdrant_collection"] and generation["graph_repo_id"], generation
+        status = await qdrant.status(corpus_id, physical=generation["qdrant_collection"])
         assert status is not None, "promoted Qdrant generation missing"
         assert status.points == chunk_rows
         assert status.dense_points == chunk_rows
@@ -159,8 +161,14 @@ async def test_index_search_and_delete_on_promoted_lane(client: AsyncClient) -> 
         assert final_reindex["status"] == "complete", final_reindex
         assert final_reindex.get("error") in (None, ""), final_reindex
         assert await pg.count_chunks(corpus_id) == chunk_rows
-        restatus = await qdrant.status(corpus_id)
+        regeneration = await pg.get_generation(corpus_id)
+        assert regeneration and regeneration["run_id"] != generation["run_id"], regeneration
+        restatus = await qdrant.status(corpus_id, physical=regeneration["qdrant_collection"])
         assert restatus is not None and restatus.points == chunk_rows
+        # The superseded generation was retired after the commit (reads as wiped).
+        retired = await qdrant.status(corpus_id, physical=generation["qdrant_collection"])
+        assert retired is not None and retired.physical_collection is None, retired
+        assert (await qdrant.count_points(regeneration["qdrant_collection"])) == chunk_rows
         latest_run = await client.get(f"/api/index/{corpus_id}/runs/latest")
         assert latest_run.status_code == 200, latest_run.text
         assert latest_run.json()["status"] == "complete", latest_run.json()
@@ -252,13 +260,26 @@ async def test_index_search_and_delete_on_promoted_lane(client: AsyncClient) -> 
         storage = stats.json()["storage_breakdown"]
         assert int(storage["qdrant_points"]) == chunk_rows
         assert int(storage["qdrant_dense_vector_bytes"]) == chunk_rows * int(cfg.embedding.embedding_dim) * 4
+        # Dashboard storage truth on the real stores (replaces the former fake-Postgres test).
+        assert int(storage["chunks_bytes"]) > 0
+        assert int(storage["postgres_total_bytes"]) >= int(storage["chunks_bytes"])
+        assert int(storage["total_storage_bytes"]) == (
+            int(storage["postgres_total_bytes"]) + int(storage["qdrant_dense_vector_bytes"]) + int(storage["neo4j_store_bytes"])
+        )
+        dashboard_status = await client.get("/api/index/status", params={"corpus_id": corpus_id})
+        assert dashboard_status.status_code == 200, dashboard_status.text
+        dashboard = dashboard_status.json()
+        assert dashboard["running"] is False
+        assert dashboard["metadata"]["corpus_id"] == corpus_id
+        assert dashboard["metadata"]["current_repo"] == corpus_id
+        assert int(dashboard["metadata"]["total_storage"]) == int(storage["total_storage_bytes"])
 
         # Deleting the index removes the Qdrant generation; the legs then fail closed (chunk rows are gone too).
         deleted = await client.delete(f"/api/index/{corpus_id}")
         assert deleted.status_code == 200, deleted.text
         assert deleted.json()["deleted_chunks"] == chunk_rows
         assert deleted.json()["deleted_vector_collections"] >= 1
-        assert await qdrant.status(corpus_id) is None
+        assert await pg.get_generation(corpus_id) is None
         cleared = await pg.get_corpus(corpus_id)
         assert cleared is not None and cleared["last_indexed"] is None and cleared["embedding_dimensions"] == 0
         # A de-indexed corpus reports empty legs, not a missing-generation failure.

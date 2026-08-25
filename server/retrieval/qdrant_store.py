@@ -4,17 +4,21 @@ Ownership boundary:
 
 - Postgres keeps chunk rows as control/state (hydration, summaries, neighbor
   expansion, graph hydration) and the recorded dense/sparse contracts.
-- Qdrant keeps the dense and sparse vectors for every corpus. Each corpus is
-  addressed through a stable alias (`ragweld_chunks_<corpus>`) that points at
-  one physical generation; a full index builds a fresh staged generation and
-  promotes it with an atomic alias switch.
+- Qdrant keeps the dense and sparse vectors for every corpus in physical
+  generation collections (`ragweld_chunks_<corpus>__<hex>`). Which generation
+  is live is decided by the corpus's generation manifest in Postgres
+  (`server/indexing/generations.py`), written by the same transaction that
+  promotes the chunk rows; a full index builds a fresh staged generation and
+  the commit is that single manifest write. Superseded generations are retired
+  afterwards. There are no Qdrant aliases.
 - Neo4j keeps its own chunk-vector index as the graph leg's implementation
   detail; it is not a vector engine for the vector leg.
 
 Writes go through the Haystack Qdrant document store so the collection schema
 (named `text-dense` / `text-sparse` vectors, IDF modifier) is the Haystack
-contract. Reads use the Qdrant client directly against the alias so a missing
-or wiped generation reads as missing instead of being silently auto-created.
+contract. Reads use the Qdrant client directly against the physical
+collection named by the manifest so a missing or wiped generation reads as
+missing instead of being silently auto-created.
 """
 
 from __future__ import annotations
@@ -27,6 +31,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Any
 
+from server.db.postgres import PostgresClient
 from server.dependency_errors import DependencyUnavailableError
 from server.models.index import Chunk
 from server.models.retrieval import ChunkMatch
@@ -42,7 +47,7 @@ logger = logging.getLogger(__name__)
 
 DENSE_VECTOR_NAME = "text-dense"
 SPARSE_VECTOR_NAME = "text-sparse"
-_ALIAS_PREFIX = "ragweld_chunks_"
+_COLLECTION_PREFIX = "ragweld_chunks_"
 
 # Chunk metadata keys that are copied into the Qdrant payload as first-class
 # provenance so every hit can become a citation without a Postgres round trip.
@@ -51,49 +56,52 @@ _PAYLOAD_META_KEYS = ("chunk_ordinal", "parent_doc_id", "char_start", "char_end"
 _SPARSE_DOC_EMBEDDERS: dict[str, Any] = {}
 _SPARSE_TEXT_EMBEDDERS: dict[str, Any] = {}
 _SPARSE_EMBEDDER_LOCK = asyncio.Lock()
-# Serializes first-write generation creation per alias (incremental upserts).
-_ALIAS_LOCKS: dict[str, asyncio.Lock] = {}
+# Serializes first-write generation creation per corpus (incremental upserts).
+_CORPUS_LOCKS: dict[str, asyncio.Lock] = {}
 
 
 class QdrantCollectionMissingError(RuntimeError):
-    """The corpus alias (or its physical generation) does not exist in Qdrant."""
+    """The corpus has no promoted generation, or its physical collection does not exist in Qdrant."""
 
-    def __init__(self, corpus_id: str, alias: str) -> None:
+    def __init__(self, corpus_id: str, collection: str | None) -> None:
         self.corpus_id = corpus_id
-        self.alias = alias
-        super().__init__(f"Qdrant collection '{alias}' for corpus '{corpus_id}' does not exist")
+        self.collection = collection
+        if collection:
+            super().__init__(f"Qdrant collection '{collection}' for corpus '{corpus_id}' does not exist")
+        else:
+            super().__init__(f"Corpus '{corpus_id}' has no promoted Qdrant generation")
 
 
 @dataclass(frozen=True)
 class QdrantCorpusStatus:
     corpus_id: str
-    alias: str
+    prefix: str
     physical_collection: str | None
     points: int
     dense_points: int
     dense_dimensions: int
 
 
-def corpus_alias(corpus_id: str) -> str:
-    """Stable, injective alias for a corpus.
+def corpus_collection_prefix(corpus_id: str) -> str:
+    """Stable, injective collection-name prefix for a corpus.
 
     The readable part is sanitized (Qdrant names are restricted), so distinct
     corpus ids such as `my-repo` / `my_repo` / `My.Repo` would collide on it
-    alone; the sha1 suffix of the exact corpus id keeps the alias injective.
-    Generations are `<alias>__<hex>`, and the suffix guarantees no other
-    corpus alias can be a prefix of this corpus's generations.
+    alone; the sha1 suffix of the exact corpus id keeps the prefix injective.
+    Generations are `<prefix>__<hex>`, and the suffix guarantees no other
+    corpus prefix can be a prefix of this corpus's generations.
     """
     raw = str(corpus_id or "").strip()
     safe = re.sub(r"[^A-Za-z0-9_]+", "_", raw).strip("_").lower()[:48] or "unknown"
     digest = hashlib.sha1(raw.encode("utf-8")).hexdigest()[:8]
-    return f"{_ALIAS_PREFIX}{safe}_{digest}"
+    return f"{_COLLECTION_PREFIX}{safe}_{digest}"
 
 
-def _alias_lock(alias: str) -> asyncio.Lock:
-    lock = _ALIAS_LOCKS.get(alias)
+def _corpus_lock(corpus_id: str) -> asyncio.Lock:
+    lock = _CORPUS_LOCKS.get(corpus_id)
     if lock is None:
         lock = asyncio.Lock()
-        _ALIAS_LOCKS[alias] = lock
+        _CORPUS_LOCKS[corpus_id] = lock
     return lock
 
 
@@ -225,17 +233,31 @@ class QdrantChunkStore:
 
         return QdrantClient(url=self.url, timeout=30)
 
-    def _raise_boundary(self, exc: BaseException, *, operation: str, corpus_id: str, alias: str) -> None:
+    def _raise_boundary(self, exc: BaseException, *, operation: str, corpus_id: str, collection: str | None) -> None:
         if is_qdrant_unavailable(exc):
             raise DependencyUnavailableError("qdrant", operation) from exc
         if _is_not_found(exc):
-            raise QdrantCollectionMissingError(corpus_id, alias) from exc
+            raise QdrantCollectionMissingError(corpus_id, collection) from exc
 
-    def _resolve_physical_sync(self, client: Any, alias: str) -> str | None:
-        for item in client.get_aliases().aliases:
-            if str(item.alias_name) == alias:
-                return str(item.collection_name)
-        return None
+    async def legacy_alias_target(self, corpus_id: str) -> str | None:
+        """The collection a pre-manifest corpus alias points at (startup upgrade only)."""
+        prefix = corpus_collection_prefix(corpus_id)
+
+        def _resolve() -> str | None:
+            client = self._client()
+            try:
+                for item in client.get_aliases().aliases:
+                    if str(item.alias_name) == prefix:
+                        return str(item.collection_name)
+                return None
+            finally:
+                client.close()
+
+        try:
+            return await asyncio.to_thread(_resolve)
+        except Exception as exc:
+            self._raise_boundary(exc, operation="Qdrant legacy alias lookup", corpus_id=corpus_id, collection=prefix)
+            raise
 
     # ------------------------------------------------------------------
     # Staged generations (full index runs)
@@ -262,9 +284,9 @@ class QdrantChunkStore:
             client.close()
 
     async def create_generation(self, corpus_id: str, *, embedding_dim: int) -> str:
-        """Create a fresh physical generation for a corpus (not yet visible through the alias)."""
-        alias = corpus_alias(corpus_id)
-        physical = f"{alias}__{uuid.uuid4().hex[:8]}"
+        """Create a fresh physical generation for a corpus (not live until the manifest names it)."""
+        prefix = corpus_collection_prefix(corpus_id)
+        physical = f"{prefix}__{uuid.uuid4().hex[:8]}"
 
         def _create() -> None:
             store = self._document_store(physical, embedding_dim=embedding_dim, recreate=True)
@@ -276,7 +298,7 @@ class QdrantChunkStore:
         try:
             await asyncio.to_thread(_create)
         except Exception as exc:
-            self._raise_boundary(exc, operation="Qdrant generation create", corpus_id=corpus_id, alias=alias)
+            self._raise_boundary(exc, operation="Qdrant generation create", corpus_id=corpus_id, collection=physical)
             raise
         return physical
 
@@ -300,7 +322,7 @@ class QdrantChunkStore:
         try:
             return await asyncio.to_thread(_write)
         except Exception as exc:
-            self._raise_boundary(exc, operation="Qdrant chunk write", corpus_id=corpus_id, alias=corpus_alias(corpus_id))
+            self._raise_boundary(exc, operation="Qdrant chunk write", corpus_id=corpus_id, collection=physical)
             raise
 
     async def count_points(self, physical: str) -> int:
@@ -320,45 +342,43 @@ class QdrantChunkStore:
                 raise DependencyUnavailableError("qdrant", "Qdrant generation count") from exc
             raise
 
-    async def promote_generation(self, corpus_id: str, physical: str) -> None:
-        """Atomically point the corpus alias at `physical`; remove superseded generations.
+    async def retire_generations(self, corpus_id: str, *, keep: str | None) -> int:
+        """Delete every generation of a corpus except ``keep`` (run after the manifest commit).
 
-        The alias is injective per corpus, so every `<alias>__*` collection
-        other than `physical` is a superseded or orphaned generation of this
-        corpus (a previous live generation, or a staged generation left by a
-        run that died before it could drop it).
+        The prefix is injective per corpus, so every `<prefix>__*` collection
+        other than ``keep`` is a superseded or orphaned generation (a previous
+        live generation, or one left by a run that died before dropping it).
+        Also removes a legacy alias if one is still present. Returns the number
+        of collections removed.
         """
         from qdrant_client import models as qmodels
 
-        alias = corpus_alias(corpus_id)
+        prefix = corpus_collection_prefix(corpus_id)
 
-        def _promote() -> None:
+        def _retire() -> int:
             client = self._client()
+            removed = 0
             try:
-                previous = self._resolve_physical_sync(client, alias)
-                if previous is None and client.collection_exists(alias):
-                    # A physical collection occupying the alias name cannot coexist with the alias.
-                    client.delete_collection(alias)
-                operations: list[Any] = []
-                if previous is not None:
-                    operations.append(qmodels.DeleteAliasOperation(delete_alias=qmodels.DeleteAlias(alias_name=alias)))
-                operations.append(
-                    qmodels.CreateAliasOperation(
-                        create_alias=qmodels.CreateAlias(collection_name=physical, alias_name=alias)
-                    )
-                )
-                client.update_collection_aliases(change_aliases_operations=operations)
-                for collection in client.get_collections().collections:
+                for item in client.get_aliases().aliases:
+                    if str(item.alias_name) == prefix:
+                        client.update_collection_aliases(
+                            change_aliases_operations=[
+                                qmodels.DeleteAliasOperation(delete_alias=qmodels.DeleteAlias(alias_name=prefix))
+                            ]
+                        )
+                for collection in list(client.get_collections().collections):
                     name = str(collection.name)
-                    if name.startswith(f"{alias}__") and name != physical:
+                    if name.startswith(f"{prefix}__") and name != keep:
                         client.delete_collection(name)
+                        removed += 1
             finally:
                 client.close()
+            return removed
 
         try:
-            await asyncio.to_thread(_promote)
+            return await asyncio.to_thread(_retire)
         except Exception as exc:
-            self._raise_boundary(exc, operation="Qdrant generation promote", corpus_id=corpus_id, alias=alias)
+            self._raise_boundary(exc, operation="Qdrant generation retire", corpus_id=corpus_id, collection=keep)
             raise
 
     async def drop_generation(self, physical: str) -> None:
@@ -378,24 +398,25 @@ class QdrantChunkStore:
             raise
 
     async def delete_corpus(self, corpus_id: str) -> int:
-        """Remove the alias and every physical generation for a corpus; returns collections removed."""
+        """Remove every physical generation (and any legacy alias) for a corpus; returns collections removed."""
         from qdrant_client import models as qmodels
 
-        alias = corpus_alias(corpus_id)
+        prefix = corpus_collection_prefix(corpus_id)
 
         def _delete() -> int:
             client = self._client()
             removed = 0
             try:
-                if self._resolve_physical_sync(client, alias) is not None:
-                    client.update_collection_aliases(
-                        change_aliases_operations=[
-                            qmodels.DeleteAliasOperation(delete_alias=qmodels.DeleteAlias(alias_name=alias))
-                        ]
-                    )
+                for item in client.get_aliases().aliases:
+                    if str(item.alias_name) == prefix:
+                        client.update_collection_aliases(
+                            change_aliases_operations=[
+                                qmodels.DeleteAliasOperation(delete_alias=qmodels.DeleteAlias(alias_name=prefix))
+                            ]
+                        )
                 for collection in list(client.get_collections().collections):
                     name = str(collection.name)
-                    if name == alias or name.startswith(f"{alias}__"):
+                    if name == prefix or name.startswith(f"{prefix}__"):
                         client.delete_collection(name)
                         removed += 1
             finally:
@@ -405,53 +426,55 @@ class QdrantChunkStore:
         try:
             return await asyncio.to_thread(_delete)
         except Exception as exc:
-            self._raise_boundary(exc, operation="Qdrant corpus delete", corpus_id=corpus_id, alias=alias)
+            self._raise_boundary(exc, operation="Qdrant corpus delete", corpus_id=corpus_id, collection=prefix)
             raise
 
     # ------------------------------------------------------------------
     # Incremental writes (recall and other append-only corpora)
     # ------------------------------------------------------------------
 
-    async def upsert_chunks(self, corpus_id: str, chunks: list[Chunk], *, embedding_dim: int) -> int:
-        """Upsert chunks into the live generation, creating and aliasing one when missing."""
+    async def upsert_chunks(
+        self,
+        corpus_id: str,
+        chunks: list[Chunk],
+        *,
+        embedding_dim: int,
+        pg: PostgresClient,
+    ) -> int:
+        """Upsert chunks into the corpus's live generation, creating one (and its manifest) on first write."""
         if not chunks:
             return 0
-        alias = corpus_alias(corpus_id)
+        from server.indexing.generations import build_generation, qdrant_collection_of
 
-        def _resolve() -> str | None:
-            client = self._client()
-            try:
-                return self._resolve_physical_sync(client, alias)
-            finally:
-                client.close()
-
-        async with _alias_lock(alias):
-            try:
-                physical = await asyncio.to_thread(_resolve)
-            except Exception as exc:
-                self._raise_boundary(exc, operation="Qdrant alias resolve", corpus_id=corpus_id, alias=alias)
-                raise
+        async with _corpus_lock(corpus_id):
+            physical = qdrant_collection_of(await pg.get_generation(corpus_id))
             if physical is None:
                 physical = await self.create_generation(corpus_id, embedding_dim=embedding_dim)
-                await self.promote_generation(corpus_id, physical)
+                await pg.set_generation(
+                    corpus_id,
+                    build_generation(
+                        run_id=f"incremental-{uuid.uuid4().hex[:10]}",
+                        qdrant_collection=physical,
+                        graph_repo_id=corpus_id,
+                    ),
+                )
             return await self.write_chunks(corpus_id, physical, chunks, embedding_dim=embedding_dim)
 
     # ------------------------------------------------------------------
     # Reads
     # ------------------------------------------------------------------
 
-    async def status(self, corpus_id: str) -> QdrantCorpusStatus | None:
-        """Live collection status for a corpus; None when the alias does not exist."""
+    async def status(self, corpus_id: str, *, physical: str | None) -> QdrantCorpusStatus | None:
+        """Live collection status for the generation named by the manifest; None when there is none."""
         from qdrant_client import models as qmodels
 
-        alias = corpus_alias(corpus_id)
+        prefix = corpus_collection_prefix(corpus_id)
+        if not physical:
+            return None
 
         def _status() -> QdrantCorpusStatus | None:
             client = self._client()
             try:
-                physical = self._resolve_physical_sync(client, alias)
-                if physical is None:
-                    return None
                 info = client.get_collection(physical)
                 vectors = getattr(getattr(info.config, "params", None), "vectors", None)
                 dense_dim = 0
@@ -467,7 +490,7 @@ class QdrantChunkStore:
                 total_points = int(client.count(physical, exact=True).count)
                 return QdrantCorpusStatus(
                     corpus_id=corpus_id,
-                    alias=alias,
+                    prefix=prefix,
                     physical_collection=physical,
                     points=total_points,
                     dense_points=dense_points,
@@ -480,28 +503,31 @@ class QdrantChunkStore:
             return await asyncio.to_thread(_status)
         except Exception as exc:
             if _is_not_found(exc):
-                # Alias present but its physical generation was wiped.
+                # The manifest names a generation that was wiped from Qdrant.
                 return QdrantCorpusStatus(
                     corpus_id=corpus_id,
-                    alias=alias,
+                    prefix=prefix,
                     physical_collection=None,
                     points=0,
                     dense_points=0,
                     dense_dimensions=0,
                 )
-            self._raise_boundary(exc, operation="Qdrant corpus status", corpus_id=corpus_id, alias=alias)
+            self._raise_boundary(exc, operation="Qdrant corpus status", corpus_id=corpus_id, collection=physical)
             raise
 
-    async def vector_search(self, corpus_id: str, query_embedding: list[float], top_k: int) -> list[ChunkMatch]:
+    async def vector_search(
+        self, corpus_id: str, query_embedding: list[float], top_k: int, *, physical: str | None
+    ) -> list[ChunkMatch]:
         if top_k <= 0 or not query_embedding:
             return []
-        alias = corpus_alias(corpus_id)
+        if not physical:
+            raise QdrantCollectionMissingError(corpus_id, None)
 
         def _search() -> list[Any]:
             client = self._client()
             try:
                 response = client.query_points(
-                    alias,
+                    physical,
                     query=[float(x) for x in query_embedding],
                     using=DENSE_VECTOR_NAME,
                     limit=int(top_k),
@@ -514,16 +540,17 @@ class QdrantChunkStore:
         try:
             points = await asyncio.to_thread(_search)
         except Exception as exc:
-            self._raise_boundary(exc, operation="Qdrant vector search", corpus_id=corpus_id, alias=alias)
+            self._raise_boundary(exc, operation="Qdrant vector search", corpus_id=corpus_id, collection=physical)
             raise
         return [_point_to_match(p, source="vector", corpus_id=corpus_id) for p in points]
 
-    async def sparse_search(self, corpus_id: str, query: str, top_k: int) -> list[ChunkMatch]:
+    async def sparse_search(self, corpus_id: str, query: str, top_k: int, *, physical: str | None) -> list[ChunkMatch]:
         if top_k <= 0 or not str(query or "").strip():
             return []
         from qdrant_client import models as qmodels
 
-        alias = corpus_alias(corpus_id)
+        if not physical:
+            raise QdrantCollectionMissingError(corpus_id, None)
         embedder = await _sparse_text_embedder(self.sparse_contract)
         sparse = await asyncio.to_thread(lambda: embedder.run(text=str(query))["sparse_embedding"])
         if not sparse.indices:
@@ -533,7 +560,7 @@ class QdrantChunkStore:
             client = self._client()
             try:
                 response = client.query_points(
-                    alias,
+                    physical,
                     query=qmodels.SparseVector(indices=list(sparse.indices), values=list(sparse.values)),
                     using=SPARSE_VECTOR_NAME,
                     limit=int(top_k),
@@ -546,22 +573,23 @@ class QdrantChunkStore:
         try:
             points = await asyncio.to_thread(_search)
         except Exception as exc:
-            self._raise_boundary(exc, operation="Qdrant sparse search", corpus_id=corpus_id, alias=alias)
+            self._raise_boundary(exc, operation="Qdrant sparse search", corpus_id=corpus_id, collection=physical)
             raise
         return [_point_to_match(p, source="sparse", corpus_id=corpus_id) for p in points]
 
-    async def get_embeddings(self, corpus_id: str, chunk_ids: list[str]) -> dict[str, list[float]]:
+    async def get_embeddings(
+        self, corpus_id: str, chunk_ids: list[str], *, physical: str | None
+    ) -> dict[str, list[float]]:
         ids = list(dict.fromkeys(str(cid) for cid in chunk_ids if str(cid).strip()))
-        if not ids:
+        if not ids or not physical:
             return {}
-        alias = corpus_alias(corpus_id)
 
         def _retrieve() -> list[Any]:
             client = self._client()
             try:
                 return list(
                     client.retrieve(
-                        alias,
+                        physical,
                         ids=[point_id_for_chunk(cid) for cid in ids],
                         with_payload=["id"],
                         with_vectors=[DENSE_VECTOR_NAME],
@@ -573,7 +601,7 @@ class QdrantChunkStore:
         try:
             records = await asyncio.to_thread(_retrieve)
         except Exception as exc:
-            self._raise_boundary(exc, operation="Qdrant embedding fetch", corpus_id=corpus_id, alias=alias)
+            self._raise_boundary(exc, operation="Qdrant embedding fetch", corpus_id=corpus_id, collection=physical)
             raise
         out: dict[str, list[float]] = {}
         for record in records:

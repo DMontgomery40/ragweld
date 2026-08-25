@@ -43,6 +43,7 @@ from server.db.postgres import PostgresClient
 from server.indexing.tokenizer import TextTokenizer
 from server.models.index import Chunk
 from server.models.tribrid_config_model import TokenizationConfig, TriBridConfig
+from server.indexing.generations import qdrant_collection_of
 from server.retrieval.qdrant_store import QdrantChunkStore
 
 DEFAULT_POSTGRES_DSN = "postgresql://postgres:postgres@127.0.0.1:5432/tribrid_rag"
@@ -1357,7 +1358,7 @@ class CorpusWriter:
                 self.metrics.db_writes_total.labels("semantic_chunks").inc()
             with self.metrics.phase_seconds.labels("qdrant_upsert_semantic").time():
                 await self.qdrant.upsert_chunks(
-                    self.config.semantic_repo_id, chunks, embedding_dim=self.config.embedding_dimensions
+                    self.config.semantic_repo_id, chunks, embedding_dim=self.config.embedding_dimensions, pg=self.pg
                 )
                 self.metrics.db_writes_total.labels("semantic_vectors").inc()
             self.metrics.chunks_written_total.labels("semantic").inc(len(chunks))
@@ -1390,7 +1391,7 @@ class CorpusWriter:
             with self.metrics.phase_seconds.labels("qdrant_upsert_artifact").time():
                 # Artifact chunks carry no dense embedding: sparse-only points.
                 await self.qdrant.upsert_chunks(
-                    self.config.artifact_repo_id, chunks, embedding_dim=self.config.embedding_dimensions
+                    self.config.artifact_repo_id, chunks, embedding_dim=self.config.embedding_dimensions, pg=self.pg
                 )
                 self.metrics.db_writes_total.labels("artifact_vectors").inc()
             self.metrics.chunks_written_total.labels("artifact").inc(len(chunks))
@@ -2550,6 +2551,8 @@ async def semantic_query_report(
     embedder: SentenceTransformerEmbedder,
     cfg: VerifyConfig,
     query: VerifyQuery,
+    *,
+    physical: str | None,
 ) -> dict[str, Any]:
     embed_started = time.perf_counter()
     embedding = (await embedder.encode([query.text]))[0]
@@ -2560,11 +2563,11 @@ async def semantic_query_report(
         )
 
     vector_started = time.perf_counter()
-    vector_hits = await qdrant.vector_search(cfg.semantic_repo_id, embedding, cfg.top_k)
+    vector_hits = await qdrant.vector_search(cfg.semantic_repo_id, embedding, cfg.top_k, physical=physical)
     vector_search_ms = (time.perf_counter() - vector_started) * 1000.0
 
     sparse_started = time.perf_counter()
-    sparse_hits = await qdrant.sparse_search(cfg.semantic_repo_id, query.text, cfg.top_k)
+    sparse_hits = await qdrant.sparse_search(cfg.semantic_repo_id, query.text, cfg.top_k, physical=physical)
     sparse_ms = (time.perf_counter() - sparse_started) * 1000.0
 
     merged = dedupe_matches(vector_hits, sparse_hits, top_k=cfg.top_k)
@@ -2597,9 +2600,11 @@ async def artifact_query_report(
     qdrant: QdrantChunkStore,
     cfg: VerifyConfig,
     query: VerifyQuery,
+    *,
+    physical: str | None,
 ) -> dict[str, Any]:
     sparse_started = time.perf_counter()
-    sparse_hits = await qdrant.sparse_search(cfg.artifact_repo_id, query.text, cfg.top_k)
+    sparse_hits = await qdrant.sparse_search(cfg.artifact_repo_id, query.text, cfg.top_k, physical=physical)
     sparse_ms = (time.perf_counter() - sparse_started) * 1000.0
 
     merged = dedupe_matches(sparse_hits, top_k=cfg.top_k)
@@ -2661,11 +2666,15 @@ async def run_verification(cfg: VerifyConfig) -> dict[str, Any]:
         )
 
         query_reports: list[dict[str, Any]] = []
+        semantic_collection = qdrant_collection_of(await pg.get_generation(cfg.semantic_repo_id))
+        artifact_collection = qdrant_collection_of(await pg.get_generation(cfg.artifact_repo_id))
         for query in cfg.queries:
             if query.stream == "semantic":
-                query_reports.append(await semantic_query_report(qdrant, embedder, cfg, query))
+                query_reports.append(
+                    await semantic_query_report(qdrant, embedder, cfg, query, physical=semantic_collection)
+                )
             else:
-                query_reports.append(await artifact_query_report(qdrant, cfg, query))
+                query_reports.append(await artifact_query_report(qdrant, cfg, query, physical=artifact_collection))
 
         passed_queries = sum(1 for item in query_reports if bool(item.get("passed")))
         overall_passed = (

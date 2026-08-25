@@ -1432,88 +1432,33 @@ class Neo4jClient:
                 if deleted <= 0:
                     break
 
-    async def promote_repo_graph(self, *, active_repo_id: str, staging_repo_id: str) -> None:
-        """Promote a staged graph to active by repo_id swap using bounded batches.
-
-        Large corpora can exceed Neo4j transaction memory limits when deleting or
-        updating all nodes in one statement. Run bounded batches to keep memory
-        usage predictable during promotion.
-        """
+    async def delete_graphs_with_prefix(self, repo_id_prefix: str) -> int:
+        """Delete every node whose repo_id starts with ``repo_id_prefix`` (staged/retired generations)."""
+        prefix = str(repo_id_prefix or "").strip()
+        if not prefix:
+            return 0
         driver = self._require_driver()
+        removed = 0
         async with driver.session(database=self.database) as session:
             batch_size = int(_BATCH_SIZE_DEFAULT * 10)
-            labels = await self._resolve_repo_scoped_labels(session)
-            for label in labels:
-                while True:
-                    res = await session.run(
-                        f"""
-                        MATCH (n:{label} {{repo_id: $active_repo_id}})
-                        WITH n LIMIT $batch_size
-                        DETACH DELETE n
-                        RETURN count(*) AS n;
-                        """,
-                        active_repo_id=active_repo_id,
-                        batch_size=batch_size,
-                    )
-                    rec = await res.single()
-                    deleted = int(rec.get("n") or 0) if rec else 0
-                    if deleted <= 0:
-                        break
-
-                while True:
-                    res = await session.run(
-                        f"""
-                        MATCH (n:{label} {{repo_id: $staging_repo_id}})
-                        WITH n LIMIT $batch_size
-                        SET n.repo_id = $active_repo_id
-                        RETURN count(*) AS n;
-                        """,
-                        staging_repo_id=staging_repo_id,
-                        active_repo_id=active_repo_id,
-                        batch_size=batch_size,
-                    )
-                    rec = await res.single()
-                    moved = int(rec.get("n") or 0) if rec else 0
-                    if moved <= 0:
-                        break
-
-            # Safety sweep for legacy/unlabeled nodes.
             while True:
                 res = await session.run(
                     """
-                    MATCH (n {repo_id: $active_repo_id})
-                    WHERE none(lbl IN labels(n) WHERE lbl IN $known_labels)
+                    MATCH (n)
+                    WHERE n.repo_id STARTS WITH $prefix
                     WITH n LIMIT $batch_size
                     DETACH DELETE n
                     RETURN count(*) AS n;
                     """,
-                    active_repo_id=active_repo_id,
-                    known_labels=labels,
+                    prefix=prefix,
                     batch_size=batch_size,
                 )
                 rec = await res.single()
                 deleted = int(rec.get("n") or 0) if rec else 0
+                removed += deleted
                 if deleted <= 0:
                     break
-
-            while True:
-                res = await session.run(
-                    """
-                    MATCH (n {repo_id: $staging_repo_id})
-                    WHERE none(lbl IN labels(n) WHERE lbl IN $known_labels)
-                    WITH n LIMIT $batch_size
-                    SET n.repo_id = $active_repo_id
-                    RETURN count(*) AS n;
-                    """,
-                    staging_repo_id=staging_repo_id,
-                    active_repo_id=active_repo_id,
-                    known_labels=labels,
-                    batch_size=batch_size,
-                )
-                rec = await res.single()
-                moved = int(rec.get("n") or 0) if rec else 0
-                if moved <= 0:
-                    break
+        return removed
 
     # ------------------------------------------------------------------
     # Internals

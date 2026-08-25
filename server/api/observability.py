@@ -28,8 +28,8 @@ async def observability_status(
     scope_id = (repo or corpus_id or repo_id or "").strip() or None
     try:
         cfg = await load_scoped_config(repo_id=scope_id)
-    except CorpusNotFoundError:
-        cfg = await load_scoped_config(repo_id=None)
+    except CorpusNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     incidents = await build_observability_incidents(cfg, repo_id=scope_id)
     status = await build_observability_status(cfg, repo_id=scope_id)
     status.incident_count = int(incidents.total_count or 0)
@@ -46,8 +46,8 @@ async def observability_catalog(
     scope_id = (repo or corpus_id or repo_id or "").strip() or None
     try:
         cfg = await load_scoped_config(repo_id=scope_id)
-    except CorpusNotFoundError:
-        cfg = await load_scoped_config(repo_id=None)
+    except CorpusNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     return build_observability_catalog(cfg)
 
 
@@ -80,6 +80,6 @@ async def observability_incidents(
     scope_id = (repo or corpus_id or repo_id or "").strip() or None
     try:
         cfg = await load_scoped_config(repo_id=scope_id)
-    except CorpusNotFoundError:
-        cfg = await load_scoped_config(repo_id=None)
+    except CorpusNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     return await build_observability_incidents(cfg, repo_id=scope_id)

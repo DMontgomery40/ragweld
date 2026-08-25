@@ -13,12 +13,15 @@ Postgres pgvector/FTS legs were removed when this lane was promoted.
   semantic/embedding caches, and the recorded index contracts
   (`corpora.embedding_*`, `corpora.sparse_contract`). Chunk rows carry no
   vectors.
-- **Qdrant** (`server/retrieval/qdrant_store.py`): one alias per corpus
-  (`ragweld_chunks_<corpus>`) pointing at one physical generation that holds
-  both the dense vector (`text-dense`) and the IDF-modified BM25 sparse vector
-  (`text-sparse`) for every chunk. Writes go through the Haystack
-  `QdrantDocumentStore`; reads use the Qdrant client against the alias so a
-  missing or wiped generation reads as missing, never as an empty 200.
+- **Qdrant** (`server/retrieval/qdrant_store.py`): physical generation
+  collections per corpus (`ragweld_chunks_<safe>_<sha1[:8]>__<hex>`), each
+  holding both the dense vector (`text-dense`) and the IDF-modified BM25 sparse
+  vector (`text-sparse`) for every chunk. Which generation is live is not a
+  Qdrant alias: it is named by the corpus's **generation manifest** in Postgres
+  (`corpora.meta.generation`, `server/indexing/generations.py`). Writes go
+  through the Haystack `QdrantDocumentStore`; reads use the Qdrant client
+  against the manifest's collection so a missing or wiped generation reads as
+  missing, never as an empty 200.
 - **Neo4j**: the graph leg (lexical graph, chunk vector index, optional
   semantic KG) is unchanged and remains the graph leg's own implementation.
 - **Docling** (`server/indexing/text_extractors.py`): PDF, DOCX, PPTX, XLSX and
@@ -27,26 +30,36 @@ Postgres pgvector/FTS legs were removed when this lane was promoted.
 
 ## Index run lifecycle (`server/api/index.py`)
 
-1. A run creates a staged Qdrant generation (`<alias>__<hex>`) and a staged
-   Postgres corpus id. Chunk rows go to Postgres, dense + sparse vectors go to
-   the staged generation. Nothing is visible to retrieval yet.
-2. Postgres staging is promoted (chunk rows, summaries, contracts). The staged
-   generation's exact point count must equal the run's chunk count before it
-   becomes visible; a mismatch fails the run and drops the staged generation
-   while the previous live generation stays in place.
-3. The Qdrant alias is then switched to the new generation in one alias
-   operation and superseded/orphaned generations of that corpus are deleted.
-   Cancelled or failed runs drop their staged generation. The alias is
-   injective per corpus (`ragweld_chunks_<safe>_<sha1[:8]>`), so similar
-   corpus ids never share generations.
+1. A run creates a staged Qdrant generation (`<prefix>__<hex>`), a staged
+   Postgres corpus id (`__staging__<corpus>__<run>`) and, when graph indexing
+   is on, writes the graph under that staging id in Neo4j. Chunk rows go to
+   Postgres, dense + sparse vectors go to the staged generation. Nothing is
+   visible to retrieval yet.
+2. Every staged resource is verified before anything changes: the staged
+   generation's exact point count must equal the run's chunk count, and a
+   lexical graph must hold one Chunk node per chunk; a mismatch fails the run
+   and drops the staged resources while the live generation stays in place.
+3. **The commit is one Postgres transaction**: it swaps the chunk rows,
+   summaries and contracts onto the corpus id and writes the generation
+   manifest `{run_id, qdrant_collection, graph_repo_id}` on the corpus row.
+   Retrieval, the graph API, index stats and the incremental writers resolve
+   the physical Qdrant collection and the Neo4j graph id from that manifest,
+   so there is no per-store swap (no alias switch, no Neo4j relabel) and no
+   window in which new chunk rows pair with old vectors or an old graph.
+   Superseded Qdrant generations and the previous graph generation are retired
+   after the commit, best-effort (a failure there leaves orphans to sweep,
+   never an inconsistent index). Cancelled or failed runs drop their staged
+   resources only while nothing has been committed.
 4. `indexing.skip_dense=true` writes sparse-only points (no dense vectors);
    the vector leg returns nothing for such corpora and the corpus records
    `embedding_dimensions = 0`.
 
 Recall (`server/chat/recall_indexer.py`) and the Codex session ingest worker
 write incrementally into the live generation through
-`QdrantChunkStore.upsert_chunks`, creating and aliasing a generation on first
-write.
+`QdrantChunkStore.upsert_chunks`, creating a generation and recording its
+manifest on first write. Corpora indexed before the manifest existed are
+upgraded once at API startup (`ensure_generation_manifests`: their alias
+target becomes the manifest's collection, their own id the graph id).
 
 ## Contracts (`server/retrieval/contracts.py`)
 
