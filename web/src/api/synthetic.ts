@@ -1,7 +1,5 @@
 import { apiClient, api, apiUrl } from './client';
 import type {
-  OkResponse,
-  SyntheticArtifactPreviewResponse,
   SyntheticConfigPatchResponse,
   SyntheticPublishResponse,
   SyntheticRun,
@@ -28,11 +26,6 @@ export const syntheticApi = {
     const { data } = await apiClient.get<SyntheticRun>(api(`/synthetic/run/${encodeURIComponent(runId)}`), {
       headers: { 'Cache-Control': 'no-store' },
     });
-    return data;
-  },
-
-  async cancelRun(runId: string): Promise<OkResponse> {
-    const { data } = await apiClient.post<OkResponse>(api(`/synthetic/run/${encodeURIComponent(runId)}/cancel`), {});
     return data;
   },
 
@@ -72,14 +65,6 @@ export const syntheticApi = {
     const { data } = await apiClient.post<SyntheticConfigPatchResponse>(
       api(`/synthetic/run/${encodeURIComponent(runId)}/publish/config_patch`),
       {}
-    );
-    return data;
-  },
-
-  async previewArtifact(runId: string, kind: string, limit = 5): Promise<SyntheticArtifactPreviewResponse> {
-    const qs = new URLSearchParams({ kind, limit: String(limit) });
-    const { data } = await apiClient.get<SyntheticArtifactPreviewResponse>(
-      api(`/synthetic/run/${encodeURIComponent(runId)}/artifact/preview?${qs.toString()}`)
     );
     return data;
   },

@@ -54,7 +54,12 @@ export const SystemPromptsSubtab: React.FC<SystemPromptsSubtabProps> = ({ classN
       const key = new URLSearchParams(window.location.search).get('prompt');
       if (!key) return;
       const el = document.getElementById(`prompt-card-${key}`);
-      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      if (el) {
+        // Cards are collapsed <details> now: a deep link must reveal the
+        // prompt, not just scroll to a closed card.
+        (el as HTMLDetailsElement).open = true;
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
     } catch {
       // ignore
     }
@@ -201,40 +206,62 @@ export const SystemPromptsSubtab: React.FC<SystemPromptsSubtabProps> = ({ classN
             const linkLabel = meta?.link_label || 'Open';
 
             return (
-              <div
+              <details
                 key={promptKey}
                 id={`prompt-card-${promptKey}`}
+                data-testid="system-prompt-card"
+                open={isEditing || undefined}
                 style={{
                   background: 'var(--card-bg)',
                   border: '1px solid var(--line)',
                   borderRadius: '8px',
-                  padding: '16px',
                   marginBottom: '12px',
                 }}
               >
-                {/* Prompt header */}
-                <div style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'flex-start',
-                  marginBottom: '12px'
-                }}>
-                  <div>
-                    <h4 style={{
+                {/* Prompt header — collapsed by default; expand to read/edit */}
+                <summary
+                  onClick={(e) => {
+                    // While a prompt is being edited, collapsing the card would
+                    // hide the live editor — keep the disclosure pinned open.
+                    if (isEditing) e.preventDefault();
+                  }}
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'baseline',
+                    gap: '12px',
+                    padding: '14px 16px',
+                    cursor: 'pointer',
+                    listStyle: 'none',
+                  }}>
+                  <span style={{ minWidth: 0 }}>
+                    <span style={{
+                      display: 'block',
                       fontSize: '14px',
                       fontWeight: 600,
                       color: 'var(--fg)',
                       marginBottom: '4px'
                     }}>
                       {meta?.label || promptKey}
-                    </h4>
-                    <p style={{
+                    </span>
+                    <span style={{
+                      display: 'block',
                       fontSize: '12px',
                       color: 'var(--fg-muted)',
                     }}>
                       {meta?.description}
-                    </p>
-                  </div>
+                    </span>
+                  </span>
+                  <span style={{ fontSize: '11px', color: 'var(--fg-muted)', whiteSpace: 'nowrap' }}>
+                    {value.length} chars
+                  </span>
+                </summary>
+                <div style={{ padding: '0 16px 16px' }}>
+                <div style={{
+                  display: 'flex',
+                  justifyContent: 'flex-end',
+                  marginBottom: '12px'
+                }}>
                   <div style={{ display: 'flex', gap: '8px' }}>
                     {!isEditing && editable && (
                       <>
@@ -356,7 +383,7 @@ export const SystemPromptsSubtab: React.FC<SystemPromptsSubtabProps> = ({ classN
                     border: '1px solid var(--line)',
                     borderRadius: '6px',
                     padding: '12px',
-                    maxHeight: '150px',
+                    maxHeight: '400px',
                     overflow: 'auto',
                   }}>
                     <pre style={{
@@ -382,7 +409,8 @@ export const SystemPromptsSubtab: React.FC<SystemPromptsSubtabProps> = ({ classN
                 }}>
                   {isEditing ? editValue.length : value.length} characters
                 </div>
-              </div>
+                </div>
+              </details>
             );
           })}
         </div>

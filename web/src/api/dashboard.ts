@@ -19,7 +19,6 @@ import type {
   ObservabilityStatusResponse,
   PromptObservabilitySummaryResponse,
   RerankerLogsResponse,
-  TriBridConfig,
   TracesLatestResponse,
 } from '@/types/generated';
 
@@ -37,7 +36,6 @@ export type {
   ObservabilityStatusResponse,
   PromptObservabilitySummaryResponse,
   TracesLatestResponse,
-  TriBridConfig,
 };
 
 // ============================================================================
@@ -46,11 +44,6 @@ export type {
 
 export async function getHealth(): Promise<HealthStatus> {
   const { data } = await apiClient.get<HealthStatus>(api('/health'));
-  return data;
-}
-
-export async function getConfig(): Promise<TriBridConfig> {
-  const { data } = await apiClient.get<TriBridConfig>(withCorpusScope(api('/config')));
   return data;
 }
 
@@ -335,87 +328,3 @@ export async function getDockerStatus(): Promise<DockerOverview> {
   }
 }
 
-export interface RepoInfo {
-  name: string;
-  profile?: string;
-  path?: string;
-  branch?: string;
-  [key: string]: any;
-}
-
-// ============================================================================
-// Analytics APIs
-// ============================================================================
-
-export interface FolderMetrics {
-  folder: string;
-  access_count: number;
-  last_access?: string;
-}
-
-export interface TopQueryData {
-  query: string;
-  count: number;
-  routes: Array<[string, number]>;
-  ips: Array<[string, number]>;
-}
-
-export type TopQueriesResponse = {
-  total_queries: number;
-  top: TopQueryData[];
-};
-
-/**
- * Get top folder access metrics by extracting folder paths from query analytics.
- * Wired to /api/monitoring/top-queries endpoint.
- * @param _days - Number of days to analyze (reserved for future backend filtering)
- */
-export async function getTopFolders(_days: number = 5): Promise<FolderMetrics[]> {
-  try {
-    // Note: _days parameter reserved for future backend filtering implementation
-    const { data } = await apiClient.get<TopQueriesResponse>(api('/monitoring/top-queries?limit=100'));
-    
-    // Extract folder references from queries and aggregate by folder
-    const folderCounts: Record<string, number> = {};
-    
-    for (const item of data.top || []) {
-      // Extract file paths from queries that mention folders/files
-      const pathMatches = item.query.match(/(?:\/[\w.-]+)+/g) || [];
-      for (const path of pathMatches) {
-        // Get the folder part (parent directory)
-        const parts = path.split('/').filter(Boolean);
-        if (parts.length >= 2) {
-          const folder = parts.slice(0, -1).join('/');
-          folderCounts[folder] = (folderCounts[folder] || 0) + item.count;
-        }
-      }
-    }
-    
-    // Convert to array and sort by access count
-    const folders: FolderMetrics[] = Object.entries(folderCounts)
-      .map(([folder, count]) => ({ folder, access_count: count }))
-      .sort((a, b) => b.access_count - a.access_count)
-      .slice(0, 10);
-    
-    return folders;
-  } catch (err) {
-    console.error('[getTopFolders] Error:', err);
-    return [];
-  }
-}
-
-/**
- * Get raw top queries data from monitoring endpoint.
- */
-export async function getTopQueries(limit: number = 20): Promise<TopQueriesResponse> {
-  try {
-    const safeLimit = Number.isFinite(Number(limit)) ? Number(limit) : 20;
-    const { data } = await apiClient.get<TopQueriesResponse>(
-      api(`/monitoring/top-queries?limit=${encodeURIComponent(String(safeLimit))}`)
-    );
-    return data;
-  } catch (err) {
-    console.error('[getTopQueries] Error:', err);
-    return { total_queries: 0, top: [] };
-  }
-}

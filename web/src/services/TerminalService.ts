@@ -17,12 +17,6 @@ interface TerminalInstance {
 
 class TerminalServiceClass {
   private terminals: Map<string, TerminalInstance> = new Map();
-  private baseUrl: string;
-
-  constructor() {
-    // Use relative URL to avoid CORS issues and work with the same origin
-    this.baseUrl = '';
-  }
 
   /**
    * Stream evaluation run logs (raw stdout) via dedicated SSE endpoint
@@ -230,140 +224,6 @@ class TerminalServiceClass {
   }
 
   /**
-   * Connect to WebSocket for bidirectional communication
-   */
-  connectWebSocket(
-    terminalId: string,
-    endpoint: string,
-    callbacks: {
-      onLine?: (line: string) => void;
-      onProgress?: (percent: number, message: string) => void;
-      onError?: (error: string) => void;
-      onComplete?: () => void;
-    }
-  ): void {
-    const wsUrl = `${this.baseUrl.replace('http', 'ws')}/ws/${endpoint}`;
-    const ws = new WebSocket(wsUrl);
-
-    ws.onopen = () => {
-      console.log(`[TerminalService] WebSocket connected for ${terminalId}`);
-    };
-
-    ws.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-
-        switch (data.type) {
-          case 'log':
-            callbacks.onLine?.(data.message);
-            break;
-          case 'progress':
-            callbacks.onProgress?.(data.percent, data.message);
-            break;
-          case 'error':
-            callbacks.onError?.(data.message);
-            callbacks.onLine?.(`\x1b[31mERROR: ${data.message}\x1b[0m`);
-            break;
-          case 'complete':
-            callbacks.onComplete?.();
-            ws.close();
-            break;
-        }
-      } catch (e) {
-        callbacks.onLine?.(event.data);
-      }
-    };
-
-    ws.onerror = (error) => {
-      console.error(`[TerminalService] WebSocket error for ${terminalId}:`, error);
-      callbacks.onError?.('Connection failed');
-    };
-
-    ws.onclose = () => {
-      console.log(`[TerminalService] WebSocket closed for ${terminalId}`);
-      this.terminals.delete(terminalId);
-    };
-
-    // Store WebSocket reference
-    this.terminals.set(terminalId, {
-      id: terminalId,
-      ...callbacks
-    });
-  }
-
-  /**
-   * Stream logs from a specific operation
-   */
-  streamOperation(
-    terminalId: string,
-    operation: string,
-    callbacks: {
-      onLine?: (line: string) => void;
-      onProgress?: (percent: number, message: string) => void;
-      onError?: (error: string) => void;
-      onComplete?: () => void;
-      [key: string]: any; // Allow additional params like backend
-    }
-  ): void {
-    const { onLine, onProgress, onError, onComplete, ...params } = callbacks;
-    const queryParams = params && Object.keys(params).length ? '?' + new URLSearchParams(params).toString() : '';
-    const endpoint = `operations/${operation}${queryParams}`;
-
-    this.connectToStream(terminalId, endpoint, {
-      onLine,
-      onProgress,
-      onError,
-      onComplete
-    });
-  }
-
-  /**
-   * Stream Docker logs
-   */
-  streamDockerLogs(terminalId: string, container?: string): void {
-    const endpoint = container ? `docker/logs/${container}` : 'docker/logs';
-
-    this.connectToStream(terminalId, endpoint, {
-      onLine: (line) => {
-        const terminal = (window as any)[`terminal_${terminalId}`];
-        terminal?.appendLine?.(line);
-      }
-    });
-  }
-
-  /**
-   * Stream build logs (cards, reranker, etc)
-   */
-  streamBuildLogs(
-    terminalId: string,
-    buildType: 'cards' | 'reranker' | 'index',
-    repo?: string
-  ): void {
-    const endpoint = `builds/${buildType}${repo ? `?repo=${encodeURIComponent(repo)}` : ''}`;
-
-    this.connectToStream(terminalId, endpoint, {
-      onLine: (line) => {
-        const terminal = (window as any)[`terminal_${terminalId}`];
-        terminal?.appendLine?.(line);
-      },
-      onProgress: (percent, message) => {
-        const terminal = (window as any)[`terminal_${terminalId}`];
-        terminal?.updateProgress?.(percent, message);
-
-        // Update progress elements if they exist
-        const progressBar = document.querySelector(`#${buildType}-progress-bar`);
-        if (progressBar) {
-          (progressBar as HTMLElement).style.width = `${percent}%`;
-        }
-        const progressText = document.querySelector(`#${buildType}-progress-percent`);
-        if (progressText) {
-          progressText.textContent = `${Math.round(percent)}%`;
-        }
-      }
-    });
-  }
-
-  /**
    * Disconnect a terminal
    */
   disconnect(terminalId: string): void {
@@ -372,13 +232,6 @@ class TerminalServiceClass {
       terminal.sse.close();
     }
     this.terminals.delete(terminalId);
-  }
-
-  /**
-   * Disconnect all terminals
-   */
-  disconnectAll(): void {
-    this.terminals.forEach((_, id) => this.disconnect(id));
   }
 }
 

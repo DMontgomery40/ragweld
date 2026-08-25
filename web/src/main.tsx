@@ -9,6 +9,12 @@ import '@fontsource/space-grotesk/500.css'
 import '@fontsource/space-grotesk/700.css'
 import '@fontsource/ibm-plex-mono/400.css'
 import '@fontsource/ibm-plex-mono/500.css'
+// Inter is self-hosted; the workbench must not fetch fonts from Google at runtime
+import '@fontsource/inter/400.css'
+import '@fontsource/inter/500.css'
+import '@fontsource/inter/600.css'
+import '@fontsource/inter/700.css'
+import '@fontsource/inter/800.css'
 // CSS MUST be loaded in exact order to match /gui for ADA compliance
 import './styles/tokens.css'
 import './styles/main.css' // Inline styles from /gui/index.html

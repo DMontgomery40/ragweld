@@ -9,7 +9,8 @@ import { LineageMeta } from '@/components/ui/LineageMeta';
 import { TooltipIcon } from '@/components/ui/TooltipIcon';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useActiveRepo } from '@/stores/useRepoStore';
-import { useConfigField, useNotification } from '@/hooks';
+import { useConfigField } from '@/hooks';
+import { showToast } from '@/utils/toast';
 import { agentTrainingService, type AgentTrainRunsScope } from '@/services/AgentTrainingService';
 import type {
   AgentTrainControlPlaneStatusResponse,
@@ -191,7 +192,12 @@ function downloadText(filename: string, text: string) {
 }
 
 export function TrainingStudio() {
-  const { success, error: notifyError, info } = useNotification();
+  // Global toast: useNotification only stores messages in local state, and this
+  // studio never rendered that list — run start/cancel/promotion feedback was
+  // silently swallowed (2026-08-24 finding).
+  const success = (message: string) => showToast(message, 'success');
+  const notifyError = (message: string) => showToast(message, 'error');
+  const info = (message: string) => showToast(message, 'info');
   const activeCorpus = useActiveRepo();
   const navigate = useNavigate();
   const config = useConfigStore((s) => s.config);

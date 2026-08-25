@@ -67,8 +67,8 @@ Knowledge base (repo-local, versioned):
 - `/Users/davidmontgomery/ragweld/docs/index.md` (entrypoint)
 - `/Users/davidmontgomery/ragweld/scripts/docs_ai/README.md` (docs-autopilot ownership + CI contract)
 
-Executable specs (structured, machine-checkable intent):
-- `/Users/davidmontgomery/ragweld/spec/README.md`
+Config reality map (machine-checked by `scripts/check_config_reality.py`):
+- `/Users/davidmontgomery/ragweld/spec/config_reality_map.json`
 
 ## Operating Model (Agent-First)
 
@@ -171,4 +171,4 @@ npm --prefix web run build
 - Larger work plans: `/Users/davidmontgomery/ragweld/docs/exec-plans/active/`
 - Tech debt backlog: `/Users/davidmontgomery/ragweld/docs/exec-plans/tech-debt-tracker.md`
 - References (links, snippets, external context you want in-repo): `/Users/davidmontgomery/ragweld/docs/references/index.md`
-- Current branch handoff: `/Users/davidmontgomery/ragweld/docs/exec-plans/active/handoff-2026-08-22-session5.md`
+- Current branch handoff: `/Users/davidmontgomery/ragweld/docs/exec-plans/active/handoff-2026-08-24-session12.md`

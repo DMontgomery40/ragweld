@@ -62,6 +62,7 @@ from server.models.tribrid_config_model import (
     PromptfooRunsResponse,
     TriBridConfig,
 )
+from server.observability import metrics
 from server.observability.ml_quality import build_eval_observability_summary
 from server.retrieval.fusion import TriBridFusion
 from server.services.config_store import get_config as load_scoped_config
@@ -285,6 +286,18 @@ def _load_run(run_id: str) -> EvalRun:
 def _save_run(run: EvalRun) -> None:
     path = _run_path(run.run_id)
     path.write_text(json.dumps(run.model_dump(mode="json"), indent=2, sort_keys=True), encoding="utf-8")
+
+
+def _record_eval_run_metrics(run: EvalRun) -> None:
+    """ML-quality metrics for the Eval/Benchmark/Prompt dashboard.
+
+    Called exactly once per completed run — both execution paths call
+    `_save_run` twice (before and after lineage attachment), so the counter
+    must not live inside the save helper.
+    """
+    metrics.EVAL_RUNS_TOTAL.inc()
+    metrics.EVAL_LAST_TOP1_ACCURACY.set(float(run.top1_accuracy))
+    metrics.EVAL_LAST_TOPK_ACCURACY.set(float(run.topk_accuracy))
 
 
 async def _resolve_ragas_answer_route(cfg: TriBridConfig) -> Any:
@@ -544,6 +557,7 @@ async def evaluate_dataset_entries(
         run.lineage_ref = make_ref("eval_run", version.version_id)
         run.bundle_id = bundle.bundle_id
         _save_run(run)
+        _record_eval_run_metrics(run)
     return run
 
 
@@ -645,6 +659,9 @@ def _save_promptfoo_run(run: PromptfooRun) -> None:
     (_PROMPTFOO_RUNS_DIR / f"{run.run_id}.json").write_text(
         run.model_dump_json(by_alias=True, indent=2), encoding="utf-8"
     )
+    metrics.PROMPTFOO_RUNS_TOTAL.inc()
+    if run.total:
+        metrics.PROMPTFOO_LAST_PASS_RATIO.set(float(run.passed) / float(run.total))
 
 
 def _load_promptfoo_runs(repo_id: str) -> list[PromptfooRun]:
@@ -1019,6 +1036,7 @@ async def eval_run_stream(
             run.lineage_ref = make_ref("eval_run", version.version_id)
             run.bundle_id = bundle.bundle_id
             _save_run(run)
+            _record_eval_run_metrics(run)
             _EVAL_STATUS["latest_run_id"] = run_id
 
             yield "data: " + json.dumps({"type": "log", "message": f"Results saved: {run_id}"}) + "\n\n"

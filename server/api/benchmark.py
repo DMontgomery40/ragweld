@@ -13,6 +13,7 @@ from server.lineage import (
     ensure_current_bundle,
     make_ref,
 )
+from server.observability import metrics
 from server.observability.ml_quality import build_benchmark_observability_summary
 from server.models.tribrid_config_model import (
     BenchmarkObservabilitySummaryResponse,
@@ -99,6 +100,12 @@ async def benchmark_run(
 
     run = await run_benchmark(prompt=prompt, models=models, config=cfg, repo_id=repo_id)
     run.input_bundle_id = input_bundle_id
+
+    # ML-quality metrics for the Eval/Benchmark/Prompt dashboard.
+    metrics.BENCHMARK_RUNS_TOTAL.inc()
+    latencies = [float(item.latency_ms) for item in (run.results or []) if item.latency_ms is not None]
+    if latencies:
+        metrics.BENCHMARK_LAST_AVG_LATENCY_MS.set(sum(latencies) / len(latencies))
 
     if repo_id:
         version = capture_benchmark_run_version(run=run)

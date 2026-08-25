@@ -260,4 +260,13 @@ Remaining (honest blockers / next slices, in order):
    (`a3-observability-fabric-2026-08-24.md`). OpenCost stays `disabled`
    honestly: it requires a Kubernetes API server and the Colima profile runs
    the plain Docker runtime.
-5. Residual dead-code removal and the full final acceptance matrix.
+5. ~~Residual dead-code removal and the full final acceptance matrix~~ —
+   done (session 12, 2026-08-24): Task 6 sweep found three of five candidate
+   classes already emptied by `ec7e852`; the rest was removed in the A5 commit
+   (spec prose YAMLs + tautological parse test, `GET /api/loki/query_range`,
+   ~200 lines of caller-less frontend symbols, the dead
+   `_is_allowed_branch_synthetic_model`, and the runtime Google Fonts fetch —
+   Inter is self-hosted now). The acceptance matrix lives at
+   `final-acceptance-matrix-2026-08-24.md`, including the deferred
+   product-decision residuals (dead-endpoint UI surfaces, consumer-less
+   synthetic routes, `card_source` rename, docs-autopilot `grid cards` fix).

@@ -514,40 +514,6 @@ async def loki_status(request: Request) -> LokiStatus:
         return LokiStatus(reachable=False, url=str(base), status=f"error: {e.__class__.__name__}")
 
 
-@router.get("/loki/query_range")
-async def loki_query_range(
-    request: Request,
-    query: str = Query(..., description="LogQL query"),
-    start_ms: int | None = Query(default=None, ge=0, description="Start time (epoch ms)"),
-    end_ms: int | None = Query(default=None, ge=0, description="End time (epoch ms)"),
-    limit: int = Query(default=2000, ge=1, le=10000, description="Max log lines"),
-    direction: str = Query(default="forward", pattern="^(forward|backward)$"),
-) -> dict[str, Any]:
-    """Proxy Loki query_range (dev tooling)."""
-    _ensure_local_request(request)
-    base = await _resolve_loki_base_url()
-    if not base:
-        raise HTTPException(status_code=503, detail="Loki not reachable")
-
-    now_ns = int(time.time() * 1_000_000_000)
-    start_ns = int(start_ms * 1_000_000) if start_ms is not None else now_ns - int(60 * 1_000_000_000)
-    end_ns = int(end_ms * 1_000_000) if end_ms is not None else now_ns
-
-    params = {"query": query, "start": str(start_ns), "end": str(end_ns), "limit": str(int(limit)), "direction": direction}
-
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            r = await client.get(f"{base}/loki/api/v1/query_range", params=params)
-        if r.status_code >= 400:
-            raise HTTPException(status_code=r.status_code, detail=r.text)
-        result: dict[str, Any] = r.json()
-        return result
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Loki query failed: {e}") from e
-
-
 @router.get("/stream/loki/tail")
 async def loki_tail(
     request: Request,

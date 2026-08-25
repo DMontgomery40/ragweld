@@ -25,7 +25,13 @@ export const evalApi = {
   },
 
   async runPromptfoo(request: EvalRequest): Promise<PromptfooRun> {
-    const { data } = await apiClient.post<PromptfooRun>(api('/eval/promptfoo/run'), request);
+    // The route blocks until the real promptfoo CLI finishes (minutes for a
+    // sampled run, ~30 min for the full dataset) — the client's default 30s
+    // timeout would abort a healthy run mid-flight. Bounded (not infinite) so
+    // a dead connection still surfaces instead of spinning forever.
+    const { data } = await apiClient.post<PromptfooRun>(api('/eval/promptfoo/run'), request, {
+      timeout: 60 * 60_000,
+    });
     return data;
   },
 
@@ -43,9 +49,14 @@ export const evalApi = {
   },
 
   async analyzeComparison(payload: EvalAnalyzeComparisonRequest): Promise<EvalAnalyzeComparisonResponse> {
+    // The analysis is one long LLM generation, server-bounded by
+    // generation.gen_timeout (600s default) — on the local lane it routinely
+    // outlives the client's 30s default timeout. Bounded at the server budget
+    // plus margin so a dead connection still fails instead of spinning.
     const { data } = await apiClient.post<EvalAnalyzeComparisonResponse>(
       withCorpusScope(api('/eval/analyze_comparison')),
-      payload
+      payload,
+      { timeout: 660_000 }
     );
     return data;
   },

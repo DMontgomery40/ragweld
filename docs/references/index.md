@@ -30,7 +30,10 @@ This folder is for pointers and short notes that make external context discovera
 
 ## Specs (machine-readable intent)
 
-- `/Users/davidmontgomery/ragweld/spec/README.md`
+- `/Users/davidmontgomery/ragweld/spec/config_reality_map.json` — config-key
+  reality map, enforced by `scripts/check_config_reality.py` and
+  `tests/unit/test_config_reality.py`. (The prose spec YAMLs were removed
+  2026-08-24: nothing consumed them and they had drifted from the code.)
 
 ## Agent orchestration references
 

@@ -862,7 +862,16 @@ export const EvalAnalysisTab: React.FC = () => {
         </button>
       </div>
 
-      {/* Header with Run Selectors - only show for analysis subtab when runs exist */}
+      {/* Content Area - only the subtab nav stays pinned. The header (title,
+          selectors, run settings, terminal, progress) scrolls with the content:
+          a fixed header inside the overflow:hidden tab root clips the whole
+          screen on short viewports (2026-08-24 Promptfoo finding).
+          paddingBottom reserves space above App.tsx action-buttons. */}
+      <div style={{
+        flex: 1,
+        overflow: 'auto',
+        paddingBottom: '80px'
+      }}>
       {showAnalysisHeader && (
       <div style={{
         padding: '20px 24px',
@@ -915,11 +924,7 @@ export const EvalAnalysisTab: React.FC = () => {
           alignItems: 'flex-end',
           flexWrap: 'wrap'
         }}>
-          {showAnalysisHeader && String(activeRepo || '').trim() ? (
-        <PromptfooRegressionPanel corpusId={String(activeRepo || '').trim()} />
-      ) : null}
-
-      {showRunSelectors && (
+          {showRunSelectors && (
             <>
               {/* Primary Run Selector */}
               <div style={{ flex: '1', minWidth: '280px' }}>
@@ -1151,37 +1156,37 @@ export const EvalAnalysisTab: React.FC = () => {
       </div>
       )}
 
-      {/* Content Area - paddingBottom reserves space above App.tsx action-buttons */}
-      <div style={{
-        flex: 1,
-        overflow: 'auto',
-        paddingBottom: '80px'
-      }}>
         {activeSubtab === 'analysis' ? (
-          // Analysis subtab: handle loading/error/empty/data states
-          loading ? (
-            <AnalysisLoadingState />
-          ) : error ? (
-            <AnalysisErrorState />
-          ) : runs.length === 0 ? (
-            <div style={{ padding: '24px' }}>
-              <AnalysisEmptyState />
-            </div>
-          ) : selectedRunId ? (
-            <EvalDrillDown
-              key={`${selectedRunId}-${compareRunId || 'none'}`}
-              runId={selectedRunId}
-              compareWithRunId={compareRunId || undefined}
-            />
-          ) : (
-            <div style={{
-              padding: '48px',
-              textAlign: 'center',
-              color: 'var(--fg-muted)'
-            }}>
-              Select an evaluation run to view details
-            </div>
-          )
+          // Analysis subtab: Promptfoo panel scrolls with the content, then the
+          // loading/error/empty/data states below it
+          <>
+            {String(activeRepo || '').trim() ? (
+              <PromptfooRegressionPanel corpusId={String(activeRepo || '').trim()} />
+            ) : null}
+            {loading ? (
+              <AnalysisLoadingState />
+            ) : error ? (
+              <AnalysisErrorState />
+            ) : runs.length === 0 ? (
+              <div style={{ padding: '24px' }}>
+                <AnalysisEmptyState />
+              </div>
+            ) : selectedRunId ? (
+              <EvalDrillDown
+                key={`${selectedRunId}-${compareRunId || 'none'}`}
+                runId={selectedRunId}
+                compareWithRunId={compareRunId || undefined}
+              />
+            ) : (
+              <div style={{
+                padding: '48px',
+                textAlign: 'center',
+                color: 'var(--fg-muted)'
+              }}>
+                Select an evaluation run to view details
+              </div>
+            )}
+          </>
         ) : activeSubtab === 'dataset' ? (
           <div style={{ padding: '24px' }}>
             <EvalDatasetSubtab />
