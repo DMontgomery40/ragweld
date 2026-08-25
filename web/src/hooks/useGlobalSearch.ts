@@ -1,318 +1,234 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { SearchResult, SettingSearchItem } from '../types';
-import { useAPI } from './useAPI';
+import { configApi } from '@/api/config';
+import type { ConfigFieldDescriptor } from '@/types/generated';
 
 /**
- * useGlobalSearch Hook
- * Converts search.js functionality to React
+ * Global settings search (Ctrl+K / Cmd+K).
  *
- * Features:
- * - Ctrl+K / Cmd+K hotkey to open search modal
- * - Live search through all GUI settings
- * - Backend API search integration
- * - Auto-navigation to settings when clicked
+ * Two indexes, both local:
+ * - the config registry (every registered TriBridConfig field with its label,
+ *   dotted path, section, owning surface and description) — so a search finds a
+ *   setting on any page, not only the one currently rendered;
+ * - the controls rendered on the current page — so a hit on this page focuses
+ *   the actual input.
+ *
+ * It never calls the RAG search API: the former implementation ran an
+ * /api/search against the active corpus on every keystroke and rendered blank
+ * rows for DOM inputs without labels (2026-08-25 drive finding M2).
  */
+export type GlobalSearchHit = {
+  kind: 'control' | 'config';
+  /** Stable identity for keys/dedupe: element name/id for controls, dotted path for config fields. */
+  id: string;
+  label: string;
+  /** Where the hit lives: the page section title for controls, the owning surface + section for config fields. */
+  location: string;
+  /** Dotted config path (config hits) or the control's name/id. */
+  path: string;
+  description?: string;
+  element?: HTMLElement;
+};
+
+type ControlIndexItem = GlobalSearchHit & { kind: 'control'; element: HTMLElement; content: string };
+type ConfigIndexItem = GlobalSearchHit & { kind: 'config'; content: string };
+
+const MAX_RESULTS = 20;
+
+function buildConfigIndex(fields: ConfigFieldDescriptor[]): ConfigIndexItem[] {
+  return fields.map((field) => {
+    const label = String(field.label || field.path).trim();
+    const description = String(field.description || '').trim();
+    const location = `${field.ui_surface} · ${field.section}`;
+    return {
+      kind: 'config',
+      id: field.path,
+      label,
+      location,
+      path: field.path,
+      description: description || undefined,
+      content: `${label} ${field.path} ${field.section} ${field.ui_surface} ${field.integration} ${description}`.toLowerCase(),
+    };
+  });
+}
+
+function buildControlIndex(): ControlIndexItem[] {
+  const index: ControlIndexItem[] = [];
+  const sections = document.querySelectorAll('.settings-section');
+  sections.forEach((sec) => {
+    const title = (sec.querySelector('h2, h3')?.textContent || '').trim();
+    sec.querySelectorAll('.input-group').forEach((group) => {
+      const input = group.querySelector('input, select, textarea') as HTMLElement | null;
+      if (!input) return;
+      const label = (group.querySelector('label')?.textContent || '').trim();
+      const name = (input as HTMLInputElement).name || input.id || '';
+      if (!label && !name) return; // nothing a person could recognise in a result row
+      const placeholder = input.getAttribute('placeholder') || '';
+      index.push({
+        kind: 'control',
+        id: name || label,
+        label: label || name,
+        location: title || 'This page',
+        path: name,
+        element: input,
+        content: `${title} ${label} ${name} ${placeholder}`.toLowerCase(),
+      });
+    });
+  });
+  return index;
+}
+
 export function useGlobalSearch() {
-  const { api } = useAPI();
   const navigate = useNavigate();
   const location = useLocation();
   const [isOpen, setIsOpen] = useState(false);
   const [query, setQuery] = useState('');
-  const [results, setResults] = useState<SearchResult[]>([]);
-  const [settingsIndex, setSettingsIndex] = useState<SettingSearchItem[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [results, setResults] = useState<GlobalSearchHit[]>([]);
+  const [controlIndex, setControlIndex] = useState<ControlIndexItem[]>([]);
+  const [configIndex, setConfigIndex] = useState<ConfigIndexItem[]>([]);
+  const [indexError, setIndexError] = useState<string | null>(null);
   const [cursor, setCursor] = useState(0);
-  const abortControllerRef = useRef<AbortController | null>(null);
 
-  const getActiveCorpusId = useCallback((): string => {
+  const rebuildControlIndex = useCallback(() => {
     try {
-      const u = new URL(window.location.href);
-      return (
-        u.searchParams.get('corpus') ||
-        u.searchParams.get('repo') ||
-        localStorage.getItem('tribrid_active_corpus') ||
-        localStorage.getItem('tribrid_active_repo') ||
-        ''
-      ).trim();
-    } catch {
-      return (
-        localStorage.getItem('tribrid_active_corpus') ||
-        localStorage.getItem('tribrid_active_repo') ||
-        ''
-      ).trim();
-    }
-  }, []);
-
-  // Build index of all settings in the GUI
-  const buildSettingsIndex = useCallback(() => {
-    const index: SettingSearchItem[] = [];
-
-    try {
-      const sections = document.querySelectorAll('.settings-section');
-      sections.forEach(sec => {
-        const titleEl = sec.querySelector('h3');
-        const title = (titleEl?.textContent || '').toLowerCase();
-
-        const inputGroups = sec.querySelectorAll('.input-group');
-        inputGroups.forEach(group => {
-          const labelEl = group.querySelector('label');
-          const label = (labelEl?.textContent || '').trim();
-
-          const input = group.querySelector('input, select, textarea');
-          if (!input) return;
-
-          const name = (input as HTMLInputElement).name || (input as HTMLInputElement).id || '';
-          const placeholder = (input as HTMLInputElement).getAttribute('placeholder') || '';
-          const content = (title + ' ' + label + ' ' + name + ' ' + placeholder).toLowerCase();
-
-          index.push({
-            label: label || name,
-            title,
-            name,
-            placeholder,
-            element: input as HTMLElement,
-            content
-          });
-        });
-      });
-
-      setSettingsIndex(index);
-      console.log('[useGlobalSearch] Built settings index:', index.length, 'items');
+      setControlIndex(buildControlIndex());
     } catch (error) {
-      console.error('[useGlobalSearch] Error building settings index:', error);
+      console.error('[useGlobalSearch] Error building control index:', error);
     }
   }, []);
 
-  // Initialize settings index
+  // Load the config registry (the source of truth for every setting). No
+  // "loaded once" ref: under StrictMode's double effect run that guard let the
+  // cancelled first fetch win and the index stayed empty.
   useEffect(() => {
-    // Build index after initial render
-    const timer = setTimeout(buildSettingsIndex, 500);
-
+    let cancelled = false;
+    configApi
+      .registry()
+      .then((registry) => {
+        if (cancelled) return;
+        setConfigIndex(buildConfigIndex(registry.fields || []));
+        setIndexError(null);
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        setIndexError(error instanceof Error ? error.message : 'Failed to load the config registry');
+      });
     return () => {
-      clearTimeout(timer);
+      cancelled = true;
     };
-  }, [buildSettingsIndex]);
+  }, []);
 
-  // Rebuild index on route changes (React Router)
+  // Re-index the current page's controls on route changes.
   useEffect(() => {
-    const t = window.setTimeout(buildSettingsIndex, 150);
+    const t = window.setTimeout(rebuildControlIndex, 150);
     return () => window.clearTimeout(t);
-  }, [buildSettingsIndex, location.pathname, location.search]);
+  }, [rebuildControlIndex, location.pathname, location.search]);
 
   // Keyboard shortcut: Ctrl+K or Cmd+K
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
         e.preventDefault();
+        rebuildControlIndex();
         setIsOpen(true);
       }
-
-      // Close on Escape
       if (e.key === 'Escape' && isOpen) {
         setIsOpen(false);
         setQuery('');
         setResults([]);
       }
     };
-
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen]);
+  }, [isOpen, rebuildControlIndex]);
 
-  // Search settings locally
-  const searchSettings = useCallback((q: string): SearchResult[] => {
-    if (!q.trim()) return [];
-
-    const searchTerm = q.trim().toLowerCase();
-    const filtered = settingsIndex.filter(item =>
-      item.content.includes(searchTerm)
-    );
-
-    return filtered.slice(0, 15).map(item => ({
-      file_path: item.label,
-      start_line: 0,
-      end_line: 0,
-      language: 'setting',
-      rerank_score: 1.0,
-      label: item.label,
-      title: item.title,
-      name: item.name,
-      element: item.element
-    }));
-  }, [settingsIndex]);
-
-  // Search backend API
-  const searchBackend = useCallback(async (q: string): Promise<SearchResult[]> => {
-    if (!q.trim()) return [];
-
-    const corpusId = getActiveCorpusId();
-    if (!corpusId) return [];
-
-    try {
-      // Cancel previous request
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort();
+  const search = useCallback(
+    (q: string) => {
+      setQuery(q);
+      const needle = q.trim().toLowerCase();
+      if (!needle) {
+        setResults([]);
+        setCursor(0);
+        return;
       }
-
-      abortControllerRef.current = new AbortController();
-
-      const response = await fetch(
-        api('/search'),
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            corpus_id: corpusId,
-            query: q,
-            top_k: 15,
-          }),
-          signal: abortControllerRef.current.signal,
-        }
-      );
-
-      if (!response.ok) {
-        throw new Error(`Search failed: ${response.statusText}`);
-      }
-
-      const data = await response.json();
-      const matches = Array.isArray(data?.matches) ? data.matches : [];
-      return matches.map((match: any) => ({
-        file_path: String(match?.file_path || ''),
-        start_line: Number(match?.start_line || 0),
-        end_line: Number(match?.end_line || 0),
-        language: String(match?.language || ''),
-        rerank_score: Number(match?.score || 0),
-      }));
-    } catch (error) {
-      if ((error as Error).name === 'AbortError') {
-        return [];
-      }
-      console.error('[useGlobalSearch] Backend search error:', error);
-      return [];
-    }
-  }, [api, getActiveCorpusId]);
-
-  // Combined search (settings + backend)
-  const search = useCallback(async (q: string) => {
-    setQuery(q);
-
-    if (!q.trim()) {
-      setResults([]);
-      setLoading(false);
-      return;
-    }
-
-    setLoading(true);
-
-    try {
-      // Search settings first (instant)
-      const settingsResults = searchSettings(q);
-
-      // Search backend (async)
-      const backendResults = await searchBackend(q);
-
-      // Combine results: settings first, then backend code results
-      const combined = [...settingsResults];
-
-      // Add backend results that aren't duplicates
-      backendResults.forEach(br => {
-        if (!combined.some(sr => sr.file_path === br.file_path)) {
-          combined.push(br);
-        }
-      });
-
-      setResults(combined.slice(0, 15));
+      const terms = needle.split(/\s+/).filter(Boolean);
+      const matches = (content: string) => terms.every((term) => content.includes(term));
+      const controlHits = controlIndex.filter((item) => matches(item.content));
+      const seenPaths = new Set(controlHits.map((item) => item.path).filter(Boolean));
+      const configHits = configIndex
+        .filter((item) => matches(item.content))
+        .filter((item) => !seenPaths.has(item.path))
+        .sort((a, b) => {
+          // Prefer label/path prefix matches over description-only matches.
+          const score = (item: ConfigIndexItem) =>
+            (item.label.toLowerCase().startsWith(needle) ? 0 : 1) + (item.path.toLowerCase().includes(needle) ? 0 : 1);
+          return score(a) - score(b) || a.path.localeCompare(b.path);
+        });
+      setResults([...controlHits, ...configHits].slice(0, MAX_RESULTS));
       setCursor(0);
-    } catch (error) {
-      console.error('[useGlobalSearch] Search error:', error);
-    } finally {
-      setLoading(false);
-    }
-  }, [searchSettings, searchBackend]);
+    },
+    [configIndex, controlIndex]
+  );
 
-  // Navigate to a search result
-  const navigateToResult = useCallback((result: SearchResult) => {
-    if (result.element) {
-      // GUI setting - navigate and highlight
-      const tabContent = result.element.closest('.tab-content');
-      const tabId = tabContent ? (tabContent as HTMLElement).id.replace('tab-', '') : '';
-
-      // Capture stable lookup info before navigation (DOM nodes may be replaced)
-      const el = result.element as HTMLElement;
-      const elementId = el.id || '';
-      const elementName = (el as HTMLInputElement).name || '';
-
-      // If the setting is within a known subtab, preserve it via query string.
-      let nextPath = tabId ? `/${tabId}` : location.pathname;
-      if (tabId === 'rag') {
-        const subtabEl = el.closest('.rag-subtab-content') as HTMLElement | null;
-        const subtabId =
-          subtabEl && typeof subtabEl.id === 'string' && subtabEl.id.startsWith('tab-rag-')
-            ? subtabEl.id.replace('tab-rag-', '')
-            : '';
-        if (subtabId) nextPath = `/rag?subtab=${encodeURIComponent(subtabId)}`;
-      }
-
-      if (nextPath !== location.pathname + location.search) {
-        navigate(nextPath);
-      }
-
-      // Highlight and scroll once the DOM is settled on the target route
-      window.setTimeout(() => {
-        let target: HTMLElement | null = null;
-        if (elementId) {
-          try {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const esc = (CSS as any)?.escape ? (CSS as any).escape(elementId) : elementId;
-            target = document.getElementById(elementId) || (document.querySelector(`#${esc}`) as HTMLElement | null);
-          } catch {
-            target = document.getElementById(elementId);
-          }
+  const navigateToResult = useCallback(
+    (result: GlobalSearchHit) => {
+      if (result.kind === 'control' && result.element) {
+        const el = result.element;
+        const tabContent = el.closest('.tab-content') as HTMLElement | null;
+        const tabId = tabContent ? tabContent.id.replace('tab-', '') : '';
+        const elementId = el.id || '';
+        const elementName = (el as HTMLInputElement).name || '';
+        let nextPath = tabId ? `/${tabId}` : location.pathname;
+        if (tabId === 'rag') {
+          const subtabEl = el.closest('.rag-subtab-content') as HTMLElement | null;
+          const subtabId =
+            subtabEl && typeof subtabEl.id === 'string' && subtabEl.id.startsWith('tab-rag-')
+              ? subtabEl.id.replace('tab-rag-', '')
+              : '';
+          if (subtabId) nextPath = `/rag?subtab=${encodeURIComponent(subtabId)}`;
         }
-        if (!target && elementName) {
-          try {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const esc = (CSS as any)?.escape ? (CSS as any).escape(elementName) : elementName;
-            target = document.querySelector(`[name="${esc}"]`) as HTMLElement | null;
-          } catch {
-            target = document.querySelector(`[name="${elementName}"]`) as HTMLElement | null;
+        if (nextPath !== location.pathname + location.search) navigate(nextPath);
+        window.setTimeout(() => {
+          let target: HTMLElement | null = null;
+          if (elementId) target = document.getElementById(elementId);
+          if (!target && elementName) {
+            target = document.querySelector(`[name="${CSS.escape(elementName)}"]`) as HTMLElement | null;
           }
-        }
-
-        if (!target) return;
-        target.classList.add('search-hit');
-        target.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        window.setTimeout(() => target?.classList.remove('search-hit'), 1200);
-      }, 200);
-    } else {
-      // Code file - could open in editor or show preview
-      console.log('[useGlobalSearch] Navigate to file:', result.file_path);
-    }
-
-    // Close modal
-    setIsOpen(false);
-    setQuery('');
-    setResults([]);
-  }, [location.pathname, location.search, navigate]);
-
-  // Keyboard navigation in results
-  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (results.length === 0) return;
-
-    if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      setCursor(prev => Math.min(prev + 1, results.length - 1));
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      setCursor(prev => Math.max(prev - 1, 0));
-    } else if (e.key === 'Enter') {
-      e.preventDefault();
-      if (results[cursor]) {
-        navigateToResult(results[cursor]);
+          if (!target) return;
+          target.classList.add('search-hit');
+          target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          target.focus?.({ preventScroll: true });
+          window.setTimeout(() => target?.classList.remove('search-hit'), 1200);
+        }, 200);
+      } else {
+        // Config field on another page: open it in the Admin explorer, filtered to the path.
+        navigate(`/admin?subtab=advanced&q=${encodeURIComponent(result.path)}`);
       }
-    }
-  }, [results, cursor, navigateToResult]);
+      setIsOpen(false);
+      setQuery('');
+      setResults([]);
+    },
+    [location.pathname, location.search, navigate]
+  );
+
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (results.length === 0) return;
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setCursor((prev) => Math.min(prev + 1, results.length - 1));
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setCursor((prev) => Math.max(prev - 1, 0));
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        if (results[cursor]) navigateToResult(results[cursor]);
+      }
+    },
+    [results, cursor, navigateToResult]
+  );
+
+  const settingsCount = useMemo(() => configIndex.length, [configIndex]);
 
   return {
     isOpen,
@@ -320,11 +236,12 @@ export function useGlobalSearch() {
     query,
     setQuery,
     results,
-    loading,
+    indexError,
     cursor,
+    setCursor,
     search,
     navigateToResult,
     handleKeyDown,
-    settingsCount: settingsIndex.length
+    settingsCount,
   };
 }

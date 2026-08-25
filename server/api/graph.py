@@ -116,6 +116,14 @@ async def get_community_subgraph(
         return out
 
 
+@router.get("/graph/{corpus_id}/subgraph", response_model=GraphNeighborsResponse)
+async def get_repo_subgraph(corpus_id: str, limit: int = 200) -> GraphNeighborsResponse:
+    """Induced subgraph over the best-connected entities of the corpus (whole-corpus visualizer)."""
+    repo_id = corpus_id
+    async with _graph_client(repo_id, boundary="Graph subgraph API") as neo4j:
+        return await neo4j.get_repo_subgraph(repo_id, limit=limit)
+
+
 @router.get("/graph/{corpus_id}/communities", response_model=list[Community])
 async def list_communities(corpus_id: str, level: int | None = None) -> list[Community]:
     repo_id = corpus_id

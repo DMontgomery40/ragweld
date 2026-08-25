@@ -1,75 +1,27 @@
 /**
- * MCPServerService
- * Replacement for legacy `web/src/modules/mcp_server.js` (no window globals).
+ * MCPServerService — status of the embedded MCP server plus a real tool probe.
+ *
+ * The Streamable HTTP transport is mounted inside the FastAPI process
+ * (cfg.mcp.mount_path); there is no separate daemon to start/stop/restart and
+ * no stdio "test" endpoint. The former lifecycle methods targeted routes that
+ * never existed (2026-08-25 drive finding M12) and are gone.
  */
-import type { MCPStatusResponse } from '@/types/generated';
-
-export type MCPHttpStatusResponse = {
-  running: boolean;
-  port?: number;
-  mode?: string;
-  url?: string;
-  host?: string;
-  path?: string;
-  error?: string;
-  [k: string]: unknown;
-};
-
-export type MCPActionResponse = {
-  success?: boolean;
-  ok?: boolean;
-  port?: number;
-  error?: string;
-  output?: string;
-  [k: string]: unknown;
-};
-
-export type MCPStdioTestResponse = {
-  success?: boolean;
-  tools?: string[];
-  tools_count?: number;
-  output?: string;
-  error?: string;
-  [k: string]: unknown;
-};
+import type { MCPRagSearchResponse, MCPStatusResponse } from '@/types/generated';
 
 export class MCPServerService {
   constructor(private api: (path: string) => string) {}
 
   async getStatus(): Promise<MCPStatusResponse> {
     const res = await fetch(this.api('/mcp/status'));
-    if (!res.ok) throw new Error(await res.text().catch(() => '') || `Failed to fetch MCP status (${res.status})`);
+    if (!res.ok) throw new Error((await res.text().catch(() => '')) || `Failed to fetch MCP status (${res.status})`);
     return (await res.json()) as MCPStatusResponse;
   }
 
-  async getHttpStatus(): Promise<MCPHttpStatusResponse> {
-    const res = await fetch(this.api('/mcp/http/status'));
-    if (!res.ok) throw new Error(await res.text().catch(() => '') || `Failed to fetch MCP HTTP status (${res.status})`);
-    return (await res.json()) as MCPHttpStatusResponse;
-  }
-
-  async startHttp(): Promise<MCPActionResponse> {
-    const res = await fetch(this.api('/mcp/http/start'), { method: 'POST' });
-    if (!res.ok) throw new Error(await res.text().catch(() => '') || `Failed to start MCP HTTP (${res.status})`);
-    return (await res.json()) as MCPActionResponse;
-  }
-
-  async stopHttp(): Promise<MCPActionResponse> {
-    const res = await fetch(this.api('/mcp/http/stop'), { method: 'POST' });
-    if (!res.ok) throw new Error(await res.text().catch(() => '') || `Failed to stop MCP HTTP (${res.status})`);
-    return (await res.json()) as MCPActionResponse;
-  }
-
-  async restartHttp(): Promise<MCPActionResponse> {
-    const res = await fetch(this.api('/mcp/http/restart'), { method: 'POST' });
-    if (!res.ok) throw new Error(await res.text().catch(() => '') || `Failed to restart MCP HTTP (${res.status})`);
-    return (await res.json()) as MCPActionResponse;
-  }
-
-  async testStdio(): Promise<MCPStdioTestResponse> {
-    const res = await fetch(this.api('/mcp/test'));
-    if (!res.ok) throw new Error(await res.text().catch(() => '') || `Failed to test stdio MCP (${res.status})`);
-    return (await res.json()) as MCPStdioTestResponse;
+  /** Run the MCP `search` tool's backing query against a corpus (real retrieval, real question). */
+  async probeSearch(question: string, corpusId: string, topK = 5): Promise<MCPRagSearchResponse> {
+    const params = new URLSearchParams({ q: question, corpus_id: corpusId, top_k: String(topK) });
+    const res = await fetch(this.api(`/mcp/rag_search?${params.toString()}`));
+    if (!res.ok) throw new Error((await res.text().catch(() => '')) || `MCP search probe failed (${res.status})`);
+    return (await res.json()) as MCPRagSearchResponse;
   }
 }
-

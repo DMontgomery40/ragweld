@@ -351,12 +351,53 @@ export function useGraph() {
   /**
    * Load initial graph data when repo changes
    */
+  /**
+   * Load the whole-corpus induced subgraph (best-connected entities + the edges
+   * between them). The entity list alone carried no relationships, so the
+   * corpus-level visualizer drew "N nodes • 0 edges" (2026-08-25 finding G2).
+   */
+  const loadSubgraph = useCallback(
+    async (limit: number = 200): Promise<{ entities: Entity[]; relationships: Relationship[] }> => {
+      if (!activeRepo) {
+        setError('No repository selected');
+        return { entities: [], relationships: [] };
+      }
+      setIsLoading(true);
+      setError(null);
+      try {
+        const url = `${GRAPH_API_BASE}/${encodeURIComponent(activeRepo)}/subgraph?limit=${encodeURIComponent(String(limit))}`;
+        const response = await fetch(url);
+        if (!response.ok) {
+          if (response.status === 404) {
+            setEntities([]);
+            setRelationships([]);
+            return { entities: [], relationships: [] };
+          }
+          throw new Error(`Failed to load graph: ${response.status}`);
+        }
+        const data = await response.json();
+        const ents = Array.isArray(data.entities) ? (data.entities as Entity[]) : [];
+        const rels = Array.isArray(data.relationships) ? (data.relationships as Relationship[]) : [];
+        setEntities(ents);
+        setRelationships(rels);
+        return { entities: ents, relationships: rels };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Failed to load graph';
+        setError(message);
+        return { entities: [], relationships: [] };
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [activeRepo, setEntities, setRelationships, setIsLoading, setError]
+  );
+
   const loadGraph = useCallback(async () => {
     if (!activeRepo) return;
 
     reset();
-    await Promise.all([loadStats(), loadCommunities(), searchEntities('', 200)]);
-  }, [activeRepo, reset, loadStats, loadCommunities, searchEntities]);
+    await Promise.all([loadStats(), loadCommunities(), loadSubgraph(200)]);
+  }, [activeRepo, reset, loadStats, loadCommunities, loadSubgraph]);
 
   // Load graph when active repo changes
   useEffect(() => {
@@ -384,6 +425,7 @@ export function useGraph() {
     loadStats,
     loadCommunities,
     loadGraph,
+    loadSubgraph,
     searchEntities,
     getNeighbors,
     getCommunityMembers,

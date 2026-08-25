@@ -34,18 +34,35 @@ def test_embedding_config_custom() -> None:
     assert config.embedding_batch_size == 64  # default
 
 
-def test_fusion_config_weights() -> None:
-    """Test fusion config weight validation - LAW auto-normalizes."""
+def test_fusion_config_weights_are_stored_as_typed() -> None:
+    """Weights persist exactly as the operator typed them; normalization happens at fusion time.
+
+    Regression for the 2026-08-25 drive finding M7: a single-field edit was
+    re-normalized on save, every input drifted to 17-digit floats and the typed
+    value could never be restored from the UI.
+    """
     config = FusionConfig(
         method="weighted",
         vector_weight=0.5,
         sparse_weight=0.3,
-        graph_weight=0.2,
+        graph_weight=0.3,
         rrf_k=60,
     )
-    # LAW normalizes weights to sum to 1.0
-    total = config.vector_weight + config.sparse_weight + config.graph_weight
-    assert abs(total - 1.0) < 0.01
+    assert (config.vector_weight, config.sparse_weight, config.graph_weight) == (0.5, 0.3, 0.3)
+
+    # A single-field edit leaves the other two fields untouched.
+    edited = config.model_copy(update={"vector_weight": 0.4})
+    round_trip = FusionConfig.model_validate(edited.model_dump())
+    assert (round_trip.vector_weight, round_trip.sparse_weight, round_trip.graph_weight) == (0.4, 0.3, 0.3)
+
+    # Restoring the typed value restores it exactly.
+    restored = FusionConfig.model_validate({**round_trip.model_dump(), "vector_weight": 0.5})
+    assert restored.vector_weight == 0.5
+
+
+def test_fusion_config_rejects_all_zero_weights() -> None:
+    with pytest.raises(ValidationError):
+        FusionConfig(method="weighted", vector_weight=0.0, sparse_weight=0.0, graph_weight=0.0)
 
 
 def test_reranker_modes() -> None:

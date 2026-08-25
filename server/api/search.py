@@ -21,7 +21,6 @@ from server.config import load_config
 from server.db.postgres import PostgresClient
 from server.models.retrieval import AnswerRequest, AnswerResponse, SearchRequest, SearchResponse
 from server.models.tribrid_config_model import ChatDebugInfo, ChatProviderInfo, TriBridConfig
-from server.observability.metrics import SEARCH_REQUESTS_TOTAL
 from server.observability.runtime import (
     apply_default_links,
     current_header_values,
@@ -79,8 +78,6 @@ async def _validated_scoped_config(repo_id: str, *, boundary: str) -> TriBridCon
 async def search(request: SearchRequest, response: Response) -> SearchResponse:
     if not request.query.strip():
         raise HTTPException(status_code=400, detail="Query must not be empty")
-
-    SEARCH_REQUESTS_TOTAL.inc()
 
     cfg = await _validated_scoped_config(request.repo_id, boundary="Search API")
     fusion = TriBridFusion()

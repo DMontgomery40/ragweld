@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
 import re
@@ -850,57 +851,150 @@ class Neo4jClient:
             return None
         return GraphNeighborsResponse(entities=entities, relationships=rels)
 
+    async def get_repo_subgraph(self, repo_id: str, *, limit: int = 200) -> GraphNeighborsResponse:
+        """Return the induced subgraph over the ``limit`` best-connected entities of a corpus.
+
+        The whole-corpus visualizer needs edges, not just the entity list; this is
+        the one query that returns both, ranked by degree so a capped view keeps
+        the hubs.
+        """
+        lim = int(max(0, limit or 0))
+        lim = min(lim, 2000)
+        if lim <= 0:
+            return GraphNeighborsResponse(entities=[], relationships=[])
+
+        allowed_rels = sorted(ALL_RELATION_TYPES)
+        driver = self._require_driver()
+        cypher = """
+        MATCH (e:__Entity__ {repo_id: $repo_id})
+        OPTIONAL MATCH (e)-[r]-(:__Entity__ {repo_id: $repo_id})
+        WHERE type(r) IN $allowed_rels
+        WITH e, count(r) AS degree
+        ORDER BY degree DESC, e.name ASC, e.entity_id ASC
+        LIMIT $limit
+
+        WITH collect(e) AS nodes
+        UNWIND nodes AS a
+        OPTIONAL MATCH (a)-[r]-(b:__Entity__ {repo_id: $repo_id})
+        WHERE b IN nodes AND type(r) IN $allowed_rels
+        WITH nodes, [x IN collect(DISTINCT r) WHERE x IS NOT NULL] AS rels
+
+        RETURN
+          [n IN nodes |
+            {
+              entity_id: n.entity_id,
+              name: n.name,
+              entity_type: n.entity_type,
+              file_path: n.file_path,
+              description: n.description,
+              properties: properties(n)
+            }
+          ] AS entities,
+          [r IN rels |
+            {
+              source_id: startNode(r).entity_id,
+              target_id: endNode(r).entity_id,
+              relation_type: type(r),
+              weight: coalesce(r.weight, 1.0),
+              properties: properties(r)
+            }
+          ] AS relationships;
+        """
+        async with driver.session(database=self.database) as session:
+            res = await session.run(cypher, repo_id=repo_id, allowed_rels=allowed_rels, limit=lim)
+            records = await res.data()
+        if not records:
+            return GraphNeighborsResponse(entities=[], relationships=[])
+        rec = records[0] or {}
+        entities = [
+            _entity_from_mapping(item) for item in (rec.get("entities") or []) if isinstance(item, dict)
+        ]
+        rels: list[Relationship] = []
+        allowed: set[str] = set(ALL_RELATION_TYPES)
+        for r in rec.get("relationships") or []:
+            if not isinstance(r, dict):
+                continue
+            rel_type = str(r.get("relation_type") or "")
+            if rel_type not in allowed:
+                continue
+            weight = max(0.0, min(1.0, float(r.get("weight") or 1.0)))
+            rels.append(
+                Relationship(
+                    source_id=str(r.get("source_id") or ""),
+                    target_id=str(r.get("target_id") or ""),
+                    relation_type=cast(RelationshipType, rel_type),
+                    weight=weight,
+                    properties=_relationship_properties_from_mapping(r),
+                )
+            )
+        return GraphNeighborsResponse(entities=entities, relationships=rels)
+
     # Community operations
     async def detect_communities(self, repo_id: str) -> list[Community]:
-        # Heuristic community detection (works without GDS): group by top-level directory.
-        #
-        # IMPORTANT:
-        # - Code entities have file_path.
-        # - Semantic KG entities (concepts) may have file_path=None but link to Chunk nodes via IN_CHUNK.
-        #   We still want them to appear in communities, so we infer a "home" group from linked chunks.
+        """Detect entity communities by deterministic label propagation over entity relationships.
+
+        Communities are groups of entities that are actually linked to each other
+        (``associated_with``, ``located_in``, ``owns``, ...). Entities with no
+        relationships belong to no community, and a corpus whose graph has no
+        entity-entity edges has no communities; the UI says so instead of showing
+        one directory bucket. Community ids are content-derived (a hash of the
+        member set) and carry no repo id, so staging -> active promotion, which
+        only rewrites ``repo_id``, leaves them valid.
+        """
         driver = self._require_driver()
+        allowed_rels = sorted(ALL_RELATION_TYPES)
         async with driver.session(database=self.database) as session:
             res = await session.run(
                 """
                 MATCH (e:__Entity__ {repo_id: $repo_id})
-                OPTIONAL MATCH (e)-[:IN_CHUNK]->(c:Chunk {repo_id: $repo_id})
-                WITH e, replace(coalesce(e.file_path, c.file_path), '\\\\', '/') AS fp
-                WITH
-                  e.entity_id AS entity_id,
-                  CASE
-                    WHEN fp IS NULL THEN '(root)'
-                    WHEN fp CONTAINS '/' THEN split(fp, '/')[0]
-                    ELSE '(root)'
-                  END AS grp
-                WITH entity_id, grp, count(*) AS n
-                ORDER BY entity_id, n DESC, grp ASC
-                WITH entity_id, collect({grp: grp, n: n})[0] AS best
-                RETURN entity_id, best.grp AS grp;
+                RETURN e.entity_id AS entity_id, e.name AS name
+                ORDER BY e.entity_id ASC;
                 """,
                 repo_id=repo_id,
             )
-            records = await res.data()
+            node_records = await res.data()
+            res = await session.run(
+                """
+                MATCH (a:__Entity__ {repo_id: $repo_id})-[r]-(b:__Entity__ {repo_id: $repo_id})
+                WHERE type(r) IN $allowed_rels AND a.entity_id < b.entity_id
+                RETURN DISTINCT a.entity_id AS source_id, b.entity_id AS target_id;
+                """,
+                repo_id=repo_id,
+                allowed_rels=allowed_rels,
+            )
+            edge_records = await res.data()
 
-        by_group: dict[str, list[str]] = defaultdict(list)
-        for r in records:
+        names: dict[str, str] = {}
+        for r in node_records:
             eid = str(r.get("entity_id") or "").strip()
-            grp = str(r.get("grp") or "(root)").strip() or "(root)"
-            if not eid:
-                continue
-            by_group[grp].append(eid)
+            if eid:
+                names[eid] = str(r.get("name") or eid)
+        adjacency: dict[str, set[str]] = {eid: set() for eid in names}
+        for r in edge_records:
+            a = str(r.get("source_id") or "").strip()
+            b = str(r.get("target_id") or "").strip()
+            if a in adjacency and b in adjacency and a != b:
+                adjacency[a].add(b)
+                adjacency[b].add(a)
 
         communities: list[Community] = []
-        for group, member_ids in sorted(by_group.items(), key=lambda t: (-len(t[1]), t[0])):
-            community_id = f"{repo_id}:{group}"
+        for members in _label_propagation_groups(adjacency):
+            ranked = sorted(members, key=lambda eid: (-len(adjacency[eid]), names[eid], eid))
+            hub = ranked[0]
+            digest = hashlib.sha1("\n".join(sorted(members)).encode("utf-8")).hexdigest()[:12]
+            preview = ", ".join(names[eid] for eid in ranked[:5])
+            if len(ranked) > 5:
+                preview += f", +{len(ranked) - 5} more"
             communities.append(
                 Community(
-                    community_id=community_id,
-                    name=group,
-                    summary=f"Entities in '{group}'",
-                    member_ids=member_ids,
+                    community_id=f"c-{digest}",
+                    name=names[hub],
+                    summary=f"{len(members)} linked entities around {names[hub]}: {preview}",
+                    member_ids=list(ranked),
                     level=0,
                 )
             )
+        communities.sort(key=lambda c: (-len(c.member_ids), c.name, c.community_id))
 
         await self._store_communities(repo_id, communities)
         return communities
@@ -1504,6 +1598,36 @@ class Neo4jClient:
                 repo_id=repo_id,
                 communities=comm_payload,
             )
+
+
+def _label_propagation_groups(adjacency: dict[str, set[str]], *, max_iterations: int = 50) -> list[list[str]]:
+    """Deterministic asynchronous label propagation.
+
+    Nodes are visited in sorted order; each adopts the label most common among its
+    neighbours (ties -> the lexically smallest label). Isolated nodes keep their own
+    label and are dropped, so every returned group has at least two members.
+    """
+    order = sorted(adjacency)
+    labels: dict[str, str] = {node: node for node in order}
+    for _ in range(max_iterations):
+        changed = False
+        for node in order:
+            neighbours = adjacency.get(node) or ()
+            if not neighbours:
+                continue
+            counts: dict[str, int] = defaultdict(int)
+            for other in neighbours:
+                counts[labels[other]] += 1
+            best = min(counts.items(), key=lambda item: (-item[1], item[0]))[0]
+            if best != labels[node]:
+                labels[node] = best
+                changed = True
+        if not changed:
+            break
+    groups: dict[str, list[str]] = defaultdict(list)
+    for node in order:
+        groups[labels[node]].append(node)
+    return [members for _, members in sorted(groups.items()) if len(members) >= 2]
 
 
 def _entity_from_record(record: Any) -> Entity:

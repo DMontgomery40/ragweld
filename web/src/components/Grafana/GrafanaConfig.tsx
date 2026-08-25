@@ -20,6 +20,7 @@ export function GrafanaConfig() {
   const [orgId, setOrgId] = useConfigField<number>('ui.grafana_org_id', 1);
   const [refresh, setRefresh] = useConfigField<string>('ui.grafana_refresh', '10s');
   const [mimirBaseUrl, setMimirBaseUrl] = useConfigField<string>('tracing.mimir_base_url', '');
+  const [prometheusBaseUrl, setPrometheusBaseUrl] = useConfigField<string>('tracing.prometheus_base_url', '');
   const [pyroscopeBaseUrl, setPyroscopeBaseUrl] = useConfigField<string>('tracing.pyroscope_base_url', '');
   const [faroBaseUrl, setFaroBaseUrl] = useConfigField<string>('tracing.faro_base_url', '');
   const [opencostBaseUrl, setOpencostBaseUrl] = useConfigField<string>('tracing.opencost_base_url', '');
@@ -333,6 +334,27 @@ export function GrafanaConfig() {
 
         <div>
           <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: 'var(--fg)', marginBottom: '8px' }}>
+            Prometheus URL
+          </label>
+          <input
+            type="text"
+            value={prometheusBaseUrl}
+            onChange={(e) => setPrometheusBaseUrl(e.target.value)}
+            placeholder="http://127.0.0.1:59090"
+            style={{
+              width: '100%',
+              background: 'var(--input-bg)',
+              border: '1px solid var(--line)',
+              color: 'var(--fg)',
+              padding: '10px 12px',
+              borderRadius: '8px',
+              fontSize: '13px'
+            }}
+          />
+        </div>
+
+        <div>
+          <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: 'var(--fg)', marginBottom: '8px' }}>
             Pyroscope URL
           </label>
           <input
@@ -440,23 +462,30 @@ export function GrafanaConfig() {
           </a>
         )}
 
-        <a
-          href="http://localhost:9090"
-          target="_blank"
-          rel="noopener noreferrer"
-          style={{
-            background: 'var(--bg-elev2)',
-            color: 'var(--fg)',
-            border: '1px solid var(--line)',
-            padding: '8px 12px',
-            borderRadius: '8px',
-            fontSize: '12px',
-            fontWeight: 700,
-            textDecoration: 'none'
-          }}
-        >
-          Open Prometheus
-        </a>
+        {String(prometheusBaseUrl || '').trim() ? (
+          <a
+            href={String(prometheusBaseUrl).replace(/\/$/, '')}
+            target="_blank"
+            rel="noopener noreferrer"
+            data-testid="grafana-config-open-prometheus"
+            style={{
+              background: 'var(--bg-elev2)',
+              color: 'var(--fg)',
+              border: '1px solid var(--line)',
+              padding: '8px 12px',
+              borderRadius: '8px',
+              fontSize: '12px',
+              fontWeight: 700,
+              textDecoration: 'none'
+            }}
+          >
+            Open Prometheus
+          </a>
+        ) : (
+          <span style={{ fontSize: '12px', color: 'var(--fg-muted)', alignSelf: 'center' }}>
+            Prometheus URL not configured
+          </span>
+        )}
       </div>
 
       {embedMeta.loading && (

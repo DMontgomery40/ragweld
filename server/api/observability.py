@@ -3,11 +3,13 @@ from __future__ import annotations
 from fastapi import APIRouter, Query
 
 from server.models.tribrid_config_model import (
+    ObservabilityAlertRulesResponse,
     ObservabilityCatalogResponse,
     ObservabilityIncidentsResponse,
     ObservabilityStatusResponse,
     TriBridConfig,
 )
+from server.observability.alert_rules import build_alert_rules
 from server.observability.catalog import build_observability_catalog
 from server.observability.incidents import build_observability_incidents
 from server.observability.status import build_observability_status
@@ -47,6 +49,21 @@ async def observability_catalog(
     except CorpusNotFoundError:
         cfg = await load_scoped_config(repo_id=None)
     return build_observability_catalog(cfg)
+
+
+@router.get("/alert-rules", response_model=ObservabilityAlertRulesResponse)
+async def observability_alert_rules(
+    repo: str | None = Query(default=None, description="Optional corpus_id to scope config"),
+    corpus_id: str | None = Query(default=None, description="Alias for repo"),
+    repo_id: str | None = Query(default=None, description="Alias for corpus_id"),
+) -> ObservabilityAlertRulesResponse:
+    """Alerting rules as Prometheus evaluates them right now (the real alert configuration)."""
+    scope_id = (repo or corpus_id or repo_id or "").strip() or None
+    try:
+        cfg = await load_scoped_config(repo_id=scope_id)
+    except CorpusNotFoundError:
+        cfg = await load_scoped_config(repo_id=None)
+    return await build_alert_rules(cfg)
 
 
 @router.get("/incidents", response_model=ObservabilityIncidentsResponse)

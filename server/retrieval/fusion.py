@@ -27,6 +27,9 @@ from server.observability.metrics import (
     GRAPH_LEG_LATENCY_SECONDS,
     SEARCH_GRAPH_HYDRATED_CHUNKS_COUNT,
     SEARCH_LEG_RESULTS_COUNT,
+    SEARCH_ERRORS_TOTAL,
+    SEARCH_LATENCY_SECONDS,
+    SEARCH_REQUESTS_TOTAL,
     SEARCH_RESULTS_FINAL_COUNT,
     SEARCH_STAGE_ERRORS_TOTAL,
     SEARCH_STAGE_LATENCY_SECONDS,
@@ -137,6 +140,40 @@ class TriBridFusion:
             SEARCH_RESULTS_FINAL_COUNT.observe(0)
             return []
 
+        # Request / latency / error accounting lives here, on the shared
+        # retrieval lane, so chat, benchmark and MCP retrieval count exactly like
+        # /api/search on the Grafana search panels.
+        SEARCH_REQUESTS_TOTAL.inc()
+        with SEARCH_LATENCY_SECONDS.time():
+            try:
+                return await self._search_fused(
+                    corpus_ids,
+                    query,
+                    config,
+                    include_vector=include_vector,
+                    include_sparse=include_sparse,
+                    include_graph=include_graph,
+                    top_k=top_k,
+                    cache_mode=cache_mode,
+                    cache_namespace=cache_namespace,
+                )
+            except Exception:
+                SEARCH_ERRORS_TOTAL.inc()
+                raise
+
+    async def _search_fused(
+        self,
+        corpus_ids: list[str],
+        query: str,
+        config: FusionConfig,
+        *,
+        include_vector: bool,
+        include_sparse: bool,
+        include_graph: bool,
+        top_k: int | None,
+        cache_mode: CacheMode,
+        cache_namespace: str,
+    ) -> list[ChunkMatch]:
         cache_service: SemanticCacheService | None = None
         cache_scope_key = SemanticCacheService.scope_key(corpus_ids)
         cache_endpoint = self._cache_endpoint_from_namespace(cache_namespace)
@@ -1158,9 +1195,15 @@ class TriBridFusion:
         return [chunk_map[key].model_copy(update={"score": scores[key]}) for key in sorted_keys]
 
     def weighted_fusion(self, results: list[list[ChunkMatch]], weights: list[float]) -> list[ChunkMatch]:
+        # Weights are normalized by their sum here (never at config-save time), so
+        # the stored config keeps the operator's typed values.
+        positive_total = float(sum(max(0.0, float(w)) for w in weights))
+        if positive_total <= 0.0:
+            raise ValueError("weighted fusion requires at least one positive weight")
+        normalized = [max(0.0, float(w)) / positive_total for w in weights]
         scores: dict[str, float] = defaultdict(float)
         chunk_map: dict[str, ChunkMatch] = {}
-        for weight, result_list in zip(weights, results, strict=False):
+        for weight, result_list in zip(normalized, results, strict=False):
             for chunk in result_list:
                 key = self._fusion_key(chunk)
                 scores[key] += chunk.score * weight

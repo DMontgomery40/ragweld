@@ -7,7 +7,9 @@ export function GlobalSearch() {
     setIsOpen,
     query,
     results,
+    indexError,
     cursor: selectedIndex,
+    setCursor,
     search,
     navigateToResult,
     handleKeyDown
@@ -132,8 +134,12 @@ export function GlobalSearch() {
           }}>
             {results.map((result, index) => (
               <div
-                key={`${result.name}-${index}`}
+                key={`${result.kind}:${result.id}`}
                 onClick={() => navigateToResult(result)}
+                onMouseEnter={() => setCursor(index)}
+                data-testid="global-search-result"
+                data-kind={result.kind}
+                data-path={result.path}
                 style={{
                   padding: '12px 20px',
                   borderBottom: '1px solid var(--line)',
@@ -141,41 +147,63 @@ export function GlobalSearch() {
                   background: index === selectedIndex ? 'var(--bg-elev1)' : 'transparent',
                   transition: 'background 0.15s'
                 }}
-                onMouseEnter={() => {
-                  // Update selected index on hover for keyboard navigation
-                }}
               >
                 <div style={{
                   fontSize: '14px',
-                  fontWeight: 500,
+                  fontWeight: 600,
                   marginBottom: '4px',
-                  color: 'var(--fg)'
-                }}>
-                  {highlightText(result.label || result.name || '', query)}
-                </div>
-                <div style={{
-                  fontSize: '12px',
-                  color: 'var(--fg-muted)',
+                  color: 'var(--fg)',
                   display: 'flex',
                   alignItems: 'center',
                   gap: '8px'
                 }}>
-                  {result.title && (
-                    <>
-                      <span>{highlightText(result.title, query)}</span>
-                      <span>•</span>
-                    </>
-                  )}
-                  {result.name && result.name !== result.label && (
-                    <span style={{ fontFamily: 'monospace', fontSize: '11px' }}>
-                      {highlightText(result.name, query)}
-                    </span>
-                  )}
+                  {highlightText(result.label, query)}
+                  <span style={{
+                    fontSize: '11.5px',
+                    fontWeight: 700,
+                    color: 'var(--fg-muted)',
+                    border: '1px solid var(--line)',
+                    borderRadius: '999px',
+                    padding: '1px 7px',
+                    letterSpacing: '0.04em',
+                    textTransform: 'uppercase'
+                  }}>
+                    {result.kind === 'control' ? 'on this page' : 'config'}
+                  </span>
                 </div>
+                <div style={{
+                  fontSize: '12.5px',
+                  color: 'var(--fg-muted)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  flexWrap: 'wrap'
+                }}>
+                  <span>{highlightText(result.location, query)}</span>
+                  {result.path && result.path !== result.label ? (
+                    <>
+                      <span>•</span>
+                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: '12px' }}>
+                        {highlightText(result.path, query)}
+                      </span>
+                    </>
+                  ) : null}
+                </div>
+                {result.description ? (
+                  <div style={{ fontSize: '12.5px', color: 'var(--fg-muted)', marginTop: '4px', lineHeight: 1.4 }}>
+                    {highlightText(result.description.length > 160 ? `${result.description.slice(0, 157)}…` : result.description, query)}
+                  </div>
+                ) : null}
               </div>
             ))}
           </div>
         )}
+
+        {indexError ? (
+          <div style={{ padding: '10px 20px', fontSize: '12.5px', color: 'var(--err)' }} role="alert">
+            Config registry unavailable: {indexError}
+          </div>
+        ) : null}
 
         {/* Empty State */}
         {query && results.length === 0 && (

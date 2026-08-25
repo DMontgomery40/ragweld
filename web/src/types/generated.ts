@@ -106,10 +106,26 @@ export interface BenchmarkResult {
   breakdown_ms?: Record<string, number>;
   /** Error string when the model call failed. */
   error?: string | null; // default: None
+  /** Retrieved chunks that fit this model's context window and were sent with the prompt. */
+  context_chunks_used?: number; // default: 0
   /** Optional resolved model id. */
   model_id?: string | null; // default: None
   /** Optional human-readable model name. */
   model_name?: string | null; // default: None
+}
+
+/** How a benchmark run grounded its prompt before generation. */
+export interface BenchmarkRetrieval {
+  /** Corpus the prompt was retrieved against; null when the run had no corpus scope. */
+  corpus_id?: string | null; // default: None
+  /** True when at least one retrieved chunk was offered to every model. */
+  grounded: boolean;
+  /** Chunks retrieved through the tri-brid lane for this prompt. */
+  chunk_count?: number; // default: 0
+  /** Why no retrieval context was available (no corpus scope, no matches); null when grounded. */
+  reason?: string | null; // default: None
+  /** Distinct source file paths of the retrieved chunks, best rank first. */
+  source_paths?: string[];
 }
 
 /** Persisted benchmark run record. */
@@ -128,6 +144,8 @@ export interface BenchmarkRun {
   ended_at_ms?: number; // default: 0
   /** Per-model benchmark results. */
   results?: BenchmarkResult[];
+  /** Grounding used for this run; null on records persisted before retrieval-backed benchmarks. */
+  retrieval?: BenchmarkRetrieval | null; // default: None
   /** Current bundle id captured before the run started. */
   input_bundle_id?: string | null; // default: None
   /** Bundle id after attaching this run to lineage. */
@@ -1375,6 +1393,14 @@ export interface MCPRagSearchResult {
   rerank_score: number;
 }
 
+/** One tool registered on the embedded MCP server. */
+export interface MCPToolInfo {
+  /** Tool name as advertised to MCP clients. */
+  name: string;
+  /** Tool description as advertised to MCP clients. */
+  description?: string; // default: ""
+}
+
 /** Chat message in a conversation. */
 export interface Message {
   /** Message role */
@@ -1439,6 +1465,30 @@ export interface ModelValidationWarning {
   model_value: string;
   /** Human-readable warning message */
   message: string;
+}
+
+/** One alerting rule as Prometheus currently evaluates it. */
+export interface ObservabilityAlertRule {
+  /** Rule group name from the Prometheus rules file. */
+  group: string;
+  /** Alert name. */
+  name: string;
+  /** Prometheus rule state: inactive, pending, or firing. */
+  state: string;
+  /** severity label on the rule, when set. */
+  severity?: string | null; // default: None
+  /** PromQL expression the rule evaluates. */
+  query: string;
+  /** 'for' duration before the alert fires. */
+  duration_seconds?: number; // default: 0.0
+  /** summary annotation, when set. */
+  summary?: string | null; // default: None
+  /** description annotation, when set. */
+  description?: string | null; // default: None
+  /** Prometheus rule health: ok, err, or unknown. */
+  health?: string; // default: "unknown"
+  /** Alert instances currently pending or firing for this rule. */
+  active_alerts?: number; // default: 0
 }
 
 /** Status for one observability component or backend. */
@@ -2514,6 +2564,8 @@ export interface TracingConfig {
   alloy_base_url?: string; // default: ""
   /** Grafana Mimir base URL used for metrics backend status checks */
   mimir_base_url?: string; // default: ""
+  /** Prometheus base URL used for the alert-rule feed and operator deep links (Prometheus scrapes and remote-writes to Mimir) */
+  prometheus_base_url?: string; // default: ""
   /** Grafana Pyroscope base URL used for profiling status checks */
   pyroscope_base_url?: string; // default: ""
   /** Grafana Faro or collector base URL used for frontend telemetry status checks */
@@ -3713,6 +3765,8 @@ export interface MCPStatusResponse {
   python_stdio_available?: boolean;
   /** Human-readable diagnostic details (best-effort). */
   details?: string[];
+  /** Tools registered on the embedded Streamable HTTP server (empty when the transport is disabled). */
+  tools?: MCPToolInfo[];
 }
 
 /** Response payload for GET /api/models. */
@@ -3758,6 +3812,22 @@ export interface ModelValidationResult {
   valid: boolean;
   /** Soft warnings about model assignments */
   warnings?: ModelValidationWarning[];
+}
+
+/** Alerting rules read live from Prometheus for the Monitoring surface. */
+export interface ObservabilityAlertRulesResponse {
+  /** False when Prometheus is unconfigured or unreachable. */
+  ok?: boolean;
+  /** Prometheus base URL the rules were read from. */
+  source_url?: string | null;
+  /** Whether the Prometheus rules API answered. */
+  reachable?: boolean;
+  /** Operator-facing reason when rules could not be read. */
+  error?: string | null;
+  /** Alerting rules, firing first. */
+  rules?: ObservabilityAlertRule[];
+  firing_count?: number;
+  pending_count?: number;
 }
 
 /** Catalog of dashboard and workbench observability surfaces. */

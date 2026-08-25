@@ -5,6 +5,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
+from server.api.dependency_errors import raise_postgres_unavailable_if_applicable
 from server.chat.benchmark_runner import run_benchmark
 from server.config import load_config
 from server.lineage import (
@@ -15,7 +16,9 @@ from server.lineage import (
 )
 from server.observability import metrics
 from server.observability.ml_quality import build_benchmark_observability_summary
+from server.models.retrieval import ChunkMatch
 from server.models.tribrid_config_model import (
+    BenchmarkRetrieval,
     BenchmarkObservabilitySummaryResponse,
     BenchmarkRun,
     BenchmarkRunRequest,
@@ -24,6 +27,7 @@ from server.models.tribrid_config_model import (
 )
 from server.services.config_store import CorpusNotFoundError
 from server.services.config_store import get_config as load_scoped_config
+from server.retrieval.fusion import TriBridFusion
 
 router = APIRouter(tags=["benchmark"])
 
@@ -98,7 +102,55 @@ async def benchmark_run(
     if repo_id:
         input_bundle_id = ensure_current_bundle(repo_id=repo_id, cfg=cfg).bundle_id
 
-    run = await run_benchmark(prompt=prompt, models=models, config=cfg, repo_id=repo_id)
+    # Ground the prompt exactly like chat does (tri-brid fusion on the corpus).
+    # A benchmark that silently answered from world knowledge was the 2026-08-25
+    # drive finding M8; retrieval failures fail the run instead of degrading.
+    context_chunks: list[ChunkMatch] = []
+    if repo_id:
+        fusion = TriBridFusion()
+        try:
+            context_chunks = await fusion.search(
+                [repo_id],
+                prompt,
+                cfg.fusion,
+                include_vector=True,
+                include_sparse=True,
+                include_graph=True,
+                top_k=None,
+                cache_mode="default",
+                cache_namespace="benchmark_retrieval",
+            )
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise_postgres_unavailable_if_applicable(exc, boundary="Benchmark retrieval")
+            raise HTTPException(status_code=503, detail=f"Benchmark retrieval failed: {exc}") from exc
+        retrieval = BenchmarkRetrieval(
+            corpus_id=repo_id,
+            grounded=bool(context_chunks),
+            chunk_count=len(context_chunks),
+            reason=None if context_chunks else "tri-brid retrieval returned no chunks for this prompt on the corpus",
+            source_paths=list(
+                dict.fromkeys(str(c.file_path) for c in context_chunks if getattr(c, "file_path", None))
+            ),
+        )
+    else:
+        retrieval = BenchmarkRetrieval(
+            corpus_id=None,
+            grounded=False,
+            chunk_count=0,
+            reason="no corpus scope: the benchmark ran without retrieval",
+            source_paths=[],
+        )
+
+    run = await run_benchmark(
+        prompt=prompt,
+        models=models,
+        config=cfg,
+        repo_id=repo_id,
+        context_chunks=context_chunks,
+        retrieval=retrieval,
+    )
     run.input_bundle_id = input_bundle_id
 
     # ML-quality metrics for the Eval/Benchmark/Prompt dashboard.

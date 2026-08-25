@@ -1,28 +1,27 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAPI } from '@/hooks/useAPI';
-import { MCPServerService, type MCPActionResponse, type MCPHttpStatusResponse, type MCPStdioTestResponse } from '@/services/MCPServerService';
-import type { MCPStatusResponse } from '@/types/generated';
+import { MCPServerService } from '@/services/MCPServerService';
+import type { MCPRagSearchResponse, MCPStatusResponse } from '@/types/generated';
 
 type MCPServerState = {
   status: MCPStatusResponse | null;
-  httpStatus: MCPHttpStatusResponse | null;
-  stdioTest: MCPStdioTestResponse | null;
+  probe: MCPRagSearchResponse | null;
+  probeQuestion: string | null;
   loading: boolean;
+  probing: boolean;
   error: string | null;
-  lastAction: MCPActionResponse | null;
 };
 
 export function useMCPServer() {
   const { api } = useAPI();
   const service = useMemo(() => new MCPServerService(api), [api]);
-
   const [state, setState] = useState<MCPServerState>({
     status: null,
-    httpStatus: null,
-    stdioTest: null,
+    probe: null,
+    probeQuestion: null,
     loading: false,
+    probing: false,
     error: null,
-    lastAction: null,
   });
 
   const clearError = useCallback(() => setState((s) => ({ ...s, error: null })), []);
@@ -30,70 +29,31 @@ export function useMCPServer() {
   const refresh = useCallback(async () => {
     setState((s) => ({ ...s, loading: true, error: null }));
     try {
-      const [status, httpStatus] = await Promise.all([service.getStatus(), service.getHttpStatus().catch(() => null)]);
-      setState((s) => ({ ...s, status, httpStatus, loading: false }));
-      return { status, httpStatus };
+      const status = await service.getStatus();
+      setState((s) => ({ ...s, status, loading: false }));
+      return status;
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Failed to load MCP status';
       setState((s) => ({ ...s, loading: false, error: msg, status: null }));
-      return { status: null, httpStatus: null };
+      return null;
     }
   }, [service]);
 
-  const startHttp = useCallback(async () => {
-    setState((s) => ({ ...s, loading: true, error: null }));
-    try {
-      const res = await service.startHttp();
-      setState((s) => ({ ...s, lastAction: res, loading: false }));
-      await refresh();
-      return res;
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : 'Failed to start MCP HTTP';
-      setState((s) => ({ ...s, loading: false, error: msg }));
-      throw e;
-    }
-  }, [refresh, service]);
-
-  const stopHttp = useCallback(async () => {
-    setState((s) => ({ ...s, loading: true, error: null }));
-    try {
-      const res = await service.stopHttp();
-      setState((s) => ({ ...s, lastAction: res, loading: false }));
-      await refresh();
-      return res;
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : 'Failed to stop MCP HTTP';
-      setState((s) => ({ ...s, loading: false, error: msg }));
-      throw e;
-    }
-  }, [refresh, service]);
-
-  const restartHttp = useCallback(async () => {
-    setState((s) => ({ ...s, loading: true, error: null }));
-    try {
-      const res = await service.restartHttp();
-      setState((s) => ({ ...s, lastAction: res, loading: false }));
-      await refresh();
-      return res;
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : 'Failed to restart MCP HTTP';
-      setState((s) => ({ ...s, loading: false, error: msg }));
-      throw e;
-    }
-  }, [refresh, service]);
-
-  const testStdio = useCallback(async () => {
-    setState((s) => ({ ...s, loading: true, error: null }));
-    try {
-      const res = await service.testStdio();
-      setState((s) => ({ ...s, stdioTest: res, loading: false }));
-      return res;
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : 'Failed to test stdio MCP';
-      setState((s) => ({ ...s, loading: false, error: msg }));
-      throw e;
-    }
-  }, [service]);
+  const probeSearch = useCallback(
+    async (question: string, corpusId: string) => {
+      setState((s) => ({ ...s, probing: true, error: null }));
+      try {
+        const probe = await service.probeSearch(question, corpusId);
+        setState((s) => ({ ...s, probe, probeQuestion: question, probing: false }));
+        return probe;
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : 'MCP search probe failed';
+        setState((s) => ({ ...s, probing: false, error: msg }));
+        throw e;
+      }
+    },
+    [service]
+  );
 
   useEffect(() => {
     void refresh();
@@ -103,17 +63,13 @@ export function useMCPServer() {
 
   return {
     status: state.status,
-    httpStatus: state.httpStatus,
-    stdioTestResult: state.stdioTest,
+    probe: state.probe,
+    probeQuestion: state.probeQuestion,
     loading: state.loading,
+    probing: state.probing,
     error: state.error,
-    lastAction: state.lastAction,
     clearError,
     refresh,
-    startHttp,
-    stopHttp,
-    restartHttp,
-    testStdio,
+    probeSearch,
   };
 }
-

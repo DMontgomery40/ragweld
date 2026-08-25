@@ -86,25 +86,3 @@ async def test_get_graph_stats_uses_optional_match_and_parses_counts() -> None:
     assert "OPTIONAL MATCH (e:__Entity__" in q0
     assert "OPTIONAL MATCH (:__Entity__" in q0
     assert "OPTIONAL MATCH (c:Community" in q0
-
-
-@pytest.mark.asyncio
-async def test_detect_communities_normalizes_windows_paths_in_query() -> None:
-    client = Neo4jClient(uri="bolt://fake", user="neo4j", password="test")
-
-    client._driver = _FakeDriver(  # type: ignore[assignment]
-        [
-            _FakeResult(data=[{"entity_id": "e1", "grp": "src"}]),
-            _FakeResult(),
-            _FakeResult(),
-            _FakeResult(),
-        ]
-    )
-
-    out = await client.detect_communities(repo_id="test-corpus")
-    assert out
-
-    session = client._driver.session_obj  # type: ignore[attr-defined]
-    assert session.queries
-    q0 = session.queries[0]
-    assert "replace(coalesce(e.file_path, c.file_path), '\\\\', '/')" in q0

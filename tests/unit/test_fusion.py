@@ -61,6 +61,22 @@ def test_weighted_fusion() -> None:
     assert len(results) == 3
 
 
+def test_weighted_fusion_normalizes_weights_by_their_sum() -> None:
+    """Weights that do not sum to 1.0 are normalized at fusion time, not at config-save time (M7)."""
+    fusion = TriBridFusion()
+    vector_results = [make_chunk("v1", 1.0, "vector")]
+    sparse_results = [make_chunk("s1", 1.0, "sparse")]
+
+    unit = fusion.weighted_fusion([vector_results, sparse_results, []], weights=[0.4, 0.6, 0.0])
+    scaled = fusion.weighted_fusion([vector_results, sparse_results, []], weights=[0.8, 1.2, 0.0])
+    assert [(c.chunk_id, round(c.score, 6)) for c in unit] == [(c.chunk_id, round(c.score, 6)) for c in scaled]
+    assert unit[0].chunk_id == "s1" and round(unit[0].score, 6) == 0.6
+    assert unit[1].chunk_id == "v1" and round(unit[1].score, 6) == 0.4
+
+    with pytest.raises(ValueError):
+        fusion.weighted_fusion([vector_results, sparse_results, []], weights=[0.0, 0.0, 0.0])
+
+
 def test_weighted_fusion_normalization() -> None:
     """Test that weighted fusion normalizes scores."""
     fusion = TriBridFusion()

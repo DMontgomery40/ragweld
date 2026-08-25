@@ -768,8 +768,10 @@ async def _run_index(
     cfg = await load_scoped_config(repo_id=repo_id)
     target_repo_id = str(write_repo_id or repo_id)
 
-    if not force_reindex and repo_id in _STATS:
-        return _STATS[repo_id]
+    # Every run writes a fresh staging corpus and promotes it; a non-forced run
+    # is a full rebuild guarded by the embedding-mismatch check below, never a
+    # cache hit (returning cached stats here left the staging corpus unwritten
+    # and the promotion failed with "Staging corpus not found").
 
     # Build ignore patterns from config
     ignore_patterns: list[str] = []

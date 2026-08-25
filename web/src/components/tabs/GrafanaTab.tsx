@@ -11,8 +11,10 @@ type GrafanaSubtab = 'overview' | 'dashboards' | 'incidents' | 'config';
 export default function GrafanaTab(): React.ReactElement {
   const { activeSubtab, setSubtab } = useSubtab<GrafanaSubtab>({ routePath: '/grafana', defaultSubtab: 'overview' });
 
+  // .tab-content is the scroll container (main pane and dock alike); an inline
+  // overflow:hidden on it clipped the 6900px Overview deck (finding M3).
   return (
-    <div id="tab-grafana" className="tab-content" style={{ padding: 0, overflow: 'hidden' }}>
+    <div id="tab-grafana" className="tab-content" style={{ padding: 0 }}>
       <GrafanaSubtabs activeSubtab={activeSubtab} onSubtabChange={(s) => setSubtab(s as GrafanaSubtab)} />
 
       <div

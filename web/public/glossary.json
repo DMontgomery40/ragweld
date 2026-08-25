@@ -12585,6 +12585,22 @@
       ]
     },
     {
+      "term": "Prometheus Base URL",
+      "key": "PROMETHEUS_BASE_URL",
+      "definition": "PROMETHEUS_BASE_URL points ragweld at the Prometheus server that scrapes the API, gateway, local model and exporters and forwards every sample to Mimir over remote write. Prometheus also evaluates infra/prometheus-rules.yml, so this URL is where the Monitoring surface reads the live alert rules (state, severity, expression, for-duration) and where the Open Prometheus link lands. When the URL is empty the alert-rule feed reports unconfigured instead of showing an empty rule list.",
+      "category": "infrastructure",
+      "related": [
+        "Mimir Base URL",
+        "Alertmanager Base URL"
+      ],
+      "links": [
+        {
+          "text": "Prometheus alerting rules",
+          "href": "https://prometheus.io/docs/prometheus/latest/configuration/alerting_rules/"
+        }
+      ]
+    },
+    {
       "term": "Pyroscope Base URL",
       "key": "PYROSCOPE_BASE_URL",
       "definition": "PYROSCOPE_BASE_URL points ragweld at the Grafana Pyroscope server used for continuous profiling. When set, the host API attaches the Pyroscope agent at startup and pushes ragweld-api CPU profiles; the component status reports both server readiness (/ready) and the truthful host-agent state. Empty means profiling is off and the component reports disabled.",

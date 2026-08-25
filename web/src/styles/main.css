@@ -848,15 +848,29 @@
             white-space: nowrap;
         }
 
-        /* Make sidepanel scrollable with sticky header support */
+        /* Right panel: bounded to the viewport like .main-content so a docked
+           page scrolls inside the dock instead of stretching the layout grid
+           (2026-08-25 drive finding M3: the whole window scrolled ~5000px). */
         .sidepanel {
             grid-column: 3 / 4;
             background: var(--card-bg);
             padding: 0;
-            overflow-y: auto;
+            overflow: hidden;
             position: relative;
             display: flex;
             flex-direction: column;
+            height: 100%;
+            max-height: calc(100vh - 56px);
+            min-height: 0;
+        }
+
+        /* A docked page scrolls inside the dock: its .tab-content is the scroll
+           container, never the window (finding M3). */
+        .dock-native > .tab-content {
+            overflow-y: auto;
+            flex: 1 1 auto;
+            min-height: 0;
+            height: 0;
         }
 
         .sidepanel-shell {

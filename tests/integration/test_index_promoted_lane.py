@@ -144,6 +144,53 @@ async def test_index_search_and_delete_on_promoted_lane(client: AsyncClient) -> 
             assert res.status_code == 200, res.text
             assert res.json()["matches"], legs
 
+        # A NON-forced re-index of an already indexed corpus must rebuild through
+        # staging and promote (2026-08-25 drive finding M5: it returned cached
+        # stats without writing the staging corpus and the promotion failed with
+        # "Staging corpus not found", leaving a permanent error run).
+        reindex = await client.post(
+            "/api/index",
+            json={"corpus_id": corpus_id, "repo_path": str(_CORPUS_PATH), "force_reindex": False},
+        )
+        assert reindex.status_code == 200, reindex.text
+        final_reindex = await _wait_for_index(client, corpus_id)
+        assert final_reindex["status"] == "complete", final_reindex
+        assert final_reindex.get("error") in (None, ""), final_reindex
+        assert await pg.count_chunks(corpus_id) == chunk_rows
+        restatus = await qdrant.status(corpus_id)
+        assert restatus is not None and restatus.points == chunk_rows
+        latest_run = await client.get(f"/api/index/{corpus_id}/runs/latest")
+        assert latest_run.status_code == 200, latest_run.text
+        assert latest_run.json()["status"] == "complete", latest_run.json()
+        assert latest_run.json().get("error") in (None, ""), latest_run.json()
+        after_reindex = await client.post("/api/search", json={**body, "cache_mode": "bypass"})
+        assert after_reindex.status_code == 200 and after_reindex.json()["matches"], after_reindex.text
+
+        # Retrieval request/latency metrics are measured on the shared fusion lane,
+        # so chat retrieval counts exactly like /api/search (finding M9: chat never
+        # incremented them and the on-call p95 rendered NaN).
+        m0 = await client.get("/metrics")
+        reqs0 = _metric_value(m0.text, "tribrid_search_requests_total")
+        lat0 = _metric_value(m0.text, "tribrid_search_latency_seconds_count")
+        counted_search = await client.post("/api/search", json={**body, "cache_mode": "bypass"})
+        assert counted_search.status_code == 200, counted_search.text
+        chat = await client.post(
+            "/api/chat",
+            json={
+                "message": "How often is the salinity sensor calibrated?",
+                "corpus_id": corpus_id,
+                "sources": {"corpus_ids": [corpus_id]},
+                "stream": False,
+                "cache_mode": "bypass",
+            },
+        )
+        # LiteLLM is disabled in this corpus config, so generation fails closed with
+        # the typed 503 -- after retrieval ran on the fusion lane.
+        assert chat.status_code in (200, 503), chat.text
+        m1 = await client.get("/metrics")
+        assert _metric_value(m1.text, "tribrid_search_requests_total") == pytest.approx(reqs0 + 2.0)
+        assert _metric_value(m1.text, "tribrid_search_latency_seconds_count") == pytest.approx(lat0 + 2.0)
+
         stats = await client.get("/api/index/stats", params={"corpus_id": corpus_id})
         assert stats.status_code == 200, stats.text
         storage = stats.json()["storage_breakdown"]

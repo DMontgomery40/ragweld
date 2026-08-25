@@ -35,6 +35,7 @@ from server.models.tribrid_config_model import (
     ConfigRegistryResponse,
     CorpusScope,
     MCPHTTPTransportStatus,
+    MCPToolInfo,
     MCPRagSearchResponse,
     MCPRagSearchResult,
     MCPStatusResponse,
@@ -646,6 +647,7 @@ async def mcp_status(request: Request) -> MCPStatusResponse:
     details: list[str] = []
     python_stdio_available = False
     python_http: MCPHTTPTransportStatus | None = None
+    tools: list[MCPToolInfo] = []
 
     try:
         python_stdio_available = importlib.util.find_spec("mcp") is not None
@@ -674,6 +676,12 @@ async def mcp_status(request: Request) -> MCPStatusResponse:
                     path=path,
                     running=True,
                 )
+                from server.mcp.server import get_mcp_server
+
+                tools = [
+                    MCPToolInfo(name=str(tool.name), description=str(tool.description or ""))
+                    for tool in await get_mcp_server().list_tools()
+                ]
                 details.append(
                     f"Python HTTP MCP transport is enabled and mounted at {cfg.mcp.mount_path} "
                     f"(connect to http://{host}:{port}{path})."
@@ -692,6 +700,7 @@ async def mcp_status(request: Request) -> MCPStatusResponse:
         node_http=None,
         python_stdio_available=python_stdio_available,
         details=details,
+        tools=tools,
     )
 
 

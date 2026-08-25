@@ -477,6 +477,13 @@ class MCPHTTPTransportStatus(BaseModel):
     running: bool = Field(description="Whether the transport is reachable/responding.")
 
 
+class MCPToolInfo(BaseModel):
+    """One tool registered on the embedded MCP server."""
+
+    name: str = Field(description="Tool name as advertised to MCP clients.")
+    description: str = Field(default="", description="Tool description as advertised to MCP clients.")
+
+
 class MCPStatusResponse(BaseModel):
     """Status of MCP transports built into TriBridRAG."""
 
@@ -498,6 +505,10 @@ class MCPStatusResponse(BaseModel):
     details: list[str] = Field(
         default_factory=list,
         description="Human-readable diagnostic details (best-effort).",
+    )
+    tools: list[MCPToolInfo] = Field(
+        default_factory=list,
+        description="Tools registered on the embedded Streamable HTTP server (empty when the transport is disabled).",
     )
 
 
@@ -1612,6 +1623,33 @@ class ObservabilityIncidentsResponse(BaseModel):
     critical_count: int = Field(default=0, ge=0, description="Critical incident count in this payload.")
 
 
+class ObservabilityAlertRule(BaseModel):
+    """One alerting rule as Prometheus currently evaluates it."""
+
+    group: str = Field(description="Rule group name from the Prometheus rules file.")
+    name: str = Field(description="Alert name.")
+    state: str = Field(description="Prometheus rule state: inactive, pending, or firing.")
+    severity: str | None = Field(default=None, description="severity label on the rule, when set.")
+    query: str = Field(description="PromQL expression the rule evaluates.")
+    duration_seconds: float = Field(default=0.0, ge=0.0, description="'for' duration before the alert fires.")
+    summary: str | None = Field(default=None, description="summary annotation, when set.")
+    description: str | None = Field(default=None, description="description annotation, when set.")
+    health: str = Field(default="unknown", description="Prometheus rule health: ok, err, or unknown.")
+    active_alerts: int = Field(default=0, ge=0, description="Alert instances currently pending or firing for this rule.")
+
+
+class ObservabilityAlertRulesResponse(BaseModel):
+    """Alerting rules read live from Prometheus for the Monitoring surface."""
+
+    ok: bool = Field(default=True, description="False when Prometheus is unconfigured or unreachable.")
+    source_url: str | None = Field(default=None, description="Prometheus base URL the rules were read from.")
+    reachable: bool = Field(default=False, description="Whether the Prometheus rules API answered.")
+    error: str | None = Field(default=None, description="Operator-facing reason when rules could not be read.")
+    rules: list[ObservabilityAlertRule] = Field(default_factory=list, description="Alerting rules, firing first.")
+    firing_count: int = Field(default=0, ge=0)
+    pending_count: int = Field(default=0, ge=0)
+
+
 class ObservabilityMetricDelta(BaseModel):
     """Current/previous metric values and their delta."""
 
@@ -2468,8 +2506,34 @@ class BenchmarkResult(BaseModel):
     latency_ms: float = Field(default=0.0, ge=0.0, description="End-to-end latency for this model in milliseconds.")
     breakdown_ms: dict[str, float] = Field(default_factory=dict, description="Timing breakdown by phase.")
     error: str | None = Field(default=None, description="Error string when the model call failed.")
+    context_chunks_used: int = Field(
+        default=0,
+        ge=0,
+        description="Retrieved chunks that fit this model's context window and were sent with the prompt.",
+    )
     model_id: str | None = Field(default=None, description="Optional resolved model id.")
     model_name: str | None = Field(default=None, description="Optional human-readable model name.")
+
+
+class BenchmarkRetrieval(BaseModel):
+    """How a benchmark run grounded its prompt before generation."""
+
+    corpus_id: str | None = Field(
+        default=None,
+        description="Corpus the prompt was retrieved against; null when the run had no corpus scope.",
+        validation_alias=AliasChoices("corpus_id", "repo_id"),
+        serialization_alias="corpus_id",
+    )
+    grounded: bool = Field(description="True when at least one retrieved chunk was offered to every model.")
+    chunk_count: int = Field(default=0, ge=0, description="Chunks retrieved through the tri-brid lane for this prompt.")
+    reason: str | None = Field(
+        default=None,
+        description="Why no retrieval context was available (no corpus scope, no matches); null when grounded.",
+    )
+    source_paths: list[str] = Field(
+        default_factory=list,
+        description="Distinct source file paths of the retrieved chunks, best rank first.",
+    )
 
 
 class BenchmarkRun(BaseModel):
@@ -2487,6 +2551,10 @@ class BenchmarkRun(BaseModel):
     started_at_ms: int = Field(default=0, ge=0, description="Run start timestamp in milliseconds since epoch.")
     ended_at_ms: int = Field(default=0, ge=0, description="Run completion timestamp in milliseconds since epoch.")
     results: list[BenchmarkResult] = Field(default_factory=list, description="Per-model benchmark results.")
+    retrieval: BenchmarkRetrieval | None = Field(
+        default=None,
+        description="Grounding used for this run; null on records persisted before retrieval-backed benchmarks.",
+    )
     input_bundle_id: str | None = Field(default=None, description="Current bundle id captured before the run started.")
     bundle_id: str | None = Field(default=None, description="Bundle id after attaching this run to lineage.")
     lineage_ref: LineageRef | None = Field(default=None, description="Immutable benchmark run version reference.")
@@ -4638,18 +4706,18 @@ class FusionConfig(BaseModel):
     )
 
     @model_validator(mode='after')
-    def validate_weights_sum_to_one(self) -> Self:
-        """Normalize tri-brid weights to sum to 1.0."""
+    def validate_weights_not_all_zero(self) -> Self:
+        """Reject an all-zero weight set.
+
+        Weights are stored exactly as the operator typed them and normalized by
+        their sum at fusion time (``TriBridFusion.weighted_fusion``), so a
+        single-field edit never rewrites the other two fields.
+        """
         total = self.vector_weight + self.sparse_weight + self.graph_weight
         if total <= 0:
-            self.vector_weight = 0.4
-            self.sparse_weight = 0.3
-            self.graph_weight = 0.3
-            return self
-        if not (0.99 <= total <= 1.01):
-            self.vector_weight = self.vector_weight / total
-            self.sparse_weight = self.sparse_weight / total
-            self.graph_weight = self.graph_weight / total
+            raise ValueError(
+                "fusion weights must not all be zero: vector_weight + sparse_weight + graph_weight must be > 0"
+            )
         return self
 
 
@@ -5341,6 +5409,11 @@ class TracingConfig(BaseModel):
     mimir_base_url: str = Field(
         default="",
         description="Grafana Mimir base URL used for metrics backend status checks"
+    )
+
+    prometheus_base_url: str = Field(
+        default="",
+        description="Prometheus base URL used for the alert-rule feed and operator deep links (Prometheus scrapes and remote-writes to Mimir)"
     )
 
     pyroscope_base_url: str = Field(
@@ -6813,6 +6886,7 @@ class TriBridConfig(BaseModel):
             'TEMPO_BASE_URL': self.tracing.tempo_base_url,
             'ALLOY_BASE_URL': self.tracing.alloy_base_url,
             'MIMIR_BASE_URL': self.tracing.mimir_base_url,
+            'PROMETHEUS_BASE_URL': self.tracing.prometheus_base_url,
             'PYROSCOPE_BASE_URL': self.tracing.pyroscope_base_url,
             'FARO_BASE_URL': self.tracing.faro_base_url,
             'OPENCOST_BASE_URL': self.tracing.opencost_base_url,
@@ -7197,6 +7271,7 @@ class TriBridConfig(BaseModel):
                 tempo_base_url=data.get('TEMPO_BASE_URL', ''),
                 alloy_base_url=data.get('ALLOY_BASE_URL', ''),
                 mimir_base_url=data.get('MIMIR_BASE_URL', ''),
+                prometheus_base_url=data.get('PROMETHEUS_BASE_URL', ''),
                 pyroscope_base_url=data.get('PYROSCOPE_BASE_URL', ''),
                 faro_base_url=data.get('FARO_BASE_URL', ''),
                 opencost_base_url=data.get('OPENCOST_BASE_URL', ''),

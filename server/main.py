@@ -298,25 +298,6 @@ async def observability_middleware(
         return response
 
 
-@app.middleware("http")
-async def metrics_middleware(
-    request: Request, call_next: Callable[[Request], Awaitable[Response]]
-) -> Response:
-    # Keep middleware minimal: only measure /api/search to avoid high-cardinality labels.
-    if request.url.path == "/api/search":
-        from server.observability.metrics import SEARCH_ERRORS_TOTAL, SEARCH_LATENCY_SECONDS
-
-        with SEARCH_LATENCY_SECONDS.time():
-            try:
-                response = await call_next(request)
-                if response.status_code >= 500:
-                    SEARCH_ERRORS_TOTAL.inc()
-                return response
-            except Exception:
-                SEARCH_ERRORS_TOTAL.inc()
-                raise
-    return await call_next(request)
-
 app.include_router(health_router, prefix="/api")
 app.include_router(config_router, prefix="/api")
 app.include_router(repos_router, prefix="/api")

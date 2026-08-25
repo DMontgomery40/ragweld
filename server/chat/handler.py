@@ -75,7 +75,7 @@ def _coerce_generation_result(result: Any) -> GenerationResult:
     )
 
 
-def _fit_context_to_route(
+def fit_context_to_route(
     *,
     config: TriBridConfig,
     route_model: str,
@@ -403,7 +403,7 @@ async def chat_once(
     if resolved_route is not None:
         # No route means generation fails closed with its own typed 503; nothing to budget.
         rag_chunks, recall_chunks, context_dropped = await asyncio.to_thread(
-            _fit_context_to_route,
+            fit_context_to_route,
             config=config,
             route_model=str(resolved_route.model),
             user_message=request.message,
@@ -720,7 +720,7 @@ async def chat_stream(
     if resolved_route is not None:
         # No route means generation fails closed with its own typed 503; nothing to budget.
         rag_chunks, recall_chunks, context_dropped = await asyncio.to_thread(
-            _fit_context_to_route,
+            fit_context_to_route,
             config=config,
             route_model=str(resolved_route.model),
             user_message=request.message,

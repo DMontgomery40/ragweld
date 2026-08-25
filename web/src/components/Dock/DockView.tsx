@@ -61,7 +61,13 @@ export function DockView({ target }: DockViewProps) {
   return (
     <div
       data-testid="dock-native"
+      className="dock-native"
       style={{
+        // Column flex with a definite height so a docked page's `.tab-content`
+        // (flex: 1; height: 0; overflow-y: auto) is its own scroll container
+        // exactly as in the main pane (2026-08-25 finding M3).
+        display: 'flex',
+        flexDirection: 'column',
         height: '100%',
         minHeight: 0,
         overflow: 'hidden',

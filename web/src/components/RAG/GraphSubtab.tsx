@@ -231,26 +231,31 @@ export function GraphSubtab() {
     return () => window.clearTimeout(handle);
   }, [viewMode, vizGraphData.nodes.length, vizGraphData.links.length]);
 
-  // Fullscreen canvas resize observer
+  // Fullscreen canvas sizing: observe the canvas element itself so the graph
+  // follows the modal's real size (the modal scales in over 200ms; a one-shot
+  // measurement mid-transition left the canvas at thumbnail size — G3).
   useEffect(() => {
-    if (!isFullscreen) return;
+    if (!isFullscreen) {
+      setFullscreenSize({ w: 0, h: 0 });
+      return;
+    }
     const el = fullscreenCanvasRef.current;
     if (!el) return;
 
     const update = () => {
-      const rect = el.getBoundingClientRect();
-      setFullscreenSize({
-        w: Math.max(1, Math.floor(rect.width)),
-        h: Math.max(1, Math.floor(rect.height)),
-      });
+      // Layout size, not getBoundingClientRect: the modal opens with a
+      // scale(0.95) transform and a transformed rect would size the canvas 5% short.
+      const w = Math.max(1, Math.floor(el.clientWidth));
+      const h = Math.max(1, Math.floor(el.clientHeight));
+      setFullscreenSize((prev) => (prev.w === w && prev.h === h ? prev : { w, h }));
     };
 
-    // Small delay to let CSS transition complete
-    const initialTimeout = window.setTimeout(update, 50);
+    update();
+    const observer = new ResizeObserver(() => update());
+    observer.observe(el);
     window.addEventListener('resize', update);
-
     return () => {
-      window.clearTimeout(initialTimeout);
+      observer.disconnect();
       window.removeEventListener('resize', update);
     };
   }, [isFullscreen]);
@@ -269,6 +274,18 @@ export function GraphSubtab() {
   }, [isFullscreen, fullscreenGraphData.nodes.length, fullscreenGraphData.links.length]);
 
   // Fullscreen open/close handlers with animation
+  useEffect(() => {
+    if (!isFullscreen || fullscreenSize.w <= 1 || fullscreenSize.h <= 1) return;
+    const handle = window.setTimeout(() => {
+      try {
+        fullscreenFgRef.current?.zoomToFit?.(400, 80);
+      } catch {
+        // no-op
+      }
+    }, 300);
+    return () => window.clearTimeout(handle);
+  }, [isFullscreen, fullscreenSize.w, fullscreenSize.h]);
+
   const handleOpenFullscreen = useCallback(() => {
     setFullscreenAnimating(true);
     setIsFullscreen(true);
@@ -359,7 +376,8 @@ export function GraphSubtab() {
       // Draw label for important nodes (only when zoomed in enough)
       if (importantNodeIds.has(entity.entity_id) && globalScale >= 0.4) {
         const label = entity.name || entity.entity_id;
-        const fontSize = Math.max(10, 12 / globalScale);
+        // Keep hub labels readable but never poster-sized when zoomed out.
+        const fontSize = Math.min(26, Math.max(10, 12 / globalScale));
         ctx.font = `600 ${fontSize}px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif`;
 
         // Background pill for readability
@@ -726,7 +744,10 @@ export function GraphSubtab() {
               );
             })}
             {!communities?.length && (
-              <div style={{ fontSize: '12px', color: 'var(--fg-muted)' }}>No communities found.</div>
+              <div style={{ fontSize: '12.5px', color: 'var(--fg-muted)', lineHeight: 1.5 }} data-testid="graph-communities-empty">
+                No communities: communities are groups of entities linked by relationships, and this graph has no
+                linked entities yet (run a Force re-index with the semantic knowledge graph enabled).
+              </div>
             )}
           </div>
         </div>
@@ -992,6 +1013,7 @@ export function GraphSubtab() {
                     ['org', '#0ea5e9'],
                     ['location', '#10b981'],
                     ['event', '#eab308'],
+                    ['concept', '#94a3b8'],
                   ].map(([label, color]) => (
                     <span key={label as string} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
                       <span style={{ width: '8px', height: '8px', borderRadius: '999px', background: color as string, display: 'inline-block' }} />
@@ -1112,9 +1134,18 @@ export function GraphSubtab() {
             aria-label="Fullscreen graph visualization"
             data-testid="graph-fullscreen-overlay"
           >
-            {/* Modal container - 85% of viewport */}
+            {/* Modal container - 85% of viewport. The visualizer paints white
+                edges and dark label pills, so the modal keeps the dark token
+                set under every theme (Light theme made the edges invisible). */}
             <div
               style={{
+                ['--bg' as string]: '#09090b',
+                ['--bg-elev1' as string]: '#0f0f12',
+                ['--bg-elev2' as string]: '#18181b',
+                ['--line' as string]: '#3f3f46',
+                ['--fg' as string]: '#e4e4e7',
+                ['--fg-muted' as string]: '#a1a1aa',
+                color: '#e4e4e7',
                 width: '85vw',
                 height: '85vh',
                 maxWidth: '1800px',
@@ -1158,27 +1189,23 @@ export function GraphSubtab() {
                 </div>
 
                 <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-                  {/* Legend */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px', fontSize: '11px' }}>
-                    {[
-                      { type: 'function', color: '#22c55e' },
-                      { type: 'class', color: '#60a5fa' },
-                      { type: 'module', color: '#fbbf24' },
-                      { type: 'variable', color: '#a78bfa' },
-                      { type: 'concept', color: '#94a3b8' },
-                    ].map(({ type, color }) => (
-                      <div key={type} style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                        <div
-                          style={{
-                            width: '10px',
-                            height: '10px',
-                            borderRadius: '50%',
-                            background: color,
-                          }}
-                        />
-                        <span style={{ color: 'var(--fg-muted)' }}>{type}</span>
-                      </div>
-                    ))}
+                  {/* Legend: the entity types present in this graph, in the visualizer's colours */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px', fontSize: '12px', flexWrap: 'wrap' }} data-testid="graph-fullscreen-legend">
+                    {Array.from(new Set(filteredEntities.map((e) => e.entity_type)))
+                      .sort()
+                      .map((type) => (
+                        <div key={type} style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                          <div
+                            style={{
+                              width: '10px',
+                              height: '10px',
+                              borderRadius: '50%',
+                              background: nodeColor({ entity_id: '', name: '', entity_type: type } as Entity),
+                            }}
+                          />
+                          <span style={{ color: 'var(--fg-muted)' }}>{type}</span>
+                        </div>
+                      ))}
                   </div>
 
                   {/* Close button */}
@@ -1238,6 +1265,15 @@ export function GraphSubtab() {
                     nodeLabel={(n: any) => formatEntityLabel(n as Entity)}
                     linkLabel={(l: any) => String((l as Relationship).relation_type || '')}
                     nodeCanvasObject={fullscreenNodeCanvasObject}
+                    nodePointerAreaPaint={(node: any, color: string, ctx: CanvasRenderingContext2D) => {
+                      // Hit area must match the painted circle (custom painters get no default hit shape).
+                      const degree = (node as NodeWithDegree).__degree || 0;
+                      const radius = 4 * Math.min(2.5, 1 + degree * 0.15) + 2;
+                      ctx.fillStyle = color;
+                      ctx.beginPath();
+                      ctx.arc(node.x ?? 0, node.y ?? 0, radius, 0, 2 * Math.PI);
+                      ctx.fill();
+                    }}
                     linkColor={() => 'rgba(255, 255, 255, 0.12)'}
                     linkWidth={1.5}
                     backgroundColor="rgba(0,0,0,0)"

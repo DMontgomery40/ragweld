@@ -2,7 +2,6 @@
 export { useHealthStore } from './useHealthStore';
 export { useDockerStore } from './useDockerStore';
 export { useConfigStore } from './useConfigStore';
-export { useAlertThresholdsStore } from './useAlertThresholdsStore';
 export { useRepoStore, useActiveRepo, useRepos, useRepoLoading, useRepoInitialized } from './useRepoStore';
 export { useTooltipStore } from './useTooltipStore';
 export { useUIStore } from './useUIStore';

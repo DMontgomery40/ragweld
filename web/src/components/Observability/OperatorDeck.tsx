@@ -652,6 +652,22 @@ export function ObservabilityOperatorDeck({
         }
 
         .obs-deck-shell {
+          /* The deck is always painted on its own dark gradient, so its text
+             tokens stay the dark-palette values under the Light theme as well
+             (2026-08-25 drive finding M4: title/chips/buttons flipped to ~1.2:1). */
+          --fg: #e4e4e7;
+          --fg-muted: #a1a1aa;
+          --line: #3f3f46;
+          --bg: #09090b;
+          --bg-elev1: #0f0f12;
+          --bg-elev2: #18181b;
+          --card-bg: #0f0f12;
+          --panel: #0f0f12;
+          --code-bg: #111114;
+          --chip-bg: #18181b;
+          --link: #94a3b8;
+          --accent-contrast: #ffffff;
+          color: var(--fg);
           position: relative;
           display: flex;
           flex-direction: column;

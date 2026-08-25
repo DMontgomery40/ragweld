@@ -17,7 +17,7 @@ async def test_run_benchmark_clamps_invalid_max_concurrency_to_avoid_deadlock() 
 
     payload = await asyncio.wait_for(
         run_benchmark(
-            prompt="ping",
+            prompt="How often is the salinity sensor calibrated?",
             models=["litellm:ragweld-local"],
             config=cfg,
         ),
@@ -43,7 +43,7 @@ async def test_run_benchmark_saves_relative_results_path_from_repo_root(tmp_path
         os.chdir(other_cwd)
         payload = await asyncio.wait_for(
             run_benchmark(
-                prompt="ping",
+                prompt="How often is the salinity sensor calibrated?",
                 models=["litellm:ragweld-local"],
                 config=cfg,
             ),

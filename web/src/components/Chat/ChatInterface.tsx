@@ -1137,17 +1137,49 @@ export function ChatInterface({ onTraceUpdate }: ChatInterfaceProps) {
     };
   }, [loadChatHistory]);
 
+  // Default sources for a new thread: the configured defaults (recall memory)
+  // plus the app's active corpus, so a first question goes to the corpus the
+  // operator is looking at (2026-08-25 drive finding M6: Chat opened scoped to a
+  // stale thread's corpus while a different corpus was active).
+  const defaultSourcesForActiveCorpus = useCallback((): ActiveSources => {
+    const configured = (config?.chat?.default_corpus_ids ?? ['recall_default']).map(String);
+    const recallEnabled = config?.chat?.recall?.enabled ?? true;
+    const recallId = String(config?.chat?.recall?.default_corpus_id || 'recall_default');
+    const ids = configured.filter((id) => id !== recallId || recallEnabled);
+    const corpus = String(activeRepo || '').trim();
+    if (corpus && !ids.includes(corpus)) ids.push(corpus);
+    return { corpus_ids: ids };
+  }, [activeRepo, config]);
+  const defaultSourcesRef = useRef(defaultSourcesForActiveCorpus);
+  useEffect(() => {
+    defaultSourcesRef.current = defaultSourcesForActiveCorpus;
+  }, [defaultSourcesForActiveCorpus]);
+
   useEffect(() => {
     if (!config) return;
-    const defaults = config.chat?.default_corpus_ids ?? ['recall_default'];
     if (!sessionsLoadedRef.current) return;
     setActiveSources((current) => {
       if (Array.isArray(current?.corpus_ids) && current.corpus_ids.length > 0) return current;
-      const next = { corpus_ids: defaults };
+      const next = defaultSourcesForActiveCorpus();
       activeSourcesRef.current = next;
       return next;
     });
-  }, [config]);
+  }, [config, defaultSourcesForActiveCorpus]);
+
+  // A thread that has not been used yet follows the active corpus when it changes.
+  useEffect(() => {
+    if (!config || !sessionsLoadedRef.current) return;
+    if (messages.length > 0) return;
+    const corpus = String(activeRepo || '').trim();
+    if (!corpus) return;
+    setActiveSources((current) => {
+      const ids = (current?.corpus_ids ?? []).map(String);
+      if (ids.includes(corpus)) return current;
+      const next = defaultSourcesForActiveCorpus();
+      activeSourcesRef.current = next;
+      return next;
+    });
+  }, [activeRepo, config, defaultSourcesForActiveCorpus, messages.length]);
 
   useEffect(() => {
     if (!config) return;
@@ -1605,7 +1637,7 @@ export function ChatInterface({ onTraceUpdate }: ChatInterfaceProps) {
       title: 'New chat',
       messages: [],
       modelOverride: modelOverrideRef.current,
-      sources: activeSourcesRef.current || defaultChatSources(),
+      sources: defaultSourcesRef.current(),
       chatHistoryMax,
     });
     const nextConversationId = String(session.conversation_id || '').trim();
@@ -1641,7 +1673,7 @@ export function ChatInterface({ onTraceUpdate }: ChatInterfaceProps) {
           title: 'New chat',
           messages: [],
           modelOverride: modelOverrideRef.current,
-          sources: activeSourcesRef.current || defaultChatSources(),
+          sources: defaultSourcesRef.current(),
           chatHistoryMax,
         }),
       ];

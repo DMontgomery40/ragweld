@@ -1,379 +1,219 @@
 // TriBridRAG - Monitoring Subtab Component
-// Grafana metrics display and alert configuration
+// Live alert rules (as Prometheus evaluates them) + Grafana/Prometheus deep links.
+//
+// The former "alert thresholds" form posted to /api/monitoring/alert-thresholds,
+// a route that never existed (2026-08-25 drive finding M10); the real alert
+// configuration is infra/prometheus-rules.yml, read back here from Prometheus.
 
-import { useState, useEffect } from 'react';
-import { useAlertThresholdsStore, useAlertThresholdField } from '@/stores/useAlertThresholdsStore';
+import { useCallback, useEffect, useState } from 'react';
+import { apiClient, api } from '@/api/client';
+import { useConfigField } from '@/hooks/useConfig';
 import { TooltipIcon } from '@/components/ui/TooltipIcon';
 import { ObservabilityOperatorDeck } from '@/components/Observability/OperatorDeck';
+import type { ObservabilityAlertRule, ObservabilityAlertRulesResponse } from '@/types/generated';
+
+function stateTone(state: string): { fg: string; label: string } {
+  if (state === 'firing') return { fg: 'var(--err)', label: 'FIRING' };
+  if (state === 'pending') return { fg: 'var(--warn)', label: 'PENDING' };
+  return { fg: 'var(--ok)', label: 'OK' };
+}
+
+function formatDuration(seconds: number): string {
+  if (!seconds) return 'immediate';
+  if (seconds % 3600 === 0) return `${seconds / 3600}h`;
+  if (seconds % 60 === 0) return `${seconds / 60}m`;
+  return `${seconds}s`;
+}
+
+function normalizeBase(url: string): string {
+  return String(url || '').trim().replace(/\/$/, '');
+}
+
+function AlertRuleRow({ rule }: { rule: ObservabilityAlertRule }) {
+  const tone = stateTone(rule.state);
+  return (
+    <tr data-testid={`alert-rule-${rule.name}`} data-state={rule.state}>
+      <td style={{ padding: '8px 10px', whiteSpace: 'nowrap' }}>
+        <span style={{ color: tone.fg, fontWeight: 700, fontSize: '12px' }}>{tone.label}</span>
+        {(rule.active_alerts ?? 0) > 0 ? (
+          <span style={{ marginLeft: 6, fontSize: '11.5px', color: 'var(--fg-muted)' }}>×{rule.active_alerts}</span>
+        ) : null}
+      </td>
+      <td style={{ padding: '8px 10px' }}>
+        <div style={{ fontWeight: 700, color: 'var(--fg)', fontSize: '13px' }}>{rule.name}</div>
+        {rule.summary ? <div style={{ fontSize: '12px', color: 'var(--fg-muted)', marginTop: 2 }}>{rule.summary}</div> : null}
+      </td>
+      <td style={{ padding: '8px 10px', whiteSpace: 'nowrap', fontSize: '12px', color: 'var(--fg)' }}>{rule.severity || '—'}</td>
+      <td style={{ padding: '8px 10px', whiteSpace: 'nowrap', fontSize: '12px', color: 'var(--fg)' }}>{formatDuration(rule.duration_seconds ?? 0)}</td>
+      <td style={{ padding: '8px 10px', fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--fg)', wordBreak: 'break-all' }}>
+        {rule.query}
+      </td>
+    </tr>
+  );
+}
 
 export function MonitoringSubtab() {
-  const [actionMessage, setActionMessage] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
-  const loadThresholds = useAlertThresholdsStore((state) => state.load);
-  const thresholdsLoaded = useAlertThresholdsStore((state) => state.loaded);
-  const thresholdsLoading = useAlertThresholdsStore((state) => state.loading && !state.loaded);
-  const saveThresholds = useAlertThresholdsStore((state) => state.save);
-  const [errorRateThreshold, setErrorRateThreshold] = useAlertThresholdField('error_rate_threshold_percent');
-  const [latencyP99, setLatencyP99] = useAlertThresholdField('request_latency_p99_seconds');
-  const [timeoutErrors, setTimeoutErrors] = useAlertThresholdField('timeout_errors_per_5min');
-  const [rateLimitErrors, setRateLimitErrors] = useAlertThresholdField('rate_limit_errors_per_5min');
-  const [endpointCallFreq, setEndpointCallFreq] = useAlertThresholdField('endpoint_call_frequency_per_minute');
-  const [sustainedDuration, setSustainedDuration] = useAlertThresholdField('endpoint_frequency_sustained_minutes');
-  const [cohereRerankCalls, setCohereRerankCalls] = useAlertThresholdField('cohere_rerank_calls_per_minute');
+  const [grafanaBaseUrl] = useConfigField<string>('ui.grafana_base_url', '');
+  const [prometheusBaseUrl] = useConfigField<string>('tracing.prometheus_base_url', '');
+  const [alertmanagerBaseUrl] = useConfigField<string>('tracing.alertmanager_base_url', '');
+  const [rules, setRules] = useState<ObservabilityAlertRulesResponse | null>(null);
+  const ruleRows: ObservabilityAlertRule[] = rules?.rules ?? [];
+  const [rulesError, setRulesError] = useState<string | null>(null);
+  const [rulesLoading, setRulesLoading] = useState(true);
+  const [lastLoaded, setLastLoaded] = useState<Date | null>(null);
+
+  const loadRules = useCallback(async () => {
+    setRulesLoading(true);
+    setRulesError(null);
+    try {
+      const { data } = await apiClient.get<ObservabilityAlertRulesResponse>(api('/observability/alert-rules'));
+      setRules(data);
+      setLastLoaded(new Date());
+    } catch (error) {
+      setRules(null);
+      setRulesError(error instanceof Error ? error.message : 'Failed to load alert rules');
+    } finally {
+      setRulesLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
-    if (!thresholdsLoaded) {
-      loadThresholds();
-    }
-  }, [thresholdsLoaded, loadThresholds]);
+    void loadRules();
+  }, [loadRules]);
 
-  async function saveAlertConfig() {
-    setSaving(true);
-    setActionMessage('Saving alert configuration...');
-    try {
-      const { updated, status } = await saveThresholds([
-        'error_rate_threshold_percent',
-        'request_latency_p99_seconds',
-        'timeout_errors_per_5min',
-        'rate_limit_errors_per_5min',
-        'endpoint_call_frequency_per_minute',
-        'endpoint_frequency_sustained_minutes',
-        'cohere_rerank_calls_per_minute',
-      ]);
-      if (status === 'ok') {
-        setActionMessage(`Alert configuration saved successfully! Updated ${updated} threshold(s).`);
-      } else {
-        setActionMessage('Failed to save alert configuration: backend returned an error.');
-      }
-    } catch (error: any) {
-      setActionMessage(`Error saving alert configuration: ${error.message ?? 'Unknown error'}`);
-    } finally {
-      setSaving(false);
-      setTimeout(() => setActionMessage(null), 3000);
-    }
-  }
-
-  if (thresholdsLoading) {
-    return (
-      <div style={{ padding: '20px', textAlign: 'center', color: 'var(--fg-muted)' }}>
-        Loading alert configuration...
-      </div>
-    );
-  }
+  const grafanaHref = normalizeBase(grafanaBaseUrl);
+  const prometheusHref = normalizeBase(prometheusBaseUrl);
+  const alertmanagerHref = normalizeBase(alertmanagerBaseUrl);
+  const linkStyle = (enabled: boolean, bg: string) => ({
+    background: enabled ? bg : 'var(--bg-elev2)',
+    color: enabled ? 'var(--accent-contrast)' : 'var(--fg-muted)',
+    border: enabled ? 'none' : '1px solid var(--line)',
+    fontWeight: 700,
+    padding: '10px',
+    borderRadius: '6px',
+    textAlign: 'center' as const,
+    textDecoration: 'none',
+    fontSize: '13px',
+    pointerEvents: enabled ? ('auto' as const) : ('none' as const),
+  });
 
   return (
     <div className="settings-section">
-      {/* Action message */}
-      {actionMessage && (
-        <div style={{
-          padding: '12px',
-          background: 'var(--bg-elev2)',
-          border: '1px solid var(--line)',
-          borderRadius: '6px',
-          marginBottom: '16px',
-          fontSize: '12px',
-          color: 'var(--fg)'
-        }}>
-          {actionMessage}
-        </div>
-      )}
+      <ObservabilityOperatorDeck />
 
-      <ObservabilityOperatorDeck
-        title="Infrastructure Observability Deck"
-        subtitle="The operator-facing integration view for Grafana, traces, logs, gateway routing, workflow truth, and retrieval execution. This belongs here because production incidents are debugged visually, not by staring at Python alone."
-      />
-
-      <h2>Performance & Reliability Alerts</h2>
-      <p className="small" style={{ marginBottom: '24px' }}>
-        Set thresholds for error rates, latency, and timeout incidents.
-      </p>
-
-      {/* Performance Alerts */}
       <div
         style={{
           background: 'var(--bg-elev2)',
           border: '1px solid var(--line)',
           borderRadius: '6px',
           padding: '20px',
-          marginBottom: '20px'
+          marginTop: '20px',
+          marginBottom: '20px',
         }}
+        data-testid="alert-rules-panel"
       >
-        <h3 style={{ marginTop: 0 }}>Performance Thresholds</h3>
-
-        <div className="input-row">
-          <div className="input-group">
-            <label>
-              Error Rate Threshold (%)
-              <TooltipIcon name="ERROR_RATE_THRESHOLD" />
-            </label>
-            <input
-              type="number"
-              value={errorRateThreshold}
-              onChange={(e) => setErrorRateThreshold(e.target.value)}
-              min="0.1"
-              max="50"
-              step="0.1"
-              style={{
-                width: '100%',
-                padding: '8px',
-                background: 'var(--input-bg)',
-                border: '1px solid var(--line)',
-                borderRadius: '4px',
-                color: 'var(--fg)'
-              }}
-            />
-            <p className="small" style={{ color: 'var(--fg-muted)', marginTop: '4px' }}>
-              Alert when error rate exceeds this percentage
-            </p>
-          </div>
-          <div className="input-group">
-            <label>
-              Latency P99 Threshold (s)
-              <TooltipIcon name="LATENCY_P99_THRESHOLD" />
-            </label>
-            <input
-              type="number"
-              value={latencyP99}
-              onChange={(e) => setLatencyP99(e.target.value)}
-              min="0.1"
-              max="60"
-              step="0.1"
-              style={{
-                width: '100%',
-                padding: '8px',
-                background: 'var(--input-bg)',
-                border: '1px solid var(--line)',
-                borderRadius: '4px',
-                color: 'var(--fg)'
-              }}
-            />
-            <p className="small" style={{ color: 'var(--fg-muted)', marginTop: '4px' }}>
-              Alert when 99th percentile latency exceeds this
-            </p>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+          <h3 style={{ margin: 0 }}>
+            Alert Rules <TooltipIcon name="PROMETHEUS_BASE_URL" />
+          </h3>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span style={{ fontSize: '12px', color: 'var(--fg-muted)' }}>
+              {lastLoaded ? `Read ${lastLoaded.toLocaleTimeString()}` : ''}
+            </span>
+            <button type="button" className="small-button" onClick={() => void loadRules()} disabled={rulesLoading}>
+              {rulesLoading ? 'Loading…' : '↻ Refresh'}
+            </button>
           </div>
         </div>
-
-        <div className="input-row">
-          <div className="input-group">
-            <label>
-              Timeout Errors Threshold
-              <TooltipIcon name="TIMEOUT_ERRORS_THRESHOLD" />
-            </label>
-            <input
-              type="number"
-              value={timeoutErrors}
-              onChange={(e) => setTimeoutErrors(e.target.value)}
-              min="1"
-              max="1000"
-              step="1"
-              style={{
-                width: '100%',
-                padding: '8px',
-                background: 'var(--input-bg)',
-                border: '1px solid var(--line)',
-                borderRadius: '4px',
-                color: 'var(--fg)'
-              }}
-            />
-            <p className="small" style={{ color: 'var(--fg-muted)', marginTop: '4px' }}>
-              Alert when timeout count exceeds this
-            </p>
-          </div>
-          <div className="input-group">
-            <label>
-              Rate Limit Errors Threshold
-              <TooltipIcon name="RATE_LIMIT_ERRORS_THRESHOLD" />
-            </label>
-            <input
-              type="number"
-              value={rateLimitErrors}
-              onChange={(e) => setRateLimitErrors(e.target.value)}
-              min="1"
-              max="1000"
-              step="1"
-              style={{
-                width: '100%',
-                padding: '8px',
-                background: 'var(--input-bg)',
-                border: '1px solid var(--line)',
-                borderRadius: '4px',
-                color: 'var(--fg)'
-              }}
-            />
-            <p className="small" style={{ color: 'var(--fg-muted)', marginTop: '4px' }}>
-              Alert when rate limit hits exceed this
-            </p>
-          </div>
-        </div>
-      </div>
-
-      {/* API Anomaly Alerts */}
-      <div
-        style={{
-          background: 'var(--bg-elev2)',
-          border: '1px solid var(--line)',
-          borderRadius: '6px',
-          padding: '20px',
-          marginBottom: '20px'
-        }}
-      >
-        <h3 style={{ marginTop: 0 }}>API Anomaly Alerts</h3>
-        <p className="small" style={{ marginBottom: '16px' }}>
-          Detect unusual API calling patterns that might indicate issues or loops.
+        <p className="small" style={{ marginTop: 8, marginBottom: 14 }}>
+          These are the alerting rules Prometheus is evaluating right now (source: <code>infra/prometheus-rules.yml</code>);
+          firing rules route to Alertmanager and appear in the incident feed above. Edit the rules file and reload Prometheus to
+          change thresholds.
         </p>
 
-        <div className="input-row">
-          <div className="input-group">
-            <label>
-              Endpoint Call Frequency
-              <TooltipIcon name="ENDPOINT_CALL_FREQUENCY" />
-            </label>
-            <input
-              type="number"
-              value={endpointCallFreq}
-              onChange={(e) => setEndpointCallFreq(e.target.value)}
-              min="1"
-              max="1000"
-              step="1"
-              style={{
-                width: '100%',
-                padding: '8px',
-                background: 'var(--input-bg)',
-                border: '1px solid var(--line)',
-                borderRadius: '4px',
-                color: 'var(--fg)'
-              }}
-            />
-            <p className="small" style={{ color: 'var(--fg-muted)', marginTop: '4px' }}>
-              Alert when a single endpoint gets called this frequently
-            </p>
+        {rulesError ? (
+          <div role="alert" style={{ color: 'var(--err)', fontSize: '13px' }} data-testid="alert-rules-error">
+            Failed to load alert rules: {rulesError}
           </div>
-          <div className="input-group">
-            <label>
-              Sustained Duration (min)
-              <TooltipIcon name="ENDPOINT_SUSTAINED_DURATION" />
-            </label>
-            <input
-              type="number"
-              value={sustainedDuration}
-              onChange={(e) => setSustainedDuration(e.target.value)}
-              min="1"
-              max="60"
-              step="1"
-              style={{
-                width: '100%',
-                padding: '8px',
-                background: 'var(--input-bg)',
-                border: '1px solid var(--line)',
-                borderRadius: '4px',
-                color: 'var(--fg)'
-              }}
-            />
-            <p className="small" style={{ color: 'var(--fg-muted)', marginTop: '4px' }}>
-              Duration threshold for sustained frequency alert
-            </p>
+        ) : null}
+        {rules && !rules.ok ? (
+          <div role="alert" style={{ color: 'var(--warn)', fontSize: '13px' }} data-testid="alert-rules-unavailable">
+            {rules.error}
           </div>
-        </div>
-
-        <div className="input-row">
-          <div className="input-group">
-            <label>
-              Cohere Rerank Calls/min
-              <TooltipIcon name="COHERE_RERANK_CALLS" />
-            </label>
-            <input
-              type="number"
-              value={cohereRerankCalls}
-              onChange={(e) => setCohereRerankCalls(e.target.value)}
-              min="1"
-              max="1000"
-              step="1"
-              style={{
-                width: '100%',
-                padding: '8px',
-                background: 'var(--input-bg)',
-                border: '1px solid var(--line)',
-                borderRadius: '4px',
-                color: 'var(--fg)'
-              }}
-            />
-            <p className="small" style={{ color: 'var(--fg-muted)', marginTop: '4px' }}>
-              Alert when Cohere reranking calls spike
-            </p>
+        ) : null}
+        {rules && rules.ok ? (
+          <div style={{ overflowX: 'auto' }}>
+            <div style={{ fontSize: '12.5px', color: 'var(--fg-muted)', marginBottom: 8 }} data-testid="alert-rules-summary">
+              {ruleRows.length} rule{ruleRows.length === 1 ? '' : 's'} · {rules.firing_count ?? 0} firing · {rules.pending_count ?? 0}{' '}
+              pending · read from <code>{rules.source_url}</code>
+            </div>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }} data-testid="alert-rules-table">
+              <thead>
+                <tr style={{ textAlign: 'left', color: 'var(--fg-muted)', fontSize: '11.5px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                  <th style={{ padding: '6px 10px' }}>State</th>
+                  <th style={{ padding: '6px 10px' }}>Rule</th>
+                  <th style={{ padding: '6px 10px' }}>Severity</th>
+                  <th style={{ padding: '6px 10px' }}>For</th>
+                  <th style={{ padding: '6px 10px' }}>Expression</th>
+                </tr>
+              </thead>
+              <tbody>
+                {ruleRows.map((rule) => (
+                  <AlertRuleRow key={`${rule.group}:${rule.name}`} rule={rule} />
+                ))}
+              </tbody>
+            </table>
           </div>
-          <div className="input-group"></div>
-        </div>
+        ) : null}
       </div>
 
-      {/* Grafana Metrics Display */}
       <div
         style={{
           background: 'var(--bg-elev2)',
           border: '1px solid var(--line)',
           borderRadius: '6px',
           padding: '20px',
-          marginBottom: '20px'
+          marginBottom: '20px',
         }}
       >
-        <h3 style={{ marginTop: 0 }}>Grafana Metrics</h3>
+        <h3 style={{ marginTop: 0 }}>Metrics Backends</h3>
         <p className="small" style={{ marginBottom: '16px' }}>
-          Access detailed metrics and dashboards via Grafana.
+          Links resolve from the configured base URLs (Grafana Config → Observability endpoints). A greyed link means that URL is
+          not configured.
         </p>
-
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px', marginBottom: '16px' }}>
-          <button
-            className="small-button"
-            onClick={() => window.open('http://127.0.0.1:3000', '_blank')}
-            style={{
-              background: 'var(--link)',
-              color: 'var(--accent-contrast)',
-              fontWeight: '600',
-              padding: '10px'
-            }}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px' }}>
+          <a
+            href={grafanaHref || undefined}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-disabled={!grafanaHref}
+            style={linkStyle(Boolean(grafanaHref), 'var(--link)')}
+            data-testid="open-grafana"
           >
-            Open Grafana Dashboard
-          </button>
-          <button
-            className="small-button"
-            onClick={() => window.open('http://127.0.0.1:9090', '_blank')}
-            style={{
-              background: 'var(--warn)',
-              color: 'var(--accent-contrast)',
-              fontWeight: '600',
-              padding: '10px'
-            }}
+            {grafanaHref ? 'Open Grafana' : 'Grafana URL not configured'}
+          </a>
+          <a
+            href={prometheusHref || undefined}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-disabled={!prometheusHref}
+            style={linkStyle(Boolean(prometheusHref), 'var(--warn)')}
+            data-testid="open-prometheus"
           >
-            Open Prometheus
-          </button>
-        </div>
-
-        <div style={{ fontSize: '12px', color: 'var(--fg-muted)' }}>
-          <p style={{ marginBottom: '8px' }}>Available Metrics:</p>
-          <ul style={{ marginLeft: '20px', lineHeight: '1.6' }}>
-            <li>Request latency (P50, P95, P99)</li>
-            <li>Error rates and counts</li>
-            <li>API token usage and costs</li>
-            <li>Retrieval quality scores</li>
-            <li>Container resource usage</li>
-          </ul>
+            {prometheusHref ? 'Open Prometheus' : 'Prometheus URL not configured'}
+          </a>
+          <a
+            href={alertmanagerHref || undefined}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-disabled={!alertmanagerHref}
+            style={linkStyle(Boolean(alertmanagerHref), 'var(--accent)')}
+            data-testid="open-alertmanager"
+          >
+            {alertmanagerHref ? 'Open Alertmanager' : 'Alertmanager URL not configured'}
+          </a>
         </div>
       </div>
-
-      {/* Save Button */}
-      <button
-        className="small-button"
-        onClick={saveAlertConfig}
-        disabled={saving}
-        style={{
-          width: '100%',
-          background: 'var(--accent)',
-          color: 'var(--accent-contrast)',
-          fontWeight: '600',
-          padding: '12px'
-        }}
-      >
-        {saving ? 'Saving...' : 'Save Alert Configuration'}
-      </button>
     </div>
   );
 }

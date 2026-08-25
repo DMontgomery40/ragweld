@@ -21,22 +21,23 @@ from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, ge
 # Core request/search metrics
 # --------------------------------------------------------------------------------------
 
-# Search endpoint request count.
+# Tri-brid retrieval request count, measured on the shared fusion lane so
+# /api/search, chat retrieval, benchmark grounding and MCP search all count.
 SEARCH_REQUESTS_TOTAL = Counter(
     "tribrid_search_requests_total",
-    "Total number of /api/search requests handled.",
+    "Total number of tri-brid retrieval requests (search, chat, benchmark, MCP).",
 )
 
-# Search endpoint error count (internal errors; HTTP validation errors are not counted here).
+# Retrieval error count (exceptions raised by the fusion lane; HTTP validation errors are not counted here).
 SEARCH_ERRORS_TOTAL = Counter(
     "tribrid_search_errors_total",
-    "Total number of /api/search internal errors.",
+    "Total number of tri-brid retrieval failures (search, chat, benchmark, MCP).",
 )
 
-# End-to-end search latency (seconds). Use histogram_quantile on *_bucket.
+# End-to-end retrieval latency (seconds) on the fusion lane. Use histogram_quantile on *_bucket.
 SEARCH_LATENCY_SECONDS = Histogram(
     "tribrid_search_latency_seconds",
-    "End-to-end /api/search latency in seconds.",
+    "End-to-end tri-brid retrieval latency in seconds (search, chat, benchmark, MCP).",
     buckets=(
         0.005,
         0.01,

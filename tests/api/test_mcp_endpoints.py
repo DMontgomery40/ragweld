@@ -20,6 +20,11 @@ async def test_mcp_status_and_streamable_http_tools() -> None:
             assert data["python_http"] is not None
             assert data["python_http"]["running"] is True
             assert data["python_http"]["path"] == "/mcp/"
+            # The status boundary advertises the registered tools so the MCP subtab
+            # can show them without a start/stop daemon that never existed (M12).
+            advertised = {tool["name"] for tool in data["tools"]}
+            assert {"search", "answer", "list_corpora"}.issubset(advertised)
+            assert all(str(tool["description"]).strip() for tool in data["tools"])
 
             from mcp import ClientSession
             from mcp.client.streamable_http import streamable_http_client

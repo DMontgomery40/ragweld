@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 
 import { ConfigFieldEditor, useConfigControlPlaneData, useConfigFieldSave } from './configControlPlane';
 
@@ -13,7 +14,14 @@ export function ConfigExplorerSubtab({ onOpenRaw }: ConfigExplorerSubtabProps) {
     await saveField(path, value);
     await reload();
   };
-  const [query, setQuery] = useState('');
+  // `?q=<dotted.path>` deep-links from the global settings search (Ctrl+K).
+  const location = useLocation();
+  const requestedPath = useMemo(() => new URLSearchParams(location.search || '').get('q') || '', [location.search]);
+  const [query, setQuery] = useState(requestedPath);
+  const highlightRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (requestedPath) setQuery(requestedPath);
+  }, [requestedPath]);
   const [integrationFilter, setIntegrationFilter] = useState('all');
   const [scopeFilter, setScopeFilter] = useState('all');
   const [impactFilter, setImpactFilter] = useState('all');
@@ -49,6 +57,14 @@ export function ConfigExplorerSubtab({ onOpenRaw }: ConfigExplorerSubtabProps) {
       return haystack.includes(needle);
     });
   }, [impactFilter, integrationFilter, query, registry, scopeFilter, surfaceFilter]);
+
+  useEffect(() => {
+    if (!requestedPath || loading) return;
+    const handle = window.setTimeout(() => {
+      highlightRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 150);
+    return () => window.clearTimeout(handle);
+  }, [loading, requestedPath, filteredFields.length]);
 
   if (loading) {
     return <div className="settings-section">Loading advanced configuration explorer…</div>;
@@ -122,16 +138,26 @@ export function ConfigExplorerSubtab({ onOpenRaw }: ConfigExplorerSubtabProps) {
       </div>
 
       <div style={{ display: 'grid', gap: 12 }}>
-        {filteredFields.map((field) => (
-          <ConfigFieldEditor
-            key={field.path}
-            field={field}
-            config={config}
-            onSave={saveAndRefresh}
-            onOpenRaw={onOpenRaw}
-            saving={saving}
-          />
-        ))}
+        {filteredFields.map((field) => {
+          const highlighted = Boolean(requestedPath) && field.path === requestedPath;
+          return (
+            <div
+              key={field.path}
+              ref={highlighted ? highlightRef : undefined}
+              data-testid={`config-field-${field.path}`}
+              data-highlighted={highlighted ? 'true' : undefined}
+              style={highlighted ? { outline: '2px solid var(--accent)', outlineOffset: 4, borderRadius: 12 } : undefined}
+            >
+              <ConfigFieldEditor
+                field={field}
+                config={config}
+                onSave={saveAndRefresh}
+                onOpenRaw={onOpenRaw}
+                saving={saving}
+              />
+            </div>
+          );
+        })}
       </div>
     </div>
   );

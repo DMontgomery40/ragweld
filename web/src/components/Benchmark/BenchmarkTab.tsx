@@ -7,7 +7,7 @@ import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { PipelineProfile } from '@/components/Benchmark/PipelineProfile';
 import { ResultsTable } from '@/components/Benchmark/ResultsTable';
 import { SplitScreen } from '@/components/Benchmark/SplitScreen';
-import type { ChatModelInfo, ChatModelsResponse, LineageRef } from '@/types/generated';
+import type { BenchmarkRetrieval, ChatModelInfo, ChatModelsResponse, LineageRef } from '@/types/generated';
 import { chatModelDetail, chatModelLabel, chatModelName, groupChatModels } from '@/components/Chat/modelLabel';
 
 type BenchmarkRunRequest = {
@@ -30,8 +30,20 @@ type BenchmarkRunResponse = {
   input_bundle_id?: string;
   bundle_id?: string;
   lineage_ref?: LineageRef | null;
+  retrieval?: BenchmarkRetrieval | null;
   results: BenchmarkRunResult[];
 };
+
+function toBenchmarkRetrieval(value: unknown): BenchmarkRetrieval | null {
+  if (!isRecord(value) || typeof value.grounded !== 'boolean') return null;
+  return {
+    corpus_id: typeof value.corpus_id === 'string' ? value.corpus_id : null,
+    grounded: value.grounded,
+    chunk_count: typeof value.chunk_count === 'number' ? value.chunk_count : 0,
+    reason: typeof value.reason === 'string' ? value.reason : null,
+    source_paths: Array.isArray(value.source_paths) ? value.source_paths.map((p) => String(p)) : [],
+  };
+}
 
 function toModelValue(model: ChatModelInfo): string {
   return String(model.override || model.id || '').trim();
@@ -118,6 +130,7 @@ function normalizeBenchmarkRunResponse(payload: unknown): BenchmarkRunResponse {
           label: typeof record?.lineage_ref.label === 'string' ? record.lineage_ref.label : undefined,
         } as LineageRef)
       : undefined,
+    retrieval: toBenchmarkRetrieval(record?.retrieval),
     results,
   };
 }
@@ -413,6 +426,48 @@ export default function BenchmarkTab() {
             </div>
             <div style={{ fontSize: 12, color: 'var(--fg-muted)' }}>{promptOk ? `${prompt.trim().length} chars` : ''}</div>
           </div>
+
+          {runResult?.retrieval ? (
+            <div
+              data-testid="benchmark-grounding"
+              data-grounded={runResult.retrieval.grounded ? 'true' : 'false'}
+              role="status"
+              style={{
+                marginTop: 12,
+                padding: '10px 12px',
+                borderRadius: 10,
+                border: runResult.retrieval.grounded
+                  ? '1px solid rgba(var(--ok-rgb), 0.35)'
+                  : '1px solid rgba(var(--warn-rgb), 0.45)',
+                background: runResult.retrieval.grounded
+                  ? 'rgba(var(--ok-rgb), 0.10)'
+                  : 'rgba(var(--warn-rgb), 0.12)',
+                color: 'var(--fg)',
+                fontSize: 13,
+                lineHeight: 1.5,
+              }}
+            >
+              {runResult.retrieval.grounded ? (
+                <>
+                  <strong>Grounded:</strong> every model received the same {runResult.retrieval.chunk_count} retrieved chunk
+                  {runResult.retrieval.chunk_count === 1 ? '' : 's'} from{' '}
+                  <code>{runResult.retrieval.corpus_id}</code>
+                  {(runResult.retrieval.source_paths ?? []).length > 0 ? (
+                    <span style={{ color: 'var(--fg-muted)' }}>
+                      {' '}
+                      ({(runResult.retrieval.source_paths ?? []).slice(0, 4).join(', ')}
+                      {(runResult.retrieval.source_paths ?? []).length > 4 ? ', …' : ''})
+                    </span>
+                  ) : null}
+                </>
+              ) : (
+                <>
+                  <strong>Not grounded:</strong> the answers below were generated without retrieval —{' '}
+                  {runResult.retrieval.reason || 'no retrieval context'}.
+                </>
+              )}
+            </div>
+          ) : null}
 
           {runResult ? (
             <div style={{ marginTop: 12 }}>
