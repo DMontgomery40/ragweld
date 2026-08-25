@@ -632,6 +632,20 @@ class CorpusCreateRequest(BaseModel):
     path: str = Field(description="Root path on disk")
     description: str | None = Field(default=None, description="Optional description")
 
+    @field_validator("repo_id", mode="before")
+    @classmethod
+    def _validate_repo_id(cls, value: object) -> object:
+        """A corpus id names one filesystem component under data/lineage, data/index_runs
+        and friends: dot segments and path separators would escape those directories."""
+        if value is None:
+            return None
+        text = str(value).strip()
+        if not text:
+            return None
+        if text in {".", ".."} or "/" in text or "\\" in text or any(ch.isspace() for ch in text):
+            raise ValueError("corpus_id must be a single path-safe component (no '.', '..', separators or whitespace)")
+        return text
+
 
 class CorpusUpdateRequest(BaseModel):
     """Request to update an existing corpus. All fields optional."""

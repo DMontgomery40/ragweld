@@ -4,6 +4,7 @@ import fcntl
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import threading
 from datetime import UTC, datetime
@@ -66,7 +67,16 @@ def lineage_root(root: Path | None = None) -> Path:
 
 
 def _safe_repo_id(repo_id: str) -> str:
-    return quote(str(repo_id or "").strip(), safe="._-")
+    """One filesystem component for a corpus id.
+
+    `quote` escapes separators, but it preserves `.` and `..`; those would resolve to the
+    lineage root or its parent, so they are rejected here (the corpus-create boundary
+    rejects them too). An empty id would name the directory itself.
+    """
+    raw = str(repo_id or "").strip()
+    if raw in {"", ".", ".."}:
+        raise ValueError(f"Invalid corpus id for lineage paths: {repo_id!r}")
+    return quote(raw, safe="._-")
 
 
 def _assets_dir(kind: LineageAssetKind, *, root: Path | None = None) -> Path:
@@ -381,7 +391,11 @@ def _active_artifact_path(root: Path) -> Path:
     Neither case ever snapshots the root tree as if it were an artifact (no flat-layout
     fallback: the store is the only read path).
     """
-    from server.training.artifact_store import ArtifactStoreError, pointer_path, resolve_active_artifact_dir
+    from server.training.artifact_store import (
+        ArtifactStoreError,
+        pointer_path,
+        resolve_active_artifact_dir,
+    )
 
     try:
         active = resolve_active_artifact_dir(root)
@@ -644,6 +658,43 @@ def repo_lineage_lock(repo_id: str, *, root: Path | None = None) -> _RepoLineage
             _REPO_LOCKS[key] = lock
         return lock
 
+
+
+def delete_repo_lineage(repo_id: str, *, root: Path | None = None) -> dict[str, int]:
+    """Remove every corpus-scoped lineage record for `repo_id`.
+
+    Aliases and bundles belong to the corpus and go with it when the corpus is deleted;
+    asset versions are content-addressed and shared across corpora, so they stay. The
+    per-corpus lock file is kept on purpose: unlinking a lock another process may hold
+    lets a third process create a fresh inode and bypass the mutual exclusion, and an
+    orphaned empty lock file is harmless. Returns the number of alias and bundle files
+    removed. Any filesystem failure surfaces as the typed lineage-store dependency error.
+
+    Not atomic with the registry row: a lineage writer for the same corpus that runs
+    between this call and the Postgres row deletion can recreate the directories (they
+    are then orphans until the next deletion). Corpus deletion as a whole is a
+    non-transactional saga across Qdrant, Neo4j, lineage and Postgres; see
+    `docs/exec-plans/tech-debt-tracker.md`.
+    """
+    base = lineage_root(root).resolve()
+    safe = _safe_repo_id(repo_id)
+    targets = {"aliases": base / "aliases" / safe, "bundles": base / "bundles" / safe}
+    for key, directory in targets.items():
+        # Defense in depth against a corpus id that quotes to a path escaping its kind
+        # directory: the target must be a strict child of `<root>/<kind>`.
+        if directory.resolve().parent != (base / key):
+            raise ValueError(f"Refusing to delete lineage outside {base / key}: {directory}")
+    removed = {"aliases": 0, "bundles": 0}
+    try:
+        with repo_lineage_lock(repo_id, root=root):
+            for key, directory in targets.items():
+                if not directory.exists():
+                    continue
+                removed[key] = sum(1 for child in directory.iterdir() if child.is_file())
+                shutil.rmtree(directory)
+    except OSError as exc:
+        _raise_lineage_store_error("Lineage corpus deletion", exc)
+    return removed
 
 def snapshot_aliases(
     *, repo_id: str, names: tuple[LineageAliasName, ...], root: Path | None = None

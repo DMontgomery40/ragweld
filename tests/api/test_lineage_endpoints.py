@@ -16,6 +16,7 @@ from server.models.tribrid_config_model import (
     SyntheticRunStartRequest,
     SyntheticRunSummary,
 )
+from server.synthetic.storage import runs_dir as synthetic_runs_dir
 
 pytestmark = pytest.mark.requires_postgres
 
@@ -96,7 +97,7 @@ async def test_lineage_config_benchmark_and_alias_endpoints(client: AsyncClient,
             "/api/benchmark/run",
             params={"corpus_id": corpus_id},
             json={
-                "prompt": "ping",
+                "prompt": "How often is the salinity sensor array on each buoy calibrated?",
                 "models": ["openrouter:openai/gpt-4o-mini", "openrouter:openai/gpt-4o-mini"],
             },
         )
@@ -145,7 +146,7 @@ async def test_lineage_refresh_drops_old_run_refs_after_prompt_change(client: As
             "/api/benchmark/run",
             params={"corpus_id": corpus_id},
             json={
-                "prompt": "ping",
+                "prompt": "How often is the salinity sensor array on each buoy calibrated?",
                 "models": ["openrouter:openai/gpt-4o-mini", "openrouter:openai/gpt-4o-mini"],
             },
         )
@@ -319,9 +320,10 @@ async def test_lineage_dataset_and_synthetic_publish_refresh_current_bundle(clie
     corpus_id = f"pytest_lineage_dataset_{uuid.uuid4().hex[:8]}"
     await _create_corpus(client, corpus_id=corpus_id, path=tmp_path)
 
-    root = _repo_root()
     run_id = f"{corpus_id}__publish_eval"
-    run_dir = root / "data" / "synthetic_runs" / run_id
+    # The API under test resolves runs through `runs_dir()`, which pytest points at a
+    # disposable directory (conftest); writing anywhere else would be a live-store leak.
+    run_dir = synthetic_runs_dir() / run_id
     artifact_dir = run_dir / "artifacts"
     artifact_dir.mkdir(parents=True, exist_ok=True)
 
@@ -409,3 +411,58 @@ async def test_lineage_dataset_and_synthetic_publish_refresh_current_bundle(clie
     finally:
         shutil.rmtree(run_dir, ignore_errors=True)
         await client.delete(f"/api/corpora/{corpus_id}")
+
+
+@pytest.mark.asyncio
+async def test_deleting_a_corpus_removes_its_lineage_state(client: AsyncClient, tmp_path: Path) -> None:
+    """Corpus deletion takes the corpus-scoped lineage records with it.
+
+    Playwright and pytest corpora used to leave `data/lineage/aliases/<corpus>/` and
+    `bundles/<corpus>/` behind after `DELETE /api/corpora/{id}` (the e2e-* orphans found
+    on 2026-08-24). Shared asset versions are content-addressed and must survive.
+    """
+    corpus_id = f"pytest_lineage_delete_{uuid.uuid4().hex[:8]}"
+    await _create_corpus(client, corpus_id=corpus_id, path=tmp_path)
+    root = lineage_root()
+    aliases_dir = root / "aliases" / corpus_id
+    bundles_dir = root / "bundles" / corpus_id
+    lock_path = root / "locks" / f"{corpus_id}.lock"
+
+    patched = await client.request(
+        "PATCH",
+        "/api/config/tokenization",
+        params={"corpus_id": corpus_id},
+        json={"normalize_unicode": False},
+    )
+    assert patched.status_code == 200
+    current = await client.get("/api/lineage/current", params={"corpus_id": corpus_id})
+    assert current.status_code == 200
+    bundle_id = current.json()["bundle_id"]
+    aliased = await client.post(
+        "/api/lineage/aliases/canary",
+        params={"corpus_id": corpus_id},
+        json={"bundle_id": bundle_id},
+    )
+    assert aliased.status_code == 200
+    assert (aliases_dir / "canary.json").exists()
+    assert (bundles_dir / f"{bundle_id}.json").exists()
+    assert lock_path.exists()
+    asset_files_before = sorted(p for p in (root / "assets").rglob("*.json"))
+    assert asset_files_before, "the bundle must have captured shared asset versions"
+
+    deleted = await client.delete(f"/api/corpora/{corpus_id}")
+    assert deleted.status_code == 200, deleted.text
+
+    assert not aliases_dir.exists()
+    assert not bundles_dir.exists()
+    # The lock inode is kept on purpose (unlinking a held lock breaks mutual exclusion).
+    assert lock_path.exists()
+    assert sorted(p for p in (root / "assets").rglob("*.json")) == asset_files_before
+
+    # The corpus is gone from the registry, so its lineage reads answer 404 and,
+    # crucially, do not recreate the directories as a side effect.
+    aliases = await client.get("/api/lineage/aliases", params={"corpus_id": corpus_id})
+    assert aliases.status_code == 404
+    assert not aliases_dir.exists()
+    again = await client.delete(f"/api/corpora/{corpus_id}")
+    assert again.status_code == 404

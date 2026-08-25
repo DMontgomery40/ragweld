@@ -45,7 +45,7 @@ export class OutcomeSink {
     await appendFile(this.ndjsonPath, `${JSON.stringify(row)}\n`, 'utf8');
   }
 
-  async finalize(): Promise<void> {
+  async finalize(run: Record<string, unknown> = {}): Promise<void> {
     const ok = this.rows.filter((r) => r.status === 'ok').length;
     const failed = this.rows.filter((r) => r.status === 'failed').length;
     const skipped = this.rows.filter((r) => r.status === 'skipped').length;
@@ -65,6 +65,7 @@ export class OutcomeSink {
       JSON.stringify(
         {
           generated_at: new Date().toISOString(),
+          run,
           totals: {
             total: this.rows.length,
             ok,

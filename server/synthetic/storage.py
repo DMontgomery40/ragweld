@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -17,10 +18,19 @@ from server.models.tribrid_config_model import (
 _ROOT = Path(__file__).resolve().parents[2]
 _RUNS_DIR = _ROOT / "data" / "synthetic_runs"
 
+# Isolation seam, same contract as RAGWELD_LINEAGE_ROOT: a process that must not
+# write into the live synthetic-run store (pytest, disposable integration lanes)
+# points this at its own directory. Relative values resolve from the repo root.
+
 
 def runs_dir() -> Path:
-    _RUNS_DIR.mkdir(parents=True, exist_ok=True)
-    return _RUNS_DIR
+    raw = str(os.environ.get("RAGWELD_SYNTHETIC_RUNS_ROOT") or "").strip()
+    base = _RUNS_DIR
+    if raw:
+        candidate = Path(raw).expanduser()
+        base = candidate if candidate.is_absolute() else (_ROOT / candidate)
+    base.mkdir(parents=True, exist_ok=True)
+    return base
 
 
 def _normalized_run_id(run_id: str) -> str:
