@@ -1323,3 +1323,57 @@ unchanged).
   prose chunks nulled every row and the tiles read 0 B; the live dashboard
   assertions in the promoted-lane test now require real byte counts.
 
+### Adversarial review pass 2 (codex exec, high effort) — REFUTED the manifest slice; all findings acted on
+
+Findings and what changed (session 14d):
+
+- **Retention was current-only.** A reader that resolved the manifest just
+  before a commit could find its collection dropped by the retirement that
+  followed. The manifest now carries `previous_qdrant_collection` /
+  `previous_graph_repo_id`; retention is current + previous, and a commit
+  retires only the generation before the one it replaced, by exact id from the
+  manifest chain (never a prefix sweep, so another run's staged collection is
+  never touched). `GenerationManifest` / `IndexRunFence` are Pydantic models
+  (`extra="forbid"`); a malformed manifest raises instead of reading as
+  unpromoted.
+- **No durable run fence.** Two workers could build and retire against the same
+  corpus. `POST /api/index` now claims `corpora.meta.index_run` with a
+  `FOR UPDATE` compare-and-set and answers 409 (naming the running run) while it
+  is held; the job releases it in `finally`.
+- **A committed run could still report `error`/`cancelled`.** The manifest is
+  written, then `_publish_complete` publishes status, `_STATS` and the run
+  summary immediately; the retirement that follows is best-effort and a
+  cancel/error after the commit leaves the run complete.
+- **`delete_index` dropped Qdrant before Postgres**, so a failure in the
+  external stores left a manifest naming a dropped collection. Postgres first,
+  in one transaction (`delete_index_state`: chunk rows + summaries + contracts +
+  manifest + fence), then Qdrant, then Neo4j (manifest graph, previous graph,
+  staged graphs of this corpus, legacy id).
+- **Startup upgrade ran once.** `ensure_generation_manifests_until_done` retries
+  every 60s as a lifespan task until it succeeds once (Postgres down at boot no
+  longer leaves pre-manifest corpora unpromoted for the process lifetime).
+- **Two readers bypassed the manifest** (`config.py` contract lock,
+  `config_control_plane.py` readiness): both resolve `physical=` now. Neo4j
+  entity/relationship endpoints scope by the manifest graph id.
+  `upsert_chunks(pg=)` records the manifest after the points land (never a
+  manifest naming an empty collection), with `graph_repo_id=None` — the
+  incremental writers build no graph and the manifest says so.
+- **Fake compat left in fusion**: the TypeError "older client stubs" retry
+  around `chunk_vector_search` is deleted.
+- **Legacy shim next to the route**: `POST /api/index/start` ("compatibility
+  endpoint for legacy dashboard UI", loose dict with `repo`/`path` aliases,
+  leaked its Postgres connection) had no caller anywhere; deleted. `POST
+  /api/index` declares 404/409 in the contract bundle.
+- **Tests**: `test_graph_hydration_live.py` is three tests over one seeded
+  corpus (module-scoped fixture), both neighbor windows at 0 so every hit is
+  one the leg hydrated, and the chunk-mode seeds are compared by id with the
+  Qdrant dense leg over the same deterministic vectors; entity expansion must
+  be a strict superset of those seeds. The promoted-lane test proves the 409
+  fence, the fence release, current+previous retention, and the exact
+  retirement after a third run. The observability test requires 503 with
+  `required_retrieval_leg_failed` exactly.
+- Verification: live lane 16 passed (store, promoted lane, communities,
+  observability, hydration ×3, incremental writers), quick gates green, full
+  `uv run pytest -q` run alone, Playwright P1 spec against the restarted
+  backend — see the session-14d memory note for the exact numbers.
+

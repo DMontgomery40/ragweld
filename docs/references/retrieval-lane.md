@@ -46,10 +46,15 @@ Postgres pgvector/FTS legs were removed when this lane was promoted.
    the physical Qdrant collection and the Neo4j graph id from that manifest,
    so there is no per-store swap (no alias switch, no Neo4j relabel) and no
    window in which new chunk rows pair with old vectors or an old graph.
-   Superseded Qdrant generations and the previous graph generation are retired
-   after the commit, best-effort (a failure there leaves orphans to sweep,
-   never an inconsistent index). Cancelled or failed runs drop their staged
-   resources only while nothing has been committed.
+   Retention is current + previous: the generation being replaced stays alive
+   until the next commit (a reader that resolved the manifest just before the
+   commit still finds its collection and graph), and the generation before it
+   is retired after the commit by exact id, best-effort (a failure there leaves
+   an orphan to sweep, never an inconsistent index). A durable per-corpus run
+   fence on the corpus row (`corpora.meta.index_run`, compare-and-set) rejects
+   a second run with 409 while one is building. Cancelled or failed runs drop
+   their staged resources only while nothing has been committed; once the
+   manifest is written the run is complete whatever happens afterwards.
 4. `indexing.skip_dense=true` writes sparse-only points (no dense vectors);
    the vector leg returns nothing for such corpora and the corpus records
    `embedding_dimensions = 0`.
@@ -77,9 +82,10 @@ target becomes the manifest's collection, their own id the graph id).
 ## Query-time legs (`server/retrieval/fusion.py`)
 
 - Vector: embed the query with the corpus contract, `query_points` on the
-  alias using `text-dense`.
+  manifest's collection using `text-dense`.
 - Sparse: embed the query with the corpus sparse contract (fastembed
-  `Qdrant/bm25`), `query_points` on the alias using `text-sparse`.
+  `Qdrant/bm25`), `query_points` on the manifest's collection using
+  `text-sparse`.
 - Graph: Neo4j chunk/entity retrieval hydrated from Postgres chunk rows.
 - Rerank, scoring boosts, dedup/MMR/neighbor expansion and the semantic cache
   operate on `ChunkMatch` lists and are storage-agnostic. MMR reads dense
@@ -106,9 +112,9 @@ target becomes the manifest's collection, their own id the graph id).
   `learning` mode loads the MLX LoRA reranker on the host; after the 2026-08-22
   crashes the operator rule is to keep reranking on cloud models.
 - Failure semantics: Qdrant unreachable -> typed 503 `dependency_unavailable`
-  (`qdrant`); alias missing for a corpus that has been indexed -> typed 503
-  `required_retrieval_leg_failed`; alias missing for a never-indexed corpus ->
-  empty leg (the truthful answer).
+  (`qdrant`); the manifest's collection missing for a corpus that has been
+  indexed -> typed 503 `required_retrieval_leg_failed`; no manifest for a
+  never-indexed corpus -> empty leg (the truthful answer).
 
 ## Operator surfaces
 

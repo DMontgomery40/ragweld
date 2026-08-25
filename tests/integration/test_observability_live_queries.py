@@ -54,12 +54,19 @@ def _component(payload: dict, component_id: str) -> dict:
     for item in payload.get("components") or []:
         if item.get("id") == component_id:
             return item
-    raise AssertionError(f"component {component_id} missing from {[c.get('id') for c in payload.get('components') or []]}")
+    raise AssertionError(
+        f"component {component_id} missing from {[c.get('id') for c in payload.get('components') or []]}"
+    )
 
 
 async def test_unknown_corpus_is_a_404_on_every_observability_route(client: AsyncClient) -> None:
     missing = f"missing-obs-{uuid.uuid4().hex[:8]}"
-    for path in ("/api/observability/status", "/api/observability/catalog", "/api/observability/incidents", "/api/observability/alert-rules"):
+    for path in (
+        "/api/observability/status",
+        "/api/observability/catalog",
+        "/api/observability/incidents",
+        "/api/observability/alert-rules",
+    ):
         res = await client.get(path, params={"corpus_id": missing})
         assert res.status_code == 404, (path, res.status_code, res.text[:200])
         assert missing in str(res.json().get("detail"))
@@ -73,7 +80,8 @@ async def test_status_and_incidents_reflect_real_queries_on_the_corpus(client: A
     try:
         await pg.connect()
         created = await client.post(
-            "/api/corpora", json={"corpus_id": corpus_id, "name": corpus_id, "path": str(_CORPUS_PATH)}
+            "/api/corpora",
+            json={"corpus_id": corpus_id, "name": corpus_id, "path": str(_CORPUS_PATH)},
         )
         assert created.status_code in (200, 201), created.text
         cfg.embedding.embedding_backend = "deterministic"
@@ -84,25 +92,33 @@ async def test_status_and_incidents_reflect_real_queries_on_the_corpus(client: A
         await pg.upsert_corpus_config_json(corpus_id, cfg.model_dump(mode="serialization"))
         config_store._store = None
         started = await client.post(
-            "/api/index", json={"corpus_id": corpus_id, "repo_path": str(_CORPUS_PATH), "force_reindex": True}
+            "/api/index",
+            json={"corpus_id": corpus_id, "repo_path": str(_CORPUS_PATH), "force_reindex": True},
         )
         assert started.status_code == 200, started.text
         assert (await _wait_for_index(client, corpus_id))["status"] == "complete"
         chunk_rows = await pg.count_chunks(corpus_id)
         generation = await pg.get_generation(corpus_id)
-        assert chunk_rows > 0 and generation and generation["qdrant_collection"]
+        assert chunk_rows > 0 and generation and generation.qdrant_collection
 
         # Real queries first, then observe them.
         correlation_ids: list[str] = []  # observability run ids of the searches we make
         for question in _QUESTIONS:
             res = await client.post(
                 "/api/search",
-                json={"query": question, "corpus_id": corpus_id, "top_k": 5, "cache_mode": "bypass"},
+                json={
+                    "query": question,
+                    "corpus_id": corpus_id,
+                    "top_k": 5,
+                    "cache_mode": "bypass",
+                },
             )
             assert res.status_code == 200, res.text
             assert res.json()["matches"], question
             # Every request carries its observability identity back to the caller.
-            assert res.headers.get("X-Correlation-ID") and res.headers.get("X-Trace-ID"), dict(res.headers)
+            assert res.headers.get("X-Correlation-ID") and res.headers.get("X-Trace-ID"), dict(
+                res.headers
+            )
             correlation_ids.append(str(res.json()["debug"]["observability_run_id"]))
 
         status = await client.get("/api/observability/status", params={"corpus_id": corpus_id})
@@ -110,12 +126,21 @@ async def test_status_and_incidents_reflect_real_queries_on_the_corpus(client: A
         status_payload = status.json()
         retrieval = _component(status_payload, "haystack_docling_qdrant")
         assert retrieval["reachable"] is True
-        assert f"'{corpus_id}': {chunk_rows} points" in str(retrieval["detail"]), retrieval["detail"]
-        assert generation["qdrant_collection"] in str(retrieval["detail"])
-        assert status_payload["incident_count"] == status_payload["critical_incident_count"] == 0 or all(
-            not str(i.get("id", "")).startswith("retrieval:") for i in (await client.get("/api/observability/incidents", params={"corpus_id": corpus_id})).json()["incidents"]
+        assert f"'{corpus_id}': {chunk_rows} points" in str(retrieval["detail"]), retrieval[
+            "detail"
+        ]
+        assert generation.qdrant_collection in str(retrieval["detail"])
+        assert status_payload["incident_count"] == status_payload[
+            "critical_incident_count"
+        ] == 0 or all(
+            not str(i.get("id", "")).startswith("retrieval:")
+            for i in (
+                await client.get("/api/observability/incidents", params={"corpus_id": corpus_id})
+            ).json()["incidents"]
         )
-        incidents = await client.get("/api/observability/incidents", params={"corpus_id": corpus_id})
+        incidents = await client.get(
+            "/api/observability/incidents", params={"corpus_id": corpus_id}
+        )
         assert incidents.status_code == 200, incidents.text
         assert not [i for i in incidents.json()["incidents"] if i["id"] == f"retrieval:{corpus_id}"]
 
@@ -126,7 +151,10 @@ async def test_status_and_incidents_reflect_real_queries_on_the_corpus(client: A
         assert latest.status_code == 200, latest.text
         trace_payload = latest.json()
         assert trace_payload["repo"] == corpus_id, trace_payload
-        assert trace_payload["run_id"] in correlation_ids, (trace_payload["run_id"], correlation_ids)
+        assert trace_payload["run_id"] in correlation_ids, (
+            trace_payload["run_id"],
+            correlation_ids,
+        )
         trace = trace_payload["trace"]
         assert trace, "tracing must have captured the search run"
         recorded = str(trace)
@@ -134,20 +162,35 @@ async def test_status_and_incidents_reflect_real_queries_on_the_corpus(client: A
 
         # Wipe the live generation out from under the corpus: chunk rows exist,
         # vectors do not -> the retrieval incident fires and status reports it.
-        await qdrant.drop_generation(generation["qdrant_collection"])
-        incidents = await client.get("/api/observability/incidents", params={"corpus_id": corpus_id})
+        await qdrant.drop_generation(generation.qdrant_collection)
+        incidents = await client.get(
+            "/api/observability/incidents", params={"corpus_id": corpus_id}
+        )
         assert incidents.status_code == 200, incidents.text
         firing = [i for i in incidents.json()["incidents"] if i["id"] == f"retrieval:{corpus_id}"]
-        assert firing and firing[0]["status"] == "firing" and firing[0]["severity"] == "critical", incidents.text[:400]
-        status_after = await client.get("/api/observability/status", params={"corpus_id": corpus_id})
+        assert firing and firing[0]["status"] == "firing" and firing[0]["severity"] == "critical", (
+            incidents.text[:400]
+        )
+        status_after = await client.get(
+            "/api/observability/status", params={"corpus_id": corpus_id}
+        )
         assert status_after.status_code == 200
         assert status_after.json()["incident_count"] >= 1
         retrieval_after = _component(status_after.json(), "haystack_docling_qdrant")
         assert "empty or wiped" in str(retrieval_after["detail"]), retrieval_after["detail"]
         broken = await client.post(
-            "/api/search", json={"query": _QUESTIONS[0], "corpus_id": corpus_id, "top_k": 5, "cache_mode": "bypass"}
+            "/api/search",
+            json={
+                "query": _QUESTIONS[0],
+                "corpus_id": corpus_id,
+                "top_k": 5,
+                "cache_mode": "bypass",
+            },
         )
-        assert broken.status_code in (503, 409), broken.text  # fails closed, never an empty 200
+        assert broken.status_code == 503, (
+            broken.text
+        )  # required leg failed: fails closed, never an empty 200
+        assert broken.json()["detail"]["code"] == "required_retrieval_leg_failed", broken.text
     finally:
         config_store._store = None
         await client.delete(f"/api/index/{corpus_id}")

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
 import contextlib
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Any
@@ -97,23 +97,29 @@ async def get_entity(corpus_id: str, entity_id: str) -> Entity:
         neo4j = scope.neo4j
         if scope.graph_repo_id is None:
             raise HTTPException(status_code=404, detail="Entity not found")
-        ent = await neo4j.get_entity(entity_id)
+        ent = await neo4j.get_entity(scope.graph_repo_id, entity_id)
         if ent is None:
             raise HTTPException(status_code=404, detail="Entity not found")
         return ent
 
 
-@router.get("/graph/{corpus_id}/entity/{entity_id}/relationships", response_model=list[Relationship])
+@router.get(
+    "/graph/{corpus_id}/entity/{entity_id}/relationships", response_model=list[Relationship]
+)
 async def get_entity_relationships(corpus_id: str, entity_id: str) -> list[Relationship]:
     async with _graph_client(corpus_id, boundary="Graph relationships API") as scope:
         neo4j = scope.neo4j
         if scope.graph_repo_id is None:
             return []
-        return await neo4j.get_relationships(entity_id)
+        return await neo4j.get_relationships(scope.graph_repo_id, entity_id)
 
 
-@router.get("/graph/{corpus_id}/entity/{entity_id}/neighbors", response_model=GraphNeighborsResponse)
-async def get_entity_neighbors(corpus_id: str, entity_id: str, max_hops: int = 2, limit: int = 200) -> GraphNeighborsResponse:
+@router.get(
+    "/graph/{corpus_id}/entity/{entity_id}/neighbors", response_model=GraphNeighborsResponse
+)
+async def get_entity_neighbors(
+    corpus_id: str, entity_id: str, max_hops: int = 2, limit: int = 200
+) -> GraphNeighborsResponse:
     async with _graph_client(corpus_id, boundary="Graph neighbors API") as scope:
         neo4j = scope.neo4j
         repo_id = scope.graph_repo_id
@@ -126,7 +132,9 @@ async def get_entity_neighbors(corpus_id: str, entity_id: str, max_hops: int = 2
 
 
 @router.get("/graph/{corpus_id}/community/{community_id}/members", response_model=list[Entity])
-async def get_community_members(corpus_id: str, community_id: str, limit: int = 500) -> list[Entity]:
+async def get_community_members(
+    corpus_id: str, community_id: str, limit: int = 500
+) -> list[Entity]:
     async with _graph_client(corpus_id, boundary="Graph community members API") as scope:
         neo4j = scope.neo4j
         repo_id = scope.graph_repo_id
@@ -183,7 +191,9 @@ async def get_graph_stats(corpus_id: str) -> GraphStats:
         neo4j = scope.neo4j
         repo_id = scope.graph_repo_id
         if repo_id is None:
-            return GraphStats(repo_id=corpus_id, total_entities=0, total_relationships=0, total_communities=0)
+            return GraphStats(
+                repo_id=corpus_id, total_entities=0, total_relationships=0, total_communities=0
+            )
         stats = await neo4j.get_graph_stats(repo_id)
         # Report the corpus id the operator knows, not the physical generation id.
         return stats.model_copy(update={"repo_id": corpus_id})

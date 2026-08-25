@@ -23079,6 +23079,12 @@
             },
             "description": "Successful Response"
           },
+          "404": {
+            "description": "Unknown corpus"
+          },
+          "409": {
+            "description": "An index run already holds this corpus (durable per-corpus run fence)"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -23133,56 +23139,6 @@
           }
         },
         "summary": "Estimate Index",
-        "tags": [
-          "index"
-        ]
-      }
-    },
-    "/api/index/start": {
-      "post": {
-        "description": "Compatibility endpoint for legacy dashboard UI.\n\nExpected payload: {\"repo_id\": \"...\", \"repo_path\": \"...\", \"force_reindex\": bool}",
-        "operationId": "start_index_compat_api_index_start_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "anyOf": [
-                  {
-                    "additionalProperties": true,
-                    "type": "object"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ],
-                "title": "Payload"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/IndexStatus"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Start Index Compat",
         "tags": [
           "index"
         ]

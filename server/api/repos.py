@@ -18,9 +18,9 @@ from server.api.dependency_errors import (
 )
 from server.config import load_config
 from server.db.neo4j import Neo4jClient
-from server.indexing.generations import graph_repo_id_of
 from server.db.postgres import PostgresClient
 from server.dependency_errors import DependencyUnavailableError
+from server.indexing.generations import graph_repo_id_of
 from server.indexing.loader import FileLoader
 from server.lineage.registry import delete_repo_lineage
 from server.models.index import IndexStats
@@ -146,7 +146,10 @@ async def add_repo(request: CorpusCreateRequest) -> Corpus:
 
     # Enterprise option: per-corpus Neo4j databases (multi-db).
     # Only attempted when explicitly enabled in config.
-    if cfg.graph_storage.neo4j_database_mode == "per_corpus" and cfg.graph_storage.neo4j_auto_create_databases:
+    if (
+        cfg.graph_storage.neo4j_database_mode == "per_corpus"
+        and cfg.graph_storage.neo4j_auto_create_databases
+    ):
         neo4j = Neo4jClient(
             cfg.graph_storage.neo4j_uri,
             cfg.graph_storage.neo4j_user,
@@ -279,7 +282,10 @@ async def get_repo_stats(corpus_id: str) -> CorpusStats:
     # If graph storage is down, the whole endpoint is a structured 503; fail fast
     # before walking the corpus tree or loading index stats from Postgres.
     neo4j = await _get_neo4j(repo_id)
-    graph_stats = await _get_graph_stats_or_none(neo4j, repo_id)
+    graph_generation_id = graph_repo_id_of(await pg.get_generation(repo_id))
+    graph_stats = (
+        await _get_graph_stats_or_none(neo4j, graph_generation_id) if graph_generation_id else None
+    )
 
     # Compute file stats from disk (best-effort for now)
     root_path = row["path"]
@@ -331,19 +337,35 @@ async def delete_repo(corpus_id: str) -> dict[str, Any]:
     if row is None:
         raise HTTPException(status_code=404, detail=f"Corpus not found: {repo_id}")
 
-    # Vector generations first: if Qdrant is unreachable the corpus row stays
-    # (typed 503, retryable) instead of leaving orphaned collections behind.
+    # Postgres first, in one transaction: the manifest and chunk rows go before
+    # any external store is touched, so a failure below leaves a corpus that reads
+    # as never indexed (retry finishes the external cleanup), never a manifest
+    # naming a dropped collection or graph.
+    generation = await pg.get_generation(repo_id)
+    try:
+        await pg.delete_index_state(repo_id)
+    except Exception as exc:
+        raise_postgres_unavailable_if_applicable(exc, boundary="Corpus deletion API")
+        raise
     try:
         await QdrantChunkStore(load_config()).delete_corpus(repo_id)
     except DependencyUnavailableError as exc:
-        raise dependency_unavailable_http_exception(exc.dependency, boundary="Corpus deletion API", exc=exc) from exc
+        raise dependency_unavailable_http_exception(
+            exc.dependency, boundary="Corpus deletion API", exc=exc
+        ) from exc
 
     neo4j = await _get_neo4j(repo_id)
     try:
-        generation_graph_id = graph_repo_id_of(await pg.get_generation(repo_id))
-        if generation_graph_id:
-            await neo4j.delete_graph(generation_graph_id)
-        await neo4j.delete_graphs_with_prefix(f"__staging__{repo_id}__")
+        for gid in {
+            g
+            for g in (
+                graph_repo_id_of(generation),
+                generation.previous_graph_repo_id if generation else None,
+            )
+            if g
+        }:
+            await neo4j.delete_graph(gid)
+        await neo4j.delete_staged_graphs(repo_id)
         await neo4j.delete_graph(repo_id)
     except Exception as exc:
         raise_neo4j_unavailable_if_applicable(exc, boundary="Corpus deletion API")
@@ -361,7 +383,9 @@ async def delete_repo(corpus_id: str) -> dict[str, Any]:
     try:
         await asyncio.to_thread(delete_repo_lineage, repo_id)
     except DependencyUnavailableError as exc:
-        raise dependency_unavailable_http_exception(exc.dependency, boundary="Corpus deletion API", exc=exc) from exc
+        raise dependency_unavailable_http_exception(
+            exc.dependency, boundary="Corpus deletion API", exc=exc
+        ) from exc
 
     try:
         await pg.delete_corpus(repo_id)

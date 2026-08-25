@@ -12,17 +12,13 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.responses import Response
 
-from server.chat.prompt_budget import warm_prompt_budget
-from server.gateway_catalog import warm_gateway_catalog
-from server.api.cost import warm_cost_catalog
-from server.observability.costing import warm_costing_catalog
-
 from server.api.agent import router as agent_router
 from server.api.benchmark import router as benchmark_router
 from server.api.chat import router as chat_router
 from server.api.chunk_summaries import router as chunk_summaries_router
 from server.api.config import router as config_router
 from server.api.cost import router as cost_router
+from server.api.cost import warm_cost_catalog
 from server.api.dataset import router as dataset_router
 from server.api.docker import router as docker_router
 from server.api.eval import router as eval_router
@@ -40,8 +36,11 @@ from server.api.reranker import router as reranker_router
 from server.api.runtime_capabilities import router as runtime_capabilities_router
 from server.api.search import router as search_router
 from server.api.synthetic import router as synthetic_router
+from server.chat.prompt_budget import warm_prompt_budget
 from server.config import load_config
+from server.gateway_catalog import warm_gateway_catalog
 from server.mcp.server import get_mcp_server, record_mounted_state
+from server.observability.costing import warm_costing_catalog
 from server.observability.metrics import render_latest
 from server.observability.runtime import (
     apply_default_links,
@@ -174,7 +173,9 @@ def _recover_artifact_stores() -> None:
             )
             continue
         if action is not None:
-            logger.warning("artifact store for the %s at %s recovered at startup: %s", label, root, action)
+            logger.warning(
+                "artifact store for the %s at %s recovered at startup: %s", label, root, action
+            )
 
 
 async def _catalog_refresh_loop() -> None:
@@ -189,7 +190,10 @@ async def _catalog_refresh_loop() -> None:
         try:
             await asyncio.to_thread(_warm_catalog_views)
         except (OSError, ValueError) as error:
-            logger.warning("generation gateway catalog refresh failed; keeping the last good snapshot: %s", error)
+            logger.warning(
+                "generation gateway catalog refresh failed; keeping the last good snapshot: %s",
+                error,
+            )
 
 
 @asynccontextmanager
@@ -197,20 +201,21 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     try:
         await asyncio.to_thread(_warm_catalog_views)
     except (OSError, ValueError) as error:
-        logger.warning("generation gateway catalog not loaded at startup (generation fails closed): %s", error)
+        logger.warning(
+            "generation gateway catalog not loaded at startup (generation fails closed): %s", error
+        )
     await asyncio.to_thread(_recover_artifact_stores)
-    try:
-        from server.indexing.generations import ensure_generation_manifests
+    from server.indexing.generations import ensure_generation_manifests_until_done
 
-        upgraded = await ensure_generation_manifests(_global_cfg)
-        if upgraded:
-            logger.info("recorded generation manifests for %d pre-manifest corpora", upgraded)
-    except Exception as error:  # Postgres down at startup: liveness stays dependency-free
-        logger.warning("generation manifest upgrade skipped (will read as unpromoted until it runs): %s", error)
+    manifest_upgrade_task = asyncio.create_task(
+        ensure_generation_manifests_until_done(_global_cfg), name="generation-manifest-upgrade"
+    )
     from server.observability.profiling import start_profiling
 
     await asyncio.to_thread(start_profiling, _global_cfg)
-    catalog_refresh_task = asyncio.create_task(_catalog_refresh_loop(), name="gateway-catalog-refresh")
+    catalog_refresh_task = asyncio.create_task(
+        _catalog_refresh_loop(), name="gateway-catalog-refresh"
+    )
     mcp_session_cm = None
     if _global_cfg.mcp.enabled:
         mcp_session_cm = _mcp.session_manager.run()
@@ -219,10 +224,12 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         yield
     finally:
         catalog_refresh_task.cancel()
-        try:
-            await catalog_refresh_task
-        except (asyncio.CancelledError, Exception):
-            pass
+        manifest_upgrade_task.cancel()
+        for task in (catalog_refresh_task, manifest_upgrade_task):
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):
+                pass
         if mcp_session_cm is not None:
             await mcp_session_cm.__aexit__(None, None, None)
 
@@ -243,7 +250,9 @@ app.add_middleware(
 
 if _global_cfg.mcp.enabled:
     app.mount(_global_cfg.mcp.mount_path, _mcp.streamable_http_app())
-record_mounted_state(enabled=bool(_global_cfg.mcp.enabled), mount_path=str(_global_cfg.mcp.mount_path))
+record_mounted_state(
+    enabled=bool(_global_cfg.mcp.enabled), mount_path=str(_global_cfg.mcp.mount_path)
+)
 
 
 @app.get("/metrics")

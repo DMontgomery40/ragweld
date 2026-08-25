@@ -51,7 +51,14 @@ _COLLECTION_PREFIX = "ragweld_chunks_"
 
 # Chunk metadata keys that are copied into the Qdrant payload as first-class
 # provenance so every hit can become a citation without a Postgres round trip.
-_PAYLOAD_META_KEYS = ("chunk_ordinal", "parent_doc_id", "char_start", "char_end", "extraction", "kind")
+_PAYLOAD_META_KEYS = (
+    "chunk_ordinal",
+    "parent_doc_id",
+    "char_start",
+    "char_end",
+    "extraction",
+    "kind",
+)
 
 _SPARSE_DOC_EMBEDDERS: dict[str, Any] = {}
 _SPARSE_TEXT_EMBEDDERS: dict[str, Any] = {}
@@ -67,7 +74,9 @@ class QdrantCollectionMissingError(RuntimeError):
         self.corpus_id = corpus_id
         self.collection = collection
         if collection:
-            super().__init__(f"Qdrant collection '{collection}' for corpus '{corpus_id}' does not exist")
+            super().__init__(
+                f"Qdrant collection '{collection}' for corpus '{corpus_id}' does not exist"
+            )
         else:
             super().__init__(f"Corpus '{corpus_id}' has no promoted Qdrant generation")
 
@@ -199,7 +208,9 @@ def _point_to_match(point: Any, *, source: str, corpus_id: str) -> ChunkMatch:
     meta = dict(payload.get("meta") or {})
     language = meta.get("language")
     metadata: dict[str, Any] = {
-        k: v for k, v in meta.items() if k not in {"file_path", "start_line", "end_line", "language"}
+        k: v
+        for k, v in meta.items()
+        if k not in {"file_path", "start_line", "end_line", "language"}
     }
     metadata["corpus_id"] = corpus_id
     if source == "sparse":
@@ -233,7 +244,9 @@ class QdrantChunkStore:
 
         return QdrantClient(url=self.url, timeout=30)
 
-    def _raise_boundary(self, exc: BaseException, *, operation: str, corpus_id: str, collection: str | None) -> None:
+    def _raise_boundary(
+        self, exc: BaseException, *, operation: str, corpus_id: str, collection: str | None
+    ) -> None:
         if is_qdrant_unavailable(exc):
             raise DependencyUnavailableError("qdrant", operation) from exc
         if _is_not_found(exc):
@@ -256,7 +269,9 @@ class QdrantChunkStore:
         try:
             return await asyncio.to_thread(_resolve)
         except Exception as exc:
-            self._raise_boundary(exc, operation="Qdrant legacy alias lookup", corpus_id=corpus_id, collection=prefix)
+            self._raise_boundary(
+                exc, operation="Qdrant legacy alias lookup", corpus_id=corpus_id, collection=prefix
+            )
             raise
 
     # ------------------------------------------------------------------
@@ -298,11 +313,15 @@ class QdrantChunkStore:
         try:
             await asyncio.to_thread(_create)
         except Exception as exc:
-            self._raise_boundary(exc, operation="Qdrant generation create", corpus_id=corpus_id, collection=physical)
+            self._raise_boundary(
+                exc, operation="Qdrant generation create", corpus_id=corpus_id, collection=physical
+            )
             raise
         return physical
 
-    async def write_chunks(self, corpus_id: str, physical: str, chunks: list[Chunk], *, embedding_dim: int) -> int:
+    async def write_chunks(
+        self, corpus_id: str, physical: str, chunks: list[Chunk], *, embedding_dim: int
+    ) -> int:
         """Write dense + sparse vectors for chunks into a physical generation."""
         if not chunks:
             return 0
@@ -310,7 +329,9 @@ class QdrantChunkStore:
 
         documents = [_chunk_to_document(corpus_id, chunk) for chunk in chunks]
         sparse_embedder = await _sparse_doc_embedder(self.sparse_contract)
-        documents = await asyncio.to_thread(lambda: list(sparse_embedder.run(documents=documents)["documents"]))
+        documents = await asyncio.to_thread(
+            lambda: list(sparse_embedder.run(documents=documents)["documents"])
+        )
 
         def _write() -> int:
             store = self._document_store(physical, embedding_dim=embedding_dim, recreate=False)
@@ -322,7 +343,9 @@ class QdrantChunkStore:
         try:
             return await asyncio.to_thread(_write)
         except Exception as exc:
-            self._raise_boundary(exc, operation="Qdrant chunk write", corpus_id=corpus_id, collection=physical)
+            self._raise_boundary(
+                exc, operation="Qdrant chunk write", corpus_id=corpus_id, collection=physical
+            )
             raise
 
     async def count_points(self, physical: str) -> int:
@@ -342,43 +365,35 @@ class QdrantChunkStore:
                 raise DependencyUnavailableError("qdrant", "Qdrant generation count") from exc
             raise
 
-    async def retire_generations(self, corpus_id: str, *, keep: str | None) -> int:
-        """Delete every generation of a corpus except ``keep`` (run after the manifest commit).
-
-        The prefix is injective per corpus, so every `<prefix>__*` collection
-        other than ``keep`` is a superseded or orphaned generation (a previous
-        live generation, or one left by a run that died before dropping it).
-        Also removes a legacy alias if one is still present. Returns the number
-        of collections removed.
-        """
+    async def drop_legacy_alias(self, corpus_id: str) -> bool:
+        """Remove a pre-manifest corpus alias (startup upgrade only); returns whether one existed."""
         from qdrant_client import models as qmodels
 
         prefix = corpus_collection_prefix(corpus_id)
 
-        def _retire() -> int:
+        def _drop() -> bool:
             client = self._client()
-            removed = 0
             try:
                 for item in client.get_aliases().aliases:
                     if str(item.alias_name) == prefix:
                         client.update_collection_aliases(
                             change_aliases_operations=[
-                                qmodels.DeleteAliasOperation(delete_alias=qmodels.DeleteAlias(alias_name=prefix))
+                                qmodels.DeleteAliasOperation(
+                                    delete_alias=qmodels.DeleteAlias(alias_name=prefix)
+                                )
                             ]
                         )
-                for collection in list(client.get_collections().collections):
-                    name = str(collection.name)
-                    if name.startswith(f"{prefix}__") and name != keep:
-                        client.delete_collection(name)
-                        removed += 1
+                        return True
+                return False
             finally:
                 client.close()
-            return removed
 
         try:
-            return await asyncio.to_thread(_retire)
+            return await asyncio.to_thread(_drop)
         except Exception as exc:
-            self._raise_boundary(exc, operation="Qdrant generation retire", corpus_id=corpus_id, collection=keep)
+            self._raise_boundary(
+                exc, operation="Qdrant legacy alias drop", corpus_id=corpus_id, collection=prefix
+            )
             raise
 
     async def drop_generation(self, physical: str) -> None:
@@ -411,7 +426,9 @@ class QdrantChunkStore:
                     if str(item.alias_name) == prefix:
                         client.update_collection_aliases(
                             change_aliases_operations=[
-                                qmodels.DeleteAliasOperation(delete_alias=qmodels.DeleteAlias(alias_name=prefix))
+                                qmodels.DeleteAliasOperation(
+                                    delete_alias=qmodels.DeleteAlias(alias_name=prefix)
+                                )
                             ]
                         )
                 for collection in list(client.get_collections().collections):
@@ -426,7 +443,9 @@ class QdrantChunkStore:
         try:
             return await asyncio.to_thread(_delete)
         except Exception as exc:
-            self._raise_boundary(exc, operation="Qdrant corpus delete", corpus_id=corpus_id, collection=prefix)
+            self._raise_boundary(
+                exc, operation="Qdrant corpus delete", corpus_id=corpus_id, collection=prefix
+            )
             raise
 
     # ------------------------------------------------------------------
@@ -448,17 +467,27 @@ class QdrantChunkStore:
 
         async with _corpus_lock(corpus_id):
             physical = qdrant_collection_of(await pg.get_generation(corpus_id))
-            if physical is None:
-                physical = await self.create_generation(corpus_id, embedding_dim=embedding_dim)
-                await pg.set_generation(
-                    corpus_id,
-                    build_generation(
-                        run_id=f"incremental-{uuid.uuid4().hex[:10]}",
-                        qdrant_collection=physical,
-                        graph_repo_id=corpus_id,
-                    ),
+            if physical is not None:
+                return await self.write_chunks(
+                    corpus_id, physical, chunks, embedding_dim=embedding_dim
                 )
-            return await self.write_chunks(corpus_id, physical, chunks, embedding_dim=embedding_dim)
+            # First write: the manifest is recorded only after the points exist,
+            # so a failed write never leaves a manifest naming an empty collection
+            # (an orphaned empty collection is swept by delete_corpus instead).
+            # Incremental corpora write no graph, so graph_repo_id stays None.
+            physical = await self.create_generation(corpus_id, embedding_dim=embedding_dim)
+            written = await self.write_chunks(
+                corpus_id, physical, chunks, embedding_dim=embedding_dim
+            )
+            await pg.set_generation(
+                corpus_id,
+                build_generation(
+                    run_id=f"incremental-{uuid.uuid4().hex[:10]}",
+                    qdrant_collection=physical,
+                    graph_repo_id=None,
+                ),
+            )
+            return written
 
     # ------------------------------------------------------------------
     # Reads
@@ -483,7 +512,9 @@ class QdrantChunkStore:
                 dense_points = int(
                     client.count(
                         physical,
-                        count_filter=qmodels.Filter(must=[qmodels.HasVectorCondition(has_vector=DENSE_VECTOR_NAME)]),
+                        count_filter=qmodels.Filter(
+                            must=[qmodels.HasVectorCondition(has_vector=DENSE_VECTOR_NAME)]
+                        ),
                         exact=True,
                     ).count
                 )
@@ -512,7 +543,9 @@ class QdrantChunkStore:
                     dense_points=0,
                     dense_dimensions=0,
                 )
-            self._raise_boundary(exc, operation="Qdrant corpus status", corpus_id=corpus_id, collection=physical)
+            self._raise_boundary(
+                exc, operation="Qdrant corpus status", corpus_id=corpus_id, collection=physical
+            )
             raise
 
     async def vector_search(
@@ -540,11 +573,15 @@ class QdrantChunkStore:
         try:
             points = await asyncio.to_thread(_search)
         except Exception as exc:
-            self._raise_boundary(exc, operation="Qdrant vector search", corpus_id=corpus_id, collection=physical)
+            self._raise_boundary(
+                exc, operation="Qdrant vector search", corpus_id=corpus_id, collection=physical
+            )
             raise
         return [_point_to_match(p, source="vector", corpus_id=corpus_id) for p in points]
 
-    async def sparse_search(self, corpus_id: str, query: str, top_k: int, *, physical: str | None) -> list[ChunkMatch]:
+    async def sparse_search(
+        self, corpus_id: str, query: str, top_k: int, *, physical: str | None
+    ) -> list[ChunkMatch]:
         if top_k <= 0 or not str(query or "").strip():
             return []
         from qdrant_client import models as qmodels
@@ -561,7 +598,9 @@ class QdrantChunkStore:
             try:
                 response = client.query_points(
                     physical,
-                    query=qmodels.SparseVector(indices=list(sparse.indices), values=list(sparse.values)),
+                    query=qmodels.SparseVector(
+                        indices=list(sparse.indices), values=list(sparse.values)
+                    ),
                     using=SPARSE_VECTOR_NAME,
                     limit=int(top_k),
                     with_payload=True,
@@ -573,7 +612,9 @@ class QdrantChunkStore:
         try:
             points = await asyncio.to_thread(_search)
         except Exception as exc:
-            self._raise_boundary(exc, operation="Qdrant sparse search", corpus_id=corpus_id, collection=physical)
+            self._raise_boundary(
+                exc, operation="Qdrant sparse search", corpus_id=corpus_id, collection=physical
+            )
             raise
         return [_point_to_match(p, source="sparse", corpus_id=corpus_id) for p in points]
 
@@ -601,7 +642,9 @@ class QdrantChunkStore:
         try:
             records = await asyncio.to_thread(_retrieve)
         except Exception as exc:
-            self._raise_boundary(exc, operation="Qdrant embedding fetch", corpus_id=corpus_id, collection=physical)
+            self._raise_boundary(
+                exc, operation="Qdrant embedding fetch", corpus_id=corpus_id, collection=physical
+            )
             raise
         out: dict[str, list[float]] = {}
         for record in records:

@@ -28,6 +28,7 @@ from server.config_control_plane import (
 from server.db.postgres import PostgresClient
 from server.dependency_errors import DependencyUnavailableError
 from server.gateway_catalog import gateway_rows_snapshot
+from server.indexing.generations import qdrant_collection_of
 from server.lineage import ensure_current_bundle
 from server.models.retrieval import ChunkMatch
 from server.models.tribrid_config_model import (
@@ -35,10 +36,10 @@ from server.models.tribrid_config_model import (
     ConfigRegistryResponse,
     CorpusScope,
     MCPHTTPTransportStatus,
-    MCPToolInfo,
     MCPProbeRequest,
     MCPProbeResponse,
     MCPStatusResponse,
+    MCPToolInfo,
     ModelValidationResult,
     ModelValidationWarning,
     TriBridConfig,
@@ -241,10 +242,9 @@ def _validate_model_capabilities(config: TriBridConfig) -> None:
     # Embedding fields (must be EMB-capable).
     embedding_provider = str(config.embedding.embedding_type or "").strip().lower() or None
     emb_model = _resolve_embedding_model(config)
-    strict_unknown_embedding = (
-        str(config.embedding.embedding_backend or "").strip().lower() == "provider"
-        and not getattr(config.indexing, "skip_dense", False)
-    )
+    strict_unknown_embedding = str(
+        config.embedding.embedding_backend or ""
+    ).strip().lower() == "provider" and not getattr(config.indexing, "skip_dense", False)
     _validate_capability(
         catalog_models,
         field_name="embedding.*",
@@ -347,11 +347,15 @@ async def _enforce_index_contract_lock(
         if total_chunks <= 0:
             return
         try:
-            qdrant_status = await QdrantChunkStore(existing_config).status(rid)
+            qdrant_status = await QdrantChunkStore(existing_config).status(
+                rid, physical=qdrant_collection_of(await pg.get_generation(rid))
+            )
         except DependencyUnavailableError as exc:
             # The lock cannot be evaluated without the vector store: refuse the
             # contract change instead of silently accepting it.
-            raise dependency_unavailable_http_exception(exc.dependency, boundary="Config contract lock", exc=exc) from exc
+            raise dependency_unavailable_http_exception(
+                exc.dependency, boundary="Config contract lock", exc=exc
+            ) from exc
         has_dense_index = bool(qdrant_status is not None and qdrant_status.dense_points > 0)
 
         blocked_dense = bool(dense_changed and has_dense_index)
@@ -407,24 +411,32 @@ def _collect_model_warnings(config: TriBridConfig) -> list[ModelValidationWarnin
     catalog_models = _load_catalog_models_for_validation()
     warnings: list[ModelValidationWarning] = []
 
-    def _check(field_name: str, model_value: str, required_component: str, provider_hint: str | None = None) -> None:
+    def _check(
+        field_name: str, model_value: str, required_component: str, provider_hint: str | None = None
+    ) -> None:
         raw = str(model_value or "").strip()
         if not raw:
             return
-        caps = _catalog_capabilities_for_model(catalog_models, model_value=raw, provider_hint=provider_hint)
+        caps = _catalog_capabilities_for_model(
+            catalog_models, model_value=raw, provider_hint=provider_hint
+        )
         if not caps:
-            warnings.append(ModelValidationWarning(
-                field=field_name,
-                model_value=raw,
-                message=f"Model '{raw}' is not in the catalog. It may work but cannot be validated.",
-            ))
+            warnings.append(
+                ModelValidationWarning(
+                    field=field_name,
+                    model_value=raw,
+                    message=f"Model '{raw}' is not in the catalog. It may work but cannot be validated.",
+                )
+            )
         elif required_component not in caps:
             found = ", ".join(sorted(caps))
-            warnings.append(ModelValidationWarning(
-                field=field_name,
-                model_value=raw,
-                message=f"Model '{raw}' supports [{found}] but this field requires [{required_component}].",
-            ))
+            warnings.append(
+                ModelValidationWarning(
+                    field=field_name,
+                    model_value=raw,
+                    message=f"Model '{raw}' supports [{found}] but this field requires [{required_component}].",
+                )
+            )
 
     gateway_aliases = gateway_rows_snapshot()
     for field_name, value in (
@@ -435,7 +447,10 @@ def _collect_model_warnings(config: TriBridConfig) -> list[ModelValidationWarnin
         ("generation.gen_model_mcp", config.generation.gen_model_mcp),
         ("generation.gen_model_cli", config.generation.gen_model_cli),
         ("chat.multimodal.vision_model_override", config.chat.multimodal.vision_model_override),
-        ("graph_indexing.semantic_kg_llm_model", getattr(config.graph_indexing, "semantic_kg_llm_model", "")),
+        (
+            "graph_indexing.semantic_kg_llm_model",
+            getattr(config.graph_indexing, "semantic_kg_llm_model", ""),
+        ),
     ):
         alias = str(value or "").strip()
         if alias.startswith("litellm:"):
@@ -443,46 +458,60 @@ def _collect_model_warnings(config: TriBridConfig) -> list[ModelValidationWarnin
         if not alias:
             continue
         if not gateway_aliases:
-            warnings.append(ModelValidationWarning(
-                field=field_name,
-                model_value=alias,
-                message="Generation catalog is not loaded; gateway aliases cannot be verified and generation fails closed.",
-            ))
+            warnings.append(
+                ModelValidationWarning(
+                    field=field_name,
+                    model_value=alias,
+                    message="Generation catalog is not loaded; gateway aliases cannot be verified and generation fails closed.",
+                )
+            )
         elif alias not in gateway_aliases:
-            warnings.append(ModelValidationWarning(
-                field=field_name,
-                model_value=alias,
-                message=f"'{alias}' is not a gateway alias in data/models.json; generation with it fails closed.",
-            ))
+            warnings.append(
+                ModelValidationWarning(
+                    field=field_name,
+                    model_value=alias,
+                    message=f"'{alias}' is not a gateway alias in data/models.json; generation with it fails closed.",
+                )
+            )
 
-    if (
-        str(config.embedding.embedding_backend or "").strip().lower() == "provider"
-        and not getattr(config.indexing, "skip_dense", False)
+    if str(config.embedding.embedding_backend or "").strip().lower() == "provider" and not getattr(
+        config.indexing, "skip_dense", False
     ):
         emb_provider = str(config.embedding.embedding_type or "").strip().lower()
         if emb_provider and emb_provider not in SUPPORTED_PROVIDER_BACKEND_EMBEDDING_PROVIDERS:
             allowed = ", ".join(sorted(SUPPORTED_PROVIDER_BACKEND_EMBEDDING_PROVIDERS))
-            warnings.append(ModelValidationWarning(
-                field="embedding.embedding_type",
-                model_value=emb_provider,
-                message=f"Embedding provider '{emb_provider}' is not runtime-selectable today. Allowed providers: [{allowed}].",
-            ))
-
+            warnings.append(
+                ModelValidationWarning(
+                    field="embedding.embedding_type",
+                    model_value=emb_provider,
+                    message=f"Embedding provider '{emb_provider}' is not runtime-selectable today. Allowed providers: [{allowed}].",
+                )
+            )
 
     for field, alias, output_tokens in (
-        ("chat.max_tokens", str(config.chat.litellm.default_model or "").strip(), int(config.chat.max_tokens)),
-        ("generation.gen_max_tokens", str(config.generation.gen_model or "").strip(), int(config.generation.gen_max_tokens)),
+        (
+            "chat.max_tokens",
+            str(config.chat.litellm.default_model or "").strip(),
+            int(config.chat.max_tokens),
+        ),
+        (
+            "generation.gen_max_tokens",
+            str(config.generation.gen_model or "").strip(),
+            int(config.generation.gen_max_tokens),
+        ),
     ):
         window = context_window_for_alias(alias) if alias else None
         if window is not None and output_tokens >= window // 2:
-            warnings.append(ModelValidationWarning(
-                field=field,
-                model_value=str(output_tokens),
-                message=(
-                    f"{field}={output_tokens} reserves at least half of alias '{alias}' {window}-token context window; "
-                    "retrieved context will be trimmed aggressively and requests are refused once nothing fits."
-                ),
-            ))
+            warnings.append(
+                ModelValidationWarning(
+                    field=field,
+                    model_value=str(output_tokens),
+                    message=(
+                        f"{field}={output_tokens} reserves at least half of alias '{alias}' {window}-token context window; "
+                        "retrieved context will be trimmed aggressively and requests are refused once nothing fits."
+                    ),
+                )
+            )
 
     return warnings
 
@@ -569,7 +598,9 @@ async def update_config_section(
         base = config.model_dump()
         current_section = base.get(section)
         if not isinstance(current_section, dict):
-            raise HTTPException(status_code=400, detail=f"Config section '{section}' is not patchable")
+            raise HTTPException(
+                status_code=400, detail=f"Config section '{section}' is not patchable"
+            )
         if not isinstance(updates, dict):
             raise HTTPException(status_code=422, detail="PATCH body must be a JSON object")
 
@@ -617,7 +648,9 @@ async def reset_config(scope: CorpusScope = _CORPUS_SCOPE_DEP) -> TriBridConfig:
 
 
 @router.get("/secrets/check")
-async def check_secrets(keys: str = Query(..., description="Comma-separated env var names")) -> dict[str, bool]:
+async def check_secrets(
+    keys: str = Query(..., description="Comma-separated env var names"),
+) -> dict[str, bool]:
     """Return which secret env vars are configured (never returns values)."""
     names = [k.strip() for k in (keys or "").split(",") if k.strip()]
     if not names:
@@ -656,7 +689,9 @@ async def mcp_status(request: Request) -> MCPStatusResponse:
     if python_stdio_available:
         details.append("Python stdio MCP transport is available (client-spawned; no daemon).")
     else:
-        details.append("Python stdio MCP transport not available (Python package 'mcp' not installed).")
+        details.append(
+            "Python stdio MCP transport not available (Python package 'mcp' not installed)."
+        )
 
     # Python Streamable HTTP transport is embedded under cfg.mcp.mount_path (same FastAPI app).
     try:
@@ -727,11 +762,10 @@ async def mcp_probe(
     that bypasses the tool (the former /api/mcp/rag_search always enabled every
     retrieval leg and ignored mcp.default_mode).
     """
+    import httpx
     from mcp import ClientSession
     from mcp.client.streamable_http import streamable_http_client
     from mcp.types import TextContent
-
-    import httpx
 
     from server.mcp.server import mounted_state
 
@@ -743,7 +777,10 @@ async def mcp_probe(
         raise HTTPException(status_code=400, detail="Question must not be empty")
     enabled, mount_path = mounted_state()
     if not enabled:
-        raise HTTPException(status_code=503, detail="The MCP Streamable HTTP transport is not mounted in this process")
+        raise HTTPException(
+            status_code=503,
+            detail="The MCP Streamable HTTP transport is not mounted in this process",
+        )
 
     cfg = load_global_config()
     # Same typed boundary as every stateful route: a reachable store proves the
@@ -769,9 +806,15 @@ async def mcp_probe(
     transport_url = f"http://{host}:{port}{mount_path.rstrip('/')}/"
 
     # Same process, real transport: the MCP session manager runs in this app's lifespan.
-    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=request.app), base_url=f"http://{host}:{port}") as http_client:
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=request.app), base_url=f"http://{host}:{port}"
+    ) as http_client:
         try:
-            async with streamable_http_client(transport_url, http_client=http_client) as (read, write, _):
+            async with streamable_http_client(transport_url, http_client=http_client) as (
+                read,
+                write,
+                _,
+            ):
                 async with ClientSession(read, write) as session:
                     await session.initialize()
                     arguments: dict[str, Any] = {"query": question, "corpus_id": corpus_id}
@@ -794,7 +837,9 @@ async def mcp_probe(
         lowered = text.lower()
         if "corpus not found" in lowered or "not found" in lowered:
             raise HTTPException(status_code=404, detail=text or f"Corpus not found: {corpus_id}")
-        raise HTTPException(status_code=502, detail=f"MCP search tool returned an error: {text or 'no detail'}")
+        raise HTTPException(
+            status_code=502, detail=f"MCP search tool returned an error: {text or 'no detail'}"
+        )
     structured = result.structuredContent
     rows = structured.get("result") if isinstance(structured, dict) else structured
     if not isinstance(rows, list):

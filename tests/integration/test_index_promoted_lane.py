@@ -15,8 +15,8 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from server.config import load_config
-from server.main import app
 from server.db.postgres import PostgresClient
+from server.main import app
 from server.retrieval.contracts import sparse_contract_from_config
 from server.retrieval.qdrant_store import QdrantChunkStore
 from server.services import config_store
@@ -82,15 +82,30 @@ async def test_index_search_and_delete_on_promoted_lane(client: AsyncClient) -> 
         metrics_before = await client.get("/metrics")
         assert metrics_before.status_code == 200
         runs_before = _metric_value(metrics_before.text, "tribrid_index_runs_total")
-        duration_count_before = _metric_value(metrics_before.text, "tribrid_index_duration_seconds_count")
+        duration_count_before = _metric_value(
+            metrics_before.text, "tribrid_index_duration_seconds_count"
+        )
 
         started = await client.post(
             "/api/index",
             json={"corpus_id": corpus_id, "repo_path": str(_CORPUS_PATH), "force_reindex": True},
         )
         assert started.status_code == 200, started.text
+        # Durable per-corpus fence: a second run on the same corpus is refused while
+        # the first is building (409 names the running run), and the fence lives on
+        # the corpus row, not in this process.
+        overlapping = await client.post(
+            "/api/index",
+            json={"corpus_id": corpus_id, "repo_path": str(_CORPUS_PATH), "force_reindex": True},
+        )
+        assert overlapping.status_code == 409, overlapping.text
+        fenced_row = await pg.get_corpus(corpus_id)
+        assert (fenced_row["meta"].get("index_run") or {}).get("run_id"), fenced_row["meta"]
         final = await _wait_for_index(client, corpus_id)
         assert final["status"] == "complete", final
+        assert "index_run" not in (await pg.get_corpus(corpus_id))["meta"], (
+            "the fence is released with the run"
+        )
 
         # Postgres holds the chunk rows + contracts; Qdrant holds a promoted generation with one point per chunk.
         corpus = await pg.get_corpus(corpus_id)
@@ -100,8 +115,8 @@ async def test_index_search_and_delete_on_promoted_lane(client: AsyncClient) -> 
         chunk_rows = await pg.count_chunks(corpus_id)
         assert chunk_rows > 0
         generation = await pg.get_generation(corpus_id)
-        assert generation and generation["qdrant_collection"] and generation["graph_repo_id"], generation
-        status = await qdrant.status(corpus_id, physical=generation["qdrant_collection"])
+        assert generation and generation.qdrant_collection and generation.graph_repo_id, generation
+        status = await qdrant.status(corpus_id, physical=generation.qdrant_collection)
         assert status is not None, "promoted Qdrant generation missing"
         assert status.points == chunk_rows
         assert status.dense_points == chunk_rows
@@ -109,13 +124,19 @@ async def test_index_search_and_delete_on_promoted_lane(client: AsyncClient) -> 
         # A real index run increments the index metrics and sets the chunk gauge to the promoted count.
         metrics_after = await client.get("/metrics")
         assert metrics_after.status_code == 200
-        assert _metric_value(metrics_after.text, "tribrid_index_runs_total") == pytest.approx(runs_before + 1.0)
-        assert _metric_value(metrics_after.text, "tribrid_index_duration_seconds_count") == pytest.approx(
-            duration_count_before + 1.0
+        assert _metric_value(metrics_after.text, "tribrid_index_runs_total") == pytest.approx(
+            runs_before + 1.0
         )
-        assert _metric_value(metrics_after.text, "tribrid_chunks_indexed_current") == pytest.approx(float(chunk_rows))
+        assert _metric_value(
+            metrics_after.text, "tribrid_index_duration_seconds_count"
+        ) == pytest.approx(duration_count_before + 1.0)
+        assert _metric_value(metrics_after.text, "tribrid_chunks_indexed_current") == pytest.approx(
+            float(chunk_rows)
+        )
         stored_chunks = await pg.list_chunks_for_repo(corpus_id, limit=5)
-        assert stored_chunks and all(ch.metadata.get("extraction") == "direct" for ch in stored_chunks)
+        assert stored_chunks and all(
+            ch.metadata.get("extraction") == "direct" for ch in stored_chunks
+        )
         assert all(ch.embedding is None for ch in stored_chunks)
 
         # All three legs return results for a grounded query.
@@ -143,7 +164,10 @@ async def test_index_search_and_delete_on_promoted_lane(client: AsyncClient) -> 
         assert all(m["metadata"].get("corpus_id") == corpus_id for m in matches)
 
         # Sparse-only and vector-only requests both succeed on the same generation.
-        for legs in ({"include_vector": False, "include_graph": False}, {"include_sparse": False, "include_graph": False}):
+        for legs in (
+            {"include_vector": False, "include_graph": False},
+            {"include_sparse": False, "include_graph": False},
+        ):
             res = await client.post("/api/search", json={**body, **legs})
             assert res.status_code == 200, res.text
             assert res.json()["matches"], legs
@@ -162,35 +186,68 @@ async def test_index_search_and_delete_on_promoted_lane(client: AsyncClient) -> 
         assert final_reindex.get("error") in (None, ""), final_reindex
         assert await pg.count_chunks(corpus_id) == chunk_rows
         regeneration = await pg.get_generation(corpus_id)
-        assert regeneration and regeneration["run_id"] != generation["run_id"], regeneration
-        restatus = await qdrant.status(corpus_id, physical=regeneration["qdrant_collection"])
+        assert regeneration and regeneration.run_id != generation.run_id, regeneration
+        restatus = await qdrant.status(corpus_id, physical=regeneration.qdrant_collection)
         assert restatus is not None and restatus.points == chunk_rows
-        # The superseded generation was retired after the commit (reads as wiped).
-        retired = await qdrant.status(corpus_id, physical=generation["qdrant_collection"])
-        assert retired is not None and retired.physical_collection is None, retired
-        assert (await qdrant.count_points(regeneration["qdrant_collection"])) == chunk_rows
+        # Retention is current + previous: the replaced generation is still readable
+        # (an in-flight reader that resolved the old manifest keeps working) and the
+        # new manifest records it as previous.
+        assert regeneration.previous_qdrant_collection == generation.qdrant_collection
+        assert regeneration.previous_graph_repo_id == generation.graph_repo_id
+        kept = await qdrant.status(corpus_id, physical=generation.qdrant_collection)
+        assert kept is not None and kept.physical_collection == generation.qdrant_collection
+        assert (await qdrant.count_points(regeneration.qdrant_collection)) == chunk_rows
+        # The fence was released with the run: a third run starts, and the generation
+        # before the previous one is retired by exact id after its commit.
+        third = await client.post(
+            "/api/index",
+            json={"corpus_id": corpus_id, "repo_path": str(_CORPUS_PATH), "force_reindex": False},
+        )
+        assert third.status_code == 200, third.text
+        assert (await _wait_for_index(client, corpus_id))["status"] == "complete"
+        third_generation = await pg.get_generation(corpus_id)
+        assert (
+            third_generation
+            and third_generation.previous_qdrant_collection == regeneration.qdrant_collection
+        )
+        retired = await qdrant.status(corpus_id, physical=generation.qdrant_collection)
+        assert retired is not None and retired.physical_collection is None, (
+            "the generation before previous is retired"
+        )
+        assert (
+            await qdrant.status(corpus_id, physical=regeneration.qdrant_collection)
+        ).points == chunk_rows
         latest_run = await client.get(f"/api/index/{corpus_id}/runs/latest")
         assert latest_run.status_code == 200, latest_run.text
         assert latest_run.json()["status"] == "complete", latest_run.json()
         assert latest_run.json().get("error") in (None, ""), latest_run.json()
         after_reindex = await client.post("/api/search", json={**body, "cache_mode": "bypass"})
-        assert after_reindex.status_code == 200 and after_reindex.json()["matches"], after_reindex.text
+        assert after_reindex.status_code == 200 and after_reindex.json()["matches"], (
+            after_reindex.text
+        )
 
         # A run that fails before promotion must leave the active index and its
         # process-level stats exactly as they were (stats are published only
         # after the Postgres/Qdrant/Neo4j cutover completes).
-        stats_before = (await client.get("/api/index/stats", params={"corpus_id": corpus_id})).json()
+        stats_before = (
+            await client.get("/api/index/stats", params={"corpus_id": corpus_id})
+        ).json()
         # A path the API cannot read is refused up front (it used to "complete" with 0 files).
         missing = await client.post(
             "/api/index",
-            json={"corpus_id": corpus_id, "repo_path": str(_CORPUS_PATH / "does-not-exist"), "force_reindex": False},
+            json={
+                "corpus_id": corpus_id,
+                "repo_path": str(_CORPUS_PATH / "does-not-exist"),
+                "force_reindex": False,
+            },
         )
         assert missing.status_code == 400, missing.text
         # A readable but empty directory starts a run that fails instead of promoting an empty index.
         empty_dir = tempfile.mkdtemp(prefix="ragweld-empty-corpus-")
         try:
             bogus = await client.post(
-                "/api/index", json={"corpus_id": corpus_id, "repo_path": empty_dir, "force_reindex": False}
+                "/api/index",
+                json={"corpus_id": corpus_id, "repo_path": empty_dir, "force_reindex": False},
             )
             assert bogus.status_code == 200, bogus.text
             failed = await _wait_for_index(client, corpus_id)
@@ -208,7 +265,9 @@ async def test_index_search_and_delete_on_promoted_lane(client: AsyncClient) -> 
         # registered `search` tool (mcp.default_mode), not an HTTP shortcut. The
         # MCP session manager lives in the app lifespan, so run this leg under it.
         async with app.router.lifespan_context(app):
-            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://localhost:8000") as mcp_client:
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url="http://localhost:8000"
+            ) as mcp_client:
                 probe = await mcp_client.post(
                     "/api/mcp/probe",
                     params={"corpus_id": corpus_id},
@@ -216,7 +275,9 @@ async def test_index_search_and_delete_on_promoted_lane(client: AsyncClient) -> 
                 )
                 assert probe.status_code == 200, probe.text
                 probe_payload = probe.json()
-                assert probe_payload["tool"] == "search" and probe_payload["transport_url"].endswith("/mcp/")
+                assert probe_payload["tool"] == "search" and probe_payload[
+                    "transport_url"
+                ].endswith("/mcp/")
                 assert probe_payload["mode"] == cfg.mcp.default_mode and probe_payload["top_k"] == 5
                 assert probe_payload["results"] and any(
                     "calibrat" in r["content"].lower() for r in probe_payload["results"]
@@ -224,10 +285,17 @@ async def test_index_search_and_delete_on_promoted_lane(client: AsyncClient) -> 
                 sparse_only = await mcp_client.post(
                     "/api/mcp/probe",
                     params={"corpus_id": corpus_id},
-                    json={"question": "How often is the salinity sensor calibrated?", "mode": "sparse_only", "top_k": 3},
+                    json={
+                        "question": "How often is the salinity sensor calibrated?",
+                        "mode": "sparse_only",
+                        "top_k": 3,
+                    },
                 )
                 assert sparse_only.status_code == 200, sparse_only.text
-                assert sparse_only.json()["mode"] == "sparse_only" and len(sparse_only.json()["results"]) <= 3
+                assert (
+                    sparse_only.json()["mode"] == "sparse_only"
+                    and len(sparse_only.json()["results"]) <= 3
+                )
                 assert all(r["source"] == "sparse" for r in sparse_only.json()["results"])
 
         # Retrieval request/latency metrics are measured on the shared fusion lane,
@@ -253,18 +321,25 @@ async def test_index_search_and_delete_on_promoted_lane(client: AsyncClient) -> 
         assert chat.status_code in (200, 503), chat.text
         m1 = await client.get("/metrics")
         assert _metric_value(m1.text, "tribrid_search_requests_total") == pytest.approx(reqs0 + 2.0)
-        assert _metric_value(m1.text, "tribrid_search_latency_seconds_count") == pytest.approx(lat0 + 2.0)
+        assert _metric_value(m1.text, "tribrid_search_latency_seconds_count") == pytest.approx(
+            lat0 + 2.0
+        )
 
         stats = await client.get("/api/index/stats", params={"corpus_id": corpus_id})
         assert stats.status_code == 200, stats.text
         storage = stats.json()["storage_breakdown"]
         assert int(storage["qdrant_points"]) == chunk_rows
-        assert int(storage["qdrant_dense_vector_bytes"]) == chunk_rows * int(cfg.embedding.embedding_dim) * 4
+        assert (
+            int(storage["qdrant_dense_vector_bytes"])
+            == chunk_rows * int(cfg.embedding.embedding_dim) * 4
+        )
         # Dashboard storage truth on the real stores (replaces the former fake-Postgres test).
         assert int(storage["chunks_bytes"]) > 0
         assert int(storage["postgres_total_bytes"]) >= int(storage["chunks_bytes"])
         assert int(storage["total_storage_bytes"]) == (
-            int(storage["postgres_total_bytes"]) + int(storage["qdrant_dense_vector_bytes"]) + int(storage["neo4j_store_bytes"])
+            int(storage["postgres_total_bytes"])
+            + int(storage["qdrant_dense_vector_bytes"])
+            + int(storage["neo4j_store_bytes"])
         )
         dashboard_status = await client.get("/api/index/status", params={"corpus_id": corpus_id})
         assert dashboard_status.status_code == 200, dashboard_status.text
@@ -281,7 +356,11 @@ async def test_index_search_and_delete_on_promoted_lane(client: AsyncClient) -> 
         assert deleted.json()["deleted_vector_collections"] >= 1
         assert await pg.get_generation(corpus_id) is None
         cleared = await pg.get_corpus(corpus_id)
-        assert cleared is not None and cleared["last_indexed"] is None and cleared["embedding_dimensions"] == 0
+        assert (
+            cleared is not None
+            and cleared["last_indexed"] is None
+            and cleared["embedding_dimensions"] == 0
+        )
         # A de-indexed corpus reports empty legs, not a missing-generation failure.
         empty = await client.post("/api/search", json=body)
         assert empty.status_code == 200, empty.text

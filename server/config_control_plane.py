@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import contextlib
 import importlib.util
+import logging
 import os
 import re
 from dataclasses import dataclass
@@ -18,6 +20,7 @@ from server.chat.gateway_runtime import (
 )
 from server.db.neo4j import Neo4jClient
 from server.db.postgres import PostgresClient
+from server.indexing.generations import qdrant_collection_of
 from server.models.tribrid_config_model import (
     ConfigFieldDescriptor,
     ConfigIntegrationContract,
@@ -50,26 +53,44 @@ class _SectionDefaults:
 
 _SECTION_DEFAULTS: dict[str, _SectionDefaults] = {
     "retrieval": _SectionDefaults("corpus", "tribrid_retrieval", "retrieval", "advanced", "live"),
-    "semantic_cache": _SectionDefaults("corpus", "tribrid_retrieval", "retrieval", "advanced", "live"),
+    "semantic_cache": _SectionDefaults(
+        "corpus", "tribrid_retrieval", "retrieval", "advanced", "live"
+    ),
     "scoring": _SectionDefaults("corpus", "tribrid_retrieval", "retrieval", "advanced", "live"),
     "layer_bonus": _SectionDefaults("corpus", "tribrid_retrieval", "retrieval", "advanced", "live"),
-    "embedding": _SectionDefaults("corpus", "tribrid_retrieval", "retrieval", "advanced", "reindex"),
-    "tokenization": _SectionDefaults("corpus", "tribrid_retrieval", "retrieval", "advanced", "reindex"),
+    "embedding": _SectionDefaults(
+        "corpus", "tribrid_retrieval", "retrieval", "advanced", "reindex"
+    ),
+    "tokenization": _SectionDefaults(
+        "corpus", "tribrid_retrieval", "retrieval", "advanced", "reindex"
+    ),
     "chunking": _SectionDefaults("corpus", "tribrid_retrieval", "retrieval", "advanced", "reindex"),
     "indexing": _SectionDefaults("corpus", "tribrid_retrieval", "retrieval", "advanced", "reindex"),
-    "qdrant": _SectionDefaults("global", "haystack_docling_qdrant", "retrieval", "advanced", "restart"),
+    "qdrant": _SectionDefaults(
+        "global", "haystack_docling_qdrant", "retrieval", "advanced", "restart"
+    ),
     "graph_storage": _SectionDefaults("global", "neo4j", "graph", "basic", "restart"),
     "graph_indexing": _SectionDefaults("corpus", "neo4j", "graph", "advanced", "reindex"),
     "fusion": _SectionDefaults("corpus", "tribrid_retrieval", "retrieval", "advanced", "live"),
-    "vector_search": _SectionDefaults("corpus", "tribrid_retrieval", "retrieval", "advanced", "live"),
-    "sparse_search": _SectionDefaults("corpus", "tribrid_retrieval", "retrieval", "advanced", "live"),
+    "vector_search": _SectionDefaults(
+        "corpus", "tribrid_retrieval", "retrieval", "advanced", "live"
+    ),
+    "sparse_search": _SectionDefaults(
+        "corpus", "tribrid_retrieval", "retrieval", "advanced", "live"
+    ),
     "graph_search": _SectionDefaults("corpus", "neo4j", "graph", "advanced", "live"),
     "reranking": _SectionDefaults("corpus", "tribrid_retrieval", "retrieval", "advanced", "live"),
     "generation": _SectionDefaults("corpus", "litellm", "runtime", "basic", "live"),
-    "enrichment": _SectionDefaults("corpus", "tribrid_retrieval", "retrieval", "advanced", "reindex"),
-    "chunk_summaries": _SectionDefaults("corpus", "tribrid_retrieval", "retrieval", "expert", "reindex"),
+    "enrichment": _SectionDefaults(
+        "corpus", "tribrid_retrieval", "retrieval", "advanced", "reindex"
+    ),
+    "chunk_summaries": _SectionDefaults(
+        "corpus", "tribrid_retrieval", "retrieval", "expert", "reindex"
+    ),
     "keywords": _SectionDefaults("corpus", "tribrid_retrieval", "retrieval", "advanced", "reindex"),
-    "tracing": _SectionDefaults("global", "otel_grafana_stack", "observability", "basic", "restart"),
+    "tracing": _SectionDefaults(
+        "global", "otel_grafana_stack", "observability", "basic", "restart"
+    ),
     "training": _SectionDefaults("corpus", "unsloth", "training", "basic", "redeploy"),
     "ui": _SectionDefaults("global", "shell_ui", "shell", "basic", "live"),
     "chat": _SectionDefaults("corpus", "litellm", "runtime", "advanced", "live"),
@@ -82,49 +103,218 @@ _SECTION_DEFAULTS: dict[str, _SectionDefaults] = {
 }
 
 _FIELD_OVERRIDES: dict[str, dict[str, Any]] = {
-    "generation.gen_model": {"integration": "litellm", "ui_surface": "runtime", "exposure_level": "basic"},
-    "chat.temperature": {"integration": "litellm", "ui_surface": "runtime", "exposure_level": "basic"},
-    "chat.max_tokens": {"integration": "litellm", "ui_surface": "runtime", "exposure_level": "basic"},
-    "chat.vllm.enabled": {"integration": "vllm", "ui_surface": "runtime", "exposure_level": "basic"},
-    "chat.vllm.base_url": {"integration": "vllm", "ui_surface": "runtime", "exposure_level": "basic"},
-    "chat.vllm.default_model": {"integration": "vllm", "ui_surface": "runtime", "exposure_level": "basic"},
-    "chat.litellm.enabled": {"integration": "litellm", "ui_surface": "runtime", "exposure_level": "basic"},
-    "chat.litellm.base_url": {"integration": "litellm", "ui_surface": "runtime", "exposure_level": "basic"},
-    "chat.litellm.default_model": {"integration": "litellm", "ui_surface": "runtime", "exposure_level": "basic"},
-    "retrieval.final_k": {"integration": "tribrid_retrieval", "ui_surface": "retrieval", "exposure_level": "basic"},
-    "retrieval.multi_query_m": {"integration": "tribrid_retrieval", "ui_surface": "retrieval", "exposure_level": "basic"},
-    "chunking.chunking_strategy": {"integration": "tribrid_retrieval", "ui_surface": "retrieval", "exposure_level": "basic"},
-    "embedding.embedding_backend": {"integration": "tribrid_retrieval", "ui_surface": "retrieval", "exposure_level": "basic"},
-    "reranking.reranker_mode": {"integration": "tribrid_retrieval", "ui_surface": "retrieval", "exposure_level": "basic"},
-    "vector_search.enabled": {"integration": "tribrid_retrieval", "ui_surface": "retrieval", "exposure_level": "basic"},
-    "sparse_search.enabled": {"integration": "tribrid_retrieval", "ui_surface": "retrieval", "exposure_level": "basic"},
-    "graph_search.enabled": {"integration": "neo4j", "ui_surface": "graph", "exposure_level": "basic"},
-    "training.ragweld_agent_workflow_backend": {"integration": "flyte", "ui_surface": "training", "exposure_level": "basic"},
-    "training.ragweld_agent_flyte_admin_base_url": {"integration": "flyte", "ui_surface": "training", "exposure_level": "basic"},
-    "training.ragweld_agent_flyte_console_base_url": {"integration": "flyte", "ui_surface": "training", "exposure_level": "basic"},
-    "training.ragweld_agent_flyte_project": {"integration": "flyte", "ui_surface": "training", "exposure_level": "basic"},
-    "training.ragweld_agent_flyte_domain": {"integration": "flyte", "ui_surface": "training", "exposure_level": "basic"},
-    "training.ragweld_agent_flyte_launchplan": {"integration": "flyte", "ui_surface": "training", "exposure_level": "basic"},
-    "training.ragweld_agent_flyte_callback_base_url": {"integration": "flyte", "ui_surface": "training", "exposure_level": "basic"},
-    "training.ragweld_agent_tracking_backend": {"integration": "mlflow", "ui_surface": "training", "exposure_level": "basic"},
-    "training.ragweld_agent_mlflow_tracking_url": {"integration": "mlflow", "ui_surface": "training", "exposure_level": "basic"},
-    "training.ragweld_agent_mlflow_experiment_name": {"integration": "mlflow", "ui_surface": "training", "exposure_level": "basic"},
-    "training.ragweld_agent_backend": {"integration": "unsloth", "ui_surface": "training", "exposure_level": "basic"},
-    "training.ragweld_agent_unsloth_image": {"integration": "unsloth", "ui_surface": "training", "exposure_level": "basic"},
-    "tracing.langfuse_enabled": {"integration": "langfuse", "ui_surface": "observability", "exposure_level": "basic"},
-    "tracing.langfuse_base_url": {"integration": "langfuse", "ui_surface": "observability", "exposure_level": "basic"},
-    "tracing.langfuse_project": {"integration": "langfuse", "ui_surface": "observability", "exposure_level": "basic"},
-    "ui.grafana_base_url": {"integration": "otel_grafana_stack", "ui_surface": "observability", "exposure_level": "basic"},
+    "generation.gen_model": {
+        "integration": "litellm",
+        "ui_surface": "runtime",
+        "exposure_level": "basic",
+    },
+    "chat.temperature": {
+        "integration": "litellm",
+        "ui_surface": "runtime",
+        "exposure_level": "basic",
+    },
+    "chat.max_tokens": {
+        "integration": "litellm",
+        "ui_surface": "runtime",
+        "exposure_level": "basic",
+    },
+    "chat.vllm.enabled": {
+        "integration": "vllm",
+        "ui_surface": "runtime",
+        "exposure_level": "basic",
+    },
+    "chat.vllm.base_url": {
+        "integration": "vllm",
+        "ui_surface": "runtime",
+        "exposure_level": "basic",
+    },
+    "chat.vllm.default_model": {
+        "integration": "vllm",
+        "ui_surface": "runtime",
+        "exposure_level": "basic",
+    },
+    "chat.litellm.enabled": {
+        "integration": "litellm",
+        "ui_surface": "runtime",
+        "exposure_level": "basic",
+    },
+    "chat.litellm.base_url": {
+        "integration": "litellm",
+        "ui_surface": "runtime",
+        "exposure_level": "basic",
+    },
+    "chat.litellm.default_model": {
+        "integration": "litellm",
+        "ui_surface": "runtime",
+        "exposure_level": "basic",
+    },
+    "retrieval.final_k": {
+        "integration": "tribrid_retrieval",
+        "ui_surface": "retrieval",
+        "exposure_level": "basic",
+    },
+    "retrieval.multi_query_m": {
+        "integration": "tribrid_retrieval",
+        "ui_surface": "retrieval",
+        "exposure_level": "basic",
+    },
+    "chunking.chunking_strategy": {
+        "integration": "tribrid_retrieval",
+        "ui_surface": "retrieval",
+        "exposure_level": "basic",
+    },
+    "embedding.embedding_backend": {
+        "integration": "tribrid_retrieval",
+        "ui_surface": "retrieval",
+        "exposure_level": "basic",
+    },
+    "reranking.reranker_mode": {
+        "integration": "tribrid_retrieval",
+        "ui_surface": "retrieval",
+        "exposure_level": "basic",
+    },
+    "vector_search.enabled": {
+        "integration": "tribrid_retrieval",
+        "ui_surface": "retrieval",
+        "exposure_level": "basic",
+    },
+    "sparse_search.enabled": {
+        "integration": "tribrid_retrieval",
+        "ui_surface": "retrieval",
+        "exposure_level": "basic",
+    },
+    "graph_search.enabled": {
+        "integration": "neo4j",
+        "ui_surface": "graph",
+        "exposure_level": "basic",
+    },
+    "training.ragweld_agent_workflow_backend": {
+        "integration": "flyte",
+        "ui_surface": "training",
+        "exposure_level": "basic",
+    },
+    "training.ragweld_agent_flyte_admin_base_url": {
+        "integration": "flyte",
+        "ui_surface": "training",
+        "exposure_level": "basic",
+    },
+    "training.ragweld_agent_flyte_console_base_url": {
+        "integration": "flyte",
+        "ui_surface": "training",
+        "exposure_level": "basic",
+    },
+    "training.ragweld_agent_flyte_project": {
+        "integration": "flyte",
+        "ui_surface": "training",
+        "exposure_level": "basic",
+    },
+    "training.ragweld_agent_flyte_domain": {
+        "integration": "flyte",
+        "ui_surface": "training",
+        "exposure_level": "basic",
+    },
+    "training.ragweld_agent_flyte_launchplan": {
+        "integration": "flyte",
+        "ui_surface": "training",
+        "exposure_level": "basic",
+    },
+    "training.ragweld_agent_flyte_callback_base_url": {
+        "integration": "flyte",
+        "ui_surface": "training",
+        "exposure_level": "basic",
+    },
+    "training.ragweld_agent_tracking_backend": {
+        "integration": "mlflow",
+        "ui_surface": "training",
+        "exposure_level": "basic",
+    },
+    "training.ragweld_agent_mlflow_tracking_url": {
+        "integration": "mlflow",
+        "ui_surface": "training",
+        "exposure_level": "basic",
+    },
+    "training.ragweld_agent_mlflow_experiment_name": {
+        "integration": "mlflow",
+        "ui_surface": "training",
+        "exposure_level": "basic",
+    },
+    "training.ragweld_agent_backend": {
+        "integration": "unsloth",
+        "ui_surface": "training",
+        "exposure_level": "basic",
+    },
+    "training.ragweld_agent_unsloth_image": {
+        "integration": "unsloth",
+        "ui_surface": "training",
+        "exposure_level": "basic",
+    },
+    "tracing.langfuse_enabled": {
+        "integration": "langfuse",
+        "ui_surface": "observability",
+        "exposure_level": "basic",
+    },
+    "tracing.langfuse_base_url": {
+        "integration": "langfuse",
+        "ui_surface": "observability",
+        "exposure_level": "basic",
+    },
+    "tracing.langfuse_project": {
+        "integration": "langfuse",
+        "ui_surface": "observability",
+        "exposure_level": "basic",
+    },
+    "ui.grafana_base_url": {
+        "integration": "otel_grafana_stack",
+        "ui_surface": "observability",
+        "exposure_level": "basic",
+    },
     # Read per request by /api/observability/alert-rules and the Monitoring links: no restart involved.
-    "tracing.prometheus_base_url": {"integration": "otel_grafana_stack", "ui_surface": "observability", "exposure_level": "basic", "impact": "live"},
-    "ui.grafana_embed_enabled": {"integration": "otel_grafana_stack", "ui_surface": "observability", "exposure_level": "basic"},
-    "ui.grafana_dashboard_uid": {"integration": "otel_grafana_stack", "ui_surface": "observability", "exposure_level": "basic"},
-    "ui.grafana_dashboard_slug": {"integration": "otel_grafana_stack", "ui_surface": "observability", "exposure_level": "basic"},
-    "ui.grafana_auth_mode": {"integration": "otel_grafana_stack", "ui_surface": "observability", "exposure_level": "advanced"},
-    "evaluation.eval_dataset_path": {"integration": "ragas", "ui_surface": "eval", "exposure_level": "basic"},
-    "evaluation.baseline_path": {"integration": "promptfoo", "ui_surface": "eval", "exposure_level": "basic"},
-    "system_prompts.eval_analysis": {"integration": "ragas", "ui_surface": "eval", "exposure_level": "expert"},
-    "system_prompts.synthetic_judge": {"integration": "promptfoo", "ui_surface": "eval", "exposure_level": "expert"},
+    "tracing.prometheus_base_url": {
+        "integration": "otel_grafana_stack",
+        "ui_surface": "observability",
+        "exposure_level": "basic",
+        "impact": "live",
+    },
+    "ui.grafana_embed_enabled": {
+        "integration": "otel_grafana_stack",
+        "ui_surface": "observability",
+        "exposure_level": "basic",
+    },
+    "ui.grafana_dashboard_uid": {
+        "integration": "otel_grafana_stack",
+        "ui_surface": "observability",
+        "exposure_level": "basic",
+    },
+    "ui.grafana_dashboard_slug": {
+        "integration": "otel_grafana_stack",
+        "ui_surface": "observability",
+        "exposure_level": "basic",
+    },
+    "ui.grafana_auth_mode": {
+        "integration": "otel_grafana_stack",
+        "ui_surface": "observability",
+        "exposure_level": "advanced",
+    },
+    "evaluation.eval_dataset_path": {
+        "integration": "ragas",
+        "ui_surface": "eval",
+        "exposure_level": "basic",
+    },
+    "evaluation.baseline_path": {
+        "integration": "promptfoo",
+        "ui_surface": "eval",
+        "exposure_level": "basic",
+    },
+    "system_prompts.eval_analysis": {
+        "integration": "ragas",
+        "ui_surface": "eval",
+        "exposure_level": "expert",
+    },
+    "system_prompts.synthetic_judge": {
+        "integration": "promptfoo",
+        "ui_surface": "eval",
+        "exposure_level": "expert",
+    },
 }
 
 _LOCKED_INTEGRATION_CONTRACTS: tuple[ConfigIntegrationContract, ...] = (
@@ -133,9 +323,19 @@ _LOCKED_INTEGRATION_CONTRACTS: tuple[ConfigIntegrationContract, ...] = (
         label="LiteLLM",
         summary="Gateway and routing surface for model/provider traffic.",
         ui_surface="runtime",
-        required_config_paths=["chat.litellm.enabled", "chat.litellm.base_url", "chat.litellm.default_model"],
+        required_config_paths=[
+            "chat.litellm.enabled",
+            "chat.litellm.base_url",
+            "chat.litellm.default_model",
+        ],
         required_secret_ids=["litellm_api_key"],
-        readiness_checks=["enabled", "base_url_present", "default_model_present", "required_secret_present", "http_probe"],
+        readiness_checks=[
+            "enabled",
+            "base_url_present",
+            "default_model_present",
+            "required_secret_present",
+            "http_probe",
+        ],
         blocked_surfaces=["runtime", "chat", "benchmark"],
     ),
     ConfigIntegrationContract(
@@ -143,7 +343,11 @@ _LOCKED_INTEGRATION_CONTRACTS: tuple[ConfigIntegrationContract, ...] = (
         label="vLLM",
         summary="Self-hosted serving lane for owned generation models.",
         ui_surface="runtime",
-        required_config_paths=["chat.vllm.enabled", "chat.vllm.base_url", "chat.vllm.default_model"],
+        required_config_paths=[
+            "chat.vllm.enabled",
+            "chat.vllm.base_url",
+            "chat.vllm.default_model",
+        ],
         required_secret_ids=[],
         readiness_checks=["enabled", "base_url_present", "default_model_present", "http_probe"],
         blocked_surfaces=["runtime", "chat", "benchmark"],
@@ -162,7 +366,12 @@ _LOCKED_INTEGRATION_CONTRACTS: tuple[ConfigIntegrationContract, ...] = (
             "training.ragweld_agent_flyte_callback_base_url",
         ],
         required_secret_ids=[],
-        readiness_checks=["backend_selected", "required_fields_present", "admin_probe", "launch_plan_registered"],
+        readiness_checks=[
+            "backend_selected",
+            "required_fields_present",
+            "admin_probe",
+            "launch_plan_registered",
+        ],
         blocked_surfaces=["training"],
     ),
     ConfigIntegrationContract(
@@ -170,7 +379,12 @@ _LOCKED_INTEGRATION_CONTRACTS: tuple[ConfigIntegrationContract, ...] = (
         label="Tri-brid Retrieval (Postgres + Qdrant + Neo4j)",
         summary="Canonical retrieval/indexing lane: Postgres chunk control rows, Qdrant dense + sparse legs, Neo4j graph leg.",
         ui_surface="retrieval",
-        required_config_paths=["indexing.postgres_url", "qdrant.url", "vector_search.enabled", "sparse_search.enabled"],
+        required_config_paths=[
+            "indexing.postgres_url",
+            "qdrant.url",
+            "vector_search.enabled",
+            "sparse_search.enabled",
+        ],
         required_secret_ids=[],
         readiness_checks=["postgres_probe", "qdrant_probe", "graph_probe_when_enabled"],
         blocked_surfaces=["retrieval", "chat"],
@@ -180,9 +394,19 @@ _LOCKED_INTEGRATION_CONTRACTS: tuple[ConfigIntegrationContract, ...] = (
         label="Haystack + Docling + Qdrant",
         summary="Docling extraction, Haystack Qdrant document store, and the corpus dense + sparse vector generation.",
         ui_surface="retrieval",
-        required_config_paths=["qdrant.url", "embedding.embedding_backend", "chunking.chunking_strategy", "indexing.skip_dense"],
+        required_config_paths=[
+            "qdrant.url",
+            "embedding.embedding_backend",
+            "chunking.chunking_strategy",
+            "indexing.skip_dense",
+        ],
         required_secret_ids=[],
-        readiness_checks=["packages_present", "qdrant_probe", "corpus_selected", "corpus_generation_present"],
+        readiness_checks=[
+            "packages_present",
+            "qdrant_probe",
+            "corpus_selected",
+            "corpus_generation_present",
+        ],
         blocked_surfaces=["retrieval"],
     ),
     ConfigIntegrationContract(
@@ -190,7 +414,11 @@ _LOCKED_INTEGRATION_CONTRACTS: tuple[ConfigIntegrationContract, ...] = (
         label="Neo4j",
         summary="Graph parity substrate for entity/chunk search and corpus graph state.",
         ui_surface="graph",
-        required_config_paths=["graph_storage.neo4j_uri", "graph_storage.neo4j_user", "graph_storage.neo4j_database"],
+        required_config_paths=[
+            "graph_storage.neo4j_uri",
+            "graph_storage.neo4j_user",
+            "graph_storage.neo4j_database",
+        ],
         required_secret_ids=["neo4j_password"],
         readiness_checks=["required_fields_present", "password_present", "neo4j_probe"],
         blocked_surfaces=["graph", "retrieval"],
@@ -200,7 +428,10 @@ _LOCKED_INTEGRATION_CONTRACTS: tuple[ConfigIntegrationContract, ...] = (
         label="Unsloth",
         summary="Training execution backend for the Learning Agent target lane.",
         ui_surface="training",
-        required_config_paths=["training.ragweld_agent_backend", "training.ragweld_agent_unsloth_image"],
+        required_config_paths=[
+            "training.ragweld_agent_backend",
+            "training.ragweld_agent_unsloth_image",
+        ],
         required_secret_ids=[],
         readiness_checks=["backend_selected", "image_present"],
         blocked_surfaces=["training"],
@@ -244,9 +475,18 @@ _LOCKED_INTEGRATION_CONTRACTS: tuple[ConfigIntegrationContract, ...] = (
         label="Langfuse",
         summary="LLM-native tracing and prompt observability substrate.",
         ui_surface="observability",
-        required_config_paths=["tracing.langfuse_enabled", "tracing.langfuse_base_url", "tracing.langfuse_project"],
+        required_config_paths=[
+            "tracing.langfuse_enabled",
+            "tracing.langfuse_base_url",
+            "tracing.langfuse_project",
+        ],
         required_secret_ids=["langfuse_public_key", "langfuse_secret_key"],
-        readiness_checks=["enabled", "required_fields_present", "required_secrets_present", "http_probe"],
+        readiness_checks=[
+            "enabled",
+            "required_fields_present",
+            "required_secrets_present",
+            "http_probe",
+        ],
         blocked_surfaces=["observability", "eval"],
     ),
     ConfigIntegrationContract(
@@ -403,7 +643,9 @@ _SECRET_REQUIREMENTS: tuple[SecretRequirement, ...] = (
     ),
 )
 
-_FIELD_TREE_ERROR = "Field registry generation only supports BaseModel-backed TriBridConfig sections."
+_FIELD_TREE_ERROR = (
+    "Field registry generation only supports BaseModel-backed TriBridConfig sections."
+)
 _ACRONYM_TOKENS = {
     "api": "API",
     "url": "URL",
@@ -529,12 +771,17 @@ def _label_for_path(path: str) -> str:
     return " ".join(rendered)
 
 
-def _infer_exposure_level(path: str, field_type: str, enum_values: list[str], fallback: str) -> Literal["basic", "advanced", "expert"]:
+def _infer_exposure_level(
+    path: str, field_type: str, enum_values: list[str], fallback: str
+) -> Literal["basic", "advanced", "expert"]:
     if path.startswith("system_prompts.") or path.endswith("_json") or path.endswith("_headers"):
         return "expert"
     if field_type in {"array", "object"}:
         return "expert"
-    if any(token in path for token in ("target_modules", "dockview_layout_json", "intent_matrix", "path_boosts")):
+    if any(
+        token in path
+        for token in ("target_modules", "dockview_layout_json", "intent_matrix", "path_boosts")
+    ):
         return "expert"
     basic_hints = (
         "enabled",
@@ -594,14 +841,25 @@ def _apply_field_overrides(path: str, metadata: dict[str, Any]) -> dict[str, Any
         return metadata  # an explicit per-field impact wins over the section prefix rules
     if path.startswith("tracing.langfuse_"):
         metadata["impact"] = "restart"
-    elif path.startswith("tracing.") or path.startswith("graph_storage.") or path.startswith("mcp.") or path.startswith("docker."):
+    elif (
+        path.startswith("tracing.")
+        or path.startswith("graph_storage.")
+        or path.startswith("mcp.")
+        or path.startswith("docker.")
+    ):
         metadata["impact"] = "restart"
-    elif path.startswith("training.ragweld_agent_flyte_") or path.startswith("training.ragweld_agent_mlflow_") or path.startswith("training.ragweld_agent_unsloth_"):
+    elif (
+        path.startswith("training.ragweld_agent_flyte_")
+        or path.startswith("training.ragweld_agent_mlflow_")
+        or path.startswith("training.ragweld_agent_unsloth_")
+    ):
         metadata["impact"] = "redeploy"
     return metadata
 
 
-def _iter_leaf_fields(model_cls: type[BaseModel], *, prefix: str = "") -> list[tuple[str, Any, Any]]:
+def _iter_leaf_fields(
+    model_cls: type[BaseModel], *, prefix: str = ""
+) -> list[tuple[str, Any, Any]]:
     rows: list[tuple[str, Any, Any]] = []
     for name, field in model_cls.model_fields.items():
         path = f"{prefix}.{name}" if prefix else name
@@ -647,7 +905,9 @@ def build_config_field_descriptors() -> list[ConfigFieldDescriptor]:
             "description": str(field.description or "").strip() or None,
             "scope": defaults.scope,
             "integration": defaults.integration,
-            "exposure_level": _infer_exposure_level(path, field_type, enum_values, defaults.exposure_level),
+            "exposure_level": _infer_exposure_level(
+                path, field_type, enum_values, defaults.exposure_level
+            ),
             "impact": defaults.impact,
             "secret_dependency_ids": [],
             "ui_surface": defaults.ui_surface,
@@ -740,14 +1000,22 @@ def _build_integration_readiness(
     )
 
 
-def _component_map(items: list[ObservabilityComponentStatus]) -> dict[str, ObservabilityComponentStatus]:
+def _component_map(
+    items: list[ObservabilityComponentStatus],
+) -> dict[str, ObservabilityComponentStatus]:
     return {item.id: item for item in items}
 
 
-async def _build_runtime_integration_readiness(config: TriBridConfig, contract: ConfigIntegrationContract) -> IntegrationReadiness:
+async def _build_runtime_integration_readiness(
+    config: TriBridConfig, contract: ConfigIntegrationContract
+) -> IntegrationReadiness:
     if contract.id == "litellm":
         enabled = bool(config.chat.litellm.enabled)
-        missing = [path for path in contract.required_config_paths[1:] if _is_missing(_config_value(config, path))]
+        missing = [
+            path
+            for path in contract.required_config_paths[1:]
+            if _is_missing(_config_value(config, path))
+        ]
         missing_secret_ids = [
             secret_id
             for secret_id in contract.required_secret_ids
@@ -800,7 +1068,9 @@ async def _build_runtime_integration_readiness(config: TriBridConfig, contract: 
             missing_config_paths=missing,
             missing_secret_ids=[],
             failing_checks=failing_checks,
-            operator_hint=detail if state == "degraded" else "LiteLLM is selected as the gateway/routing layer.",
+            operator_hint=detail
+            if state == "degraded"
+            else "LiteLLM is selected as the gateway/routing layer.",
             links=[
                 TraceExternalLink(
                     label="LiteLLM Gateway",
@@ -814,7 +1084,11 @@ async def _build_runtime_integration_readiness(config: TriBridConfig, contract: 
         )
 
     enabled = bool(config.chat.vllm.enabled)
-    missing = [path for path in contract.required_config_paths[1:] if _is_missing(_config_value(config, path))]
+    missing = [
+        path
+        for path in contract.required_config_paths[1:]
+        if _is_missing(_config_value(config, path))
+    ]
     if not enabled:
         return _build_integration_readiness(
             contract,
@@ -878,15 +1152,25 @@ async def _build_training_integration_readiness(
             failing_checks=["component_missing"],
             operator_hint="Training control-plane component metadata is missing.",
         )
-    missing_config = [path for path in contract.required_config_paths[1:] if _is_missing(_config_value(config, path))]
+    missing_config = [
+        path
+        for path in contract.required_config_paths[1:]
+        if _is_missing(_config_value(config, path))
+    ]
     return _build_integration_readiness(
         contract,
         state=str(component.state or "unconfigured"),  # type: ignore[arg-type]
         enabled=bool(component.enabled),
         configured=bool(component.configured) and not missing_config,
-        reachable=True if str(component.state or "") == "ready" else None if str(component.state or "") == "disabled" else False,
+        reachable=True
+        if str(component.state or "") == "ready"
+        else None
+        if str(component.state or "") == "disabled"
+        else False,
         missing_config_paths=missing_config,
-        failing_checks=[] if str(component.state or "") == "ready" else list(contract.readiness_checks),
+        failing_checks=[]
+        if str(component.state or "") == "ready"
+        else list(contract.readiness_checks),
         operator_hint=component.detail or status.operator_hint,
         links=list(component.links or []),
     )
@@ -932,7 +1216,9 @@ async def _build_tribrid_retrieval_readiness(
         except Exception:
             neo4j_ok = False
             failing_checks.append("graph_probe_when_enabled")
-            operator_hint = operator_hint or "Neo4j is unreachable; the graph retrieval leg cannot run."
+            operator_hint = (
+                operator_hint or "Neo4j is unreachable; the graph retrieval leg cannot run."
+            )
         finally:
             try:
                 await neo4j.disconnect()
@@ -950,6 +1236,9 @@ async def _build_tribrid_retrieval_readiness(
         operator_hint=operator_hint
         or "Canonical tri-brid retrieval lane (Qdrant dense + sparse, Neo4j graph, Postgres control rows) is functional.",
     )
+
+
+logger = logging.getLogger(__name__)
 
 
 async def _build_retrieval_integration_readiness(
@@ -972,6 +1261,19 @@ async def _build_retrieval_integration_readiness(
     failing_checks: list[str] = []
     if missing_packages:
         failing_checks.append("packages_present")
+    # The readiness probe reads the corpus' live generation from its manifest
+    # (Postgres), exactly as the retrieval lane resolves it.
+    physical: str | None = None
+    if scope_id:
+        pg_manifest = PostgresClient(config.indexing.postgres_url)
+        try:
+            await pg_manifest.connect()
+            physical = qdrant_collection_of(await pg_manifest.get_generation(scope_id))
+        except Exception as error:
+            logger.warning("generation manifest lookup for %s failed: %s", scope_id, error)
+        finally:
+            with contextlib.suppress(Exception):
+                await pg_manifest.disconnect()
     qdrant_ok = await store.ping()
     if not qdrant_ok:
         failing_checks.append("qdrant_probe")
@@ -1010,7 +1312,7 @@ async def _build_retrieval_integration_readiness(
             links=links,
         )
     try:
-        status = await store.status(scope_id)
+        status = await store.status(scope_id, physical=physical)
     except Exception:
         status = None
     if status is None or status.points <= 0:
@@ -1049,7 +1351,9 @@ async def _build_neo4j_integration_readiness(
     *,
     scope_id: str | None,
 ) -> IntegrationReadiness:
-    missing_config = [path for path in contract.required_config_paths if _is_missing(_config_value(config, path))]
+    missing_config = [
+        path for path in contract.required_config_paths if _is_missing(_config_value(config, path))
+    ]
     password = config.graph_storage.resolve_password()
     missing_secret_ids = [] if password else ["neo4j_password"]
     if missing_config or missing_secret_ids:
@@ -1119,7 +1423,11 @@ async def _build_observability_integration_readiness(
             for secret_id in contract.required_secret_ids
             if not os.getenv(get_secret_requirement_by_id(secret_id).env_var, "").strip()
         ]
-        missing_config = [path for path in contract.required_config_paths[1:] if _is_missing(_config_value(config, path))]
+        missing_config = [
+            path
+            for path in contract.required_config_paths[1:]
+            if _is_missing(_config_value(config, path))
+        ]
         if component is None:
             return _build_integration_readiness(
                 contract,
@@ -1158,7 +1466,11 @@ async def _build_observability_integration_readiness(
     relevant_ids = {"local_trace_buffer", "otlp_export", "alloy", "tempo", "grafana"}
     relevant = [components[item_id] for item_id in relevant_ids if item_id in components]
     enabled = any(item.enabled for item in relevant)
-    missing_config = [path for path in contract.required_config_paths[1:] if _is_missing(_config_value(config, path))]
+    missing_config = [
+        path
+        for path in contract.required_config_paths[1:]
+        if _is_missing(_config_value(config, path))
+    ]
     failing_checks: list[str] = []
     state = "ready"
     reachable: bool | None = True if relevant else None
@@ -1197,7 +1509,10 @@ def _eval_substrate_executable(contract_id: str) -> tuple[bool, str]:
     if contract_id == "ragas":
         if importlib.util.find_spec("ragas") is not None:
             return True, "ragas package importable"
-        return False, "ragas package is not installed; evaluation runs the native retrieval scorer, not Ragas"
+        return (
+            False,
+            "ragas package is not installed; evaluation runs the native retrieval scorer, not Ragas",
+        )
     if contract_id == "promptfoo":
         local_bin = _SERVER_ROOT.parent / "web" / "node_modules" / ".bin" / "promptfoo"
         if _shutil.which("promptfoo") or local_bin.exists():
@@ -1206,8 +1521,12 @@ def _eval_substrate_executable(contract_id: str) -> tuple[bool, str]:
     return True, ""
 
 
-def _build_eval_integration_readiness(config: TriBridConfig, contract: ConfigIntegrationContract) -> IntegrationReadiness:
-    missing_config = [path for path in contract.required_config_paths if _is_missing(_config_value(config, path))]
+def _build_eval_integration_readiness(
+    config: TriBridConfig, contract: ConfigIntegrationContract
+) -> IntegrationReadiness:
+    missing_config = [
+        path for path in contract.required_config_paths if _is_missing(_config_value(config, path))
+    ]
     executable, executable_detail = _eval_substrate_executable(contract.id)
     failing_checks: list[str] = []
     state: Literal["ready", "degraded", "unconfigured", "disabled"] = "ready"
@@ -1234,8 +1553,12 @@ def _build_eval_integration_readiness(config: TriBridConfig, contract: ConfigInt
     )
 
 
-def _build_shell_ui_readiness(config: TriBridConfig, contract: ConfigIntegrationContract) -> IntegrationReadiness:
-    missing_config = [path for path in contract.required_config_paths if _is_missing(_config_value(config, path))]
+def _build_shell_ui_readiness(
+    config: TriBridConfig, contract: ConfigIntegrationContract
+) -> IntegrationReadiness:
+    missing_config = [
+        path for path in contract.required_config_paths if _is_missing(_config_value(config, path))
+    ]
     return _build_integration_readiness(
         contract,
         state="ready" if not missing_config else "unconfigured",
@@ -1255,20 +1578,30 @@ def get_secret_requirement_by_id(secret_id: str) -> SecretRequirement:
     raise KeyError(secret_id)
 
 
-async def build_config_readiness_response(config: TriBridConfig, *, scope_id: str | None = None) -> ConfigReadinessResponse:
+async def build_config_readiness_response(
+    config: TriBridConfig, *, scope_id: str | None = None
+) -> ConfigReadinessResponse:
     contracts = list_integration_contracts()
     integrations: list[IntegrationReadiness] = []
     for contract in contracts:
         if contract.id in {"litellm", "vllm"}:
             integrations.append(await _build_runtime_integration_readiness(config, contract))
         elif contract.id in {"flyte", "mlflow", "unsloth"}:
-            integrations.append(await _build_training_integration_readiness(config, contract, scope_id=scope_id))
+            integrations.append(
+                await _build_training_integration_readiness(config, contract, scope_id=scope_id)
+            )
         elif contract.id == "tribrid_retrieval":
-            integrations.append(await _build_tribrid_retrieval_readiness(config, contract, scope_id=scope_id))
+            integrations.append(
+                await _build_tribrid_retrieval_readiness(config, contract, scope_id=scope_id)
+            )
         elif contract.id == "haystack_docling_qdrant":
-            integrations.append(await _build_retrieval_integration_readiness(config, contract, scope_id=scope_id))
+            integrations.append(
+                await _build_retrieval_integration_readiness(config, contract, scope_id=scope_id)
+            )
         elif contract.id == "neo4j":
-            integrations.append(await _build_neo4j_integration_readiness(config, contract, scope_id=scope_id))
+            integrations.append(
+                await _build_neo4j_integration_readiness(config, contract, scope_id=scope_id)
+            )
         elif contract.id in {"langfuse", "otel_grafana_stack"}:
             integrations.append(await _build_observability_integration_readiness(config, contract))
         elif contract.id in {"ragas", "promptfoo"}:
@@ -1325,7 +1658,9 @@ def validate_config_field_registry() -> list[str]:
     contract_ids = {contract.id for contract in list_integration_contracts()}
     for descriptor in descriptors:
         if descriptor.integration not in contract_ids:
-            errors.append(f"{descriptor.path}: integration '{descriptor.integration}' has no contract")
+            errors.append(
+                f"{descriptor.path}: integration '{descriptor.integration}' has no contract"
+            )
     return errors
 
 
@@ -1334,7 +1669,11 @@ def validate_secret_registry() -> list[str]:
     requirement_ids = {requirement.id for requirement in list_secret_requirements()}
     requirement_env_vars = {requirement.env_var for requirement in list_secret_requirements()}
     for descriptor in build_config_field_descriptors():
-        missing = [secret_id for secret_id in descriptor.secret_dependency_ids if secret_id not in requirement_ids]
+        missing = [
+            secret_id
+            for secret_id in descriptor.secret_dependency_ids
+            if secret_id not in requirement_ids
+        ]
         if missing:
             errors.append(f"{descriptor.path}: unknown secret dependency ids {missing!r}")
 
@@ -1352,7 +1691,9 @@ def validate_secret_registry() -> list[str]:
                 found_secret_env_vars.add(match)
     undeclared = sorted(found_secret_env_vars - requirement_env_vars)
     if undeclared:
-        errors.append(f"Undeclared secret env vars referenced in server code: {', '.join(undeclared)}")
+        errors.append(
+            f"Undeclared secret env vars referenced in server code: {', '.join(undeclared)}"
+        )
     return errors
 
 
@@ -1380,7 +1721,11 @@ def validate_integration_contracts() -> list[str]:
     missing_ids = sorted(expected_ids - set(ids))
     if missing_ids:
         errors.append(f"Missing locked integration contracts: {', '.join(missing_ids)}")
-    missing_surfaces = sorted(contract.id for contract in contracts if not contract.ui_surface or not contract.blocked_surfaces)
+    missing_surfaces = sorted(
+        contract.id
+        for contract in contracts
+        if not contract.ui_surface or not contract.blocked_surfaces
+    )
     if missing_surfaces:
         errors.append(f"Contracts missing protected UI metadata: {', '.join(missing_surfaces)}")
     return errors

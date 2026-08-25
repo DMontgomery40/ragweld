@@ -20,13 +20,22 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 from starlette.responses import StreamingResponse
 
-from server.api.dependency_errors import dependency_unavailable_http_exception
+from server.api.dependency_errors import (
+    dependency_unavailable_http_exception,
+    raise_postgres_unavailable_if_applicable,
+)
 from server.chat.provider_router import ProviderRoute, select_provider_route
 from server.db.neo4j import Neo4jClient
 from server.db.postgres import PostgresClient
 from server.dependency_errors import DependencyUnavailableError
 from server.indexing.chunker import Chunker
 from server.indexing.embedder import Embedder, configure_postgres_embedding_cache_backend
+from server.indexing.generations import (
+    build_generation,
+    generation_from_corpus_row,
+    graph_repo_id_of,
+    qdrant_collection_of,
+)
 from server.indexing.loader import FileLoader
 from server.indexing.official_graphrag import (
     extract_semantic_kg_with_graphrag,
@@ -65,13 +74,8 @@ from server.observability.metrics import (
     INDEX_STAGE_LATENCY_SECONDS,
     INDEX_TOKENS_TOTAL,
 )
-from server.indexing.generations import (
-    build_generation,
-    generation_from_corpus_row,
-    graph_repo_id_of,
-    qdrant_collection_of,
-)
 from server.retrieval.qdrant_store import QdrantChunkStore
+from server.services.config_store import CorpusNotFoundError
 from server.services.config_store import get_config as load_scoped_config
 
 logger = logging.getLogger(__name__)
@@ -104,7 +108,12 @@ _EST_RANGE_HIGH_MULT = 1.9
 
 # Local embedding throughput heuristics (tokens/sec) by hardware class.
 _LOCAL_EMBED_TPS_TABLE: dict[str, dict[str, int]] = {
-    "apple_silicon_mlx": {"mlx": 60_000, "huggingface": 12_000, "local": 10_000, "_default": 12_000},
+    "apple_silicon_mlx": {
+        "mlx": 60_000,
+        "huggingface": 12_000,
+        "local": 10_000,
+        "_default": 12_000,
+    },
     "apple_silicon_cpu": {"mlx": 18_000, "huggingface": 9_000, "local": 8_000, "_default": 8_000},
     "cuda_gpu": {"mlx": 25_000, "huggingface": 40_000, "local": 35_000, "_default": 32_000},
     "cpu_only": {"mlx": 6_000, "huggingface": 5_000, "local": 4_000, "_default": 4_500},
@@ -128,7 +137,9 @@ def _idle_status(repo_id: str) -> IndexStatus:
     )
 
 
-def _clear_runtime_state_for_repo(repo_id: str, *, queue: asyncio.Queue[dict[str, Any]] | None = None) -> None:
+def _clear_runtime_state_for_repo(
+    repo_id: str, *, queue: asyncio.Queue[dict[str, Any]] | None = None
+) -> None:
     # Remove task only when this cleanup corresponds to the currently-registered task.
     cur_task = _TASKS.get(repo_id)
     if cur_task is not None and (queue is None or _EVENT_QUEUES.get(repo_id) is queue):
@@ -245,7 +256,9 @@ def _coerce_stale_indexing_run_to_error(repo_id: str, run: IndexRunSummary) -> I
     return finalized
 
 
-def _allow_parallel_chunk_batches(*, indexing_workers: int, batch_count: int, has_graph_upserts: bool) -> bool:
+def _allow_parallel_chunk_batches(
+    *, indexing_workers: int, batch_count: int, has_graph_upserts: bool
+) -> bool:
     """Whether chunk upsert batches can safely run concurrently.
 
     Neo4j chunk/document writes can deadlock under concurrent per-file batch
@@ -305,7 +318,9 @@ def _append_run_event(repo_id: str, run_id: str, event: dict[str, Any]) -> None:
         type=event_type,
         message=str(event.get("message")) if event.get("message") is not None else None,
         percent=_to_optional_int(event.get("percent")),
-        current_file=str(event.get("current_file")) if event.get("current_file") is not None else None,
+        current_file=str(event.get("current_file"))
+        if event.get("current_file") is not None
+        else None,
         meta={
             k: v
             for k, v in event.items()
@@ -453,7 +468,9 @@ def _find_model_spec(
 
 
 def _semantic_kg_model_override(cfg: TriBridConfig) -> str:
-    alias = str(cfg.graph_indexing.semantic_kg_llm_model or cfg.chat.litellm.default_model or "").strip()
+    alias = str(
+        cfg.graph_indexing.semantic_kg_llm_model or cfg.chat.litellm.default_model or ""
+    ).strip()
     if re.fullmatch(r"[A-Za-z0-9._-]+", alias) is None:
         raise ValueError("GraphRAG semantic model must be a configured LiteLLM alias.")
     return alias
@@ -502,7 +519,9 @@ def _estimate_local_tokens_per_second(*, cfg: TriBridConfig, provider: str) -> i
     hw_class = _detect_local_hardware_class()
     table = _LOCAL_EMBED_TPS_TABLE.get(hw_class, _LOCAL_EMBED_TPS_TABLE["cpu_only"])
     p = _norm_key(provider)
-    est = int(table.get(p) or table.get("_default") or _LOCAL_EMBED_TPS_TABLE["cpu_only"]["_default"])
+    est = int(
+        table.get(p) or table.get("_default") or _LOCAL_EMBED_TPS_TABLE["cpu_only"]["_default"]
+    )
     if hw_class == "cpu_only":
         cores = max(1, multiprocessing.cpu_count())
         if cores >= 24:
@@ -668,7 +687,9 @@ async def _compute_dashboard_storage_breakdown(*, repo_id: str) -> DashboardInde
     qdrant_points = 0
     qdrant_dense_vector_bytes = 0
     try:
-        status = await QdrantChunkStore(cfg).status(repo_id, physical=qdrant_collection_of(generation))
+        status = await QdrantChunkStore(cfg).status(
+            repo_id, physical=qdrant_collection_of(generation)
+        )
         if status is not None:
             qdrant_points = int(status.points)
             qdrant_dense_vector_bytes = int(status.dense_points) * int(status.dense_dimensions) * 4
@@ -852,14 +873,20 @@ async def _run_index(
         # metadata was not cleared, there is nothing to protect.
         has_embeddings = False
         if stored_model and stored_dim > 0:
-            live = await qdrant.status(repo_id, physical=qdrant_collection_of(generation_from_corpus_row(corpus)))
+            live = await qdrant.status(
+                repo_id, physical=qdrant_collection_of(generation_from_corpus_row(corpus))
+            )
             has_embeddings = bool(live is not None and live.dense_points > 0)
         if stored_model and stored_dim > 0 and has_embeddings:
             current_model = str(cfg.embedding.effective_model or "").strip()
             current_dim = int(embedder.dim)
-            current_backend = str(cfg.embedding.embedding_backend or "").strip().lower() or "deterministic"
+            current_backend = (
+                str(cfg.embedding.embedding_backend or "").strip().lower() or "deterministic"
+            )
             current_provider = str(cfg.embedding.embedding_type or "").strip()
-            both_deterministic = current_backend == "deterministic" and stored_backend == "deterministic"
+            both_deterministic = (
+                current_backend == "deterministic" and stored_backend == "deterministic"
+            )
 
             mismatches: list[str] = []
             if stored_dim != current_dim:
@@ -887,7 +914,9 @@ async def _run_index(
                     )
                 raise RuntimeError(msg)
 
-    loader = FileLoader(ignore_patterns=ignore_patterns, extra_gitignore_patterns=extra_gitignore_patterns)
+    loader = FileLoader(
+        ignore_patterns=ignore_patterns, extra_gitignore_patterns=extra_gitignore_patterns
+    )
 
     neo4j: Neo4jClient | None = None
     try:
@@ -910,7 +939,11 @@ async def _run_index(
                 )
                 raise RuntimeError(f"Neo4j schema initialization failed: {exc}") from exc
             # Lexical chunk vector index (Neo4j native vector indexes)
-            if cfg.graph_indexing.build_lexical_graph and cfg.graph_indexing.store_chunk_embeddings and not skip_dense:
+            if (
+                cfg.graph_indexing.build_lexical_graph
+                and cfg.graph_indexing.store_chunk_embeddings
+                and not skip_dense
+            ):
                 try:
                     assert embedder is not None
                     online = await neo4j.ensure_vector_index(
@@ -938,12 +971,17 @@ async def _run_index(
                     logger.warning("Neo4j vector index ensure failed", exc_info=True)
                     _emit_event(
                         event_queue,
-                        {"type": "warning", "message": "Neo4j chunk vector index setup failed for this run"},
+                        {
+                            "type": "warning",
+                            "message": "Neo4j chunk vector index setup failed for this run",
+                        },
                         drop_oldest=True,
                     )
     except Exception as exc:
         # Explicitly fail when graph indexing was requested but cannot initialize.
-        logger.warning("Neo4j graph initialization failed for repo_id=%s: %s", repo_id, exc, exc_info=True)
+        logger.warning(
+            "Neo4j graph initialization failed for repo_id=%s: %s", repo_id, exc, exc_info=True
+        )
         raise
 
     try:
@@ -996,14 +1034,18 @@ async def _run_index_body(
     to the staged Qdrant generation `qdrant_generation`. Neither is visible to
     retrieval until the caller promotes both.
     """
-    vector_dim = int(embedder.dim) if embedder is not None else int(cfg.embedding.embedding_dim or 0)
+    vector_dim = (
+        int(embedder.dim) if embedder is not None else int(cfg.embedding.embedding_dim or 0)
+    )
     total_files = 0
     total_chunks = 0
     total_tokens = 0
     file_breakdown: dict[str, int] = defaultdict(int)
 
     prev_status = _STATUS.get(repo_id)
-    started_at = prev_status.started_at if prev_status and prev_status.started_at else datetime.now(UTC)
+    started_at = (
+        prev_status.started_at if prev_status and prev_status.started_at else datetime.now(UTC)
+    )
 
     # Collect file paths once so we can report progress deterministically,
     # without loading every file's contents into memory.
@@ -1032,16 +1074,25 @@ async def _run_index_body(
     if skip_dense and event_queue is not None:
         _emit_event(
             event_queue,
-            {"type": "log", "message": "⚡ skip_dense=1 → sparse-only vectors; no dense embeddings this run"},
+            {
+                "type": "log",
+                "message": "⚡ skip_dense=1 → sparse-only vectors; no dense embeddings this run",
+            },
             drop_oldest=True,
         )
 
-    semantic_budget = int(cfg.graph_indexing.semantic_kg_max_chunks) if cfg.graph_indexing.semantic_kg_enabled else 0
+    semantic_budget = (
+        int(cfg.graph_indexing.semantic_kg_max_chunks)
+        if cfg.graph_indexing.semantic_kg_enabled
+        else 0
+    )
     semantic_processed = 0
     semantic_entities_total = 0
     semantic_relations_total = 0
     semantic_empty_chunks = 0
-    contextual_mode = str(getattr(cfg.embedding, "contextual_chunk_embeddings", "off") or "off").strip().lower()
+    contextual_mode = (
+        str(getattr(cfg.embedding, "contextual_chunk_embeddings", "off") or "off").strip().lower()
+    )
     indexing_workers = max(1, int(getattr(cfg.indexing, "indexing_workers", 1) or 1))
     has_graph_upserts = bool(neo4j is not None and cfg.graph_indexing.build_lexical_graph)
     cross_file_chunk_batching = _allow_cross_file_chunk_batching(
@@ -1066,12 +1117,16 @@ async def _run_index_body(
             with INDEX_STAGE_LATENCY_SECONDS.labels(stage="postgres_upsert_chunks").time():
                 await postgres.upsert_chunks(write_repo_id, chunks)
             with INDEX_STAGE_LATENCY_SECONDS.labels(stage="qdrant_write_chunks").time():
-                await qdrant.write_chunks(repo_id, qdrant_generation, chunks, embedding_dim=vector_dim)
+                await qdrant.write_chunks(
+                    repo_id, qdrant_generation, chunks, embedding_dim=vector_dim
+                )
             if neo4j is not None and cfg.graph_indexing.build_lexical_graph:
                 batch_paths = {str(ch.file_path or "") for ch in chunks}
                 if len(batch_paths) != 1:
                     raise RuntimeError("Lexical graph upserts require a single-file chunk batch")
-                with INDEX_STAGE_LATENCY_SECONDS.labels(stage="neo4j_upsert_document_chunks").time():
+                with INDEX_STAGE_LATENCY_SECONDS.labels(
+                    stage="neo4j_upsert_document_chunks"
+                ).time():
                     graph, lexical_graph_config = await write_lexical_graph_with_graphrag(
                         repo_id=write_repo_id,
                         run_id=run_id,
@@ -1103,7 +1158,9 @@ async def _run_index_body(
         with INDEX_STAGE_LATENCY_SECONDS.labels(stage="postgres_upsert_chunks").time():
             await postgres.upsert_chunks(write_repo_id, embedded)
         with INDEX_STAGE_LATENCY_SECONDS.labels(stage="qdrant_write_chunks").time():
-            await qdrant.write_chunks(repo_id, qdrant_generation, embedded, embedding_dim=vector_dim)
+            await qdrant.write_chunks(
+                repo_id, qdrant_generation, embedded, embedding_dim=vector_dim
+            )
         if neo4j is not None and cfg.graph_indexing.build_lexical_graph:
             batch_paths = {str(ch.file_path or "") for ch in embedded}
             if len(batch_paths) != 1:
@@ -1130,7 +1187,9 @@ async def _run_index_body(
     ) -> list[Chunk]:
         if not chunks:
             return []
-        batches = [chunks[i0 : i0 + _indexing_batch] for i0 in range(0, len(chunks), _indexing_batch)]
+        batches = [
+            chunks[i0 : i0 + _indexing_batch] for i0 in range(0, len(chunks), _indexing_batch)
+        ]
         if not _allow_parallel_chunk_batches(
             indexing_workers=_indexing_workers,
             batch_count=len(batches),
@@ -1159,7 +1218,9 @@ async def _run_index_body(
         nonlocal pending_cross_file_chunks
         if not cross_file_chunk_batching or not pending_cross_file_chunks:
             return
-        while pending_cross_file_chunks and (force or len(pending_cross_file_chunks) >= cross_file_flush_size):
+        while pending_cross_file_chunks and (
+            force or len(pending_cross_file_chunks) >= cross_file_flush_size
+        ):
             batch_len = len(pending_cross_file_chunks) if force else cross_file_flush_size
             batch = pending_cross_file_chunks[:batch_len]
             pending_cross_file_chunks = pending_cross_file_chunks[batch_len:]
@@ -1208,8 +1269,12 @@ async def _run_index_body(
 
         # Large text files: allow a streaming ingestion mode to avoid loading the entire file into memory.
         ext_lower = abs_path.suffix.lower()
-        stream_mode = str(getattr(cfg.indexing, "large_file_mode", "read_all") or "read_all").strip().lower()
-        stream_block_chars = int(getattr(cfg.indexing, "large_file_stream_chunk_chars", 2_000_000) or 2_000_000)
+        stream_mode = (
+            str(getattr(cfg.indexing, "large_file_mode", "read_all") or "read_all").strip().lower()
+        )
+        stream_block_chars = int(
+            getattr(cfg.indexing, "large_file_stream_chunk_chars", 2_000_000) or 2_000_000
+        )
         use_stream = (
             stream_mode == "stream"
             and ext_lower in {".txt", ".md", ".rst", ".log"}
@@ -1278,13 +1343,23 @@ async def _run_index_body(
                 with INDEX_STAGE_LATENCY_SECONDS.labels(stage="file_read").time():
                     content = extract_text_for_path(
                         abs_path,
-                        parquet_max_rows=int(getattr(cfg.indexing, "parquet_extract_max_rows", 5000) or 5000),
-                        parquet_max_chars=int(getattr(cfg.indexing, "parquet_extract_max_chars", 2_000_000) or 2_000_000),
-                        parquet_max_cell_chars=int(
-                            getattr(cfg.indexing, "parquet_extract_max_cell_chars", 20_000) or 20_000
+                        parquet_max_rows=int(
+                            getattr(cfg.indexing, "parquet_extract_max_rows", 5000) or 5000
                         ),
-                        parquet_text_columns_only=bool(getattr(cfg.indexing, "parquet_extract_text_columns_only", True)),
-                        parquet_include_column_names=bool(getattr(cfg.indexing, "parquet_extract_include_column_names", True)),
+                        parquet_max_chars=int(
+                            getattr(cfg.indexing, "parquet_extract_max_chars", 2_000_000)
+                            or 2_000_000
+                        ),
+                        parquet_max_cell_chars=int(
+                            getattr(cfg.indexing, "parquet_extract_max_cell_chars", 20_000)
+                            or 20_000
+                        ),
+                        parquet_text_columns_only=bool(
+                            getattr(cfg.indexing, "parquet_extract_text_columns_only", True)
+                        ),
+                        parquet_include_column_names=bool(
+                            getattr(cfg.indexing, "parquet_extract_include_column_names", True)
+                        ),
                     )
                     if content is None:
                         content = abs_path.read_text(encoding="utf-8", errors="ignore")
@@ -1307,9 +1382,15 @@ async def _run_index_body(
             # This is experimental and only applies when explicitly enabled via config.
             late_mode = (
                 not skip_dense
-                and str(getattr(cfg.embedding, "embedding_backend", "deterministic") or "deterministic").strip().lower()
+                and str(
+                    getattr(cfg.embedding, "embedding_backend", "deterministic") or "deterministic"
+                )
+                .strip()
+                .lower()
                 == "provider"
-                and str(getattr(cfg.embedding, "contextual_chunk_embeddings", "off") or "off").strip().lower()
+                and str(getattr(cfg.embedding, "contextual_chunk_embeddings", "off") or "off")
+                .strip()
+                .lower()
                 == "late_chunking_local_only"
             )
             if late_mode:
@@ -1318,9 +1399,13 @@ async def _run_index_body(
 
                 strat = str(getattr(cfg.chunking, "chunking_strategy", "") or "").strip().lower()
                 if strat not in {"fixed_tokens"}:
-                    raise RuntimeError("late_chunking_local_only requires chunking.chunking_strategy='fixed_tokens'")
+                    raise RuntimeError(
+                        "late_chunking_local_only requires chunking.chunking_strategy='fixed_tokens'"
+                    )
                 with INDEX_STAGE_LATENCY_SECONDS.labels(stage="late_chunking").time():
-                    chunks = late_chunk_document(rel_path, content, chunking=cfg.chunking, embedding=cfg.embedding)
+                    chunks = late_chunk_document(
+                        rel_path, content, chunking=cfg.chunking, embedding=cfg.embedding
+                    )
                 INDEX_FILES_PROCESSED_TOTAL.inc()
                 if not chunks:
                     continue
@@ -1380,7 +1465,9 @@ async def _run_index_body(
                         route_api_key=str(semantic_route.api_key or "").strip() or None,
                     )
 
-                    with INDEX_STAGE_LATENCY_SECONDS.labels(stage="neo4j_upsert_semantic_graph").time():
+                    with INDEX_STAGE_LATENCY_SECONDS.labels(
+                        stage="neo4j_upsert_semantic_graph"
+                    ).time():
                         await neo4j.upsert_graphrag_graph(
                             write_repo_id,
                             graphrag_result.graph,
@@ -1397,12 +1484,12 @@ async def _run_index_body(
                             {
                                 "type": "log",
                                 "message": (
-                                "🧠 GraphRAG semantic batch: "
-                                f"chunks={graphrag_result.processed_chunks} "
-                                f"entities={graphrag_result.entity_count} "
-                                f"relations={graphrag_result.relationship_count} "
-                                f"empty_chunks={graphrag_result.empty_chunks}"
-                            ),
+                                    "🧠 GraphRAG semantic batch: "
+                                    f"chunks={graphrag_result.processed_chunks} "
+                                    f"entities={graphrag_result.entity_count} "
+                                    f"relations={graphrag_result.relationship_count} "
+                                    f"empty_chunks={graphrag_result.empty_chunks}"
+                                ),
                             },
                             drop_oldest=True,
                         )
@@ -1506,9 +1593,49 @@ async def _run_index_body(
     return stats
 
 
-async def _background_index_job(request: IndexRequest, queue: asyncio.Queue[dict[str, Any]]) -> None:
+def _publish_complete(
+    *,
+    repo_id: str,
+    run_id: str,
+    started_at: datetime,
+    stats: IndexStats,
+    queue: asyncio.Queue[dict[str, Any]],
+) -> None:
+    """The manifest is committed: this run IS the live index, whatever happens afterwards."""
+    _STATS[repo_id] = stats
+    _STATUS[repo_id] = IndexStatus(
+        repo_id=repo_id,
+        status="complete",
+        progress=1.0,
+        current_file=None,
+        started_at=started_at,
+        completed_at=datetime.now(UTC),
+    )
+    summary = IndexRunSummary(
+        run_id=run_id,
+        repo_id=repo_id,
+        status="complete",
+        started_at=started_at,
+        completed_at=datetime.now(UTC),
+        progress=1.0,
+        error=None,
+        total_files=int(getattr(stats, "total_files", 0) or 0),
+        total_chunks=int(getattr(stats, "total_chunks", 0) or 0),
+        total_tokens=int(getattr(stats, "total_tokens", 0) or 0),
+        embedding_provider=str(getattr(stats, "embedding_provider", "") or ""),
+        embedding_model=str(getattr(stats, "embedding_model", "") or ""),
+        embedding_dimensions=int(getattr(stats, "embedding_dimensions", 0) or 0),
+    )
+    with contextlib.suppress(Exception):
+        _persist_run_summary(summary)
+    _emit_event(queue, {"type": "complete", "message": "✓ Indexing complete"}, guarantee=True)
+
+
+async def _background_index_job(
+    request: IndexRequest, queue: asyncio.Queue[dict[str, Any]], *, run_id: str
+) -> None:
+    """One index run; ``run_id`` is the fence this run holds on the corpus row (released in ``finally``)."""
     repo_id = request.repo_id
-    run_id = f"{datetime.now(UTC).strftime('%Y%m%dT%H%M%S')}_{uuid.uuid4().hex[:10]}"
     staging_repo_id = _build_staging_repo_id(repo_id, run_id)
     started_at = datetime.now(UTC)
     this_task = asyncio.current_task()
@@ -1553,7 +1680,10 @@ async def _background_index_job(request: IndexRequest, queue: asyncio.Queue[dict
         qdrant_generation = await qdrant.create_generation(repo_id, embedding_dim=vector_dim)
         _emit_event(
             queue,
-            {"type": "log", "message": f"📦 Staged Qdrant generation {qdrant_generation} (dense + sparse)"},
+            {
+                "type": "log",
+                "message": f"📦 Staged Qdrant generation {qdrant_generation} (dense + sparse)",
+            },
             drop_oldest=True,
         )
         with INDEX_DURATION_SECONDS.time():
@@ -1590,7 +1720,10 @@ async def _background_index_job(request: IndexRequest, queue: asyncio.Queue[dict
                 staged_graph = await neo4j_verify.get_graph_stats(staging_repo_id)
             finally:
                 await neo4j_verify.disconnect()
-            if cfg.graph_indexing.build_lexical_graph and int(staged_graph.total_chunks or 0) != expected_points:
+            if (
+                cfg.graph_indexing.build_lexical_graph
+                and int(staged_graph.total_chunks or 0) != expected_points
+            ):
                 raise RuntimeError(
                     f"Staged graph {staging_repo_id} holds {staged_graph.total_chunks} chunk nodes but the run "
                     f"indexed {expected_points} chunks; refusing to promote a partial graph"
@@ -1601,9 +1734,9 @@ async def _background_index_job(request: IndexRequest, queue: asyncio.Queue[dict
         # the generation manifest (Qdrant collection + Neo4j graph id). Readers
         # resolve both stores from the manifest, so there is no per-store swap
         # and no window where new chunk rows pair with old vectors or graph.
-        generation = build_generation(
-            run_id=run_id, qdrant_collection=qdrant_generation, graph_repo_id=graph_generation_id
-        )
+        # Retention is current + previous: the generation being replaced stays
+        # alive until the NEXT commit, so a reader that resolved the manifest
+        # just before this commit still finds its collection and graph.
         postgres = PostgresClient(cfg.indexing.postgres_url)
         await postgres.connect()
         try:
@@ -1611,13 +1744,22 @@ async def _background_index_job(request: IndexRequest, queue: asyncio.Queue[dict
             active_name = str((active_corpus or {}).get("name") or repo_id)
             active_description = (active_corpus or {}).get("description")
             active_meta = (active_corpus.get("meta") or {}) if active_corpus else {}
+            current_generation = generation_from_corpus_row(active_corpus)
+            generation = build_generation(
+                run_id=run_id,
+                qdrant_collection=qdrant_generation,
+                graph_repo_id=graph_generation_id,
+                previous=current_generation,
+            )
             with INDEX_STAGE_LATENCY_SECONDS.labels(stage="generation_commit").time():
                 previous_generation = await postgres.promote_staging_index(
                     active_repo_id=repo_id,
                     staging_repo_id=staging_repo_id,
                     active_name=active_name,
                     active_root_path=request.repo_path,
-                    active_description=str(active_description) if active_description is not None else None,
+                    active_description=str(active_description)
+                    if active_description is not None
+                    else None,
                     active_meta=active_meta,
                     generation=generation,
                 )
@@ -1639,18 +1781,44 @@ async def _background_index_job(request: IndexRequest, queue: asyncio.Queue[dict
             },
             drop_oldest=True,
         )
+        # The run is complete the moment the manifest is committed: publish it
+        # before any best-effort retirement so a failure or cancellation there
+        # can never report a live generation as failed or cancelled.
+        _publish_complete(
+            repo_id=repo_id, run_id=run_id, started_at=started_at, stats=stats, queue=queue
+        )
 
-        # Retire superseded generations after the commit (best-effort: a
-        # failure here leaves orphans to sweep, never an inconsistent index).
-        try:
-            retired = await qdrant.retire_generations(repo_id, keep=promoted_collection)
-            if retired:
-                _emit_event(queue, {"type": "log", "message": f"🧹 Retired {retired} superseded Qdrant generation(s)"}, drop_oldest=True)
-        except Exception as exc:
-            logger.warning("retiring Qdrant generations for %s failed: %s", repo_id, exc)
-        if cfg.graph_indexing.enabled:
-            previous_graph = graph_repo_id_of(previous_generation)
-            retire_ids = {gid for gid in (previous_graph, repo_id) if gid and gid != graph_generation_id}
+        # Retire the generation BEFORE the one we just replaced (exact ids from
+        # the manifest chain, never a prefix sweep: another run's staged
+        # collection is never touched). Best-effort: a failure leaves an orphan
+        # to sweep, never an inconsistent index.
+        retire_collection = (
+            previous_generation.previous_qdrant_collection if previous_generation else None
+        )
+        if retire_collection and retire_collection not in {
+            promoted_collection,
+            qdrant_collection_of(previous_generation),
+        }:
+            try:
+                await qdrant.drop_generation(retire_collection)
+                _emit_event(
+                    queue,
+                    {"type": "log", "message": f"🧹 Retired Qdrant generation {retire_collection}"},
+                    drop_oldest=True,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "retiring Qdrant generation %s for %s failed: %s",
+                    retire_collection,
+                    repo_id,
+                    exc,
+                )
+        retire_graph = previous_generation.previous_graph_repo_id if previous_generation else None
+        if (
+            cfg.graph_indexing.enabled
+            and retire_graph
+            and retire_graph not in {graph_generation_id, graph_repo_id_of(previous_generation)}
+        ):
             try:
                 neo4j_retire = Neo4jClient(
                     cfg.graph_storage.neo4j_uri,
@@ -1660,15 +1828,13 @@ async def _background_index_job(request: IndexRequest, queue: asyncio.Queue[dict
                 )
                 await neo4j_retire.connect()
                 try:
-                    for gid in sorted(retire_ids):
-                        await neo4j_retire.delete_graph(gid)
+                    await neo4j_retire.delete_graph(retire_graph)
                 finally:
                     await neo4j_retire.disconnect()
             except Exception as exc:
-                logger.warning("retiring previous graph generation(s) %s for %s failed: %s", sorted(retire_ids), repo_id, exc)
-        # The cutover is complete on every store; only now do the process-level
-        # stats describe the active index.
-        _STATS[repo_id] = stats
+                logger.warning(
+                    "retiring graph generation %s for %s failed: %s", retire_graph, repo_id, exc
+                )
         # Update process-level “size” gauges (best-effort; no per-corpus labels).
         try:
             CHUNKS_INDEXED_CURRENT.set(int(getattr(stats, "total_chunks", 0) or 0))
@@ -1691,39 +1857,24 @@ async def _background_index_job(request: IndexRequest, queue: asyncio.Queue[dict
                 try:
                     gstats = await neo4j.get_graph_stats(graph_generation_id or repo_id)
                     GRAPH_ENTITIES_CURRENT.set(int(getattr(gstats, "total_entities", 0) or 0))
-                    GRAPH_RELATIONSHIPS_CURRENT.set(int(getattr(gstats, "total_relationships", 0) or 0))
+                    GRAPH_RELATIONSHIPS_CURRENT.set(
+                        int(getattr(gstats, "total_relationships", 0) or 0)
+                    )
                 finally:
                     await neo4j.disconnect()
         except Exception:
             # Never fail indexing due to gauge update issues.
             pass
-        _STATUS[repo_id] = IndexStatus(
-            repo_id=repo_id,
-            status="complete",
-            progress=1.0,
-            current_file=None,
-            started_at=started_at,
-            completed_at=datetime.now(UTC),
-        )
-        summary = IndexRunSummary(
-            run_id=run_id,
-            repo_id=repo_id,
-            status="complete",
-            started_at=started_at,
-            completed_at=datetime.now(UTC),
-            progress=1.0,
-            error=None,
-            total_files=int(getattr(stats, "total_files", 0) or 0),
-            total_chunks=int(getattr(stats, "total_chunks", 0) or 0),
-            total_tokens=int(getattr(stats, "total_tokens", 0) or 0),
-            embedding_provider=str(getattr(stats, "embedding_provider", "") or ""),
-            embedding_model=str(getattr(stats, "embedding_model", "") or ""),
-            embedding_dimensions=int(getattr(stats, "embedding_dimensions", 0) or 0),
-        )
-        with contextlib.suppress(Exception):
-            _persist_run_summary(summary)
-        _emit_event(queue, {"type": "complete", "message": "✓ Indexing complete"}, guarantee=True)
     except asyncio.CancelledError:
+        if committed:
+            # The manifest already names this run's generation: the index is live
+            # and the cancellation only interrupted best-effort retirement.
+            _emit_event(
+                queue,
+                {"type": "log", "message": "Cancellation after commit: the new generation is live"},
+                drop_oldest=True,
+            )
+            return
         if qdrant is not None and qdrant_generation is not None and not committed:
             with contextlib.suppress(Exception):
                 await asyncio.shield(qdrant.drop_generation(qdrant_generation))
@@ -1787,6 +1938,20 @@ async def _background_index_job(request: IndexRequest, queue: asyncio.Queue[dict
         _emit_event(queue, {"type": "cancelled", "message": "⚠ Indexing cancelled"}, guarantee=True)
         raise
     except Exception as e:
+        if committed:
+            logger.warning(
+                "post-commit step failed for %s run %s (index is live): %s",
+                repo_id,
+                run_id,
+                e,
+                exc_info=True,
+            )
+            _emit_event(
+                queue,
+                {"type": "warning", "message": f"Post-commit cleanup failed (index is live): {e}"},
+                drop_oldest=True,
+            )
+            return
         if qdrant is not None and qdrant_generation is not None and not committed:
             with contextlib.suppress(Exception):
                 await qdrant.drop_generation(qdrant_generation)
@@ -1846,6 +2011,14 @@ async def _background_index_job(request: IndexRequest, queue: asyncio.Queue[dict
             _persist_run_summary(summary)
         _emit_event(queue, {"type": "error", "message": str(e)}, guarantee=True)
     finally:
+        with contextlib.suppress(Exception):
+            cfg_release = await load_scoped_config(repo_id=repo_id)
+            pg_release = PostgresClient(cfg_release.indexing.postgres_url)
+            await pg_release.connect()
+            try:
+                await pg_release.release_index_fence(repo_id, run_id)
+            finally:
+                await pg_release.disconnect()
         # Avoid clearing a newer task/queue for the same repo if a new run already started.
         if _TASKS.get(repo_id) is this_task:
             _TASKS.pop(repo_id, None)
@@ -1873,7 +2046,9 @@ async def estimate_index(request: IndexRequest) -> IndexEstimate:
             await pg.disconnect()
 
     if not repo_path:
-        raise HTTPException(status_code=422, detail="repo_path is required (or create corpus first)")
+        raise HTTPException(
+            status_code=422, detail="repo_path is required (or create corpus first)"
+        )
 
     cfg = await load_scoped_config(repo_id=repo_id)
 
@@ -1910,7 +2085,9 @@ async def estimate_index(request: IndexRequest) -> IndexEstimate:
     except Exception:
         extra_gitignore_patterns = []
 
-    loader = FileLoader(ignore_patterns=ignore_patterns, extra_gitignore_patterns=extra_gitignore_patterns)
+    loader = FileLoader(
+        ignore_patterns=ignore_patterns, extra_gitignore_patterns=extra_gitignore_patterns
+    )
 
     total_files = 0
     total_bytes = 0
@@ -1939,12 +2116,18 @@ async def estimate_index(request: IndexRequest) -> IndexEstimate:
     )
 
     skip_dense = bool(getattr(cfg.indexing, "skip_dense", False))
-    embedding_backend = str(getattr(cfg.embedding, "embedding_backend", "deterministic") or "deterministic").strip()
+    embedding_backend = str(
+        getattr(cfg.embedding, "embedding_backend", "deterministic") or "deterministic"
+    ).strip()
     embedding_provider = str(getattr(cfg.embedding, "embedding_type", "") or "").strip()
     embedding_model = str(getattr(cfg.embedding, "effective_model", "") or "").strip()
 
     semantic_kg_enabled = bool(cfg.graph_indexing.semantic_kg_enabled)
-    semantic_kg_chunks = min(est_chunks, max(0, int(cfg.graph_indexing.semantic_kg_max_chunks or 0))) if semantic_kg_enabled else 0
+    semantic_kg_chunks = (
+        min(est_chunks, max(0, int(cfg.graph_indexing.semantic_kg_max_chunks or 0)))
+        if semantic_kg_enabled
+        else 0
+    )
     semantic_model, semantic_provider_hint = _resolve_semantic_kg_model_and_provider(cfg)
 
     # Pricing (models.json): deterministic backend and skip_dense imply $0 external embedding cost.
@@ -1969,7 +2152,11 @@ async def estimate_index(request: IndexRequest) -> IndexEstimate:
 
     total_cost: float | None
     if semantic_kg_enabled:
-        total_cost = None if embedding_cost is None or semantic_kg_cost is None else float(embedding_cost) + float(semantic_kg_cost)
+        total_cost = (
+            None
+            if embedding_cost is None or semantic_kg_cost is None
+            else float(embedding_cost) + float(semantic_kg_cost)
+        )
     else:
         total_cost = embedding_cost
 
@@ -1998,7 +2185,9 @@ async def estimate_index(request: IndexRequest) -> IndexEstimate:
             tps = _estimate_local_tokens_per_second(cfg=cfg, provider=embedding_provider)
             override_tps = getattr(cfg.indexing, "estimated_tokens_per_second_local", None)
             if override_tps is not None and int(override_tps or 0) > 0:
-                assumptions.append(f"embedding tokens/sec≈{tps:,} (indexing.estimated_tokens_per_second_local override)")
+                assumptions.append(
+                    f"embedding tokens/sec≈{tps:,} (indexing.estimated_tokens_per_second_local override)"
+                )
             else:
                 assumptions.append(
                     f"embedding tokens/sec≈{tps:,} (local hardware={_detect_local_hardware_class()} provider={embedding_provider or 'local'})"
@@ -2015,7 +2204,9 @@ async def estimate_index(request: IndexRequest) -> IndexEstimate:
                 model=semantic_model,
             )
             if resolved_semantic_spec is not None:
-                semantic_provider_for_time = str(resolved_semantic_spec.get("provider") or semantic_provider_for_time)
+                semantic_provider_for_time = str(
+                    resolved_semantic_spec.get("provider") or semantic_provider_for_time
+                )
             estimated_seconds_semantic_kg = _estimate_semantic_kg_seconds(
                 provider=semantic_provider_for_time,
                 chunks_in_scope=semantic_kg_chunks,
@@ -2025,8 +2216,13 @@ async def estimate_index(request: IndexRequest) -> IndexEstimate:
             assumptions.append(
                 f"semantic_graphrag≈{semantic_kg_chunks:,} chunks using {semantic_provider_for_time or 'unknown'}"
             )
-        est_low = max(0.0, (base_total_seconds * _EST_RANGE_LOW_MULT) + float(_EST_OVERHEAD_SECONDS))
-        est_high = max(est_low, (base_total_seconds * _EST_RANGE_HIGH_MULT) + float(_EST_OVERHEAD_SECONDS) * 2.0)
+        est_low = max(
+            0.0, (base_total_seconds * _EST_RANGE_LOW_MULT) + float(_EST_OVERHEAD_SECONDS)
+        )
+        est_high = max(
+            est_low,
+            (base_total_seconds * _EST_RANGE_HIGH_MULT) + float(_EST_OVERHEAD_SECONDS) * 2.0,
+        )
 
     return IndexEstimate(
         repo_id=repo_id,
@@ -2050,20 +2246,62 @@ async def estimate_index(request: IndexRequest) -> IndexEstimate:
     )
 
 
-@router.post("/index", response_model=IndexStatus)
+@router.post(
+    "/index",
+    response_model=IndexStatus,
+    responses={
+        404: {"description": "Unknown corpus"},
+        409: {
+            "description": "An index run already holds this corpus (durable per-corpus run fence)"
+        },
+    },
+)
 async def start_index(request: IndexRequest) -> IndexStatus:
     # Fail closed on a path the API cannot read: the loader yields nothing for a
     # missing root and the run would otherwise "complete" with zero files.
     root = Path(str(request.repo_path or "")).expanduser()
     if not str(request.repo_path or "").strip() or not root.is_dir():
-        raise HTTPException(status_code=400, detail=f"repo_path is not a readable directory: {request.repo_path}")
+        raise HTTPException(
+            status_code=400, detail=f"repo_path is not a readable directory: {request.repo_path}"
+        )
     global _LAST_STARTED_REPO
 
-    # If already running, return current status.
-    if request.repo_id in _TASKS and request.repo_id in _STATUS:
-        return _STATUS[request.repo_id]
+    if (
+        request.repo_id in _TASKS
+        and request.repo_id in _STATUS
+        and _STATUS[request.repo_id].status == "indexing"
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=f"An index run is already in progress for corpus {request.repo_id}",
+        )
 
     started_at = datetime.now(UTC)
+    run_id = f"{started_at.strftime('%Y%m%dT%H%M%S')}_{uuid.uuid4().hex[:10]}"
+    # Durable per-corpus run fence (compare-and-set on the corpus row): a second
+    # worker or process cannot build and retire against the same corpus.
+    cfg = await load_scoped_config(repo_id=request.repo_id)
+    postgres = PostgresClient(cfg.indexing.postgres_url)
+    try:
+        await postgres.connect()
+        held = await postgres.acquire_index_fence(request.repo_id, run_id, started_at=started_at)
+    except CorpusNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        raise_postgres_unavailable_if_applicable(exc, boundary="Index run fence")
+        raise
+    finally:
+        with contextlib.suppress(Exception):
+            await postgres.disconnect()
+    if held is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Corpus {request.repo_id} is fenced by index run {held.run_id} (started {held.started_at.isoformat()}); "
+                "wait for it to finish, or cancel it, before starting another run"
+            ),
+        )
+
     _STATUS[request.repo_id] = IndexStatus(
         repo_id=request.repo_id,
         status="indexing",
@@ -2076,34 +2314,9 @@ async def start_index(request: IndexRequest) -> IndexStatus:
     _EVENT_QUEUES[request.repo_id] = queue
     _LAST_STARTED_REPO = request.repo_id
 
-    task = asyncio.create_task(_background_index_job(request, queue))
+    task = asyncio.create_task(_background_index_job(request, queue, run_id=run_id))
     _TASKS[request.repo_id] = task
     return _STATUS[request.repo_id]
-
-
-@router.post("/index/start", response_model=IndexStatus)
-async def start_index_compat(payload: dict[str, Any] | None = None) -> IndexStatus:
-    """Compatibility endpoint for legacy dashboard UI.
-
-    Expected payload: {"repo_id": "...", "repo_path": "...", "force_reindex": bool}
-    """
-    payload = payload or {}
-    repo_id = str(payload.get("repo_id") or payload.get("repo") or "").strip()
-    repo_path = str(payload.get("repo_path") or payload.get("path") or "").strip()
-    if not repo_id:
-        raise HTTPException(status_code=422, detail="repo_id is required")
-    if not repo_path:
-        # Try to resolve from corpus registry
-        cfg = await load_scoped_config(repo_id=None)
-        pg = PostgresClient(cfg.indexing.postgres_url)
-        await pg.connect()
-        corpus = await pg.get_corpus(repo_id)
-        if corpus is not None:
-            repo_path = str(corpus.get("path") or "")
-    if not repo_path:
-        raise HTTPException(status_code=422, detail="repo_path is required (or create corpus first)")
-    force_reindex = bool(payload.get("force_reindex") or payload.get("force") or False)
-    return await start_index(IndexRequest(repo_id=repo_id, repo_path=repo_path, force_reindex=force_reindex))
 
 
 @router.post("/index/{corpus_id}/stop", response_model=IndexStatus)
@@ -2135,7 +2348,9 @@ async def stop_index_compat(
 
 
 @router.get("/index/status", response_model=DashboardIndexStatusResponse)
-async def get_dashboard_index_status(scope: CorpusScope = _CORPUS_SCOPE_DEP) -> DashboardIndexStatusResponse:
+async def get_dashboard_index_status(
+    scope: CorpusScope = _CORPUS_SCOPE_DEP,
+) -> DashboardIndexStatusResponse:
     """Dashboard index summary (legacy-compatible endpoint).
 
     This endpoint exists for the Dashboard System tab's full index summary panel.
@@ -2170,7 +2385,9 @@ async def get_dashboard_index_status(scope: CorpusScope = _CORPUS_SCOPE_DEP) -> 
     embedding_provider = cfg.embedding.embedding_type
     embedding_dim = int(cfg.embedding.embedding_dim)
     skip_dense = bool(getattr(cfg.indexing, "skip_dense", False))
-    embedding_backend = str(getattr(cfg.embedding, "embedding_backend", "deterministic") or "deterministic").strip()
+    embedding_backend = str(
+        getattr(cfg.embedding, "embedding_backend", "deterministic") or "deterministic"
+    ).strip()
     total_tokens = 0
     total_chunks = 0
     try:
@@ -2201,14 +2418,20 @@ async def get_dashboard_index_status(scope: CorpusScope = _CORPUS_SCOPE_DEP) -> 
     semantic_kg_enabled = bool(cfg.graph_indexing.semantic_kg_enabled)
     if semantic_kg_enabled:
         semantic_model, semantic_provider_hint = _resolve_semantic_kg_model_and_provider(cfg)
-        semantic_chunks = min(total_chunks, max(0, int(cfg.graph_indexing.semantic_kg_max_chunks or 0)))
+        semantic_chunks = min(
+            total_chunks, max(0, int(cfg.graph_indexing.semantic_kg_max_chunks or 0))
+        )
         semantic_kg_cost = _estimate_semantic_kg_cost_usd(
             provider_hint=semantic_provider_hint,
             model=semantic_model,
             chunks_in_scope=semantic_chunks,
             enrich_max_chars=int(cfg.enrichment.enrich_max_chars or 1000),
         )
-        total_cost = None if embedding_cost is None or semantic_kg_cost is None else float(embedding_cost) + float(semantic_kg_cost)
+        total_cost = (
+            None
+            if embedding_cost is None or semantic_kg_cost is None
+            else float(embedding_cost) + float(semantic_kg_cost)
+        )
 
     storage_breakdown = await _compute_dashboard_storage_breakdown(repo_id=repo_id)
 
@@ -2257,7 +2480,9 @@ async def get_dashboard_index_status(scope: CorpusScope = _CORPUS_SCOPE_DEP) -> 
 
 
 @router.get("/index/stats", response_model=DashboardIndexStatsResponse)
-async def get_dashboard_index_stats(scope: CorpusScope = _CORPUS_SCOPE_DEP) -> DashboardIndexStatsResponse:
+async def get_dashboard_index_stats(
+    scope: CorpusScope = _CORPUS_SCOPE_DEP,
+) -> DashboardIndexStatsResponse:
     """Dashboard storage metrics (legacy-compatible endpoint)."""
     repo_id = await _resolve_dashboard_repo_id(scope)
 
@@ -2290,12 +2515,16 @@ async def get_latest_index_run(corpus_id: str) -> IndexRunSummary:
         raise HTTPException(status_code=422, detail="corpus_id is required")
     run = _load_latest_run_summary(repo_id)
     if run is None:
-        raise HTTPException(status_code=404, detail=f"No persisted index runs found for repo_id={repo_id}")
+        raise HTTPException(
+            status_code=404, detail=f"No persisted index runs found for repo_id={repo_id}"
+        )
     return _coerce_stale_indexing_run_to_error(repo_id, run)
 
 
 @router.get("/index/{corpus_id}/runs/{run_id}/events", response_model=list[IndexRunEvent])
-async def get_index_run_events(corpus_id: str, run_id: str, limit: int = Query(default=200, ge=1, le=5000)) -> list[IndexRunEvent]:
+async def get_index_run_events(
+    corpus_id: str, run_id: str, limit: int = Query(default=200, ge=1, le=5000)
+) -> list[IndexRunEvent]:
     repo_id = str(corpus_id or "").strip()
     rid = str(run_id or "").strip()
     if not repo_id:
@@ -2382,13 +2611,17 @@ async def delete_index(corpus_id: str) -> dict[str, Any]:
     cfg = await load_scoped_config(repo_id=repo_id)
     postgres = PostgresClient(cfg.indexing.postgres_url)
     await postgres.connect()
-    generation_graph_id = graph_repo_id_of(await postgres.get_generation(repo_id))
-    deleted_rows = await postgres.delete_chunks(repo_id)
+    generation = await postgres.get_generation(repo_id)
+    # Postgres first, in one transaction (chunk rows + manifest + contracts): a
+    # failure in the external stores below leaves a corpus that reads as never
+    # indexed, never a manifest naming a dropped collection or graph.
+    deleted_rows = await postgres.delete_index_state(repo_id)
     try:
         deleted_collections = await QdrantChunkStore(cfg).delete_corpus(repo_id)
     except DependencyUnavailableError as exc:
-        raise dependency_unavailable_http_exception(exc.dependency, boundary=exc.operation, exc=exc) from exc
-    await postgres.clear_corpus_index_state(repo_id)
+        raise dependency_unavailable_http_exception(
+            exc.dependency, boundary=exc.operation, exc=exc
+        ) from exc
     try:
         await postgres.semantic_cache_clear_for_corpus(repo_id)
     except Exception:
@@ -2404,9 +2637,16 @@ async def delete_index(corpus_id: str) -> dict[str, Any]:
         )
         await neo4j.connect()
         try:
-            if generation_graph_id:
-                await neo4j.delete_graph(generation_graph_id)
-            await neo4j.delete_graphs_with_prefix(_build_staging_repo_id(repo_id, ""))
+            for gid in {
+                g
+                for g in (
+                    graph_repo_id_of(generation),
+                    generation.previous_graph_repo_id if generation else None,
+                )
+                if g
+            }:
+                await neo4j.delete_graph(gid)
+            await neo4j.delete_staged_graphs(repo_id)
             await neo4j.delete_graph(repo_id)
         finally:
             await neo4j.disconnect()

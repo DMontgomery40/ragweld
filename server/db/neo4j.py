@@ -17,7 +17,9 @@ from neo4j_graphrag.experimental.components.types import LexicalGraphConfig, Neo
 from server.models.graph import Community, Entity, GraphNeighborsResponse, GraphStats, Relationship
 from server.models.retrieval import ChunkMatch
 
-EntityType = Literal["function", "class", "module", "variable", "concept", "person", "org", "location", "event"]
+EntityType = Literal[
+    "function", "class", "module", "variable", "concept", "person", "org", "location", "event"
+]
 RelationshipType = Literal[
     "calls",
     "imports",
@@ -86,7 +88,9 @@ class Neo4jClient:
         driver = self._require_driver()
         async with driver.session(database="system") as session:
             # Works in Neo4j 5+; returns (name, versions, edition).
-            res = await session.run("CALL dbms.components() YIELD name, versions, edition RETURN name, versions, edition LIMIT 1;")
+            res = await session.run(
+                "CALL dbms.components() YIELD name, versions, edition RETURN name, versions, edition LIMIT 1;"
+            )
             rec: Any | None
             if hasattr(res, "single"):
                 rec = await res.single()
@@ -114,11 +118,15 @@ class Neo4jClient:
             return False
         driver = self._require_driver()
         async with driver.session(database="system") as session:
-            res = await session.run("SHOW DATABASES YIELD name WHERE name = $name RETURN count(*) AS n;", name=db)
+            res = await session.run(
+                "SHOW DATABASES YIELD name WHERE name = $name RETURN count(*) AS n;", name=db
+            )
             rec = await res.single()
         return bool(int(rec.get("n") or 0) > 0) if rec else False
 
-    async def ensure_database(self, database: str, *, wait_online: bool = True, timeout_s: float = 10.0) -> bool:
+    async def ensure_database(
+        self, database: str, *, wait_online: bool = True, timeout_s: float = 10.0
+    ) -> bool:
         """Create a database if missing (Enterprise). No-op if it already exists.
 
         Returns True if the database exists/was created, False if creation is not supported.
@@ -292,7 +300,9 @@ class Neo4jClient:
         if not graph.nodes and not graph.relationships:
             return
         await self._upsert_graphrag_nodes(repo_id, graph, lexical_graph_config=lexical_graph_config)
-        await self._upsert_graphrag_relationships(repo_id, graph, lexical_graph_config=lexical_graph_config)
+        await self._upsert_graphrag_relationships(
+            repo_id, graph, lexical_graph_config=lexical_graph_config
+        )
 
     async def _upsert_graphrag_nodes(
         self,
@@ -304,7 +314,9 @@ class Neo4jClient:
         driver = self._require_driver()
         document_label = _sanitize_cypher_identifier(lexical_graph_config.document_node_label)
         chunk_label = _sanitize_cypher_identifier(lexical_graph_config.chunk_node_label)
-        chunk_embedding_property = _sanitize_cypher_identifier(lexical_graph_config.chunk_embedding_property)
+        chunk_embedding_property = _sanitize_cypher_identifier(
+            lexical_graph_config.chunk_embedding_property
+        )
         if not document_label or not chunk_label or not chunk_embedding_property:
             raise ValueError("Invalid GraphRAG lexical graph configuration")
 
@@ -421,7 +433,9 @@ class Neo4jClient:
 
         async with driver.session(database=self.database) as session:
             for rel_type, rows in rel_rows_by_type.items():
-                if rel_type == _sanitize_cypher_identifier(lexical_graph_config.chunk_to_document_relationship_type):
+                if rel_type == _sanitize_cypher_identifier(
+                    lexical_graph_config.chunk_to_document_relationship_type
+                ):
                     query = f"""
                     UNWIND $rows AS row
                     MATCH (c:`{chunk_label}` {{repo_id: $repo_id, chunk_id: row.start_node_id}})
@@ -429,7 +443,9 @@ class Neo4jClient:
                     MERGE (c)-[rel:`{rel_type}`]->(d)
                     SET rel += row.properties;
                     """
-                elif rel_type == _sanitize_cypher_identifier(lexical_graph_config.next_chunk_relationship_type):
+                elif rel_type == _sanitize_cypher_identifier(
+                    lexical_graph_config.next_chunk_relationship_type
+                ):
                     query = f"""
                     UNWIND $rows AS row
                     MATCH (a:`{chunk_label}` {{repo_id: $repo_id, chunk_id: row.start_node_id}})
@@ -437,7 +453,9 @@ class Neo4jClient:
                     MERGE (a)-[rel:`{rel_type}`]->(b)
                     SET rel += row.properties;
                     """
-                elif rel_type == _sanitize_cypher_identifier(lexical_graph_config.node_to_chunk_relationship_type):
+                elif rel_type == _sanitize_cypher_identifier(
+                    lexical_graph_config.node_to_chunk_relationship_type
+                ):
                     query = f"""
                     UNWIND $rows AS row
                     MATCH (e:__Entity__ {{repo_id: $repo_id, entity_id: row.start_node_id}})
@@ -524,12 +542,13 @@ class Neo4jClient:
             out.append((cid, float(r.get("score") or 0.0)))
         return out
 
-    async def get_entity(self, entity_id: str) -> Entity | None:
+    async def get_entity(self, repo_id: str, entity_id: str) -> Entity | None:
+        """An entity of ONE graph generation; entity ids are only unique within a corpus/generation."""
         driver = self._require_driver()
         async with driver.session(database=self.database) as session:
             row = await session.run(
                 """
-                MATCH (n:__Entity__ {entity_id: $entity_id})
+                MATCH (n:__Entity__ {repo_id: $repo_id, entity_id: $entity_id})
                 RETURN n.repo_id AS repo_id,
                        n.entity_id AS entity_id,
                        n.name AS name,
@@ -539,6 +558,7 @@ class Neo4jClient:
                        properties(n) AS properties
                 LIMIT 1;
                 """,
+                repo_id=repo_id,
                 entity_id=entity_id,
             )
             rec = await row.single()
@@ -546,7 +566,9 @@ class Neo4jClient:
             return None
         return _entity_from_record(rec)
 
-    async def list_entities(self, repo_id: str, entity_type: str | None, limit: int, query: str | None = None) -> list[Entity]:
+    async def list_entities(
+        self, repo_id: str, entity_type: str | None, limit: int, query: str | None = None
+    ) -> list[Entity]:
         driver = self._require_driver()
         where = "WHERE n.repo_id = $repo_id"
         params: dict[str, Any] = {"repo_id": repo_id, "limit": int(limit)}
@@ -580,18 +602,20 @@ class Neo4jClient:
             records = await res.data()
         return [_entity_from_mapping(r) for r in records]
 
-    async def get_relationships(self, entity_id: str) -> list[Relationship]:
+    async def get_relationships(self, repo_id: str, entity_id: str) -> list[Relationship]:
+        """Outgoing relationships of an entity within ONE graph generation (both endpoints scoped)."""
         driver = self._require_driver()
         async with driver.session(database=self.database) as session:
             res = await session.run(
                 """
-                MATCH (a:__Entity__ {entity_id: $entity_id})-[r]->(b:__Entity__)
+                MATCH (a:__Entity__ {repo_id: $repo_id, entity_id: $entity_id})-[r]->(b:__Entity__ {repo_id: $repo_id})
                 RETURN a.entity_id AS source_id,
                        b.entity_id AS target_id,
                        type(r) AS relation_type,
                        coalesce(r.weight, 1.0) AS weight,
                        properties(r) AS properties;
                 """,
+                repo_id=repo_id,
                 entity_id=entity_id,
             )
             records = await res.data()
@@ -719,7 +743,9 @@ class Neo4jClient:
 
         return GraphNeighborsResponse(entities=entities, relationships=rels)
 
-    async def get_community_members(self, repo_id: str, community_id: str, *, limit: int = 500) -> list[Entity]:
+    async def get_community_members(
+        self, repo_id: str, community_id: str, *, limit: int = 500
+    ) -> list[Entity]:
         lim = int(max(0, limit or 0))
         lim = min(lim, 5000)
         if not community_id.strip() or lim <= 0:
@@ -907,7 +933,9 @@ class Neo4jClient:
             return GraphNeighborsResponse(entities=[], relationships=[])
         rec = records[0] or {}
         entities = [
-            _entity_from_mapping(item) for item in (rec.get("entities") or []) if isinstance(item, dict)
+            _entity_from_mapping(item)
+            for item in (rec.get("entities") or [])
+            if isinstance(item, dict)
         ]
         rels: list[Relationship] = []
         allowed: set[str] = set(ALL_RELATION_TYPES)
@@ -1038,7 +1066,9 @@ class Neo4jClient:
         return out
 
     # Search
-    async def graph_search(self, repo_id: str, query: str, max_hops: int, top_k: int) -> list[ChunkMatch]:
+    async def graph_search(
+        self, repo_id: str, query: str, max_hops: int, top_k: int
+    ) -> list[ChunkMatch]:
         if not query.strip() or top_k <= 0:
             return []
         driver = self._require_driver()
@@ -1228,7 +1258,9 @@ class Neo4jClient:
             out.append((cid, float(r.get("score") or 0.0)))
         return out
 
-    async def execute_cypher(self, query: str, params: dict[str, Any] | None) -> list[dict[str, Any]]:
+    async def execute_cypher(
+        self, query: str, params: dict[str, Any] | None
+    ) -> list[dict[str, Any]]:
         driver = self._require_driver()
         p = params or {}
 
@@ -1432,10 +1464,15 @@ class Neo4jClient:
                 if deleted <= 0:
                     break
 
-    async def delete_graphs_with_prefix(self, repo_id_prefix: str) -> int:
-        """Delete every node whose repo_id starts with ``repo_id_prefix`` (staged/retired generations)."""
-        prefix = str(repo_id_prefix or "").strip()
-        if not prefix:
+    async def delete_staged_graphs(self, corpus_id: str) -> int:
+        """Delete every staged graph generation of ONE corpus.
+
+        Staging ids are ``__staging__<corpus>__<run>`` and run ids never contain
+        ``__``, so the remainder after the prefix must be free of ``__``: corpus
+        ``a`` must not sweep the staging graphs of corpus ``a__b``.
+        """
+        prefix = f"__staging__{str(corpus_id or '').strip()}__"
+        if prefix == "__staging____":
             return 0
         driver = self._require_driver()
         removed = 0
@@ -1446,6 +1483,7 @@ class Neo4jClient:
                     """
                     MATCH (n)
                     WHERE n.repo_id STARTS WITH $prefix
+                      AND NOT substring(n.repo_id, size($prefix)) CONTAINS '__'
                     WITH n LIMIT $batch_size
                     DETACH DELETE n
                     RETURN count(*) AS n;
@@ -1635,7 +1673,17 @@ def _entity_properties_from_mapping(mapping: dict[str, Any]) -> dict[str, Any]:
 
 
 def _coerce_entity_type(value: str) -> EntityType:
-    allowed: set[str] = {"function", "class", "module", "variable", "concept", "person", "org", "location", "event"}
+    allowed: set[str] = {
+        "function",
+        "class",
+        "module",
+        "variable",
+        "concept",
+        "person",
+        "org",
+        "location",
+        "event",
+    }
     if value in allowed:
         return cast(EntityType, value)
     return "concept"

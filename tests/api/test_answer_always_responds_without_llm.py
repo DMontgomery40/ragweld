@@ -52,7 +52,7 @@ async def test_answer_returns_200_without_any_llm_keys(client: AsyncClient) -> N
             metadata={"kind": "unit_test"},
         )
         await pg.upsert_chunks(repo_id, [ch])
-        await qdrant.upsert_chunks(repo_id, [ch], embedding_dim=int(cfg.embedding.embedding_dim))
+        await qdrant.upsert_chunks(repo_id, [ch], embedding_dim=int(cfg.embedding.embedding_dim), pg=pg)
 
         resp = await client.post(
             "/api/answer",

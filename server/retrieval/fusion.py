@@ -16,6 +16,11 @@ from server.dependency_errors import (
     is_transport_unavailable,
 )
 from server.indexing.embedder import Embedder, configure_postgres_embedding_cache_backend
+from server.indexing.generations import (
+    generation_from_corpus_row,
+    graph_repo_id_of,
+    qdrant_collection_of,
+)
 from server.models.retrieval import ChunkMatch
 from server.models.tribrid_config_model import (
     FusionConfig,
@@ -25,10 +30,10 @@ from server.models.tribrid_config_model import (
 )
 from server.observability.metrics import (
     GRAPH_LEG_LATENCY_SECONDS,
-    SEARCH_GRAPH_HYDRATED_CHUNKS_COUNT,
-    SEARCH_LEG_RESULTS_COUNT,
     SEARCH_ERRORS_TOTAL,
+    SEARCH_GRAPH_HYDRATED_CHUNKS_COUNT,
     SEARCH_LATENCY_SECONDS,
+    SEARCH_LEG_RESULTS_COUNT,
     SEARCH_REQUESTS_TOTAL,
     SEARCH_RESULTS_FINAL_COUNT,
     SEARCH_STAGE_ERRORS_TOTAL,
@@ -44,7 +49,6 @@ from server.retrieval.errors import (
     RequiredRetrievalLegError,
     SparseContractMismatchError,
 )
-from server.indexing.generations import generation_from_corpus_row, graph_repo_id_of, qdrant_collection_of
 from server.retrieval.qdrant_store import QdrantChunkStore, QdrantCollectionMissingError
 from server.retrieval.rerank import Reranker
 from server.retrieval.scoring_boosts import apply_scoring_boosts
@@ -208,14 +212,20 @@ class TriBridFusion:
         if primary_cfg is not None:
             cache_cfg = primary_cfg.semantic_cache
             mode = str(cache_mode or "default").strip().lower()
-            configured = str(getattr(cache_cfg, "mode", "read_write") or "read_write").strip().lower()
+            configured = (
+                str(getattr(cache_cfg, "mode", "read_write") or "read_write").strip().lower()
+            )
             enabled = int(getattr(cache_cfg, "enabled", 0) or 0) == 1
-            reads_allowed = mode != "bypass" and mode != "refresh" and configured in {"read_only", "read_write"}
+            reads_allowed = (
+                mode != "bypass" and mode != "refresh" and configured in {"read_only", "read_write"}
+            )
             writes_allowed = mode != "bypass" and configured in {"write_only", "read_write"}
             min_chars = int(getattr(cache_cfg, "min_query_chars", 1) or 1)
             query_eligible = len(SemanticCacheService.canonical_query(query)) >= min_chars
             cache_lookup_enabled = bool(enabled and reads_allowed and query_eligible)
-            cache_fingerprint_enabled = bool(enabled and query_eligible and (reads_allowed or writes_allowed))
+            cache_fingerprint_enabled = bool(
+                enabled and query_eligible and (reads_allowed or writes_allowed)
+            )
             if not cache_lookup_enabled and cache_lookup_outcome == "ready":
                 cache_lookup_outcome = "disabled"
         if top_k is not None:
@@ -226,10 +236,16 @@ class TriBridFusion:
                 cfg_for_corpus = scoped_cfgs.get(cid)
                 if cfg_for_corpus is None:
                     continue
-                final_k_candidates_for_cache.append(int(getattr(cfg_for_corpus.retrieval, "final_k", 0) or 0))
+                final_k_candidates_for_cache.append(
+                    int(getattr(cfg_for_corpus.retrieval, "final_k", 0) or 0)
+                )
             if not final_k_candidates_for_cache and primary_cfg is not None:
-                final_k_candidates_for_cache.append(int(getattr(primary_cfg.retrieval, "final_k", 0) or 0))
-            effective_final_k = int(max(final_k_candidates_for_cache) if final_k_candidates_for_cache else 0)
+                final_k_candidates_for_cache.append(
+                    int(getattr(primary_cfg.retrieval, "final_k", 0) or 0)
+                )
+            effective_final_k = int(
+                max(final_k_candidates_for_cache) if final_k_candidates_for_cache else 0
+            )
         primary_reranking = primary_cfg.reranking if primary_cfg is not None else RerankingConfig()
         primary_training = primary_cfg.training if primary_cfg is not None else TrainingConfig()
         primary_vector = primary_cfg.vector_search if primary_cfg is not None else None
@@ -242,7 +258,9 @@ class TriBridFusion:
             if cfg_for_corpus is None:
                 corpus_config_fingerprints.append(f"{cid}:missing")
                 continue
-            cfg_fp = SemanticCacheService.fingerprint(cfg_for_corpus.model_dump(mode="serialization", by_alias=True))
+            cfg_fp = SemanticCacheService.fingerprint(
+                cfg_for_corpus.model_dump(mode="serialization", by_alias=True)
+            )
             corpus_config_fingerprints.append(f"{cid}:{cfg_fp}")
         index_revisions: list[str] = []
         if cache_fingerprint_enabled:
@@ -311,19 +329,29 @@ class TriBridFusion:
                 "fusion_normalize_scores": bool(config.normalize_scores),
                 "vector_enabled": bool(getattr(primary_vector, "enabled", True)),
                 "vector_top_k": int(getattr(primary_vector, "top_k", 0) or 0),
-                "vector_similarity_threshold": float(getattr(primary_vector, "similarity_threshold", 0.0) or 0.0),
+                "vector_similarity_threshold": float(
+                    getattr(primary_vector, "similarity_threshold", 0.0) or 0.0
+                ),
                 "sparse_enabled": bool(getattr(primary_sparse, "enabled", True)),
                 "sparse_top_k": int(getattr(primary_sparse, "top_k", 0) or 0),
                 "sparse_bm25_k1": float(getattr(primary_sparse, "bm25_k1", 0.0) or 0.0),
                 "sparse_bm25_b": float(getattr(primary_sparse, "bm25_b", 0.0) or 0.0),
-                "sparse_stemmer": str(getattr(primary_cfg.indexing, "bm25_tokenizer", "") or "") if primary_cfg else "",
-                "sparse_language": str(getattr(primary_cfg.indexing, "bm25_stemmer_lang", "") or "") if primary_cfg else "",
+                "sparse_stemmer": str(getattr(primary_cfg.indexing, "bm25_tokenizer", "") or "")
+                if primary_cfg
+                else "",
+                "sparse_language": str(getattr(primary_cfg.indexing, "bm25_stemmer_lang", "") or "")
+                if primary_cfg
+                else "",
                 "graph_enabled": bool(getattr(primary_graph, "enabled", True)),
                 "graph_mode": str(getattr(primary_graph, "mode", "") or ""),
                 "graph_top_k": int(getattr(primary_graph, "top_k", 0) or 0),
                 "graph_max_hops": int(getattr(primary_graph, "max_hops", 0) or 0),
-                "graph_include_communities": bool(getattr(primary_graph, "include_communities", False)),
-                "graph_chunk_neighbor_window": int(getattr(primary_graph, "chunk_neighbor_window", 0) or 0),
+                "graph_include_communities": bool(
+                    getattr(primary_graph, "include_communities", False)
+                ),
+                "graph_chunk_neighbor_window": int(
+                    getattr(primary_graph, "chunk_neighbor_window", 0) or 0
+                ),
                 "graph_chunk_entity_expansion_enabled": bool(
                     getattr(primary_graph, "chunk_entity_expansion_enabled", False)
                 ),
@@ -332,18 +360,38 @@ class TriBridFusion:
                 ),
                 "retrieval_final_k": int(getattr(primary_retrieval, "final_k", 0) or 0),
                 "retrieval_dedup_by": str(getattr(primary_retrieval, "dedup_by", "") or ""),
-                "retrieval_max_chunks_per_file": int(getattr(primary_retrieval, "max_chunks_per_file", 0) or 0),
-                "retrieval_neighbor_window": int(getattr(primary_retrieval, "neighbor_window", 0) or 0),
+                "retrieval_max_chunks_per_file": int(
+                    getattr(primary_retrieval, "max_chunks_per_file", 0) or 0
+                ),
+                "retrieval_neighbor_window": int(
+                    getattr(primary_retrieval, "neighbor_window", 0) or 0
+                ),
                 "retrieval_enable_mmr": bool(getattr(primary_retrieval, "enable_mmr", False)),
                 "retrieval_mmr_lambda": float(getattr(primary_retrieval, "mmr_lambda", 0.0) or 0.0),
-                "reranker_mode": str(getattr(primary_reranking, "reranker_mode", "") or "").strip().lower(),
-                "reranker_cloud_provider": str(getattr(primary_reranking, "reranker_cloud_provider", "") or ""),
-                "reranker_cloud_model": str(getattr(primary_reranking, "reranker_cloud_model", "") or ""),
-                "reranker_cloud_top_n": int(getattr(primary_reranking, "reranker_cloud_top_n", 0) or 0),
-                "tribrid_reranker_alpha": float(getattr(primary_reranking, "tribrid_reranker_alpha", 0.0) or 0.0),
-                "tribrid_reranker_topn": int(getattr(primary_reranking, "tribrid_reranker_topn", 0) or 0),
-                "tribrid_reranker_batch": int(getattr(primary_reranking, "tribrid_reranker_batch", 0) or 0),
-                "tribrid_reranker_maxlen": int(getattr(primary_reranking, "tribrid_reranker_maxlen", 0) or 0),
+                "reranker_mode": str(getattr(primary_reranking, "reranker_mode", "") or "")
+                .strip()
+                .lower(),
+                "reranker_cloud_provider": str(
+                    getattr(primary_reranking, "reranker_cloud_provider", "") or ""
+                ),
+                "reranker_cloud_model": str(
+                    getattr(primary_reranking, "reranker_cloud_model", "") or ""
+                ),
+                "reranker_cloud_top_n": int(
+                    getattr(primary_reranking, "reranker_cloud_top_n", 0) or 0
+                ),
+                "tribrid_reranker_alpha": float(
+                    getattr(primary_reranking, "tribrid_reranker_alpha", 0.0) or 0.0
+                ),
+                "tribrid_reranker_topn": int(
+                    getattr(primary_reranking, "tribrid_reranker_topn", 0) or 0
+                ),
+                "tribrid_reranker_batch": int(
+                    getattr(primary_reranking, "tribrid_reranker_batch", 0) or 0
+                ),
+                "tribrid_reranker_maxlen": int(
+                    getattr(primary_reranking, "tribrid_reranker_maxlen", 0) or 0
+                ),
                 "learning_reranker_backend": str(
                     getattr(primary_training, "learning_reranker_backend", "") or ""
                 ),
@@ -372,7 +420,9 @@ class TriBridFusion:
                 cache_lookup_outcome = "error"
             if hit is not None:
                 try:
-                    cached = [ChunkMatch.model_validate(r) for r in (hit.payload.get("matches") or [])]
+                    cached = [
+                        ChunkMatch.model_validate(r) for r in (hit.payload.get("matches") or [])
+                    ]
                 except Exception:
                     hit = None
                     cache_lookup_outcome = "miss"
@@ -474,16 +524,20 @@ class TriBridFusion:
             corpus_collection = qdrant_collection_of(corpus_generation)
             corpus_graph_id = graph_repo_id_of(corpus_generation)
             collections_by_corpus[cid] = corpus_collection
-            debug["fusion_generation_run_id"] = str((corpus_generation or {}).get("run_id") or "")
+            debug["fusion_generation_run_id"] = corpus_generation.run_id if corpus_generation else ""
             stored_backend = str((corpus_meta or {}).get("embedding_backend") or "").strip().lower()
-            stored_provider = str((corpus_meta or {}).get("embedding_provider") or "").strip().lower()
+            stored_provider = (
+                str((corpus_meta or {}).get("embedding_provider") or "").strip().lower()
+            )
             stored_model = str((corpus_meta or {}).get("embedding_model") or "").strip()
             stored_dim = int((corpus_meta or {}).get("embedding_dimensions") or 0)
             corpus_meta_payload = (corpus_meta or {}).get("meta")
             if isinstance(corpus_meta_payload, dict):
                 corpus_keywords = corpus_meta_payload.get("keywords")
                 if isinstance(corpus_keywords, list):
-                    debug["fusion_corpus_keywords"] = [str(k) for k in corpus_keywords if str(k).strip()]
+                    debug["fusion_corpus_keywords"] = [
+                        str(k) for k in corpus_keywords if str(k).strip()
+                    ]
                 else:
                     debug["fusion_corpus_keywords"] = []
             else:
@@ -494,20 +548,36 @@ class TriBridFusion:
                 if isinstance(last_indexed_raw, datetime)
                 else str(last_indexed_raw or "")
             )
-            current_backend = str(cfg.embedding.embedding_backend or "").strip().lower() or "deterministic"
+            current_backend = (
+                str(cfg.embedding.embedding_backend or "").strip().lower() or "deterministic"
+            )
             current_provider = str(cfg.embedding.embedding_type or "").strip().lower()
             current_model = str(cfg.embedding.effective_model or "").strip()
-            current_dim = int(getattr(embedder, "dim", getattr(cfg.embedding, "embedding_dim", 0)) or 0)
+            current_dim = int(
+                getattr(embedder, "dim", getattr(cfg.embedding, "embedding_dim", 0)) or 0
+            )
 
-            both_deterministic = stored_backend == "deterministic" and current_backend == "deterministic"
+            both_deterministic = (
+                stored_backend == "deterministic" and current_backend == "deterministic"
+            )
             vector_contract_mismatch_reasons: list[str] = []
             if stored_dim > 0 and stored_dim != current_dim:
                 vector_contract_mismatch_reasons.append("dimensions")
             if stored_dim > 0 and stored_backend and stored_backend != current_backend:
                 vector_contract_mismatch_reasons.append("backend")
-            if stored_dim > 0 and not both_deterministic and stored_provider and stored_provider != current_provider:
+            if (
+                stored_dim > 0
+                and not both_deterministic
+                and stored_provider
+                and stored_provider != current_provider
+            ):
                 vector_contract_mismatch_reasons.append("provider")
-            if stored_dim > 0 and not both_deterministic and stored_model and stored_model != current_model:
+            if (
+                stored_dim > 0
+                and not both_deterministic
+                and stored_model
+                and stored_model != current_model
+            ):
                 vector_contract_mismatch_reasons.append("model")
             vector_contract_mismatch = bool(vector_contract_mismatch_reasons)
             if vector_contract_mismatch:
@@ -525,7 +595,9 @@ class TriBridFusion:
                     current_dim,
                 )
                 debug["fusion_vector_contract_mismatch"] = True
-                debug["fusion_vector_contract_mismatch_fields"] = list(vector_contract_mismatch_reasons)
+                debug["fusion_vector_contract_mismatch_fields"] = list(
+                    vector_contract_mismatch_reasons
+                )
                 debug["fusion_vector_dim_mismatch"] = stored_dim > 0 and stored_dim != current_dim
                 debug["fusion_vector_dim_stored"] = stored_dim
                 debug["fusion_vector_dim_query"] = current_dim
@@ -551,19 +623,29 @@ class TriBridFusion:
 
             # Run legs (request toggles + config.*.enabled)
             if include_vector and cfg.vector_search.enabled and not vector_contract_mismatch:
-                with stage_span("retrieval.vector", ragweld_corpus_id=cid), VECTOR_LEG_LATENCY_SECONDS.time():
+                with (
+                    stage_span("retrieval.vector", ragweld_corpus_id=cid),
+                    VECTOR_LEG_LATENCY_SECONDS.time(),
+                ):
                     if q_emb is None:
                         try:
                             with SEARCH_STAGE_LATENCY_SECONDS.labels(stage="embed_query").time():
                                 q_emb = await embedder.embed(query)
                         except Exception as e:
                             SEARCH_STAGE_ERRORS_TOTAL.labels(stage="embed_query").inc()
-                            _raise_required_leg_error(e, leg="vector", operation="vector query embedding")
+                            _raise_required_leg_error(
+                                e, leg="vector", operation="vector query embedding"
+                            )
                             raise
                     try:
-                        with SEARCH_STAGE_LATENCY_SECONDS.labels(stage="qdrant_vector_search").time():
+                        with SEARCH_STAGE_LATENCY_SECONDS.labels(
+                            stage="qdrant_vector_search"
+                        ).time():
                             vector_results = await qdrant.vector_search(
-                                cid, q_emb, int(top_k or cfg.vector_search.top_k), physical=corpus_collection
+                                cid,
+                                q_emb,
+                                int(top_k or cfg.vector_search.top_k),
+                                physical=corpus_collection,
                             )
                     except QdrantCollectionMissingError as e:
                         if last_indexed_raw is None:
@@ -571,18 +653,26 @@ class TriBridFusion:
                             vector_results = []
                         else:
                             SEARCH_STAGE_ERRORS_TOTAL.labels(stage="vector_leg").inc()
-                            raise RequiredRetrievalLegError(leg="vector", operation="Qdrant vector search") from e
+                            raise RequiredRetrievalLegError(
+                                leg="vector", operation="Qdrant vector search"
+                            ) from e
                     except Exception as e:
                         SEARCH_STAGE_ERRORS_TOTAL.labels(stage="vector_leg").inc()
-                        _raise_qdrant_boundary_error(e, operation="Qdrant vector search", leg="vector")
+                        _raise_qdrant_boundary_error(
+                            e, operation="Qdrant vector search", leg="vector"
+                        )
                         raise
                     if cfg.vector_search.similarity_threshold > 0:
                         vector_results = [
-                            r for r in vector_results if r.score >= cfg.vector_search.similarity_threshold
+                            r
+                            for r in vector_results
+                            if r.score >= cfg.vector_search.similarity_threshold
                         ]
                     min_v = float(getattr(cfg.retrieval, "min_score_vector", 0.0) or 0.0)
                     if min_v > 0:
-                        vector_results = [r for r in vector_results if float(r.score) >= float(min_v)]
+                        vector_results = [
+                            r for r in vector_results if float(r.score) >= float(min_v)
+                        ]
             debug["fusion_vector_results"] = len(vector_results)
 
             stored_sparse = (corpus_meta or {}).get("sparse_contract")
@@ -594,7 +684,9 @@ class TriBridFusion:
             if sparse_contract_mismatch:
                 logger.warning(
                     "Sparse retrieval contract mismatch for corpus '%s': indexed=%s query=%s",
-                    cid, stored_sparse, current_sparse,
+                    cid,
+                    stored_sparse,
+                    current_sparse,
                 )
                 debug["fusion_sparse_contract_mismatch"] = True
                 debug["fusion_sparse_contract_stored"] = stored_sparse
@@ -607,9 +699,14 @@ class TriBridFusion:
                     )
 
             if include_sparse and cfg.sparse_search.enabled:
-                with stage_span("retrieval.sparse", ragweld_corpus_id=cid), SPARSE_LEG_LATENCY_SECONDS.time():
+                with (
+                    stage_span("retrieval.sparse", ragweld_corpus_id=cid),
+                    SPARSE_LEG_LATENCY_SECONDS.time(),
+                ):
                     try:
-                        with SEARCH_STAGE_LATENCY_SECONDS.labels(stage="qdrant_sparse_search").time():
+                        with SEARCH_STAGE_LATENCY_SECONDS.labels(
+                            stage="qdrant_sparse_search"
+                        ).time():
                             sparse_results = await qdrant.sparse_search(
                                 cid,
                                 query,
@@ -621,10 +718,14 @@ class TriBridFusion:
                             sparse_results = []
                         else:
                             SEARCH_STAGE_ERRORS_TOTAL.labels(stage="sparse_leg").inc()
-                            raise RequiredRetrievalLegError(leg="sparse", operation="Qdrant sparse search") from e
+                            raise RequiredRetrievalLegError(
+                                leg="sparse", operation="Qdrant sparse search"
+                            ) from e
                     except Exception as e:
                         SEARCH_STAGE_ERRORS_TOTAL.labels(stage="sparse_leg").inc()
-                        _raise_qdrant_boundary_error(e, operation="Qdrant sparse search", leg="sparse")
+                        _raise_qdrant_boundary_error(
+                            e, operation="Qdrant sparse search", leg="sparse"
+                        )
                         raise
 
                 min_s = float(getattr(cfg.retrieval, "min_score_sparse", 0.0) or 0.0)
@@ -638,7 +739,9 @@ class TriBridFusion:
                     }
                 except Exception:
                     engines = set()
-                debug["fusion_sparse_engine"] = next(iter(sorted(engines)), None) if engines else None
+                debug["fusion_sparse_engine"] = (
+                    next(iter(sorted(engines)), None) if engines else None
+                )
             debug["fusion_sparse_results"] = len(sparse_results)
 
             # Graph retrieval: query Neo4j for relevant entities, then hydrate to chunks from Postgres.
@@ -653,7 +756,10 @@ class TriBridFusion:
                 db_name = cfg.graph_storage.resolve_database(cid)
                 neo4j: Neo4jClient | None = None
                 try:
-                    with stage_span("retrieval.graph", ragweld_corpus_id=cid), GRAPH_LEG_LATENCY_SECONDS.time():
+                    with (
+                        stage_span("retrieval.graph", ragweld_corpus_id=cid),
+                        GRAPH_LEG_LATENCY_SECONDS.time(),
+                    ):
                         neo4j = Neo4jClient(
                             cfg.graph_storage.neo4j_uri,
                             cfg.graph_storage.neo4j_user,
@@ -670,7 +776,9 @@ class TriBridFusion:
                             # Chunk-level graph retrieval: Neo4j vector index over Chunk nodes.
                             if q_emb is None:
                                 try:
-                                    with SEARCH_STAGE_LATENCY_SECONDS.labels(stage="embed_query").time():
+                                    with SEARCH_STAGE_LATENCY_SECONDS.labels(
+                                        stage="embed_query"
+                                    ).time():
                                         q_emb = await embedder.embed(query)
                                 except Exception as e:
                                     _raise_required_leg_error(
@@ -680,56 +788,52 @@ class TriBridFusion:
                                     )
                                     raise
                             overfetch = (
-                                int(getattr(cfg.graph_search, "chunk_seed_overfetch_multiplier", 1) or 1)
+                                int(
+                                    getattr(cfg.graph_search, "chunk_seed_overfetch_multiplier", 1)
+                                    or 1
+                                )
                                 if cfg.graph_storage.neo4j_database_mode == "shared"
                                 else 1
                             )
-                            with SEARCH_STAGE_LATENCY_SECONDS.labels(stage="neo4j_chunk_vector_search").time():
+                            with SEARCH_STAGE_LATENCY_SECONDS.labels(
+                                stage="neo4j_chunk_vector_search"
+                            ).time():
                                 try:
                                     hits = await neo4j.chunk_vector_search(
                                         corpus_graph_id,
                                         q_emb,
                                         index_name=cfg.graph_indexing.chunk_vector_index_name,
                                         top_k=graph_k,
-                                        neighbor_window=int(getattr(cfg.graph_search, "chunk_neighbor_window", 0) or 0),
+                                        neighbor_window=int(
+                                            getattr(cfg.graph_search, "chunk_neighbor_window", 0)
+                                            or 0
+                                        ),
                                         overfetch_multiplier=overfetch,
                                         query_mode=str(
-                                            getattr(cfg.graph_storage, "neo4j_vector_query_mode", "auto") or "auto"
+                                            getattr(
+                                                cfg.graph_storage, "neo4j_vector_query_mode", "auto"
+                                            )
+                                            or "auto"
                                         ),
                                     )
-                                except TypeError as e:
-                                    # Backward-compat for test doubles / older client stubs.
-                                    if "query_mode" not in str(e):
-                                        _raise_neo4j_boundary_error(e, operation="Neo4j chunk vector search")
-                                        raise
-                                    try:
-                                        hits = await neo4j.chunk_vector_search(
-                                            corpus_graph_id,
-                                            q_emb,
-                                            index_name=cfg.graph_indexing.chunk_vector_index_name,
-                                            top_k=graph_k,
-                                            neighbor_window=int(
-                                                getattr(cfg.graph_search, "chunk_neighbor_window", 0) or 0
-                                            ),
-                                            overfetch_multiplier=overfetch,
-                                        )
-                                    except Exception as fallback_error:
-                                        _raise_neo4j_boundary_error(
-                                            fallback_error,
-                                            operation="Neo4j chunk vector search",
-                                        )
-                                        raise
                                 except Exception as e:
-                                    _raise_neo4j_boundary_error(e, operation="Neo4j chunk vector search")
+                                    _raise_neo4j_boundary_error(
+                                        e, operation="Neo4j chunk vector search"
+                                    )
                                     raise
                             debug["fusion_graph_entity_hits"] = len(hits)
 
                             score_by_id = {chunk_id: float(score) for chunk_id, score in hits}
 
                             # Expand via entities (semantic KG / code entities linked to chunks).
-                            if bool(
-                                getattr(cfg.graph_search, "chunk_entity_expansion_enabled", False)
-                            ) and int(cfg.graph_search.max_hops) > 0:
+                            if (
+                                bool(
+                                    getattr(
+                                        cfg.graph_search, "chunk_entity_expansion_enabled", False
+                                    )
+                                )
+                                and int(cfg.graph_search.max_hops) > 0
+                            ):
                                 with SEARCH_STAGE_LATENCY_SECONDS.labels(
                                     stage="neo4j_expand_chunks_via_entities"
                                 ).time():
@@ -747,16 +851,22 @@ class TriBridFusion:
                                         )
                                         raise
                                 debug["fusion_graph_entity_expansion_hits"] = len(exp_hits)
-                                w = float(getattr(cfg.graph_search, "chunk_entity_expansion_weight", 1.0) or 0.0)
+                                w = float(
+                                    getattr(cfg.graph_search, "chunk_entity_expansion_weight", 1.0)
+                                    or 0.0
+                                )
                                 for chunk_id, score in exp_hits:
                                     score_by_id[chunk_id] = max(
                                         float(score_by_id.get(chunk_id) or 0.0), float(score) * w
                                     )
 
                             chunk_ids = sorted(
-                                score_by_id, key=lambda chunk_id: (-float(score_by_id[chunk_id]), chunk_id)
+                                score_by_id,
+                                key=lambda chunk_id: (-float(score_by_id[chunk_id]), chunk_id),
                             )[:graph_k]
-                            with SEARCH_STAGE_LATENCY_SECONDS.labels(stage="postgres_get_chunks").time():
+                            with SEARCH_STAGE_LATENCY_SECONDS.labels(
+                                stage="postgres_get_chunks"
+                            ).time():
                                 try:
                                     hydrated = await postgres.get_chunks(cid, chunk_ids)
                                 except Exception as e:
@@ -789,7 +899,9 @@ class TriBridFusion:
                             debug["fusion_graph_hydrated_chunks"] = len(graph_results)
                         else:
                             # Entity-mode graph retrieval: return real chunk_ids via Entity-[:IN_CHUNK]->Chunk.
-                            with SEARCH_STAGE_LATENCY_SECONDS.labels(stage="neo4j_entity_chunk_search").time():
+                            with SEARCH_STAGE_LATENCY_SECONDS.labels(
+                                stage="neo4j_entity_chunk_search"
+                            ).time():
                                 try:
                                     hits = await neo4j.entity_chunk_search(
                                         corpus_graph_id,
@@ -798,13 +910,17 @@ class TriBridFusion:
                                         graph_k,
                                     )
                                 except Exception as e:
-                                    _raise_neo4j_boundary_error(e, operation="Neo4j entity chunk search")
+                                    _raise_neo4j_boundary_error(
+                                        e, operation="Neo4j entity chunk search"
+                                    )
                                     raise
                             debug["fusion_graph_entity_hits"] = len(hits)
 
                             score_by_id = {chunk_id: float(score) for chunk_id, score in hits}
                             chunk_ids = [chunk_id for chunk_id, _score in hits]
-                            with SEARCH_STAGE_LATENCY_SECONDS.labels(stage="postgres_get_chunks").time():
+                            with SEARCH_STAGE_LATENCY_SECONDS.labels(
+                                stage="postgres_get_chunks"
+                            ).time():
                                 try:
                                     hydrated = await postgres.get_chunks(cid, chunk_ids)
                                 except Exception as e:
@@ -824,7 +940,11 @@ class TriBridFusion:
                                     language=ch.language,
                                     score=float(score_by_id.get(ch.chunk_id) or 0.0),
                                     source="graph",
-                                    metadata={**(ch.metadata or {}), "corpus_id": cid, "graph_mode": "entity"},
+                                    metadata={
+                                        **(ch.metadata or {}),
+                                        "corpus_id": cid,
+                                        "graph_mode": "entity",
+                                    },
                                 )
                                 for ch in hydrated
                                 if ch.chunk_id in score_by_id
@@ -837,7 +957,9 @@ class TriBridFusion:
                     if is_neo4j_unavailable(e):
                         raise DependencyUnavailableError("neo4j", "Neo4j graph retrieval") from e
                     if is_postgres_unavailable(e):
-                        raise DependencyUnavailableError("postgres", "Postgres graph hydration") from e
+                        raise DependencyUnavailableError(
+                            "postgres", "Postgres graph hydration"
+                        ) from e
                     raise RequiredRetrievalLegError(
                         leg="graph",
                         operation="graph retrieval",
@@ -894,7 +1016,16 @@ class TriBridFusion:
         graph_errors: list[dict[str, str]] = []
 
         for cid in corpus_ids:
-            v, s, g, dbg, final_k_default, rerank_cfg, train_cfg, train_path = await _search_single_corpus(cid)
+            (
+                v,
+                s,
+                g,
+                dbg,
+                final_k_default,
+                rerank_cfg,
+                train_cfg,
+                train_path,
+            ) = await _search_single_corpus(cid)
             per_corpus_debug[cid] = dbg
             vector_lists.append(v)
             sparse_lists.append(s)
@@ -915,7 +1046,9 @@ class TriBridFusion:
             any_sparse_enabled = any_sparse_enabled or bool(dbg.get("fusion_sparse_enabled"))
             any_graph_enabled = any_graph_enabled or bool(dbg.get("fusion_graph_enabled"))
             any_graph_attempted = any_graph_attempted or bool(dbg.get("fusion_graph_attempted"))
-            any_degraded_retrieval = any_degraded_retrieval or bool(dbg.get("fusion_degraded_retrieval"))
+            any_degraded_retrieval = any_degraded_retrieval or bool(
+                dbg.get("fusion_degraded_retrieval")
+            )
             for reason in list(dbg.get("fusion_degraded_reasons") or []):
                 r = str(reason or "").strip()
                 if r and r not in degraded_reasons:
@@ -958,7 +1091,10 @@ class TriBridFusion:
             "fusion_graph_error": graph_errors[0]["error"] if graph_errors else None,
             "fusion_graph_errors": graph_errors,
             "fusion_graph_entity_expansion_enabled": bool(
-                any(bool(d.get("fusion_graph_entity_expansion_enabled")) for d in per_corpus_debug.values())
+                any(
+                    bool(d.get("fusion_graph_entity_expansion_enabled"))
+                    for d in per_corpus_debug.values()
+                )
             ),
             "fusion_graph_entity_expansion_hits": int(total_graph_exp_hits),
             "fusion_degraded_retrieval": bool(any_degraded_retrieval),
@@ -1014,7 +1150,8 @@ class TriBridFusion:
                         reranking_cfg,
                         training_config=training_cfg,
                         trained_model_path=trained_model_path,
-                        gateway_config=scoped_cfgs.get(rerank_config_corpus_id or "") or primary_cfg,
+                        gateway_config=scoped_cfgs.get(rerank_config_corpus_id or "")
+                        or primary_cfg,
                     )
                     rr = await reranker.try_rerank(query, results)
                     results = rr.chunks
@@ -1054,7 +1191,9 @@ class TriBridFusion:
         shape_qdrant: QdrantChunkStore | None = None
         shape_collection: str | None = None
         try:
-            shape_corpus_id = str(rerank_config_corpus_id or (corpus_ids[0] if corpus_ids else "")).strip()
+            shape_corpus_id = str(
+                rerank_config_corpus_id or (corpus_ids[0] if corpus_ids else "")
+            ).strip()
             if shape_corpus_id:
                 shape_full = await load_scoped_config(repo_id=shape_corpus_id)
                 shape_cfg = shape_full.retrieval
@@ -1113,7 +1252,9 @@ class TriBridFusion:
                 debug["postprocess_error"] = str(e)
 
         if results:
-            score_cfg_corpus_id = str(rerank_config_corpus_id or (corpus_ids[0] if corpus_ids else "")).strip()
+            score_cfg_corpus_id = str(
+                rerank_config_corpus_id or (corpus_ids[0] if corpus_ids else "")
+            ).strip()
             score_cfg = scoped_cfgs.get(score_cfg_corpus_id) or primary_cfg or TriBridConfig()
             corpus_meta_by_id: dict[str, Any] = {}
             for cid, cdbg in per_corpus_debug.items():
@@ -1186,7 +1327,10 @@ class TriBridFusion:
                         query=query,
                         request_fingerprint=cache_request_fingerprint,
                         payload={
-                            "matches": [m.model_dump(mode="serialization", by_alias=True) for m in final_results],
+                            "matches": [
+                                m.model_dump(mode="serialization", by_alias=True)
+                                for m in final_results
+                            ],
                             "debug": debug,
                         },
                         cache_mode=cache_mode,
@@ -1213,7 +1357,9 @@ class TriBridFusion:
         sorted_keys = sorted(scores, key=lambda key: scores[key], reverse=True)
         return [chunk_map[key].model_copy(update={"score": scores[key]}) for key in sorted_keys]
 
-    def weighted_fusion(self, results: list[list[ChunkMatch]], weights: list[float]) -> list[ChunkMatch]:
+    def weighted_fusion(
+        self, results: list[list[ChunkMatch]], weights: list[float]
+    ) -> list[ChunkMatch]:
         # Weights are normalized by their sum here (never at config-save time), so
         # the stored config keeps the operator's typed values.
         positive_total = float(sum(max(0.0, float(w)) for w in weights))
@@ -1360,7 +1506,9 @@ async def _apply_mmr_if_enabled(
     emb_by_id: dict[str, list[float]] = {}
     if repo_id and qdrant is not None:
         try:
-            emb_by_id = await qdrant.get_embeddings(str(repo_id), [r.chunk_id for r in pool], physical=physical)
+            emb_by_id = await qdrant.get_embeddings(
+                str(repo_id), [r.chunk_id for r in pool], physical=physical
+            )
         except Exception:
             emb_by_id = {}
 
@@ -1415,7 +1563,7 @@ def _cosine_sim(a: list[float], b: list[float]) -> float:
         nb += fy * fy
     if na <= 0.0 or nb <= 0.0:
         return 0.0
-    return float(float(dot) / (float(na ** 0.5) * float(nb ** 0.5)))
+    return float(float(dot) / (float(na**0.5) * float(nb**0.5)))
 
 
 async def _expand_neighbors(

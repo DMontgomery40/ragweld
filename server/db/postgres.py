@@ -6,7 +6,7 @@ import os
 import time
 from collections import defaultdict
 from datetime import UTC, datetime
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import asyncpg
 from pgvector.asyncpg import register_vector
@@ -16,6 +16,9 @@ from server.models.tribrid_config_model import (
     ChunkSummariesLastBuild,
     ChunkSummary,
 )
+
+if TYPE_CHECKING:
+    from server.indexing.generations import GenerationManifest, IndexRunFence
 
 # -----------------------------------------------------------------------------
 # Shared asyncpg pool caching (process-wide)
@@ -77,10 +80,7 @@ def _sanitize_json_value(value: Any) -> Any:
     if isinstance(value, list):
         return [_sanitize_json_value(item) for item in value]
     if isinstance(value, dict):
-        return {
-            _sanitize_pg_text(key): _sanitize_json_value(item)
-            for key, item in value.items()
-        }
+        return {_sanitize_pg_text(key): _sanitize_json_value(item) for key, item in value.items()}
     return value
 
 
@@ -152,7 +152,9 @@ class PostgresClient:
                             # Keep their bootstrap independent so they remain available
                             # even when vector extensions are not installed.
                             include_vector = self._schema_mode == "full"
-                            self._vector_available = await self._ensure_schema(conn, include_vector=include_vector)
+                            self._vector_available = await self._ensure_schema(
+                                conn, include_vector=include_vector
+                            )
                             if include_vector and self._vector_available:
                                 await register_vector(conn)
                     except Exception:
@@ -240,7 +242,9 @@ class PostgresClient:
             """
         )
         # Ensure new columns exist when upgrading an existing DB
-        await conn.execute("ALTER TABLE corpora ADD COLUMN IF NOT EXISTS meta JSONB NOT NULL DEFAULT '{}'::jsonb;")
+        await conn.execute(
+            "ALTER TABLE corpora ADD COLUMN IF NOT EXISTS meta JSONB NOT NULL DEFAULT '{}'::jsonb;"
+        )
         await conn.execute("ALTER TABLE corpora ADD COLUMN IF NOT EXISTS embedding_backend TEXT;")
         await conn.execute("ALTER TABLE corpora ADD COLUMN IF NOT EXISTS embedding_provider TEXT;")
         await conn.execute("ALTER TABLE corpora ADD COLUMN IF NOT EXISTS sparse_contract JSONB;")
@@ -612,7 +616,9 @@ class PostgresClient:
         await self._require_pool()
         assert self._pool is not None
         async with self._pool.acquire() as conn:
-            row = await conn.fetchrow("SELECT COUNT(*)::int AS n FROM chunks WHERE repo_id = $1;", repo_id)
+            row = await conn.fetchrow(
+                "SELECT COUNT(*)::int AS n FROM chunks WHERE repo_id = $1;", repo_id
+            )
         return int((row or {}).get("n") or 0)
 
     async def get_chunk(self, repo_id: str, chunk_id: str) -> Chunk | None:
@@ -681,7 +687,9 @@ class PostgresClient:
             for r in rows
         ]
 
-    async def get_chunks_by_file_ordinals(self, repo_id: str, file_path: str, ordinals: list[int]) -> list[Chunk]:
+    async def get_chunks_by_file_ordinals(
+        self, repo_id: str, file_path: str, ordinals: list[int]
+    ) -> list[Chunk]:
         """Fetch chunks for a file by chunk_ordinal (stored in metadata)."""
         if not ordinals:
             return []
@@ -850,7 +858,9 @@ class PostgresClient:
 
         out = {
             "chunks_bytes": int(chunks_row["chunks_bytes"] or 0) if chunks_row else 0,
-            "chunk_summaries_bytes": int(summaries_row["chunk_summaries_bytes"] or 0) if summaries_row else 0,
+            "chunk_summaries_bytes": int(summaries_row["chunk_summaries_bytes"] or 0)
+            if summaries_row
+            else 0,
         }
         self._dashboard_storage_cache[repo_id] = (now, out)
         return dict(out)
@@ -869,8 +879,7 @@ class PostgresClient:
                 FROM corpora
                 WHERE repo_id NOT LIKE $1
                 ORDER BY created_at DESC;
-                """
-                ,
+                """,
                 f"{_STAGING_REPO_PREFIX}%",
             )
         return [
@@ -913,7 +922,9 @@ class PostgresClient:
             "embedding_provider": str(row["embedding_provider"] or ""),
             "embedding_model": str(row["embedding_model"] or ""),
             "embedding_dimensions": int(row["embedding_dimensions"] or 0),
-            "sparse_contract": _coerce_jsonb_dict(row["sparse_contract"]) if row["sparse_contract"] else None,
+            "sparse_contract": _coerce_jsonb_dict(row["sparse_contract"])
+            if row["sparse_contract"]
+            else None,
         }
 
     async def upsert_corpus(
@@ -1190,7 +1201,9 @@ class PostgresClient:
                 str(exact_key),
             )
 
-    async def semantic_cache_delete_expired(self, *, scope_key: str | None = None, endpoint: str | None = None) -> int:
+    async def semantic_cache_delete_expired(
+        self, *, scope_key: str | None = None, endpoint: str | None = None
+    ) -> int:
         await self._require_pool()
         assert self._pool is not None
         async with self._pool.acquire() as conn:
@@ -1262,7 +1275,9 @@ class PostgresClient:
             )
         return int(str(result).split()[-1])
 
-    async def semantic_cache_clear(self, *, scope_key: str | None = None, endpoint: str | None = None) -> int:
+    async def semantic_cache_clear(
+        self, *, scope_key: str | None = None, endpoint: str | None = None
+    ) -> int:
         await self._require_pool()
         assert self._pool is not None
         async with self._pool.acquire() as conn:
@@ -1514,7 +1529,9 @@ class PostgresClient:
             for r in rows
         ]
 
-    async def list_chunk_summaries(self, repo_id: str, limit: int | None = None) -> list[ChunkSummary]:
+    async def list_chunk_summaries(
+        self, repo_id: str, limit: int | None = None
+    ) -> list[ChunkSummary]:
         await self._require_pool()
         assert self._pool is not None
         async with self._pool.acquire() as conn:
@@ -1585,17 +1602,25 @@ class PostgresClient:
                     end_line=int(r["end_line"]) if r["end_line"] is not None else None,
                     purpose=str(r["purpose"]) if r["purpose"] is not None else None,
                     symbols=[str(x) for x in symbols] if isinstance(symbols, list) else [],
-                    technical_details=str(r["technical_details"]) if r["technical_details"] is not None else None,
-                    domain_concepts=[str(x) for x in domain_concepts] if isinstance(domain_concepts, list) else [],
+                    technical_details=str(r["technical_details"])
+                    if r["technical_details"] is not None
+                    else None,
+                    domain_concepts=[str(x) for x in domain_concepts]
+                    if isinstance(domain_concepts, list)
+                    else [],
                     routes=[str(x) for x in routes] if isinstance(routes, list) else [],
-                    dependencies=[str(x) for x in dependencies] if isinstance(dependencies, list) else [],
+                    dependencies=[str(x) for x in dependencies]
+                    if isinstance(dependencies, list)
+                    else [],
                     patterns=[str(x) for x in patterns] if isinstance(patterns, list) else [],
                     card_source=(
                         "llm"
                         if str(r.get("card_source") or "").strip().lower() == "llm"
                         else "deterministic"
                     ),
-                    card_score=(float(r["card_score"]) if r.get("card_score") is not None else None),
+                    card_score=(
+                        float(r["card_score"]) if r.get("card_score") is not None else None
+                    ),
                 )
             )
         return out
@@ -1655,12 +1680,10 @@ class PostgresClient:
                                 _json_dumps_sanitized(list(s.routes or [])),
                                 _json_dumps_sanitized(list(s.dependencies or [])),
                                 _json_dumps_sanitized(list(s.patterns or [])),
-                                _sanitize_pg_text(getattr(s, "card_source", "deterministic") or "deterministic"),
-                                (
-                                    float(s.card_score)
-                                    if s.card_score is not None
-                                    else None
+                                _sanitize_pg_text(
+                                    getattr(s, "card_source", "deterministic") or "deterministic"
                                 ),
+                                (float(s.card_score) if s.card_score is not None else None),
                             )
                             for s in summaries
                         ],
@@ -1692,23 +1715,105 @@ class PostgresClient:
                     chunk_id,
                 )
             else:
-                result = await conn.execute("DELETE FROM chunk_summaries WHERE chunk_id = $1;", chunk_id)
+                result = await conn.execute(
+                    "DELETE FROM chunk_summaries WHERE chunk_id = $1;", chunk_id
+                )
         return int(result.split()[-1])
 
-    async def get_generation(self, repo_id: str) -> dict[str, Any] | None:
+    async def get_generation(self, repo_id: str) -> GenerationManifest | None:
         """The active-generation manifest of a corpus (None when nothing is promoted)."""
-        row = await self.get_corpus(repo_id)
-        if row is None:
-            return None
-        meta = row.get("meta") if isinstance(row.get("meta"), dict) else {}
-        generation = meta.get("generation")
-        if isinstance(generation, dict) and str(generation.get("run_id") or "").strip():
-            return dict(generation)
+        from server.indexing.generations import generation_from_corpus_row
+
+        return generation_from_corpus_row(await self.get_corpus(repo_id))
+
+    async def set_generation(self, repo_id: str, generation: GenerationManifest) -> None:
+        """Point a corpus at a generation outside a full index run (incremental corpora, upgrades)."""
+        await self.update_corpus_meta(repo_id, {"generation": generation.model_dump(mode="json")})
+
+    async def acquire_index_fence(
+        self, repo_id: str, run_id: str, *, started_at: datetime
+    ) -> IndexRunFence | None:
+        """Durably claim the single index-run slot of a corpus (compare-and-set on the corpus row).
+
+        Returns None when the claim succeeded, otherwise the fence held by another
+        run. Process-local task maps are not enough: a second worker/process
+        could otherwise build and retire against the same corpus.
+        """
+        from server.indexing.generations import IndexRunFence
+
+        await self._require_pool()
+        assert self._pool is not None
+        fence = IndexRunFence(run_id=run_id, started_at=started_at)
+        async with self._pool.acquire() as conn:
+            async with conn.transaction():
+                row = await conn.fetchrow(
+                    "SELECT meta FROM corpora WHERE repo_id = $1 FOR UPDATE;",
+                    repo_id,
+                )
+                if row is None:
+                    from server.services.config_store import CorpusNotFoundError
+
+                    raise CorpusNotFoundError(f"Corpus not found: {repo_id}")
+                meta = _coerce_jsonb_dict(row["meta"])
+                existing = meta.get("index_run")
+                if isinstance(existing, dict) and str(existing.get("run_id") or "").strip():
+                    return IndexRunFence.model_validate(existing)
+                await conn.execute(
+                    "UPDATE corpora SET meta = COALESCE(meta, '{}'::jsonb) || $2::jsonb WHERE repo_id = $1;",
+                    repo_id,
+                    _json_dumps_sanitized({"index_run": fence.model_dump(mode="json")}),
+                )
         return None
 
-    async def set_generation(self, repo_id: str, generation: dict[str, Any]) -> None:
-        """Point a corpus at a generation outside a full index run (incremental corpora, upgrades)."""
-        await self.update_corpus_meta(repo_id, {"generation": dict(generation)})
+    async def release_index_fence(self, repo_id: str, run_id: str) -> None:
+        """Release the run slot, but only if this run still owns it."""
+        await self._require_pool()
+        assert self._pool is not None
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE corpora
+                SET meta = COALESCE(meta, '{}'::jsonb) - 'index_run'
+                WHERE repo_id = $1 AND meta->'index_run'->>'run_id' = $2;
+                """,
+                repo_id,
+                run_id,
+            )
+
+    async def delete_index_state(self, repo_id: str) -> int:
+        """De-index a corpus in Postgres in ONE transaction: chunk rows gone, manifest and contracts cleared.
+
+        Runs before the external stores are touched so a failure there leaves a
+        corpus that reads as never indexed (no manifest naming a dropped
+        collection), never chunk rows paired with missing vectors.
+        """
+        await self._require_pool()
+        assert self._pool is not None
+        async with self._pool.acquire() as conn:
+            async with conn.transaction():
+                deleted = await conn.fetchval(
+                    "WITH d AS (DELETE FROM chunks WHERE repo_id = $1 RETURNING 1) SELECT count(*) FROM d;",
+                    repo_id,
+                )
+                await conn.execute("DELETE FROM chunk_summaries WHERE repo_id = $1;", repo_id)
+                await conn.execute(
+                    "DELETE FROM chunk_summaries_last_build WHERE repo_id = $1;", repo_id
+                )
+                await conn.execute(
+                    """
+                    UPDATE corpora
+                    SET last_indexed = NULL,
+                        embedding_backend = NULL,
+                        embedding_provider = NULL,
+                        embedding_model = NULL,
+                        embedding_dimensions = NULL,
+                        sparse_contract = NULL,
+                        meta = ((COALESCE(meta, '{}'::jsonb) - 'embedding_backend') - 'generation') - 'index_run'
+                    WHERE repo_id = $1;
+                    """,
+                    repo_id,
+                )
+        return int(deleted or 0)
 
     async def update_corpus_meta(self, repo_id: str, meta: dict[str, Any]) -> None:
         await self._require_pool()
@@ -1764,7 +1869,7 @@ class PostgresClient:
 
             query = f"""
                 UPDATE corpora
-                SET {', '.join(updates)}
+                SET {", ".join(updates)}
                 WHERE repo_id = $1
                 RETURNING *;
             """
@@ -1789,7 +1894,9 @@ class PostgresClient:
         assert self._pool is not None
         async with self._pool.acquire() as conn:
             async with conn.transaction():
-                await conn.execute("DELETE FROM chunk_summaries_last_build WHERE repo_id = $1;", repo_id)
+                await conn.execute(
+                    "DELETE FROM chunk_summaries_last_build WHERE repo_id = $1;", repo_id
+                )
                 await conn.execute("DELETE FROM chunk_summaries WHERE repo_id = $1;", repo_id)
                 await conn.execute("DELETE FROM chunks WHERE repo_id = $1;", repo_id)
                 await conn.execute("DELETE FROM corpus_configs WHERE repo_id = $1;", repo_id)
@@ -1804,8 +1911,8 @@ class PostgresClient:
         active_root_path: str,
         active_description: str | None = None,
         active_meta: dict[str, Any] | None = None,
-        generation: dict[str, Any],
-    ) -> dict[str, Any] | None:
+        generation: GenerationManifest,
+    ) -> GenerationManifest | None:
         """Atomically promote staged chunks/stats into the active corpus id.
 
         The same transaction records ``generation`` (the Qdrant collection and
@@ -1846,20 +1953,32 @@ class PostgresClient:
                         active_repo_id,
                         name=active_name or str(staging["name"] or active_repo_id),
                         root_path=active_root_path or str(staging["root_path"] or "."),
-                        description=active_description if active_description is not None else str(staging["description"] or ""),
+                        description=active_description
+                        if active_description is not None
+                        else str(staging["description"] or ""),
                         meta=active_meta or _coerce_jsonb_dict(staging["meta"]),
                     )
 
                 merged_meta = (
                     _coerce_jsonb_dict(active["meta"])
                     if active is not None
-                    else (_coerce_jsonb_dict(staging["meta"]) if active_meta is None else dict(active_meta))
+                    else (
+                        _coerce_jsonb_dict(staging["meta"])
+                        if active_meta is None
+                        else dict(active_meta)
+                    )
                 )
                 if active_meta:
                     merged_meta = {**merged_meta, **active_meta}
-                previous_generation = merged_meta.get("generation")
-                previous_generation = dict(previous_generation) if isinstance(previous_generation, dict) else None
-                merged_meta["generation"] = dict(generation)
+                from server.indexing.generations import GenerationManifest as _Manifest
+
+                raw_previous = merged_meta.get("generation")
+                previous_generation = (
+                    _Manifest.model_validate(raw_previous)
+                    if isinstance(raw_previous, dict)
+                    else None
+                )
+                merged_meta["generation"] = generation.model_dump(mode="json")
                 merged_meta.pop("internal_staging", None)
 
                 await conn.execute("DELETE FROM chunks WHERE repo_id = $1;", active_repo_id)
@@ -1869,14 +1988,18 @@ class PostgresClient:
                     staging_repo_id,
                 )
 
-                await conn.execute("DELETE FROM chunk_summaries WHERE repo_id = $1;", active_repo_id)
+                await conn.execute(
+                    "DELETE FROM chunk_summaries WHERE repo_id = $1;", active_repo_id
+                )
                 await conn.execute(
                     "UPDATE chunk_summaries SET repo_id = $1 WHERE repo_id = $2;",
                     active_repo_id,
                     staging_repo_id,
                 )
 
-                await conn.execute("DELETE FROM chunk_summaries_last_build WHERE repo_id = $1;", active_repo_id)
+                await conn.execute(
+                    "DELETE FROM chunk_summaries_last_build WHERE repo_id = $1;", active_repo_id
+                )
                 await conn.execute(
                     "UPDATE chunk_summaries_last_build SET repo_id = $1 WHERE repo_id = $2;",
                     active_repo_id,
@@ -1899,12 +2022,26 @@ class PostgresClient:
                     WHERE repo_id = $1;
                     """,
                     active_repo_id,
-                    _sanitize_pg_text((active["name"] if active is not None else None) or active_name or staging["name"] or active_repo_id),
-                    _sanitize_pg_text((active["root_path"] if active is not None else None) or active_root_path or staging["root_path"] or "."),
+                    _sanitize_pg_text(
+                        (active["name"] if active is not None else None)
+                        or active_name
+                        or staging["name"]
+                        or active_repo_id
+                    ),
+                    _sanitize_pg_text(
+                        (active["root_path"] if active is not None else None)
+                        or active_root_path
+                        or staging["root_path"]
+                        or "."
+                    ),
                     (
                         _sanitize_pg_text(active["description"])
                         if (active is not None and active["description"] is not None)
-                        else _sanitize_optional_text(active_description if active_description is not None else staging["description"])
+                        else _sanitize_optional_text(
+                            active_description
+                            if active_description is not None
+                            else staging["description"]
+                        )
                     ),
                     _json_dumps_sanitized(merged_meta),
                     staging["last_indexed"],
@@ -1915,7 +2052,9 @@ class PostgresClient:
                     staging["sparse_contract"],
                 )
 
-                await conn.execute("DELETE FROM corpus_configs WHERE repo_id = $1;", staging_repo_id)
+                await conn.execute(
+                    "DELETE FROM corpus_configs WHERE repo_id = $1;", staging_repo_id
+                )
                 await conn.execute("DELETE FROM corpora WHERE repo_id = $1;", staging_repo_id)
         return previous_generation
 

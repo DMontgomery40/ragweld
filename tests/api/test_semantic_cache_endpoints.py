@@ -52,7 +52,7 @@ async def _seed_repo(pg: PostgresClient, repo_id: str) -> None:
         )
     ]
     await pg.upsert_chunks(repo_id, chunks)
-    await QdrantChunkStore(cfg).upsert_chunks(repo_id, chunks, embedding_dim=int(cfg.embedding.embedding_dim))
+    await QdrantChunkStore(cfg).upsert_chunks(repo_id, chunks, embedding_dim=int(cfg.embedding.embedding_dim), pg=pg)
 
 
 @pytest.mark.asyncio
