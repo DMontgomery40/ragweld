@@ -85,8 +85,30 @@ the codex review outcome: session record §5–§7.
 Not run: `playwright.config.ts --project web` (structurally a no-op, see
 session 12), the B8 training drive (operator-present only).
 
+## 4b. Curious-user browser drive (session 13b, inventory only — nothing fixed)
+
+After the operator refuted "done" ("you never did the full e2e browser thing"),
+five parallel agents plus the lead drove every tab and subtab in Chrome as a
+first-time operator on an isolated corpus (`ragweld-drive-81854`, kept in the
+registry with a populated semantic-KG graph for the follow-up fixes). Result:
+`docs/exec-plans/active/curious-user-drive-2026-08-25.md` — a ranked master
+table M1–M63 (15 P1, 36 P2, 12 P3 groups) plus the five per-surface reports
+verbatim. Headline P1s: the onboarding wizard is a mock, global settings
+search returns blank rows and fires RAG searches, the dock scrolls the whole
+window and is unreadable in Light theme, a non-forced re-index always fails
+("Staging corpus not found"), Chat opens scoped to the wrong corpus, fusion
+weights drift into 17-digit floats, Benchmark answers without retrieval,
+search-rate panels never see chat traffic, Monitoring thresholds / MCP
+controls / Open-Prometheus hit dead routes, and the graph visualizer's
+fullscreen has a thumbnail canvas with no zoom, no node click, a code-graph
+legend, one "(root)" community carrying the staging corpus id, and duplicate
+entities. Fixing is the next session's queue, in master-table order.
+
 ## 5. Next steps (ordered)
 
+0. **Work the drive inventory** (`curious-user-drive-2026-08-25.md`, M1 → M63);
+   the drive corpus `ragweld-drive-81854` stays registered as the reproduction
+   corpus (delete it through `DELETE /api/corpora/ragweld-drive-81854` when done).
 1. **Operator**: push `main`; remove the orphan residue (§2); decide whether
    to keep the isolated corpus prefix `ragweld-exhaustive-*` or move it to a
    dedicated test namespace in the registry.
