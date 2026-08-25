@@ -36,7 +36,7 @@ record §7.
 ## 2. Working tree / branch
 
 - `main` ahead of `origin/main` by this session's post-merge commits; see
-  `git log origin/main..main`. Session-13 code+docs commit: SESSION13_COMMIT_SHA.
+  `git log origin/main..main`. Session-13 code+docs commit: `1d42651`.
 - Uncommitted, deliberately: `AGENTS.md` + `CLAUDE.md` GitNexus tooling blocks
   and untracked `.claude/skills/` (operator-local). The `AGENTS.md` handoff
   pointer was committed with the partial-staging trick
