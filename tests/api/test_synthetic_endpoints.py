@@ -19,6 +19,7 @@ from server.models.tribrid_config_model import (
     TriBridConfig,
 )
 from server.synthetic.recipes import resolve_synthetic_route
+from server.synthetic.storage import runs_dir as synthetic_runs_dir
 
 
 async def _wait_terminal(client, run_id: str, timeout_s: float = 20.0) -> dict:
@@ -48,8 +49,8 @@ def _provider_model_for_env() -> str | None:
     return model
 
 
-def _write_gate_failed_run(*, root: Path, corpus_id: str, run_id: str) -> Path:
-    return _write_full_stack_run(root=root, corpus_id=corpus_id, run_id=run_id, gate_passed=False)
+def _write_gate_failed_run(*, corpus_id: str, run_id: str) -> Path:
+    return _write_full_stack_run(corpus_id=corpus_id, run_id=run_id, gate_passed=False)
 
 
 _VALID_TRIPLET_LINE = (
@@ -59,9 +60,9 @@ _VALID_TRIPLET_LINE = (
 
 
 def _write_full_stack_run(
-    *, root: Path, corpus_id: str, run_id: str, gate_passed: bool, triplets_text: str = _VALID_TRIPLET_LINE
+    *, corpus_id: str, run_id: str, gate_passed: bool, triplets_text: str = _VALID_TRIPLET_LINE
 ) -> Path:
-    run_dir = root / "data" / "synthetic_runs" / run_id
+    run_dir = synthetic_runs_dir() / run_id
     artifacts_dir = run_dir / "artifacts"
     artifacts_dir.mkdir(parents=True, exist_ok=True)
 
@@ -244,8 +245,7 @@ async def test_synthetic_start_rejects_direct_provider_model(client) -> None:
 async def test_synthetic_publish_endpoints_blocked_when_quality_gate_failed(client) -> None:
     corpus_id = f"pytest_synth_gate_{uuid.uuid4().hex[:8]}"
     run_id = f"{corpus_id}__gate_failed"
-    root = Path(__file__).resolve().parents[2]
-    run_dir = _write_gate_failed_run(root=root, corpus_id=corpus_id, run_id=run_id)
+    run_dir = _write_gate_failed_run(corpus_id=corpus_id, run_id=run_id)
 
     try:
         resp_eval = await client.post(f"/api/synthetic/run/{run_id}/publish/eval_dataset")
@@ -267,7 +267,6 @@ async def test_synthetic_run_without_indexed_chunks_fails_closed_and_blocks_publ
     model = "litellm:openai.gpt-5.6-luna"
 
     corpus_id = f"pytest_synth_gate_art_{uuid.uuid4().hex[:8]}"
-    root = Path(__file__).resolve().parents[2]
     run_dir: Path | None = None
     corpus_root = tmp_path / "corpus"
     corpus_root.mkdir()
@@ -290,7 +289,7 @@ async def test_synthetic_run_without_indexed_chunks_fails_closed_and_blocks_publ
         )
         assert start.status_code == 200
         run_id = str(start.json()["run_id"])
-        run_dir = root / "data" / "synthetic_runs" / run_id
+        run_dir = synthetic_runs_dir() / run_id
 
         terminal = await _wait_terminal(client, run_id)
         assert terminal["status"] == "failed"
@@ -336,7 +335,6 @@ async def test_publish_triplets_replaces_the_live_file_through_the_validated_bou
     TripletRows and swapped in atomically; a corrupt artifact is a 409 and an empty one a 400,
     and neither touches the live triplets file."""
     corpus_id = f"pytest_synth_publish_{uuid.uuid4().hex[:8]}"
-    root = Path(__file__).resolve().parents[2]
     corpus_root = tmp_path / "corpus"
     corpus_root.mkdir()
     live = tmp_path / "triplets.jsonl"
@@ -355,7 +353,7 @@ async def test_publish_triplets_replaces_the_live_file_through_the_validated_bou
         assert patched.status_code == 200, patched.text
 
         good_run = f"{corpus_id}__good"
-        run_dirs.append(_write_full_stack_run(root=root, corpus_id=corpus_id, run_id=good_run, gate_passed=True))
+        run_dirs.append(_write_full_stack_run(corpus_id=corpus_id, run_id=good_run, gate_passed=True))
         os.chmod(live, 0o600)  # codex pass 17: the operator's restrictive mode survives the parked replacement
         published = await client.post(f"/api/synthetic/run/{good_run}/publish/triplets")
         assert published.status_code == 200, published.text
@@ -369,7 +367,6 @@ async def test_publish_triplets_replaces_the_live_file_through_the_validated_bou
         corrupt_run = f"{corpus_id}__corrupt"
         run_dirs.append(
             _write_full_stack_run(
-                root=root,
                 corpus_id=corpus_id,
                 run_id=corrupt_run,
                 gate_passed=True,
@@ -382,7 +379,7 @@ async def test_publish_triplets_replaces_the_live_file_through_the_validated_bou
 
         byte_corrupt_run = f"{corpus_id}__bytes"
         run_dirs.append(
-            _write_full_stack_run(root=root, corpus_id=corpus_id, run_id=byte_corrupt_run, gate_passed=True)
+            _write_full_stack_run(corpus_id=corpus_id, run_id=byte_corrupt_run, gate_passed=True)
         )
         (run_dirs[-1] / "artifacts" / "triplets.jsonl").write_bytes(_VALID_TRIPLET_LINE.encode("utf-8") + b"\xff\xfe\n")
         refused_bytes = await client.post(f"/api/synthetic/run/{byte_corrupt_run}/publish/triplets")
@@ -391,7 +388,7 @@ async def test_publish_triplets_replaces_the_live_file_through_the_validated_bou
 
         empty_run = f"{corpus_id}__empty"
         run_dirs.append(
-            _write_full_stack_run(root=root, corpus_id=corpus_id, run_id=empty_run, gate_passed=True, triplets_text="\n")
+            _write_full_stack_run(corpus_id=corpus_id, run_id=empty_run, gate_passed=True, triplets_text="\n")
         )
         refused_empty = await client.post(f"/api/synthetic/run/{empty_run}/publish/triplets")
         assert refused_empty.status_code == 400, refused_empty.text
@@ -415,7 +412,6 @@ async def test_publish_triplets_replaces_the_live_file_through_the_validated_bou
             second_run = f"{corpus_id}__second"
             run_dirs.append(
                 _write_full_stack_run(
-                    root=root,
                     corpus_id=corpus_id,
                     run_id=second_run,
                     gate_passed=True,
@@ -450,9 +446,8 @@ async def test_synthetic_runs_listing_reports_unreadable_run_directories_instead
     """A run.json that no longer validates (here: a provider that was replaced) is reported in
     `unreadable`, and the readable runs of the corpus still list normally."""
     corpus_id = f"pytest_synth_unreadable_{uuid.uuid4().hex[:8]}"
-    root = Path(__file__).resolve().parents[2]
-    good_dir = _write_full_stack_run(root=root, corpus_id=corpus_id, run_id=f"{corpus_id}__good", gate_passed=True)
-    stale_dir = root / "data" / "synthetic_runs" / f"{corpus_id}__stale_provider"
+    good_dir = _write_full_stack_run(corpus_id=corpus_id, run_id=f"{corpus_id}__good", gate_passed=True)
+    stale_dir = synthetic_runs_dir() / f"{corpus_id}__stale_provider"
     stale_dir.mkdir(parents=True, exist_ok=True)
     stale = json.loads((good_dir / "run.json").read_text(encoding="utf-8"))
     stale["run_id"] = f"{corpus_id}__stale_provider"
@@ -460,14 +455,14 @@ async def test_synthetic_runs_listing_reports_unreadable_run_directories_instead
     stale["request"]["provider"] = "synthetic_data_kit"
     (stale_dir / "run.json").write_text(json.dumps(stale), encoding="utf-8")
     other_corpus = f"{corpus_id}_other"
-    other_dir = root / "data" / "synthetic_runs" / f"{other_corpus}__stale_provider"
+    other_dir = synthetic_runs_dir() / f"{other_corpus}__stale_provider"
     other_dir.mkdir(parents=True, exist_ok=True)
     other = dict(stale, run_id=f"{other_corpus}__stale_provider", corpus_id=other_corpus)
     (other_dir / "run.json").write_text(json.dumps(other), encoding="utf-8")
-    garbage_dir = root / "data" / "synthetic_runs" / f"{corpus_id}__garbage"
+    garbage_dir = synthetic_runs_dir() / f"{corpus_id}__garbage"
     garbage_dir.mkdir(parents=True, exist_ok=True)
     (garbage_dir / "run.json").write_text("{not json", encoding="utf-8")
-    orphan_dir = root / "data" / "synthetic_runs" / f"{corpus_id}__orphan"
+    orphan_dir = synthetic_runs_dir() / f"{corpus_id}__orphan"
     (orphan_dir / "artifacts").mkdir(parents=True, exist_ok=True)  # crashed before run.json was committed
     try:
         res = await client.get(f"/api/synthetic/runs?corpus_id={corpus_id}&limit=10")

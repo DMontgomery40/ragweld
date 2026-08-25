@@ -42,10 +42,15 @@ mocks, no interception.
 
 1. B8 run-start/cancel drive — requires the operator at the machine (MLX rule,
    two prior crashes).
-2. Exhaustive-suite modernization — `coverage.spec.ts` mutation loop needs
-   real domain questions, bounded runtime, isolated corpus (defect 6 note).
-3. Pytest/Playwright corpus-registry pollution root cause — `ragweld-exhaustive`
-   leaked into the live registry twice; cleaned, cause still open.
+2. ~~Exhaustive-suite modernization~~ — done 2026-08-25 (session 13): isolated
+   indexed corpus per run, evidence-graded Aurora questions, wall-clock budget,
+   global-config isolation proof, blocked host-side actions, fails on failed
+   actions (`session13-pr-loop-and-registry-pollution-2026-08-25.md` §4).
+3. ~~Pytest/Playwright corpus-registry pollution root cause~~ — found and closed
+   2026-08-25 (session 13): corpus deletion now removes corpus-scoped lineage,
+   the synthetic run store has an isolation seam pytest uses, and the exhaustive
+   suite provisions/deletes its own corpus (same record, §3). Pre-existing orphan
+   directories are listed for operator removal.
 4. Dead-endpoint UI surfaces needing a product decision (A5 sweep, 2026-08-24):
    `MCPSubtab` start/stop/restart/test controls, both `MonitoringSubtab`s
    (alert thresholds / alertmanager status), and `QuickActions` reranker

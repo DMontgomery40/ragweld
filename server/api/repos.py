@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from contextlib import suppress
@@ -20,6 +21,7 @@ from server.db.neo4j import Neo4jClient
 from server.db.postgres import PostgresClient
 from server.dependency_errors import DependencyUnavailableError
 from server.indexing.loader import FileLoader
+from server.lineage.registry import delete_repo_lineage
 from server.models.index import IndexStats
 from server.models.tribrid_config_model import (
     Corpus,
@@ -343,6 +345,18 @@ async def delete_repo(corpus_id: str) -> dict[str, Any]:
         raise
     finally:
         await neo4j.disconnect()
+
+    # Corpus-scoped lineage (aliases, bundles) goes with the corpus. It runs before
+    # the registry row is removed so a failed removal answers a typed, retryable 503
+    # while the corpus is still registered, instead of leaving orphaned alias/bundle
+    # directories behind under data/lineage. Deletion as a whole is still a
+    # non-transactional saga (Qdrant -> Neo4j -> lineage -> Postgres): a failure at
+    # any step leaves the registry row with the earlier stores already gone, and the
+    # retry finishes the job. A durable "deleting" tombstone is tracked as tech debt.
+    try:
+        await asyncio.to_thread(delete_repo_lineage, repo_id)
+    except DependencyUnavailableError as exc:
+        raise dependency_unavailable_http_exception(exc.dependency, boundary="Corpus deletion API", exc=exc) from exc
 
     try:
         await pg.delete_corpus(repo_id)

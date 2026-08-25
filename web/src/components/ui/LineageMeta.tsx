@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { lineageService } from '@/services/LineageService';
+import { useActiveRepo } from '@/stores/useRepoStore';
 import { showToast } from '@/utils/toast';
 import type { LineageRef } from '@/types/generated';
 import type { LineageAliasName } from '@/services/LineageService';
@@ -27,16 +28,33 @@ export function LineageMeta({
   corpusId?: string | null;
 }) {
   const [savingAlias, setSavingAlias] = useState<LineageAliasName | null>(null);
-  // alias name -> bundle id it currently points at (for this corpus)
+  // alias name -> bundle id it currently points at (for the scoped corpus)
   const [aliasTargets, setAliasTargets] = useState<Record<string, string>>({});
   // Distinguish "no aliases exist" from "the lookup failed" — the empty-state
   // copy must never paper over an unreachable alias store.
   const [aliasLookupFailed, setAliasLookupFailed] = useState(false);
   const canAlias = Boolean(bundleId);
+  // Aliases are corpus-scoped. Parents that render a run of the active corpus
+  // omit `corpusId`; following the store here (instead of the request-time
+  // localStorage fallback) makes an in-app corpus switch a scope change this
+  // component observes, so alias state is always looked up for the corpus the
+  // buttons would write to.
+  const activeRepo = useActiveRepo();
+  const scopeCorpus = String(corpusId || activeRepo || '').trim();
+  // Monotonic request token: a lookup that started under a previous scope must
+  // never land on the current one, whichever order the responses arrive in.
+  const lookupSeq = useRef(0);
+  // Current scope, readable after any await: a write or lookup that started
+  // under corpus A must not refresh or render into a component now scoped to B.
+  const scopeRef = useRef(scopeCorpus);
+  scopeRef.current = scopeCorpus;
 
   const refreshAliases = useCallback(async () => {
+    const seq = ++lookupSeq.current;
+    const scope = scopeCorpus;
     try {
-      const data = await lineageService.listAliases(corpusId || undefined);
+      const data = await lineageService.listAliases(scopeCorpus || undefined);
+      if (seq !== lookupSeq.current || scope !== scopeRef.current) return;
       const next: Record<string, string> = {};
       for (const entry of data.aliases || []) {
         next[entry.alias] = entry.bundle_id;
@@ -44,21 +62,33 @@ export function LineageMeta({
       setAliasTargets(next);
       setAliasLookupFailed(false);
     } catch {
+      if (seq !== lookupSeq.current || scope !== scopeRef.current) return;
+      // A failed lookup shows no assignments at all: the previous scope's
+      // targets must not stay on screen as if they belonged to this one.
+      setAliasTargets({});
       setAliasLookupFailed(true);
     }
-  }, [corpusId]);
+  }, [scopeCorpus]);
 
   useEffect(() => {
+    // Scope changed (corpus or displayed bundle): drop the old scope's alias
+    // state synchronously, invalidate any in-flight lookup, then look up anew.
+    lookupSeq.current += 1;
+    setAliasTargets({});
+    setAliasLookupFailed(false);
     if (canAlias) void refreshAliases();
-  }, [canAlias, refreshAliases]);
+  }, [canAlias, bundleId, refreshAliases]);
 
   const setAlias = async (alias: LineageAliasName) => {
     if (!bundleId) return;
+    const scope = scopeCorpus;
     setSavingAlias(alias);
     try {
-      await lineageService.setAlias(alias, bundleId, corpusId || undefined);
+      await lineageService.setAlias(alias, bundleId, scope || undefined);
       showToast(`Lineage alias "${alias}" now points at ${shortId(bundleId)}`, 'success');
-      await refreshAliases();
+      // The write belonged to `scope`; if the component moved on, its own
+      // scope-change effect already fetched the right aliases.
+      if (scope === scopeRef.current) await refreshAliases();
     } catch (e) {
       showToast(e instanceof Error ? e.message : `Failed to set ${alias}`, 'error');
     } finally {

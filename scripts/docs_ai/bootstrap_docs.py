@@ -249,10 +249,6 @@ Required stable anchor headings (MUST be exact headings):
             "server/api/config.py",
             "server/api/models.py",
             "server/api/health.py",
-            "spec/backend/api_search.yaml",
-            "spec/backend/api_index.yaml",
-            "spec/backend/api_config.yaml",
-            "spec/backend/api_health.yaml",
         ],
         "instruction": """Write a complete API reference page.
 
@@ -322,7 +318,9 @@ Required stable anchor headings (MUST be exact headings):
         "source_files": [
             "AGENTS.md",
             "server/models/tribrid_config_model.py",
-            "web/src/modules/tooltips.js",
+            "data/glossary.json",
+            "web/src/stores/useTooltipStore.ts",
+            "web/src/components/ui/TooltipIcon.tsx",
         ],
         "instruction": """Write a large, practical glossary.
 

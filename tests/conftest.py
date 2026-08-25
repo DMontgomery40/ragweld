@@ -153,6 +153,27 @@ def isolate_runtime_config_file() -> Generator[None, None, None]:
 
 
 @pytest.fixture(autouse=True)
+def isolate_synthetic_runs_root() -> Generator[None, None, None]:
+    """Keep synthetic run directories out of the live `data/synthetic_runs` store during tests.
+
+    Same seam as the lineage root: the API under test writes run.json/artifacts wherever
+    `server.synthetic.storage.runs_dir()` points, and a crashed test must never leave
+    `pytest_*` run directories behind in the operator's store.
+    """
+    old = os.environ.get("RAGWELD_SYNTHETIC_RUNS_ROOT")
+    tmp_dir = tempfile.mkdtemp(prefix="ragweld-synthetic-runs-tests-")
+    os.environ["RAGWELD_SYNTHETIC_RUNS_ROOT"] = tmp_dir
+    try:
+        yield
+    finally:
+        if old is None:
+            os.environ.pop("RAGWELD_SYNTHETIC_RUNS_ROOT", None)
+        else:
+            os.environ["RAGWELD_SYNTHETIC_RUNS_ROOT"] = old
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+@pytest.fixture(autouse=True)
 def isolate_lineage_root() -> Generator[None, None, None]:
     """Keep lineage output out of the repo worktree during tests."""
     old = os.environ.get("RAGWELD_LINEAGE_ROOT")
