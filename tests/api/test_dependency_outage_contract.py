@@ -90,8 +90,11 @@ def test_index_start_409_is_the_discriminated_fence_union() -> None:
     }, body
     for path, method in (
         ("/api/index/{corpus_id}/status", "get"),
+        ("/api/index/{corpus_id}/stats", "get"),
         ("/api/index/{corpus_id}/runs/latest", "get"),
         ("/api/index/{corpus_id}", "delete"),
+        ("/api/index/status", "get"),
+        ("/api/index/stats", "get"),
     ):
         conflict = schema["paths"][path][method]["responses"]["409"]["content"]["application/json"][
             "schema"

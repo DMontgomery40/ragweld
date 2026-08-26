@@ -102,6 +102,8 @@ built `site/`).
    fix generator inputs, and Actions is billing-locked (catch-up dispatch
    documented in project memory).
 5. **GitNexus MCP reader** still storage v40 vs index v42 — the CLI and
+   Resolved 2026-08-26: `node .gitnexus/run.cjs analyze --force` rebuilt the index (the incremental path
+   failed on a corrupt `file_fts` FTS index) and the MCP reader reads it; `detect_changes` is usable again.
    PreToolUse hook work; the MCP server binary needs upgrading.
 
 ## 6. Needs tightening (smaller, none blocking)

@@ -23584,6 +23584,24 @@
             },
             "description": "Successful Response"
           },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/IndexRunConflictResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PersistedStateCorruptResponse"
+                    }
+                  ],
+                  "title": "Response 409 Get Dashboard Index Stats Api Index Stats Get"
+                }
+              }
+            },
+            "description": "A malformed fence (index_fence_corrupt) or malformed persisted index state: manifest, tombstone, fence or reclaim backlog (persisted_state_corrupt)."
+          },
           "422": {
             "content": {
               "application/json": {
@@ -23593,6 +23611,24 @@
               }
             },
             "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/DependencyUnavailableResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/IndexDeletionIncompleteResponse"
+                    }
+                  ],
+                  "title": "Response 503 Get Dashboard Index Stats Api Index Stats Get"
+                }
+              }
+            },
+            "description": "Postgres is unavailable, or the corpus is being de-indexed."
           }
         },
         "summary": "Get Dashboard Index Stats",
@@ -23666,6 +23702,24 @@
             },
             "description": "Successful Response"
           },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/IndexRunConflictResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PersistedStateCorruptResponse"
+                    }
+                  ],
+                  "title": "Response 409 Get Dashboard Index Status Api Index Status Get"
+                }
+              }
+            },
+            "description": "A malformed fence (index_fence_corrupt) or malformed persisted index state: manifest, tombstone, fence or reclaim backlog (persisted_state_corrupt)."
+          },
           "422": {
             "content": {
               "application/json": {
@@ -23675,6 +23729,24 @@
               }
             },
             "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/DependencyUnavailableResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/IndexDeletionIncompleteResponse"
+                    }
+                  ],
+                  "title": "Response 503 Get Dashboard Index Status Api Index Status Get"
+                }
+              }
+            },
+            "description": "Postgres is unavailable, or the corpus is being de-indexed."
           }
         },
         "summary": "Get Dashboard Index Status",
@@ -23932,6 +24004,24 @@
               }
             },
             "description": "Successful Response"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/IndexRunConflictResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PersistedStateCorruptResponse"
+                    }
+                  ],
+                  "title": "Response 409 Get Index Stats Api Index  Corpus Id  Stats Get"
+                }
+              }
+            },
+            "description": "A malformed fence (index_fence_corrupt) or malformed persisted index state: manifest, tombstone, fence or reclaim backlog (persisted_state_corrupt)."
           },
           "422": {
             "content": {

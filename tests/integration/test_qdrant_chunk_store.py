@@ -18,6 +18,7 @@ from server.models.index import Chunk
 from server.retrieval.qdrant_store import (
     QdrantChunkStore,
     QdrantCollectionMissingError,
+    QdrantGenerationExistsError,
     corpus_collection_prefix,
 )
 
@@ -447,3 +448,34 @@ async def test_startup_upgrade_records_manifests_for_pre_manifest_corpora() -> N
             await store.delete_corpus(cid)
             await pg.delete_corpus_with_data(cid)
         await pg.disconnect()
+
+
+async def test_a_generation_is_never_recreated_over_an_existing_collection() -> None:
+    """Generation names cannot collide (128-bit suffix) and a create never wipes an existing collection."""
+    store = QdrantChunkStore(load_config())
+    corpus_id = f"qdrant-no-recreate-{uuid.uuid4().hex[:8]}"
+    try:
+        first = await store.create_generation(corpus_id, embedding_dim=4)
+        prefix, _, suffix = first.rpartition("__")
+        assert prefix == corpus_collection_prefix(corpus_id)
+        assert len(suffix) == 32 and int(suffix, 16) >= 0, suffix
+        assert (
+            await store.write_chunks(
+                corpus_id,
+                first,
+                [
+                    _chunk("a", "salinity array calibrated every 45 days", embedding=[1, 0, 0, 0], ordinal=0),
+                    _chunk("b", "tidal gauge drift report", embedding=[0, 1, 0, 0], ordinal=1),
+                ],
+                embedding_dim=4,
+            )
+            == 2
+        )
+        # A planned name that already exists (a live or retained generation, or a
+        # run whose create response was lost) is refused, and the data survives.
+        with pytest.raises(QdrantGenerationExistsError):
+            await store.create_generation(corpus_id, embedding_dim=4, physical=first)
+        assert await store.count_points(first) == 2
+        assert (await store.status(corpus_id, physical=first)).points == 2
+    finally:
+        await store.delete_corpus(corpus_id)

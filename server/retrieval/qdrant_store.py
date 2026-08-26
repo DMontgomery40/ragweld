@@ -81,6 +81,18 @@ class QdrantCollectionMissingError(RuntimeError):
             super().__init__(f"Corpus '{corpus_id}' has no promoted Qdrant generation")
 
 
+class QdrantGenerationExistsError(RuntimeError):
+    """A generation create met an existing collection: it is never recreated over."""
+
+    def __init__(self, corpus_id: str, collection: str) -> None:
+        self.corpus_id = corpus_id
+        self.collection = collection
+        super().__init__(
+            f"Qdrant collection '{collection}' for corpus '{corpus_id}' already exists; "
+            "a generation is never recreated over an existing collection"
+        )
+
+
 @dataclass(frozen=True)
 class QdrantCorpusStatus:
     corpus_id: str
@@ -299,17 +311,32 @@ class QdrantChunkStore:
             client.close()
 
     def generation_name(self, corpus_id: str) -> str:
-        """A fresh physical collection name for a corpus (chosen before creation so it can be recorded)."""
-        return f"{corpus_collection_prefix(corpus_id)}__{uuid.uuid4().hex[:8]}"
+        """A fresh physical collection name for a corpus (chosen before creation so it can be recorded).
+
+        The suffix is a full 128-bit uuid: a generation name can never coincide
+        with a live or retained collection, so creating it can never destroy one.
+        """
+        return f"{corpus_collection_prefix(corpus_id)}__{uuid.uuid4().hex}"
 
     async def create_generation(
         self, corpus_id: str, *, embedding_dim: int, physical: str | None = None
     ) -> str:
-        """Create a fresh physical generation for a corpus (not live until the manifest names it)."""
+        """Create a fresh physical generation for a corpus (not live until the manifest names it).
+
+        Never recreates: a name that already exists belongs to someone (a live or
+        retained generation, or a run whose create response was lost) and is
+        refused, so a generation create can never wipe readable data.
+        """
         physical = physical or self.generation_name(corpus_id)
 
         def _create() -> None:
-            store = self._document_store(physical, embedding_dim=embedding_dim, recreate=True)
+            client = self._client()
+            try:
+                if client.collection_exists(physical):
+                    raise QdrantGenerationExistsError(corpus_id, physical)
+            finally:
+                client.close()
+            store = self._document_store(physical, embedding_dim=embedding_dim, recreate=False)
             try:
                 store.count_documents()
             finally:

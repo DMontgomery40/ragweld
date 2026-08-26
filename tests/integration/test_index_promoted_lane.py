@@ -6,6 +6,7 @@ Runs only against live services (strict lane provisions disposable ones). No moc
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import tempfile
 import uuid
@@ -19,7 +20,13 @@ import server.api.index as index_api
 from server.config import load_config
 from server.db.neo4j import Neo4jClient
 from server.db.postgres import PostgresClient
-from server.indexing.generations import DeletionTombstone, RetiredGeneration
+from server.indexing.generations import (
+    DeletionTombstone,
+    RetiredGeneration,
+    build_generation,
+    reclaim_stale_run,
+    staging_repo_id,
+)
 from server.main import app
 from server.retrieval.contracts import sparse_contract_from_config
 from server.retrieval.qdrant_store import QdrantChunkStore
@@ -756,3 +763,137 @@ async def test_index_search_and_delete_on_promoted_lane(client: AsyncClient) -> 
             await pg.delete_corpus_with_data(corpus_id)
         finally:
             await pg.disconnect()
+
+
+async def test_only_the_manifest_run_id_proves_a_commit_and_reclaim_never_drops_manifest_resources(
+    client: AsyncClient,
+) -> None:
+    """A dead run whose recorded staged collection is a RETAINED one is not "committed".
+
+    Only ``manifest.run_id`` proves a commit. Stop and takeover both classify the
+    dead run as uncommitted (cancelled, never complete) and hand its inventory
+    to reclaim; reclaim drops the run's own staged graph but NEVER a collection
+    the manifest names (live or retained), and clears the backlog entry.
+    """
+    corpus_id = f"retained-id-{uuid.uuid4().hex[:8]}"
+    pg = PostgresClient(os.environ["POSTGRES_DSN"])
+    cfg = load_config()
+    qdrant = QdrantChunkStore(cfg)
+    neo4j: Neo4jClient | None = None
+    retained: str | None = None
+    live: str | None = None
+    dead_run = "dead-run-3"
+    staged_graph = staging_repo_id(corpus_id, dead_run)
+    lease = cfg.indexing.index_run_lease_seconds
+    try:
+        await pg.connect()
+        neo4j = Neo4jClient(
+            cfg.graph_storage.neo4j_uri,
+            cfg.graph_storage.neo4j_user,
+            cfg.graph_storage.resolve_password(),
+            database=cfg.graph_storage.resolve_database(corpus_id),
+        )
+        await neo4j.connect()
+        created = await client.post(
+            "/api/corpora",
+            json={"corpus_id": corpus_id, "name": corpus_id, "path": str(_CORPUS_PATH)},
+        )
+        assert created.status_code in (200, 201), created.text
+        dim = int(cfg.embedding.embedding_dim)
+        retained = await qdrant.create_generation(corpus_id, embedding_dim=dim)
+        live = await qdrant.create_generation(corpus_id, embedding_dim=dim)
+        manifest = build_generation(
+            run_id="live-run",
+            qdrant_collection=live,
+            graph_repo_id=None,
+            previous=build_generation(
+                run_id="old-run",
+                qdrant_collection=retained,
+                graph_repo_id=None,
+                now=datetime.now(UTC) - timedelta(seconds=30),
+            ),
+            now=datetime.now(UTC),
+        )
+        assert retained in manifest.all_qdrant_collections()
+        await pg.set_generation(corpus_id, manifest)
+        driver = neo4j._require_driver()
+        async with driver.session(database=neo4j.database) as session:
+            await session.run(
+                "CREATE (:__Entity__ {repo_id: $repo_id, name: 'Tidal gauge', id: $id})",
+                repo_id=staged_graph,
+                id=f"{staged_graph}:tidal-gauge",
+            )
+        await pg.upsert_corpus(staged_graph, name=staged_graph, root_path=".")
+        stale_beat = datetime.now(UTC) - timedelta(seconds=lease + 5)
+
+        async def _seed_dead_fence() -> None:
+            assert (
+                await pg.acquire_index_fence(
+                    corpus_id,
+                    dead_run,
+                    started_at=stale_beat,
+                    owner="dead-worker:3",
+                    lease_seconds=lease,
+                    heartbeat_at=stale_beat,
+                )
+            ).acquired
+            assert await pg.record_fence_staging(
+                corpus_id, dead_run, qdrant_collection=retained, graph_repo_id=staged_graph
+            )
+
+        # 1) Stop: the dead run is reclaimed (cancelled), never finalized as complete.
+        await _seed_dead_fence()
+        config_store._store = None
+        stopped = await client.post(f"/api/index/{corpus_id}/stop")
+        assert stopped.status_code == 200, stopped.text
+        assert stopped.json()["status"] == "cancelled", stopped.json()
+        assert dead_run in str(stopped.json()["error"])
+        assert await pg.get_index_fence(corpus_id) is None
+        assert await pg.reclaim_backlog(corpus_id) == [], "the reclaim confirmed and cleared itself"
+        assert (await qdrant.status(corpus_id, physical=retained)).physical_collection == retained
+        assert (await qdrant.status(corpus_id, physical=live)).physical_collection == live
+        assert (await neo4j.get_graph_stats(staged_graph)).total_entities == 0
+        assert await pg.get_corpus(staged_graph) is None
+        after_stop = await pg.get_generation(corpus_id)
+        assert after_stop is not None and after_stop.run_id == "live-run"
+        assert retained in after_stop.all_qdrant_collections()
+
+        # 2) Takeover: the claim classifies the same dead fence as uncommitted and
+        #    moves its inventory to the backlog; the reclaim leaves the retained
+        #    collection alone and confirms.
+        await pg.upsert_corpus(staged_graph, name=staged_graph, root_path=".")
+        await _seed_dead_fence()
+        claim = await pg.acquire_index_fence(
+            corpus_id,
+            "new-run",
+            started_at=datetime.now(UTC),
+            owner="worker:new",
+            lease_seconds=lease,
+        )
+        assert claim.acquired and claim.taken_over is not None
+        assert claim.taken_over.run_id == dead_run
+        assert claim.taken_over_committed is False, "a retained id is not ownership"
+        backlog = await pg.reclaim_backlog(corpus_id)
+        assert [e.run_id for e in backlog] == [dead_run]
+        assert backlog[0].staged_qdrant_collection == retained
+        assert await reclaim_stale_run(cfg, corpus_id, backlog[0]) is True
+        assert await pg.reclaim_backlog(corpus_id) == []
+        assert (await qdrant.status(corpus_id, physical=retained)).physical_collection == retained
+        assert await pg.get_corpus(staged_graph) is None
+        assert await pg.release_index_fence(corpus_id, "new-run") is True
+    finally:
+        config_store._store = None
+        await client.post(f"/api/index/{corpus_id}/stop")
+        await client.delete(f"/api/index/{corpus_id}")
+        await client.delete(f"/api/corpora/{corpus_id}")
+        for collection in (retained, live):
+            if collection is not None:
+                with contextlib.suppress(Exception):
+                    await qdrant.drop_generation(collection)
+        if neo4j is not None:
+            with contextlib.suppress(Exception):
+                await neo4j.delete_graph(staged_graph)
+            await neo4j.disconnect()
+        with contextlib.suppress(Exception):
+            await pg.delete_corpus_with_data(staged_graph)
+        await pg.disconnect()

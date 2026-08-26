@@ -53,10 +53,13 @@ def test_both_holders_due_releases_the_shared_resource_once() -> None:
         ],
     )
     due = manifest.due_for_retirement(now=NOW, grace_seconds=3600)
-    assert {(d.qdrant_collection, d.graph_repo_id) for d in due} == {
-        ("c-a", "g-shared"),
-        ("c-b", "g-shared"),
-    }
+    # Each physical resource is emitted in exactly ONE retirement operation: the
+    # shared graph rides with the first due holder and is masked from the second.
+    assert [(d.run_id, d.qdrant_collection, d.graph_repo_id) for d in due] == [
+        ("a", "c-a", "g-shared"),
+        ("b", "c-b", None),
+    ]
+    assert [d.graph_repo_id for d in due].count("g-shared") == 1
     assert manifest.without_resources(due) == []
 
 
@@ -97,6 +100,29 @@ def test_build_generation_masks_reused_ids_and_deduplicates_pairs() -> None:
     )
     assert all(r.qdrant_collection != "c-prev" for r in manifest2.retired)
     assert {r.graph_repo_id for r in manifest2.retired} == {"g-shared"}
+
+
+def test_entries_converging_on_one_pair_after_masking_keep_one_with_the_latest_grace() -> None:
+    # An older retired entry and the previous generation name the SAME collection
+    # and graph; the new generation reuses that graph, so both mask to
+    # ("c-x", None): one entry survives, stamped with the LATER retirement (the
+    # shared collection never gets a shorter grace than any holder promised).
+    previous = GenerationManifest(
+        run_id="prev",
+        qdrant_collection="c-x",
+        graph_repo_id="g-shared",
+        promoted_at=NOW - timedelta(seconds=60),
+        retired=[_retired("older", "c-x", "g-shared", age_s=120)],
+    )
+    manifest = build_generation(
+        run_id="new", qdrant_collection="c-new", graph_repo_id="g-shared", previous=previous, now=NOW
+    )
+    assert [(r.qdrant_collection, r.graph_repo_id) for r in manifest.retired] == [("c-x", None)]
+    assert manifest.retired[0].retired_at == NOW, "the later retirement wins"
+    assert manifest.retired[0].run_id == "prev"
+    # The single surviving entry retires c-x exactly once, on the later clock.
+    assert manifest.due_for_retirement(now=NOW + timedelta(seconds=59), grace_seconds=60) == []
+    assert [d.qdrant_collection for d in manifest.due_for_retirement(now=NOW + timedelta(seconds=60), grace_seconds=60)] == ["c-x"]
 
 
 def test_grace_zero_retires_at_the_next_commit_and_nothing_before_it() -> None:

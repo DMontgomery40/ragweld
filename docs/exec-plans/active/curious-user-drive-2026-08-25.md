@@ -1892,3 +1892,55 @@ accepted:
    task/queue/markers erased.
 7. The 409 descriptions name the complete union.
 
+### Round 12 — own end-to-end audit (before any reviewer) + adversarial review pass 11
+
+Session 14m. The whole protocol (`generations.py`, the Postgres fence /
+promotion / deletion transactions, the job and every handler, stop / takeover /
+retire / start / delete) was read end to end and a failure matrix built BEFORE
+reading the pass-11 report. Own findings, all fixed:
+
+1. **Graph participation came from three config snapshots** (the fence record,
+   `_run_index`'s own reload, and a reload at commit): a flag flipped mid-run
+   could orphan a built graph or demand an unbuilt one. One snapshot now: the
+   job's config is passed into `_run_index`, and the commit names the graph iff
+   the fence recorded one.
+2. **De-index left a crashed run's inventory behind**: a stale fence (a run
+   that died and was never taken over) was cleared without its staged
+   collection / graph joining the tombstone, and its Postgres staging rows were
+   never deleted. The fence's inventory now joins the tombstone exactly like a
+   backlog entry, and every staging row of THIS corpus is swept with the exact
+   `__staging__<corpus>__<run>` rule (`a` never sweeps `a__b`).
+3. **Orphan-fence window in `start_index`**: a request cancelled between a
+   successful claim and the job's start (e.g. during the pool disconnect) held
+   the corpus until the lease expired. Any failure after the claim now releases
+   it (shielded).
+
+Pass 11 (codex, scoped) — REFUTED (5 P1 / 3 P2); all acted on:
+
+1. Generation names were 32-bit suffixes created with `recreate=True`: a
+   collision with a live/retained collection would have wiped it. Names carry
+   a full 128-bit uuid and `create_generation` refuses an existing collection
+   (`QdrantGenerationExistsError`); live test proves the data survives.
+2. Takeover/stop classified a dead run as committed when its staged collection
+   merely appeared among retained ids. Only `manifest.run_id` proves a commit;
+   and `reclaim_stale_run` never drops a resource the manifest names (live or
+   retained) whatever the entry says. Live test: stop → cancelled, retained
+   collection survives, the run's own graph goes, backlog clears; takeover
+   claim → `taken_over_committed is False`, reclaim confirms.
+3. Dashboard `/api/index/status`, `/api/index/stats` and the latest-run 404
+   short-circuit bypassed the strict state read; all three go through it now,
+   and the runtime 409 test covers six readers.
+4. `due_for_retirement` emits each physical resource exactly once (first due
+   holder carries it); the retention test asserts the graph id occurs once.
+5. `_dedupe_retired` keeps the entry with the LATEST `retired_at` (shared
+   resources never get a shorter grace); a test seeds two entries converging on
+   one pair after masking.
+6. `requires_qdrant` / `requires_neo4j` markers on the hardened live test.
+7. Test resources are acquired inside the protected block and cleaned
+   conditionally.
+8. `/api/index/{corpus_id}/stats` and both dashboard routes declare the 409
+   union; contract bundle regenerated; contract matrix extended.
+
+Not tested by a live flip (structural only): the single-snapshot graph
+decision and the `start_index` release-on-failure guard.
+

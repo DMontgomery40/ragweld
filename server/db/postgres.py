@@ -1921,13 +1921,10 @@ class PostgresClient:
                     if not held.is_stale(now=db_now, lease_seconds=lease_seconds):
                         return FenceClaim(held_by=held)
                     taken_over = held
-                    taken_over_committed = live_manifest is not None and (
-                        live_manifest.run_id == held.run_id
-                        or (
-                            held.staged_qdrant_collection is not None
-                            and held.staged_qdrant_collection
-                            in live_manifest.all_qdrant_collections()
-                        )
+                    # Only the manifest's run id proves the dead run committed: a
+                    # collection id appearing among retained ones is not ownership.
+                    taken_over_committed = (
+                        live_manifest is not None and live_manifest.run_id == held.run_id
                     )
                     logger.warning(
                         "taking over stale index-run fence on %s: run %s (owner %s) last heartbeat %s%s",
@@ -2287,6 +2284,7 @@ class PostgresClient:
                 # state: a fence, manifest or tombstone that does not validate is
                 # cleared here (loudly), never silently read as absent anywhere else.
                 raw_fence = meta.get("index_run")
+                fence: IndexRunFence | None = None
                 if raw_fence is not None:
                     try:
                         fence = IndexRunFence.model_validate(raw_fence)
@@ -2337,6 +2335,13 @@ class PostgresClient:
                 raw_backlog = meta.get("reclaim_backlog")
                 backlog_collections: list[str] = []
                 backlog_graphs: list[str] = []
+                staging_tables = (
+                    "chunk_summaries_last_build",
+                    "chunk_summaries",
+                    "chunks",
+                    "corpus_configs",
+                    "corpora",
+                )
                 if isinstance(raw_backlog, list):
                     for item in raw_backlog:
                         try:
@@ -2351,19 +2356,33 @@ class PostgresClient:
                         if entry.staged_graph_repo_id:
                             backlog_graphs.append(entry.staged_graph_repo_id)
                         staged_id = staging_repo_id(repo_id, entry.run_id)
-                        for table in (
-                            "chunk_summaries_last_build",
-                            "chunk_summaries",
-                            "chunks",
-                            "corpus_configs",
-                            "corpora",
-                        ):
+                        for table in staging_tables:
                             await conn.execute(
                                 f"DELETE FROM {table} WHERE repo_id = $1;", staged_id
                             )
                 elif raw_backlog is not None:
                     logger.error(
                         "de-index of %s drops a malformed reclaim backlog: %r", repo_id, raw_backlog
+                    )
+                # A fence still on the row here belongs to a dead run (a live one was
+                # refused above): its staged inventory is the only record of those
+                # ids, so it joins the tombstone exactly like a backlog entry.
+                if fence is not None:
+                    if fence.staged_qdrant_collection:
+                        backlog_collections.append(fence.staged_qdrant_collection)
+                    if fence.staged_graph_repo_id:
+                        backlog_graphs.append(fence.staged_graph_repo_id)
+                # Every staging row of THIS corpus goes too (dead runs whose fence or
+                # backlog record was lost or malformed). Staging ids are
+                # ``__staging__<corpus>__<run>`` and run ids never contain ``__``, so
+                # the remainder after the prefix must be free of ``__``: corpus ``a``
+                # never sweeps the staging rows of corpus ``a__b``.
+                staging_prefix = staging_repo_id(repo_id, "")
+                for table in staging_tables:
+                    await conn.execute(
+                        f"DELETE FROM {table} WHERE starts_with(repo_id, $1) "
+                        "AND position('__' in substr(repo_id, length($1) + 1)) = 0;",
+                        staging_prefix,
                     )
                 if backlog_collections or backlog_graphs:
                     tombstone = DeletionTombstone(

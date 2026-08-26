@@ -117,7 +117,9 @@ class GenerationManifest(BaseModel):
         A collection or graph is droppable only when NOTHING alive still names
         it: not the live generation, and not another retired entry that is still
         inside its grace (two entries may share one resource when only the other
-        store was rebuilt). Every resource keeps the latest expiry among its holders.
+        store was rebuilt). Every resource keeps the latest expiry among its
+        holders, and each physical resource is emitted exactly once (the first
+        due holder carries it; later due holders are masked).
         """
         holders_alive_collections = {self.qdrant_collection} - {None}
         holders_alive_graphs = {self.graph_repo_id} - {None}
@@ -125,18 +127,24 @@ class GenerationManifest(BaseModel):
             if not entry.due(now=now, grace_seconds=grace_seconds):
                 holders_alive_collections.add(entry.qdrant_collection)
                 holders_alive_graphs.add(entry.graph_repo_id)
+        emitted_collections: set[str] = set()
+        emitted_graphs: set[str] = set()
         out: list[RetiredGeneration] = []
         for entry in self.retired:
             if not entry.due(now=now, grace_seconds=grace_seconds):
                 continue
-            collection = (
-                None
-                if entry.qdrant_collection in holders_alive_collections
-                else entry.qdrant_collection
-            )
-            graph = None if entry.graph_repo_id in holders_alive_graphs else entry.graph_repo_id
+            collection = entry.qdrant_collection
+            if collection in holders_alive_collections or collection in emitted_collections:
+                collection = None
+            graph = entry.graph_repo_id
+            if graph in holders_alive_graphs or graph in emitted_graphs:
+                graph = None
             if collection is None and graph is None:
                 continue
+            if collection is not None:
+                emitted_collections.add(collection)
+            if graph is not None:
+                emitted_graphs.add(graph)
             out.append(
                 entry.model_copy(update={"qdrant_collection": collection, "graph_repo_id": graph})
             )
@@ -353,15 +361,21 @@ def heartbeat_interval_seconds(lease_seconds: int) -> float:
 
 
 def _dedupe_retired(entries: list[RetiredGeneration]) -> list[RetiredGeneration]:
-    seen: set[tuple[str | None, str | None]] = set()
-    out: list[RetiredGeneration] = []
+    """One entry per (collection, graph) pair; the pair keeps its LATEST retirement time.
+
+    Two entries can only converge on one pair after masking; keeping the later
+    ``retired_at`` gives the shared resources the longest grace (never shorter
+    than any holder promised).
+    """
+    by_key: dict[tuple[str | None, str | None], RetiredGeneration] = {}
     for entry in entries:
         key = (entry.qdrant_collection, entry.graph_repo_id)
-        if key in seen or key == (None, None):
+        if key == (None, None):
             continue
-        seen.add(key)
-        out.append(entry)
-    return out
+        kept = by_key.get(key)
+        if kept is None or entry.retired_at > kept.retired_at:
+            by_key[key] = entry
+    return list(by_key.values())
 
 
 def build_generation(
@@ -515,15 +529,56 @@ async def reclaim_stale_run(config: TriBridConfig, repo_id: str, entry: ReclaimE
     The entry stays on the corpus row's reclaim backlog until this returns
     True, so a failure here (or a crash right after the takeover) never loses
     the only record of those ids.
+
+    A resource the corpus manifest names (live or retained) is NEVER dropped
+    here, whatever the entry says: the manifest owns it, and only retention or
+    a de-index may remove it. An unreadable manifest (corrupt, or a de-index in
+    progress) leaves the entry untouched for the repair path.
     """
     from server.db.neo4j import Neo4jClient
     from server.db.postgres import PostgresClient
     from server.retrieval.qdrant_store import QdrantChunkStore
 
-    ok = True
-    if entry.staged_qdrant_collection:
+    try:
+        pg_manifest = PostgresClient(config.indexing.postgres_url)
+        await pg_manifest.connect()
         try:
-            await QdrantChunkStore(config).drop_generation(entry.staged_qdrant_collection)
+            manifest = await pg_manifest.get_generation(repo_id)
+        finally:
+            await pg_manifest.disconnect()
+    except Exception as exc:
+        logger.warning(
+            "reclaim of dead run %s on %s skipped: the manifest is unreadable (%s)",
+            entry.run_id,
+            repo_id,
+            exc,
+        )
+        return False
+    owned_collections = set(manifest.all_qdrant_collections()) if manifest else set()
+    owned_graphs = set(manifest.all_graph_repo_ids()) if manifest else set()
+    collection = entry.staged_qdrant_collection
+    if collection and collection in owned_collections:
+        logger.warning(
+            "staged collection %s of dead run %s is named by the manifest of %s; not reclaimed",
+            collection,
+            entry.run_id,
+            repo_id,
+        )
+        collection = None
+    graph = entry.staged_graph_repo_id
+    if graph and graph in owned_graphs:
+        logger.warning(
+            "staged graph %s of dead run %s is named by the manifest of %s; not reclaimed",
+            graph,
+            entry.run_id,
+            repo_id,
+        )
+        graph = None
+
+    ok = True
+    if collection:
+        try:
+            await QdrantChunkStore(config).drop_generation(collection)
         except Exception as exc:
             ok = False
             logger.warning(
@@ -532,7 +587,7 @@ async def reclaim_stale_run(config: TriBridConfig, repo_id: str, entry: ReclaimE
                 entry.run_id,
                 exc,
             )
-    if entry.staged_graph_repo_id:
+    if graph:
         try:
             neo4j = Neo4jClient(
                 config.graph_storage.neo4j_uri,
@@ -542,7 +597,7 @@ async def reclaim_stale_run(config: TriBridConfig, repo_id: str, entry: ReclaimE
             )
             await neo4j.connect()
             try:
-                await neo4j.delete_graph(entry.staged_graph_repo_id)
+                await neo4j.delete_graph(graph)
             finally:
                 await neo4j.disconnect()
         except Exception as exc:

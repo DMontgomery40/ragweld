@@ -34,6 +34,7 @@ from server.indexing.chunker import Chunker
 from server.indexing.embedder import Embedder, configure_postgres_embedding_cache_backend
 from server.indexing.generations import (
     DeletionIncompleteError,
+    FenceClaim,
     GenerationManifest,
     IndexFenceCorruptError,
     IndexFenceHeldError,
@@ -693,13 +694,10 @@ async def _stop_without_local_task(repo_id: str) -> IndexStatus:
         ):
             raise _index_run_conflict(repo_id, fence)
         manifest = await pg.get_generation(repo_id)
-        committed = manifest is not None and (
-            manifest.run_id == fence.run_id
-            or (
-                fence.staged_qdrant_collection is not None
-                and fence.staged_qdrant_collection in manifest.all_qdrant_collections()
-            )
-        )
+        # Only the manifest's run id proves the dead run committed (a collection id
+        # among the retained ones is not ownership); reclaim itself never drops a
+        # resource the manifest names.
+        committed = manifest is not None and manifest.run_id == fence.run_id
         if not committed and (fence.staged_qdrant_collection or fence.staged_graph_repo_id):
             # The dead run's staged inventory goes to the durable backlog BEFORE the
             # fence (its only other record of those ids) is released.
@@ -1233,8 +1231,10 @@ async def _run_index(
     write_repo_id: str | None = None,
     qdrant: QdrantChunkStore,
     qdrant_generation: str,
+    cfg: TriBridConfig,
 ) -> IndexStats:
-    cfg = await load_scoped_config(repo_id=repo_id)
+    # ONE config snapshot per run (the caller's): what the fence recorded, what is
+    # built here and what the commit names must come from the same decision.
     target_repo_id = str(write_repo_id or repo_id)
 
     # Every run writes a fresh staging corpus and promotes it; a non-forced run
@@ -2400,6 +2400,7 @@ async def _background_index_job(
                 write_repo_id=staging_repo_id,
                 qdrant=qdrant,
                 qdrant_generation=qdrant_generation,
+                cfg=cfg,
             )
         # Verify every staged resource BEFORE the commit: a partial vector index
         # or an empty staged graph must never become the active generation.
@@ -2410,9 +2411,11 @@ async def _background_index_job(
                 f"Staged Qdrant generation {qdrant_generation} holds {staged_points} points but the run "
                 f"indexed {expected_points} chunks; refusing to promote a partial vector index"
             )
-        cfg = await load_scoped_config(repo_id=repo_id)
+        # Graph participation is the decision recorded on the fence at the start
+        # (the same config snapshot the build used), never a re-read flag: a flag
+        # flipped mid-run can neither orphan a built graph nor demand an unbuilt one.
         graph_generation_id: str | None = None
-        if cfg.graph_indexing.enabled:
+        if staged_graph_recorded is not None:
             neo4j_verify = Neo4jClient(
                 cfg.graph_storage.neo4j_uri,
                 cfg.graph_storage.neo4j_user,
@@ -2553,8 +2556,7 @@ async def _background_index_job(
         except Exception:
             pass
         try:
-            cfg = await load_scoped_config(repo_id=repo_id)
-            if not cfg.graph_indexing.enabled or not graph_generation_id:
+            if not graph_generation_id:
                 # No graph in this generation: never read a stale legacy graph
                 # stored under the corpus id as if it were current.
                 GRAPH_ENTITIES_CURRENT.set(0)
@@ -3002,57 +3004,62 @@ async def start_index(request: IndexRequest) -> IndexStatus:
     # worker or process cannot build and retire against the same corpus.
     cfg = await load_scoped_config(repo_id=request.repo_id)
     postgres = PostgresClient(cfg.indexing.postgres_url)
+    claim: FenceClaim | None = None
     try:
-        await postgres.connect()
-        claim = await postgres.acquire_index_fence(
-            request.repo_id,
-            run_id,
-            started_at=started_at,
-            owner=fence_owner(),
-            lease_seconds=cfg.indexing.index_run_lease_seconds,
-        )
-    except CorpusNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except IndexFenceCorruptError as exc:
-        raise _fence_corrupt_conflict(request.repo_id, exc) from exc
-    except DeletionIncompleteError:
-        raise
-    except Exception as exc:
-        raise_postgres_unavailable_if_applicable(exc, boundary="Index run fence")
-        raise
-    finally:
-        with contextlib.suppress(Exception):
-            await postgres.disconnect()
-    if claim.held_by is not None:
-        raise _index_run_conflict(request.repo_id, claim.held_by)
-    if claim.taken_over is not None and claim.taken_over_committed:
-        # The previous holder committed and then died before releasing: its
-        # staged resources ARE the live generation. Finalize its run record;
-        # never reclaim. Anything failing between the claim and the job's start
-        # releases the fence again (no orphan claim until the lease expires).
         try:
-            await _finalize_dead_committed_run(request.repo_id, claim.taken_over.run_id)
-        except BaseException:
-            with contextlib.suppress(Exception):
-                await _release_fence(request.repo_id, run_id)
+            await postgres.connect()
+            claim = await postgres.acquire_index_fence(
+                request.repo_id,
+                run_id,
+                started_at=started_at,
+                owner=fence_owner(),
+                lease_seconds=cfg.indexing.index_run_lease_seconds,
+            )
+        except CorpusNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except IndexFenceCorruptError as exc:
+            raise _fence_corrupt_conflict(request.repo_id, exc) from exc
+        except DeletionIncompleteError:
             raise
-    # A dead run's staged inventory (moved to the durable backlog by the takeover
-    # transaction, or left by an earlier failed reclaim) is drained by the
-    # background job itself, after its heartbeat is running.
-    _STATUS[request.repo_id] = IndexStatus(
-        repo_id=request.repo_id,
-        status="indexing",
-        progress=0.0,
-        current_file=None,
-        started_at=started_at,
-    )
+        except Exception as exc:
+            raise_postgres_unavailable_if_applicable(exc, boundary="Index run fence")
+            raise
+        finally:
+            with contextlib.suppress(Exception):
+                await postgres.disconnect()
+        if claim.held_by is not None:
+            raise _index_run_conflict(request.repo_id, claim.held_by)
+        if claim.taken_over is not None and claim.taken_over_committed:
+            # The previous holder committed and then died before releasing: its
+            # staged resources ARE the live generation. Finalize its run record;
+            # never reclaim.
+            await _finalize_dead_committed_run(request.repo_id, claim.taken_over.run_id)
+        # A dead run's staged inventory (moved to the durable backlog by the takeover
+        # transaction, or left by an earlier failed reclaim) is drained by the
+        # background job itself, after its heartbeat is running.
+        _STATUS[request.repo_id] = IndexStatus(
+            repo_id=request.repo_id,
+            status="indexing",
+            progress=0.0,
+            current_file=None,
+            started_at=started_at,
+        )
 
-    queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=2000)
-    _EVENT_QUEUES[request.repo_id] = queue
-    _LAST_STARTED_REPO = request.repo_id
+        queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=2000)
+        _EVENT_QUEUES[request.repo_id] = queue
+        _LAST_STARTED_REPO = request.repo_id
 
-    task = asyncio.create_task(_background_index_job(request, queue, run_id=run_id))
-    _TASKS[request.repo_id] = task
+        task = asyncio.create_task(_background_index_job(request, queue, run_id=run_id))
+        _TASKS[request.repo_id] = task
+    except BaseException:
+        # Anything failing (or a request cancelled) between a successful claim and
+        # the job's start releases the fence again: no orphan claim that holds the
+        # corpus until the lease expires. Shielded, so a cancellation delivered
+        # here cannot interrupt the release itself.
+        if claim is not None and claim.acquired:
+            with contextlib.suppress(BaseException):
+                await asyncio.shield(_release_fence(request.repo_id, run_id))
+        raise
     return _STATUS[request.repo_id]
 
 
@@ -3065,7 +3072,20 @@ async def stop_index_for_corpus(corpus_id: str) -> IndexStatus:
     return await _cancel_index_run(repo_id)
 
 
-@router.get("/index/status", response_model=DashboardIndexStatusResponse)
+@router.get(
+    "/index/status",
+    response_model=DashboardIndexStatusResponse,
+    responses={
+        409: {
+            "model": IndexRunConflictResponse | PersistedStateCorruptResponse,
+            "description": "A malformed fence (index_fence_corrupt) or malformed persisted index state: manifest, tombstone, fence or reclaim backlog (persisted_state_corrupt).",
+        },
+        503: {
+            "model": DependencyUnavailableResponse | IndexDeletionIncompleteResponse,
+            "description": "Postgres is unavailable, or the corpus is being de-indexed.",
+        },
+    },
+)
 async def get_dashboard_index_status(
     scope: CorpusScope = _CORPUS_SCOPE_DEP,
 ) -> DashboardIndexStatusResponse:
@@ -3076,10 +3096,13 @@ async def get_dashboard_index_status(
     """
     repo_id = await _resolve_dashboard_repo_id(scope)
 
-    # Durable first: a fresh fence held anywhere means the corpus is being indexed;
-    # this process's state only refines it.
+    # Durable first: the row's index state must validate (typed 409/503 otherwise),
+    # then a fresh fence held anywhere means the corpus is being indexed; this
+    # process's state only refines it.
     s = _STATUS.get(repo_id)
     try:
+        with contextlib.suppress(CorpusNotFoundError):
+            await _read_index_state(repo_id, await load_scoped_config(repo_id=repo_id))
         live = await _live_fence(repo_id)
     except IndexFenceCorruptError as exc:
         raise _fence_corrupt_conflict(repo_id, exc) from exc
@@ -3204,12 +3227,32 @@ async def get_dashboard_index_status(
     )
 
 
-@router.get("/index/stats", response_model=DashboardIndexStatsResponse)
+@router.get(
+    "/index/stats",
+    response_model=DashboardIndexStatsResponse,
+    responses={
+        409: {
+            "model": IndexRunConflictResponse | PersistedStateCorruptResponse,
+            "description": "A malformed fence (index_fence_corrupt) or malformed persisted index state: manifest, tombstone, fence or reclaim backlog (persisted_state_corrupt).",
+        },
+        503: {
+            "model": DependencyUnavailableResponse | IndexDeletionIncompleteResponse,
+            "description": "Postgres is unavailable, or the corpus is being de-indexed.",
+        },
+    },
+)
 async def get_dashboard_index_stats(
     scope: CorpusScope = _CORPUS_SCOPE_DEP,
 ) -> DashboardIndexStatsResponse:
     """Dashboard storage metrics (legacy-compatible endpoint)."""
     repo_id = await _resolve_dashboard_repo_id(scope)
+
+    # The row's index state must validate before any storage figure is served.
+    try:
+        with contextlib.suppress(CorpusNotFoundError):
+            await _read_index_state(repo_id, await load_scoped_config(repo_id=repo_id))
+    except IndexFenceCorruptError as exc:
+        raise _fence_corrupt_conflict(repo_id, exc) from exc
 
     cfg_global = await load_scoped_config(repo_id=None)
     pg = PostgresClient(cfg_global.indexing.postgres_url)
@@ -3251,19 +3294,20 @@ async def get_latest_index_run(corpus_id: str) -> IndexRunSummary:
     repo_id = str(corpus_id or "").strip()
     if not repo_id:
         raise HTTPException(status_code=422, detail="corpus_id is required")
+    # The row's index state must validate BEFORE any answer, the 404 included: a
+    # malformed row is a typed 409 whether or not a summary exists.
+    try:
+        with contextlib.suppress(CorpusNotFoundError):
+            await _read_index_state(repo_id, await load_scoped_config(repo_id=repo_id))
+    except IndexFenceCorruptError as exc:
+        raise _fence_corrupt_conflict(repo_id, exc) from exc
     await _flush_run_events()
     run = await asyncio.to_thread(_load_latest_run_summary, repo_id)
     if run is None:
         raise HTTPException(
             status_code=404, detail=f"No persisted index runs found for repo_id={repo_id}"
         )
-    try:
-        # The persisted summary is served only from a row whose index state validates.
-        with contextlib.suppress(CorpusNotFoundError):
-            await _read_index_state(repo_id, await load_scoped_config(repo_id=repo_id))
-        return await _finalize_interrupted_run(repo_id, run)
-    except IndexFenceCorruptError as exc:
-        raise _fence_corrupt_conflict(repo_id, exc) from exc
+    return await _finalize_interrupted_run(repo_id, run)
 
 
 @router.get("/index/{corpus_id}/runs/{run_id}/events", response_model=list[IndexRunEvent])
@@ -3384,6 +3428,10 @@ async def get_index_status(corpus_id: str) -> IndexStatus:
     "/index/{corpus_id}/stats",
     response_model=IndexStats,
     responses={
+        409: {
+            "model": IndexRunConflictResponse | PersistedStateCorruptResponse,
+            "description": "A malformed fence (index_fence_corrupt) or malformed persisted index state: manifest, tombstone, fence or reclaim backlog (persisted_state_corrupt).",
+        },
         503: {
             "model": DependencyUnavailableResponse | IndexDeletionIncompleteResponse,
             "description": "Postgres is unavailable, or the corpus is being de-indexed.",
