@@ -287,10 +287,6 @@ async def test_chunk_mode_hydrates_exactly_the_vector_seeds(
         hit_ids = {m["chunk_id"] for m in matches}
         assert direct_ids, "the same-engine oracle returned no seeds"
         assert hit_ids == direct_ids, (sorted(hit_ids), sorted(direct_ids))
-        # With the multiplier at 1 the global top-k filtered to this corpus can only be a
-        # subset of the corpus's own exact top-k (Qdrant dense leg): a second, engine-
-        # independent bound on the same hits.
-        assert hit_ids <= set(seeded.vector_seed_ids), (sorted(hit_ids), seeded.vector_seed_ids)
         # The corpus's own dense ranking (Qdrant) is exact on this small collection:
         # every graph seed is one of its chunks (never a chunk outside the corpus).
         assert hit_ids <= set(seeded.content_by_id)

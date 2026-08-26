@@ -21399,7 +21399,7 @@
           "type": "string"
         },
         "key": {
-          "description": "Which persisted key is malformed (generation, index_tombstone, index_run)",
+          "description": "Which persisted key is malformed (generation, index_tombstone, index_run, reclaim_backlog)",
           "title": "Key",
           "type": "string"
         },
@@ -21440,7 +21440,7 @@
               "type": "string"
             },
             "key": {
-              "description": "Which persisted key is malformed (generation, index_tombstone, index_run)",
+              "description": "Which persisted key is malformed (generation, index_tombstone, index_run, reclaim_backlog)",
               "title": "Key",
               "type": "string"
             },

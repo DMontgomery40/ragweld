@@ -47,16 +47,21 @@ async def test_heartbeat_advances_while_the_event_loop_is_blocked(client: AsyncC
         heartbeat = _FenceHeartbeat(cfg, corpus_id, "heartbeat-run")
         heartbeat.start()
         # Block THIS event loop (the one the API and every asyncio task share)
-        # for longer than the beat interval: only a loop-independent heartbeat
-        # keeps the fence fresh.
-        time.sleep(7.5)
-        after = (await pg.get_index_fence(corpus_id)).heartbeat_at
-        assert after > before, (before, after)
+        # for longer than the beat interval, twice: only a loop-independent
+        # heartbeat keeps the fence fresh, and it must keep beating, not beat once.
+        time.sleep(6.5)
+        first = (await pg.get_index_fence(corpus_id)).heartbeat_at
+        assert first > before, (before, first)
+        time.sleep(6.5)
+        second = (await pg.get_index_fence(corpus_id)).heartbeat_at
+        assert second > first, (first, second)
         assert not heartbeat.fence_lost.is_set()
         assert await pg.release_index_fence(corpus_id, "heartbeat-run") is True
     finally:
         if heartbeat is not None:
             heartbeat.stop()
+            heartbeat.join(timeout=15)
+            assert not heartbeat.is_alive(), "heartbeat thread did not stop"
         config_store._store = None
         await client.delete(f"/api/corpora/{corpus_id}")
         await pg.disconnect()

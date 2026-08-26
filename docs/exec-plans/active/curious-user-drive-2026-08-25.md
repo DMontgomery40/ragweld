@@ -1785,3 +1785,72 @@ Playwright `curious_user_p1_fixes` 9 passed against the restarted backend,
 quick gates green, contract bundle carries the corruption 409 union. Codex
 pass 9 (scoped to this diff, adjudicated items marked settled) launched.
 
+### Adversarial review pass 9 (codex exec, scoped to the round-9 diff) — REFUTED (2 P1 / 5 P2 / 1 P3); all acted on
+
+Session 14k. Every finding concerned round-9 code and was accepted:
+
+1. **De-index repairs the reclaim backlog too**: `delete_index_state` hands
+   every valid backlog entry's staged ids to the tombstone, drops its staging
+   rows, and removes the key whatever shape it had. Live test: a malformed
+   backlog → typed 409 on start (no fence written) → DELETE → start succeeds.
+2. **`get_index_tombstone` goes through the strict reader** (a malformed
+   tombstone is the typed 409, never absent or a raw 500); a lost CAS still
+   answers the typed incomplete-deletion 503.
+3. **Nothing sits between the claim and the job's heartbeat**: the reclaim
+   backlog is drained by the background job after its heartbeat starts, and
+   the only post-acquire work (finalizing a committed dead run) releases the
+   fence on failure.
+4. **Every claim drains the backlog**, so a failed reclaim is retried by the
+   next normal run.
+5. **A persisted `complete` summary is history**: with no manifest (another
+   worker de-indexed), status reports idle instead of resurrecting it.
+6. **Status and latest-run declare the corruption 409 union**; the contract
+   matrix covers status, latest-run and delete; `reclaim_backlog` is a named
+   key of the corruption detail.
+7. **The cross-engine Qdrant bound is gone** from the chunk-mode hydration
+   test (same-engine equality and corpus scope stay).
+8. **The heartbeat test proves two beats** across two blocked-loop intervals
+   and joins the thread.
+
+### Self-audit (session 14k, before any further review)
+
+The operator called out the pattern — ten rounds in which lesser models kept
+finding defects, several of them introduced while fixing others — and asked
+for reasoning and foresight instead of reactive patching. The whole protocol
+(job, start/stop/delete/status routes, Postgres claim/promotion/delete/
+incremental/reclaim methods, retirement, heartbeat, reclaim helper) was
+read end-to-end against a failure matrix: every durable write and a crash
+right after it; every `await` in the commit/cleanup paths under a
+cancellation; every pair of concurrent operations on one corpus; every
+persisted key when malformed; every new test asked whether it stays green
+with the behaviour broken. Found and fixed:
+
+- **Thread internals**: `_FenceHeartbeat` set `self._stop`, shadowing
+  `threading.Thread._stop()`; `join()` then raised — the heartbeat test
+  caught it live (`'Event' object is not callable`). Renamed.
+- **Committed after disconnect**: `committed = True` was set after the
+  `finally: await postgres.disconnect()`; `contextlib.suppress(Exception)`
+  does not catch `CancelledError`, so a stop landing during that disconnect
+  read a committed transaction as uncommitted and the cancel handler would
+  have dropped the live collection. `committed`/`qdrant_generation` now
+  flip the instant the shielded promotion returns.
+- **Own cleanup is durable**: the cancel/error handlers dropped staged
+  resources inline; a second cancellation mid-cleanup then let `finally`
+  release the fence (the only record of the staged ids). Both handlers now
+  push a reclaim-backlog entry first and run the exact reclaim
+  (`_reclaim_own_staged`, shielded); the entry clears only on confirmed
+  success.
+- **One staging-id definition** (`staging_repo_id`): three hand-written
+  `__staging__{repo}__{run}` copies (index API, Postgres, reclaim) happened
+  to agree; a drift there would have silently orphaned staging rows.
+- **Staging cleanup on de-index** now covers every staging table
+  (`chunk_summaries`, `_last_build`, `corpus_configs`, `chunks`, `corpora`).
+- `_UNKNOWN_COMMITS` resets when a new run starts for the corpus; `delete`
+  pops every in-memory run marker; the status route no longer infers
+  `complete` from a process-cached `IndexStats` (durable inference only).
+
+Verification (session 14k): live lane 19 passed (incl. corrupt-backlog repair
+and the two-beat heartbeat), full `uv run pytest -q` alone 1161 passed / 93
+skipped, Playwright `curious_user_p1_fixes` 9 passed against the restarted
+backend, quick gates green. Codex pass 10 (scoped to this diff) launched.
+

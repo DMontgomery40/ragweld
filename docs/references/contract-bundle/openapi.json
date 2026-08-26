@@ -11190,7 +11190,7 @@
             "type": "string"
           },
           "key": {
-            "description": "Which persisted key is malformed (generation, index_tombstone, index_run)",
+            "description": "Which persisted key is malformed (generation, index_tombstone, index_run, reclaim_backlog)",
             "title": "Key",
             "type": "string"
           },
@@ -23792,7 +23792,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/IndexRunConflictResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/IndexRunConflictResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PersistedStateCorruptResponse"
+                    }
+                  ],
+                  "title": "Response 409 Get Latest Index Run Api Index  Corpus Id  Runs Latest Get"
                 }
               }
             },
@@ -23990,7 +23998,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/IndexRunConflictResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/IndexRunConflictResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PersistedStateCorruptResponse"
+                    }
+                  ],
+                  "title": "Response 409 Get Index Status Api Index  Corpus Id  Status Get"
                 }
               }
             },

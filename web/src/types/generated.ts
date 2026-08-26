@@ -1679,7 +1679,7 @@ export interface PersistedStateCorruptDetail {
   code?: "persisted_state_corrupt"; // default: "persisted_state_corrupt"
   /** Corpus whose persisted state is malformed */
   corpus_id: string;
-  /** Which persisted key is malformed (generation, index_tombstone, index_run) */
+  /** Which persisted key is malformed (generation, index_tombstone, index_run, reclaim_backlog) */
   key: string;
   /** Stable, non-sensitive summary */
   message: string;

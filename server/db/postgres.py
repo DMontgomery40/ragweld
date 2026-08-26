@@ -2207,7 +2207,8 @@ class PostgresClient:
         return True
 
     async def get_index_tombstone(self, repo_id: str) -> DeletionTombstone | None:
-        from server.indexing.generations import DeletionTombstone
+        """The row's tombstone through the strict reader: a malformed one raises, never reads as absent."""
+        from server.indexing.generations import tombstone_from_meta
 
         await self._require_pool()
         assert self._pool is not None
@@ -2215,8 +2216,7 @@ class PostgresClient:
             row = await conn.fetchrow("SELECT meta FROM corpora WHERE repo_id = $1;", repo_id)
         if row is None:
             return None
-        raw = _coerce_jsonb_dict(row["meta"]).get("index_tombstone")
-        return DeletionTombstone.model_validate(raw) if isinstance(raw, dict) else None
+        return tombstone_from_meta(_coerce_jsonb_dict(row["meta"]), repo_id=repo_id)
 
     async def clear_index_tombstone(self, repo_id: str, tombstone: DeletionTombstone) -> bool:
         """Every external cleanup named by THIS tombstone succeeded: clear it, and only it.
@@ -2327,6 +2327,56 @@ class PostgresClient:
                             raw_tombstone,
                         )
                 tombstone = build_tombstone(generation, now=now, intent=intent).merged(earlier)
+                # The reclaim backlog is absorbed here too: every entry that validates
+                # hands its staged ids to the tombstone (and its staging rows are
+                # dropped); the key is removed whatever shape it had, so de-index is
+                # a repair path for it as well.
+                from server.indexing.generations import ReclaimEntry as _ReclaimEntry
+                from server.indexing.generations import staging_repo_id
+
+                raw_backlog = meta.get("reclaim_backlog")
+                backlog_collections: list[str] = []
+                backlog_graphs: list[str] = []
+                if isinstance(raw_backlog, list):
+                    for item in raw_backlog:
+                        try:
+                            entry = _ReclaimEntry.model_validate(item)
+                        except Exception:
+                            logger.error(
+                                "de-index of %s drops a malformed reclaim entry: %r", repo_id, item
+                            )
+                            continue
+                        if entry.staged_qdrant_collection:
+                            backlog_collections.append(entry.staged_qdrant_collection)
+                        if entry.staged_graph_repo_id:
+                            backlog_graphs.append(entry.staged_graph_repo_id)
+                        staged_id = staging_repo_id(repo_id, entry.run_id)
+                        for table in (
+                            "chunk_summaries_last_build",
+                            "chunk_summaries",
+                            "chunks",
+                            "corpus_configs",
+                            "corpora",
+                        ):
+                            await conn.execute(
+                                f"DELETE FROM {table} WHERE repo_id = $1;", staged_id
+                            )
+                elif raw_backlog is not None:
+                    logger.error(
+                        "de-index of %s drops a malformed reclaim backlog: %r", repo_id, raw_backlog
+                    )
+                if backlog_collections or backlog_graphs:
+                    tombstone = DeletionTombstone(
+                        qdrant_collections=list(
+                            dict.fromkeys([*tombstone.qdrant_collections, *backlog_collections])
+                        ),
+                        graph_repo_ids=list(
+                            dict.fromkeys([*tombstone.graph_repo_ids, *backlog_graphs])
+                        ),
+                        created_at=tombstone.created_at,
+                        revision=tombstone.revision,
+                        intent=tombstone.intent,
+                    )
 
                 deleted = await conn.fetchval(
                     "WITH d AS (DELETE FROM chunks WHERE repo_id = $1 RETURNING 1) SELECT count(*) FROM d;",
@@ -2346,7 +2396,7 @@ class PostgresClient:
                             embedding_model = NULL,
                             embedding_dimensions = NULL,
                             sparse_contract = NULL,
-                            meta = (COALESCE(meta, '{}'::jsonb) - 'generation' - 'index_run') || $2::jsonb
+                            meta = (COALESCE(meta, '{}'::jsonb) - 'generation' - 'index_run' - 'reclaim_backlog') || $2::jsonb
                         WHERE repo_id = $1;
                         """,
                         repo_id,

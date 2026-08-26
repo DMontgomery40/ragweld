@@ -50,6 +50,14 @@ from server.models.tribrid_config_model import TriBridConfig
 
 logger = logging.getLogger(__name__)
 
+STAGING_REPO_PREFIX = "__staging__"
+
+
+def staging_repo_id(repo_id: str, run_id: str) -> str:
+    """The Postgres corpus id a run stages its rows under (one definition for every reader/cleaner)."""
+    return f"{STAGING_REPO_PREFIX}{repo_id}__{run_id}"
+
+
 GENERATION_META_KEY = "generation"
 INDEX_FENCE_META_KEY = "index_run"
 INDEX_TOMBSTONE_META_KEY = "index_tombstone"
@@ -549,7 +557,7 @@ async def reclaim_stale_run(config: TriBridConfig, repo_id: str, entry: ReclaimE
         pg = PostgresClient(config.indexing.postgres_url)
         await pg.connect()
         try:
-            await pg.delete_corpus_with_data(f"__staging__{repo_id}__{entry.run_id}")
+            await pg.delete_corpus_with_data(staging_repo_id(repo_id, entry.run_id))
             if ok:
                 await pg.clear_reclaim_entry(repo_id, entry.run_id)
         finally:
@@ -775,6 +783,7 @@ __all__ = [
     "reclaim_backlog_from_meta",
     "qdrant_collection_of",
     "reclaim_stale_run",
+    "staging_repo_id",
     "tombstone_from_meta",
     "upgrade_pre_retention_manifest",
 ]

@@ -48,6 +48,7 @@ from server.indexing.generations import (
     heartbeat_interval_seconds,
     qdrant_collection_of,
     reclaim_stale_run,
+    staging_repo_id,
 )
 from server.indexing.loader import FileLoader
 from server.indexing.official_graphrag import (
@@ -112,7 +113,6 @@ _LAST_STARTED_REPO: str | None = None
 
 _MODELS_JSON_PATH = Path(__file__).parent.parent.parent / "data" / "models.json"
 _INDEX_RUNS_DIR = Path(__file__).parent.parent.parent / "data" / "index_runs"
-_STAGING_REPO_PREFIX = "__staging__"
 
 _ACTIVE_RUNS: dict[str, str] = {}
 _UNKNOWN_COMMITS: dict[str, str] = {}  # runs whose promotion outcome awaits manifest reconciliation
@@ -522,7 +522,7 @@ def _load_run_events(repo_id: str, run_id: str, *, limit: int) -> list[IndexRunE
 
 
 def _build_staging_repo_id(repo_id: str, run_id: str) -> str:
-    return f"{_STAGING_REPO_PREFIX}{repo_id}__{run_id}"
+    return staging_repo_id(repo_id, run_id)
 
 
 async def _clear_semantic_cache_for_repo(repo_id: str) -> None:
@@ -579,6 +579,37 @@ async def _cancel_index_run(repo_id: str) -> IndexStatus:
             )
     _clear_runtime_state_for_repo(repo_id, queue=event_queue)
     return _STATUS.get(repo_id) or _idle_status(repo_id)
+
+
+async def _reclaim_own_staged(
+    repo_id: str, run_id: str, staged_collection: str | None, staged_graph: str
+) -> None:
+    """A failed/cancelled run cleans its own staged inventory through the durable backlog.
+
+    The entry is written before anything is dropped and removed only when every
+    store confirmed, so an interruption here can never orphan resources whose
+    only record was in this process.
+    """
+    cfg = await load_scoped_config(repo_id=repo_id)
+    pg = PostgresClient(cfg.indexing.postgres_url)
+    try:
+        await pg.connect()
+        entry = ReclaimEntry(
+            run_id=run_id,
+            staged_qdrant_collection=staged_collection,
+            staged_graph_repo_id=staged_graph if cfg.graph_indexing.enabled else None,
+            recorded_at=await pg.database_now(),
+        )
+        await pg.push_reclaim_entry(repo_id, entry)
+    finally:
+        with contextlib.suppress(Exception):
+            await pg.disconnect()
+    if not await reclaim_stale_run(cfg, repo_id, entry):
+        logger.warning(
+            "run %s on %s could not fully reclaim its staged resources; they stay on the backlog",
+            run_id,
+            repo_id,
+        )
 
 
 async def _drain_reclaim_backlog(cfg: TriBridConfig, repo_id: str) -> None:
@@ -2002,15 +2033,16 @@ class _FenceHeartbeat(threading.Thread):
         self._cfg = cfg
         self._repo_id = repo_id
         self._run_id = run_id
-        self._stop = threading.Event()
+        # NOT `_stop`: threading.Thread owns a private `_stop()` used by join().
+        self._halt = threading.Event()
         self.fence_lost = threading.Event()
 
     def stop(self) -> None:
-        self._stop.set()
+        self._halt.set()
 
     def run(self) -> None:
         interval = heartbeat_interval_seconds(self._cfg.indexing.index_run_lease_seconds)
-        while not self._stop.wait(interval):
+        while not self._halt.wait(interval):
             try:
                 alive = asyncio.run(self._beat())
             except Exception as exc:
@@ -2215,6 +2247,7 @@ async def _background_index_job(
     started_at = datetime.now(UTC)
     this_task = asyncio.current_task()
     _ACTIVE_RUNS[repo_id] = run_id
+    _UNKNOWN_COMMITS.pop(repo_id, None)  # any earlier unknown run is now the takeover's business
     _QUEUE_RUN_CONTEXT[id(queue)] = (repo_id, run_id)
 
     summary = IndexRunSummary(
@@ -2262,6 +2295,9 @@ async def _background_index_job(
         cfg = await load_scoped_config(repo_id=repo_id)
         heartbeat = _FenceHeartbeat(cfg, repo_id, run_id)
         heartbeat.start()
+        # Every claim drains the durable reclaim backlog (a failed reclaim from an
+        # earlier takeover is retried by the next normal run, never forgotten).
+        await _drain_reclaim_backlog(cfg, repo_id)
         qdrant = QdrantChunkStore(cfg)
         vector_dim = (
             int(cfg.embedding.embedding_dim or 0)
@@ -2374,6 +2410,12 @@ async def _background_index_job(
             try:
                 with INDEX_STAGE_LATENCY_SECONDS.labels(stage="generation_commit").time():
                     generation = await asyncio.shield(promote)
+                # Committed the instant the transaction returned: a cancellation
+                # delivered anywhere after this (the disconnect below, the phase
+                # write, retirement) must never read as "uncommitted".
+                committed = True
+                promoted_collection = qdrant_generation
+                qdrant_generation = None  # owned by the manifest now; never dropped as "staged"
             except BaseException:
                 # The transaction may have committed although this await did not
                 # return normally (cancellation delivered on the way back, or the
@@ -2420,9 +2462,6 @@ async def _background_index_job(
         finally:
             with contextlib.suppress(Exception):
                 await postgres.disconnect()
-        committed = True
-        promoted_collection = qdrant_generation
-        qdrant_generation = None  # owned by the manifest now; never dropped as "staged"
         _emit_event(
             queue,
             {
@@ -2500,31 +2539,13 @@ async def _background_index_job(
                 repo_id=repo_id, run_id=run_id, started_at=started_at, queue=queue
             )
             raise
-        if qdrant is not None and qdrant_generation is not None and not committed:
-            with contextlib.suppress(Exception):
-                await asyncio.shield(qdrant.drop_generation(qdrant_generation))
-        with contextlib.suppress(Exception):
-            cfg = await load_scoped_config(repo_id=repo_id)
-            pg = PostgresClient(cfg.indexing.postgres_url)
-            await pg.connect()
-            try:
-                if not committed:
-                    await pg.delete_corpus_with_data(staging_repo_id)
-            finally:
-                await pg.disconnect()
-            if cfg.graph_indexing.enabled and not committed:
-                db_name = cfg.graph_storage.resolve_database(repo_id)
-                neo4j = Neo4jClient(
-                    cfg.graph_storage.neo4j_uri,
-                    cfg.graph_storage.neo4j_user,
-                    cfg.graph_storage.resolve_password(),
-                    database=db_name,
-                )
-                await neo4j.connect()
-                try:
-                    await neo4j.delete_graph(staging_repo_id)
-                finally:
-                    await neo4j.disconnect()
+        # Staged cleanup is durable: the run's inventory goes to the reclaim
+        # backlog first, then the exact reclaim runs (shielded: a second
+        # cancellation cannot leave half-cleaned resources unrecorded).
+        with contextlib.suppress(BaseException):
+            await asyncio.shield(
+                _reclaim_own_staged(repo_id, run_id, qdrant_generation, staging_repo_id)
+            )
         # Cancelled tasks cannot rely on direct awaits for cleanup, so shield
         # invalidation to let it continue even while this task is cancelled.
         try:
@@ -2583,31 +2604,12 @@ async def _background_index_job(
                 repo_id=repo_id, run_id=run_id, started_at=started_at, queue=queue
             )
             return
-        if qdrant is not None and qdrant_generation is not None and not committed:
-            with contextlib.suppress(Exception):
-                await qdrant.drop_generation(qdrant_generation)
-        with contextlib.suppress(Exception):
-            cfg = await load_scoped_config(repo_id=repo_id)
-            pg = PostgresClient(cfg.indexing.postgres_url)
-            await pg.connect()
-            try:
-                if not committed:
-                    await pg.delete_corpus_with_data(staging_repo_id)
-            finally:
-                await pg.disconnect()
-            if cfg.graph_indexing.enabled and not committed:
-                db_name = cfg.graph_storage.resolve_database(repo_id)
-                neo4j = Neo4jClient(
-                    cfg.graph_storage.neo4j_uri,
-                    cfg.graph_storage.neo4j_user,
-                    cfg.graph_storage.resolve_password(),
-                    database=db_name,
-                )
-                await neo4j.connect()
-                try:
-                    await neo4j.delete_graph(staging_repo_id)
-                finally:
-                    await neo4j.disconnect()
+        # Staged cleanup is durable (backlog entry first, exact reclaim, cleared
+        # only on confirmed success).
+        with contextlib.suppress(BaseException):
+            await asyncio.shield(
+                _reclaim_own_staged(repo_id, run_id, qdrant_generation, staging_repo_id)
+            )
         # If indexing failed after deleting/updating chunks, stale cache entries can
         # point to content that no longer exists. Best-effort clear on errors.
         with contextlib.suppress(Exception):
@@ -2957,18 +2959,20 @@ async def start_index(request: IndexRequest) -> IndexStatus:
             await postgres.disconnect()
     if claim.held_by is not None:
         raise _index_run_conflict(request.repo_id, claim.held_by)
-    if claim.taken_over is not None:
-        dead = claim.taken_over
-        if claim.taken_over_committed:
-            # The previous holder committed and then died before releasing: its
-            # staged resources ARE the live generation. Finalize its run record;
-            # never reclaim.
-            await _finalize_dead_committed_run(request.repo_id, dead.run_id)
-        else:
-            # The previous holder died mid-build: its staged inventory was moved to
-            # the durable reclaim backlog by the takeover transaction; drain it.
-            await _drain_reclaim_backlog(cfg, request.repo_id)
-
+    if claim.taken_over is not None and claim.taken_over_committed:
+        # The previous holder committed and then died before releasing: its
+        # staged resources ARE the live generation. Finalize its run record;
+        # never reclaim. Anything failing between the claim and the job's start
+        # releases the fence again (no orphan claim until the lease expires).
+        try:
+            await _finalize_dead_committed_run(request.repo_id, claim.taken_over.run_id)
+        except BaseException:
+            with contextlib.suppress(Exception):
+                await _release_fence(request.repo_id, run_id)
+            raise
+    # A dead run's staged inventory (moved to the durable backlog by the takeover
+    # transaction, or left by an earlier failed reclaim) is drained by the
+    # background job itself, after its heartbeat is running.
     _STATUS[request.repo_id] = IndexStatus(
         repo_id=request.repo_id,
         status="indexing",
@@ -3168,7 +3172,7 @@ async def get_dashboard_index_stats(
     response_model=IndexRunSummary,
     responses={
         409: {
-            "model": IndexRunConflictResponse,
+            "model": IndexRunConflictResponse | PersistedStateCorruptResponse,
             "description": "The corpus carries a malformed fence.",
         },
         503: {
@@ -3213,7 +3217,7 @@ async def get_index_run_events(
     response_model=IndexStatus,
     responses={
         409: {
-            "model": IndexRunConflictResponse,
+            "model": IndexRunConflictResponse | PersistedStateCorruptResponse,
             "description": "The corpus carries a malformed fence.",
         },
         503: {
@@ -3267,6 +3271,18 @@ async def get_index_status(corpus_id: str) -> IndexStatus:
     persisted_run = await asyncio.to_thread(_load_latest_run_summary, repo_id)
     if persisted_run is not None:
         persisted_run = await _finalize_interrupted_run(repo_id, persisted_run)
+        if persisted_run.status == "complete" and cfg is not None:
+            # A completed run is history, not current state, once another worker
+            # de-indexed the corpus (no manifest): report idle, never a stale complete.
+            pg_hist = PostgresClient(cfg.indexing.postgres_url)
+            try:
+                await pg_hist.connect()
+                current_manifest = await pg_hist.get_generation(repo_id)
+            finally:
+                with contextlib.suppress(Exception):
+                    await pg_hist.disconnect()
+            if current_manifest is None:
+                return _idle_status(repo_id)
         return IndexStatus(
             repo_id=repo_id,
             status=persisted_run.status,
@@ -3276,19 +3292,8 @@ async def get_index_status(corpus_id: str) -> IndexStatus:
             started_at=persisted_run.started_at,
             completed_at=persisted_run.completed_at,
         )
-    # In-memory status is lost on server reload; infer "complete" from persisted
-    # index stats so clients don't see a misleading "idle" state.
-    if repo_id in _STATS and int(getattr(_STATS[repo_id], "total_chunks", 0) or 0) > 0:
-        s = _STATS[repo_id]
-        return IndexStatus(
-            repo_id=repo_id,
-            status="complete",
-            progress=1.0,
-            current_file=None,
-            error=None,
-            started_at=None,
-            completed_at=getattr(s, "last_indexed", None),
-        )
+    # No run record: infer "complete" from the DURABLE index stats only (a
+    # process-cached IndexStats could outlive another worker's de-index).
     try:
         if cfg is None:
             raise CorpusNotFoundError(f"Corpus not found: {repo_id}")
@@ -3403,6 +3408,9 @@ async def delete_index(corpus_id: str) -> dict[str, Any]:
     _STATS.pop(repo_id, None)
     _TASKS.pop(repo_id, None)
     _EVENT_QUEUES.pop(repo_id, None)
+    _STATUS_RUN_ID.pop(repo_id, None)
+    _UNKNOWN_COMMITS.pop(repo_id, None)
+    _CANCELLED_AFTER_COMMIT.pop(repo_id, None)
     # Best-effort gauges (process-level; no per-corpus labels).
     # Reset to zero to avoid stale dashboards in single-corpus dev flows.
     try:

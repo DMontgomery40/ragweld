@@ -10,6 +10,7 @@ from pydantic import AliasChoices, BaseModel, Field
 
 class Chunk(BaseModel):
     """A code chunk from the indexed repository."""
+
     chunk_id: str = Field(description="Unique identifier for this chunk")
     content: str = Field(description="The actual code/text content")
     file_path: str = Field(description="Path to the source file")
@@ -24,6 +25,7 @@ class Chunk(BaseModel):
 
 class IndexRequest(BaseModel):
     """Request to index a repository."""
+
     repo_id: str = Field(
         description="Corpus identifier",
         validation_alias=AliasChoices("repo_id", "corpus_id"),
@@ -35,12 +37,15 @@ class IndexRequest(BaseModel):
 
 class IndexStatus(BaseModel):
     """Current status of repository indexing."""
+
     repo_id: str = Field(
         description="Corpus identifier",
         validation_alias=AliasChoices("repo_id", "corpus_id"),
         serialization_alias="corpus_id",
     )
-    status: Literal["idle", "indexing", "complete", "error", "cancelled"] = Field(description="Current indexing state")
+    status: Literal["idle", "indexing", "complete", "error", "cancelled"] = Field(
+        description="Current indexing state"
+    )
     progress: float = Field(ge=0.0, le=1.0, description="Progress from 0.0 to 1.0")
     current_file: str | None = Field(default=None, description="File currently being indexed")
     error: str | None = Field(default=None, description="Error message if status is 'error'")
@@ -57,17 +62,27 @@ class IndexRunSummary(BaseModel):
         validation_alias=AliasChoices("repo_id", "corpus_id"),
         serialization_alias="corpus_id",
     )
-    status: Literal["indexing", "complete", "error", "cancelled"] = Field(description="Final or current run state")
+    status: Literal["indexing", "complete", "error", "cancelled"] = Field(
+        description="Final or current run state"
+    )
     started_at: datetime = Field(description="When indexing run started")
     completed_at: datetime | None = Field(default=None, description="When indexing run completed")
-    progress: float = Field(default=0.0, ge=0.0, le=1.0, description="Best-effort progress for this run")
+    progress: float = Field(
+        default=0.0, ge=0.0, le=1.0, description="Best-effort progress for this run"
+    )
     error: str | None = Field(default=None, description="Error message when status='error'")
     total_files: int = Field(default=0, ge=0, description="Indexed file count for this run")
     total_chunks: int = Field(default=0, ge=0, description="Indexed chunk count for this run")
     total_tokens: int = Field(default=0, ge=0, description="Indexed token count for this run")
-    embedding_provider: str | None = Field(default=None, description="Embedding provider used by this run")
-    embedding_model: str | None = Field(default=None, description="Embedding model used by this run")
-    embedding_dimensions: int | None = Field(default=None, ge=0, description="Embedding dimensions used by this run")
+    embedding_provider: str | None = Field(
+        default=None, description="Embedding provider used by this run"
+    )
+    embedding_model: str | None = Field(
+        default=None, description="Embedding model used by this run"
+    )
+    embedding_dimensions: int | None = Field(
+        default=None, ge=0, description="Embedding dimensions used by this run"
+    )
 
 
 class IndexRunEvent(BaseModel):
@@ -77,13 +92,16 @@ class IndexRunEvent(BaseModel):
     ts: datetime = Field(description="Event timestamp (UTC)")
     type: str = Field(description="Event type (log/progress/warning/error/complete/cancelled)")
     message: str | None = Field(default=None, description="Human-readable message")
-    percent: int | None = Field(default=None, ge=0, le=100, description="Progress percentage when present")
+    percent: int | None = Field(
+        default=None, ge=0, le=100, description="Progress percentage when present"
+    )
     current_file: str | None = Field(default=None, description="Current file when present")
     meta: dict[str, Any] = Field(default_factory=dict, description="Additional event payload")
 
 
 class IndexStats(BaseModel):
     """Statistics about an indexed repository."""
+
     repo_id: str = Field(
         description="Corpus identifier",
         validation_alias=AliasChoices("repo_id", "corpus_id"),
@@ -99,7 +117,9 @@ class IndexStats(BaseModel):
     embedding_model: str = Field(description="Model used for embeddings")
     embedding_dimensions: int = Field(description="Dimension of embedding vectors")
     last_indexed: datetime | None = Field(default=None, description="When last indexed")
-    file_breakdown: dict[str, int] = Field(default_factory=dict, description="Count by file extension")
+    file_breakdown: dict[str, int] = Field(
+        default_factory=dict, description="Count by file extension"
+    )
 
 
 class IndexEstimate(BaseModel):
@@ -120,14 +140,20 @@ class IndexEstimate(BaseModel):
     total_files: int = Field(ge=0, description="Estimated number of files that will be processed")
     total_size_bytes: int = Field(ge=0, description="Estimated total bytes across included files")
     skipped_large_files: int = Field(ge=0, description="Count of files skipped due to size limits")
-    estimated_total_tokens: int = Field(ge=0, description="Estimated total tokens to be chunked/embedded")
+    estimated_total_tokens: int = Field(
+        ge=0, description="Estimated total tokens to be chunked/embedded"
+    )
     estimated_total_chunks: int = Field(ge=0, description="Estimated number of chunks (heuristic)")
     embedding_backend: Literal["deterministic", "provider"] = Field(
         description="Embedding backend used for indexing (deterministic has no external cost)"
     )
-    embedding_provider: str = Field(description="Embedding provider used for indexing (embedding.embedding_type)")
+    embedding_provider: str = Field(
+        description="Embedding provider used for indexing (embedding.embedding_type)"
+    )
     embedding_model: str = Field(description="Embedding model used for indexing (effective model)")
-    skip_dense: bool = Field(description="Whether dense embeddings are skipped (indexing.skip_dense)")
+    skip_dense: bool = Field(
+        description="Whether dense embeddings are skipped (indexing.skip_dense)"
+    )
     embedding_cost_usd: float | None = Field(
         default=None,
         ge=0.0,
@@ -144,17 +170,23 @@ class IndexEstimate(BaseModel):
         description="Estimated total indexing cost (USD): embedding + semantic KG (when applicable).",
     )
     estimated_seconds_low: float | None = Field(
-        default=None, ge=0.0, description="Very rough low-end estimate for total indexing time (seconds)"
+        default=None,
+        ge=0.0,
+        description="Very rough low-end estimate for total indexing time (seconds)",
     )
     estimated_seconds_high: float | None = Field(
-        default=None, ge=0.0, description="Very rough high-end estimate for total indexing time (seconds)"
+        default=None,
+        ge=0.0,
+        description="Very rough high-end estimate for total indexing time (seconds)",
     )
     estimated_seconds_semantic_kg: float | None = Field(
         default=None,
         ge=0.0,
         description="Estimated GraphRAG semantic phase time (seconds) when enabled.",
     )
-    assumptions: list[str] = Field(default_factory=list, description="Human-readable assumptions used for the estimate")
+    assumptions: list[str] = Field(
+        default_factory=list, description="Human-readable assumptions used for the estimate"
+    )
 
 
 # =============================================================================
@@ -195,8 +227,12 @@ class IndexDeletionIncompleteDetail(BaseModel):
 
     code: Literal["index_deletion_incomplete"] = "index_deletion_incomplete"
     corpus_id: str = Field(description="Corpus whose external index cleanup has not completed")
-    qdrant_collections: list[str] = Field(default_factory=list, description="Collections still to drop")
-    graph_repo_ids: list[str] = Field(default_factory=list, description="Neo4j graphs still to drop")
+    qdrant_collections: list[str] = Field(
+        default_factory=list, description="Collections still to drop"
+    )
+    graph_repo_ids: list[str] = Field(
+        default_factory=list, description="Neo4j graphs still to drop"
+    )
     created_at: datetime = Field(description="When the deletion tombstone was written")
     message: str = Field(description="Stable, non-sensitive summary")
     operator_hint: str = Field(description="What the operator can do next")
@@ -207,7 +243,11 @@ class PersistedStateCorruptDetail(BaseModel):
 
     code: Literal["persisted_state_corrupt"] = "persisted_state_corrupt"
     corpus_id: str = Field(description="Corpus whose persisted state is malformed")
-    key: str = Field(description="Which persisted key is malformed (generation, index_tombstone, index_run)")
+    key: str = Field(
+        description=(
+            "Which persisted key is malformed (generation, index_tombstone, index_run, reclaim_backlog)"
+        )
+    )
     message: str = Field(description="Stable, non-sensitive summary")
     operator_hint: str = Field(description="The repair action (de-index the corpus, then re-index)")
 

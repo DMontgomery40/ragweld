@@ -72,3 +72,43 @@ async def test_index_status_reads_the_fence_with_the_corpus_scoped_lease(
         config_store._store = None
         await client.delete(f"/api/corpora/{corpus_id}")
         await pg.disconnect()
+
+
+async def test_deindex_repairs_a_corrupt_reclaim_backlog(client: AsyncClient) -> None:
+    """A malformed reclaim backlog answers the typed 409 on start; DELETE repairs it; start succeeds."""
+    corpus_id = f"backlog-repair-{uuid.uuid4().hex[:8]}"
+    pg = PostgresClient(os.environ["POSTGRES_DSN"])
+    await pg.connect()
+    try:
+        created = await client.post(
+            "/api/corpora", json={"corpus_id": corpus_id, "name": corpus_id, "path": "."}
+        )
+        assert created.status_code in (200, 201), created.text
+        await pg.update_corpus_meta(corpus_id, {"reclaim_backlog": {"not": "a list"}})
+        config_store._store = None
+        refused = await client.post(
+            "/api/index", json={"corpus_id": corpus_id, "repo_path": ".", "force_reindex": True}
+        )
+        assert refused.status_code == 409, refused.text
+        assert refused.json()["detail"]["code"] == "persisted_state_corrupt", refused.text
+        assert refused.json()["detail"]["key"] == "reclaim_backlog"
+        assert await pg.get_index_fence(corpus_id) is None, (
+            "no fence is written for a corrupt corpus"
+        )
+        repaired = await client.delete(f"/api/index/{corpus_id}")
+        assert repaired.status_code == 200, repaired.text
+        row = await pg.get_corpus(corpus_id)
+        assert "reclaim_backlog" not in row["meta"], row["meta"]
+        assert await pg.get_index_tombstone(corpus_id) is None
+        started = await client.post(
+            "/api/index", json={"corpus_id": corpus_id, "repo_path": ".", "force_reindex": True}
+        )
+        assert started.status_code == 200, started.text
+        stopped = await client.post(f"/api/index/{corpus_id}/stop")
+        assert stopped.status_code == 200, stopped.text
+    finally:
+        config_store._store = None
+        await client.post(f"/api/index/{corpus_id}/stop")
+        await client.delete(f"/api/index/{corpus_id}")
+        await client.delete(f"/api/corpora/{corpus_id}")
+        await pg.disconnect()

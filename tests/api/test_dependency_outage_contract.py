@@ -41,7 +41,10 @@ def test_stateful_api_openapi_documents_typed_dependency_503() -> None:
             "RequiredRetrievalLegFailureResponse",
             "IndexDeletionIncompleteResponse",
         },
-        ("/api/index", "post"): {"DependencyUnavailableResponse", "IndexDeletionIncompleteResponse"},
+        ("/api/index", "post"): {
+            "DependencyUnavailableResponse",
+            "IndexDeletionIncompleteResponse",
+        },
         ("/api/index/{corpus_id}/status", "get"): {
             "DependencyUnavailableResponse",
             "IndexDeletionIncompleteResponse",
@@ -66,9 +69,11 @@ def test_stateful_api_openapi_documents_typed_dependency_503() -> None:
     for (path, method), expected_models in operations.items():
         response = schema["paths"][path][method]["responses"]["503"]
         detail_schema = response["content"]["application/json"]["schema"]
-        refs = [detail_schema["$ref"]] if "$ref" in detail_schema else [
-            item["$ref"] for item in detail_schema.get("anyOf", [])
-        ]
+        refs = (
+            [detail_schema["$ref"]]
+            if "$ref" in detail_schema
+            else [item["$ref"] for item in detail_schema.get("anyOf", [])]
+        )
         assert {ref.rsplit("/", 1)[-1] for ref in refs} == expected_models
 
 
@@ -83,6 +88,23 @@ def test_index_start_409_is_the_discriminated_fence_union() -> None:
         "IndexRunConflictResponse",
         "PersistedStateCorruptResponse",
     }, body
+    for path, method in (
+        ("/api/index/{corpus_id}/status", "get"),
+        ("/api/index/{corpus_id}/runs/latest", "get"),
+        ("/api/index/{corpus_id}", "delete"),
+    ):
+        conflict = schema["paths"][path][method]["responses"]["409"]["content"]["application/json"][
+            "schema"
+        ]
+        conflict_refs = (
+            [conflict["$ref"]]
+            if "$ref" in conflict
+            else [item["$ref"] for item in conflict.get("anyOf", [])]
+        )
+        assert {r.rsplit("/", 1)[-1] for r in conflict_refs} == {
+            "IndexRunConflictResponse",
+            "PersistedStateCorruptResponse",
+        }, (path, conflict)
     detail = schema["components"]["schemas"]["IndexRunConflictResponse"]["properties"]["detail"]
     mapping = detail.get("discriminator", {}).get("mapping", {})
     assert set(mapping) == {"index_run_in_progress", "index_fence_corrupt"}, detail
@@ -92,7 +114,9 @@ def test_index_start_409_is_the_discriminated_fence_union() -> None:
     }
 
 
-def test_postgres_outage_returns_structured_503_across_stateful_api_families(tmp_path: Path) -> None:
+def test_postgres_outage_returns_structured_503_across_stateful_api_families(
+    tmp_path: Path,
+) -> None:
     config = json.loads((ROOT / "tribrid_config.json").read_text(encoding="utf-8"))
     config["indexing"]["postgres_url"] = "postgresql://postgres:postgres@127.0.0.1:1/ragweld_outage"
     (tmp_path / "tribrid_config.json").write_text(json.dumps(config), encoding="utf-8")
@@ -212,7 +236,9 @@ asyncio.run(main())
     assert "LITELLM_API_KEY" not in json.dumps(payload["body"])
 
 
-def test_readiness_is_503_and_sanitized_when_required_dependencies_are_unavailable(tmp_path: Path) -> None:
+def test_readiness_is_503_and_sanitized_when_required_dependencies_are_unavailable(
+    tmp_path: Path,
+) -> None:
     config = json.loads((ROOT / "tribrid_config.json").read_text(encoding="utf-8"))
     config["indexing"]["postgres_url"] = "postgresql://postgres:secret@127.0.0.1:1/ragweld_outage"
     config["graph_storage"]["neo4j_uri"] = "bolt://127.0.0.1:1"
