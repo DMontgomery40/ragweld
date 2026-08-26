@@ -1,5 +1,5 @@
 {
-  "model_count": 257,
+  "model_count": 260,
   "module": "server.models.tribrid_config_model",
   "root_models": {
     "ActiveSources": {
@@ -14569,6 +14569,133 @@
       "title": "ImageGenConfig",
       "type": "object"
     },
+    "IndexDeletionIncompleteDetail": {
+      "description": "Public error detail (HTTP 503) while a corpus's de-index tombstone is still being cleaned up.",
+      "properties": {
+        "code": {
+          "const": "index_deletion_incomplete",
+          "default": "index_deletion_incomplete",
+          "title": "Code",
+          "type": "string"
+        },
+        "corpus_id": {
+          "description": "Corpus whose external index cleanup has not completed",
+          "title": "Corpus Id",
+          "type": "string"
+        },
+        "created_at": {
+          "description": "When the deletion tombstone was written",
+          "format": "date-time",
+          "title": "Created At",
+          "type": "string"
+        },
+        "graph_repo_ids": {
+          "description": "Neo4j graphs still to drop",
+          "items": {
+            "type": "string"
+          },
+          "title": "Graph Repo Ids",
+          "type": "array"
+        },
+        "message": {
+          "description": "Stable, non-sensitive summary",
+          "title": "Message",
+          "type": "string"
+        },
+        "operator_hint": {
+          "description": "What the operator can do next",
+          "title": "Operator Hint",
+          "type": "string"
+        },
+        "qdrant_collections": {
+          "description": "Collections still to drop",
+          "items": {
+            "type": "string"
+          },
+          "title": "Qdrant Collections",
+          "type": "array"
+        }
+      },
+      "required": [
+        "corpus_id",
+        "created_at",
+        "message",
+        "operator_hint"
+      ],
+      "title": "IndexDeletionIncompleteDetail",
+      "type": "object"
+    },
+    "IndexDeletionIncompleteResponse": {
+      "$defs": {
+        "IndexDeletionIncompleteDetail": {
+          "description": "Public error detail (HTTP 503) while a corpus's de-index tombstone is still being cleaned up.",
+          "properties": {
+            "code": {
+              "const": "index_deletion_incomplete",
+              "default": "index_deletion_incomplete",
+              "title": "Code",
+              "type": "string"
+            },
+            "corpus_id": {
+              "description": "Corpus whose external index cleanup has not completed",
+              "title": "Corpus Id",
+              "type": "string"
+            },
+            "created_at": {
+              "description": "When the deletion tombstone was written",
+              "format": "date-time",
+              "title": "Created At",
+              "type": "string"
+            },
+            "graph_repo_ids": {
+              "description": "Neo4j graphs still to drop",
+              "items": {
+                "type": "string"
+              },
+              "title": "Graph Repo Ids",
+              "type": "array"
+            },
+            "message": {
+              "description": "Stable, non-sensitive summary",
+              "title": "Message",
+              "type": "string"
+            },
+            "operator_hint": {
+              "description": "What the operator can do next",
+              "title": "Operator Hint",
+              "type": "string"
+            },
+            "qdrant_collections": {
+              "description": "Collections still to drop",
+              "items": {
+                "type": "string"
+              },
+              "title": "Qdrant Collections",
+              "type": "array"
+            }
+          },
+          "required": [
+            "corpus_id",
+            "created_at",
+            "message",
+            "operator_hint"
+          ],
+          "title": "IndexDeletionIncompleteDetail",
+          "type": "object"
+        }
+      },
+      "description": "FastAPI response envelope for an incomplete-deletion detail.",
+      "properties": {
+        "detail": {
+          "$ref": "#/$defs/IndexDeletionIncompleteDetail"
+        }
+      },
+      "required": [
+        "detail"
+      ],
+      "title": "IndexDeletionIncompleteResponse",
+      "type": "object"
+    },
     "IndexEstimate": {
       "description": "Best-effort estimate for indexing cost/time before running the indexer.\n\nNotes:\n- Token count is an approximation (byte-based heuristic).\n- Time is an intentionally rough range (depends on machine, provider latency,\n  GraphRAG extraction scope, and local hardware throughput).",
       "properties": {
@@ -14745,6 +14872,39 @@
       "title": "IndexEstimate",
       "type": "object"
     },
+    "IndexFenceCorruptDetail": {
+      "description": "Public error detail returned (HTTP 409) when a corpus carries a malformed index-run fence.",
+      "properties": {
+        "code": {
+          "const": "index_fence_corrupt",
+          "default": "index_fence_corrupt",
+          "title": "Code",
+          "type": "string"
+        },
+        "corpus_id": {
+          "description": "Corpus whose index-run fence is malformed",
+          "title": "Corpus Id",
+          "type": "string"
+        },
+        "message": {
+          "description": "Stable, non-sensitive summary",
+          "title": "Message",
+          "type": "string"
+        },
+        "operator_hint": {
+          "description": "What the operator can do next",
+          "title": "Operator Hint",
+          "type": "string"
+        }
+      },
+      "required": [
+        "corpus_id",
+        "message",
+        "operator_hint"
+      ],
+      "title": "IndexFenceCorruptDetail",
+      "type": "object"
+    },
     "IndexRequest": {
       "description": "Request to index a repository.",
       "properties": {
@@ -14833,6 +14993,39 @@
     },
     "IndexRunConflictResponse": {
       "$defs": {
+        "IndexFenceCorruptDetail": {
+          "description": "Public error detail returned (HTTP 409) when a corpus carries a malformed index-run fence.",
+          "properties": {
+            "code": {
+              "const": "index_fence_corrupt",
+              "default": "index_fence_corrupt",
+              "title": "Code",
+              "type": "string"
+            },
+            "corpus_id": {
+              "description": "Corpus whose index-run fence is malformed",
+              "title": "Corpus Id",
+              "type": "string"
+            },
+            "message": {
+              "description": "Stable, non-sensitive summary",
+              "title": "Message",
+              "type": "string"
+            },
+            "operator_hint": {
+              "description": "What the operator can do next",
+              "title": "Operator Hint",
+              "type": "string"
+            }
+          },
+          "required": [
+            "corpus_id",
+            "message",
+            "operator_hint"
+          ],
+          "title": "IndexFenceCorruptDetail",
+          "type": "object"
+        },
         "IndexRunConflictDetail": {
           "description": "Public error detail returned (HTTP 409) when a corpus is fenced by a running index run.",
           "properties": {
@@ -14893,10 +15086,25 @@
           "type": "object"
         }
       },
-      "description": "FastAPI response envelope for an index-run conflict detail.",
+      "description": "FastAPI response envelope for every index-run fence conflict (HTTP 409).",
       "properties": {
         "detail": {
-          "$ref": "#/$defs/IndexRunConflictDetail"
+          "discriminator": {
+            "mapping": {
+              "index_fence_corrupt": "#/$defs/IndexFenceCorruptDetail",
+              "index_run_in_progress": "#/$defs/IndexRunConflictDetail"
+            },
+            "propertyName": "code"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/IndexRunConflictDetail"
+            },
+            {
+              "$ref": "#/$defs/IndexFenceCorruptDetail"
+            }
+          ],
+          "title": "Detail"
         }
       },
       "required": [
@@ -22484,7 +22692,8 @@
               "postgres",
               "neo4j",
               "litellm",
-              "vllm"
+              "vllm",
+              "index_manifests"
             ]
           },
           "title": "Dependencies",

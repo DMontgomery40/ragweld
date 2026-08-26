@@ -13,18 +13,24 @@ Retention: a commit moves the generation it replaces onto the manifest's
 operator's ``indexing.generation_retention_seconds`` (a reader that resolved
 the old manifest before the commit keeps finding its collection and graph); a
 later commit drops the entries whose grace has elapsed, by exact id, and prunes
-them from the manifest. Nothing is ever swept by name prefix.
+them from the manifest. Each store is tracked on its own: a retired entry whose
+collection is reused by the live generation still names its old graph for
+cleanup. Nothing is ever swept by name prefix while a manifest is live.
 
 Concurrency: a durable per-corpus run fence (``corpora.meta.index_run``) with an
 owner, a heartbeat and a lease keeps two index runs from building and retiring
-against the same corpus, survives a worker crash (a stale fence can be taken
-over) and is checked again, under row lock, by the promotion transaction.
-Incremental writers (recall, Codex ingest) create a corpus's first generation
-with a set-if-absent under the same per-corpus advisory lock.
+against the same corpus, survives a worker crash (a stale fence is taken over
+and its staged resources reclaimed exactly), and is checked again, under row
+lock, by the promotion transaction, which builds the new manifest from the
+row-locked previous one. Incremental writers (recall, Codex ingest) write rows
+and vectors inside one Postgres transaction that holds the same per-corpus
+advisory lock, so they serialise with promotion and with each other.
 
 Deletion: de-indexing records the exact Qdrant collections and Neo4j graph ids
 it must drop as a tombstone on the corpus row before any external store is
-touched; the tombstone is cleared only when every external cleanup succeeded.
+touched. While the tombstone exists every reader and writer of the corpus
+fails closed with a typed 503; it is cleared (compare-and-set on its own
+timestamp) only when every external cleanup succeeded.
 """
 
 from __future__ import annotations
@@ -49,7 +55,7 @@ INDEX_TOMBSTONE_META_KEY = "index_tombstone"
 
 
 class RetiredGeneration(BaseModel):
-    """A generation the manifest replaced; kept readable until its grace elapses."""
+    """A generation the manifest replaced; each store stays readable until its grace elapses."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -62,6 +68,16 @@ class RetiredGeneration(BaseModel):
 
     def due(self, *, now: datetime, grace_seconds: int) -> bool:
         return self.retired_at + timedelta(seconds=max(0, int(grace_seconds))) <= now
+
+    def masked(
+        self, *, live_collection: str | None, live_graph: str | None
+    ) -> RetiredGeneration | None:
+        """This entry without any resource the live generation reuses; None when nothing is left."""
+        collection = None if self.qdrant_collection == live_collection else self.qdrant_collection
+        graph = None if self.graph_repo_id == live_graph else self.graph_repo_id
+        if collection is None and graph is None:
+            return None
+        return self.model_copy(update={"qdrant_collection": collection, "graph_repo_id": graph})
 
 
 class GenerationManifest(BaseModel):
@@ -86,16 +102,17 @@ class GenerationManifest(BaseModel):
     )
 
     def due_for_retirement(self, *, now: datetime, grace_seconds: int) -> list[RetiredGeneration]:
-        """Retired entries whose grace has elapsed, never naming the live resources."""
-        return [
-            entry
-            for entry in self.retired
-            if entry.due(now=now, grace_seconds=grace_seconds)
-            and (
-                entry.qdrant_collection != self.qdrant_collection or entry.qdrant_collection is None
+        """Retired entries whose grace has elapsed, masked so they never name a live resource."""
+        out: list[RetiredGeneration] = []
+        for entry in self.retired:
+            if not entry.due(now=now, grace_seconds=grace_seconds):
+                continue
+            masked = entry.masked(
+                live_collection=self.qdrant_collection, live_graph=self.graph_repo_id
             )
-            and (entry.graph_repo_id != self.graph_repo_id or entry.graph_repo_id is None)
-        ]
+            if masked is not None:
+                out.append(masked)
+        return out
 
     def all_qdrant_collections(self) -> list[str]:
         out = [
@@ -116,10 +133,29 @@ class IndexRunFence(BaseModel):
     run_id: str = Field(min_length=1)
     owner: str = Field(min_length=1, description="Worker holding the fence (host:pid).")
     started_at: datetime
-    heartbeat_at: datetime
+    heartbeat_at: datetime = Field(description="Database time of the last heartbeat.")
+    staged_qdrant_collection: str | None = Field(
+        default=None, description="Collection this run is building (reclaimed if the run dies)."
+    )
+    staged_graph_repo_id: str | None = Field(
+        default=None, description="Graph id this run is building (reclaimed if the run dies)."
+    )
 
     def is_stale(self, *, now: datetime, lease_seconds: int) -> bool:
         return self.heartbeat_at + timedelta(seconds=max(1, int(lease_seconds))) <= now
+
+
+class FenceClaim(BaseModel):
+    """Outcome of an acquire: the live holder that refused us, or the stale fence we took over."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    held_by: IndexRunFence | None = None
+    taken_over: IndexRunFence | None = None
+
+    @property
+    def acquired(self) -> bool:
+        return self.held_by is None
 
 
 class DeletionTombstone(BaseModel):
@@ -180,6 +216,28 @@ class IndexFenceCorruptError(RuntimeError):
         )
 
 
+class DeletionIncompleteError(RuntimeError):
+    """The corpus is being de-indexed and its external cleanup has not completed (retry later)."""
+
+    def __init__(self, repo_id: str, tombstone: DeletionTombstone) -> None:
+        self.repo_id = repo_id
+        self.tombstone = tombstone
+        super().__init__(
+            f"Corpus {repo_id} is being de-indexed; {len(tombstone.qdrant_collections)} collection(s) and "
+            f"{len(tombstone.graph_repo_ids)} graph(s) still to drop (since {tombstone.created_at.isoformat()})"
+        )
+
+
+class TombstoneCleanupError(RuntimeError):
+    """An external store named by a deletion tombstone could not be cleaned (retry later)."""
+
+    def __init__(self, dependency: str, operation: str, cause: BaseException) -> None:
+        self.dependency = dependency
+        self.operation = operation
+        self.cause = cause
+        super().__init__(f"{operation}: {dependency} cleanup failed: {cause}")
+
+
 def fence_owner() -> str:
     return f"{socket.gethostname()}:{os.getpid()}"
 
@@ -189,50 +247,81 @@ def heartbeat_interval_seconds(lease_seconds: int) -> float:
     return max(1.0, float(lease_seconds) / 10.0)
 
 
+def _dedupe_retired(entries: list[RetiredGeneration]) -> list[RetiredGeneration]:
+    seen: set[tuple[str | None, str | None]] = set()
+    out: list[RetiredGeneration] = []
+    for entry in entries:
+        key = (entry.qdrant_collection, entry.graph_repo_id)
+        if key in seen or key == (None, None):
+            continue
+        seen.add(key)
+        out.append(entry)
+    return out
+
+
 def build_generation(
     *,
     run_id: str,
     qdrant_collection: str | None,
     graph_repo_id: str | None,
     previous: GenerationManifest | None = None,
+    now: datetime | None = None,
 ) -> GenerationManifest:
-    now = datetime.now(UTC)
+    """The manifest for a new live generation; ``previous`` (if any) joins the retired list.
+
+    Resources the new generation reuses are masked out per store, never as a
+    whole entry, so a replaced generation that shares one id with the new one
+    still names its other store for cleanup. Entries are deduplicated by the
+    pair of ids they name.
+    """
+    stamp = now or datetime.now(UTC)
+    live_collection = str(qdrant_collection) if qdrant_collection else None
+    live_graph = str(graph_repo_id) if graph_repo_id else None
     retired: list[RetiredGeneration] = list(previous.retired) if previous else []
-    if previous is not None and (previous.qdrant_collection or previous.graph_repo_id):
+    if previous is not None:
         retired.append(
             RetiredGeneration(
                 run_id=previous.run_id,
                 qdrant_collection=previous.qdrant_collection,
                 graph_repo_id=previous.graph_repo_id,
-                retired_at=now,
+                retired_at=stamp,
             )
         )
-    # Never carry an entry that names the resources going live now.
-    retired = [
-        r
-        for r in retired
-        if not (r.qdrant_collection and r.qdrant_collection == qdrant_collection)
-        and not (r.graph_repo_id and r.graph_repo_id == graph_repo_id)
+    masked = [
+        m
+        for m in (r.masked(live_collection=live_collection, live_graph=live_graph) for r in retired)
+        if m is not None
     ]
     return GenerationManifest(
         run_id=str(run_id),
-        qdrant_collection=str(qdrant_collection) if qdrant_collection else None,
-        graph_repo_id=str(graph_repo_id) if graph_repo_id else None,
-        promoted_at=now,
-        retired=retired,
+        qdrant_collection=live_collection,
+        graph_repo_id=live_graph,
+        promoted_at=stamp,
+        retired=_dedupe_retired(masked),
     )
+
+
+def tombstone_from_meta(meta: dict[str, Any] | None) -> DeletionTombstone | None:
+    raw = meta.get(INDEX_TOMBSTONE_META_KEY) if isinstance(meta, dict) else None
+    return DeletionTombstone.model_validate(raw) if isinstance(raw, dict) else None
 
 
 def generation_from_corpus_row(row: dict[str, Any] | None) -> GenerationManifest | None:
     """The manifest stored on a corpus row, or None when the corpus has no promoted generation.
 
-    A present-but-malformed manifest raises (loudly) instead of reading as
+    A corpus whose de-index tombstone is still being cleaned up raises
+    ``DeletionIncompleteError``: readers and writers fail closed (typed 503)
+    instead of reading an empty index while collections are half-dropped. A
+    present-but-malformed manifest raises (loudly) instead of reading as
     unpromoted: that would silently disable retrieval for an indexed corpus.
     """
     if not row:
         return None
-    meta = row.get("meta")
-    generation = meta.get(GENERATION_META_KEY) if isinstance(meta, dict) else None
+    meta = row.get("meta") if isinstance(row.get("meta"), dict) else {}
+    tombstone = tombstone_from_meta(meta)
+    if tombstone is not None:
+        raise DeletionIncompleteError(str(row.get("repo_id") or ""), tombstone)
+    generation = meta.get(GENERATION_META_KEY)
     if generation is None:
         return None
     return GenerationManifest.model_validate(generation)
@@ -246,22 +335,14 @@ def graph_repo_id_of(generation: GenerationManifest | None) -> str | None:
     return generation.graph_repo_id if generation else None
 
 
-def build_tombstone(generation: GenerationManifest | None) -> DeletionTombstone:
+def build_tombstone(
+    generation: GenerationManifest | None, *, now: datetime | None = None
+) -> DeletionTombstone:
     return DeletionTombstone(
         qdrant_collections=generation.all_qdrant_collections() if generation else [],
         graph_repo_ids=generation.all_graph_repo_ids() if generation else [],
-        created_at=datetime.now(UTC),
+        created_at=now or datetime.now(UTC),
     )
-
-
-class TombstoneCleanupError(RuntimeError):
-    """An external store named by a deletion tombstone could not be cleaned (retry later)."""
-
-    def __init__(self, dependency: str, operation: str, cause: BaseException) -> None:
-        self.dependency = dependency
-        self.operation = operation
-        self.cause = cause
-        super().__init__(f"{operation}: {dependency} cleanup failed: {cause}")
 
 
 async def drop_tombstoned_stores(
@@ -269,9 +350,12 @@ async def drop_tombstoned_stores(
 ) -> int:
     """Drop every external resource a deletion tombstone names (plus the corpus's staged namespace).
 
-    Raises ``TombstoneCleanupError`` on the first store that fails; the caller
-    keeps the tombstone so the next attempt retries exactly these targets.
-    Returns the number of Qdrant collections removed.
+    The tombstone blocks every writer of the corpus (no generation can appear
+    while it exists), so the staged-namespace sweep can only meet collections
+    of runs that died before de-indexing. Raises ``TombstoneCleanupError`` on
+    the first store that fails; the caller keeps the tombstone so the next
+    attempt retries exactly these targets. Returns the number of Qdrant
+    collections removed.
     """
     from server.db.neo4j import Neo4jClient
     from server.retrieval.qdrant_store import QdrantChunkStore
@@ -303,6 +387,43 @@ async def drop_tombstoned_stores(
     return int(removed or 0)
 
 
+async def reclaim_stale_run(config: TriBridConfig, repo_id: str, fence: IndexRunFence) -> None:
+    """Best-effort exact cleanup of a dead run's staged resources (its fence was taken over)."""
+    from server.db.neo4j import Neo4jClient
+    from server.retrieval.qdrant_store import QdrantChunkStore
+
+    if fence.staged_qdrant_collection:
+        try:
+            await QdrantChunkStore(config).drop_generation(fence.staged_qdrant_collection)
+        except Exception as exc:
+            logger.warning(
+                "reclaiming staged collection %s of dead run %s failed: %s",
+                fence.staged_qdrant_collection,
+                fence.run_id,
+                exc,
+            )
+    if fence.staged_graph_repo_id:
+        try:
+            neo4j = Neo4jClient(
+                config.graph_storage.neo4j_uri,
+                config.graph_storage.neo4j_user,
+                config.graph_storage.resolve_password(),
+                database=config.graph_storage.resolve_database(repo_id),
+            )
+            await neo4j.connect()
+            try:
+                await neo4j.delete_graph(fence.staged_graph_repo_id)
+            finally:
+                await neo4j.disconnect()
+        except Exception as exc:
+            logger.warning(
+                "reclaiming staged graph %s of dead run %s failed: %s",
+                fence.staged_graph_repo_id,
+                fence.run_id,
+                exc,
+            )
+
+
 _PRE_RETENTION_KEYS = ("previous_qdrant_collection", "previous_graph_repo_id")
 
 
@@ -310,8 +431,9 @@ def upgrade_pre_retention_manifest(raw: dict[str, Any]) -> GenerationManifest | 
     """One-time shape upgrade for manifests written before the ``retired`` list existed.
 
     Those carried a single ``previous_*`` slot. The slot becomes a retired entry
-    stamped with the manifest's own promotion time. Returns None when ``raw`` is
-    not of that shape.
+    stamped with the manifest's own promotion time; ids equal to the live ones
+    are masked and an entry naming nothing is not added. Returns None when
+    ``raw`` is not of that shape.
     """
     if not any(k in raw for k in _PRE_RETENTION_KEYS):
         return None
@@ -319,16 +441,24 @@ def upgrade_pre_retention_manifest(raw: dict[str, Any]) -> GenerationManifest | 
     manifest = GenerationManifest.model_validate(body)
     prev_collection = raw.get("previous_qdrant_collection")
     prev_graph = raw.get("previous_graph_repo_id")
-    if prev_collection or prev_graph:
-        manifest.retired.append(
-            RetiredGeneration(
-                run_id=f"pre-retention-{manifest.run_id}",
-                qdrant_collection=str(prev_collection) if prev_collection else None,
-                graph_repo_id=str(prev_graph) if prev_graph else None,
-                retired_at=manifest.promoted_at,
-            )
-        )
+    entry = RetiredGeneration(
+        run_id=f"pre-retention-{manifest.run_id}",
+        qdrant_collection=str(prev_collection) if prev_collection else None,
+        graph_repo_id=str(prev_graph) if prev_graph else None,
+        retired_at=manifest.promoted_at,
+    ).masked(live_collection=manifest.qdrant_collection, live_graph=manifest.graph_repo_id)
+    if entry is not None:
+        manifest.retired.append(entry)
+    manifest.retired = _dedupe_retired(manifest.retired)
     return manifest
+
+
+_UPGRADE_STATE = {"complete": False}
+
+
+def manifest_upgrade_complete() -> bool:
+    """Whether the durable manifest upgrades ran to completion once in this process."""
+    return bool(_UPGRADE_STATE["complete"])
 
 
 async def ensure_generation_manifests(config: TriBridConfig) -> int:
@@ -343,7 +473,7 @@ async def ensure_generation_manifests(config: TriBridConfig) -> int:
       the ``retired`` list (same lock; only if the row still carries that shape).
 
     Idempotent: corpora already in the current shape are untouched. Returns the
-    number of corpora changed.
+    number of corpora changed and marks the upgrade complete for readiness.
     """
     from server.retrieval.qdrant_store import QdrantChunkStore
 
@@ -370,6 +500,8 @@ async def ensure_generation_manifests(config: TriBridConfig) -> int:
                         "generation manifest of %s upgraded to the retained-list shape", repo_id
                     )
                 continue
+            if tombstone_from_meta(meta) is not None:
+                continue
             # A pre-manifest corpus is live iff its Qdrant alias still points at a
             # collection (an indexed corpus, or an incremental one that wrote
             # before the manifest existed). Anything else has nothing to point at:
@@ -383,12 +515,10 @@ async def ensure_generation_manifests(config: TriBridConfig) -> int:
                     run_id=f"legacy-{repo_id}", qdrant_collection=legacy, graph_repo_id=repo_id
                 ),
             )
-            if not recorded:
-                # A full run promoted this corpus while we looked: its manifest wins;
-                # the alias is stale either way.
-                await qdrant.drop_legacy_alias(repo_id)
-                continue
             await qdrant.drop_legacy_alias(repo_id)
+            if not recorded:
+                # A full run promoted this corpus while we looked: its manifest wins.
+                continue
             upgraded += 1
             logger.info(
                 "generation manifest recorded for pre-manifest corpus %s (qdrant=%s)",
@@ -397,6 +527,7 @@ async def ensure_generation_manifests(config: TriBridConfig) -> int:
             )
     finally:
         await pg.disconnect()
+    _UPGRADE_STATE["complete"] = True
     return upgraded
 
 
@@ -414,7 +545,7 @@ async def ensure_generation_manifests_until_done(
             raise
         except Exception as error:
             logger.warning(
-                "generation manifest upgrade not possible yet (pre-manifest corpora read as unpromoted until it runs); retrying in %ss: %s",
+                "generation manifest upgrade not possible yet (readiness reports it pending); retrying in %ss: %s",
                 retry_seconds,
                 error,
             )
@@ -422,7 +553,9 @@ async def ensure_generation_manifests_until_done(
 
 
 __all__ = [
+    "DeletionIncompleteError",
     "DeletionTombstone",
+    "FenceClaim",
     "GenerationManifest",
     "IndexFenceCorruptError",
     "IndexFenceHeldError",
@@ -440,6 +573,9 @@ __all__ = [
     "generation_from_corpus_row",
     "graph_repo_id_of",
     "heartbeat_interval_seconds",
+    "manifest_upgrade_complete",
     "qdrant_collection_of",
+    "reclaim_stale_run",
+    "tombstone_from_meta",
     "upgrade_pre_retention_manifest",
 ]

@@ -400,7 +400,9 @@ class ReadinessStatus(BaseModel):
     ready: bool
     corpus_id: str | None = None
     corpus_error: str | None = None
-    dependencies: dict[Literal["postgres", "neo4j", "litellm", "vllm"], ReadinessDependencyStatus]
+    dependencies: dict[
+        Literal["postgres", "neo4j", "litellm", "vllm", "index_manifests"], ReadinessDependencyStatus
+    ]
 
 
 class DockerContainer(BaseModel):
@@ -749,10 +751,37 @@ class IndexRunConflictDetail(BaseModel):
     operator_hint: str = Field(description="What the operator can do next")
 
 
-class IndexRunConflictResponse(BaseModel):
-    """FastAPI response envelope for an index-run conflict detail."""
+class IndexFenceCorruptDetail(BaseModel):
+    """Public error detail returned (HTTP 409) when a corpus carries a malformed index-run fence."""
 
-    detail: IndexRunConflictDetail
+    code: Literal["index_fence_corrupt"] = "index_fence_corrupt"
+    corpus_id: str = Field(description="Corpus whose index-run fence is malformed")
+    message: str = Field(description="Stable, non-sensitive summary")
+    operator_hint: str = Field(description="What the operator can do next")
+
+
+class IndexRunConflictResponse(BaseModel):
+    """FastAPI response envelope for every index-run fence conflict (HTTP 409)."""
+
+    detail: IndexRunConflictDetail | IndexFenceCorruptDetail = Field(discriminator="code")
+
+
+class IndexDeletionIncompleteDetail(BaseModel):
+    """Public error detail (HTTP 503) while a corpus's de-index tombstone is still being cleaned up."""
+
+    code: Literal["index_deletion_incomplete"] = "index_deletion_incomplete"
+    corpus_id: str = Field(description="Corpus whose external index cleanup has not completed")
+    qdrant_collections: list[str] = Field(default_factory=list, description="Collections still to drop")
+    graph_repo_ids: list[str] = Field(default_factory=list, description="Neo4j graphs still to drop")
+    created_at: datetime = Field(description="When the deletion tombstone was written")
+    message: str = Field(description="Stable, non-sensitive summary")
+    operator_hint: str = Field(description="What the operator can do next")
+
+
+class IndexDeletionIncompleteResponse(BaseModel):
+    """FastAPI response envelope for an incomplete-deletion detail."""
+
+    detail: IndexDeletionIncompleteDetail
 
 
 class RequiredRetrievalLegFailureDetail(BaseModel):

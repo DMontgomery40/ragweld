@@ -1120,6 +1120,34 @@ export interface ImageGenConfig {
   default_resolution?: string; // default: "1024x1024"
 }
 
+/** Public error detail (HTTP 503) while a corpus's de-index tombstone is still being cleaned up. */
+export interface IndexDeletionIncompleteDetail {
+  code?: "index_deletion_incomplete"; // default: "index_deletion_incomplete"
+  /** Corpus whose external index cleanup has not completed */
+  corpus_id: string;
+  /** Collections still to drop */
+  qdrant_collections?: string[];
+  /** Neo4j graphs still to drop */
+  graph_repo_ids?: string[];
+  /** When the deletion tombstone was written */
+  created_at: string;
+  /** Stable, non-sensitive summary */
+  message: string;
+  /** What the operator can do next */
+  operator_hint: string;
+}
+
+/** Public error detail returned (HTTP 409) when a corpus carries a malformed index-run fence. */
+export interface IndexFenceCorruptDetail {
+  code?: "index_fence_corrupt"; // default: "index_fence_corrupt"
+  /** Corpus whose index-run fence is malformed */
+  corpus_id: string;
+  /** Stable, non-sensitive summary */
+  message: string;
+  /** What the operator can do next */
+  operator_hint: string;
+}
+
 /** Public error detail returned (HTTP 409) when a corpus is fenced by a running index run. */
 export interface IndexRunConflictDetail {
   code?: "index_run_in_progress"; // default: "index_run_in_progress"
@@ -3568,6 +3596,11 @@ export interface HealthStatus {
   services?: Record<string, HealthServiceStatus>;
 }
 
+/** FastAPI response envelope for an incomplete-deletion detail. */
+export interface IndexDeletionIncompleteResponse {
+  detail: IndexDeletionIncompleteDetail;
+}
+
 /** Best-effort estimate for indexing cost/time before running the indexer.  Notes: - Token count is an approximation (byte-based heuristic). - Time is an intentionally rough range (depends on machine, provider latency,   GraphRAG extraction scope, and local hardware throughput). */
 export interface IndexEstimate {
   /** Corpus identifier */
@@ -3618,9 +3651,9 @@ export interface IndexRequest {
   force_reindex?: boolean;
 }
 
-/** FastAPI response envelope for an index-run conflict detail. */
+/** FastAPI response envelope for every index-run fence conflict (HTTP 409). */
 export interface IndexRunConflictResponse {
-  detail: IndexRunConflictDetail;
+  detail: IndexRunConflictDetail | IndexFenceCorruptDetail;
 }
 
 /** Persisted index terminal event for replay. */

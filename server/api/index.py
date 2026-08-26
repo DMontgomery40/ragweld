@@ -6,6 +6,7 @@ import importlib.util
 import json
 import logging
 import multiprocessing
+import os
 import platform
 import queue
 import re
@@ -32,18 +33,19 @@ from server.db.postgres import PostgresClient
 from server.indexing.chunker import Chunker
 from server.indexing.embedder import Embedder, configure_postgres_embedding_cache_backend
 from server.indexing.generations import (
+    DeletionIncompleteError,
     GenerationManifest,
     IndexFenceCorruptError,
     IndexFenceHeldError,
     IndexFenceLostError,
     IndexRunFence,
     TombstoneCleanupError,
-    build_generation,
     drop_tombstoned_stores,
     fence_owner,
     generation_from_corpus_row,
     heartbeat_interval_seconds,
     qdrant_collection_of,
+    reclaim_stale_run,
 )
 from server.indexing.loader import FileLoader
 from server.indexing.official_graphrag import (
@@ -53,6 +55,7 @@ from server.indexing.official_graphrag import (
 from server.indexing.text_extractors import extract_text_for_path, extraction_method_for_path
 from server.models.index import (
     Chunk,
+    IndexFenceCorruptDetail,
     IndexRequest,
     IndexRunConflictDetail,
     IndexRunConflictResponse,
@@ -69,6 +72,8 @@ from server.models.tribrid_config_model import (
     DashboardIndexStatusMetadata,
     DashboardIndexStatusResponse,
     DashboardIndexStorageBreakdown,
+    DependencyUnavailableResponse,
+    IndexDeletionIncompleteResponse,
     IndexEstimate,
     TriBridConfig,
 )
@@ -191,9 +196,12 @@ def _run_events_path(repo_id: str, run_id: str) -> Path:
 
 
 def _persist_run_summary(summary: IndexRunSummary) -> None:
+    """Queue an atomic replace of the run summary (off the event loop, in order with its events)."""
     path = _run_summary_path(summary.repo_id, summary.run_id)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(summary.model_dump_json(by_alias=True, exclude_none=False, indent=2))
+    _ensure_event_writer()
+    _EVENT_WRITE_QUEUE.put(
+        ("replace", path, summary.model_dump_json(by_alias=True, exclude_none=False, indent=2))
+    )
 
 
 def _load_run_summary(repo_id: str, run_id: str) -> IndexRunSummary | None:
@@ -234,10 +242,37 @@ async def _manifest_names_run(repo_id: str, run_id: str) -> bool | None:
         finally:
             with contextlib.suppress(Exception):
                 await pg.disconnect()
+    except CorpusNotFoundError:
+        # No such corpus any more: nothing can name the run (definitive, not unknown).
+        return False
+    except DeletionIncompleteError:
+        # Being de-indexed: no live generation names any run.
+        return False
     except Exception:
         logger.warning("could not read the generation manifest of %s", repo_id, exc_info=True)
         return None
     return generation is not None and generation.run_id == run_id
+
+
+async def _live_fence(repo_id: str, *, cfg: TriBridConfig | None = None) -> IndexRunFence | None:
+    """The corpus's durable fence if it is fresh (None when absent, stale, or unreadable)."""
+    try:
+        cfg = cfg or await load_scoped_config(repo_id=repo_id)
+        pg = PostgresClient(cfg.indexing.postgres_url)
+        await pg.connect()
+        try:
+            fence = await pg.get_index_fence(repo_id)
+            if fence is None:
+                return None
+            db_now = await pg.database_now()
+        finally:
+            with contextlib.suppress(Exception):
+                await pg.disconnect()
+    except Exception:
+        return None
+    if fence.is_stale(now=db_now, lease_seconds=cfg.indexing.index_run_lease_seconds):
+        return None
+    return fence
 
 
 async def _finalize_interrupted_run(repo_id: str, run: IndexRunSummary) -> IndexRunSummary:
@@ -254,13 +289,22 @@ async def _finalize_interrupted_run(repo_id: str, run: IndexRunSummary) -> Index
     if task is not None and not task.done():
         return run
 
-    if await _manifest_names_run(repo_id, run.run_id):
+    named = await _manifest_names_run(repo_id, run.run_id)
+    if named is None:
+        # The manifest could not be read (Postgres outage): the run's outcome is
+        # unknown right now, never an error. It is reconsidered on the next read.
+        return run
+    if named:
         finalized = run.model_copy(
             update={"status": "complete", "progress": 1.0, "completed_at": datetime.now(UTC)}
         )
         with contextlib.suppress(Exception):
             _persist_run_summary(finalized)
         return finalized
+    live = await _live_fence(repo_id)
+    if live is not None and live.run_id == run.run_id:
+        # Another worker holds a fresh fence for this very run: it is still indexing.
+        return run
 
     await _flush_run_events()
     msg = (
@@ -346,26 +390,43 @@ def _to_optional_float(value: Any) -> float | None:
         return None
 
 
-_EVENT_WRITE_QUEUE: queue.Queue[tuple[Path, str] | None] = queue.Queue(maxsize=20000)
+_EVENT_WRITE_QUEUE: queue.Queue[tuple[str, Path, str] | None] = queue.Queue()
 _EVENT_WRITER_LOCK = threading.Lock()
 _EVENT_WRITER: threading.Thread | None = None
-_EVENT_WRITES_DROPPED = 0
 
 
 def _event_writer_loop() -> None:
+    """Single FIFO writer: appends event lines, replaces summaries atomically; nothing is dropped."""
     while True:
         item = _EVENT_WRITE_QUEUE.get()
         try:
             if item is None:
                 return
-            path, line = item
+            kind, path, payload = item
             path.parent.mkdir(parents=True, exist_ok=True)
-            with path.open("a", encoding="utf-8") as f:
-                f.write(line)
+            if kind == "append":
+                with path.open("a", encoding="utf-8") as f:
+                    f.write(payload)
+            else:
+                tmp = path.with_name(path.name + ".tmp")
+                tmp.write_text(payload, encoding="utf-8")
+                os.replace(tmp, path)
         except Exception:
-            logger.warning("index event persistence failed", exc_info=True)
+            logger.warning("index run persistence failed", exc_info=True)
         finally:
             _EVENT_WRITE_QUEUE.task_done()
+
+
+async def shutdown_event_writer() -> None:
+    """Flush every queued record and stop the writer (called from the app lifespan shutdown)."""
+    global _EVENT_WRITER
+    with _EVENT_WRITER_LOCK:
+        writer = _EVENT_WRITER
+        _EVENT_WRITER = None
+    if writer is None or not writer.is_alive():
+        return
+    _EVENT_WRITE_QUEUE.put(None)
+    await asyncio.to_thread(writer.join)
 
 
 def _ensure_event_writer() -> None:
@@ -389,7 +450,6 @@ async def _flush_run_events() -> None:
 
 def _append_run_event(repo_id: str, run_id: str, event: dict[str, Any]) -> None:
     """Queue one JSONL event for the writer thread; never touches the disk on the event loop."""
-    global _EVENT_WRITES_DROPPED
     event_type = str(event.get("type") or "").strip()
     if not event_type:
         return
@@ -411,14 +471,7 @@ def _append_run_event(repo_id: str, run_id: str, event: dict[str, Any]) -> None:
     path = _run_events_path(repo_id, run_id)
     line = evt.model_dump_json(by_alias=True, exclude_none=True) + "\n"
     _ensure_event_writer()
-    try:
-        _EVENT_WRITE_QUEUE.put_nowait((path, line))
-    except queue.Full:
-        _EVENT_WRITES_DROPPED += 1
-        if _EVENT_WRITES_DROPPED % 1000 == 1:
-            logger.warning(
-                "index event persistence queue full; %d event(s) dropped", _EVENT_WRITES_DROPPED
-            )
+    _EVENT_WRITE_QUEUE.put(("append", path, line))
 
 
 def _load_run_events(repo_id: str, run_id: str, *, limit: int) -> list[IndexRunEvent]:
@@ -514,8 +567,10 @@ async def _stop_without_local_task(repo_id: str) -> IndexStatus:
         ):
             raise _index_run_conflict(repo_id, fence)
         released = await pg.release_index_fence(repo_id, fence.run_id)
-    except (IndexFenceCorruptError, CorpusNotFoundError) as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except IndexFenceCorruptError as exc:
+        raise _fence_corrupt_conflict(repo_id, exc) from exc
+    except CorpusNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     except HTTPException:
         raise
     except Exception as exc:
@@ -539,6 +594,18 @@ async def _stop_without_local_task(repo_id: str) -> IndexStatus:
     )
     _STATUS[repo_id] = status
     return status
+
+
+def _fence_corrupt_conflict(repo_id: str, exc: IndexFenceCorruptError) -> HTTPException:
+    detail = IndexFenceCorruptDetail(
+        corpus_id=repo_id,
+        message=f"Corpus {repo_id} carries a malformed index-run fence.",
+        operator_hint=(
+            "De-index the corpus (DELETE /api/index/{corpus_id}) to clear the fence, then re-index. "
+            f"Stored value: {exc.raw!r}"
+        ),
+    )
+    return HTTPException(status_code=409, detail=detail.model_dump(mode="json"))
 
 
 def _index_run_conflict(repo_id: str, fence: IndexRunFence) -> HTTPException:
@@ -1110,27 +1177,23 @@ async def _run_index(
                         timeout_s=float(cfg.graph_indexing.vector_index_online_timeout_s),
                     )
                     if not online:
-                        _emit_event(
-                            event_queue,
-                            {
-                                "type": "warning",
-                                "message": (
-                                    "Neo4j chunk vector index did not reach ONLINE state "
-                                    f"({cfg.graph_indexing.chunk_vector_index_name})"
-                                ),
-                            },
-                            drop_oldest=True,
+                        raise RuntimeError(
+                            "Neo4j chunk vector index did not reach ONLINE state "
+                            f"({cfg.graph_indexing.chunk_vector_index_name}); chunk-mode graph "
+                            "retrieval would be unable to query this corpus, so the run fails closed"
                         )
-                except Exception:
-                    logger.warning("Neo4j vector index ensure failed", exc_info=True)
+                except Exception as exc:
+                    # Chunk embeddings are stored for chunk-mode graph retrieval: an
+                    # index that cannot serve them is a promotion prerequisite, not a warning.
                     _emit_event(
                         event_queue,
                         {
-                            "type": "warning",
-                            "message": "Neo4j chunk vector index setup failed for this run",
+                            "type": "error",
+                            "message": f"Neo4j chunk vector index setup failed: {exc}",
                         },
-                        drop_oldest=True,
+                        guarantee=True,
                     )
+                    raise RuntimeError(f"Neo4j chunk vector index setup failed: {exc}") from exc
     except Exception as exc:
         # Explicitly fail when graph indexing was requested but cannot initialize.
         logger.warning(
@@ -1750,6 +1813,17 @@ async def _run_index_body(
     return stats
 
 
+async def _release_fence(repo_id: str, run_id: str) -> bool:
+    cfg_release = await load_scoped_config(repo_id=repo_id)
+    pg_release = PostgresClient(cfg_release.indexing.postgres_url)
+    await pg_release.connect()
+    try:
+        return await pg_release.release_index_fence(repo_id, run_id)
+    finally:
+        with contextlib.suppress(Exception):
+            await pg_release.disconnect()
+
+
 async def _heartbeat_fence(
     cfg: TriBridConfig, repo_id: str, run_id: str, fence_lost: asyncio.Event
 ) -> None:
@@ -1779,37 +1853,6 @@ async def _heartbeat_fence(
             )
             fence_lost.set()
             return
-
-
-def _republish_complete_status(*, repo_id: str, run_id: str, started_at: datetime) -> None:
-    """A committed run stays complete whatever interrupted its post-commit steps."""
-    stats = _STATS.get(repo_id)
-    _STATUS[repo_id] = IndexStatus(
-        repo_id=repo_id,
-        status="complete",
-        progress=1.0,
-        current_file=None,
-        started_at=started_at,
-        completed_at=datetime.now(UTC),
-    )
-    if stats is not None:
-        summary = IndexRunSummary(
-            run_id=run_id,
-            repo_id=repo_id,
-            status="complete",
-            started_at=started_at,
-            completed_at=datetime.now(UTC),
-            progress=1.0,
-            error=None,
-            total_files=int(getattr(stats, "total_files", 0) or 0),
-            total_chunks=int(getattr(stats, "total_chunks", 0) or 0),
-            total_tokens=int(getattr(stats, "total_tokens", 0) or 0),
-            embedding_provider=str(getattr(stats, "embedding_provider", "") or ""),
-            embedding_model=str(getattr(stats, "embedding_model", "") or ""),
-            embedding_dimensions=int(getattr(stats, "embedding_dimensions", 0) or 0),
-        )
-        with contextlib.suppress(Exception):
-            _persist_run_summary(summary)
 
 
 def _publish_commit_unknown(
@@ -2005,6 +2048,18 @@ async def _background_index_job(
     qdrant_generation: str | None = None
     committed = False  # once the manifest is written, staged resources are the live ones
     commit_unknown = False  # promotion interrupted and the manifest unreadable: touch nothing
+    stats: IndexStats | None = None
+    complete_published = False
+
+    def _publish_complete_once() -> None:
+        nonlocal complete_published
+        if complete_published or stats is None:
+            return
+        complete_published = True
+        _publish_complete(
+            repo_id=repo_id, run_id=run_id, started_at=started_at, stats=stats, queue=queue
+        )
+
     fence_lost = asyncio.Event()
     heartbeat_task: asyncio.Task[None] | None = None
     try:
@@ -2026,6 +2081,21 @@ async def _background_index_job(
             else int(Embedder(cfg.embedding, cfg.tokenization).dim)
         )
         qdrant_generation = await qdrant.create_generation(repo_id, embedding_dim=vector_dim)
+        # The fence names what this run is building, so a crash can be reclaimed exactly.
+        pg_fence = PostgresClient(cfg.indexing.postgres_url)
+        await pg_fence.connect()
+        try:
+            recorded = await pg_fence.record_fence_staging(
+                repo_id,
+                run_id,
+                qdrant_collection=qdrant_generation,
+                graph_repo_id=staging_repo_id if cfg.graph_indexing.enabled else None,
+            )
+        finally:
+            with contextlib.suppress(Exception):
+                await pg_fence.disconnect()
+        if not recorded:
+            raise IndexFenceLostError(repo_id, run_id, None)
         _emit_event(
             queue,
             {
@@ -2093,13 +2163,8 @@ async def _background_index_job(
             active_corpus = await postgres.get_corpus(repo_id)
             active_name = str((active_corpus or {}).get("name") or repo_id)
             active_description = (active_corpus or {}).get("description")
-            current_generation = generation_from_corpus_row(active_corpus)
-            generation = build_generation(
-                run_id=run_id,
-                qdrant_collection=qdrant_generation,
-                graph_repo_id=graph_generation_id,
-                previous=current_generation,
-            )
+            # The manifest is built INSIDE the promotion, from the row-locked
+            # previous one, so nothing that appeared after this snapshot is lost.
             promote = asyncio.ensure_future(
                 postgres.promote_staging_index(
                     active_repo_id=repo_id,
@@ -2109,12 +2174,14 @@ async def _background_index_job(
                     active_description=str(active_description)
                     if active_description is not None
                     else None,
-                    generation=generation,
+                    run_id=run_id,
+                    qdrant_collection=qdrant_generation,
+                    graph_repo_id=graph_generation_id,
                 )
             )
             try:
                 with INDEX_STAGE_LATENCY_SECONDS.labels(stage="generation_commit").time():
-                    await asyncio.shield(promote)
+                    generation = await asyncio.shield(promote)
             except BaseException:
                 # The transaction may have committed although this await did not
                 # return normally (cancellation delivered on the way back, or the
@@ -2155,9 +2222,7 @@ async def _background_index_job(
         # The run is complete the moment the manifest is committed: publish it
         # before any best-effort retirement so a failure or cancellation there
         # can never report a live generation as failed or cancelled.
-        _publish_complete(
-            repo_id=repo_id, run_id=run_id, started_at=started_at, stats=stats, queue=queue
-        )
+        _publish_complete_once()
         await _retire_due_generations(cfg, repo_id, run_id, generation, queue)
         # Update process-level “size” gauges (best-effort; no per-corpus labels).
         try:
@@ -2196,7 +2261,7 @@ async def _background_index_job(
             # The manifest already names this run's generation: the index is live
             # and the cancellation only interrupted best-effort retirement. The
             # run's terminal state is complete, whatever the caller wrote.
-            _republish_complete_status(repo_id=repo_id, run_id=run_id, started_at=started_at)
+            _publish_complete_once()
             _emit_event(
                 queue,
                 {"type": "log", "message": "Cancellation after commit: the new generation is live"},
@@ -2279,7 +2344,7 @@ async def _background_index_job(
                 e,
                 exc_info=True,
             )
-            _republish_complete_status(repo_id=repo_id, run_id=run_id, started_at=started_at)
+            _publish_complete_once()
             _emit_event(
                 queue,
                 {"type": "warning", "message": f"Post-commit cleanup failed (index is live): {e}"},
@@ -2354,24 +2419,21 @@ async def _background_index_job(
             heartbeat_task.cancel()
             with contextlib.suppress(BaseException):
                 await heartbeat_task
+        # The release must survive a cancellation delivered while this `finally`
+        # is awaiting (a stop that lands after the commit): shield it, and never
+        # let it raise out of the cleanup.
         try:
-            cfg_release = await load_scoped_config(repo_id=repo_id)
-            pg_release = PostgresClient(cfg_release.indexing.postgres_url)
-            await pg_release.connect()
-            try:
-                released = await pg_release.release_index_fence(repo_id, run_id)
-            finally:
-                with contextlib.suppress(Exception):
-                    await pg_release.disconnect()
+            released = await asyncio.shield(_release_fence(repo_id, run_id))
             if not released:
                 logger.warning(
                     "index run %s did not hold the fence on %s at release (taken over or cleared)",
                     run_id,
                     repo_id,
                 )
-        except Exception:
+        except BaseException:
             logger.warning(
-                "releasing the index-run fence of %s (run %s) failed; it expires after the lease",
+                "releasing the index-run fence of %s (run %s) was interrupted or failed; "
+                "it expires after the lease",
                 repo_id,
                 run_id,
                 exc_info=True,
@@ -2632,7 +2694,7 @@ async def start_index(request: IndexRequest) -> IndexStatus:
     postgres = PostgresClient(cfg.indexing.postgres_url)
     try:
         await postgres.connect()
-        held = await postgres.acquire_index_fence(
+        claim = await postgres.acquire_index_fence(
             request.repo_id,
             run_id,
             started_at=started_at,
@@ -2642,15 +2704,29 @@ async def start_index(request: IndexRequest) -> IndexStatus:
     except CorpusNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except IndexFenceCorruptError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+        raise _fence_corrupt_conflict(request.repo_id, exc) from exc
     except Exception as exc:
         raise_postgres_unavailable_if_applicable(exc, boundary="Index run fence")
         raise
     finally:
         with contextlib.suppress(Exception):
             await postgres.disconnect()
-    if held is not None:
-        raise _index_run_conflict(request.repo_id, held)
+    if claim.held_by is not None:
+        raise _index_run_conflict(request.repo_id, claim.held_by)
+    if claim.taken_over is not None:
+        # The previous holder died: reclaim exactly what its fence named (best-effort;
+        # the staged corpus rows go with it) before this run builds.
+        dead = claim.taken_over
+        await reclaim_stale_run(cfg, request.repo_id, dead)
+        with contextlib.suppress(Exception):
+            pg_dead = PostgresClient(cfg.indexing.postgres_url)
+            await pg_dead.connect()
+            try:
+                await pg_dead.delete_corpus_with_data(
+                    _build_staging_repo_id(request.repo_id, dead.run_id)
+                )
+            finally:
+                await pg_dead.disconnect()
 
     _STATUS[request.repo_id] = IndexStatus(
         repo_id=request.repo_id,
@@ -2844,6 +2920,7 @@ async def get_latest_index_run(corpus_id: str) -> IndexRunSummary:
     repo_id = str(corpus_id or "").strip()
     if not repo_id:
         raise HTTPException(status_code=422, detail="corpus_id is required")
+    await _flush_run_events()
     run = _load_latest_run_summary(repo_id)
     if run is None:
         raise HTTPException(
@@ -2872,6 +2949,23 @@ async def get_index_status(corpus_id: str) -> IndexStatus:
     repo_id = corpus_id
     if repo_id in _STATUS:
         return _STATUS[repo_id]
+    try:
+        cfg: TriBridConfig | None = await load_scoped_config(repo_id=repo_id)
+    except CorpusNotFoundError:
+        cfg = None  # persisted run summaries can outlive the corpus registration
+    live = await _live_fence(repo_id, cfg=cfg) if cfg is not None else None
+    if live is not None:
+        # Another worker is indexing this corpus: the durable fence is the truth.
+        return IndexStatus(
+            repo_id=repo_id,
+            status="indexing",
+            progress=0.0,
+            current_file=f"run {live.run_id} on {live.owner}",
+            error=None,
+            started_at=live.started_at,
+            completed_at=None,
+        )
+    await _flush_run_events()
     persisted_run = _load_latest_run_summary(repo_id)
     if persisted_run is not None:
         persisted_run = await _finalize_interrupted_run(repo_id, persisted_run)
@@ -2898,7 +2992,8 @@ async def get_index_status(corpus_id: str) -> IndexStatus:
             completed_at=getattr(s, "last_indexed", None),
         )
     try:
-        cfg = await load_scoped_config(repo_id=repo_id)
+        if cfg is None:
+            raise CorpusNotFoundError(f"Corpus not found: {repo_id}")
         postgres = PostgresClient(cfg.indexing.postgres_url)
         await postgres.connect()
         try:
@@ -2935,7 +3030,22 @@ async def get_index_stats(corpus_id: str) -> IndexStats:
     return stats
 
 
-@router.delete("/index/{corpus_id}")
+@router.delete(
+    "/index/{corpus_id}",
+    responses={
+        409: {
+            "model": IndexRunConflictResponse,
+            "description": "A live index run holds this corpus; stop it first.",
+        },
+        503: {
+            "model": DependencyUnavailableResponse | IndexDeletionIncompleteResponse,
+            "description": (
+                "External cleanup failed; the deletion tombstone stays and the next delete retries "
+                "exactly its targets."
+            ),
+        },
+    },
+)
 async def delete_index(corpus_id: str) -> dict[str, Any]:
     repo_id = corpus_id
     if repo_id in _TASKS:
@@ -2956,7 +3066,7 @@ async def delete_index(corpus_id: str) -> dict[str, Any]:
         except IndexFenceHeldError as exc:
             raise _index_run_conflict(repo_id, exc.fence) from exc
         except IndexFenceCorruptError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
+            raise _fence_corrupt_conflict(repo_id, exc) from exc
         except Exception as exc:
             raise_postgres_unavailable_if_applicable(exc, boundary="Index deletion")
             raise
@@ -2969,7 +3079,11 @@ async def delete_index(corpus_id: str) -> dict[str, Any]:
             raise dependency_unavailable_http_exception(
                 exc.dependency, boundary="Index deletion", exc=exc
             ) from exc
-        await postgres.clear_index_tombstone(repo_id)
+        if not await postgres.clear_index_tombstone(repo_id, tombstone):
+            logger.warning(
+                "tombstone of %s changed during cleanup; the newer tombstone stays for the next delete",
+                repo_id,
+            )
     finally:
         with contextlib.suppress(Exception):
             await postgres.disconnect()

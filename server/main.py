@@ -10,6 +10,7 @@ from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from starlette.responses import Response
 
 from server.api.agent import router as agent_router
@@ -39,7 +40,12 @@ from server.api.synthetic import router as synthetic_router
 from server.chat.prompt_budget import warm_prompt_budget
 from server.config import load_config
 from server.gateway_catalog import warm_gateway_catalog
+from server.indexing.generations import DeletionIncompleteError
 from server.mcp.server import get_mcp_server, record_mounted_state
+from server.models.tribrid_config_model import (
+    IndexDeletionIncompleteDetail,
+    IndexDeletionIncompleteResponse,
+)
 from server.observability.costing import warm_costing_catalog
 from server.observability.metrics import render_latest
 from server.observability.runtime import (
@@ -236,6 +242,9 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
+        from server.api.index import shutdown_event_writer
+
+        await shutdown_event_writer()
         catalog_refresh_task.cancel()
         if manifest_upgrade_task is not None:
             manifest_upgrade_task.cancel()
@@ -263,6 +272,29 @@ app.add_middleware(
     # MCP streamable HTTP uses this header for session management.
     expose_headers=["Mcp-Session-Id"],
 )
+
+
+@app.exception_handler(DeletionIncompleteError)
+async def _deletion_incomplete_handler(
+    _request: Request, exc: DeletionIncompleteError
+) -> JSONResponse:
+    """A corpus whose de-index cleanup has not completed fails closed everywhere (retryable 503)."""
+    detail = IndexDeletionIncompleteDetail(
+        corpus_id=exc.repo_id,
+        qdrant_collections=list(exc.tombstone.qdrant_collections),
+        graph_repo_ids=list(exc.tombstone.graph_repo_ids),
+        created_at=exc.tombstone.created_at,
+        message=f"Corpus {exc.repo_id} is being de-indexed; its external cleanup has not completed.",
+        operator_hint=(
+            "Retry the de-index (DELETE /api/index/{corpus_id}) once Qdrant and Neo4j answer; the tombstone "
+            "names exactly what is still to drop and is cleared when that succeeds."
+        ),
+    )
+    return JSONResponse(
+        status_code=503,
+        content=IndexDeletionIncompleteResponse(detail=detail).model_dump(mode="json"),
+    )
+
 
 if _global_cfg.mcp.enabled:
     app.mount(_global_cfg.mcp.mount_path, _mcp.streamable_http_app())

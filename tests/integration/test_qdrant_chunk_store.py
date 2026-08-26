@@ -390,6 +390,58 @@ async def test_startup_upgrade_records_manifests_for_pre_manifest_corpora() -> N
         await ensure_generation_manifests(cfg)
         assert await pg.get_generation(legacy_id) == before
         assert (await store.status(legacy_id, physical=physical)).points == 1
+
+        # Round-3 manifests carried one previous_* slot: the upgrade rewrites them to
+        # the retired list (stamped with the manifest's own promotion time), masks ids
+        # equal to the live ones, and never records the same pair twice.
+        shaped_id = f"legacy-shape-{uuid.uuid4().hex[:8]}"
+        await pg.upsert_corpus(shaped_id, name=shaped_id, root_path=".")
+        await pg.update_corpus_meta(
+            shaped_id,
+            {
+                "generation": {
+                    "run_id": "r3",
+                    "qdrant_collection": "ragweld_chunks_shape_live",
+                    "graph_repo_id": "shape-graph-live",
+                    "promoted_at": "2026-08-25T00:00:00+00:00",
+                    "previous_qdrant_collection": "ragweld_chunks_shape_old",
+                    "previous_graph_repo_id": "shape-graph-live",
+                }
+            },
+        )
+        equal_id = f"legacy-equal-{uuid.uuid4().hex[:8]}"
+        await pg.upsert_corpus(equal_id, name=equal_id, root_path=".")
+        await pg.update_corpus_meta(
+            equal_id,
+            {
+                "generation": {
+                    "run_id": "r3",
+                    "qdrant_collection": "ragweld_chunks_equal_live",
+                    "graph_repo_id": None,
+                    "promoted_at": "2026-08-25T00:00:00+00:00",
+                    "previous_qdrant_collection": "ragweld_chunks_equal_live",
+                    "previous_graph_repo_id": None,
+                }
+            },
+        )
+        try:
+            assert await ensure_generation_manifests(cfg) >= 2
+            shaped = await pg.get_generation(shaped_id)
+            assert (
+                shaped
+                and shaped.run_id == "r3"
+                and shaped.qdrant_collection == "ragweld_chunks_shape_live"
+            )
+            assert [(r.qdrant_collection, r.graph_repo_id) for r in shaped.retired] == [
+                ("ragweld_chunks_shape_old", None)  # the graph id equal to the live one is masked
+            ], shaped
+            assert shaped.retired[0].retired_at == shaped.promoted_at
+            equal = await pg.get_generation(equal_id)
+            assert equal and equal.retired == [], equal  # nothing left to retire once masked
+            assert await ensure_generation_manifests(cfg) == 0  # idempotent
+        finally:
+            for cid in (shaped_id, equal_id):
+                await pg.delete_corpus_with_data(cid)
     finally:
         for cid in (legacy_id, fresh_id):
             await store.delete_corpus(cid)

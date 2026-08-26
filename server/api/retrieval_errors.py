@@ -6,6 +6,7 @@ from fastapi import HTTPException
 
 from server.models.tribrid_config_model import (
     DependencyUnavailableResponse,
+    IndexDeletionIncompleteResponse,
     RequiredRetrievalLegFailureDetail,
     RequiredRetrievalLegFailureResponse,
     RetrievalContractMismatchDetail,
@@ -17,8 +18,15 @@ logger = logging.getLogger(__name__)
 
 RETRIEVAL_RUNTIME_UNAVAILABLE_RESPONSES = {
     503: {
-        "model": DependencyUnavailableResponse | RequiredRetrievalLegFailureResponse,
-        "description": "A required storage dependency or requested retrieval leg is unavailable.",
+        "model": (
+            DependencyUnavailableResponse
+            | RequiredRetrievalLegFailureResponse
+            | IndexDeletionIncompleteResponse
+        ),
+        "description": (
+            "A required storage dependency or requested retrieval leg is unavailable, or the corpus "
+            "is being de-indexed and its external cleanup has not completed."
+        ),
     },
     409: {
         "model": RetrievalContractMismatchResponse,
@@ -42,7 +50,9 @@ def required_retrieval_leg_http_exception(exc: RequiredRetrievalLegError) -> HTT
     return HTTPException(status_code=503, detail=detail.model_dump(mode="json"))
 
 
-def retrieval_contract_mismatch_http_exception(exc: RetrievalContractMismatchError) -> HTTPException:
+def retrieval_contract_mismatch_http_exception(
+    exc: RetrievalContractMismatchError,
+) -> HTTPException:
     """Translate an index-contract mismatch into its validated 409 boundary shape."""
 
     detail = RetrievalContractMismatchDetail.model_validate(exc.to_detail())

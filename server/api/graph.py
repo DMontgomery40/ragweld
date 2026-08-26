@@ -9,7 +9,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 
 from server.api.dependency_errors import (
-    DEPENDENCY_UNAVAILABLE_RESPONSES,
+    MANIFEST_READER_UNAVAILABLE_RESPONSES,
     raise_neo4j_unavailable_if_applicable,
     raise_postgres_unavailable_if_applicable,
 )
@@ -20,7 +20,7 @@ from server.models.graph import Community, Entity, GraphNeighborsResponse, Graph
 from server.services.config_store import CorpusNotFoundError
 from server.services.config_store import get_config as load_scoped_config
 
-router = APIRouter(tags=["graph"], responses=DEPENDENCY_UNAVAILABLE_RESPONSES)
+router = APIRouter(tags=["graph"], responses=MANIFEST_READER_UNAVAILABLE_RESPONSES)
 
 
 @dataclass(frozen=True)

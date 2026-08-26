@@ -1,10 +1,15 @@
-"""Index-related registered boundary model exports.
+"""Index-domain boundary models.
 
-These public schemas currently aggregate through tribrid_config_model.py.
-This file re-exports them for backwards compatibility.
+The index API imports its registered boundary schemas from here; the aggregate
+(`tribrid_config_model.py`) remains the composition root that registers them
+for TypeScript generation.
 """
+
 from server.models.tribrid_config_model import (
     Chunk,
+    IndexDeletionIncompleteDetail,
+    IndexDeletionIncompleteResponse,
+    IndexFenceCorruptDetail,
     IndexRequest,
     IndexRunConflictDetail,
     IndexRunConflictResponse,
@@ -15,5 +20,15 @@ from server.models.tribrid_config_model import (
 )
 
 __all__ = [
+    "Chunk",
+    "IndexDeletionIncompleteDetail",
+    "IndexDeletionIncompleteResponse",
+    "IndexFenceCorruptDetail",
+    "IndexRequest",
     "IndexRunConflictDetail",
-    "IndexRunConflictResponse","Chunk", "IndexRequest", "IndexStats", "IndexStatus", "IndexRunSummary", "IndexRunEvent"]
+    "IndexRunConflictResponse",
+    "IndexRunEvent",
+    "IndexRunSummary",
+    "IndexStats",
+    "IndexStatus",
+]

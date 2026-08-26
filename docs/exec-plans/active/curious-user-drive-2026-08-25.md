@@ -1462,3 +1462,73 @@ Playwright `curious_user_p1_fixes` 9 passed against the restarted backend,
 quick gates green (453 config keys, contract bundle with the typed 409).
 Codex pass 4 launched on the committed diff.
 
+### Adversarial review pass 4 (codex exec, high effort) — REFUTED again (10 P1 / 7 P2); all acted on
+
+Session 14f, by finding:
+
+1. **Tombstone fails closed everywhere.** `generation_from_corpus_row` raises
+   `DeletionIncompleteError` while `corpora.meta.index_tombstone` exists; a
+   global handler answers the typed 503 `index_deletion_incomplete`
+   (`IndexDeletionIncompleteDetail`, declared on search and both delete
+   routes). `set_generation_if_absent` and promotion refuse a tombstoned corpus.
+2. **Deletion cannot erase a concurrent generation.** No writer can create one
+   under a tombstone (above); the tombstone is cleared by compare-and-set on
+   its own `created_at`, never unconditionally.
+3. **Incremental writes are one unit of work.**
+   `PostgresClient.upsert_chunks_with_vectors`: one transaction holds the
+   per-corpus advisory lock, resolves/creates the live generation from the
+   row-locked manifest, writes the vectors inside it, then commits the rows —
+   a failed vector write rolls the rows back (no blind deletes), promotion
+   cannot switch generations under the writer. Recall and Codex ingest call it
+   once; the bisect/dead-letter contract is unchanged.
+4. **Manifest built under the lock.** `promote_staging_index` takes
+   `run_id/qdrant_collection/graph_repo_id` and builds the manifest from the
+   row-locked previous one, so a first generation that appeared meanwhile
+   joins the retired chain.
+5. **Unknown stays unknown.** An unreadable manifest leaves an interrupted
+   run untouched; a missing corpus is a definitive non-commit.
+6. **Durable status.** `GET /api/index/{id}/status` reports a fresh fence held
+   by another worker as `indexing`; interrupted-run finalisation respects a
+   live fence for the same run. (Streaming stays worker-local: the API runs
+   one uvicorn worker; recorded, not papered over.)
+7. **Per-store retention.** Retired entries are masked per resource, never
+   dropped whole; entries are deduplicated by the ids they name; pruning
+   matches by run id; the shape upgrade masks equal ids and never records the
+   same pair twice.
+8. **Idempotent completion.** `stats` is retained; every confirmed-commit path
+   (normal, cancelled, failed) runs the same complete publisher once
+   (status, `_STATS`, persisted summary, terminal event).
+9. **`onCancelled` reaches the stream** (TerminalService destructures and
+   passes it; it is no longer serialised into the query string).
+10. **Tests**: six concurrent `acquire_index_fence` claims (exactly one wins,
+    the rest name the holder), heartbeat moves the DB-stamped timestamp for
+    the holder only, a controlled stop the moment the manifest goes live
+    (status/summary `complete`, generation live, fence released), three
+    retained generations with mixed expiry then pruned by exact id, the
+    round-3 shape upgrade with an equal-id case, fence release polled (it
+    happens after publication).
+11. **Hydration oracle**: overfetch multiplier 1 and a subset (membership)
+    assertion against the corpus's exact top-k; order/count are not
+    cross-engine invariants.
+12. `server/models/index.py` is the index domain module (docstring says so);
+    the UI treats an unparseable 409 as a contract failure, never raw text.
+13. **Readiness** reports `index_manifests` (the durable upgrade) as a fifth
+    dependency; the service is not ready until it ran once.
+14. **Neo4j chunk vector index** creation/ONLINE is a promotion prerequisite
+    when chunk embeddings are stored (fails the run, never a warning).
+15. **Persistence**: unbounded FIFO (nothing dropped), summaries replaced
+    atomically by the same writer, readers flush before reading, lifespan
+    shutdown flushes and joins the writer.
+16. **Typed 409 union**: `IndexFenceCorruptDetail` for a malformed fence,
+    discriminated on `code`, in the OpenAPI bundle.
+17. **Fence**: database-clock timestamps for heartbeat and staleness; the
+    fence names the staged collection/graph and a takeover reclaims them
+    exactly (plus the dead run's staging rows). `run_id` is the opaque
+    per-claim token (unique per claim; a takeover mints a new one).
+
+Verification (session 14f): live lane 16 passed, full `uv run pytest -q` alone
+1156 passed / 90 skipped, Playwright `curious_user_p1_fixes` 9 passed against
+the restarted backend, quick gates green, contract bundle carries the typed
+409 union and the `index_deletion_incomplete` 503 on every manifest reader.
+Codex pass 5 launched on the committed diff.
+

@@ -264,9 +264,6 @@ class _FakeArtifactPg:
         self.successful_writes.append([chunk.chunk_id for chunk in chunks])
         return len(chunks)
 
-    async def delete_chunks_by_ids(self, _repo_id: str, chunk_ids: list[str]) -> int:
-        self.compensated = [*getattr(self, "compensated", []), list(chunk_ids)]
-        return len(chunk_ids)
 
 
 class _FakeArtifactQdrant:
@@ -278,6 +275,9 @@ class _FakeArtifactQdrant:
     async def upsert_chunks(self, _repo_id: str, chunks: list[Chunk], *, embedding_dim: int, pg: object = None) -> int:
         assert embedding_dim > 0
         assert all(chunk.embedding is None for chunk in chunks)
+        # The real protocol commits the rows inside the vector write's transaction.
+        assert pg is not None
+        await pg.upsert_chunks(_repo_id, chunks)  # type: ignore[attr-defined]
         self.successful_writes.append([chunk.chunk_id for chunk in chunks])
         return len(chunks)
 

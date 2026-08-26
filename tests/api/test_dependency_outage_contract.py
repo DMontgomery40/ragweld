@@ -18,10 +18,12 @@ def test_stateful_api_openapi_documents_typed_dependency_503() -> None:
         ("/api/search", "post"): {
             "DependencyUnavailableResponse",
             "RequiredRetrievalLegFailureResponse",
+            "IndexDeletionIncompleteResponse",
         },
         ("/api/answer", "post"): {
             "DependencyUnavailableResponse",
             "RequiredRetrievalLegFailureResponse",
+            "IndexDeletionIncompleteResponse",
         },
         ("/api/chat", "post"): {
             "DependencyUnavailableResponse",
@@ -31,15 +33,20 @@ def test_stateful_api_openapi_documents_typed_dependency_503() -> None:
         ("/api/chat/stream", "post"): {
             "DependencyUnavailableResponse",
             "RequiredRetrievalLegFailureResponse",
+            "IndexDeletionIncompleteResponse",
         },
         ("/api/mcp/probe", "post"): {
             "DependencyUnavailableResponse",
             "RequiredRetrievalLegFailureResponse",
+            "IndexDeletionIncompleteResponse",
         },
         ("/api/config", "get"): {"DependencyUnavailableResponse"},
         ("/api/feedback", "post"): {"DependencyUnavailableResponse"},
         ("/api/reranker/click", "post"): {"DependencyUnavailableResponse"},
-        ("/api/graph/{corpus_id}/stats", "get"): {"DependencyUnavailableResponse"},
+        ("/api/graph/{corpus_id}/stats", "get"): {
+            "DependencyUnavailableResponse",
+            "IndexDeletionIncompleteResponse",
+        },
         ("/api/lineage/current", "get"): {"DependencyUnavailableResponse"},
     }
     for (path, method), expected_models in operations.items():

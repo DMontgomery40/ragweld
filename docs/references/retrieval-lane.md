@@ -63,10 +63,19 @@ Postgres pgvector/FTS legs were removed when this lane was promoted.
    set-if-absent). Cancelled or failed runs drop their staged resources only
    after proving, against the manifest, that nothing was committed; once the
    manifest is written the run is complete whatever happens afterwards.
-   De-indexing records the exact collections and graph ids to drop as a
-   tombstone (`corpora.meta.index_tombstone`) in the same transaction that
-   clears the rows and the manifest, answers a typed 503 until every external
-   cleanup succeeded, and only then clears the tombstone.
+   The fence's timestamps come from the database clock, it names the
+   collection/graph the run is building (reclaimed exactly when a stale fence
+   is taken over), and every worker reports a fresh fence as `indexing` even
+   when the run lives in another process. Incremental writers (recall, Codex
+   ingest) write rows and vectors inside one Postgres transaction that holds
+   the same per-corpus advisory lock, so they serialise with promotion and a
+   failed vector write rolls the rows back. De-indexing records the exact
+   collections and graph ids to drop as a tombstone
+   (`corpora.meta.index_tombstone`) in the same transaction that clears the
+   rows and the manifest; while it exists every reader and writer of the
+   corpus answers a typed 503 (`index_deletion_incomplete`), the next delete
+   retries exactly its targets, and it is cleared by compare-and-set on its
+   own timestamp only when every external cleanup succeeded.
 4. `indexing.skip_dense=true` writes sparse-only points (no dense vectors);
    the vector leg returns nothing for such corpora and the corpus records
    `embedding_dimensions = 0`.

@@ -33,15 +33,23 @@ type StopOptions = {
  */
 function describeIndexStartFailure(status: number, body: string): string {
   if (status === 409) {
+    // Every fence conflict is the typed envelope (IndexRunConflictResponse); an
+    // unparseable 409 is a contract failure and is reported as such, never
+    // rendered from raw text.
+    let parsed: IndexRunConflictResponse | null = null;
     try {
-      const parsed = JSON.parse(body) as IndexRunConflictResponse;
-      const d = parsed.detail;
-      if (d && d.code === 'index_run_in_progress') {
-        return `${d.message} Run ${d.run_id} on ${d.owner} started ${new Date(d.started_at).toLocaleTimeString()} (last heartbeat ${new Date(d.heartbeat_at).toLocaleTimeString()}). ${d.operator_hint}`;
-      }
+      parsed = JSON.parse(body) as IndexRunConflictResponse;
     } catch {
-      /* not the typed envelope: fall through to the raw text */
+      parsed = null;
     }
+    const d = parsed?.detail;
+    if (d?.code === 'index_run_in_progress') {
+      return `${d.message} Run ${d.run_id} on ${d.owner} started ${new Date(d.started_at).toLocaleTimeString()} (last heartbeat ${new Date(d.heartbeat_at).toLocaleTimeString()}). ${d.operator_hint}`;
+    }
+    if (d?.code === 'index_fence_corrupt') {
+      return `${d.message} ${d.operator_hint}`;
+    }
+    return 'Index request conflicted (409) but the response was not the typed fence envelope; check the API contract.';
   }
   return body || `Index request failed (${status})`;
 }

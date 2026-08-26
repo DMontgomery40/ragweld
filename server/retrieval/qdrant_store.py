@@ -24,7 +24,6 @@ missing instead of being silently auto-created.
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import hashlib
 import logging
 import re
@@ -465,46 +464,18 @@ class QdrantChunkStore:
         embedding_dim: int,
         pg: PostgresClient,
     ) -> int:
-        """Upsert chunks into the corpus's live generation, creating one (and its manifest) on first write."""
+        """Incremental write: rows and vectors as one unit of work under the corpus lock.
+
+        Delegates to ``PostgresClient.upsert_chunks_with_vectors``: the Postgres
+        transaction holds the per-corpus advisory lock, resolves (or creates)
+        the live generation from the row-locked manifest, writes the vectors
+        through ``write_chunks`` while the lock is held, then commits the rows.
+        """
         if not chunks:
             return 0
-        from server.indexing.generations import build_generation, qdrant_collection_of
-
-        async with _corpus_lock(corpus_id):
-            physical = qdrant_collection_of(await pg.get_generation(corpus_id))
-            if physical is not None:
-                return await self.write_chunks(
-                    corpus_id, physical, chunks, embedding_dim=embedding_dim
-                )
-            # First write: the manifest is recorded only after the points exist,
-            # so a failed write never leaves a manifest naming an empty collection
-            # (an orphaned empty collection is swept by delete_corpus instead).
-            # Incremental corpora write no graph, so graph_repo_id stays None.
-            physical = await self.create_generation(corpus_id, embedding_dim=embedding_dim)
-            written = await self.write_chunks(
-                corpus_id, physical, chunks, embedding_dim=embedding_dim
-            )
-            recorded = await pg.set_generation_if_absent(
-                corpus_id,
-                build_generation(
-                    run_id=f"incremental-{uuid.uuid4().hex[:10]}",
-                    qdrant_collection=physical,
-                    graph_repo_id=None,
-                ),
-            )
-            if recorded:
-                return written
-            # Another process (a full promotion, or a sibling incremental writer)
-            # recorded the corpus's first generation meanwhile: that manifest wins.
-            # Our collection is dropped and the chunks land in the live generation.
-            with contextlib.suppress(Exception):
-                await self.drop_generation(physical)
-            winner = qdrant_collection_of(await pg.get_generation(corpus_id))
-            if winner is None:
-                raise RuntimeError(
-                    f"corpus {corpus_id}: first-generation race lost but no manifest is readable"
-                )
-            return await self.write_chunks(corpus_id, winner, chunks, embedding_dim=embedding_dim)
+        return await pg.upsert_chunks_with_vectors(
+            corpus_id, chunks, embedding_dim=embedding_dim, qdrant=self
+        )
 
     # ------------------------------------------------------------------
     # Reads

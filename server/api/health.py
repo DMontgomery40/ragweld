@@ -4,14 +4,15 @@ import httpx
 from fastapi import APIRouter, Depends
 from starlette.responses import JSONResponse
 
-from server.config import load_config
 from server.chat.gateway_runtime import (
     resolve_litellm_api_key,
     resolve_litellm_base_url,
     resolve_vllm_base_url,
 )
+from server.config import load_config
 from server.db.neo4j import Neo4jClient
 from server.db.postgres import PostgresClient
+from server.indexing.generations import manifest_upgrade_complete
 from server.models.tribrid_config_model import (
     CorpusScope,
     HealthServiceStatus,
@@ -51,12 +52,16 @@ async def _probe_neo4j_readiness(
             if not exists:
                 status.ok = False
                 status.error = "Resolved Neo4j database does not exist."
-                status.operator_hint = "Create the resolved graph database or correct the corpus database mapping."
+                status.operator_hint = (
+                    "Create the resolved graph database or correct the corpus database mapping."
+                )
                 return False
         except Exception:
             status.ok = False
             status.error = "Neo4j database readiness could not be verified."
-            status.operator_hint = "Verify Neo4j database permissions and the resolved corpus database."
+            status.operator_hint = (
+                "Verify Neo4j database permissions and the resolved corpus database."
+            )
             return False
         return True
     finally:
@@ -110,6 +115,20 @@ async def readiness_check(scope: CorpusScope = _CORPUS_SCOPE_DEP) -> ReadinessSt
     vllm_status = ReadinessDependencyStatus()
     ready = not bool(corpus_error)
 
+    # Durable generation-manifest upgrades must have run once in this process:
+    # until then manifest-dependent routes may meet a pre-upgrade shape, so the
+    # service is not ready (liveness is unaffected).
+    manifests = ReadinessDependencyStatus()
+    if manifest_upgrade_complete():
+        manifests.ok = True
+    else:
+        ready = False
+        manifests.error = "Generation-manifest upgrade has not completed in this process."
+        manifests.operator_hint = (
+            "The startup upgrade retries every 60s until Postgres and Qdrant answer; readiness "
+            "turns green once it has run to completion."
+        )
+
     # Postgres
     try:
         pg = PostgresClient(cfg.indexing.postgres_url)
@@ -119,7 +138,9 @@ async def readiness_check(scope: CorpusScope = _CORPUS_SCOPE_DEP) -> ReadinessSt
     except Exception:
         ready = False
         postgres.error = "PostgreSQL control store is unavailable."
-        postgres.operator_hint = "Verify the scoped Ragweld Postgres service and DSN, then retry readiness."
+        postgres.operator_hint = (
+            "Verify the scoped Ragweld Postgres service and DSN, then retry readiness."
+        )
 
     # Neo4j
     try:
@@ -136,7 +157,9 @@ async def readiness_check(scope: CorpusScope = _CORPUS_SCOPE_DEP) -> ReadinessSt
         ready = False
         neo4j_status.ok = False
         neo4j_status.error = "Neo4j graph store is unavailable."
-        neo4j_status.operator_hint = "Verify the scoped Ragweld Neo4j service and credentials, then retry readiness."
+        neo4j_status.operator_hint = (
+            "Verify the scoped Ragweld Neo4j service and credentials, then retry readiness."
+        )
 
     # Generation gateway
     try:
@@ -153,7 +176,9 @@ async def readiness_check(scope: CorpusScope = _CORPUS_SCOPE_DEP) -> ReadinessSt
     except Exception:
         ready = False
         litellm_status.error = "LiteLLM generation gateway is unavailable."
-        litellm_status.operator_hint = "Start the managed LiteLLM service and verify its client key."
+        litellm_status.operator_hint = (
+            "Start the managed LiteLLM service and verify its client key."
+        )
 
     # Local serving backend: readiness requires the served identity, not just a
     # listener — the alias must front chat.vllm.default_model at the catalog
@@ -196,6 +221,7 @@ async def readiness_check(scope: CorpusScope = _CORPUS_SCOPE_DEP) -> ReadinessSt
             "neo4j": neo4j_status,
             "litellm": litellm_status,
             "vllm": vllm_status,
+            "index_manifests": manifests,
         },
     )
     if ready:

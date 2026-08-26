@@ -176,12 +176,8 @@ async def index_recall_conversation(
         return 0
     embedded_chunks = await embedder.embed_chunks(chunks)
 
-    await pg.upsert_chunks(config.default_corpus_id, embedded_chunks)
-    try:
-        await qdrant.upsert_chunks(config.default_corpus_id, embedded_chunks, embedding_dim=int(embedder.dim), pg=pg)
-    except Exception:
-        # Rows without vectors would read as a wiped corpus: take them back before failing.
-        await pg.delete_chunks_by_ids(config.default_corpus_id, [c.chunk_id for c in embedded_chunks])
-        raise
+    # Rows and vectors are one unit of work under the corpus lock (see
+    # PostgresClient.upsert_chunks_with_vectors): no chunk ever exists in one store only.
+    await qdrant.upsert_chunks(config.default_corpus_id, embedded_chunks, embedding_dim=int(embedder.dim), pg=pg)
 
     return len(chunks)

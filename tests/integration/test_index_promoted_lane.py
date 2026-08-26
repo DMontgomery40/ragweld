@@ -53,6 +53,20 @@ async def _wait_for_index(client: AsyncClient, corpus_id: str, *, timeout_s: flo
     raise AssertionError(f"index did not finish in time: {last}")
 
 
+async def _wait_fence_released(
+    pg: PostgresClient, corpus_id: str, *, timeout_s: float = 10.0
+) -> None:
+    """The job releases its fence in `finally`, after it published `complete`: poll briefly."""
+    deadline = asyncio.get_running_loop().time() + timeout_s
+    while asyncio.get_running_loop().time() < deadline:
+        if await pg.get_index_fence(corpus_id) is None:
+            return
+        await asyncio.sleep(0.05)
+    raise AssertionError(
+        f"fence on {corpus_id} was not released: {await pg.get_index_fence(corpus_id)}"
+    )
+
+
 async def test_index_search_and_delete_on_promoted_lane(client: AsyncClient) -> None:
     corpus_id = f"promoted-lane-{uuid.uuid4().hex[:8]}"
     pg = PostgresClient(os.environ["POSTGRES_DSN"])
@@ -110,7 +124,7 @@ async def test_index_search_and_delete_on_promoted_lane(client: AsyncClient) -> 
         assert conflict["corpus_id"] == corpus_id and conflict["operator_hint"]
         final = await _wait_for_index(client, corpus_id)
         assert final["status"] == "complete", final
-        assert await pg.get_index_fence(corpus_id) is None, "the fence is released with the run"
+        await _wait_fence_released(pg, corpus_id)
 
         # The fence is durable, not process-local: a fence written by ANOTHER worker
         # (nothing in this process's task map) refuses both a new run and a
@@ -124,8 +138,7 @@ async def test_index_search_and_delete_on_promoted_lane(client: AsyncClient) -> 
                 owner="other-worker:1",
                 lease_seconds=cfg.indexing.index_run_lease_seconds,
             )
-            is None
-        )
+        ).acquired
         refused = await client.post(
             "/api/index",
             json={"corpus_id": corpus_id, "repo_path": str(_CORPUS_PATH), "force_reindex": True},
@@ -154,8 +167,7 @@ async def test_index_search_and_delete_on_promoted_lane(client: AsyncClient) -> 
                 lease_seconds=cfg.indexing.index_run_lease_seconds,
                 heartbeat_at=stale_beat,
             )
-            is None
-        )
+        ).acquired
         takeover = await client.post(
             "/api/index",
             json={"corpus_id": corpus_id, "repo_path": str(_CORPUS_PATH), "force_reindex": False},
@@ -164,7 +176,36 @@ async def test_index_search_and_delete_on_promoted_lane(client: AsyncClient) -> 
         taken = await pg.get_index_fence(corpus_id)
         assert taken is None or taken.run_id != "crashed-run", taken
         assert (await _wait_for_index(client, corpus_id))["status"] == "complete"
-        assert await pg.get_index_fence(corpus_id) is None
+        await _wait_fence_released(pg, corpus_id)
+        # Concurrent claims on one corpus: exactly one wins the durable CAS, the
+        # others are told who holds it (the database row is the only authority).
+        claims = await asyncio.gather(
+            *(
+                pg.acquire_index_fence(
+                    corpus_id,
+                    f"racer-{i}",
+                    started_at=datetime.now(UTC),
+                    owner=f"racer-worker:{i}",
+                    lease_seconds=cfg.indexing.index_run_lease_seconds,
+                )
+                for i in range(6)
+            )
+        )
+        winners = [c for c in claims if c.acquired]
+        assert len(winners) == 1, claims
+        assert all(
+            c.held_by is not None and c.held_by.run_id.startswith("racer-")
+            for c in claims
+            if not c.acquired
+        )
+        holder = await pg.get_index_fence(corpus_id)
+        assert holder is not None and holder.run_id.startswith("racer-")
+        # Heartbeats move the database-stamped heartbeat forward for the holder only.
+        before_beat = holder.heartbeat_at
+        assert await pg.heartbeat_index_fence(corpus_id, holder.run_id) is True
+        assert await pg.heartbeat_index_fence(corpus_id, "racer-nobody") is False
+        assert (await pg.get_index_fence(corpus_id)).heartbeat_at >= before_beat
+        assert await pg.release_index_fence(corpus_id, holder.run_id) is True
         # A stale fence with no run behind it is released by the stop route.
         assert (
             await pg.acquire_index_fence(
@@ -175,8 +216,7 @@ async def test_index_search_and_delete_on_promoted_lane(client: AsyncClient) -> 
                 lease_seconds=cfg.indexing.index_run_lease_seconds,
                 heartbeat_at=stale_beat,
             )
-            is None
-        )
+        ).acquired
         stopped = await client.post(f"/api/index/{corpus_id}/stop")
         assert stopped.status_code == 200, stopped.text
         assert stopped.json()["status"] == "cancelled" and "crashed-run-2" in str(
@@ -296,7 +336,77 @@ async def test_index_search_and_delete_on_promoted_lane(client: AsyncClient) -> 
         assert kept is not None and kept.physical_collection == regeneration.qdrant_collection
         assert kept.points == chunk_rows
         assert (await qdrant.count_points(third_generation.qdrant_collection)) == chunk_rows
-        regeneration = third_generation
+        # A second retained commit: the chain now holds TWO retired generations
+        # (single-previous retention would have dropped the older one).
+        fourth = await client.post(
+            "/api/index",
+            json={"corpus_id": corpus_id, "repo_path": str(_CORPUS_PATH), "force_reindex": False},
+        )
+        assert fourth.status_code == 200, fourth.text
+        assert (await _wait_for_index(client, corpus_id))["status"] == "complete"
+        fourth_generation = await pg.get_generation(corpus_id)
+        assert fourth_generation and [r.qdrant_collection for r in fourth_generation.retired] == [
+            regeneration.qdrant_collection,
+            third_generation.qdrant_collection,
+        ], fourth_generation
+        for collection in (regeneration.qdrant_collection, third_generation.qdrant_collection):
+            still = await qdrant.status(corpus_id, physical=collection)
+            assert still is not None and still.physical_collection == collection, collection
+        # Grace back to 0: the next commit retires both by exact id and prunes them.
+        scoped = await config_store.get_config(repo_id=corpus_id)
+        scoped.indexing.generation_retention_seconds = 0
+        await pg.upsert_corpus_config_json(corpus_id, scoped.model_dump(mode="serialization"))
+        config_store._store = None
+        fifth = await client.post(
+            "/api/index",
+            json={"corpus_id": corpus_id, "repo_path": str(_CORPUS_PATH), "force_reindex": False},
+        )
+        assert fifth.status_code == 200, fifth.text
+        assert (await _wait_for_index(client, corpus_id))["status"] == "complete"
+        fifth_generation = await pg.get_generation(corpus_id)
+        assert fifth_generation and fifth_generation.retired == [], fifth_generation
+        for collection in (
+            regeneration.qdrant_collection,
+            third_generation.qdrant_collection,
+            fourth_generation.qdrant_collection,
+        ):
+            gone = await qdrant.status(corpus_id, physical=collection)
+            assert gone is not None and gone.physical_collection is None, collection
+        assert (await qdrant.count_points(fifth_generation.qdrant_collection)) == chunk_rows
+        # Back to a long grace so the deletion below has a retained generation to tombstone.
+        scoped.indexing.generation_retention_seconds = 3600
+        await pg.upsert_corpus_config_json(corpus_id, scoped.model_dump(mode="serialization"))
+        config_store._store = None
+        sixth = await client.post(
+            "/api/index",
+            json={"corpus_id": corpus_id, "repo_path": str(_CORPUS_PATH), "force_reindex": False},
+        )
+        assert sixth.status_code == 200, sixth.text
+        # Cancellation at/after the commit boundary: stop the run the moment its
+        # manifest is live; the run must end complete (persisted summary too),
+        # never cancelled, and the generation must stay live.
+        deadline = asyncio.get_running_loop().time() + 120
+        committed_generation = None
+        while asyncio.get_running_loop().time() < deadline:
+            current = await pg.get_generation(corpus_id)
+            if current is not None and current.run_id != fifth_generation.run_id:
+                committed_generation = current
+                break
+            await asyncio.sleep(0.02)
+        assert committed_generation is not None, "the sixth run never committed"
+        stopped_after_commit = await client.post(f"/api/index/{corpus_id}/stop")
+        assert stopped_after_commit.status_code == 200, stopped_after_commit.text
+        assert stopped_after_commit.json()["status"] == "complete", stopped_after_commit.json()
+        latest_after_stop = await client.get(f"/api/index/{corpus_id}/runs/latest")
+        assert (
+            latest_after_stop.status_code == 200
+            and latest_after_stop.json()["status"] == "complete"
+        )
+        assert latest_after_stop.json()["run_id"] == committed_generation.run_id
+        assert (await pg.get_generation(corpus_id)).run_id == committed_generation.run_id
+        assert (await qdrant.count_points(committed_generation.qdrant_collection)) == chunk_rows
+        await _wait_fence_released(pg, corpus_id)
+        regeneration = committed_generation
         latest_run = await client.get(f"/api/index/{corpus_id}/runs/latest")
         assert latest_run.status_code == 200, latest_run.text
         assert latest_run.json()["status"] == "complete", latest_run.json()

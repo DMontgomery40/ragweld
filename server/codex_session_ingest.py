@@ -1353,21 +1353,14 @@ class CorpusWriter:
         if not chunks:
             return 0
         try:
-            with self.metrics.phase_seconds.labels("pg_upsert_semantic").time():
-                await self.pg.upsert_chunks(self.config.semantic_repo_id, chunks)
-                self.metrics.db_writes_total.labels("semantic_chunks").inc()
+            # Rows and vectors are one unit of work: the store writes the vectors inside
+            # the Postgres transaction that commits the rows (per-corpus lock held).
             with self.metrics.phase_seconds.labels("qdrant_upsert_semantic").time():
-                try:
-                    await self.qdrant.upsert_chunks(
-                        self.config.semantic_repo_id, chunks, embedding_dim=self.config.embedding_dimensions, pg=self.pg
-                    )
-                except Exception:
-                    # The rows above are visible but their vectors are not: take the
-                    # rows back so no chunk ever exists in Postgres only, then let the
-                    # batch bisect/dead-letter as usual.
-                    await self.pg.delete_chunks_by_ids(self.config.semantic_repo_id, [c.chunk_id for c in chunks])
-                    raise
+                await self.qdrant.upsert_chunks(
+                    self.config.semantic_repo_id, chunks, embedding_dim=self.config.embedding_dimensions, pg=self.pg
+                )
                 self.metrics.db_writes_total.labels("semantic_vectors").inc()
+                self.metrics.db_writes_total.labels("semantic_chunks").inc()
             self.metrics.chunks_written_total.labels("semantic").inc(len(chunks))
             return len(chunks)
         except Exception as exc:
@@ -1392,22 +1385,15 @@ class CorpusWriter:
         if not chunks:
             return 0
         try:
-            with self.metrics.phase_seconds.labels("pg_upsert_artifact").time():
-                await self.pg.upsert_chunks(self.config.artifact_repo_id, chunks)
-                self.metrics.db_writes_total.labels("artifact_chunks").inc()
+            # Rows and vectors are one unit of work: the store writes the vectors inside
+            # the Postgres transaction that commits the rows (per-corpus lock held).
             with self.metrics.phase_seconds.labels("qdrant_upsert_artifact").time():
                 # Artifact chunks carry no dense embedding: sparse-only points.
-                try:
-                    await self.qdrant.upsert_chunks(
-                        self.config.artifact_repo_id, chunks, embedding_dim=self.config.embedding_dimensions, pg=self.pg
-                    )
-                except Exception:
-                    # The rows above are visible but their vectors are not: take the
-                    # rows back so no chunk ever exists in Postgres only, then let the
-                    # batch bisect/dead-letter as usual.
-                    await self.pg.delete_chunks_by_ids(self.config.artifact_repo_id, [c.chunk_id for c in chunks])
-                    raise
+                await self.qdrant.upsert_chunks(
+                    self.config.artifact_repo_id, chunks, embedding_dim=self.config.embedding_dimensions, pg=self.pg
+                )
                 self.metrics.db_writes_total.labels("artifact_vectors").inc()
+                self.metrics.db_writes_total.labels("artifact_chunks").inc()
             self.metrics.chunks_written_total.labels("artifact").inc(len(chunks))
             return len(chunks)
         except Exception as exc:

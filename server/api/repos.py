@@ -34,7 +34,10 @@ from server.models.tribrid_config_model import (
     CorpusCreateRequest,
     CorpusStats,
     CorpusUpdateRequest,
+    DependencyUnavailableResponse,
     GraphStats,
+    IndexDeletionIncompleteResponse,
+    IndexRunConflictResponse,
 )
 
 logger = logging.getLogger(__name__)
@@ -333,7 +336,19 @@ async def get_corpus_stats(corpus_id: str) -> CorpusStats:
     return await get_repo_stats(corpus_id)
 
 
-@router.delete("/repos/{corpus_id}")
+@router.delete(
+    "/repos/{corpus_id}",
+    responses={
+        409: {
+            "model": IndexRunConflictResponse,
+            "description": "A live index run holds this corpus; stop it first.",
+        },
+        503: {
+            "model": DependencyUnavailableResponse | IndexDeletionIncompleteResponse,
+            "description": "External cleanup failed; the deletion tombstone stays for the next attempt.",
+        },
+    },
+)
 async def delete_repo(corpus_id: str) -> dict[str, Any]:
     repo_id = corpus_id
     pg = await _get_postgres()
@@ -374,7 +389,11 @@ async def delete_repo(corpus_id: str) -> dict[str, Any]:
         raise dependency_unavailable_http_exception(
             exc.dependency, boundary="Corpus deletion API", exc=exc
         ) from exc
-    await pg.clear_index_tombstone(repo_id)
+    if not await pg.clear_index_tombstone(repo_id, tombstone):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Corpus {repo_id}: a newer de-index tombstone appeared during cleanup; retry the deletion",
+        )
 
     # Corpus-scoped lineage (aliases, bundles) goes with the corpus. It runs before
     # the registry row is removed so a failed removal answers a typed, retryable 503

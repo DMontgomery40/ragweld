@@ -13,6 +13,7 @@ from server.dependency_errors import (
     is_transport_unavailable,
 )
 from server.models.tribrid_config_model import (
+    IndexDeletionIncompleteResponse,
     DependencyUnavailableDetail,
     DependencyUnavailableResponse,
 )
@@ -25,6 +26,18 @@ DEPENDENCY_UNAVAILABLE_RESPONSES = {
     503: {
         "model": DependencyUnavailableResponse,
         "description": "A required runtime dependency is unavailable.",
+    }
+}
+
+# Routes that resolve a corpus's generation manifest can also meet a de-index
+# tombstone: the corpus fails closed until its external cleanup completed.
+MANIFEST_READER_UNAVAILABLE_RESPONSES = {
+    503: {
+        "model": DependencyUnavailableResponse | IndexDeletionIncompleteResponse,
+        "description": (
+            "A required runtime dependency is unavailable, or the corpus is being de-indexed and its "
+            "external cleanup has not completed."
+        ),
     }
 }
 

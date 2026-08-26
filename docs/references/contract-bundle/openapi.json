@@ -7744,6 +7744,75 @@
         "title": "ImageGenConfig",
         "type": "object"
       },
+      "IndexDeletionIncompleteDetail": {
+        "description": "Public error detail (HTTP 503) while a corpus's de-index tombstone is still being cleaned up.",
+        "properties": {
+          "code": {
+            "const": "index_deletion_incomplete",
+            "default": "index_deletion_incomplete",
+            "title": "Code",
+            "type": "string"
+          },
+          "corpus_id": {
+            "description": "Corpus whose external index cleanup has not completed",
+            "title": "Corpus Id",
+            "type": "string"
+          },
+          "created_at": {
+            "description": "When the deletion tombstone was written",
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "graph_repo_ids": {
+            "description": "Neo4j graphs still to drop",
+            "items": {
+              "type": "string"
+            },
+            "title": "Graph Repo Ids",
+            "type": "array"
+          },
+          "message": {
+            "description": "Stable, non-sensitive summary",
+            "title": "Message",
+            "type": "string"
+          },
+          "operator_hint": {
+            "description": "What the operator can do next",
+            "title": "Operator Hint",
+            "type": "string"
+          },
+          "qdrant_collections": {
+            "description": "Collections still to drop",
+            "items": {
+              "type": "string"
+            },
+            "title": "Qdrant Collections",
+            "type": "array"
+          }
+        },
+        "required": [
+          "corpus_id",
+          "created_at",
+          "message",
+          "operator_hint"
+        ],
+        "title": "IndexDeletionIncompleteDetail",
+        "type": "object"
+      },
+      "IndexDeletionIncompleteResponse": {
+        "description": "FastAPI response envelope for an incomplete-deletion detail.",
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/IndexDeletionIncompleteDetail"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "IndexDeletionIncompleteResponse",
+        "type": "object"
+      },
       "IndexEstimate": {
         "description": "Best-effort estimate for indexing cost/time before running the indexer.\n\nNotes:\n- Token count is an approximation (byte-based heuristic).\n- Time is an intentionally rough range (depends on machine, provider latency,\n  GraphRAG extraction scope, and local hardware throughput).",
         "properties": {
@@ -7914,6 +7983,39 @@
         "title": "IndexEstimate",
         "type": "object"
       },
+      "IndexFenceCorruptDetail": {
+        "description": "Public error detail returned (HTTP 409) when a corpus carries a malformed index-run fence.",
+        "properties": {
+          "code": {
+            "const": "index_fence_corrupt",
+            "default": "index_fence_corrupt",
+            "title": "Code",
+            "type": "string"
+          },
+          "corpus_id": {
+            "description": "Corpus whose index-run fence is malformed",
+            "title": "Corpus Id",
+            "type": "string"
+          },
+          "message": {
+            "description": "Stable, non-sensitive summary",
+            "title": "Message",
+            "type": "string"
+          },
+          "operator_hint": {
+            "description": "What the operator can do next",
+            "title": "Operator Hint",
+            "type": "string"
+          }
+        },
+        "required": [
+          "corpus_id",
+          "message",
+          "operator_hint"
+        ],
+        "title": "IndexFenceCorruptDetail",
+        "type": "object"
+      },
       "IndexRequest": {
         "description": "Request to index a repository.",
         "properties": {
@@ -8001,10 +8103,25 @@
         "type": "object"
       },
       "IndexRunConflictResponse": {
-        "description": "FastAPI response envelope for an index-run conflict detail.",
+        "description": "FastAPI response envelope for every index-run fence conflict (HTTP 409).",
         "properties": {
           "detail": {
-            "$ref": "#/components/schemas/IndexRunConflictDetail"
+            "discriminator": {
+              "mapping": {
+                "index_fence_corrupt": "#/components/schemas/IndexFenceCorruptDetail",
+                "index_run_in_progress": "#/components/schemas/IndexRunConflictDetail"
+              },
+              "propertyName": "code"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/IndexRunConflictDetail"
+              },
+              {
+                "$ref": "#/components/schemas/IndexFenceCorruptDetail"
+              }
+            ],
+            "title": "Detail"
           }
         },
         "required": [
@@ -11768,7 +11885,8 @@
                 "postgres",
                 "neo4j",
                 "litellm",
-                "vllm"
+                "vllm",
+                "index_manifests"
               ]
             },
             "title": "Dependencies",
@@ -18674,13 +18792,16 @@
                     },
                     {
                       "$ref": "#/components/schemas/RequiredRetrievalLegFailureResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/IndexDeletionIncompleteResponse"
                     }
                   ],
                   "title": "Response 503 Answer Api Answer Post"
                 }
               }
             },
-            "description": "A required storage dependency or requested retrieval leg is unavailable."
+            "description": "A required storage dependency or requested retrieval leg is unavailable, or the corpus is being de-indexed and its external cleanup has not completed."
           }
         },
         "summary": "Answer",
@@ -18741,13 +18862,16 @@
                     },
                     {
                       "$ref": "#/components/schemas/RequiredRetrievalLegFailureResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/IndexDeletionIncompleteResponse"
                     }
                   ],
                   "title": "Response 503 Answer Stream Api Answer Stream Post"
                 }
               }
             },
-            "description": "A required storage dependency or requested retrieval leg is unavailable."
+            "description": "A required storage dependency or requested retrieval leg is unavailable, or the corpus is being de-indexed and its external cleanup has not completed."
           }
         },
         "summary": "Answer Stream",
@@ -19036,13 +19160,16 @@
                     },
                     {
                       "$ref": "#/components/schemas/RequiredRetrievalLegFailureResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/IndexDeletionIncompleteResponse"
                     }
                   ],
                   "title": "Response 503 Benchmark Run Api Benchmark Run Post"
                 }
               }
             },
-            "description": "A required storage dependency or requested retrieval leg is unavailable."
+            "description": "A required storage dependency or requested retrieval leg is unavailable, or the corpus is being de-indexed and its external cleanup has not completed."
           }
         },
         "summary": "Benchmark Run",
@@ -19453,13 +19580,16 @@
                     },
                     {
                       "$ref": "#/components/schemas/RequiredRetrievalLegFailureResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/IndexDeletionIncompleteResponse"
                     }
                   ],
                   "title": "Response 503 Chat Stream Api Chat Stream Post"
                 }
               }
             },
-            "description": "A required storage dependency or requested retrieval leg is unavailable."
+            "description": "A required storage dependency or requested retrieval leg is unavailable, or the corpus is being de-indexed and its external cleanup has not completed."
           }
         },
         "summary": "Chat Stream",
@@ -22465,11 +22595,19 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/DependencyUnavailableResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/DependencyUnavailableResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/IndexDeletionIncompleteResponse"
+                    }
+                  ],
+                  "title": "Response 503 List Communities Api Graph  Corpus Id  Communities Get"
                 }
               }
             },
-            "description": "A required runtime dependency is unavailable."
+            "description": "A required runtime dependency is unavailable, or the corpus is being de-indexed and its external cleanup has not completed."
           }
         },
         "summary": "List Communities",
@@ -22540,11 +22678,19 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/DependencyUnavailableResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/DependencyUnavailableResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/IndexDeletionIncompleteResponse"
+                    }
+                  ],
+                  "title": "Response 503 Get Community Members Api Graph  Corpus Id  Community  Community Id  Members Get"
                 }
               }
             },
-            "description": "A required runtime dependency is unavailable."
+            "description": "A required runtime dependency is unavailable, or the corpus is being de-indexed and its external cleanup has not completed."
           }
         },
         "summary": "Get Community Members",
@@ -22612,11 +22758,19 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/DependencyUnavailableResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/DependencyUnavailableResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/IndexDeletionIncompleteResponse"
+                    }
+                  ],
+                  "title": "Response 503 Get Community Subgraph Api Graph  Corpus Id  Community  Community Id  Subgraph Get"
                 }
               }
             },
-            "description": "A required runtime dependency is unavailable."
+            "description": "A required runtime dependency is unavailable, or the corpus is being de-indexed and its external cleanup has not completed."
           }
         },
         "summary": "Get Community Subgraph",
@@ -22710,11 +22864,19 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/DependencyUnavailableResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/DependencyUnavailableResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/IndexDeletionIncompleteResponse"
+                    }
+                  ],
+                  "title": "Response 503 List Entities Api Graph  Corpus Id  Entities Get"
                 }
               }
             },
-            "description": "A required runtime dependency is unavailable."
+            "description": "A required runtime dependency is unavailable, or the corpus is being de-indexed and its external cleanup has not completed."
           }
         },
         "summary": "List Entities",
@@ -22771,11 +22933,19 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/DependencyUnavailableResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/DependencyUnavailableResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/IndexDeletionIncompleteResponse"
+                    }
+                  ],
+                  "title": "Response 503 Get Entity Api Graph  Corpus Id  Entity  Entity Id  Get"
                 }
               }
             },
-            "description": "A required runtime dependency is unavailable."
+            "description": "A required runtime dependency is unavailable, or the corpus is being de-indexed and its external cleanup has not completed."
           }
         },
         "summary": "Get Entity",
@@ -22852,11 +23022,19 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/DependencyUnavailableResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/DependencyUnavailableResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/IndexDeletionIncompleteResponse"
+                    }
+                  ],
+                  "title": "Response 503 Get Entity Neighbors Api Graph  Corpus Id  Entity  Entity Id  Neighbors Get"
                 }
               }
             },
-            "description": "A required runtime dependency is unavailable."
+            "description": "A required runtime dependency is unavailable, or the corpus is being de-indexed and its external cleanup has not completed."
           }
         },
         "summary": "Get Entity Neighbors",
@@ -22917,11 +23095,19 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/DependencyUnavailableResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/DependencyUnavailableResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/IndexDeletionIncompleteResponse"
+                    }
+                  ],
+                  "title": "Response 503 Get Entity Relationships Api Graph  Corpus Id  Entity  Entity Id  Relationships Get"
                 }
               }
             },
-            "description": "A required runtime dependency is unavailable."
+            "description": "A required runtime dependency is unavailable, or the corpus is being de-indexed and its external cleanup has not completed."
           }
         },
         "summary": "Get Entity Relationships",
@@ -22983,11 +23169,19 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/DependencyUnavailableResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/DependencyUnavailableResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/IndexDeletionIncompleteResponse"
+                    }
+                  ],
+                  "title": "Response 503 Graph Query Api Graph  Corpus Id  Query Post"
                 }
               }
             },
-            "description": "A required runtime dependency is unavailable."
+            "description": "A required runtime dependency is unavailable, or the corpus is being de-indexed and its external cleanup has not completed."
           }
         },
         "summary": "Graph Query",
@@ -23035,11 +23229,19 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/DependencyUnavailableResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/DependencyUnavailableResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/IndexDeletionIncompleteResponse"
+                    }
+                  ],
+                  "title": "Response 503 Get Graph Stats Api Graph  Corpus Id  Stats Get"
                 }
               }
             },
-            "description": "A required runtime dependency is unavailable."
+            "description": "A required runtime dependency is unavailable, or the corpus is being de-indexed and its external cleanup has not completed."
           }
         },
         "summary": "Get Graph Stats",
@@ -23098,11 +23300,19 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/DependencyUnavailableResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/DependencyUnavailableResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/IndexDeletionIncompleteResponse"
+                    }
+                  ],
+                  "title": "Response 503 Get Repo Subgraph Api Graph  Corpus Id  Subgraph Get"
                 }
               }
             },
-            "description": "A required runtime dependency is unavailable."
+            "description": "A required runtime dependency is unavailable, or the corpus is being de-indexed and its external cleanup has not completed."
           }
         },
         "summary": "Get Repo Subgraph",
@@ -23419,6 +23629,16 @@
             },
             "description": "Successful Response"
           },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IndexRunConflictResponse"
+                }
+              }
+            },
+            "description": "A live index run holds this corpus; stop it first."
+          },
           "422": {
             "content": {
               "application/json": {
@@ -23428,6 +23648,24 @@
               }
             },
             "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/DependencyUnavailableResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/IndexDeletionIncompleteResponse"
+                    }
+                  ],
+                  "title": "Response 503 Delete Index Api Index  Corpus Id  Delete"
+                }
+              }
+            },
+            "description": "External cleanup failed; the deletion tombstone stays and the next delete retries exactly its targets."
           }
         },
         "summary": "Delete Index",
@@ -24449,13 +24687,16 @@
                     },
                     {
                       "$ref": "#/components/schemas/RequiredRetrievalLegFailureResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/IndexDeletionIncompleteResponse"
                     }
                   ],
                   "title": "Response 503 Mcp Probe Api Mcp Probe Post"
                 }
               }
             },
-            "description": "A required storage dependency or requested retrieval leg is unavailable."
+            "description": "A required storage dependency or requested retrieval leg is unavailable, or the corpus is being de-indexed and its external cleanup has not completed."
           }
         },
         "summary": "Mcp Probe",
@@ -25638,6 +25879,16 @@
             },
             "description": "Successful Response"
           },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IndexRunConflictResponse"
+                }
+              }
+            },
+            "description": "A live index run holds this corpus; stop it first."
+          },
           "422": {
             "content": {
               "application/json": {
@@ -25652,11 +25903,19 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/DependencyUnavailableResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/DependencyUnavailableResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/IndexDeletionIncompleteResponse"
+                    }
+                  ],
+                  "title": "Response 503 Delete Repo Api Repos  Corpus Id  Delete"
                 }
               }
             },
-            "description": "A required runtime dependency is unavailable."
+            "description": "External cleanup failed; the deletion tombstone stays for the next attempt."
           }
         },
         "summary": "Delete Repo",
@@ -27280,13 +27539,16 @@
                     },
                     {
                       "$ref": "#/components/schemas/RequiredRetrievalLegFailureResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/IndexDeletionIncompleteResponse"
                     }
                   ],
                   "title": "Response 503 Search Api Search Post"
                 }
               }
             },
-            "description": "A required storage dependency or requested retrieval leg is unavailable."
+            "description": "A required storage dependency or requested retrieval leg is unavailable, or the corpus is being de-indexed and its external cleanup has not completed."
           }
         },
         "summary": "Search",

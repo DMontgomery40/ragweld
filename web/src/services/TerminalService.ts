@@ -109,7 +109,7 @@ class TerminalServiceClass {
       onCancelled?: () => void;
     }
   ): void {
-    const { onLine, onProgress, onError, onComplete, ...queryParams } = params;
+    const { onLine, onProgress, onError, onComplete, onCancelled, ...queryParams } = params;
 
     // Backend SSE for index logs is:
     //   GET /api/stream/operations/index?corpus_id=...
@@ -127,7 +127,7 @@ class TerminalServiceClass {
     });
 
     const endpoint = `operations/index${qs.toString() ? `?${qs.toString()}` : ''}`;
-    this.connectToStream(terminalId, endpoint, { onLine, onProgress, onError, onComplete });
+    this.connectToStream(terminalId, endpoint, { onLine, onProgress, onError, onComplete, onCancelled });
   }
 
   /**

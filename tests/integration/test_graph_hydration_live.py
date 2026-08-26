@@ -13,7 +13,7 @@ dense leg over the corpus-isolated collection (exact below Qdrant's full-scan
 threshold, same deterministic vectors). Neo4j's chunk vector index is shared by
 every corpus of the same dimension and over-fetches a global top-N before
 filtering by corpus, so the graph leg may return FEWER seeds than requested;
-what it returns must be a prefix of the corpus's exact ranking, never a chunk
+what it returns must be a subset of the corpus's exact top-k, never a chunk
 outside it.
 """
 
@@ -33,6 +33,7 @@ from httpx import ASGITransport, AsyncClient
 
 from server.config import load_config
 from server.db.postgres import PostgresClient
+from server.gateway_catalog import warm_gateway_catalog
 from server.main import app
 from server.services import config_store
 
@@ -107,11 +108,19 @@ async def _search(
 
 
 async def _set_graph_mode(
-    pg: PostgresClient, corpus_id: str, *, mode: str, entity_expansion: bool
+    pg: PostgresClient,
+    corpus_id: str,
+    *,
+    mode: str,
+    entity_expansion: bool,
+    seed_overfetch_multiplier: int = 10,
 ) -> None:
     cfg = await config_store.get_config(repo_id=corpus_id)
     cfg.graph_search.mode = mode
     cfg.graph_search.chunk_entity_expansion_enabled = entity_expansion
+    # Neo4j's chunk vector index is shared by every corpus of the same dimension:
+    # the leg takes the global top-(k x multiplier) and keeps this corpus's chunks.
+    cfg.graph_search.chunk_seed_overfetch_multiplier = seed_overfetch_multiplier
     await pg.upsert_corpus_config_json(corpus_id, cfg.model_dump(mode="serialization"))
     config_store._store = None
 
@@ -122,6 +131,9 @@ async def seeded() -> AsyncIterator[SeededGraph]:
     pg = PostgresClient(os.environ["POSTGRES_DSN"])
     cfg = load_config()
     kg_skip = await _gateway_serves(str(cfg.chat.litellm.base_url), _KG_MODEL)
+    # ASGITransport does not run the lifespan: warm the gateway catalog the way
+    # the shared client fixture does, or semantic-KG route resolution has no catalog.
+    await asyncio.to_thread(warm_gateway_catalog)
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         try:
             await pg.connect()
@@ -157,6 +169,8 @@ async def seeded() -> AsyncIterator[SeededGraph]:
             if kg_skip is None:
                 cfg.graph_indexing.semantic_kg_mode = "llm"
                 cfg.graph_indexing.semantic_kg_llm_model = _KG_MODEL
+                # The seed must be real: a failed extraction fails the run, never an empty graph.
+                cfg.graph_indexing.semantic_kg_require_llm_success = True
             cfg.chat.litellm.enabled = kg_skip is None
             cfg.reranking.reranker_mode = "none"
             cfg.semantic_cache.enabled = 0
@@ -226,7 +240,11 @@ async def test_chunk_mode_hydrates_exactly_the_vector_seeds(
     pg = PostgresClient(os.environ["POSTGRES_DSN"])
     await pg.connect()
     try:
-        await _set_graph_mode(pg, seeded.corpus_id, mode="chunk", entity_expansion=False)
+        # Multiplier 1: the global top-k filtered to this corpus can only be a subset
+        # of the corpus's own exact top-k (the oracle below).
+        await _set_graph_mode(
+            pg, seeded.corpus_id, mode="chunk", entity_expansion=False, seed_overfetch_multiplier=1
+        )
         payload = await _search(client, seeded.corpus_id, leg="graph")
         matches = payload["matches"]
         debug = payload["debug"]["fusion_per_corpus"][seeded.corpus_id]
@@ -237,11 +255,13 @@ async def test_chunk_mode_hydrates_exactly_the_vector_seeds(
         # With both neighbor windows at zero the leg's hydrated hits ARE the final list ...
         assert int(debug["fusion_graph_hydrated_chunks"]) == len(matches), debug
         assert 1 <= len(matches) <= _SEED_K, [m["chunk_id"] for m in matches]
-        # ... and they are a prefix of the corpus's exact ranking over the same vectors:
-        # a seed the graph leg returns is never a chunk the dense leg ranks lower
-        # than one it omitted (the shared Neo4j index can only shrink the set).
-        hit_ids = [m["chunk_id"] for m in matches]
-        assert hit_ids == seeded.vector_seed_ids[: len(hit_ids)], (hit_ids, seeded.vector_seed_ids)
+        # ... and every hit is one of the corpus's exact top-k chunks over the same
+        # vectors (the Qdrant dense leg over the corpus-isolated collection). With
+        # the overfetch multiplier at 1, Neo4j takes the global top-k and keeps
+        # what belongs to this corpus, so the set can only shrink; order and count
+        # are not cross-engine invariants, membership is.
+        hit_ids = {m["chunk_id"] for m in matches}
+        assert hit_ids <= set(seeded.vector_seed_ids), (sorted(hit_ids), seeded.vector_seed_ids)
     finally:
         await pg.disconnect()
 
