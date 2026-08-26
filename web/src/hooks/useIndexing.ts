@@ -190,9 +190,9 @@ export function useIndexing() {
 
   const stopIndex = useCallback(
     async (corpusId: string, options: StopOptions = {}) => {
-      if (options.terminalId) {
-        TerminalService.disconnect(options.terminalId);
-      }
+      // The stream stays connected until the backend answers: the run's terminal
+      // event (`cancelled`, or `complete` when the stop landed after the commit)
+      // reaches the terminal, and the response status is the terminal authority.
       setState((s) => ({ ...s, loading: true, error: null }));
       try {
         const r = await fetch(api(`index/${encodeURIComponent(corpusId)}/stop`), {
@@ -201,6 +201,9 @@ export function useIndexing() {
         });
         if (!r.ok) throw new Error((await r.text().catch(() => '')) || `Stop request failed (${r.status})`);
         const data: IndexStatus = await r.json();
+        if (options.terminalId) {
+          TerminalService.disconnect(options.terminalId);
+        }
         setState((s) => ({ ...s, status: data, loading: false }));
         return data;
       } catch (e) {

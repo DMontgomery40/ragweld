@@ -9,6 +9,7 @@ from server.models.tribrid_config_model import (
     DependencyUnavailableResponse,
     GenerationUnavailableDetail,
     GenerationUnavailableResponse,
+    IndexDeletionIncompleteResponse,
     PromptBudgetExceededResponse,
     RequiredRetrievalLegFailureResponse,
 )
@@ -25,9 +26,13 @@ CHAT_RUNTIME_UNAVAILABLE_RESPONSES = {
             DependencyUnavailableResponse
             | RequiredRetrievalLegFailureResponse
             | GenerationUnavailableResponse
+            | IndexDeletionIncompleteResponse
         ),
-        "description": "Chat storage, retrieval, or generation is unavailable.",
-    }
+        "description": (
+            "Chat storage, retrieval, or generation is unavailable, or the corpus is being de-indexed "
+            "and its external cleanup has not completed."
+        ),
+    },
 }
 
 

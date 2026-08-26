@@ -32,8 +32,10 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
 from server.config import load_config
+from server.db.neo4j import Neo4jClient
 from server.db.postgres import PostgresClient
 from server.gateway_catalog import warm_gateway_catalog
+from server.indexing.embedder import Embedder
 from server.main import app
 from server.services import config_store
 
@@ -255,13 +257,39 @@ async def test_chunk_mode_hydrates_exactly_the_vector_seeds(
         # With both neighbor windows at zero the leg's hydrated hits ARE the final list ...
         assert int(debug["fusion_graph_hydrated_chunks"]) == len(matches), debug
         assert 1 <= len(matches) <= _SEED_K, [m["chunk_id"] for m in matches]
-        # ... and every hit is one of the corpus's exact top-k chunks over the same
-        # vectors (the Qdrant dense leg over the corpus-isolated collection). With
-        # the overfetch multiplier at 1, Neo4j takes the global top-k and keeps
-        # what belongs to this corpus, so the set can only shrink; order and count
-        # are not cross-engine invariants, membership is.
+        # ... and they are exactly the seeds the same engine returns for the same
+        # query: Neo4j's chunk vector index on the manifest's graph id, same top-k,
+        # same overfetch, same neighbor window (a same-engine oracle; ANN order and
+        # cross-engine rankings are not invariants, this is).
+        scoped = await config_store.get_config(repo_id=seeded.corpus_id)
+        query_vector = await Embedder(scoped.embedding, scoped.tokenization).embed(_QUESTION)
+        graph_id = (await pg.get_generation(seeded.corpus_id)).graph_repo_id
+        assert graph_id
+        neo4j = Neo4jClient(
+            scoped.graph_storage.neo4j_uri,
+            scoped.graph_storage.neo4j_user,
+            scoped.graph_storage.resolve_password(),
+            database=scoped.graph_storage.resolve_database(seeded.corpus_id),
+        )
+        await neo4j.connect()
+        try:
+            direct = await neo4j.chunk_vector_search(
+                graph_id,
+                query_vector,
+                index_name=scoped.graph_indexing.chunk_vector_index_name,
+                top_k=_SEED_K,
+                neighbor_window=0,
+                overfetch_multiplier=1,
+            )
+        finally:
+            await neo4j.disconnect()
+        direct_ids = {chunk_id for chunk_id, _score in direct}
         hit_ids = {m["chunk_id"] for m in matches}
-        assert hit_ids <= set(seeded.vector_seed_ids), (sorted(hit_ids), seeded.vector_seed_ids)
+        assert direct_ids, "the same-engine oracle returned no seeds"
+        assert hit_ids == direct_ids, (sorted(hit_ids), sorted(direct_ids))
+        # The corpus's own dense ranking (Qdrant) is exact on this small collection:
+        # every graph seed is one of its chunks (never a chunk outside the corpus).
+        assert hit_ids <= set(seeded.content_by_id)
     finally:
         await pg.disconnect()
 

@@ -102,17 +102,52 @@ class GenerationManifest(BaseModel):
     )
 
     def due_for_retirement(self, *, now: datetime, grace_seconds: int) -> list[RetiredGeneration]:
-        """Retired entries whose grace has elapsed, masked so they never name a live resource."""
+        """Retired entries whose grace has elapsed, masked per resource.
+
+        A collection or graph is droppable only when NOTHING alive still names
+        it: not the live generation, and not another retired entry that is still
+        inside its grace (two entries may share one resource when only the other
+        store was rebuilt). Every resource keeps the latest expiry among its holders.
+        """
+        holders_alive_collections = {self.qdrant_collection} - {None}
+        holders_alive_graphs = {self.graph_repo_id} - {None}
+        for entry in self.retired:
+            if not entry.due(now=now, grace_seconds=grace_seconds):
+                holders_alive_collections.add(entry.qdrant_collection)
+                holders_alive_graphs.add(entry.graph_repo_id)
         out: list[RetiredGeneration] = []
         for entry in self.retired:
             if not entry.due(now=now, grace_seconds=grace_seconds):
                 continue
-            masked = entry.masked(
-                live_collection=self.qdrant_collection, live_graph=self.graph_repo_id
+            collection = (
+                None
+                if entry.qdrant_collection in holders_alive_collections
+                else entry.qdrant_collection
             )
-            if masked is not None:
-                out.append(masked)
+            graph = None if entry.graph_repo_id in holders_alive_graphs else entry.graph_repo_id
+            if collection is None and graph is None:
+                continue
+            out.append(
+                entry.model_copy(update={"qdrant_collection": collection, "graph_repo_id": graph})
+            )
         return out
+
+    def without_resources(self, dropped: list[RetiredGeneration]) -> list[RetiredGeneration]:
+        """The retired list after the given resources were dropped (entries with nothing left go)."""
+        gone_collections = {d.qdrant_collection for d in dropped} - {None}
+        gone_graphs = {d.graph_repo_id for d in dropped} - {None}
+        kept: list[RetiredGeneration] = []
+        for entry in self.retired:
+            collection = (
+                None if entry.qdrant_collection in gone_collections else entry.qdrant_collection
+            )
+            graph = None if entry.graph_repo_id in gone_graphs else entry.graph_repo_id
+            if collection is None and graph is None:
+                continue
+            kept.append(
+                entry.model_copy(update={"qdrant_collection": collection, "graph_repo_id": graph})
+            )
+        return kept
 
     def all_qdrant_collections(self) -> list[str]:
         out = [
@@ -228,6 +263,18 @@ class DeletionIncompleteError(RuntimeError):
         )
 
 
+class PersistedStateCorruptError(RuntimeError):
+    """A persisted boundary (manifest or tombstone) is present but not a valid shape; never read as absent."""
+
+    def __init__(self, repo_id: str, key: str, raw: Any) -> None:
+        self.repo_id = repo_id
+        self.key = key
+        self.raw = raw
+        super().__init__(
+            f"Corpus {repo_id} carries a malformed {key}; de-index the corpus to repair it: {raw!r}"
+        )
+
+
 class TombstoneCleanupError(RuntimeError):
     """An external store named by a deletion tombstone could not be cleaned (retry later)."""
 
@@ -301,9 +348,17 @@ def build_generation(
     )
 
 
-def tombstone_from_meta(meta: dict[str, Any] | None) -> DeletionTombstone | None:
+def tombstone_from_meta(
+    meta: dict[str, Any] | None, *, repo_id: str = ""
+) -> DeletionTombstone | None:
+    """The deletion tombstone on a row's meta; a present-but-malformed one raises (never reads as absent)."""
     raw = meta.get(INDEX_TOMBSTONE_META_KEY) if isinstance(meta, dict) else None
-    return DeletionTombstone.model_validate(raw) if isinstance(raw, dict) else None
+    if raw is None:
+        return None
+    try:
+        return DeletionTombstone.model_validate(raw)
+    except Exception as exc:
+        raise PersistedStateCorruptError(repo_id, INDEX_TOMBSTONE_META_KEY, raw) from exc
 
 
 def generation_from_corpus_row(row: dict[str, Any] | None) -> GenerationManifest | None:
@@ -317,14 +372,18 @@ def generation_from_corpus_row(row: dict[str, Any] | None) -> GenerationManifest
     """
     if not row:
         return None
+    repo_id = str(row.get("repo_id") or "")
     meta = row.get("meta") if isinstance(row.get("meta"), dict) else {}
-    tombstone = tombstone_from_meta(meta)
+    tombstone = tombstone_from_meta(meta, repo_id=repo_id)
     if tombstone is not None:
-        raise DeletionIncompleteError(str(row.get("repo_id") or ""), tombstone)
+        raise DeletionIncompleteError(repo_id, tombstone)
     generation = meta.get(GENERATION_META_KEY)
     if generation is None:
         return None
-    return GenerationManifest.model_validate(generation)
+    try:
+        return GenerationManifest.model_validate(generation)
+    except Exception as exc:
+        raise PersistedStateCorruptError(repo_id, GENERATION_META_KEY, generation) from exc
 
 
 def qdrant_collection_of(generation: GenerationManifest | None) -> str | None:
@@ -453,12 +512,17 @@ def upgrade_pre_retention_manifest(raw: dict[str, Any]) -> GenerationManifest | 
     return manifest
 
 
-_UPGRADE_STATE = {"complete": False}
+_UPGRADE_STATE = {"complete": False, "failed": False}
 
 
 def manifest_upgrade_complete() -> bool:
     """Whether the durable manifest upgrades ran to completion once in this process."""
     return bool(_UPGRADE_STATE["complete"])
+
+
+def manifest_upgrade_blocked() -> bool:
+    """An upgrade attempt failed and none has succeeded since: manifest routes must fail closed."""
+    return bool(_UPGRADE_STATE["failed"]) and not bool(_UPGRADE_STATE["complete"])
 
 
 async def ensure_generation_manifests(config: TriBridConfig) -> int:
@@ -489,6 +553,10 @@ async def ensure_generation_manifests(config: TriBridConfig) -> int:
             meta = row.get("meta") if isinstance(row.get("meta"), dict) else {}
             raw = meta.get(GENERATION_META_KEY)
             if isinstance(raw, dict):
+                # Alias removal is its own idempotent step: a manifest recorded by an
+                # earlier pass whose alias drop failed still loses its alias here.
+                if await qdrant.legacy_alias_target(repo_id) is not None:
+                    await qdrant.drop_legacy_alias(repo_id)
                 upgraded_manifest = upgrade_pre_retention_manifest(raw)
                 if upgraded_manifest is None:
                     continue
@@ -525,9 +593,13 @@ async def ensure_generation_manifests(config: TriBridConfig) -> int:
                 repo_id,
                 legacy,
             )
+    except BaseException:
+        _UPGRADE_STATE["failed"] = True
+        raise
     finally:
         await pg.disconnect()
     _UPGRADE_STATE["complete"] = True
+    _UPGRADE_STATE["failed"] = False
     return upgraded
 
 
@@ -561,6 +633,7 @@ __all__ = [
     "IndexFenceHeldError",
     "IndexFenceLostError",
     "IndexRunFence",
+    "PersistedStateCorruptError",
     "RetiredGeneration",
     "TombstoneCleanupError",
     "ValidationError",
@@ -573,6 +646,7 @@ __all__ = [
     "generation_from_corpus_row",
     "graph_repo_id_of",
     "heartbeat_interval_seconds",
+    "manifest_upgrade_blocked",
     "manifest_upgrade_complete",
     "qdrant_collection_of",
     "reclaim_stale_run",

@@ -28,6 +28,15 @@ async def test_get_index_status_uses_corpus_scoped_config(
         async def disconnect(self) -> None:
             return None
 
+        async def get_corpus(self, repo_id: str) -> dict[str, object]:
+            return {"repo_id": repo_id, "meta": {}}
+
+        async def get_index_fence(self, _repo_id: str) -> None:
+            return None
+
+        async def database_now(self) -> datetime:
+            return datetime.now(UTC)
+
         async def get_index_stats(self, repo_id: str) -> IndexStats:
             return IndexStats(
                 repo_id=repo_id,

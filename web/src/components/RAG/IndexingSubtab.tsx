@@ -568,10 +568,17 @@ export function IndexingSubtab() {
     const rid = String(activeRepo || '').trim();
     if (!rid) return;
     try {
-      await stopIndex(rid, { terminalId: 'indexing_terminal' });
+      const stopped = await stopIndex(rid, { terminalId: 'indexing_terminal' });
       setIsIndexing(false);
-      setProgress((prev) => ({ ...prev, status: 'Cancelled' }));
-      terminalRef.current?.appendLine(`\x1b[33m⚠ Indexing cancelled by user\x1b[0m`);
+      if (stopped.status === 'complete') {
+        // The stop landed after the generation manifest was committed: the run is
+        // complete and the new index is live; only best-effort retirement was cut short.
+        setProgress((prev) => ({ ...prev, status: 'Complete', current: 100, total: 100 }));
+        terminalRef.current?.appendLine(`\x1b[32m✓ Stop arrived after the commit: the new index is live\x1b[0m`);
+      } else {
+        setProgress((prev) => ({ ...prev, status: 'Cancelled' }));
+        terminalRef.current?.appendLine(`\x1b[33m⚠ Indexing cancelled by user\x1b[0m`);
+      }
       await loadStats();
       await refreshStatus();
       await loadLatestRunReplay();

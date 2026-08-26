@@ -17,6 +17,7 @@ from httpx import ASGITransport, AsyncClient
 
 from server.config import load_config
 from server.db.postgres import PostgresClient
+from server.indexing.generations import DeletionTombstone, RetiredGeneration
 from server.main import app
 from server.retrieval.contracts import sparse_contract_from_config
 from server.retrieval.qdrant_store import QdrantChunkStore
@@ -202,9 +203,12 @@ async def test_index_search_and_delete_on_promoted_lane(client: AsyncClient) -> 
         assert holder is not None and holder.run_id.startswith("racer-")
         # Heartbeats move the database-stamped heartbeat forward for the holder only.
         before_beat = holder.heartbeat_at
+        await asyncio.sleep(0.05)
         assert await pg.heartbeat_index_fence(corpus_id, holder.run_id) is True
         assert await pg.heartbeat_index_fence(corpus_id, "racer-nobody") is False
-        assert (await pg.get_index_fence(corpus_id)).heartbeat_at >= before_beat
+        assert (await pg.get_index_fence(corpus_id)).heartbeat_at > before_beat, (
+            "a no-op heartbeat would not advance"
+        )
         assert await pg.release_index_fence(corpus_id, holder.run_id) is True
         # A stale fence with no run behind it is released by the stop route.
         assert (
@@ -373,10 +377,6 @@ async def test_index_search_and_delete_on_promoted_lane(client: AsyncClient) -> 
             gone = await qdrant.status(corpus_id, physical=collection)
             assert gone is not None and gone.physical_collection is None, collection
         assert (await qdrant.count_points(fifth_generation.qdrant_collection)) == chunk_rows
-        # Back to a long grace so the deletion below has a retained generation to tombstone.
-        scoped.indexing.generation_retention_seconds = 3600
-        await pg.upsert_corpus_config_json(corpus_id, scoped.model_dump(mode="serialization"))
-        config_store._store = None
         sixth = await client.post(
             "/api/index",
             json={"corpus_id": corpus_id, "repo_path": str(_CORPUS_PATH), "force_reindex": False},
@@ -406,7 +406,61 @@ async def test_index_search_and_delete_on_promoted_lane(client: AsyncClient) -> 
         assert (await pg.get_generation(corpus_id)).run_id == committed_generation.run_id
         assert (await qdrant.count_points(committed_generation.qdrant_collection)) == chunk_rows
         await _wait_fence_released(pg, corpus_id)
-        regeneration = committed_generation
+        # Mixed expiry, seeded on the manifest itself: one retired entry is long past
+        # the grace (due), one is fresh (kept), and both are real collections. The
+        # next commit drops exactly the due one, keeps the fresh one, and adds the
+        # generation it replaced.
+        scoped.indexing.generation_retention_seconds = 3600
+        await pg.upsert_corpus_config_json(corpus_id, scoped.model_dump(mode="serialization"))
+        config_store._store = None
+        due_collection = await qdrant.create_generation(
+            corpus_id, embedding_dim=int(cfg.embedding.embedding_dim)
+        )
+        fresh_collection = await qdrant.create_generation(
+            corpus_id, embedding_dim=int(cfg.embedding.embedding_dim)
+        )
+        seeded = committed_generation.model_copy(
+            update={
+                "retired": [
+                    RetiredGeneration(
+                        run_id="seed-due",
+                        qdrant_collection=due_collection,
+                        graph_repo_id=None,
+                        retired_at=datetime.now(UTC) - timedelta(seconds=7200),
+                    ),
+                    RetiredGeneration(
+                        run_id="seed-fresh",
+                        qdrant_collection=fresh_collection,
+                        graph_repo_id=None,
+                        retired_at=datetime.now(UTC),
+                    ),
+                ]
+            }
+        )
+        await pg.set_generation(corpus_id, seeded)
+        seventh = await client.post(
+            "/api/index",
+            json={"corpus_id": corpus_id, "repo_path": str(_CORPUS_PATH), "force_reindex": False},
+        )
+        assert seventh.status_code == 200, seventh.text
+        assert (await _wait_for_index(client, corpus_id))["status"] == "complete"
+        await _wait_fence_released(pg, corpus_id)
+        after_mixed = await pg.get_generation(corpus_id)
+        assert after_mixed is not None
+        retired_now = {r.qdrant_collection for r in after_mixed.retired}
+        assert due_collection not in retired_now, (
+            after_mixed
+        )  # its grace had elapsed: dropped and pruned
+        assert (await qdrant.status(corpus_id, physical=due_collection)).physical_collection is None
+        assert fresh_collection in retired_now, after_mixed  # still inside its grace: kept
+        assert (
+            await qdrant.status(corpus_id, physical=fresh_collection)
+        ).physical_collection == fresh_collection
+        # The generation the seventh run replaced (the sixth) joins the retired list.
+        assert committed_generation.qdrant_collection in retired_now, [
+            (r.run_id, r.qdrant_collection, r.retired_at.isoformat()) for r in after_mixed.retired
+        ]
+        regeneration = after_mixed
         latest_run = await client.get(f"/api/index/{corpus_id}/runs/latest")
         assert latest_run.status_code == 200, latest_run.text
         assert latest_run.json()["status"] == "complete", latest_run.json()
@@ -543,7 +597,41 @@ async def test_index_search_and_delete_on_promoted_lane(client: AsyncClient) -> 
         # Deleting the index drops the live AND the retained generation (the exact ids
         # the tombstone recorded), clears the tombstone, and the legs then fail
         # closed (chunk rows are gone too).
-        retained_collection = regeneration.retired[0].qdrant_collection
+        retained_collections = [
+            r.qdrant_collection for r in regeneration.retired if r.qdrant_collection
+        ]
+        assert retained_collections
+        retained_collection = retained_collections[0]
+        # A de-index tombstone on the row (an earlier deletion whose external cleanup
+        # did not finish) closes every reader and writer with the typed 503 until the
+        # deletion is retried; its targets are merged into that retry.
+        stale_tombstone = DeletionTombstone(
+            qdrant_collections=[f"{regeneration.qdrant_collection}__never_created"],
+            graph_repo_ids=[],
+            created_at=datetime.now(UTC) - timedelta(seconds=60),
+        )
+        await pg.update_corpus_meta(
+            corpus_id, {"index_tombstone": stale_tombstone.model_dump(mode="json")}
+        )
+        config_store._store = None
+        for call in (
+            client.post("/api/search", json={**body, "cache_mode": "bypass"}),
+            client.post(
+                "/api/index",
+                json={
+                    "corpus_id": corpus_id,
+                    "repo_path": str(_CORPUS_PATH),
+                    "force_reindex": True,
+                },
+            ),
+            client.get(f"/api/index/{corpus_id}/status"),
+            client.get(f"/api/index/{corpus_id}/stats"),
+            client.get(f"/api/graph/{corpus_id}/stats"),
+        ):
+            closed = await call
+            assert closed.status_code == 503, closed.text
+            assert closed.json()["detail"]["code"] == "index_deletion_incomplete", closed.text
+            assert closed.json()["detail"]["corpus_id"] == corpus_id
         deleted = await client.delete(f"/api/index/{corpus_id}")
         assert deleted.status_code == 200, deleted.text
         assert deleted.json()["deleted_chunks"] == chunk_rows

@@ -40,7 +40,7 @@ from server.api.synthetic import router as synthetic_router
 from server.chat.prompt_budget import warm_prompt_budget
 from server.config import load_config
 from server.gateway_catalog import warm_gateway_catalog
-from server.indexing.generations import DeletionIncompleteError
+from server.indexing.generations import DeletionIncompleteError, manifest_upgrade_blocked
 from server.mcp.server import get_mcp_server, record_mounted_state
 from server.models.tribrid_config_model import (
     IndexDeletionIncompleteDetail,
@@ -242,8 +242,11 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
-        from server.api.index import shutdown_event_writer
+        from server.api.index import shutdown_event_writer, stop_index_runs
 
+        # Index runs first (their terminal handlers still persist), then the writer
+        # they persist through, then the housekeeping tasks.
+        await stop_index_runs()
         await shutdown_event_writer()
         catalog_refresh_task.cancel()
         if manifest_upgrade_task is not None:
@@ -272,6 +275,42 @@ app.add_middleware(
     # MCP streamable HTTP uses this header for session management.
     expose_headers=["Mcp-Session-Id"],
 )
+
+
+_MANIFEST_ROUTE_PREFIXES = (
+    "/api/search",
+    "/api/chat",
+    "/api/index",
+    "/api/graph",
+    "/api/corpora",
+    "/api/repos",
+    "/api/mcp",
+)
+
+
+@app.middleware("http")
+async def _manifest_upgrade_gate(request: Request, call_next):  # type: ignore[no-untyped-def]
+    """While a failed manifest upgrade has not succeeded, manifest-dependent routes answer 503.
+
+    Liveness and readiness stay reachable; readiness reports `index_manifests`.
+    """
+    if manifest_upgrade_blocked() and request.url.path.startswith(_MANIFEST_ROUTE_PREFIXES):
+        detail = DependencyUnavailableDetail(
+            code="dependency_unavailable",
+            dependency="postgres",
+            operation="generation manifest upgrade",
+            message="The generation-manifest upgrade failed at startup and has not succeeded yet.",
+            retryable=True,
+            operator_hint=(
+                "Index and retrieval routes stay closed until the upgrade completes (it retries every 60s); "
+                "check /api/ready (index_manifests) and the Postgres/Qdrant services."
+            ),
+        )
+        return JSONResponse(
+            status_code=503,
+            content=DependencyUnavailableResponse(detail=detail).model_dump(mode="json"),
+        )
+    return await call_next(request)
 
 
 @app.exception_handler(DeletionIncompleteError)

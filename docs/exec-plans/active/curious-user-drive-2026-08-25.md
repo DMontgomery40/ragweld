@@ -1532,3 +1532,67 @@ the restarted backend, quick gates green, contract bundle carries the typed
 409 union and the `index_deletion_incomplete` 503 on every manifest reader.
 Codex pass 5 launched on the committed diff.
 
+### Adversarial review pass 5 (codex exec, high effort) — REFUTED again (10 P1 / 8 P2); acted on, residuals recorded
+
+Session 14g, by finding:
+
+1. **Fence claims refuse a tombstoned corpus** (under the same row lock; typed 503).
+2. **Cross-store atomicity of incremental writes — recorded residual.** Rows and
+   vectors cannot commit atomically without an outbox; the protocol keeps the
+   vector write inside the row transaction so no row ever exists without its
+   vectors. A vector that lands without its row (row commit failed after the
+   vector write) is unreachable — hydration is by chunk_id from Postgres — and
+   is overwritten by the retry of the same chunk. Accepted and documented.
+3. **Per-resource retention refcount**: a collection or graph is droppable only
+   when nothing alive still names it (live generation or an entry inside its
+   grace); pruning removes resources, not entries (`without_resources`).
+4. **Corpus delete keeps the tombstone** through lineage cleanup; the registry
+   row is removed under the corpus advisory lock (writers cannot slip in).
+5. **Malformed persisted keys are typed corruption** (`PersistedStateCorruptError`
+   for manifest and tombstone; malformed fences already were); nothing reads
+   as absent.
+6. **De-index is the repair path**: `delete_index_state` clears a malformed
+   fence/manifest/tombstone loudly (the corpus namespace sweep still covers
+   its collections and graphs) instead of refusing with the same 409.
+7. **Unknown commit stays non-terminal** (`indexing` with the explanation); the
+   next status read reconciles it against the manifest.
+8. **Durable-first readers**: status resolves tombstone → fence → this
+   process's state → persisted runs; the dashboard's `running` derives from
+   the fence too; `_live_fence` propagates outages (typed 503) and corruption
+   (typed 409) instead of reading as idle; stats resolve the tombstone first.
+9. **UI stop**: the stream stays connected until the backend answers; the
+   component branches on the returned status (`complete` after the commit
+   boundary is rendered as complete, never "Cancelled").
+10. **Tests**: live tombstone → search/index/status/stats/graph-stats all
+    answer 503 `index_deletion_incomplete`, the retried delete clears it;
+    heartbeat must strictly advance the DB timestamp; a seeded manifest with
+    one due and one fresh retired collection proves per-resource expiry on a
+    real commit; the graph-hydration oracle is the same engine
+    (`Neo4jClient.chunk_vector_search` on the manifest graph id, same
+    parameters) — set equality; the pre-existing fake-based codex-ingest
+    bisect suite stays fake (recorded residual: the poison path has no real
+    Postgres trigger).
+11. **Staged ids are chosen and recorded on the fence before creation**
+    (`generation_name` → `record_fence_staging` → `create_generation(physical=)`).
+12. **Vector-index contract check**: ONLINE plus label/property/dimension/
+    similarity from `SHOW VECTOR INDEXES`; drift fails the run.
+13. **Remote stop uses the database clock.**
+14. **Upgrade**: alias removal is its own idempotent step; once an upgrade
+    attempt has failed, manifest-dependent routes answer 503 until it succeeds
+    (middleware; liveness/readiness stay reachable). An unattempted upgrade
+    (tests without lifespan) does not gate.
+15. **Persistence**: lifespan stops index runs before the writer; summary and
+    event reads run off-loop. Bounded spooling with backpressure is a recorded
+    residual (unbounded FIFO stays).
+16. **Incremental first vector write preserves a live graph pointer.**
+17. **Contracts**: 503 unions declared on POST /api/index, status, stats, both
+    deletes, the chat family and graph stats; corpus-delete 409 is the
+    Pydantic detail; the contract test covers them.
+18. **Index boundary models live in `server/models/index.py`**; the aggregate
+    re-imports them.
+
+Verification (session 14g): live lane 16 passed, full `uv run pytest -q` alone
+1156 passed / 90 skipped, Playwright `curious_user_p1_fixes` 9 passed against
+the restarted backend, quick gates green. Codex pass 6 launched on the
+committed diff.
+

@@ -19236,13 +19236,16 @@
                     },
                     {
                       "$ref": "#/components/schemas/GenerationUnavailableResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/IndexDeletionIncompleteResponse"
                     }
                   ],
                   "title": "Response 503 Chat Api Chat Post"
                 }
               }
             },
-            "description": "Chat storage, retrieval, or generation is unavailable."
+            "description": "Chat storage, retrieval, or generation is unavailable, or the corpus is being de-indexed and its external cleanup has not completed."
           }
         },
         "summary": "Chat",
@@ -23388,6 +23391,24 @@
               }
             },
             "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/DependencyUnavailableResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/IndexDeletionIncompleteResponse"
+                    }
+                  ],
+                  "title": "Response 503 Start Index Api Index Post"
+                }
+              }
+            },
+            "description": "Postgres is unavailable, or the corpus is being de-indexed."
           }
         },
         "summary": "Start Index",
@@ -23817,6 +23838,24 @@
               }
             },
             "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/DependencyUnavailableResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/IndexDeletionIncompleteResponse"
+                    }
+                  ],
+                  "title": "Response 503 Get Index Stats Api Index  Corpus Id  Stats Get"
+                }
+              }
+            },
+            "description": "Postgres is unavailable, or the corpus is being de-indexed."
           }
         },
         "summary": "Get Index Stats",
@@ -23827,6 +23866,7 @@
     },
     "/api/index/{corpus_id}/status": {
       "get": {
+        "description": "Durable truth first: tombstone, then the fence, then this process's state, then persisted runs.",
         "operationId": "get_index_status_api_index__corpus_id__status_get",
         "parameters": [
           {
@@ -23850,6 +23890,16 @@
             },
             "description": "Successful Response"
           },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IndexRunConflictResponse"
+                }
+              }
+            },
+            "description": "The corpus carries a malformed fence."
+          },
           "422": {
             "content": {
               "application/json": {
@@ -23859,6 +23909,24 @@
               }
             },
             "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/DependencyUnavailableResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/IndexDeletionIncompleteResponse"
+                    }
+                  ],
+                  "title": "Response 503 Get Index Status Api Index  Corpus Id  Status Get"
+                }
+              }
+            },
+            "description": "Postgres is unavailable, or the corpus is being de-indexed."
           }
         },
         "summary": "Get Index Status",

@@ -637,10 +637,12 @@ class PostgresClient:
                 new_manifest = None
                 if physical is None:
                     physical = await qdrant.create_generation(repo_id, embedding_dim=embedding_dim)
+                    # Adding the missing vector store never retires a live graph: the
+                    # manifest keeps whatever graph it already named.
                     new_manifest = build_generation(
                         run_id=f"incremental-{uuid.uuid4().hex[:10]}",
                         qdrant_collection=physical,
-                        graph_repo_id=None,
+                        graph_repo_id=generation.graph_repo_id if generation else None,
                         previous=generation,
                     )
                 try:
@@ -1017,10 +1019,13 @@ class PostgresClient:
             )
 
     async def delete_corpus(self, repo_id: str) -> None:
+        """Remove the registry row under the corpus lock (no writer can slip a generation in meanwhile)."""
         await self._require_pool()
         assert self._pool is not None
         async with self._pool.acquire() as conn:
-            await conn.execute("DELETE FROM corpora WHERE repo_id = $1;", repo_id)
+            async with conn.transaction():
+                await conn.execute("SELECT pg_advisory_xact_lock(hashtext($1));", repo_id)
+                await conn.execute("DELETE FROM corpora WHERE repo_id = $1;", repo_id)
 
     async def get_corpus_config_json(self, repo_id: str) -> dict[str, Any] | None:
         await self._require_pool()
@@ -1849,7 +1854,13 @@ class PostgresClient:
         enough: a second worker/process could otherwise build and retire
         against the same corpus.
         """
-        from server.indexing.generations import FenceClaim, IndexFenceCorruptError, IndexRunFence
+        from server.indexing.generations import (
+            DeletionIncompleteError,
+            FenceClaim,
+            IndexFenceCorruptError,
+            IndexRunFence,
+            tombstone_from_meta,
+        )
 
         await self._require_pool()
         assert self._pool is not None
@@ -1865,7 +1876,11 @@ class PostgresClient:
                     raise CorpusNotFoundError(f"Corpus not found: {repo_id}")
                 db_now: datetime = row["db_now"]
                 taken_over: IndexRunFence | None = None
-                existing = _coerce_jsonb_dict(row["meta"]).get("index_run")
+                meta = _coerce_jsonb_dict(row["meta"])
+                tombstone = tombstone_from_meta(meta, repo_id=repo_id)
+                if tombstone is not None:
+                    raise DeletionIncompleteError(repo_id, tombstone)
+                existing = meta.get("index_run")
                 if existing is not None:
                     try:
                         held = IndexRunFence.model_validate(existing)
@@ -2017,6 +2032,7 @@ class PostgresClient:
     async def prune_retired_generations(
         self, repo_id: str, run_id: str, *, dropped: list[RetiredGeneration]
     ) -> bool:
+        _dropped = list(dropped)
         """Remove retired entries from the manifest after their stores were dropped.
 
         Only while the manifest still belongs to ``run_id`` (a newer commit owns
@@ -2026,7 +2042,7 @@ class PostgresClient:
 
         await self._require_pool()
         assert self._pool is not None
-        gone = {d.run_id for d in dropped}
+        del dropped  # resources are matched below through GenerationManifest.without_resources
         async with self._pool.acquire() as conn:
             async with conn.transaction():
                 row = await conn.fetchrow(
@@ -2040,7 +2056,7 @@ class PostgresClient:
                 manifest = _Manifest.model_validate(raw)
                 if manifest.run_id != run_id:
                     return False
-                manifest.retired = [r for r in manifest.retired if r.run_id not in gone]
+                manifest.retired = manifest.without_resources(_dropped)
                 await conn.execute(
                     "UPDATE corpora SET meta = COALESCE(meta, '{}'::jsonb) || $2::jsonb WHERE repo_id = $1;",
                     repo_id,
@@ -2098,7 +2114,6 @@ class PostgresClient:
         """
         from server.indexing.generations import (
             DeletionTombstone,
-            IndexFenceCorruptError,
             IndexFenceHeldError,
             IndexRunFence,
             build_tombstone,
@@ -2118,28 +2133,49 @@ class PostgresClient:
                 )
                 now: datetime = row["db_now"] if row is not None else datetime.now(UTC)
                 meta = _coerce_jsonb_dict(row["meta"]) if row is not None else {}
+                # De-indexing is the explicit repair path for malformed persisted
+                # state: a fence, manifest or tombstone that does not validate is
+                # cleared here (loudly), never silently read as absent anywhere else.
                 raw_fence = meta.get("index_run")
                 if raw_fence is not None:
                     try:
                         fence = IndexRunFence.model_validate(raw_fence)
-                    except Exception as exc:
-                        raise IndexFenceCorruptError(repo_id, raw_fence) from exc
-                    if fence.run_id != allow_fence_run_id and not fence.is_stale(
-                        now=now, lease_seconds=lease_seconds
+                    except Exception:
+                        logger.error(
+                            "de-index of %s clears a malformed index-run fence: %r",
+                            repo_id,
+                            raw_fence,
+                        )
+                        fence = None
+                    if (
+                        fence is not None
+                        and fence.run_id != allow_fence_run_id
+                        and not fence.is_stale(now=now, lease_seconds=lease_seconds)
                     ):
                         raise IndexFenceHeldError(repo_id, fence)
                 raw_generation = meta.get("generation")
-                generation = (
-                    _Manifest.model_validate(raw_generation)
-                    if isinstance(raw_generation, dict)
-                    else None
-                )
+                generation = None
+                if raw_generation is not None:
+                    try:
+                        generation = _Manifest.model_validate(raw_generation)
+                    except Exception:
+                        logger.error(
+                            "de-index of %s clears a malformed generation manifest (its external "
+                            "targets are covered by the corpus namespace sweep): %r",
+                            repo_id,
+                            raw_generation,
+                        )
                 raw_tombstone = meta.get("index_tombstone")
-                earlier = (
-                    DeletionTombstone.model_validate(raw_tombstone)
-                    if isinstance(raw_tombstone, dict)
-                    else None
-                )
+                earlier = None
+                if raw_tombstone is not None:
+                    try:
+                        earlier = DeletionTombstone.model_validate(raw_tombstone)
+                    except Exception:
+                        logger.error(
+                            "de-index of %s replaces a malformed tombstone: %r",
+                            repo_id,
+                            raw_tombstone,
+                        )
                 tombstone = build_tombstone(generation, now=now).merged(earlier)
 
                 deleted = await conn.fetchval(

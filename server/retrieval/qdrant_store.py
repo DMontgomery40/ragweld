@@ -298,10 +298,15 @@ class QdrantChunkStore:
         if client is not None:
             client.close()
 
-    async def create_generation(self, corpus_id: str, *, embedding_dim: int) -> str:
+    def generation_name(self, corpus_id: str) -> str:
+        """A fresh physical collection name for a corpus (chosen before creation so it can be recorded)."""
+        return f"{corpus_collection_prefix(corpus_id)}__{uuid.uuid4().hex[:8]}"
+
+    async def create_generation(
+        self, corpus_id: str, *, embedding_dim: int, physical: str | None = None
+    ) -> str:
         """Create a fresh physical generation for a corpus (not live until the manifest names it)."""
-        prefix = corpus_collection_prefix(corpus_id)
-        physical = f"{prefix}__{uuid.uuid4().hex[:8]}"
+        physical = physical or self.generation_name(corpus_id)
 
         def _create() -> None:
             store = self._document_store(physical, embedding_dim=embedding_dim, recreate=True)

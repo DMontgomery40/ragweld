@@ -266,9 +266,54 @@ class Neo4jClient:
                     rec = await res.single()
             state = str(rec.get("state") if rec else "").upper()
             if state == "ONLINE":
+                await self._assert_vector_index_contract(
+                    idx,
+                    label=lbl,
+                    embedding_property=prop,
+                    dimensions=int(dimensions),
+                    similarity=sim,
+                )
                 return True
             await asyncio.sleep(0.25)
         return False
+
+    async def _assert_vector_index_contract(
+        self, idx: str, *, label: str, embedding_property: str, dimensions: int, similarity: str
+    ) -> None:
+        """An existing index with another dimension/property/label/similarity would serve wrong answers."""
+        driver = self._require_driver()
+        async with driver.session(database=self.database) as session:
+            res = await session.run(
+                "SHOW VECTOR INDEXES YIELD name, labelsOrTypes, properties, options "
+                "WHERE name = $name RETURN labelsOrTypes AS labels, properties AS props, options AS options LIMIT 1;",
+                name=idx,
+            )
+            rec = await res.single()
+        if rec is None:
+            raise RuntimeError(
+                f"Neo4j vector index {idx} is ONLINE but not listed as a vector index"
+            )
+        labels = [str(x) for x in (rec.get("labels") or [])]
+        props = [str(x) for x in (rec.get("props") or [])]
+        options = rec.get("options") or {}
+        config = options.get("indexConfig") if isinstance(options, dict) else None
+        config = config if isinstance(config, dict) else {}
+        actual_dim = int(config.get("vector.dimensions") or 0)
+        actual_sim = str(config.get("vector.similarity_function") or "").lower()
+        drift = []
+        if label not in labels:
+            drift.append(f"label {labels} != {label}")
+        if embedding_property not in props:
+            drift.append(f"property {props} != {embedding_property}")
+        if actual_dim != int(dimensions):
+            drift.append(f"dimensions {actual_dim} != {dimensions}")
+        if actual_sim != similarity:
+            drift.append(f"similarity {actual_sim!r} != {similarity!r}")
+        if drift:
+            raise RuntimeError(
+                f"Neo4j vector index {idx} does not match this run's contract ({'; '.join(drift)}); "
+                "drop or rename the index before promoting a corpus that would query it"
+            )
 
     async def upsert_graphrag_graph(
         self,

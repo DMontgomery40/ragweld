@@ -21,6 +21,7 @@ from server.db.neo4j import Neo4jClient
 from server.db.postgres import PostgresClient
 from server.dependency_errors import DependencyUnavailableError
 from server.indexing.generations import (
+    DeletionIncompleteError,
     IndexFenceHeldError,
     TombstoneCleanupError,
     drop_tombstoned_stores,
@@ -37,6 +38,7 @@ from server.models.tribrid_config_model import (
     DependencyUnavailableResponse,
     GraphStats,
     IndexDeletionIncompleteResponse,
+    IndexRunConflictDetail,
     IndexRunConflictResponse,
 )
 
@@ -367,19 +369,18 @@ async def delete_repo(corpus_id: str) -> dict[str, Any]:
             repo_id, lease_seconds=cfg.indexing.index_run_lease_seconds
         )
     except IndexFenceHeldError as exc:
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "code": "index_run_in_progress",
-                "corpus_id": repo_id,
-                "run_id": exc.fence.run_id,
-                "owner": exc.fence.owner,
-                "started_at": exc.fence.started_at.isoformat(),
-                "heartbeat_at": exc.fence.heartbeat_at.isoformat(),
-                "message": f"Corpus {repo_id} is fenced by index run {exc.fence.run_id}.",
-                "operator_hint": "Stop that index run (or wait for its lease to expire) before deleting the corpus.",
-            },
-        ) from exc
+        detail = IndexRunConflictDetail(
+            corpus_id=repo_id,
+            run_id=exc.fence.run_id,
+            owner=exc.fence.owner,
+            started_at=exc.fence.started_at,
+            heartbeat_at=exc.fence.heartbeat_at,
+            message=f"Corpus {repo_id} is fenced by index run {exc.fence.run_id}.",
+            operator_hint="Stop that index run (or wait for its lease to expire) before deleting the corpus.",
+        )
+        raise HTTPException(status_code=409, detail=detail.model_dump(mode="json")) from exc
+    except DeletionIncompleteError:
+        raise
     except Exception as exc:
         raise_postgres_unavailable_if_applicable(exc, boundary="Corpus deletion API")
         raise
@@ -389,11 +390,9 @@ async def delete_repo(corpus_id: str) -> dict[str, Any]:
         raise dependency_unavailable_http_exception(
             exc.dependency, boundary="Corpus deletion API", exc=exc
         ) from exc
-    if not await pg.clear_index_tombstone(repo_id, tombstone):
-        raise HTTPException(
-            status_code=409,
-            detail=f"Corpus {repo_id}: a newer de-index tombstone appeared during cleanup; retry the deletion",
-        )
+    # The tombstone stays until the registry row itself is removed (below, under
+    # the corpus lock): no writer can slip a new generation in while lineage
+    # cleanup runs.
 
     # Corpus-scoped lineage (aliases, bundles) goes with the corpus. It runs before
     # the registry row is removed so a failed removal answers a typed, retryable 503
