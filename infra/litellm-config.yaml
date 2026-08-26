@@ -423,10 +423,6 @@ model_list:
   litellm_params:
     model: openrouter/google/gemma-3-4b-it
     api_key: os.environ/OPENROUTER_API_KEY
-- model_name: google.gemma-3n-e4b-it
-  litellm_params:
-    model: openrouter/google/gemma-3n-e4b-it
-    api_key: os.environ/OPENROUTER_API_KEY
 - model_name: google.gemma-4-26b-a4b-it
   litellm_params:
     model: openrouter/google/gemma-4-26b-a4b-it
@@ -467,21 +463,9 @@ model_list:
   litellm_params:
     model: openrouter/inception/mercury-2
     api_key: os.environ/OPENROUTER_API_KEY
-- model_name: inclusionai.ling-2.6-1t
-  litellm_params:
-    model: openrouter/inclusionai/ling-2.6-1t
-    api_key: os.environ/OPENROUTER_API_KEY
-- model_name: inclusionai.ling-2.6-flash
-  litellm_params:
-    model: openrouter/inclusionai/ling-2.6-flash
-    api_key: os.environ/OPENROUTER_API_KEY
 - model_name: inclusionai.ling-3.0-flash
   litellm_params:
     model: openrouter/inclusionai/ling-3.0-flash
-    api_key: os.environ/OPENROUTER_API_KEY
-- model_name: inclusionai.ring-2.6-1t
-  litellm_params:
-    model: openrouter/inclusionai/ring-2.6-1t
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: kwaipilot.kat-coder-air-v2.5
   litellm_params:
@@ -591,6 +575,10 @@ model_list:
   litellm_params:
     model: openrouter/minimax/minimax-m2.7
     api_key: os.environ/OPENROUTER_API_KEY
+- model_name: minimax.minimax-m2.7.free
+  litellm_params:
+    model: openrouter/minimax/minimax-m2.7:free
+    api_key: os.environ/OPENROUTER_API_KEY
 - model_name: minimax.minimax-m3
   litellm_params:
     model: openrouter/minimax/minimax-m3
@@ -599,9 +587,17 @@ model_list:
   litellm_params:
     model: openrouter/minimax/minimax-m3:batch
     api_key: os.environ/OPENROUTER_API_KEY
+- model_name: minimax.minimax-m3.free
+  litellm_params:
+    model: openrouter/minimax/minimax-m3:free
+    api_key: os.environ/OPENROUTER_API_KEY
 - model_name: mistralai.codestral-2508
   litellm_params:
     model: openrouter/mistralai/codestral-2508
+    api_key: os.environ/OPENROUTER_API_KEY
+- model_name: mistralai.devstral-2512
+  litellm_params:
+    model: openrouter/mistralai/devstral-2512
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: mistralai.ministral-14b-2512
   litellm_params:
@@ -743,10 +739,6 @@ model_list:
   litellm_params:
     model: openrouter/nvidia/nemotron-3-nano-30b-a3b
     api_key: os.environ/OPENROUTER_API_KEY
-- model_name: nvidia.nemotron-3-nano-30b-a3b.free
-  litellm_params:
-    model: openrouter/nvidia/nemotron-3-nano-30b-a3b:free
-    api_key: os.environ/OPENROUTER_API_KEY
 - model_name: nvidia.nemotron-3-nano-omni-30b-a3b-reasoning.free
   litellm_params:
     model: openrouter/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free
@@ -782,14 +774,6 @@ model_list:
 - model_name: nvidia.nemotron-3.5-lightning.free
   litellm_params:
     model: openrouter/nvidia/nemotron-3.5-lightning:free
-    api_key: os.environ/OPENROUTER_API_KEY
-- model_name: nvidia.nemotron-nano-12b-v2-vl.free
-  litellm_params:
-    model: openrouter/nvidia/nemotron-nano-12b-v2-vl:free
-    api_key: os.environ/OPENROUTER_API_KEY
-- model_name: nvidia.nemotron-nano-9b-v2.free
-  litellm_params:
-    model: openrouter/nvidia/nemotron-nano-9b-v2:free
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.gpt-3.5-turbo
   litellm_params:
@@ -1223,10 +1207,6 @@ model_list:
   litellm_params:
     model: openrouter/qwen/qwen-plus-2025-07-28
     api_key: os.environ/OPENROUTER_API_KEY
-- model_name: qwen.qwen-plus-2025-07-28.thinking
-  litellm_params:
-    model: openrouter/qwen/qwen-plus-2025-07-28:thinking
-    api_key: os.environ/OPENROUTER_API_KEY
 - model_name: qwen.qwen2.5-vl-72b-instruct
   litellm_params:
     model: openrouter/qwen/qwen2.5-vl-72b-instruct
@@ -1466,6 +1446,10 @@ model_list:
 - model_name: tencent.hy-mt2-30b-a3b
   litellm_params:
     model: openrouter/tencent/hy-mt2-30b-a3b
+    api_key: os.environ/OPENROUTER_API_KEY
+- model_name: tencent.hy-mt2-7b
+  litellm_params:
+    model: openrouter/tencent/hy-mt2-7b
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: tencent.hy3
   litellm_params:
