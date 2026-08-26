@@ -9,8 +9,10 @@ from typing import Any
 
 from server.chat.provider_router import ProviderRoute, select_provider_route
 from server.db.postgres import PostgresClient
-from server.models.tribrid_config_model import (
+from server.models.index import (
     Chunk,
+)
+from server.models.tribrid_config_model import (
     ChunkSummary,
     EvalDatasetItem,
     SyntheticRunStartRequest,

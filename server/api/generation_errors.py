@@ -5,11 +5,13 @@ import logging
 from fastapi import HTTPException
 
 from server.chat.prompt_budget import PromptBudgetError, prompt_budget_exceeded_detail
+from server.models.index import (
+    IndexDeletionIncompleteResponse,
+)
 from server.models.tribrid_config_model import (
     DependencyUnavailableResponse,
     GenerationUnavailableDetail,
     GenerationUnavailableResponse,
-    IndexDeletionIncompleteResponse,
     PromptBudgetExceededResponse,
     RequiredRetrievalLegFailureResponse,
 )

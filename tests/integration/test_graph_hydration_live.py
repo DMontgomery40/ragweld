@@ -312,11 +312,36 @@ async def test_chunk_mode_entity_expansion_adds_chunks_beyond_the_seeds(
         ids = {m["chunk_id"] for m in matches}
         # Entities extracted by the semantic KG add chunks reachable through IN_CHUNK
         # links on top of the vector seeds; nothing else pads the list, so the leg's
-        # hydrated count is the whole list and it exceeds what the seeds alone gave.
+        # hydrated count is the whole list. The baseline is the SAME engine with
+        # expansion off (Neo4j seeds for this query on the manifest graph): at least
+        # one final chunk must lie outside it.
         assert int(debug["fusion_graph_hydrated_chunks"]) == len(matches), debug
-        assert ids & set(seeded.vector_seed_ids), (sorted(ids), seeded.vector_seed_ids)
-        assert len(ids) > len(ids & set(seeded.vector_seed_ids)), (
-            "expansion must add non-seed chunks"
+        scoped = await config_store.get_config(repo_id=seeded.corpus_id)
+        query_vector = await Embedder(scoped.embedding, scoped.tokenization).embed(_QUESTION)
+        graph_id = (await pg.get_generation(seeded.corpus_id)).graph_repo_id
+        neo4j = Neo4jClient(
+            scoped.graph_storage.neo4j_uri,
+            scoped.graph_storage.neo4j_user,
+            scoped.graph_storage.resolve_password(),
+            database=scoped.graph_storage.resolve_database(seeded.corpus_id),
+        )
+        await neo4j.connect()
+        try:
+            baseline = await neo4j.chunk_vector_search(
+                graph_id,
+                query_vector,
+                index_name=scoped.graph_indexing.chunk_vector_index_name,
+                top_k=scoped.graph_search.top_k,
+                neighbor_window=0,
+                overfetch_multiplier=scoped.graph_search.chunk_seed_overfetch_multiplier,
+            )
+        finally:
+            await neo4j.disconnect()
+        baseline_ids = {chunk_id for chunk_id, _score in baseline}
+        assert baseline_ids, "the same-engine baseline returned no seeds"
+        assert ids & baseline_ids, (sorted(ids), sorted(baseline_ids))
+        assert ids - baseline_ids, (
+            "expansion must add at least one chunk outside the same-engine seeds"
         )
     finally:
         await pg.disconnect()

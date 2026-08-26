@@ -29,18 +29,7 @@ except ImportError:
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from server.models.index import Chunk as Chunk
-from server.models.index import IndexDeletionIncompleteDetail as IndexDeletionIncompleteDetail
-from server.models.index import IndexDeletionIncompleteResponse as IndexDeletionIncompleteResponse
-from server.models.index import IndexEstimate as IndexEstimate
-from server.models.index import IndexFenceCorruptDetail as IndexFenceCorruptDetail
-from server.models.index import IndexRequest as IndexRequest
-from server.models.index import IndexRunConflictDetail as IndexRunConflictDetail
-from server.models.index import IndexRunConflictResponse as IndexRunConflictResponse
-from server.models.index import IndexRunEvent as IndexRunEvent
-from server.models.index import IndexRunSummary as IndexRunSummary
-from server.models.index import IndexStats as IndexStats
-from server.models.index import IndexStatus as IndexStatus
+from server.models.index import IndexStats
 from server.models.runtime_gateway import BenchmarkConfig as BenchmarkConfig
 from server.models.runtime_gateway import ChatModelInfo as ChatModelInfo
 from server.models.runtime_gateway import ChatModelsResponse as ChatModelsResponse

@@ -9,7 +9,7 @@ import time
 import uuid
 from collections import defaultdict
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 import asyncpg
 from pgvector.asyncpg import register_vector
@@ -644,6 +644,7 @@ class PostgresClient:
                         qdrant_collection=physical,
                         graph_repo_id=generation.graph_repo_id if generation else None,
                         previous=generation,
+                        now=await conn.fetchval("SELECT now();"),
                     )
                 try:
                     await qdrant.write_chunks(
@@ -1857,8 +1858,10 @@ class PostgresClient:
         from server.indexing.generations import (
             DeletionIncompleteError,
             FenceClaim,
+            GenerationManifest,
             IndexFenceCorruptError,
             IndexRunFence,
+            PersistedStateCorruptError,
             tombstone_from_meta,
         )
 
@@ -1876,6 +1879,7 @@ class PostgresClient:
                     raise CorpusNotFoundError(f"Corpus not found: {repo_id}")
                 db_now: datetime = row["db_now"]
                 taken_over: IndexRunFence | None = None
+                taken_over_committed = False
                 meta = _coerce_jsonb_dict(row["meta"])
                 tombstone = tombstone_from_meta(meta, repo_id=repo_id)
                 if tombstone is not None:
@@ -1889,12 +1893,34 @@ class PostgresClient:
                     if not held.is_stale(now=db_now, lease_seconds=lease_seconds):
                         return FenceClaim(held_by=held)
                     taken_over = held
+                    # Did the dead run commit before dying? Then its staged resources
+                    # are the live generation: the caller finalizes, never reclaims.
+                    raw_manifest = meta.get("generation")
+                    live_manifest = None
+                    if raw_manifest is not None:
+                        try:
+                            live_manifest = GenerationManifest.model_validate(raw_manifest)
+                        except Exception as exc:
+                            raise PersistedStateCorruptError(
+                                repo_id, "generation", raw_manifest
+                            ) from exc
+                    taken_over_committed = live_manifest is not None and (
+                        live_manifest.run_id == held.run_id
+                        or (
+                            held.staged_qdrant_collection is not None
+                            and held.staged_qdrant_collection
+                            in live_manifest.all_qdrant_collections()
+                        )
+                    )
                     logger.warning(
-                        "taking over stale index-run fence on %s: run %s (owner %s) last heartbeat %s",
+                        "taking over stale index-run fence on %s: run %s (owner %s) last heartbeat %s%s",
                         repo_id,
                         held.run_id,
                         held.owner,
                         held.heartbeat_at.isoformat(),
+                        " (it had committed: finalizing, not reclaiming)"
+                        if taken_over_committed
+                        else "",
                     )
                 fence = IndexRunFence(
                     run_id=run_id,
@@ -1907,7 +1933,7 @@ class PostgresClient:
                     repo_id,
                     _json_dumps_sanitized({"index_run": fence.model_dump(mode="json")}),
                 )
-        return FenceClaim(taken_over=taken_over)
+        return FenceClaim(taken_over=taken_over, taken_over_committed=taken_over_committed)
 
     async def record_fence_staging(
         self,
@@ -2090,7 +2116,9 @@ class PostgresClient:
                 """
                 UPDATE corpora
                 SET meta = COALESCE(meta, '{}'::jsonb) - 'index_tombstone'
-                WHERE repo_id = $1 AND meta->'index_tombstone'->>'created_at' = $2
+                WHERE repo_id = $1
+                  AND meta->'index_tombstone'->>'created_at' = $2
+                  AND COALESCE(meta->'index_tombstone'->>'intent', 'deindex') = 'deindex'
                 RETURNING 1;
                 """,
                 repo_id,
@@ -2099,7 +2127,12 @@ class PostgresClient:
         return row is not None
 
     async def delete_index_state(
-        self, repo_id: str, *, allow_fence_run_id: str | None = None, lease_seconds: int
+        self,
+        repo_id: str,
+        *,
+        allow_fence_run_id: str | None = None,
+        lease_seconds: int,
+        intent: Literal["deindex", "delete_corpus"] = "deindex",
     ) -> tuple[int, DeletionTombstone]:
         """De-index a corpus in Postgres in ONE transaction: chunk rows gone, manifest and contracts cleared.
 
@@ -2176,7 +2209,7 @@ class PostgresClient:
                             repo_id,
                             raw_tombstone,
                         )
-                tombstone = build_tombstone(generation, now=now).merged(earlier)
+                tombstone = build_tombstone(generation, now=now, intent=intent).merged(earlier)
 
                 deleted = await conn.fetchval(
                     "WITH d AS (DELETE FROM chunks WHERE repo_id = $1 RETURNING 1) SELECT count(*) FROM d;",
@@ -2366,6 +2399,7 @@ class PostgresClient:
                     DeletionIncompleteError,
                     IndexFenceLostError,
                     IndexRunFence,
+                    PersistedStateCorruptError,
                     build_generation,
                     tombstone_from_meta,
                 )
@@ -2389,16 +2423,23 @@ class PostgresClient:
                 # a generation that appeared after the caller last looked (an
                 # incremental first write) still joins the retired chain.
                 raw_previous = merged_meta.get("generation")
-                previous_generation = (
-                    _Manifest.model_validate(raw_previous)
-                    if isinstance(raw_previous, dict)
-                    else None
-                )
+                previous_generation = None
+                if raw_previous is not None:
+                    try:
+                        previous_generation = _Manifest.model_validate(raw_previous)
+                    except Exception as exc:
+                        # A malformed manifest is never overwritten (its resources would
+                        # be lost): de-index the corpus to repair it, then re-index.
+                        raise PersistedStateCorruptError(
+                            active_repo_id, "generation", raw_previous
+                        ) from exc
+                db_now: datetime = await conn.fetchval("SELECT now();")
                 generation = build_generation(
                     run_id=run_id,
                     qdrant_collection=qdrant_collection,
                     graph_repo_id=graph_repo_id,
                     previous=previous_generation,
+                    now=db_now,
                 )
                 merged_meta["generation"] = generation.model_dump(mode="json")
                 merged_meta.pop("internal_staging", None)

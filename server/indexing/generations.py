@@ -40,7 +40,7 @@ import logging
 import os
 import socket
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
@@ -181,12 +181,18 @@ class IndexRunFence(BaseModel):
 
 
 class FenceClaim(BaseModel):
-    """Outcome of an acquire: the live holder that refused us, or the stale fence we took over."""
+    """Outcome of an acquire: the live holder that refused us, or the stale fence we took over.
+
+    ``taken_over_committed`` is True when the dead run's manifest is the live
+    one (it committed, then died before releasing): its staged resources ARE the
+    live index and must be finalized, never reclaimed.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     held_by: IndexRunFence | None = None
     taken_over: IndexRunFence | None = None
+    taken_over_committed: bool = False
 
     @property
     def acquired(self) -> bool:
@@ -201,6 +207,13 @@ class DeletionTombstone(BaseModel):
     qdrant_collections: list[str] = Field(default_factory=list)
     graph_repo_ids: list[str] = Field(default_factory=list)
     created_at: datetime
+    intent: Literal["deindex", "delete_corpus"] = Field(
+        default="deindex",
+        description=(
+            "deindex: cleared when the external cleanup succeeded; delete_corpus: only the registry "
+            "row's removal ends it (a concurrent de-index must never clear it)."
+        ),
+    )
 
     def merged(self, other: DeletionTombstone | None) -> DeletionTombstone:
         if other is None:
@@ -211,6 +224,7 @@ class DeletionTombstone(BaseModel):
             ),
             graph_repo_ids=list(dict.fromkeys([*other.graph_repo_ids, *self.graph_repo_ids])),
             created_at=min(self.created_at, other.created_at),
+            intent="delete_corpus" if "delete_corpus" in (self.intent, other.intent) else "deindex",
         )
 
 
@@ -395,12 +409,16 @@ def graph_repo_id_of(generation: GenerationManifest | None) -> str | None:
 
 
 def build_tombstone(
-    generation: GenerationManifest | None, *, now: datetime | None = None
+    generation: GenerationManifest | None,
+    *,
+    now: datetime | None = None,
+    intent: Literal["deindex", "delete_corpus"] = "deindex",
 ) -> DeletionTombstone:
     return DeletionTombstone(
         qdrant_collections=generation.all_qdrant_collections() if generation else [],
         graph_repo_ids=generation.all_graph_repo_ids() if generation else [],
         created_at=now or datetime.now(UTC),
+        intent=intent,
     )
 
 
@@ -552,12 +570,22 @@ async def ensure_generation_manifests(config: TriBridConfig) -> int:
                 continue
             meta = row.get("meta") if isinstance(row.get("meta"), dict) else {}
             raw = meta.get(GENERATION_META_KEY)
-            if isinstance(raw, dict):
+            if raw is not None:
+                if not isinstance(raw, dict):
+                    raise PersistedStateCorruptError(repo_id, GENERATION_META_KEY, raw)
+                upgraded_manifest = upgrade_pre_retention_manifest(raw)
+                if upgraded_manifest is None:
+                    # Current shape: it must validate; a corrupt manifest blocks the
+                    # upgrade (readiness pending, manifest routes closed) until the
+                    # corpus is de-indexed.
+                    try:
+                        GenerationManifest.model_validate(raw)
+                    except Exception as exc:
+                        raise PersistedStateCorruptError(repo_id, GENERATION_META_KEY, raw) from exc
                 # Alias removal is its own idempotent step: a manifest recorded by an
                 # earlier pass whose alias drop failed still loses its alias here.
                 if await qdrant.legacy_alias_target(repo_id) is not None:
                     await qdrant.drop_legacy_alias(repo_id)
-                upgraded_manifest = upgrade_pre_retention_manifest(raw)
                 if upgraded_manifest is None:
                     continue
                 if await pg.replace_generation_if_shape(

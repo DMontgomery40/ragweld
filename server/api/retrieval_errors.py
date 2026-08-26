@@ -4,9 +4,11 @@ import logging
 
 from fastapi import HTTPException
 
+from server.models.index import (
+    IndexDeletionIncompleteResponse,
+)
 from server.models.tribrid_config_model import (
     DependencyUnavailableResponse,
-    IndexDeletionIncompleteResponse,
     RequiredRetrievalLegFailureDetail,
     RequiredRetrievalLegFailureResponse,
     RetrievalContractMismatchDetail,

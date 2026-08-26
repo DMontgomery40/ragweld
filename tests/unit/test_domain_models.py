@@ -7,42 +7,35 @@ Tests cover:
 - Chat models (Message, ChatRequest, ChatResponse)
 """
 
+from datetime import UTC, datetime
+
 import pytest
-from datetime import datetime, timezone
 from pydantic import ValidationError
 
-from server.models.tribrid_config_model import (
-    # Chunk/Retrieval models
+from server.models.index import (
     Chunk,
-    ChunkMatch,
-    SearchRequest,
-    SearchResponse,
-    AnswerRequest,
-    AnswerResponse,
-    # Index models
     IndexRequest,
-    IndexStatus,
     IndexStats,
-    # Graph models
-    Entity,
-    Relationship,
+    IndexStatus,
+)
+from server.models.tribrid_config_model import (
+    ChatRequest,
+    ChatResponse,
+    ChunkMatch,
     Community,
-    GraphStats,
-    # Eval models
+    Entity,
+    EvalComparisonResult,
     EvalDatasetItem,
-    EvalRequest,
     EvalMetrics,
     EvalResult,
     EvalRun,
-    EvalComparisonResult,
-    # Chat models
+    GraphStats,
     Message,
-    ChatRequest,
-    ChatResponse,
-    # Config for EvalRun
+    Relationship,
+    SearchRequest,
+    SearchResponse,
     TriBridConfig,
 )
-
 
 # ============================================================================
 # Chunk/Retrieval Models
@@ -334,7 +327,7 @@ class TestEvalDatasetItem:
             expected_paths=["chunk_auth_001", "chunk_auth_002"],
             expected_answer="Authentication uses JWT tokens...",
             tags=["auth", "security"],
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         assert item.question == "How does authentication work?"
         assert len(item.expected_paths) == 2
@@ -346,7 +339,7 @@ class TestEvalDatasetItem:
             entry_id="q_002",
             question="What is RAG?",
             expected_paths=["chunk_rag_001"],
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         assert item.expected_answer is None
         assert item.tags == []
@@ -421,8 +414,8 @@ class TestEvalRun:
             config_snapshot=config.model_dump(),
             metrics=metrics,
             results=[result],
-            started_at=datetime.now(timezone.utc),
-            completed_at=datetime.now(timezone.utc),
+            started_at=datetime.now(UTC),
+            completed_at=datetime.now(UTC),
         )
         assert run.run_id == "run_001"
         assert len(run.results) == 1
@@ -587,7 +580,7 @@ class TestIndexModels:
             embedding_model="text-embedding-3-large",
             embedding_dimensions=3072,
             file_breakdown={".py": 80, ".ts": 20},
-            last_indexed=datetime.now(timezone.utc),
+            last_indexed=datetime.now(UTC),
         )
         assert stats.total_chunks == 1500
         assert stats.file_breakdown[".py"] == 80

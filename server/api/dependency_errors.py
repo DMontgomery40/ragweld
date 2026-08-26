@@ -12,8 +12,10 @@ from server.dependency_errors import (
     is_postgres_unavailable,
     is_transport_unavailable,
 )
-from server.models.tribrid_config_model import (
+from server.models.index import (
     IndexDeletionIncompleteResponse,
+)
+from server.models.tribrid_config_model import (
     DependencyUnavailableDetail,
     DependencyUnavailableResponse,
 )

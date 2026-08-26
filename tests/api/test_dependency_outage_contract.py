@@ -72,6 +72,22 @@ def test_stateful_api_openapi_documents_typed_dependency_503() -> None:
         assert {ref.rsplit("/", 1)[-1] for ref in refs} == expected_models
 
 
+def test_index_start_409_is_the_discriminated_fence_union() -> None:
+    from server.main import app
+
+    schema = app.openapi()
+    response = schema["paths"]["/api/index"]["post"]["responses"]["409"]
+    ref = response["content"]["application/json"]["schema"]["$ref"].rsplit("/", 1)[-1]
+    assert ref == "IndexRunConflictResponse"
+    detail = schema["components"]["schemas"]["IndexRunConflictResponse"]["properties"]["detail"]
+    mapping = detail.get("discriminator", {}).get("mapping", {})
+    assert set(mapping) == {"index_run_in_progress", "index_fence_corrupt"}, detail
+    assert {v.rsplit("/", 1)[-1] for v in mapping.values()} == {
+        "IndexRunConflictDetail",
+        "IndexFenceCorruptDetail",
+    }
+
+
 def test_postgres_outage_returns_structured_503_across_stateful_api_families(tmp_path: Path) -> None:
     config = json.loads((ROOT / "tribrid_config.json").read_text(encoding="utf-8"))
     config["indexing"]["postgres_url"] = "postgresql://postgres:postgres@127.0.0.1:1/ragweld_outage"

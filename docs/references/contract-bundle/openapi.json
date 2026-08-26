@@ -23720,6 +23720,16 @@
             },
             "description": "Successful Response"
           },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IndexRunConflictResponse"
+                }
+              }
+            },
+            "description": "The corpus carries a malformed fence."
+          },
           "422": {
             "content": {
               "application/json": {
@@ -23729,6 +23739,24 @@
               }
             },
             "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/DependencyUnavailableResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/IndexDeletionIncompleteResponse"
+                    }
+                  ],
+                  "title": "Response 503 Get Latest Index Run Api Index  Corpus Id  Runs Latest Get"
+                }
+              }
+            },
+            "description": "Postgres is unavailable, or the corpus is being de-indexed."
           }
         },
         "summary": "Get Latest Index Run",

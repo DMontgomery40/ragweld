@@ -1596,3 +1596,54 @@ Verification (session 14g): live lane 16 passed, full `uv run pytest -q` alone
 the restarted backend, quick gates green. Codex pass 6 launched on the
 committed diff.
 
+### Adversarial review pass 6 (codex exec, high effort) — REFUTED again (9 P1 / 5 P2); all acted on
+
+Session 14h, by finding:
+
+1. **Stale-fence recovery never deletes a live index.** `acquire_index_fence`
+   compares the stale fence with the row-locked manifest (`run_id`, or its
+   staged collection among the manifest's collections); `FenceClaim.
+   taken_over_committed` makes the caller finalize the dead run's summary as
+   complete instead of reclaiming. The remote stop path does the same check
+   and reports `complete` for a committed dead run. (This was a real defect
+   introduced in session 14e.)
+2. **Malformed manifests fail closed everywhere**: promotion raises
+   `PersistedStateCorruptError` instead of overwriting; the startup upgrade
+   validates every present manifest and a corrupt one blocks the upgrade
+   (readiness pending, manifest routes gated) until the corpus is de-indexed.
+3. **Tombstone intent**: `delete_corpus` tombstones are never cleared by a
+   concurrent de-index (`clear_index_tombstone` only clears `deindex`
+   intent); only the locked row removal ends them.
+4. **Vector-index contract is checked whether or not the run waits for ONLINE**;
+   the `SHOW INDEXES` compatibility retry is gone.
+5. **Manifest and retirement timestamps come from Postgres `now()`** inside the
+   locked transaction (promotion, incremental first write, tombstone) and
+   retirement decisions use `database_now()`.
+6. **The monkeypatched dashboard status test is deleted**; a live test proves
+   the status route resolves the CORPUS-scoped lease from the durable fence
+   (stale under the corpus lease, live and named under a fresh fence).
+7. **Shared-resource retention test**: due and fresh entries share one graph
+   and differ in collection; the shared graph survives on the fresh entry,
+   the due entry's own collection goes.
+8. **Fence 409 proven only durably** (the in-process overlapping POST is
+   gone); the post-commit stop asserts this process still owns the task and
+   the fence still names it, with four due retired collections widening the
+   post-commit window.
+9. **Expansion baseline is the same engine** (Neo4j seeds with expansion off);
+   at least one final chunk must lie outside it.
+10. **Process state never overrides durable truth**: local progress only for
+    the run the fence names (`_ACTIVE_RUNS`), dashboard `running` from the
+    fence, cached stats only while this process runs the corpus.
+11. **An unknown commit keeps its fence**, expiring into the manifest-aware
+    takeover (finalize or reclaim exactly).
+12. **Latest-run reconciliation propagates a corrupt fence** as the typed 409.
+13. **Consumers import index models from `server.models.index`**; the
+    aggregate re-export aliases are gone; the generator imports from the
+    domain module.
+14. **The contract test asserts the POST /api/index 409 discriminated union.**
+
+Verification (session 14h): live lane 17 passed (incl. the new scoped-lease
+status test), full `uv run pytest -q` alone 1156 passed / 91 skipped,
+Playwright `curious_user_p1_fixes` 9 passed against the restarted backend,
+quick gates green. Codex pass 7 launched on the committed diff.
+

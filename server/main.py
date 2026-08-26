@@ -42,9 +42,13 @@ from server.config import load_config
 from server.gateway_catalog import warm_gateway_catalog
 from server.indexing.generations import DeletionIncompleteError, manifest_upgrade_blocked
 from server.mcp.server import get_mcp_server, record_mounted_state
-from server.models.tribrid_config_model import (
+from server.models.index import (
     IndexDeletionIncompleteDetail,
     IndexDeletionIncompleteResponse,
+)
+from server.models.tribrid_config_model import (
+    DependencyUnavailableDetail,
+    DependencyUnavailableResponse,
 )
 from server.observability.costing import warm_costing_catalog
 from server.observability.metrics import render_latest

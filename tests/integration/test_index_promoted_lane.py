@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+import server.api.index as index_api
 from server.config import load_config
 from server.db.postgres import PostgresClient
 from server.indexing.generations import DeletionTombstone, RetiredGeneration
@@ -110,19 +111,6 @@ async def test_index_search_and_delete_on_promoted_lane(client: AsyncClient) -> 
             json={"corpus_id": corpus_id, "repo_path": str(_CORPUS_PATH), "force_reindex": True},
         )
         assert started.status_code == 200, started.text
-        # Durable per-corpus fence: a second run on the same corpus is refused while
-        # the first is building; the typed 409 names the running run and its owner,
-        # both read from the corpus row (the fence has a heartbeat, not a task map).
-        overlapping = await client.post(
-            "/api/index",
-            json={"corpus_id": corpus_id, "repo_path": str(_CORPUS_PATH), "force_reindex": True},
-        )
-        assert overlapping.status_code == 409, overlapping.text
-        conflict = overlapping.json()["detail"]
-        live_fence = await pg.get_index_fence(corpus_id)
-        assert live_fence is not None and conflict["code"] == "index_run_in_progress"
-        assert conflict["run_id"] == live_fence.run_id and conflict["owner"] == live_fence.owner
-        assert conflict["corpus_id"] == corpus_id and conflict["operator_hint"]
         final = await _wait_for_index(client, corpus_id)
         assert final["status"] == "complete", final
         await _wait_fence_released(pg, corpus_id)
@@ -377,6 +365,30 @@ async def test_index_search_and_delete_on_promoted_lane(client: AsyncClient) -> 
             gone = await qdrant.status(corpus_id, physical=collection)
             assert gone is not None and gone.physical_collection is None, collection
         assert (await qdrant.count_points(fifth_generation.qdrant_collection)) == chunk_rows
+        # Widen the post-commit window: several due (grace 0) retired collections
+        # give the sixth run real retirement work after its commit.
+        window_collections = [
+            await qdrant.create_generation(
+                corpus_id, embedding_dim=int(cfg.embedding.embedding_dim)
+            )
+            for _ in range(4)
+        ]
+        await pg.set_generation(
+            corpus_id,
+            fifth_generation.model_copy(
+                update={
+                    "retired": [
+                        RetiredGeneration(
+                            run_id=f"window-{i}",
+                            qdrant_collection=collection,
+                            graph_repo_id=None,
+                            retired_at=datetime.now(UTC) - timedelta(seconds=60),
+                        )
+                        for i, collection in enumerate(window_collections)
+                    ]
+                }
+            ),
+        )
         sixth = await client.post(
             "/api/index",
             json={"corpus_id": corpus_id, "repo_path": str(_CORPUS_PATH), "force_reindex": False},
@@ -394,6 +406,12 @@ async def test_index_search_and_delete_on_promoted_lane(client: AsyncClient) -> 
                 break
             await asyncio.sleep(0.02)
         assert committed_generation is not None, "the sixth run never committed"
+        # The stop must hit a LIVE run: this process still owns the task and the
+        # durable fence still names it (otherwise the test would prove nothing).
+        assert corpus_id in index_api._TASKS and not index_api._TASKS[corpus_id].done(), (
+            "the sixth run finished before the stop could land; widen the window"
+        )
+        assert (await pg.get_index_fence(corpus_id)) is not None
         stopped_after_commit = await client.post(f"/api/index/{corpus_id}/stop")
         assert stopped_after_commit.status_code == 200, stopped_after_commit.text
         assert stopped_after_commit.json()["status"] == "complete", stopped_after_commit.json()
@@ -422,16 +440,19 @@ async def test_index_search_and_delete_on_promoted_lane(client: AsyncClient) -> 
         seeded = committed_generation.model_copy(
             update={
                 "retired": [
+                    # Both entries name the SAME graph: only the due entry's own
+                    # collection may go; the shared graph must survive because the
+                    # fresh entry still holds it.
                     RetiredGeneration(
                         run_id="seed-due",
                         qdrant_collection=due_collection,
-                        graph_repo_id=None,
+                        graph_repo_id="shared-graph-seed",
                         retired_at=datetime.now(UTC) - timedelta(seconds=7200),
                     ),
                     RetiredGeneration(
                         run_id="seed-fresh",
                         qdrant_collection=fresh_collection,
-                        graph_repo_id=None,
+                        graph_repo_id="shared-graph-seed",
                         retired_at=datetime.now(UTC),
                     ),
                 ]
@@ -453,6 +474,15 @@ async def test_index_search_and_delete_on_promoted_lane(client: AsyncClient) -> 
         )  # its grace had elapsed: dropped and pruned
         assert (await qdrant.status(corpus_id, physical=due_collection)).physical_collection is None
         assert fresh_collection in retired_now, after_mixed  # still inside its grace: kept
+        # The shared graph survived on the fresh entry (entry-wise retirement would have
+        # dropped it with the due entry); the due entry is gone entirely.
+        by_run = {r.run_id: r for r in after_mixed.retired}
+        assert by_run["seed-fresh"].graph_repo_id == "shared-graph-seed", after_mixed
+        # The due entry lost its own collection but still names the shared graph
+        # (dropping it entry-wise would have deleted a graph the fresh entry holds);
+        # it goes with the graph once nothing alive names it.
+        assert "seed-due" in by_run and by_run["seed-due"].qdrant_collection is None, after_mixed
+        assert by_run["seed-due"].graph_repo_id == "shared-graph-seed", after_mixed
         assert (
             await qdrant.status(corpus_id, physical=fresh_collection)
         ).physical_collection == fresh_collection

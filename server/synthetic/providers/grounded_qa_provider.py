@@ -32,8 +32,10 @@ from server.chat.generation import generate_chat_text
 from server.chat.provider_router import ProviderRoute
 from server.evaluation.text_tokens import has_cjk, normalize_text, phrase_in, tokens
 from server.gateway_catalog import gateway_rows_snapshot
-from server.models.tribrid_config_model import (
+from server.models.index import (
     Chunk,
+)
+from server.models.tribrid_config_model import (
     EvalDatasetItem,
     SyntheticArtifactKind,
     SyntheticGeneratorConfig,

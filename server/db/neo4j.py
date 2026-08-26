@@ -245,25 +245,21 @@ class Neo4jClient:
             await session.run(cypher)
 
         if not wait_online:
+            # Not waiting for ONLINE is a latency choice, never a contract bypass.
+            await self._assert_vector_index_contract(
+                idx, label=lbl, embedding_property=prop, dimensions=int(dimensions), similarity=sim
+            )
             return True
 
         loop = asyncio.get_running_loop()
         deadline = loop.time() + max(0.1, float(timeout_s))
         while loop.time() < deadline:
             async with driver.session(database=self.database) as session:
-                rec = None
-                try:
-                    res = await session.run(
-                        "SHOW VECTOR INDEXES YIELD name, state WHERE name = $name RETURN state AS state LIMIT 1;",
-                        name=idx,
-                    )
-                    rec = await res.single()
-                except Exception:
-                    res = await session.run(
-                        "SHOW INDEXES YIELD name, state WHERE name = $name RETURN state AS state LIMIT 1;",
-                        name=idx,
-                    )
-                    rec = await res.single()
+                res = await session.run(
+                    "SHOW VECTOR INDEXES YIELD name, state WHERE name = $name RETURN state AS state LIMIT 1;",
+                    name=idx,
+                )
+                rec = await res.single()
             state = str(rec.get("state") if rec else "").upper()
             if state == "ONLINE":
                 await self._assert_vector_index_contract(

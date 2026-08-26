@@ -29,7 +29,12 @@ from server.indexing.generations import (
 )
 from server.indexing.loader import FileLoader
 from server.lineage.registry import delete_repo_lineage
-from server.models.index import IndexStats
+from server.models.index import (
+    IndexDeletionIncompleteResponse,
+    IndexRunConflictDetail,
+    IndexRunConflictResponse,
+    IndexStats,
+)
 from server.models.tribrid_config_model import (
     Corpus,
     CorpusCreateRequest,
@@ -37,9 +42,6 @@ from server.models.tribrid_config_model import (
     CorpusUpdateRequest,
     DependencyUnavailableResponse,
     GraphStats,
-    IndexDeletionIncompleteResponse,
-    IndexRunConflictDetail,
-    IndexRunConflictResponse,
 )
 
 logger = logging.getLogger(__name__)
@@ -366,7 +368,9 @@ async def delete_repo(corpus_id: str) -> dict[str, Any]:
     cfg = load_config()
     try:
         _, tombstone = await pg.delete_index_state(
-            repo_id, lease_seconds=cfg.indexing.index_run_lease_seconds
+            repo_id,
+            lease_seconds=cfg.indexing.index_run_lease_seconds,
+            intent="delete_corpus",  # only the registry row's removal ends this tombstone
         )
     except IndexFenceHeldError as exc:
         detail = IndexRunConflictDetail(

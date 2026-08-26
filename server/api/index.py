@@ -55,6 +55,8 @@ from server.indexing.official_graphrag import (
 from server.indexing.text_extractors import extract_text_for_path, extraction_method_for_path
 from server.models.index import (
     Chunk,
+    IndexDeletionIncompleteResponse,
+    IndexEstimate,
     IndexFenceCorruptDetail,
     IndexRequest,
     IndexRunConflictDetail,
@@ -73,8 +75,6 @@ from server.models.tribrid_config_model import (
     DashboardIndexStatusResponse,
     DashboardIndexStorageBreakdown,
     DependencyUnavailableResponse,
-    IndexDeletionIncompleteResponse,
-    IndexEstimate,
     TriBridConfig,
 )
 from server.observability.metrics import (
@@ -310,10 +310,7 @@ async def _finalize_interrupted_run(repo_id: str, run: IndexRunSummary) -> Index
         with contextlib.suppress(Exception):
             _persist_run_summary(finalized)
         return finalized
-    try:
-        live = await _live_fence(repo_id)
-    except IndexFenceCorruptError:
-        live = None
+    live = await _live_fence(repo_id)
     if live is not None and live.run_id == run.run_id:
         # Another worker holds a fresh fence for this very run: it is still indexing.
         return run
@@ -570,6 +567,19 @@ async def _cancel_index_run(repo_id: str) -> IndexStatus:
     return _STATUS.get(repo_id) or _idle_status(repo_id)
 
 
+async def _finalize_dead_committed_run(repo_id: str, run_id: str) -> None:
+    """A run whose manifest is live but whose summary still says indexing is complete."""
+    await _flush_run_events()
+    summary = await asyncio.to_thread(_load_run_summary, repo_id, run_id)
+    if summary is None or str(summary.status) != "indexing":
+        return
+    finalized = summary.model_copy(
+        update={"status": "complete", "progress": 1.0, "completed_at": datetime.now(UTC)}
+    )
+    with contextlib.suppress(Exception):
+        _persist_run_summary(finalized)
+
+
 async def _stop_without_local_task(repo_id: str) -> IndexStatus:
     """Stop for a corpus this process is not indexing: act on the durable fence.
 
@@ -587,6 +597,14 @@ async def _stop_without_local_task(repo_id: str) -> IndexStatus:
             now=await pg.database_now(), lease_seconds=cfg.indexing.index_run_lease_seconds
         ):
             raise _index_run_conflict(repo_id, fence)
+        manifest = await pg.get_generation(repo_id)
+        committed = manifest is not None and (
+            manifest.run_id == fence.run_id
+            or (
+                fence.staged_qdrant_collection is not None
+                and fence.staged_qdrant_collection in manifest.all_qdrant_collections()
+            )
+        )
         released = await pg.release_index_fence(repo_id, fence.run_id)
     except IndexFenceCorruptError as exc:
         raise _fence_corrupt_conflict(repo_id, exc) from exc
@@ -600,19 +618,32 @@ async def _stop_without_local_task(repo_id: str) -> IndexStatus:
     finally:
         with contextlib.suppress(Exception):
             await pg.disconnect()
-    status = IndexStatus(
-        repo_id=repo_id,
-        status="cancelled",
-        progress=0.0,
-        current_file=None,
-        error=(
-            f"Stale index run {fence.run_id} (owner {fence.owner}) released"
-            if released
-            else f"Stale index run {fence.run_id} was already released"
-        ),
-        started_at=fence.started_at,
-        completed_at=datetime.now(UTC),
-    )
+    if committed:
+        # The dead run committed before it died: it is complete, its index is live.
+        await _finalize_dead_committed_run(repo_id, fence.run_id)
+        status = IndexStatus(
+            repo_id=repo_id,
+            status="complete",
+            progress=1.0,
+            current_file=None,
+            error=None,
+            started_at=fence.started_at,
+            completed_at=datetime.now(UTC),
+        )
+    else:
+        status = IndexStatus(
+            repo_id=repo_id,
+            status="cancelled",
+            progress=0.0,
+            current_file=None,
+            error=(
+                f"Stale index run {fence.run_id} (owner {fence.owner}) released"
+                if released
+                else f"Stale index run {fence.run_id} was already released"
+            ),
+            started_at=fence.started_at,
+            completed_at=datetime.now(UTC),
+        )
     _STATUS[repo_id] = status
     return status
 
@@ -1941,8 +1972,15 @@ async def _retire_due_generations(
     Best-effort: a failure leaves the entry on the manifest for the next commit
     to retry, never an inconsistent index.
     """
+    pg_now = PostgresClient(cfg.indexing.postgres_url)
+    try:
+        await pg_now.connect()
+        db_now = await pg_now.database_now()
+    finally:
+        with contextlib.suppress(Exception):
+            await pg_now.disconnect()
     due = generation.due_for_retirement(
-        now=datetime.now(UTC), grace_seconds=cfg.indexing.generation_retention_seconds
+        now=db_now, grace_seconds=cfg.indexing.generation_retention_seconds
     )
     if not due:
         return
@@ -2460,9 +2498,19 @@ async def _background_index_job(
                 await heartbeat_task
         # The release must survive a cancellation delivered while this `finally`
         # is awaiting (a stop that lands after the commit): shield it, and never
-        # let it raise out of the cleanup.
+        # let it raise out of the cleanup. An unknown commit outcome keeps its
+        # fence: it expires into a manifest-aware takeover that either finalizes
+        # the run (it had committed) or reclaims its staged resources exactly.
         try:
-            released = await asyncio.shield(_release_fence(repo_id, run_id))
+            if commit_unknown:
+                logger.warning(
+                    "index run %s on %s keeps its fence: commit outcome unknown until the manifest is read",
+                    run_id,
+                    repo_id,
+                )
+                released = True
+            else:
+                released = await asyncio.shield(_release_fence(repo_id, run_id))
             if not released:
                 logger.warning(
                     "index run %s did not hold the fence on %s at release (taken over or cleared)",
@@ -2759,19 +2807,25 @@ async def start_index(request: IndexRequest) -> IndexStatus:
     if claim.held_by is not None:
         raise _index_run_conflict(request.repo_id, claim.held_by)
     if claim.taken_over is not None:
-        # The previous holder died: reclaim exactly what its fence named (best-effort;
-        # the staged corpus rows go with it) before this run builds.
         dead = claim.taken_over
-        await reclaim_stale_run(cfg, request.repo_id, dead)
-        with contextlib.suppress(Exception):
-            pg_dead = PostgresClient(cfg.indexing.postgres_url)
-            await pg_dead.connect()
-            try:
-                await pg_dead.delete_corpus_with_data(
-                    _build_staging_repo_id(request.repo_id, dead.run_id)
-                )
-            finally:
-                await pg_dead.disconnect()
+        if claim.taken_over_committed:
+            # The previous holder committed and then died before releasing: its
+            # staged resources ARE the live generation. Finalize its run record;
+            # never reclaim.
+            await _finalize_dead_committed_run(request.repo_id, dead.run_id)
+        else:
+            # The previous holder died mid-build: reclaim exactly what its fence
+            # named (best-effort; the staged corpus rows go with it).
+            await reclaim_stale_run(cfg, request.repo_id, dead)
+            with contextlib.suppress(Exception):
+                pg_dead = PostgresClient(cfg.indexing.postgres_url)
+                await pg_dead.connect()
+                try:
+                    await pg_dead.delete_corpus_with_data(
+                        _build_staging_repo_id(request.repo_id, dead.run_id)
+                    )
+                finally:
+                    await pg_dead.disconnect()
 
     _STATUS[request.repo_id] = IndexStatus(
         repo_id=request.repo_id,
@@ -2813,12 +2867,15 @@ async def get_dashboard_index_status(
     # Durable first: a fresh fence held anywhere means the corpus is being indexed;
     # this process's state only refines it.
     s = _STATUS.get(repo_id)
-    running = bool(repo_id in _TASKS) or (s is not None and s.status == "indexing")
-    if not running:
-        try:
-            running = await _live_fence(repo_id) is not None
-        except IndexFenceCorruptError as exc:
-            raise _fence_corrupt_conflict(repo_id, exc) from exc
+    try:
+        live = await _live_fence(repo_id)
+    except IndexFenceCorruptError as exc:
+        raise _fence_corrupt_conflict(repo_id, exc) from exc
+    # A fresh fence anywhere means running; this process's state refines it only
+    # for the run the fence names.
+    running = live is not None or (
+        repo_id in _TASKS and s is not None and s.status == "indexing" and live is None
+    )
     progress = float(s.progress) if s is not None else None
     current_file = s.current_file if s is not None else None
 
@@ -2966,7 +3023,20 @@ async def get_dashboard_index_stats(
     )
 
 
-@router.get("/index/{corpus_id}/runs/latest", response_model=IndexRunSummary)
+@router.get(
+    "/index/{corpus_id}/runs/latest",
+    response_model=IndexRunSummary,
+    responses={
+        409: {
+            "model": IndexRunConflictResponse,
+            "description": "The corpus carries a malformed fence.",
+        },
+        503: {
+            "model": DependencyUnavailableResponse | IndexDeletionIncompleteResponse,
+            "description": "Postgres is unavailable, or the corpus is being de-indexed.",
+        },
+    },
+)
 async def get_latest_index_run(corpus_id: str) -> IndexRunSummary:
     repo_id = str(corpus_id or "").strip()
     if not repo_id:
@@ -2977,7 +3047,10 @@ async def get_latest_index_run(corpus_id: str) -> IndexRunSummary:
         raise HTTPException(
             status_code=404, detail=f"No persisted index runs found for repo_id={repo_id}"
         )
-    return await _finalize_interrupted_run(repo_id, run)
+    try:
+        return await _finalize_interrupted_run(repo_id, run)
+    except IndexFenceCorruptError as exc:
+        raise _fence_corrupt_conflict(repo_id, exc) from exc
 
 
 @router.get("/index/{corpus_id}/runs/{run_id}/events", response_model=list[IndexRunEvent])
@@ -3025,8 +3098,13 @@ async def get_index_status(corpus_id: str) -> IndexStatus:
         await _assert_not_tombstoned(repo_id, cfg)
     local = _STATUS.get(repo_id)
     if live is not None:
-        if local is not None and local.status == "indexing" and repo_id in _TASKS:
-            return local  # this process runs it: progress is known
+        if (
+            local is not None
+            and local.status == "indexing"
+            and repo_id in _TASKS
+            and _ACTIVE_RUNS.get(repo_id) == live.run_id
+        ):
+            return local  # this process runs THAT run: progress is known
         # Another worker is indexing this corpus: the durable fence is the truth.
         return IndexStatus(
             repo_id=repo_id,
@@ -3101,10 +3179,11 @@ async def get_index_status(corpus_id: str) -> IndexStatus:
 )
 async def get_index_stats(corpus_id: str) -> IndexStats:
     repo_id = corpus_id
-    # Durable truth first: a corpus mid-de-index never serves cached stats.
+    # Durable truth first: a corpus mid-de-index never serves cached stats, and a
+    # cached IndexStats from this process never outlives another worker's promotion.
     with contextlib.suppress(CorpusNotFoundError):
         await _assert_not_tombstoned(repo_id, await load_scoped_config(repo_id=repo_id))
-    if repo_id in _STATS:
+    if repo_id in _STATS and repo_id in _TASKS:
         return _STATS[repo_id]
     # Read from Postgres (source of truth)
     cfg = await load_scoped_config(repo_id=None)
