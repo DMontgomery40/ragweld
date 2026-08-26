@@ -357,10 +357,21 @@ async def _deletion_incomplete_handler(
         qdrant_collections=list(exc.tombstone.qdrant_collections),
         graph_repo_ids=list(exc.tombstone.graph_repo_ids),
         created_at=exc.tombstone.created_at,
-        message=f"Corpus {exc.repo_id} is being de-indexed; its external cleanup has not completed.",
+        message=(
+            f"Corpus {exc.repo_id} is being "
+            + ("deleted" if exc.tombstone.intent == "delete_corpus" else "de-indexed")
+            + "; its external cleanup has not completed."
+        ),
         operator_hint=(
-            "Retry the de-index (DELETE /api/index/{corpus_id}) once Qdrant and Neo4j answer; the tombstone "
-            "names exactly what is still to drop and is cleared when that succeeds."
+            (
+                f"Retry the corpus deletion (DELETE /api/corpora/{exc.repo_id}) once Qdrant and Neo4j answer; "
+                "a de-index cannot clear a corpus-deletion tombstone."
+            )
+            if exc.tombstone.intent == "delete_corpus"
+            else (
+                f"Retry the de-index (DELETE /api/index/{exc.repo_id}) once Qdrant and Neo4j answer; the "
+                "tombstone names exactly what is still to drop and is cleared when that succeeds."
+            )
         ),
     )
     return JSONResponse(

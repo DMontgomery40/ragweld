@@ -1854,3 +1854,41 @@ and the two-beat heartbeat), full `uv run pytest -q` alone 1161 passed / 93
 skipped, Playwright `curious_user_p1_fixes` 9 passed against the restarted
 backend, quick gates green. Codex pass 10 (scoped to this diff) launched.
 
+Further self-audit items while pass 10 ran: `delete_repo` decided fence
+staleness with the global config instead of the corpus-scoped lease (fixed:
+`load_scoped_config`); the incomplete-deletion 503 hint now depends on the
+tombstone's intent (a de-index can never clear a corpus-deletion tombstone;
+retry the corpus deletion); the Qdrant namespace sweep was re-checked and is
+injective (sha1 suffix in the corpus prefix); the retention invariants
+(shared resources across due/fresh entries, live-id masking, pair
+deduplication, resource-level pruning, grace 0) have a pure unit suite
+(`tests/unit/test_generation_retention.py`).
+
+### Adversarial review pass 10 (codex exec, scoped) — REFUTED (2 P1 / 4 P2 / 1 P3); all acted on
+
+Session 14l. Every finding concerned round-10/self-audit code and was
+accepted:
+
+1. **Own cleanup gates the fence release**: `_reclaim_own_staged` reports
+   whether the inventory was durably handed to the backlog; if the push
+   failed (or a second cancellation interrupted the wait before it was
+   recorded), the `finally` keeps the fence — which names the same inventory
+   — for the stale takeover, exactly like an unknown commit.
+2. **The backlog-repair test seeds a real valid entry** (a real Qdrant
+   collection, a real Neo4j graph and real staging rows of a dead run) next to
+   the malformed item, asserts status/stats answer the typed 409 at runtime,
+   and proves the de-index dropped all three and left no key or tombstone.
+3. **Own cleanup uses the exact recorded inventory**: the planned collection
+   name recorded on the fence before creation and the graph id recorded with
+   it — never a client response that may have been lost, never current
+   feature flags.
+4. **One strict persisted-index-state reader** (`_read_index_state`: manifest,
+   tombstone, fence, reclaim backlog) is used by status, stats and latest-run;
+   a malformed backlog now answers the typed 409 on every reader.
+5. The completed-summary manifest check reuses that strict read (no second,
+   unguarded Postgres round trip).
+6. **De-index clears this process's state while the tombstone still blocks
+   starts**, so a run claimed after the tombstone clears can never have its
+   task/queue/markers erased.
+7. The 409 descriptions name the complete union.
+

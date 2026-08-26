@@ -23726,7 +23726,7 @@
                 }
               }
             },
-            "description": "A live index run holds this corpus; stop it first."
+            "description": "A live index run holds this corpus (index_run_in_progress), or its persisted index state is malformed (index_fence_corrupt / persisted_state_corrupt)."
           },
           "422": {
             "content": {
@@ -23804,7 +23804,7 @@
                 }
               }
             },
-            "description": "The corpus carries a malformed fence."
+            "description": "A malformed fence (index_fence_corrupt) or malformed persisted index state: manifest, tombstone, fence or reclaim backlog (persisted_state_corrupt)."
           },
           "422": {
             "content": {
@@ -24010,7 +24010,7 @@
                 }
               }
             },
-            "description": "The corpus carries a malformed fence."
+            "description": "A malformed fence (index_fence_corrupt) or malformed persisted index state: manifest, tombstone, fence or reclaim backlog (persisted_state_corrupt)."
           },
           "422": {
             "content": {

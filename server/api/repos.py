@@ -43,6 +43,7 @@ from server.models.tribrid_config_model import (
     DependencyUnavailableResponse,
     GraphStats,
 )
+from server.services.config_store import get_config as load_scoped_config
 
 logger = logging.getLogger(__name__)
 
@@ -365,7 +366,9 @@ async def delete_repo(corpus_id: str) -> dict[str, Any]:
     # recorded as a tombstone so a failure below leaves a corpus that reads as
     # never indexed plus a retryable cleanup list. A corpus fenced by a live index
     # run is refused (409): stop that run first.
-    cfg = load_config()
+    # The corpus-scoped config decides the fence lease (a scoped tunable), never
+    # the global one.
+    cfg = await load_scoped_config(repo_id=repo_id)
     try:
         _, tombstone = await pg.delete_index_state(
             repo_id,
