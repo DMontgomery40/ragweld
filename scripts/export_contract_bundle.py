@@ -40,11 +40,16 @@ def _iter_pydantic_models(module: ModuleType) -> dict[str, type[BaseModel]]:
 
 
 def build_json_schema_bundle() -> dict[str, Any]:
+    import server.models.index as index_models
     import server.models.tribrid_config_model as law
 
-    model_map = _iter_pydantic_models(law)
+    # The aggregate is the composition root; boundary models owned by a domain
+    # module that the aggregate does not re-export are walked explicitly.
+    model_map = {**_iter_pydantic_models(index_models), **_iter_pydantic_models(law)}
+    model_map = dict(sorted(model_map.items()))
     return {
         "module": law.__name__,
+        "domain_modules": [index_models.__name__],
         "model_count": len(model_map),
         "root_models": {
             name: model.model_json_schema(ref_template="#/$defs/{model}")
